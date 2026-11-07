@@ -1,4 +1,5 @@
 import base64
+import json
 from pathlib import Path
 from typing import Any
 
@@ -63,7 +64,9 @@ def test_replay_is_idempotent(
     second = client.put("/api/extensions/skill/demo", json=_body(root))
     assert first.status_code == second.status_code == 200
     assert first.json() == second.json()
-    assert db_conn.execute("SELECT count(*) FROM extensions").fetchone() == (1,)
+    assert db_conn.execute(
+        "SELECT count(*) FROM extensions WHERE kind = %s AND name = %s", ("skill", "demo")
+    ).fetchone() == (1,)
     assert db_conn.execute("SELECT count(*) FROM extension_blobs").fetchone() == (1,)
 
 
@@ -131,3 +134,94 @@ def test_unauthenticated_request_is_401_and_writes_nothing(
     )
     assert response.status_code == 401
     assert registry.get(db_conn, "demo") is None
+
+
+@pytest.mark.parametrize("registered_name", ["uploaded_provider", "uploaded-provider"])
+def test_uploaded_provider_manifest_preserves_settings_and_refuses_toggle(
+    client: TestClient, db_conn: psycopg.Connection, tmp_path: Path, registered_name: str
+) -> None:
+    root = tmp_path / "uploaded_provider"
+    root.mkdir()
+    (root / "plugin.py").write_text("# Model provider package.\n")
+    manifest = {
+        "apiVersion": 2,
+        "name": "uploaded_provider",
+        "version": "1.0.0",
+        "engines": {"meiva": ">=2026.10.1"},
+        "displayName": "Uploaded Provider",
+        "category": "provider",
+        "userToggleable": False,
+        "contributions": {"providers": ["uploaded-"]},
+    }
+    (root / "meiva-plugin.json").write_text(json.dumps(manifest), encoding="utf-8")
+    response = client.put(f"/api/extensions/plugin/{registered_name}", json=_body(root))
+    assert response.status_code == 200, response.text
+    stored = registry.get(db_conn, registered_name)
+    assert stored is not None
+    assert stored.manifest == manifest
+    plugins = {item["name"]: item for item in client.get("/api/plugins").json()["plugins"]}
+    assert plugins[registered_name]["display_name"] == "Uploaded Provider"
+    assert plugins[registered_name]["category"] == "provider"
+    assert plugins[registered_name]["provider_kinds"] == ["llm"]
+    assert plugins[registered_name]["user_toggleable"] is False
+    response = client.put("/api/plugins", json={"name": registered_name, "enabled": False})
+    assert response.status_code == 403, response.text
+    assert registry.get(db_conn, registered_name) == stored
+
+
+@pytest.mark.parametrize(
+    "metadata",
+    [
+        {"userToggleable": "false"},
+        {"category": "unknown"},
+        {"displayName": None},
+        {"category": "provider"},
+        {"name": "another_plugin"},
+    ],
+)
+def test_uploaded_invalid_plugin_metadata_is_rejected_before_registry_write(
+    client: TestClient, db_conn: psycopg.Connection, tmp_path: Path, metadata: dict[str, object]
+) -> None:
+    root = tmp_path / "invalid_plugin"
+    root.mkdir()
+    manifest = {
+        "apiVersion": 2,
+        "name": "invalid_plugin",
+        "version": "1.0.0",
+        "engines": {"meiva": ">=2026.10.1"},
+        **metadata,
+    }
+    (root / "meiva-plugin.json").write_text(json.dumps(manifest), encoding="utf-8")
+    response = client.put("/api/extensions/plugin/invalid_plugin", json=_body(root))
+    assert response.status_code == 422, response.text
+    assert registry.get(db_conn, "invalid_plugin") is None
+    assert registry.get_blob(db_conn, tree_hash(root)) is None
+
+
+def test_uploaded_legacy_plugin_without_manifest_keeps_compatible_defaults(
+    client: TestClient, db_conn: psycopg.Connection, tmp_path: Path
+) -> None:
+    root = tmp_path / "legacy_plugin"
+    root.mkdir()
+    (root / "plugin.py").write_text("# Legacy package.\n")
+    response = client.put("/api/extensions/plugin/legacy_plugin", json=_body(root))
+    assert response.status_code == 200, response.text
+    stored = registry.get(db_conn, "legacy_plugin")
+    assert stored is not None
+    assert stored.manifest is None
+    plugins = {item["name"]: item for item in client.get("/api/plugins").json()["plugins"]}
+    assert plugins["legacy_plugin"]["category"] == "extension"
+    assert plugins["legacy_plugin"]["user_toggleable"] is True
+
+
+@pytest.mark.parametrize("content", [b"{", b"[]", b"\xff"])
+def test_uploaded_malformed_plugin_manifest_is_422(
+    client: TestClient, db_conn: psycopg.Connection, tmp_path: Path, content: bytes
+) -> None:
+    root = tmp_path / "malformed_plugin"
+    root.mkdir()
+    (root / "meiva-plugin.json").write_bytes(content)
+    response = client.put("/api/extensions/plugin/malformed_plugin", json=_body(root))
+    assert response.status_code == 422, response.text
+    assert registry.get(db_conn, "malformed_plugin") is None
+    assert registry.get_blob(db_conn, tree_hash(root)) is None

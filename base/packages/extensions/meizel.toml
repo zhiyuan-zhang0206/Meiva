@@ -1,10 +1,11 @@
-exports = ["adopt.py", "install_registry.py", "materialize.py", "registry.py"]
+exports = ["adopt.py", "install_registry.py", "materialize.py", "plugin_enable.py", "registry.py"]
 
 [uses]
 "adopt.py" = ["install_registry.py", "registry.py"]
 "materialize.py" = ["install_registry.py", "registry.py"]
+"plugin_enable.py" = ["install_registry.py", "registry.py"]
 "registry.py" = ["install_registry.py"]
-"tests" = ["install_registry.py", "materialize.py", "registry.py"]
+"tests" = ["install_registry.py", "materialize.py", "plugin_enable.py", "registry.py"]
 
 [purity]
 "__init__.py" = "strict"

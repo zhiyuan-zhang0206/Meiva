@@ -37,6 +37,8 @@ class ConfigFieldView(BaseModel):
     """
 
     name: str
+    label: str
+    help_text: str | None = None
     owner: str | None = None  # None is Core; a plugin name owns its config image.
     field_type: str  # "bool" | "string" | "int" | "float" | "enum"
     current_value: object  # bool | str | int | float | None
@@ -62,9 +64,6 @@ class ConfigFieldView(BaseModel):
     sensitive: bool
     env_var: str
     scope: str  # "cluster-pinned" | "cluster-default" | "host" | "agent"
-    # Whether a spawn/restart config overlay may override this field per agent —
-    # drives the panel's "per-agent" tag and filter (one layer above `explicit`:
-    # per-process, not per-cluster). Mirrors ResolvedFieldView.per_agent.
     per_agent: bool
     remote_writable: bool
     # For an "enum" field, the allowed values (Literal members) the frontend
@@ -109,6 +108,7 @@ class ResolvedFieldView(BaseModel):
     """
 
     name: str  # flat config field name — the same key GET/PUT /api/config uses
+    label: str
     env_var: str
     description: str
     field_type: str  # "bool" | "string" | "int" | "float" | "enum"

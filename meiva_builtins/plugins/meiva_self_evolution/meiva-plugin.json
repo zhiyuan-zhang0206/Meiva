@@ -12,5 +12,6 @@
     "compactReminderSections": [
       "self_evolution_compact_reminder"
     ]
-  }
+  },
+  "category": "builtin"
 }

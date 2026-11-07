@@ -17,6 +17,7 @@ from base.config.base import EnvSettings
 
 class GeneralSettings(EnvSettings):
     service_path: str = Field(
+        title="Service executable search path",
         default="",
         alias="MEIVA_SERVICE_PATH",
         description="Host executable search directories admitted at first start, excluding virtualenv directories. Managed services prepend the current runtime virtualenv. The home declaration overrides inherited values; changing it requires stopping the current generation.",
@@ -30,6 +31,7 @@ class GeneralSettings(EnvSettings):
     )
 
     impersonation_event_seal_wait_seconds: int = Field(
+        title="Impersonation event drain timeout (seconds)",
         default=10,
         alias="MEIVA_IMPERSONATION_EVENT_SEAL_WAIT_SECONDS",
         description="Seconds an external detach waits for in-flight SDK calls to drain before sealing its event source. A call still running after the wait seals its source later; the wait never marks a source empty or complete.",
@@ -44,6 +46,7 @@ class GeneralSettings(EnvSettings):
     )
 
     impersonation_event_report_interval_seconds: int = Field(
+        title="Impersonation event warning interval (seconds)",
         default=86400,
         alias="MEIVA_IMPERSONATION_EVENT_REPORT_INTERVAL_SECONDS",
         description=(
@@ -66,6 +69,7 @@ class GeneralSettings(EnvSettings):
     )
 
     impersonation_event_abandon_grace_seconds: int = Field(
+        title="Impersonation event abandonment grace period (seconds)",
         default=300,
         alias="MEIVA_IMPERSONATION_EVENT_ABANDON_GRACE_SECONDS",
         description=(
@@ -109,6 +113,7 @@ class GeneralSettings(EnvSettings):
         return self
 
     self_evolution_coverage_alert_floor: float = Field(
+        title="Minimum self-evolution scan coverage",
         default=0.5,
         ge=0.0,
         le=1.0,
@@ -123,6 +128,7 @@ class GeneralSettings(EnvSettings):
     )
 
     timezone: str = Field(
+        title="Cluster time zone",
         default="America/Los_Angeles",
         alias="MEIVA_TIMEZONE",
         description="Timezone every agent-facing timestamp is rendered in, and the default for schedules an agent creates. Declared to the agent once as a standing context note, so the timestamps themselves carry no timezone suffix. Defaults to Los Angeles time.",
@@ -184,6 +190,7 @@ class GeneralSettings(EnvSettings):
         return self
 
     message_timestamps: bool = Field(
+        title="Include timestamps in agent messages",
         default=True,
         alias="MEIVA_MESSAGE_TIMESTAMPS",
         description="Whether agent-facing messages carry a timestamp (inbound envelope, exec output headers, lifecycle markers). Turn off when the prefix is noise; the UI still shows its own timestamps.",
@@ -196,6 +203,7 @@ class GeneralSettings(EnvSettings):
     )
 
     message_timestamp_weekday: bool = Field(
+        title="Include weekday in agent message timestamps",
         default=False,
         alias="MEIVA_MESSAGE_TIMESTAMP_WEEKDAY",
         description="Whether the agent-facing timestamp includes the weekday (e.g. `Mon`). No effect when message_timestamps is off.",
@@ -208,6 +216,7 @@ class GeneralSettings(EnvSettings):
     )
 
     track_branch: str = Field(
+        title="Memory repository tracking branch",
         default="main",
         alias="MEIVA_TRACK_BRANCH",
         description="Git branch the agent-runner memory pool tracks; `base.deploy.git.memory_repo.pull_main()` fast-forwards the gateway's consolidated memory checkout from origin/<this>, and branch-status reporting diffs against it. Override for preview/staging clusters.",
@@ -220,6 +229,7 @@ class GeneralSettings(EnvSettings):
     )
 
     os_jobs_enabled: bool = Field(
+        title="Enable operating system scheduled jobs",
         default=True,
         alias="MEIVA_OS_JOBS_ENABLED",
         description="Whether this process may hand jobs to the platform scheduler (launchd LaunchAgent / crontab line / Task Scheduler task). The test suite turns it off: the scheduler is one namespace per OS user, so a test-scoped $MEIVA_HOME cannot isolate it. Deregistration is never gated.",
@@ -233,6 +243,7 @@ class GeneralSettings(EnvSettings):
     )
 
     machine_name: str = Field(
+        title="Machine name",
         default="",
         alias="MEIVA_MACHINE_NAME",
         description="Stable machine identifier for this host. Empty raises: a unit's name is recorded by `meiva init`.",
@@ -246,6 +257,7 @@ class GeneralSettings(EnvSettings):
     )
 
     machine_serve_gateway: bool | None = Field(
+        title="Run gateway services on this machine",
         default=None,
         alias="MEIVA_MACHINE_SERVE_GATEWAY",
         description="Whether this host serves the gateway capability (Postgres/Redis + HTTP gateway + gateway daemons). A host serves gateway and/or agent-runner and/or observability-station; at least one must be true. None = off.",
@@ -259,6 +271,7 @@ class GeneralSettings(EnvSettings):
     )
 
     machine_serve_agent_runner: bool | None = Field(
+        title="Run agent services on this machine",
         default=None,
         alias="MEIVA_MACHINE_SERVE_AGENT_RUNNER",
         description="Whether this host serves the agent-runner capability (agent host, ops server, and watchdog). A host serves gateway and/or agent-runner and/or observability-station; at least one must be true. None = off.",
@@ -272,6 +285,7 @@ class GeneralSettings(EnvSettings):
     )
 
     machine_serve_observability_station: bool | None = Field(
+        title="Run observability services on this machine",
         default=None,
         alias="MEIVA_MACHINE_SERVE_OBSERVABILITY_STATION",
         description="Whether this host serves the observability-station capability (owns the native LGTM observability backends — the declarative form of the `$MEIVA_HOME/lgtm-host` marker). A host serves gateway and/or agent-runner and/or observability-station; at least one must be true. None = off.",
@@ -285,6 +299,7 @@ class GeneralSettings(EnvSettings):
     )
 
     machine_description: str = Field(
+        title="Machine description",
         default="",
         alias="MEIVA_MACHINE_DESCRIPTION",
         description="Free-text note of what this host is for, surfaced to agents via meiva.self.MACHINE_SPEC and meiva.agents.list_machines(). Empty is legal.",
@@ -298,6 +313,7 @@ class GeneralSettings(EnvSettings):
     )
 
     machine_host: str = Field(
+        title="Machine network address",
         default="",
         alias="MEIVA_MACHINE_HOST",
         description="This host's reachable address — the IP/hostname other nodes and the browser dial it at, and the address authenticated Postgres, its pooler and Linux Redis bind in addition to loopback (macOS Redis retains its loopback relay). Empty (default): `localhost`, which the registration loopback guard refuses for an enrolled agent-runner. A split deployment sets each node's real private-network address.",
@@ -311,6 +327,7 @@ class GeneralSettings(EnvSettings):
     )
 
     memory_remote: str = Field(
+        title="Memory repository remote URL",
         default="",
         alias="MEIVA_MEMORY_REMOTE",
         description="Central git remote URL for the memory pool (each host pushes to a machine-<name> branch). Empty raises on a remote-backed memory operation. Ignored when MEIVA_MEMORY_KEEP_LOCAL is true.",
@@ -323,6 +340,7 @@ class GeneralSettings(EnvSettings):
     )
 
     memory_keep_local: bool = Field(
+        title="Keep memory on this machine",
         default=False,
         alias="MEIVA_MEMORY_KEEP_LOCAL",
         description="Keep the memory pool purely local: no git remote, no push/pull, notes never leave the box. Default off (the pool syncs to MEIVA_MEMORY_REMOTE). Set true on a host whose notes must not sync off-box; explicit `meiva memory init` then strips any existing remote and skips the GitHub PR capability check.",
@@ -336,6 +354,7 @@ class GeneralSettings(EnvSettings):
     )
 
     cross_machine_transfer_backend: Literal["drive", "none"] = Field(
+        title="Cross-machine transfer provider",
         default="drive",
         alias="MEIVA_CROSS_MACHINE_TRANSFER_BACKEND",
         description="Cross-machine file transfer backend on an agent-runner: `drive` probes a writable Google Drive synced folder at start and uses it when present (missing = warn, never block); `none` assumes no framework-managed backend. Auto-skipped on a single box.",
@@ -350,6 +369,7 @@ class GeneralSettings(EnvSettings):
     )
 
     require_github_pr: bool = Field(
+        title="Require GitHub pull request access for memory",
         default=True,
         alias="MEIVA_REQUIRE_GITHUB_PR",
         description="Require gh-authenticated GitHub PR access to the memory repo on an agent-runner at start (nightly memory consolidation). Auto-skipped on a single box. Set false to opt out on a split agent-runner that doesn't consolidate via PRs.",

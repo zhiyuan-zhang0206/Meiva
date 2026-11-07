@@ -33,5 +33,6 @@
     "config": {
       "schema": "default_config.py"
     }
-  }
+  },
+  "category": "builtin"
 }

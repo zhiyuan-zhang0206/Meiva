@@ -1,6 +1,6 @@
 {
   "couldntLoad": "无法加载计划——重试中…",
-  "newRaw": "新建（原始）",
+  "newRaw": "高级脚本",
   "noSchedules": "尚未配置计划",
   "status": "状态",
   "name": "名称",
@@ -26,5 +26,16 @@
   "updateFailed": "更新失败：{error}",
   "restarted": "计划已重启",
   "pageTitle": "计划",
-  "createTitle": "创建计划"
+  "createTitle": "创建计划",
+  "needsAttention": "需要处理",
+  "completedState": "已完成",
+  "stopUnconfirmed": "停止待确认",
+  "stoppedState": "已停止",
+  "enabledState": "已启用",
+  "startUnconfirmed": "启动待确认",
+  "unknownState": "状态未知",
+  "updatingState": "更新中…",
+  "stopAction": "停止",
+  "startAction": "启动",
+  "reportedState": "最近报告：{state} · 机器：{machine}。此处显示记录状态，非实时进程检查。"
 }

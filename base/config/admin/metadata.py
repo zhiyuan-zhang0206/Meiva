@@ -73,6 +73,7 @@ class ConfigFieldMeta:
     """Full metadata for a single config field — serialized by GET /api/config for the frontend."""
 
     name: str
+    label: str
     field_type: str
     current_value: object
     default_value: _ConfigFieldValue
@@ -94,6 +95,7 @@ class ConfigFieldMeta:
     # frontend renders as a fixed-option select; None for every other type.
     choices: _ConfigChoices = None
     owner: str | None = None
+    help_text: str | None = None
 
 
 def get_config_metadata(*, authority: ConfigMetadataAuthority) -> list[ConfigFieldMeta]:
@@ -106,6 +108,8 @@ def get_config_metadata(*, authority: ConfigMetadataAuthority) -> list[ConfigFie
     for name, ref in fields().items():
         field_info = ref.info
         extra = schema_extra(field_info)
+        if not field_info.title or not field_info.title.strip():
+            raise ValueError(f"config field {name!r} must declare a display title")
         type_name, choices = field_editor_type(field_info.annotation)
 
         current = _panel_value(values[name])
@@ -131,6 +135,8 @@ def get_config_metadata(*, authority: ConfigMetadataAuthority) -> list[ConfigFie
         result.append(
             ConfigFieldMeta(
                 name=name,
+                label=field_info.title,
+                help_text=extra.get("help_text"),
                 field_type=type_name,
                 current_value=current,
                 default_value=default,

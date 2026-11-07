@@ -1,5 +1,7 @@
 "use client";
 
+import { NativeSelect } from "@/components/ui/native-select";
+
 import { Check, Lock, Pencil, X } from "lucide-react";
 import { useTranslations } from "next-intl";
 
@@ -19,9 +21,7 @@ import {
   displayGroupId,
   displayOrder,
   fieldFilterTags,
-  fieldLabel,
   formatConfigValue,
-  isPerAgent,
 } from "../config-groups";
 
 export type MachineSelection = string | null;
@@ -101,20 +101,17 @@ export function MachineSelector({
   onChange: (next: MachineSelection) => void;
 }) {
   const t = useTranslations("config");
-  const clusterLabel = gatewayName
-    ? t("clusterGateway", { name: gatewayName })
-    : t("clusterGatewayPlain");
+  const clusterLabel = gatewayName ?? t("gatewayMachine");
   return (
     <div className={cn("items-center gap-2", FLEX)}>
       <label htmlFor="config-machine" className="text-xs text-muted-foreground">
         {t("machine")}
       </label>
-      <select
+      <NativeSelect
         id="config-machine"
         aria-label={t("machine")}
         value={selection ?? ""}
         onChange={(e) => onChange(e.target.value === "" ? null : e.target.value)}
-        className="text-xs bg-transparent border border-border rounded px-1.5 py-1 text-foreground hover:text-foreground focus:outline-none focus:ring-1 focus:ring-ring cursor-pointer"
       >
         <option value="">{clusterLabel}</option>
         {agentRunners.map((m) => (
@@ -122,21 +119,14 @@ export function MachineSelector({
             {m.name}
           </option>
         ))}
-      </select>
+      </NativeSelect>
     </div>
-  );
-}
-
-function TagBadge({ children }: { children: React.ReactNode }) {
-  return (
-    <span className="rounded border border-border px-1 text-[11px] text-muted-foreground">
-      {children}
-    </span>
   );
 }
 
 export function ConfigRow({
   field,
+  simple,
   editable,
   highlighted,
   remoteReadOnly,
@@ -153,6 +143,7 @@ export function ConfigRow({
   onEditKeyDown,
 }: {
   field: ConfigFieldView;
+  simple: boolean;
   editable: boolean;
   highlighted: boolean;
   remoteReadOnly: boolean;
@@ -170,33 +161,32 @@ export function ConfigRow({
 }) {
   const t = useTranslations("config");
   const isEditing = editingField === field.name;
-  const displayValue = displayFieldValue(field);
-  const defaultText = formatConfigValue(field.default_value);
+  const label = field.label;
+  const communicationStyle = field.name === "agent_communication_style";
+  const communicationOptions: Record<string, string> = {
+    oriented: t("communication.oriented"),
+    concise: t("communication.concise"),
+    silent: t("communication.silent"),
+    off: t("communication.off"),
+  };
+  const displayValue = simple && (field.current_value == null || field.current_value === "")
+    ? t("automaticDefault") : displayFieldValue(field);
   const capabilityBlocked = field.field_type === "bool" && field.can_enable === false;
   const toggleDisabled = busy || capabilityBlocked;
 
   return (
     <div
       id={`config-field-${field.name}`}
-      className={`flex items-start justify-between gap-4 px-3 py-2 scroll-mt-12 ${
+      className={`flex items-start justify-between gap-4 px-4 py-4 scroll-mt-12 ${
         editable ? "" : "bg-muted/40"
       } ${highlighted ? "ring-1 ring-primary ring-inset" : ""}`}
     >
       <div className={cn("space-y-0.5", FLEX_1, MIN_W_0)}>
         <div className={cn("items-center gap-2 flex-wrap", FLEX)}>
-          <span className="font-medium break-all" title={field.env_var}>
-            {fieldLabel(field.env_var)}
+          <span className="font-medium break-words">
+            {label}
           </span>
-          {field.writable ? (
-            <TagBadge>{t("runtime")}</TagBadge>
-          ) : (
-            <span className="rounded border border-border bg-muted px-1 text-[11px] font-medium">
-              {t("cliOnly")}
-            </span>
-          )}
-          <TagBadge>{field.scope}</TagBadge>
-          {isPerAgent(field) && <TagBadge>{t("perAgent")}</TagBadge>}
-          {field.restart_required && <TagBadge>Startup: {field.restart_required}</TagBadge>}
+          {!field.writable && <span className="text-xs text-muted-foreground">{t("readOnly")}</span>}
           {remoteReadOnly && (
             <span className="text-[11px] text-muted-foreground italic">
               {t("editOnCluster")}
@@ -208,9 +198,10 @@ export function ConfigRow({
             </span>
           )}
         </div>
-        {field.description && (
+        {communicationStyle && <p className="text-xs text-muted-foreground leading-snug">{t("communication.help")}</p>}
+        {field.help_text && (
           <p className="text-xs text-muted-foreground leading-snug">
-            {field.description}
+            {field.help_text}
           </p>
         )}
         {editable && capabilityBlocked && field.reason && (
@@ -237,7 +228,7 @@ export function ConfigRow({
                 autoCapitalize="none"
                 spellCheck={false}
                 value={editValue}
-                aria-label={t("replace", { env: field.env_var })}
+                aria-label={t("replace", { env: label })}
                 placeholder={t("newValue")}
                 onChange={(e) => onEditValueChange(e.target.value)}
                 onKeyDown={onEditKeyDown}
@@ -281,9 +272,10 @@ export function ConfigRow({
                   variant="ghost"
                   size="sm"
                   onClick={onStartEdit}
+                  title={t("editSetting", { name: label })}
                   disabled={busy}
                   className="h-7 px-1"
-                  aria-label={`Replace ${field.env_var}`}
+                  aria-label={`Replace ${label}`}
                   data-testid={`edit-${field.name}`}
                 >
                   <Pencil className="size-3" />
@@ -296,29 +288,29 @@ export function ConfigRow({
             checked={!!field.current_value}
             disabled={!editable || toggleDisabled}
             data-testid={`toggle-${field.name}`}
-            aria-label={field.env_var}
+            aria-label={label}
             onCheckedChange={(v) => onToggle(v)}
           />
         ) : field.field_type === "enum" ? (
           editable ? (
-            <select
+            <NativeSelect
+              aria-label={label}
               value={String(field.current_value ?? "")}
               disabled={busy}
               data-testid={`select-${field.name}`}
               onChange={(e) => onSelectEnum(e.target.value)}
-              className="text-xs bg-transparent border border-border rounded px-1.5 py-1 text-foreground focus:outline-none focus:ring-1 focus:ring-ring cursor-pointer disabled:opacity-50"
             >
-              {(field.current_value == null || field.current_value === "") && (
-                <option value="" disabled>
-                  {t("notSet")}
+              {(communicationStyle || field.current_value == null || field.current_value === "") && (
+                <option value="" disabled={!communicationStyle}>
+                  {communicationStyle ? t("automaticDefault") : t("notSet")}
                 </option>
               )}
               {(field.choices ?? []).map((c) => (
                 <option key={c} value={c}>
-                  {c}
+                  {communicationStyle ? communicationOptions[c] : c}
                 </option>
               ))}
-            </select>
+            </NativeSelect>
           ) : (
             <span className="text-xs text-muted-foreground px-2">
               {displayValue}
@@ -376,6 +368,7 @@ export function ConfigRow({
                 variant="ghost"
                 size="sm"
                 onClick={onStartEdit}
+                  title={t("editSetting", { name: label })}
                 disabled={busy}
                 className="h-7 px-1"
                 data-testid={`edit-${field.name}`}
@@ -386,7 +379,7 @@ export function ConfigRow({
           </>
         )}
         </div>
-        <span className="text-[11px] text-muted-foreground">Default: {defaultText}</span>
+
       </div>
     </div>
   );

@@ -20,39 +20,16 @@ import { PackageDraftEntry } from "@/components/plugins/package-draft-entry";
 import { Switch } from "@/components/ui/switch";
 import { InlineError } from "@/components/ui/inline-error";
 
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 import { errMsg } from "@/lib/contracts/errors";
 import { useStore } from "@/lib/state/store";
-import type { SkillLayer, SkillsView } from "@/lib/contracts/types";
+import type { SkillsView } from "@/lib/contracts/types";
 
 import { useSectionVisible } from "../visibility";
-import { FLEX } from "@/lib/layout/layout";
+import { FLEX, MIN_W_0 } from "@/lib/layout/layout";
 import { cn } from "@/lib/format/utils";
 import { useApi } from "@/lib/transport/transport-context";
 
 const SKILLS_QUERY_KEY = ["skills"] as const;
-
-function layerLabel(layer: SkillLayer, t: ReturnType<typeof useTranslations<"skills">>): string {
-  // The key mapping is literal — TS narrows each branch so the key is a
-  // checked member of the skills namespace.
-  switch (layer) {
-    case "core":
-      return t("layerCore");
-    case "plugin":
-      return t("layerPlugin");
-    case "machine":
-      return t("layerMachine");
-    case "untracked":
-      return t("layerUntracked");
-  }
-}
 
 export default function SkillsPage() {
   const client = useApi();
@@ -128,38 +105,19 @@ function SkillsTable({
   }
 
   return (
-    <div className="border border-border rounded-md overflow-x-auto">
-      <Table className="[&_th]:border-r [&_th]:border-border [&_th:last-child]:border-r-0 [&_td]:border-r [&_td]:border-border [&_td:last-child]:border-r-0">
-        <TableHeader>
-          <TableRow>
-            <TableHead className="min-w-48">{t("skill")}</TableHead>
-            <TableHead>{t("source")}</TableHead>
-            <TableHead className="text-center">{t("enabled")}</TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {data.skills.map((s) => (
-            <TableRow key={s.name}>
-              <TableCell className="align-top">
-                <span className="font-mono font-medium">{s.name}</span>
-              </TableCell>
-              <TableCell className="align-top">
-                <span className="text-[11px] text-muted-foreground border border-border rounded px-1">
-                  {layerLabel(s.layer, t)}
-                </span>
-              </TableCell>
-              <TableCell className="text-center align-top">
-                <Switch
-                  checked={s.enabled}
-                  onCheckedChange={(checked) => onToggle(s.name, checked)}
-                  disabled={s.layer === "untracked" || busy}
-                  aria-label={t("toggle", { name: s.name })}
-                />
-              </TableCell>
-            </TableRow>
-          ))}
-        </TableBody>
-      </Table>
-    </div>
+    <ul className="divide-y divide-border rounded-xl border border-border">
+      {data.skills.map((skill) => (
+        <li key={skill.name} className={cn(FLEX, "items-center justify-between gap-5 px-5 py-3")}>
+          <p className={cn(MIN_W_0, "break-words text-sm font-medium")}>{skill.name}</p>
+          <Switch
+            tone="neutral"
+            checked={skill.enabled}
+            onCheckedChange={(checked) => onToggle(skill.name, checked)}
+            disabled={skill.layer === "untracked" || busy}
+            aria-label={t("toggle", { name: skill.name })}
+          />
+        </li>
+      ))}
+    </ul>
   );
 }

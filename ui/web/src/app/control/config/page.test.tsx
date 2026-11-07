@@ -11,7 +11,7 @@ import {
   VIEW,
   wrap,
 } from "./config-test-mock";
-import ConfigPage from "./page";
+import ConfigEditor from "./editor";
 import { transport } from "@/test-support/fake-api";
 
 afterEach(cleanup);
@@ -22,13 +22,13 @@ describe("ConfigPage tri-state", () => {
     transport.getConfig.mockReturnValue(
       new Promise(() => undefined),
     );
-    wrap(<ConfigPage />);
+    wrap(<ConfigEditor mode="advanced" />);
     expect(screen.getByText(/Loading config/)).toBeTruthy();
   });
 
   it("error shows a quiet line, not the raw error", async () => {
     transport.getConfig.mockRejectedValue(new Error("network down"));
-    wrap(<ConfigPage />);
+    wrap(<ConfigEditor mode="advanced" />);
     await waitFor(() => screen.getByText(/Couldn't load config/));
     expect(screen.queryByText(/network down/)).toBeNull();
   });
@@ -51,7 +51,7 @@ describe("ConfigPage render", () => {
     );
 
     cleanup();
-    wrap(<ConfigPage />);
+    wrap(<ConfigEditor mode="advanced" />);
     const restoredHeading = await screen.findByRole("heading", { name: /LLM settings/ });
     await waitFor(() =>
       expect(within(restoredHeading).getByRole("button").getAttribute("aria-expanded")).toBe(
@@ -69,18 +69,18 @@ describe("ConfigPage render", () => {
     expect(document.getElementById("config-field-log_level")).not.toBeNull();
   });
 
-  it("display-group headers render with raw case-preserved field labels", async () => {
+  it("display-group headers render backend field labels", async () => {
     transport.getConfig.mockResolvedValue(VIEW);
     await renderSettled();
 
     expect(screen.getByText("LLM settings")).toBeTruthy();
     expect(screen.getByText("Agent execution")).toBeTruthy();
-    expect(screen.getByText("Display & general")).toBeTruthy();
-    expect(screen.getByText("Connection")).toBeTruthy();
+    expect(screen.queryByText("Display & general")).toBeNull();
+    expect(screen.queryByText("Connection")).toBeNull();
 
-    expect(screen.getByTitle("MEIVA_LOG_LEVEL")).toBeTruthy();
+    expect(screen.getByText("Log level")).toBeTruthy();
 
-    expect(inGroups("MAX RETRIES")).toHaveLength(1);
+    expect(inGroups("Max retries")).toHaveLength(1);
     expect(screen.queryByText("log_level")).toBeNull();
     expect(screen.queryByText("MEIVA_LOG_LEVEL")).toBeNull();
   });
@@ -93,6 +93,7 @@ describe("ConfigPage render", () => {
         ...VIEW.fields,
         {
           name: "gateway_max_retries",
+          label: "Gateway max retries",
           field_type: "int",
           current_value: 3,
           default_value: 3,
@@ -113,7 +114,7 @@ describe("ConfigPage render", () => {
     };
     transport.getConfig.mockResolvedValue(viewWithHiddenField);
     await renderSettled();
-    expect(screen.queryByText("GATEWAY MAX RETRIES")).toBeNull();
+    expect(screen.queryByText("Gateway max retries")).toBeNull();
     expect(screen.queryByTitle("MEIVA_GATEWAY_MAX_RETRIES")).toBeNull();
   });
 
@@ -122,34 +123,27 @@ describe("ConfigPage render", () => {
     await renderSettled();
 
     const groupHeader = screen.getByText("LLM settings");
-    const fieldName = screen.getByText("LOG LEVEL");
+    const fieldName = screen.getByText("Log level");
     expect(
       groupHeader.compareDocumentPosition(fieldName) &
         Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
   });
 
-  it("scope badge is shown per row (raw scope)", async () => {
-    transport.getConfig.mockResolvedValue(VIEW);
+  it("uses authored help without repeating technical metadata", async () => {
+    transport.getConfig.mockResolvedValue({
+      ...VIEW,
+      fields: VIEW.fields.map((field) => field.name === "max_retries"
+        ? { ...field, help_text: "Set 0 to disable retries." } : field),
+    });
     await renderSettled();
 
-    expect(inGroups("cluster-default")).toHaveLength(3);
-
-    expect(inGroups("host")).toHaveLength(4);
-
-    expect(inGroups("agent")).toHaveLength(1);
-
-    expect(inGroups("cluster-pinned")).toHaveLength(1);
-  });
-
-  it("per-agent tag follows the wire field; Startup tag follows restart_required", async () => {
-    transport.getConfig.mockResolvedValue(VIEW);
-    await renderSettled();
-
-    expect(inGroups("per-agent")).toHaveLength(3);
-
-    expect(screen.getByText("Startup: all")).toBeTruthy();
-    expect(screen.getAllByText(/Startup: /).length).toBeGreaterThanOrEqual(2);
+    expect(screen.getByText("Set 0 to disable retries.")).toBeTruthy();
+    expect(inGroups("cluster-default")).toHaveLength(0);
+    expect(inGroups("per-agent")).toHaveLength(0);
+    expect(screen.queryByText("Technical details")).toBeNull();
+    expect(screen.queryByText("Logging verbosity")).toBeNull();
+    expect(screen.queryByText("Requires restart")).toBeNull();
   });
 
   it("sensitive field masked + lock; writable secret is write-only replaceable", async () => {
@@ -164,7 +158,7 @@ describe("ConfigPage render", () => {
     fireEvent.click(screen.getByTestId("edit-api_key"));
     const input = screen.getByTestId<HTMLInputElement>("input-api_key");
     expect(input.getAttribute("type")).toBe("password");
-    expect(screen.getByLabelText("Replace MEIVA_API_KEY")).toBe(input);
+    expect(screen.getByLabelText("Replace Api key")).toBe(input);
     expect(input.value).toBe("");
 
     fireEvent.change(input, { target: { value: "sk-NEW" } });
@@ -177,7 +171,7 @@ describe("ConfigPage render", () => {
   it("sensitive field: an empty submit keeps the secret (no PUT)", async () => {
     transport.getConfig.mockResolvedValue(VIEW);
     const putSpy = transport.putConfig.mockResolvedValue(OK_RESULT([]));
-    wrap(<ConfigPage />);
+    wrap(<ConfigEditor mode="advanced" />);
     await waitFor(() => screen.getByTestId("edit-api_key"));
     fireEvent.click(screen.getByTestId("edit-api_key"));
     screen.getByTestId("input-api_key");
@@ -185,12 +179,12 @@ describe("ConfigPage render", () => {
     expect(putSpy).not.toHaveBeenCalled();
   });
 
-  it("read-only field tagged CLI-only + no edit button", async () => {
+  it("read-only field explains editability without technical badges", async () => {
     transport.getConfig.mockResolvedValue(VIEW);
-    await renderSettled();
-    expect(screen.getAllByText("CLI-only").length).toBeGreaterThan(0);
+    wrap(<ConfigEditor mode="machines" />);
+    await screen.findByText("Build sha");
     expect(screen.queryByTestId("edit-build_sha")).toBeNull();
-    expect(within(screen.getByTitle("MEIVA_BUILD_SHA").closest("[id^='config-field-']")!).queryByText(/read-only/i)).toBeNull();
+    expect(within(screen.getByText("Build sha").closest("[id^='config-field-']")!).getByText(/read-only/i)).toBeTruthy();
   });
 
   it("distinguishes editable values from runtime fields read-only on this machine", async () => {
@@ -200,19 +194,19 @@ describe("ConfigPage render", () => {
         field.name === "host_label" ? { ...field, remote_writable: false } : field,
       ),
     });
-    wrap(<ConfigPage />);
+    wrap(<ConfigEditor mode="machines" />);
 
-    const editableValue = await screen.findByTitle("INFO");
+    const editableValue = await screen.findByTitle("rack-A");
     expect(editableValue.className).toContain("hover:bg-muted/50");
     expect(editableValue.className).toContain("cursor-text");
 
     fireEvent.change(screen.getByLabelText("Machine"), {
       target: { value: AGENT_RUNNER },
     });
-    const hostLabel = await screen.findByTitle("MEIVA_HOST_LABEL");
+    const hostLabel = await screen.findByText("Host label");
     await waitFor(() => expect(screen.queryByTestId("edit-host_label")).toBeNull());
     const hostRow = hostLabel.closest<HTMLElement>("[id^='config-field-']")!;
-    expect(within(hostRow).getByText("Runtime")).toBeTruthy();
+    expect(within(hostRow).queryByText("Runtime")).toBeNull();
     expect(within(hostRow).getByText(/read-only/i)).toBeTruthy();
   });
 
@@ -223,6 +217,7 @@ describe("ConfigPage render", () => {
         ...VIEW.fields,
         {
           name: "cluster_secret",
+          label: "Cluster secret",
           field_type: "string" as const,
           current_value: "••••••••",
           default_value: "",
@@ -244,12 +239,12 @@ describe("ConfigPage render", () => {
     transport.getConfig.mockResolvedValue(withHidden);
     await renderSettled();
 
-    expect(screen.queryByText("CLUSTER SECRET")).toBeNull();
+    expect(screen.queryByText("Cluster secret")).toBeNull();
   });
 
   it("bool field renders a Switch reflecting the current value", async () => {
     transport.getConfig.mockResolvedValue(VIEW);
-    wrap(<ConfigPage />);
+    wrap(<ConfigEditor mode="advanced" />);
     await waitFor(() => screen.getByTestId("toggle-enable_compact"));
     expect(
       screen.getByTestId("toggle-enable_compact").getAttribute("aria-checked"),
@@ -263,50 +258,52 @@ describe("ConfigPage tag filter", () => {
     await renderSettled();
     fireEvent.click(screen.getByTestId("filter-sensitive"));
 
-    expect(screen.getByText("API KEY")).toBeTruthy();
-    expect(screen.queryByText("LOG LEVEL")).toBeNull();
+    expect(screen.getByText("Api key")).toBeTruthy();
+    expect(screen.queryByText("Log level")).toBeNull();
     expect(screen.queryByText("LLM settings")).toBeNull();
     expect(screen.getByText("1 setting")).toBeTruthy();
 
     fireEvent.click(screen.getByTestId("filter-all"));
-    await waitFor(() => screen.getByText("LOG LEVEL"));
+    await waitFor(() => screen.getByText("Log level"));
   });
 
   it("filtering by CLI-only keeps only non-editable rows", async () => {
     transport.getConfig.mockResolvedValue(VIEW);
-    await renderSettled();
+    wrap(<ConfigEditor mode="machines" />);
+    await screen.findByText("Build sha");
     fireEvent.click(screen.getByTestId("filter-cli-only"));
 
-    await waitFor(() => screen.getByText("BUILD SHA"));
-    expect(screen.getByText("GATEWAY PORT")).toBeTruthy();
-    expect(screen.queryByText("API KEY")).toBeNull();
-    expect(screen.queryByText("LOG LEVEL")).toBeNull();
+    await waitFor(() => screen.getByText("Build sha"));
+    expect(screen.getByText("Gateway port")).toBeTruthy();
+    expect(screen.queryByText("Api key")).toBeNull();
+    expect(screen.queryByText("Log level")).toBeNull();
   });
 });
 
 describe("ConfigPage capability visibility", () => {
   it("Cluster view shows every capability's fields", async () => {
     transport.getConfig.mockResolvedValue(VIEW);
-    await renderSettled();
+    wrap(<ConfigEditor mode="machines" />);
+    await screen.findByText("Build sha");
 
     expect(
       screen.getByTestId("config-group-config-connection").textContent,
-    ).toMatch(/GATEWAY PORT/);
+    ).toMatch(/Gateway port/);
   });
 
   it("remote agent-runner view drops gateway-capability fields, keeps the rest", async () => {
     transport.getConfig.mockResolvedValue(VIEW);
-    wrap(<ConfigPage />);
+    wrap(<ConfigEditor mode="machines" />);
     const select = await waitFor(() =>
       screen.getByLabelText<HTMLSelectElement>("Machine"),
     );
     fireEvent.change(select, { target: { value: AGENT_RUNNER } });
 
-    await waitFor(() => screen.getByText("HOST LABEL"));
-    expect(screen.queryByText("GATEWAY PORT")).toBeNull();
+    await waitFor(() => screen.getByText("Host label"));
+    expect(screen.queryByText("Gateway port")).toBeNull();
     expect(screen.queryByTestId("config-group-config-connection")).toBeNull();
 
-    expect(screen.getByText("LOG LEVEL")).toBeTruthy();
+    expect(screen.queryByText("Log level")).toBeNull();
   });
 
   it("remote co-located gateway,agent-runner box keeps gateway fields", async () => {
@@ -315,13 +312,13 @@ describe("ConfigPage capability visibility", () => {
       ...VIEW,
       machine_capabilities: ["gateway", "agent-runner"],
     });
-    wrap(<ConfigPage />);
+    wrap(<ConfigEditor mode="machines" />);
     const select = await waitFor(() =>
       screen.getByLabelText<HTMLSelectElement>("Machine"),
     );
     fireEvent.change(select, { target: { value: AGENT_RUNNER } });
-    await waitFor(() => screen.getByText("HOST LABEL"));
-    expect(screen.getByText("GATEWAY PORT")).toBeTruthy();
+    await waitFor(() => screen.getByText("Host label"));
+    expect(screen.getByText("Gateway port")).toBeTruthy();
   });
 });
 
@@ -330,7 +327,7 @@ describe("ConfigPage bool toggle (putConfig + write result)", () => {
     transport.getConfig.mockResolvedValue(VIEW);
     const putSpy = transport.putConfig
       .mockResolvedValue(OK_RESULT(["enable_compact"]));
-    wrap(<ConfigPage />);
+    wrap(<ConfigEditor mode="advanced" />);
     await waitFor(() => screen.getByTestId("toggle-enable_compact"));
     fireEvent.click(screen.getByTestId("toggle-enable_compact"));
     await waitFor(() => expect(putSpy).toHaveBeenCalled());
@@ -343,7 +340,7 @@ describe("ConfigPage bool toggle (putConfig + write result)", () => {
   it("putConfig fails → show saveError", async () => {
     transport.getConfig.mockResolvedValue(VIEW);
     transport.putConfig.mockRejectedValue(new Error("server 500"));
-    wrap(<ConfigPage />);
+    wrap(<ConfigEditor mode="advanced" />);
     const btn = await waitFor(() =>
       screen.getByTestId("toggle-enable_compact"),
     );
@@ -363,7 +360,7 @@ describe("ConfigPage bool toggle (putConfig + write result)", () => {
     expect(put.mock.calls).toEqual([[{ log_level: "INFO" }, undefined], [{ enable_compact: false }, undefined]]);
     expect(await screen.findByText(/Save failed/)).toBeTruthy();
     expect(screen.getByText(/Fleet image changed/)).toBeTruthy();
-    expect(screen.getByText(/restart the following processes/i).textContent).toMatch(/All processes/);
+    expect(screen.getByRole("status").textContent).toMatch(/All processes/);
   });
 
 });
@@ -371,7 +368,7 @@ describe("ConfigPage bool toggle (putConfig + write result)", () => {
 describe("ConfigPage enum select", () => {
   it("enum field renders a select of its choices with the current value", async () => {
     transport.getConfig.mockResolvedValue(VIEW);
-    wrap(<ConfigPage />);
+    wrap(<ConfigEditor mode="advanced" />);
     const select = await waitFor(() =>
       screen.getByTestId<HTMLSelectElement>("select-nudge_cadence"),
     );
@@ -386,7 +383,7 @@ describe("ConfigPage enum select", () => {
     transport.getConfig.mockResolvedValue(VIEW);
     const putSpy = transport.putConfig
       .mockResolvedValue(OK_RESULT(["nudge_cadence"], ["agent"]));
-    wrap(<ConfigPage />);
+    wrap(<ConfigEditor mode="advanced" />);
     const select = await waitFor(() =>
       screen.getByTestId<HTMLSelectElement>("select-nudge_cadence"),
     );
@@ -406,7 +403,7 @@ describe("ConfigPage enum select", () => {
         field.name === "nudge_cadence" ? { ...field, current_value: null } : field,
       ),
     });
-    wrap(<ConfigPage />);
+    wrap(<ConfigEditor mode="advanced" />);
 
     const select = await screen.findByTestId<HTMLSelectElement>("select-nudge_cadence");
     expect(select.value).toBe("");
@@ -416,13 +413,68 @@ describe("ConfigPage enum select", () => {
 
   it("enum field is read-only text (no select) on a remote machine view", async () => {
     transport.getConfig.mockResolvedValue(VIEW);
-    wrap(<ConfigPage />);
+    wrap(<ConfigEditor mode="machines" />);
     const machineSelect = await waitFor(() =>
       screen.getByLabelText<HTMLSelectElement>("Machine"),
     );
     fireEvent.change(machineSelect, { target: { value: AGENT_RUNNER } });
 
-    await waitFor(() => expect(screen.getByText("once_per_compaction")).toBeTruthy());
+    await screen.findByText("Host label");
+    expect(screen.queryByText("once_per_compaction")).toBeNull();
     expect(screen.queryByTestId("select-nudge_cadence")).toBeNull();
+  });
+});
+
+
+describe("Settings scope", () => {
+
+  it("leads General with communication style and saves its declared enum value", async () => {
+    const style = {
+      ...VIEW.fields[0], name: "agent_communication_style", label: "Agent communication style",
+      env_var: "MEIVA_AGENT_COMMUNICATION_STYLE", field_type: "enum" as const,
+      choices: ["oriented", "silent", "concise", "off"], current_value: null, default_value: null,
+    };
+    transport.getConfig.mockResolvedValue({ ...VIEW, fields: [...VIEW.fields, style] });
+    const put = transport.putConfig.mockResolvedValue(OK_RESULT([style.name], ["agent"]));
+    wrap(<ConfigEditor mode="general" />);
+    const select = await screen.findByRole("combobox", { name: style.label });
+    expect(screen.getByRole("option", { name: "Model default" })).toBeTruthy();
+    expect(screen.getByRole("option", { name: "Keep me involved" })).toBeTruthy();
+    expect(select.compareDocumentPosition(screen.getByTestId("config-default-model")) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.queryByText("Context compaction threshold")).toBeNull();
+    fireEvent.change(select, { target: { value: "concise" } });
+    await waitFor(() => expect(put).toHaveBeenCalledWith(expect.objectContaining({ agent_communication_style: "concise" }), undefined));
+    expect(await screen.findByRole("status")).toBeTruthy();
+  });
+
+  it("restores model-default communication without writing an empty enum", async () => {
+    const style = {
+      ...VIEW.fields[0], name: "agent_communication_style", label: "Agent communication style",
+      env_var: "MEIVA_AGENT_COMMUNICATION_STYLE", field_type: "enum" as const,
+      choices: ["oriented", "silent", "concise", "off"], current_value: "concise", default_value: null,
+    };
+    transport.getConfig.mockResolvedValue({ ...VIEW, fields: [style], raw_overrides: { agent_communication_style: "concise" } });
+    const put = transport.putConfig.mockResolvedValue(OK_RESULT([style.name]));
+    wrap(<ConfigEditor mode="general" />);
+    fireEvent.change(await screen.findByRole("combobox", { name: style.label }), { target: { value: "" } });
+    await waitFor(() => expect(put).toHaveBeenCalledWith({ agent_communication_style: null }, undefined));
+  });
+
+  it("general settings omit machine selection and technical configuration", async () => {
+    transport.getConfig.mockResolvedValue(VIEW);
+    wrap(<ConfigEditor mode="general" />);
+    expect(await screen.findByTestId("config-default-model")).toBeTruthy();
+    expect(screen.queryByLabelText("Machine")).toBeNull();
+    expect(screen.queryByText("Log level")).toBeNull();
+    expect(screen.queryByText("Host label")).toBeNull();
+  });
+
+  it("advanced search finds a field by its technical name without exposing host settings", async () => {
+    transport.getConfig.mockResolvedValue(VIEW);
+    await renderSettled();
+    fireEvent.change(screen.getByRole("searchbox"), { target: { value: "MEIVA_LOG_LEVEL" } });
+    expect(screen.getByText("Log level")).toBeTruthy();
+    expect(document.getElementById("config-field-max_retries")).toBeNull();
+    expect(screen.queryByText("Host label")).toBeNull();
   });
 });

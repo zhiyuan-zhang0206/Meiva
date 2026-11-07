@@ -44,6 +44,7 @@ def _field(
 ) -> ConfigFieldView:
     return ConfigFieldView(
         name=name,
+        label=name,
         field_type=field_type,
         current_value=current_value,
         default_value=None,
@@ -276,6 +277,7 @@ def test_cli_field_editable_mirrors_shared_definition(
     )
     meta = ConfigFieldMeta(
         "parity",
+        "Parity",
         "string",
         None,
         None,

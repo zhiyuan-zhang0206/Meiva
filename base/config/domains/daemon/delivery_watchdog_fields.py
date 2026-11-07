@@ -9,6 +9,7 @@ class DeliveryWatchdogFields:
     """The delivery-watchdog fields, in their former `daemon.py` order."""
 
     delivery_watchdog_enabled: bool = Field(
+        title="Enable stalled message monitoring",
         default=True,
         alias="MEIVA_DELIVERY_WATCHDOG_ENABLED",
         description="Run the delivery watchdog daemon on the gateway. On by default; set false to disable stale-pending-inbound alerting cluster-wide.",
@@ -22,6 +23,7 @@ class DeliveryWatchdogFields:
     )
 
     delivery_watchdog_interval_seconds: float = Field(
+        title="Stalled message scan interval (seconds)",
         default=30.0,
         alias="MEIVA_DELIVERY_WATCHDOG_INTERVAL_SECONDS",
         description="Interval in seconds for observing stalled inbounds and retiring stale rows. Pending input pickup is owned by the agent host.",
@@ -34,6 +36,7 @@ class DeliveryWatchdogFields:
     )
 
     delivery_watchdog_threshold_seconds: float = Field(
+        title="Pending message alert threshold (seconds)",
         default=120.0,
         alias="MEIVA_DELIVERY_WATCHDOG_THRESHOLD_SECONDS",
         description="Delivery watchdog stall alert threshold (seconds): a chat inbound still pending longer than this whose owner is in a waiting/terminal state (idling/terminated) is reported as a stalled delivery. Baseline 2026-10-22: p50 delivery is 3-5s and 29% of chats exceed 30s, so the old 30s line sat inside normal wake latency; 120s still leaves the 600s-24h tail (the one worth acting on) untouched.",
@@ -46,6 +49,7 @@ class DeliveryWatchdogFields:
     )
 
     delivery_watchdog_stale_claimed_threshold_seconds: float = Field(
+        title="Terminated agent message cleanup threshold (seconds)",
         default=86400.0,
         alias="MEIVA_DELIVERY_WATCHDOG_STALE_CLAIMED_THRESHOLD_SECONDS",
         description="Stale-claimed dead-letter threshold (seconds): a 'claimed' chat inbound whose owner is terminated and whose claim is older than this (claimed_at, falling back to created_at for pre-column rows) is flipped to 'done' instead of being re-delivered if the agent is ever resurrected. Terminated agents leave claimed rows behind (reconcile runs only at boot); a resurrect would otherwise flip them all to 'pending' and re-deliver ancient messages (Task #654).",
@@ -58,6 +62,7 @@ class DeliveryWatchdogFields:
     )
 
     delivery_watchdog_stale_claimed_idling_threshold_seconds: float = Field(
+        title="Idle agent message cleanup threshold (seconds)",
         default=7200.0,
         alias="MEIVA_DELIVERY_WATCHDOG_STALE_CLAIMED_IDLING_THRESHOLD_SECONDS",
         description="Stale-claimed dead-letter threshold for IDLING owners (seconds): a 'claimed' chat inbound whose owner is idling and whose claim is older than this is flipped to 'done'. Hosted agents stay idling without booting, so their claims never hit the reconcile path; running owners are never swept.",
@@ -70,6 +75,7 @@ class DeliveryWatchdogFields:
     )
 
     delivery_watchdog_stranded_wake_cooldown_seconds: float = Field(
+        title="Agent wake retry cooldown (seconds)",
         default=300.0,
         alias="MEIVA_DELIVERY_WATCHDOG_STRANDED_WAKE_COOLDOWN_SECONDS",
         description="Stranded-wake cooldown (seconds): at most one retry of the delivery auto-resurrect per terminated owner per window, stamped durably on agents_meta.wake_suppressed_until before the attempt. 300s matches the crash-resurrect backoff: a wake either claims the stranded row within seconds, or the owner is unstartable and a tighter cadence only multiplies failed launch attempts.",
@@ -82,6 +88,7 @@ class DeliveryWatchdogFields:
     )
 
     delivery_watchdog_stranded_wake_max_per_round: int = Field(
+        title="Maximum agents awakened per scan",
         default=2,
         alias="MEIVA_DELIVERY_WATCHDOG_STRANDED_WAKE_MAX_PER_ROUND",
         description="Stranded-wake per-round cap (owners): how many terminated owners one scan round may wake. Each wake is one launch RPC to the owner's home machine, so a fleet-wide wave of dead owners drains over rounds instead of as a burst; two per 30s round stays far inside the launch capacity while clearing a normal backlog in one round.",

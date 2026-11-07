@@ -49,7 +49,7 @@ def materialize_cluster_extensions(
     local-only result is drift; materialization is the moment a machine catches
     up.
     """
-    from base.packages.extensions import materialize
+    from base.packages.extensions import materialize, plugin_enable
     from base.telemetry.converge_report import report_converge_preserve
 
     try:
@@ -57,6 +57,7 @@ def materialize_cluster_extensions(
         # than letting ConnectionPool.__del__ run at interpreter exit (it then
         # joins its own worker and prints "cannot join current thread" noise).
         with database_factory().pool() as pool, pool.connection() as conn:
+            plugin_enable.materialize(conn, home=home)
             result = materialize.materialize_skills(
                 conn,
                 dest_root=skills_root,

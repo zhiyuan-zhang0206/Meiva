@@ -1,5 +1,7 @@
 "use client";
 
+import { NativeSelect } from "@/components/ui/native-select";
+
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
 import { Loader2 } from "lucide-react";
@@ -63,8 +65,7 @@ export function DefaultModelPanel({ id }: { id: string }) {
     <div id={id} className="scroll-mt-4 space-y-2" data-testid="config-default-model">
       <h3 className="text-sm font-semibold text-muted-foreground">{t("defaultModel")}</h3>
       <p className="text-xs leading-snug text-muted-foreground">
-        The model a new agent is born on when the spawn names none. Agents that already
-        exist keep the model frozen at their own birth — changing this moves nobody.
+        {t("defaultModelHelp")}
       </p>
 
       {current.error || models.error ? (
@@ -73,14 +74,13 @@ export function DefaultModelPanel({ id }: { id: string }) {
         </p>
       ) : (
         <div className={cn("items-center gap-2", FLEX)}>
-          <select
+          <NativeSelect
             id="default-model-select"
             aria-label="Default model"
             data-testid="select-default-model"
             value={value}
             disabled={current.isLoading || models.isLoading || save.isPending}
             onChange={(e) => setPicked(e.target.value)}
-            className="cursor-pointer rounded border border-border bg-transparent px-1.5 py-1 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
           >
             {value === "" && (
               <option value="" disabled>
@@ -100,7 +100,7 @@ export function DefaultModelPanel({ id }: { id: string }) {
                 ))}
               </optgroup>
             ))}
-          </select>
+          </NativeSelect>
           <Button
             type="button"
             size="sm"
@@ -116,7 +116,7 @@ export function DefaultModelPanel({ id }: { id: string }) {
               className="text-[11px] italic text-muted-foreground"
               data-testid="default-model-source"
             >
-              no cluster choice yet — showing the .env / code default
+              {t("usingDefault")}
             </span>
           )}
         </div>

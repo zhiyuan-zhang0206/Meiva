@@ -16,5 +16,6 @@
     "ui": {
       "statsFace": "ui_stats.py"
     }
-  }
+  },
+  "category": "builtin"
 }

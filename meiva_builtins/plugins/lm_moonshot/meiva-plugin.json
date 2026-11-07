@@ -9,5 +9,8 @@
     "providers": [
       "kimi-"
     ]
-  }
+  },
+  "displayName": "Moonshot",
+  "userToggleable": false,
+  "category": "provider"
 }

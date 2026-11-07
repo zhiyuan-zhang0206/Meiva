@@ -303,3 +303,21 @@ def test_inventory_ops_reject_gateway(machine_identity: ConfiguredMachineIdentit
             host=fake_host(),
             home=meiva_home(),
         )
+
+
+def test_cluster_policy_refuses_a_mixed_local_write_atomically(
+    runner_home: Path, machine_identity: MachineIdentityReader
+) -> None:
+    _write_machine_mcp(runner_home, {"fs": {"command": "x"}})
+    enable_config.write_cluster_policy({"meiva_code": False}, home=runner_home)
+    result = inventory_write_op(
+        plugins={"meiva_code": True},
+        mcp_servers={"fs": False},
+        local_machine=machine_identity,
+        host=fake_host(),
+        home=runner_home,
+    )
+    assert result.applied is False
+    assert result.plugin_results["meiva_code"].ok is False
+    assert not enable_config.local_config_path(home=runner_home).exists()
+    assert mcp_enabled.read_enabled(home=runner_home) == {}

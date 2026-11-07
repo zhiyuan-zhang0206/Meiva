@@ -5,7 +5,7 @@ description: Independently loading model views and ordinary configuration editor
 tags: [frontend, configuration]
 ---
 
-# Control configuration panels
+# Settings configuration panels
 
 The ordinary field editor, cluster default-model selector and per-model resolved
 view load independently. Failure to load a model catalog must not disable the
@@ -53,3 +53,31 @@ rotation touches no remote unit (the telemetry token is an independent random va
 The two hidden gateway retry fields tune the SDK transport and remain available
 through ordinary config tools.
 The panel preserves their existing overrides rather than choosing new values.
+
+
+## Settings presentation
+
+Settings mounts one selected category at a time. General leads with communication
+style, then the default model and reasoning effort; everyday notifications, writing,
+language and available themes follow. The explicit communication-style choices retain
+their registered values; Model default removes the override with null.
+Advanced groups Agent settings, Resources & services, and Interface details.
+Only Resources & services selects a machine and edits host-scoped fields, with the
+gateway selected initially and each other online runner listed once. Selecting a
+machine never changes agent defaults. Execution timeouts, compaction thresholds and
+clock formatting belong to Advanced. Legacy machine and display links route to the
+corresponding Advanced area; General appearance and notification anchors stay in General.
+The editor preserves the existing config API, owner routing and hidden overrides.
+Every row uses its backend-authored label and optional concise help text.
+Rows omit technical identifiers, scope badges and the technical-details disclosure.
+Environment identifiers remain searchable. Restart requirements appear only after a successful field write,
+in a dismissible floating reminder using the write response's restart targets.
+Settings selects share NativeSelect's reserved arrow space and native keyboard behavior.
+
+Guide is a standalone first navigation entry; General remains the default category.
+The navigation retains old config and display deep links. OKF Graph has no Settings
+entry. Schedules shows desired enablement separately from historical process facts:
+`enabled=false,status=running` is Stop unconfirmed, not Stopped. `running` alone
+is not live health evidence, so the normal enabled badge is blue and says Enabled.
+Errors and unresolved placement remain visible. Restart is unavailable while
+stopped, and lifecycle buttons are disabled during a pending request.

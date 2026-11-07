@@ -28,5 +28,54 @@
   "allProcesses": "All processes (Gateway + Agent)",
   "clusterGatewayPlain": "Cluster (gateway)",
   "defaultModelSaved": "Default model saved — applies to agents spawned from now on.",
-  "couldntResolve": "Couldn't resolve this model's settings — check the gateway and reload."
+  "couldntResolve": "Couldn't resolve this model's settings — check the gateway and reload.",
+  "machineScope": "Changes here apply only to the selected machine.",
+  "searchSettings": "Search settings…",
+  "technicalFilters": "Filter by technical properties",
+  "noMatches": "No matching settings.",
+  "gatewayMachine": "Gateway machine",
+  "details": "Technical details",
+  "defaultModelHelp": "Used for new agents. Existing agents keep their current model.",
+  "usingDefault": "Using the system default",
+  "automaticDefault": "Model default",
+  "editSetting": "Edit {name}",
+  "agentDefaults": "Agent defaults",
+  "webSearch": "Web search",
+  "common": {
+    "reasoning": {
+      "label": "Reasoning effort",
+      "description": "How much reasoning an agent uses before answering."
+    },
+    "timeout": {
+      "label": "Execution timeout (seconds)",
+      "description": "Maximum time allowed for one code execution."
+    },
+    "compaction": {
+      "label": "Context compaction threshold",
+      "description": "Share of the context window used before summarizing history."
+    },
+    "timezone": {
+      "label": "Time zone",
+      "description": "Used for agent timestamps and new schedules."
+    },
+    "searchProvider": {
+      "label": "Search provider",
+      "description": "The service agents use to search the web."
+    },
+    "searchResults": {
+      "label": "Search results per request",
+      "description": "Maximum number of results returned by a web search."
+    }
+  },
+  "restartAfterSave": "To apply your saved changes, restart: {targets}.",
+  "dismissReminder": "Dismiss restart reminder",
+  "workingTogether": "Working together",
+  "modelsHeading": "Models",
+  "communication": {
+    "oriented": "Keep me involved",
+    "concise": "Milestone updates",
+    "silent": "Report when finished",
+    "off": "Standard guidance",
+    "help": "How often agents update you while they work."
+  }
 }

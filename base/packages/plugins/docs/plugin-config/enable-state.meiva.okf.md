@@ -40,3 +40,24 @@ present on this machine, so stale entries cannot make the next strict read fail.
 Keys are written in sorted order because image iteration controls registration
 order. Writes replace the complete local image; this operation does not update
 a database or remote authority.
+
+## Cluster-managed plugins
+
+The gateway initializes plugin decisions in `extensions.default_enabled` and serves
+GET/PUT `/api/plugins`. `base/packages/extensions/plugin_enable.py` owns that policy
+and its startup projection. `plugin_enable_policy.json` is an atomic runtime cache,
+not a local authority: every cached decision overrides the legacy image, including
+an explicit enable over a local disable. Unknown-to-this-home policy names stay in
+the cache and take effect when their content becomes available.
+
+The existing local CLI and host inventory writer refuse managed names. The Plugins
+UI saves once for the cluster without runner RPC, and announces restart activation.
+Agent-host boot and converge refresh the cache from the registry; a failed refresh
+retains it and warns. See
+[Cluster plugin enablement](../../../../../docs/decisions/extensions/plugins/2026-11-07-cluster-plugin-enablement.md).
+
+Cache publication takes the per-home `plugin_enable_policy.lock` before reading
+registry policy and atomically replacing the image. Startup, converge and API
+refresh share this owner, so an earlier refresh cannot publish an old snapshot
+after a later writer. API policy transactions commit before cache publication;
+a publication failure retains the committed policy and reports refresh failure.

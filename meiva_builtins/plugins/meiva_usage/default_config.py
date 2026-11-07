@@ -273,6 +273,7 @@ class UsageConfig(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     collectors: tuple[CollectorConfig, ...] = Field(
+        title="Usage collectors",
         default=(),
         json_schema_extra={"scope": "cluster-pinned", "restart_required": ""},
     )

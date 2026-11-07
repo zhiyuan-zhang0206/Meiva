@@ -36,3 +36,27 @@ and retains MCP capability verdicts. Its tests import the matrix owner and wire
 models directly. HTTP contracts continue to exercise the assembled app, real
 machines SQL and validated RPC results, each runner served on a real listener
 (`gateway/tests/support/runner_ops`).
+
+## Cluster plugin controls
+
+Ordinary plugin enablement uses GET/PUT `/api/plugins` (`plugins.py`), backed by
+`extensions.default_enabled`; it does not depend on reachable runners. Gateway
+startup adopts existing choices once and projects the policy cache before serving.
+The aggregate remains the diagnostic wire contract. Ordinary MCP Settings selects
+one machine and shows only its installed servers, host enablement and existing
+capability refusal reasons. Unreachable machines stay selectable with unknown
+state. MCP connections remain lazy; this API exposes no connection/authentication
+telemetry and the UI makes no login-state claims. Installation opens the existing
+installer conversation, where the target machine is agreed; the list selector
+does not redirect that installer. Per-agent tool exposure is a separate choice.
+
+`/api/plugins` projects manifest `displayName`, `category`, `userToggleable` and provider kinds
+from declared `providers` / `decisionProviders` contributions. Providers occupy
+read-only LLM and Decision groups alongside Built-in and Extensions on the same
+Plugins page. Category is presentation metadata, independent from registry trust;
+other non-toggleable plugins have no switch.
+PUT refuses non-toggleable manifests before changing policy. This capability flag
+does not alter startup policy or separate service gates.
+Host inventory writes atomically refuse any cluster-managed plugin name before
+writing either plugin or MCP state. Plugin saves announce that service restart is
+required; they do not report a cache change as process activation.

@@ -13,5 +13,8 @@
     "config": {
       "schema": "default_config.py"
     }
-  }
+  },
+  "displayName": "TypeSafe",
+  "userToggleable": false,
+  "category": "provider"
 }

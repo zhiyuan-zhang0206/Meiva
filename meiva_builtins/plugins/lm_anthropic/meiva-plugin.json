@@ -9,5 +9,8 @@
     "providers": [
       "claude-"
     ]
-  }
+  },
+  "displayName": "Anthropic",
+  "userToggleable": false,
+  "category": "provider"
 }

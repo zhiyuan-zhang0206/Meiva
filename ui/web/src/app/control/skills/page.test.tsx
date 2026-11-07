@@ -78,27 +78,23 @@ describe("SkillsPage", () => {
     await waitFor(() => screen.getByText(/no skills installed/));
   });
 
-  it("renders each skill with its layer + enabled", async () => {
+  it("renders skill names and enablement without source labels", async () => {
     transport.getSkills.mockResolvedValue(SKILLS);
     wrap(<SkillsPage />);
     await waitFor(() => screen.getByText("alpha"));
-    // names
     for (const n of ["alpha", "beta", "gamma", "stray"]) {
       expect(screen.getByText(n)).toBeTruthy();
     }
-    // layer badges
-    expect(screen.getByText("Core")).toBeTruthy();
-    expect(screen.getByText("Plugin")).toBeTruthy();
-    expect(screen.getByText("Machine")).toBeTruthy();
-    expect(screen.getByText("Untracked")).toBeTruthy();
-    // enabled column: alpha/beta enabled (checked), gamma/stray disabled (unchecked)
+    // meiva:note
+    // Installation provenance is not part of the user-facing skill list.
+    expect(screen.queryByText("Core")).toBeNull();
+    expect(screen.queryByText("Plugin")).toBeNull();
+    expect(screen.queryByText("Machine")).toBeNull();
+    expect(screen.queryByText("Untracked")).toBeNull();
     const toggles = screen.getAllByRole("switch");
     expect(toggles.length).toBe(4);
-    // alpha should be checked (enabled)
     expect(toggles[0].getAttribute("data-state")).toBe("checked");
-    // gamma should be unchecked (disabled)
     expect(toggles[2].getAttribute("data-state")).toBe("unchecked");
-    // stray (untracked) should be disabled
     expect(toggles[3].hasAttribute("disabled")).toBe(true);
   });
 

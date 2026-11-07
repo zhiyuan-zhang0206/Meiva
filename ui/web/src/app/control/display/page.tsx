@@ -1,13 +1,9 @@
 "use client";
 
-// /control#display — user-facing display & behavior preferences.
-//
-// Each setting is a row: label + description + control (toggle for bool,
-// radio group for enums). Changes are optimistic — the toggle flips
-// immediately while a PUT fires in the background; on failure it reverts.
-//
-// Settings are stored server-side (user_settings DB table) so they survive
-// across browsers and machines.
+// meiva:note
+// General exposes everyday preferences; Advanced keeps display details and operational
+// controls. The standalone legacy route retains the complete editor. All views use the
+// same persisted user settings and retain the existing save and failure behavior.
 
 import {
   Activity,
@@ -45,9 +41,9 @@ import { NotificationCategoryRows } from "./_notification-categories";
 import { RadioRow, SettingsSection, SliderRow, ToggleRow } from "./_rows";
 import { useApi } from "@/lib/transport/transport-context";
 
-// ── Page ──
-
-export default function DisplaySettingsPage() {
+export default function DisplaySettingsPage({ mode = "all" }: { mode?: "general" | "advanced" | "all" }) {
+  const general = mode !== "advanced";
+  const advanced = mode !== "general";
   const client = useApi();
   const t = useTranslations("displaySettings");
   const { settings, setSetting, isLoading } = useUserSettings();
@@ -71,6 +67,7 @@ export default function DisplaySettingsPage() {
     queryKey: ["models"],
     queryFn: () => client.getModels(),
     staleTime: Infinity,
+    enabled: advanced,
   });
 
   if (isLoading) {
@@ -99,6 +96,30 @@ export default function DisplaySettingsPage() {
 
   return (
     <div className="space-y-6">
+      {general && (
+      <SettingsSection id="display-notifications" title={t("notifications")}>
+        <ToggleRow
+          icon={Bell}
+          label={t("awaitingReply")}
+          description={t("awaitingReplyDescription")}
+          value={settings["notification.awaiting_reply"] === true}
+          onChange={(v) => setSetting("notification.awaiting_reply", v)}
+        />
+        <NotificationCategoryRows />
+      </SettingsSection>
+      )}
+      {general && (
+      <SettingsSection id="display-composer" title={t("composer")}>
+        <ToggleRow
+          icon={MessageSquareText}
+          label={t("replySuggestions")}
+          description={t("replySuggestionsSummary")}
+          value={settings["behavior.replySuggestions"] === true}
+          onChange={(v) => setSetting("behavior.replySuggestions", v)}
+        />
+      </SettingsSection>
+      )}
+      {general && (
       <SettingsSection id="display-language" title={t("language")}>
         <RadioRow
           icon={Languages}
@@ -112,16 +133,17 @@ export default function DisplaySettingsPage() {
           onChange={(v) => setSetting("display.language", v)}
         />
       </SettingsSection>
+      )}
 
       {/* Skins exist only when a plugin contributes one, so the section
           appears with the first pack rather than standing empty offering the
           console's own palette as the only choice. */}
-      {themePacks.length > 0 && (
+      {general && themePacks.length > 0 && (
         <SettingsSection id="display-theme" title="Theme">
           <RadioRow
             icon={Palette}
             label="Skin"
-            description="A plugin-contributed color pack, applied over the active light/dark palette. Colors it does not set keep following light/dark. A pack marked 'no dark variant' pins the colors it does set across both modes, so the light/dark toggle will not change them"
+            description={t("themeDescription")}
             options={[
               { value: "", label: "Default (Meiva)" },
               ...themePacks.map((p) => ({
@@ -135,6 +157,7 @@ export default function DisplaySettingsPage() {
         </SettingsSection>
       )}
 
+      {advanced && (
       <SettingsSection id="display-agent-list" title={t("agentListDisplay")}>
         <ToggleRow
           icon={CircleDot}
@@ -173,7 +196,9 @@ export default function DisplaySettingsPage() {
           onChange={(v) => setSetting("display.date_format", v)}
         />
       </SettingsSection>
+      )}
 
+      {advanced && (
       <SettingsSection id="display-timeline" title={t("timeline")}>
         <ToggleRow
           icon={Layers}
@@ -195,18 +220,12 @@ export default function DisplaySettingsPage() {
           disabled={isNarrow}
         />
       </SettingsSection>
+      )}
 
-      <SettingsSection id="display-notifications" title="Notifications">
-        <ToggleRow
-          icon={Bell}
-          label="Awaiting-reply notification"
-          description="Show the total number of notices awaiting a reply in the sidebar header"
-          value={settings["notification.awaiting_reply"] === true}
-          onChange={(v) => setSetting("notification.awaiting_reply", v)}
-        />
-        <NotificationCategoryRows />
-      </SettingsSection>
 
+
+
+      {advanced && (
       <SettingsSection id="display-realtime" title="Realtime connection">
         <ToggleRow
           icon={Activity}
@@ -216,17 +235,11 @@ export default function DisplaySettingsPage() {
           onChange={(v) => setSetting("web.sseSingleStream", v)}
         />
       </SettingsSection>
+      )}
 
-      <SettingsSection id="display-composer" title={t("composer")}>
-        <ToggleRow
-          icon={MessageSquareText}
-          label={t("replySuggestions")}
-          description={t("replySuggestionsDesc")}
-          value={settings["behavior.replySuggestions"] === true}
-          onChange={(v) => setSetting("behavior.replySuggestions", v)}
-        />
-      </SettingsSection>
 
+
+      {advanced && (
       <SettingsSection id="display-confirmations" title="Confirmations">
         <ToggleRow
           icon={AlertTriangle}
@@ -250,7 +263,9 @@ export default function DisplaySettingsPage() {
           onChange={(v) => setSetting("behavior.confirm_force_kill", v)}
         />
       </SettingsSection>
+      )}
 
+      {advanced && (
       <SettingsSection id="display-model-picker" title="Model picker">
         <ModelPickerSection
           groups={modelGroups}
@@ -273,6 +288,7 @@ export default function DisplaySettingsPage() {
           }
         />
       </SettingsSection>
+      )}
     </div>
   );
 }

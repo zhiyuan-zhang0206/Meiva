@@ -349,6 +349,11 @@ def list_enabled(conn: psycopg.Connection, *, kind: ExtensionKind | None = None)
         ).fetchall()
 
 
+def list_all(conn: psycopg.Connection, *, kind: ExtensionKind) -> list[Extension]:
+    with conn.cursor(row_factory=class_row(Extension)) as cur:
+        return cur.execute(f"{_SELECT} WHERE kind = %s ORDER BY name", (kind,)).fetchall()
+
+
 def set_default_enabled(conn: psycopg.Connection, name: str, *, enabled: bool) -> bool:
     """Flip one row's cluster-default enablement; False when no such row.
 

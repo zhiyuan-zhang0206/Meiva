@@ -102,6 +102,9 @@ class FieldInfoLike(Protocol):
     def default_factory(self) -> Callable[..., object] | None: ...
 
     @property
+    def title(self) -> str | None: ...
+
+    @property
     def description(self) -> str | None: ...
 
     @property
@@ -127,6 +130,7 @@ class DomainModelLike(Protocol):
 
 
 class SchemaExtra(TypedDict, total=False):
+    help_text: str
     scope: str
     remote_writable: bool
     writable: bool

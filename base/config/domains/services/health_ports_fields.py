@@ -28,7 +28,7 @@ from base.host.env.port_table import FIXED_PORTS
 
 
 def health_port_field(
-    name: str, *, capability: str | None = None, writable: bool = False
+    name: str, *, title: str, capability: str | None = None, writable: bool = False
 ) -> int | None:
     """The `<name>_health_port` field of a standard `/healthz` daemon.
 
@@ -45,6 +45,7 @@ def health_port_field(
     }
     return Field(
         default=None,
+        title=title,
         alias=f"MEIVA_{name.upper()}_HEALTH_PORT",
         description=(
             f"{name.replace('_', ' ').capitalize()} daemon /healthz port override (per unit). "
@@ -57,28 +58,48 @@ def health_port_field(
 class ServiceHealthPortFields:
     """The per-unit daemon /healthz port overrides."""
 
-    labeler_health_port: int | None = health_port_field("labeler")
-    im_bridge_health_port: int | None = health_port_field("im_bridge")
-    heartbeat_health_port: int | None = health_port_field("heartbeat")
-    delivery_watchdog_health_port: int | None = health_port_field("delivery_watchdog")
-    task_maintenance_health_port: int | None = health_port_field("task_maintenance")
-    events_maintenance_health_port: int | None = health_port_field("events_maintenance")
-    pg_backup_health_port: int | None = health_port_field("pg_backup")
-    ttl_reaper_health_port: int | None = health_port_field("ttl_reaper")
-    schedule_manager_health_port: int | None = health_port_field(
-        "schedule_manager", capability="common"
+    labeler_health_port: int | None = health_port_field(
+        "labeler", title="Conversation labeler health port"
     )
-    memory_indexer_health_port: int | None = health_port_field("memory_indexer")
+    im_bridge_health_port: int | None = health_port_field(
+        "im_bridge", title="Messaging bridge health port"
+    )
+    heartbeat_health_port: int | None = health_port_field(
+        "heartbeat", title="Heartbeat service health port"
+    )
+    delivery_watchdog_health_port: int | None = health_port_field(
+        "delivery_watchdog", title="Message watchdog health port"
+    )
+    task_maintenance_health_port: int | None = health_port_field(
+        "task_maintenance", title="Task maintenance service health port"
+    )
+    events_maintenance_health_port: int | None = health_port_field(
+        "events_maintenance", title="Event maintenance service health port"
+    )
+    pg_backup_health_port: int | None = health_port_field(
+        "pg_backup", title="Postgres backup service health port"
+    )
+    ttl_reaper_health_port: int | None = health_port_field(
+        "ttl_reaper", title="Expired resource cleanup service health port"
+    )
+    schedule_manager_health_port: int | None = health_port_field(
+        "schedule_manager", capability="common", title="Schedule manager health port"
+    )
+    memory_indexer_health_port: int | None = health_port_field(
+        "memory_indexer", title="Memory indexer health port"
+    )
     # The ops daemon is the agent-runner's inbound port the gateway dials to run
     # cluster ops; the runner registers the resulting URL itself.
-    ops_health_port: int | None = health_port_field("ops", capability="agent-runner")
+    ops_health_port: int | None = health_port_field(
+        "ops", capability="agent-runner", title="Operations service health port"
+    )
     # `writable`: the one official repair surface for a hosted-runner port that
     # collides on a mirrored localhost namespace (`.env` hand-edits were the only
     # fix during the 2026-09-02 8114 incident). Host scope stays
     # host-writable; remote_writable=False keeps a remote `--machine` set out.
     agent_host_health_port: int | None = health_port_field(
-        "agent_host", capability="agent-runner", writable=True
+        "agent_host", capability="agent-runner", writable=True, title="Agent host health port"
     )
     page_server_health_port: int | None = health_port_field(
-        "page_server", capability="agent-runner"
+        "page_server", capability="agent-runner", title="Page server health port"
     )

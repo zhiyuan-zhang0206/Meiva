@@ -154,10 +154,11 @@ def init_process_scope(
 
 def land_cluster_extensions(db: Database, *, home: Path) -> None:
     from base import paths
-    from base.packages.extensions import materialize
+    from base.packages.extensions import materialize, plugin_enable
 
     try:
         with db.connect() as conn:
+            plugin_enable.materialize(conn, home=home)
             result = materialize.materialize_skills(
                 conn,
                 dest_root=paths.skills_dir(home),
@@ -166,7 +167,7 @@ def land_cluster_extensions(db: Database, *, home: Path) -> None:
     except Exception as exc:
         logger.warning(
             "[extensions] could not read the cluster registry at boot ({}); this "
-            "machine keeps whatever skills it already has and retries on the next start",
+            "machine retains its extension cache and retries on the next start",
             exc,
         )
         return

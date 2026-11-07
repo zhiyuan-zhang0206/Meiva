@@ -63,16 +63,6 @@ export function displayOrder(field: ConfigFieldView): number {
 }
 
 // meiva:note
-// Display label from the env var: strip the MEIVA_ prefix and turn underscores
-// into spaces, preserving the original case so abbreviations stay intact
-// (MEIVA_MODEL → "MODEL", MEIVA_LLM_OVERRIDE → "LLM OVERRIDE", DEEPSEEK_API_KEY →
-// "DEEPSEEK API KEY"). No case conversion — env vars are uppercase by
-// convention, so labels read uppercase and never mangle LLM/SSE/URL/CIDR.
-export function fieldLabel(envVar: string): string {
-  return envVar.replace(/^MEIVA_/, "").split("_").filter(Boolean).join(" ");
-}
-
-// meiva:note
 // Whether individual agents can override this field via spawn/restart
 // config overlay — drives the "per-agent" tag and the per-agent filter.
 // Served by the backend as `ConfigFieldView.per_agent` (the same flag the

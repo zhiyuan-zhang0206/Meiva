@@ -22,6 +22,14 @@ blob derive from the bytes received, never from the client. `kind` is the closed
 `ExtensionKind` enum and `name` a path-safe token; both are 422 otherwise, as is
 an undecodable archive.
 
+For `kind=plugin`, a present `meiva-plugin.json` is parsed and validated with the
+manifest owner before registration. Manifest and URL names must share the existing
+`match_key` identity (including dash/underscore equivalence). The original declaration is stored in the
+existing registry `manifest` column, preserving display name, category and
+Settings toggle capability even before a package is materialized on the gateway.
+Malformed manifests return 422 before either a registry row or blob is written.
+A legacy upload without a manifest keeps the existing compatible defaults.
+
 The size cap is the registry blob cap (8 MiB). The base64 length is checked
 before decoding (413), and `register_tree` enforces the cap again on the packed
 archive (413). PUT needs no operation key: the blob is content-addressed and the

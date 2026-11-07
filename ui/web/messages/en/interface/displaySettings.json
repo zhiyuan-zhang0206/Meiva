@@ -33,5 +33,8 @@
   "chinese": "中文",
   "categories": {
     "coreNeedsInput": "Agent is waiting on your answer"
-  }
+  },
+  "awaitingReplyDescription": "Show the total number of notices awaiting a reply in the sidebar header.",
+  "themeDescription": "Choose the interface color palette.",
+  "replySuggestionsSummary": "Suggest replies when an agent finishes a turn."
 }

@@ -33,5 +33,8 @@
   "chinese": "中文",
   "categories": {
     "coreNeedsInput": "等你回答"
-  }
+  },
+  "awaitingReplyDescription": "在侧栏标题显示等待回复的通知总数。",
+  "themeDescription": "选择界面配色。",
+  "replySuggestionsSummary": "在 Agent 回复后提供建议回复。"
 }

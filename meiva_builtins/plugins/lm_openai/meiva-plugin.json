@@ -12,5 +12,8 @@
     "decisionProviders": [
       "gpt-"
     ]
-  }
+  },
+  "displayName": "OpenAI",
+  "userToggleable": false,
+  "category": "provider"
 }

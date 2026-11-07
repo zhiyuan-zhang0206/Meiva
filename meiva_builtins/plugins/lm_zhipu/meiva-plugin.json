@@ -9,5 +9,8 @@
     "providers": [
       "glm-"
     ]
-  }
+  },
+  "displayName": "Zhipu",
+  "userToggleable": false,
+  "category": "provider"
 }

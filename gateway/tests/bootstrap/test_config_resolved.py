@@ -55,6 +55,7 @@ def test_resolved_covers_every_tuning_field() -> None:
     assert names == list(tuning_field_names())
     assert len(names) == len(dataclass_fields(ModelTuning))
     assert set(names) <= field_names()
+    assert all(field["label"] for field in body["fields"])
     # Every tunable is picked up by the agent process, so the panel's restart
     # hint is uniform — a field that ever says otherwise is a real drift signal.
     assert {f["restart_required"] for f in body["fields"]} == {"agent"}

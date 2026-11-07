@@ -183,6 +183,12 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
     ("GET", "/api/agents/{agent_id}/inspect/metrics"): RouteContract(),
     ("GET", "/api/agents/{agent_id}/inspect/widgets"): RouteContract(),
     ("GET", "/api/agents/{agent_id}/neighbors"): RouteContract(),
+    ("GET", "/api/plugins"): RouteContract(
+        note="read cluster plugin choices and presentation metadata"
+    ),
+    ("PUT", "/api/plugins"): RouteContract(
+        note="set one cluster plugin choice and refresh its local cache; repeating writes the same choice"
+    ),
     ("GET", "/api/inventory"): RouteContract(),
     ("PUT", "/api/inventory"): RouteContract(note="full inventory replace — PUT is idempotent"),
     ("POST", "/api/agents/{agent_id}/impersonation/force-expire"): RouteContract(

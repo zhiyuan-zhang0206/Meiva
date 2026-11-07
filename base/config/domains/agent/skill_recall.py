@@ -7,6 +7,7 @@ from base.config.base import EnvSettings
 
 class AgentSkillRecallSettings(EnvSettings):
     skill_recall_enabled: bool = Field(
+        title="Suggest relevant skills before a turn",
         default=True,
         alias="MEIVA_SKILL_RECALL",
         description=(
@@ -28,6 +29,7 @@ class AgentSkillRecallSettings(EnvSettings):
     )
 
     skill_recall_model: str = Field(
+        title="Skill suggestion decision model",
         default="jev-1.13.0",
         alias="MEIVA_SKILL_RECALL_MODEL",
         description=(
@@ -49,6 +51,7 @@ class AgentSkillRecallSettings(EnvSettings):
     )
 
     skill_recall_threshold: float = Field(
+        title="Minimum relevance for skill suggestions",
         default=0.60,
         gt=0,
         le=1,
@@ -70,6 +73,7 @@ class AgentSkillRecallSettings(EnvSettings):
     )
 
     skill_recall_peer_threshold: float = Field(
+        title="Minimum relevance for peer-message skill suggestions",
         default=0.70,
         gt=0,
         le=1,
@@ -98,6 +102,7 @@ class AgentSkillRecallSettings(EnvSettings):
     )
 
     skill_recall_max: int = Field(
+        title="Maximum suggested skills per turn",
         default=2,
         ge=0,
         alias="MEIVA_SKILL_RECALL_MAX",
@@ -117,6 +122,7 @@ class AgentSkillRecallSettings(EnvSettings):
     )
 
     skill_recall_deadline_seconds: float = Field(
+        title="Skill suggestion timeout (seconds)",
         default=3.0,
         gt=0,
         alias="MEIVA_SKILL_RECALL_DEADLINE_SECONDS",
@@ -137,6 +143,7 @@ class AgentSkillRecallSettings(EnvSettings):
     )
 
     skill_recall_peer_messages: bool = Field(
+        title="Suggest skills for peer messages",
         default=False,
         alias="MEIVA_SKILL_RECALL_PEER_MESSAGES",
         description=(
@@ -157,6 +164,7 @@ class AgentSkillRecallSettings(EnvSettings):
     )
 
     skill_recall_peer_gate_work_floor: float = Field(
+        title="Peer message work request threshold",
         default=0.30,
         gt=0,
         le=1,
@@ -169,6 +177,7 @@ class AgentSkillRecallSettings(EnvSettings):
             "offer costs a redo while an extra offer costs one line in the prompt."
         ),
         json_schema_extra={
+            "help_text": "Skip messages whose probability of requesting work is at or below this threshold.",
             "restart_required": "agent",
             "writable": True,
             "sensitive": False,
@@ -179,6 +188,7 @@ class AgentSkillRecallSettings(EnvSettings):
     )
 
     skill_recall_peer_gate_method_ceiling: float = Field(
+        title="Peer message instruction threshold",
         default=0.70,
         gt=0,
         le=1,
@@ -191,6 +201,7 @@ class AgentSkillRecallSettings(EnvSettings):
             "the 2026-10-17 evaluation."
         ),
         json_schema_extra={
+            "help_text": "Skip messages whose probability of already providing a method is at or above this threshold.",
             "restart_required": "agent",
             "writable": True,
             "sensitive": False,
@@ -201,6 +212,7 @@ class AgentSkillRecallSettings(EnvSettings):
     )
 
     skill_recall_peer_gate_max_chars: int = Field(
+        title="Peer message screening limit (characters)",
         default=4000,
         gt=0,
         alias="MEIVA_SKILL_RECALL_PEER_GATE_MAX_CHARS",
@@ -221,6 +233,7 @@ class AgentSkillRecallSettings(EnvSettings):
     )
 
     skill_recall_peer_gate_deadline_seconds: float = Field(
+        title="Peer message screening timeout (seconds)",
         default=1.5,
         gt=0,
         alias="MEIVA_SKILL_RECALL_PEER_GATE_DEADLINE_SECONDS",

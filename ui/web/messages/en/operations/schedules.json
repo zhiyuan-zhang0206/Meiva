@@ -1,6 +1,6 @@
 {
   "couldntLoad": "Couldn't load schedules — retrying…",
-  "newRaw": "New (raw)",
+  "newRaw": "Advanced script",
   "noSchedules": "No schedules configured",
   "status": "Status",
   "name": "Name",
@@ -26,5 +26,16 @@
   "updateFailed": "Update failed: {error}",
   "restarted": "Schedule restarted",
   "pageTitle": "Schedules",
-  "createTitle": "Create schedule"
+  "createTitle": "Create schedule",
+  "needsAttention": "Needs attention",
+  "completedState": "Completed",
+  "stopUnconfirmed": "Stop unconfirmed",
+  "stoppedState": "Stopped",
+  "enabledState": "Enabled",
+  "startUnconfirmed": "Start unconfirmed",
+  "unknownState": "State unknown",
+  "updatingState": "Updating…",
+  "stopAction": "Stop",
+  "startAction": "Start",
+  "reportedState": "Last reported: {state} · Machine: {machine}. This is not a live process check."
 }

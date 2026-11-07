@@ -11,7 +11,7 @@
   "skills": "技能",
   "skillsDescription": "安装技能；查看每个技能的来源层与本地差异。",
   "schedules": "计划",
-  "schedulesDescription": "Cron 驱动的 agent 运行，每次一个受监督会话。",
+  "schedulesDescription": "管理自动化任务，查看最近报告的状态。",
   "okfGraph": "OKF 图谱",
   "okfGraphDescription": "仓库知识图谱的 D3 力导向视图。",
   "sections": {
@@ -57,11 +57,26 @@
     "alerts": "告警",
     "app": "应用"
   },
-  "title": "控制台",
+  "title": "设置",
   "backToAgents": "返回对话",
   "openOkfGraph": "打开 OKF 图谱",
   "app": "应用",
   "appDescription": "本机上 Meiva 应用的设置：服务器地址与更新。",
   "appOpenSettings": "打开应用设置",
-  "appOpenSettingsFailed": "应用没有打开设置页。"
+  "appOpenSettingsFailed": "应用没有打开设置页。",
+  "navigation": "设置分类",
+  "general": "常规",
+  "machines": "机器",
+  "advanced": "高级",
+  "preferences": "偏好设置",
+  "manage": "管理",
+  "system": "系统",
+  "generalDescription": "调整 Agent 与你的协作方式，以及日常使用偏好。",
+  "machinesDescription": "设备能力与本地服务，更改仅影响所选机器。",
+  "advancedDescription": "微调 Agent 行为、系统资源和界面细节。",
+  "moreSettings": "需要更多选项？打开高级设置",
+  "advancedSections": "高级设置分类",
+  "agentSettings": "Agent 设置",
+  "resourcesServices": "资源与服务",
+  "interfaceDetails": "界面细节"
 }

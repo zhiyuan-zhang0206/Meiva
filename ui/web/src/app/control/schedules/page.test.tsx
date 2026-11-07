@@ -101,7 +101,7 @@ describe("SchedulesPage", () => {
     const input = await screen.findByPlaceholderText(/Describe a scheduled task/);
     fireEvent.change(input, { target: { value: "run nightly" } });
     fireEvent.keyDown(input, { key: "Enter" });
-    await waitFor(() => expect(screen.getByRole("button", { name: "Describe" }).hasAttribute("disabled")).toBe(true));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Create schedule" }).hasAttribute("disabled")).toBe(true));
     fireEvent.keyDown(input, { key: "Enter" });
     expect(draft).toHaveBeenCalledOnce();
   });
@@ -146,7 +146,7 @@ describe("SchedulesPage", () => {
     transport.listSchedules.mockResolvedValue([SCHEDULE]);
     wrap(<SchedulesPageView navigate={pushSpy} />);
     await waitFor(() => expect(screen.getByText("memory-arbiter")).toBeTruthy());
-    expect(screen.getByText("running")).toBeTruthy();
+    expect(screen.getByText("Enabled")).toBeTruthy();
   });
 
   it("description cell carries a title attribute for the truncated full text", async () => {
@@ -164,7 +164,7 @@ describe("SchedulesPage", () => {
 
     const input = screen.getByPlaceholderText(/Describe a scheduled task/);
     fireEvent.change(input, { target: { value: "consolidate nightly" } });
-    fireEvent.click(screen.getByRole("button", { name: "Describe" }));
+    fireEvent.click(screen.getByRole("button", { name: "Create schedule" }));
 
     await waitFor(() => expect(draft).toHaveBeenCalledWith("consolidate nightly"));
     await waitFor(() => expect(pushSpy).toHaveBeenCalledWith("/"));
@@ -214,7 +214,7 @@ describe("SchedulesPage", () => {
     wrap(<SchedulesPageView navigate={pushSpy} />);
     await waitFor(() => expect(screen.getByText(/No schedules configured/)).toBeTruthy());
 
-    fireEvent.click(screen.getByRole("button", { name: /New \(raw\)/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Advanced script" }));
     fireEvent.change(screen.getByPlaceholderText("memory-arbiter"), {
       target: { value: "my-sched" },
     });
@@ -330,10 +330,29 @@ describe("SchedulesPage", () => {
     const off: ScheduleSummary = { ...SCHEDULE, enabled: false, status: "stopped" };
     transport.listSchedules.mockResolvedValue([off]);
     wrap(<SchedulesPageView navigate={pushSpy} />);
-    await waitFor(() => expect(screen.getByText("(off)")).toBeTruthy());
-    fireEvent.click(screen.getByRole("button", { name: /New \(raw\)/ }));
-    expect(screen.getByText("Create schedule")).toBeTruthy();
+    await waitFor(() => expect(screen.getByText("Stopped")).toBeTruthy());
+    fireEvent.click(screen.getByRole("button", { name: "Advanced script" }));
+    expect(screen.getByRole("heading", { name: "Create schedule" })).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
-    await waitFor(() => expect(screen.queryByText("Create schedule")).toBeNull());
+    await waitFor(() => expect(screen.queryByRole("heading", { name: "Create schedule" })).toBeNull());
+  });
+});
+
+
+describe("Schedule status meaning", () => {
+  it("keeps an unconfirmed stop visible without a green running indicator", async () => {
+    transport.listSchedules.mockResolvedValue([{ ...SCHEDULE, enabled: false, status: "running" }]);
+    wrap(<SchedulesPageView navigate={pushSpy} />);
+    const status = await screen.findByText("Stop unconfirmed");
+    expect(status.className).not.toContain("green");
+    expect(screen.queryByText("(off)")).toBeNull();
+    expect(screen.getByRole<HTMLButtonElement>("button", { name: "Restart" }).disabled).toBe(true);
+  });
+
+  it("reports a failed disabled schedule as requiring attention", async () => {
+    transport.listSchedules.mockResolvedValue([{ ...SCHEDULE, enabled: false, status: "error" }]);
+    wrap(<SchedulesPageView navigate={pushSpy} />);
+    expect(await screen.findByText("Needs attention")).toBeTruthy();
+    expect(screen.queryByText("Stopped")).toBeNull();
   });
 });

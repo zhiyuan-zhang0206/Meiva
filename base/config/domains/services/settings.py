@@ -24,6 +24,7 @@ from base.host.boundary.untyped import object_of
 
 class ServiceSettings(ServiceHealthPortFields, ServiceRuntimeSettings):
     labeler_max_chars: int = Field(
+        title="Agent label maximum length (characters)",
         default=64,
         gt=0,
         alias="MEIVA_LABELER_MAX_CHARS",
@@ -43,6 +44,7 @@ class ServiceSettings(ServiceHealthPortFields, ServiceRuntimeSettings):
     )
 
     backup_hour: int = Field(
+        title="Daily backup hour (cluster time)",
         default=3,
         ge=0,
         le=23,
@@ -64,6 +66,7 @@ class ServiceSettings(ServiceHealthPortFields, ServiceRuntimeSettings):
     )
 
     backup_keep: int = Field(
+        title="Daily backups to retain",
         default=7,
         gt=0,
         alias="MEIVA_BACKUP_KEEP",
@@ -80,6 +83,7 @@ class ServiceSettings(ServiceHealthPortFields, ServiceRuntimeSettings):
         },
     )
     backup_offsite_endpoint: str = Field(
+        title="Off-site backup storage endpoint",
         default="",
         alias="MEIVA_BACKUP_OFFSITE_ENDPOINT",
         description=(
@@ -97,6 +101,7 @@ class ServiceSettings(ServiceHealthPortFields, ServiceRuntimeSettings):
         },
     )
     backup_offsite_bucket: str = Field(
+        title="Off-site backup storage bucket",
         default="",
         alias="MEIVA_BACKUP_OFFSITE_BUCKET",
         description="Aliyun OSS bucket the daily dump is published to (under `meiva-logical/`).",
@@ -109,6 +114,7 @@ class ServiceSettings(ServiceHealthPortFields, ServiceRuntimeSettings):
         },
     )
     backup_offsite_credentials_file: Path | None = Field(
+        title="Off-site backup credentials file",
         default=None,
         alias="MEIVA_BACKUP_OFFSITE_CREDENTIALS_FILE",
         description=(
@@ -127,6 +133,7 @@ class ServiceSettings(ServiceHealthPortFields, ServiceRuntimeSettings):
     )
 
     gateway_pidfile: Path = Field(
+        title="Gateway process ID file",
         default_factory=lambda: unit_home() / "run" / "gateway.pid",
         alias="MEIVA_GATEWAY_PIDFILE",
         description="Gateway uvicorn pidfile path. healthcheck goes via HTTP; this is auxiliary only.",
@@ -140,6 +147,7 @@ class ServiceSettings(ServiceHealthPortFields, ServiceRuntimeSettings):
     )
 
     frontend_healthcheck_url: str = Field(
+        title="Frontend health check URL",
         default="http://localhost:3000",
         alias="MEIVA_FRONTEND_HEALTHCHECK_URL",
         description="The fleet UI entry the user reaches — Gate's port (the Next.js app itself binds MEIVA_APP_PORT and is proxied).",
@@ -153,10 +161,12 @@ class ServiceSettings(ServiceHealthPortFields, ServiceRuntimeSettings):
     )
 
     app_port: int | None = Field(
+        title="Web application port",
         default=None,
         alias="MEIVA_APP_PORT",
         description="The Next.js app port the gate proxies to (the gate owns the entry port). Unset = entry port + 1; converge writes the explicit value from the cluster record.",
         json_schema_extra={
+            "help_text": "Leave unset to derive the application port from the entry port.",
             "restart_required": "all",
             "writable": True,
             "sensitive": False,
@@ -165,6 +175,7 @@ class ServiceSettings(ServiceHealthPortFields, ServiceRuntimeSettings):
     )
 
     gateway_health_url: str = Field(
+        title="Gateway health check URL",
         default="http://localhost:8000/api/health",
         alias="MEIVA_GATEWAY_HEALTH_URL",
         description="Gateway healthcheck probe URL. Pure agent-runners derive it from MEIVA_GATEWAY_URL when no host override is set; gateway-capable units default to the local gateway.",
@@ -178,6 +189,7 @@ class ServiceSettings(ServiceHealthPortFields, ServiceRuntimeSettings):
     )
 
     im_bridge_enabled: bool = Field(
+        title="Enable messaging bridge",
         default=True,
         alias="MEIVA_IM_BRIDGE_ENABLED",
         description="Whether the im_bridge service is part of this cluster's service roster. A cluster with no IM adapters configured (Weixin account absent) can disable the service: the daemon retains health and background tasks even when no adapter is enabled.",
@@ -190,6 +202,7 @@ class ServiceSettings(ServiceHealthPortFields, ServiceRuntimeSettings):
     )
 
     im_bridge_health_url: str = Field(
+        title="Messaging bridge health check URL",
         default="",
         alias="MEIVA_IM_BRIDGE_HEALTH_URL",
         description="IM Bridge healthcheck URL. Empty = derive from the im_bridge row of base.daemon.endpoints.ServiceEndpoints.",
@@ -203,6 +216,7 @@ class ServiceSettings(ServiceHealthPortFields, ServiceRuntimeSettings):
     )
 
     im_disabled_adapters: Annotated[list[str], NoDecode] = Field(
+        title="Disabled messaging adapters",
         default=[],
         alias="MEIVA_IM_DISABLED_ADAPTERS",
         description="Comma-separated IM adapter names to skip at daemon load (code stays; e.g. 'weixin' — WeChat iLink production-disabled since 2026-08-06).",
@@ -215,6 +229,7 @@ class ServiceSettings(ServiceHealthPortFields, ServiceRuntimeSettings):
     )
 
     im_send_retry_delays: Annotated[list[float], NoDecode] = Field(
+        title="Messaging enqueue retry delays (seconds)",
         default=[2.0, 4.0, 8.0, 16.0, 32.0],
         alias="MEIVA_IM_SEND_RETRY_DELAYS",
         description="Comma-separated backoff delays (seconds) between gateway enqueue retries. A gateway mid-rollout is down for roughly a minute; 2+4+8+16+32 covers it. When every retry fails the error propagates and the sender is told delivery is unconfirmed; nothing is queued or replayed.",
@@ -227,6 +242,7 @@ class ServiceSettings(ServiceHealthPortFields, ServiceRuntimeSettings):
     )
 
     im_push_retry_backoff_seconds: float = Field(
+        title="Messaging send retry delay (seconds)",
         default=1.0,
         ge=0.0,
         alias="MEIVA_IM_PUSH_RETRY_BACKOFF_SECONDS",
@@ -246,6 +262,7 @@ class ServiceSettings(ServiceHealthPortFields, ServiceRuntimeSettings):
     )
 
     im_push_retry_jitter_seconds: float = Field(
+        title="Maximum messaging retry jitter (seconds)",
         default=2.0,
         ge=0.0,
         alias="MEIVA_IM_PUSH_RETRY_JITTER_SECONDS",
@@ -256,6 +273,7 @@ class ServiceSettings(ServiceHealthPortFields, ServiceRuntimeSettings):
             "the platform endpoint in lockstep. 0 disables the jitter."
         ),
         json_schema_extra={
+            "help_text": "Set 0 to disable retry jitter.",
             "restart_required": "gateway",
             "writable": True,
             "sensitive": False,
@@ -264,6 +282,7 @@ class ServiceSettings(ServiceHealthPortFields, ServiceRuntimeSettings):
     )
 
     im_sse_read_timeout_seconds: float = Field(
+        title="Messaging event stream read timeout (seconds)",
         default=120.0,
         alias="MEIVA_IM_SSE_READ_TIMEOUT_SECONDS",
         description="Read timeout (seconds) for the IM Bridge SSE subscription stream. The stream is long-lived and mostly idle (the gateway sends a keep-alive comment about once a second), so this only trips on a genuinely dead connection (task #698 G8).",
@@ -276,6 +295,7 @@ class ServiceSettings(ServiceHealthPortFields, ServiceRuntimeSettings):
     )
 
     im_bridge_timeline_window: int = Field(
+        title="Timeline items scanned for chat replay",
         default=20,
         gt=0,
         alias="MEIVA_IM_BRIDGE_TIMELINE_WINDOW",
@@ -296,6 +316,7 @@ class ServiceSettings(ServiceHealthPortFields, ServiceRuntimeSettings):
     )
 
     im_bridge_replay_messages: int = Field(
+        title="Recent messages replayed when switching chats",
         default=5,
         gt=0,
         alias="MEIVA_IM_BRIDGE_REPLAY_MESSAGES",
@@ -314,6 +335,7 @@ class ServiceSettings(ServiceHealthPortFields, ServiceRuntimeSettings):
     )
 
     im_bridge_notice_reply_window_seconds: int = Field(
+        title="Notice reply window (seconds)",
         default=300,
         gt=0,
         alias="MEIVA_IM_BRIDGE_NOTICE_REPLY_WINDOW_SECONDS",
@@ -333,6 +355,7 @@ class ServiceSettings(ServiceHealthPortFields, ServiceRuntimeSettings):
     )
 
     im_bridge_notice_open_limit: int = Field(
+        title="Maximum open notices listed in chat",
         default=50,
         gt=0,
         alias="MEIVA_IM_BRIDGE_NOTICE_OPEN_LIMIT",
@@ -351,6 +374,7 @@ class ServiceSettings(ServiceHealthPortFields, ServiceRuntimeSettings):
     )
 
     im_push_health_channels: Annotated[list[str], NoDecode] = Field(
+        title="Messaging channels monitored for delivery health",
         default=["weixin"],
         alias="MEIVA_IM_PUSH_HEALTH_CHANNELS",
         description=(
@@ -369,6 +393,7 @@ class ServiceSettings(ServiceHealthPortFields, ServiceRuntimeSettings):
     )
 
     im_push_health_interval_seconds: float = Field(
+        title="Messaging delivery health check interval (seconds)",
         default=60.0,
         gt=0,
         alias="MEIVA_IM_PUSH_HEALTH_INTERVAL_SECONDS",
@@ -387,6 +412,7 @@ class ServiceSettings(ServiceHealthPortFields, ServiceRuntimeSettings):
     )
 
     ops_concurrency: int = Field(
+        title="Maximum concurrent cluster operations",
         default=8,
         alias="MEIVA_OPS_CONCURRENCY",
         description="Max concurrent cluster ops the agent-runner executes; further inbound /ops requests queue. Prevents one fan-out from overwhelming the runner.",

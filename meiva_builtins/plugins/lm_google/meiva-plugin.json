@@ -9,5 +9,8 @@
     "providers": [
       "gemini-"
     ]
-  }
+  },
+  "displayName": "Google",
+  "userToggleable": false,
+  "category": "provider"
 }

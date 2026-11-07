@@ -23,6 +23,7 @@ def _meta(
 ) -> ConfigFieldMeta:
     return ConfigFieldMeta(
         name=name,
+        label=name,
         field_type=field_type,
         current_value=None,
         default_value=None,

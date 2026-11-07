@@ -1,4 +1,5 @@
 {
+  "loadingPlugins": "正在加载插件…",
   "couldntLoad": "无法加载清单——请检查 gateway 后刷新。",
   "plugins": "插件",
   "mcpServers": "MCP 服务器",
@@ -16,5 +17,22 @@
   "cantEnable": "无法在此主机上启用",
   "clickDisable": "点击禁用",
   "clickEnable": "点击启用",
-  "noData": "（无数据）"
+  "noData": "（无数据）",
+  "clusterPluginsHelp": "为整个集群启用插件，所有安装了该插件的机器使用同一设置。",
+  "togglePlugin": "切换 {name}",
+  "pluginRestart": "已保存集群设置。重启服务后生效；离线机器将在下次启动时使用此设置。",
+  "machine": "机器",
+  "loadingMcp": "正在加载 MCP 服务器…",
+  "machineMcpHelp": "选择机器以管理其 MCP 服务器。连接和凭证归属于该机器；Agent 单独选择暴露哪些工具。",
+  "machineUnreachable": "无法连接 {machine}。该机器的 MCP 安装和启用状态未知。",
+  "noMachineMcp": "此机器尚未安装 MCP 服务器。",
+  "mcpEnabled": "已在此机器启用",
+  "mcpDisabled": "已在此机器停用",
+  "toggleMcp": "切换 {machine} 上的 {name}",
+  "llmProviders": "LLM 提供商",
+  "decisionProviders": "Decision 模型提供商",
+  "mcpInstallScope": "安装入口会打开安装对话，由你与安装助手确认目标机器。下方选择器控制列表和启用状态修改。",
+  "builtinPlugins": "内置插件",
+  "extensionPlugins": "扩展插件",
+  "noMachines": "暂无可用机器。"
 }

@@ -15,6 +15,8 @@ import type {
   DefaultModelView,
   EventResolutionRow,
   GuideDraftResponse,
+  ClusterPluginsView,
+  ClusterPluginSaved,
   InventoryAggregate,
   InventoryWriteResult,
   MemoryNoteResponse,
@@ -205,6 +207,14 @@ export function createControlApi(http: Http) {
     ): Promise<ConfigWriteResult> {
       return Promise.resolve().then(() => f(configPath(machine), putJson(body)))
         .then(http.rawJson<ConfigWriteResult>);
+    },
+
+    getPlugins: (): Promise<ClusterPluginsView> => {
+      return f("/api/plugins").then(ok<ClusterPluginsView>);
+    },
+
+    putPluginEnabled: (name: string, enabled: boolean): Promise<ClusterPluginSaved> => {
+      return f("/api/plugins", putJson({ name, enabled })).then(ok<ClusterPluginSaved>);
     },
 
     getInventory: (): Promise<InventoryAggregate> => {

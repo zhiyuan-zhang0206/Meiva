@@ -1711,6 +1711,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/plugins": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["get_plugins_api_plugins_get"];
+        put: operations["put_plugin_api_plugins_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/skills": {
         parameters: {
             query?: never;
@@ -2859,6 +2875,27 @@ export interface components {
             current_paused: boolean;
             machines: components["schemas"]["MachineStatus"][];
         };
+        ClusterPluginSaved: {
+            name: string;
+            enabled: boolean;
+            restart_required: boolean;
+        };
+        ClusterPluginView: {
+            name: string;
+            enabled: boolean;
+            description: string;
+            display_name?: string | null;
+            user_toggleable: boolean;
+            category: "provider" | "builtin" | "extension";
+            provider_kinds?: ("llm" | "decision")[];
+        };
+        ClusterPluginWrite: {
+            name: string;
+            enabled: boolean;
+        };
+        ClusterPluginsView: {
+            plugins: components["schemas"]["ClusterPluginView"][];
+        };
         ClusterStatus: {
             machine_name: string;
             serve_gateway: boolean;
@@ -2894,6 +2931,8 @@ export interface components {
         };
         ConfigFieldView: {
             name: string;
+            label: string;
+            help_text?: string | null;
             owner?: string | null;
             field_type: string;
             current_value: unknown;
@@ -3686,6 +3725,7 @@ export interface components {
         };
         ResolvedFieldView: {
             name: string;
+            label: string;
             env_var: string;
             description: string;
             field_type: string;
@@ -7830,6 +7870,56 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["InventoryWriteResult"];
+                };
+            };
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_plugins_api_plugins_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClusterPluginsView"];
+                };
+            };
+        };
+    };
+    put_plugin_api_plugins_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ClusterPluginWrite"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClusterPluginSaved"];
                 };
             };
             422: {
