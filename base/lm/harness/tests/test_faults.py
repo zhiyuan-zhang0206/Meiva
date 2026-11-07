@@ -67,6 +67,20 @@ def test_the_cli_error_list_wins_over_the_result_text() -> None:
     assert message == "claude_code turn turn-1 failed (error): context window exceeded"
 
 
+def test_antigravity_fault_message_prefers_cli_error_over_hidden_text() -> None:
+    message = fault_message(
+        "antigravity",
+        turn(
+            text="MEIVA_HIDE_FROM_USER\nhidden assistant text",
+            errors=("API error (attempt 1): 500 Internal Server Error",),
+        ),
+    )
+
+    assert message == (
+        "antigravity turn turn-1 failed (error): API error (attempt 1): 500 Internal Server Error"
+    )
+
+
 # meiva:note
 # `stop_reason` is a *stop* reason, so it is read only when nothing else names the failure -- which
 # is where a CLI puts "usage limit reached". Reading it first is what turned a 400 into

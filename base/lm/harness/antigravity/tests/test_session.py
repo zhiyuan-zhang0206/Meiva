@@ -54,3 +54,25 @@ async def test_two_turns_reuse_one_process(tmp_path: Path) -> None:
         assert "--conversation" not in harness.argv_seen()
     finally:
         await harness.stop()
+
+
+async def test_turn_failure_populates_errors(tmp_path: Path) -> None:
+    steps: list[dict[str, object]] = []
+    turn_spec: dict[str, object] = {
+        "steps": steps,
+        "result": {
+            "status": "ERROR",
+            "error": "API error (attempt 1): 500 Internal Server Error",
+            "response": "MEIVA_HIDE_FROM_USER\nhidden output",
+        },
+    }
+    harness = await start(tmp_path, turns=[turn_spec])
+    try:
+        ticket = harness.session.submit("fail please")
+        outcome = await ticket.outcome()
+        assert outcome.is_error is True
+        assert outcome.errors == ("API error (attempt 1): 500 Internal Server Error",)
+        completed = harness.of(TurnCompleted)[0]
+        assert completed.errors == ("API error (attempt 1): 500 Internal Server Error",)
+    finally:
+        await harness.stop()

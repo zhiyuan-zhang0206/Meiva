@@ -88,7 +88,9 @@ in `FileSessionRegistry`.
   abort; the next inbound opens a fresh resumed session from the registry. Only a
   failure that names this turn ends it, and a session failure ends it as a closed
   session rather than as this turn's verdict
-  ([[base/lm/harness/docs/attribution.meiva.okf.md|attribution]]).
+  ([[base/lm/harness/docs/attribution.meiva.okf.md|attribution]]). Settled turn aborts
+  clear `harness_pending_input` alongside setting `halted=True`, so an aborted harness
+  turn leaves no stale claim in the checkpoint.
 - A non-empty notice a harness reports after its turn becomes a
   `system:harness` inbound (`base/agents/inbox/harness_notice.py`), so
   the agent wakes on it through this same path.

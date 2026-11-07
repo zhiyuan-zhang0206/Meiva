@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from collections.abc import Mapping
 from dataclasses import dataclass, field
+from pathlib import Path
 
 from base.host.boundary.json_values import is_object_dict, is_object_list
 from base.host.boundary.untyped import object_of
@@ -180,21 +181,51 @@ def parse_usage(payload: object) -> Usage:
     )
 
 
-def parse_result(payload: Mapping[str, object]) -> ResultFields:
+def parse_result(payload: Mapping[str, object], *, home: Path | None = None) -> ResultFields:
     raw_denied = payload.get("denied_actions")
     denied_items = raw_denied if is_object_list(raw_denied) else []
     denied = tuple(_denial_label(entry) for entry in denied_items if is_object_dict(entry))
     duration = payload.get("duration_seconds")
+    session_id = _text(payload.get("conversation_id"))
+    status = _text(payload.get("status")) or "UNKNOWN"
+    error = _text(payload.get("error"))
+    if (
+        status != "SUCCESS"
+        and error != "interrupted"
+        and _transcript_turn_recovered(session_id, home=home)
+    ):
+        status = "SUCCESS"
+        error = None
+    if status == "SUCCESS" and error is not None and error != "interrupted":
+        error = None
     return ResultFields(
-        session_id=_text(payload.get("conversation_id")),
-        status=_text(payload.get("status")) or "UNKNOWN",
+        session_id=session_id,
+        status=status,
         text=_text(payload.get("response")) or "",
-        error=_text(payload.get("error")),
+        error=error,
         num_turns=_int(payload.get("num_turns")),
         duration_ms=int(float(duration) * 1000.0) if isinstance(duration, int | float) else 0,
         usage=parse_usage(payload.get("usage")),
         denied_actions=denied,
     )
+
+
+def _transcript_turn_recovered(conversation_id: str | None, *, home: Path | None = None) -> bool:
+    if not conversation_id:
+        return False
+    rows = _read_transcript_rows(conversation_id, home=home)
+    if not rows:
+        return False
+    for row in reversed(rows):
+        step_type = _text(row.get("type"))
+        step_status = _text(row.get("status"))
+        if step_type == "ERROR_MESSAGE" or step_status in {"ERROR", "FAILED", "CANCELED"}:
+            return False
+        if step_type == "PLANNER_RESPONSE" and step_status == "DONE":
+            return True
+        if step_type == "USER_INPUT":
+            break
+    return False
 
 
 def _denial_label(entry: object) -> str:
@@ -221,9 +252,11 @@ def _tool_content(info: Mapping[str, object]) -> str:
     return ""
 
 
-def _read_transcript_rows(conversation_id: str) -> list[dict[str, object]]:
+def _read_transcript_rows(
+    conversation_id: str, *, home: Path | None = None
+) -> list[dict[str, object]]:
     log_dir = (
-        resolve_user_home()
+        resolve_user_home(home)
         / ".gemini"
         / "antigravity-cli"
         / "brain"
