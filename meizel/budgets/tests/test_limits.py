@@ -25,7 +25,7 @@ def _repo(root: Path, files: dict[str, int]) -> Path:
 @pytest.mark.parametrize(("lines", "flagged"), [(800, False), (801, True)])
 def test_a_file_over_the_ceiling_is_flagged(tmp_path: Path, lines: int, flagged: bool) -> None:
     repo = _repo(tmp_path, {"base/big.py": lines})
-    errors = limits.check([repo / "base"], [repo], repo, _STRUCTURE)
+    errors, _ = limits.check([repo / "base"], [repo], repo, _STRUCTURE)
     assert bool(errors) is flagged
     if flagged:
         [error] = errors
@@ -39,7 +39,7 @@ def test_a_file_over_the_ceiling_is_flagged(tmp_path: Path, lines: int, flagged:
 @pytest.mark.parametrize(("entries", "flagged"), [(20, False), (21, True)])
 def test_a_directory_over_the_cap_is_flagged(tmp_path: Path, entries: int, flagged: bool) -> None:
     repo = _repo(tmp_path, {f"base/pkg/m{i}.py": 1 for i in range(entries)})
-    errors = limits.check([repo / "base"], [repo], repo, _STRUCTURE)
+    errors, _ = limits.check([repo / "base"], [repo], repo, _STRUCTURE)
     assert bool(errors) is flagged
     if flagged:
         [error] = errors
@@ -48,6 +48,21 @@ def test_a_directory_over_the_cap_is_flagged(tmp_path: Path, entries: int, flagg
         )
         assert "directory depth is unrestricted" in error
         assert "cohesive subpackages" in error
+
+
+# meiva:note
+# The band reaches the shell with the run's changed paths and comes back beside the violations, so a
+# caller can print one and fail on the other: a file the change does not touch is never named here.
+def test_the_band_names_a_changed_file_beside_the_violations(tmp_path: Path) -> None:
+    repo = _repo(tmp_path, {"base/near.py": 795, "base/far.py": 700})
+    violations, warnings = limits.check(
+        [repo / "base"], [repo], repo, _STRUCTURE, changed={"base/near.py"}
+    )
+    assert violations == []
+    [warning] = warnings
+    assert warning.startswith(
+        "meizel: warning: base/near.py:795: within 10 lines of the 800-line hard ceiling — "
+    )
 
 
 def test_the_file_scope_skips_hidden_cache_and_migration_directories(tmp_path: Path) -> None:

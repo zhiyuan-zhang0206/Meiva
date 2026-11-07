@@ -15,7 +15,7 @@ guards are a separate group: [[scripts/content_lint/docs/content_lint.meiva.okf.
 
 ## The linters
 
-- `code_structure.py` — `main(argv, *, repo_root, baseline_base)` returns the gate exit code; Python file/CC/nesting budgets; ≤20 tracked entries in every non-root directory, including docs, tests, hidden files and links; locality (doors, owners, no path imports; `python-conventions.md`); [[meizel/docs/ambient-state.meiva.okf.md|ambient state]]. Ambient-state maps are shrink-only; budgets and locality have no exemptions. Diagnostics explain cohesive refactoring options; only hard violations are reported.
+- `code_structure.py` — `main(argv, *, repo_root, baseline_base)` returns the gate exit code; Python file/CC/nesting budgets; ≤20 tracked entries in every non-root directory, including docs, tests, hidden files and links; locality (doors, owners, no path imports; `python-conventions.md`); [[meizel/docs/ambient-state.meiva.okf.md|ambient state]]. Ambient-state maps are shrink-only; budgets and locality have no exemptions. Diagnostics explain cohesive refactoring options; hard violations fail the run, and a file the change touches within ten lines of the file ceiling also prints one `meizel: warning:` line that does not — the paths that line considers are those the comparison commit saw the change touch, so a full-repository run stays quiet about files nobody edited.
 - `../../lint_pool_keepalives.py` — a psycopg pool in `scripts/` or in a module the `postgres-dial` decision allows must carry `PG_KEEPALIVE_KWARGS` (AST-based, sees through `AsyncConnectionPool[T](...)` subscripts and `LoggingConnectionPool` subclasses); elsewhere Rule 5 already routes every pool through `base.db.pool()` / `async_pool()`. Stays at `scripts/` root, not this directory, pending the Postgres-dial locality work.
 - `no_emoji.py`, `no_os_environ.py` — Python conventions. Sibling-import guard: `meizel/language/`.
 - Ruff S110 checks lone-pass handlers in production code, including typed exceptions.
@@ -33,19 +33,7 @@ guards are a separate group: [[scripts/content_lint/docs/content_lint.meiva.okf.
 
 ## `async_no_sync_blocking.py`
 
-The gateway is a single event loop; one sync psycopg / subprocess / psutil
-call inside an `async def` handler freezes every other request (the
-2026-08-03 incident: `/api/memory/search` ran a synchronous embedding on the
-loop and the gateway hung for hours).
-
-Flags, inside an `async def` body (not a nested `def` — presumed threaded):
-DB connection/cursor/execute/fetch/commit/rollback calls, known sync DB
-helpers and sync ops, process/session backend calls, filesystem calls,
-`shutil.`/`subprocess.`/`psutil.` module calls, `os.system`, `time.sleep`,
-and any bare `*_blocking`-suffixed helper (those exist to be wrapped in
-`asyncio.to_thread`). Inline opt-out: `# async-blocking-ok: <reason>`.
-
-Scope: `gateway/` and `ops/` (the event-loop surfaces); pre-commit hook `lint-async-no-sync-blocking`.
+[[scripts/lint/docs/async-no-sync-blocking.meiva.okf.md]].
 
 ## `logger_add_diagnose.py`
 

@@ -69,7 +69,9 @@ keep production governance separate from the root distribution environment.
   judgment is in `budget_plans.py` (both ceilings, which directory entries are
   candidates, what counts as a Python file, which of a target and a structure
   directory is judged, which directories a target selects with their entry counts,
-  what counts as a line and the wording and order of both reports), while
+  what counts as a line, the wording and order of both reports and the band
+  below the file ceiling that names a file only when the run's change touches
+  it), while
   `limits.py` walks and reads the checkout and `directory_budget.py` lists a
   directory and tests a judged path's links. `scripts/lint/code_structure.py`
   drives them.

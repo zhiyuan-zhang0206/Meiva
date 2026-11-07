@@ -1,4 +1,6 @@
-"""What counts as a direct entry for the 20-entry directory budget."""
+# meiva:note
+# The two structure budgets as the gate reports them: what counts as a directory entry for the
+# 20-entry cap, and which files the band below the 800-line ceiling may name.
 
 from __future__ import annotations
 
@@ -19,6 +21,13 @@ from scripts.lint import code_structure as lcs
 from scripts.structure import baseline_shards
 
 
+def _git(root: pathlib.Path, *args: str) -> None:
+    result = run_bounded(
+        ["git", "-C", str(root), *args], timeout=30, capture_output=True, text=True
+    )
+    assert result.returncode == 0, result.stderr
+
+
 @pytest.fixture(autouse=True)
 def _isolated_repo(tmp_path: pathlib.Path) -> None:
     """Every main() call scans only its own temporary root, with an empty baseline:
@@ -34,10 +43,7 @@ def _isolated_repo(tmp_path: pathlib.Path) -> None:
         ("add", baseline_shards.SHARD_DIR),
         ("-c", "commit.gpgsign=false", "commit", "--quiet", "-m", "Empty baseline"),
     ):
-        result = run_bounded(
-            ["git", "-C", str(tmp_path), *args], timeout=30, capture_output=True, text=True
-        )
-        assert result.returncode == 0, result.stderr
+        _git(tmp_path, *args)
 
 
 def _module(path: pathlib.Path) -> None:
@@ -52,12 +58,13 @@ def test_a_meizel_manifest_is_not_a_directory_entry() -> None:
     assert children[""] == {"pkg"}
 
 
+# meiva:note
+# A package renamed or removed locally can leave a directory holding only `__pycache__` (or
+# nothing, or only hidden files); a fresh CI checkout never has it, so counting it would fail a
+# commit locally that passes in CI.
 def test_subdirectories_ci_never_checks_out_do_not_count(
     tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """A package renamed or removed locally can leave a directory holding only
-    `__pycache__` (or nothing, or only hidden files); a fresh CI checkout never
-    has it, so counting it would fail a commit locally that passes in CI."""
     package = tmp_path / "tests/package"
     for index in range(20):
         _module(package / f"entry_{index}.py")
@@ -76,10 +83,11 @@ def test_subdirectories_ci_never_checks_out_do_not_count(
     assert "tests/package: directory has 21 direct entries" in capsys.readouterr().out
 
 
+# meiva:note
+# Component documentation takes the same parent slot as any other directory.
 def test_docs_layer_without_init_counts(
     tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """Component documentation takes the same parent slot as any other directory."""
     package = tmp_path / "tests/package"
     for index in range(20):
         _module(package / f"entry_{index}.py")
@@ -90,11 +98,12 @@ def test_docs_layer_without_init_counts(
     assert "tests/package: directory has 21 direct entries" in capsys.readouterr().out
 
 
+# meiva:note
+# A directory named `docs` that has `__init__.py` is a real Python package (`base/packages/docs`)
+# and takes a slot like any other subdirectory.
 def test_docs_package_with_init_counts(
     tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """A directory named `docs` that has `__init__.py` is a real Python package
-    (`base/packages/docs`) and takes a slot like any other subdirectory."""
     package = tmp_path / "tests/package"
     for index in range(20):
         _module(package / f"entry_{index}.py")
@@ -356,14 +365,16 @@ def test_real_cli_fails_when_the_tracked_query_cannot_establish_structure(
     assert "directory has" not in result.stdout
 
 
+# meiva:note
+# Run real pre-commit selection with its normal defaults and non-file tags.
 def test_the_real_hook_selects_docs_hidden_links_and_gitlinks(
     tmp_path: pathlib.Path,
 ) -> None:
-    """Run real pre-commit selection with its normal defaults and non-file tags."""
     root = pathlib.Path(lcs.__file__).parents[2]
     config = cast(dict[str, Any], yaml.safe_load((root / ".pre-commit-config.yaml").read_text()))
     local = next(repo for repo in config["repos"] if repo["repo"] == "local")
     selected = next(hook for hook in local["hooks"] if hook["id"] == "lint-code-structure")
+    # meiva:note
     # The public entry seam reveals exactly the filenames pre-commit delivers.
     config["repos"] = [{**local, "hooks": [{**selected, "entry": "/bin/echo"}]}]
     (tmp_path / ".pre-commit-config.yaml").write_text(yaml.safe_dump(config), encoding="utf-8")
@@ -458,3 +469,48 @@ def test_explicit_deep_target_checks_all_ancestors_without_an_unrelated_sibling(
     assert "ui: directory" not in output
     assert lcs.main([], repo_root=tmp_path, baseline_base="HEAD", parse_ast=ast.parse) == 1
     assert "ui: directory has 21 direct entries" in capsys.readouterr().out
+
+
+# meiva:note
+# The band below the file ceiling, at the gate: a file the change touches within ten lines of 800
+# prints one warning and still exits 0; the same file untouched is silent, so a repository holding
+# hundreds of files parked near the ceiling does not warn about them on every run; and over the
+# ceiling the violation is exactly what it was, with no warning beside it.
+@pytest.mark.parametrize(
+    ("lines", "touched", "code", "warns"),
+    [(791, True, 0, True), (800, True, 0, True), (799, False, 0, False), (801, True, 1, False)],
+)
+def test_the_file_band_names_only_a_changed_file(
+    tmp_path: pathlib.Path,
+    capsys: pytest.CaptureFixture[str],
+    lines: int,
+    touched: bool,
+    code: int,
+    warns: bool,
+) -> None:
+    _module(tmp_path / "base" / "near.py")
+    (tmp_path / "base" / "near.py").write_text("x = 1\n" * lines, encoding="utf-8")
+    if touched:
+        _git(tmp_path, "add", "base/near.py")
+    assert lcs.main([], repo_root=tmp_path, baseline_base="HEAD", parse_ast=ast.parse) == code
+    assert ("meizel: warning: base/near.py:" in capsys.readouterr().out) is warns
+
+
+# meiva:note
+# The case the band exists for: a file committed below the ceiling and edited back up into it before
+# the commit. Nothing is staged, because the working tree is what the change is about, and the
+# warning has to name the file its author is still writing.
+def test_the_file_band_names_a_file_the_change_has_not_committed(
+    tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    (tmp_path / "base").mkdir()
+    (tmp_path / "base" / "edit.py").write_text("x = 1\n" * 700, encoding="utf-8")
+    _git(tmp_path, "add", "base/edit.py")
+    _git(tmp_path, "commit", "--quiet", "-m", "below the band")
+    (tmp_path / "base" / "edit.py").write_text("x = 1\n" * 795, encoding="utf-8")
+
+    assert lcs.main([], repo_root=tmp_path, baseline_base="HEAD", parse_ast=ast.parse) == 0
+
+    assert "meizel: warning: base/edit.py:795: within 10 lines of the 800-line hard ceiling" in (
+        capsys.readouterr().out
+    )
