@@ -38,6 +38,15 @@ from base.telemetry.tests.otlp.identity_inputs import machine_identity
 _AGENT = 8901
 
 
+# meiva:note
+# `telemetry.flush()` is `Pipeline.sync(timeout=5.0)`: a drain that misses its deadline returns
+# `DrainStatus.UNFINISHED` and reports it rather than raising, so a bare flush does not prove the
+# mirror row exists yet (2026-11-07, #8601). The helpers below prove the drain finished first.
+def _drained() -> None:
+    result = telemetry.flush()
+    assert result.status is telemetry.DrainStatus.COMPLETED, result
+
+
 def _mirror_rows(event_name: str, agent: int | None = None) -> list[dict[str, Any]]:
     """Every mirror line for (event_name[, agent]) — fail loud on absence.
 
@@ -47,7 +56,7 @@ def _mirror_rows(event_name: str, agent: int | None = None) -> list[dict[str, An
     """
     from base.paths import logs_dir
 
-    telemetry.flush()
+    _drained()
     day = datetime.now(UTC).strftime("%Y%m%d")
     path = logs_dir(home=meiva_home()) / f"events-{day}.jsonl"
     if not path.exists():
@@ -264,7 +273,7 @@ def test_jsonl_mirror_holds_every_event() -> None:
     from base.paths import logs_dir
 
     telemetry.emit("audit", "fork", agent_id=_AGENT, source="system")
-    telemetry.flush()
+    _drained()
     day = datetime.now(UTC).strftime("%Y%m%d")
     path = logs_dir(home=meiva_home()) / f"events-{day}.jsonl"
     assert path.exists(), f"mirror file missing: {path}"

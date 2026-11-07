@@ -40,8 +40,19 @@ def logging_pipeline(
         pipeline.stop(timeout=2)
 
 
+# meiva:note
+# `telemetry.flush()` is `Pipeline.sync(timeout=5.0)`: when the drain misses its deadline it
+# returns `DrainStatus.UNFINISHED` and reports it, rather than raising. A mirror read that follows
+# a bare flush therefore cannot tell "the row is not written yet" from "the sink never saw the
+# record" — the two read as the same zero rows (2026-11-07, #8601: one shard failed this way).
+# Every read below proves the drain finished before it counts anything.
+def _drained() -> None:
+    result = telemetry.flush()
+    assert result.status is telemetry.DrainStatus.COMPLETED, result
+
+
 def _mirror_last(event_name: str, agent: int) -> dict[str, Any]:
-    telemetry.flush()
+    _drained()
     day = datetime.now(UTC).strftime("%Y%m%d")
     rows = [
         row
@@ -109,7 +120,7 @@ def test_add_event_sink_registers_at_most_once(
     try:
         _g.configure(extra={"agent_id": "8901"})
         _g.info(f"one record {marker}", event="label_change")
-        telemetry.flush()
+        _drained()
 
         from base.paths import logs_dir
 
