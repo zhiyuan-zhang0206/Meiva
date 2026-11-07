@@ -7,13 +7,20 @@ only the root supervisor owns service mutations.
 
 from __future__ import annotations
 
+import asyncio
 import importlib
+import logging
+import math
 from collections.abc import Callable, Iterable
+from concurrent.futures import Future
 from dataclasses import dataclass
+from threading import Event, Thread
 from typing import Protocol, TypeGuard
 
 from base.daemon.health import DaemonProbe
 from base.host.boundary.untyped import object_of
+
+_log = logging.getLogger(__name__)
 
 Probe = Callable[[], DaemonProbe]
 """A total probe: returns a verdict, never raises (the healthcheck contract)."""
@@ -139,3 +146,108 @@ class ProbeRegistry:
             raise ProbeError("unit id must be a non-empty string")
         if unit_id in self._entries:
             raise ProbeError(f"a probe for unit {unit_id!r} is already registered")
+
+
+# meiva:note
+# Own one native observation through its real completion or bounded join: the probe runs on a
+# daemon thread (Python cannot cancel a blocked native call), and `future` carries its verdict
+# to the round that awaits it.
+class _ProbeObservation:
+    def __init__(self, probe: Probe) -> None:
+        self.future: Future[DaemonProbe] = Future()
+        self._probe = probe
+        self._stop = Event()
+        self._error: BaseException | None = None
+        self._thread = Thread(target=self._run, name="root-probe", daemon=True)
+        self._thread.start()
+
+    def _run(self) -> None:
+        try:
+            if self._stop.is_set():
+                self.future.set_result(DaemonProbe.unavailable("observation admission closed"))
+            else:
+                self.future.set_result(self._sample())
+        except BaseException as exc:
+            self._error = exc
+            _log.error("root observation worker failed", exc_info=exc)
+            self.future.set_exception(exc)
+
+    # meiva:note
+    # Inspection failures remain unknown evidence, never recovery evidence.
+    def _sample(self) -> DaemonProbe:
+        try:
+            result = self._probe()
+        except Exception as exc:
+            return DaemonProbe.unavailable(f"probe raised {type(exc).__name__}: {exc}")
+        if not isinstance(result, DaemonProbe):
+            return DaemonProbe.unavailable("probe did not return DaemonProbe")
+        return result
+
+    def close(self) -> None:
+        self._stop.set()
+
+    # meiva:note
+    # Stop admission and observe the real worker; its native call may remain live and is then
+    # reported unfinished rather than waited for.
+    def join(self, timeout_s: float) -> bool:
+        self.close()
+        self._thread.join(timeout=timeout_s)
+        complete = not self._thread.is_alive()
+        if self._error is not None:
+            raise self._error
+        return complete
+
+
+# meiva:note
+# One bounded synchronous observation per probe, with at most one daemon worker.
+#
+# A deadline reports UNAVAILABLE and retains the worker until it exits; later rounds cannot
+# replace it, and its late result is discarded before a fresh observation starts. Daemon
+# threads cannot hold root shutdown hostage.
+class ProbeRunner:
+    def __init__(self) -> None:
+        self._observation: _ProbeObservation | None = None
+        self._closed = False
+
+    # meiva:note
+    # Prevent fresh observations before any worker join begins.
+    def close(self) -> None:
+        self._closed = True
+        if self._observation is not None:
+            self._observation.close()
+
+    # meiva:note
+    # Bounded best effort; a late worker error remains owned and is raised on a repeated stop.
+    def stop(self, timeout_s: float = 0.2) -> bool:
+        if not math.isfinite(timeout_s) or timeout_s < 0:
+            raise ValueError("probe join timeout must be finite and nonnegative")
+        self.close()
+        return self._observation is None or self._observation.join(timeout_s)
+
+    # meiva:note
+    # A timed-out or cancelled caller never awaits this wrapper again, so the exception it
+    # carries is consumed here; the native observation retains and raises the same original
+    # error at stop.
+    @staticmethod
+    def _retrieve(future: asyncio.Future[DaemonProbe]) -> None:
+        if not future.cancelled():
+            future.exception()
+
+    # meiva:note
+    # One verdict; an observation still running at its deadline is UNAVAILABLE.
+    async def observe(self, probe: Probe, timeout_s: float) -> DaemonProbe:
+        if self._closed:
+            raise RuntimeError("probe runner admission closed")
+        if self._observation is not None and not self._observation.future.done():
+            return DaemonProbe.unavailable("previous observation still running after its deadline")
+        if self._observation is not None and not self._observation.join(0):
+            return DaemonProbe.unavailable("previous observation worker still completing")
+        observation = _ProbeObservation(probe)
+        self._observation = observation
+        pending = asyncio.wrap_future(observation.future)
+        pending.add_done_callback(self._retrieve)
+        try:
+            result = await asyncio.wait_for(asyncio.shield(pending), timeout_s)
+        except TimeoutError:
+            return DaemonProbe.unavailable(f"observation exceeded {timeout_s:g}s deadline")
+        return result

@@ -24,7 +24,7 @@ from base.cluster.machine import MachineIdentityReader
 from base.daemon.health import DaemonProbe
 from base.native_process.loaded_commit import LoadedCommit
 from base.telemetry.delivery.pipeline import EventPipeline
-from services.supervision.meiva_root.health import ProbeRunner
+from services.supervision.meiva_root.probes import ProbeRunner
 
 _log = logging.getLogger(__name__)
 
