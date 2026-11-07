@@ -30,12 +30,8 @@ raises each desktop dialog at most once per process, so a later pass over an
 unanswered row re-reads the state and reports it rather than re-interrupting the
 operator; see the authorization model.
 
-The desktop rows are not one ask set. `request_grants` covers Screen Recording and
-Accessibility, the two grants a system dialog can still raise for this helper. App
-Management is never asked, because tccd refuses to prompt an unentitled client and
-records a policy denial instead (see the grant catalog's App Management section): the
-row stays `SYSTEM_SETTINGS`, and adding it to the ask would spend no dialog and could
-only create that denial.
+`request_grants` covers Screen Recording and Accessibility, the two grants a system
+dialog can still raise for this helper.
 
 ## A restart is custody, not a button
 

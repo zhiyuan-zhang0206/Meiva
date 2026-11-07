@@ -127,7 +127,6 @@ included: its prompt writes no `PROMPTING` line, so verify it by screenshot
 |---|---|---|---|---|---|---|
 | Screen Recording (incl. ScreenCaptureKit) | `kTCCServiceScreenCapture` | helper | the helper's first start without the grant, or the first capture | yes -- helper-owned `CGRequestScreenCaptureAccess` (`ping.request_grants_v1`), at most once per helper process | **yes** once denied -- System Settings > Screen Recording | **yes** |
 | Accessibility | `kTCCServiceAccessibility` | helper | the helper's first start without the grant, or the first AX-gated operation | yes -- helper-owned `AXIsProcessTrustedWithOptions` (`axTrustedOrPrompt`), at most once per helper process | **yes** once denied | no (read live per call) |
-| App Management | `kTCCServiceSystemPolicyAppBundles` | helper | never asked: tccd refuses to prompt an unentitled client | **no** -- `TCCAccessRequest` is answered "does not allow prompting for unentitled binaries; returning denied" and records a policy denial (measured 2026-10-21) | **yes** -- System Settings > App Management | no |
 | Local network | `kTCCServiceLocalNetwork` | helper | the helper's first local-network packet -- every tailnet (`100.64/10`) call counts, so a cluster call raises it | **no** -- macOS exposes no request API for this service; the system writes the row when traffic first flows from the helper | only if the prompt was dismissed (the row stays off until it is turned on) | no |
 | Desktop / Documents / Downloads folders | `kTCCServiceSystemPolicy{Desktop,Documents,Downloads}Folder` | helper | first folder operation by whichever workflow needed it | yes -- helper-spawned child lists the folder | after a denial | no |
 | Automation (Finder, Terminal, System Events, Safari, Chrome) | `kTCCServiceAppleEvents` per target | helper | first AppleEvent to that app | yes -- one benign `get version` event per app | after a denial | no |
@@ -180,15 +179,14 @@ are never attempted, by decision.
 
 ## Trigger mechanics worth knowing
 
-- **App Management can not be requested at all.** The helper is self-signed, so
-  it carries no team identity and tccd treats it as an unentitled binary: a
-  `TCCAccessRequest` for `kTCCServiceSystemPolicyAppBundles` is answered `Service
-  kTCCServiceSystemPolicyAppBundles does not allow prompting for unentitled binaries;
-  returning denied` (`authValue=0, authReason=2`), raises no dialog, and *creates* that
-  denial row for the asking identity; the enforcement path (a helper-spawned write into
-  another app's bundle) is refused the same way. Onboard therefore never asks for it, the
-  pane toggle is the only grant path, and a request path must not be added back
-  (macOS 26, 2026-10-21).
+- **App Management is deliberately not requested.** `kTCCServiceSystemPolicyAppBundles`
+  is not in the catalog and must not come back without the symptom below. Two reasons,
+  both of which outlive this build: Meiva does not modify another app's bundle (the
+  browser is driven over CDP against a separate profile, never by injecting into Chrome's
+  own app), and installing an app for debugging is what Computer Use is for. Decision:
+  2026-11-08, the user's, taken as a deletion rather than by keeping the row manual-only.
+  Revisit when a workflow of ours actually needs it -- the symptom is macOS answering
+  "Meiva would like to access data from other apps" to something we ship.
 - **Local network has no request path, and no reader.** There is no
   `TCCAccessRequest` for `kTCCServiceLocalNetwork`: the row appears the first time a
   process actually sends local-network traffic, and the grant belongs to the process
@@ -196,11 +194,11 @@ are never attempted, by decision.
   CLI. On this cluster every cross-machine call targets a tailnet `100.64/10` address,
   which macOS counts as the local network -- so the prompt arrives on the first cluster
   call after a helper (re)start, at whatever moment that happens. The catalog therefore
-  carries the row as `RequestMode.LIVE_EVENT`: it is listed and named (12 required rows),
+  carries the row as `RequestMode.LIVE_EVENT`: it is listed and named (11 required rows),
   reports `not readable here`, and never blocks the gate. Raising it during the first
   onboarding round needs a helper-side nudge (`nudge_local_network`, sending one UDP
   datagram from the helper to its own non-loopback address); that is tracked as #5541 and
-  ships with the next helper rebuild, because rebuilding the helper drops App Management
+  ships with the next helper rebuild, because rebuilding the helper drops every grant
   on every machine.
 - **Documents can not be triggered through the helper file APIs.** The
   helper's `file_list` / `file_read` path whitelist covers only `~/Desktop`,

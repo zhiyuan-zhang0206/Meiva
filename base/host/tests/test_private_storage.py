@@ -94,7 +94,7 @@ def test_converge_skips_foreign_nodes(request: pytest.FixtureRequest, tmp_path: 
 
 # meiva:note
 # Linux gives a file's owner no way to make its own chmod fail, so the refusal is made with
-# the macOS user-immutable flag, which answers `chmod` with EPERM as App Management does.
+# the macOS user-immutable flag, which answers `chmod` with EPERM.
 # The subject exists only on a macOS host, hence the `requires_host` mark on its tests.
 def _make_chmod_refuse(path: Path, request: pytest.FixtureRequest) -> None:
     subprocess.run(["chflags", "uchg", str(path)], check=True)  # noqa: S603

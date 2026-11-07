@@ -35,7 +35,6 @@ def test_required_set_is_the_product_desktop_surface() -> None:
     assert {
         "screen-recording",
         "accessibility",
-        "app-management",
         "local-network",
         "desktop-folder",
         "documents-folder",
@@ -43,26 +42,6 @@ def test_required_set_is_the_product_desktop_surface() -> None:
         *(f"automation-{suffix}" for suffix, _ in catalog.AUTOMATION_TARGETS),
     } == required
     assert all(not item.required for item in catalog.REPORT_ONLY_ITEMS)
-
-
-# meiva:note
-# App Management is the one row no dialog can grant: tccd refuses to prompt this service
-# for an unentitled client ("Service kTCCServiceSystemPolicyAppBundles does not allow
-# prompting for unentitled binaries; returning denied") and records that denial, so the
-# row must stay SYSTEM_SETTINGS and must not grow a request or a helper boolean (#5481,
-# measured 2026-10-21).
-def test_app_management_sends_the_person_to_its_pane_instead_of_asking() -> None:
-    item = catalog.ITEMS_BY_ID["app-management"]
-    assert item.mode is RequestMode.SYSTEM_SETTINGS
-    assert item.required
-    assert item.group == "desktop"
-    assert item.services == ("kTCCServiceSystemPolicyAppBundles",)
-    assert item.pane == "Privacy_AppBundles"
-    assert catalog.settings_url(item).endswith("?Privacy_AppBundles")
-    assert "App Management" in item.verify
-    assert "no longer fails" in item.verify
-    assert "by hand" in item.verify
-    assert not item.ping_key
 
 
 # meiva:note
