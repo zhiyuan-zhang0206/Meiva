@@ -234,14 +234,18 @@ class ProbeRunner:
             future.exception()
 
     # meiva:note
-    # One verdict; an observation still running at its deadline is UNAVAILABLE.
+    # One verdict; an observation still running at its deadline is UNAVAILABLE. A previous
+    # worker whose verdict is already in hand is only tidy-up: it cannot still hold the native
+    # call, so a round proceeds on its verdict instead of spending itself on the join.
     async def observe(self, probe: Probe, timeout_s: float) -> DaemonProbe:
         if self._closed:
             raise RuntimeError("probe runner admission closed")
-        if self._observation is not None and not self._observation.future.done():
-            return DaemonProbe.unavailable("previous observation still running after its deadline")
-        if self._observation is not None and not self._observation.join(0):
-            return DaemonProbe.unavailable("previous observation worker still completing")
+        if self._observation is not None:
+            if not self._observation.future.done():
+                return DaemonProbe.unavailable(
+                    "previous observation still running after its deadline"
+                )
+            _ = self._observation.join(0)
         observation = _ProbeObservation(probe)
         self._observation = observation
         pending = asyncio.wrap_future(observation.future)
