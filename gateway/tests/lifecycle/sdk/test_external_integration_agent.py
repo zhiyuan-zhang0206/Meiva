@@ -30,6 +30,7 @@ from base.db import Database, create_agent
 from base.events.live.bus import EventBus
 from base.host.boundary.json_values import is_object_dict
 from base.native_process.runtime_incarnation import RuntimeIncarnation
+from base.packages.extensions import plugin_enable
 from base.packages.plugins import enable_config
 from base.packages.plugins.loading import faces
 from base.paths import meiva_home
@@ -77,21 +78,15 @@ def native_checkpoint(
         "    return PluginContributions(state=(IntegrationPlugin,))\n",
         encoding="utf-8",
     )
-    enable_config.write_local(
-        {
-            "plugins": {
-                **{
-                    name: {"enabled": False}
-                    for name in enable_config.discover_plugins(home=unit_home)
-                },
-                "integration": {"enabled": True},
-            }
-        },
-        home=unit_home,
-    )
-    registry = faces.import_faces(
-        validate_state=state_module.plugin_state_schema, home=unit_home
-    ).registry
+    # meiva:note
+    # Gateway boot may already own enablement; isolate this agent through that same authority.
+    for name in enable_config.discover_plugins(home=unit_home):
+        _ = plugin_enable.set_enabled(db_conn, name, enabled=name == "integration", home=unit_home)
+    db_conn.commit()
+    plugin_enable.materialize(db_conn, home=unit_home)
+    loaded = faces.import_faces(validate_state=state_module.plugin_state_schema, home=unit_home)
+    registry = loaded.registry
+    assert {name for name, _ in registry.plugins} == {"integration"}
 
     pin_agent(None, owns_loop=True)
     process_context.unbind_exec_turn()
@@ -100,7 +95,7 @@ def native_checkpoint(
     sampling = fixed_sampling_owner()
     install.install(
         registry,
-        config_images=model_installation.config_images,
+        config_images=loaded.config_images,
         catalog=model_installation.catalog,
         provider_keys=model_installation.provider_keys,
         authority=model_installation.authority,
