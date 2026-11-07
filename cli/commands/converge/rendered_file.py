@@ -2,13 +2,20 @@ from __future__ import annotations
 
 import hashlib
 import json
+import sys
+from collections.abc import Iterable
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
 from pydantic import TypeAdapter
 
+from base.deploy.lifecycle.pause_markers import root_running
 from base.host.atomic_io import write_text_atomic
+from base.host.boundary.json_values import is_object_dict, is_object_list
+from base.paths import run_dir
 from base.telemetry.converge_report import report_converge_overwrite, report_converge_preserve
+from cli.boundary.json_body import loads
 
 LocalEditPolicy = Literal["preserve", "overwrite"]
 _HASHES: TypeAdapter[dict[str, str]] = TypeAdapter(dict[str, str])
@@ -59,3 +66,111 @@ def write_rendered_guarded(
     recorded[key] = hashlib.sha256(content.encode("utf-8")).hexdigest()
     hashes_path.write_text(json.dumps(recorded, indent=2) + "\n", encoding="utf-8")
     return drift
+
+
+# meiva:note
+# One root's admitted seals, and whether the probe could confirm it runs.
+@dataclass(frozen=True, slots=True)
+class RootAdmission:
+    seals: tuple[tuple[Path, str], ...]
+    liveness_known: bool
+
+
+# meiva:note
+# The units whose sealed path covers `path` — the path itself or anything beneath it. A sealed
+# file and a sealed directory are the two shapes the root admits.
+def sealed_units(path: Path, seals: Iterable[tuple[Path, str]]) -> tuple[str, ...]:
+    return tuple(unit for sealed, unit in seals if path == sealed or sealed in path.parents)
+
+
+# meiva:note
+# What a root may have sealed on this home, and whether its liveness could be read at all. `None`
+# is a home with no root — its next start re-admits every input, so a warning there would be
+# noise. `liveness_known=False` is the case the cost says must not go quiet: an unreadable
+# instance lock means either no root (a surplus warning, costing one look) or a running root whose
+# drift we would otherwise swallow (costing a blind window and a host restart). The warning fires
+# and says it is guessing.
+#
+# Liveness is the instance lock, not a request: a converge pass must not reach the service tree it
+# runs next to — not even to ask whether it is up — and the root holds this lock exclusively for
+# its whole life.
+def read_root_admission(home: Path) -> RootAdmission | None:
+    running = root_running(home)
+    if running is False:
+        return None
+    return RootAdmission(
+        seals=admitted_seals(run_dir(home) / "meiva-root" / "manifests.json"),
+        liveness_known=running is True,
+    )
+
+
+# meiva:note
+# The admission record a root writes at start is the only place that says which paths it sealed
+# and for which unit. A missing or malformed record answers with nothing rather than failing a
+# render.
+def admitted_seals(record: Path) -> tuple[tuple[Path, str], ...]:
+    try:
+        raw = loads(record.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return ()
+    if not is_object_dict(raw):
+        return ()
+    units = raw.get("units")
+    if not is_object_list(units):
+        return ()
+    seals: list[tuple[Path, str]] = []
+    for unit in units:
+        if not is_object_dict(unit):
+            continue
+        unit_id, inputs = unit.get("id"), unit.get("inputs")
+        if not isinstance(unit_id, str) or not is_object_list(inputs):
+            continue
+        for seal in inputs:
+            if not is_object_dict(seal):
+                continue
+            sealed = seal.get("path")
+            if isinstance(sealed, str):
+                seals.append((Path(sealed), unit_id))
+    return tuple(seals)
+
+
+# meiva:note
+# A rendered file that is also a sealed input of a running unit is the moment that unit stops
+# being replaceable: the root refuses every later birth of a unit whose input changed since its
+# admission, the health monitor's own replacement included (task #6403). Say it here, at the verb
+# that wrote the files, and name the recovery — a report one health round later reaches whoever is
+# on duty, never the person who just ran `meiva lgtm` or converge. `writer` is the command that
+# wrote them, so the line names the run the reader can retrace.
+def warn_sealed_inputs(home: Path, changed: Iterable[Path], *, writer: str) -> None:
+    files = tuple(changed)
+    admission = read_root_admission(home) if files else None
+    if admission is None:
+        return
+    units = sorted({unit for path in files for unit in sealed_units(path, admission.seals)})
+    # meiva:note
+    # An unreadable lock still speaks: the units may be unknown, the hazard is not.
+    if not units and admission.liveness_known:
+        return
+    joined = ", ".join(units) if units else "a unit this pass cannot name"
+    paths = ", ".join(str(path) for path in files)
+    caveat = (
+        ""
+        if admission.liveness_known
+        else " (root liveness unknown: this home's instance lock was unreadable)"
+    )
+    from base.log import logger
+
+    logger.warning(
+        f"{writer} wrote a sealed input of {joined}: this root generation can no longer spawn "
+        f"them — re-admit the inputs or restart the host before they are needed{caveat}",
+        event="converge_sealed_input_changed",
+        writer=writer,
+        units=joined,
+        paths=paths,
+        liveness="live" if admission.liveness_known else "unknown",
+    )
+    print(
+        f"  ! {writer} changed a sealed input of {joined} — this root generation can no longer "
+        f"spawn them; restart the host (or re-admit the inputs) before they are needed{caveat}",
+        file=sys.stderr,
+    )

@@ -275,3 +275,29 @@ def test_converge_drops_sidecar_entries_with_no_rendered_file(
     assert "dashboards/ava-ops-main.json" not in hashes
     assert _REL in hashes
     assert "dropped hash entries with no rendered file" in capsys.readouterr().out
+
+
+# meiva:note
+# The render answers the destinations whose contents it moved, so the seal warning names one run
+# and an unchanged re-render stays silent (task #6403).
+def test_a_render_answers_the_destinations_it_changed(tmp_path: Path) -> None:
+    repo = _repo(tmp_path)
+    source = repo / "deploy/lgtm/config/grafana/provisioning"
+    (source / "alerting").mkdir()
+    (source / "alerting/contact.yml").write_text("contactPoints: []\n", encoding="utf-8")
+    native = tmp_path / "native"
+    dashboard = RenderedDashboard(_json(_REFERENCE), ())
+
+    def render() -> tuple[Path, ...]:
+        written: list[Any] = []
+        pipeline = EventPipeline(writer=written.extend)
+        try:
+            return provisioning.render_provisioning(
+                repo, native, dashboard=dashboard, producer=lambda: pipeline
+            )
+        finally:
+            assert pipeline.stop().status is DrainStatus.COMPLETED
+
+    changed = render()
+    assert changed == (native / "config/provisioning/alerting/contact.yml",)
+    assert render() == ()

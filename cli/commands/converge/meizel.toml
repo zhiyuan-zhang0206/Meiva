@@ -13,7 +13,7 @@ exports = ["brew_pin.py", "firewall.py", "firewall_command.py", "frontend_env.py
 "redis_bridge.py" = ["plans", "spec.py"]
 "steps.py" = ["plans", "spec.py"]
 "telemetry_token.py" = ["spec.py"]
-"tests" = ["harness_clis.py", "health_preflight.py", "os_jobs.py", "plans", "redis_bridge.py", "spec.py", "steps.py", "telemetry_token.py"]
+"tests" = ["harness_clis.py", "health_preflight.py", "os_jobs.py", "plans", "redis_bridge.py", "rendered_file.py", "spec.py", "steps.py", "telemetry_token.py"]
 "walg.py" = ["plans", "spec.py"]
 
 [purity]

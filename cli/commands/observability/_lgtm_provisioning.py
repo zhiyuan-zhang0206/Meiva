@@ -246,13 +246,16 @@ def render_provisioning(
     *,
     dashboard: DashboardOutcome,
     producer: Callable[[], EventPipeline],
-) -> None:
+) -> tuple[Path, ...]:
     source_dir = repo / "deploy/lgtm/config/grafana/provisioning"
     if not source_dir.is_dir():
-        return
+        return ()
     dest_dir = native_dir / "config" / "provisioning"
     hashes_path = native_dir / "config" / "provisioning-hashes.json"
     rendered_relative: set[str] = set()
+    # meiva:note
+    # What actually changed, so the seal warning below names this render and not a no-op one.
+    changed: list[Path] = []
     for source in sorted(source_dir.rglob("*")):
         if not source.is_file():
             continue
@@ -260,9 +263,13 @@ def render_provisioning(
         if rel.as_posix() == RENDERED_DASHBOARD_REL:
             continue
         rendered_relative.add(rel.as_posix())
+        content = source.read_text(encoding="utf-8")
+        dest = dest_dir / rel
+        if not dest.is_file() or dest.read_text(encoding="utf-8") != content:
+            changed.append(dest)
         warning = write_rendered_guarded(
-            dest_dir / rel,
-            source.read_text(encoding="utf-8"),
+            dest,
+            content,
             hashes_path,
             rel.as_posix(),
             surface="lgtm-provisioning",
@@ -281,6 +288,7 @@ def render_provisioning(
     )
     _remove_orphans(dest_dir, hashes_path, rendered_relative)
     _prune_ghost_hashes(dest_dir, hashes_path)
+    return tuple(changed)
 
 
 # meiva:note

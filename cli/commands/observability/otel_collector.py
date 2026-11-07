@@ -36,7 +36,7 @@ from base.host.net.ports import SYSTEM_URL_OPENER, StreamingUrlOpener
 from base.paths import otel_collector_config, otel_collector_dir
 from base.telemetry.observability import collector_allowed_for_home, endpoint_override_is_explicit
 from base.telemetry.station_endpoint import resolve_station_target, validated_observability_base
-from cli.commands.converge.rendered_file import write_rendered_guarded
+from cli.commands.converge.rendered_file import warn_sealed_inputs, write_rendered_guarded
 from cli.commands.converge.spec import ConvergeCtx
 from cli.commands.observability.inputs import CollectorSettings, collector_settings_from_boot
 from cli.commands.observability.plans.authority import host_port
@@ -289,7 +289,8 @@ def generate_config(
 # creation: split runners carry the cluster bearer and gateways may additionally carry data-plane
 # credentials, so the file must never be exposed through the process umask (the temporary file is
 # created 0600 and replacement publishes only the fully-written private file).
-def write_config(path: Path, rendered: str) -> None:
+def write_config(path: Path, rendered: str) -> bool:
+    before = path.read_bytes() if path.exists() else None
     warning = write_rendered_guarded(
         path,
         rendered,
@@ -299,6 +300,7 @@ def write_config(path: Path, rendered: str) -> None:
     )
     if warning is not None:
         print(f"  ! otel-collector: {warning}", file=sys.stderr)
+    return (path.read_bytes() if path.exists() else None) != before
 
 
 # meiva:note
@@ -351,8 +353,9 @@ def ensure_otel_collector(
             print(f"  · otel-collector: otelcol-contrib {version} present")
         case _:
             assert_never(plan)
-    write_config(
-        otel_collector_config(meiva_home),
+    config_path = otel_collector_config(meiva_home)
+    wrote = write_config(
+        config_path,
         generate_config(
             repo,
             meiva_home,
@@ -362,6 +365,8 @@ def ensure_otel_collector(
             machine=machine,
         ),
     )
+    if wrote:
+        warn_sealed_inputs(meiva_home, (config_path,), writer="converge")
 
 
 # meiva:note

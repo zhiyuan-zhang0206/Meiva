@@ -1216,6 +1216,16 @@ image (`python3 scripts/verify/tart_run.py --ref <ref>`, same flow, plus the hel
   are refused (`schedule_recovery_gated` after the configured window; each refusal
   is a `schedule_launch_refused` event). `meiva start` is idempotent — it skips
   every running unit and takes seconds.
+- **`unit <name> failed to start: service input changed since generation admission` is a
+  refusal, not a crash.** Each unit's declared inputs are sealed by content digest when the
+  generation starts, so a render that rewrites a sealed file under a live root — `meiva lgtm`
+  provisioning, the OpenTelemetry collector config — leaves that unit unable to be replaced,
+  the health monitor's own restart included. On 2026-11-07 that cost the observability station
+  100 seconds of blind alerting before anyone could see why. `meiva cluster re-admit-inputs
+  <unit>` accepts the current contents for the rest of the generation and records each path's
+  old → new digest and caller; it restarts nothing, so restart the unit yourself when it is
+  down. Prefer it to a whole-host restart when the change was intended. While the state holds,
+  the health round reports the unit as `root_unit_inputs_changed`.
 - **`paused yes` in the roster is not always an operator pause.** It is the first
   true clause of `no_state` / `startup`; the
   operator latch that fences spawns is `machines.paused_at` (see

@@ -35,6 +35,7 @@ from base.telemetry import EventPipeline
 from base.telemetry.lgtm_local import BACKENDS, binary_path
 from base.telemetry.loki_index_labels import validate_loki_deploy_config
 from base.telemetry.station_endpoint import validated_observability_base
+from cli.commands.converge.rendered_file import warn_sealed_inputs
 from cli.commands.converge.spec import ConvergeCtx
 from cli.commands.observability._lgtm_assets import NATIVE_CONSTANTS, load_versions
 from cli.commands.observability._lgtm_provisioning import render_dashboard, render_provisioning
@@ -276,7 +277,7 @@ def download_and_verify(
     *,
     tag: str,
     limits: DownloadLimits,
-) -> None:
+) -> tuple[Path, ...]:
     with tempfile.TemporaryDirectory() as temporary_dir:
         archive = Path(temporary_dir) / Path(asset["url"]).name
         print(f"  · lgtm native: downloading {name} {version} from {asset['url']}")
@@ -302,29 +303,33 @@ def download_and_verify(
                 _extract_member(name, archive, native_dir / destination, member)
             case _:
                 assert_never(extraction)
-    for filename, content in install_markers(name, version=version, tag=tag):
-        (native_dir / filename).write_text(content, encoding="utf-8")
+    return tuple(
+        native_dir / filename
+        for filename, content in install_markers(name, version=version, tag=tag)
+        if write_if_changed(native_dir / filename, content)
+    )
 
 
 # meiva:note
-# Publish text only when it differs, avoiding needless launchd churn. A `mode` creates the file
-# owner-restricted from the start and corrects an existing file's mode even when the text is
-# unchanged.
-def write_if_changed(path: Path, content: str, *, mode: int | None = None) -> None:
+# Publish text only when it differs, avoiding needless launchd churn, and answer whether it wrote.
+# A `mode` creates the file owner-restricted from the start and corrects an existing file's mode
+# even when the text is unchanged.
+def write_if_changed(path: Path, content: str, *, mode: int | None = None) -> bool:
     path.parent.mkdir(parents=True, exist_ok=True)
     if path.exists() and path.read_text(encoding="utf-8") == content:
         if mode is not None:
             path.chmod(mode)
-        return
+        return False
     if mode is None:
         path.write_text(content, encoding="utf-8")
-        return
+        return True
     if path.exists():
         path.chmod(mode)
     descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, mode)
     with os.fdopen(descriptor, "w", encoding="utf-8") as output:
         os.fchmod(output.fileno(), mode)
         output.write(content)
+    return True
 
 
 # meiva:note
@@ -428,7 +433,7 @@ def render_configs(
     dashboard: DashboardOutcome,
     producer: Callable[[], EventPipeline],
     machine: MachineIdentityReader,
-) -> None:
+) -> tuple[Path, ...]:
     source_dir = repo / "deploy/lgtm/native/config"
     obs = settings.observability
     tempo_query_url = obs.telemetry_tempo_query_url.rstrip("/")
@@ -480,23 +485,30 @@ def render_configs(
     if not _is_object_dict(loki_config):
         raise TypeError("native Loki config must render to a mapping")
     validate_loki_deploy_config(loki_config)
-    for name, content in rendered.items():
-        write_if_changed(native_dir / "config" / name, content)
+    changed = [
+        native_dir / "config" / name
+        for name, content in rendered.items()
+        if write_if_changed(native_dir / "config" / name, content)
+    ]
     rendered_run_script = native_dir / "grafana" / "run.sh"
-    write_if_changed(
+    if write_if_changed(
         rendered_run_script,
         render_run_script((source_dir / "run.sh").read_text(encoding="utf-8"), values),
-    )
+    ):
+        changed.append(rendered_run_script)
     rendered_run_script.chmod(0o755)
-    render_provisioning(repo, native_dir, dashboard=dashboard, producer=producer)
+    return tuple(changed) + render_provisioning(
+        repo, native_dir, dashboard=dashboard, producer=producer
+    )
 
 
 # meiva:note
 # Render the host-scoped Grafana credential when one is configured.
-def render_grafana_admin_password(native_dir: Path, password: str | None) -> None:
+def render_grafana_admin_password(native_dir: Path, password: str | None) -> Path | None:
     if password is None:
-        return
-    write_if_changed(native_dir / "grafana/admin_password", password + "\n", mode=0o600)
+        return None
+    path = native_dir / "grafana/admin_password"
+    return path if write_if_changed(path, password + "\n", mode=0o600) else None
 
 
 def _installed_markers(native_dir: Path, names: tuple[str, ...]) -> dict[str, InstalledMarkers]:
@@ -546,37 +558,45 @@ def ensure_lgtm_native(
         installed=_installed_markers(native_dir, tuple(assets)),
         services=services,
     )
+    changed: list[Path] = []
     for step in plan:
         asset = assets[step.name]
         match step:
             case KeepBackend():
                 print(f"  · lgtm native: {step.name} {asset['version']} present")
             case InstallBackend():
-                download_and_verify(
-                    step.name,
-                    asset["version"],
-                    asset,
-                    native_dir,
-                    tag=tag,
-                    limits=settings.download,
+                changed.extend(
+                    download_and_verify(
+                        step.name,
+                        asset["version"],
+                        asset,
+                        native_dir,
+                        tag=tag,
+                        limits=settings.download,
+                    )
                 )
                 print(f"  · lgtm native: installed {step.name} {asset['version']} ({tag})")
             case _:
                 assert_never(step)
-    render_configs(
-        repo,
-        native_dir,
-        meiva_home,
-        settings=settings,
-        storage_dir=storage_dir,
-        direct_db_url=database_factory().direct_resolution().url,
-        dashboard=render_dashboard(database_factory),
-        producer=producer,
-        machine=machine,
+    changed.extend(
+        render_configs(
+            repo,
+            native_dir,
+            meiva_home,
+            settings=settings,
+            storage_dir=storage_dir,
+            direct_db_url=database_factory().direct_resolution().url,
+            dashboard=render_dashboard(database_factory),
+            producer=producer,
+            machine=machine,
+        )
     )
     if "grafana" in services:
-        render_grafana_admin_password(native_dir, settings.credentials.admin_password)
+        password = render_grafana_admin_password(native_dir, settings.credentials.admin_password)
+        if password is not None:
+            changed.append(password)
         (native_dir / "grafana/telegram.env").unlink(missing_ok=True)
+    warn_sealed_inputs(meiva_home, changed, writer="the lgtm render")
     if "loki" in services:
         verify_loki(meiva_home, host=host)
 

@@ -1,4 +1,4 @@
-exports = ["control.py", "cron.py", "health.py", "home.py", "ops.py", "plans", "tests", "unit_join.py"]
+exports = ["control.py", "cron.py", "health.py", "home.py", "ops.py", "plans", "re_admit.py", "tests", "unit_join.py"]
 
 [uses]
 "_provider_guard.py" = ["plans"]

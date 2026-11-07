@@ -41,6 +41,11 @@ class _DestroyOptions:
 
 
 @dataclass(frozen=True)
+class _ReAdmitOptions:
+    unit: str
+
+
+@dataclass(frozen=True)
 class _OpsOptions:
     hours: int
     limit: int
@@ -152,6 +157,23 @@ def _h_cluster_ops(args: argparse.Namespace) -> int:
         hours=opts.hours,
         limit=opts.limit,
         operation=opts.operation,
+    )
+
+
+# meiva:note
+# `meiva cluster re-admit-inputs` is the one verb here that acts on this home's root rather than
+# the cluster, and it prints the machine it reached (task #6403). It lives in this group because
+# the alternative was a new top-level namespace for a single operator action.
+def _h_cluster_re_admit(args: argparse.Namespace) -> int:
+    from cli.commands.cluster.re_admit import cmd_re_admit_inputs
+    from cli.database.runtime import runtime_of
+
+    runtime = runtime_of(args)
+    return cmd_re_admit_inputs(
+        options(args, _ReAdmitOptions).unit,
+        home=runtime.home,
+        environ=runtime.host.environ,
+        pid=runtime.pid,
     )
 
 
@@ -407,3 +429,14 @@ def add_cluster_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser])
         help="expand one operation id to its per-host rows",
     )
     cluster_ops_p.set_defaults(func=_h_cluster_ops)
+
+    # meiva:note
+    # `meiva cluster re-admit-inputs` accepts a drifted unit's current inputs; see
+    # cli/commands/cluster/re_admit.py.
+    cluster_re_admit_p = cluster_sub.add_parser(
+        "re-admit-inputs",
+        help="[this home] accept a root unit's current declared-input contents for this "
+        "generation, so it can be spawned again without a restart",
+    )
+    cluster_re_admit_p.add_argument("unit", metavar="UNIT", help="the root unit id")
+    cluster_re_admit_p.set_defaults(func=_h_cluster_re_admit)

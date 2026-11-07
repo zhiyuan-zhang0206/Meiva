@@ -112,6 +112,10 @@ class ScriptedRoot:
     # Raw wire rows answered in place of the unit table: a root whose status passes the client's
     # check but not the lifecycle commands' own reading of it.
     raw_unit_rows: list[dict[str, object]] | None = None
+    # meiva:note
+    # Answers to `resource` requests, by operation name: what a root returns for a registered
+    # resource verb such as `admit-inputs`. An operation absent here is refused as unknown.
+    resources: dict[str, dict[str, object]] = field(default_factory=dict[str, dict[str, object]])
     _guard: threading.Lock = field(default_factory=threading.Lock, repr=False)
 
     def status(self) -> dict[str, object]:
@@ -146,6 +150,13 @@ class ScriptedRoot:
             self.asked_at.append(datetime.now(UTC))
             if verb == "status":
                 return dict(ok_response(self.status()))
+            if verb == "resource":
+                scripted = self.resources.get(name or "")
+                if scripted is None:
+                    return dict(
+                        error_response(ErrorCode.UNKNOWN_UNIT, f"unknown resource {name!r}")
+                    )
+                return dict(ok_response(dict(scripted)))
             row = self.units.get(name or "")
             if row is None:
                 return dict(error_response(ErrorCode.UNKNOWN_UNIT, f"unknown unit {name!r}"))

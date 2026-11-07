@@ -84,6 +84,11 @@ class RevivalHost(Protocol):
         """The failure-state facts of one unit; unknown units raise UnknownUnitError."""
         ...
 
+    # meiva:note
+    # Sealed paths whose contents changed since admission; re-read every health round, because
+    # the answer is otherwise invisible until a spawn fails (task #6403). Unknown units raise.
+    def unit_input_drift(self, unit_id: str) -> tuple[str, ...]: ...
+
 
 HealthGate = Callable[[], tuple[bool, str]]
 """A blocking-policy seam: `(allowed, why)`; absent means always allowed.
@@ -262,6 +267,7 @@ class HealthMonitor:
             await self._check_unit(unit_id)
             self._sync_breaker(unit_id, self._unit_state(unit_id))
         self._report_failure_states()
+        self._report_input_drift()
 
     # meiva:note
     # One dependency probe per round while a breaker is open on a unit that is not
@@ -342,6 +348,36 @@ class HealthMonitor:
                 attempts=state.restart_attempts,
                 last_error=facts.last_error or "",
             )
+
+    # meiva:note
+    # Report a unit this root could no longer spawn: its declared input changed since admission,
+    # so every later birth of it — a manual restart, this monitor's own replacement — is refused
+    # until a new root generation or an explicit re-admission (task #6403). Nothing else says so:
+    # until something tries to spawn the unit, the drift is invisible, and the unit looks
+    # healthy right up to the moment it cannot be revived.
+    #
+    # Only a unit whose intent says running is reported: a stopped unit that cannot be spawned
+    # is a fact about a decision nobody has made yet, not a degradation. The condition is a
+    # state, emitted every round while it holds.
+    def _report_input_drift(self) -> None:
+        for unit_id in self._registry.unit_ids():
+            try:
+                drift = self._supervisor.unit_input_drift(unit_id)
+                facts = self._supervisor.unit_failure_facts(unit_id)
+            except UnknownUnitError:
+                continue
+            if not drift or not facts.intent_running:
+                continue
+            from base.log import logger
+
+            for path in drift:
+                logger.warning(
+                    "[health] unit {unit}: declared input {path} changed since admission — this "
+                    "root refuses to spawn it again",
+                    event="root_unit_inputs_changed",
+                    unit=unit_id,
+                    path=path,
+                )
 
     # meiva:note
     # The kind this round reports, which is not always the kind this round derived: a

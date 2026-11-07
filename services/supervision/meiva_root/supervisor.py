@@ -63,6 +63,7 @@ from services.supervision.meiva_root.unit_records import (
     Generation,
     HealthSource,
     MetricsSource,
+    SealedInputsMixin,
     UnitRuntime,
 )
 
@@ -77,7 +78,7 @@ type ArgvTransform = Callable[[str, Sequence[str]], Sequence[str]]
 # Owns the lifecycle of every unit in one registry. Whole-tree transitions and overlapping
 # mutations on the same attach subtree serialize while disjoint subtrees stop or start
 # concurrently; `status` is lock-free (one event-loop turn reads a consistent snapshot).
-class Supervisor(LeftBehindMixin, StoppingMixin):
+class Supervisor(LeftBehindMixin, StoppingMixin, SealedInputsMixin):
     def __init__(
         self,
         registry: UnitRegistry,
@@ -447,11 +448,14 @@ class Supervisor(LeftBehindMixin, StoppingMixin):
         ]
         return {"root_pid": self._root_pid, "units": units}
 
+    def _runtime(self, unit_id: str) -> UnitRuntime:
+        if (runtime := self._units.get(unit_id)) is None:
+            raise UnknownUnitError(f"unknown unit {unit_id!r}")
+        return runtime
+
     def health_generation(self, unit_id: str) -> tuple[OwnedProcess, float] | None:
         """The retained native generation and its monotonic launch time."""
-        runtime = self._units.get(unit_id)
-        if runtime is None:
-            raise UnknownUnitError(f"unknown unit {unit_id!r}")
+        runtime = self._runtime(unit_id)
         generation = runtime.generation
         if generation is None or generation.identity is None:
             return None
@@ -459,9 +463,7 @@ class Supervisor(LeftBehindMixin, StoppingMixin):
 
     def revival_deferral(self, unit_id: str) -> str | None:
         """Preserve stop/never policy and the code-version gate's permanent refusal."""
-        runtime = self._units.get(unit_id)
-        if runtime is None:
-            raise UnknownUnitError(f"unknown unit {unit_id!r}")
+        runtime = self._runtime(unit_id)
         if runtime.intent is not UnitIntent.RUNNING:
             return "held down"
         if runtime.manifest.restart is RestartPolicy.NEVER:
@@ -474,9 +476,7 @@ class Supervisor(LeftBehindMixin, StoppingMixin):
 
     def unit_failure_facts(self, unit_id: str) -> UnitFailureFacts:
         """The unit's operator intent and recorded replacement failure."""
-        runtime = self._units.get(unit_id)
-        if runtime is None:
-            raise UnknownUnitError(f"unknown unit {unit_id!r}")
+        runtime = self._runtime(unit_id)
         # meiva:note
         # Absence is read from the generation this supervisor already holds, never from a
         # probe: `_is_active` is the same test every verb here uses, so the fact costs the
