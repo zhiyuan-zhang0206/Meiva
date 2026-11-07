@@ -609,14 +609,14 @@ describe("line breaks (remark-breaks)", () => {
       expect(container.querySelector("svg")).toBeNull();
     });
 
-    it("renders inline code file paths as underlined code without button wrappers or icons", () => {
+    it("renders inline code file paths as normal inline code without underlines, button wrappers or icons", () => {
       const { container } = renderMarkdown(
         <ChatMarkdown content={"Check `src/index.ts#L10-L20` and `to_user.md` for status"} />,
       );
       const codePaths = container.querySelectorAll('[data-testid="file-path-code"]');
       expect(codePaths).toHaveLength(2);
       expect(codePaths[0].querySelector("code")).not.toBeNull();
-      expect(codePaths[0].className).toContain("underline");
+      expect(codePaths[0].className).not.toContain("underline");
       expect(codePaths[0].textContent).toBe("src/index.ts#L10-L20");
       expect(codePaths[1].textContent).toBe("to_user.md");
       expect(container.querySelector("button, svg")).toBeNull();
