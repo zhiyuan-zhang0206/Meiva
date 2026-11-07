@@ -377,7 +377,19 @@ export function useTimelineWindow({
         const vpTop = viewport.getBoundingClientRect().top;
         const docTop = node.getBoundingClientRect().top - vpTop + viewport.scrollTop;
         const delta = docTop - preserved.docTop;
-        if (Math.abs(delta) >= 1) viewport.scrollTop += delta;
+        if (Math.abs(delta) >= 1) {
+          viewport.scrollTop += delta;
+          // meiva:note
+          // One layout shift, one correction. `docTop` does not move with scrollTop, so a
+          // capture this correction already answered must not answer it again: every commit
+          // re-arms the pre-commit capture, and re-applying the same shift there writes
+          // scrollTop on every commit, renders again from the new `top`, and repeats until
+          // React gives up with "Maximum update depth exceeded".
+          // The vitest case "does not roll back user scroll" cannot see this branch: its mocked
+          // geometry leaves docTop equal to the captured value, so delta is always 0. What covers
+          // delta != 0 is tests/e2e/_timeline.py::assert_timeline_surface (#8663).
+          preserveRef.current = { ...preserved, docTop };
+        }
       }
     }
     rememberVisible();

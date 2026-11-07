@@ -12,7 +12,11 @@ import pytest
 from playwright.sync_api import Route
 from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
-from tests.e2e._timeline import move_to_top_and_read_anchor, wait_for_parked_tail
+from tests.e2e._timeline import (
+    assert_timeline_surface,
+    move_to_top_and_read_anchor,
+    wait_for_parked_tail,
+)
 from tests.e2e.fixture_environment import E2EEnv
 
 ITEM_COUNT = 1200
@@ -187,6 +191,10 @@ def test_parked_deep_history_mounts_a_bounded_window(e2e_env: E2EEnv, kind: str)
     }""",
         FRAME_SAMPLE_ROUNDS,
     )
+    # meiva:note
+    # The sample above is the load that exposed the regression this guards; the helper names the
+    # layer (surface gone / boundary took over) instead of a null `.closest` from a later step.
+    assert_timeline_surface(page)
     cdp = cast(_CDPSession, page.context.new_cdp_session(page))
     cdp.send("Performance.enable")
     metrics = cast(list[dict[str, float | str]], cdp.send("Performance.getMetrics")["metrics"])
