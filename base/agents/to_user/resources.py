@@ -79,12 +79,27 @@ def referenced_files(document: Path, content: str, *, limits: ToUserLimits) -> d
     return references
 
 
+# meiva:note
+# One file, one readable name: its path from the workspace root, or absolute when the document
+# reaches outside it. Only the second form starts with `/`, so the two cannot collide, and one
+# file keeps one name however its link was spelled (`./plot.png`, `plot.png` and `../w/plot.png`
+# agree).
+def resource_path(workspace: Path, target: Path) -> str:
+    try:
+        return target.relative_to(workspace).as_posix()
+    except ValueError:
+        return target.as_posix()
+
+
+# meiva:note
+# The digest a link used to be keyed by. A panel URL written before 2026-11-07 carries it, and a
+# shared link outlives the spelling of the address bar, so a chain element still matches it.
 def reference_id(href: str) -> str:
     return hashlib.sha256(href.encode()).hexdigest()
 
 
 def resource_descriptions(
-    document: Path, content: str, *, limits: ToUserLimits
+    document: Path, content: str, *, workspace: Path, limits: ToUserLimits
 ) -> dict[str, ToUserResource]:
     result: dict[str, ToUserResource] = {}
     for href, path in referenced_files(document, content, limits=limits).items():
@@ -97,7 +112,7 @@ def resource_descriptions(
         except OSError:
             version = None
         result[href] = ToUserResource(
-            id=reference_id(href),
+            file=resource_path(workspace, path),
             name=path.name,
             markdown=path.suffix.lower() in (".md", ".markdown"),
             version=version,
@@ -124,26 +139,30 @@ def read_regular_file(path: Path, limit: int) -> tuple[bytes, os.stat_result]:
     return raw, info
 
 
-def resolve_reference(workspace: Path, references: list[str], *, limits: ToUserLimits) -> Path:
+def resolve_file(workspace: Path, files: list[str], *, limits: ToUserLimits) -> Path:
 
     if workspace.is_symlink():
         raise ValueError("To user workspace must not be a symlink")
     max_depth = limits.chain_depth
-    if not references or len(references) > max_depth:
-        raise ValueError(f"A resource requires between one and {max_depth} reference IDs")
+    if not files or len(files) > max_depth:
+        raise ValueError(f"A resource requires between one and {max_depth} file names")
     path = workspace / DOCUMENT_FILENAME
-    for resource_id in references:
+    for name in files:
         if path.suffix.lower() not in (".md", ".markdown"):
             raise ValueError("Only Markdown documents can link further resources")
         raw, _ = read_regular_file(path, limits.document_bytes)
         targets = referenced_files(path, raw.decode("utf-8"), limits=limits)
-        matches = [target for href, target in targets.items() if reference_id(href) == resource_id]
+        matches = [
+            target
+            for href, target in targets.items()
+            if resource_path(workspace, target) == name or reference_id(href) == name
+        ]
         if not matches:
             raise FileNotFoundError("The document no longer references this resource")
         path = matches[0]
     return path
 
 
-def read_resource(workspace: Path, references: list[str], *, limits: ToUserLimits) -> bytes:
-    path = resolve_reference(workspace, references, limits=limits)
+def read_resource(workspace: Path, files: list[str], *, limits: ToUserLimits) -> bytes:
+    path = resolve_file(workspace, files, limits=limits)
     return read_regular_file(path, limits.resource_bytes)[0]

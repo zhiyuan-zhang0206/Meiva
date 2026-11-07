@@ -6,40 +6,36 @@ from base.agents.to_user.limits import ToUserLimits
 from base.agents.to_user.models import DOCUMENT_FILENAME, ToUserDocument
 from base.agents.to_user.resources import (
     read_regular_file,
-    resolve_reference,
+    resolve_file,
     resource_descriptions,
 )
 
 
 def read_document(
-    workspace: Path, *, limits: ToUserLimits, references: list[str] | None = None
+    workspace: Path, *, limits: ToUserLimits, files: list[str] | None = None
 ) -> ToUserDocument:
 
     if workspace.is_symlink():
         raise ValueError("To user workspace must not be a symlink")
-    path = (
-        resolve_reference(workspace, references, limits=limits)
-        if references
-        else workspace / DOCUMENT_FILENAME
-    )
+    path = resolve_file(workspace, files, limits=limits) if files else workspace / DOCUMENT_FILENAME
     if path.suffix.lower() not in (".md", ".markdown"):
         raise ValueError("To user documents must be Markdown")
     empty = ToUserDocument(
         content=None,
         version=None,
         modified_at=None,
-        legacy_html=not references and (workspace / "to_user.html").is_file(),
+        legacy_html=not files and (workspace / "to_user.html").is_file(),
     )
     try:
         raw, info = read_regular_file(path, limits.document_bytes)
     except FileNotFoundError:
-        if references:
+        if files:
             raise
         return empty
     content = raw.decode("utf-8")
     if not content.strip():
         return empty
-    resources = resource_descriptions(path, content, limits=limits)
+    resources = resource_descriptions(path, content, workspace=workspace, limits=limits)
     revision = hashlib.sha256(raw)
     for href, resource in sorted(resources.items()):
         revision.update(f"\n{href}:{resource.version}".encode())

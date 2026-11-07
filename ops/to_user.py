@@ -11,12 +11,12 @@ def read_to_user(
     agent_id: int,
     machine: str,
     *,
-    references: list[str],
+    files: list[str],
     home: Path,
     limits: ToUserLimits,
 ) -> ToUserDocument:
     return read_document(
-        owned_workspace(pool, agent_id, machine, home=home), limits=limits, references=references
+        owned_workspace(pool, agent_id, machine, home=home), limits=limits, files=files
     )
 
 

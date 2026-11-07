@@ -1,3 +1,4 @@
+import hashlib
 import os
 from pathlib import Path
 
@@ -11,9 +12,10 @@ from base.agents.to_user import (
     read_document,
     read_failure,
     read_resource,
-    resolve_reference,
+    resolve_file,
     to_user_limits,
 )
+from base.agents.to_user.resources import resource_path
 from base.config import settings
 
 # meiva:note
@@ -66,6 +68,17 @@ def test_symlinks_devices_invalid_encoding_and_oversize_are_refused(tmp_path: Pa
         read_document(tmp_path, limits=LIMITS)
 
 
+# meiva:note
+# The name the panel puts in its address bar, and the one the read resolves: a file inside the
+# workspace is named from the workspace root, one outside it absolutely, so the two forms cannot
+# collide and the name alone identifies the file.
+def test_a_file_is_named_from_the_workspace_or_absolutely(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    assert resource_path(workspace, workspace / "reports" / "plot.png") == "reports/plot.png"
+    assert resource_path(workspace, tmp_path / "note.md") == str(tmp_path / "note.md")
+    assert resource_path(workspace, Path("/elsewhere/x.md")) == "/elsewhere/x.md"
+
+
 def test_relative_absolute_file_uri_and_reference_links(tmp_path: Path) -> None:
     workspace = tmp_path / "workspace"
     workspace.mkdir()
@@ -91,11 +104,13 @@ def test_relative_absolute_file_uri_and_reference_links(tmp_path: Path) -> None:
     for href, resource in document.resources.items():
         if href == "html-secret":
             assert resource.name == "html-secret"
+            assert resource.file == "html-secret"
             continue
         assert resource.name == "a b.png"
-        assert read_resource(workspace, [resource.id], limits=LIMITS) == b"image"
+        assert resource.file == str(asset)
+        assert read_resource(workspace, [resource.file], limits=LIMITS) == b"image"
     with pytest.raises(FileNotFoundError):
-        read_resource(workspace, ["0" * 64], limits=LIMITS)
+        read_resource(workspace, ["missing.png"], limits=LIMITS)
 
 
 def test_nested_markdown_uses_its_own_directory_and_rechecks_chain(tmp_path: Path) -> None:
@@ -105,12 +120,28 @@ def test_nested_markdown_uses_its_own_directory_and_rechecks_chain(tmp_path: Pat
     (report / "index.md").write_text("![plot](plot.png)")
     (report / "plot.png").write_bytes(b"plot")
     first = next(iter(read_document(tmp_path, limits=LIMITS).resources.values()))
-    child = read_document(tmp_path, limits=LIMITS, references=[first.id])
+    assert first.file == "report/index.md"
+    child = read_document(tmp_path, limits=LIMITS, files=[first.file])
     second = next(iter(child.resources.values()))
-    assert read_resource(tmp_path, [first.id, second.id], limits=LIMITS) == b"plot"
+    assert second.file == "report/plot.png"
+    assert read_resource(tmp_path, [first.file, second.file], limits=LIMITS) == b"plot"
     (report / "index.md").write_text("Link removed")
     with pytest.raises(FileNotFoundError):
-        read_resource(tmp_path, [first.id, second.id], limits=LIMITS)
+        read_resource(tmp_path, [first.file, second.file], limits=LIMITS)
+
+
+# meiva:note
+# A link shared before the address bar named files carries digests. A chain element matches the
+# current document's own references either by readable name or by the digest that named it, so an
+# old link still opens the file it always opened.
+def test_a_legacy_digest_chain_still_resolves(tmp_path: Path) -> None:
+    (tmp_path / "to_user.md").write_text("[report](report.md)")
+    (tmp_path / "report.md").write_text("# Report")
+    legacy = hashlib.sha256(b"report.md").hexdigest()
+    assert read_resource(tmp_path, [legacy], limits=LIMITS) == b"# Report"
+    (tmp_path / "to_user.md").write_text("Link removed")
+    with pytest.raises(FileNotFoundError):
+        read_resource(tmp_path, [legacy], limits=LIMITS)
 
 
 def test_linked_file_revision_changes_without_document_edit(tmp_path: Path) -> None:
@@ -130,15 +161,20 @@ def test_resource_limits_and_removed_file(tmp_path: Path) -> None:
         stream.truncate(LIMITS.resource_bytes + 1)
     resource = next(iter(read_document(tmp_path, limits=LIMITS).resources.values()))
     with pytest.raises(ValueError, match="byte limit"):
-        read_resource(tmp_path, [resource.id], limits=LIMITS)
+        read_resource(tmp_path, [resource.file], limits=LIMITS)
     target.unlink()
     with pytest.raises(FileNotFoundError):
-        read_resource(tmp_path, [resource.id], limits=LIMITS)
+        read_resource(tmp_path, [resource.file], limits=LIMITS)
     with pytest.raises(ValueError):
-        ToUserReadRequest(agent_id=1, references=["/etc/passwd"])
+        ToUserReadRequest(agent_id=1, files=[""])
+    # meiva:note
+    # A readable name makes an arbitrary path well formed, so the document's own references are
+    # the whitelist: a stranger's absolute path reads nothing even though the shape is legal.
+    with pytest.raises(FileNotFoundError):
+        read_resource(tmp_path, ["/etc/passwd"], limits=LIMITS)
     depth = LIMITS.chain_depth
     with pytest.raises(ValueError, match=f"between one and {depth}"):
-        resolve_reference(tmp_path, ["0" * 64] * (depth + 1), limits=LIMITS)
+        resolve_file(tmp_path, ["missing.md"] * (depth + 1), limits=LIMITS)
 
 
 def test_home_reference_and_symlink_target(tmp_path: Path) -> None:
@@ -150,7 +186,8 @@ def test_home_reference_and_symlink_target(tmp_path: Path) -> None:
     document = read_document(tmp_path, limits=LIMITS)
     assert len(document.resources) == 2
     for resource in document.resources.values():
-        assert read_resource(tmp_path, [resource.id], limits=LIMITS) == b"shared"
+        assert resource.file == "file.txt"
+        assert read_resource(tmp_path, [resource.file], limits=LIMITS) == b"shared"
 
 
 def test_raw_html_images_and_links_are_resources(tmp_path: Path) -> None:
@@ -175,7 +212,7 @@ def test_footnote_links_are_resources_but_raw_html_blocks_are_not(tmp_path: Path
     document = read_document(tmp_path, limits=LIMITS)
     assert set(document.resources) == {"report.pdf"}
     resource = document.resources["report.pdf"]
-    assert read_resource(tmp_path, [resource.id], limits=LIMITS) == b"pdf"
+    assert read_resource(tmp_path, [resource.file], limits=LIMITS) == b"pdf"
 
 
 def test_ensure_document_seeds_only_a_missing_panel(tmp_path: Path) -> None:
@@ -195,11 +232,11 @@ def test_every_refused_read_lands_in_one_class(tmp_path: Path) -> None:
     (tmp_path / "broken.md").write_bytes(b"\xff")
     resources = read_document(tmp_path, limits=LIMITS).resources
     with pytest.raises(ToUserFileTooLarge) as too_large:
-        read_document(tmp_path, limits=LIMITS, references=[resources["big.md"].id])
+        read_document(tmp_path, limits=LIMITS, files=[resources["big.md"].file])
     assert read_failure(too_large.value) is ToUserReadFailure.TOO_LARGE
     with pytest.raises(FileNotFoundError) as gone:
-        read_document(tmp_path, limits=LIMITS, references=["0" * 64])
+        read_document(tmp_path, limits=LIMITS, files=["missing.md"])
     assert read_failure(gone.value) is ToUserReadFailure.GONE
     with pytest.raises(UnicodeError) as unreadable:
-        read_document(tmp_path, limits=LIMITS, references=[resources["broken.md"].id])
+        read_document(tmp_path, limits=LIMITS, files=[resources["broken.md"].file])
     assert read_failure(unreadable.value) is ToUserReadFailure.UNREADABLE

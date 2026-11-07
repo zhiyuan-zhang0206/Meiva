@@ -15,7 +15,7 @@ failed op result, next to the local `error` text the gateway logs.
 
 | Class | Raised by | Answer |
 |---|---|---|
-| `gone` | the id is no longer in the document, or the file is missing | `404 to_user_reference_gone` |
+| `gone` | the file name is no longer in the document, or the file is missing | `404 to_user_reference_gone` |
 | `too_large` | `read_regular_file` past the route's byte budget | `413 to_user_document_too_large` |
 | `unreadable` | not a regular file, not UTF-8, a symlinked hop, permission | `422 to_user_document_unreadable` |
 

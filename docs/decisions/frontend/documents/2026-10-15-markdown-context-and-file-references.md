@@ -1,3 +1,7 @@
+> **Revised 2026-11-07** — the reference-ID chain is replaced by readable file
+> names; see
+> [`2026-11-07-to-user-readable-file-chain.md`](2026-11-07-to-user-readable-file-chain.md).
+
 > **Revised 2026-10-17** — the "without raw HTML" clause is replaced by the
 > safe HTML subset decision; scripts and styles stay stripped and the file
 > references and bounds clauses stand. See

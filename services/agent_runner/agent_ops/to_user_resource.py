@@ -34,7 +34,7 @@ def resource_response(
     try:
         request = ToUserReadRequest.model_validate_json(body)
         workspace = owned_workspace(pool, request.agent_id, machine, home=home)
-        content = read_resource(workspace, request.references, limits=limits)
+        content = read_resource(workspace, request.files, limits=limits)
     except ValidationError:
         return 422, b"Invalid resource request", "text/plain"
     except (OSError, ValueError) as exc:

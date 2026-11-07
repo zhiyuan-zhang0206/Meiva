@@ -29,8 +29,8 @@ export function listAgentsPath(options: {
   return `/api/agents?${params.toString()}`;
 }
 
-export function toUserPath(agentId: number, references: readonly string[]): string {
-  const query = new URLSearchParams(references.map((reference) => ["reference", reference]));
+export function toUserPath(agentId: number, files: readonly string[]): string {
+  const query = new URLSearchParams(files.map((file) => ["file", file]));
   return `/api/agents/${agentId}/to-user${query.size ? `?${query.toString()}` : ""}`;
 }
 

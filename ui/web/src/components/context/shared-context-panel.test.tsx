@@ -197,7 +197,7 @@ it("starts a new agent or referenced document at the top of the shared reading a
   const body = readingArea();
   body.scrollTop = 420;
   act(() => {
-    browser.traverse(`http://fake.local/?agent_id=7&reference=${"a".repeat(64)}`);
+    browser.traverse("http://fake.local/?agent_id=7&file=reports%2Fdetails.md");
   });
   expect(body.scrollTop).toBe(0);
   body.scrollTop = 500;

@@ -75,13 +75,13 @@ def home_machine(request: Request, agent_id: int) -> str:
     return row.machine
 
 
-def resource_request(agent_id: int, references: list[str], *, max_depth: int) -> ToUserReadRequest:
-    if len(references) > max_depth:
-        raise HTTPException(422, f"A resource chain may carry at most {max_depth} reference IDs")
+def resource_request(agent_id: int, files: list[str], *, max_depth: int) -> ToUserReadRequest:
+    if len(files) > max_depth:
+        raise HTTPException(422, f"A resource chain may carry at most {max_depth} file names")
     try:
-        return ToUserReadRequest(agent_id=agent_id, references=references)
+        return ToUserReadRequest(agent_id=agent_id, files=files)
     except ValidationError as exc:
-        raise HTTPException(422, "Invalid document reference") from exc
+        raise HTTPException(422, "Invalid document file name") from exc
 
 
 async def read_snapshot(request: Request, query: ToUserReadRequest, machine: str) -> ToUserDocument:
@@ -110,11 +110,11 @@ async def read_snapshot(request: Request, query: ToUserReadRequest, machine: str
 async def get_to_user(
     agent_id: int,
     request: Request,
-    reference: Annotated[list[str] | None, Query()] = None,
+    file: Annotated[list[str] | None, Query()] = None,
 ) -> ToUserDocument | JSONResponse:
     machine = await asyncio.to_thread(home_machine, request, agent_id)
     max_depth = gateway_config(request).to_user.max_chain_depth
-    query = resource_request(agent_id, reference or [], max_depth=max_depth)
+    query = resource_request(agent_id, file or [], max_depth=max_depth)
     try:
         return await read_snapshot(request, query, machine)
     except PanelReadFailed as failed:
@@ -196,18 +196,18 @@ async def fetch_resource(
 async def get_resource(
     agent_id: int,
     request: Request,
-    reference: Annotated[list[str], Query(min_length=1)],
+    file: Annotated[list[str], Query(min_length=1)],
 ) -> Response | JSONResponse:
     machine = await asyncio.to_thread(home_machine, request, agent_id)
     to_user = gateway_config(request).to_user
-    query = resource_request(agent_id, reference, max_depth=to_user.max_chain_depth)
-    parent = resource_request(agent_id, query.references[:-1], max_depth=to_user.max_chain_depth)
+    query = resource_request(agent_id, file, max_depth=to_user.max_chain_depth)
+    parent = resource_request(agent_id, query.files[:-1], max_depth=to_user.max_chain_depth)
     try:
         document = await read_snapshot(request, parent, machine)
     except PanelReadFailed as failed:
         return failed.response(request)
     resource = next(
-        (value for value in document.resources.values() if value.id == reference[-1]), None
+        (value for value in document.resources.values() if value.file == file[-1]), None
     )
     if resource is None:
         raise HTTPException(404, "The document no longer references this resource")

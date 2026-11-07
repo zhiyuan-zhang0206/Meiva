@@ -6,13 +6,13 @@
 import { useQuery } from "@tanstack/react-query";
 import { useApi } from "../transport/transport-context";
 
-export function useToUser(agentId: number | null, references: string[] = []) {
+export function useToUser(agentId: number | null, files: string[] = []) {
   const client = useApi();
   return useQuery({
-    queryKey: references.length ? ["to-user", agentId, ...references] : ["to-user", agentId],
+    queryKey: files.length ? ["to-user", agentId, ...files] : ["to-user", agentId],
     queryFn: ({ signal }) => {
       if (agentId == null) throw new Error("To user requires an agent");
-      return client.getToUser(agentId, signal, references);
+      return client.getToUser(agentId, signal, files);
     },
     enabled: agentId != null,
     staleTime: Infinity,

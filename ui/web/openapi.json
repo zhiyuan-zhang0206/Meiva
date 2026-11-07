@@ -598,7 +598,7 @@
             }
           },
           {
-            "name": "reference",
+            "name": "file",
             "in": "query",
             "required": false,
             "schema": {
@@ -613,7 +613,7 @@
                   "type": "null"
                 }
               ],
-              "title": "Reference"
+              "title": "File"
             }
           }
         ],
@@ -656,7 +656,7 @@
             }
           },
           {
-            "name": "reference",
+            "name": "file",
             "in": "query",
             "required": true,
             "schema": {
@@ -665,7 +665,7 @@
                 "type": "string"
               },
               "minItems": 1,
-              "title": "Reference"
+              "title": "File"
             }
           }
         ],
@@ -20563,10 +20563,12 @@
       },
       "ToUserResource": {
         "properties": {
-          "id": {
+          "file": {
             "type": "string",
-            "pattern": "^[0-9a-f]{64}$",
-            "title": "Id"
+            "maxLength": 4096,
+            "minLength": 1,
+            "pattern": "^[^\\x00]+$",
+            "title": "File"
           },
           "name": {
             "type": "string",
@@ -20591,7 +20593,7 @@
         "additionalProperties": false,
         "type": "object",
         "required": [
-          "id",
+          "file",
           "name",
           "markdown",
           "version"

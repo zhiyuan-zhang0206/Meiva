@@ -64,7 +64,7 @@ def dispatch_sync(
                     pool,
                     request.agent_id,
                     local_machine.name(),
-                    references=request.references,
+                    files=request.files,
                     home=home,
                     limits=to_user_limits_from_read_model(authority),
                 )

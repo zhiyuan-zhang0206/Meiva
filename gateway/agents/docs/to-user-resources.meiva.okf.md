@@ -8,9 +8,15 @@ tags: [gateway, to-user, security]
 # To user resources
 
 `GET /api/agents/{id}/to-user/resource` streams one file the panel's Markdown
-references, after the reference chain is re-read on the owning machine. The last
-hop is `resource_response`, which owns both the content disposition and the CSP a
+references, after the chain of file names (`?file=reports/runbook.md`, one per
+document hop) is re-read on the owning machine. The last hop is
+`resource_response`, which owns both the content disposition and the CSP a
 browser applies to the bytes.
+
+A name is only a key. The read matches it against the names the traversed
+documents produce, so a path a reader invents matches nothing and is answered
+`gone`, and no filesystem path is ever built from the request — the document's
+own links, not the URL, decide what can be served.
 
 ## Disposition
 

@@ -74,7 +74,7 @@ def test_the_document_is_read_from_the_home_machines_workspace(
 
     with database.pool() as pool:
         document = read_to_user(
-            pool, agent_id, "source-host", references=[], home=served_home, limits=LIMITS
+            pool, agent_id, "source-host", files=[], home=served_home, limits=LIMITS
         )
 
     assert document.content == "# Report\n\nDone.\n"

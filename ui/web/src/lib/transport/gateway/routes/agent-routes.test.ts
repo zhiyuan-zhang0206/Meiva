@@ -33,9 +33,9 @@ describe("agent routes", () => {
     expect(agentShellPath(3, 9, 50)).toBe("/api/agents/3/shell/9?lines=50");
   });
 
-  it("the to-user document repeats one reference parameter per reference", () => {
+  it("the to-user document repeats one file parameter per file", () => {
     expect(toUserPath(5, [])).toBe("/api/agents/5/to-user");
-    expect(toUserPath(5, ["a", "b c"])).toBe("/api/agents/5/to-user?reference=a&reference=b+c");
+    expect(toUserPath(5, ["a", "b c"])).toBe("/api/agents/5/to-user?file=a&file=b+c");
   });
 
   it("tasks take a window and a field set", () => {
