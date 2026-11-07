@@ -1,5 +1,6 @@
-"""The two structure budgets as the gate reports them: what counts as a directory entry
-for the 20-entry cap, and which files the band below the 800-line ceiling may name."""
+# meiva:note
+# The two structure budgets as the gate reports them: what counts as a directory entry for the
+# 20-entry cap, and which files the band below the 800-line ceiling may name.
 
 from __future__ import annotations
 
@@ -57,12 +58,13 @@ def test_a_meizel_manifest_is_not_a_directory_entry() -> None:
     assert children[""] == {"pkg"}
 
 
+# meiva:note
+# A package renamed or removed locally can leave a directory holding only `__pycache__` (or
+# nothing, or only hidden files); a fresh CI checkout never has it, so counting it would fail a
+# commit locally that passes in CI.
 def test_subdirectories_ci_never_checks_out_do_not_count(
     tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """A package renamed or removed locally can leave a directory holding only
-    `__pycache__` (or nothing, or only hidden files); a fresh CI checkout never
-    has it, so counting it would fail a commit locally that passes in CI."""
     package = tmp_path / "tests/package"
     for index in range(20):
         _module(package / f"entry_{index}.py")
@@ -81,10 +83,11 @@ def test_subdirectories_ci_never_checks_out_do_not_count(
     assert "tests/package: directory has 21 direct entries" in capsys.readouterr().out
 
 
+# meiva:note
+# Component documentation takes the same parent slot as any other directory.
 def test_docs_layer_without_init_counts(
     tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """Component documentation takes the same parent slot as any other directory."""
     package = tmp_path / "tests/package"
     for index in range(20):
         _module(package / f"entry_{index}.py")
@@ -95,11 +98,12 @@ def test_docs_layer_without_init_counts(
     assert "tests/package: directory has 21 direct entries" in capsys.readouterr().out
 
 
+# meiva:note
+# A directory named `docs` that has `__init__.py` is a real Python package (`base/packages/docs`)
+# and takes a slot like any other subdirectory.
 def test_docs_package_with_init_counts(
     tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """A directory named `docs` that has `__init__.py` is a real Python package
-    (`base/packages/docs`) and takes a slot like any other subdirectory."""
     package = tmp_path / "tests/package"
     for index in range(20):
         _module(package / f"entry_{index}.py")
@@ -361,14 +365,16 @@ def test_real_cli_fails_when_the_tracked_query_cannot_establish_structure(
     assert "directory has" not in result.stdout
 
 
+# meiva:note
+# Run real pre-commit selection with its normal defaults and non-file tags.
 def test_the_real_hook_selects_docs_hidden_links_and_gitlinks(
     tmp_path: pathlib.Path,
 ) -> None:
-    """Run real pre-commit selection with its normal defaults and non-file tags."""
     root = pathlib.Path(lcs.__file__).parents[2]
     config = cast(dict[str, Any], yaml.safe_load((root / ".pre-commit-config.yaml").read_text()))
     local = next(repo for repo in config["repos"] if repo["repo"] == "local")
     selected = next(hook for hook in local["hooks"] if hook["id"] == "lint-code-structure")
+    # meiva:note
     # The public entry seam reveals exactly the filenames pre-commit delivers.
     config["repos"] = [{**local, "hooks": [{**selected, "entry": "/bin/echo"}]}]
     (tmp_path / ".pre-commit-config.yaml").write_text(yaml.safe_dump(config), encoding="utf-8")

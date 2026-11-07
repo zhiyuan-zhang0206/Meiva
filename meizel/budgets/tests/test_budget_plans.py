@@ -22,8 +22,9 @@ def _text(lines: int) -> str:
     return "x = 1\n" * lines
 
 
+# meiva:note
+# The violations of one run; the band below the ceiling is tested on its own.
 def _report(texts: dict[Path, str], judged: dict[str, int] | None = None) -> list[str]:
-    """The violations of one run; the band below the ceiling is tested on its own."""
     violations, _ = budget_plans.ceiling_report(texts, _ROOT, judged or {})
     return violations
 
