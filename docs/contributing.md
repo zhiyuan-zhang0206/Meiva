@@ -52,8 +52,8 @@ to join: the pre-merge Trunk queue was retired on 2026-11-01
 ([decision](decisions/engineering/tooling/2026-11-01-release-train-and-channels.md)),
 because running the full matrix in a serialized queue *and* again on the release train
 doubled runner spend without adding coverage. What replaced it: `ci.yml` runs
-impact-selected checks on the pull request, `release-gate.yml` re-runs the full suite on
-`main` every six hours and mints the release certificate, and
+impact-selected checks on the pull request, `release-gate.yml` requires full release verification on
+`main` every six hours and mints the release certificate (see the [verification policy](conventions/engineering/host-versioning.md#release-eligibility-timestamped-calver-tags-carry-meiva-releasev1-certificates)), and
 `scripts/host_ops/release/bisect_train.py` localizes a cross-PR break to its first bad
 commit. `main`'s branch protection requires twelve status checks and no approving
 review (measured 2026-11-03; the contract is `scripts/audit/analysis/protection.py` and

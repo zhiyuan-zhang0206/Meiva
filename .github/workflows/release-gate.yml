@@ -3,6 +3,8 @@
 # Scheduled runs certify `main` HEAD when new commits have landed since `channel/latest`, skipping
 # runner-hours when `channel/latest` already points at `main` HEAD. Manual `workflow_dispatch` runs
 # certify `main`, a release candidate ref, or a hotfix branch (`hotfix_of` -> `-hf<N>`).
+# Dispatch with `verify_only=true` to run the matrix on the workflow's exact commit without
+# publishing. Pull requests editing this workflow exercise the same read-only path.
 #
 # Products on success (all Git-native, zero reverse pull requests to `main`):
 #   - immutable annotated tag `vYYYY.MM.DD.HHMMSS` (or `vYYYY.MM.DD.HHMMSS-hf<N>`) carrying a
@@ -13,16 +15,23 @@
 #     `channel/stable` and `--latest`).
 #
 # A cron slot GitHub never started is backfilled with `main-typecheck.yml` (`workflow_dispatch`),
-# which runs the full-tree type check and publishes nothing. Do not dispatch this workflow to
-# fill a missed slot: a passing run mints a tag and moves `channel/latest`.
+# which runs the full-tree type check and publishes nothing.
 
 name: Release gate
+run-name: ${{ (github.event_name == 'pull_request' || inputs.verify_only == true) && format('Verify release tree {0}', github.sha) || 'Certify release' }}
 
 on:
   schedule:
     - cron: '17 */6 * * *'
+  pull_request:
+    paths:
+      - '.github/workflows/release-gate.yml'
   workflow_dispatch:
     inputs:
+      verify_only:
+        description: Verify this workflow's commit without publishing (main preflight)
+        type: boolean
+        default: false
       target_ref:
         description: Branch, tag, or commit to certify (default main)
         required: false
@@ -41,7 +50,7 @@ on:
         default: ''
 
 permissions:
-  contents: write
+  contents: read
   actions: read
 
 env:
@@ -50,7 +59,7 @@ env:
   MEIVA_REDIS_URL: redis://127.0.0.1:1/0
 
 concurrency:
-  group: release-gate
+  group: ${{ (github.event_name == 'pull_request' || inputs.verify_only == true) && format('verify-release-{0}', github.sha) || 'release-gate' }}
   cancel-in-progress: false
 
 jobs:
@@ -65,12 +74,14 @@ jobs:
       version: ${{ steps.target.outputs.version }}
       hotfix_of: ${{ steps.target.outputs.hotfix_of }}
       durations_key: ${{ steps.durations.outputs.key }}
+      evidence_run: ${{ steps.evidence.outputs.run_id }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
 
       - name: Fetch release and channel tags
+        if: github.event_name != 'pull_request' && inputs.verify_only != true
         run: git fetch --tags --force origin
 
       - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
@@ -82,20 +93,21 @@ jobs:
         id: target
         env:
           EVENT_NAME: ${{ github.event_name }}
+          VERIFY_ONLY: ${{ inputs.verify_only }}
           TARGET_REF: ${{ inputs.target_ref || 'main' }}
           EXPLICIT_VERSION: ${{ inputs.version }}
           HOTFIX_OF: ${{ inputs.hotfix_of }}
-        run: >
-          python3 scripts/host_ops/release/certify.py precheck
-          --repo .
-          --event-name "$EVENT_NAME"
-          --target-ref "$TARGET_REF"
-          --version "$EXPLICIT_VERSION"
-          --hotfix-of "$HOTFIX_OF"
-          --github-output "$GITHUB_OUTPUT"
+        run: |
+          if [ "$VERIFY_ONLY" = true ] || [ "$EVENT_NAME" = pull_request ]; then
+            printf 'sha=%s\nskip_train=false\n' "$GITHUB_SHA" >> "$GITHUB_OUTPUT"
+          else
+            python3 scripts/host_ops/release/certify.py precheck --repo . \
+              --event-name "$EVENT_NAME" --target-ref "$TARGET_REF" --version "$EXPLICIT_VERSION" \
+              --hotfix-of "$HOTFIX_OF" --github-output "$GITHUB_OUTPUT"
+          fi
 
       - name: Refuse a tree without a certified base
-        if: steps.target.outputs.skip_train != 'true'
+        if: steps.target.outputs.source_ref != '' && steps.target.outputs.skip_train != 'true'
         run: >
           python3 scripts/host_ops/release/base.py
           --repo .
@@ -103,7 +115,7 @@ jobs:
           --bootstrap-when-empty
 
       - name: Refuse a commit whose nightly full suite was red
-        if: steps.target.outputs.skip_train != 'true'
+        if: steps.target.outputs.source_ref != '' && steps.target.outputs.skip_train != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -112,19 +124,47 @@ jobs:
             --limit 1 --json conclusion --jq '.[0].conclusion // ""')"
           case "$conclusion" in
             failure) echo "::error::$sha failed the nightly full suite; a red night blocks the release gate"; exit 1 ;;
-            "") echo "no nightly run for $sha - the gate's own matrix is the full-suite evidence" ;;
+            "") echo "no nightly run for $sha" ;;
             *) echo "nightly full suite for $sha: $conclusion" ;;
           esac
 
+      - name: Find a complete verification for this tree
+        id: evidence
+        if: >-
+          github.ref == 'refs/heads/main' &&
+          steps.target.outputs.skip_train != 'true' &&
+          steps.target.outputs.source_ref == 'refs/heads/main' &&
+          steps.target.outputs.hotfix_of == ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TARGET_SHA: ${{ steps.target.outputs.sha }}
+        run: |
+          if ! runs="$(gh api \
+            "repos/$GITHUB_REPOSITORY/actions/workflows/release-gate.yml/runs?branch=main&event=workflow_dispatch&per_page=20")"; then
+            echo "::notice::Verification history is unavailable. Running the full suite."
+            exit 0
+          fi
+          run_id="$(python3 -m scripts.host_ops.release.evidence --repo . \
+            --github-repository "$GITHUB_REPOSITORY" --target "$TARGET_SHA" \
+            --now "$(date -u +%Y-%m-%dT%H:%M:%SZ)" <<< "$runs")"
+          if [ -n "$run_id" ]; then
+            echo "run_id=$run_id" >> "$GITHUB_OUTPUT"
+            echo "Reusing full verification: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$run_id/attempts/1"
+          fi
+
       - name: Resolve the test durations
         id: durations
-        if: steps.target.outputs.skip_train != 'true'
+        if: steps.target.outputs.skip_train != 'true' && steps.evidence.outputs.run_id == ''
         uses: ./.github/actions/resolve-test-durations
 
   static-and-structure:
+    name: Full static checks (${{ matrix.lane }})
+    strategy:
+      fail-fast: false
+      matrix:
+        lane: [structure, analysis]
     needs: precheck
-    if: needs.precheck.outputs.skip_train != 'true'
-    name: Static, structure & locality full gate
+    if: needs.precheck.outputs.skip_train != 'true' && needs.precheck.outputs.evidence_run == ''
     runs-on: ubuntu-24.04
     container:
       image: ghcr.io/zhiyuan-zhang0206/meiva-ci-runner@sha256:a17652b71203a57be18bd343938fc20d8227ccb40010aba8067a08b0e74b3029
@@ -137,6 +177,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ needs.precheck.outputs.sha }}
+          persist-credentials: false
           fetch-depth: 0
 
       - name: Cache uv wheels
@@ -161,6 +202,7 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Check repository language, locks, and core-content manifests
+        if: matrix.lane == 'analysis'
         run: |
           python3 scripts/content_lint/lint_no_cjk.py
           python3 scripts/content_lint/lint_no_tailnet.py
@@ -171,6 +213,7 @@ jobs:
           uv run python scripts/content_lint/lint_core_content_manifests.py
 
       - name: Run full ruff, migrations, and clock lattice checks
+        if: matrix.lane == 'analysis'
         run: |
           uv run ruff check
           uv run ruff format --check
@@ -178,26 +221,34 @@ jobs:
           uv run python -m meizel.owners.clock_lattice_cli
 
       - name: Apply migrations to fresh DB + trigger smoke
+        if: matrix.lane == 'analysis'
         run: |
           mkdir -p "$HOME/.meiva"
           ln -sfn "$CI_VENDORED_RUNTIME_ROOT" "$HOME/.meiva/runtime"
           uv run python scripts/ci/migration_smoke.py
 
       - name: Run full basedpyright
+        if: matrix.lane == 'analysis'
         run: time uv run basedpyright --threads 2
 
-      - name: Validate source notes, structural hooks, codegen freshness, and locality
+      - name: Validate source notes, structural hooks and codegen freshness
+        if: matrix.lane == 'structure'
         env:
-          SKIP: check-code-comments,ruff,ruff-format,pyright,meizel-check-changed,lint-migrations,lint-clock-lattice,frontend-tsc,frontend-eslint,frontend-vitest,lint-core-content-manifests,check-git-hooks-install
+          SKIP: lint-code-structure,check-code-comments,ruff,ruff-format,pyright,meizel-check-changed,lint-migrations,lint-clock-lattice,frontend-tsc,frontend-eslint,frontend-vitest,lint-core-content-manifests,check-git-hooks-install
         run: |
           bash scripts/content_lint/code_comments/check.sh validate
           env -u VIRTUAL_ENV uv run pre-commit run --all-files
+
+      - name: Validate code structure and locality
+        if: matrix.lane == 'analysis'
+        run: |
+          env -u VIRTUAL_ENV uv run pre-commit run lint-code-structure --all-files
           env -u VIRTUAL_ENV uv run python -m meizel check
 
   backend-static:
-    needs: precheck
-    if: needs.precheck.outputs.skip_train != 'true'
     name: Backend static contracts (${{ matrix.group }}/8)
+    needs: precheck
+    if: needs.precheck.outputs.skip_train != 'true' && needs.precheck.outputs.evidence_run == ''
     runs-on: ubuntu-24.04
     container:
       image: ghcr.io/zhiyuan-zhang0206/meiva-ci-runner@sha256:a17652b71203a57be18bd343938fc20d8227ccb40010aba8067a08b0e74b3029
@@ -214,6 +265,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ needs.precheck.outputs.sha }}
+          persist-credentials: false
 
       - name: Restore the test durations
         uses: ./.github/actions/restore-test-durations
@@ -258,27 +310,28 @@ jobs:
           junit-patterns: '["tmp/junit-release-static-${{ matrix.group }}.xml"]'
 
   frontend:
-    needs: precheck
-    if: needs.precheck.outputs.skip_train != 'true'
     name: Frontend full suite (typecheck, build, lint, vitest)
+    needs: precheck
+    if: needs.precheck.outputs.skip_train != 'true' && needs.precheck.outputs.evidence_run == ''
     runs-on: ubuntu-24.04
+    container:
+      image: ghcr.io/zhiyuan-zhang0206/meiva-ci-runner@sha256:a17652b71203a57be18bd343938fc20d8227ccb40010aba8067a08b0e74b3029
+      options: --init --shm-size=2g
+    defaults:
+      run:
+        shell: bash
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ needs.precheck.outputs.sha }}
+          persist-credentials: false
 
-      - name: Install Node
-        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+      - name: Cache frontend node_modules
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          node-version: 22
-
-      - name: Install pnpm
-        uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
-        with:
-          version: "11.9.0"
-          cache: true
-          cache_dependency_path: ui/web/pnpm-lock.yaml
+          path: ui/web/node_modules
+          key: ui-web-node-modules-${{ runner.os }}-${{ hashFiles('ui/web/pnpm-lock.yaml') }}
 
       - name: Install frontend deps
         working-directory: ui/web
@@ -351,9 +404,9 @@ jobs:
           min-tests: '0'
 
   backend:
-    needs: precheck
-    if: needs.precheck.outputs.skip_train != 'true'
     name: Backend full suite (${{ matrix.group }}/8)
+    needs: precheck
+    if: needs.precheck.outputs.skip_train != 'true' && needs.precheck.outputs.evidence_run == ''
     runs-on: ubuntu-24.04
     container:
       image: ghcr.io/zhiyuan-zhang0206/meiva-ci-runner@sha256:a17652b71203a57be18bd343938fc20d8227ccb40010aba8067a08b0e74b3029
@@ -370,6 +423,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ needs.precheck.outputs.sha }}
+          persist-credentials: false
 
       - name: Restore the test durations
         uses: ./.github/actions/restore-test-durations
@@ -413,9 +467,9 @@ jobs:
           exit "$status"
 
   e2e:
-    needs: precheck
-    if: needs.precheck.outputs.skip_train != 'true'
     name: e2e full matrix (${{ matrix.group }}/4)
+    needs: precheck
+    if: needs.precheck.outputs.skip_train != 'true' && needs.precheck.outputs.evidence_run == ''
     runs-on: ubuntu-24.04
     container:
       image: ghcr.io/zhiyuan-zhang0206/meiva-ci-runner@sha256:a17652b71203a57be18bd343938fc20d8227ccb40010aba8067a08b0e74b3029
@@ -432,6 +486,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ needs.precheck.outputs.sha }}
+          persist-credentials: false
 
       - name: Restore the test durations
         uses: ./.github/actions/restore-test-durations
@@ -505,9 +560,9 @@ jobs:
           path: tmp/e2e-logs/
 
   platform-smoke:
-    needs: precheck
-    if: needs.precheck.outputs.skip_train != 'true'
     name: Platform smoke (vendored runtime)
+    needs: precheck
+    if: needs.precheck.outputs.skip_train != 'true' && needs.precheck.outputs.evidence_run == ''
     runs-on: ubuntu-24.04
     container:
       image: ghcr.io/zhiyuan-zhang0206/meiva-ci-runner@sha256:a17652b71203a57be18bd343938fc20d8227ccb40010aba8067a08b0e74b3029
@@ -520,6 +575,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ needs.precheck.outputs.sha }}
+          persist-credentials: false
 
       - name: Cache uv wheels
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -537,7 +593,22 @@ jobs:
 
   certify:
     needs: [precheck, static-and-structure, backend-static, frontend, backend, e2e, platform-smoke]
-    if: success() && needs.precheck.outputs.skip_train != 'true'
+    if: >-
+      !cancelled() && !failure() &&
+      github.event_name != 'pull_request' &&
+      inputs.verify_only != true &&
+      needs.precheck.result == 'success' &&
+      needs.precheck.outputs.source_ref != '' &&
+      needs.precheck.outputs.skip_train != 'true' &&
+      (needs.precheck.outputs.evidence_run != '' ||
+        (needs.static-and-structure.result == 'success' &&
+         needs.backend-static.result == 'success' &&
+         needs.frontend.result == 'success' &&
+         needs.backend.result == 'success' &&
+         needs.e2e.result == 'success' &&
+         needs.platform-smoke.result == 'success'))
+    permissions:
+      contents: write
     name: Certify and publish channel/latest
     runs-on: ubuntu-24.04
     timeout-minutes: 15
@@ -549,6 +620,18 @@ jobs:
 
       - name: Fetch release and channel tags
         run: git fetch --tags --force origin
+
+      - name: Record the verification source
+        env:
+          EVIDENCE_RUN: ${{ needs.precheck.outputs.evidence_run }}
+          SHA: ${{ needs.precheck.outputs.sha }}
+        run: |
+          if [ -n "$EVIDENCE_RUN" ]; then
+            url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$EVIDENCE_RUN/attempts/1"
+            printf 'Verification for commit `%s` using [full verification](%s) of the same Git tree.\n' "$SHA" "$url" >> "$GITHUB_STEP_SUMMARY"
+          else
+            printf 'Verification for commit `%s` using the full verification jobs in this run.\n' "$SHA" >> "$GITHUB_STEP_SUMMARY"
+          fi
 
       - name: Mint annotated release certificate
         id: mint

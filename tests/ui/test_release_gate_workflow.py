@@ -26,60 +26,67 @@ def test_release_gate_supports_scheduled_train_and_manual_dispatch() -> None:
     workflow = _yaml(_RELEASE_GATE)
     triggers = workflow[True]
 
-    assert set(triggers) == {"schedule", "workflow_dispatch"}
+    assert set(triggers) == {"schedule", "workflow_dispatch", "pull_request"}
     assert triggers["schedule"] == [{"cron": "17 */6 * * *"}]
     inputs = triggers["workflow_dispatch"]["inputs"]
-    assert set(inputs) == {"target_ref", "version", "hotfix_of", "reason"}
+    assert set(inputs) == {"verify_only", "target_ref", "version", "hotfix_of", "reason"}
+    assert inputs["verify_only"] == {
+        "description": "Verify this workflow's commit without publishing (main preflight)",
+        "type": "boolean",
+        "default": False,
+    }
     assert inputs["version"]["required"] is False
     assert "pull-requests" not in workflow["permissions"]
 
 
+_CHECKS = ("static-and-structure", "backend-static", "frontend", "backend", "e2e", "platform-smoke")
+
+
+def test_preflight_checks_its_dispatch_commit_and_cannot_publish() -> None:
+    workflow = _yaml(_RELEASE_GATE)
+    jobs = workflow["jobs"]
+    assert workflow["permissions"] == {"contents": "read", "actions": "read"}
+    assert "Verify release tree {0}" in workflow["run-name"]
+    assert "inputs.verify_only == true" in workflow["run-name"]
+    assert "verify-release-{0}" in workflow["concurrency"]["group"]
+    resolve = _step(jobs["precheck"]["steps"], "Resolve target and check idle train")
+    assert '"$VERIFY_ONLY" = true' in resolve["run"]
+    assert '"$EVENT_NAME" = pull_request' in resolve["run"]
+    assert '"$GITHUB_SHA" >> "$GITHUB_OUTPUT"' in resolve["run"]
+    assert "github.event_name != 'pull_request'" in jobs["certify"]["if"]
+    assert "inputs.verify_only != true" in jobs["certify"]["if"]
+    lookup = _step(jobs["precheck"]["steps"], "Find a complete verification for this tree")
+    assert "steps.target.outputs.source_ref == 'refs/heads/main'" in lookup["if"]
+
+
 def test_every_leg_runs_on_the_commit_the_precheck_resolved_and_skips_idle_train() -> None:
     jobs = _yaml(_RELEASE_GATE)["jobs"]
-
-    assert set(jobs) == {
-        "precheck",
-        "static-and-structure",
-        "backend-static",
-        "frontend",
-        "backend",
-        "e2e",
-        "platform-smoke",
-        "certify",
-    }
-    for name in (
-        "static-and-structure",
-        "backend-static",
-        "frontend",
-        "backend",
-        "e2e",
-        "platform-smoke",
-    ):
-        assert jobs[name]["needs"] == "precheck"
-        assert jobs[name]["if"] == "needs.precheck.outputs.skip_train != 'true'"
-        checkout = jobs[name]["steps"][0]
+    assert set(jobs) == {"precheck", "certify", *_CHECKS}
+    for name in _CHECKS:
+        job = jobs[name]
+        assert job["needs"] == "precheck"
+        assert job["if"] == (
+            "needs.precheck.outputs.skip_train != 'true' && needs.precheck.outputs.evidence_run == ''"
+        )
+        checkout = job["steps"][0]
         assert checkout["with"]["ref"] == "${{ needs.precheck.outputs.sha }}"
-
-    for container_leg in (
-        "static-and-structure",
-        "backend-static",
-        "backend",
-        "e2e",
-        "platform-smoke",
-    ):
-        container = jobs[container_leg]["container"]
-        assert container["image"].startswith("ghcr.io/zhiyuan-zhang0206/meiva-ci-runner@sha256:")
-        assert container["options"] == "--init --shm-size=2g"
-        assert jobs[container_leg]["defaults"]["run"]["shell"] == "bash"
-    assert jobs["backend-static"]["strategy"]["matrix"]["group"] == [1, 2, 3, 4, 5, 6, 7, 8]
+        assert checkout["with"]["persist-credentials"] is False
+        assert job["container"]["image"].startswith(
+            "ghcr.io/zhiyuan-zhang0206/meiva-ci-runner@sha256:"
+        )
+        assert job["defaults"]["run"]["shell"] == "bash"
+        assert job["container"]["options"] == "--init --shm-size=2g"
 
 
 def test_release_gate_splits_restore_durations_resolved_by_precheck() -> None:
     jobs = _yaml(_RELEASE_GATE)["jobs"]
     assert jobs["precheck"]["outputs"]["durations_key"] == "${{ steps.durations.outputs.key }}"
-    resolve_durations = _step(jobs["precheck"]["steps"], "Resolve the test durations")
-    assert resolve_durations["uses"] == "./.github/actions/resolve-test-durations"
-    assert resolve_durations["if"] == "steps.target.outputs.skip_train != 'true'"
+    resolve = _step(jobs["precheck"]["steps"], "Resolve the test durations")
+    assert resolve["uses"] == "./.github/actions/resolve-test-durations"
+    assert resolve["if"] == (
+        "steps.target.outputs.skip_train != 'true' && steps.evidence.outputs.run_id == ''"
+    )
+    assert jobs["backend-static"]["strategy"]["matrix"]["group"] == list(range(1, 9))
     for split_leg in ("backend-static", "backend", "e2e"):
         restore = _step(jobs[split_leg]["steps"], "Restore the test durations")
         assert restore["uses"] == "./.github/actions/restore-test-durations"
@@ -103,16 +110,13 @@ def test_precheck_validates_target_base_and_nightly_verdict() -> None:
 def test_certify_mints_git_native_certificate_without_reverse_pr() -> None:
     jobs = _yaml(_RELEASE_GATE)["jobs"]
     certify = jobs["certify"]
-    assert certify["needs"] == [
-        "precheck",
-        "static-and-structure",
-        "backend-static",
-        "frontend",
-        "backend",
-        "e2e",
-        "platform-smoke",
-    ]
+    assert certify["needs"] == ["precheck", *_CHECKS]
+    assert "needs.precheck.result == 'success'" in certify["if"]
     assert "skip_train != 'true'" in certify["if"]
+    assert "needs.precheck.outputs.evidence_run != ''" in certify["if"]
+    for name in _CHECKS:
+        assert f"needs.{name}.result == 'success'" in certify["if"]
+    assert certify["permissions"] == {"contents": "write"}
 
     mint = _step(certify["steps"], "Mint annotated release certificate")
     publish = _step(certify["steps"], "Publish release tag, channel/latest, and GitHub Release")
