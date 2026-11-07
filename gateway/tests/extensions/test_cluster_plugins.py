@@ -47,12 +47,24 @@ def test_provider_metadata_and_crafted_toggle_rejection(db_conn: psycopg.Connect
         assert plugins["lm_typesafe"]["provider_kinds"] == ["decision"]
         assert plugins["lm_openai"]["provider_kinds"] == ["llm", "decision"]
         assert plugins["meiva_code"]["user_toggleable"] is True
+        assert all(p["user_toggleable"] for p in plugins.values() if "llm" in p["provider_kinds"])
         db_conn.commit()
         before = plugin_enable.policy(db_conn)
-        for name in ("lm_anthropic", "lm-anthropic", "lm_typesafe"):
-            response = client.put("/api/plugins", json={"name": name, "enabled": False})
-            assert response.status_code == 403, response.text
+        response = client.put("/api/plugins", json={"name": "lm_typesafe", "enabled": False})
+        assert response.status_code == 403, response.text
         assert plugin_enable.policy(db_conn) == before
+
+
+def test_llm_provider_cluster_toggle_round_trip(db_conn: psycopg.Connection) -> None:
+    with gateway_test_client() as client:
+        db_conn.commit()
+        response = client.put("/api/plugins", json={"name": "lm-anthropic", "enabled": False})
+        assert response.status_code == 200, response.text
+        assert response.json()["enabled"] is False
+        assert plugin_enable.policy(db_conn)["lm_anthropic"] is False
+        response = client.put("/api/plugins", json={"name": "lm_anthropic", "enabled": True})
+        assert response.status_code == 200, response.text
+        assert plugin_enable.policy(db_conn)["lm_anthropic"] is True
 
 
 def test_registry_only_readonly_plugin_keeps_policy_and_category(

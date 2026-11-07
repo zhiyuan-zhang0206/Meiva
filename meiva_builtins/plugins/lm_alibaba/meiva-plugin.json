@@ -11,6 +11,6 @@
     ]
   },
   "displayName": "Alibaba",
-  "userToggleable": false,
+  "userToggleable": true,
   "category": "provider"
 }

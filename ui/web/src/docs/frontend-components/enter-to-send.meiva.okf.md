@@ -36,7 +36,7 @@ Uniform, because they are all "type a message, send it":
   selects the command or sends the draft.
 - `components/notifications/open-notice-detail.tsx` — the notice reply box and,
   through `components/notifications/notice-question-form.tsx`, a question's
-  answer box and its optional comment box.
+  single text answer box or a choice question's optional Note box.
 - `components/agents/agent-prompt-dialog.tsx` — the fork / resurrect prompt: a
   prompt is a message to an agent.
 
@@ -65,4 +65,4 @@ on Enter without a reload.
 ## Relationship to Other Nodes
 
 - [[ui/web/src/docs/frontend-components/frontend-components.meiva.okf.md|Frontend Components]] — the catalog this node hangs from; the Composer bullet describes its states, drafts and submissions.
-- [[ui/web/src/docs/frontend-components/fleet-view.meiva.okf.md|Fleet View]] — the Inbox and inspector share `OpenNoticeDetail`, whose question form is one of these fields.
+- [[ui/web/src/docs/frontend-components/fleet-view.meiva.okf.md|Fleet View]] — the Inbox and composer question queue share `OpenNoticeDetail`, whose question form is one of these fields.

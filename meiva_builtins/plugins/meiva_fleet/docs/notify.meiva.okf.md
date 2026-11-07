@@ -7,10 +7,11 @@ tags: [fleet, user-communication]
 
 # Ask contract
 
-`meiva.ui.ask(title, content=None, *, question=None, note_suggestion=None)` creates a durable question in Timeline and the user's Ask queue.
+`meiva.ui.ask(title, content=None, *, question=None, note_suggestion=None)` creates a durable question in the composer's pending-question queue. Resolved questions stay in timeline history.
 The title names the decision and content supplies context. Omitted `question`
-means text; choice questions use `single_select` or `multi_select`. Every type
-supports an editable Note. The agent's `note_suggestion` is a draft, never an answer.
+means text with one answer field; choice questions use `single_select` or
+`multi_select` and keep an optional Note. `note_suggestion` offers candidate
+text for the answer or Note until the user explicitly applies it.
 
 An agent can have several open questions. New questions have no expiration and
 never overwrite an unanswered question. The runtime preserves operation identity across retries; the gateway replays

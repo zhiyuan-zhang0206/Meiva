@@ -64,8 +64,9 @@ def ask(
     """Ask a persistent question without ending your turn or sending a notification.
 
     question accepts type=text (default), single_select or multi_select with ordered
-    options (id, label, optional description). Every question includes a user-editable
-    Note; note_suggestion seeds that draft and is never a submitted user answer.
+    options (id, label, optional description). Text questions have one answer field;
+    choices keep an optional Note. note_suggestion offers a candidate answer or Note
+    that the user must explicitly apply before submitting.
     Multiple questions may remain open. Questions do not expire or replace earlier
     ones. A user answer or explicit close arrives asynchronously. The runtime owns
     retry identity. Returns the global question id.

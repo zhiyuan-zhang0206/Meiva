@@ -432,19 +432,42 @@ describe("OpenNoticeDetail — Enter sends", () => {
   });
 });
 
-it.each(["text", "single_select", "multi_select"] as const)("%s keeps the Agent Note editable until the user submits", async (type) => {
+it.each(["text", "single_select", "multi_select"] as const)("%s applies a suggestion explicitly to its answer field", async (type) => {
   resolveNotice.mockResolvedValue({ status: "ok" });
   const question = type === "text"
     ? { type, note_suggestion: "Validate first" }
     : { type, note_suggestion: "Validate first", options: [{ id: "small", label: "Small" }], allow_other: false };
   renderNotice(<OpenNoticeDetail agentId={7} notice={ntc({ question })} />);
-  const note = screen.getByRole<HTMLTextAreaElement>("textbox", { name: "Note (optional)" });
-  expect(note.value).toBe("Validate first");
+  const field = screen.getByRole<HTMLTextAreaElement>("textbox", { name: type === "text" ? "Your answer" : "Note (optional)" });
+  expect(field.value).toBe("");
+  expect(field.placeholder).toBe("Validate first");
+  expect(screen.getAllByRole("textbox")).toHaveLength(1);
+  fireEvent.keyDown(field, { key: "Enter" });
   expect(resolveNotice).not.toHaveBeenCalled();
-  fireEvent.change(note, { target: { value: "Validate tomorrow" } });
-  if (type === "text") fireEvent.change(screen.getByRole("textbox", { name: "Your answer" }), { target: { value: "Yes" } });
+  fireEvent.keyDown(field, { key: "Tab" });
+  expect(field.value).toBe("Validate first");
+  expect(resolveNotice).not.toHaveBeenCalled();
+  fireEvent.change(field, { target: { value: "Validate tomorrow" } });
   fireEvent.click(screen.getByRole("button", { name: "Submit answer" }));
   await waitFor(() => expect(resolveNotice).toHaveBeenCalledWith(7, 11, {
-    action: "answer", answer: type === "text" ? { text: "Yes", comment: "Validate tomorrow" } : { option_ids: [], comment: "Validate tomorrow" },
+    action: "answer", answer: type === "text" ? { text: "Validate tomorrow" } : { option_ids: [], comment: "Validate tomorrow" },
   }, expect.any(String)));
+});
+
+it.each(["Tab", "ArrowRight"])("%s accepts an open question suggestion without submitting it", (key) => {
+  renderNotice(<OpenNoticeDetail agentId={7} notice={ntc({ question: { type: "text", note_suggestion: "Ship it" } })} />);
+  const field = screen.getByRole<HTMLTextAreaElement>("textbox", { name: "Your answer" });
+  expect(field.value).toBe("");
+  expect(field.className).toContain("placeholder:text-muted-foreground/60");
+  expect(field.className).toContain("text-foreground");
+  fireEvent.keyDown(field, { key: "Tab", shiftKey: true });
+  expect(field.value).toBe("");
+  fireEvent.keyDown(field, { key: "ArrowRight", isComposing: true });
+  expect(field.value).toBe("");
+  fireEvent.keyDown(field, { key });
+  expect(field.value).toBe("Ship it");
+  expect(resolveNotice).not.toHaveBeenCalled();
+  fireEvent.change(field, { target: { value: "My answer" } });
+  fireEvent.keyDown(field, { key });
+  expect(field.value).toBe("My answer");
 });

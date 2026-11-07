@@ -14,10 +14,9 @@ owns only that column — the agent rail stays mounted, because the mode changes
 what the panel shows, not whether navigation is reachable (user 2026-10-20). The
 bar keeps just the controls the mode uses: its name, the pressed magnifier and the
 column's collapse; the document's home, back and refresh read the body the mode
-hides, so they leave with it. The question is not part of this mode: it is the column's own bottom region, so
-it stays under the Inspector body with its draft, and switching back restores
-the shared document reading position (2026-10-30; until then the mode hid the
-question with the body it used to sit in). The panel itself never scrolls: Inspector keeps its
+hides, so they leave with it. Questions belong above the conversation composer,
+independent from this column's mode. Switching back restores the shared document
+reading position. The panel itself never scrolls: Inspector keeps its
 own scrollbar under the same bar. Below the
 desktop breakpoint the shared context opens as a full-screen reading view from
 the header's To user action — available whenever an agent is selected. Its top
@@ -28,5 +27,5 @@ the top bar. The document component stays mounted to retain reference navigation
 The narrow document toolbar carries the document's own controls; the
 mode switch stays in the top bar beside Back.
 
-The reading area, its title bar and the question below it belong to
+The reading area, its title bar and the separate composer question queue are described in
 [[ui/web/src/docs/frontend-state/shared-context/shared-context.meiva.okf.md|shared user context]].

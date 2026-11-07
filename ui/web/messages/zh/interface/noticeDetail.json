@@ -19,5 +19,8 @@
   "noLongerAvailable": "此问题已无法回答，请刷新查看最新状态。",
   "originalOptions": "原始编号选项",
   "selected": "已选择",
-  "comment": "补充说明（可选）"
+  "comment": "补充说明（可选）",
+  "pendingQuestions": "{count} 个待回答问题",
+  "questionsUnavailable": "无法加载待回答问题。",
+  "suggestionKeys": "按 Tab 或右箭头采纳建议。"
 }

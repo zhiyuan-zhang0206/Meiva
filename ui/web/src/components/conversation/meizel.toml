@@ -1,4 +1,4 @@
-exports = ["composer.tsx", "pending-strip.tsx", "upload-button.tsx"]
+exports = ["composer.tsx", "pending-strip.tsx", "pending-questions.tsx", "upload-button.tsx"]
 
 [uses]
 "composer-attachments.test.tsx" = ["composer.tsx"]
@@ -12,3 +12,5 @@ exports = ["composer.tsx", "pending-strip.tsx", "upload-button.tsx"]
 "pending-strip.test.tsx" = ["pending-strip.tsx"]
 "slash-autocomplete.test.tsx" = ["slash-autocomplete.tsx"]
 "upload-button.test.tsx" = ["upload-button.tsx"]
+
+"pending-questions.test.tsx" = ["pending-questions.tsx"]

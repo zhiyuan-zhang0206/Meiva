@@ -42,15 +42,18 @@ nothing and writing a comment submits `option_ids: []` with that comment, so
 "none of these, here is why" is an answer rather than a dismissal. An answer
 carrying neither is still refused.
 
-The Web always shows a Note field below the answer, for all three types.
-The agent may seed it with `note_suggestion`; the user can edit or clear it. Writing or editing
-it does not change the selection, and selecting options preserves the comment.
+The Web shows one answer input for text questions. Choice questions keep an
+optional Note below their numbered options. `note_suggestion` is offered as
+light placeholder text in the text answer or choice Note; Tab or Right Arrow
+applies it to the draft, which the user can edit or clear. Suggestions are never
+submitted implicitly. Selecting options preserves a choice question's Note.
 There is no Other option or Add note button. A single choice is cleared by
-choosing it again, so the field that starts empty can return to empty.
-Nothing is preselected and selecting an option never submits the answer.
+choosing it again. Nothing is preselected and selecting an option never submits.
 
-Web sends `answer.option_ids` and optional `answer.comment`; text questions send
-`answer.text` and optional `answer.comment` (the Note wire field). The gateway validates against the stored immutable question and
+Web choice answers send `answer.option_ids` and optional `answer.comment`;
+text answers send `answer.text`. Existing stored answers and other callers'
+optional text-answer comments remain compatible with the wire contract.
+The gateway validates against the stored immutable question and
 stores the canonical answer and readable reply in the same transaction as the
 agent inbound. CLI and IM use option numbers separated by commas on the first
 line, followed by an optional multiline comment. Open questions accept plain text.

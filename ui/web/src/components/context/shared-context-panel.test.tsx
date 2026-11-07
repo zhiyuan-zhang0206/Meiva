@@ -4,8 +4,7 @@ import { renderWithBrowser } from "@/test-support/render";
 import type { ReactElement, ReactNode } from "react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
-import { USER_SETTING_DEFAULTS, type NoticeItem } from "@/lib/contracts/types";
-import { QUESTION_REGION_MAX_HEIGHT_CLASS } from "@/lib/layout/layout";
+import { USER_SETTING_DEFAULTS } from "@/lib/contracts/types";
 import { WallClockProvider } from "@/lib/transport/transport-context";
 import type { useToUser } from "@/lib/context/use-to-user";
 
@@ -29,8 +28,7 @@ beforeEach(() => {
 let qc: QueryClient;
 
 // meiva:note
-// The panel renders the open-notice detail, which ages its labels against the page's clock; the
-// wrapper mounts the app's own answer so this file keeps deciding nothing about time.
+// Inspector reads time from the same clock owner as the rest of the page.
 function PanelWrapper({ children }: { children: ReactNode }) {
   return (
     <WallClockProvider wallNow={() => Date.now()}>
@@ -71,32 +69,14 @@ function documentQuery(): DocumentQuery {
   } as unknown as DocumentQuery;
 }
 
-function notice(): NoticeItem {
-  return {
-    id: 1,
-    agent_id: 7,
-    agent_label: null,
-    title: "Needs review",
-    content: null,
-    priority: "P1",
-    require_response: true,
-    blocking: false,
-    created_at: "2026-10-16T00:00:00Z",
-    expire_at: "2026-10-17T00:00:00Z",
-  };
-}
-
-function renderPanelView({ mobile = false, notices = [], onClose = vi.fn() }: {
+function renderPanelView({ mobile = false, onClose = vi.fn() }: {
   mobile?: boolean;
-  notices?: NoticeItem[];
   onClose?: () => void;
 } = {}) {
   return renderPanel(
     <SharedContextPanel
       agentId={7}
       document={documentQuery()}
-      notices={notices}
-      noticesFailed={false}
       mobile={mobile}
       onClose={onClose}
     />,
@@ -165,47 +145,22 @@ it("swaps the body under a bar that stays, instead of laying a sheet over it", a
   expect(screen.queryByTestId("notice-bar")).toBeNull();
 });
 
-it("keeps the document in the reading area and the question out of every scroll viewport", () => {
-  // meiva:note
-  // The question is the column's bottom region: it never travels with the
-  // reading area, so a long document scrolls under a card that stays put (user
-  // report 2026-10-30).
-  // meiva:link ui/web/src/docs/frontend-state/shared-context/shared-context.meiva.okf.md
-  renderPanelView({ notices: [notice()] });
-  const body = screen.getByTestId("shared-document").querySelector<HTMLDivElement>('[data-slot="scroll-area-viewport"]')!;
-  expect(body.contains(screen.getByText("No content"))).toBe(true);
-  const question = screen.getByRole("region", { name: "Ask" });
-  expect(body.contains(question)).toBe(false);
-  expect(question.closest('[data-slot="scroll-area-viewport"]')).toBeNull();
-  expect(screen.queryByText("Needs your reply")).toBeNull();
-});
-
-it("keeps the question at the bottom in Inspector mode and restores the reading position", async () => {
-  // meiva:note
-  // The bottom region is the column's, not the body's: switching to Inspector
-  // replaces the reading area above it and leaves the pending question where the
-  // reader left it, draft included (user 2026-10-30; until then the mode hid it
-  // with the body it used to sit in).
-  // meiva:link ui/web/src/docs/frontend-state/shared-context/shared-context.meiva.okf.md
-  const props = { agentId: 7, document: documentQuery(), notices: [notice()], noticesFailed: false, mobile: false, onClose: vi.fn() };
+it("keeps questions out of the right panel and restores reading position across Inspector mode", async () => {
+  const props = { agentId: 7, document: documentQuery(), mobile: false, onClose: vi.fn() };
   const { rerender } = renderPanel(<SharedContextPanel {...props} />);
   const body = screen.getByTestId("shared-document").querySelector<HTMLDivElement>('[data-slot="scroll-area-viewport"]')!;
-  const draft = screen.getByRole<HTMLTextAreaElement>("textbox", { name: /^Reply to question:/ });
-  fireEvent.change(draft, { target: { value: "Keep this answer" } });
   body.scrollTop = 420;
   fireEvent.click(screen.getByRole("button", { name: "Open inspector" }));
   snapshot.inspectorOpen = true;
   rerender(<SharedContextPanel {...props} />);
   expect(await screen.findByTestId("shared-inspector")).toBeTruthy();
-  expect(screen.getByRole("region", { name: "Ask" })).toBeTruthy();
-  expect(screen.getByRole("textbox", { name: /^Reply to question:/ })).toBe(draft);
+  expect(screen.queryByTestId("notice-region")).toBeNull();
+  expect(screen.queryByRole("textbox")).toBeNull();
   body.scrollTop = 0;
   snapshot.inspectorOpen = false;
   rerender(<SharedContextPanel {...props} />);
-  expect(screen.getByRole("region", { name: "Ask" })).toBeTruthy();
   expect(body.scrollTop).toBe(420);
-  expect(screen.getByRole("textbox", { name: /^Reply to question:/ })).toBe(draft);
-  expect(draft.value).toBe("Keep this answer");
+  expect(screen.queryByTestId("notice-region")).toBeNull();
 });
 
 function readingArea(): HTMLDivElement {
@@ -213,7 +168,7 @@ function readingArea(): HTMLDivElement {
 }
 
 it("starts a new agent or referenced document at the top of the shared reading area", () => {
-  const props = { agentId: 7, document: documentQuery(), notices: [notice()], noticesFailed: false, mobile: false, onClose: vi.fn() };
+  const props = { agentId: 7, document: documentQuery(), mobile: false, onClose: vi.fn() };
   const { rerender, browser } = renderPanel(<SharedContextPanel {...props} />);
   const body = readingArea();
   body.scrollTop = 420;
@@ -234,41 +189,6 @@ function follows(first: Element, second: Element): boolean {
   return Boolean(first.compareDocumentPosition(second) & Node.DOCUMENT_POSITION_FOLLOWING);
 }
 
-it.each([false, true])("orders the column as title bar, then the reading area, then the question (mobile=%s)", (mobile) => {
-  // meiva:note
-  // Top to bottom: the bar heads the column, the reading area scrolls under it,
-  // and the question is the column's own bottom region (user report 2026-10-30)
-  // instead of the reading area's first block (2026-10-29). The order is the
-  // same at every breakpoint.
-  // meiva:link ui/web/src/docs/frontend-state/shared-context/shared-context.meiva.okf.md
-  renderPanelView({ notices: [notice()], mobile });
-  const bar = screen.getByTestId("document-bar");
-  const document = screen.getByText("No content");
-  const question = screen.getByRole("region", { name: "Ask" });
-  expect(follows(bar, document)).toBe(true);
-  expect(follows(document, question)).toBe(true);
-  expect(screen.getAllByText("Shared context")).toHaveLength(1);
-  expect(screen.queryByTestId("notice-bar")).toBeNull();
-});
-
-it.each([false, true])("pins the question as the column's last region in both modes (inspector=%s)", async (inspector) => {
-  // meiva:note
-  // The bottom region is the column's own last child, outside the reading
-  // viewport and outside the Inspector body, so it is anchored under whatever
-  // the column shows above it; without a question the region does not render at
-  // all and takes no space.
-  // meiva:link ui/web/src/docs/frontend-state/shared-context/shared-context.meiva.okf.md
-  snapshot.inspectorOpen = inspector;
-  renderPanelView({ notices: [notice()] });
-  if (inspector) expect(await screen.findByTestId("shared-inspector")).toBeTruthy();
-  const column = screen.getByRole("complementary", { name: "To user" });
-  const region = screen.getByTestId("notice-region");
-  expect(column.lastElementChild).toBe(region);
-  expect(follows(screen.getByTestId("shared-document"), region)).toBe(true);
-  expect(region.closest('[data-slot="scroll-area-viewport"]')).toBeNull();
-  if (inspector) expect(follows(screen.getByTestId("shared-inspector"), region)).toBe(true);
-});
-
 it.each([false, true])("leaves no bottom region, and no gap, when there is no question (mobile=%s)", (mobile) => {
   renderPanelView({ mobile });
   expect(screen.queryByTestId("notice-region")).toBeNull();
@@ -278,12 +198,11 @@ it.each([false, true])("leaves no bottom region, and no gap, when there is no qu
 it.each([false, true])("pins the title bar outside the reading viewport, so a scroll moves only the content (inspector=%s)", async (inspector) => {
   // meiva:note
   // The bar belongs to the column, not to the reading area: both modes keep it
-  // out of the scrolling element, so a scroll never carries it away — Shared
-  // Context scrolls the question and document below it exactly as Inspector
-  // scrolls its own body (user report 2026-10-29).
+  // out of the scrolling element, so a scroll never carries it away. Shared
+  // Context and Inspector each scroll only their own body.
   // meiva:link ui/web/src/docs/frontend-state/shared-context/shared-context.meiva.okf.md
   snapshot.inspectorOpen = inspector;
-  renderPanelView({ notices: [notice()] });
+  renderPanelView();
   if (inspector) expect(await screen.findByTestId("shared-inspector")).toBeTruthy();
   const bar = screen.getByTestId("document-bar");
   const readingArea = screen.getByTestId("shared-document");
@@ -292,7 +211,7 @@ it.each([false, true])("pins the title bar outside the reading viewport, so a sc
   expect(follows(bar, readingArea)).toBe(true);
   if (!inspector) {
     expect(viewport.contains(screen.getByText("No content"))).toBe(true);
-    expect(viewport.contains(screen.getByRole("region", { name: "Ask" }))).toBe(false);
+    expect(screen.queryByRole("region", { name: "Ask" })).toBeNull();
   }
 });
 
@@ -304,7 +223,7 @@ it("closes the reading view from the mobile header", () => {
 });
 
 it("keeps the narrow Inspector toggle beside Back through mode changes", () => {
-  const props = { agentId: 7, document: documentQuery(), notices: [notice()], noticesFailed: false, mobile: true, onClose: vi.fn() };
+  const props = { agentId: 7, document: documentQuery(), mobile: true, onClose: vi.fn() };
   const { rerender } = renderPanel(<SharedContextPanel {...props} />);
   const back = screen.getByRole("button", { name: "Back to messages" });
   const toggle = screen.getByRole("button", { name: "Open inspector" });
@@ -327,52 +246,6 @@ it("keeps the narrow Inspector toggle beside Back through mode changes", () => {
   // the reading area; the position comes back from the panel's own record.
   // meiva:link ui/web/src/docs/frontend-state/shared-context/shared-context.meiva.okf.md
   expect(readingArea().scrollTop).toBe(180);
-});
-
-it("caps the notice viewport against the visual viewport and scrolls inside the inner viewport instead of clipping on the root", () => {
-  // meiva:note
-  // Regression (user report 2026-11-02): placing QUESTION_REGION_MAX_HEIGHT_CLASS
-  // on ScrollArea's `className` put max-height on the `height: auto` root while
-  // the inner viewport (`size-full` -> `height: 100%`) resolved to `auto`, so
-  // tall notices were clipped by the root's `overflow-hidden` and could not scroll.
-  // Bounding against `--visual-viewport-height` keeps the 70% cap inside the
-  // remaining area above an open iOS/iPadOS on-screen keyboard.
-  // meiva:link ui/web/src/docs/frontend-state/shared-context/shared-context.meiva.okf.md
-  expect(QUESTION_REGION_MAX_HEIGHT_CLASS).toBe("max-h-[calc(var(--visual-viewport-height,100dvh)*0.7)]");
-  renderPanelView({
-    notices: [
-      {
-        ...notice(),
-        content: Array.from({ length: 40 }, (_, i) => `Paragraph ${i + 1}`).join("\n\n"),
-      },
-    ],
-  });
-
-  const region = screen.getByTestId("notice-region");
-  const root = region.querySelector<HTMLDivElement>('[data-slot="scroll-area"]')!;
-  const viewport = region.querySelector<HTMLDivElement>('[data-slot="scroll-area-viewport"]')!;
-  const scrollbar = region.querySelector<HTMLDivElement>('[data-slot="scroll-area-scrollbar"]')!;
-  const docScrollbar = screen
-    .getByTestId("shared-document")
-    .querySelector<HTMLDivElement>('[data-slot="scroll-area-scrollbar"]')!;
-
-  expect(root.className).not.toContain(QUESTION_REGION_MAX_HEIGHT_CLASS);
-  expect(root.className).not.toContain("max-h-");
-  expect(viewport.className).toContain(QUESTION_REGION_MAX_HEIGHT_CLASS);
-  expect(viewport.className).toContain("overscroll-y-contain");
-  expect(viewport.style.overflowY).toBe("scroll");
-
-  const docBody = readingArea();
-  docBody.scrollTop = 240;
-  Object.defineProperty(viewport, "scrollHeight", { configurable: true, value: 1200 });
-  Object.defineProperty(viewport, "clientHeight", { configurable: true, value: 560 });
-  viewport.scrollTop = 320;
-  fireEvent.scroll(viewport);
-
-  expect(viewport.scrollTop).toBe(320);
-  expect(scrollbar.getAttribute("data-visible")).toBe("true");
-  expect(docBody.scrollTop).toBe(240);
-  expect(docScrollbar.getAttribute("data-visible")).toBe("false");
 });
 
 it("sizes the mobile full-screen sheet to --visual-viewport-height so an open keyboard never hides its reply composer", () => {

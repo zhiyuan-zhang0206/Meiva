@@ -11,6 +11,6 @@
     ]
   },
   "displayName": "Google",
-  "userToggleable": false,
+  "userToggleable": true,
   "category": "provider"
 }
