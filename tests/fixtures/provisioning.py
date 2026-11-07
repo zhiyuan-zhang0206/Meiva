@@ -311,6 +311,39 @@ def disable_loaded_event_store() -> None:
         set_enabled(enabled=False)
 
 
+# meiva:note
+# Point every reader of a provisioned service URL at the window's server: the settings
+# singleton, the home `.env`, and the process environment. The environment is the one that was
+# missing (#6409): `load_dotenv(override=False)` lets an environment key outrank `.env`, so a
+# component that rebuilt its boot from `os.environ` dialed the import-time sentinel
+# (`127.0.0.1:1`) while its siblings were healthy, and the bare `Connection refused` named no
+# owner. Each write gets a finalizer, and the file snapshot is taken before the rewrite, so
+# a window opened inside another (the DB and Redis fixtures together) still restores each layer
+# to the state that preceded it.
+def _open_service_window(
+    request: pytest.FixtureRequest, *, field: str, env_name: str, url: str
+) -> None:
+    from base.config import get_field, set_field
+
+    previous_value = get_field(field)
+    set_field(field, url)
+    request.addfinalizer(functools.partial(set_field, field, previous_value))
+    env_file = TEST_MEIVA_HOME / ".env"
+    previous_file = env_file.read_text()
+    request.addfinalizer(functools.partial(env_file.write_text, previous_file))
+    _rewrite_test_env_file_line(env_file, env_name, url)
+    previous_env = os.environ.get(env_name)
+    os.environ[env_name] = url
+    request.addfinalizer(functools.partial(_restore_environ, env_name, previous_env))
+
+
+def _restore_environ(name: str, previous: str | None) -> None:
+    if previous is None:
+        os.environ.pop(name, None)
+    else:
+        os.environ[name] = previous
+
+
 @pytest.fixture
 def _clean_db(
     provisioned_db: str,
@@ -320,15 +353,9 @@ def _clean_db(
 ) -> Iterator[None]:
     import psycopg
 
-    from base.config import get_field, set_field, settings
+    from base.config import settings
 
-    previous_db_url = get_field("db_url")
-    set_field("db_url", provisioned_db)
-    request.addfinalizer(functools.partial(set_field, "db_url", previous_db_url))
-    env_file = TEST_MEIVA_HOME / ".env"
-    previous_file = env_file.read_text()
-    request.addfinalizer(functools.partial(env_file.write_text, previous_file))
-    _rewrite_test_env_file_line(env_file, "MEIVA_DB_URL", provisioned_db)
+    _open_service_window(request, field="db_url", env_name="MEIVA_DB_URL", url=provisioned_db)
     disable_loaded_event_store()
 
     quiesce_loaded_telemetry()
@@ -357,15 +384,9 @@ def _clean_redis(
     redis_access: None,
     request: pytest.FixtureRequest,
 ) -> Iterator[None]:
-    from base.config import get_field, set_field
-
-    previous_redis_url = get_field("redis_url")
-    set_field("redis_url", provisioned_redis)
-    request.addfinalizer(functools.partial(set_field, "redis_url", previous_redis_url))
-    env_file = TEST_MEIVA_HOME / ".env"
-    previous_file = env_file.read_text()
-    request.addfinalizer(functools.partial(env_file.write_text, previous_file))
-    _rewrite_test_env_file_line(env_file, "MEIVA_REDIS_URL", provisioned_redis)
+    _open_service_window(
+        request, field="redis_url", env_name="MEIVA_REDIS_URL", url=provisioned_redis
+    )
     with sync_redis(provisioned_redis) as client:
         client.flushdb()
     yield

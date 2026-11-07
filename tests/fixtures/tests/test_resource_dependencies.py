@@ -103,6 +103,25 @@ def test_12_no_data_plane(process_config):
     with pytest.raises(pytest.fail.Exception, match="Unrequested Postgres"):
         connect("postgresql://127.0.0.1:1/unused")
 
+def test_13_a_window_is_visible_through_the_process_environment(db_url, redis_url):
+    import psycopg
+    import redis
+    from tests.fixtures.env_bootstrap import UNPROVISIONED_DB_URL, UNPROVISIONED_REDIS_URL
+    assert os.environ["MEIVA_DB_URL"] == db_url != UNPROVISIONED_DB_URL
+    assert os.environ["MEIVA_REDIS_URL"] == redis_url != UNPROVISIONED_REDIS_URL
+    # A component that rebuilds its boot from `os.environ` dials what the environment holds:
+    # inside the window that is the provisioned server, not the import-time sentinel.
+    with psycopg.connect(os.environ["MEIVA_DB_URL"]) as conn:
+        assert conn.execute("SELECT 1").fetchone() == (1,)
+    with redis.Redis.from_url(os.environ["MEIVA_REDIS_URL"]) as client:
+        assert client.ping()
+
+def test_14_the_environment_returns_to_the_sentinel(process_config):
+    import psycopg
+    test_12_no_data_plane(process_config)
+    with pytest.raises(pytest.fail.Exception, match="Unrequested Postgres"):
+        psycopg.connect(os.environ["MEIVA_DB_URL"])
+
 def test_20_failed_redis(failed_redis):
     raise AssertionError("setup must fail first")
 
@@ -130,6 +149,6 @@ def test_31_refusal_after_telemetry(process_config):
 """
     )
     result = pytester.runpytest_subprocess("-q", "-o", "addopts=")
-    result.assert_outcomes(passed=6, errors=2)
+    result.assert_outcomes(passed=8, errors=2)
     assert "database-setup-failed" in result.stdout.str()
     assert "redis-setup-failed" in result.stdout.str()

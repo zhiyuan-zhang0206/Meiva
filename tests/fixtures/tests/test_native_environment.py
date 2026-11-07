@@ -20,6 +20,8 @@ def test_native_process_environment_provisions_isolated_data_plane(
     assert not settings.general.os_jobs_enabled
     assert db_url == settings.data_plane.db_url
     assert redis_url == settings.data_plane.redis_url
+    assert os.environ["MEIVA_DB_URL"] == db_url
+    assert os.environ["MEIVA_REDIS_URL"] == redis_url
     db = conninfo_to_dict(settings.data_plane.db_url)
     assert db["dbname"] != "unprovisioned"
     assert settings.data_plane.redis_url != UNPROVISIONED_REDIS_URL
