@@ -17,6 +17,7 @@ from contextlib import AbstractContextManager, contextmanager
 from pathlib import Path
 from threading import RLock, get_ident
 
+from base.config.boot_delivery import captured_env_boot, harness_dotenv_pass
 from base.config.config_registry import DOMAIN_ATTRS
 from base.config.domain_shape import SettingsDomains
 from base.config.lite_access import (
@@ -46,12 +47,7 @@ from base.host.env.config_lite_table import (
     LITE_FIELDS,
     REQUIRED_FIELDS,
 )
-from base.host.env.dotenv_boot import (
-    PLACEHOLDER_DB_URL,
-    EnvBootResult,
-    load_meiva_env,
-    read_database_delivery,
-)
+from base.host.env.dotenv_boot import PLACEHOLDER_DB_URL, EnvBootResult, load_meiva_env
 from base.host.env.process_profile import (
     MEIVA_PROCESS_PROFILE_ENV,
     ProcessProfile,
@@ -281,6 +277,7 @@ class ConfigBoot:
         "_lock",
         "env_boot",
         "environment",
+        "home",
         "mode",
         "pending",
         "prepared",
@@ -304,6 +301,7 @@ class ConfigBoot:
         self.view = _SettingsView(self)
         self.env_boot: EnvBootResult | None = None
         self.environment: dict[str, str] | None = environment
+        self.home: Path | None = None
         self.mode = _LITE
         self.reason: str | None = None
         self.upgrades = 0
@@ -360,11 +358,10 @@ class ConfigBoot:
                 if self.environment is not None:
                     return
                 raise RuntimeError("configuration owner was already prepared")
-            if self.environment is None and os.environ.get("MEIVA_HARNESS_HANDLE"):
-                for key in [k for k, v in os.environ.items() if k.startswith("MEIVA_") and v == ""]:
-                    os.environ.pop(key, None)
-                if not os.environ.get("MEIVA_DB_URL"):
-                    load_meiva_env(os.environ, home=resolve_meiva_home())
+            live_environment = self.environment is None
+            dotenv_result = (
+                harness_dotenv_pass(home=resolve_meiva_home()) if live_environment else None
+            )
             environment = dict(self.process_environment())
             profile = environment.get(MEIVA_PROCESS_PROFILE_ENV)
             parsed_profile = None if profile is None else parse_process_profile(profile)
@@ -374,8 +371,11 @@ class ConfigBoot:
                     parse_field(_name, row[1], row[2], row[5], raw)
             self.environment = environment
             self.profile = parsed_profile
-            self.env_boot = read_database_delivery(
-                environment, home=home_from_env(environment, user_home=default_home().parent)
+            self.env_boot = captured_env_boot(
+                environment,
+                home=home_from_env(environment, user_home=default_home().parent),
+                process=_state if live_environment else None,
+                dotenv_result=dotenv_result,
             )
             self.prepared = True
 
@@ -506,6 +506,7 @@ class ConfigBoot:
                 if self.environment is None or "MEIVA_HOME" not in self.environment
                 else Path(self.environment["MEIVA_HOME"])
             )
+            self.home = home
             self.env_boot = load_meiva_env(target_env, home=home)
             profile = target_env.get(MEIVA_PROCESS_PROFILE_ENV)
             self.profile = None if profile is None else parse_process_profile(profile)

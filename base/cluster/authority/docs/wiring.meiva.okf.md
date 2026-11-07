@@ -89,7 +89,11 @@ What a bundle carries and who shares it:
   Environment loading and runner bootstrap return an immutable `EnvBootResult`.
   The existing config boot retains it through lite-to-full upgrade; each
   `DbConfig` copies its refusal together with its connection facts. A later
-  delivery or data-plane refresh cannot authorize an earlier refused handle.
+  delivery or data-plane refresh cannot authorize an earlier refused handle. The
+  refusal belongs to the `(process, home)` pair that ran the delivery, so an owner
+  created later in the same process (the SDK's own bootstrap, an external-harness
+  attachment) captures the boot's result instead of re-reading the credential-free
+  URL the boot left behind, which cannot say why the delivery was refused.
   The first credential-free dial raises `NoDatabaseAuthorityError`; environment
   loading itself still permits commands that need no database. These runtime
   facts are excluded from config dumps and have no environment alias.

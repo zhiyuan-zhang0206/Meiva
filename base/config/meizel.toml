@@ -18,7 +18,7 @@ exports = ["admin", "agent_pins.py", "base.py", "config_registry.py", "domains",
 [uses]
 "__init__.py" = ["_full.py", "_lite.py", "admin", "agent_pins.py", "config_registry.py", "profiles.py", "service_read.py"]
 "_full.py" = ["admin", "agent_pins.py", "base.py", "config_registry.py", "domains", "profiles.py", "service_read.py"]
-"_lite.py" = ["_full.py", "config_registry.py", "domain_shape.py", "lite_access.py", "lite_parse.py", "profiles.py"]
+"_lite.py" = ["_full.py", "boot_delivery.py", "config_registry.py", "domain_shape.py", "lite_access.py", "lite_parse.py", "profiles.py"]
 "admin" = ["config_registry.py"]
 "agent_pins.py" = ["config_registry.py"]
 "config_registry.py" = ["domains", "profiles.py"]
@@ -32,6 +32,7 @@ exports = ["admin", "agent_pins.py", "base.py", "config_registry.py", "domains",
 "__init__.py" = ["settings"]
 
 [roots]
+"boot_delivery.py" = { kinds = ["environ"], why = "the harness dotenv pass runs before any owner holds an environment: it scrubs the empty MEIVA_ keys a harness launch leaves, reads MEIVA_HARNESS_HANDLE / MEIVA_DB_URL raw, and loads the home's .env into the process environment — the same bootstrap-ordering class as _lite.py, on the pass that has to run before the owner snapshot exists" }
 "_full.py" = { kinds = ["environ"], why = "the eager builder reads MEIVA_PROCESS_PROFILE at construction time, before the singleton exists — the same bootstrap-ordering class as base/config/domains/storage/data_plane.py" }
 "_lite.py" = { kinds = ["environ", "clock"], why = "the boot-lite resolution layer IS the Settings bootstrap, and it reads the wall clock once for a bootstrap fetch TTL: `base.clock` builds a `Clock` from Settings, so asking it here would be a cycle.  it reads raw env aliases and plants the placeholder data-plane URLs before any sub-model exists — the same \"cannot depend on Settings by construction\" class as base/config/__init__.py" }
 

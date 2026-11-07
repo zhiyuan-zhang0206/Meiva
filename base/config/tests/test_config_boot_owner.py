@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import sys
 import time
@@ -51,7 +52,7 @@ def test_constructor_and_skip_boot_do_not_deliver_environment() -> None:
 
 def test_read_only_owners_keep_delivered_values_through_parallel_eager_builds() -> None:
     result = run_bounded(
-        [sys.executable, str(_CHILD)],
+        [sys.executable, str(_CHILD), "read_only_owners"],
         env={
             **os.environ,
             "MEIVA_CONFIG_FETCH": "skip",
@@ -65,6 +66,70 @@ def test_read_only_owners_keep_delivered_values_through_parallel_eager_builds() 
         timeout=20,
     )
     assert result.returncode == 0, result.stderr
+
+
+# meiva:note
+# A gateway home whose ledger refuses this process: its start intent admits another checkout
+# (`require_admitted_runtime`), which is what a process running a second clone of the repository
+# hits on an external harness (task #6418).
+def _refused_home(home: Path) -> Path:
+    (home / "db-authority").mkdir(parents=True)
+    (home / "db-authority" / "ledger.json").write_text("{}\n", encoding="utf-8")
+    (home / "start-intent.json").write_text(
+        json.dumps({"home": str(home.resolve()), "checkout": str(home / "admitted-checkout")}),
+        encoding="utf-8",
+    )
+    (home / ".env").write_text(
+        "MEIVA_MACHINE_SERVE_GATEWAY=true\n"
+        "MEIVA_DB_URL=postgresql://meiva_main@127.0.0.1:1/meiva_main\n"
+        "MEIVA_REDIS_URL=redis://127.0.0.1:1/0\n",
+        encoding="utf-8",
+    )
+    return home
+
+
+# meiva:note
+# Run one scenario of the owner child, which asserts for itself what a fresh owner captures: its
+# exit status carries the result. The environment is stated, not inherited — the session's own
+# launch carries this machine's cluster values, and the boot under test would read those as its
+# delivery.
+def _run_owner_child(home: Path, other: Path, *, scenario: str, **pins: str) -> None:
+    result = run_bounded(
+        [sys.executable, str(_CHILD), scenario, str(home), str(other)],
+        env={
+            "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
+            "HOME": str(Path.home()),
+            "MEIVA_HOME": str(home),
+            **pins,
+        },
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    assert result.returncode == 0, result.stderr
+
+
+# meiva:note
+# `$MEIVA_PYTHON -c "import meiva; ..."` run inside another checkout loads that checkout's code
+# (`sys.path[0]` is the working directory), so the home's ledger refuses the delivery. An owner
+# created after the boot read only the credential-free URL the refusal left in the environment
+# and reported "no database login was delivered by this process's startup entry".
+def test_a_later_owner_captures_the_process_boots_refusal(tmp_path: Path) -> None:
+    other = tmp_path / "other"
+    other.mkdir()
+    _run_owner_child(_refused_home(tmp_path / "home"), other, scenario="refused_home")
+
+
+# meiva:note
+# A settings-lite process (`MEIVA_CONFIG_FETCH=skip`) prepares no process owner, so a later
+# owner's dotenv pass is the process's first delivery. Its refusal is the only precise one there
+# is, and it used to be dropped in favour of the ledger read's generic message.
+def test_a_settings_lite_process_keeps_the_dotenv_refusal(tmp_path: Path) -> None:
+    other = tmp_path / "other"
+    other.mkdir()
+    _run_owner_child(
+        _refused_home(tmp_path / "home"), other, scenario="dotenv", MEIVA_CONFIG_FETCH="skip"
+    )
 
 
 def test_process_entry_still_delivers_its_home_environment(tmp_path: Path) -> None:
