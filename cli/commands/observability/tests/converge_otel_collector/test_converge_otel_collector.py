@@ -573,3 +573,15 @@ def test_local_otlp_pipelines_drop_resources_that_name_another_cluster(
         ]
     assert "filter/cluster_allow" not in sequence_at(pipelines, "metrics/infra", "processors")
     assert "filter/cluster_allow" not in sequence_at(pipelines, "traces/remote", "processors")
+
+
+# meiva:note
+# The write answers whether the file's contents moved: that is the one fact the seal warning and
+# the health round both need (task #6403).
+def test_a_config_write_answers_whether_the_contents_moved(tmp_path: Path) -> None:
+    config = tmp_path / "otel-collector" / "config.yaml"
+    config.parent.mkdir()
+
+    assert oc.write_config(config, "v1\n") is True
+    assert oc.write_config(config, "v1\n") is False
+    assert oc.write_config(config, "v2\n") is True

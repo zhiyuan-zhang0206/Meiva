@@ -121,28 +121,32 @@ def admitted_seals(record: Path) -> tuple[tuple[Path, str], ...]:
 # meiva:note
 # A rendered file that is also a sealed input of a running unit is the moment that unit stops
 # being replaceable: the root refuses every later birth of a unit whose input changed since its
-# admission, the health monitor's own replacement included (task #6403). Say it here, where the
-# change is made, and name the recovery — a report one health round later reaches whoever is on
-# duty, never the person who just ran converge.
-def warn_sealed_inputs(home: Path, changed: Iterable[Path]) -> None:
+# admission, the health monitor's own replacement included (task #6403). Say it here, at the verb
+# that wrote the files, and name the recovery — a report one health round later reaches whoever is
+# on duty, never the person who just ran `meiva lgtm` or converge. `writer` is the command that
+# wrote them, so the line names the run the reader can retrace.
+def warn_sealed_inputs(home: Path, changed: Iterable[Path], *, writer: str) -> None:
+    files = tuple(changed)
     seals = live_root_seals(home)
-    if not seals:
+    if not seals or not files:
         return
-    units = sorted({unit for path in changed for unit in sealed_units(path, seals)})
+    units = sorted({unit for path in files for unit in sealed_units(path, seals)})
     if not units:
         return
     joined = ", ".join(units)
     from base.log import logger
 
+    paths = ", ".join(str(path) for path in files)
     logger.warning(
-        "converge wrote a sealed input of {units}: this root generation can no longer spawn them "
+        "{writer} wrote a sealed input of {units}: this root generation can no longer spawn them "
         "— re-admit the inputs or restart the host before they are needed",
         event="converge_sealed_input_changed",
+        writer=writer,
         units=joined,
-        paths=", ".join(str(path) for path in changed),
+        paths=paths,
     )
     print(
-        f"  ! converge changed a sealed input of {joined} — this root generation can no longer "
+        f"  ! {writer} changed a sealed input of {joined} — this root generation can no longer "
         "spawn them; restart the host (or re-admit the inputs) before they are needed",
         file=sys.stderr,
     )

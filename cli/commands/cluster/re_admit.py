@@ -18,6 +18,7 @@ import sys
 from collections.abc import Mapping
 from pathlib import Path
 
+from base.host.boundary.json_values import is_object_dict, is_object_list
 from base.native_process.root_control.client import RootClient, RootClientError, caller_identity
 
 
@@ -45,16 +46,20 @@ def cmd_re_admit_inputs(unit: str, *, home: Path, environ: Mapping[str, str], pi
         print(f"  ✗ no root answers this home: {error}", file=sys.stderr)
         return 1
     result = response.get("result")
-    if not response.get("ok") or not isinstance(result, dict):
+    if not response.get("ok") or not is_object_dict(result):
         print(f"  ✗ the root refused the re-admission: {result!r}", file=sys.stderr)
         return 1
     changed = result.get("changed")
-    items = (
-        [item for item in changed if isinstance(item, list)] if isinstance(changed, list) else []
-    )
+    items: list[tuple[str, str, str]] = []
+    for item in changed if is_object_list(changed) else []:
+        if not is_object_list(item) or len(item) != 3:
+            continue
+        path, admitted, current = item
+        if isinstance(path, str) and isinstance(admitted, str) and isinstance(current, str):
+            items.append((path, admitted, current))
     print(f"re-admitted on {machine}: {unit} ({len(items)} changed input(s))")
-    for path, admitted, current in (item for item in items if len(item) == 3):
-        print(f"  {path}: {str(admitted)[:12]} -> {str(current)[:12]}")
+    for path, admitted, current in items:
+        print(f"  {path}: {admitted[:12]} -> {current[:12]}")
     if not items:
         print("  (nothing changed since admission; the seal already matches the contents)")
     print("  the running generation still uses what it started with; nothing was restarted")

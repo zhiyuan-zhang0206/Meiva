@@ -316,9 +316,10 @@ class BootRetriesExhausted(TypedDict):
 
 
 # meiva:note
-# One converge wrote a file that a live root sealed as a unit's input: the units it names are the
-# ones this generation can no longer spawn (task #6403).
+# One render wrote a file that a live root sealed as a unit's input: the units it names are the ones
+# this generation can no longer spawn, and `writer` is the command that wrote them (task #6403).
 class ConvergeSealedInputChanged(TypedDict):
+    writer: str
     units: str
     paths: str
 
@@ -395,7 +396,7 @@ EVENTS: dict[str, EventSpec] = {
     ),
     "converge_sealed_input_changed": telemetry_event(
         "converge_sealed_input_changed",
-        "converge wrote a file a live root has sealed as a unit input, so that unit can no longer "
+        "a render wrote a file a live root has sealed as a unit input, so that unit can no longer "
         "be spawned until a new generation or an explicit re-admission (task #6403)",
         payload=ConvergeSealedInputChanged,
         tier="anomaly",

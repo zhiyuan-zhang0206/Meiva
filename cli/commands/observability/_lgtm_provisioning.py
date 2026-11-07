@@ -15,7 +15,7 @@ from base.host.atomic_io import write_text_atomic
 from base.log import logger
 from base.telemetry import EventPipeline
 from cli.boundary.json_body import loads, response_value
-from cli.commands.converge.rendered_file import warn_sealed_inputs, write_rendered_guarded
+from cli.commands.converge.rendered_file import write_rendered_guarded
 from cli.commands.observability.plans.lgtm.dashboard_checks import (
     GrafanaReply,
     file_problems,
@@ -244,13 +244,12 @@ def render_provisioning(
     repo: Path,
     native_dir: Path,
     *,
-    home: Path,
     dashboard: DashboardOutcome,
     producer: Callable[[], EventPipeline],
-) -> None:
+) -> tuple[Path, ...]:
     source_dir = repo / "deploy/lgtm/config/grafana/provisioning"
     if not source_dir.is_dir():
-        return
+        return ()
     dest_dir = native_dir / "config" / "provisioning"
     hashes_path = native_dir / "config" / "provisioning-hashes.json"
     rendered_relative: set[str] = set()
@@ -289,7 +288,7 @@ def render_provisioning(
     )
     _remove_orphans(dest_dir, hashes_path, rendered_relative)
     _prune_ghost_hashes(dest_dir, hashes_path)
-    warn_sealed_inputs(home, changed)
+    return tuple(changed)
 
 
 # meiva:note

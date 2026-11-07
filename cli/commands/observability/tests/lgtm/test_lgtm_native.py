@@ -405,7 +405,7 @@ def test_the_dashboard_comes_from_the_render_not_from_the_checkout_copy(tmp_path
     native = tmp_path / "native"
 
     _lgtm_provisioning.render_provisioning(
-        repo, native, home=native.parent, dashboard=STUB_DASHBOARD, producer=_never_produced
+        repo, native, dashboard=STUB_DASHBOARD, producer=_never_produced
     )
 
     dest_dir = native / "config/provisioning"
@@ -426,13 +426,13 @@ def test_deleting_the_checkout_copy_does_not_delete_the_generated_dashboard(
     repo = provisioning_checkout(tmp_path / "repo")
     native = tmp_path / "native"
     _lgtm_provisioning.render_provisioning(
-        repo, native, home=native.parent, dashboard=STUB_DASHBOARD, producer=_never_produced
+        repo, native, dashboard=STUB_DASHBOARD, producer=_never_produced
     )
     dest = native / DASHBOARD_REL
     (repo / "deploy/lgtm/config/grafana/provisioning/dashboards/meiva-ops-main.json").unlink()
 
     _lgtm_provisioning.render_provisioning(
-        repo, native, home=native.parent, dashboard=STUB_DASHBOARD, producer=_never_produced
+        repo, native, dashboard=STUB_DASHBOARD, producer=_never_produced
     )
 
     assert dest.read_text(encoding="utf-8") == STUB_DASHBOARD.content
@@ -442,12 +442,12 @@ def test_an_unchanged_render_does_not_rewrite_the_dashboard(tmp_path: Path) -> N
     repo = provisioning_checkout(tmp_path / "repo")
     native = tmp_path / "native"
     _lgtm_provisioning.render_provisioning(
-        repo, native, home=native.parent, dashboard=STUB_DASHBOARD, producer=_never_produced
+        repo, native, dashboard=STUB_DASHBOARD, producer=_never_produced
     )
     before = (native / DASHBOARD_REL).stat().st_mtime_ns
 
     _lgtm_provisioning.render_provisioning(
-        repo, native, home=native.parent, dashboard=STUB_DASHBOARD, producer=_never_produced
+        repo, native, dashboard=STUB_DASHBOARD, producer=_never_produced
     )
 
     assert (native / DASHBOARD_REL).stat().st_mtime_ns == before
@@ -459,7 +459,7 @@ def test_a_dashboard_written_outside_converge_is_replaced_by_the_next_render(
     repo = provisioning_checkout(tmp_path / "repo")
     native = tmp_path / "native"
     _lgtm_provisioning.render_provisioning(
-        repo, native, home=native.parent, dashboard=STUB_DASHBOARD, producer=_never_produced
+        repo, native, dashboard=STUB_DASHBOARD, producer=_never_produced
     )
     dest = native / DASHBOARD_REL
     # meiva:note
@@ -468,7 +468,7 @@ def test_a_dashboard_written_outside_converge_is_replaced_by_the_next_render(
     dest.write_text('{"panels": ["rendered by hand on 10-02"]}\n', encoding="utf-8")
 
     _lgtm_provisioning.render_provisioning(
-        repo, native, home=native.parent, dashboard=STUB_DASHBOARD, producer=_never_produced
+        repo, native, dashboard=STUB_DASHBOARD, producer=_never_produced
     )
 
     assert dest.read_text(encoding="utf-8") == STUB_DASHBOARD.content
@@ -485,7 +485,7 @@ def test_a_failed_render_keeps_the_previous_dashboard_and_reports_it(
     repo = provisioning_checkout(tmp_path / "repo")
     native = tmp_path / "native"
     _lgtm_provisioning.render_provisioning(
-        repo, native, home=native.parent, dashboard=STUB_DASHBOARD, producer=_never_produced
+        repo, native, dashboard=STUB_DASHBOARD, producer=_never_produced
     )
     dest = native / DASHBOARD_REL
     before = dest.read_text(encoding="utf-8")
@@ -497,7 +497,6 @@ def test_a_failed_render_keeps_the_previous_dashboard_and_reports_it(
         _lgtm_provisioning.render_provisioning(
             repo,
             native,
-            home=native.parent,
             dashboard=FailedDashboardRender("render exploded"),
             producer=lambda: pipeline,
         )
@@ -524,7 +523,6 @@ def test_plugins_that_failed_to_load_are_named_and_their_panels_are_missing_from
     _lgtm_provisioning.render_provisioning(
         repo,
         tmp_path / "native",
-        home=tmp_path,
         dashboard=RenderedDashboard(STUB_DASHBOARD.content, ("broken-plugin", "other")),
         producer=_never_produced,
     )
