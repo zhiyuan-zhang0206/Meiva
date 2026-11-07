@@ -36,7 +36,7 @@ import psycopg
 from psycopg.types.json import Jsonb
 from pydantic import TypeAdapter
 
-from base.db.rows import query_one
+from base.db.rows import IdRow, query_one
 from base.telemetry.alerts.copy import (
     ALERT_GROUP_COUNT,
     ALERT_GROUP_MORE,
@@ -289,14 +289,14 @@ def _upsert_row(
         "INSERT INTO alerts"
         " (status, severity, alertname, labels, annotations, starts_at, ends_at,"
         "  fingerprint, generator_url, source)"
-        " VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"
+        " VALUES (%s, %s, %s, %s, %s, %s, COALESCE(%s, CASE WHEN %s = 'resolved' THEN now() ELSE NULL END), %s, %s, %s)"
         " ON CONFLICT (fingerprint, starts_at) DO UPDATE SET"
         "  status = EXCLUDED.status,"
         "  severity = EXCLUDED.severity,"
         "  alertname = EXCLUDED.alertname,"
         "  labels = EXCLUDED.labels,"
         "  annotations = EXCLUDED.annotations,"
-        "  ends_at = EXCLUDED.ends_at,"
+        "  ends_at = COALESCE(EXCLUDED.ends_at, CASE WHEN EXCLUDED.status = 'resolved' THEN COALESCE(alerts.ends_at, now()) ELSE NULL END),"
         "  generator_url = EXCLUDED.generator_url,"
         "  updated_at = now()"
         " RETURNING id, status, severity, alertname, labels, annotations, starts_at,"
@@ -310,6 +310,7 @@ def _upsert_row(
             Jsonb(_string_map(alert, "annotations")),
             starts_at,
             parse_ts(_text(alert, "ends_at")),
+            status,
             fp,
             str(alert.get("generator_url") or ""),
             source,
@@ -334,6 +335,52 @@ def resolve_alert_key(conn: psycopg.Connection, alert: AlertPayload) -> AlertKey
     if starts_at is None:
         starts_at = _existing_starts_at(conn, fp, parse_alertname(labels))
     return (fp, starts_at) if starts_at is not None else None
+
+
+# meiva:note
+# Resolve any open alerts for a stopped, completed or deleted schedule.
+def resolve_schedule_alerts(conn: psycopg.Connection, schedule_id: int) -> int:
+    with conn.cursor() as cur:
+        cur.execute(
+            "UPDATE alerts SET status = 'resolved', ends_at = COALESCE(ends_at, now()), updated_at = now() "
+            "WHERE status = 'unresolved' AND (labels->>'attributes_schedule_id' = %s OR labels->>'schedule_id' = %s)",
+            (str(schedule_id), str(schedule_id)),
+        )
+        return cur.rowcount
+
+
+@dataclass(frozen=True)
+class _ScheduleInactiveRow:
+    enabled: bool
+    status: str
+
+
+# meiva:note
+# True if the alert targets a schedule that is disabled, stopped, completed, or deleted.
+def is_schedule_inactive(conn: psycopg.Connection, labels: dict[str, str]) -> bool:
+    sid_str = labels.get("attributes_schedule_id") or labels.get("schedule_id")
+    if not sid_str:
+        return False
+    try:
+        sid = int(sid_str)
+    except (ValueError, TypeError):
+        return False
+    has_table = query_one(
+        conn,
+        IdRow,
+        "SELECT 1 AS id FROM pg_tables WHERE schemaname = 'public' AND tablename = 'schedules'",
+    )
+    if has_table is None:
+        return False
+    sched_row = query_one(
+        conn,
+        _ScheduleInactiveRow,
+        "SELECT enabled, status FROM schedules WHERE id = %s",
+        (sid,),
+    )
+    if sched_row is None:
+        return True
+    return (not sched_row.enabled) or (sched_row.status in ("stopped", "completed"))
 
 
 def upsert_alert(
@@ -368,6 +415,10 @@ def upsert_alert(
 
     labels = _string_map(alert, "labels")
     status = normalize_status(str(alert.get("status") or "firing"))
+    schedule_inactive = is_schedule_inactive(conn, labels)
+    if status == "unresolved" and schedule_inactive:
+        status = "resolved"
+
     severity = parse_severity(labels)
     alertname = parse_alertname(labels)
     key = instance_key or resolve_alert_key(conn, alert)
@@ -397,8 +448,12 @@ def upsert_alert(
         source=source,
     )
 
-    should_notify = im_fanout_allowed(labels) and _transition_notifies(
-        status, severity, old_status, old_severity, was_notified=was_notified
+    should_notify = (
+        not schedule_inactive
+        and im_fanout_allowed(labels)
+        and _transition_notifies(
+            status, severity, old_status, old_severity, was_notified=was_notified
+        )
     )
     return (fp, starts_at), did_insert, should_notify, row
 

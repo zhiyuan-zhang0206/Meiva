@@ -408,6 +408,17 @@ async def claim_inbound_batch(
     return [ClaimedInbound.from_row(r) for r in rows]
 
 
+@dataclass(frozen=True)
+class _LifecycleKindRow:
+    kind: str
+
+
+@dataclass(frozen=True)
+class _AgentMetaLifecycleRow:
+    status: str
+    termination_source: str | None
+
+
 # meiva:note
 # One claimed chat the finalize pass consumed: its id, kind and content, and how many seconds it
 # waited since `created_at`. The column is aliased `AS age_s` so `class_row` binds it by name.
@@ -437,8 +448,32 @@ async def finalize_claimed_inbounds(
     """
     if pool is None:
         return 0
+    lifecycle_kind: str | None = None
     async with async_write_transaction(pool) as conn:
         await lock_inbound_owner(conn, agent_id, incarnation=incarnation)
+        if unknown_execution:
+            lrow = await aquery_one(
+                conn,
+                _LifecycleKindRow,
+                "SELECT kind FROM inbound_messages "
+                "WHERE agent_id = %s AND kind IN ('restart', 'cancel', 'terminate') "
+                "ORDER BY id DESC LIMIT 1",
+                (agent_id,),
+            )
+            if lrow is not None:
+                lifecycle_kind = lrow.kind
+            else:
+                am_row = await aquery_one(
+                    conn,
+                    _AgentMetaLifecycleRow,
+                    "SELECT status, termination_source FROM agents_meta WHERE id = %s",
+                    (agent_id,),
+                )
+                if am_row is not None and (
+                    am_row.status == "terminated"
+                    or am_row.termination_source in ("user", "exit", "reaper")
+                ):
+                    lifecycle_kind = f"meta_{am_row.termination_source or am_row.status}"
         async with conn.cursor(row_factory=class_row(_ConsumedRow)) as cur:
             await cur.execute(
                 "UPDATE inbound_messages SET status = 'done', "
@@ -451,15 +486,27 @@ async def finalize_claimed_inbounds(
             )
             rows = await cur.fetchall()
     for consumed in rows if unknown_execution else ():
-        logger.warning(
-            "claimed inbound {inbound_id} consumed without execution evidence",
-            event="inbound_consumed_unknown",
-            agent_id=agent_id,
-            inbound_id=consumed.id,
-            kind=consumed.kind,
-            age_s=consumed.age_s,
-            content_preview=consumed.content[:200],
-        )
+        if lifecycle_kind is not None:
+            logger.info(
+                "claimed inbound {inbound_id} consumed after lifecycle interruption ({lifecycle_kind})",
+                event="inbound_reconcile",
+                agent_id=agent_id,
+                inbound_id=consumed.id,
+                kind=consumed.kind,
+                age_s=consumed.age_s,
+                lifecycle_kind=lifecycle_kind,
+                content_preview=consumed.content[:200],
+            )
+        else:
+            logger.warning(
+                "claimed inbound {inbound_id} consumed without execution evidence",
+                event="inbound_consumed_unknown",
+                agent_id=agent_id,
+                inbound_id=consumed.id,
+                kind=consumed.kind,
+                age_s=consumed.age_s,
+                content_preview=consumed.content[:200],
+            )
     return len(rows)
 
 

@@ -74,6 +74,8 @@ R17_R18_EXCLUSION_ROUTE_PATTERNS: dict[str, tuple[str, ...]] = {
         r"/api/agents/.*/terminate",
         r"/api/agents/.*/resurrect",
         r"/api/agents/.*/neighbors",
+        r"/api/agents/.*/files/.*",
+        r"/api/agents/.*/inspect/.*",
     ),
 }
 _ROUTE_CLASS_REGEXES = {

@@ -251,6 +251,42 @@ class TestFinalizeClaimedInbounds:
         assert payload is not None
         assert payload[0]["consumed_without_execution"] is True
 
+    async def test_lifecycle_interruption_distinguished_from_unexplained_loss(
+        self,
+        redis_url: str,
+        db_conn: psycopg.Connection,
+        aops_pool: AsyncConnectionPool,
+        *,
+        model_catalog: ModelCatalog,
+        config_authority: ConfigAuthority,
+        database_gate: ProcessDbGate,
+        machine_identity: MachineIdentityReader,
+    ) -> None:
+        tid = spawn_agent(
+            catalog=model_catalog,
+            authority=config_authority,
+            database_gate=database_gate,
+            machine=machine_identity,
+        )
+        lost = self._insert_claimed(db_conn, tid, "before restart", "1 minute")
+        with db_conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO inbound_messages (agent_id, content, kind, source, status) "
+                "VALUES (%s, 'host restart', 'restart', 'system', 'pending')",
+                (tid,),
+            )
+        db_conn.commit()
+
+        consumed = await finalize_claimed_inbounds(
+            aops_pool, tid, incarnation=None, unknown_execution=True
+        )
+        assert consumed == 1
+        payload = db_conn.execute(
+            "SELECT payload FROM inbound_messages WHERE id = %s", (lost,)
+        ).fetchone()
+        assert payload is not None
+        assert payload[0]["consumed_without_execution"] is True
+
     async def test_no_claimed_rows_is_noop(
         self,
         redis_url: str,

@@ -250,7 +250,7 @@ def test_root_health_tick_staleness_tracks_each_recent_root_home() -> None:
     assert "unless on(machine, home_id, process)" in expr
     assert "max by (machine, home_id, process)" in expr
     assert threshold_params(rule) == [[0]]
-    assert rule["for"] == "0m"
+    assert rule["for"] == "5m"
     assert rule["noDataState"] == "OK"
     assert rule["execErrState"] == "OK"
 

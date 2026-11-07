@@ -32,6 +32,7 @@ Auth split by consumer:
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping
 from datetime import timedelta
 from typing import LiteralString
 
@@ -43,6 +44,7 @@ from pydantic import TypeAdapter
 from base import telemetry
 from base.db.rows import count_one
 from base.db.transaction import write_transaction
+from base.host.boundary.json_values import is_object_dict
 from base.telemetry.alerts import (
     AlertMessageStyle,
     display_language,
@@ -144,7 +146,15 @@ def ingest_alerts(body: AlertWebhookPayload, request: Request) -> AlertIngestRes
         shadow.freeze()
         conn.commit()
 
-    publish_alert_rows(gateway_state(request).bus, rows)
+    def _is_watchdog_row(row: Mapping[str, object]) -> bool:
+        labels = row.get("labels")
+        if is_object_dict(labels):
+            return labels.get("metric") == "alert_pipeline_watchdog"
+        return False
+
+    ui_rows = [r for r in rows if not _is_watchdog_row(r)]
+    if ui_rows:
+        publish_alert_rows(gateway_state(request).bus, ui_rows)
 
     if rows:
         # meiva:note
@@ -237,9 +247,14 @@ def list_alerts(
     )
     since = gateway_clock(request).now() - _WINDOWS[window]
     params: list[object] = [since]
-    # Live problems never age out. The window limits recovery history, including
-    # long-running incidents that ended recently.
-    where: list[LiteralString] = ["(status = 'unresolved' OR COALESCE(ends_at, starts_at) > %s)"]
+    # meiva:note
+    # Live problems never age out. The window limits recovery history, including long-running
+    # incidents that ended recently. Internal synthetic watchdogs are excluded from the human UI
+    # and badges.
+    where: list[LiteralString] = [
+        "(status = 'unresolved' OR COALESCE(ends_at, starts_at) > %s)",
+        "(labels->>'metric' IS DISTINCT FROM 'alert_pipeline_watchdog' AND COALESCE(labels->>'ruleUID', '') != 'meiva-ops-alert-pipeline-watchdog' AND alertname != 'Alert pipeline watchdog (synthetic heartbeat)')",
+    ]
     if status is not None:
         where.append("status = %s")
         params.append(status)
@@ -256,7 +271,10 @@ def list_alerts(
         if status == "resolved":
             unresolved_count = 0
         else:
-            base: list[LiteralString] = ["status = 'unresolved'"]
+            base: list[LiteralString] = [
+                "status = 'unresolved'",
+                "(labels->>'metric' IS DISTINCT FROM 'alert_pipeline_watchdog' AND COALESCE(labels->>'ruleUID', '') != 'meiva-ops-alert-pipeline-watchdog' AND alertname != 'Alert pipeline watchdog (synthetic heartbeat)')",
+            ]
             base_params: list[object] = []
             if severity is not None:
                 base.append("severity = %s")

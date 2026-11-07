@@ -14,6 +14,7 @@ from base.cluster import session_name
 from base.db.rows import query_all, query_one
 from base.db.transaction import write_transaction
 from base.sessions.protocol import SessionBackend
+from base.telemetry.alerts import resolve_schedule_alerts
 from gateway.agents.creation import create_and_launch_agent, guarded_draft_key
 from gateway.http.auth.request_principal import cluster_credential
 from gateway.http.config import (
@@ -202,6 +203,10 @@ def _apply_schedule_update(
         sql.SQL("UPDATE schedules SET {} WHERE id = %s").format(sql.SQL(", ").join(assignments)),
         (*changed.values(), schedule_id),
     )
+    effective_enabled = changed.get("enabled", previous.enabled)
+    effective_status = changed.get("status", previous.status)
+    if not effective_enabled or effective_status in ("stopped", "completed"):
+        resolve_schedule_alerts(cur.connection, schedule_id)
     if code_changed:
         cur.execute(
             "INSERT INTO schedule_versions (schedule_id, script, command, note) "
@@ -460,6 +465,7 @@ def delete_blocking(pool: ConnectionPool, schedule_id: int) -> str:
         )
         if deleted is None:
             raise HTTPException(status_code=404, detail=f"schedule {schedule_id} not found")
+        resolve_schedule_alerts(conn, schedule_id)
         session_control.enqueue_in_transaction(conn, schedule_id, deleted.machine)
         return deleted.machine
 
@@ -683,6 +689,8 @@ def control_blocking(
                 (plan.enabled, schedule_id),
             )
             session_control.enqueue_in_transaction(conn, schedule_id, machine)
+            if not plan.enabled:
+                resolve_schedule_alerts(conn, schedule_id)
         full_row = query_one(conn, ScheduleFullRow, _FULL_QUERY, (schedule_id,))
         assert full_row is not None  # noqa: S101
         receipts.finish(conn, key, full_row)
