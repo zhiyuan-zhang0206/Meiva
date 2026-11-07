@@ -133,7 +133,13 @@ def test_loki_rules_match_event_labels_in_the_selector() -> None:
     for rule in load_rules():
         for expr in rule_query_exprs(rule, "loki"):
             assert "| json" in expr, f"{rule['uid']}: no | json stage:\n{expr}"
-            assert "unknown_service" in expr, f"{rule['uid']}: wrong stream selector"
+            # meiva:note
+            # This used to require `service_name="unknown_service"`, a stand-in for "emitted by a
+            # process with no bound telemetry pipeline". #6352 binds that pipeline at the schedule
+            # entry, so the value becomes a real process name and a rule pinned to `unknown_service`
+            # would go silent exactly when its event starts arriving (#6400). The selector itself is
+            # checked below — braces present, and `event_name` as a matcher rather than a `| json`
+            # filter; whether a rule also pins a service stays its own choice.
             selector = expr.split("| json")[0]
             assert "{" in selector and "}" in selector
             pipeline = expr.split("| json")[1]

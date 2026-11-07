@@ -112,6 +112,21 @@ SIGNALS: dict[str, Signal] = {
     "meiva-ops-root-diagnostic-task-telemetry": Signal(
         "root_diagnostic", "meiva-ops-slow", "0m", "warning", 1
     ),
+    # meiva:note
+    # Five events the 2026-11-06 audit found declared and unheard (#6400). They sit in the fast
+    # group because each is "one occurrence is the signal", and none of them reads `service_name`:
+    # that value is a by-product of how a process got a telemetry pipeline, not of what happened.
+    "meiva-ops-schedule-not-progressing": Signal(
+        "schedule_not_progressing", "meiva-ops", "0m", "warning"
+    ),
+    "meiva-ops-llm-turn-aborted": Signal("llm_turn_aborted", "meiva-ops", "0m", "warning"),
+    "meiva-ops-llm-usage-metering-failed": Signal(
+        "llm_usage_metering_failed", "meiva-ops", "0m", "warning"
+    ),
+    "meiva-ops-exec-node-timeout": Signal("exec_node_timeout", "meiva-ops", "0m", "warning"),
+    "meiva-ops-exec-subprocess-killed": Signal(
+        "exec_subprocess_killed", "meiva-ops", "0m", "warning"
+    ),
 }
 
 
