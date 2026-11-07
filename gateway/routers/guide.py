@@ -43,6 +43,7 @@ async def guarded_draft_guide(
         prompt=prompt,
         prompt_source="user",
         label="meiva-guide",
+        config={"llm_model": "deepseek-flash"},
     )
     spawned = await create_and_launch_agent(
         body_obj,

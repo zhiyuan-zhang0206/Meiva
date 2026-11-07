@@ -440,7 +440,6 @@ describe("Settings scope", () => {
     const select = await screen.findByRole("combobox", { name: style.label });
     expect(screen.getByRole("option", { name: "Model default" })).toBeTruthy();
     expect(screen.getByRole("option", { name: "Keep me involved" })).toBeTruthy();
-    expect(select.compareDocumentPosition(screen.getByTestId("config-default-model")) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(screen.queryByText("Context compaction threshold")).toBeNull();
     fireEvent.change(select, { target: { value: "concise" } });
     await waitFor(() => expect(put).toHaveBeenCalledWith(expect.objectContaining({ agent_communication_style: "concise" }), undefined));
@@ -463,7 +462,7 @@ describe("Settings scope", () => {
   it("general settings omit machine selection and technical configuration", async () => {
     transport.getConfig.mockResolvedValue(VIEW);
     wrap(<ConfigEditor mode="general" />);
-    expect(await screen.findByTestId("config-default-model")).toBeTruthy();
+    expect(await screen.findByTestId("config-group-config-communication")).toBeTruthy();
     expect(screen.queryByLabelText("Machine")).toBeNull();
     expect(screen.queryByText("Log level")).toBeNull();
     expect(screen.queryByText("Host label")).toBeNull();

@@ -23,7 +23,6 @@ from base.agents.model.birth_config import (
     resolve_birth_config,
 )
 from base.api_contracts.agent_contract import (
-    AgentNotFound,
     Harness,
     InvalidModelConfig,
     is_spawner_agent_id_malformed,
@@ -213,20 +212,27 @@ def _resolve_parent_spawn_inheritance(
     )
     p_row = cur.fetchone()
     if p_row is None:
-        raise AgentNotFound(f"parent agent {parent_id} does not exist")
-    parent_harness = str(p_row[0])
-    parent_overlay = _as_mapping(p_row[1])
-    parent_birth = _as_mapping(p_row[2])
-    parent_model = (
-        parent_overlay.get("llm_model")
-        if "llm_model" in parent_overlay
-        else parent_birth.get("llm_model")
-    )
-    parent_effort = (
-        parent_overlay.get("reasoning_effort")
-        if "reasoning_effort" in parent_overlay
-        else parent_birth.get("reasoning_effort")
-    )
+        logger.warning(
+            "parent agent {id} does not exist in agents_meta; defaulting to meiva deepseek-flash",
+            id=parent_id,
+        )
+        parent_harness = "meiva"
+        parent_model = "deepseek-flash"
+        parent_effort = None
+    else:
+        parent_harness = str(p_row[0])
+        parent_overlay = _as_mapping(p_row[1])
+        parent_birth = _as_mapping(p_row[2])
+        parent_model = (
+            parent_overlay.get("llm_model")
+            if "llm_model" in parent_overlay
+            else parent_birth.get("llm_model")
+        )
+        parent_effort = (
+            parent_overlay.get("reasoning_effort")
+            if "reasoning_effort" in parent_overlay
+            else parent_birth.get("reasoning_effort")
+        )
     req_model = config.get("llm_model") if config else None
     req_effort = config.get("reasoning_effort") if config else None
 

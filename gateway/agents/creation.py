@@ -97,7 +97,11 @@ def _parent_source(pool: ConnectionPool, parent_id: int) -> tuple[str, str | Non
             (parent_id,),
         )
     if row is None:
-        raise AgentNotFound(f"parent agent {parent_id} does not exist")
+        logger.warning(
+            "parent agent {id} does not exist in agents_meta; defaulting to meiva deepseek-flash",
+            id=parent_id,
+        )
+        return ("meiva", "deepseek-flash", None)
     parent_harness = row.harness
     overlay = row.config_overlay or {}
     birth = row.birth_config or {}

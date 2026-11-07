@@ -29,7 +29,9 @@ def test_sdk_fork_lost_response_retains_original_child_and_checkpoint(
     source_change: str,
 ) -> None:
     parent = client.post(
-        PATH, json={"machine": "local-test"}, headers={**HEADERS, "Idempotency-Key": "parent"}
+        PATH,
+        json={"machine": "local-test", "config": {"llm_model": "deepseek-flash"}},
+        headers={**HEADERS, "Idempotency-Key": "parent"},
     )
     assert parent.status_code == 201, parent.text
     parent_id = parent.json()["id"]

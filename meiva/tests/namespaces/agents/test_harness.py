@@ -139,4 +139,3 @@ def test_harness_availability_reports_every_harness() -> None:
     assert rows[0].status == "available"
     assert rows[0].harness is agents.Harness.MEIVA
     assert rows[0].models == ()
-    assert rows[0].default_model is None

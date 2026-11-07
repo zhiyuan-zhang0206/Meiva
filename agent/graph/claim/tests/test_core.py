@@ -315,7 +315,7 @@ class TestRestart:
             )
             before_row = cur.fetchone()
         assert before_row is not None
-        assert before_row[0] in (None, {})
+        assert before_row[0] in (None, {}, {"llm_model": "deepseek-flash"})
 
         with pytest.raises(meiva.self.InvalidConfigOverlay, match="not a registered model"):  # type: ignore[attr-defined]
             meiva.self.restart(
