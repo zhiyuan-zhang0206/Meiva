@@ -6,6 +6,8 @@
   "showStatusDotDesc": "Show extra sidebar markers for spawn placeholders, taken-over agents, and terminated agents",
   "showTerminated": "Show terminated agents",
   "showTerminatedDesc": "Show terminated agents (red status dot) in the sidebar; off shows only live agents",
+  "showWeekday": "Show weekday in timestamps",
+  "showWeekdayDesc": "Show the weekday in timeline card timestamps (e.g. Mon 14:30)",
   "dateFormat": "Date format",
   "dateFormatDesc": "Display format for timestamps",
   "relative": "Relative (e.g. 3m ago)",

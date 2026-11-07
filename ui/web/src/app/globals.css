@@ -469,9 +469,12 @@
   content-visibility: auto;
   contain-intrinsic-size: auto 80px;
   /* meiva:note
-     The timeline's bottom spacing is measured from the last row's box.
-     Extend that box into the gap and hand back the same height so the
-     composer clearance stays consistent without shifting the message body. */
+     A block owns the gap BELOW it: the hover chrome (timestamp, Copy) sits in
+     that gap, and content-visibility paint containment would clip it if it were
+     drawn past the row. The row grows by 16px (1rem) and hands the height back
+     as a negative margin so block-to-block spacing (20px = 12px space-y-3 + 8px
+     group py-1) stays uniform and the 12px chrome band sits symmetrically in
+     that 20px whitespace without being clipped by paint containment. */
   position: relative;
   padding-bottom: 1rem;
   margin-bottom: -1rem;
@@ -486,7 +489,8 @@
   content-visibility: visible;
 }
 
-/* Details rows use their card height inside the bounded work-block scrollport. */
+/* Detail items inside a TurnBlock / Live Activity Window carry no below-card
+   timestamp chrome, so their layout box equals their visual card height. */
 [data-turn-id] .timeline-item {
   padding-bottom: 0;
   margin-bottom: 0;

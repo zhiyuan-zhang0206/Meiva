@@ -1,25 +1,74 @@
 ---
 type: doc
 title: Timeline card chrome
-description: Primary timeline message presentation, publication acknowledgment, and Copy reveal rules for Details.
+description: The hover-revealed chrome of a timeline block — the item timestamp and Copy, its band in the gap below the block, and the hover, focus, touch and expansion rules.
 tags:
 - frontend
 ---
 
 # Timeline card chrome
 
-`TimelineRow` renders human messages as right-aligned bubbles and user-facing
-agent replies as unboxed Markdown. Primary messages have no floating footer.
-Publications are marked read when an invisible anchor at the bottom of their
-row enters the viewport while the document is visible. The anchor occupies no
-layout space.
+`components/timeline/row.tsx` — `TimelineRow` — renders three visual tiers:
+1. **Human message** (`inbound_chat` with `inboundKind(source) === "human"`): a right-aligned conversational bubble (`data-testid="user-message-bubble"`, `max-w-[85%] sm:max-w-[min(70%,34rem)]`, stripped `<header>\n\n` envelope) with a right-aligned hover chrome band (`CARD_FOOTER_CLS`) below it.
+2. **Agent reply** (`agent_chat` with `user_facing !== false`): unboxed Markdown prose directly on the canvas (`data-testid="agent-message-prose"`, with a subtle pulsing `streaming-cursor` while `partial` is true) and a right-aligned hover chrome band (`CARD_FOOTER_CLS`) below it (user ruling 2026-11-01 — primary timestamps and Copy align uniformly on the right).
+3. **Secondary work item** (thinking, tool call, tool output, system prompt, attach, notes, inter-agent / system inbound, and non-user-facing `agent_chat` with `user_facing === false`): a borderless `MessageCard` + `CardHeader` (`ChevronRight` + icon + summary/title, `px-1 py-1`) inside an inline `TurnBlock` (`ml-1.5 pl-2` rail), with its expanded body flush with the card header (`px-1 pt-0.5 pb-1.5`, no nested body indentation) and `code_output` / non-human items rendering their full payload without splitting a separate first-line header. Secondary items omit below-card timestamps and float a hover-revealed Copy pill inside the expanded body's bottom-right corner (`bottom-1 right-1 justify-end`, keeping uniform `pb-1.5` spacing with sibling blocks) only when `config.copy` is true (inter-agent / external-agent messages and non-user-facing `agent_chat`).
 
-Expanded Details offer an inline Copy control at the bottom right of message
-text from an agent or external agent. The per-kind whitelist in
-`messageCardConfig` excludes thinking, tool calls and outputs, attachments,
-system prompts, and system notes. The Copy control appears on hover or focus.
-On touch, it appears for `TOUCH_REVEAL_MS` after touching the card. The hidden
-control is click-through and remains reachable by keyboard.
+Copy is **decided per block kind**, in `messageCardConfig`'s `copy` field — a
+whitelist, not "everything except …", so a kind added later has to opt in rather
+than inherit a button. Only the two kinds whose payload is a message a reader can
+quote offer it: `inbound_chat` from a human or an agent (a peer or an external
+agent, with human copy payload stripped of its envelope header via `copyPayloadFor`)
+and the agent's own reply (`agent_chat`). A system-generated inbound —
+scheduler, watcher, framework — is not text a person or an agent wrote and
+carries none. Thinking, tool calls and their output, the system prompt,
+attachments and system notes are the agent's machinery, not its conversation, and
+mount no copy control anywhere in the block: the band's button and the
+body-level one are the same decision (`PythonCode` gets `copy={false}`, the
+code-output envelope has none), and a body-level button is no longer a way to
+"keep" Copy on a kind the whitelist excludes. A still-streaming primary reply
+keeps its stamp (`justify-end`) but never Copy. A kind that offers neither Copy
+nor a stamp mounts no band at all, so there is never an empty strip under a block.
+
+Publications are marked read automatically when an invisible anchor (`showReadButton={false}` on `MessageActions`) at the bottom of their row enters the viewport while the document is visible. The anchor occupies no layout space and renders no unread dot or button inside the message footer.
+
+For primary messages, the band **sits symmetrically in the 20px gap below the
+block, outside the message box**, so the time reads as a clean separator between
+blocks instead of eating the message's own bottom padding. `.timeline-item` owns
+that reservation: it pads its bottom by `1rem` (16px) and hands the height back
+as a `-1rem` negative margin (`[data-virtual-group]` adds `py-1` around each
+group on top of `space-y-3`, yielding uniform 20px block-to-block spacing and
+symmetric ~5.5px visual clearance above and below the 12px chrome band). Drawing
+the band inside `.timeline-item`'s own padding keeps it unclipped by
+`content-visibility: auto` paint containment; inside `[data-turn-id]`, child
+`.timeline-item` rows reset `padding-bottom: 0; margin-bottom: 0` because they
+carry no below-card timestamp band. The stamp's rect must stay inside every
+clipping ancestor; the Playwright check in
+`tests/e2e/visual/test_work_block_chrome.py` verifies both the primary message's
+unclipped stamp and the absence of below-card chrome inside `[data-turn-id]`.
+
+The stamp carries no brackets (`2026-05-06 16:56:29`, not `[2026-05-06 …]`) and
+renders at `text-[9px]`; Copy is a `size-2.5` icon with no padding, so the control
+fits the 12px band instead of overlapping the message edge it sits below, and
+reads no taller than the stamp beside it (user 2026-10-22 — at `size-3` the glyph
+was visibly bigger than the time). Its hit area is an invisible `after:-inset-1`
+box, not a painted one.
+
+## Reveal rules
+
+| State | Band |
+| --- | --- |
+| Pointer over the block (`group-hover/msgcard`) | visible, interactive |
+| Focus anywhere inside the block (`group-focus-within/msgcard`) | visible, interactive |
+| Neither | `opacity-0` and `pointer-events-none` — not painted, not clickable, and still reachable by keyboard (focusing Copy reveals it) |
+| Touched on a coarse pointer (`TimelineRow` holds the band up for 6 s) | visible, interactive; hidden again after the window |
+
+`opacity: 0` alone still hit-tests, so the hidden state gates `pointer-events`
+too. The hidden chrome deliberately stays in the accessibility tree: a screen
+reader does not hover, and removing it would take Copy away from every non-pointer
+user. A touch device has no hover, so touching a block is its reveal gesture: the
+band comes up for `TOUCH_REVEAL_MS` and drops again, instead of standing painted
+under every message for good (user 2026-10-22 — the always-visible band was the
+bug). A mouse press does not take that path.
 
 Parent: [[ui/web/src/docs/frontend-components/timeline-view/timeline-view.meiva.okf.md|Timeline View]].
 

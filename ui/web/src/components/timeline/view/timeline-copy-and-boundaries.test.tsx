@@ -5,6 +5,7 @@ import { ChatMarkdownMock, ScrollAreaMock, cleanupTimelineTest, makeItem, render
 vi.mock("@/components/content/markdown", () => ({ ChatMarkdown: ChatMarkdownMock }));
 vi.mock("@/components/ui/scroll-area", () => ({ ScrollArea: ScrollAreaMock }));
 import { TimelineView } from "..";
+import { formatItemTime } from "../timestamp";
 import { resetTransport, transport } from "@/test-support/fake-api";
 afterEach(cleanupTimelineTest);
 describe("CopyButton feedback state machine", () => {
@@ -17,25 +18,49 @@ describe("CopyButton feedback state machine", () => {
   });
   it("click copy → 'copy' flips immediately to 'copied'", async () => {
     render(
-      <TimelineView items={[makeItem({ kind: "agent_chat", user_facing: false, payload: "x" })]} />,
+      <TimelineView items={[makeItem({ kind: "agent_chat", payload: "x" })]} />,
     );
-    fireEvent.click(screen.getByTestId("turn-toggle"));
+    expect(screen.getByLabelText("Copy message")).toBeTruthy();
     fireEvent.click(screen.getByLabelText("Copy message"));
     await waitFor(() => expect(screen.getByLabelText("Copied")).toBeTruthy());
   });
   it("after 1s reverts to 'copy' automatically (timer fires)", async () => {
     render(
-      <TimelineView items={[makeItem({ kind: "agent_chat", user_facing: false, payload: "x" })]} />,
+      <TimelineView items={[makeItem({ kind: "agent_chat", payload: "x" })]} />,
     );
-    fireEvent.click(screen.getByTestId("turn-toggle"));
     fireEvent.click(screen.getByLabelText("Copy message"));
     await waitFor(() => expect(screen.getByLabelText("Copied")).toBeTruthy());
     await waitFor(() => expect(screen.getByLabelText("Copy message")).toBeTruthy(), {
       timeout: 1500,
     });
   });
+  it("copies human inbound_chat raw body stripped of its envelope header", async () => {
+    const { browser } = render(
+      <TimelineView
+        items={[
+          makeItem({
+            kind: "inbound_chat",
+            source: "user",
+            payload: "User [2026-05-15]:\n\nhello raw body",
+          }),
+        ]}
+      />,
+    );
+    fireEvent.click(screen.getByLabelText("Copy message"));
+    await waitFor(() => expect(browser.actions.copied).toEqual(["hello raw body"]));
+  });
 });
 
+// meiva:note
+// Copy is a PER-KIND whitelist (card.tsx CardConfig.copy): a block offers it only
+// when its payload is a message the reader can quote — the human's message and
+// the agent's own reply. Thinking, tool calls, tool output, the system prompt,
+// attachments and system notes are the agent's machinery, not its conversation,
+// and carry no copy control anywhere in the block: neither the hover band
+// (timeline/buttons.tsx) nor a body-level one (PythonCode / EnvelopeContent).
+// A whitelist, not "everything except …", so a kind added later must opt in
+// instead of inheriting a button (user 2026-10-29).
+// meiva:link ui/web/src/docs/frontend-components/timeline-view/card-chrome.meiva.okf.md
 describe("Copy is scoped to message text (per-kind whitelist)", () => {
   const cases: {
     label: string;
@@ -45,12 +70,12 @@ describe("Copy is scoped to message text (per-kind whitelist)", () => {
     {
       label: "human inbound_chat (human text)",
       item: makeItem({ kind: "inbound_chat", source: "user", payload: "hi" }),
-      copy: false,
+      copy: true,
     },
     {
-      label: "agent_chat (primary agent text)",
+      label: "agent_chat (agent text)",
       item: makeItem({ kind: "agent_chat", payload: "done" }),
-      copy: false,
+      copy: true,
     },
     {
       label: "inbound_chat from a peer agent (agent text)",
@@ -123,10 +148,22 @@ describe("Copy is scoped to message text (per-kind whitelist)", () => {
     expect(screen.queryAllByRole("button", { name: /copy/i })).toHaveLength(0);
   });
 
+  it("a streaming primary reply keeps its timestamp and drops only the button", () => {
+    const item = makeItem({ kind: "agent_chat", payload: "streaming", partial: true });
+    render(<TimelineView items={[item]} />);
+    const stamp = screen.getByText(formatItemTime(item.created_at!, { showWeekday: true }));
+    expect(stamp.parentElement?.className).toContain("justify-end");
+    expect(stamp.parentElement?.querySelectorAll("button")).toHaveLength(0);
+  });
 });
 
-describe("timeline message actions", () => {
-  it("marks a visible publication read without rendering floating actions", async () => {
+// meiva:note
+// The hover band itself (position, reveal, focus, touch) is unchanged by the
+// whitelist; these assertions pin that it still exists wherever a kind does
+// offer Copy.
+// meiva:link ui/web/src/docs/frontend-components/timeline-view/card-chrome.meiva.okf.md
+describe("block-level copy actions (hover band)", () => {
+  it("marks a visible publication read via invisible anchor while keeping hover reveal on the footer", async () => {
     resetTransport();
     transport.resolveUserMessage.mockResolvedValue({ status: "idling", inbound_id: null });
     let reportIntersection: IntersectionObserverCallback | undefined;
@@ -149,7 +186,7 @@ describe("timeline message actions", () => {
     const row = screen.getByTestId("agent-message-prose").closest(".timeline-item");
     const [anchor] = observer.observe.mock.calls.flat();
     expect(row?.contains(anchor)).toBe(true);
-    expect(screen.queryByTestId("card-chrome")).toBeNull();
+    expect(screen.getByTestId("card-chrome").classList.contains("opacity-100")).toBe(false);
     expect(screen.queryByRole("button", { name: "Unread · mark read" })).toBeNull();
     expect(transport.resolveUserMessage).not.toHaveBeenCalled();
     expect(container.textContent).toContain("Published reply");
@@ -164,6 +201,15 @@ describe("timeline message actions", () => {
     await waitFor(() => expect(transport.resolveUserMessage).toHaveBeenCalledWith(
       7, 12, { action: "read" }, expect.any(String),
     ));
+  });
+  it("the footer holds Copy and no other control", () => {
+    render(
+      <TimelineView
+        items={[makeItem({ kind: "agent_chat", payload: "ok" })]}
+      />,
+    );
+    const band = screen.getByLabelText("Copy message").parentElement;
+    expect(band?.querySelectorAll("button")).toHaveLength(1);
   });
   it("floats Copy inside expanded non-user-facing agent_chat without inflating bottom spacing", () => {
     render(
@@ -190,10 +236,9 @@ describe("timeline message actions", () => {
   it("copy button carries no title tooltip (aria-label only)", () => {
     render(
       <TimelineView
-        items={[makeItem({ kind: "agent_chat", user_facing: false, payload: "ok" })]}
+        items={[makeItem({ kind: "agent_chat", payload: "ok" })]}
       />,
     );
-    fireEvent.click(screen.getByTestId("turn-toggle"));
     const copyBtn = screen.getByLabelText("Copy message").closest("button");
     expect(copyBtn?.hasAttribute("title")).toBe(false);
     expect(screen.getByLabelText("Copy message")).toBeTruthy();
@@ -202,10 +247,18 @@ describe("timeline message actions", () => {
   // meiva:note
   // The reveal itself is CSS (`group-hover`/`group-focus-within`) and jsdom has no paint engine to evaluate it, so the tests pin the structure the browser turns into the behavior: hidden means no paint AND no hit-testing, focus inside the card reveals it for keyboard users, and a touch brings it up for a few seconds because a phone has no hover to gate on.
   // meiva:link ui/web/src/docs/frontend-components/timeline-view/card-chrome.meiva.okf.md
-  it("Details Copy is hidden and click-through until the card is hovered or focused", () => {
-    render(<TimelineView items={[makeItem({ kind: "agent_chat", user_facing: false, payload: "ok" })]} />);
-    fireEvent.click(screen.getByTestId("turn-toggle"));
-    const band = screen.getByLabelText("Copy message").parentElement;
+  it("footer is hidden and click-through until the card is hovered or focused", () => {
+    render(
+      <TimelineView
+        items={[
+          makeItem({ item_id: "1.0", kind: "inbound_chat", source: "user", payload: "hi" }),
+          makeItem({ item_id: "2.0", kind: "agent_chat", payload: "ok" }),
+        ]}
+      />,
+    );
+    const [humanCopy, agentCopy] = screen.getAllByLabelText("Copy message");
+    expect(humanCopy.parentElement?.className).toContain("justify-end");
+    const band = agentCopy.parentElement;
     expect(band?.className).toContain("justify-end");
     expect(band?.className).toContain("opacity-0");
     expect(band?.className).toContain("pointer-events-none");
@@ -218,12 +271,13 @@ describe("timeline message actions", () => {
     // meiva:link ui/web/src/docs/frontend-components/timeline-view/card-chrome.meiva.okf.md
     expect(band?.className).not.toContain("pointer-coarse:opacity-100");
   });
-  it("reveals Details Copy when the block is touched", () => {
+  it("reveals the footer when the block is touched, and only then", () => {
     // meiva:note
-    // A phone has no hover, so touching the Details block reveals Copy briefly.
+    // A phone has no hover, so touching the block brings the time and Copy up for
+    // a few seconds; leaving the band painted put chrome under every message for
+    // good (user 2026-10-22).
     // meiva:link ui/web/src/docs/frontend-components/timeline-view/card-chrome.meiva.okf.md
-    render(<TimelineView items={[makeItem({ kind: "agent_chat", user_facing: false, payload: "ok" })]} />);
-    fireEvent.click(screen.getByTestId("turn-toggle"));
+    render(<TimelineView items={[makeItem({ kind: "agent_chat", payload: "ok" })]} />);
     const band = screen.getByLabelText("Copy message").parentElement;
     const row = screen.getByLabelText("Copy message").closest(".timeline-item");
     expect(row).not.toBeNull();
@@ -235,15 +289,22 @@ describe("timeline message actions", () => {
     expect(band?.className).toContain("opacity-100");
   });
   it("keeps the band hidden when a mouse presses the block", () => {
-    render(<TimelineView items={[makeItem({ kind: "agent_chat", user_facing: false, payload: "ok" })]} />);
-    fireEvent.click(screen.getByTestId("turn-toggle"));
+    render(<TimelineView items={[makeItem({ kind: "agent_chat", payload: "ok" })]} />);
     const band = screen.getByLabelText("Copy message").parentElement;
     const row = screen.getByLabelText("Copy message").closest(".timeline-item");
     expect(row).not.toBeNull();
     fireEvent.pointerDown(row as HTMLElement, { pointerType: "mouse" });
     expect(band?.className).toContain("opacity-0");
   });
-
+  it("sizes the Copy glyph to the band it shares with the stamp", () => {
+    // meiva:note
+    // The stamp is 9px and the band 12px; at the body's size-3 the glyph read as
+    // visibly bigger than the time beside it (user 2026-10-22).
+    // meiva:link ui/web/src/docs/frontend-components/timeline-view/card-chrome.meiva.okf.md
+    render(<TimelineView items={[makeItem({ kind: "agent_chat", payload: "ok" })]} />);
+    const icon = screen.getByLabelText("Copy message").querySelector("svg");
+    expect(icon?.getAttribute("class")).toContain("size-2.5");
+  });
 });
 
 describe("splitEnvelope boundary", () => {
@@ -324,6 +385,38 @@ describe("UnknownMarkerChip source render", () => {
     } finally {
       warnSpy.mockRestore();
     }
+  });
+});
+
+describe("formatItemTime: clock format without zone name", () => {
+  it("renders 24-hour text with no zone name by default", () => {
+    render(
+      <TimelineView
+        items={[
+          makeItem({
+            kind: "agent_chat",
+            payload: "x",
+            created_at: "2026-05-15T12:00:00Z",
+          }),
+        ]}
+      />,
+    );
+    expect(screen.getByText("2026-05-15 Fri 12:00:00")).toBeTruthy();
+  });
+  it("renders a 12-hour clock with no zone name when the viewer selects 12h", () => {
+    setUserSettings({ "display.clock_format": "12h" });
+    render(
+      <TimelineView
+        items={[
+          makeItem({
+            kind: "agent_chat",
+            payload: "x",
+            created_at: "2026-05-15T12:00:00Z",
+          }),
+        ]}
+      />,
+    );
+    expect(screen.getByText("2026-05-15 Fri 12:00:00 PM")).toBeTruthy();
   });
 });
 

@@ -4,7 +4,7 @@ import { ChatMarkdownMock, ScrollAreaMock, cleanupTimelineTest, makeItem, render
 vi.mock("@/components/content/markdown", () => ({ ChatMarkdown: ChatMarkdownMock }));
 vi.mock("@/components/ui/scroll-area", () => ({ ScrollArea: ScrollAreaMock }));
 import { TimelineView } from "..";
-import { formatAbsolute } from "@/lib/format/time";
+import { formatItemTime } from "../timestamp";
 afterEach(cleanupTimelineTest);
 
 describe("Settled vs live expansion behavior", () => {
@@ -199,29 +199,93 @@ describe("UnknownMarkerChip console.warn", () => {
   });
 });
 
-describe("timeline message chrome", () => {
-  it("renders primary messages without a timestamp or Copy footer", () => {
-    const human = makeItem({
+describe("ItemTimestamp", () => {
+  it("invalid iso → no timestamp span rendered (Number.isNaN(d.getTime()) guard)", () => {
+    render(
+      <TimelineView
+        items={[
+          makeItem({
+            kind: "agent_chat",
+            payload: "hello",
+            created_at: "this is not a date",
+          }),
+        ]}
+      />,
+    );
+    expect(screen.queryByText(/\[\d{4}-\d{2}-\d{2}/)).toBeNull();
+  });
+  it("valid iso → renders YYYY-MM-DD DayOfWeek HH:MM:SS with no brackets and no hover tooltip", () => {
+    render(
+      <TimelineView
+        items={[
+          makeItem({
+            kind: "agent_chat",
+            payload: "hello",
+            created_at: "2026-05-15T12:00:00Z",
+          }),
+        ]}
+      />,
+    );
+    const stamp = screen.getByText(/^\d{4}-\d{2}-\d{2}( [A-Z][a-z]{2})? \d{2}:\d{2}:\d{2}$/);
+    expect(stamp).toBeTruthy();
+    expect(stamp.getAttribute("title")).toBeNull();
+  });
+  it("empty iso (created_at='') → no timestamp rendered", () => {
+    render(
+      <TimelineView
+        items={[
+          makeItem({
+            kind: "agent_chat",
+            payload: "hello",
+            created_at: "",
+          }),
+        ]}
+      />,
+    );
+    expect(screen.queryByText(/\[\d{4}-\d{2}-\d{2}/)).toBeNull();
+  });
+});
+
+// meiva:note
+// The item stamp and Copy share one right-aligned footer OUTSIDE the message block for both human bubbles and agent prose.
+// meiva:link ui/web/src/docs/frontend-components/timeline-view/card-chrome.meiva.okf.md
+describe("card hover footer", () => {
+  it("timestamp and Copy share the right-aligned band under the block, outside the message box", () => {
+    const humanItem = makeItem({
       item_id: "1.0",
       kind: "inbound_chat",
       source: "user",
       payload: "hi",
       created_at: "2026-10-06T13:39:24+00:00",
     });
-    const agent = makeItem({
+    const agentItem = makeItem({
       item_id: "2.0",
       kind: "agent_chat",
       payload: "hello",
       created_at: "2026-10-06T13:39:25+00:00",
     });
-    render(<TimelineView items={[human, agent]} />);
-    expect(screen.getByTestId("user-message-bubble").textContent).toContain("hi");
-    expect(screen.getByTestId("agent-message-prose").textContent).toContain("hello");
-    expect(screen.queryByTestId("card-chrome")).toBeNull();
-    for (const message of [human, agent]) {
-      expect(screen.queryByText(formatAbsolute(message.created_at!, { weekday: true }))).toBeNull();
-    }
-    expect(screen.queryByRole("button", { name: "Copy message" })).toBeNull();
+    render(<TimelineView items={[humanItem, agentItem]} />);
+    const humanStamp = screen.getByText(formatItemTime(humanItem.created_at!, { showWeekday: true }));
+    expect(humanStamp.parentElement?.className).toContain("justify-end");
+
+    const stamp = screen.getByText(formatItemTime(agentItem.created_at!, { showWeekday: true }));
+    const band = stamp.parentElement;
+    const [, agentCopy] = screen.getAllByLabelText("Copy message");
+    expect(band).toBe(agentCopy.parentElement);
+    expect(band?.className).toContain("justify-end");
+    expect(band?.closest('[data-testid="card-toggle"]')).toBeNull();
+    // meiva:note
+    // The band is the row's own bottom strip, not the card's: it follows the
+    // message box as a sibling inside `.timeline-item`, which pads its bottom
+    // by 1rem and gives that height back with a negative margin. So the chrome
+    // stands in whitespace that already existed, and never overlaps the body.
+    // meiva:link ui/web/src/docs/frontend-components/timeline-view/card-chrome.meiva.okf.md
+    const proseBox = band?.previousElementSibling;
+    expect(proseBox?.textContent).toContain("hello");
+    expect(proseBox?.contains(band ?? null)).toBe(false);
+    expect(band?.className).toContain("absolute");
+    expect(band?.className).toContain("bottom-0");
+    expect(band?.parentElement?.className).toContain("timeline-item");
   });
   it("secondary work items inside TurnBlock stamp no time even when expanded", () => {
     const item = makeItem({
@@ -231,11 +295,11 @@ describe("timeline message chrome", () => {
     });
     render(<TimelineView items={[item]} />);
     revealCollapsedCards();
-    const stamped = formatAbsolute(item.created_at!, { weekday: true });
+    const stamped = formatItemTime(item.created_at!, { showWeekday: true });
     expect(screen.getByText("deep thought")).toBeTruthy();
     expect(screen.queryByText(stamped)).toBeNull();
   });
-  it("a streaming reply carries no timestamp or Copy footer", () => {
+  it("a streaming reply stamps the right-aligned timestamp but offers no Copy", () => {
     const item = makeItem({
       kind: "agent_chat",
       payload: "streaming",
@@ -243,7 +307,8 @@ describe("timeline message chrome", () => {
       created_at: "2026-10-06T13:39:25+00:00",
     });
     render(<TimelineView items={[item]} />);
-    expect(screen.queryByTestId("card-chrome")).toBeNull();
+    const stamp = screen.getByText(formatItemTime(item.created_at!, { showWeekday: true }));
+    expect(stamp.parentElement?.className).toContain("justify-end");
     expect(screen.queryByLabelText("Copy message")).toBeNull();
   });
   it("standing notes (show_timestamp false) and undated items stamp nothing", () => {
@@ -261,7 +326,7 @@ describe("timeline message chrome", () => {
       created_at: null,
     });
     const { container } = render(<TimelineView items={[standing, undated]} />);
-    expect(container.textContent).not.toContain(formatAbsolute(standing.created_at!, { weekday: true }));
+    expect(container.textContent).not.toContain(formatItemTime(standing.created_at!, { showWeekday: true }));
     expect(container.querySelectorAll(".font-mono.tabular-nums")).toHaveLength(0);
   });
 });
