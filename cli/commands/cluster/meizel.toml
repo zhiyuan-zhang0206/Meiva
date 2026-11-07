@@ -1,4 +1,4 @@
-exports = ["control.py", "cron.py", "health.py", "home.py", "ops.py", "plans", "tests", "unit_join.py"]
+exports = ["control.py", "cron.py", "health.py", "home.py", "ops.py", "plans", "re_admit.py", "tests", "unit_join.py"]
 
 [uses]
 "_provider_guard.py" = ["plans"]
@@ -6,7 +6,7 @@ exports = ["control.py", "cron.py", "health.py", "home.py", "ops.py", "plans", "
 "health.py" = ["_provider_guard.py", "health_readings.py", "plans"]
 "health_readings.py" = ["_provider_guard.py", "plans"]
 "home.py" = ["plans"]
-"tests" = ["_provider_guard.py", "control.py", "cron.py", "health.py", "health_readings.py", "home.py", "ops.py", "plans", "unit_join.py"]
+"tests" = ["_provider_guard.py", "control.py", "cron.py", "health.py", "health_readings.py", "home.py", "ops.py", "plans", "unit_join.py", "re_admit.py"]
 "unit_join.py" = ["plans"]
 
 [purity]

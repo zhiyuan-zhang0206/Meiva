@@ -131,10 +131,20 @@ class SealedInputsMixin:
     # Accept the current contents of this unit's declared inputs for the rest of this generation.
     # Nothing restarts: a healthy unit keeps running what it started with, and a unit that is down
     # becomes replaceable again on the next health round. Returns what changed.
-    def admit_inputs(self, unit_id: str) -> tuple[tuple[str, str, str], ...]:
+    def admit_inputs(self, unit_id: str, *, caller: str = "") -> tuple[tuple[str, str, str], ...]:
         runtime = self._units.get(unit_id)
         if runtime is None:
             raise UnknownUnitError(f"unknown unit {unit_id!r}")
         seals, changed = readmit_seals(runtime.manifest.inputs)
         runtime.manifest = replace(runtime.manifest, inputs=seals)
+        from base.log import logger
+
+        logger.warning(
+            "unit {unit}: declared inputs re-admitted for this root generation ({count} changed)",
+            event="root_unit_inputs_readmitted",
+            unit=unit_id,
+            count=len(changed),
+            re_admitted=[f"{path} {old[:12]}->{new[:12]}" for path, old, new in changed],
+            caller=caller or "unknown",
+        )
         return changed

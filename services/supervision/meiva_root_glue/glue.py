@@ -43,7 +43,11 @@ from services.supervision.meiva_root.health import HealthConfig, HealthMonitor, 
 from services.supervision.meiva_root.probes import Probe, ProbeError, ProbeRegistry, ProbeSource
 from services.supervision.meiva_root.selfcheck import SelfCheckConfig, TreeSelfCheck
 from services.supervision.meiva_root.supervisor import Supervisor
-from services.supervision.meiva_root.wiring import WiringContext, WiringParticipant
+from services.supervision.meiva_root.wiring import (
+    ResourceHandler,
+    WiringContext,
+    WiringParticipant,
+)
 from services.supervision.meiva_root_glue.diagnostic_probes import (
     ProbeConfig,
     build_diagnostics,
@@ -372,6 +376,21 @@ contract).
 """
 
 
+# meiva:note
+# The root's one operator resource: accept a unit's current declared-input contents for this
+# generation (task #6403). It rides the existing `resource` channel rather than a new wire verb,
+# and returns what changed so the caller can print the exception it granted.
+def admit_inputs_handler(supervisor: Supervisor) -> ResourceHandler:
+    async def handle(payload: dict[str, object]) -> object:
+        unit, caller = payload.get("unit"), payload.get("caller")
+        if not isinstance(unit, str) or not unit:
+            raise ValueError("admit-inputs needs a unit name")
+        changed = supervisor.admit_inputs(unit, caller=caller if isinstance(caller, str) else "")
+        return {"unit": unit, "changed": [list(item) for item in changed]}
+
+    return handle
+
+
 def build_wiring(
     context: WiringContext,
     *,
@@ -457,6 +476,7 @@ def build_wiring(
         if diagnostics is None
         else diagnostics
     )
+    context.resource_handlers["admit-inputs"] = admit_inputs_handler(context.supervisor)
     return assemble(
         context,
         registry,

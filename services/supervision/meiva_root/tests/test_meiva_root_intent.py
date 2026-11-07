@@ -419,6 +419,34 @@ async def test_a_changed_sealed_input_is_reported_as_drift(tmp_path: Path) -> No
 
 
 # meiva:note
+# The recovery the seal needs (task #6403). A drifted input makes the unit unreplaceable — the
+# first restart below is the negative control and must fail while the bytes differ — and
+# re-admission is what makes it replaceable again WITHOUT a new root generation. Re-admission
+# restarts nothing: the evidence that nothing was replaced is that the unit answered "failed"
+# before it and "restarted" after.
+async def test_re_admission_makes_a_drifted_unit_replaceable_again(tmp_path: Path) -> None:
+    input_path, seal = _sealed_input(tmp_path)
+    owner = _supervisor(tmp_path, [_unit(*_SLEEP_FOREVER, inputs=(seal,))])
+    await owner.start()
+    try:
+        await _wait_state(owner, "running")
+        input_path.write_text("v2")
+        assert owner.unit_input_drift("svc") == (str(input_path),)
+        refused = cast("list[dict[str, Any]]", (await owner.restart("svc"))["units"])[0]
+        assert refused["action"] == "failed"
+        assert "service input changed since generation admission" in str(refused["error"])
+        changed = owner.admit_inputs("svc", caller="test")
+        assert [(path, len(old), len(new)) for path, old, new in changed] == [
+            (str(input_path), 64, 64)
+        ]
+        assert owner.unit_input_drift("svc") == ()
+        again = cast("list[dict[str, Any]]", (await owner.restart("svc"))["units"])[0]
+        assert again["action"] == "restarted"
+    finally:
+        await owner.shutdown()
+
+
+# meiva:note
 # A child that exits on its own leaves the intent running; until something replaces it the
 # unit is absent, and that is the state this task makes reportable (task #6345).
 async def test_an_unreplaced_exit_is_an_absent_unit(tmp_path: Path) -> None:
