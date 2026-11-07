@@ -21,7 +21,6 @@ from typing import NoReturn
 import httpx
 
 from base.db import Database
-from base.host.net.auth import delivered_token
 from schedules.jobs.agent_directory import ensure_agent
 from schedules.jobs.loop import CronSchedule, loop_once, run_rounds
 from schedules.plans.weekly_trigger import (
@@ -57,21 +56,48 @@ class EventsApi:
 
 
 # meiva:note
-# The cluster secret is the delivered token of the environment, else the `MEIVA_CLUSTER_SECRET`
-# line of the home's `.env`; the gateway URL is `MEIVA_GATEWAY_URL`, local by default. The entry
-# reads both once and hands the result down.
+# The gateway credential comes from the same decision every other caller uses (`gateway_bearer`),
+# fed by the same parts: the machine token this process was launched with, else the home's own
+# secret, read from its `.env` on every run so a rotation reaches this weekly job without a restart.
+# What it must not do is send a request with no credential at all: on a trusted-network deployment
+# that is served as the cluster administrator, on any other it is refused, and the same job changing
+# identity with a deployment flag is the inconsistency this convergence removes.
+# meiva:link docs/decisions/data/security/2026-10-03-cluster-secret-contraction.md
 def read_events_api(env: Mapping[str, str], home: Path) -> EventsApi:
-    secret = delivered_token(env) or ""
-    env_file = home / ".env"
-    if not secret and env_file.exists():
-        for line in env_file.read_text().splitlines():
-            if line.startswith("MEIVA_CLUSTER_SECRET="):
-                secret = line.split("=", 1)[1].strip().strip("\"'")
-    return EventsApi(env.get("MEIVA_GATEWAY_URL", "http://localhost:8000"), secret)
+    from base.cluster.machine import GatewayAccess, GatewayApiTokenMissing, gateway_bearer
+    from base.host.env import dotenv_file
+    from base.host.env.bootstrap import launch_facts
+
+    env_file = dotenv_file.read_env_aliases(dotenv_file.env_file_path(home))
+    facts = launch_facts(env, env_file=env_file)
+    secret = env.get("MEIVA_CLUSTER_SECRET") or env_file.get("MEIVA_CLUSTER_SECRET") or ""
+    try:
+        token = gateway_bearer(
+            GatewayAccess(
+                gateway_url="",
+                cluster_secret=secret,
+                remote_plane=False,
+                machine_token=facts.machine_token,
+                launcher_profile=facts.launcher_profile,
+                gateway_home=facts.gateway_home,
+            )
+        )
+    except GatewayApiTokenMissing as exc:
+        raise RuntimeError(
+            f"the self-evolution trigger has no gateway credential on home {home}: {exc}"
+        ) from exc
+    return EventsApi(env.get("MEIVA_GATEWAY_URL", "http://localhost:8000"), token)
 
 
 def count_events(api: EventsApi, since: datetime, until: datetime) -> int:
-    headers = {"Authorization": f"Bearer {api.token}"} if api.token else {}
+    # meiva:note
+    # A boundary check, not a second policy: a caller that reached here without a credential is a
+    # bug, and an anonymous request would be answered as the administrator on a trusted-network
+    # deployment. `read_events_api` is the only producer of an `EventsApi` and never returns one
+    # without a token.
+    if not api.token:
+        raise RuntimeError("refusing to read events with no gateway credential")
+    headers = {"Authorization": f"Bearer {api.token}"}
     params: dict[str, str | int] = {
         "from": since.isoformat(),
         "to": until.isoformat(),
