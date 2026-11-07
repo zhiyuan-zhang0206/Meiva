@@ -155,3 +155,85 @@ def test_inspector_metrics_read_only_persisted_events() -> None:
     assert not _unpersisted(names), (
         f"inspector metrics over events without persist=True: {_unpersisted(names)}"
     )
+
+
+# meiva:note
+# Persisted events without a reader, in the manifest's debt shape (`meizel.toml` `[debt.*]`): the
+# `owner` paying it down and the `until` that ends it. A bare allowance would be the whitelist the
+# judgment below exists to prevent; an entry must still describe a real gap
+# (`test_the_reader_debt_still_describes_a_gap`), so this table can only shrink.
+_PERSIST_WITHOUT_READER_DEBT: dict[str, dict[str, str]] = {
+    "schedule_not_progressing": {
+        "owner": "#6400",
+        "until": (
+            "waits for the A-segment alert consumer (agent #1818) to choose between a Loki rule "
+            "and a card that reads the event from the table; only the card reads it by name, so "
+            "the entry goes to zero when that decision lands"
+        ),
+    },
+    "llm_usage_metering_failed": {
+        "owner": "#6400",
+        "until": (
+            "waits on the same A-segment decision (agent #1818): the metering failure is an alert "
+            "candidate whose consumer, a Loki rule, would not read the table — an entry here only "
+            "while the card path is still open"
+        ),
+    },
+}
+
+
+# meiva:note
+# The reader inventory as the three shapes above see it, which is also the set the reverse
+# judgment below is allowed to accept: a name in a SQL literal, in one of the name lists the
+# readers pass, or in an inspector metric. `main_red_watch_round` is read through a query that
+# names it literally for this reason.
+def _named_reader_names() -> set[str]:
+    names, prefixes = _queried_by_sql()
+    selected = set(names) | _inspector_names()
+    for listed in _parameter_lists().values():
+        selected |= set(listed)
+    for prefix in prefixes:
+        selected |= {name for name in EVENTS if name.startswith(prefix)}
+    return selected
+
+
+# meiva:note
+# The other half of the judgment: `persist` means "a Postgres reader queries it by name"
+# (docs/decisions/observability/telemetry/2026-10-03-telemetry-events-stores-what-is-read.md), so
+# a persisted event no reader names is a row on the hottest write path that no query answers. A
+# reader the source scan cannot name is the declaration this test must fail on, not a detail to
+# allow: the one such reader, `main_red_watch_round`'s, now spells its event into the query.
+def test_persisted_events_have_a_named_reader() -> None:
+    named = _named_reader_names()
+    missing = sorted(
+        name
+        for name, spec in EVENTS.items()
+        if spec.persist and name not in named and name not in _PERSIST_WITHOUT_READER_DEBT
+    )
+    assert not missing, (
+        "events marked persist=True that no reader selects by name: "
+        f"{missing}. Either a reader selects the name — a SQL literal, a name list, or an "
+        "inspector metric — or the declaration drops persist=True: `persist` marks an event a "
+        "Postgres reader queries by name, and the JSONL mirror and Loki keep the rest."
+    )
+
+
+# meiva:note
+# The debt above only shrinks: an entry whose event gained a reader, lost its `persist`, or left
+# the registry is stale, and the fix is to delete it rather than to widen the allowance.
+def test_the_reader_debt_still_describes_a_gap() -> None:
+    named = _named_reader_names()
+    stale = sorted(
+        name
+        for name, entry in _PERSIST_WITHOUT_READER_DEBT.items()
+        if name not in EVENTS
+        or not EVENTS[name].persist
+        or name in named
+        or not entry.get("owner")
+        or not entry.get("until")
+    )
+    assert not stale, (
+        "reader-debt entries that no longer describe a persisted event without a reader: "
+        f"{stale}. Delete each: the gap it recorded is closed, or the entry lost the owner/until "
+        "that make it a debt rather than an allowance."
+    )

@@ -19,13 +19,21 @@ __all__ = ["EVENT_NAME", "liveness_once", "newest_round_at"]
 
 EVENT_NAME = "main_red_watch_round"
 
+# meiva:note
+# The name is spelled into the query rather than bound: `gateway/inspect/tests/
+# test_persisted_events_cover_readers.py` proves this event has a reader by reading the literal,
+# and a bound parameter (`event_name = %s`) is invisible to that scan — which is how this reader
+# went unseen. The assert keeps the two spellings from drifting apart.
+_NEWEST_ROUND_SQL = "SELECT max(ts) FROM telemetry_events WHERE event_name = 'main_red_watch_round'"
+assert EVENT_NAME in _NEWEST_ROUND_SQL, "the query and EVENT_NAME name different events"
+
 
 # meiva:note
 # `main_red_watch_round` is declared `persist`, so the row is in `telemetry_events`; reading it
 # here is what makes "the watch stopped" an observation instead of an assumption.
 def newest_round_at(database: Database) -> datetime | None:
     with database.connect(autocommit=True) as conn, conn.cursor() as cur:
-        cur.execute("SELECT max(ts) FROM telemetry_events WHERE event_name = %s", (EVENT_NAME,))
+        cur.execute(_NEWEST_ROUND_SQL, ())
         row = cur.fetchone()
     return row[0] if row and row[0] is not None else None
 

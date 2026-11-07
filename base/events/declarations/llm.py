@@ -106,7 +106,6 @@ EVENTS: dict[str, EventSpec] = {
         "an agent's turn-end declaration was refused (recorded as invalid); the turn continued",
         payload=TurnEndDeclarationRejected,
         tier="anomaly",
-        persist=True,
     ),
     "llm_usage_metering_failed": telemetry_event(
         "llm_usage_metering_failed",
@@ -155,10 +154,9 @@ EVENTS: dict[str, EventSpec] = {
         "applied context compaction size reduction and completed count",
         payload=CompactionCompleted,
         tier="noise",
-        persist=True,
     ),
     "compact_request": telemetry_event("compact_request", "compact requested", tier="noise"),
-    "auto_compact": telemetry_event("auto_compact", "auto-compact", tier="noise", persist=True),
+    "auto_compact": telemetry_event("auto_compact", "auto-compact", tier="noise"),
     "compact_reminder": telemetry_event("compact_reminder", "compact reminder", tier="noise"),
     "circuit_breaker_open": telemetry_event(
         "circuit_breaker_open", "heartbeat circuit breaker opened", tier="noise"

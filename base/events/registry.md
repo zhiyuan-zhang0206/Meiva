@@ -118,7 +118,7 @@ above (or when its name is unregistered); otherwise it stays in the JSONL mirror
 | `sdk_call` | SDK call metering | noise | fn, duration, sample_rate, detail | — | events | — |
 | `sdk_sampling_refresh_unfinished` | SDK sampling refresh worker retained after the finite shutdown wait | anomaly | — | — | events | — |
 | `plugin_activation` | a plugin injection surface fired (hook / wrap / prompt section) | noise | plugin, surface, identifier, detail, model | — | events | ✓ |
-| `heartbeat_paused` | heartbeat paused | observation | duration_s | — | events | ✓ |
+| `heartbeat_paused` | heartbeat paused | observation | duration_s | — | events | — |
 | `shell_ttl_renewed` | shell TTL deadline renewed | observation | session_id, ttl_s, prev_expires_at, new_expires_at | — | events | — |
 | `screen_capture_notify_failed` | screenshot notify failed | anomaly | — | — | events | — |
 | `delta_message_suffix` | message history write-body transfer and retained suffix counts; excludes snapshot seed | noise | thread_id, checkpoint_ns, checkpoint_id, candidate_writes, fetched_rows, fetched_bytes, body_batches, retained_writes, reset_found | — | events | — |
@@ -129,15 +129,15 @@ above (or when its name is unregistered); otherwise it stays in the JSONL mirror
 | `trace` | otel span export | noise | — | — | events | — |
 | `history_dump` | pre-compact history dumped to workspace | noise | — | — | events | — |
 | `passive_recall` | passive memory recall | noise | body, search_ms, injected | — | events | ✓ |
-| `skill_recall` | skill recall | noise | candidates, offered | — | events | ✓ |
+| `skill_recall` | skill recall | noise | candidates, offered | — | events | — |
 | `hook_timing` | hook-runner pass — per-hook wall durations, attributing a slow before_llm / before_exec node to its hooks from events alone | noise | hook_ms | — | events | — |
 | `last_msg` | last-message check | noise | — | — | events | — |
 | `pty_transcript` | a pty session's transcript append failed (full disk, closed fd); the session keeps running with an incomplete transcript | anomaly | — | — | events | — |
 | `status_change` | agent status transition — both telemetry (loguru) and audit (audit_events) sides emit this name | noise | from, to, unapplied_handoff_receipt, reason | — | events | — |
 | `turn_fault_lost_inbound` | a harness turn faulted before producing any text; the inbounds that started it were consumed and are never redelivered | anomaly | harness, turn_key, inbound_ids, reason | — | events | — |
 | `turn_fault_note_failed` | a lost turn could not be recorded in the conversation: the note append raised, the original fault propagates anyway, and the inbound that died leaves no trace the reader can see | anomaly | agent_id, turn_key | — | events | — |
-| `inbound_consumed_unknown` | a claimed inbound was consumed without knowing whether its work ran (host crash / aborted turn); the row is marked in its payload and is never redelivered — this event is the only record of what was lost | anomaly | inbound_id, kind, age_s, content_preview | — | events | ✓ |
-| `delivery_stranded_wake` | a message reached a terminated owner with no live consumer and the delivery fallback woke it: the delivery-time auto-resurrect did not run because the message committed while the owner still read running | anomaly | inbound_id, kind | — | events | ✓ |
+| `inbound_consumed_unknown` | a claimed inbound was consumed without knowing whether its work ran (host crash / aborted turn); the row is marked in its payload and is never redelivered — this event is the only record of what was lost | anomaly | inbound_id, kind, age_s, content_preview | — | events | — |
+| `delivery_stranded_wake` | a message reached a terminated owner with no live consumer and the delivery fallback woke it: the delivery-time auto-resurrect did not run because the message committed while the owner still read running | anomaly | inbound_id, kind | — | events | — |
 | `delivery_stalled` | delivery backlog | anomaly | inbound_id, age_s | — | events | ✓ |
 | `exec` | execute_code succeeded | observation | body, ok, duration_seconds | — | events | ✓ |
 | `exec_failed` | execute_code failed | anomaly | exc_type, body | — | events | ✓ |
@@ -247,7 +247,7 @@ above (or when its name is unregistered); otherwise it stays in the JSONL mirror
 | `harness_notice_failed` | an unsolicited provider report could not be written as an inbound; the report is lost and the agent that was waiting on it is never told | anomaly | — | — | events | — |
 | `llm_usage` | LLM call metering | observation | model, calls, in_total, out_total, cache_read, cache_write_5m, cache_write_1h, cache_write_30m, reasoning, latency_ms, decode_ms, cost_usd, price_miss, price_hit, price_out, price_write_5m, price_write_1h, price_write_30m, unpriced, usage_kind, attribution, source | — | events | ✓ |
 | `turn_end` | one turn finished | observation | ok, duration_seconds, ended_with, ended_with_reason | — | events | ✓ |
-| `turn_end_declaration_rejected` | an agent's turn-end declaration was refused (recorded as invalid); the turn continued | anomaly | raw_ended_with, raw_ended_with_reason, problem | — | events | ✓ |
+| `turn_end_declaration_rejected` | an agent's turn-end declaration was refused (recorded as invalid); the turn continued | anomaly | raw_ended_with, raw_ended_with_reason, problem | — | events | — |
 | `llm_usage_metering_failed` | direct model call accounting failed (the call ran; its llm_usage row is dropped) | anomaly | model, error_type, failures | — | events | ✓ |
 | `llm_turn_aborted` | turn aborted after retries | anomaly | — | LLM_ERROR | events | ✓ |
 | `recovery_breaker_halt` | recovery circuit breaker tripped — consecutive permanent provider rejections halted every automatic recovery path until a turn succeeds (task #3617) | anomaly | — | — | events | — |
@@ -256,9 +256,9 @@ above (or when its name is unregistered); otherwise it stays in the JSONL mirror
 | `thinking_block_sanitized` | thinking block sanitized | noise | — | — | events | — |
 | `web_fetch_injection_check_failed` | the decision-model injection check of a fetched page failed (request error, bad response or missing key) — the page is returned without a verdict. Carries model and error_type | anomaly | — | — | events | — |
 | `llm_cancelled` | LLM call cancelled | anomaly | — | — | events | — |
-| `compaction_completed` | applied context compaction size reduction and completed count | noise | compact_kind, reminder_shown, compactions, history_chars, summary_chars, summary_history_ratio | — | events | ✓ |
+| `compaction_completed` | applied context compaction size reduction and completed count | noise | compact_kind, reminder_shown, compactions, history_chars, summary_chars, summary_history_ratio | — | events | — |
 | `compact_request` | compact requested | noise | — | — | events | — |
-| `auto_compact` | auto-compact | noise | — | — | events | ✓ |
+| `auto_compact` | auto-compact | noise | — | — | events | — |
 | `compact_reminder` | compact reminder | noise | — | — | events | — |
 | `circuit_breaker_open` | heartbeat circuit breaker opened | noise | — | — | events | — |
 | `circuit_breaker_closed` | heartbeat circuit breaker closed | noise | — | — | events | — |
