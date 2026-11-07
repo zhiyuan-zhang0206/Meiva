@@ -308,7 +308,6 @@ EVENTS: dict[str, EventSpec] = {
         "heartbeat paused",
         payload=HeartbeatPaused,
         site='meiva/self/__init__.py:258 telemetry.emit("telemetry", ...)',
-        persist=True,
     ),
     "shell_ttl_renewed": telemetry_event(
         "shell_ttl_renewed",
@@ -362,7 +361,6 @@ EVENTS: dict[str, EventSpec] = {
         "skill recall",
         payload=SkillRecallScored,
         tier="noise",
-        persist=True,
     ),
     "hook_timing": telemetry_event(
         "hook_timing",

@@ -18,10 +18,21 @@ The JSONL mirror and Loki keep every event.
   and the status page read by level), or when the name is not registered.
 - Three entrances apply it: the emitter's live sink, the mirror replay (`jsonl_rows`) and the
   backfill script. Missing one would bring the filtered rows back through a replay.
-- A guard test (`base/events/tests/test_persisted_events_cover_readers.py`) collects the names the
-  readers query (the SQL literals of every module that reads the table, the name lists the readers
-  pass, the inspector metrics) and requires `persist=True` for each. A new reader that forgets the
-  mark fails the test instead of reading an empty set.
+- A guard test (`gateway/inspect/tests/test_persisted_events_cover_readers.py`) collects the names
+  the readers query (the SQL literals of every module that reads the table, the name lists the
+  readers pass, the inspector metrics) and requires `persist=True` for each. A new reader that
+  forgets the mark fails the test instead of reading an empty set.
+- The judgment runs both ways (2026-11-07, task #6400): every `persist=True` event must be named
+  by one of those readers, so a declaration without a reader fails instead of paying for rows no
+  query answers. A reader the scan cannot see is not an exemption — `main_red_watch_round`'s
+  query names its event literally for this reason, where it used to bind it as a parameter. Two
+  events whose consumer is still being decided (`schedule_not_progressing`,
+  `llm_usage_metering_failed`) sit in the test's debt table, in the `meizel.toml` shape: an
+  `owner` and the `until` that ends the wait, and a companion test deletes an entry the moment a
+  reader appears. Seven events lost the mark: `heartbeat_paused`, `skill_recall`,
+  `turn_end_declaration_rejected`, `compaction_completed`, `auto_compact`,
+  `delivery_stranded_wake` and `inbound_consumed_unknown`; the two warning-level ones are still
+  stored on their level, which is a different mechanism and not this field.
 - The two readers whose only source was a non-stored event are removed: the `/api/metrics`
   `sdk_usage` section (`sdk_call`) and the `node_exit` branch of the observation recovery scan.
   The live observation projection still reads `node_exit` from the emitter.
