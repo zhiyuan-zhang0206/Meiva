@@ -10,6 +10,7 @@ import hashlib
 import json
 import re
 import stat
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -67,6 +68,19 @@ class InputSeal:
             raise InputChangedError(
                 f"service input changed since generation admission: {self.path}"
             )
+
+
+# meiva:note
+# The sealed paths whose contents are no longer the ones admitted. Asking this before a spawn is
+# what turns "the unit cannot be revived" into a fact with a name (task #6403).
+def diverged_inputs(seals: Iterable[InputSeal]) -> tuple[str, ...]:
+    drift: list[str] = []
+    for seal in seals:
+        try:
+            seal.require_unchanged()
+        except InputChangedError:
+            drift.append(str(seal.path))
+    return tuple(drift)
 
 
 def parse_inputs(raw: object) -> tuple[InputSeal, ...]:

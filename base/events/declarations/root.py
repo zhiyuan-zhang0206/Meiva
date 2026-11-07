@@ -74,6 +74,13 @@ class RootUnitFailureState(TypedDict):
 
 
 # meiva:note
+# The declared input changed since admission: this generation cannot spawn the unit (task #6403).
+class RootUnitInputsChanged(TypedDict):
+    unit: str
+    path: str
+
+
+# meiva:note
 # One transition, once: the unit spent its restart budget on a continuous outage,
 # so only the backoff ladder's capped cadence, or a dependency-recovery grant
 # (one attempt on the first usable database observed, then one per
@@ -543,6 +550,13 @@ EVENTS: dict[str, EventSpec] = {
         "restart attempts exhausted) — emitted every health round while it holds "
         "(task #4872)",
         payload=RootUnitFailureState,
+        tier="anomaly",
+    ),
+    "root_unit_inputs_changed": telemetry_event(
+        "root_unit_inputs_changed",
+        "a root unit's declared input changed since this generation admitted it, so the unit "
+        "cannot be spawned again (task #6403)",
+        payload=RootUnitInputsChanged,
         tier="anomaly",
     ),
     "root_unit_breaker_open": telemetry_event(

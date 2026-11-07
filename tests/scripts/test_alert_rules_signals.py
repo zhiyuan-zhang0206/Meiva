@@ -82,6 +82,9 @@ SIGNALS: dict[str, Signal] = {
         "root_unit_failure_state", "meiva-ops", "0m", "error"
     ),
     "meiva-ops-root-unit-absent": Signal("root_unit_failure_state", "meiva-ops", "0m", "error"),
+    "meiva-ops-root-unit-inputs-changed": Signal(
+        "root_unit_inputs_changed", "meiva-ops", "0m", "warning"
+    ),
     "meiva-ops-root-unit-breaker-open": Signal(
         "root_unit_failure_state", "meiva-ops", "0m", "critical"
     ),

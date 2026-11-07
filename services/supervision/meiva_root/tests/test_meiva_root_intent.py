@@ -406,6 +406,19 @@ async def test_failure_facts_report_absence_until_a_generation_exists(tmp_path: 
 
 
 # meiva:note
+# The seal is what decides whether this root may spawn a unit again, so "did its input change
+# since admission" has to be answerable without attempting a spawn — that is the whole of
+# task #6403's visibility half. An unchanged input answers with nothing, a changed one names
+# the path, and a unit outside this tree is an error rather than an empty answer.
+async def test_a_changed_sealed_input_is_reported_as_drift(tmp_path: Path) -> None:
+    input_path, seal = _sealed_input(tmp_path)
+    owner = _supervisor(tmp_path, [_unit(*_SLEEP_FOREVER, inputs=(seal,))])
+    assert owner.unit_input_drift("svc") == (), "admission bytes are the baseline"
+    input_path.write_text("v2")
+    assert owner.unit_input_drift("svc") == (str(input_path),)
+
+
+# meiva:note
 # A child that exits on its own leaves the intent running; until something replaces it the
 # unit is absent, and that is the state this task makes reportable (task #6345).
 async def test_an_unreplaced_exit_is_an_absent_unit(tmp_path: Path) -> None:

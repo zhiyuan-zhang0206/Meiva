@@ -40,6 +40,7 @@ class StubSupervisor:
         self.on_restart: Callable[[], None] | None = None
         self.generation = (OwnedProcess(42, 100.0, None), 0.0)
         self.failure_facts = UnitFailureFacts(intent_running=True, restart_failed=None)
+        self.input_drift: tuple[str, ...] = ()
 
     async def restart(self, unit_id: str) -> dict[str, object]:
         self.restart_calls.append(unit_id)
@@ -61,6 +62,11 @@ class StubSupervisor:
         if unit_id in self.unknown_units:
             raise manifest_mod.UnknownUnitError(f"unknown unit {unit_id!r}")
         return self.failure_facts
+
+    def unit_input_drift(self, unit_id: str) -> tuple[str, ...]:
+        if unit_id in self.unknown_units:
+            raise manifest_mod.UnknownUnitError(f"unknown unit {unit_id!r}")
+        return self.input_drift
 
 
 class CellProbe:

@@ -231,6 +231,9 @@ class _OwnerlessSupervisor:
     def unit_failure_facts(self, unit_id: str) -> UnitFailureFacts:
         return UnitFailureFacts(intent_running=True, restart_failed=None)
 
+    def unit_input_drift(self, unit_id: str) -> tuple[str, ...]:
+        return ()
+
     def operator_stop_facts(self, unit_id: str) -> OperatorStopFacts | None:
         return None
 
