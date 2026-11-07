@@ -1,4 +1,5 @@
 {
+  "loadingPlugins": "Loading plugins…",
   "couldntLoad": "Couldn't load inventory — check the gateway and reload.",
   "plugins": "Plugins",
   "mcpServers": "MCP servers",
@@ -16,5 +17,8 @@
   "cantEnable": "Cannot enable on this host",
   "clickDisable": "Click to disable",
   "clickEnable": "Click to enable",
-  "noData": "(no data)"
+  "noData": "(no data)",
+  "clusterPluginsHelp": "Enable plugins for the cluster. The same choice applies wherever a plugin is installed.",
+  "togglePlugin": "Toggle {name}",
+  "pluginRestart": "Saved for the cluster. Restart services to apply the change. Offline machines will use it on their next start."
 }

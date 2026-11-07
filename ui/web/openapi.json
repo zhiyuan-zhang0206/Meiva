@@ -5852,6 +5852,60 @@
         }
       }
     },
+    "/api/plugins": {
+      "get": {
+        "summary": "Get Plugins",
+        "operationId": "get_plugins_api_plugins_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClusterPluginsView"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "summary": "Put Plugin",
+        "operationId": "put_plugin_api_plugins_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ClusterPluginWrite"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClusterPluginSaved"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/skills": {
       "get": {
         "summary": "Get Skills",
@@ -11356,6 +11410,86 @@
         ],
         "title": "ClusterPanel",
         "description": "GET /api/status cluster sub-section — multi-machine view.\n\n`current_*` is the perspective of the gateway that received this\nrequest; `machines` is every machine registered in DB + live probe\nresults."
+      },
+      "ClusterPluginSaved": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled"
+          },
+          "restart_required": {
+            "type": "boolean",
+            "title": "Restart Required"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "enabled",
+          "restart_required"
+        ],
+        "title": "ClusterPluginSaved"
+      },
+      "ClusterPluginView": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "enabled",
+          "description"
+        ],
+        "title": "ClusterPluginView"
+      },
+      "ClusterPluginWrite": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "enabled"
+        ],
+        "title": "ClusterPluginWrite"
+      },
+      "ClusterPluginsView": {
+        "properties": {
+          "plugins": {
+            "items": {
+              "$ref": "#/components/schemas/ClusterPluginView"
+            },
+            "type": "array",
+            "title": "Plugins"
+          }
+        },
+        "type": "object",
+        "required": [
+          "plugins"
+        ],
+        "title": "ClusterPluginsView"
       },
       "ClusterStatus": {
         "properties": {

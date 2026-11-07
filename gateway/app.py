@@ -74,6 +74,7 @@ from gateway.events import system as system_router
 from gateway.extensions import inventory as inventory_router
 from gateway.extensions import packages as packages_router
 from gateway.extensions import plugin_ui as plugin_ui_router
+from gateway.extensions import plugins as plugins_router
 from gateway.extensions import registry as extensions_registry_router
 from gateway.extensions import skills as skills_router
 from gateway.extensions import ui_contributions as ui_contributions_router
@@ -301,6 +302,7 @@ async def lifespan(
             db_pool = state.db.pool(max_size=state.gateway_config.db_pool_max_size)
             state.db_pool = db_pool
             releases.callback(db_pool.close)
+            await asyncio.to_thread(plugins_router.initialize_plugins, db_pool, home=process.home)
             state.sessions = SessionStore(db_pool)
             state.session_keys = SessionKeys(state.gateway_config.rng)
             state.login_passwords = LoginPasswords(state.gateway_config.rng)
@@ -535,6 +537,7 @@ def create_app(
         schedules_router.router,
         guide_router.router,
         inventory_router.router,
+        plugins_router.router,
         skills_router.router,
         extensions_registry_router.router,
         packages_router.router,

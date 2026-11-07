@@ -1,4 +1,6 @@
 exports = ["page.tsx"]
 
 [uses]
+"_plugins.test.tsx" = ["page.tsx"]
 "page.test.tsx" = ["page.tsx"]
+"page.tsx" = ["_plugins.tsx"]

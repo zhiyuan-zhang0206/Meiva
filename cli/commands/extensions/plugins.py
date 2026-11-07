@@ -89,12 +89,12 @@ def cmd_plugins_disable(name: str, *, home: Path) -> int:
 
 
 def _set_enabled(name: str, *, enabled: bool, home: Path) -> int:
-    from base.packages.plugins.enable_config import DanglingPlugin, set_local_enabled
+    from base.packages.plugins.enable_config import PluginsConfigError, set_local_enabled
 
     verb = "enable" if enabled else "disable"
     try:
         set_local_enabled(name, enabled=enabled, home=home)
-    except DanglingPlugin as e:
+    except PluginsConfigError as e:
         print(f"[meiva plugins {verb}] {e}", file=sys.stderr)
         return 1
     print(f"[meiva plugins {verb}] {name} {verb}d in this machine's local config.")

@@ -32,6 +32,8 @@ import { Check, Loader2, X } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useCallback } from "react";
 
+import { PluginsInventory } from "./_plugins";
+
 import { PackageDraftEntry } from "@/components/plugins/package-draft-entry";
 import { Button } from "@/components/ui/button";
 import { InlineError } from "@/components/ui/inline-error";
@@ -209,10 +211,7 @@ function InventoryBody({
   return <InventoryMatrix rows={rows} aggregate={controller.data} controller={controller} />;
 }
 
-/** Plugins matrix — a top-level settings section. */
-export function PluginsInventory() {
-  return <InventoryKind kind="plugin" />;
-}
+export { PluginsInventory } from "./_plugins";
 
 /** MCP servers matrix — a top-level settings section. */
 export function McpInventory() {

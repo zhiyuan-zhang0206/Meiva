@@ -4,9 +4,10 @@ import json
 from dataclasses import dataclass
 from pathlib import Path
 
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel, StrictBool, TypeAdapter, ValidationError
 
 from base import paths
+from base.host.atomic_io import write_text_atomic
 from base.host.boundary.json_values import is_object_dict
 from base.host.boundary.untyped import object_of
 from base.packages.plugins import load_report
@@ -157,6 +158,25 @@ def _validate_schema(data: dict[str, object]) -> PluginsConfig:
         raise SchemaInvalid(f"plugins.json schema invalid: {e}") from e
 
 
+def read_cluster_policy(*, home: Path) -> dict[str, bool]:
+    path = home / "plugin_enable_policy.json"
+    if not path.exists():
+        return {}
+    return TypeAdapter(dict[str, StrictBool]).validate_json(path.read_text())
+
+
+def write_cluster_policy(policy: dict[str, bool], *, home: Path) -> None:
+    home.mkdir(parents=True, exist_ok=True)
+    write_text_atomic(home / "plugin_enable_policy.json", json.dumps(policy, sort_keys=True))
+
+
+def _with_cluster_policy(cfg: PluginsConfig, *, home: Path) -> PluginsConfig:
+    for name, enabled in read_cluster_policy(home=home).items():
+        if name in cfg.plugins:
+            cfg.plugins[name] = PluginEntry(enabled=enabled)
+    return cfg
+
+
 def _default_config(known_plugins: set[str]) -> PluginsConfig:
     return PluginsConfig(
         plugins={name: PluginEntry(enabled=True) for name in sorted(known_plugins)}
@@ -189,7 +209,7 @@ class PluginEnableStore:
         raw = self.read() or {}
 
         if not raw or not raw.get("plugins"):
-            return _default_config(known_plugins)
+            return _with_cluster_policy(_default_config(known_plugins), home=self.path.parent)
 
         cfg = _validate_schema(raw)
 
@@ -220,7 +240,7 @@ class PluginEnableStore:
         for name in sorted(new_plugins):
             cfg.plugins[name] = PluginEntry(enabled=True)
 
-        return cfg
+        return _with_cluster_policy(cfg, home=self.path.parent)
 
     def set_enabled(self, name: str, *, enabled: bool, known: set[str]) -> PluginsConfig:
         # meiva:link base/packages/plugins/docs/plugin-config/enable-state.meiva.okf.md
@@ -230,6 +250,10 @@ class PluginEnableStore:
                 f"plugin {name!r} is not present on this machine (known: {sorted(known) or '<none>'})"
             )
         name = resolved
+        if name in read_cluster_policy(home=self.path.parent):
+            raise PluginsConfigError(
+                f"plugin {name!r} is cluster-managed; change it in Settings > Plugins"
+            )
         raw = self.read() or {}
         existing = _validate_schema(raw).plugins if raw.get("plugins") else {}
         # meiva:note

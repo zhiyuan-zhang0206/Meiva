@@ -36,3 +36,13 @@ and retains MCP capability verdicts. Its tests import the matrix owner and wire
 models directly. HTTP contracts continue to exercise the assembled app, real
 machines SQL and validated RPC results, each runner served on a real listener
 (`gateway/tests/support/runner_ops`).
+
+## Cluster plugin controls
+
+Ordinary plugin enablement uses GET/PUT `/api/plugins` (`plugins.py`), backed by
+`extensions.default_enabled`; it does not depend on reachable runners. Gateway
+startup adopts existing choices once and projects the policy cache before serving.
+The inventory matrix remains a diagnostic view and the MCP host control surface.
+Host inventory writes atomically refuse any cluster-managed plugin name before
+writing either plugin or MCP state. Plugin saves announce that service restart is
+required; they do not report a cache change as process activation.

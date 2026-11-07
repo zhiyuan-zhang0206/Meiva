@@ -1,13 +1,5 @@
-// /control/inventory page tests — loading/error tri-state + the
-// cross-machine matrix render (per-machine columns, the N/M-enabled summary
-// chip), the not-installed "—" cell, the can't-enable disabled cell + its
-// reason, a cell click -> putInventory with the right body + machine, the
-// query invalidating on settle, and the per-section install entry (each posts
-// its own kind, and stays usable when the read failed).
-//
-// happy-dom + RTL + real QueryClient (mock at the api.{getInventory,
-// putInventory} layer so useQuery / useMutation goes through its full
-// lifecycle).
+// meiva:note
+// Plugins use one cluster endpoint; MCP retains per-host capability and installation coverage.
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
@@ -39,6 +31,10 @@ beforeEach(() => {
   vi.restoreAllMocks();
   resetTransport();
   navigation.moves.length = 0;
+  transport.getPlugins.mockResolvedValue({ plugins: [
+    { name: "meiva_code", enabled: true, description: "Code execution plugin" },
+    { name: "only_h1", enabled: false, description: "Only on h1" },
+  ] });
 });
 
 function makeQc() {
@@ -158,15 +154,6 @@ describe("InventoryPage render", () => {
     expect(screen.getAllByText(H2).length).toBeGreaterThan(0);
   });
 
-  it("N/M enabled chip reflects present+enabled over present", async () => {
-    transport.getInventory.mockResolvedValue(AGGREGATE);
-    wrap(<InventoryPage />);
-    await waitFor(() => screen.getByTestId("summary-meiva_code"));
-    // meiva_code: enabled on h1, disabled on h2, present on both -> 1/2.
-    expect(screen.getByTestId("summary-meiva_code").textContent).toBe("1/2 enabled");
-    // only_h1: present on h1 only, disabled -> 0/1.
-    expect(screen.getByTestId("summary-only_h1").textContent).toBe("0/1 enabled");
-  });
 
   it("not-installed cell shows — for a host lacking the item", async () => {
     transport.getInventory.mockResolvedValue(AGGREGATE);
@@ -190,28 +177,7 @@ describe("InventoryPage render", () => {
 });
 
 describe("InventoryPage toggle (putInventory)", () => {
-  it("clicking an enabled cell calls putInventory with {plugins:{name:false}} + machine", async () => {
-    transport.getInventory.mockResolvedValue(AGGREGATE);
-    const putSpy = transport.putInventory.mockResolvedValue(OK_RESULT);
-    wrap(<InventoryPage />);
-    // meiva_code is enabled on h1 -> clicking turns it OFF.
-    const cell = await waitFor(() => screen.getByTestId(`cell-meiva_code-${H1}`));
-    fireEvent.click(cell);
-    await waitFor(() => expect(putSpy).toHaveBeenCalled());
-    expect(putSpy).toHaveBeenCalledWith({ plugins: { meiva_code: false } }, H1);
-  });
 
-  it("clicking a disabled cell calls putInventory to enable it on that host", async () => {
-    transport.getInventory.mockResolvedValue(AGGREGATE);
-    const putSpy = transport.putInventory.mockResolvedValue(OK_RESULT);
-    wrap(<InventoryPage />);
-    // meiva_code is disabled on h2 -> clicking turns it ON.
-    const cell = await waitFor(() => screen.getByTestId(`cell-meiva_code-${H2}`));
-    fireEvent.click(cell);
-    await waitFor(() =>
-      expect(putSpy).toHaveBeenCalledWith({ plugins: { meiva_code: true } }, H2),
-    );
-  });
 
   it("an mcp cell builds an mcp_servers body, not a plugins body", async () => {
     // Use an aggregate where the mcp server is enabled on h1 so its cell is
@@ -244,30 +210,7 @@ describe("InventoryPage toggle (putInventory)", () => {
     );
   });
 
-  it("a settled write re-reads the inventory", async () => {
-    transport.getInventory.mockResolvedValue(AGGREGATE);
-    transport.putInventory.mockResolvedValue(OK_RESULT);
-    wrap(<InventoryPage />);
-    const cell = await waitFor(() => screen.getByTestId(`cell-meiva_code-${H1}`));
-    fireEvent.click(cell);
-    // meiva:note
-    // The initial read, then the one the settlement asks for: the second GET is what the user
-    // sees (the matrix reflects the write), and no assertion has to watch the cache's method to
-    // know it happened.
-    await waitFor(() => expect(transport.getInventory).toHaveBeenCalledTimes(2));
-  });
 
-  it("enable-all fans out one putInventory per installed+enableable host", async () => {
-    transport.getInventory.mockResolvedValue(AGGREGATE);
-    const putSpy = transport.putInventory.mockResolvedValue(OK_RESULT);
-    wrap(<InventoryPage />);
-    // meiva_code: enabled on h1 (skipped — already target), disabled on h2 ->
-    // exactly one PUT for h2.
-    const btn = await waitFor(() => screen.getByTestId("enable-all-meiva_code"));
-    fireEvent.click(btn);
-    await waitFor(() => expect(putSpy).toHaveBeenCalledTimes(1));
-    expect(putSpy).toHaveBeenCalledWith({ plugins: { meiva_code: true } }, H2);
-  });
 });
 
 // Both sections render on this page, so these also pin that each entry carries

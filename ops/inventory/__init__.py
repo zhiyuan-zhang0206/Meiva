@@ -117,6 +117,18 @@ def inventory_write_op(
         capabilities=capabilities,
     )
 
+    managed = set(plugins) & enable_config.read_cluster_policy(home=home).keys()
+    if managed:
+        reason = "Cluster-managed plugins must be changed in Settings > Plugins: " + ", ".join(
+            sorted(managed)
+        )
+        return InventoryWriteOpResult(
+            machine=local_machine.name(),
+            applied=False,
+            plugin_results={name: FieldWriteResult(ok=False, reason=reason) for name in plugins},
+            mcp_results={name: FieldWriteResult(ok=False, reason=reason) for name in mcp_servers},
+        )
+
     if verdicts.applied:
         for name, want in plugins.items():
             enable_config.set_local_enabled(name, enabled=want, home=home)

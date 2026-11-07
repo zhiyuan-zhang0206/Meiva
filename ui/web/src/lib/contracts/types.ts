@@ -486,3 +486,6 @@ export type FleetGraph = Omit<WireFleetGraph, "nodes" | "edges"> & {
 };
 
 export type { UserMessage, UserMessageFeed, ResolveUserMessage } from "./types-user-delivery";
+
+export type ClusterPluginsView = Schemas["ClusterPluginsView"];
+export type ClusterPluginSaved = Schemas["ClusterPluginSaved"];
