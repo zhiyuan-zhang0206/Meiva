@@ -33,7 +33,7 @@ The shared ScrollArea track stays hit-testable at opacity 0 and reveals on hover
 
 With the on-screen keyboard up the composer stays inside the visible band: the viewport meta asks Chrome to resize content (interactive-widget=resizes-content, the Android half, which Safari ignores) and the shell pins <html> to the shrunken visualViewport height (the iOS half). A shortfall below the 150px keyboard threshold and a pinch-zoom leave the shell unpinned, and closing the keyboard restores the layout height.
 
-Every expanded `TurnBlock` stays in normal document flow without `position: sticky` on either its turn header (`turn-toggle`) or its child detail headers (`card-toggle`), and wraps its indented body in a shared auto-hiding `ScrollArea` whose viewport (`turn-scroll-viewport`) is capped at 50% of the visible timeline message area (`--timeline-turn-max-h`), scrolling internally when child content exceeds that cap (`test_expanded_work_block_bounded_scroll_and_no_sticky`).
+Expanded work headers stick below the floating navigation (`position: sticky` on `turn-toggle`) while child detail headers (`card-toggle`) stay in normal document flow without `position: sticky`. Historical work blocks flow at full height in the outer timeline without an inner scrollport (`test_expanded_work_block_bounded_scroll_and_no_sticky`), while the trailing work block retains the half-viewport inner `ScrollArea`.
 
 `test_work_block_chrome.py` opens `stubbed_home.work_block_items()` and checks
 that the human and agent message rows have no floating footer. Its work block

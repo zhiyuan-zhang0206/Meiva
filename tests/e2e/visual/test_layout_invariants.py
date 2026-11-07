@@ -434,21 +434,21 @@ def test_expanded_work_block_bounded_scroll_and_no_sticky(
             header.click()
             expect(header).to_have_attribute("aria-expanded", "true")
         row.locator("div").first.evaluate("el => { el.style.minHeight = '1200px'; }")
-        assert turn_toggle.evaluate("el => getComputedStyle(el).position") != "sticky"
+        assert turn_toggle.evaluate("el => getComputedStyle(el).position") == "sticky"
         assert header.evaluate("el => getComputedStyle(el).position") != "sticky"
-        inner_vp = turn.locator('[data-testid="turn-scroll-viewport"]')
-        metrics = inner_vp.evaluate("""el => {
-          const outerVp = document.querySelector('[data-testid="timeline-surface"] [data-slot="scroll-area-viewport"]');
+        assert turn.locator('[data-testid="turn-scroll-viewport"]').count() == 0
+        outer_vp = page.locator(
+            '[data-testid="timeline-surface"] [data-slot="scroll-area-viewport"]'
+        )
+        metrics = outer_vp.evaluate("""el => {
           el.scrollTop = 120;
           return {
             clientHeight: el.clientHeight,
             scrollHeight: el.scrollHeight,
             scrollTop: el.scrollTop,
-            outerHeight: outerVp ? outerVp.clientHeight : 0,
           };
         }""")
         assert metrics["scrollHeight"] > metrics["clientHeight"], metrics
-        assert metrics["clientHeight"] <= metrics["outerHeight"] * 0.5 + 2, metrics
         assert metrics["scrollTop"] > 0, metrics
         for item_id in ("1.1", "1.2"):
             primary_row = page.locator(f'.timeline-item[data-item-id="{item_id}"]')
