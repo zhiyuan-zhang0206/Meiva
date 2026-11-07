@@ -8,6 +8,7 @@ exports = ["agent_env.py", "agent_slices.py", "boot_actions.py", "boot_policy.py
 "dotenv_boot.py" = ["boot_policy.py", "bootstrap.py", "dotenv_file.py", "registry.py"]
 "dotenv_file.py" = ["dotenv_content.py"]
 "harness" = ["harness_binaries.py"]
+"harness_binaries.py" = ["agent_env.py"]
 "health_ports.py" = ["port_table.py", "registry.py"]
 "registry.py" = ["agent_env.py", "config_lite_table.py", "process_profile.py"]
 "tests" = ["agent_env.py", "boot_actions.py", "boot_policy.py", "bootstrap.py", "dotenv_content.py", "dotenv_file.py", "harness", "harness_binaries.py", "port_lease.py", "port_table.py", "registry.py"]

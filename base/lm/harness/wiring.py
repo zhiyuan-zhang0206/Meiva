@@ -8,7 +8,11 @@ from pathlib import Path
 
 from base.api_contracts.agent_contract import Harness
 from base.host.env.agent_env import MEIVA_PYTHON_ENV
-from base.host.env.harness_binaries import resolve_harness_binary, with_harness_path
+from base.host.env.harness_binaries import (
+    noninteractive_bash_path,
+    resolve_harness_binary,
+    with_harness_path,
+)
 from base.host.env.registry import process_environment
 from base.lm.harness.antigravity import (
     AgySession,
@@ -62,6 +66,7 @@ def session_environ(environ: Mapping[str, str]) -> dict[str, str]:
     else:
         base["PATH"] = venv_bin
     base[MEIVA_PYTHON_ENV] = sys.executable
+    base["SHELL"] = noninteractive_bash_path()
     return with_harness_path(base)
 
 

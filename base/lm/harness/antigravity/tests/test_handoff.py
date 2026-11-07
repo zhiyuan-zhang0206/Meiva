@@ -24,6 +24,7 @@ def test_the_adapter_handoff_carries_the_shell_semantics() -> None:
         assert rule in rendered
     assert "fresh shell" in rendered
     assert "setsid" in rendered
+    assert "stdin closed" in rendered
 
 
 def test_a_plain_handoff_does_not_carry_them() -> None:

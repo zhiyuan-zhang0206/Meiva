@@ -58,6 +58,7 @@ Nothing ran, the exit code is 0, and `denied_actions` is the only structured
 signal. The adapter turns that into `subtype="denied"`, `is_error=True`,
 `permission_denials=("command:RunCommand",)`.
 | Every `run_command` is a fresh shell: `cd` and `export` do not survive into the next call | `handoff_rules.SHELL_SEMANTICS`, appended to the handoff by `build_handoff()` |
+| `run_command` runs non-interactively with stdin closed (`/dev/null`) under modern GNU bash | `wiring.session_environ` sets `SHELL` to the non-interactive bash wrapper script; commands reading stdin receive immediate EOF |
 | A background process started with `&` is killed when the turn ends | same: the handoff tells the agent to use `setsid nohup …` or tmux |
 | `run_command` caps `WaitMsBeforeAsync` at 10s, while cold `import meiva` attachment + plugin loading takes several seconds | same: the handoff tells the agent to pass `WaitMsBeforeAsync=10000` and batch synchronous `meiva.*` calls in one `"$MEIVA_PYTHON" -c` invocation |
 

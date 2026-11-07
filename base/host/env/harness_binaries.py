@@ -9,6 +9,7 @@ import shutil
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 
+from base.host.env.agent_env import MACOS_GNU_BIN_DIRS
 from base.paths.home import user_home
 
 # meiva:note
@@ -27,6 +28,13 @@ HARNESS_BIN_DIRS = (
     "/usr/local/bin",
     "/opt/homebrew/bin",
 )
+
+NONINTERACTIVE_BASH_SCRIPT = Path(__file__).parent / "harness" / "noninteractive_bash.sh"
+
+
+def noninteractive_bash_path() -> str:
+    return str(NONINTERACTIVE_BASH_SCRIPT.resolve())
+
 
 _SYSTEM_BIN_DIRS = ("/usr/bin", "/bin", "/usr/sbin", "/sbin")
 
@@ -101,6 +109,15 @@ def resolve_harness_binary(
     return str(Path(found).absolute())
 
 
+def _child_bin_dirs(home: Path | None = None) -> list[str]:
+    dirs: list[str] = []
+    for entry in harness_bin_dirs(home):
+        if entry == "/opt/homebrew/bin":
+            dirs.extend(MACOS_GNU_BIN_DIRS)
+        dirs.append(entry)
+    return dirs
+
+
 # meiva:note
 # PATH for a harness child: what the host has, then every known install dir, then the
 # system dirs, de-duplicated in that order.
@@ -108,7 +125,7 @@ def resolve_harness_binary(
 def harness_child_path(*, path_env: str | None = None, home: Path | None = None) -> str:
     entries = [
         *(path_env or "").split(os.pathsep),
-        *harness_bin_dirs(home),
+        *_child_bin_dirs(home),
         *_SYSTEM_BIN_DIRS,
     ]
     return os.pathsep.join(dict.fromkeys(entry for entry in entries if entry))
@@ -144,6 +161,6 @@ def require_harness_paths(path_value: str, *, home: Path | None = None, what: st
 
 
 def harness_unit_path(*, leading: Sequence[str], home: Path | None = None, what: str) -> str:
-    entries = [*leading, *harness_bin_dirs(home), *_SYSTEM_BIN_DIRS]
+    entries = [*leading, *_child_bin_dirs(home), *_SYSTEM_BIN_DIRS]
     joined = os.pathsep.join(dict.fromkeys(entry for entry in entries if entry))
     return require_harness_paths(joined, home=home, what=what)

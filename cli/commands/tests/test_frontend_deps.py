@@ -18,6 +18,7 @@ from pathlib import Path
 
 import pytest
 
+from base.sessions.env_forwarding import FRONTEND_TOOLCHAIN_DIRS
 from cli.commands import _repo
 
 _EMPTY_LOCK = "lockfileVersion: '9.0'\n\nimporters:\n  .: {}\n"
@@ -113,12 +114,9 @@ def test_pnpm_install_injects_toolchain_path_from_a_minimal_non_login_shell(
 
     fake_pnpm_install.ensure(repo, {"PATH": "/usr/bin:/bin"})
 
-    assert fake_pnpm_install.seen_path().split(":")[:4] == [
-        "/opt/homebrew/bin",
-        "/usr/local/bin",
-        "/usr/bin",
-        "/bin",
-    ]
+    assert fake_pnpm_install.seen_path().split(":")[: len(FRONTEND_TOOLCHAIN_DIRS)] == list(
+        FRONTEND_TOOLCHAIN_DIRS
+    )
 
 
 # meiva:note

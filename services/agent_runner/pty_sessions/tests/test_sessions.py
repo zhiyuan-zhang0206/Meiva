@@ -23,6 +23,7 @@ from base.sessions.pty.tests.pty_shells import (
     type_line,
     wait_for,
 )
+from services.agent_runner.pty_sessions import session
 
 pytestmark = [
     pytest.mark.usefixtures("pty_service"),
@@ -69,7 +70,7 @@ def test_the_session_record_carries_identity_and_launch_facts(unit_home: Path) -
     (info,) = client.list_sessions(socket_path=service_socket())
     assert info.name == name
     assert info.cwd == str(cwd)
-    assert info.cmd == "/bin/bash -l -i"
+    assert info.cmd == session.SHELL_COMMAND
     assert info.started_at > 0
     assert psutil.Process(info.pid).is_running()
     assert info.record().pid == info.pid

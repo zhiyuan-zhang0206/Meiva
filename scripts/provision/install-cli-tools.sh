@@ -20,6 +20,32 @@
 set -euo pipefail
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_lib.sh"
 
+OS="$(prov_os)"
+
+if [ "$OS" = "macos" ]; then
+    missing=()
+    for bin in git rg jq fd bat tree fzf htop gh; do
+        command -v "$bin" >/dev/null 2>&1 || missing+=("$bin")
+    done
+    command -v gtimeout >/dev/null 2>&1 || [ -x /opt/homebrew/opt/coreutils/libexec/gnubin/timeout ] || [ -x /usr/local/opt/coreutils/libexec/gnubin/timeout ] || missing+=(coreutils)
+    command -v gsed >/dev/null 2>&1 || [ -x /opt/homebrew/opt/gnu-sed/libexec/gnubin/sed ] || [ -x /usr/local/opt/gnu-sed/libexec/gnubin/sed ] || missing+=(gnu-sed)
+    command -v ggrep >/dev/null 2>&1 || [ -x /opt/homebrew/opt/grep/libexec/gnubin/grep ] || [ -x /usr/local/opt/grep/libexec/gnubin/grep ] || missing+=(grep)
+    command -v gfind >/dev/null 2>&1 || [ -x /opt/homebrew/opt/findutils/libexec/gnubin/find ] || [ -x /usr/local/opt/findutils/libexec/gnubin/find ] || missing+=(findutils)
+    command -v gawk >/dev/null 2>&1 || [ -x /opt/homebrew/opt/gawk/libexec/gnubin/gawk ] || [ -x /usr/local/opt/gawk/libexec/gnubin/gawk ] || missing+=(gawk)
+    command -v gtar >/dev/null 2>&1 || [ -x /opt/homebrew/opt/gnu-tar/libexec/gnubin/tar ] || [ -x /usr/local/opt/gnu-tar/libexec/gnubin/tar ] || missing+=(gnu-tar)
+    [ -x /opt/homebrew/bin/bash ] || [ -x /usr/local/bin/bash ] || missing+=(bash)
+
+    if [ ${#missing[@]} -eq 0 ]; then
+        echo "install-cli-tools.sh: all CLI and GNU tools already present — skipping brew"
+        exit 0
+    fi
+
+    echo "install-cli-tools.sh: installing missing tools via Homebrew: ${missing[*]}"
+    export HOMEBREW_NO_AUTO_UPDATE=1 HOMEBREW_NO_INSTALL_UPGRADE=1 NONINTERACTIVE=1
+    brew install git ripgrep jq fd bat tree fzf htop gh bash coreutils gnu-sed grep findutils gawk gnu-tar < /dev/null
+    exit 0
+fi
+
 # The complete tool set, keyed by the binary each package provides (Debian
 # renames fd-find -> fdfind and bat -> batcat). A host that already carries
 # every one of them — a host without sudo, a pre-provisioned CI image —
