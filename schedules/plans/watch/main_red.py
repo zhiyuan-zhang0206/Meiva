@@ -22,6 +22,7 @@ from datetime import datetime, timedelta
 __all__ = [
     "FAILURE_INFRA",
     "FAILURE_TEST",
+    "FAILURE_UNNAMED",
     "NIGHTLY_STALE_AFTER",
     "STATE_CONFIRMED",
     "STATE_INFRA",
@@ -42,6 +43,13 @@ __all__ = [
 
 FAILURE_TEST = "test"
 FAILURE_INFRA = "infra"
+# meiva:note
+# A red run whose log named nothing the watch could read is neither a flake nor the runner: the run
+# failed and no parse put a name on it. Two strikes would buy a night of silence for exactly the
+# failure that once hid a four-hour structure red on `main`, so this class reports on its first
+# sighting -- the fingerprint keeps it to one card -- and its id names the steps a mapping would
+# have to cover, which is how the mapping stops rotting unnoticed.
+FAILURE_UNNAMED = "unnamed"
 
 # meiva:note
 # The watch's own heartbeat, in missed slots: a round lands every half hour, so one hour is two
@@ -140,6 +148,7 @@ class Entry:
     last_green_sha: str | None = None
     last_green_at: datetime | None = None
     task_id: int | None = None
+    kind: str = FAILURE_TEST
 
 
 # meiva:note
@@ -256,20 +265,29 @@ def parse_failures(
     if found:
         return found
     # meiva:note
-    # A named check step failing is a red of that check, not of the runner. Only a workflow that
-    # names its check steps gets here: for the full-suite workflows an unnamed failure stays infra,
-    # because their steps include installs that fail for reasons that are nobody's regression.
+    # A named check step failing is a red of that check, not of the runner.
     for step in failed_steps:
         if step in check_steps:
             return (Failure(f"{job_name} / {step}", FAILURE_TEST),)
+    # meiva:note
+    # Everything below is a red this watch cannot name, and the steps are the whole of what it
+    # knows: an empty tuple here is how a failed run once left no trace at all, so the answer is a
+    # failure that carries the step names -- the fingerprint of a red that names nothing is the
+    # pair (job, steps), which keeps one card per unreadable shape.
+    steps = _steps_label(failed_steps)
     if suite_step_failed and _PYTEST_SUMMARY in log_text:
-        # meiva:note
-        # The suite ran and its summary named nothing this watch could read. Reported under its
-        # own name so a round says "the watch could not parse this", not "the runner broke".
-        return (Failure(f"{job_name}: pytest summary without a parsable case", FAILURE_INFRA),)
-    if suite_step_failed:
-        return (Failure(f"{job_name}: unnamed failure", FAILURE_INFRA),)
+        return (
+            Failure(
+                f"{job_name}: pytest summary without a parsable case ({steps})", FAILURE_UNNAMED
+            ),
+        )
+    if suite_step_failed or failed_steps:
+        return (Failure(f"{job_name}: unnamed failure ({steps})", FAILURE_UNNAMED),)
     return ()
+
+
+def _steps_label(failed_steps: tuple[str, ...]) -> str:
+    return ", ".join(failed_steps) if failed_steps else "no failed step reported"
 
 
 def _unique(failures: tuple[Failure, ...]) -> tuple[Failure, ...]:
@@ -315,16 +333,28 @@ def apply_run(entries: dict[str, Entry], run: RunFacts) -> Plan:
         name = fingerprint(run.workflow, failure.test_id)
         entry = plan_entries.get(name)
         if entry is None:
-            plan_entries[name] = Entry(
+            # meiva:note
+            # An unnameable red is confirmed on its first sighting: there is nothing to wait for a
+            # second time, because the doubt two strikes answer -- "is this case flaky?" -- does not
+            # exist when the doubt is "can the watch read this log at all". Every other class keeps
+            # the second sighting, which is what stops one bad runner from opening a card.
+            state = STATE_CONFIRMED if failure.kind == FAILURE_UNNAMED else STATE_SUSPECTED
+            created = Entry(
                 fingerprint=name,
-                state=STATE_SUSPECTED,
+                state=state,
                 first_seen_sha=run.head_sha,
                 first_seen_at=run.created_at,
                 last_red_sha=run.head_sha,
                 last_red_at=run.created_at,
                 red_count=1,
+                kind=failure.kind,
             )
-            notes.append(f"suspected {name} on {run.head_sha}")
+            plan_entries[name] = created
+            if state == STATE_CONFIRMED:
+                confirmed.append(created)
+                notes.append(f"confirmed {name} on its first red run ({failure.kind})")
+            else:
+                notes.append(f"suspected {name} on {run.head_sha}")
             continue
         updated = replace(
             entry,
@@ -343,7 +373,11 @@ def apply_run(entries: dict[str, Entry], run: RunFacts) -> Plan:
             notes.append(f"confirmed {name} after {updated.red_count} red runs")
         plan_entries[name] = updated
     if run.conclusion == "failure" and not _unique(run.failures):
-        notes.append(f"red run {run.head_sha} named no failure: nothing recorded")
+        # meiva:note
+        # Only reachable when a red run had no failing job to parse at all: every failing job now
+        # yields at least an `unnamed` failure, so this line is the backstop that says the round
+        # still saw a red -- never the whole story it used to be.
+        notes.append(f"red run {run.head_sha} had no failing job to parse: nothing recorded")
     return Plan(tuple(plan_entries.items()), tuple(confirmed), (), tuple(notes))
 
 
@@ -362,6 +396,20 @@ def card_body(
     workflow, _, test_id = entry.fingerprint.partition(_SEPARATOR)
     jobs = ", ".join(job_names) or "-"
     commits = "\n".join(candidate_commits[:_CANDIDATE_LIMIT]) or "(not collected)"
+    # meiva:note
+    # What closes an unnameable red cannot be "this case passes": no case names it. A full-suite run
+    # on a later commit that is green is the only evidence that the tree it failed on was repaired.
+    closes = (
+        "Closes when: `apply_run` reads a green run with `covers_full_suite=true` whose "
+        "`created_at` is later than this entry's `last_red_at`; that run removes the entry and "
+        "the card with it, and no human closes either. While it is open, the same unnameable "
+        "shape only increments `red_count`. Boundary: any full-suite workflow counts, not only "
+        "the one that failed -- a red this workflow keeps reporting while another full-suite "
+        "workflow passes the same tree retires the card while the red stands, and that "
+        "combination is when this rule has to split by workflow."
+        if entry.kind == FAILURE_UNNAMED
+        else f"Closes when: `{test_id}` passes on `main` in any post-merge workflow; the card closes itself."
+    )
     return (
         f"Fingerprint: `{entry.fingerprint}`\n\n"
         f"Evidence: {latest_url or '-'} (jobs: {jobs})\n\n"
@@ -371,8 +419,8 @@ def card_body(
         f"Last green: `{entry.last_green_sha or '-'}`\n\n"
         f"Candidate commits ({workflow}, last green to latest red, {_CANDIDATE_LIMIT} lines max):\n\n"
         f"```\n{commits}\n```\n\n"
-        f"Class: `{FAILURE_TEST}`\n\n"
-        f"Closes when: `{test_id}` passes on `main` in any post-merge workflow; the card closes itself."
+        f"Class: `{entry.kind}`\n\n"
+        f"{closes}"
     )
 
 

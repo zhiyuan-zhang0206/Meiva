@@ -26,6 +26,8 @@ from typing import NamedTuple
 
 from base.host.boundary.json_values import is_object_dict
 from schedules.plans.watch.main_red import (
+    FAILURE_TEST,
+    FAILURE_UNNAMED,
     Card,
     Entry,
     RunFacts,
@@ -151,6 +153,10 @@ def load_state(path: Path) -> WatchState:
                 else None
             ),
             task_id=value.get("task_id"),
+            # meiva:note
+            # A ledger written before the class existed carries no `kind`; those entries were all
+            # named cases, which is the default, so an upgrade never re-reads an old red as new.
+            kind=value.get("kind") or FAILURE_TEST,
         )
         for name, value in raw.get("entries", {}).items()
     }
@@ -177,6 +183,7 @@ def save_state(path: Path, state: WatchState) -> None:
                 "last_green_sha": entry.last_green_sha,
                 "last_green_at": entry.last_green_at.isoformat() if entry.last_green_at else None,
                 "task_id": entry.task_id,
+                "kind": entry.kind,
             }
             for name, entry in state.entries.items()
         },
@@ -255,9 +262,51 @@ def _confirmed_card(
     )
 
 
-def round_line(*, entries: int, confirmed: int, infra: int, notes: tuple[str, ...]) -> str:
-    head = f"fingerprints={entries} confirmed={confirmed} infra={infra}"
+def round_line(
+    *, entries: int, confirmed: int, infra: int, notes: tuple[str, ...], unnamed: int = 0
+) -> str:
+    # meiva:note
+    # `unnamed` is the count that watches the watch: a class-mapping that keeps missing steps shows
+    # up here as a number that grows, because a repeat of a shape already on a card only increments
+    # its count and produces no second card. A flat zero says the mappings still cover what fails.
+    head = f"fingerprints={entries} confirmed={confirmed} infra={infra} unnamed={unnamed}"
     return head if not notes else f"{head} | " + " | ".join(notes)
+
+
+# meiva:note
+# One run's effects, kept out of the round so the round stays a loop over streams: what a run does
+# to the ledger is apply the verdict, keep the newest green, and act on the cards it confirms or
+# closes. `unnamed` is the count of reds the round could not put a name on -- a repeat of a shape
+# already on a card only increments it, so this number is the only place a stale mapping shows.
+def _apply_one_run(
+    entries: dict[str, Entry],
+    run: RunFacts,
+    *,
+    greens: dict[str, str],
+    compare: Compare | None,
+    open_card: Callable[[Card], int],
+    close_card: Callable[[int, str], None],
+    notes: list[str],
+) -> tuple[dict[str, Entry], int, int, int]:
+    plan = apply_run(entries, run)
+    entries = dict(plan.entries)
+    if run.conclusion == "success" and run.covers_full_suite and run.head_sha:
+        greens[run.workflow] = run.head_sha
+    infra = sum(1 for note in plan.notes if "infra on" in note)
+    unnamed = sum(1 for failure in run.failures if failure.kind == FAILURE_UNNAMED)
+    opened = 0
+    for entry in plan.confirmed:
+        card, candidate_note = _confirmed_card(entry, run, compare, greens.get(run.workflow))
+        if candidate_note is not None:
+            notes.append(candidate_note)
+        task_id = open_card(card)
+        entries[entry.fingerprint] = replace(entries[entry.fingerprint], task_id=task_id)
+        opened += 1
+        notes.append(f"opened card {task_id} for {entry.fingerprint}")
+    for task_id in plan.closes:
+        close_card(task_id, "resolved by a green run")
+        notes.append(f"closed card {task_id}")
+    return entries, opened, infra, unnamed
 
 
 def watch_once(
@@ -284,6 +333,7 @@ def watch_once(
     stale = 0
     opened = 0
     infra = 0
+    unnamed = 0
     for workflow in workflows:
         watermark = watermarks.get(workflow)
         seen_at = datetime.fromisoformat(watermark) if watermark else None
@@ -298,24 +348,18 @@ def watch_once(
             if seen_at is not None and run.created_at <= seen_at:
                 continue
             newest = run.created_at if newest is None else max(newest, run.created_at)
-            plan = apply_run(entries, run)
-            entries = dict(plan.entries)
-            if run.conclusion == "success" and run.covers_full_suite and run.head_sha:
-                greens[run.workflow] = run.head_sha
-            infra += sum(1 for note in plan.notes if "infra on" in note)
-            for entry in plan.confirmed:
-                card, candidate_note = _confirmed_card(
-                    entry, run, compare, greens.get(run.workflow)
-                )
-                if candidate_note is not None:
-                    notes.append(candidate_note)
-                task_id = open_card(card)
-                entries[entry.fingerprint] = replace(entries[entry.fingerprint], task_id=task_id)
-                opened += 1
-                notes.append(f"opened card {task_id} for {entry.fingerprint}")
-            for task_id in plan.closes:
-                close_card(task_id, "resolved by a green run")
-                notes.append(f"closed card {task_id}")
+            entries, run_opened, run_infra, run_unnamed = _apply_one_run(
+                entries,
+                run,
+                greens=greens,
+                compare=compare,
+                open_card=open_card,
+                close_card=close_card,
+                notes=notes,
+            )
+            opened += run_opened
+            infra += run_infra
+            unnamed += run_unnamed
         if newest is not None:
             watermarks[workflow] = newest.isoformat()
     for stream in liveness:
@@ -343,9 +387,12 @@ def watch_once(
             "confirmed": opened,
             "infra": infra,
             "stale": stale,
+            "unnamed": unnamed,
         }
     )
-    return round_line(entries=len(entries), confirmed=opened, infra=infra, notes=tuple(notes))
+    return round_line(
+        entries=len(entries), confirmed=opened, infra=infra, notes=tuple(notes), unnamed=unnamed
+    )
 
 
 # meiva:note
