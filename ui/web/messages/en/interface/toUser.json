@@ -23,7 +23,5 @@
   "missing": "This link is no longer available.",
   "unreadable": "This file can't be shown here.",
   "openRaw": "Open the file itself",
-  "deliveryUnread": "Unread · mark read",
-  "deliveryPending": "Unread publications",
-  "deliveryUnavailable": "User messages could not be loaded."
+  "deliveryUnread": "Unread · mark read"
 }

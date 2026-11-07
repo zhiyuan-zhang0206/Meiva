@@ -23,7 +23,5 @@
   "missing": "这条链接已经失效。",
   "unreadable": "这个文件在这里显示不了。",
   "openRaw": "直接打开这个文件",
-  "deliveryUnread": "未读 · 标为已读",
-  "deliveryPending": "未读消息",
-  "deliveryUnavailable": "无法加载用户消息。"
+  "deliveryUnread": "未读 · 标为已读"
 }

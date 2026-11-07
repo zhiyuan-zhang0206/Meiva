@@ -190,9 +190,25 @@ function follows(first: Element, second: Element): boolean {
 }
 
 it.each([false, true])("leaves no bottom region, and no gap, when there is no question (mobile=%s)", (mobile) => {
+  qc.setQueryData(["user-messages", 7], {
+    mode: "sdk",
+    items: [
+      {
+        id: 1,
+        agent_id: 7,
+        mode: "sdk",
+        source_key: "sdk:pub:1",
+        content: "Published summary",
+        suggestions: null,
+        created_at: "2026-11-07T00:00:00Z",
+        read_at: null,
+      },
+    ],
+  });
   renderPanelView({ mobile });
   expect(screen.queryByTestId("notice-region")).toBeNull();
   expect(screen.queryByRole("region", { name: "Ask" })).toBeNull();
+  expect(screen.queryByText("Published summary")).toBeNull();
 });
 
 it.each([false, true])("pins the title bar outside the reading viewport, so a scroll moves only the content (inspector=%s)", async (inspector) => {
