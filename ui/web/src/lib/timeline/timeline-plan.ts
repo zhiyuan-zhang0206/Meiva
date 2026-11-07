@@ -28,7 +28,11 @@ export function hasUnsettledClock(items: readonly BackendTimelineItem[]): boolea
     if (
       (it.reasoningStartedAt != null && it.reasoning_ms == null) ||
       it.codeStartedAt != null ||
-      (it.execStartedAt != null && it.exec_ms == null)
+      (it.execStartedAt != null && it.exec_ms == null) ||
+      (it.activity_revision != null &&
+        ((it.kind === "agent_reasoning" && it.reasoning_ms == null) ||
+          (it.kind === "agent_code" && it.code_elapsed_ms == null) ||
+          (it.kind === "code_output" && it.exec_ms == null)))
     ) {
       return true;
     }

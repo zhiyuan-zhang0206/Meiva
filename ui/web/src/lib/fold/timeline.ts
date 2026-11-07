@@ -316,9 +316,14 @@ function upsertItemById(
  *  that thinking precedes all text. */
 export function freezeReasoningClocks(items: BackendTimelineItem[], nowMs = 1): BackendTimelineItem[] {
   return items.map((it) => {
-    if (it.kind === "agent_reasoning" && it.reasoningStartedAt != null && it.reasoning_ms == null) {
-      const { reasoningStartedAt, ...rest } = it;
-      return { ...rest, reasoningElapsedMs: nowMs - reasoningStartedAt };
+    if (it.kind === "agent_reasoning" && it.reasoning_ms == null) {
+      const startedAt =
+        it.reasoningStartedAt ??
+        (it.activity_revision != null && it.created_at ? Date.parse(it.created_at) : undefined);
+      if (startedAt != null && !Number.isNaN(startedAt)) {
+        const { reasoningStartedAt: _, ...rest } = it;
+        return { ...rest, reasoningElapsedMs: Math.max(nowMs - startedAt, 0) };
+      }
     }
     return it;
   });
@@ -329,9 +334,14 @@ export function freezeReasoningClocks(items: BackendTimelineItem[], nowMs = 1): 
  *  Only touches items whose `codeStartedAt` is set (genuine live clocks). */
 export function clearCodeClocks(items: BackendTimelineItem[], nowMs = 1): BackendTimelineItem[] {
   return items.map((it) => {
-    if (it.kind === "agent_code" && it.codeStartedAt != null) {
-      const { codeStartedAt: _, ...rest } = it;
-      return { ...rest, codeElapsedMs: nowMs - it.codeStartedAt };
+    if (it.kind === "agent_code" && it.code_elapsed_ms == null) {
+      const startedAt =
+        it.codeStartedAt ??
+        (it.activity_revision != null && it.created_at ? Date.parse(it.created_at) : undefined);
+      if (startedAt != null && !Number.isNaN(startedAt)) {
+        const { codeStartedAt: _, ...rest } = it;
+        return { ...rest, codeElapsedMs: Math.max(nowMs - startedAt, 0) };
+      }
     }
     return it;
   });
@@ -339,9 +349,14 @@ export function clearCodeClocks(items: BackendTimelineItem[], nowMs = 1): Backen
 
 export function freezeExecClocks(items: BackendTimelineItem[], nowMs = 1): BackendTimelineItem[] {
   return items.map((it) => {
-    if (it.kind === "code_output" && it.execStartedAt != null && it.exec_ms == null) {
-      const { execStartedAt, ...rest } = it;
-      return { ...rest, execElapsedMs: Math.max(nowMs - execStartedAt, 0) };
+    if (it.kind === "code_output" && it.exec_ms == null) {
+      const startedAt =
+        it.execStartedAt ??
+        (it.activity_revision != null && it.created_at ? Date.parse(it.created_at) : undefined);
+      if (startedAt != null && !Number.isNaN(startedAt)) {
+        const { execStartedAt: _, ...rest } = it;
+        return { ...rest, execElapsedMs: Math.max(nowMs - startedAt, 0) };
+      }
     }
     return it;
   });
@@ -630,11 +645,42 @@ export function mergeSnapshotWithStreaming(
         it.activity_revision > committed.activity_revision
       ) {
         committedById.set(it.item_id, it);
+      } else {
+        let updated = committed;
+        if (
+          it.reasoningStartedAt != null &&
+          committed.reasoningStartedAt == null &&
+          committed.reasoning_ms == null
+        ) {
+          updated = { ...updated, reasoningStartedAt: it.reasoningStartedAt };
+        }
+        if (
+          it.codeStartedAt != null &&
+          committed.codeStartedAt == null &&
+          committed.code_elapsed_ms == null
+        ) {
+          updated = { ...updated, codeStartedAt: it.codeStartedAt };
+        }
+        if (
+          it.execStartedAt != null &&
+          committed.execStartedAt == null &&
+          committed.exec_ms == null
+        ) {
+          updated = { ...updated, execStartedAt: it.execStartedAt };
+        }
+        if (updated !== committed) {
+          committedById.set(it.item_id, updated);
+        }
       }
       return false;
     }
     const isUncommittedStreamItem =
       Boolean(it.partial) ||
+      it.activity_pending === true ||
+      (it.activity_revision != null &&
+        ((it.kind === "agent_reasoning" && it.reasoning_ms == null) ||
+          (it.kind === "agent_code" && it.code_elapsed_ms == null) ||
+          (it.kind === "code_output" && it.exec_ms == null))) ||
       (it.reasoningStartedAt != null && it.reasoning_ms == null) ||
       (it.codeStartedAt != null && it.code_elapsed_ms == null) ||
       (it.kind === "code_output" && it.execStartedAt != null && it.exec_ms == null);
@@ -774,9 +820,9 @@ export function foldEvent(t: ThreadTimelineState, ev: SystemEvent, nowMs = 1): T
   const applied = applySystemEvent(t.items, ev, nowMs);
   const anyLiveClock = applied.some(
     (it) =>
-      (it.reasoningStartedAt != null && it.reasoning_ms == null) ||
-      (it.codeStartedAt != null && it.code_elapsed_ms == null) ||
-      (it.execStartedAt != null && it.exec_ms == null),
+      ((it.reasoningStartedAt != null || it.activity_revision != null) && it.reasoning_ms == null && it.kind === "agent_reasoning") ||
+      ((it.codeStartedAt != null || it.activity_revision != null) && it.code_elapsed_ms == null && it.kind === "agent_code") ||
+      ((it.execStartedAt != null || it.activity_revision != null) && it.exec_ms == null && it.kind === "code_output"),
   );
   // cancelled is handled above (it flips both flags off); intentionally absent here.
   const hardTurnEnd = ev.role === "llm_done" || ev.role === "error";

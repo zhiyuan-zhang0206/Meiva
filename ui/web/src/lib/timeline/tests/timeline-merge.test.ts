@@ -243,6 +243,28 @@ describe("mergeSnapshotWithStreaming", () => {
     ]);
   });
 
+  it("preserves reasoningStartedAt/codeStartedAt/execStartedAt from prev when snapshot item is still unsettled", () => {
+    const prev = [
+      item({
+        item_id: "2.0",
+        kind: "agent_reasoning",
+        payload: "thinking...",
+        reasoningStartedAt: 123456,
+        reasoning_ms: null,
+      }),
+    ];
+    const snapshot = [
+      item({
+        item_id: "2.0",
+        kind: "agent_reasoning",
+        payload: "thinking more...",
+        reasoning_ms: null,
+      }),
+    ];
+    const result = mergeSnapshotWithStreaming(prev, snapshot, 3);
+    expect(result[0].reasoningStartedAt).toBe(123456);
+  });
+
 });
 
 describe("isEventForThread", () => {

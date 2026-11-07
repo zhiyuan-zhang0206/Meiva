@@ -23,7 +23,7 @@ import {
 import { cn } from "@/lib/format/utils";
 import { FLEX, MIN_W_0 } from "@/lib/layout/layout";
 
-import { isLiveCode, isLiveExecution } from "../model/reasoning-clock";
+import { isLiveCode, isLiveExecution, itemLiveStartedAt } from "../model/reasoning-clock";
 
 export function agentChatTitle(item: BackendTimelineItem): {
   title: string;
@@ -133,8 +133,9 @@ function ThinkingSummary({
   const t = useTranslations("timeline");
 
   let label: string;
-  if (live && item.reasoningStartedAt != null) {
-    label = t("thinkingFor", { duration: formatDuration(now - item.reasoningStartedAt) });
+  const startedAt = item.reasoningStartedAt ?? itemLiveStartedAt(item);
+  if (live && startedAt != null) {
+    label = t("thinkingFor", { duration: formatDuration(now - startedAt) });
   } else if (item.reasoning_ms != null) {
     label = t("thoughtFor", { duration: formatDuration(item.reasoning_ms) });
   } else if (item.reasoningElapsedMs != null) {
@@ -165,8 +166,9 @@ function CodeSummary({
   let timing: string | null = null;
   const liveCode = isLiveCode(item);
   const codeElapsed = item.code_elapsed_ms ?? item.codeElapsedMs;
-  if (liveCode && item.codeStartedAt != null) {
-    timing = t("writingCodeFor", { duration: formatDuration(now - item.codeStartedAt) });
+  const codeStartedAt = item.codeStartedAt ?? itemLiveStartedAt(item);
+  if (liveCode && codeStartedAt != null) {
+    timing = t("writingCodeFor", { duration: formatDuration(now - codeStartedAt) });
   } else if (codeElapsed != null) {
     timing = t("wroteCodeFor", { duration: formatDuration(codeElapsed) });
   }
@@ -226,11 +228,12 @@ function OutputSummary({ item, now }: { item: BackendTimelineItem; now: number }
   const t = useTranslations("timeline");
   const liveExec = isLiveExecution(item);
   const execMs = item.exec_ms ?? item.execElapsedMs;
+  const execStartedAt = item.execStartedAt ?? itemLiveStartedAt(item);
   let ran: string | null = null;
   if (execMs != null) {
     ran = t("ranIn", { duration: formatDuration(execMs) });
-  } else if (liveExec && item.execStartedAt != null) {
-    ran = t("runningFor", { duration: formatDuration(now - item.execStartedAt) });
+  } else if (liveExec && execStartedAt != null) {
+    ran = t("runningFor", { duration: formatDuration(now - execStartedAt) });
   }
   return (
     <span className={cn("items-center gap-1.5", FLEX, MIN_W_0)}>

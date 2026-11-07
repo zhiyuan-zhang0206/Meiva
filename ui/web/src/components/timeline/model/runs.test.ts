@@ -395,3 +395,59 @@ describe("summarizeTurn — workedMs", () => {
     expect(formatTurnSummary(several)).toBe("2 system notes");
   });
 });
+
+describe("summarizeTurn — external harness items", () => {
+  it("tracks in-progress external harness reasoning", () => {
+    const s = summarizeTurn([
+      item("agent_reasoning", null, "1.0", {
+        created_at: "2026-10-25T01:02:03.000Z",
+        activity_revision: 1,
+      }),
+    ]);
+    expect(s.thinking).toBe(1);
+    expect(s.lastLiveKind).toBe("reasoning");
+    expect(s.lastLiveStartedAt).toBe(Date.parse("2026-10-25T01:02:03.000Z"));
+  });
+
+  it("tracks in-progress external harness tool execution", () => {
+    const s = summarizeTurn([
+      item("agent_code", null, "2.0", {
+        created_at: "2026-10-25T01:02:03.000Z",
+        code_elapsed_ms: 1_200,
+        activity_revision: 1,
+      }),
+      item("code_output", null, "3.0", {
+        created_at: "2026-10-25T01:02:04.200Z",
+        activity_revision: 1,
+      }),
+    ]);
+    expect(s.code).toBe(1);
+    expect(s.output).toBe(1);
+    expect(s.workedMs).toBe(1_200);
+    expect(s.lastLiveKind).toBe("output");
+    expect(s.lastLiveStartedAt).toBe(Date.parse("2026-10-25T01:02:04.200Z"));
+  });
+
+  it("clears live kind once external harness items are settled", () => {
+    const s = summarizeTurn([
+      item("agent_reasoning", null, "1.0", {
+        created_at: "2026-10-25T01:02:03.000Z",
+        activity_revision: 2,
+        reasoning_ms: 2_500,
+      }),
+      item("agent_code", null, "2.0", {
+        created_at: "2026-10-25T01:02:05.500Z",
+        code_elapsed_ms: 500,
+        activity_revision: 1,
+      }),
+      item("code_output", null, "3.0", {
+        created_at: "2026-10-25T01:02:06.000Z",
+        activity_revision: 2,
+        exec_ms: 3_000,
+      }),
+    ]);
+    expect(s.workedMs).toBe(6_000);
+    expect(s.lastLiveKind).toBeNull();
+    expect(s.lastLiveStartedAt).toBe(0);
+  });
+});
