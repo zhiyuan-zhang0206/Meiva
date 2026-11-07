@@ -102,6 +102,9 @@ class FieldInfoLike(Protocol):
     def default_factory(self) -> Callable[..., object] | None: ...
 
     @property
+    def title(self) -> str | None: ...
+
+    @property
     def description(self) -> str | None: ...
 
     @property
