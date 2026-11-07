@@ -185,7 +185,7 @@ const createDefaultComponents = (onOpenFile: (path: string, lineRange?: string) 
                 onOpenFile(fileMatch.path, fileMatch.lineRange);
               }
             }}
-            className="underline underline-offset-2 cursor-pointer"
+            className="cursor-pointer"
           >
             <code className={className} {...props}>
               {children}
@@ -236,7 +236,7 @@ const createInlineComponents = (onOpenFile: (path: string, lineRange?: string) =
               onOpenFile(fileMatch.path, fileMatch.lineRange);
             }
           }}
-          className="underline underline-offset-2 cursor-pointer"
+          className="cursor-pointer"
         >
           <code>{children}</code>
         </span>
