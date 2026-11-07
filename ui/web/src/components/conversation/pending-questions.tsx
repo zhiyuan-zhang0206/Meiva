@@ -13,9 +13,9 @@ import { FLEX, OVERFLOW_HIDDEN, QUESTION_REGION_MAX_HEIGHT_CLASS } from "@/lib/l
 import { dropOpenNotices } from "@/lib/notifications/use-notices";
 
 // meiva:note
-// The queue overlays the timeline above the composer. Expansion never changes the
-// timeline's height, and hiding rather than unmounting keeps every answer draft.
-// meiva:link ui/web/src/docs/frontend-state/shared-context/shared-context.meiva.okf.md
+// The collapsed bar has one stable row above the composer. Answers expand over
+// the timeline without resizing it; hidden mounted forms retain every draft.
+// meiva:link ui/web/src/docs/frontend-state/shared-context/questions.meiva.okf.md
 export function PendingQuestions({ questions, failed, maxWidthCss }: {
   questions: readonly NoticeItem[];
   failed: boolean;
@@ -27,9 +27,9 @@ export function PendingQuestions({ questions, failed, maxWidthCss }: {
   const contentId = useId();
   if (!questions.length && !failed) return null;
   return <section data-testid="pending-questions" aria-label={t("pendingQuestions", { count: questions.length })}
-    className="absolute inset-x-0 bottom-full z-30 mx-auto w-full px-4 pb-1"
+    className="relative z-30 mx-auto w-full px-4 pb-1"
     style={maxWidthCss ? { maxWidth: maxWidthCss } : undefined}>
-    <div className={cn(OVERFLOW_HIDDEN, "rounded-xl border border-border bg-background shadow-lg")}>
+    <div className={cn("relative border border-border bg-background shadow-lg", expanded ? "rounded-b-xl" : "rounded-xl")}>
       {failed && <p role="status" className="px-3 py-2 text-xs text-muted-foreground">{t("questionsUnavailable")}</p>}
       {questions.length > 0 && <>
         <button type="button" aria-expanded={expanded} aria-controls={contentId}
@@ -38,9 +38,9 @@ export function PendingQuestions({ questions, failed, maxWidthCss }: {
           <span className="grow">{t("pendingQuestions", { count: questions.length })}</span>
           {expanded ? <ChevronDown aria-hidden className="size-4" /> : <ChevronUp aria-hidden className="size-4" />}
         </button>
-        <div id={contentId} hidden={!expanded}>
+        <div id={contentId} hidden={!expanded} className={cn(OVERFLOW_HIDDEN, "absolute -inset-x-px bottom-full rounded-t-xl border border-b-0 border-border bg-background shadow-lg")}>
           <ScrollArea viewportClassName={cn(QUESTION_REGION_MAX_HEIGHT_CLASS, "overscroll-y-contain")}>
-            <div className="divide-y divide-border border-t border-border">
+            <div className="divide-y divide-border">
               {questions.map((question) => <article key={question.id} aria-label={question.title} className="p-3">
                 <OpenNoticeDetail agentId={question.agent_id} notice={question} onResolved={() => {
                   dropOpenNotices(cache, [question.id]);

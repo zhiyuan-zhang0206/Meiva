@@ -29,11 +29,13 @@ afterEach(() => { cleanup(); dropTombstonesResetForTest(); });
 it("anchors a collapsed queue above the composer and retains independent drafts through collapse", () => {
   renderQuestions(<PendingQuestions questions={questions} failed={false} maxWidthCss="768px" />);
   const region = screen.getByTestId("pending-questions");
-  expect(region.className).toContain("absolute");
-  expect(region.className).toContain("bottom-full");
+  expect(region.className).toContain("relative");
   expect(region.style.maxWidth).toBe("768px");
   const toggle = screen.getByRole("button", { name: "2 questions waiting" });
   expect(toggle.getAttribute("aria-expanded")).toBe("false");
+  const answerLayer = document.getElementById(toggle.getAttribute("aria-controls")!)!;
+  expect(answerLayer.className).toContain("absolute");
+  expect(answerLayer.className).toContain("bottom-full");
   expect(screen.queryByRole("textbox")).toBeNull();
   fireEvent.click(toggle);
   const first = within(screen.getByRole("article", { name: "Question 1" })).getByRole<HTMLTextAreaElement>("textbox");

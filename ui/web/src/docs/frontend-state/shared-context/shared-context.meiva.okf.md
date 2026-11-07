@@ -25,35 +25,10 @@ reading position to the top. Within `[data-testid="document-content"]`,
 `15px / 14px / 13px / 12.5px` headings, `12px` code blocks and tables, and
 `11.5px` inline code), subordinate to the `15px` conversation column.
 
-## Questions above the composer
-
-`PendingQuestions` owns the selected agent's entire awaiting-response queue,
-including legacy unstructured questions. The default collapsed bar shows the
-count; expanding shows independently answerable questions ordered by priority
-and age. The queue is absolutely anchored above the composer, overlaying the
-conversation rather than reducing its viewport height. Its inner `ScrollArea`
-viewport is capped at 45% of the visual viewport, including the on-screen
-keyboard. The existing `OpenNoticeDetail` owns submission, operation keys,
-conflicts and retries. Collapse hides mounted forms, preserving every draft.
-A successful reply drops only that question from the shared notice cache and
-refreshes resolved history. A failed feed preserves stale questions and visibly
-reports the failure.
-
-Pending forms appear here once. The right panel remains a document/Inspector
-surface, and the timeline keeps resolved question/answer history. Suggestion
-requests still receive pending-question context, even though those questions
-are outside the visible timeline. The former right-column card and timeline
-form were rejected because they duplicated the answer surface and separated it
-from the place the user composes a reply. A normal stacked footer was rejected
-because expansion would shrink the message viewport.
-
-Open text questions have one answer box and no separate Note. Choice questions
-keep numbered options and one optional Note. `note_suggestion` is a light
-placeholder in the corresponding answer or Note box, not an initial draft.
-Tab or Right Arrow applies it as ordinary foreground text without submitting;
-Enter sends only a nonempty draft. Modified shortcuts, IME composition and
-existing drafts keep their normal keyboard behavior. This same Tab/Right
-acceptance applies to conversation reply suggestions.
+Pending questions belong above the conversation composer, with one collapsed
+queue row and answers expanding over the timeline. Their forms, draft lifecycle
+and suggestion acceptance have their own node:
+[[ui/web/src/docs/frontend-state/shared-context/questions.meiva.okf.md|Conversation question queue]].
 
 The inspector is a mode over the right column, not a peer tab: the magnifier at
 the end of the document bar switches the column to the inspector and the same
