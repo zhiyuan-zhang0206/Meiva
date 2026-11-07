@@ -35,6 +35,15 @@ repository with a foreign `.venv`. The same binary directory list feeds the prob
 `base/agents/birth/harness.py` and the `launchd` job PATH in
 `base/host/system/cron/mechanics.py`, so all three agree on where the CLIs live.
 
+The pinned interpreter fixes which `python` runs, not which code it imports:
+`python -c` puts the working directory first on `sys.path`, so that command run
+inside a clone of this repository imports that clone's `base`/`meiva` and the
+home's ledger refuses the process it then is (`this process runs <cwd>, not the
+home's source checkout <source>`). Run the command outside any checkout
+(`cd /tmp`), or pin `PYTHONSAFEPATH=1` on that one command; never export it, since
+every child inherits it and a checkout's `pytest` imports its own tree from the
+working directory.
+
 Every unit this repository installs composes its PATH through
 `harness_binaries.harness_unit_path`, which appends the table and then refuses a
 result that omits any of it (`HarnessPathIncompleteError`, naming the unit and the
