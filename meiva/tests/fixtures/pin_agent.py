@@ -27,6 +27,30 @@ from meiva.boot import clients_over, derived_clients
 from meiva.sdk_surface import process_context
 
 
+# TEMPORARY DEBUG PROBE (#6424) — debug/6424-dburl-probe only, never merge.
+def _probe_snapshot(config: object) -> None:
+    import sys
+
+    view = getattr(config, "view", None)
+    plane = getattr(view, "data_plane", None)
+    url = getattr(plane, "db_url", "") or ""
+    if ":1/" in url and "meiva_citest" in url:
+        sys.stderr.write(
+            "PROBE-SNAPSHOT test=%r url=%r env=%r\n"
+            % (os.environ.get("PYTEST_CURRENT_TEST"), url, os.environ.get("MEIVA_DB_URL"))
+        )
+        sys.stderr.flush()
+
+
+def _probe_tag(clients: ClientSet) -> None:
+    if getattr(clients, "_probe_created_by", None) is not None:
+        return
+    try:
+        clients._probe_created_by = os.environ.get("PYTEST_CURRENT_TEST")
+    except Exception:
+        pass
+
+
 @pytest.fixture
 async def hosted_resources() -> AsyncGenerator[HostedTurnResources]:
     """An explicit test service owns watcher/completion results until fixture join."""
@@ -41,14 +65,20 @@ async def hosted_resources() -> AsyncGenerator[HostedTurnResources]:
 # Clients over a snapshot of the process configuration, for a pinned agent whose test supplied none.
 def snapshot_clients() -> ClientSet:
     config = snapshot_process_config()
-    return derived_clients(config, ConfiguredMachineIdentity(config))
+    _probe_snapshot(config)
+    clients = derived_clients(config, ConfiguredMachineIdentity(config))
+    _probe_tag(clients)
+    return clients
 
 
 # meiva:note
 # Clients over a snapshot of the process configuration whose database is the factory the test holds.
 def snapshot_clients_over(database: DatabaseFactory) -> ClientSet:
     config = snapshot_process_config()
-    return clients_over(config, ConfiguredMachineIdentity(config), database)
+    _probe_snapshot(config)
+    clients = clients_over(config, ConfiguredMachineIdentity(config), database)
+    _probe_tag(clients)
+    return clients
 
 
 def pin_agent(
@@ -69,10 +99,7 @@ def pin_agent(
     # TEMPORARY DEBUG PROBE (#6424) — debug/6424-dburl-probe only, never merge.
     _probe_target = clients if clients is not None else (bound.clients if bound else None)
     if _probe_target is not None:
-        try:
-            _probe_target._probe_pinned_by = os.environ.get("PYTEST_CURRENT_TEST")
-        except Exception:
-            pass
+        _probe_tag(_probe_target)
     process_context.bind_context(
         MeivaContext(
             meiva_home=resolve_meiva_home() if meiva_home is None else meiva_home,

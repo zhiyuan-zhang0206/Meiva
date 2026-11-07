@@ -54,11 +54,11 @@ def _probe_port_one(handle: object, owner: object) -> None:
     except Exception as exc:  # pragma: no cover - debug only
         settings_url = f"<{type(exc).__name__}>"
     sys.stderr.write(
-        "PROBE-DIAL test=%r clients=%s pinned_by=%r url=%r settings=%r\n"
+        "PROBE-DIAL test=%r clients=%s created_by=%r url=%r settings=%r\n"
         % (
             os.environ.get("PYTEST_CURRENT_TEST"),
             id(owner),
-            getattr(owner, "_probe_pinned_by", None),
+            getattr(owner, "_probe_created_by", None),
             url,
             settings_url,
         )
