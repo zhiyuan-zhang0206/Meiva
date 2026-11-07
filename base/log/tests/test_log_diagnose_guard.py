@@ -13,6 +13,7 @@
 
 from __future__ import annotations
 
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -24,6 +25,18 @@ from base.log.sinks import add_sink
 
 _CHILD = Path(__file__).with_name("diagnose_guard_child.py")
 _SENTINEL = "SENTINEL-PASSWORD-123"
+
+
+# meiva:note
+# loguru colorizes a record by wrapping each token in an escape sequence, so a literal spanning two
+# tokens ("RuntimeError: boom") is split by a reset and never matches -- the assertion would then
+# test the colorizer rather than the guard. Strip the escapes and assert on the tokens that matter:
+# the failure survives, the frame's local value does not.
+_ANSI = re.compile(r"\x1b\[[0-9;]*m")
+
+
+def _plain(text: str) -> str:
+    return _ANSI.sub("", text)
 
 
 def _discard(_message: object) -> None:
@@ -46,15 +59,16 @@ def test_a_sink_added_directly_still_renders_frame_locals() -> None:
     done = _run("raw-add")
 
     assert done.stdout.strip() != "diagnosing handlers: []"
-    assert _SENTINEL in done.stderr
+    assert _SENTINEL in _plain(done.stderr)
 
 
 def test_a_process_with_its_own_sink_renders_no_frame_locals() -> None:
     done = _run("own-sink")
+    output = _plain(done.stderr)
 
     assert done.stdout.strip() == "diagnosing handlers: []"
-    assert _SENTINEL not in done.stderr
-    assert "RuntimeError: boom" in done.stderr
+    assert _SENTINEL not in output
+    assert "boom" in output
 
 
 def test_add_sink_disables_a_handler_registered_before_it() -> None:
