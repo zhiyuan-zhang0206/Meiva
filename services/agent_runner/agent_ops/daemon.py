@@ -73,6 +73,7 @@ from services.agent_runner.agent_ops.to_user_resource import resource_route
 from services.agent_runner.agent_ops.to_user_watch import watch_to_user
 from services.agent_runner.agent_ops.upload_object import upload_object_route
 from services.agent_runner.agent_ops.workspace_export import workspace_export_route
+from services.agent_runner.agent_ops.workspace_file import content_route, raw_route
 
 _log = logging.getLogger("services.agent_runner.agent_ops.daemon")
 
@@ -607,6 +608,31 @@ async def serve_ops_daemon(
                     machine=our_machine,
                     home=home,
                     limits=to_user_limits_from_read_model(authority),
+                    executor=executor,
+                    dispatch_sem=dispatch_sem,
+                    requests=requests,
+                    workers=workers,
+                ),
+                # meiva:note
+                # Answers for this machine's own agents only; both routes share the to_user budget.
+                # meiva:link base/agents/workspace_files/docs/workspace-files.meiva.okf.md
+                ("POST", "/workspace-file/content"): functools.partial(
+                    content_route,
+                    pool=pool,
+                    machine=our_machine,
+                    home=home,
+                    max_bytes=to_user_limits_from_read_model(authority).resource_bytes,
+                    executor=executor,
+                    dispatch_sem=dispatch_sem,
+                    requests=requests,
+                    workers=workers,
+                ),
+                ("POST", "/workspace-file/raw"): functools.partial(
+                    raw_route,
+                    pool=pool,
+                    machine=our_machine,
+                    home=home,
+                    max_bytes=to_user_limits_from_read_model(authority).resource_bytes,
                     executor=executor,
                     dispatch_sem=dispatch_sem,
                     requests=requests,

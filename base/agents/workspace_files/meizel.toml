@@ -1,0 +1,10 @@
+exports = ["paths.py", "read.py"]
+
+[uses]
+"__init__.py" = ["errors.py", "models.py", "paths.py", "read.py"]
+"read.py" = ["errors.py", "models.py", "paths.py"]
+"paths.py" = ["errors.py"]
+
+[purity]
+"errors.py" = "strict"
+"models.py" = "strict"

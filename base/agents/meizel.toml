@@ -1,4 +1,4 @@
-exports = ["birth", "context", "history", "inbox", "incarnation", "labels.py", "lifecycle.py", "lifecycle_signals.py", "messages", "model", "observation", "recovery", "sdk", "tasks", "tests", "to_user", "upload_delivery"]
+exports = ["birth", "context", "history", "inbox", "incarnation", "labels.py", "lifecycle.py", "lifecycle_signals.py", "messages", "model", "observation", "recovery", "sdk", "tasks", "tests", "to_user", "upload_delivery", "workspace_files"]
 
 [uses]
 "birth" = ["history", "inbox", "labels.py", "model"]

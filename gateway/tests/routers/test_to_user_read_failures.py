@@ -44,6 +44,14 @@ def client(db_url: str) -> Iterator[GatewayTestClient]:
         yield value
 
 
+# meiva:note
+# The workspace-file routes read locally only when the agent's row names this gateway's own machine,
+# so these tests place their agent here: a literal "macmini" would now exercise the remote branch and
+# answer 503 against a machine that does not exist in the fixture.
+def _local_machine(client: GatewayTestClient) -> str:
+    return str(client.app.state.gateway_process.machine.name())
+
+
 def _home_machine_agent(conn: psycopg.Connection, machine: str) -> int:
     agent = create_agent(conn)
     conn.execute(
@@ -99,7 +107,7 @@ def test_a_failure_without_a_reason_is_the_unreadable_class(
 def test_get_workspace_file_text_success(
     client: GatewayTestClient, db_conn: psycopg.Connection
 ) -> None:
-    agent = _home_machine_agent(db_conn, "macmini")
+    agent = _home_machine_agent(db_conn, _local_machine(client))
     ws = Path(workspace_path(client.app.state.gateway_process.home, agent))
     ws.mkdir(parents=True, exist_ok=True)
     target = ws / "subdir" / "test.txt"
@@ -120,7 +128,7 @@ def test_get_workspace_file_text_success(
 def test_get_workspace_file_with_line_hash_and_absolute_path(
     client: GatewayTestClient, db_conn: psycopg.Connection
 ) -> None:
-    agent = _home_machine_agent(db_conn, "macmini")
+    agent = _home_machine_agent(db_conn, _local_machine(client))
     ws = Path(workspace_path(client.app.state.gateway_process.home, agent))
     ws.mkdir(parents=True, exist_ok=True)
     target = ws / "code.py"
@@ -138,7 +146,7 @@ def test_get_workspace_file_with_line_hash_and_absolute_path(
 def test_get_workspace_file_image_returns_base64(
     client: GatewayTestClient, db_conn: psycopg.Connection
 ) -> None:
-    agent = _home_machine_agent(db_conn, "macmini")
+    agent = _home_machine_agent(db_conn, _local_machine(client))
     ws = Path(workspace_path(client.app.state.gateway_process.home, agent))
     ws.mkdir(parents=True, exist_ok=True)
     target = ws / "icon.png"
@@ -161,7 +169,7 @@ def test_get_workspace_file_image_returns_base64(
 def test_get_workspace_file_raw_video_range_request(
     client: GatewayTestClient, db_conn: psycopg.Connection
 ) -> None:
-    agent = _home_machine_agent(db_conn, "macmini")
+    agent = _home_machine_agent(db_conn, _local_machine(client))
     ws = Path(workspace_path(client.app.state.gateway_process.home, agent))
     ws.mkdir(parents=True, exist_ok=True)
     target = ws / "clip.mp4"
@@ -180,7 +188,7 @@ def test_get_workspace_file_raw_video_range_request(
 def test_get_workspace_file_in_custom_cwd(
     client: GatewayTestClient, db_conn: psycopg.Connection, tmp_path: Path
 ) -> None:
-    agent = _home_machine_agent(db_conn, "macmini")
+    agent = _home_machine_agent(db_conn, _local_machine(client))
     ws = Path(workspace_path(client.app.state.gateway_process.home, agent))
     ws.mkdir(parents=True, exist_ok=True)
     _ = (ws / "ws_file.txt").write_text("in workspace", encoding="utf-8")
@@ -213,7 +221,7 @@ def test_get_workspace_file_in_custom_cwd(
 def test_get_workspace_file_traversal_forbidden(
     client: GatewayTestClient, db_conn: psycopg.Connection
 ) -> None:
-    agent = _home_machine_agent(db_conn, "macmini")
+    agent = _home_machine_agent(db_conn, _local_machine(client))
     ws = Path(workspace_path(client.app.state.gateway_process.home, agent))
     ws.mkdir(parents=True, exist_ok=True)
     response = client.get(f"/api/agents/{agent}/files/content?path=../../etc/passwd")
@@ -223,7 +231,7 @@ def test_get_workspace_file_traversal_forbidden(
 def test_get_workspace_file_nonexistent_not_found(
     client: GatewayTestClient, db_conn: psycopg.Connection
 ) -> None:
-    agent = _home_machine_agent(db_conn, "macmini")
+    agent = _home_machine_agent(db_conn, _local_machine(client))
     ws = Path(workspace_path(client.app.state.gateway_process.home, agent))
     ws.mkdir(parents=True, exist_ok=True)
     response = client.get(f"/api/agents/{agent}/files/content?path=nonexistent.txt")
@@ -233,7 +241,7 @@ def test_get_workspace_file_nonexistent_not_found(
 def test_get_workspace_file_too_large_413(
     client: GatewayTestClient, db_conn: psycopg.Connection
 ) -> None:
-    agent = _home_machine_agent(db_conn, "macmini")
+    agent = _home_machine_agent(db_conn, _local_machine(client))
     ws = Path(workspace_path(client.app.state.gateway_process.home, agent))
     ws.mkdir(parents=True, exist_ok=True)
     target = ws / "big.bin"

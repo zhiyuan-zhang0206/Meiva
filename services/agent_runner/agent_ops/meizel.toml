@@ -1,12 +1,13 @@
 exports = ["boot.py", "daemon.py", "dispatch_sync.py", "in_flight.py", "tests", "upload_object.py", "workspace_export.py"]
 
 [uses]
-"daemon.py" = ["boot.py", "dispatch_sync.py", "health.py", "idempotency_plan.py", "in_flight.py", "ops_plan.py", "to_user_resource.py", "to_user_watch.py", "upload_object.py", "workspace_export.py"]
+"daemon.py" = ["boot.py", "dispatch_sync.py", "health.py", "idempotency_plan.py", "in_flight.py", "ops_plan.py", "to_user_resource.py", "to_user_watch.py", "upload_object.py", "workspace_export.py", "workspace_file.py"]
 "dispatch_sync.py" = ["ops_plan.py"]
-"tests" = ["boot.py", "daemon.py", "health.py", "idempotency_plan.py", "in_flight.py", "ops_plan.py", "to_user_resource.py", "to_user_watch.py"]
+"tests" = ["boot.py", "daemon.py", "health.py", "idempotency_plan.py", "in_flight.py", "ops_plan.py", "to_user_resource.py", "to_user_watch.py", "workspace_file.py"]
 "to_user_resource.py" = ["in_flight.py"]
 "upload_object.py" = ["in_flight.py"]
 "workspace_export.py" = ["in_flight.py"]
+"workspace_file.py" = ["in_flight.py"]
 
 [purity]
 "__init__.py" = "strict"
