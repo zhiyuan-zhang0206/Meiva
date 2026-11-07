@@ -15,10 +15,8 @@ import asyncio
 import logging
 import math
 from collections.abc import Callable, Mapping, Sequence
-from concurrent.futures import Future
 from contextlib import suppress
 from dataclasses import dataclass, field, replace
-from threading import Event, Thread
 from typing import Final, Protocol
 
 from base.clock import Clock
@@ -31,6 +29,7 @@ from base.deploy.progress_timeout import (
 from base.native_process.ownership import OwnedProcess
 from services.supervision.meiva_root.failure_state import (
     DEFAULT_OPERATOR_STOP_ALARM_S,
+    FailureKind,
     LeaseGraceState,
     LeaseProbe,
     UnitFailureFacts,
@@ -42,7 +41,7 @@ from services.supervision.meiva_root.failure_state import (
     report_lease_recovered,
 )
 from services.supervision.meiva_root.manifest import UnknownUnitError
-from services.supervision.meiva_root.probes import Probe, ProbeError, ProbeRegistry
+from services.supervision.meiva_root.probes import Probe, ProbeError, ProbeRegistry, ProbeRunner
 from services.supervision.meiva_root.stopping import UnitStopTimeoutError
 
 _log = logging.getLogger(__name__)
@@ -94,6 +93,14 @@ controllers do not run inside this service observer.
 """
 
 
+# meiva:note
+# One validation step per line: the rules a config enforces are independent of each other, and
+# a reader checks a list of them rather than a cascade of branches.
+def _require(*, condition: bool, message: str) -> None:
+    if not condition:
+        raise ValueError(message)
+
+
 @dataclass(frozen=True, slots=True)
 class HealthConfig:
     """Timing policy for the health runner (seconds unless noted)."""
@@ -111,6 +118,15 @@ class HealthConfig:
     max_restart_attempts: int = 3
     restart_backoff_s: tuple[float, ...] = DEFAULT_RESTART_BACKOFF_S
     # meiva:note
+    # How many consecutive rounds a unit whose intent says running and whose process is
+    # gone must be seen that way before the absence itself is reported (task #6345).
+    # Absence is the one failure kind that is a claim about nothing being there, so it has
+    # to outlast the ordinary gaps: the root spawns every running unit before this
+    # monitor's first round, and a replacement clears its old generation before the new one
+    # exists. Three rounds at the deploy interval (60s) is about two minutes — longer than
+    # a replacement, and inside the 3m look-back of the failure-state rules.
+    absent_rounds_before_report: int = 3
+    # meiva:note
     # How long the first attempt of one outage yields to a live impersonation lease; zero
     # disables the courtesy. The root passes `daemon.health_restart_lease_grace_s`; the
     # default here is the deploy family's own constant, never a restated literal.
@@ -118,22 +134,36 @@ class HealthConfig:
     operator_stop_alarm_s: float = DEFAULT_OPERATOR_STOP_ALARM_S
 
     def __post_init__(self) -> None:
-        if not math.isfinite(self.startup_grace_s) or self.startup_grace_s < 0:
-            raise ValueError("startup_grace_s must be nonnegative")
-        if self.probe_timeout_s <= 0:
-            raise ValueError("probe_timeout_s must be positive")
-        if self.interval_s <= 0:
-            raise ValueError("interval_s must be positive")
-        if self.max_restart_attempts < 1:
-            raise ValueError("max_restart_attempts must be at least 1")
-        if not math.isfinite(self.operator_stop_alarm_s) or self.operator_stop_alarm_s <= 0:
-            raise ValueError("operator_stop_alarm_s must be positive")
-        if not self.restart_backoff_s:
-            raise ValueError("restart_backoff_s must hold at least one delay")
-        if any(not math.isfinite(value) or value < 0 for value in self.restart_backoff_s):
-            raise ValueError("restart_backoff_s delays must be finite and nonnegative")
-        if not math.isfinite(self.lease_grace_s) or self.lease_grace_s < 0:
-            raise ValueError("lease_grace_s must be finite and nonnegative")
+        _require(
+            condition=math.isfinite(self.startup_grace_s) and self.startup_grace_s >= 0,
+            message="startup_grace_s must be nonnegative",
+        )
+        _require(condition=self.probe_timeout_s > 0, message="probe_timeout_s must be positive")
+        _require(condition=self.interval_s > 0, message="interval_s must be positive")
+        _require(
+            condition=self.max_restart_attempts >= 1,
+            message="max_restart_attempts must be at least 1",
+        )
+        _require(
+            condition=self.absent_rounds_before_report >= 1,
+            message="absent_rounds_before_report must be at least 1",
+        )
+        _require(
+            condition=math.isfinite(self.operator_stop_alarm_s) and self.operator_stop_alarm_s > 0,
+            message="operator_stop_alarm_s must be positive",
+        )
+        _require(
+            condition=bool(self.restart_backoff_s),
+            message="restart_backoff_s must hold at least one delay",
+        )
+        _require(
+            condition=all(math.isfinite(value) and value >= 0 for value in self.restart_backoff_s),
+            message="restart_backoff_s delays must be finite and nonnegative",
+        )
+        _require(
+            condition=math.isfinite(self.lease_grace_s) and self.lease_grace_s >= 0,
+            message="lease_grace_s must be finite and nonnegative",
+        )
 
 
 @dataclass(slots=True)
@@ -159,6 +189,11 @@ class UnitHealth:
     breaker_open: bool = False
     breaker_since: float | None = None
     db_recovery_pending: bool = False
+    # meiva:note
+    # Consecutive rounds this unit has been observed with intent running and no process
+    # (task #6345). The count IS the debounce, so any round that is not an absence resets
+    # it — a unit must be absent now, and have been absent every round before now.
+    absent_rounds: int = 0
     last_verdict: str | None = None
     """Value of the last probe verdict (`alive` / `down` / `port-taken` / `unavailable`)."""
     last_detail: str = ""
@@ -175,103 +210,6 @@ _NO_REVIVAL_VERB = "no revival verb (not a tree unit)"
 # meiva:note
 # Unfinished-observation name of the breaker's dependency probe.
 _DB_RECOVERY = "db-recovery"
-
-
-class _ProbeObservation:
-    """Own one native observation through its real completion or bounded join."""
-
-    def __init__(self, probe: Probe) -> None:
-        self.future: Future[DaemonProbe] = Future()
-        self._probe = probe
-        self._stop = Event()
-        self._error: BaseException | None = None
-        self._thread = Thread(target=self._run, name="root-probe", daemon=True)
-        self._thread.start()
-
-    def _run(self) -> None:
-        try:
-            if self._stop.is_set():
-                self.future.set_result(DaemonProbe.unavailable("observation admission closed"))
-            else:
-                self.future.set_result(self._sample())
-        except BaseException as exc:
-            self._error = exc
-            _log.error("root observation worker failed", exc_info=exc)
-            self.future.set_exception(exc)
-
-    def _sample(self) -> DaemonProbe:
-        """Inspection failures remain unknown evidence, never recovery evidence."""
-        try:
-            result = self._probe()
-        except Exception as exc:
-            return DaemonProbe.unavailable(f"probe raised {type(exc).__name__}: {exc}")
-        if not isinstance(result, DaemonProbe):
-            return DaemonProbe.unavailable("probe did not return DaemonProbe")
-        return result
-
-    def close(self) -> None:
-        self._stop.set()
-
-    def join(self, timeout_s: float) -> bool:
-        """Stop admission and observe the real worker; native calls may remain live."""
-        self.close()
-        self._thread.join(timeout=timeout_s)
-        complete = not self._thread.is_alive()
-        if self._error is not None:
-            raise self._error
-        return complete
-
-
-class ProbeRunner:
-    """One bounded synchronous observation, with at most one daemon worker.
-
-    Python cannot cancel a blocked native call. A deadline therefore reports
-    UNAVAILABLE and retains the worker until it exits. Later rounds cannot
-    replace it; its late result is discarded before a fresh observation starts.
-    Daemon threads cannot hold root shutdown hostage.
-    """
-
-    def __init__(self) -> None:
-        self._observation: _ProbeObservation | None = None
-        self._closed = False
-
-    def close(self) -> None:
-        """Prevent fresh observations before any worker join begins."""
-        self._closed = True
-        if self._observation is not None:
-            self._observation.close()
-
-    def stop(self, timeout_s: float = 0.2) -> bool:
-        """Bounded best effort; a late worker error remains owned on repeated stop."""
-        if not math.isfinite(timeout_s) or timeout_s < 0:
-            raise ValueError("probe join timeout must be finite and nonnegative")
-        self.close()
-        return self._observation is None or self._observation.join(timeout_s)
-
-    @staticmethod
-    def _retrieve(future: asyncio.Future[DaemonProbe]) -> None:
-        # A timed-out/cancelled caller does not await this wrapper again. The
-        # native observation retains and raises the same original error at stop.
-        if not future.cancelled():
-            future.exception()
-
-    async def observe(self, probe: Probe, timeout_s: float) -> DaemonProbe:
-        """One verdict; an observation still running at its deadline is UNAVAILABLE."""
-        if self._closed:
-            raise RuntimeError("probe runner admission closed")
-        if self._observation is not None and not self._observation.future.done():
-            return DaemonProbe.unavailable("previous observation still running after its deadline")
-        if self._observation is not None and not self._observation.join(0):
-            return DaemonProbe.unavailable("previous observation worker still completing")
-        observation = _ProbeObservation(probe)
-        self._observation = observation
-        pending = asyncio.wrap_future(observation.future)
-        pending.add_done_callback(self._retrieve)
-        try:
-            result = await asyncio.wait_for(asyncio.shield(pending), timeout_s)
-        except TimeoutError:
-            return DaemonProbe.unavailable(f"observation exceeded {timeout_s:g}s deadline")
-        return result
 
 
 class HealthMonitor:
@@ -381,11 +319,15 @@ class HealthMonitor:
                 facts = self._supervisor.unit_failure_facts(unit_id)
             except UnknownUnitError:
                 continue
-            state = self._units.get(unit_id)
-            kind = derive_kind(
-                facts,
-                restart_limit_reached=state is not None
-                and state.restart_attempts >= self._config.max_restart_attempts,
+            state = self._unit_state(unit_id)
+            kind = self._confirmed_kind(
+                unit_id,
+                state,
+                derive_kind(
+                    facts,
+                    restart_limit_reached=state.restart_attempts
+                    >= self._config.max_restart_attempts,
+                ),
             )
             if kind is None:
                 continue
@@ -396,10 +338,32 @@ class HealthMonitor:
                 event="root_unit_failure_state",
                 unit=unit_id,
                 kind=kind.value,
-                detail=describe(facts, kind, state.last_detail if state is not None else ""),
-                attempts=0 if state is None else state.restart_attempts,
+                detail=describe(facts, kind, state.last_detail),
+                attempts=state.restart_attempts,
                 last_error=facts.last_error or "",
             )
+
+    # meiva:note
+    # The kind this round reports, which is not always the kind this round derived: a
+    # recorded failure is a fact and is reported at once, while absence is a claim about
+    # nothing being there and must survive `absent_rounds_before_report` consecutive
+    # rounds first (task #6345). Absence that something else already explains is not
+    # reported a second time: a probe that answers while this root owns no generation is
+    # `root_unit_unowned_alive`, and a unit whose policy forbids revival is
+    # `root_unit_not_revivable` on this same round.
+    def _confirmed_kind(
+        self, unit_id: str, state: UnitHealth, kind: FailureKind | None
+    ) -> FailureKind | None:
+        if kind is not FailureKind.ABSENT:
+            state.absent_rounds = 0
+            return kind
+        if state.unowned_alive or self._deferral(unit_id) is not None:
+            state.absent_rounds = 0
+            return None
+        state.absent_rounds += 1
+        if state.absent_rounds < self._config.absent_rounds_before_report:
+            return None
+        return kind
 
     async def start(self) -> None:
         """Run rounds until `stop()` — sleep first, then one round per interval."""

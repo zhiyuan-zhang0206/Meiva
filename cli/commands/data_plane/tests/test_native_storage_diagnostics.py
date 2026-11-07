@@ -13,7 +13,7 @@ from base.deploy.tests.containers import free_port, redis_server
 from cli.commands.data_plane._pooler_stop import OwnedPooler
 from cli.commands.data_plane.tests.native_cluster import redis_command, redis_from_url, redis_ping
 from cli.commands.data_plane.tests.native_processes import native_pooler as native_pooler
-from services.supervision.meiva_root.health import ProbeRunner
+from services.supervision.meiva_root.probes import ProbeRunner
 from services.supervision.meiva_root_glue import diagnostic_probes as probes
 
 

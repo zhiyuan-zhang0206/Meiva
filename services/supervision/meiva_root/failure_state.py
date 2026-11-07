@@ -37,6 +37,14 @@ class FailureKind(StrEnum):
     RESTART_FAILED = "restart_failed"
     """A replacement failed at its down or up half; the monitor may retry within its finite budget."""
 
+    # meiva:note
+    # The unit's intent says running and the supervisor observes no running unit: nothing
+    # recorded a failure because nothing replaced it, and no restart was attempted — it is
+    # simply not there (task #6345). It ranks below both recorded failure states: a unit that
+    # failed is reported as having failed, and only when nothing else explains the absence is
+    # the absence itself the finding.
+    ABSENT = "absent"
+
 
 @dataclass(frozen=True, slots=True)
 class UnitFailureFacts:
@@ -48,6 +56,12 @@ class UnitFailureFacts:
     intent_running: bool
     restart_failed: RestartFailure | None
     last_error: str | None = None
+    # meiva:note
+    # The supervisor's live observation that no process answers for a unit whose intent says
+    # running (task #6345). `restart_failed` records what a replacement did; this records that
+    # nothing was there to replace. It must come from facts the supervisor already holds —
+    # deriving it by probing again would make the monitor itself the load.
+    observed_absent: bool = False
     # meiva:note
     # The intent's provenance and age: which verb set it (`operator` makes a stop an
     # owned decision) and when. An unattended operator stop is reported from these.
@@ -126,6 +140,8 @@ def derive_kind(facts: UnitFailureFacts, *, restart_limit_reached: bool) -> Fail
         return FailureKind.BREAKER_OPEN
     if facts.restart_failed is not None:
         return FailureKind.RESTART_FAILED
+    if facts.observed_absent:
+        return FailureKind.ABSENT
     return None
 
 
@@ -141,6 +157,8 @@ def describe(facts: UnitFailureFacts, kind: FailureKind, detail: str = "") -> st
                 "circuit breaker open"
             )
         return detail or "automatic restart attempts exhausted; circuit breaker open"
+    if kind is FailureKind.ABSENT:
+        return detail or "intent says running; no process is running"
     return detail
 
 

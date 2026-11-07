@@ -23,7 +23,7 @@ from base.log.tests.log_records import loguru_records as loguru_records
 from base.native_process.loaded_commit import LoadedCommit
 from base.telemetry.delivery.pipeline import EventPipeline
 from base.telemetry.station_endpoint import StationEndpointConfig
-from services.supervision.meiva_root.health import ProbeRunner
+from services.supervision.meiva_root.probes import ProbeRunner
 from services.supervision.meiva_root_glue import diagnostic_probes as probes
 from services.supervision.meiva_root_glue.diagnostics import (
     Diagnostic,

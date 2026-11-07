@@ -18,7 +18,7 @@ from services.supervision.meiva_root.failure_state import (
     derive_kind,
     describe,
 )
-from services.supervision.meiva_root.health import HealthConfig, HealthMonitor
+from services.supervision.meiva_root.health import HealthConfig, HealthGate, HealthMonitor
 from services.supervision.meiva_root.intent_store import IntentSource, RestartFailure, RestartStage
 from services.supervision.meiva_root.probes import ProbeRegistry
 from services.supervision.meiva_root.tests.slices import clock_over, system_clock
@@ -59,6 +59,21 @@ def test_derive_kind_priority_and_the_intent_gate() -> None:
     assert derive_kind(stopped, restart_limit_reached=True) is None
 
 
+# meiva:note
+# Absence is the third state and the weakest claim: it reports "intent says running and
+# nothing answers", which is only the finding when no recorded failure explains it. It must
+# lose to both recorded states, and it must still be gated by the intent — a stopped unit that
+# is not running is a decision, not an absence (task #6345).
+def test_derive_kind_reports_absence_and_ranks_it_last() -> None:
+    absent = UnitFailureFacts(intent_running=True, restart_failed=None, observed_absent=True)
+    assert derive_kind(absent, restart_limit_reached=False) is FailureKind.ABSENT
+    assert derive_kind(absent, restart_limit_reached=True) is FailureKind.BREAKER_OPEN
+    both = UnitFailureFacts(intent_running=True, restart_failed=_failure(), observed_absent=True)
+    assert derive_kind(both, restart_limit_reached=False) is FailureKind.RESTART_FAILED
+    stopped = UnitFailureFacts(intent_running=False, restart_failed=None, observed_absent=True)
+    assert derive_kind(stopped, restart_limit_reached=False) is None
+
+
 def test_describe_carries_the_kind_evidence() -> None:
     failed = UnitFailureFacts(
         intent_running=True, restart_failed=_failure(RestartStage.DOWN, "stop refused")
@@ -74,9 +89,14 @@ def test_describe_carries_the_kind_evidence() -> None:
     assert describe(failed, FailureKind.BREAKER_OPEN) == (
         "replacement failed at its down half: stop refused; circuit breaker open"
     )
+    absent = UnitFailureFacts(intent_running=True, restart_failed=None, observed_absent=True)
+    assert describe(absent, FailureKind.ABSENT) == "intent says running; no process is running"
+    assert describe(absent, FailureKind.ABSENT, "pid 123 is gone") == "pid 123 is gone"
 
 
 class _Supervisor:
+    generation: tuple[OwnedProcess, float] | None
+
     def __init__(self) -> None:
         self.generation = (OwnedProcess(42, 100.0, None), 0.0)
         self.facts = UnitFailureFacts(intent_running=True, restart_failed=None)
@@ -87,7 +107,7 @@ class _Supervisor:
         self.restart_calls.append(unit_id)
         return {"verb": "restart", "units": []}
 
-    def health_generation(self, unit_id: str) -> tuple[OwnedProcess, float]:
+    def health_generation(self, unit_id: str) -> tuple[OwnedProcess, float] | None:
         return self.generation
 
     def revival_deferral(self, unit_id: str) -> str | None:
@@ -132,6 +152,7 @@ def _monitor(
     probe: Callable[[], DaemonProbe],
     *,
     timers: Timers = SYSTEM_TIMERS,
+    gate: HealthGate | None = None,
 ) -> HealthMonitor:
     registry = ProbeRegistry()
     registry.register("svc", probe)
@@ -142,7 +163,11 @@ def _monitor(
         "restart_backoff_s": (0.0,),
     }
     return HealthMonitor(
-        supervisor, registry, config=HealthConfig(**values), clock=clock_over(timers)
+        supervisor,
+        registry,
+        config=HealthConfig(**values),
+        gate=gate,
+        clock=clock_over(timers),
     )
 
 
@@ -554,4 +579,77 @@ async def test_unattended_operator_stop_reports_once_then_again_for_a_new_stop(
     reports = recorder.events("root_unit_operator_stop_unattended")
     assert len(reports) == 1
     assert reports[0]["unit"] == "svc"
+    assert supervisor.restart_calls == []
+
+
+# meiva:note
+# Absence is the one kind derived from nothing being there, so it must hold across rounds
+# before it is reported (task #6345): three rounds, then the ordinary every-round report. A
+# round in which the unit is not absent resets the count, so two separated absences are
+# never spent as one.
+async def test_absence_is_reported_only_after_consecutive_rounds(
+    clock: _Clock, recorder: _Recorder
+) -> None:
+    supervisor = _Supervisor()
+    supervisor.facts = UnitFailureFacts(
+        intent_running=True, restart_failed=None, observed_absent=True
+    )
+    monitor = _monitor(
+        supervisor,
+        _Cell(DaemonProbe.down("no")),
+        timers=clock,
+        gate=lambda: (False, "an operator holds this window"),
+    )
+    await monitor.run_round()
+    await monitor.run_round()
+    assert recorder.events("root_unit_failure_state") == [], "two rounds is not absence yet"
+    await monitor.run_round()
+    assert [(s["kind"], s["detail"]) for s in recorder.events("root_unit_failure_state")] == [
+        ("absent", "no")
+    ]
+    await monitor.run_round()
+    assert len(recorder.events("root_unit_failure_state")) == 2, "then it reports every round"
+
+    supervisor.facts = UnitFailureFacts(intent_running=True, restart_failed=None)
+    await monitor.run_round()
+    await monitor.run_round()
+    await monitor.run_round()
+    assert len(recorder.events("root_unit_failure_state")) == 2, "a present round clears it"
+
+
+# meiva:note
+# An absence whose gap is filled by a process this root does not own is already its own
+# finding (`root_unit_unowned_alive`, task #5474), and reporting it a second time as a
+# failure state would name the wrong cause (task #6345).
+async def test_absence_is_not_reported_when_a_leftover_answers_the_probe(
+    clock: _Clock, recorder: _Recorder
+) -> None:
+    supervisor = _Supervisor()
+    supervisor.generation = None
+    supervisor.facts = UnitFailureFacts(
+        intent_running=True, restart_failed=None, observed_absent=True
+    )
+    monitor = _monitor(supervisor, _Cell(DaemonProbe.up("someone answers")), timers=clock)
+    for _ in range(4):
+        await monitor.run_round()
+    assert recorder.events("root_unit_failure_state") == []
+    assert len(recorder.events("root_unit_unowned_alive")) == 1
+
+
+# meiva:note
+# A unit whose policy forbids revival is reported every round as `root_unit_not_revivable`;
+# its absence is the same fact, so it is not reported twice (task #6345).
+async def test_absence_is_not_reported_when_the_policy_forbids_revival(
+    clock: _Clock, recorder: _Recorder
+) -> None:
+    supervisor = _Supervisor()
+    supervisor.deferrals["svc"] = "policy never"
+    supervisor.facts = UnitFailureFacts(
+        intent_running=True, restart_failed=None, observed_absent=True
+    )
+    monitor = _monitor(supervisor, _Cell(DaemonProbe.down("no")), timers=clock)
+    for _ in range(4):
+        await monitor.run_round()
+    assert recorder.events("root_unit_failure_state") == []
+    assert len(recorder.events("root_unit_not_revivable")) == 4
     assert supervisor.restart_calls == []

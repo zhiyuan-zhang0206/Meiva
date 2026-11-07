@@ -477,10 +477,16 @@ class Supervisor(LeftBehindMixin, StoppingMixin):
         runtime = self._units.get(unit_id)
         if runtime is None:
             raise UnknownUnitError(f"unknown unit {unit_id!r}")
+        # meiva:note
+        # Absence is read from the generation this supervisor already holds, never from a
+        # probe: `_is_active` is the same test every verb here uses, so the fact costs the
+        # health round nothing and cannot make the monitor itself the load (task #6345).
+        observed_absent = not self._is_active(runtime)
         return UnitFailureFacts(
             intent_running=runtime.intent is UnitIntent.RUNNING,
             restart_failed=runtime.restart_failed,
             last_error=runtime.last_error,
+            observed_absent=observed_absent,
             intent_source=runtime.intent_source,
             intent_since=runtime.intent_since,
             intent_caller=runtime.intent_caller,

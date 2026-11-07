@@ -16,6 +16,7 @@ from base.log.tests.log_records import loguru_records as loguru_records
 from base.native_process.process_control import SYSTEM_PROCESS_CONTROL, ProcessControl
 from base.native_process.tests.fake_process_control import FakeProcessControl
 from services.supervision.meiva_root import intent_store
+from services.supervision.meiva_root.failure_state import FailureKind, derive_kind
 from services.supervision.meiva_root.inputs import InputSeal
 from services.supervision.meiva_root.intent_store import (
     CallerFacts,
@@ -378,6 +379,45 @@ async def test_boot_carries_recorded_failure_until_a_generation_proves_it_gone(
         )
     finally:
         await second.shutdown()
+
+
+# meiva:note
+# Absence is the supervisor's own observation, so it is read from the generation the tree
+# already holds: before a unit is spawned there is none, a live child is not absent, and an
+# exit that nobody replaced leaves the intent running with nothing behind it (task #6345).
+# An operator stop is the one case that is absent by construction and must not read as a
+# failure — the intent gate, not the observation, decides that.
+async def test_failure_facts_report_absence_until_a_generation_exists(tmp_path: Path) -> None:
+    owner = _supervisor(tmp_path, [_unit(*_SLEEP_FOREVER)])
+    assert owner.unit_failure_facts("svc").observed_absent is True, "nothing spawned yet"
+    await owner.start()
+    try:
+        await _wait_state(owner, "running")
+        facts = owner.unit_failure_facts("svc")
+        assert facts.observed_absent is False
+        assert derive_kind(facts, restart_limit_reached=False) is None
+        await owner.down("svc")
+        await _wait_state(owner, "stopped")
+        stopped = owner.unit_failure_facts("svc")
+        assert stopped.observed_absent is True and stopped.intent_running is False
+        assert derive_kind(stopped, restart_limit_reached=False) is None, "a stop is a decision"
+    finally:
+        await owner.shutdown()
+
+
+# meiva:note
+# A child that exits on its own leaves the intent running; until something replaces it the
+# unit is absent, and that is the state this task makes reportable (task #6345).
+async def test_an_unreplaced_exit_is_an_absent_unit(tmp_path: Path) -> None:
+    owner = _supervisor(tmp_path, [_unit("noop")])
+    await owner.start()
+    try:
+        await _wait_state(owner, "stopped")
+        facts = owner.unit_failure_facts("svc")
+        assert (facts.intent_running, facts.observed_absent) == (True, True)
+        assert derive_kind(facts, restart_limit_reached=False) is FailureKind.ABSENT
+    finally:
+        await owner.shutdown()
 
 
 def _caller() -> CallerFacts:

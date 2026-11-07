@@ -19,9 +19,9 @@ from base.native_process.root_control.instance_lock import (
 )
 from base.native_process.tests.fake_process_control import FakeProcessControl
 from services.supervision.meiva_root.daemon import finish
-from services.supervision.meiva_root.health import HealthMonitor, ProbeRunner
+from services.supervision.meiva_root.health import HealthMonitor
 from services.supervision.meiva_root.manifest import RestartPolicy, UnitManifest, UnitRegistry
-from services.supervision.meiva_root.probes import ProbeRegistry
+from services.supervision.meiva_root.probes import ProbeRegistry, ProbeRunner
 from services.supervision.meiva_root.server import ControlServer
 from services.supervision.meiva_root.supervisor import Supervisor, SupervisorConfig
 from services.supervision.meiva_root.tests.slices import system_clock
