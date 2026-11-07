@@ -42,10 +42,15 @@ it". The two never mix, and neither replaces the other; see the
 - **Moving channel tags (`channel/latest`, `channel/stable`).** Two moving annotated Git tags
   embed a `meiva-channel/v1` JSON pointer (`---BEGIN MEIVA CHANNEL POINTER---` ...
   `---END MEIVA CHANNEL POINTER---`). `.github/workflows/release-gate.yml` (6-hour scheduled
-  Release Train plus manual/hotfix dispatch) advances `channel/latest` and publishes the GitHub
-  Release (`--latest=false`). `.github/workflows/promote-release.yml` invokes
-  `scripts/host_ops/release/promote.py` to verify the target tag's `meiva-release/v1` certificate
-  before advancing `channel/stable` and marking that GitHub Release `--latest`.
+  Release Train plus manual/hotfix dispatch) advances `channel/latest`.
+  `.github/workflows/promote-release.yml` invokes `scripts/host_ops/release/promote.py` to verify
+  the target tag's `meiva-release/v1` certificate before advancing `channel/stable`.
+- **No GitHub Release per cluster version.** A certified release is the annotated tag and the
+  channel pointers, both of which travel by `git fetch --tags`; nothing in this repository reads a
+  `v*` Release object. The GitHub Releases page carries artifact deliverables only (`android-*`,
+  `app-*`, `android-latest`, `app-latest`), because a repository has one `Latest` badge and it
+  belongs to the artifact release its users download. See the
+  [decision](../../decisions/engineering/tooling/2026-11-07-cluster-releases-stay-git-only.md).
 - **Release verification.** Dispatch `release-gate.yml` on `main` with `verify_only=true` to run
   the full release suite early with read-only permissions. The release gate can reuse a successful first
   attempt started in the preceding 24 hours when GitHub identifies it as this repository's
