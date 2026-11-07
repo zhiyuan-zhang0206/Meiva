@@ -3,8 +3,8 @@
 // meiva:note
 // Unified collapsible TurnBlock for secondary agent steps (both live "Working…"
 // turns and completed "Worked for Xs" turns): inline unboxed header with live/settled
-// duration summary, no sticky header pinning, and an inner auto-hiding ScrollArea
-// capped at half the visible timeline viewport height (--timeline-turn-max-h, fallback 50dvh).
+// duration summary and a sticky expanded header. Historical bodies flow through
+// the timeline; only the trailing turn retains a half-viewport inner ScrollArea.
 // meiva:link ui/web/src/docs/frontend-components/timeline-view/timeline-view.meiva.okf.md
 
 import { ChevronRight, Layers } from "lucide-react";
@@ -24,12 +24,14 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { formatDuration, type SdkCall } from "@/lib/format/item-summary";
 import { cn } from "@/lib/format/utils";
 import {
+  BAR_CLEAR_TOP_OFFSET_CLASS,
   FLEX,
   FLEX_1,
   FLEX_COL,
   MIN_H_0,
   MIN_W_0,
   OVERFLOW_HIDDEN,
+  TIMELINE_TURN_ROW_GAP_PX,
 } from "@/lib/layout/layout";
 
 import { CallBadge } from "./view/card-summary";
@@ -40,7 +42,6 @@ import { span, windowForSizes } from "./model/use-timeline-window";
 const INNER_BOOTSTRAP_ROWS = 24;
 const INNER_ESTIMATED_ROW_PX = 40;
 const INNER_UNMEASURED_VIEW_PX = 360;
-const INNER_ROW_GAP_PX = 4;
 
 interface TurnBlockProps {
   id: string;
@@ -50,6 +51,7 @@ interface TurnBlockProps {
   memberSources?: readonly string[];
   summary: TurnSummary;
   expanded: boolean;
+  bounded?: boolean;
   onToggle: (id: string, currentlyExpanded: boolean) => void;
   turnActive?: boolean;
   liveWindow?: boolean;
@@ -78,6 +80,7 @@ function turnBlockPropsEqual(prev: TurnBlockProps, next: TurnBlockProps): boolea
     prev.id === next.id &&
     prev.toggleKey === next.toggleKey &&
     prev.expanded === next.expanded &&
+    prev.bounded === next.bounded &&
     prev.onToggle === next.onToggle &&
     prev.turnActive === next.turnActive &&
     prev.liveWindow === next.liveWindow &&
@@ -104,6 +107,7 @@ export const TurnBlock = memo(function TurnBlock({
   memberSources,
   summary,
   expanded,
+  bounded = true,
   onToggle,
   turnActive,
   liveWindow = false,
@@ -135,6 +139,7 @@ export const TurnBlock = memo(function TurnBlock({
   const seenScrollSeqRef = useRef(scrollToBottomSeq);
 
   const isWindowed =
+    bounded &&
     expanded &&
     windowedCount !== undefined &&
     turnRows !== undefined &&
@@ -146,7 +151,7 @@ export const TurnBlock = memo(function TurnBlock({
   // the tail of those sizes, not a mapping of the DOM scrollTop. Mapping a pinned
   // scrollTop through estimates mounted a different row set each frame, the
   // height change re-pinned the scrollport, and the live window flickered for as
-  // long as the agent worked. Rows sit `space-y-1` (INNER_ROW_GAP_PX) apart.
+  // long as the agent worked. Row gaps follow the shared work-block geometry.
   // meiva:link ui/web/src/docs/frontend-components/timeline-view/bounded-window.meiva.okf.md
   const [innerView, setInnerView] = useState({ top: 0, height: 0, follow: true });
   const [rowHeights, setRowHeights] = useState<ReadonlyMap<string, number>>(() => new Map());
@@ -340,12 +345,12 @@ export const TurnBlock = memo(function TurnBlock({
     const range = (() => {
       if (innerView.height <= 0 && innerView.top <= 0) {
         const start = Math.max(0, windowedCount - INNER_BOOTSTRAP_ROWS);
-        return { start, end: windowedCount, before: span(sizes, 0, start, INNER_ROW_GAP_PX), after: 0 };
+        return { start, end: windowedCount, before: span(sizes, 0, start, TIMELINE_TURN_ROW_GAP_PX), after: 0 };
       }
       const top = liveWindow && innerView.follow
-        ? Math.max(0, span(sizes, 0, windowedCount, INNER_ROW_GAP_PX) - viewHeight)
+        ? Math.max(0, span(sizes, 0, windowedCount, TIMELINE_TURN_ROW_GAP_PX) - viewHeight)
         : innerView.top;
-      return windowForSizes(sizes, top, viewHeight, 0, INNER_ROW_GAP_PX);
+      return windowForSizes(sizes, top, viewHeight, 0, TIMELINE_TURN_ROW_GAP_PX);
     })();
     return (
       <>
@@ -387,9 +392,10 @@ export const TurnBlock = memo(function TurnBlock({
         className={cn(
           "items-start gap-1.5 text-left select-none transition-colors",
           expanded
-            ? "w-[calc(100%+0.5rem)] -ml-2 px-2 py-0.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/50"
+            ? "sticky z-20 bg-background w-[calc(100%+0.5rem)] -ml-2 px-2 py-0.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted"
             : "max-w-full rounded-lg px-2 py-0.5 -ml-2 text-muted-foreground/75 hover:text-foreground hover:bg-muted/50",
           FLEX,
+          expanded && BAR_CLEAR_TOP_OFFSET_CLASS,
         )}
         aria-expanded={expanded}
         data-testid="turn-toggle"
@@ -419,7 +425,11 @@ export const TurnBlock = memo(function TurnBlock({
         )}
       >
         <div className={cn(OVERFLOW_HIDDEN, MIN_H_0, MIN_W_0)}>
-          {expanded ? (
+          {expanded && !bounded ? (
+            <div className="mt-1.5 ml-1.5 pl-2 pr-2 border-l border-border/60 space-y-1">
+              {renderedBody}
+            </div>
+          ) : expanded ? (
             <ScrollArea
               data-turn-scroll="true"
               data-activity-scroll={liveWindow ? "true" : undefined}

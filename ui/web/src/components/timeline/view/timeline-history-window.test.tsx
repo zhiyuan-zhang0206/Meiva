@@ -132,6 +132,22 @@ describe("deep history DOM window", () => {
     expect(viewport.querySelector('[data-timeline-spacer="turn-before"]')).not.toBeNull();
   });
 
+  it("windows expanded historical details through the outer timeline without an inner scrollport", () => {
+    displayLimits.set("MEIVA_TIMELINE_WINDOW_ACTIVATION_ROWS", 20);
+    displayLimits.set("MEIVA_TIMELINE_WINDOW_TURN_ROWS", 20);
+    const reasoning = Array.from({ length: 60 }, (_, index) => makeItem({
+      item_id: `${index + 1}.0`, kind: "agent_reasoning", payload: `Thought ${index + 1}`,
+    }));
+    render(<TimelineView items={[...reasoning, makeItem({ item_id: "61.0", kind: "agent_chat", payload: "Done" })]} />);
+    fireEvent.click(screen.getByTestId("turn-toggle"));
+    const viewport = screen.getByTestId("scroll-viewport");
+    expect(screen.queryByTestId("turn-scroll-viewport")).toBeNull();
+    expect(viewport.querySelectorAll("[data-virtual-row]").length).toBeLessThan(60);
+    expect(viewport.querySelectorAll("[data-virtual-row]").length).toBeGreaterThan(0);
+    expect(viewport.querySelector('[data-timeline-spacer="turn-before"]')).not.toBeNull();
+    expect(screen.getByText("Done")).toBeTruthy();
+  });
+
   it("starts measuring at the configured row count before activation", () => {
     displayLimits.set("MEIVA_TIMELINE_WINDOW_ACTIVATION_ROWS", 50);
     displayLimits.set("MEIVA_TIMELINE_WINDOW_MEASURE_ROWS", 10);

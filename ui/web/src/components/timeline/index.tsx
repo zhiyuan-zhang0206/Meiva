@@ -436,7 +436,7 @@ export const TimelineView = memo(function TimelineView({
     prevLoadingOlderReleaseRef.current = loadingOlder;
   }, [loadingOlder, finishHistoryPull, historyPullActive, controller, pendingAnchorRef]);
 
-  const { groups, groupEntries, virtualEnabled, virtualRange, turnRows } = useTimelineGroupWindow({
+  const { groups, groupEntries, virtualEnabled, virtualRange, rowRange, turnRows } = useTimelineGroupWindow({
     canonicalItems,
     compactBuffer,
     bufferedItems,
@@ -521,6 +521,7 @@ export const TimelineView = memo(function TimelineView({
             groupEntries={groupEntries}
             virtualEnabled={virtualEnabled}
             virtualRange={virtualRange}
+            rowRange={rowRange}
             turnRows={turnRows}
           />
           <CompactingBlock />

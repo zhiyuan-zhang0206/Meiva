@@ -310,7 +310,41 @@ describe("streamingParseIntervalMs (adaptive stream-parse window, user report 20
 });
 
 describe("TimelineView bounded expanded work block", () => {
-  it("renders expanded work block without sticky header classes and inside a max-height scrollport", () => {
+  it("keeps historical turns collapsed until opened, then uses the full outer timeline height", () => {
+    const { container } = render(<TimelineView items={[
+      makeItem({ item_id: "1.0", kind: "agent_reasoning", payload: "Earlier thought" }),
+      makeItem({ item_id: "1.1", kind: "agent_chat", user_facing: false, payload: "Earlier progress" }),
+      makeItem({ item_id: "2.0", kind: "agent_chat", payload: "Reply" }),
+      makeItem({ item_id: "3.0", kind: "agent_code", payload: "latest()" }),
+    ]} />);
+    const [historical, trailing] = screen.getAllByTestId("turn-toggle");
+    expect(historical.getAttribute("aria-expanded")).toBe("false");
+    expect(trailing.getAttribute("aria-expanded")).toBe("false");
+    fireEvent.click(historical);
+    const earlier = container.querySelector('[data-turn-id="1.0"]')!;
+    expect(earlier.querySelector('[data-turn-scroll="true"]')).toBeNull();
+    expect(screen.getByText("Earlier progress")).toBeTruthy();
+    expect(historical.className).toContain("sticky");
+    fireEvent.click(trailing);
+    expect(screen.getByTestId("turn-scroll-viewport").className).toContain("max-h-");
+    fireEvent.click(historical);
+    expect(historical.getAttribute("aria-expanded")).toBe("false");
+    expect(screen.queryByText("Earlier progress")).toBeNull();
+  });
+
+  it("releases the inner scrollport when an opened trailing turn becomes historical", () => {
+    const work = [makeItem({ item_id: "1.0", kind: "agent_reasoning", payload: "Thought" })];
+    const { rerender } = render(<TimelineView items={work} />);
+    const header = screen.getByTestId("turn-toggle");
+    fireEvent.click(header);
+    expect(screen.getByTestId("turn-scroll-viewport")).toBeTruthy();
+    rerender(<TimelineView items={[...work, makeItem({ item_id: "2.0", kind: "agent_chat", payload: "Done" })]} />);
+    expect(screen.getByTestId("turn-toggle")).toBe(header);
+    expect(header.getAttribute("aria-expanded")).toBe("true");
+    expect(screen.queryByTestId("turn-scroll-viewport")).toBeNull();
+  });
+
+  it("renders the expanded trailing work block with a sticky header and bounded body", () => {
     const items = [
       makeItem({ item_id: "1.0", kind: "agent_reasoning", payload: "thinking" }),
       makeItem({ item_id: "1.1", kind: "agent_code", payload: "code" }),
@@ -320,7 +354,7 @@ describe("TimelineView bounded expanded work block", () => {
     const toggle = screen.getByTestId("turn-toggle");
     fireEvent.click(toggle);
     expect(toggle.getAttribute("data-expanded")).toBe("true");
-    expect(toggle.className).not.toContain("sticky");
+    expect(toggle.className).toContain("sticky");
     const turnViewport = screen.getByTestId("turn-scroll-viewport");
     expect(turnViewport.className).toContain("max-h-[var(--timeline-turn-max-h,50dvh)]");
   });
@@ -388,7 +422,7 @@ describe("TimelineView header scrolling scope", () => {
     makeItem({ item_id: "2.2", kind: "code_output", payload: "result" }),
     makeItem({ item_id: "3.0", kind: "agent_chat", payload: "Agent reply" }),
   ];
-  it("keeps primary messages headerless and work/detail headers non-sticky", () => {
+  it("keeps primary messages headerless and only pins the expanded work header", () => {
     const { container } = render(<TimelineView items={items} />);
     revealCollapsedCards();
     const titles = [...screen.getAllByTestId("card-toggle"), ...screen.getAllByTestId("turn-toggle")];
@@ -398,7 +432,7 @@ describe("TimelineView header scrolling scope", () => {
       expect(row.querySelector('[data-testid="card-toggle"]')).toBeNull();
     }
     for (const title of titles) {
-      expect(title.className).not.toContain("sticky");
+      expect(title.className.includes("sticky")).toBe(title.dataset.testid === "turn-toggle");
       expect(container.contains(title)).toBe(true);
     }
     const viewport = screen.getByTestId("scroll-viewport");
