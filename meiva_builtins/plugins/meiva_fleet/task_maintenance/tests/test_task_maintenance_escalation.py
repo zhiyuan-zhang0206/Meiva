@@ -17,7 +17,7 @@ from meiva_builtins.plugins.meiva_fleet.task_maintenance.tests.failing_writes im
 
 # meiva:note
 # Delegator escalation marker (`escalated_at`), plus the copy both legs deliver. The
-# delegation leg reports a task still open after repeated reminders by sending one
+# delegation leg reports a task still open with no state change by sending one
 # digest to the delegator; the marker, stamped in the same transaction as that
 # digest's inbound insert, makes the message at-most-once per overdue window — a
 # failed delivery leaves it unset (the next sweep retries), and both update() paths
@@ -174,20 +174,20 @@ def escalated_at(db: psycopg.Connection, tid: int) -> Any:
     return row[0]
 
 
+# meiva:note
+# Two sweeps inside one stalled window deliver one digest: the first stamps
+# `escalated_at`, so the second re-selects the task and skips it. Every 5-min sweep
+# used to re-send the digest while the task stayed eligible; the threshold is a
+# property of the task, not of one delivery, so it keeps holding across sweeps.
 def test_delegator_escalation_at_most_once_per_overdue_window(
     pool: ConnectionPool,
     db_conn: psycopg.Connection,
     database: Database,
     event_bus: EventBus,
 ) -> None:
-    """Two sweeps inside one stalled window deliver one digest: the first
-    stamps `escalated_at`, so the second re-selects the task and skips it.
-    (Defect class fixed here: every 5-min sweep re-sent the digest while
-    reminder_count sat at the threshold — reminder delivery is backoff-gated
-    for up to 24h.)"""
     parent_owner, _owner, tid = stalled_subtask(db_conn)
-    assert run_escalate(pool, database, event_bus, 3) == 1
-    assert run_escalate(pool, database, event_bus, 3) == 0
+    assert run_escalate(pool, database, event_bus, 3, 0.0) == 1
+    assert run_escalate(pool, database, event_bus, 3, 0.0) == 0
     assert len(inbound_messages(db_conn, parent_owner)) == 1
     assert escalated_at(db_conn, tid) is not None
 
@@ -205,12 +205,12 @@ def test_delegator_escalation_retries_after_delivery_failure(
         inserts_failing(db_conn, "inbound_messages"),
         pytest.raises(psycopg.errors.RaiseException, match="inbound_messages inserts refused"),
     ):
-        run_escalate(pool, database, event_bus, 3)
+        run_escalate(pool, database, event_bus, 3, 0.0)
     assert inbound_messages(db_conn, parent_owner) == []
     assert escalated_at(db_conn, tid) is None
-    assert run_escalate(pool, database, event_bus, 3) == 1  # retried and delivered
+    assert run_escalate(pool, database, event_bus, 3, 0.0) == 1  # retried and delivered
     assert len(inbound_messages(db_conn, parent_owner)) == 1
-    assert run_escalate(pool, database, event_bus, 3) == 0  # marker holds: no third send
+    assert run_escalate(pool, database, event_bus, 3, 0.0) == 0  # marker holds: no third send
     assert len(inbound_messages(db_conn, parent_owner)) == 1
 
 
@@ -224,8 +224,8 @@ def test_delegator_escalation_rearms_after_owner_update(
     owner re-engages and a later window re-crosses the threshold, the delegator
     is told again."""
     parent_owner, _owner, tid = stalled_subtask(db_conn)
-    assert run_escalate(pool, database, event_bus, 3) == 1
-    assert run_escalate(pool, database, event_bus, 3) == 0
+    assert run_escalate(pool, database, event_bus, 3, 0.0) == 1
+    assert run_escalate(pool, database, event_bus, 3, 0.0) == 0
     # The owner updates the task: both update() paths reset the bookkeeping
     # (test_update_resets_reminder_count / the gateway PATCH test below cover
     # the real paths; mirror their write here).
@@ -243,7 +243,7 @@ def test_delegator_escalation_rearms_after_owner_update(
             (tid,),
         )
     db_conn.commit()
-    assert run_escalate(pool, database, event_bus, 3) == 1
+    assert run_escalate(pool, database, event_bus, 3, 0.0) == 1
     assert len(inbound_messages(db_conn, parent_owner)) == 2
 
 
@@ -291,7 +291,7 @@ def test_user_escalation_delivers_a_needs_input_notification(
     owner, tid, _parent = human_leg_subtask(db_conn)
     live: Any = _RecordingBus()
 
-    assert run_escalate(pool, database, live, 3) == 1
+    assert run_escalate(pool, database, live, 3, 0.0) == 1
 
     notices = inbox_notices(db_conn, owner)
     assert [require_response for _title, require_response in notices] == [True]
@@ -320,7 +320,7 @@ def test_user_escalation_survives_a_lost_announce(
     live: Any = _RecordingBus()
     live.drop = True
 
-    assert run_escalate(pool, database, live, 3) == 1
+    assert run_escalate(pool, database, live, 3, 0.0) == 1
 
     assert len(inbox_notices(db_conn, owner)) == 1
     assert [category for category, _subject in notifications(db_conn, owner)] == [
@@ -348,7 +348,7 @@ def test_delegator_escalation_is_not_a_user_notification(
     # meiva:link base/events/notifications/docs/notifications.meiva.okf.md
     parent_owner, owner, _tid = stalled_subtask(db_conn)
 
-    assert run_escalate(pool, database, event_bus, 3) == 1
+    assert run_escalate(pool, database, event_bus, 3, 0.0) == 1
 
     assert len(inbound_messages(db_conn, parent_owner)) == 1
     assert notifications(db_conn, owner) == []
@@ -400,13 +400,13 @@ def test_digest_copy_serves_a_live_and_a_gone_owner_alike(
         reminder_count=3,
     )
 
-    assert run_escalate(pool, database, event_bus, 3) == 1
+    assert run_escalate(pool, database, event_bus, 3, 0.0) == 1
 
     messages = inbound_messages(db_conn, delegator)
     assert len(messages) == 1
     content = messages[0][0]
     assert content.splitlines()[0] == (
-        "Subtasks still open after repeated reminders — task state unchanged "
+        "Subtasks still open with no state change "
         "(a note or a change on the task would have restarted the reminders):"
     )
     assert f"- #{live_task} " in content
@@ -415,10 +415,11 @@ def test_digest_copy_serves_a_live_and_a_gone_owner_alike(
 
 
 # meiva:note
-# The human queue's notice keeps the same rule and still ends in an action:
-# reminders, an unchanged state, and what the reader can do about it. The title and
-# body are pinned verbatim so a later edit cannot quietly restore a verdict.
-def test_human_notice_copy_states_reminders_and_an_unchanged_state(
+# The human queue's notice keeps the same rule and still ends in an action: how long
+# the task has been silent, that its state did not change, and what the reader can do
+# about it. The title and body are pinned verbatim so a later edit cannot quietly
+# restore a verdict.
+def test_human_notice_copy_states_elapsed_silence_and_an_unchanged_state(
     pool: ConnectionPool,
     db_conn: psycopg.Connection,
     database: Database,
@@ -426,7 +427,7 @@ def test_human_notice_copy_states_reminders_and_an_unchanged_state(
 ) -> None:
     owner, tid, _parent = human_leg_subtask(db_conn)
 
-    assert run_escalate(pool, database, event_bus, 3) == 1
+    assert run_escalate(pool, database, event_bus, 3, 0.0) == 1
 
     db_conn.rollback()
     with db_conn.cursor() as cur:
@@ -438,11 +439,62 @@ def test_human_notice_copy_states_reminders_and_an_unchanged_state(
     assert len(notices) == 1
     title, content = notices[0]
     assert title.startswith(f"Task #{tid} ")
-    assert title.endswith(" — 3 reminders with no state change; reassign or cancel")
+    assert title.endswith(" — no state change for 2.0h; reassign or cancel")
     assert content == (
-        f"Agent #{owner} has not changed this task's state after 3 reminders "
+        f"Agent #{owner} has not changed this task's state for 2.0h "
         "(a note or a change on the task would have restarted the reminders), and no live agent "
         "owns any ancestor task to catch it. Reassign it to another agent, cancel it, or reply "
         "to remind the owner once more."
     )
     assert_states_evidence_not_a_verdict(f"{title}\n{content}")
+
+
+# meiva:note
+# The threshold counts cadence periods of silence, not delivered reminders
+# (2026-11-07 ruling, task #6354). Reminder delivery is throttled per owner by the
+# digest window, so a reminder count stops measuring time as soon as the window is
+# wider than the task's interval — three reminders then span many cadences. These
+# three tests pin the replacement: silence long enough escalates however few
+# reminders went out, recent activity holds it however many did, and a task nobody
+# was ever reminded about is not escalated on silence alone.
+def _human_leg_task(db: psycopg.Connection, *, updated_s_ago: float, reminder_count: int) -> int:
+    parent = make_task(db, owner=None, remind_interval_seconds=None)
+    owner = make_agent(db)
+    return make_task(
+        db,
+        owner=owner,
+        parent_id=parent,
+        remind_interval_seconds=1800,
+        updated_s_ago=updated_s_ago,
+        reminder_count=reminder_count,
+    )
+
+
+def test_silence_escalates_after_one_delivered_reminder(
+    pool: ConnectionPool,
+    db_conn: psycopg.Connection,
+    database: Database,
+    event_bus: EventBus,
+) -> None:
+    _human_leg_task(db_conn, updated_s_ago=14400, reminder_count=1)
+    assert run_escalate(pool, database, event_bus, 3, 0.0) == 1
+
+
+def test_recent_activity_holds_escalation_despite_many_reminders(
+    pool: ConnectionPool,
+    db_conn: psycopg.Connection,
+    database: Database,
+    event_bus: EventBus,
+) -> None:
+    _human_leg_task(db_conn, updated_s_ago=600, reminder_count=10)
+    assert run_escalate(pool, database, event_bus, 3, 0.0) == 0
+
+
+def test_silence_alone_does_not_escalate_a_task_never_reminded(
+    pool: ConnectionPool,
+    db_conn: psycopg.Connection,
+    database: Database,
+    event_bus: EventBus,
+) -> None:
+    _human_leg_task(db_conn, updated_s_ago=86400, reminder_count=0)
+    assert run_escalate(pool, database, event_bus, 3, 0.0) == 0

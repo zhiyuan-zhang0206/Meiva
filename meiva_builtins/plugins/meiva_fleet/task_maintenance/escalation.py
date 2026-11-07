@@ -42,6 +42,13 @@ class _Task:
     owner: int | None
     title: str
     status: TaskStatus
+    # meiva:note
+    # Escalation counts cadence periods of silence, not delivered reminders: the delivery
+    # window can hold a reminder back, and a task must not look younger than it is because
+    # nobody spoke. `elapsed_seconds` and `remind_interval_seconds` are read from the locked
+    # row so the eligibility recheck sees the values the lock protects.
+    elapsed_seconds: int
+    remind_interval_seconds: int | None
     reminder_count: int
     escalated_at: datetime | None
     priority: str
@@ -66,42 +73,60 @@ class _TaskRow:
     owner: int | None
     title: str
     status: str
+    elapsed_seconds: int
+    remind_interval_seconds: int | None
     reminder_count: int
     escalated_at: datetime | None
     priority: str
     is_root: bool
 
 
-def _lock_candidates(cur: psycopg.Cursor, threshold: int) -> tuple[list[int], dict[int, _Task]]:
+def _lock_candidates(
+    cur: psycopg.Cursor, threshold: int, backoff_seconds: float
+) -> tuple[list[int], dict[int, _Task]]:
+    # meiva:note
     # Discovery never authorizes an effect. Lock the union in stable id order;
     # SKIP LOCKED avoids reversing a writer's child -> parent lock order.
     # NO KEY UPDATE still fences mutations while allowing a gateway notice
     # creator holding the agent identity lock to reference task_id by FK.
+    # A task is a candidate once it has been silent for `threshold` of its own cadence
+    # periods — the same `GREATEST(backoff, remind_interval_seconds)` the reminder pass
+    # schedules by — and at least one reminder actually left, so an escalation always
+    # answers something the owner received. Counting reminders alone would let the
+    # delivery window stretch this: the window thins the reminders an owner gets, so
+    # three of them then span far more than three cadence periods (2026-11-07 ruling,
+    # task #6354 — escalation must not be keyed on a delivery policy).
     candidates = query_all(
         cur.connection,
         _Edge,
         "SELECT id,parent_id FROM agent_tasks WHERE status='in_progress' "
-        "AND reminder_count >= %s AND NOT is_root "
-        "AND (reminders_paused_until IS NULL OR reminders_paused_until <= now()) ORDER BY id",
-        (threshold,),
+        "AND NOT is_root AND reminder_count >= 1 "
+        "AND (reminders_paused_until IS NULL OR reminders_paused_until <= now()) "
+        "AND now() - updated_at >= make_interval(secs => %s::float8 * "
+        "GREATEST(%s, COALESCE(remind_interval_seconds, 0))) ORDER BY id",
+        (float(threshold), float(backoff_seconds)),
     )
     ids = sorted({i for edge in candidates for i in (edge.id, edge.parent_id) if i is not None})
     locked = {
         row.id: _Task(
-            row.id,
-            row.parent_id,
-            row.owner,
-            row.title,
-            TaskStatus(row.status),
-            row.reminder_count,
-            row.escalated_at,
-            row.priority,
-            row.is_root,
+            id=row.id,
+            parent=row.parent_id,
+            owner=row.owner,
+            title=row.title,
+            status=TaskStatus(row.status),
+            elapsed_seconds=row.elapsed_seconds,
+            remind_interval_seconds=row.remind_interval_seconds,
+            reminder_count=row.reminder_count,
+            escalated_at=row.escalated_at,
+            priority=row.priority,
+            is_root=row.is_root,
         )
         for row in query_all(
             cur.connection,
             _TaskRow,
-            "SELECT id,parent_id,owner,title,status,reminder_count,escalated_at,priority,is_root "
+            "SELECT id,parent_id,owner,title,status,"
+            "EXTRACT(EPOCH FROM (now() - updated_at))::bigint AS elapsed_seconds,"
+            "remind_interval_seconds,reminder_count,escalated_at,priority,is_root "
             "FROM agent_tasks WHERE id=ANY(%s) ORDER BY id FOR NO KEY UPDATE SKIP LOCKED",
             (ids,),
         )
@@ -123,6 +148,15 @@ def _lock_candidates(cur: psycopg.Cursor, threshold: int) -> tuple[list[int], di
 _STATE_CHANGE_BASIS = "a note or a change on the task would have restarted the reminders"
 
 
+# meiva:note
+# The evidence an escalation states is how long the task has been silent, read from the
+# locked row. It replaced the reminder count on 2026-11-07 (task #6354): reminders are
+# throttled per owner by the delivery window, so a count no longer measures time, and an
+# escalation that quoted it would understate how long nobody has touched the task.
+def _silent_for(task: _Task) -> str:
+    return f"{task.elapsed_seconds / 3600:.1f}h"
+
+
 def _user_notice(
     cur: psycopg.Cursor,
     conn: psycopg.Connection,
@@ -133,14 +167,13 @@ def _user_notice(
     if task.owner is None:
         raise ValueError("human escalation requires a task owner")
     title = (
-        f'Task #{task.id} "{task.title}" — {task.reminder_count} reminders with no state '
-        "change; reassign or cancel"
+        f'Task #{task.id} "{task.title}" — no state change for {_silent_for(task)}; '
+        "reassign or cancel"
     )
     content = (
-        f"Agent #{task.owner} has not changed this task's state after "
-        f"{task.reminder_count} reminders ({_STATE_CHANGE_BASIS}), and no live agent owns "
-        "any ancestor task to catch it. Reassign it to another agent, cancel it, or reply "
-        "to remind the owner once more."
+        f"Agent #{task.owner} has not changed this task's state for {_silent_for(task)} "
+        f"({_STATE_CHANGE_BASIS}), and no live agent owns any ancestor task to catch it. "
+        "Reassign it to another agent, cancel it, or reply to remind the owner once more."
     )
     staged = stage_human_notice(
         cur,
@@ -158,12 +191,10 @@ def _user_notice(
 
 
 def _delegator_note(cur: psycopg.Cursor, owner: int, tasks: list[_Task]) -> EscalationReceipt:
-    lines = [
-        "Subtasks still open after repeated reminders — task state unchanged "
-        f"({_STATE_CHANGE_BASIS}):"
-    ]
+    lines = [f"Subtasks still open with no state change ({_STATE_CHANGE_BASIS}):"]
     lines.extend(
-        f'- #{task.id} "{task.title}" — owner #{task.owner}, {task.reminder_count} reminders'
+        f'- #{task.id} "{task.title}" — owner #{task.owner}, '
+        f"no state change for {_silent_for(task)}"
         for task in tasks
     )
     content = "\n".join(lines)
@@ -191,6 +222,7 @@ def _eligible_groups(
     candidates: list[int],
     locked: dict[int, _Task],
     threshold: int,
+    backoff_seconds: float,
     managers: dict[int, int | None],
 ) -> tuple[dict[int, list[_Task]], list[_Task]]:
     delegated: dict[int, list[_Task]] = defaultdict(list)
@@ -201,7 +233,9 @@ def _eligible_groups(
             task is None
             or task.is_root
             or task.status is not TaskStatus.IN_PROGRESS
-            or task.reminder_count < threshold
+            or task.reminder_count < 1
+            or task.elapsed_seconds
+            < threshold * max(backoff_seconds, task.remind_interval_seconds or 0)
         ):
             continue
         parent = locked.get(task.parent) if task.parent is not None else None
@@ -215,8 +249,17 @@ def _eligible_groups(
     return delegated, human
 
 
+# meiva:note
+# `threshold` is counted in the task's own cadence periods
+# (`GREATEST(backoff_seconds, remind_interval_seconds)`), not in delivered reminders:
+# delivery is throttled per owner by the digest window, and a task must not read
+# younger than it is because the owner was not spoken to (2026-11-07, task #6354).
 def accept_escalations(
-    pool: ConnectionPool, threshold: int, *, notice_ttl_limit_seconds: float
+    pool: ConnectionPool,
+    threshold: int,
+    backoff_seconds: float,
+    *,
+    notice_ttl_limit_seconds: float,
 ) -> list[EscalationReceipt]:
     """Commit each eligible digest/notice from current task and parent rows.
 
@@ -225,9 +268,11 @@ def accept_escalations(
     create's open check and local-id allocation. All live hints happen later.
     """
     with write_transaction(pool) as conn, conn.cursor() as cur:
-        candidates, locked = _lock_candidates(cur, threshold)
+        candidates, locked = _lock_candidates(cur, threshold, backoff_seconds)
         managers = nearest_manager(cur, [task_id for task_id in candidates if task_id in locked])
-        delegated, human = _eligible_groups(candidates, locked, threshold, managers)
+        delegated, human = _eligible_groups(
+            candidates, locked, threshold, backoff_seconds, managers
+        )
         # Same physical identity lock as gateway notice create. Ordered locks
         # prevent two overlapping human batches from reversing agent order.
         owners = sorted(set(delegated) | {task.owner for task in human if task.owner is not None})

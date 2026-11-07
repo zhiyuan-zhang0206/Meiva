@@ -1,7 +1,10 @@
 # meiva:note
 # Which task writes restart a task's reminder ladder — one vocabulary for every write surface.
-# `task_maintenance` counts consecutive unanswered reminders in `agent_tasks.reminder_count` and
-# escalates once the count reaches Fleet `task_escalate_n`; a write makes those reminders stale
+# `task_maintenance` counts consecutive unanswered reminders in `agent_tasks.reminder_count`, and
+# escalates once a task has gone Fleet `task_escalate_n` of its own cadence periods without a write
+# and at least one reminder reached the owner (2026-11-07, task #6354 — the count itself no longer
+# gates escalation, because the per-owner digest window throttles delivery); a write makes those
+# reminders stale
 # only when it is activity on the task — a change to the work, or a note from someone still here.
 # Resetting on every write is what let the daily note stream (87% of all task updates) hold the
 # ladder at zero, so no task ever passed one reminder (task #5314); the 2026-10-31 ruling brought

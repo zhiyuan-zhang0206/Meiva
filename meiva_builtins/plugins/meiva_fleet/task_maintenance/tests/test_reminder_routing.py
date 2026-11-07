@@ -178,7 +178,7 @@ def test_rerouted_reminder_does_not_repeat_at_the_escalation_threshold(
     _dead, _tid = _dead_owner_under(db_conn, manager, reminder_count=2)
 
     assert run_reminders(pool, database, event_bus, 3600.0) == 1
-    assert run_escalate(pool, database, event_bus, 3) == 0
+    assert run_escalate(pool, database, event_bus, 3, 0.0) == 0
     assert len(inbound_messages(db_conn, manager)) == 1
 
 
@@ -198,7 +198,7 @@ def test_delegator_escalation_skips_a_terminated_parent_owner(
     owner = make_agent(db_conn)
     make_task(db_conn, owner=owner, parent_id=parent, updated_s_ago=7200, reminder_count=3)
 
-    assert run_escalate(pool, database, event_bus, 3) == 1
+    assert run_escalate(pool, database, event_bus, 3, 0.0) == 1
 
     assert inbound_messages(db_conn, dead) == []
     assert len(inbound_messages(db_conn, manager)) == 1
@@ -215,7 +215,7 @@ def test_delegator_escalation_falls_back_to_the_human_queue(
     owner = make_agent(db_conn)
     make_task(db_conn, owner=owner, parent_id=parent, updated_s_ago=7200, reminder_count=3)
 
-    assert run_escalate(pool, database, event_bus, 3) == 1
+    assert run_escalate(pool, database, event_bus, 3, 0.0) == 1
 
     assert inbound_messages(db_conn, dead) == []
     assert [title for title, _ in inbox_notices(db_conn, owner)]

@@ -83,14 +83,14 @@ When a task is cancelled:
 
 ### Reminder Mechanism
 
-A task's `remind_interval_seconds` (seconds) triggers a reminder to its owner if the task is not updated within that window — a chat message telling the owner the task has gone quiet. New tasks default to 30 minutes (`meiva.tasks.create(...)` sets `remind_interval_seconds=1800` unless you pass a different value; `None` also means the default — reminders cannot be turned off). An `meiva.tasks.update()` restarts the reminder counters when it changes the work (status, results, owner, priority, parent); appending a note or renaming the task does not. The daemon also escalates to the parent task's owner after 3 unanswered reminders. Reminders are useful for:
+A task's `remind_interval_seconds` (seconds) triggers a reminder to its owner if the task is not updated within that window — a chat message telling the owner the task has gone quiet. New tasks default to 30 minutes (`meiva.tasks.create(...)` sets `remind_interval_seconds=1800` unless you pass a different value; `None` also means the default — reminders cannot be turned off). An `meiva.tasks.update()` restarts the reminder counters when it changes the work (status, results, owner, priority, parent); appending a note or renaming the task does not. The daemon also escalates to the parent task's owner once a task has gone three of its own reminder cadences without a state change (and at least one reminder reached the owner) — the threshold counts silence, not delivered reminders. Reminders are useful for:
 - Long-running tasks where the orchestrator wants a periodic pulse
 - Tasks assigned to agents that might stall silently
 - Health checks on delegation chains
 
 The reminder is sent at most once per overdue window — updating the task resets the window, so an agent that reports progress regularly never gets pinged.
 
-Reminders fire automatically — the cluster runs a task-maintenance daemon that reminds overdue task owners. You do not launch anything. After 3 unanswered reminders the daemon escalates to the parent task's owner.
+Reminders fire automatically — the cluster runs a task-maintenance daemon that reminds overdue task owners. You do not launch anything. After three reminder cadences of silence the daemon escalates to the nearest live manager, or to the human queue when no live agent owns an ancestor task.
 ## Two Roles
 
 **Orchestrator** (coordinating delegated work) and **worker** (carrying out an accepted mission) are optional descriptions of current work, not exhaustive agent types or fixed identities. An agent may execute directly, collaborate as a peer, or combine these activities without adopting either role.
