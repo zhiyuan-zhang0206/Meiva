@@ -24,7 +24,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { formatDuration, type SdkCall } from "@/lib/format/item-summary";
 import { cn } from "@/lib/format/utils";
 import {
-  BAR_CLEAR_TOP_OFFSET_CLASS,
+  BAR_STICKY_TOP_CLASS,
   FLEX,
   FLEX_1,
   FLEX_COL,
@@ -390,12 +390,12 @@ export const TurnBlock = memo(function TurnBlock({
         type="button"
         onClick={() => onToggle(toggleKey ?? id, expanded)}
         className={cn(
-          "items-start gap-1.5 text-left select-none transition-colors",
+          "w-[calc(100%+0.5rem)] -ml-2 px-2 py-0.5 items-start gap-1.5 text-left select-none transition-colors",
           expanded
-            ? "sticky z-20 bg-background w-[calc(100%+0.5rem)] -ml-2 px-2 py-0.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted"
-            : "max-w-full rounded-lg px-2 py-0.5 -ml-2 text-muted-foreground/75 hover:text-foreground hover:bg-muted/50",
+            ? "sticky z-20 bg-background rounded-md text-muted-foreground hover:text-foreground hover:bg-muted"
+            : "rounded-lg text-muted-foreground/75 hover:text-foreground hover:bg-muted/50",
           FLEX,
-          expanded && BAR_CLEAR_TOP_OFFSET_CLASS,
+          expanded && BAR_STICKY_TOP_CLASS,
         )}
         aria-expanded={expanded}
         data-testid="turn-toggle"
@@ -407,7 +407,7 @@ export const TurnBlock = memo(function TurnBlock({
             expanded && "rotate-90",
           )}
         />
-        <span className={cn("gap-0.5", FLEX, FLEX_COL, MIN_W_0, expanded && FLEX_1)}>
+        <span className={cn("gap-0.5", FLEX, FLEX_COL, MIN_W_0, FLEX_1)}>
           <span className={cn("items-center gap-1.5 text-[13px] leading-snug", FLEX, MIN_W_0)}>
             <Layers className="size-3.5 shrink-0 opacity-70" />
             <span className="truncate whitespace-nowrap tabular-nums">{workedLabel}</span>
@@ -465,7 +465,7 @@ export const PendingLiveActivityWindow = memo(function PendingLiveActivityWindow
     >
       <div
         className={cn(
-          "max-w-full items-start gap-1.5 px-2 py-0.5 -ml-2 rounded-md text-left select-none text-muted-foreground",
+          "w-[calc(100%+0.5rem)] -ml-2 px-2 py-0.5 items-start gap-1.5 rounded-md text-left select-none text-muted-foreground",
           FLEX,
         )}
       >

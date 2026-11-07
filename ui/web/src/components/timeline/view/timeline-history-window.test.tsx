@@ -162,6 +162,92 @@ describe("deep history DOM window", () => {
     expect(range.end).toBe(60);
   });
 
+  it("does not jump scrollTop past a newly expanded work block when a primary message sits below it", () => {
+    displayLimits.set("MEIVA_TIMELINE_WINDOW_MEASURE_ROWS", 5);
+    const items = [
+      ...Array.from({ length: 8 }, (_, index) => makeItem({
+        item_id: `1.${index}`, kind: "agent_reasoning", payload: `Step ${index + 1}`,
+      })),
+      makeItem({ item_id: "2.0", kind: "agent_chat", payload: "Final reply" }),
+    ];
+    render(<TimelineView items={items} threadKey="expand-keep-top" />);
+    const viewport = screen.getByTestId("scroll-viewport");
+    const content = viewport.querySelector<HTMLElement>('[role="log"]')!;
+    const box = (top: number, height = 0) => ({
+      top, bottom: top + height, left: 0, right: 0, width: 0, height,
+      x: 0, y: top, toJSON: () => ({}),
+    });
+    Object.defineProperty(viewport, "clientHeight", { value: 600, configurable: true });
+    Object.defineProperty(viewport, "scrollHeight", { value: 2400, configurable: true });
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+      if (this === viewport) return box(0, 600);
+      const group = this.matches("[data-virtual-group]") ? this : this.closest<HTMLElement>("[data-virtual-group]");
+      if (!group) return box(0);
+      let top = 52;
+      for (const sibling of content.children) {
+        if (sibling === group) break;
+        if (sibling.hasAttribute("data-virtual-group")) {
+          const isExpandedTurn = sibling.querySelector('[data-turn-expanded="true"]') !== null;
+          top += (isExpandedTurn ? 420 : 40) + 12;
+        }
+      }
+      const isExpandedTurn = group.querySelector('[data-turn-expanded="true"]') !== null;
+      return box(top - viewport.scrollTop, isExpandedTurn ? 420 : 40);
+    });
+    act(() => {
+      viewport.scrollTop = 1800;
+      fireEvent.scroll(viewport);
+    });
+    act(() => {
+      viewport.scrollTop = 40;
+      fireEvent.scroll(viewport);
+    });
+    expect(viewport.scrollTop).toBe(40);
+    fireEvent.click(screen.getByTestId("turn-toggle"));
+    expect(screen.getByTestId("turn-toggle").getAttribute("aria-expanded")).toBe("true");
+    expect(viewport.scrollTop).toBe(40);
+    vi.restoreAllMocks();
+  });
+
+  it("does not roll back user scroll when a commit lands after scrollTop advances", () => {
+    displayLimits.set("MEIVA_TIMELINE_WINDOW_MEASURE_ROWS", 5);
+    const items = Array.from({ length: 12 }, (_, index) => makeItem({
+      item_id: `${index + 1}.0`, kind: "agent_chat", payload: `Reply ${index + 1}`,
+    }));
+    const { rerender } = render(<TimelineView items={items} threadKey="scroll-no-rollback" />);
+    const viewport = screen.getByTestId("scroll-viewport");
+    const content = viewport.querySelector<HTMLElement>('[role="log"]')!;
+    const box = (top: number, height = 0) => ({
+      top, bottom: top + height, left: 0, right: 0, width: 0, height,
+      x: 0, y: top, toJSON: () => ({}),
+    });
+    Object.defineProperty(viewport, "clientHeight", { value: 600, configurable: true });
+    Object.defineProperty(viewport, "scrollHeight", { value: 2400, configurable: true });
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+      if (this === viewport) return box(0, 600);
+      const group = this.matches("[data-virtual-group]") ? this : this.closest<HTMLElement>("[data-virtual-group]");
+      if (!group) return box(0);
+      let top = 52;
+      for (const sibling of content.children) {
+        if (sibling === group) break;
+        if (sibling.hasAttribute("data-virtual-group")) top += 92;
+      }
+      return box(top - viewport.scrollTop, 80);
+    });
+    act(() => {
+      viewport.scrollTop = 1800;
+      fireEvent.scroll(viewport);
+    });
+    act(() => {
+      viewport.scrollTop = 300;
+      fireEvent.scroll(viewport);
+    });
+    viewport.scrollTop = 360;
+    rerender(<TimelineView items={[...items]} threadKey="scroll-no-rollback" />);
+    expect(viewport.scrollTop).toBe(360);
+    vi.restoreAllMocks();
+  });
+
   it("starts measuring at the configured row count before activation", () => {
     displayLimits.set("MEIVA_TIMELINE_WINDOW_ACTIVATION_ROWS", 50);
     displayLimits.set("MEIVA_TIMELINE_WINDOW_MEASURE_ROWS", 10);

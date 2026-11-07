@@ -107,8 +107,15 @@ function visibleRow(content: HTMLElement, rect: DOMRect): HTMLElement | null {
     const box = node.getBoundingClientRect();
     return box.bottom > rect.top && box.top < rect.bottom;
   };
-  return [...content.querySelectorAll<HTMLElement>(".timeline-item")].find(intersects) ??
-    [...content.querySelectorAll<HTMLElement>("[data-turn-id]")].find(intersects) ?? null;
+  return (
+    [...content.querySelectorAll<HTMLElement>(".timeline-item, [data-turn-expanded='false'][data-turn-id]")].find(intersects) ??
+    [...content.querySelectorAll<HTMLElement>("[data-turn-id]")].find(intersects) ??
+    null
+  );
+}
+
+function groupHeightKey(group: WindowGroup): string {
+  return group.expandedRows ? `${group.key}:open` : group.key;
 }
 
 function keepFocusInTimeline(content: HTMLElement, rect: DOMRect): void {
@@ -189,7 +196,7 @@ export function useTimelineWindow({
   const previousIdentityRef = useRef(identity);
   const [view, setView] = useState({ top: restoreTop ?? 0, height: 0, origin: 52 });
   const viewRef = useRef(view);
-  const readingRef = useRef<{ node: HTMLElement; top: number; id: string; rank: number; identity: string | null } | null>(null);
+  const readingRef = useRef<{ node: HTMLElement; docTop: number; id: string; rank: number; identity: string | null } | null>(null);
   const preserveRef = useRef<typeof readingRef.current>(null);
   const tracking = enabled || groups.reduce((count, group) =>
     count + (group.expandedRows?.length ?? 1), 0) >= measureRows;
@@ -203,11 +210,13 @@ export function useTimelineWindow({
     }
     const content = contentRef.current;
     const viewport = viewportRef.current;
-    const node = content && viewport ? visibleRow(content, viewport.getBoundingClientRect()) : null;
+    const vpRect = viewport?.getBoundingClientRect();
+    const node = content && viewport && vpRect ? visibleRow(content, vpRect) : null;
     const id = node?.dataset.itemId;
-    if (!node || !id) return;
+    if (!node || !id || !viewport || !vpRect) return;
     const rank = Number(node.dataset.displayRank ?? 0);
-    readingRef.current = { node, top: node.getBoundingClientRect().top, id, rank, identity };
+    const docTop = node.getBoundingClientRect().top - vpRect.top + viewport.scrollTop;
+    readingRef.current = { node, docTop, id, rank, identity };
     setVisiblePin((previous) => previous?.id === id && previous.rank === rank && previous.identity === identity
       ? previous : { id, rank, identity });
   }, [contentRef, identity, isFollowing, viewportRef]);
@@ -255,7 +264,7 @@ export function useTimelineWindow({
     if (first && firstIndex >= 0 && rect.height > 0 && first.getBoundingClientRect().height > 0) {
       origin = first.getBoundingClientRect().top - rect.top + viewport.scrollTop;
       for (let index = 0; index < firstIndex; index++) {
-        origin -= (heights.get(groups[index].key) ?? groups[index].estimatedHeight) + GAP;
+        origin -= (heights.get(groupHeightKey(groups[index])) ?? groups[index].estimatedHeight) + GAP;
       }
     }
     const next = { top: viewport.scrollTop, height: viewport.clientHeight, origin };
@@ -264,7 +273,7 @@ export function useTimelineWindow({
       Math.abs(previous.origin - next.origin) >= 1;
     if (changed) {
       rememberVisible();
-      preserveRef.current = readingRef.current;
+      preserveRef.current ??= readingRef.current;
       viewRef.current = next;
       setView(next);
     }
@@ -293,7 +302,7 @@ export function useTimelineWindow({
     };
   }, [tracking, measureView, viewportRef]);
 
-  const sizes = groups.map((group) => heights.get(group.key) ?? group.estimatedHeight);
+  const sizes = groups.map((group) => heights.get(groupHeightKey(group)) ?? group.estimatedHeight);
   const pin = pendingAnchor ?? (visiblePin?.identity === identity ? visiblePin : null);
   const pinnedIndex = pin
     ? groups.findIndex((group) =>
@@ -364,7 +373,12 @@ export function useTimelineWindow({
         contentRef.current?.querySelector<HTMLElement>(
           `.timeline-item[data-item-id="${CSS.escape(preserved.id)}"][data-display-rank="${preserved.rank}"], [data-turn-expanded="false"][data-item-id="${CSS.escape(preserved.id)}"][data-display-rank="${preserved.rank}"]`,
         );
-      if (node) viewport.scrollTop += node.getBoundingClientRect().top - preserved.top;
+      if (node) {
+        const vpTop = viewport.getBoundingClientRect().top;
+        const docTop = node.getBoundingClientRect().top - vpTop + viewport.scrollTop;
+        const delta = docTop - preserved.docTop;
+        if (Math.abs(delta) >= 1) viewport.scrollTop += delta;
+      }
     }
     rememberVisible();
   });
@@ -383,7 +397,10 @@ export function useTimelineWindow({
       const nextHeights = new Map(heightsRef.current);
       for (const entry of entries) {
         const node = entry.target as HTMLElement;
-        const key = node.dataset.virtualGroup ?? node.dataset.virtualRow;
+        const groupKey = node.dataset.virtualGroup;
+        const key = groupKey
+          ? (node.querySelector('[data-turn-expanded="true"]') ? `${groupKey}:open` : groupKey)
+          : node.dataset.virtualRow;
         if (!key) continue;
         const height = entry.borderBoxSize[0]?.blockSize ?? node.getBoundingClientRect().height;
         if (height <= 0 || Math.abs((nextHeights.get(key) ?? 0) - height) < 1) continue;
@@ -398,7 +415,7 @@ export function useTimelineWindow({
       preserveRef.current = readingRef.current;
       const groups = groupsRef.current;
       if (nextHeights.size > Math.max(HEIGHT_CACHE_SWEEP_FLOOR, groups.length * 2)) {
-        const live = new Set(groups.flatMap((group) => [group.key, ...(group.expandedRows ?? [])]));
+        const live = new Set(groups.flatMap((group) => [group.key, `${group.key}:open`, ...(group.expandedRows ?? [])]));
         for (const key of nextHeights.keys()) {
           if (!live.has(key)) nextHeights.delete(key);
         }
