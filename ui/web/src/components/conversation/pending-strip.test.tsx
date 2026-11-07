@@ -108,7 +108,6 @@ describe("PendingStrip", () => {
     expect(thumbs[0].getAttribute("src")).toContain("/api/agents/7/uploads/a.png");
     expect(thumbs[1].getAttribute("src")).toContain("/api/agents/7/uploads/b.png");
     expect(thumbs[0].getAttribute("alt")).toBe("pending image");
-    // The message's text still shows next to its thumbnails.
     expect(screen.getByText("look at this")).toBeTruthy();
   });
 
@@ -123,9 +122,18 @@ describe("PendingStrip", () => {
       <PendingStrip items={[item({ id: 1, content: "[image]", images: ["/api/agents/7/uploads/a.png"] })]} />,
     );
     expect(screen.queryByText("[image]")).toBeNull();
-    // Without an image the same literal is the message's real text — keep it.
     rerender(<PendingStrip items={[item({ id: 1, content: "[image]" })]} />);
     expect(screen.getByText("[image]")).toBeTruthy();
+  });
+
+  it("caps and centers the root container with px-4 so its inner border-t matches the composer width", () => {
+    render(<PendingStrip items={[item({ id: 1, content: "queued" })]} maxWidthCss="768px" />);
+    const root = screen.getByTestId("pending-strip");
+    expect(root.style.maxWidth).toBe("768px");
+    expect(root.className.split(" ")).toEqual(expect.arrayContaining(["mx-auto", "w-full", "px-4"]));
+    const inner = root.firstElementChild as HTMLElement;
+    expect(inner.style.maxWidth).toBe("");
+    expect(inner.className.split(" ")).toContain("border-t");
   });
 
   it("renders file chips for system:upload and suppresses the [files] placeholder on the companion user row", () => {
