@@ -71,3 +71,18 @@ def expand_plan(
             continue
         resolved.append(path)
     return ExpandPlan(tuple(resolved), tuple(refused))
+
+
+# meiva:note
+# `meiva.help()` prints a leading Markdown heading (`# meiva`, `## meiva.files`, ...) followed by
+# raw Python stub source. When embedded into the Markdown system prompt, wrapping the Python stub
+# body in a ` ```python ` fenced code block keeps the heading as a Markdown heading while rendering
+# the imports, docstrings, type annotations and `def`/`class` signatures as syntax-highlighted
+# Python code.
+def fence_sdk_stub(rendered: str) -> str:
+    stripped = rendered.rstrip()
+    heading, sep, body = stripped.partition("\n\n")
+    if not sep or not heading.startswith("#") or body.startswith("#"):
+        return stripped
+    fence = "````" if "```" in body else "```"
+    return f"{heading}\n\n{fence}python\n{body}\n{fence}"

@@ -17,6 +17,7 @@ def coding_tools_section(slices: AgentSlices, *, catalog: ModelCatalog) -> str:
     from agent.graph.prompt.live import (
         effective_sdk_disable,
         effective_sdk_expand,
+        fence_sdk_stub,
         read_plugin_expansions,
     )
 
@@ -38,7 +39,7 @@ def coding_tools_section(slices: AgentSlices, *, catalog: ModelCatalog) -> str:
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
             meiva.help(mod)
-        pieces.append(buf.getvalue().rstrip())
+        pieces.append(fence_sdk_stub(buf.getvalue()))
     body = "\n\n".join(pieces)
     preamble = (
         "Use the Meiva file and shell tools for coding work. "
