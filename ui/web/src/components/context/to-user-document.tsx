@@ -5,6 +5,8 @@ import { useTranslations } from "next-intl";
 import { useCallback, useEffect, useState } from "react";
 
 import { ChatMarkdown } from "@/components/content/markdown";
+import { isFilePath } from "@/components/content/file-path-utils";
+import { useWorkspaceFileStore } from "@/lib/context/workspace-file-store";
 import { InlineError } from "@/components/ui/inline-error";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { ZoomableImage } from "@/components/content/zoomable-image";
@@ -221,9 +223,23 @@ export function ToUserDocumentView({ agentId, document, failure, pending, refres
                     const resource = href ? byUrl.get(href) : undefined;
                     const external = !href?.startsWith("#");
                     return <a href={href} target={external ? "_blank" : undefined} rel={external ? "noopener noreferrer" : undefined} onClick={(event) => {
-                      if (!resource?.markdown || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || event.button !== 0) return;
-                      event.preventDefault();
-                      show([...files, resource.file], "push");
+                      if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || event.button !== 0) return;
+                      if (resource?.markdown) {
+                        event.preventDefault();
+                        show([...files, resource.file], "push");
+                        return;
+                      }
+                      if (href) {
+                        const fileMatch = isFilePath(href);
+                        if (fileMatch.isPath) {
+                          event.preventDefault();
+                          useWorkspaceFileStore.getState().openFile({
+                            agentId,
+                            path: fileMatch.path,
+                            lineRange: fileMatch.lineRange,
+                          });
+                        }
+                      }
                     }}>{children}</a>;
                   },
                 }} />

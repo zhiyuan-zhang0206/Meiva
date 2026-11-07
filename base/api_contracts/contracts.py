@@ -42,6 +42,8 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
     ("GET", "/api/agents/{agent_id}/born-chain"): RouteContract(),
     ("GET", "/api/agents/{agent_id}/to-user"): RouteContract(),
     ("GET", "/api/agents/{agent_id}/to-user/resource"): RouteContract(),
+    ("GET", "/api/agents/{agent_id}/files/content"): RouteContract(),
+    ("GET", "/api/agents/{agent_id}/files/raw"): RouteContract(),
     ("GET", "/api/alerts"): RouteContract(),
     ("GET", "/api/alerts/stream"): RouteContract(
         note="SSE tail — subscribing to an idle stream just waits; the UI's initial fetch covers the gap"

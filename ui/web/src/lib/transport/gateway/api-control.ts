@@ -49,6 +49,7 @@ import type {
   UserSettingListResponse,
   UserSettingRow,
   WireFleetGraph,
+  WorkspaceFileResponse,
 } from "../../contracts/types";
 import { toUserPath } from "./routes/agent-routes";
 import { configPath, harnessAvailabilityPath, inventoryPath, resolvedConfigPath, settingPath } from "./routes/config-routes";
@@ -105,6 +106,14 @@ export function createControlApi(http: Http) {
       return f(toUserPath(agentId, files), { signal }).then(ok<ToUserDocument>);
     },
 
+    getWorkspaceFile: (
+      agentId: number,
+      path: string,
+      signal?: AbortSignal,
+    ): Promise<WorkspaceFileResponse> => {
+      const query = new URLSearchParams({ path });
+      return f(`/api/agents/${agentId}/files/content?${query}`, { signal }).then(ok<WorkspaceFileResponse>);
+    },
     getFleetGraph: (opts?: { hours?: number; decayLambda?: number }): Promise<WireFleetGraph> => {
       return f(fleetGraphPath(opts)).then(ok<WireFleetGraph>);
     },

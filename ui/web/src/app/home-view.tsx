@@ -22,6 +22,7 @@ import type { useAgents } from "@/lib/agents/use-agents";
 import type { useSidebarCollapsed } from "@/lib/agents/sidebar";
 import { useReplySuggestion } from "@/lib/composer/use-reply-suggestion";
 import { useToUser } from "@/lib/context/use-to-user";
+import { useWorkspaceFileStore } from "@/lib/context/workspace-file-store";
 import type { AgentRow, DeliveredUploadStatus } from "@/lib/contracts/types";
 import { errMsg } from "@/lib/contracts/errors";
 import { cn } from "@/lib/format/utils";
@@ -177,9 +178,10 @@ export function HomePageView(props: HomePageProps) {
   // is closed still shows it, because otherwise the mode would be on with
   // nothing to inspect. On mobile the inspector keeps its own sheet.
   // meiva:link ui/web/src/docs/frontend-state/shared-context/shared-context.meiva.okf.md
+  const activeWorkspaceFile = useWorkspaceFileStore((s) => s.activeFile);
   const showContext = isLarge
-    ? activeId != null && (contextPanel.open || inspector.open)
-    : mobileContextOpen || inspector.open;
+    ? activeId != null && (contextPanel.open || inspector.open || activeWorkspaceFile != null)
+    : mobileContextOpen || inspector.open || activeWorkspaceFile != null;
 
   const spawn = agents.spawn;
   const focusComposer = store.focusComposer;
@@ -251,8 +253,20 @@ export function HomePageView(props: HomePageProps) {
           notices={activeNotices}
           noticesFailed={noticeFeed.error}
           mobile={!isLarge}
-          onClose={() => { setMobileContextOpen(false); if (inspector.open) inspector.toggle(); }}
-          onCollapse={isLarge ? () => { contextPanel.setOpen(false); if (inspector.open) inspector.toggle(); } : undefined}
+          onClose={() => {
+            useWorkspaceFileStore.getState().closeFile();
+            setMobileContextOpen(false);
+            if (inspector.open) inspector.toggle();
+          }}
+          onCollapse={
+            isLarge
+              ? () => {
+                  useWorkspaceFileStore.getState().closeFile();
+                  contextPanel.setOpen(false);
+                  if (inspector.open) inspector.toggle();
+                }
+              : undefined
+          }
         />
       </ErrorBoundary>
     ) : null;

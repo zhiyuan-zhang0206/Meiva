@@ -65,6 +65,7 @@ export {
   type TaskRow,
   type TaskSummaryRow,
   type ToUserDocument,
+  type WorkspaceFileResponse,
   type UserSettingListResponse,
   type UserSettingRow,
 } from "./types-settings";

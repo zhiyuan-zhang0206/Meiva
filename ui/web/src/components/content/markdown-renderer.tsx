@@ -3,8 +3,9 @@
 // meiva:link ui/web/src/docs/frontend-components/markdown-surfaces.meiva.okf.md
 "use client";
 
-import { createContext, memo, useContext, useEffect, useState, type ReactNode } from "react";
+import { createContext, memo, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import ReactMarkdown, { type Components, type UrlTransform } from "react-markdown";
+import { FileCode } from "lucide-react";
 import rehypeRaw from "rehype-raw";
 import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
 import rehypeSlug from "rehype-slug";
@@ -15,7 +16,9 @@ import remarkGfm from "remark-gfm";
 import type { Plugin, PluggableList } from "unified";
 
 import { CopyButton } from "@/components/content/copy-button";
+import { isFilePath } from "@/components/content/file-path-utils";
 import { PythonCode } from "@/components/content/python-code";
+import { useWorkspaceFileStore } from "@/lib/context/workspace-file-store";
 import { MIN_W_0 } from "@/lib/layout/layout";
 import {
   defaultMarkdownMath,
@@ -25,6 +28,7 @@ import {
 } from "@/lib/markdown/math";
 import remarkAutolinkDelimiter from "@/lib/markdown/remark-autolink-delimiter";
 import remarkCjkLinkBoundary from "@/lib/markdown/remark-cjk-link-boundary";
+import { useStore } from "@/lib/state/store";
 import { cn } from "@/lib/format/utils";
 
 // meiva:note
@@ -49,8 +53,14 @@ export function useMarkdownMath(): MarkdownMathSource {
   return useContext(MarkdownMathContext);
 }
 
-const urlTransform = (url: string): string => {
-  return /^(https?:|mailto:|#)/i.test(url) ? url : "about:blank";
+const DANGEROUS_PROTOCOLS = /^(javascript|vbscript):/i;
+
+export const urlTransform: UrlTransform = (url: string): string => {
+  const trimmed = url.trim();
+  if (DANGEROUS_PROTOCOLS.test(trimmed)) {
+    return "about:blank";
+  }
+  return trimmed;
 };
 
 // meiva:link ui/web/src/docs/frontend-components/markdown-safe-content.meiva.okf.md
@@ -59,6 +69,11 @@ const sanitizeSchema = {
   clobberPrefix: "",
   strip: [...(defaultSchema.strip ?? []), "style", "iframe", "template"],
   tagNames: [...(defaultSchema.tagNames ?? []), "figure", "figcaption", "mark"],
+  protocols: {
+    ...defaultSchema.protocols,
+    href: [...(defaultSchema.protocols?.href ?? ["http", "https", "mailto"]), "file"],
+    src: [...(defaultSchema.protocols?.src ?? ["http", "https"]), "file"],
+  },
   attributes: {
     ...defaultSchema.attributes,
     // meiva:note
@@ -113,10 +128,31 @@ const baseRehypePlugins = (resolve: UrlTransform, inline: boolean): PluggableLis
   rehypeSlug,
 ];
 
-const components: Components = {
+const createDefaultComponents = (onOpenFile: (path: string, lineRange?: string) => void): Components => ({
   pre: ({ node: _node, children }) => <>{children}</>,
   a: ({ node: _node, href, children, ...props }) => {
     const external = /^https?:/i.test(href ?? "");
+    const fileMatch = href ? isFilePath(href) : null;
+    const isFile = Boolean(fileMatch?.isPath);
+    if (isFile && fileMatch) {
+      return (
+        <a
+          href={href}
+          {...props}
+          data-testid="file-path-link"
+          onClick={(e) => {
+            if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
+            e.preventDefault();
+            onOpenFile(fileMatch.path, fileMatch.lineRange);
+          }}
+          className={cn("inline-flex items-center gap-1 font-mono text-primary underline underline-offset-2 hover:opacity-80 cursor-pointer", props.className)}
+          title={`Open ${fileMatch.path}${fileMatch.lineRange ? ` (Line ${fileMatch.lineRange})` : ""}`}
+        >
+          <FileCode className="size-3.5 inline-block opacity-70" />
+          <span>{children}</span>
+        </a>
+      );
+    }
     return external ? (
       <a href={href} {...props} target="_blank" rel="noopener noreferrer">
         {children}
@@ -132,6 +168,24 @@ const components: Components = {
 
     const text = typeof children === "string" ? children : "";
     if (lang === undefined && !text.includes("\n")) {
+      const fileMatch = isFilePath(text);
+      if (fileMatch.isPath) {
+        return (
+          <button
+            type="button"
+            data-testid="file-path-pill"
+            onClick={(e) => {
+              e.stopPropagation();
+              onOpenFile(fileMatch.path, fileMatch.lineRange);
+            }}
+            className="inline-flex items-center gap-1 mx-0.5 px-1.5 py-0.5 rounded text-[12px] font-mono bg-primary/10 hover:bg-primary/20 text-primary border border-primary/20 hover:border-primary/40 transition-colors cursor-pointer align-baseline"
+            title={`Open ${fileMatch.path}${fileMatch.lineRange ? ` (Line ${fileMatch.lineRange})` : ""}`}
+          >
+            <FileCode className="size-3 shrink-0 opacity-70" />
+            <code className={className}>{text}</code>
+          </button>
+        );
+      }
       return (
         <code className={className} {...props}>
           {children}
@@ -151,26 +205,76 @@ const components: Components = {
       </div>
     );
   },
-};
+});
 
-const inlineComponents: Components = {
+const createInlineComponents = (onOpenFile: (path: string, lineRange?: string) => void): Components => ({
   p: ({ children }) => <>{children}</>,
-  code: ({ children }) => <code>{children}</code>,
-};
+  code: ({ children }) => {
+    const text = typeof children === "string" ? children : "";
+    const fileMatch = isFilePath(text);
+    if (fileMatch.isPath) {
+      return (
+        <button
+          type="button"
+          data-testid="file-path-pill"
+          onClick={(e) => {
+            e.stopPropagation();
+            onOpenFile(fileMatch.path, fileMatch.lineRange);
+          }}
+          className="inline-flex items-center gap-1 mx-0.5 px-1.5 py-0.5 rounded text-[12px] font-mono bg-primary/10 hover:bg-primary/20 text-primary border border-primary/20 hover:border-primary/40 transition-colors cursor-pointer align-baseline"
+          title={`Open ${fileMatch.path}${fileMatch.lineRange ? ` (Line ${fileMatch.lineRange})` : ""}`}
+        >
+          <FileCode className="size-3 shrink-0 opacity-70" />
+          <code>{text}</code>
+        </button>
+      );
+    }
+    return <code>{children}</code>;
+  },
+});
 
 export interface ChatMarkdownProps {
   content: string;
   components?: Components;
   resolveUrl?: UrlTransform;
   inline?: boolean;
+  onOpenFile?: (path: string, lineRange?: string) => void;
 }
 
 // meiva:note
 // Headings gain stable, deduplicated slug ids and same-document # links keep targeting them; GFM footnote reference/definition anchor pairs still match after sanitizing; the To user panel treats page-anchor links as in-panel navigation rather than external opens.
 // meiva:link ui/web/src/docs/frontend-components/markdown-safe-content.meiva.okf.md
-export const ChatMarkdownRenderer = memo(function ChatMarkdownRenderer({ content, components: overrides, resolveUrl, inline = false }: ChatMarkdownProps) {
+export const ChatMarkdownRenderer = memo(function ChatMarkdownRenderer({
+  content,
+  components: overrides,
+  resolveUrl,
+  inline = false,
+  onOpenFile,
+}: ChatMarkdownProps) {
   const [math, setMath] = useState<MarkdownMath | null>(null);
   const mathSource = useMarkdownMath();
+  const activeId = useStore((s) => s.activeId);
+
+  const defaultOpenFile = useCallback(
+    (path: string, lineRange?: string) => {
+      if (activeId !== null) {
+        useWorkspaceFileStore.getState().openFile({ agentId: activeId, path, lineRange });
+      }
+    },
+    [activeId],
+  );
+
+  const effectiveOpenFile = onOpenFile ?? defaultOpenFile;
+
+  const defaultComponents = useMemo(
+    () => createDefaultComponents(effectiveOpenFile),
+    [effectiveOpenFile],
+  );
+  const defaultInlineComponents = useMemo(
+    () => createInlineComponents(effectiveOpenFile),
+    [effectiveOpenFile],
+  );
+
   const needsMath = hasMathSyntax(content);
   useEffect(() => {
     if (!needsMath || math !== null) return;
@@ -186,6 +290,15 @@ export const ChatMarkdownRenderer = memo(function ChatMarkdownRenderer({ content
     };
   }, [needsMath, math, mathSource]);
 
+  const activeComponents = useMemo(() => {
+    if (inline) {
+      return overrides
+        ? { ...defaultComponents, ...defaultInlineComponents, ...overrides }
+        : { ...defaultComponents, ...defaultInlineComponents };
+    }
+    return overrides ? { ...defaultComponents, ...overrides } : defaultComponents;
+  }, [inline, overrides, defaultComponents, defaultInlineComponents]);
+
   const Wrapper = inline ? "span" : "div";
   return (
     <Wrapper className={cn("chat-md font-sans", MIN_W_0)}>
@@ -193,7 +306,7 @@ export const ChatMarkdownRenderer = memo(function ChatMarkdownRenderer({ content
         remarkPlugins={[...baseRemarkPlugins, ...(math?.remark ?? [])]}
         rehypePlugins={[...baseRehypePlugins(resolveUrl ?? urlTransform, inline), ...(math?.rehype ?? [])]}
         urlTransform={resolveUrl ?? urlTransform}
-        components={inline || overrides ? { ...components, ...(inline ? inlineComponents : {}), ...overrides } : components}
+        components={activeComponents}
       >
         {content}
       </ReactMarkdown>
