@@ -16,7 +16,7 @@ import json
 from collections.abc import Iterable, Mapping
 
 from meizel.contracts.debt import file_key
-from meizel.contracts.manifest import Manifest, effective_purity
+from meizel.contracts.manifest import Manifest, effective_purity, unlicensed
 from meizel.contracts.policy import POLICY, Policy
 from meizel.graph.imports import Scope, collect_scope
 from meizel.graph.model import (
@@ -30,6 +30,7 @@ from meizel.graph.model import (
     MeizelError,
     Sources,
     Unless,
+    covered_kinds,
 )
 from meizel.graph.universe import Universe
 from meizel.language import cached_module_imports, load_cached_sources, store_cached_sources
@@ -126,25 +127,6 @@ def sources_from(manifests: Mapping[str, Manifest], policy: Policy, universe: Un
 
 
 # meiva:note
-# The kinds a `[roots]` declaration of one kind also allows, and why the relation has one direction.
-#
-# `clock` covers `monotonic`: a file already allowed the instant is allowed the duration, because a
-# reading of `time.monotonic` says less about the world than the wall clock the same root reads — it
-# orders events inside one process and is compared with deadlines that process wrote.
-#
-# `monotonic` does not cover `clock`, and that direction is the reason the kind exists: a root
-# declared only for `monotonic` still fails on `time.time()` and `datetime.now()`. Making this map
-# symmetric, or dropping `monotonic` back into `clock`, would silently license the wall clock in every
-# poll loop that times a wait — the exact read the narrow kind was introduced to keep out — so a
-# change here needs the failing case, not a tidy-up.
-_COVERED: dict[str, frozenset[str]] = {AmbientKind.CLOCK: frozenset({AmbientKind.MONOTONIC})}
-
-
-def _covers(kind: str) -> frozenset[str]:
-    return _COVERED.get(kind, frozenset()) | {kind}
-
-
-# meiva:note
 # Whether the rule governs this file: a governed top-level role (tests record no acquisitions).
 def in_scope(path: str, manifests: Mapping[str, Manifest]) -> bool:
     root = manifests.get("")
@@ -172,28 +154,63 @@ def _diagnostic(scan: FileScan, acquisition: Acquisition, mode: str, owner: str)
 
 
 # meiva:note
-# Every acquisition in a governed file whose directory manifest does not declare its kind.
+# Every acquisition in a governed file whose directory manifest does not declare its kind -- and every
+# `[debt.impure-call]` entry that pays for the same call the declaration licenses (`unlicensed`): the
+# read a root makes is one fact, so the ledger states it once.
 def ambient_diagnostics(
     scans: Iterable[FileScan], manifests: Mapping[str, Manifest]
 ) -> list[Diagnostic]:
+    scanned = list(scans)
     found: list[Diagnostic] = []
-    for scan in scans:
+    for scan in scanned:
         if not scan.ambient or not in_scope(scan.path, manifests):
             continue
         owner, _, name = scan.path.rpartition("/")
         manifest = manifests.get(owner)
-        root = None if manifest is None else manifest.roots.get(name)
-        allowed = frozenset(
-            covered
-            for declared in (() if root is None else root.kinds)
-            for covered in _covers(declared)
-        )
+        allowed = frozenset[KindName]() if manifest is None else manifest.licensed_kinds(name)
         mode = effective_purity(scan.path, manifests)
         found.extend(
             _diagnostic(scan, acquisition, mode, owner)
             for acquisition in scan.ambient
             if acquisition.kind not in allowed
         )
+    found.extend(_legal_calls_recorded(manifests, scanned))
+    return found
+
+
+# meiva:note
+# The `[debt.impure-call]` entries this run leaves unrecorded because `[roots]` licenses the call: one
+# read declared twice, kept as a number `debt prune` drops. This note is the only trace of the drop,
+# so it names the entry; it records a counting correction, not a repayment -- the code still calls.
+def _legal_calls_recorded(
+    manifests: Mapping[str, Manifest], scans: Iterable[FileScan]
+) -> list[Diagnostic]:
+    found: list[Diagnostic] = []
+    for scan in scans:
+        owner = scan.path.rpartition("/")[0]
+        manifest = manifests.get(owner)
+        if manifest is None or not manifest.debt:
+            continue
+        rows = manifest.debt.get(Code.IMPURE_CALL, {})
+        kept = {item.key for item in unlicensed(manifests, scan)}
+        for item in scan.purity:
+            key = file_key(owner, scan.path, item.key)
+            if item.code is not Code.IMPURE_CALL or item.key in kept or key not in rows:
+                continue
+            found.append(
+                Diagnostic(
+                    manifest.path,
+                    manifest.debt_line(Code.IMPURE_CALL, key),
+                    Code.LEGAL_READ_RECORDED,
+                    f"[roots] licenses `{item.key}` in {scan.path!r}, and the entry records that "
+                    "call as debt",
+                    (
+                        "delete the entry: one read cannot be licensed by [roots] and paid for as "
+                        "debt at once; `debt prune` drops it, and this is a counting correction, "
+                        "not a repayment",
+                    ),
+                )
+            )
     return found
 
 
@@ -219,7 +236,7 @@ def stale_roots(
                     ("remove the kind from [roots]; a root declares what it reads, not more",),
                 )
                 for kind in root.kinds
-                if not acquired.intersection(_covers(kind))
+                if not acquired.intersection(covered_kinds(kind))
             )
     return found
 

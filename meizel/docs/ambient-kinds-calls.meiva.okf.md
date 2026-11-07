@@ -30,4 +30,20 @@ a dynamic value can be `None`, and the checker does not infer its runtime value 
 This is static evidence of a possible ambient
 seed, not proof that every execution reads the machine. A class reference alone acquires nothing.
 
+## What a root licence settles
+
+A call a file's `[roots]` declaration licenses is not that file's impurity. `ambient-read` has
+already left the acquisition alone, because the file is where that kind of world is read; the
+purity rule must not charge for the same call again, so `impure-call` neither reports nor records
+it, and a `[debt.impure-call]` entry that still holds it fails as `legal-read-recorded` until
+`debt prune` drops it — the number falls, the code still makes the call, and nothing was repaid.
+
+The two rules meet in one of two ways. They meet on the line: the scan records an acquisition of a
+licensed kind on the line the purity rule recorded the call on, which is the same call in whatever
+language judged it (a TypeScript `crypto.randomUUID()` under a `random` root). They meet on the
+name: the ambient table judges the recorded call a reader of a licensed kind, and the call is
+unconditional — one with an `unless` clause reads nothing once it is handed the value. A call of
+another kind keeps its record: `time.sleep` under a `clock` root is an effect of the clock's own
+door, not a read of the clock's kind, so the wait stays on the books.
+
 Parent: [[meizel/docs/ambient-kinds.meiva.okf.md|the ambient kinds node]].

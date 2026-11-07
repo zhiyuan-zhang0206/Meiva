@@ -20,9 +20,7 @@ exports = ["configuration.py", "ids.py", "tests"]
 "__init__.py#settings base.config.settings" = { count = 1, owner = "#5816", until = "permanently: clock_config_from_settings() is the door Clock.from_settings() uses for code that was handed no clock, and it is the fallback construction the clock lattice names (clock_lattice_cli.py); the read is the door itself, not a shortcut around it" }
 
 [debt.impure-call]
-"__init__.py#datetime.now" = { count = 1, owner = "#7240", until = "permanently: the clock door owns the host clock — [roots] kinds=[clock] grants the read here and SYSTEM_TIMERS is the one place the process sleeps or reads monotonic time; a caller can still pass its own Clock, and every other module asks this door instead of re-deriving the read" }
-"__init__.py#time.monotonic" = { count = 1, owner = "#7240", until = "permanently: same boundary as the wall clock above — this is the real interval clock behind SYSTEM_TIMERS, which exists so no other module reads the host time" }
-"__init__.py#time.sleep" = { count = 1, owner = "#7240", until = "permanently: same boundary — the wait belongs to the same SYSTEM_TIMERS value; a module that sleeps takes a Timers it was handed" }
+"__init__.py#time.sleep" = { count = 1, owner = "#7240", until = "permanently: the wait belongs to the same SYSTEM_TIMERS value, and sleeping is an effect rather than a read of the clock (meizel/graph/ambient_process_table.py, the `time` table), so no [roots] kind covers it and this record is the clock door's own; a module that sleeps takes a Timers it was handed" }
 
 [debt.impure-edge]
 "__init__.py#base/config/__init__.py" = { count = 1, owner = "#7240", until = "waits for `ClockConfig` and its settings-derived construction to move to an owner `base/clock` may import directly: `base/config` may not import `base/clock` — its boot-lite layer resolves a clock before Settings exists and reads the host clock itself — so the one direction left is this edge, deferred into the function body so `base/clock` imports without Settings; the 102 `Clock.from_settings()` call sites (25 outside tests) are what the move costs, not a reason it cannot happen" }
