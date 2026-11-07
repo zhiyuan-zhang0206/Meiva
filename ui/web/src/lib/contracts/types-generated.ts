@@ -2844,7 +2844,7 @@ export interface components {
         CancelAgentResponse: {
             status: components["schemas"]["CancelResult"];
         };
-        CancelResult: "cancelled" | "not_running";
+        CancelResult: "cancelled" | "enqueued" | "not_running";
         ChoiceQuestion: {
             note_suggestion?: string | null;
             type: "multi_select" | "single_select";

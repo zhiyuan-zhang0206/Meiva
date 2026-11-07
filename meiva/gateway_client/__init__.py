@@ -368,7 +368,7 @@ def restart(
 
 
 # meiva:note
-# POST /api/agents/{id}/cancel → status string (`cancelled` / `not_running`).
+# POST /api/agents/{id}/cancel → status string (`cancelled`, `enqueued` or `not_running`).
 def cancel(agent_id: int) -> str:
     response = _run(Request("POST", f"/api/agents/{agent_id}/cancel", body={}), _ctx(None))
     return _StatusAnswer.model_validate(_transport.json_object(response)).status

@@ -445,8 +445,9 @@ def restart(
 def cancel(agent_id: int) -> CancelResult:
     """Cancel the agent's running turn; the agent stays alive and idles.
 
-    `cancelled` means a running turn was cancelled, `not_running` that there
-    was none. The next input starts a fresh turn."""
+    `cancelled` means a native turn was cancelled. `enqueued` means an external
+    harness has a foreground cancellation pending. `not_running` means there
+    was no running turn."""
     agent_id = coerce_typed(agent_id, "agent_id", int)
     schedule_capability.assert_schedule_capability("agents.cancel", target_agent_id=agent_id)
     return CancelResult(gateway_client.cancel(agent_id))

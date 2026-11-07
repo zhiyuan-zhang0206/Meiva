@@ -457,7 +457,7 @@ async def post_agent_restart(
 
 @router.post(
     "/api/agents/{agent_id}/cancel",
-    description="Cancel the agent's running turn without terminating the agent.\n\nThe request is forwarded to the home runner, whose host cancels the running\nturn task. The agent stays alive and idles; its next input starts a fresh\nturn. `cancelled` means a running turn was cancelled; `not_running` means\nthere was none. An unreachable home runner is an error, not `not_running`.",
+    description="Cancel the agent's running turn without terminating the agent.\n\nThe home runner returns `cancelled` after cancelling a native turn or\n`enqueued` after recording a foreground cancel for an external harness.\nThe external harness reports the outcome through the timeline. `not_running`\nmeans there was no running turn. An unreachable home runner is an error.",
 )
 async def post_agent_cancel(agent_id: int, request: Request) -> CancelAgentResponse:
 

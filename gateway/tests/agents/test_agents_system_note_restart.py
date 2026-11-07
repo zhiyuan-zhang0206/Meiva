@@ -623,19 +623,22 @@ class TestRestart:
                 row = cur.fetchone()
             assert row is not None and row[0] == "meiva"
 
-    @pytest.mark.parametrize("restart_in_place", [False, True])
+    @pytest.mark.parametrize(
+        ("old_harness", "old_model"),
+        [("meiva", None), ("codex", "gpt-6.1-sol"), ("claude_code", "claude-opus-4-6")],
+    )
     def test_external_restart_message_is_a_lifecycle_note(
-        self, db_conn: psycopg.Connection, restart_in_place: bool
+        self, db_conn: psycopg.Connection, old_harness: str, old_model: str | None
     ) -> None:
         with gateway_test_client() as client:
             _seed_restart_harnesses(client)
             agent_id = spawn_via_http(client, {}).json()["id"]
-            if restart_in_place:
+            if old_model is not None:
                 first = client.post(
                     f"/api/agents/{agent_id}/restart",
                     json={
-                        "message": "switching to codex",
-                        "config_overlay": {"harness": "codex", "llm_model": "gpt-6.1-sol"},
+                        "message": "preparing the starting harness",
+                        "config_overlay": {"harness": old_harness, "llm_model": old_model},
                     },
                 )
                 assert first.status_code == 200, first.text
@@ -650,8 +653,8 @@ class TestRestart:
             assert resp.status_code == 200, resp.text
 
         expected = "continue checking"
-        if not restart_in_place:
-            expected = "[Harness switched from 'meiva' to 'codex']\n" + expected
+        if old_harness != "codex":
+            expected = f"[Harness switched from '{old_harness}' to 'codex']\n" + expected
         with db_conn.cursor() as cur:
             cur.execute(
                 "SELECT content, kind, source, payload FROM inbound_messages "

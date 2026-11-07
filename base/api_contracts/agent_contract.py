@@ -217,6 +217,7 @@ class RestartResult(StrEnum):
 
 class CancelResult(StrEnum):
     CANCELLED = "cancelled"
+    ENQUEUED = "enqueued"
     NOT_RUNNING = "not_running"
 
 

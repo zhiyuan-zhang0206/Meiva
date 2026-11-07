@@ -7,7 +7,7 @@ tags: []
 
 # Hosted Turn Cancel
 
-Stop and force terminate share one primitive: the home host's loopback
+Native stop and force terminate share one primitive: the home host's loopback
 `POST /cancel-turn` (`services/agent_runner/agent_host/health_routes.py`) takes
 `{"agent_id": N}`, cancels that agent's running turn Task with a bounded unwind
 (`TurnScheduler.cancel_turn`) and answers `{"cancelled": true|false}`. The route
@@ -22,6 +22,9 @@ owns the agent's status:
 - force terminate (`ops.lifecycle.terminate_agent_op`) writes `terminated` in its
   own transaction first and cancels best effort, so a failed cancel only means
   the turn ends at its next ownership check.
+
+Public stop on an external harness queues a foreground cancel as described in
+[[agent/graph/docs/turn-interrupts.meiva.okf.md]].
 
 The scheduler owns one Task per actual turn. The host shields real awaited work,
 including thread-backed work, from outer Task cancellation: a thread that cannot

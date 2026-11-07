@@ -11,15 +11,19 @@ import pytest
 
 from base.api_contracts.agent_contract import AgentNotFound, CancelResult
 from base.db import Database, create_agent
+from base.events.live.bus import EventBus
 from ops.lifecycle import cancel_agent_op
 from ops.lifecycle.hosted_turn import LocalAgentHost
 from ops.lifecycle.tests.loopback.agent_host import serve_agent_host
 from ops.lifecycle.tests.loopback.scripted_post import Reply, closed_port, serve_post
 
 
-def _agent(db_conn: psycopg.Connection) -> int:
+def _agent(db_conn: psycopg.Connection, *, status: str = "running", harness: str = "meiva") -> int:
     agent_id = create_agent(db_conn)
-    db_conn.execute("INSERT INTO agents_meta (id,status) VALUES (%s,'running')", (agent_id,))
+    db_conn.execute(
+        "INSERT INTO agents_meta (id,status,harness) VALUES (%s,%s,%s)",
+        (agent_id, status, harness),
+    )
     db_conn.commit()
     return agent_id
 
@@ -31,6 +35,7 @@ def _agent(db_conn: psycopg.Connection) -> int:
 async def test_reports_what_the_host_answered(
     db_conn: psycopg.Connection,
     database: Database,
+    event_bus: EventBus,
     unit_home: Path,
     cancelled: bool,
     expected: CancelResult,
@@ -38,47 +43,79 @@ async def test_reports_what_the_host_answered(
     agent_id = _agent(db_conn)
 
     with serve_agent_host(unit_home, cancelled=cancelled) as served:
-        response = await cancel_agent_op(database, agent_id, host=served.host)
+        response = await cancel_agent_op(database, event_bus, agent_id, host=served.host)
 
     assert response.status is expected
     assert served.cancel_requests == [agent_id]
 
 
-async def test_an_unknown_agent_is_never_cancelled(database: Database, unit_home: Path) -> None:
+async def test_an_unknown_agent_is_never_cancelled(
+    database: Database, event_bus: EventBus, unit_home: Path
+) -> None:
     with serve_agent_host(unit_home) as served, pytest.raises(AgentNotFound):
-        await cancel_agent_op(database, 987654, host=served.host)
+        await cancel_agent_op(database, event_bus, 987654, host=served.host)
 
     assert served.cancel_requests == []
 
 
 async def test_an_unreachable_host_is_an_error_not_a_quiet_not_running(
-    db_conn: psycopg.Connection, database: Database, unit_home: Path
+    db_conn: psycopg.Connection, database: Database, event_bus: EventBus, unit_home: Path
 ) -> None:
     agent_id = _agent(db_conn)
     host = LocalAgentHost(home=unit_home, health_port=closed_port())
 
     with pytest.raises(httpx.ConnectError):
-        await cancel_agent_op(database, agent_id, host=host)
+        await cancel_agent_op(database, event_bus, agent_id, host=host)
 
 
 async def test_a_host_that_answers_with_an_error_status_is_an_error(
-    db_conn: psycopg.Connection, database: Database, unit_home: Path
+    db_conn: psycopg.Connection, database: Database, event_bus: EventBus, unit_home: Path
 ) -> None:
     agent_id = _agent(db_conn)
 
     with serve_post({"/cancel-turn": lambda _body: Reply({}, status=503)}) as served:
         host = LocalAgentHost(home=unit_home, health_port=served.port)
         with pytest.raises(httpx.HTTPStatusError):
-            await cancel_agent_op(database, agent_id, host=host)
+            await cancel_agent_op(database, event_bus, agent_id, host=host)
 
 
 @pytest.mark.parametrize("answer", [{}, {"cancelled": "yes"}])
 async def test_a_host_answer_without_a_boolean_cancelled_is_an_error(
-    db_conn: psycopg.Connection, database: Database, unit_home: Path, answer: dict[str, object]
+    db_conn: psycopg.Connection,
+    database: Database,
+    event_bus: EventBus,
+    unit_home: Path,
+    answer: dict[str, object],
 ) -> None:
     agent_id = _agent(db_conn)
 
     with serve_post({"/cancel-turn": lambda _body: Reply(answer)}) as served:
         host = LocalAgentHost(home=unit_home, health_port=served.port)
         with pytest.raises(TypeError, match="cancel-turn answered"):
-            await cancel_agent_op(database, agent_id, host=host)
+            await cancel_agent_op(database, event_bus, agent_id, host=host)
+
+
+@pytest.mark.parametrize(
+    ("status", "expected"),
+    [("running", CancelResult.ENQUEUED), ("idling", CancelResult.NOT_RUNNING)],
+)
+async def test_external_cancel_only_queues_one_control_for_a_running_agent(
+    db_conn: psycopg.Connection,
+    database: Database,
+    event_bus: EventBus,
+    unit_home: Path,
+    status: str,
+    expected: CancelResult,
+) -> None:
+    agent_id = _agent(db_conn, status=status, harness="claude_code")
+    with serve_agent_host(unit_home) as served:
+        for _ in range(2):
+            response = await cancel_agent_op(database, event_bus, agent_id, host=served.host)
+            assert response.status is expected
+
+    assert served.cancel_requests == []
+    rows = db_conn.execute(
+        "SELECT kind, status, source FROM inbound_messages WHERE agent_id = %s",
+        (agent_id,),
+    ).fetchall()
+    assert rows == ([("cancel", "pending", "user")] if status == "running" else [])

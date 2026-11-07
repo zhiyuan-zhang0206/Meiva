@@ -99,8 +99,9 @@ in `FileSessionRegistry`.
   `harness_close_unobserved`.
 - Missing SDKs or refused submissions raise `HarnessSetupError` and settle on the
   same fatal-stream path.
-- `interrupt` races via `subscribe_interrupt`, logs the adapter's `settled` report
-  verbatim (`None` stays unobservable), and closes/retires the session in `finally`.
+- A foreground cancel calls `interrupt` via `subscribe_interrupt` and logs the
+  adapter's `settled` report verbatim (`None` stays unobservable). It reads the
+  terminal result on the same session so background work remains owned there.
 
 Configuration updates and service shutdown use the same durable restart path as
 Meiva turns: an interrupted harness turn keeps the restart cause, then claim and
@@ -110,7 +111,10 @@ continuation. The shared deadlines and shutdown fallback are owned by
 
 An explicit external harness restart or a harness switch delivers its restart
 message as a lifecycle system note. The note starts execution on the selected
-harness and appears as a system marker in the timeline.
+harness and appears as a system marker in the timeline. External harnesses
+share one display store, so an external-to-external switch writes this marker
+once. A switch across the native checkpoint and external display stores also
+records a handoff in the outgoing history.
 
 ## Cost and usage
 

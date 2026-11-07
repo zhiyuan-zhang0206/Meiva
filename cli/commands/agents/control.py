@@ -310,8 +310,8 @@ def send_agent_message(
 # meiva:note
 # `meiva agents cancel <id>` — POST /api/agents/{id}/cancel.
 #
-# Cancels the agent's running turn; the agent stays alive and idles. The status line says
-# `cancelled` or `not_running` (there was no turn to cancel).
+# Reports the home runner's verdict: cancelled for a settled native turn, enqueued
+# for an external foreground request, or not_running when there is no turn.
 def cmd_agents_cancel(access: GatewayAccess, agent_id: int) -> int:
     resp = http_dial.post(
         _api(access, f"agents/{agent_id}/cancel"),
