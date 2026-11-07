@@ -6,6 +6,8 @@
   "showStatusDotDesc": "在侧边栏额外标记创建占位行、已接管和已终止的 agent",
   "showTerminated": "显示已终止 agent",
   "showTerminatedDesc": "在侧边栏显示已终止 agent（红色状态点）；关闭则只显示存活 agent",
+  "showWeekday": "时间戳显示星期",
+  "showWeekdayDesc": "在时间线卡片时间戳中显示星期（如 周一 14:30）",
   "dateFormat": "日期格式",
   "dateFormatDesc": "时间戳的显示格式",
   "relative": "相对（如 3 分钟前）",

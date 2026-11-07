@@ -66,6 +66,20 @@ export function streamingParseIntervalMs(payloadLength: number): number {
 }
 
 // meiva:note
+// Strip the backend `<header>\n\n` envelope from human user messages so Copy
+// puts only the user's words on the clipboard.
+// meiva:link ui/web/src/docs/frontend-components/timeline-view/card-chrome.meiva.okf.md
+export function copyPayloadFor(item: BackendTimelineItem): string {
+  if (
+    item.kind === "inbound_chat" &&
+    inboundKind(item.source) === "human"
+  ) {
+    return splitEnvelope(item.payload).body;
+  }
+  return item.payload;
+}
+
+// meiva:note
 // Attach items (attachMode) render through AttachContent: the backend caption
 // lines interleave with their thumbnails (label → image → label → image), the
 // leading notice line renders dimmed, and every thumbnail opens a lightbox on
