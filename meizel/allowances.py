@@ -88,6 +88,7 @@ RULES: dict[str, dict[str, str]] = {
     },
     "type-checking": {"files": REASONS},
     "approved-patches": {"files": REASONS, "max-files": NAMES},
+    "injected-calls": {"sites": REASONS, "max-sites": NAMES},
     "single-owner": {"postgres-dial-owners": NAMES},
     "purity": {
         "impure-imports": NAMES,

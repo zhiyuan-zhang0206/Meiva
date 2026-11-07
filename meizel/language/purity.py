@@ -29,6 +29,7 @@ __all__ = [
     "IMPURE_STDLIB_MODULES",
     "PurityState",
     "make_state",
+    "path_annotated",
     "record_assign",
     "record_attr_write",
     "record_call",
@@ -662,6 +663,7 @@ def record_call(
     dotted: _Dotted,
     *,
     unshadowed_open: bool,
+    injected: bool = False,
 ) -> None:
     state.call_funcs.add(id(node.func))
     if unshadowed_open:
@@ -696,6 +698,13 @@ def record_call(
             return
     if not isinstance(node.func, ast.Attribute):
         return
+    # meiva:note
+    # A call the policy declares an injected callable: its receiver is a parameter, not a path, and the
+    # attribute name is the only thing this rule could match on. The declaration is what separates the
+    # two, so the site is not a read -- `injected-calls` names why, and the site that stops being one
+    # fails as a stale approval rather than lingering as a silent exemption.
+    if injected:
+        return
     attr = node.func.attr
     if (
         attr in _PATH_IO_METHODS and (callee is None or callee.startswith(("pathlib.", "Path.")))
@@ -711,6 +720,27 @@ def record_call(
                 _IMPURE_CALL_HINT,
             )
         )
+
+
+# meiva:note
+# The annotation names that make a receiver a path: a parameter annotated `Path` (or one of its
+# siblings) holds a path even when nothing in the function builds one, so a call on it is a read and
+# no `[injected-calls]` entry may excuse it. That refusal is what keeps the exit from becoming a
+# shield over every `def read(p: Path)`.
+_PATH_TYPES = frozenset({"Path", "PurePath", "PosixPath", "WindowsPath"})
+
+
+def path_annotated(annotation: ast.expr | None) -> bool:
+    if annotation is None:
+        return False
+    return bool(
+        {
+            node.attr if isinstance(node, ast.Attribute) else node.id
+            for node in ast.walk(annotation)
+            if isinstance(node, ast.Name | ast.Attribute)
+        }
+        & _PATH_TYPES
+    )
 
 
 def _signature_types(node: ast.FunctionDef | ast.AsyncFunctionDef) -> list[ast.expr]:
