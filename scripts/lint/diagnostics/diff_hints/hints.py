@@ -548,7 +548,17 @@ def _pr_body() -> str:
         branch = _git("rev-parse", "--abbrev-ref", "HEAD").decode().strip()
     except GitError:
         return ""
-    if not branch or branch == "HEAD":
+    if not branch:
+        return ""
+    if branch == "HEAD":
+        # meiva:note
+        # A detached head is how CI checks a pull request, and the body is unreachable from it: a
+        # silent "" would look like "the body carried no answer" and send its author back to edit a
+        # body that was never read.
+        sys.stderr.write(
+            "diff hints: note: the pull request body is unreadable on a detached HEAD -- answer in"
+            " the commit message\n"
+        )
         return ""
     return _gh("pr", "list", "--head", branch, "--state", "open", "--limit", "1", *_GH_PR_FIELDS)
 
