@@ -54,13 +54,20 @@ def test_active_archives_and_unknown_files_stay_attachments(name: str) -> None:
     assert response.headers["content-disposition"].startswith("attachment;")
 
 
-@pytest.mark.parametrize(
-    "references", [["/etc/passwd"], ["a" * 64] * (settings.to_user.max_chain_depth + 1)]
-)
-def test_client_paths_and_unbounded_chains_are_rejected(references: list[str]) -> None:
+@pytest.mark.parametrize("files", [[""], ["missing.md"] * (settings.to_user.max_chain_depth + 1)])
+def test_malformed_names_and_unbounded_chains_are_rejected(files: list[str]) -> None:
     with pytest.raises(HTTPException) as error:
-        resource_request(1, references, max_depth=settings.to_user.max_chain_depth)
+        resource_request(1, files, max_depth=settings.to_user.max_chain_depth)
     assert error.value.status_code == 422
+
+
+# meiva:note
+# The gateway bounds the shape of a name and nothing else: a readable path makes any path well
+# formed, so whether the document references it is the owning machine's answer — an unreferenced
+# path comes back `gone` rather than being refused here.
+def test_a_path_the_document_may_not_reference_still_travels() -> None:
+    query = resource_request(1, ["/etc/passwd"], max_depth=settings.to_user.max_chain_depth)
+    assert query.files == ["/etc/passwd"]
 
 
 @pytest.mark.asyncio

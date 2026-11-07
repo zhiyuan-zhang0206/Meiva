@@ -8,8 +8,11 @@ tags: [frontend, navigation]
 # Panel navigation history
 
 The panel's reading position is the URL, not component state:
-`?agent_id=<agent>&reference=<id>&reference=<id>` is the chain from `to_user.md`
-to the document on screen. Every in-app navigation — a linked Markdown document,
+`?agent_id=<agent>&file=<name>&file=<name>` is the chain from `to_user.md` to
+the document on screen. An element is the file's readable name — from the
+workspace root, or absolute for a file outside it — and keeps its `/` in the
+address bar, so a copied link says which file it opens instead of carrying a
+digest. Every in-app navigation — a linked Markdown document,
 or the home control — pushes a history entry, so browser Back returns to the
 previous document instead of leaving the app and Forward returns to the one just
 opened. A reload or a shared link restores the same chain.
@@ -29,4 +32,4 @@ two selected agents pushes, because the agent the app opens on rewrites its own
 entry in place and must not leave a duplicate behind it. External links keep opening in a new tab and
 non-Markdown resources keep their own document.
 
-The panel's document chain lives in the URL as `?agent_id=…&reference=…`: opening a linked document pushes a history entry, a popstate traversal restores the chain it selects, and the panel's Back control calls `history.back()` for entries it pushed while a chain without history rewrites its own entry instead of leaving the app. Selecting another agent drops the previous chain.
+The panel's document chain lives in the URL as `?agent_id=…&file=…`: opening a linked document pushes a history entry, a popstate traversal restores the chain it selects, and the panel's Back control calls `history.back()` for entries it pushed while a chain without history rewrites its own entry instead of leaving the app. Selecting another agent drops the previous chain.

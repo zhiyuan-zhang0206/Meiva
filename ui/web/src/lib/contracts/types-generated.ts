@@ -4268,7 +4268,7 @@ export interface components {
             legacy_html: boolean;
         };
         ToUserResource: {
-            id: string;
+            file: string;
             name: string;
             markdown: boolean;
             version: string | null;
@@ -4808,7 +4808,7 @@ export interface operations {
     get_to_user_api_agents__agent_id__to_user_get: {
         parameters: {
             query?: {
-                reference?: string[] | null;
+                file?: string[] | null;
             };
             header?: never;
             path: {
@@ -4839,7 +4839,7 @@ export interface operations {
     get_resource_api_agents__agent_id__to_user_resource_get: {
         parameters: {
             query: {
-                reference: string[];
+                file: string[];
             };
             header?: never;
             path: {

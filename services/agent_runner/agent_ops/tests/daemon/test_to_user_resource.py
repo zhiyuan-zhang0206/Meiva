@@ -40,15 +40,19 @@ async def test_authenticated_home_machine_file_roundtrip(
     outside.write_bytes(b"\x00\xffreport")
     (workspace / "to_user.md").write_text(f"[report]({outside})")
     resource = next(iter(read_document(workspace, limits=LIMITS).resources.values()))
-    payload = {"agent_id": agent_id, "references": [resource.id]}
+    # meiva:note
+    # The file sits beside the workspace, not inside it, and beside a home that is not this
+    # process's: its readable name is the absolute path the document already wrote.
+    assert resource.file == str(outside)
+    payload = {"agent_id": agent_id, "files": [resource.file]}
     requests: RequestTokens = set()
     workers: WorkerFutures = set()
     with database.pool() as pool:
         assert read_to_user(
-            pool, agent_id, "source-host", references=[], home=unit_home, limits=LIMITS
+            pool, agent_id, "source-host", files=[], home=unit_home, limits=LIMITS
         ).content
         with pytest.raises(ValueError, match="home machine"):
-            read_to_user(pool, agent_id, "wrong-host", references=[], home=unit_home, limits=LIMITS)
+            read_to_user(pool, agent_id, "wrong-host", files=[], home=unit_home, limits=LIMITS)
         handler = partial(
             resource_route,
             pool=pool,
@@ -80,12 +84,15 @@ async def test_authenticated_home_machine_file_roundtrip(
                 assert response.headers["content-type"] == "application/octet-stream"
                 (workspace / "to_user.md").write_text("Link removed")
                 assert (await client.post("/to-user/resource", json=payload)).status_code == 404
+                # meiva:note
+                # A readable name makes the absolute path of the file well formed, so the
+                # refusal is the document's whitelist, not the shape: `gone`, not `invalid`.
                 assert (
                     await client.post(
                         "/to-user/resource",
-                        content=json.dumps({"agent_id": agent_id, "references": [str(outside)]}),
+                        content=json.dumps({"agent_id": agent_id, "files": [str(outside)]}),
                     )
-                ).status_code == 422
+                ).status_code == 404
     assert not requests
     assert not workers
 
@@ -101,16 +108,16 @@ async def test_a_refused_document_read_reports_its_class(
     with (workspace / "big.md").open("wb") as stream:
         stream.truncate(settings.to_user.max_document_bytes + 1)
     (workspace / "to_user.md").write_text("[big](big.md)")
-    oversized = read_document(workspace, limits=LIMITS).resources["big.md"].id
+    oversized = read_document(workspace, limits=LIMITS).resources["big.md"].file
 
     _, too_large = await ops.route(
-        {"kind": "to_user_read", "payload": {"agent_id": agent_id, "references": [oversized]}}
+        {"kind": "to_user_read", "payload": {"agent_id": agent_id, "files": [oversized]}}
     )
     assert too_large["status"] == "failed"
     assert too_large["result"]["reason"] == "too_large"
 
     _, gone = await ops.route(
-        {"kind": "to_user_read", "payload": {"agent_id": agent_id, "references": ["0" * 64]}}
+        {"kind": "to_user_read", "payload": {"agent_id": agent_id, "files": ["missing.md"]}}
     )
     assert gone["status"] == "failed"
     assert gone["result"]["reason"] == "gone"

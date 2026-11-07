@@ -10,7 +10,7 @@ from base.agents.to_user.models import (
     ToUserDocument,
     ToUserReadRequest,
 )
-from base.agents.to_user.resources import read_resource, resolve_reference
+from base.agents.to_user.resources import read_resource, resolve_file
 
 __all__ = [
     "DOCUMENT_FILENAME",
@@ -23,7 +23,7 @@ __all__ = [
     "read_document",
     "read_failure",
     "read_resource",
-    "resolve_reference",
+    "resolve_file",
     "to_user_limits",
     "to_user_limits_from_agent",
 ]

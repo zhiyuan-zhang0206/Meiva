@@ -67,7 +67,7 @@ def test_a_refused_read_names_its_class_and_is_never_retryable(
     client.app.state.rpc = _RefusingRpc(
         ClusterOpFailed({"error": "ValueError: refused", "reason": reason})
     )
-    response = client.get(f"/api/agents/{agent}/to-user?reference={'a' * 64}")
+    response = client.get(f"/api/agents/{agent}/to-user?file=reports%2Frunbook.md")
     assert response.status_code == status
     body = response.json()
     assert body["code"] == code

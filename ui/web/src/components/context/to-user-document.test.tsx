@@ -21,13 +21,18 @@ beforeAll(async () => {
   await preloadChatMarkdown();
 });
 
-const id = "a".repeat(64);
-const linkId = "b".repeat(64);
+// meiva:note
+// The file names the panel puts in the address bar: the workspace-relative path of the linked
+// document, and the absolute path of a file outside the workspace.
+// meiva:link ui/web/src/docs/frontend-state/navigation-history.meiva.okf.md
+const plot = "reports/plot.png";
+const details = "reports/details.md";
+const report = "/tmp/file.pdf";
 function document(content: string, modifiedAt: string | null = null): ToUserDocument {
   return { content, version: "1", modified_at: modifiedAt, legacy_html: false, resources: {
-    "/tmp/plot.png": { id, name: "plot.png", markdown: false, version: "asset-v1" },
-    "details.md": { id: linkId, name: "details.md", markdown: true, version: "doc-v1" },
-    "file:///tmp/file.pdf": { id: "c".repeat(64), name: "file.pdf", markdown: false, version: null },
+    "/tmp/plot.png": { file: plot, name: "plot.png", markdown: false, version: "asset-v1" },
+    "details.md": { file: details, name: "details.md", markdown: true, version: "doc-v1" },
+    "file:///tmp/file.pdf": { file: report, name: "file.pdf", markdown: false, version: null },
   } };
 }
 const HOME = "http://fake.local/?agent_id=7";
@@ -38,7 +43,7 @@ function show(
 ) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } });
   if (linked !== undefined) {
-    if (!(linked instanceof Error)) qc.setQueryData(["to-user", 7, linkId], linked);
+    if (!(linked instanceof Error)) qc.setQueryData(["to-user", 7, details], linked);
     transport.getToUser.mockImplementation(() =>
       linked instanceof Error ? Promise.reject(linked) : Promise.resolve(linked),
     );
@@ -72,7 +77,7 @@ function show(
 function chain(browser: FakeBrowser): string[] {
   const where = browser.navigation.location();
   if (where === null) throw new Error("the fake page always has an address");
-  return new URL(where.href).searchParams.getAll("reference");
+  return new URL(where.href).searchParams.getAll("file");
 }
 
 function travel(browser: FakeBrowser, to: string): void {
@@ -87,8 +92,8 @@ afterEach(() => {
 describe("To user Markdown", () => {
   it("renders local images and file URIs through authenticated resource URLs", () => {
     show(document("![plot](/tmp/plot.png)\n\n[report](file:///tmp/file.pdf)"));
-    expect(screen.getByRole("img").getAttribute("src")).toContain(`/api/agents/7/to-user/resource?reference=${id}&v=asset-v1`);
-    expect(screen.getByRole("link", { name: "report" }).getAttribute("href")).toContain("reference=" + "c".repeat(64));
+    expect(screen.getByRole("img").getAttribute("src")).toContain(`/api/agents/7/to-user/resource?file=${plot}&v=asset-v1`);
+    expect(screen.getByRole("link", { name: "report" }).getAttribute("href")).toContain("file=/tmp/file.pdf");
   });
   it("keeps the shared theme, strips hostile HTML and unregistered filesystem links", () => {
     const { container } = show(document('# Status\n\n<style>body{color:red}</style>\n\n<script>alert(1)</script>\n\n[secret](/private/file)\n\n[site](https://example.com)'));
@@ -103,7 +108,7 @@ describe("To user Markdown", () => {
     const { container } = show(document('<details><summary>More</summary>body</details>\n\n<img src="/tmp/plot.png" alt="raw plot">'));
     expect(container.querySelector("details > summary")?.textContent).toBe("More");
     expect(container.querySelector("details")?.textContent).toContain("body");
-    expect(screen.getByRole("img", { name: "raw plot" }).getAttribute("src")).toContain(`/api/agents/7/to-user/resource?reference=${id}&v=asset-v1`);
+    expect(screen.getByRole("img", { name: "raw plot" }).getAttribute("src")).toContain(`/api/agents/7/to-user/resource?file=${plot}&v=asset-v1`);
   });
   it("keeps modifier clicks as ordinary resource downloads", () => {
     const { browser } = show(document("[Details](details.md)"));
@@ -136,7 +141,7 @@ describe("To user navigation history", () => {
     expect(onNavigate).toHaveBeenCalledTimes(1);
     fireEvent.click(screen.getByRole("link", { name: "Details" }));
     expect(onNavigate).toHaveBeenCalledTimes(2);
-    expect(chain(browser)).toEqual([linkId]);
+    expect(chain(browser)).toEqual([details]);
     expect(screen.getByRole("heading", { name: "Nested document" })).toBeTruthy();
 
     travel(browser, "http://fake.local/?agent_id=7");
@@ -144,19 +149,41 @@ describe("To user navigation history", () => {
     expect(chain(browser)).toEqual([]);
     expect(screen.getByRole("link", { name: "Details" })).toBeTruthy();
 
-    travel(browser, `http://fake.local/?agent_id=7&reference=${linkId}`);
+    travel(browser, `http://fake.local/?agent_id=7&file=${details}`);
     expect(onNavigate).toHaveBeenCalledTimes(4);
-    expect(chain(browser)).toEqual([linkId]);
+    expect(chain(browser)).toEqual([details]);
     expect(screen.getByRole("heading", { name: "Nested document" })).toBeTruthy();
   });
 
+  // meiva:note
+  // Why the chain carries file names: the address bar says which file is open, so the reader can
+  // trust and edit the link instead of looking at a digest (user 2026-11-07).
+  // meiva:link ui/web/src/docs/frontend-state/navigation-history.meiva.okf.md
+  it("names the open file in the address bar", () => {
+    const { browser } = show(root(), { linked: nested() });
+    fireEvent.click(screen.getByRole("link", { name: "Details" }));
+    expect(browser.navigation.location()?.href).toBe("http://fake.local/?agent_id=7&file=reports/details.md");
+  });
+
   it("restores a shared link's chain but not a chain left by another agent", () => {
-    const shared = fakeBrowser({ href: `http://fake.local/?agent_id=7&reference=${linkId}` });
+    const shared = fakeBrowser({ href: `http://fake.local/?agent_id=7&file=${details}` });
     show(root(), { linked: nested(), browser: shared });
     expect(screen.getByRole("heading", { name: "Nested document" })).toBeTruthy();
 
-    travel(shared, `http://fake.local/?agent_id=8&reference=${linkId}`);
+    travel(shared, `http://fake.local/?agent_id=8&file=${details}`);
     expect(screen.queryByRole("heading", { name: "Nested document" })).toBeNull();
+  });
+
+  // meiva:note
+  // A link shared before 2026-11-07 carries the digest chain; it still opens the document it names,
+  // and the panel's own navigation writes the readable parameter back into the entry.
+  // meiva:link ui/web/src/docs/frontend-state/navigation-history.meiva.okf.md
+  it("still opens a link that carries the old digest chain", async () => {
+    const legacy = `http://fake.local/?agent_id=7&reference=${"a".repeat(64)}`;
+    const { browser } = show(root(), { linked: nested(), browser: fakeBrowser({ href: legacy }) });
+    expect(await screen.findByRole("heading", { name: "Nested document" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Home" }));
+    expect(browser.navigation.location()?.href).toBe("http://fake.local/?agent_id=7");
   });
 
   it("walks browser history from the panel's back control, falling back to the parent", () => {
@@ -166,7 +193,7 @@ describe("To user navigation history", () => {
     expect(browser.actions.backs).toBe(1);
 
     cleanup();
-    const deep = fakeBrowser({ href: `http://fake.local/?agent_id=7&reference=${linkId}` });
+    const deep = fakeBrowser({ href: `http://fake.local/?agent_id=7&file=${details}` });
     show(root(), { linked: nested(), browser: deep });
     fireEvent.click(screen.getByRole("button", { name: "Back" }));
     expect(deep.actions.backs).toBe(0);
@@ -299,7 +326,7 @@ describe("To user refusals", () => {
     const refused = (await screen.findByTestId("document-failure")).textContent;
     expect(refused).toContain("too large to show here");
     expect(screen.getByRole("link", { name: "Open the file itself" }).getAttribute("href")).toContain(
-      `/api/agents/7/to-user/resource?reference=${linkId}`,
+      `/api/agents/7/to-user/resource?file=${details}`,
     );
 
     cleanup();

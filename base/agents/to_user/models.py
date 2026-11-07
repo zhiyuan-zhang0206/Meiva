@@ -4,12 +4,25 @@ from typing import Annotated
 from pydantic import BaseModel, ConfigDict, Field
 
 DOCUMENT_FILENAME = "to_user.md"
-ResourceId = Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
+
+# meiva:note
+# Linux refuses a path longer than PATH_MAX, so no document can name a file with a longer name.
+MAX_FILE_LENGTH = 4096
+
+
+# meiva:note
+# The readable name of one referenced file, and the `file` value in the panel's address bar. It
+# is only ever compared to the names the document's own references produce, so no pattern can
+# make a stranger's path servable; the shape is bounded so a malformed request still fails at
+# the boundary instead of travelling to the owning machine.
+ResourceFile = Annotated[
+    str, Field(min_length=1, max_length=MAX_FILE_LENGTH, pattern=r"^[^\x00]+$")
+]
 
 
 class ToUserResource(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    id: ResourceId
+    file: ResourceFile
     name: str
     markdown: bool
     version: str | None
@@ -27,4 +40,4 @@ class ToUserDocument(BaseModel):
 class ToUserReadRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     agent_id: int = Field(gt=0)
-    references: list[ResourceId] = Field(default_factory=list)
+    files: list[ResourceFile] = Field(default_factory=list)

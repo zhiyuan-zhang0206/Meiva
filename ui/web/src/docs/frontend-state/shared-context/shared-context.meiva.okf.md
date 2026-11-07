@@ -55,18 +55,18 @@ and how the narrow reading view and its own scrollbar behave have their own node
 [[ui/web/src/docs/frontend-state/shared-context/inspector-mode/inspector-mode.meiva.okf.md|Inspector mode]].
 
 `["to-user", agentId]` owns the root document snapshot. Linked Markdown uses
-that query-key prefix followed by its reference chain. The home-machine ops
+that query-key prefix followed by its file chain. The home-machine ops
 server reads `to_user.md`; there is no format setting, HTML frame, publication
 registry or database content copy. `ChatMarkdown` owns typography, GFM, CJK
 behavior and safe links for both conversation and document surfaces. The document
 explicitly skips raw HTML. External links open in a new tab; linked Markdown
-opens in the panel and is pushed into browser history (`?agent_id=…&reference=…`),
+opens in the panel and is pushed into browser history (`?agent_id=…&file=…`),
 so Back and Forward walk the same chain and a reload or a shared link restores
 it; [panel navigation history](../navigation-history.meiva.okf.md)
 owns that contract. Other files open or download through the authenticated gateway resource
 endpoint.
 
-The document response maps Markdown link/image destinations to resource IDs.
+The document response maps Markdown link/image destinations to readable file names.
 The backend parses Markdown with markdown-it-py, including reference-style links;
 code fences and raw HTML do not expose resources. Relative paths resolve from
 the containing Markdown file, absolute paths and `~/` paths resolve on the
@@ -74,7 +74,7 @@ agent's home machine. `file:` URIs with an empty or localhost authority work too
 Root-relative paths denote local files; use a full HTTP(S) URL for a web route.
 There is no required assets directory, file copy or agent-owned HTTP server.
 
-The browser submits only a chain of reference IDs. Every read traverses that
+The browser submits only a chain of file names. Every read traverses that
 chain again from `to_user.md`, checking each link in the current parent document.
 Deleted references stop resolving. Symlinked resources resolve to regular files;
 the root document and workspace reject symlinks. Filesystem access runs under

@@ -11,7 +11,7 @@ import { ZoomableImage } from "@/components/content/zoomable-image";
 import type { BrowserNavigation } from "@/lib/browser/browser";
 import { useBrowser } from "@/lib/browser/browser-provider";
 import type { ToUserDocument } from "@/lib/contracts/types";
-import { readReferences, withReferences } from "@/lib/context/reference-url";
+import { fileQuery, readFiles, withFiles } from "@/lib/context/reference-url";
 import { useToUser } from "@/lib/context/use-to-user";
 import { cn } from "@/lib/format/utils";
 import { useWallDate } from "@/lib/format/now/use-wall-date";
@@ -54,10 +54,10 @@ function refusalOf(error: unknown): { text: RefusalText; raw: boolean } {
 // The inspector trigger is optional: `onInspect` decides whether the bar renders
 // it at all, and `inspecting` drives its pressed state.
 //
-// The reference chain comes from the page's address, so a frame with no page (a server render)
-// has no chain to read and the panel opens on the document the route itself loaded. A pushed
-// reference entry is marked, so the panel's own Back calls history.back() for it instead of
-// rewriting a deep link that has no in-app entry to return to.
+// The file chain comes from the page's address, so a frame with no page (a server render) has no
+// chain to read and the panel opens on the document the route itself loaded. A pushed file entry
+// is marked, so the panel's own Back calls history.back() for it instead of rewriting a deep link
+// that has no in-app entry to return to.
 // meiva:link ui/web/src/docs/frontend-state/navigation-history.meiva.okf.md
 export function ToUserDocumentView({ agentId, document, failure, pending, refresh, mobile, inspecting = false, bodyHidden = false, onInspect, onCollapse, onNavigate, viewportRef }: {
   agentId: number;
@@ -77,24 +77,27 @@ export function ToUserDocumentView({ agentId, document, failure, pending, refres
   const tInspector = useTranslations("inspector");
   const navigation = useBrowser().navigation;
   const now = useWallDate();
-  const [references, setReferences] = useState<string[]>(() => {
+  const [files, setFiles] = useState<string[]>(() => {
     const where = navigation.location();
-    return where === null ? [] : readReferences(new URL(where.href), agentId);
+    return where === null ? [] : readFiles(new URL(where.href), agentId);
   });
-  const linked = useToUser(references.length ? agentId : null, references);
-  const current = references.length ? linked.data : document;
-  const loading = references.length ? linked.isFetching : pending;
-  const error = references.length ? linked.error : failure;
+  const linked = useToUser(files.length ? agentId : null, files);
+  const current = files.length ? linked.data : document;
+  const loading = files.length ? linked.isFetching : pending;
+  const error = files.length ? linked.error : failure;
   const failed = error != null;
   const refusal = failed ? refusalOf(error) : null;
-  const referencePath = references.join("/");
-  useEffect(() => { onNavigate?.(); }, [referencePath, onNavigate]);
+  // meiva:note
+  // The chain as one value: a file name may itself contain `/`, so the joined form is not a key.
+  // meiva:link ui/web/src/docs/frontend-state/navigation-history.meiva.okf.md
+  const fileKey = JSON.stringify(files);
+  useEffect(() => { onNavigate?.(); }, [fileKey, onNavigate]);
   const content = current?.content;
   const show = useCallback((next: string[], mode: "push" | "replace") => {
-    setReferences(next);
+    setFiles(next);
     const where = navigation.location();
     if (where === null) return;
-    const url = withReferences(where.href, next);
+    const url = withFiles(where.href, next);
     if (mode === "push") {
       navigation.push(url, { ...asRecord(navigation.state()), [PUSHED_ENTRY]: true });
     } else {
@@ -105,29 +108,27 @@ export function ToUserDocumentView({ agentId, document, failure, pending, refres
   useEffect(() => {
     const restore = () => {
       const where = navigation.location();
-      if (where !== null) setReferences(readReferences(new URL(where.href), agentId));
+      if (where !== null) setFiles(readFiles(new URL(where.href), agentId));
     };
     return navigation.onTraverse(restore);
   }, [agentId, navigation]);
 
   const goBack = () => {
     if (pushedEntry(navigation)) navigation.back();
-    else show(references.slice(0, -1), "replace");
+    else show(files.slice(0, -1), "replace");
   };
 
   const resources = new Map(Object.entries(current?.resources ?? {}).map(([href, resource]) => {
-    const query = new URLSearchParams();
-    for (const reference of [...references, resource.id]) query.append("reference", reference);
-    if (resource.version) query.set("v", resource.version);
+    const version = resource.version ? `&v=${resource.version}` : "";
     const fragment = href.includes("#") ? href.slice(href.indexOf("#")) : "";
-    return [href, { ...resource, url: `${API_BASE}/api/agents/${agentId}/to-user/resource?${query}${fragment}` }];
+    const chain = fileQuery([...files, resource.file]);
+    return [href, { ...resource, url: `${API_BASE}/api/agents/${agentId}/to-user/resource?${chain}${version}${fragment}` }];
   }));
   const byUrl = new Map([...resources.values()].map((resource) => [resource.url, resource]));
   // meiva:note
   // The same file the panel could not render, served as bytes: the resource route
   // bounds it by its own budget, so a document too large to display stays reachable.
-  const rawQuery = new URLSearchParams(references.map((reference) => ["reference", reference]));
-  const rawUrl = `${API_BASE}/api/agents/${agentId}/to-user/resource?${rawQuery}`;
+  const rawUrl = `${API_BASE}/api/agents/${agentId}/to-user/resource?${fileQuery(files)}`;
   // meiva:note
   // This section owns the column's title bar and its reading area; the caller
   // owns the question, which sits below this area as the column's own bottom
@@ -146,10 +147,10 @@ export function ToUserDocumentView({ agentId, document, failure, pending, refres
       <div data-testid="document-bar" className={cn("shrink-0 flex-wrap items-center gap-x-2 gap-y-1 px-3 py-1 text-[11px] text-muted-foreground", COLUMN_TITLE_BAR_WRAP_CLASS, FLEX)}>
         {inspecting ? null : (
           <>
-            <button title={t("home")} aria-label={t("home")} className="rounded p-1 hover:bg-accent" onClick={() => { if (references.length) show([], "push"); }}>
+            <button title={t("home")} aria-label={t("home")} className="rounded p-1 hover:bg-accent" onClick={() => { if (files.length) show([], "push"); }}>
               <House className="size-3.5" />
             </button>
-            {references.length > 0 && <button title={t("back")} aria-label={t("back")} className="rounded p-1 hover:bg-accent" onClick={goBack}>
+            {files.length > 0 && <button title={t("back")} aria-label={t("back")} className="rounded p-1 hover:bg-accent" onClick={goBack}>
               <ArrowLeft className="size-3.5" />
             </button>}
           </>
@@ -158,7 +159,7 @@ export function ToUserDocumentView({ agentId, document, failure, pending, refres
         {inspecting ? null : (
           <div data-testid="document-status" className={cn("shrink-0 items-center gap-1.5", FLEX)}>
             {current?.modified_at && <span className="whitespace-nowrap">{t("updated", { time: formatRelative(current.modified_at, now) })}</span>}
-            <button title={t("refresh")} aria-label={t("refresh")} onClick={() => { if (references.length) void linked.refetch(); else refresh(); }} disabled={loading} className="rounded p-1 hover:bg-accent disabled:opacity-50">
+            <button title={t("refresh")} aria-label={t("refresh")} onClick={() => { if (files.length) void linked.refetch(); else refresh(); }} disabled={loading} className="rounded p-1 hover:bg-accent disabled:opacity-50">
               <RefreshCw className="size-3.5" />
             </button>
           </div>
@@ -199,14 +200,14 @@ export function ToUserDocumentView({ agentId, document, failure, pending, refres
                 {loading ? t("loading") : refusal ? (
                   <div data-testid="document-failure" className="space-y-1">
                     <InlineError>{t(refusal.text)}</InlineError>
-                    {refusal.raw && references.length > 0 ? (
+                    {refusal.raw && files.length > 0 ? (
                       <a className="underline hover:text-foreground text-xs" href={rawUrl} target="_blank" rel="noopener noreferrer">{t("openRaw")}</a>
                     ) : null}
                   </div>
                 ) : current?.legacy_html ? t("legacyHtml") : t("empty")}
               </div>
             ) : (
-              <div key={references.join("/")} data-testid="document-content" className="px-5 py-3.5 text-[13px] leading-[21px] text-foreground/90 dark:text-[#dfdcd6] [&>.chat-md>:first-child]:mt-0">
+              <div key={fileKey} data-testid="document-content" className="px-5 py-3.5 text-[13px] leading-[21px] text-foreground/90 dark:text-[#dfdcd6] [&>.chat-md>:first-child]:mt-0">
                 <ChatMarkdown content={content} resolveUrl={(href) => {
                   const resource = resources.get(href);
                   return resource?.url ?? (/^(https?:|mailto:|#)/i.test(href) ? href : "about:blank");
@@ -222,7 +223,7 @@ export function ToUserDocumentView({ agentId, document, failure, pending, refres
                     return <a href={href} target={external ? "_blank" : undefined} rel={external ? "noopener noreferrer" : undefined} onClick={(event) => {
                       if (!resource?.markdown || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || event.button !== 0) return;
                       event.preventDefault();
-                      show([...references, resource.id], "push");
+                      show([...files, resource.file], "push");
                     }}>{children}</a>;
                   },
                 }} />

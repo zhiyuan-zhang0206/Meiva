@@ -100,8 +100,8 @@ export function createControlApi(http: Http) {
       return f(`/api/agents/${agentId}`, patchJson({ label })).then(http.accepted);
     },
 
-    getToUser: (agentId: number, signal?: AbortSignal, references: string[] = []): Promise<ToUserDocument> => {
-      return f(toUserPath(agentId, references), { signal }).then(ok<ToUserDocument>);
+    getToUser: (agentId: number, signal?: AbortSignal, files: string[] = []): Promise<ToUserDocument> => {
+      return f(toUserPath(agentId, files), { signal }).then(ok<ToUserDocument>);
     },
 
     listPages: (agentId: number): Promise<PageRow[]> => {
