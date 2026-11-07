@@ -17,6 +17,7 @@ __all__ = [
     "AGENT_BIRTH_CONFIG_ENV",
     "AGENT_CONFIG_OVERLAY_ENV",
     "AGENT_ID_ENV",
+    "HOMEBREW_PREFIXES",
     "HOST_PASSTHROUGH_KEYS",
     "MACOS_GNU_BIN_DIRS",
     "MEIVA_HOME_ENV",
@@ -35,6 +36,13 @@ AGENT_CONFIG_OVERLAY_ENV = "MEIVA_AGENT_CONFIG_OVERLAY"
 AGENT_BIRTH_CONFIG_ENV = "MEIVA_AGENT_BIRTH_CONFIG"
 MEIVA_HOME_ENV = "MEIVA_HOME"
 MEIVA_PYTHON_ENV = "MEIVA_PYTHON"
+
+# meiva:note
+# The two Homebrew prefixes in precedence order: Apple Silicon installs under `/opt/homebrew`,
+# an Intel Mac under `/usr/local`, and a host can carry both — the native one must win over the
+# other architecture's. A non-login shell reads only `~/.zshenv`, where neither is on PATH, so a
+# host that resolved `bat` for its login shell could not resolve it for `ssh host bat` (#6433).
+HOMEBREW_PREFIXES: tuple[str, ...] = ("/opt/homebrew", "/usr/local")
 
 MACOS_GNU_BIN_DIRS: tuple[str, ...] = (
     "/opt/homebrew/opt/coreutils/libexec/gnubin",

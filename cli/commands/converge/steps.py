@@ -6,7 +6,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from base.host.boundary.process import stdout_text
+from base.host.boundary.process import stderr_text, stdout_text
 from base.host.env.harness_binaries import with_harness_path
 from base.host.private_storage import converge_private_tree, ensure_private_file
 from cli.commands.converge.plans.checkout_warnings import hook_scan_argv, hook_scan_warnings
@@ -56,20 +56,32 @@ def ensure_local_bin_on_path(ctx: ConvergeCtx) -> None:
         _ = zshenv.write_text(updated_zshenv)
 
 
+# meiva:note
+# The check is `command -v` over the tool list: seconds, not the minutes an install takes.
+_CLI_TOOLS_CHECK_TIMEOUT_S = 60.0
+
+
+# meiva:note
+# Report the host CLI tools converge needs; never install them.
+#
+# A package manager inside a start runs on the wave's clock. On 2026-11-07 company-mini's up leg
+# built two Homebrew formulae from source and the step was killed at its 300 s timeout: the wave
+# went on, nothing was installed, and the next wave paid the same five minutes (#6433). A
+# missing tool is an operator action; the report names the script to run outside the wave.
 def ensure_cli_tools_step(ctx: ConvergeCtx) -> None:
     script = ctx.repo / "scripts" / "provision" / "install-cli-tools.sh"
     if not script.exists():
         return
     res = ctx.host.run(
-        ["bash", str(script)],
-        timeout=300.0,
+        ["bash", str(script), "--check"],
+        timeout=_CLI_TOOLS_CHECK_TIMEOUT_S,
         capture_output=True,
         text=True,
         env=with_harness_path(ctx.config.process_environment(), home=ctx.session.user_home),
     )
     if res.returncode != 0:
-        stderr = res.stderr if isinstance(res.stderr, str) else ""
-        raise RuntimeError(f"install-cli-tools failed with code {res.returncode}: {stderr.strip()}")
+        detail = stderr_text(res).strip() or stdout_text(res).strip()
+        raise RuntimeError(detail or f"install-cli-tools --check failed with code {res.returncode}")
 
 
 def ensure_meiva_home_dirs(ctx: ConvergeCtx) -> None:
