@@ -301,7 +301,7 @@ and trailing window carry the debounce. A condition that stops resolves itself w
 | `meiva-ops-delivery-stalled` | `delivery_stalled` per agent | 1m | warning | the deploy-window hold and settle grace |
 | `meiva-ops-delivery-stranded-wake` | `delivery_stranded_wake` per agent (inbound id in the summary) | 0s | warning | nothing: an automatic wake that revives an owner a user had just killed had no notification path (2026-10-25 review of #7066) |
 | `meiva-ops-db-pool-acquire-slow` | `db_pool_acquire_slow` per machine | 2m | warning | the per-host cooldown marker |
-| `meiva-ops-root-unit-restart-failed` / `-breaker-open` | `root_unit_failure_state` per `attributes_kind`, per machine and unit | 0m | error / critical | the root unit episode store and its posts |
+| `meiva-ops-root-unit-restart-failed` / `-absent` / `-breaker-open` | `root_unit_failure_state` per `attributes_kind`, per machine and unit | 0m | error / error / critical | the root unit episode store and its posts; `-absent` adds the state nothing recorded a cause for (task #6345) |
 | `meiva-ops-root-unit-not-revivable` | `root_unit_not_revivable` >1 in 2m | 0m | error | `terminal_escalate_rounds` |
 | `meiva-ops-root-unit-stop-escalated` | `root_unit_stop_escalated` >0 in 10m | 0m | error | nothing: a stop that outlived its window gave up silently and left a half-dead unit (2026-10-18) |
 | `meiva-ops-root-unit-unowned-alive` | `root_unit_unowned_alive` per machine and unit | 0m | error | nothing: a unit could read "state stopped / probe alive" for a day with every rule green (2026-10-20) |
