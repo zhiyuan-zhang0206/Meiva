@@ -7,11 +7,13 @@ import pytest
 
 from base.host.env.harness_binaries import (
     HARNESS_BIN_DIRS,
+    MACOS_GNU_BIN_DIRS,
     HarnessBinaryNotFoundError,
     HarnessPathIncompleteError,
     harness_child_path,
     harness_unit_path,
     locate_harness_binary,
+    noninteractive_bash_path,
     require_harness_paths,
     resolve_harness_binary,
     with_harness_path,
@@ -150,3 +152,18 @@ def test_the_unit_builder_always_covers_the_table(tmp_path: Path) -> None:
     entries = built.split(os.pathsep)
     assert entries[0] == "/vendor/bin"
     assert require_harness_paths(built, home=tmp_path, what="the test unit PATH") == built
+
+
+def test_harness_child_path_places_gnu_bin_dirs_before_homebrew_bin(tmp_path: Path) -> None:
+    entries = harness_child_path(home=tmp_path).split(os.pathsep)
+    homebrew_idx = entries.index("/opt/homebrew/bin")
+    gnu_idx = entries.index(MACOS_GNU_BIN_DIRS[0])
+    assert gnu_idx < homebrew_idx
+    for gnu_dir in MACOS_GNU_BIN_DIRS:
+        assert gnu_dir in entries
+
+
+def test_noninteractive_bash_path_resolves_to_executable_wrapper() -> None:
+    script_path = Path(noninteractive_bash_path())
+    assert script_path.is_file()
+    assert os.access(script_path, os.X_OK)

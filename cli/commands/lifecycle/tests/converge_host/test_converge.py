@@ -16,7 +16,15 @@ from base.host.system.tests.fake_commands import fake_host
 from base.host.tests.short_tmp import short_tmp as short_tmp
 from cli.commands.converge import frontend_env as _fe_env
 from cli.commands.converge import steps as _steps
-from cli.commands.converge.plans.shell_rc import PATH_BEGIN, PATH_END, rc_file_name, with_path_block
+from cli.commands.converge.plans.shell_rc import (
+    PATH_BEGIN,
+    PATH_END,
+    ZSHENV_BEGIN,
+    ZSHENV_END,
+    rc_file_name,
+    with_path_block,
+    with_zshenv_block,
+)
 from cli.commands.converge.redis_bridge import retire_launchd_redis_bridge
 from cli.commands.converge.spec import ConvergeCtx
 from cli.commands.lifecycle import converge_host
@@ -79,6 +87,14 @@ def test_applying_the_path_block_twice_changes_nothing(tmp_path: Path) -> None:
     assert with_path_block(once, tmp_path) == once
 
 
+def test_the_zshenv_block_is_appended_and_idempotent() -> None:
+    text = with_zshenv_block("export BAR=1\n")
+    assert text.startswith("export BAR=1\n" + ZSHENV_BEGIN + "\n")
+    assert text.endswith(ZSHENV_END + "\n")
+    assert "unsetopt nomatch bang_hist" in text
+    assert with_zshenv_block(text) == text
+
+
 # meiva:note
 # --- the host-wiring steps against a real user home ---------------------------------
 
@@ -111,6 +127,14 @@ def test_ensure_local_bin_on_path_writes_the_block_once_into_the_users_rc(
     assert "export FOO=1" in text
     assert str(user_home / ".local" / "bin") in text
 
+    zshenv = user_home / ".zshenv"
+    assert zshenv.exists()
+    zshenv_text = zshenv.read_text()
+    assert zshenv_text.count(PATH_BEGIN) == 1
+    assert zshenv_text.count(ZSHENV_BEGIN) == 1
+    assert "unsetopt nomatch bang_hist" in zshenv_text
+    assert str(user_home / ".local" / "bin") in zshenv_text
+
 
 def test_ensure_local_bin_on_path_creates_the_rc_of_the_users_shell(
     ctx: ConvergeCtx, user_home: Path
@@ -122,6 +146,38 @@ def test_ensure_local_bin_on_path_creates_the_rc_of_the_users_shell(
 
     assert PATH_BEGIN in (user_home / ".bashrc").read_text()
     assert not (user_home / ".zshrc").exists()
+
+
+def test_ensure_cli_tools_step_runs_when_script_exists(ctx: ConvergeCtx, tmp_path: Path) -> None:
+    from base.host.system.tests.fake_commands import FakeCommands, Reply, fake_host
+
+    script = tmp_path / "scripts" / "provision" / "install-cli-tools.sh"
+    script.parent.mkdir(parents=True)
+    script.write_text("#!/bin/bash\nexit 0\n")
+
+    fc = FakeCommands()
+    fc.on(("bash", str(script)), Reply(returncode=0))
+    host_ctx = replace(ctx, repo=tmp_path, host=fake_host(fc))
+
+    _steps.ensure_cli_tools_step(host_ctx)
+    assert len(fc.calls) == 1
+    call_env = fc.calls[0].kwargs["env"]
+    assert "/opt/homebrew/bin" in call_env["PATH"]
+
+
+def test_ensure_cli_tools_step_raises_on_script_failure(ctx: ConvergeCtx, tmp_path: Path) -> None:
+    from base.host.system.tests.fake_commands import FakeCommands, Reply, fake_host
+
+    script = tmp_path / "scripts" / "provision" / "install-cli-tools.sh"
+    script.parent.mkdir(parents=True)
+    script.write_text("#!/bin/bash\nexit 1\n")
+
+    fc = FakeCommands()
+    fc.on(("bash", str(script)), Reply(returncode=1, stderr="brew error"))
+    host_ctx = replace(ctx, repo=tmp_path, host=fake_host(fc))
+
+    with pytest.raises(RuntimeError, match="install-cli-tools failed with code 1: brew error"):
+        _steps.ensure_cli_tools_step(host_ctx)
 
 
 def test_ensure_meiva_home_dirs(ctx: ConvergeCtx) -> None:

@@ -64,12 +64,16 @@ def test_managed_service_path_accepts_plain_spaces(tmp_path: Path) -> None:
 @pytest.mark.parametrize("shell_path", ["/usr/bin:/bin", "/bin"])
 def test_frontend_toolchain_path_is_independent_of_shell_profile(shell_path: str) -> None:
     """The Node locations are injected even when a remote shell exports only system dirs."""
-    assert env_forwarding.frontend_toolchain_path(shell_path).split(":")[:4] == [
+    expected = [
+        *env_forwarding.MACOS_GNU_BIN_DIRS,
         "/opt/homebrew/bin",
         "/usr/local/bin",
         "/usr/bin",
         "/bin",
     ]
+    assert (
+        env_forwarding.frontend_toolchain_path(shell_path).split(":")[: len(expected)] == expected
+    )
 
 
 def test_venv_activation_prefix_omits_an_empty_path_entry() -> None:

@@ -80,6 +80,7 @@ from cli.commands.converge.runner import (
 )
 from cli.commands.converge.spec import ConvergeCtx, ConvergeStep
 from cli.commands.converge.steps import (
+    ensure_cli_tools_step,
     ensure_local_bin_on_path,
     ensure_local_git_hooks,
     ensure_meiva_home_dirs,
@@ -394,6 +395,12 @@ CONVERGE_STEPS: tuple[ConvergeStep, ...] = (
     ConvergeStep("$MEIVA_HOME ownership preflight", _ensure_ownership_preflight),
     ConvergeStep("meiva on PATH", ensure_meiva_on_path, host_global=True),
     ConvergeStep("~/.local/bin on PATH", ensure_local_bin_on_path, host_global=True),
+    ConvergeStep(
+        "CLI and GNU tools",
+        ensure_cli_tools_step,
+        host_global=True,
+        on_failure="advisory",
+    ),
     # meiva:note
     # The one step whose failure stops the table: every later step writes into this home, so a
     # skeleton that could not be laid out (a `logs` symlink pointing out of it, a read-only

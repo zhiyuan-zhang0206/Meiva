@@ -55,10 +55,12 @@ from pathlib import Path
 
 from dotenv import dotenv_values
 
+from base.host.env.harness_binaries import MACOS_GNU_BIN_DIRS
 from base.host.system.backend import get_backend
 
 # Keep this in sync with the provisioned Node locations in scripts/provision/node.sh.
 _FRONTEND_TOOLCHAIN_DIRS = (
+    *MACOS_GNU_BIN_DIRS,
     "/opt/homebrew/bin",
     "/usr/local/bin",
     "/usr/bin",

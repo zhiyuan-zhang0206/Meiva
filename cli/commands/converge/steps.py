@@ -7,9 +7,14 @@ import sys
 from pathlib import Path
 
 from base.host.boundary.process import stdout_text
+from base.host.env.harness_binaries import with_harness_path
 from base.host.private_storage import converge_private_tree, ensure_private_file
 from cli.commands.converge.plans.checkout_warnings import hook_scan_argv, hook_scan_warnings
-from cli.commands.converge.plans.shell_rc import rc_file_name, with_path_block
+from cli.commands.converge.plans.shell_rc import (
+    rc_file_name,
+    with_path_block,
+    with_zshenv_block,
+)
 from cli.commands.converge.spec import ConvergeCtx
 
 # --- host-wiring steps (no preconditions) ---------------------------------
@@ -37,11 +42,35 @@ def ensure_meiva_on_path(ctx: ConvergeCtx) -> None:
 
 
 def ensure_local_bin_on_path(ctx: ConvergeCtx) -> None:
+    local_bin = ctx.session.user_home / ".local" / "bin"
     rc = ctx.session.user_home / rc_file_name(ctx.session.login_shell)
     existing = rc.read_text() if rc.exists() else ""
-    updated = with_path_block(existing, ctx.session.user_home / ".local" / "bin")
+    updated = with_path_block(existing, local_bin)
     if updated != existing:
-        rc.write_text(updated)
+        _ = rc.write_text(updated)
+
+    zshenv = ctx.session.user_home / ".zshenv"
+    existing_zshenv = zshenv.read_text() if zshenv.exists() else ""
+    updated_zshenv = with_path_block(existing_zshenv, local_bin)
+    updated_zshenv = with_zshenv_block(updated_zshenv)
+    if updated_zshenv != existing_zshenv:
+        _ = zshenv.write_text(updated_zshenv)
+
+
+def ensure_cli_tools_step(ctx: ConvergeCtx) -> None:
+    script = ctx.repo / "scripts" / "provision" / "install-cli-tools.sh"
+    if not script.exists():
+        return
+    res = ctx.host.run(
+        ["bash", str(script)],
+        timeout=300.0,
+        capture_output=True,
+        text=True,
+        env=with_harness_path(ctx.config.process_environment(), home=ctx.session.user_home),
+    )
+    if res.returncode != 0:
+        stderr = res.stderr if isinstance(res.stderr, str) else ""
+        raise RuntimeError(f"install-cli-tools failed with code {res.returncode}: {stderr.strip()}")
 
 
 def ensure_meiva_home_dirs(ctx: ConvergeCtx) -> None:

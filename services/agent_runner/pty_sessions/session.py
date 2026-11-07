@@ -68,8 +68,17 @@ _RAW_RING_CAP = 2 * 1024 * 1024
 _INITIAL_CMD_READY_TIMEOUT_S = 30.0
 _INITIAL_CMD_SETTLE_S = 0.3
 
+
+def _resolve_bash_binary() -> str:
+    for candidate in ("/opt/homebrew/bin/bash", "/usr/local/bin/bash", "/bin/bash"):
+        p = Path(candidate)
+        if p.is_file() and os.access(p, os.X_OK):
+            return candidate
+    return "/bin/bash"
+
+
 # The shell: a login interactive bash, the classic pane shape.
-SHELL_ARGV = ("/bin/bash", "-l", "-i")
+SHELL_ARGV = (_resolve_bash_binary(), "-l", "-i")
 SHELL_COMMAND = " ".join(SHELL_ARGV)
 
 # Sentinel for a child whose create_time could not be read (died at spawn: the

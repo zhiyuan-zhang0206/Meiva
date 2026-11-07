@@ -18,6 +18,7 @@ __all__ = [
     "AGENT_CONFIG_OVERLAY_ENV",
     "AGENT_ID_ENV",
     "HOST_PASSTHROUGH_KEYS",
+    "MACOS_GNU_BIN_DIRS",
     "MEIVA_HOME_ENV",
     "MEIVA_PYTHON_ENV",
     "NETWORK_PROXY_KEYS",
@@ -34,6 +35,22 @@ AGENT_CONFIG_OVERLAY_ENV = "MEIVA_AGENT_CONFIG_OVERLAY"
 AGENT_BIRTH_CONFIG_ENV = "MEIVA_AGENT_BIRTH_CONFIG"
 MEIVA_HOME_ENV = "MEIVA_HOME"
 MEIVA_PYTHON_ENV = "MEIVA_PYTHON"
+
+MACOS_GNU_BIN_DIRS: tuple[str, ...] = (
+    "/opt/homebrew/opt/coreutils/libexec/gnubin",
+    "/opt/homebrew/opt/gnu-sed/libexec/gnubin",
+    "/opt/homebrew/opt/grep/libexec/gnubin",
+    "/opt/homebrew/opt/findutils/libexec/gnubin",
+    "/opt/homebrew/opt/gawk/libexec/gnubin",
+    "/opt/homebrew/opt/gnu-tar/libexec/gnubin",
+    "/usr/local/opt/coreutils/libexec/gnubin",
+    "/usr/local/opt/gnu-sed/libexec/gnubin",
+    "/usr/local/opt/grep/libexec/gnubin",
+    "/usr/local/opt/findutils/libexec/gnubin",
+    "/usr/local/opt/gawk/libexec/gnubin",
+    "/usr/local/opt/gnu-tar/libexec/gnubin",
+)
+
 
 HOST_PASSTHROUGH_KEYS = frozenset({"DISPLAY", "WAYLAND_DISPLAY", "HOME", "USER", "LOGNAME"})
 NETWORK_PROXY_KEYS = frozenset(

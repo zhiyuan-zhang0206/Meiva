@@ -24,6 +24,9 @@ SHELL_SEMANTICS: tuple[str, ...] = (
     "Every `run_command` call starts a fresh shell: `cd` and `export` do not carry over "
     "to the next call. Put the working directory and every variable in the same command "
     "line, or use absolute paths.",
+    "`run_command` runs non-interactively with stdin closed (`/dev/null`) under modern GNU "
+    "bash. Commands that read stdin (like `cat` or `wc` without an input file or pipe) receive "
+    "an immediate EOF rather than hanging.",
     "A background process started with `&` is killed when your turn ends. Start anything "
     "that must outlive the turn with `setsid nohup … &` or inside tmux.",
     "A fresh `\"$MEIVA_PYTHON\" -c 'import meiva; ...'` command attaches your agent identity "
