@@ -10,5 +10,6 @@
       "before_llm",
       "after_exec"
     ]
-  }
+  },
+  "category": "builtin"
 }

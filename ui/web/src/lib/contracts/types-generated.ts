@@ -2884,6 +2884,10 @@ export interface components {
             name: string;
             enabled: boolean;
             description: string;
+            display_name?: string | null;
+            user_toggleable: boolean;
+            category: "provider" | "builtin" | "extension";
+            provider_kinds?: ("llm" | "decision")[];
         };
         ClusterPluginWrite: {
             name: string;

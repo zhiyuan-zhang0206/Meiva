@@ -520,3 +520,41 @@ def test_check_host_commit_unresolvable_blocks(tmp_path: Path) -> None:
     repo, _main, _side = _commit_repo(tmp_path)
     errors = pm.check_host_commit(_manifest(requires_commit="f" * 40), repo, environ=ENVIRON)
     assert errors and "unresolvable" in errors[0]
+
+
+def test_settings_metadata_defaults_and_explicit_values() -> None:
+    legacy = _manifest()
+    assert legacy.user_toggleable is True
+    assert legacy.display_name is None
+    provider = _manifest(displayName="Anthropic", userToggleable=False)
+    assert provider.display_name == "Anthropic"
+    assert provider.user_toggleable is False
+
+
+@pytest.mark.parametrize("value", [None, 0, 1, "false", [], {}])
+def test_settings_toggle_metadata_requires_boolean(value: object) -> None:
+    with pytest.raises(ManifestError, match="userToggleable must be a boolean"):
+        _manifest(userToggleable=value)
+
+
+@pytest.mark.parametrize("value", [None, "", "  ", 1, False, [], {}])
+def test_settings_display_name_requires_nonempty_string(value: object) -> None:
+    with pytest.raises(ManifestError, match="displayName must be a non-empty string"):
+        _manifest(displayName=value)
+
+
+@pytest.mark.parametrize("value", [None, "unknown", [], {}, 1, False])
+def test_settings_category_rejects_unknown_or_invalid_values(value: object) -> None:
+    with pytest.raises(ManifestError, match="category must be"):
+        _manifest(category=value)
+
+
+def test_provider_category_requires_declared_model_capability() -> None:
+    with pytest.raises(ManifestError, match="requires providers or decisionProviders"):
+        _manifest(category="provider")
+    assert (
+        _manifest(category="provider", contributions={"providers": ["custom-"]}).category
+        == "provider"
+    )
+    assert _manifest(category="builtin", userToggleable=False).category == "builtin"
+    assert _manifest().category == "extension"

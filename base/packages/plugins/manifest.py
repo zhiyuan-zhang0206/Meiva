@@ -6,6 +6,7 @@ import subprocess
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal
 
 from base import paths
 from base.host.boundary.json_values import is_object_dict, is_object_list
@@ -16,6 +17,8 @@ from base.packages.plugins.surface.notification_contributions import (
     validate_notification_contributions,
 )
 from base.packages.plugins.surface.ui_contributions import validate_ui_contributions
+
+PluginCategory = Literal["provider", "builtin", "extension"]
 
 MANIFEST_FILENAME = "meiva-plugin.json"
 API_VERSION = 2
@@ -147,6 +150,9 @@ class PluginManifest:
     dependencies: Dependencies
     lifecycle: Lifecycle
     requires_commit: str | None = None
+    display_name: str | None = None
+    user_toggleable: bool = True
+    category: PluginCategory = "extension"
 
 
 def _str_list(value: object, what: str, errors: list[str]) -> list[str] | None:
@@ -171,6 +177,9 @@ def _validate_identity(data: dict[str, object], errors: list[str]) -> tuple[str,
         "dependencies",
         "lifecycle",
         "requires_commit",
+        "displayName",
+        "userToggleable",
+        "category",
     }
     for key in data:
         if key not in known:
@@ -476,9 +485,22 @@ def _validate_lifecycle(data: dict[str, object], errors: list[str]) -> Lifecycle
 def validate(data: dict[str, object]) -> PluginManifest:
     errors: list[str] = []
     name, version, description = _validate_identity(data, errors)
+    display_name = data.get("displayName")
+    if "displayName" in data and (not isinstance(display_name, str) or not display_name.strip()):
+        errors.append("displayName must be a non-empty string")
+    user_toggleable = data.get("userToggleable", True)
+    if not isinstance(user_toggleable, bool):
+        errors.append("userToggleable must be a boolean")
+    category = data.get("category", "extension")
+    if category not in ("provider", "builtin", "extension"):
+        errors.append("category must be provider, builtin or extension")
     parsed_engines = _validate_engines(data, errors)
     parsed_requires_commit = _validate_requires_commit(data, errors)
     parsed_contributions = _validate_contributions(data, errors)
+    if category == "provider" and not (
+        parsed_contributions.get("providers") or parsed_contributions.get("decisionProviders")
+    ):
+        errors.append("category provider requires providers or decisionProviders contributions")
     parsed_deps = _validate_dependencies(data, errors)
     parsed_lifecycle = _validate_lifecycle(data, errors)
 
@@ -493,6 +515,9 @@ def validate(data: dict[str, object]) -> PluginManifest:
         dependencies=parsed_deps,
         lifecycle=parsed_lifecycle,
         requires_commit=parsed_requires_commit,
+        display_name=display_name if isinstance(display_name, str) else None,
+        user_toggleable=user_toggleable if isinstance(user_toggleable, bool) else True,
+        category=category if category in ("provider", "builtin", "extension") else "extension",
     )
 
 

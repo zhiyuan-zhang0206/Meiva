@@ -11447,6 +11447,43 @@
           "description": {
             "type": "string",
             "title": "Description"
+          },
+          "display_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Display Name"
+          },
+          "user_toggleable": {
+            "type": "boolean",
+            "title": "User Toggleable",
+            "default": true
+          },
+          "category": {
+            "type": "string",
+            "enum": [
+              "provider",
+              "builtin",
+              "extension"
+            ],
+            "title": "Category",
+            "default": "extension"
+          },
+          "provider_kinds": {
+            "items": {
+              "type": "string",
+              "enum": [
+                "llm",
+                "decision"
+              ]
+            },
+            "type": "array",
+            "title": "Provider Kinds"
           }
         },
         "type": "object",

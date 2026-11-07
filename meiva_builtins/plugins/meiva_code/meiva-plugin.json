@@ -28,5 +28,6 @@
       "coding_tools_section",
       "engineering_workflow_section"
     ]
-  }
+  },
+  "category": "builtin"
 }

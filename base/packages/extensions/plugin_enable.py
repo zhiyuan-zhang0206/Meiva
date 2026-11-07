@@ -4,6 +4,7 @@ from pathlib import Path
 
 import psycopg
 
+from base.native_process.os_platform import file_lock
 from base.packages.extensions import registry
 from base.packages.plugins import enable_config
 
@@ -13,7 +14,8 @@ def policy(conn: psycopg.Connection) -> dict[str, bool]:
 
 
 def materialize(conn: psycopg.Connection, *, home: Path) -> None:
-    enable_config.write_cluster_policy(policy(conn), home=home)
+    with file_lock(home / "plugin_enable_policy.lock", timeout_s=10):
+        enable_config.write_cluster_policy(policy(conn), home=home)
 
 
 def initialize(conn: psycopg.Connection, *, home: Path) -> None:

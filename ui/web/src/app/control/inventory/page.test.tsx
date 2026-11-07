@@ -32,8 +32,8 @@ beforeEach(() => {
   resetTransport();
   navigation.moves.length = 0;
   transport.getPlugins.mockResolvedValue({ plugins: [
-    { name: "meiva_code", enabled: true, description: "Code execution plugin" },
-    { name: "only_h1", enabled: false, description: "Only on h1" },
+    { name: "meiva_code", enabled: true, user_toggleable: true, category: "builtin", description: "Code execution plugin" },
+    { name: "only_h1", enabled: false, user_toggleable: true, category: "extension", description: "Only on h1" },
   ] });
 });
 
@@ -62,9 +62,6 @@ function wrap(ui: React.ReactElement, qc?: QueryClient) {
 const H1 = "h1";
 const H2 = "h2";
 
-// meiva_code: present+enabled on h1, present+disabled on h2 -> 1/2 enabled.
-// only_h1: present on h1 only -> its h2 cell is "not installed".
-// mcp "needs_display": present+disabled on h1 with can_enable:false.
 const AGGREGATE: InventoryAggregate = {
   machines: [H1, H2],
   unreachable: [],
@@ -118,22 +115,19 @@ describe("InventoryPage tri-state", () => {
       new Promise(() => undefined /* never resolves */),
     );
     wrap(<InventoryPage />);
-    // The spinner is an svg with the animate-spin class.
-    expect(document.querySelector(".animate-spin")).toBeTruthy();
+    expect(screen.getByLabelText("Loading MCP servers…")).toBeTruthy();
   });
 
   it("error shows a quiet line, not the raw error", async () => {
     transport.getInventory.mockRejectedValue(new Error("network down"));
     wrap(<InventoryPage />);
-    // Both the Plugins and MCP matrices surface the same quiet line (one query,
-    // two sections), so assert presence via getAllByText.
     await waitFor(() => expect(screen.getAllByText(/Couldn't load inventory/).length).toBeGreaterThan(0));
     expect(screen.queryByText(/network down/)).toBeNull();
   });
 });
 
 describe("InventoryPage render", () => {
-  it("renders both section headers + every item row", async () => {
+  it("renders both sections and the selected machine MCP list", async () => {
     transport.getInventory.mockResolvedValue(AGGREGATE);
     wrap(<InventoryPage />);
     await waitFor(() => screen.getByText("meiva_code"));
@@ -145,31 +139,31 @@ describe("InventoryPage render", () => {
     expect(screen.getByText("Code execution plugin")).toBeTruthy();
   });
 
-  it("machine columns appear as headers", async () => {
+  it("selects one machine and lists only its installed MCP servers", async () => {
     transport.getInventory.mockResolvedValue(AGGREGATE);
     wrap(<InventoryPage />);
-    await waitFor(() => screen.getByText("meiva_code"));
-    // Each machine appears as a header cell.
-    expect(screen.getAllByText(H1).length).toBeGreaterThan(0);
-    expect(screen.getAllByText(H2).length).toBeGreaterThan(0);
+    const selector = await screen.findByRole("combobox", { name: "Machine" });
+    expect(screen.getByText("needs_display")).toBeTruthy();
+    fireEvent.change(selector, { target: { value: H2 } });
+    expect(screen.queryByText("needs_display")).toBeNull();
+    expect(screen.getByText("No MCP servers installed on this machine.")).toBeTruthy();
+    expect(screen.queryByRole("columnheader")).toBeNull();
   });
 
-
-  it("not-installed cell shows — for a host lacking the item", async () => {
-    transport.getInventory.mockResolvedValue(AGGREGATE);
+  it("keeps unreachable machines selectable and reports unknown state", async () => {
+    transport.getInventory.mockResolvedValue({ ...AGGREGATE, unreachable: [H2] });
     wrap(<InventoryPage />);
-    await waitFor(() => screen.getByText("only_h1"));
-    // only_h1 has no h1/h2 toggle for the h2 column (not installed there).
-    expect(screen.queryByTestId(`cell-only_h1-${H2}`)).toBeNull();
-    // A "—" placeholder is rendered for the not-installed cell.
-    expect(screen.getAllByLabelText("Not installed on this host").length).toBeGreaterThan(0);
+    fireEvent.change(await screen.findByRole("combobox", { name: "Machine" }), { target: { value: H2 } });
+    expect(screen.getByRole("status").textContent).toContain("Its MCP installation and enablement state are unknown");
+    expect(screen.queryByText("No MCP servers installed on this machine.")).toBeNull();
+    expect(screen.queryByText("needs_display")).toBeNull();
   });
 
   it("can't-enable cell is disabled and shows its reason as title", async () => {
     transport.getInventory.mockResolvedValue(AGGREGATE);
     wrap(<InventoryPage />);
     const cell = await waitFor(() =>
-      screen.getByTestId<HTMLButtonElement>(`cell-needs_display-${H1}`),
+      screen.getByRole<HTMLButtonElement>("switch", { name: "requires a display" }),
     );
     expect(cell.disabled).toBe(true);
     expect(cell.getAttribute("aria-label")).toMatch(/requires a display/);
@@ -200,7 +194,7 @@ describe("InventoryPage toggle (putInventory)", () => {
     const putSpy = transport.putInventory.mockResolvedValue(OK_RESULT);
     wrap(<InventoryPage />);
     const cell = await waitFor(() =>
-      screen.getByTestId<HTMLButtonElement>(`cell-needs_display-${H1}`),
+      screen.getByRole<HTMLButtonElement>("switch", { name: "Toggle needs_display on h1" }),
     );
     // Enabled mcp item is clickable even with can_enable:false.
     expect(cell.disabled).toBe(false);
@@ -252,4 +246,36 @@ describe("InventoryPage install entries", () => {
     expect(screen.getByRole("button", { name: "Find and install a plugin" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Find and install an MCP server" })).toBeTruthy();
   });
+});
+
+
+it("writes only the selected machine and surfaces the host rejection", async () => {
+  transport.getInventory.mockResolvedValue({ ...AGGREGATE, mcp_servers: [{
+    ...AGGREGATE.mcp_servers[0],
+    hosts: {
+      [H1]: { present: true, enabled: true, can_enable: true, reason: null },
+      [H2]: { present: true, enabled: false, can_enable: true, reason: null },
+    },
+  }] });
+  transport.putInventory.mockResolvedValue({ applied: false, plugin_results: {}, mcp_results: { needs_display: { ok: false, reason: "credentials unavailable" } } });
+  wrap(<InventoryPage />);
+  fireEvent.change(await screen.findByRole("combobox", { name: "Machine" }), { target: { value: H2 } });
+  fireEvent.click(screen.getByRole("switch", { name: "Toggle needs_display on h2" }));
+  await waitFor(() => expect(transport.putInventory.mock.calls).toEqual([[{ mcp_servers: { needs_display: true } }, H2]]));
+  expect(await screen.findByText(/Change not applied: credentials unavailable/)).toBeTruthy();
+  expect(screen.getByRole("switch", { name: "Toggle needs_display on h2" }).getAttribute("aria-checked")).toBe("false");
+});
+
+it("keeps the selected machine when a write fails and can switch machines afterwards", async () => {
+  transport.getInventory.mockResolvedValue({ ...AGGREGATE, mcp_servers: [{
+    ...AGGREGATE.mcp_servers[0],
+    hosts: { [H1]: { present: true, enabled: true, can_enable: true, reason: null } },
+  }] });
+  transport.putInventory.mockRejectedValue(new Error("host unavailable"));
+  wrap(<InventoryPage />);
+  fireEvent.click(await screen.findByRole("switch", { name: "Toggle needs_display on h1" }));
+  expect(await screen.findByText(/Save failed: host unavailable/)).toBeTruthy();
+  fireEvent.change(screen.getByRole("combobox", { name: "Machine" }), { target: { value: H2 } });
+  expect(screen.queryByText(/Save failed: host unavailable/)).toBeNull();
+  expect(screen.getByText("No MCP servers installed on this machine.")).toBeTruthy();
 });

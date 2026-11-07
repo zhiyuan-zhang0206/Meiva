@@ -36,17 +36,27 @@ export function PluginsInventory() {
     <p className="text-sm text-muted-foreground">{t("clusterPluginsHelp")}</p>
     {plugins.isLoading && <p className="text-sm text-muted-foreground">{t("loadingPlugins")}</p>}
     {plugins.error && <InlineError onRetry={() => void plugins.refetch()}>{t("couldntLoad")}</InlineError>}
-    {plugins.data && <ul className="divide-y divide-border rounded-lg border border-border">
-      {plugins.data.plugins.map((plugin) => <li key={plugin.name} className={cn(FLEX, "items-center justify-between gap-4 p-4")}>
-        <div className={cn(MIN_W_0, "space-y-1")}>
-          <p className="text-sm font-medium break-words">{plugin.name}</p>
-          {plugin.description && <p className="text-xs text-muted-foreground">{plugin.description}</p>}
-        </div>
-        <Switch tone="neutral" checked={plugin.enabled} disabled={save.isPending}
-          aria-label={t("togglePlugin", { name: plugin.name })}
-          onCheckedChange={(enabled) => save.mutate({ name: plugin.name, enabled })} />
-      </li>)}
-    </ul>}
+    {plugins.data && (["llm", "decision", "builtin", "extension"] as const).map((group) => {
+      const heading = { llm: "llmProviders", decision: "decisionProviders", builtin: "builtinPlugins", extension: "extensionPlugins" } as const;
+      const entries = plugins.data.plugins.filter((plugin) => group === "llm" || group === "decision"
+        ? plugin.category === "provider" && plugin.provider_kinds?.includes(group)
+        : plugin.category === group);
+      if (!entries.length) return null;
+      return <section key={group} aria-label={t(heading[group])} className="space-y-2">
+        <h3 className="text-sm font-medium">{t(heading[group])}</h3>
+        <ul className="divide-y divide-border rounded-lg border border-border">
+          {entries.map((plugin) => <li key={plugin.name} className={cn(FLEX, "items-center justify-between gap-4 p-4")}>
+            <div className={cn(MIN_W_0, "space-y-1")}>
+              <p className="text-sm font-medium break-words">{group === "llm" ? "LLM · " : group === "decision" ? "Decision · " : ""}{plugin.display_name ?? plugin.name}</p>
+              {plugin.description && <p className="text-xs text-muted-foreground">{plugin.description}</p>}
+            </div>
+            {plugin.user_toggleable && <Switch tone="neutral" checked={plugin.enabled} disabled={save.isPending}
+              aria-label={t("togglePlugin", { name: plugin.name })}
+              onCheckedChange={(enabled) => save.mutate({ name: plugin.name, enabled })} />}
+          </li>)}
+        </ul>
+      </section>;
+    })}
     {save.error && <InlineError>{t("saveFailed", { error: errMsg(save.error) })}</InlineError>}
     {saved && <p role="status" className="rounded-lg border border-border p-3 text-sm text-muted-foreground">{t("pluginRestart")}</p>}
   </div>;

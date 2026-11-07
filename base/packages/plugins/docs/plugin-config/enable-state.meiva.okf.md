@@ -55,3 +55,9 @@ UI saves once for the cluster without runner RPC, and announces restart activati
 Agent-host boot and converge refresh the cache from the registry; a failed refresh
 retains it and warns. See
 [Cluster plugin enablement](../../../../../docs/decisions/extensions/plugins/2026-11-07-cluster-plugin-enablement.md).
+
+Cache publication takes the per-home `plugin_enable_policy.lock` before reading
+registry policy and atomically replacing the image. Startup, converge and API
+refresh share this owner, so an earlier refresh cannot publish an old snapshot
+after a later writer. API policy transactions commit before cache publication;
+a publication failure retains the committed policy and reports refresh failure.

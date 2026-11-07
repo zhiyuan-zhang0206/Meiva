@@ -9,5 +9,8 @@
     "providers": [
       "deepseek-"
     ]
-  }
+  },
+  "displayName": "DeepSeek",
+  "userToggleable": false,
+  "category": "provider"
 }

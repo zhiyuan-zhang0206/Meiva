@@ -9,5 +9,8 @@
     "providers": [
       "mimo-"
     ]
-  }
+  },
+  "displayName": "Xiaomi",
+  "userToggleable": false,
+  "category": "provider"
 }

@@ -66,6 +66,25 @@ borrow/not-borrow section.
 - The three runtimes share one vocabulary and one registry row; tooling sees
   one flat surface.
 
+## Settings presentation metadata
+
+The optional top-level `displayName` is a non-empty display label; it never changes
+package identity, directory names or persisted plugin policy keys. The optional
+`userToggleable` is a strict boolean, defaulting to `true` for existing packages.
+It controls whether Settings may offer or accept a plugin enablement change.
+`false` does not change runtime loading or reset existing enablement policy.
+The Settings mutation endpoint refuses such changes even when crafted manually.
+
+The optional `category` is the closed vocabulary `provider`, `builtin` or
+`extension` (default). It controls presentation grouping only; `builtin` does not
+grant trust or change execution policy. A `provider` category requires a provider
+contribution. Built-in functional plugins explicitly declare `builtin`.
+
+Provider kind comes from explicit `contributions.providers` (LLM) and
+`contributions.decisionProviders` (Decision model) declarations; one package may
+contribute both; Settings shows that one plugin in both provider groups. Provider manifests declare `userToggleable: false` and a human
+label. Settings lists them in read-only provider groups, alongside Built-in plugins and Extensions on the same Plugins page. Existing `lm_*` package IDs remain stable for compatibility.
+
 ## The manifest — `meiva-plugin.json`
 
 Placed at the package root. The name is **`meiva-plugin.json`** (user ruling

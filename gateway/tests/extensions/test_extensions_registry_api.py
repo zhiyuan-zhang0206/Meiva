@@ -63,7 +63,9 @@ def test_replay_is_idempotent(
     second = client.put("/api/extensions/skill/demo", json=_body(root))
     assert first.status_code == second.status_code == 200
     assert first.json() == second.json()
-    assert db_conn.execute("SELECT count(*) FROM extensions").fetchone() == (1,)
+    assert db_conn.execute(
+        "SELECT count(*) FROM extensions WHERE kind = %s AND name = %s", ("skill", "demo")
+    ).fetchone() == (1,)
     assert db_conn.execute("SELECT count(*) FROM extension_blobs").fetchone() == (1,)
 
 

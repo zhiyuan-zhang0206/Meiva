@@ -9,5 +9,8 @@
     "providers": [
       "qwen3.8-"
     ]
-  }
+  },
+  "displayName": "Alibaba",
+  "userToggleable": false,
+  "category": "provider"
 }
