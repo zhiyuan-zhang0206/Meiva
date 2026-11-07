@@ -96,6 +96,27 @@ def test_the_zshenv_block_is_appended_and_idempotent() -> None:
 
 
 # meiva:note
+# The shape is the contract: `export PATH="$PATH:..."` appends, so the block cannot reorder
+# anything already on PATH. A non-login shell reaches a formula the host installed without
+# Homebrew's `python3` taking the name from `/usr/bin` — prepending was measured on 2026-11-07
+# (company-mini: python3 3.9.6 -> 3.14.7, with pip3, node and openssl following, #6433).
+def test_homebrew_extends_the_end_of_the_path_in_the_zshenv_block() -> None:
+    text = with_zshenv_block("", Path("/home/dev/.local/bin"))
+
+    assert 'export PATH="$PATH:/opt/homebrew/bin:/opt/homebrew/sbin"' in text
+    assert 'export PATH="/opt/homebrew/bin' not in text
+    assert text.index('[ -d "/opt/homebrew/bin" ]') > text.index(
+        'export PATH="/home/dev/.local/bin'
+    )
+
+
+def test_the_rc_block_carries_the_same_homebrew_lines(tmp_path: Path) -> None:
+    text = with_path_block("", tmp_path / ".local" / "bin")
+
+    assert 'export PATH="$PATH:/opt/homebrew/bin:/opt/homebrew/sbin"' in text
+
+
+# meiva:note
 # --- the host-wiring steps against a real user home ---------------------------------
 
 
@@ -156,11 +177,15 @@ def test_ensure_cli_tools_step_runs_when_script_exists(ctx: ConvergeCtx, tmp_pat
     script.write_text("#!/bin/bash\nexit 0\n")
 
     fc = FakeCommands()
-    fc.on(("bash", str(script)), Reply(returncode=0))
+    fc.on(("bash", str(script), "--check"), Reply(returncode=0))
     host_ctx = replace(ctx, repo=tmp_path, host=fake_host(fc))
 
     _steps.ensure_cli_tools_step(host_ctx)
     assert len(fc.calls) == 1
+    # meiva:note
+    # `--check` is the promise that a start never runs a package manager: it reports the gap
+    # and the wave goes on (#6433).
+    assert fc.calls[0].argv == ("bash", str(script), "--check")
     call_env = fc.calls[0].kwargs["env"]
     assert "/opt/homebrew/bin" in call_env["PATH"]
 
@@ -172,11 +197,12 @@ def test_ensure_cli_tools_step_raises_on_script_failure(ctx: ConvergeCtx, tmp_pa
     script.parent.mkdir(parents=True)
     script.write_text("#!/bin/bash\nexit 1\n")
 
+    missing = "install-cli-tools.sh: missing CLI and GNU tools: htop gawk"
     fc = FakeCommands()
-    fc.on(("bash", str(script)), Reply(returncode=1, stderr="brew error"))
+    fc.on(("bash", str(script), "--check"), Reply(returncode=1, stderr=missing))
     host_ctx = replace(ctx, repo=tmp_path, host=fake_host(fc))
 
-    with pytest.raises(RuntimeError, match="install-cli-tools failed with code 1: brew error"):
+    with pytest.raises(RuntimeError, match="missing CLI and GNU tools: htop gawk"):
         _steps.ensure_cli_tools_step(host_ctx)
 
 

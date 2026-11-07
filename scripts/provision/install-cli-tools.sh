@@ -12,6 +12,9 @@
 # Does NOT clean /var/lib/apt/lists/* — the caller decides (the verification
 # Dockerfile removes them after the whole system layer).
 #
+# `--check` reports what the host is missing and changes nothing; converge calls it on every
+# start so a wave never runs a package manager.
+#
 # Without sudo: a host that already carries every tool skips apt entirely
 # (the gh keyring + apt-sources writes below need root), and an apt failure
 # degrades to a warning instead of a hard stop — the missing tools can be
@@ -22,12 +25,36 @@ set -euo pipefail
 
 OS="$(prov_os)"
 
+usage() {
+    echo "usage: $(basename "$0") [--check]" >&2
+    exit 2
+}
+
+CHECK_ONLY=0
+[ $# -le 1 ] || usage
+case "${1:-}" in
+    "") ;;
+    --check) CHECK_ONLY=1 ;;
+    *) usage ;;
+esac
+
+# The report a host gets when a tool is missing: what is missing, and the command that installs
+# it outside a start/update wave.
+report_missing() {
+    echo "install-cli-tools.sh: missing CLI and GNU tools: $*" >&2
+    echo "  install them outside a start/update wave: bash $0" >&2
+    exit 1
+}
+
 if [ "$OS" = "macos" ]; then
     missing=()
     for bin in git rg jq fd bat tree fzf htop gh; do
         command -v "$bin" >/dev/null 2>&1 || missing+=("$bin")
     done
-    command -v gtimeout >/dev/null 2>&1 || [ -x /opt/homebrew/opt/coreutils/libexec/gnubin/timeout ] || [ -x /usr/local/opt/coreutils/libexec/gnubin/timeout ] || missing+=(coreutils)
+    # coreutils is deliberately absent from this list: no code in the repository calls
+    # gtimeout, gls or any other GNU name, and `brew install coreutils` is refused while
+    # ca-certificates is pinned — a report that can never be satisfied is worse than a
+    # convenience package a host may add on its own (2026-11-07, #6433).
     command -v gsed >/dev/null 2>&1 || [ -x /opt/homebrew/opt/gnu-sed/libexec/gnubin/sed ] || [ -x /usr/local/opt/gnu-sed/libexec/gnubin/sed ] || missing+=(gnu-sed)
     command -v ggrep >/dev/null 2>&1 || [ -x /opt/homebrew/opt/grep/libexec/gnubin/grep ] || [ -x /usr/local/opt/grep/libexec/gnubin/grep ] || missing+=(grep)
     command -v gfind >/dev/null 2>&1 || [ -x /opt/homebrew/opt/findutils/libexec/gnubin/find ] || [ -x /usr/local/opt/findutils/libexec/gnubin/find ] || missing+=(findutils)
@@ -36,8 +63,11 @@ if [ "$OS" = "macos" ]; then
     [ -x /opt/homebrew/bin/bash ] || [ -x /usr/local/bin/bash ] || missing+=(bash)
 
     if [ ${#missing[@]} -eq 0 ]; then
-        echo "install-cli-tools.sh: all CLI and GNU tools already present — skipping brew"
+        echo "install-cli-tools.sh: all CLI and GNU tools already present"
         exit 0
+    fi
+    if [ "$CHECK_ONLY" = 1 ]; then
+        report_missing "${missing[@]}"
     fi
 
     echo "install-cli-tools.sh: installing missing tools via Homebrew: ${missing[*]}"
@@ -58,6 +88,9 @@ done
 if [ ${#missing[@]} -eq 0 ]; then
     echo "install-cli-tools.sh: all CLI tools already present — skipping apt (works without sudo)"
     exit 0
+fi
+if [ "$CHECK_ONLY" = 1 ]; then
+    report_missing "${missing[@]}"
 fi
 
 if ! command -v apt-get >/dev/null 2>&1; then

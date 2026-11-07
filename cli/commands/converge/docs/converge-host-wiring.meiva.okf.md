@@ -73,6 +73,10 @@ Remote-managed data planes skip local server and extension preparation entirely.
   `sudo -n` and then an exact manual command without blocking `meiva start`.
   See
   [[base/docs/base.meiva.okf.md|Base Library]].
+- `steps.ensure_cli_tools_step` runs `scripts/provision/install-cli-tools.sh --check`: it
+  reports a missing CLI or GNU tool and installs nothing. Installing is an operator action
+  outside a start or update wave, where a package manager can build a formula from source for
+  longer than the step's budget without the wave noticing (#6433).
 - `steps.ensure_local_git_hooks` warns when any conventional local
   checkout's Git hook installation is missing or drifted (via
   `base/deploy/git/check_git_hooks.py --scan-machine`, run through `ctx.host` from
@@ -80,7 +84,10 @@ Remote-managed data planes skip local server and extension preparation entirely.
   decides the argv and which output lines are warnings. See the runbook's Git hooks
   section.
 - The rest of the decisions live in `strict` pure modules beside their steps and the shells
-  only execute them: `shell_rc.py` (the `~/.local/bin` PATH block of the user's rc file),
+  only execute them: `shell_rc.py` (the Homebrew and `~/.local/bin` PATH blocks of the
+  user's rc files, `~/.zshenv` included so a non-login `ssh` command reaches them; the
+  Homebrew lines append — they make a formula reachable and must not take an interpreter's
+  name from `/usr/bin`),
   `browser_plan.py` and `helper_plan.py` (what the browser and permissions-helper steps do
   for the host's incapability reason), `split_host_checks.py` (the transfer and GitHub PR
   checks apply only to a runner split from its gateway), `walg_plan.py` (the WAL-G steps, in
