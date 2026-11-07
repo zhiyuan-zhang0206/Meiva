@@ -81,6 +81,15 @@ async def test_backward_time_still_clamps_execution_duration() -> None:
     assert items["3.0"].exec_ms == 0
 
 
+async def test_tool_use_immediate_code_elapsed_ms_is_zero() -> None:
+    timers = ManualTimers(wall_start=START)
+    clock = Clock(ClockConfig("UTC", "UTC", False), timers=timers, now=timers.now)
+    projector, items = _projector(clock)
+    await projector.on_event(_tool())
+    assert items["2.0"].kind == "agent_code"
+    assert items["2.0"].code_elapsed_ms == 0
+
+
 async def test_parallel_results_keep_their_slots_and_unknown_results_do_not_add_items() -> None:
     timers = ManualTimers(wall_start=START)
     clock = Clock(ClockConfig("UTC", "UTC", False), timers=timers, now=timers.now)

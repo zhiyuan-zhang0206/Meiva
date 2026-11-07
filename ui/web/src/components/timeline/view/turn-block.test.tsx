@@ -183,6 +183,27 @@ describe("TurnBlock component", () => {
     }
   });
 
+  it("ticks smoothly for an external harness active turn with an in-progress activity item", () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(100_000);
+      const harnessLive: TurnSummary = {
+        ...sampleSummary,
+        workedMs: 3_000,
+        lastLiveKind: "output",
+        lastLiveStartedAt: 99_000,
+      };
+      render(
+        <TurnBlock id="turn-harness" memberIds={["1.0"]} summary={harnessLive} expanded={false} turnActive onToggle={vi.fn()} />,
+      );
+      expect(screen.getByTestId("turn-toggle").textContent).toContain("Working for 4s");
+      act(() => { vi.advanceTimersByTime(2_000); });
+      expect(screen.getByTestId("turn-toggle").textContent).toContain("Working for 6s");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("calls onToggle with its id and current state", () => {
     const onToggle = vi.fn();
     render(

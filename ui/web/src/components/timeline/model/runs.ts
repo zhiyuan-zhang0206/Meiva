@@ -12,7 +12,7 @@ import { orderSdkCalls, type SdkCall } from "@/lib/format/item-summary";
 import enMessages from "../../../../messages/en";
 
 import { classifyMarker, isSilentMarker } from "./marker-classify";
-import { isLiveCode, isLiveExecution, isLiveReasoning } from "./reasoning-clock";
+import { isLiveCode, isLiveExecution, isLiveReasoning, itemLiveStartedAt } from "./reasoning-clock";
 
 export type TurnTranslator = (
   key: string,
@@ -203,21 +203,39 @@ export function summarizeTurn(items: readonly BackendTimelineItem[]): TurnSummar
     const it = items[i];
     if (isLiveReasoning(it)) {
       lastLiveKind = "reasoning";
-      lastLiveStartedAt = it.reasoningStartedAt ?? 0;
+      lastLiveStartedAt = itemLiveStartedAt(it) ?? it.reasoningStartedAt ?? 0;
       break;
     }
     if (isLiveCode(it)) {
       lastLiveKind = "code";
-      lastLiveStartedAt = it.codeStartedAt ?? 0;
+      lastLiveStartedAt = itemLiveStartedAt(it) ?? it.codeStartedAt ?? 0;
       break;
     }
     if (isLiveExecution(it)) {
       lastLiveKind = "output";
-      lastLiveStartedAt = it.execStartedAt ?? 0;
+      lastLiveStartedAt = itemLiveStartedAt(it) ?? it.execStartedAt ?? 0;
       break;
     }
   }
-  return { total: items.length, thinking, code, output, turns: Math.max(thinking, code, output), systemPrompts, compactSummaries, memories, agentMessages, systemNotes, thinkingMs, codeMs, execMs, sdkCalls, workedMs, lastLiveKind, lastLiveStartedAt };
+  return {
+    total: items.length,
+    thinking,
+    code,
+    output,
+    turns: Math.max(thinking, code, output),
+    systemPrompts,
+    compactSummaries,
+    memories,
+    agentMessages,
+    systemNotes,
+    thinkingMs,
+    codeMs,
+    execMs,
+    sdkCalls,
+    workedMs,
+    lastLiveKind,
+    lastLiveStartedAt,
+  };
 }
 
 export function turnSummaryEqual(a: TurnSummary, b: TurnSummary): boolean {

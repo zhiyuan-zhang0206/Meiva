@@ -19,10 +19,29 @@ import { createContext, useContext, useEffect, useState } from "react";
 import type { BackendTimelineItem } from "@/lib/contracts/types";
 import { useWallNow } from "@/lib/transport/transport-context";
 
+export function itemLiveStartedAt(item: BackendTimelineItem): number | undefined {
+  if (item.kind === "agent_reasoning") {
+    if (item.reasoningStartedAt != null) return item.reasoningStartedAt;
+  } else if (item.kind === "agent_code") {
+    if (item.codeStartedAt != null) return item.codeStartedAt;
+  } else if (item.kind === "code_output") {
+    if (item.execStartedAt != null) return item.execStartedAt;
+  } else {
+    return undefined;
+  }
+  if (item.activity_revision != null || item.activity_pending != null) {
+    if (item.created_at != null) {
+      const parsed = Date.parse(item.created_at);
+      if (!Number.isNaN(parsed)) return parsed;
+    }
+  }
+  return undefined;
+}
+
 export function isLiveReasoning(item: BackendTimelineItem): boolean {
   return (
     item.kind === "agent_reasoning" &&
-    item.reasoningStartedAt != null &&
+    itemLiveStartedAt(item) != null &&
     item.reasoning_ms == null &&
     // An interrupted stream never gets its reasoning_ms commit — without
     // this the clock would tick forever on the dead item.
@@ -40,7 +59,7 @@ export function isLiveReasoning(item: BackendTimelineItem): boolean {
 export function isLiveCode(item: BackendTimelineItem): boolean {
   return (
     item.kind === "agent_code" &&
-    item.codeStartedAt != null &&
+    itemLiveStartedAt(item) != null &&
     item.code_elapsed_ms == null &&
     !item.interrupted
   );
@@ -49,7 +68,7 @@ export function isLiveCode(item: BackendTimelineItem): boolean {
 export function isLiveExecution(item: BackendTimelineItem): boolean {
   return (
     item.kind === "code_output" &&
-    item.execStartedAt != null &&
+    itemLiveStartedAt(item) != null &&
     item.exec_ms == null &&
     // An interrupted stream never gets its exec_ms commit — without
     // this the clock would tick forever on the dead item.

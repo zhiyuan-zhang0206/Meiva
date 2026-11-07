@@ -182,7 +182,7 @@ class HarnessTurnProjector:
             format_tool_use(event.name, event.tool_input),
             now,
             source=event.name if event.name != "execute_code" else None,
-            code_elapsed_ms=code_ms or None,
+            code_elapsed_ms=code_ms,
             sdk_calls=[SdkCall(method=event.name, count=1)],
         )
         self._tools[event.tool_use_id] = (self._new_item("code_output", "Tool running", now), now)
