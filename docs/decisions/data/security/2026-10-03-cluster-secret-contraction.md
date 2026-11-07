@@ -12,7 +12,9 @@ observability-station probe (it derived the OTLP telemetry token from it).
 
 ## Decision
 
-Outside the gateway, the CLI and the root, no component holds the secret.
+Outside the gateway, the CLI and the root, no **managed service** holds the secret. A server an
+operator starts by hand from a shell that exported it inherits it — a local UI dev server is the
+case measured on 2026-11-08 — and that is a property of the launching shell, not of the service.
 
 - **im_bridge** presents its delivered machine API token (`gateway_auth_headers()`) and never
   logs in; `/send` accepts the active write generation's two machine tokens
@@ -43,9 +45,11 @@ Outside the gateway, the CLI and the root, no component holds the secret.
 
 ## Consequences
 
-- A write-generation rotation reaches im_bridge through its restart (it reads the token from its
-  environment); a rotated human secret reaches the station probe at the next start, which
-  republishes the telemetry token.
+- A rotated human secret reaches the station probe at the next start, which republishes the
+  telemetry token. There is no write-generation rotation to survive: the
+  [rotation retirement](../../runtime/updates/execution/converge/2026-10-03-retire-write-generation-rotation.md)
+  left one generation per home, born at its first start, so im_bridge's token changes only when the
+  home is reborn.
 - A cluster whose gateway process holds no delivered token while its secret is set would present
   the secret to `/send` and be refused; the root delivers the gateway-class token to the gateway
   services, so this is a launch defect to fix, not a state to accommodate.

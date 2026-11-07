@@ -109,28 +109,55 @@ def _guard_gateway_write(target: str, process: ConfigProcess) -> None:
         )
 
 
-def _auth_headers(process: ConfigProcess) -> dict[str, str]:
-    """This unit's bearer, read without constructing Settings.
-
-    A delivered machine API token first (the boot pass gives an admitted
-    operator process on the gateway home its token); else the gateway's human
-    secret (environment, then `.env`); else, on a remote unit, its installed
-    capability's API token, only while this process runs the admitted runtime.
-    """
+# meiva:note
+# This unit's bearer, decided by `gateway_bearer` like every other caller's. The parts are assembled
+# here because this command runs before Settings exist, but the decision is not this file's: an
+# agent-profile process with no token used to authenticate as the operator from the CLI while the SDK
+# raised for the same operation. `remote_plane` is False because that is a gateway-side fact this
+# command cannot see; on that plane it still presents the secret, as it did before.
+# meiva:link docs/decisions/data/security/2026-10-03-cluster-secret-contraction.md
+def auth_headers(process: ConfigProcess) -> dict[str, str]:
+    from base.cluster.machine import (
+        GatewayAccess,
+        GatewayApiTokenMissing,
+        gateway_bearer,
+    )
     from base.host.env import dotenv_file
-    from base.host.net.auth import bearer_header, delivered_token
+    from base.host.env.bootstrap import launch_facts
+    from base.host.net.auth import bearer_header
 
     home = process.home
-    bearer = delivered_token(process.environ) or process.environ.get("MEIVA_CLUSTER_SECRET")
-    if bearer is None:
-        bearer = dotenv_file.read_env_aliases(dotenv_file.env_file_path(home)).get(
-            "MEIVA_CLUSTER_SECRET", ""
-        )
-    if not bearer and (home / "db-authority" / "unit.json").exists():
+    env = dict(process.environ)
+    env_file = dotenv_file.read_env_aliases(dotenv_file.env_file_path(home))
+    facts = launch_facts(env, env_file=env_file)
+    secret = env.get("MEIVA_CLUSTER_SECRET") or env_file.get("MEIVA_CLUSTER_SECRET") or ""
+    token = facts.machine_token
+    if not token and (home / "db-authority" / "unit.json").exists():
         from base.host.db_authority.unit import consume_unit
 
-        bearer = consume_unit(home.resolve()).api.token
-    return bearer_header(bearer) if bearer else {}
+        token = consume_unit(home.resolve()).api.token
+    try:
+        bearer = gateway_bearer(
+            GatewayAccess(
+                gateway_url="",
+                cluster_secret=secret,
+                remote_plane=False,
+                machine_token=token,
+                launcher_profile=facts.launcher_profile,
+                gateway_home=facts.gateway_home,
+            )
+        )
+    except GatewayApiTokenMissing as exc:
+        # meiva:note
+        # A launched agent- or runner-profile process holds a token whenever the cluster API is
+        # authenticated, so a missing one is a launch defect and both this command and the SDK must
+        # say so -- they used to disagree, and the CLI was the one that worked by presenting the
+        # operator's secret. A plain shell on a home that has no credential yet (`meiva config`
+        # before `meiva init`) is a different state: it sends no header and lets the gateway answer.
+        if facts.launcher_profile in {"agent", "runner"}:
+            raise SystemExit(f"meiva config: {exc}") from exc
+        return {}
+    return bearer_header(bearer)
 
 
 def get_config(machine: str | None, process: ConfigProcess) -> ConfigView:
@@ -141,7 +168,7 @@ def get_config(machine: str | None, process: ConfigProcess) -> ConfigView:
         f"{gateway_base(process)}/api/config",
         params=params,
         timeout=_HTTP_TIMEOUT_S,
-        headers=_auth_headers(process),
+        headers=auth_headers(process),
     )
     resp.raise_for_status()
     return ConfigView.model_validate(resp.json())
@@ -157,7 +184,7 @@ def get_config_audit(machine: str | None, last: int, process: ConfigProcess) -> 
         f"{gateway_base(process)}/api/config/audit",
         params=params,
         timeout=_HTTP_TIMEOUT_S,
-        headers=_auth_headers(process),
+        headers=auth_headers(process),
     )
     resp.raise_for_status()
     return ConfigAuditView.model_validate_json(resp.content)
@@ -175,7 +202,7 @@ def put_config(
         json=body,
         params=params,
         timeout=_HTTP_TIMEOUT_S,
-        headers=_auth_headers(process),
+        headers=auth_headers(process),
     )
     if resp.status_code == 400:
         # The gateway rejects unknown / read-only fields with a 400 + detail.

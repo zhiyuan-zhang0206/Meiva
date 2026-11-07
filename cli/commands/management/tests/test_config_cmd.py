@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import secrets
 import subprocess
 import sys
 from collections.abc import Generator
@@ -30,6 +31,46 @@ _CHILD = Path(__file__).with_name("child_config_cmd.py")
 
 def _process(home: Path) -> cfg.ConfigProcess:
     return cfg.ConfigProcess(environ=os.environ, home=home)
+
+
+# meiva:note
+# The divergence this convergence removes, as a control: one process (agent profile, no machine
+# token, the home's human secret in reach) must get the same verdict from the CLI helper and from
+# the SDK's own decision. Before this change the CLI presented the operator's secret and the SDK
+# raised `GatewayApiTokenMissing` for the same operation.
+def test_the_cli_and_the_sdk_reach_the_same_verdict_about_one_process(tmp_path: Path) -> None:
+    from base.cluster.machine import GatewayAccess, GatewayApiTokenMissing, gateway_bearer
+
+    fixture_secret = secrets.token_urlsafe(12)
+    (tmp_path / ".env").write_text(f"MEIVA_CLUSTER_SECRET={fixture_secret}\n")
+    process = cfg.ConfigProcess(
+        environ={"MEIVA_PROCESS_PROFILE": "agent", "MEIVA_HOME": str(tmp_path)}, home=tmp_path
+    )
+
+    with pytest.raises(SystemExit, match="no machine API token"):
+        cfg.auth_headers(process)
+    # meiva:note
+    # A plain shell on that home is the operator case and presents the secret. A bare home (`meiva
+    # config` before `meiva init`) has nothing to present, sends no header, and lets the gateway
+    # answer: that state is not a launch defect.
+    plain = cfg.ConfigProcess(environ={"MEIVA_HOME": str(tmp_path)}, home=tmp_path)
+    assert cfg.auth_headers(plain) == {"Authorization": f"Bearer {fixture_secret}"}
+    virgin = tmp_path / "virgin"
+    virgin.mkdir()
+    assert (
+        cfg.auth_headers(cfg.ConfigProcess(environ={"MEIVA_HOME": str(virgin)}, home=virgin)) == {}
+    )
+    with pytest.raises(GatewayApiTokenMissing):
+        gateway_bearer(
+            GatewayAccess(
+                gateway_url="",
+                cluster_secret=fixture_secret,
+                remote_plane=False,
+                machine_token=None,
+                launcher_profile="agent",
+                gateway_home=True,
+            )
+        )
 
 
 def _field(

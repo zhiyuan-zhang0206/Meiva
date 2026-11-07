@@ -261,27 +261,59 @@ def test_a_reply_without_a_total_fails_instead_of_counting_zero() -> None:
         serve_json({"meta": {}, "items": []}) as served,
         pytest.raises(RuntimeError, match="no total"),
     ):
-        count_events(EventsApi(served.url, ""), _NOW - timedelta(days=1), _NOW)
+        count_events(EventsApi(served.url, "test-token"), _NOW - timedelta(days=1), _NOW)
 
-    assert "authorization" not in served.requests[0].headers
+    assert served.requests[0].headers["authorization"] == "Bearer test-token"
 
 
-def test_the_events_api_comes_from_the_environment_then_the_homes_env_file(
-    tmp_path: Path,
-) -> None:
-    (tmp_path / ".env").write_text("OTHER=1\nMEIVA_CLUSTER_SECRET='file-secret'\n")
+# meiva:note
+# The parts, not a private precedence: a delivered machine token wins, else the home's own secret
+# read from `.env` on every run (so a rotation reaches this weekly job without a restart). The third
+# case is the one this convergence exists for -- an agent-profile process holding only the human
+# secret used to authenticate as the operator here while the SDK raised for the same operation, and
+# now both refuse.
+def test_the_events_api_follows_the_shared_bearer_policy(tmp_path: Path) -> None:
+    (tmp_path / ".env").write_text("OTHER=1\nMEIVA_CLUSTER_SECRET='fixture-file-secret'\n")
     delivered = read_events_api(
         {"MEIVA_API_TOKEN": "delivered", "MEIVA_GATEWAY_URL": "http://gw:1"}, tmp_path
     )
     from_file = read_events_api({}, tmp_path)
 
     assert delivered == EventsApi("http://gw:1", "delivered")
-    assert from_file == EventsApi("http://localhost:8000", "file-secret")
-    assert read_events_api({}, tmp_path / "empty-home") == EventsApi("http://localhost:8000", "")
+    assert from_file == EventsApi("http://localhost:8000", "fixture-file-secret")
+
+
+# meiva:note
+# The positive control for the divergence: an agent-profile process with no machine token and the
+# human secret in reach must be refused by the same rule the SDK applies, instead of quietly
+# authenticating as the operator. Before this change the CLI answered and the SDK raised.
+def test_an_agent_profile_without_a_token_is_refused_instead_of_using_the_secret(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / ".env").write_text("MEIVA_CLUSTER_SECRET='fixture-file-secret'\n")
+
+    with pytest.raises(RuntimeError, match="no gateway credential"):
+        read_events_api({"MEIVA_PROCESS_PROFILE": "agent"}, tmp_path)
+
+
+# meiva:note
+# And with nothing at all, no anonymous request is sent: an empty bearer is served as the cluster
+# administrator on a trusted-network deployment and refused everywhere else, which is one job
+# changing identity with a deployment flag.
+def test_a_home_with_no_credential_refuses_instead_of_asking_anonymously(
+    tmp_path: Path,
+) -> None:
+    with pytest.raises(RuntimeError, match="no gateway credential"):
+        read_events_api({}, tmp_path / "empty-home")
+
+
+def test_counting_refuses_an_api_with_no_token() -> None:
+    with pytest.raises(RuntimeError, match="no gateway credential"):
+        count_events(EventsApi("http://unused", ""), _NOW - timedelta(days=1), _NOW)
 
 
 def _weekly_api(url: str) -> EventsApi:
-    return EventsApi(url, "")
+    return EventsApi(url, "test-token")
 
 
 def test_a_busy_main_check_wakes_the_agent_and_arms_the_follow_up(
@@ -337,7 +369,9 @@ def test_the_follow_up_check_counts_four_days_and_disarms(sdk_environment: Meiva
 
 def test_an_unknown_weekly_trigger_is_refused() -> None:
     with pytest.raises(ValueError, match="unknown self-evolution weekly trigger: monday"):
-        handle_weekly_trigger(_NOW, "monday", api=EventsApi("http://unused", ""), prompt=_PROMPT)
+        handle_weekly_trigger(
+            _NOW, "monday", api=EventsApi("http://unused", "test-token"), prompt=_PROMPT
+        )
 
 
 _WEEKLY_AGENT = (
