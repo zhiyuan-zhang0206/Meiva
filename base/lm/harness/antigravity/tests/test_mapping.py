@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 from base.lm.harness.antigravity.mapping import (
     assistant_text,
     map_init,
@@ -105,3 +108,90 @@ def test_text_delta_and_assistant_text() -> None:
     assert assistant_text(update, turn_id="turn-1", text="") is None
     done = {"step_index": 1, "state": "DONE", "step_type": "agent_response", "text_delta": ""}
     assert assistant_text(done, turn_id="turn-1", text="hi") is not None
+
+
+def test_historical_transcript_error_overridden_to_success(tmp_path: Path) -> None:
+    log_dir = (
+        tmp_path
+        / ".gemini"
+        / "antigravity-cli"
+        / "brain"
+        / "conv-recovered"
+        / ".system_generated"
+        / "logs"
+    )
+    log_dir.mkdir(parents=True)
+    transcript = log_dir / "transcript.jsonl"
+    lines = [
+        {"step_index": 517, "type": "USER_INPUT", "status": "DONE"},
+        {
+            "step_index": 518,
+            "type": "ERROR_MESSAGE",
+            "status": "ERROR",
+            "content": "API error (attempt 1): EOF",
+        },
+        {"step_index": 519, "type": "PLANNER_RESPONSE", "status": "DONE", "content": "recovered"},
+    ]
+    transcript.write_text("\n".join(json.dumps(row) for row in lines) + "\n", encoding="utf-8")
+    fields = parse_result(
+        {
+            "conversation_id": "conv-recovered",
+            "status": "ERROR",
+            "response": "ok",
+            "error": "API error (attempt 1): EOF",
+        },
+        home=tmp_path,
+    )
+    assert fields.status == "SUCCESS"
+    assert fields.error is None
+    assert fields.is_error is False
+
+
+def test_unrecovered_terminal_error_in_transcript_preserved(tmp_path: Path) -> None:
+    log_dir = (
+        tmp_path
+        / ".gemini"
+        / "antigravity-cli"
+        / "brain"
+        / "conv-unrecovered"
+        / ".system_generated"
+        / "logs"
+    )
+    log_dir.mkdir(parents=True)
+    transcript = log_dir / "transcript.jsonl"
+    lines = [
+        {"step_index": 517, "type": "USER_INPUT", "status": "DONE"},
+        {"step_index": 518, "type": "PLANNER_RESPONSE", "status": "DONE", "content": "in progress"},
+        {
+            "step_index": 519,
+            "type": "ERROR_MESSAGE",
+            "status": "ERROR",
+            "content": "API error: 500",
+        },
+    ]
+    transcript.write_text("\n".join(json.dumps(row) for row in lines) + "\n", encoding="utf-8")
+    fields = parse_result(
+        {
+            "conversation_id": "conv-unrecovered",
+            "status": "ERROR",
+            "response": "failed",
+            "error": "API error: 500",
+        },
+        home=tmp_path,
+    )
+    assert fields.status == "ERROR"
+    assert fields.error == "API error: 500"
+    assert fields.is_error is True
+
+
+def test_success_status_clears_retry_error() -> None:
+    fields = parse_result(
+        {
+            "status": "SUCCESS",
+            "response": "ok",
+            "error": "API error (attempt 1): EOF",
+        }
+    )
+    assert fields.status == "SUCCESS"
+    assert fields.error is None
+    assert fields.is_error is False

@@ -290,6 +290,7 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
     def _handle_result(self, payload: object, ticket: TurnTicket) -> None:
         fields = parse_result(payload if is_object_dict(payload) else {})
         text = "".join(ticket.parts).strip() or self._flush_step_text() or fields.text.strip()
+        errors = (fields.error,) if fields.error else ()
         outcome = TurnOutcome(
             turn_id=ticket.turn_id,
             text=text,
@@ -300,6 +301,7 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
             usage=fields.usage,
             cost_usd=None,
             permission_denials=fields.denied_actions,
+            errors=errors,
         )
         self._totals = self._totals.with_turn(fields.usage, None)
         if fields.session_id:
@@ -322,6 +324,7 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
                 cumulative_cost_usd=self._totals.cost_usd,
                 permission_denials=fields.denied_actions,
                 steps=steps,
+                errors=errors,
             )
         )
         self._complete(ticket, outcome)

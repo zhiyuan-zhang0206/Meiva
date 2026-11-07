@@ -64,3 +64,4 @@ class TurnOutcome:
     num_turns: int = 1
     steps: tuple[Usage, ...] = ()
     per_turn_usage: bool = True
+    errors: tuple[str, ...] = ()

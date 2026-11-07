@@ -8,7 +8,10 @@ from typing import Any
 import psycopg
 import pytest
 
+from agent.graph.claim.node import claim_will_idle
 from agent.graph.llm_errors import FatalLLMStreamError
+from agent.state import AgentState
+from base.api_contracts.agent_contract import Harness
 from services.agent_runner.agent_host.tests.runtime.host_support import (
     AgentRows,
     Build,
@@ -91,6 +94,29 @@ class TestSettlementReconciles:
         assert stored.status(1) == "idling"
         assert stored.corpse_marked(1)
         assert graph.updates, "the abort was written into the checkpoint first"
+        assert graph.updates[-1]["harness_pending_input"] is None
+        assert graph.updates[-1]["halted"] is True
+
+    async def test_fatal_llm_stream_error_settlement_clears_harness_pending_input_and_claim_idles(
+        self, wired: Build, db_conn: psycopg.Connection
+    ) -> None:
+        with _consumption_log(db_conn):
+            _, graph, _ = await self._run_claiming(
+                wired, db_conn, FatalLLMStreamError("the provider closed the stream")
+            )
+        assert graph.updates, "the abort was written into the checkpoint first"
+        settled_update = graph.updates[-1]
+        assert settled_update["harness_pending_input"] is None
+        assert settled_update["halted"] is True
+
+        initial_state = AgentState(
+            harness_pending_input={"prompt": "work", "key": "inbound-1"},
+            halted=False,
+        )
+        assert claim_will_idle(initial_state, harness=Harness.CLAUDE_CODE) is False
+        settled_state = initial_state.model_copy(update=settled_update)
+        assert settled_state.harness_pending_input is None
+        assert claim_will_idle(settled_state, harness=Harness.CLAUDE_CODE) is True
 
     async def test_unclassified_crash_leaves_the_reconcile_to_the_next_admission(
         self, wired: Build, db_conn: psycopg.Connection
