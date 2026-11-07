@@ -142,3 +142,22 @@ def move_to_top_and_read_anchor(page: Page) -> dict[str, Any]:
     page.evaluate(_MOVE_TO_TOP_JS)
     page.wait_for_function(_A_ROW_IN_VIEW_JS, timeout=PIN_TIMEOUT_MS)
     return page.evaluate(_READ_ANCHOR_JS)
+
+
+_SURFACE_JS = """() => ({
+  timeline: Boolean(document.querySelector('[role=log]')),
+  boundary: (document.body.innerText || '').includes('Something went wrong'),
+  surfaceText: (document.body.innerText || '').slice(0, 200),
+})"""
+
+
+# meiva:note
+# The deep-history scroll sample is the load that exposed a non-converging anchor correction:
+# setState looped until React raised its update-depth limit (#185), the section ErrorBoundary
+# replaced the timeline, and the next evaluate failed on a null `.closest` that named no layer.
+# Assert the surface itself, so the same shape fails where the reason is readable.
+# meiva:link ui/web/src/docs/frontend-components/timeline-view/bounded-window.meiva.okf.md
+def assert_timeline_surface(page: Page) -> None:
+    surface = page.evaluate(_SURFACE_JS)
+    assert surface["timeline"], ("the timeline surface is gone", surface)
+    assert not surface["boundary"], ("an error boundary replaced the timeline", surface)
