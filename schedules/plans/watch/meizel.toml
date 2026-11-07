@@ -4,6 +4,7 @@ exports = [
     "release_gate_slot.py",
     "stall_rule.py",
     "main_red.py",
+    "workflow_graph.py",
 ]
 
 [purity]
@@ -12,6 +13,7 @@ exports = [
 "release_gate_slot.py" = "strict"
 "stall_rule.py" = "strict"
 "main_red.py" = "strict"
+"workflow_graph.py" = "strict"
 
 [uses]
 "release_gate_slot.py" = ["main_red.py"]

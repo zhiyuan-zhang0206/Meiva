@@ -19,6 +19,7 @@ import re
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 
+
 __all__ = [
     "FAILURE_INFRA",
     "FAILURE_TEST",
@@ -116,6 +117,11 @@ class Failure:
     test_id: str
     kind: str
     # meiva:note
+    # Which job in the run reported this. The card's fingerprint stays (workflow, test_id) -- a
+    # shard name must not decide identity -- but a decision about the job itself (is it downstream
+    # of another red?) needs the job as a field, not as a prefix of `test_id`.
+    job: str = ""
+    # meiva:note
     # Whether the job that reported this failure ran the population. A workflow's nightly verdict
     # can carry a job that runs part of the tree (the macOS data-plane job inside `ci.yml`), and a
     # red from it belongs to that job: the next green of the workflow proves nothing about a test
@@ -135,6 +141,11 @@ class RunFacts:
     failures: tuple[Failure, ...]
     html_url: str | None = None
     job_names: tuple[str, ...] = ()
+    # meiva:note
+    # Failing jobs that a job they `needs` also failed in this run: they started only because the
+    # workflow's dependency graph let them, so their red is the upstream red seen once more. See
+    # `downstream_failing_jobs` for why the graph, and not timing, is what says so.
+    downstream_jobs: tuple[str, ...] = ()
     covers_full_suite: bool = True
     head_title: str = ""
 
@@ -270,9 +281,9 @@ def parse_failures(
 ) -> tuple[Failure, ...]:
     marker = _infrastructure_marker(log_text)
     if marker is not None:
-        return (Failure(f"{job_name} runner: {marker}", FAILURE_INFRA),)
+        return (Failure(f"{job_name} runner: {marker}", FAILURE_INFRA, job_name),)
     found = tuple(
-        Failure(match.group("test_id").strip(), FAILURE_TEST)
+        Failure(match.group("test_id").strip(), FAILURE_TEST, job_name)
         for match in _FAILED_LINE.finditer(log_text)
     )
     if found:
@@ -281,7 +292,7 @@ def parse_failures(
     # A named check step failing is a red of that check, not of the runner.
     for step in failed_steps:
         if step in check_steps:
-            return (Failure(f"{job_name} / {step}", FAILURE_TEST),)
+            return (Failure(f"{job_name} / {step}", FAILURE_TEST, job_name),)
     # meiva:note
     # Everything below is a red this watch cannot name, and the steps are the whole of what it
     # knows: an empty tuple here is how a failed run once left no trace at all, so the answer is a
@@ -291,11 +302,13 @@ def parse_failures(
     if suite_step_failed and _PYTEST_SUMMARY in log_text:
         return (
             Failure(
-                f"{job_name}: pytest summary without a parsable case ({steps})", FAILURE_UNNAMED
+                f"{job_name}: pytest summary without a parsable case ({steps})",
+                FAILURE_UNNAMED,
+                job_name,
             ),
         )
     if suite_step_failed or failed_steps:
-        return (Failure(f"{job_name}: unnamed failure ({steps})", FAILURE_UNNAMED),)
+        return (Failure(f"{job_name}: unnamed failure ({steps})", FAILURE_UNNAMED, job_name),)
     return ()
 
 
@@ -351,6 +364,16 @@ def apply_run(entries: dict[str, Entry], run: RunFacts) -> Plan:
     for failure in _unique(run.failures):
         if failure.kind == FAILURE_INFRA:
             notes.append(f"infra on {run.head_sha}: {failure.test_id}")
+            continue
+        # meiva:note
+        # One event, one card. An aggregate job that failed only because a job it needs failed is
+        # the same event, and its name still reaches the surviving card through `job_names`, so
+        # nothing is lost by not carding it. Only an unnamed red is folded: a failure the watch
+        # could name a case for is evidence in its own right, whatever ran before it.
+        if failure.kind == FAILURE_UNNAMED and failure.job in run.downstream_jobs:
+            notes.append(
+                f"{failure.job} failed downstream of another red job in {run.head_sha}: folded"
+            )
             continue
         name = fingerprint(run.workflow, failure.test_id)
         entry = plan_entries.get(name)
