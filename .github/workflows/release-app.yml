@@ -179,6 +179,18 @@ jobs:
           if [ -z "$TAURI_SIGNING_PRIVATE_KEY" ]; then
             EXTRA+=(--no-sign)
           fi
+          # An unconfigured secret still exports an empty variable, and an empty
+          # APPLE_CERTIFICATE reads to the bundler as a certificate to import:
+          # `security import` then fails on an empty keychain item and the unsigned
+          # build dies after it has compiled. Clear the group it is not part of, and
+          # the updater key with it — an empty key is the same shape, and `--no-sign`
+          # above is the only thing hiding it.
+          if [ -z "$APPLE_CERTIFICATE" ]; then
+            unset APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_SIGNING_IDENTITY
+          fi
+          if [ -z "$TAURI_SIGNING_PRIVATE_KEY" ]; then
+            unset TAURI_SIGNING_PRIVATE_KEY TAURI_SIGNING_PRIVATE_KEY_PASSWORD
+          fi
           cargo tauri build --target "${{ matrix.target }}" \
             --bundles "${{ matrix.bundles }}" "${EXTRA[@]}"
 
