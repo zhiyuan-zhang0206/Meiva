@@ -73,6 +73,7 @@ describe("TurnBlock component", () => {
     const toggle = screen.getByTestId("turn-toggle");
     expect(toggle.getAttribute("data-expanded")).toBe("false");
     expect(toggle.className).not.toContain("sticky");
+    expect(toggle.className).toContain("w-[calc(100%+0.5rem)]");
     expect(container.querySelector('[data-turn-scroll="true"]')).toBeNull();
   });
 
@@ -96,7 +97,8 @@ describe("TurnBlock component", () => {
     const toggle = screen.getByTestId("turn-toggle");
     expect(toggle.getAttribute("data-expanded")).toBe("true");
     expect(toggle.className).toContain("sticky");
-    expect(toggle.className).toContain("top-[52px]");
+    expect(toggle.className).toContain("top-11");
+    expect(toggle.className).toContain("w-[calc(100%+0.5rem)]");
 
     const viewport = screen.getByTestId("turn-scroll-viewport");
     expect(viewport.className).toContain("max-h-[var(--timeline-turn-max-h,50dvh)]");

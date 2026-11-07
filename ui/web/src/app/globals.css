@@ -477,9 +477,11 @@
   margin-bottom: -1rem;
 }
 
-/* The mounted virtual window and the fixed-height live activity scrollport both
-   need immediate real DOM heights without off-screen containment placeholders. */
+/* The mounted virtual window, expanded work blocks, and the fixed-height live
+   activity scrollport all need immediate real DOM heights without off-screen
+   containment placeholders. */
 .timeline-virtual .timeline-item,
+[data-turn-id] .timeline-item,
 [data-activity-scroll="true"] .timeline-item {
   content-visibility: visible;
 }
