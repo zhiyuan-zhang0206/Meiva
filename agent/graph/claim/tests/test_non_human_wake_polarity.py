@@ -363,7 +363,7 @@ async def test_harness_projector_propagates_non_human_wake() -> None:
         checkpoint=checkpoint, base_idx=2, clock=clock, non_human_wake=True
     )
     await projector.on_event(TextDelta(turn_id="t1", text="Checking worker..."))
-    assert items["2.0"].user_facing is False
+    assert items["h2.0"].user_facing is False
     await projector.on_event(AssistantText(turn_id="t1", text="Checking worker..."))
     await projector.on_event(
         ToolUse(turn_id="t1", tool_use_id="c1", name="Bash", tool_input={"command": "ls"})

@@ -37,7 +37,7 @@ async def test_steer_consumes_only_after_ack_and_commits_timeline(
     assert await claim_inbound_batch(aops_pool, agent, incarnation=None) == []
 
     item = TimelineItem(
-        item_id="0.0", kind="inbound_chat", inbound_id=inbound_id, payload="more context"
+        item_id="h0.0", kind="inbound_chat", inbound_id=inbound_id, payload="more context"
     )
     saved = await finish_harness_steer(ctx, agent, inbound_id, accepted_items=[item])
 
@@ -118,7 +118,7 @@ async def test_external_initial_claim_remains_visible_until_provider_receipt(
     assert [row.id for row in list_pending_inbounds(db_conn, agent)] == [inbound_id]
     assert load_harness_timeline_items(db_conn, agent) == []
     item = TimelineItem(
-        item_id="0.0", kind="inbound_chat", inbound_id=inbound_id, payload="initial prompt"
+        item_id="h0.0", kind="inbound_chat", inbound_id=inbound_id, payload="initial prompt"
     )
     staged = {"timeline_items": [item.model_dump(mode="json")], "claimed_chat_ids": [inbound_id]}
     with pytest.raises(RuntimeError, match="harness input claim changed"):

@@ -65,6 +65,15 @@ def load_harness_message_count(conn: Connection, agent_id: int) -> int:
         return _int_from_row(cur.fetchone())
 
 
+def has_harness_messages(conn: Connection, agent_id: int) -> bool:
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT 1 FROM agent_harness_messages WHERE agent_id = %s LIMIT 1",
+            (agent_id,),
+        )
+        return cur.fetchone() is not None
+
+
 async def aload_harness_message_count(conn: AsyncConnection, agent_id: int) -> int:
     async with conn.cursor() as cur:
         await cur.execute(
@@ -72,6 +81,12 @@ async def aload_harness_message_count(conn: AsyncConnection, agent_id: int) -> i
             (agent_id,),
         )
         return _int_from_row(await cur.fetchone())
+
+
+def _normalize_harness_item(item: TimelineItem) -> TimelineItem:
+    if not item.item_id.startswith("h"):
+        return item.model_copy(update={"item_id": f"h{item.item_id}"})
+    return item
 
 
 def load_harness_timeline_items(
@@ -92,7 +107,7 @@ def load_harness_timeline_items(
         params.append(limit)
 
     rows = query_all(conn, _ItemRow, query, tuple(params))
-    return [TimelineItem.model_validate(row.item) for row in rows]
+    return [_normalize_harness_item(TimelineItem.model_validate(row.item)) for row in rows]
 
 
 async def aload_harness_timeline_items(
@@ -113,7 +128,7 @@ async def aload_harness_timeline_items(
         params.append(limit)
 
     rows = await aquery_all(conn, _ItemRow, query, tuple(params))
-    return [TimelineItem.model_validate(row.item) for row in rows]
+    return [_normalize_harness_item(TimelineItem.model_validate(row.item)) for row in rows]
 
 
 def append_harness_timeline_items(
@@ -138,7 +153,7 @@ def append_harness_timeline_items(
         persisted: list[TimelineItem] = []
         for i, item in enumerate(items):
             seq = start_seq + i
-            item_id = f"{seq}.0"
+            item_id = f"h{seq}.0"
             updated = item.model_copy(update={"item_id": item_id})
             persisted.append(updated)
             item_json = json.dumps(updated.model_dump(mode="json"))
@@ -178,7 +193,7 @@ async def aappend_harness_timeline_items(
         persisted: list[TimelineItem] = []
         for i, item in enumerate(items):
             seq = start_seq + i
-            item_id = f"{seq}.0"
+            item_id = f"h{seq}.0"
             updated = item.model_copy(update={"item_id": item_id})
             persisted.append(updated)
             item_json = json.dumps(updated.model_dump(mode="json"))
@@ -222,6 +237,7 @@ async def aupsert_harness_timeline_item(
     *,
     incarnation: RuntimeIncarnation | None = None,
 ) -> TimelineItem | None:
+    item = _normalize_harness_item(item)
     seq = _activity_seq(item.item_id)
     revision = item.activity_revision
     if revision is None:
@@ -239,7 +255,7 @@ async def aupsert_harness_timeline_item(
             return await _insert_harness_activity(conn, agent_id, seq, harness, item)
         if row.harness != harness:
             return None
-        previous = TimelineItem.model_validate_json(row.item)
+        previous = _normalize_harness_item(TimelineItem.model_validate_json(row.item))
         if not _can_advance_activity(previous, item, revision):
             return item if previous == item else None
         await conn.execute(
@@ -251,6 +267,7 @@ async def aupsert_harness_timeline_item(
 
 def _activity_seq(item_id: str) -> int:
     message, separator, block = item_id.partition(".")
+    message = message.removeprefix("h")
     if not separator or block != "0" or not message.isascii() or not message.isdecimal():
         raise ValueError("harness activity requires a flat timeline item id")
     if len(message) > 10:
@@ -297,6 +314,7 @@ async def _insert_harness_activity(
 ) -> TimelineItem | None:
     if seq != await aget_next_harness_message_seq(conn, agent_id):
         return None
+    item = _normalize_harness_item(item)
     await conn.execute(
         _INSERT_HARNESS_TIMELINE_ITEM,
         (agent_id, seq, harness, item.model_dump_json(), item.inbound_id, item.created_at),

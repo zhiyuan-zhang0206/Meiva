@@ -564,13 +564,13 @@ async def test_intra_turn_events_project_to_live_sse_and_committed_messages(
     assert [
         (event["items"][0]["item_id"], event["items"][0]["payload"]) for event in events[:-1]
     ] == [
-        ("0.0", "Checking "),
-        ("0.0", "Checking files..."),
-        ("1.0", "ls -la"),
-        ("2.0", "Tool running"),
-        ("2.0", "README.md\n"),
-        ("3.0", "all done"),
-        ("3.0", "all done"),
+        ("h0.0", "Checking "),
+        ("h0.0", "Checking files..."),
+        ("h1.0", "ls -la"),
+        ("h2.0", "Tool running"),
+        ("h2.0", "README.md\n"),
+        ("h3.0", "all done"),
+        ("h3.0", "all done"),
     ]
 
 
@@ -597,10 +597,10 @@ async def test_consecutive_assistant_text_blocks_project_to_distinct_ai_messages
     events = await live_events.events()
     items = [event["items"][0] for event in events if event["role"] == "timeline_snapshot"]
     assert [(item["item_id"], item["payload"], item["user_facing"]) for item in items] == [
-        ("0.0", "", False),
-        ("0.0", "First message", False),
-        ("1.0", "", False),
-        ("1.0", "Second message", True),
+        ("h0.0", "", False),
+        ("h0.0", "First message", False),
+        ("h1.0", "", False),
+        ("h1.0", "Second message", True),
     ]
 
 
@@ -683,12 +683,12 @@ async def test_harness_turn_projects_reasoning_and_step_timing(live_events: Live
     assert command.update == {"halted": True, "harness_pending_input": None}
     events = await live_events.events()
     latest = {item["item_id"]: item for event in events for item in event.get("items", [])}
-    assert latest["0.0"]["payload"] == "Planning tool call"
-    assert latest["0.0"]["reasoning_ms"] >= 0
-    assert latest["1.0"]["kind"] == "agent_code"
-    assert latest["2.0"]["exec_ms"] >= 0
-    assert latest["3.0"]["payload"] == "Synthesizing reply"
-    assert latest["4.0"]["payload"] == "Final answer"
+    assert latest["h0.0"]["payload"] == "Planning tool call"
+    assert latest["h0.0"]["reasoning_ms"] >= 0
+    assert latest["h1.0"]["kind"] == "agent_code"
+    assert latest["h2.0"]["exec_ms"] >= 0
+    assert latest["h3.0"]["payload"] == "Synthesizing reply"
+    assert latest["h4.0"]["payload"] == "Final answer"
 
 
 async def test_terminate_interrupt_preserves_projected_tool_call_messages() -> None:

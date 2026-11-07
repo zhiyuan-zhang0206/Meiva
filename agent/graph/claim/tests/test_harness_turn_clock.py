@@ -78,7 +78,7 @@ async def test_backward_time_still_clamps_execution_duration() -> None:
     )
     await projector.on_event(_tool())
     await projector.on_event(_result())
-    assert items["3.0"].exec_ms == 0
+    assert items["h3.0"].exec_ms == 0
 
 
 async def test_tool_use_immediate_code_elapsed_ms_is_zero() -> None:
@@ -86,8 +86,8 @@ async def test_tool_use_immediate_code_elapsed_ms_is_zero() -> None:
     clock = Clock(ClockConfig("UTC", "UTC", False), timers=timers, now=timers.now)
     projector, items = _projector(clock)
     await projector.on_event(_tool())
-    assert items["2.0"].kind == "agent_code"
-    assert items["2.0"].code_elapsed_ms == 0
+    assert items["h2.0"].kind == "agent_code"
+    assert items["h2.0"].code_elapsed_ms == 0
 
 
 async def test_parallel_results_keep_their_slots_and_unknown_results_do_not_add_items() -> None:
@@ -109,8 +109,8 @@ async def test_parallel_results_keep_their_slots_and_unknown_results_do_not_add_
         ("code_output", "ok"),
         ("agent_chat", "Waiting on a tool."),
     ]
-    assert items["3.0"].exec_ms is None
-    assert items["5.0"].exec_ms == 5000
+    assert items["h3.0"].exec_ms is None
+    assert items["h5.0"].exec_ms == 5000
 
 
 async def test_silent_provider_does_not_hold_the_trailing_delta() -> None:

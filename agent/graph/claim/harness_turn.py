@@ -494,7 +494,7 @@ def _publish_inbound(ctx: MeivaContext, agent_id: int, items: list[TimelineItem]
     publisher = ctx.event_publisher
     if publisher is None or not items:
         return
-    count = int(items[-1].item_id.split(".")[0]) + 1
+    count = int(items[-1].item_id.split(".")[0].removeprefix("h")) + 1
     publisher.emit(
         TimelineSnapshot(
             agent_id=agent_id, items=[item.model_dump() for item in items], msg_count=count
