@@ -52,16 +52,15 @@ plus a nightly full run, so a merge starts no test; the six-hourly `release-gate
 the nightly verdict and that nightly full run are the only evidence, and on
 2026-11-01 two scheduled gate runs went red on `main` with nobody watching. The
 full run's own listing is narrowed to `main`: `ci.yml` also runs on every pull
-request, and a red branch there is that pull request's business. The narrow
-`main-push.yml` gate is read the same way, except that a green run of it never
-closes a card — it runs two checks, not the population, so it cannot say a red
-nightly found is fixed. Every thirty minutes it reads their newest runs
-and opens **one** task for the P0 lead per red that no green run of the same
-commit explains: a first red is recorded silently (a single test out of 1344 is
+request, and a red branch there is that pull request's business. Every thirty
+minutes it reads their newest runs and opens **one** task for the P0 lead per red
+that no green run of the same commit explains: a first red is recorded silently
+(a single test out of 1344 is
 usually a flake, and that same commit passed the nightly an hour later), a red
 that survives into a second run becomes a card — the tree need not move for it
 (`main` can stand still for days), because a run the watch has not read before
-is new evidence even on the same commit — and a green run closes it. A red the
+is new evidence even on the same commit — and a green run that exercises it
+closes it. A red the
 watch cannot name is the exception to that two-run rule: when the log carries no
 failing case and the failing step is no workflow's declared check, the run is
 reported on its **first** sighting, because the doubt two runs answer — is this
@@ -80,6 +79,16 @@ silence is reported — a nightly added today has no run on record because its
 cron has not come round yet — and a stream that cannot be read at all (a
 renamed workflow, a busy API) is one named note in the round, never the end of
 the round or of the process that would report it next time.
+
+Two things it reads run part of the tree rather than the population: the narrow
+`main-push.yml` gate (two checks) and the `data plane (macOS)` job inside the
+nightly `ci.yml` verdict (two test directories, on a hosted Mac). Their reds are
+cards like any other, but they retire only on evidence that exercises them: a run
+that never collected the test is not evidence that it passes, and without that split
+the next Linux nightly — which runs the whole population without ever touching
+macOS — would retire the macOS card while the red stood. The failure and the entry
+carry that fact (`covers_full_suite`), so `apply_run` asks the record itself which
+greens exercise the red.
 
 - **product** schedules (adversarial evaluation, self-evolution, memory, model
   tracking, debt clearing, CI observability, trace shipping, harness CLI convergence) are Meiva's own

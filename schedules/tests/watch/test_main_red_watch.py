@@ -50,6 +50,7 @@ def _red(
     test_id: str = "pkg/tests/test_a.py::test_x",
     *,
     full_suite: bool = True,
+    partial_job: bool = False,
     title: str = "",
 ) -> RunFacts:
     from schedules.plans.watch.main_red import Failure
@@ -59,7 +60,7 @@ def _red(
         sha,
         when,
         "failure",
-        (Failure(test_id, FAILURE_TEST),),
+        (Failure(test_id, FAILURE_TEST, covers_full_suite=not partial_job),),
         covers_full_suite=full_suite,
         head_title=title,
     )
@@ -162,6 +163,65 @@ def test_the_second_red_on_another_commit_opens_one_card_and_the_third_opens_non
     (entry,) = entries.values()
     assert entry.red_count == 3
     assert entry.task_id == 900
+
+
+# meiva:note
+# The macOS job rides `ci.yml`'s nightly verdict, so the card it opens arrives in the same workflow
+# whose Linux green would otherwise retire it - a run that never collected the test is not repair.
+# The state file remembers the kind of red across rounds (this test reloads it three times) and a
+# later `ci.yml` green retires it, because that is the run that collects the test.
+def test_a_partial_jobs_card_survives_the_populations_green_and_closes_on_its_own(
+    tmp_path: Path,
+) -> None:
+    opened: list[Card] = []
+    closed: list[tuple[int, str]] = []
+    lane = "ci.yml"
+    _watch(
+        tmp_path,
+        [
+            _red(
+                lane,
+                "sha1",
+                datetime(2026, 11, 8, 21, 47, tzinfo=UTC),
+                partial_job=True,
+            ),
+            _red(
+                lane,
+                "sha2",
+                datetime(2026, 11, 9, 21, 47, tzinfo=UTC),
+                partial_job=True,
+            ),
+        ],
+        opened=opened,
+        closed=closed,
+        heartbeats=[],
+        workflows=(lane,),
+    )
+    assert len(opened) == 1
+    (entry,) = load_state(tmp_path / STATE_FILE).entries.values()
+    assert entry.covers_full_suite is False
+
+    _watch(
+        tmp_path,
+        [_green("refresh-test-durations.yml", "sha3", datetime(2026, 11, 10, 2, tzinfo=UTC))],
+        opened=opened,
+        closed=closed,
+        heartbeats=[],
+        workflows=(lane,),
+    )
+    assert closed == []
+    assert load_state(tmp_path / STATE_FILE).entries != {}
+
+    _watch(
+        tmp_path,
+        [_green(lane, "sha4", datetime(2026, 11, 10, 21, 47, tzinfo=UTC))],
+        opened=opened,
+        closed=closed,
+        heartbeats=[],
+        workflows=(lane,),
+    )
+    assert closed and closed[0][0] == 900
+    assert load_state(tmp_path / STATE_FILE).entries == {}
 
 
 def test_a_green_run_closes_the_card(tmp_path: Path) -> None:

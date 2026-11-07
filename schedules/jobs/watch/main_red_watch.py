@@ -157,6 +157,11 @@ def load_state(path: Path) -> WatchState:
             # A ledger written before the class existed carries no `kind`; those entries were all
             # named cases, which is the default, so an upgrade never re-reads an old red as new.
             kind=value.get("kind") or FAILURE_TEST,
+            # meiva:note
+            # A ledger written before the field existed holds full-suite reds (the push gate's were
+            # the only partial ones), so the default keeps an upgrade from re-reading an old red as
+            # something only its own lane may retire.
+            covers_full_suite=bool(value.get("covers_full_suite", True)),
         )
         for name, value in raw.get("entries", {}).items()
     }
@@ -184,6 +189,7 @@ def save_state(path: Path, state: WatchState) -> None:
                 "last_green_at": entry.last_green_at.isoformat() if entry.last_green_at else None,
                 "task_id": entry.task_id,
                 "kind": entry.kind,
+                "covers_full_suite": entry.covers_full_suite,
             }
             for name, entry in state.entries.items()
         },

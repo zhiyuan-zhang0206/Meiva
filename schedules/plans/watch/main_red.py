@@ -115,6 +115,12 @@ _CANDIDATE_LIMIT = 20
 class Failure:
     test_id: str
     kind: str
+    # meiva:note
+    # Whether the job that reported this failure ran the population. A workflow's nightly verdict
+    # can carry a job that runs part of the tree (the macOS data-plane job inside `ci.yml`), and a
+    # red from it belongs to that job: the next green of the workflow proves nothing about a test
+    # the job alone collects.
+    covers_full_suite: bool = True
 
 
 # meiva:note
@@ -149,6 +155,13 @@ class Entry:
     last_green_at: datetime | None = None
     task_id: int | None = None
     kind: str = FAILURE_TEST
+    # meiva:note
+    # Whether the run that reported this red ran the whole population. It decides what may retire
+    # the card: a full-suite red is evidence about the whole tree, so any full-suite green on a
+    # later commit resolves it, while a red from a lane that runs part of the tree is resolved only
+    # by that lane's own green. Without this the macOS lane's red would be retired by the next
+    # Linux nightly, which never collected the test — a card that closes while the red stands.
+    covers_full_suite: bool = True
 
 
 # meiva:note
@@ -298,18 +311,27 @@ def _unique(failures: tuple[Failure, ...]) -> tuple[Failure, ...]:
 
 
 # meiva:note
-# A green run ends every open red that started at or before it, whichever post-merge workflow
-# found the red: both run the whole population, so a green nightly on a commit where a release-gate
-# run failed is exactly the evidence that the commit was fine (2026-11-01, b32d5a8662). Only a
-# workflow that covers the full suite may resolve, and an older run never resolves a newer red.
+# A green run ends the reds it is evidence about, and an older run never resolves a newer red. Its
+# own workflow always counts: the lane re-ran and passed. Another workflow counts only when both
+# sides run the whole population — a green nightly on a commit where a release-gate run failed is
+# exactly the evidence that the commit was fine (2026-11-01, b32d5a8662) — because a run that never
+# collected the test says nothing about it. The two facts are on the records themselves
+# (`covers_full_suite` on the run and on the entry), so a reader can check the card's sentence
+# against the same numbers.
+def _green_ran_the_red(run: RunFacts, entry: Entry) -> bool:
+    if run.workflow == entry.fingerprint.partition(_SEPARATOR)[0]:
+        return True
+    return run.covers_full_suite and entry.covers_full_suite
+
+
 def _resolve_green(plan_entries: dict[str, Entry], run: RunFacts) -> tuple[int, ...]:
-    if not run.covers_full_suite:
-        return ()
     closes: list[int] = []
     for name, entry in list(plan_entries.items()):
         if entry.state == STATE_INFRA:
             continue
         if run.created_at < entry.last_red_at:
+            continue
+        if not _green_ran_the_red(run, entry):
             continue
         if entry.task_id is not None:
             closes.append(entry.task_id)
@@ -348,6 +370,7 @@ def apply_run(entries: dict[str, Entry], run: RunFacts) -> Plan:
                 last_red_at=run.created_at,
                 red_count=1,
                 kind=failure.kind,
+                covers_full_suite=run.covers_full_suite and failure.covers_full_suite,
             )
             plan_entries[name] = created
             if state == STATE_CONFIRMED:
@@ -397,18 +420,28 @@ def card_body(
     jobs = ", ".join(job_names) or "-"
     commits = "\n".join(candidate_commits[:_CANDIDATE_LIMIT]) or "(not collected)"
     # meiva:note
-    # What closes an unnameable red cannot be "this case passes": no case names it. A full-suite run
-    # on a later commit that is green is the only evidence that the tree it failed on was repaired.
+    # What closes an unnameable red cannot be "this case passes": no case names it. A green run that
+    # exercises the red on a later commit is the only evidence that the tree it failed on was
+    # repaired, and which runs exercise it is the entry's own record: the same workflow always does,
+    # and a full-suite workflow does while `covers_full_suite=true`. The sentence names that
+    # predicate and its fields, so a reader can check it against the card's numbers.
     closes = (
-        "Closes when: `apply_run` reads a green run with `covers_full_suite=true` whose "
-        "`created_at` is later than this entry's `last_red_at`; that run removes the entry and "
-        "the card with it, and no human closes either. While it is open, the same unnameable "
-        "shape only increments `red_count`. Boundary: any full-suite workflow counts, not only "
-        "the one that failed -- a red this workflow keeps reporting while another full-suite "
-        "workflow passes the same tree retires the card while the red stands, and that "
-        "combination is when this rule has to split by workflow."
+        "Closes when: `apply_run` reads a green run whose `created_at` is later than this entry's "
+        "`last_red_at` and which exercises this red -- the same workflow, or another one while "
+        "this entry keeps `covers_full_suite=true`; that run removes the entry and the card with "
+        "it, and no human closes either. A lane that runs part of the tree is retired only by its "
+        "own green, because a run that never collected the test says nothing about it. While it is "
+        "open, the same unnameable shape only increments `red_count`."
         if entry.kind == FAILURE_UNNAMED
-        else f"Closes when: `{test_id}` passes on `main` in any post-merge workflow; the card closes itself."
+        else (
+            f"Closes when: `{test_id}` passes on `main` in `{workflow}`"
+            + (
+                ", or in a full-suite workflow on the main branch"
+                if entry.covers_full_suite
+                else " (this red came from a lane that runs part of the tree, so only that lane's own green retires it)"
+            )
+            + "; the card closes itself."
+        )
     )
     return (
         f"Fingerprint: `{entry.fingerprint}`\n\n"

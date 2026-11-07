@@ -16,6 +16,7 @@ import os
 import subprocess
 import sys
 from collections.abc import Callable, Mapping
+from dataclasses import replace
 from datetime import UTC, datetime
 from functools import partial
 from pathlib import Path
@@ -62,9 +63,19 @@ _NIGHTLY = "refresh-test-durations.yml"
 _CI_NIGHTLY = "ci.yml"
 _MAIN_PUSH = "main-push.yml"
 # meiva:note
+# The jobs inside a workflow that run part of the tree rather than the population. A failure they
+# report is not full-suite evidence even though the run it arrived in is: `ci.yml`'s nightly verdict
+# includes the macOS data-plane job, and a red there is retired only by that job's own green -
+# otherwise the next Linux nightly, which never collected those tests, would close the card while
+# the red stood (2026-11-08, #8659/#8660). Keyed by job name because that is what a failed run
+# reports: the run's jobs are the only record of which part of the tree a failure came from.
+_PARTIAL_JOBS = frozenset({"data plane (macOS)"})
+# meiva:note
 # Only a workflow that runs the whole population may close a red; the push gate runs two checks,
 # so its green run says nothing about the test a nightly run found. Reading it as verdict enough
-# would close cards for failures nobody fixed.
+# would close cards for failures nobody fixed. The macOS lane is the third shape: its green says
+# its own tests pass, so it neither closes another stream's card nor opens one for a host it never
+# touched - its reds are confirmed and closed against the full-suite runs like everything else.
 _FULL_SUITE_WORKFLOWS = frozenset({_RELEASE_GATE, _NIGHTLY, _CI_NIGHTLY})
 _REPORT_AGENT = 405
 _ENV_REPORT_AGENT = "MEIVA_MAIN_RED_REPORT_AGENT"
@@ -160,10 +171,16 @@ def fetch_runs(workflow: str, run_process: RunProcess) -> tuple[RunFacts, ...]:
             )
             for job in failed:
                 log = _job_log(job["id"], run_process)
+                name = job.get("name", "")
                 parsed.extend(
-                    parse_failures(
+                    # meiva:note
+                    # The coverage flag travels with the failure, not only with the run: a job that
+                    # runs part of the tree reports reds no other job in the workflow can retire by
+                    # passing (`_PARTIAL_JOBS`).
+                    replace(failure, covers_full_suite=name not in _PARTIAL_JOBS)
+                    for failure in parse_failures(
                         log[-400_000:],
-                        job_name=job.get("name", ""),
+                        job_name=name,
                         suite_step_failed=True,
                         failed_steps=_failed_step_names(job),
                         check_steps=check_steps,

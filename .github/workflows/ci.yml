@@ -1821,6 +1821,73 @@ jobs:
             tmp/host-marks-census.json
             tmp/junit-host-marks.xml
 
+  # The macOS half of the data-plane tests, on the nightly verdict and on a dispatch.
+  #
+  # This job exists because nothing else in CI collects these two directories on macOS: `host-marks`
+  # selects `-m requires_host` (by marker, not by directory) and `helper-signing-smoke` builds and
+  # signs the helper. A test that writes its launch receipt's platform down instead of reading it
+  # stays green on every lane while failing on the Mac that runs it — twice on 2026-11-08 (#8659,
+  # #8660), and both times nobody was watching the Mac.
+  #
+  # No pull request runs it: a macOS runner costs ten times an Ubuntu one, and the static half of
+  # this defence refuses the written-down value at the commit
+  # (`scripts/lint/host_platform_marks.py` rule 3). This is the dynamic half — a platform that
+  # arrives through a variable, which no lint can see — so it rides the daily verdict instead.
+  #
+  # Its reds are read by `main-red-watch` like any other failure in this workflow, with one
+  # difference: the job runs part of the tree, so a Linux green of the same workflow never retires
+  # its card (`_PARTIAL_JOBS` in `schedules/jobs/watch/main-red-watch-schedule.py`, keyed on this
+  # job's name). Renaming the job moves that entry with it.
+  macos-data-plane:
+    name: data plane (macOS)
+    runs-on: macos-15
+    # 435 tests on an M-series Mac take about two and a half minutes; the data-plane install is the
+    # rest. A hung server is killed here rather than holding the runner for hours.
+    timeout-minutes: 20
+    if: ${{ !cancelled() && github.event_name != 'pull_request' }}
+    env:
+      MEIVA_DB_URL: ""
+      MEIVA_REDIS_URL: ""
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          version: 0.13.1
+          enable-cache: true
+
+      - name: Install Python deps
+        uses: ./.github/actions/uv-sync
+
+      # The macOS branch of the one provisioning script: brew installs `postgresql@17`, `redis@8.2`,
+      # `pgbouncer` and `pgvector`, then proves each binary is there. The same script `meiva start`'s
+      # host preflight runs, so the versions this job tests are the versions a Mac host carries — not
+      # a second list kept in YAML.
+      - name: Install the data plane (Postgres 17, Redis, PgBouncer, pgvector)
+        run: bash scripts/provision/database.sh
+
+      - name: Create an isolated Meiva home
+        run: |
+          mkdir -p "$RUNNER_TEMP/meiva-home"
+          echo "MEIVA_HOME=$RUNNER_TEMP/meiva-home" >> "$GITHUB_ENV"
+
+      - name: Run the data-plane suites
+        run: >-
+          uv run python -m pytest
+          cli/commands/data_plane/tests
+          cli/commands/lifecycle/tests/start_storage
+          -q --junit-xml=tmp/junit-macos-data-plane.xml
+
+      - name: Upload the report
+        if: ${{ always() }}
+        continue-on-error: true
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: macos-data-plane-report
+          if-no-files-found: warn
+          path: tmp/junit-macos-data-plane.xml
+
   backend:
     name: backend (pytest + pyright)
     runs-on: ubuntu-24.04
