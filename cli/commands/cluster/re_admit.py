@@ -53,10 +53,8 @@ def cmd_re_admit_inputs(unit: str, *, home: Path, environ: Mapping[str, str], pi
         [item for item in changed if isinstance(item, list)] if isinstance(changed, list) else []
     )
     print(f"re-admitted on {machine}: {unit} ({len(items)} changed input(s))")
-    for item in items:
-        if len(item) == 3:
-            path, admitted, current = item
-            print(f"  {path}: {str(admitted)[:12]} -> {str(current)[:12]}")
+    for path, admitted, current in (item for item in items if len(item) == 3):
+        print(f"  {path}: {str(admitted)[:12]} -> {str(current)[:12]}")
     if not items:
         print("  (nothing changed since admission; the seal already matches the contents)")
     print("  the running generation still uses what it started with; nothing was restarted")
