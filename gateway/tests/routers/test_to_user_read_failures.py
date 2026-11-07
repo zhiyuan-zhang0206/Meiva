@@ -5,11 +5,13 @@
 # meiva:link gateway/agents/docs/to-user-read-failures.meiva.okf.md
 
 from collections.abc import Iterator
+from pathlib import Path
 
 import psycopg
 import pytest
 
 from base.db import create_agent
+from base.paths import workspace_path
 from gateway.tests.auth.gateway_config import GatewayTestClient, gateway_test_client
 from ops.cluster.rpc import ClusterOpFailed, ClusterOpUnreachable
 
@@ -92,3 +94,155 @@ def test_a_failure_without_a_reason_is_the_unreadable_class(
     response = client.get(f"/api/agents/{agent}/to-user")
     assert response.status_code == 422
     assert response.json()["code"] == "to_user_document_unreadable"
+
+
+def test_get_workspace_file_text_success(
+    client: GatewayTestClient, db_conn: psycopg.Connection
+) -> None:
+    agent = _home_machine_agent(db_conn, "macmini")
+    ws = Path(workspace_path(client.app.state.gateway_process.home, agent))
+    ws.mkdir(parents=True, exist_ok=True)
+    target = ws / "subdir" / "test.txt"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    _ = target.write_text("hello world from workspace\nline 2", encoding="utf-8")
+
+    response = client.get(f"/api/agents/{agent}/files/content?path=subdir/test.txt")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["name"] == "test.txt"
+    assert body["extension"] == ".txt"
+    assert body["content"] == "hello world from workspace\nline 2"
+    assert body["size"] == len(b"hello world from workspace\nline 2")
+    assert body["binary"] is False
+    assert "modified_at" in body
+
+
+def test_get_workspace_file_with_line_hash_and_absolute_path(
+    client: GatewayTestClient, db_conn: psycopg.Connection
+) -> None:
+    agent = _home_machine_agent(db_conn, "macmini")
+    ws = Path(workspace_path(client.app.state.gateway_process.home, agent))
+    ws.mkdir(parents=True, exist_ok=True)
+    target = ws / "code.py"
+    _ = target.write_text("print('hi')", encoding="utf-8")
+
+    abs_path = str(target.resolve())
+    response = client.get(f"/api/agents/{agent}/files/content?path={abs_path}%23L1-L5")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["name"] == "code.py"
+    assert body["extension"] == ".py"
+    assert body["content"] == "print('hi')"
+
+
+def test_get_workspace_file_image_returns_base64(
+    client: GatewayTestClient, db_conn: psycopg.Connection
+) -> None:
+    agent = _home_machine_agent(db_conn, "macmini")
+    ws = Path(workspace_path(client.app.state.gateway_process.home, agent))
+    ws.mkdir(parents=True, exist_ok=True)
+    target = ws / "icon.png"
+    png_bytes = b"\x89PNG\r\n\x1a\nfakeimagebytes"
+    _ = target.write_bytes(png_bytes)
+
+    response = client.get(f"/api/agents/{agent}/files/content?path=icon.png")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["binary"] is True
+    assert body["extension"] == ".png"
+    assert body["content"] == ""
+
+    raw_resp = client.get(f"/api/agents/{agent}/files/raw?path=icon.png")
+    assert raw_resp.status_code == 200
+    assert raw_resp.content == png_bytes
+    assert raw_resp.headers["content-type"] == "image/png"
+
+
+def test_get_workspace_file_raw_video_range_request(
+    client: GatewayTestClient, db_conn: psycopg.Connection
+) -> None:
+    agent = _home_machine_agent(db_conn, "macmini")
+    ws = Path(workspace_path(client.app.state.gateway_process.home, agent))
+    ws.mkdir(parents=True, exist_ok=True)
+    target = ws / "clip.mp4"
+    data = b"0123456789abcdefghij"
+    _ = target.write_bytes(data)
+
+    range_resp = client.get(
+        f"/api/agents/{agent}/files/raw?path=clip.mp4",
+        headers={"Range": "bytes=0-4"},
+    )
+    assert range_resp.status_code == 206
+    assert range_resp.content == b"01234"
+    assert range_resp.headers["content-range"].startswith("bytes 0-4/")
+
+
+def test_get_workspace_file_in_custom_cwd(
+    client: GatewayTestClient, db_conn: psycopg.Connection, tmp_path: Path
+) -> None:
+    agent = _home_machine_agent(db_conn, "macmini")
+    ws = Path(workspace_path(client.app.state.gateway_process.home, agent))
+    ws.mkdir(parents=True, exist_ok=True)
+    _ = (ws / "ws_file.txt").write_text("in workspace", encoding="utf-8")
+
+    custom_cwd = tmp_path / "custom_project"
+    custom_cwd.mkdir(parents=True, exist_ok=True)
+    _ = (custom_cwd / "cwd_file.txt").write_text("in custom cwd", encoding="utf-8")
+
+    import json
+
+    ckpt = json.dumps({"channel_values": {"meiva_code__cwd": str(custom_cwd)}})
+    _ = db_conn.execute(
+        """
+        INSERT INTO checkpoints (thread_id, checkpoint_ns, checkpoint_id, type, checkpoint, metadata)
+        VALUES (%s, '', '1', 'json', %s::jsonb, '{}'::jsonb)
+        """,
+        (str(agent), ckpt),
+    )
+    db_conn.commit()
+
+    resp_cwd = client.get(f"/api/agents/{agent}/files/content?path=cwd_file.txt")
+    assert resp_cwd.status_code == 200
+    assert resp_cwd.json()["content"] == "in custom cwd"
+
+    resp_ws = client.get(f"/api/agents/{agent}/files/content?path=ws_file.txt")
+    assert resp_ws.status_code == 200
+    assert resp_ws.json()["content"] == "in workspace"
+
+
+def test_get_workspace_file_traversal_forbidden(
+    client: GatewayTestClient, db_conn: psycopg.Connection
+) -> None:
+    agent = _home_machine_agent(db_conn, "macmini")
+    ws = Path(workspace_path(client.app.state.gateway_process.home, agent))
+    ws.mkdir(parents=True, exist_ok=True)
+    response = client.get(f"/api/agents/{agent}/files/content?path=../../etc/passwd")
+    assert response.status_code == 403
+
+
+def test_get_workspace_file_nonexistent_not_found(
+    client: GatewayTestClient, db_conn: psycopg.Connection
+) -> None:
+    agent = _home_machine_agent(db_conn, "macmini")
+    ws = Path(workspace_path(client.app.state.gateway_process.home, agent))
+    ws.mkdir(parents=True, exist_ok=True)
+    response = client.get(f"/api/agents/{agent}/files/content?path=nonexistent.txt")
+    assert response.status_code == 404
+
+
+def test_get_workspace_file_too_large_413(
+    client: GatewayTestClient, db_conn: psycopg.Connection
+) -> None:
+    agent = _home_machine_agent(db_conn, "macmini")
+    ws = Path(workspace_path(client.app.state.gateway_process.home, agent))
+    ws.mkdir(parents=True, exist_ok=True)
+    target = ws / "big.bin"
+    _ = target.write_bytes(b"a" * (1024 * 1024 + 10))
+
+    response = client.get(f"/api/agents/{agent}/files/content?path=big.bin")
+    assert response.status_code == 413
+
+
+def test_get_workspace_file_unknown_agent_404(client: GatewayTestClient) -> None:
+    response = client.get("/api/agents/9999999/files/content?path=file.txt")
+    assert response.status_code == 404

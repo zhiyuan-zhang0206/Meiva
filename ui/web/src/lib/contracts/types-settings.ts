@@ -87,6 +87,7 @@ export const USER_SETTING_DEFAULTS: Record<string, unknown> = {
 
 
 export type ToUserDocument = Schemas["ToUserDocument"];
+export type WorkspaceFileResponse = Schemas["WorkspaceFileResponse"];
 
 type TaskStatus = Schemas["TaskStatus"];
 

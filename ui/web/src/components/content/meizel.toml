@@ -1,14 +1,18 @@
-exports = ["code-highlighter-preloader.tsx", "copy-button.tsx", "lazy-chunk.ts", "markdown.tsx", "python-code.tsx", "zoomable-image.tsx"]
+exports = ["code-highlighter-preloader.tsx", "copy-button.tsx", "file-path-utils.ts", "lazy-chunk.ts", "markdown.tsx", "python-code.tsx", "zoomable-image.tsx"]
 
 [uses]
 "code-highlighter-preloader.test.tsx" = ["code-highlighter-preloader.tsx", "lazy-chunk.ts", "python-code.tsx"]
 "code-highlighter-preloader.tsx" = ["python-code.tsx"]
 "copy-button.test.tsx" = ["copy-button.tsx"]
+"file-path-utils.test.ts" = ["file-path-utils.ts"]
 "lazy-chunk.test.ts" = ["lazy-chunk.ts"]
 "lazy-chunk.ts" = []
 "markdown-lazy.test.tsx" = ["lazy-chunk.ts", "markdown-renderer.tsx", "markdown.tsx"]
-"markdown-renderer.tsx" = ["copy-button.tsx", "python-code.tsx"]
+"markdown-renderer.tsx" = ["copy-button.tsx", "file-path-utils.ts", "python-code.tsx"]
 "markdown.test.tsx" = ["fixtures", "lazy-chunk.ts", "markdown-renderer.tsx", "markdown.tsx", "python-code.tsx"]
 "markdown.tsx" = ["lazy-chunk.ts", "markdown-renderer.tsx"]
 "python-code.test.tsx" = ["lazy-chunk.ts", "python-code.tsx"]
 "python-code.tsx" = ["copy-button.tsx", "lazy-chunk.ts"]
+
+[purity]
+"file-path-utils.ts" = "strict"

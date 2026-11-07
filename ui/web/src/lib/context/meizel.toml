@@ -1,8 +1,9 @@
-exports = ["category-colors.ts", "context-panel-open.ts", "reference-url.ts", "use-to-user.ts", "use-user-messages.ts"]
+exports = ["category-colors.ts", "context-panel-open.ts", "reference-url.ts", "use-to-user.ts", "use-user-messages.ts", "workspace-file-store.ts"]
 
 [uses]
 "context-panel-open.test.tsx" = ["context-panel-open.ts"]
 "use-user-messages.test.ts" = ["use-user-messages.ts"]
+"workspace-file-store.test.ts" = ["workspace-file-store.ts"]
 
 [purity]
 "category-colors.ts" = "strict"

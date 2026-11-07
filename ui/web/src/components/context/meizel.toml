@@ -2,6 +2,7 @@ exports = ["shared-context-panel.tsx"]
 
 [uses]
 "shared-context-panel.test.tsx" = ["shared-context-panel.tsx"]
-"shared-context-panel.tsx" = ["to-user-document.tsx"]
+"shared-context-panel.tsx" = ["to-user-document.tsx", "workspace-file-view.tsx"]
 "to-user-document.test.tsx" = ["to-user-document.tsx"]
 "to-user-empty-state.test.tsx" = ["to-user-document.tsx"]
+"workspace-file-view.test.tsx" = ["workspace-file-view.tsx"]

@@ -1,5 +1,5 @@
 import { notifyManager, QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, cleanup, fireEvent, type RenderOptions, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, type RenderOptions, screen, waitFor } from "@testing-library/react";
 import { renderWithBrowser } from "@/test-support/render";
 import type { ReactElement, ReactNode } from "react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
@@ -18,6 +18,7 @@ notifyManager.setScheduler((cb) => {
 // is mounted reads `shared-inspector`, the panel's own wrapper, so nothing replaces the
 // inspector module.
 import { SharedContextPanel } from "./shared-context-panel";
+import { useWorkspaceFileStore } from "@/lib/context/workspace-file-store";
 
 import { resetTransport, transport } from "@/test-support/fake-api";
 import { resetStreamHandlers, TestStreamProvider } from "@/test-support/fake-stream";
@@ -103,6 +104,7 @@ function renderPanelView({ mobile = false, notices = [], onClose = vi.fn() }: {
 }
 
 beforeEach(() => {
+  useWorkspaceFileStore.getState().closeFile();
   window.history.replaceState(null, "", "/?agent_id=7");
   qc = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } });
   qc.setQueryData(["user-settings"], { ...USER_SETTING_DEFAULTS, "display.inspector_open": false });
@@ -126,6 +128,26 @@ it("shows the document as the panel's body without a view switcher", () => {
   expect(screen.getByText("No content")).toBeTruthy();
   expect(screen.queryByTestId("shared-inspector")).toBeNull();
   expect(screen.queryByRole("tablist")).toBeNull();
+});
+
+it("renders WorkspaceFileView when activeFile is set for this agent", async () => {
+  transport.getWorkspaceFile.mockResolvedValue({
+    path: "src/app.py",
+    name: "app.py",
+    extension: ".py",
+    content: "x = 42\n",
+    size: 7,
+    binary: false,
+    modified_at: "2026-11-07T12:00:00Z",
+  });
+  useWorkspaceFileStore.getState().openFile({ agentId: 7, path: "src/app.py", lineRange: "1" });
+
+  renderPanelView();
+
+  await waitFor(() => {
+    expect(screen.getByTestId("workspace-file-view")).toBeTruthy();
+    expect(screen.getByTestId("workspace-code-content")).toBeTruthy();
+  });
 });
 
 it("swaps the body under a bar that stays, instead of laying a sheet over it", async () => {

@@ -691,6 +691,104 @@
         }
       }
     },
+    "/api/agents/{agent_id}/files/content": {
+      "get": {
+        "summary": "Get Workspace File Content",
+        "operationId": "get_workspace_file_content_api_agents__agent_id__files_content_get",
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Agent Id"
+            }
+          },
+          {
+            "name": "path",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "Workspace or cwd relative path, absolute path, or file:// URL",
+              "title": "Path"
+            },
+            "description": "Workspace or cwd relative path, absolute path, or file:// URL"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceFileResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/agents/{agent_id}/files/raw": {
+      "get": {
+        "summary": "Get Workspace File Raw",
+        "operationId": "get_workspace_file_raw_api_agents__agent_id__files_raw_get",
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Agent Id"
+            }
+          },
+          {
+            "name": "path",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "Workspace or cwd relative path, absolute path, or file:// URL",
+              "title": "Path"
+            },
+            "description": "Workspace or cwd relative path, absolute path, or file:// URL"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/keyed/v1/agents/{agent_id}/retry-launch": {
       "post": {
         "summary": "Retry Launch",
@@ -20778,6 +20876,51 @@
           "type"
         ],
         "title": "ValidationError"
+      },
+      "WorkspaceFileResponse": {
+        "properties": {
+          "path": {
+            "type": "string",
+            "title": "Path"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "extension": {
+            "type": "string",
+            "title": "Extension"
+          },
+          "content": {
+            "type": "string",
+            "title": "Content"
+          },
+          "size": {
+            "type": "integer",
+            "title": "Size"
+          },
+          "binary": {
+            "type": "boolean",
+            "title": "Binary"
+          },
+          "modified_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Modified At"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "path",
+          "name",
+          "extension",
+          "content",
+          "size",
+          "binary",
+          "modified_at"
+        ],
+        "title": "WorkspaceFileResponse"
       }
     }
   }

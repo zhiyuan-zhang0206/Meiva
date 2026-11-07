@@ -11,7 +11,9 @@ import { InspectorPanel } from "@/components/inspector/inspector-panel";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { OpenNoticeDetail } from "@/components/notifications/open-notice-detail";
 import { ToUserDocumentView } from "./to-user-document";
+import { WorkspaceFileView } from "./workspace-file-view";
 import type { NoticeItem } from "@/lib/contracts/types";
+import { useWorkspaceFileStore } from "@/lib/context/workspace-file-store";
 import type { useToUser } from "@/lib/context/use-to-user";
 import { useInspectorOpen } from "@/lib/inspector/inspector-panel-store";
 import { dropOpenNotices } from "@/lib/notifications/use-notices";
@@ -30,6 +32,8 @@ export function SharedContextPanel({ agentId, document, notices, noticesFailed, 
   const t = useTranslations("toUser");
   const tInspector = useTranslations("inspector");
   const { open: inspecting, toggle: toggleInspector } = useInspectorOpen();
+  const activeFile = useWorkspaceFileStore((s) => s.activeFile);
+  const isViewingFile = activeFile !== null && activeFile.agentId === agentId;
   const queryClient = useQueryClient();
   const documentScroll = useRef<HTMLDivElement>(null);
   const readingPosition = useRef(0);
@@ -82,21 +86,33 @@ export function SharedContextPanel({ agentId, document, notices, noticesFailed, 
           <ScanSearch className="size-3.5" />
         </button>
       </header>}
-      <ToUserDocumentView
-        key={agentId}
-        agentId={agentId}
-        document={document.data}
-        failure={document.error}
-        pending={document.isFetching}
-        refresh={() => void document.refetch()}
-        mobile={mobile}
-        inspecting={inspecting}
-        bodyHidden={inspecting}
-        onNavigate={resetReadingPosition}
-        onInspect={mobile ? undefined : toggleInspection}
-        onCollapse={onCollapse}
-        viewportRef={documentScroll}
-      />
+      {isViewingFile && !inspecting ? (
+        <WorkspaceFileView
+          key={`${agentId}:${activeFile.path}:${activeFile.lineRange ?? ""}`}
+          agentId={agentId}
+          target={activeFile}
+          mobile={mobile}
+          inspecting={inspecting}
+          onInspect={mobile ? undefined : toggleInspection}
+          onCollapse={onCollapse}
+        />
+      ) : (
+        <ToUserDocumentView
+          key={agentId}
+          agentId={agentId}
+          document={document.data}
+          failure={document.error}
+          pending={document.isFetching}
+          refresh={() => void document.refetch()}
+          mobile={mobile}
+          inspecting={inspecting}
+          bodyHidden={inspecting}
+          onNavigate={resetReadingPosition}
+          onInspect={mobile ? undefined : toggleInspection}
+          onCollapse={onCollapse}
+          viewportRef={documentScroll}
+        />
+      )}
       {inspecting && (
         <div data-testid="shared-inspector" className={cn(MIN_H_0, FLEX_1, FLEX)}>
           <InspectorPanel agentId={agentId} />

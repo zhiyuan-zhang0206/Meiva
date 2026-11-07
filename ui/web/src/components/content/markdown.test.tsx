@@ -596,4 +596,46 @@ describe("line breaks (remark-breaks)", () => {
     expect(link?.getAttribute("href")).toBe("https://example.com");
     expect(link?.textContent).toBe("\u7b2c\u4e09\u884c\u94fe\u63a5");
   });
+
+  describe("workspace file links and path pills", () => {
+    it("preserves file:// URLs and workspace-relative paths without rewriting to about:blank", () => {
+      const { container } = renderMarkdown(
+        <ChatMarkdown content={"[code](file:///Users/dev/workspace/main.py) and [doc](docs/readme.md#L10)"} />,
+      );
+      const links = container.querySelectorAll("a");
+      expect(links).toHaveLength(2);
+      expect(links[0].getAttribute("href")).toBe("file:///Users/dev/workspace/main.py");
+      expect(links[1].getAttribute("href")).toBe("docs/readme.md#L10");
+    });
+
+    it("renders inline code file paths as interactive pills", () => {
+      const { container } = renderMarkdown(
+        <ChatMarkdown content={"Check `src/index.ts#L10-L20` and `to_user.md` for status"} />,
+      );
+      const pills = container.querySelectorAll('[data-testid="file-path-pill"]');
+      expect(pills).toHaveLength(2);
+      expect(pills[0].textContent).toContain("src/index.ts#L10-L20");
+      expect(pills[1].textContent).toContain("to_user.md");
+    });
+
+    it("triggers onOpenFile when clicking a file link or file pill", () => {
+      const onOpenFile = vi.fn();
+      const { container } = renderMarkdown(
+        <ChatMarkdown
+          content={"[open me](src/foo.py#L42) and `components/bar.tsx`"}
+          onOpenFile={onOpenFile}
+        />,
+      );
+
+      const link = container.querySelector('[data-testid="file-path-link"]');
+      expect(link).not.toBeNull();
+      link?.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+      expect(onOpenFile).toHaveBeenCalledWith("src/foo.py", "42");
+
+      const pill = container.querySelector('[data-testid="file-path-pill"]');
+      expect(pill).not.toBeNull();
+      pill?.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+      expect(onOpenFile).toHaveBeenCalledWith("components/bar.tsx", undefined);
+    });
+  });
 });
