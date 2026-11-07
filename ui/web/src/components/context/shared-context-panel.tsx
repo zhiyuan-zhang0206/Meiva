@@ -1,6 +1,5 @@
 "use client";
 
-import { PendingUserMessages } from "@/components/user-delivery/pending-messages";
 import { ArrowLeft, ScanSearch } from "lucide-react";
 import { FLEX, FLEX_1, FLEX_COL, MIN_H_0 } from "@/lib/layout/layout";
 import { useTranslations } from "next-intl";
@@ -100,7 +99,6 @@ export function SharedContextPanel({ agentId, document, mobile, onClose, onColla
           <InspectorPanel agentId={agentId} />
         </div>
       )}
-      <PendingUserMessages agentId={agentId} />
     </aside>
   );
 }
