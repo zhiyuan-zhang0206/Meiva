@@ -98,7 +98,7 @@ def _by_message(items: Sequence[TimelineItem]) -> list[tuple[int, list[TimelineI
     """The items grouped per message index, in message order."""
     groups: list[tuple[int, list[TimelineItem]]] = []
     for item in items:
-        idx = int(item.item_id.split(".")[0])
+        idx = int(item.item_id.split(".")[0].removeprefix("h"))
         if groups and groups[-1][0] == idx:
             groups[-1][1].append(item)
         else:

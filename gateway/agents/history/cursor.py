@@ -16,14 +16,16 @@ class TimelineCursor:
     checkpoint_id: str | None
     msg_idx: int
     block_idx: int
+    is_harness: bool = False
 
     def item_id(self, segment_prefix: str = "") -> str:
-        local_id = f"{self.msg_idx}.{self.block_idx}"
+        prefix = "h" if self.is_harness else ""
+        local_id = f"{prefix}{self.msg_idx}.{self.block_idx}"
         return f"{segment_prefix}.{local_id}" if segment_prefix else local_id
 
 
 # meiva:note
-# Parse current (`m.b`) or historical (`sK.cpid.m.b`) item ids.
+# Parse current (`m.b`, `hm.b`) or historical (`sK.cpid.m.b`) item ids.
 #
 # Historical ranks are syntax only. The checkpoint id is resolved against
 # the current boundary index and determines the canonical rank used in the
@@ -34,11 +36,15 @@ def parse_cursor(before: str) -> TimelineCursor | None:
     parts = before.split(".")
     if len(parts) == 2:
         msg, block = parts
-        msg_idx = _parse_index(msg)
+        is_harness = msg.startswith("h")
+        raw_msg = msg[1:] if is_harness else msg
+        msg_idx = _parse_index(raw_msg)
         block_idx = _parse_index(block)
         if msg_idx is None or block_idx is None:
             return None
-        return TimelineCursor(checkpoint_id=None, msg_idx=msg_idx, block_idx=block_idx)
+        return TimelineCursor(
+            checkpoint_id=None, msg_idx=msg_idx, block_idx=block_idx, is_harness=is_harness
+        )
     if len(parts) != 4:
         return None
     rank, checkpoint_id, msg, block = parts
@@ -50,7 +56,9 @@ def parse_cursor(before: str) -> TimelineCursor | None:
         return None
     if msg_idx is None or block_idx is None:
         return None
-    return TimelineCursor(checkpoint_id=checkpoint_id, msg_idx=msg_idx, block_idx=block_idx)
+    return TimelineCursor(
+        checkpoint_id=checkpoint_id, msg_idx=msg_idx, block_idx=block_idx, is_harness=False
+    )
 
 
 # meiva:note
@@ -76,4 +84,5 @@ def _parse_index(value: str) -> int | None:
 # on a clock skew now that items carry real wall-clock timestamps.
 def item_sort_key(item_id: str) -> tuple[int, int]:
     *_, msg_idx, block_idx = item_id.split(".")
-    return (int(msg_idx), int(block_idx))
+    raw_msg = msg_idx.removeprefix("h")
+    return (int(raw_msg), int(block_idx))

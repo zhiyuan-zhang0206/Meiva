@@ -92,7 +92,7 @@ class HarnessTurnProjector:
             await self._flush()
             items = await commit()
             for item in items:
-                if item.item_id != f"{self._next_idx}.0":
+                if item.item_id not in (f"h{self._next_idx}.0", f"{self._next_idx}.0"):
                     raise RuntimeError(f"unexpected harness inbound position {item.item_id}")
                 self._next_idx += 1
             self._committed_count = self._next_idx
@@ -223,7 +223,7 @@ class HarnessTurnProjector:
         item = TimelineItem.model_validate(
             {
                 **fields,
-                "item_id": f"{self._next_idx}.0",
+                "item_id": f"h{self._next_idx}.0",
                 "kind": kind,
                 "payload": payload,
                 "created_at": now.isoformat(),
@@ -250,7 +250,7 @@ class HarnessTurnProjector:
 
     async def _flush(self) -> None:
         for item_id, item in list(self._pending.items()):
-            msg_count = max(self._committed_count, int(item_id.split(".")[0]) + 1)
+            msg_count = max(self._committed_count, int(item_id.split(".")[0].removeprefix("h")) + 1)
             await self._checkpoint(item, msg_count)
             self._committed_count = msg_count
             del self._pending[item_id]

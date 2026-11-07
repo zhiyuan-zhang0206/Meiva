@@ -121,7 +121,7 @@ async def recover_harness_steer(
             TimelineSnapshot(
                 agent_id=agent_id,
                 items=[item.model_dump() for item in persisted],
-                msg_count=int(persisted[-1].item_id.partition(".")[0]) + 1,
+                msg_count=int(persisted[-1].item_id.partition(".")[0].removeprefix("h")) + 1,
             ).model_dump_json()
         )
     return persisted

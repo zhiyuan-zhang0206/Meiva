@@ -54,3 +54,12 @@ def test_item_ids_order_numerically_not_lexically() -> None:
     assert item_sort_key("2.0") < item_sort_key("10.0")
     assert item_sort_key("3.2") < item_sort_key("3.10")
     assert item_sort_key("s1.cp.4.1") == (4, 1)
+    assert item_sort_key("h2.0") < item_sort_key("h10.0")
+    assert item_sort_key("h3.2") == (3, 2)
+
+
+def test_a_harness_cursor_parses_with_harness_flag() -> None:
+    cursor = parse_cursor("h12.3")
+    assert cursor == TimelineCursor(checkpoint_id=None, msg_idx=12, block_idx=3, is_harness=True)
+    assert cursor is not None
+    assert cursor.item_id() == "h12.3"

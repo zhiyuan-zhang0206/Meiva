@@ -202,7 +202,7 @@ def hydrate(
 
 def _position(item_id: str) -> tuple[int, int]:
     message, block = item_id.split(".")[-2:]
-    return int(message), int(block)
+    return int(message.removeprefix("h")), int(block)
 
 
 def _message(anchor: TimelineItem, row: _EntryRow) -> TimelineItem:
