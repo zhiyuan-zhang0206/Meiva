@@ -628,3 +628,17 @@ def test_a_named_failure_is_never_folded_as_downstream() -> None:
         downstream_jobs=(_HAPPY,),
     )
     assert len(dict(apply_run({}, named_downstream).entries)) == 1
+
+
+def test_a_workflow_with_a_trigger_key_is_still_read() -> None:
+    # meiva:note
+    # YAML 1.1 reads a bare `on:` as the boolean True, so a workflow with a trigger has a
+    # non-string key at the top level. The first version rejected the whole document and folded
+    # nothing on every real workflow; the sample above has no `on:` and could not show it.
+    workflow = (
+        "on:\n  push:\n    branches: [main]\n"
+        "jobs:\n"
+        "  a:\n    name: a\n"
+        "  b:\n    name: b\n    needs: [a]\n"
+    )
+    assert downstream_failing_jobs(workflow, ("a", "b")) == ("b",)

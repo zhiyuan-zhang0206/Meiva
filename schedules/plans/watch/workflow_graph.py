@@ -37,8 +37,14 @@ def _display_pattern(template: str) -> re.Pattern[str]:
 # The names among `failing` whose transitive `needs` include another failing job: they started only
 # because the graph let them, so their red is the upstream red seen once more.
 def downstream_failing_jobs(workflow_yaml: str, failing: tuple[str, ...]) -> tuple[str, ...]:
+    # meiva:note
+    # `BaseLoader` keeps every scalar a string, and that is the point: YAML 1.1 reads a bare `on:`
+    # key as the boolean True, so `safe_load` gives a real workflow a non-string key at the top
+    # level and a whole-document check rejects it -- which it did, silently, on every workflow,
+    # until a real run was replayed (2026-11-08). Nothing here needs a resolved type: `needs` and
+    # `name` are strings on both sides of the comparison.
     try:
-        document = object_of(yaml.safe_load, workflow_yaml)
+        document = object_of(yaml.load, workflow_yaml, Loader=yaml.BaseLoader)
     except yaml.YAMLError:
         return ()
     if not is_object_dict(document):
