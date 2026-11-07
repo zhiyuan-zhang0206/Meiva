@@ -61,6 +61,7 @@ function ConnectionHealthProvider() {
     page.addEventListener("visibilitychange", syncVisibility);
     return () => {
       clearPending();
+      visibleRef.current = null;
       page.removeEventListener("visibilitychange", syncVisibility);
     };
   }, [page, clearPending, syncVisibility]);

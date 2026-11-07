@@ -7,7 +7,7 @@
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, render as rtlRender } from "@testing-library/react";
-import type { ReactElement, ReactNode } from "react";
+import { StrictMode, type ReactElement, type ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { AuthProvider } from "@/lib/auth/auth-context";
@@ -86,6 +86,7 @@ beforeEach(async () => {
 
 afterEach(async () => {
   cleanup();
+  stream.hub.dispose();
   for (const client of clients) client.clear();
   clients.clear();
   useStore.setState({ connState: "open", setConnState: origSetConnState });
@@ -163,6 +164,13 @@ describe("AppConnectionBanner connection state", () => {
 
   it("times out an initial connection that never opens or emits an error", async () => {
     await renderBanner();
+    act(() => { vi.advanceTimersByTime(CONNECTION_ERROR_DELAY_MS); });
+    expect(useStore.getState().connState).toBe("closed");
+  });
+
+  it("retains the initial recovery deadline through StrictMode effect replay", async () => {
+    render(<StrictMode><AppConnectionBanner /></StrictMode>);
+    await vi.waitFor(() => expect(streamHandlers.connection).toBeDefined());
     act(() => { vi.advanceTimersByTime(CONNECTION_ERROR_DELAY_MS); });
     expect(useStore.getState().connState).toBe("closed");
   });
