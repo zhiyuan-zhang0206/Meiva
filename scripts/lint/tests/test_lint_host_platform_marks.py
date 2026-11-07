@@ -1,6 +1,6 @@
 # meiva:note
 # Locks `scripts/lint/host_platform_marks.py`: a test names the host it needs, or injects one.
-# meiva:link scripts/lint/docs/host-platform-marks.meiva.okf.md
+# meiva:link scripts/lint/docs/host-platform-marks/host-platform-marks.meiva.okf.md
 
 from __future__ import annotations
 
@@ -146,6 +146,133 @@ def test_a_marker_inside_a_class_covers_its_methods() -> None:
         "    def test_x(self):\n        assert sys.platform == 'linux'\n"
     )
     assert _findings(src) == []
+
+
+# meiva:note
+# Rule 3, and the two shapes that reached `main` on 2026-11-08 (#8659/#8660): a launch receipt's
+# platform is compared with `Platform.current().system` when it is read back, so a value written
+# down ahead of time is unreadable on every host it does not name - and on Linux the two are equal,
+# which is why no lane could ever have reddened on it.
+def test_a_named_platform_constant_is_a_finding() -> None:
+    src = 'NATIVE_TEST_SYSTEM = "linux"\n\n\ndef test_x():\n    pass\n'
+    found = _findings(src)
+    assert len(found) == 1
+    assert "`platform constant`" in found[0]
+    assert "Platform.current().system" in found[0]
+
+
+@pytest.mark.parametrize("value", ['"linux"', '"darwin"'])
+def test_both_systems_the_platform_holds_are_findings(value: str) -> None:
+    assert _findings(f"NATIVE = {value}\n") != []
+
+
+def test_a_canned_platform_object_constant_is_a_finding() -> None:
+    # meiva:note
+    # #8659's fixture: the Object a test picks between and a caller receives as this process's
+    # platform. An object built from the name is the name with a machine attached.
+    src = 'LINUX_X86 = Platform("linux", "x86_64", "/usr/bin/python3")\n'
+    found = _findings(src)
+    assert len(found) == 1 and "`platform constant`" in found[0]
+
+
+def test_a_platform_default_is_a_finding() -> None:
+    src = 'def _site(*, system: str = "darwin") -> None:\n    return None\n'
+    found = _findings(src)
+    assert len(found) == 1 and "`platform default`" in found[0]
+
+
+def test_a_default_naming_a_platform_constant_is_left_to_the_constant() -> None:
+    # meiva:note
+    # The documented boundary: `platform: Platform = LINUX_X86` is one finding on the line that
+    # binds `LINUX_X86`, not a second one at every default that forwards it. Resolving the name
+    # would be a rule of its own, and the remedy is written once, where the value is chosen.
+    src = (
+        'LINUX_X86 = Platform("linux", "x86_64", "/usr/bin/python3")\n\n\n'
+        "def fake_host(*, platform: Platform = LINUX_X86):\n    return platform\n"
+    )
+    assert [line for line, _, _ in _lint.findings_in_source(src)] == [1]
+
+
+def test_a_host_platform_handed_to_a_receipt_is_a_finding() -> None:
+    # meiva:note
+    # #8659's failing line: the host a test builds is a double, so the platform it answers with is
+    # the canned one, and the receipt written from it is refused the moment it is read back.
+    src = (
+        "def test_x(command_runtime):\n"
+        "    bringup.ensure_gateway_data_plane(\n"
+        "        config, system=command_runtime.host.platform.system\n"
+        "    )\n"
+    )
+    found = _findings(src)
+    assert len(found) == 1 and "`system=<host>.platform`" in found[0]
+
+
+def test_a_host_platform_bound_to_a_name_is_a_finding() -> None:
+    # meiva:note
+    # The shape one fixture used to write a Linux receipt macOS refused at setup: the host is built
+    # inline, so the attribute names are read from the tail rather than from a name.
+    src = "def test_x():\n    system = fake_host(uid=os.geteuid()).platform.system\n"
+    found = _findings(src)
+    assert len(found) == 1 and "`host platform bound`" in found[0]
+
+
+def test_the_process_platform_bound_to_a_name_is_rule_ones_finding_only() -> None:
+    # meiva:note
+    # `sys.platform` is this process's own platform, so it is one finding (`sys.platform`) - the
+    # rule-1 remedy - and not a second one about a host double.
+    found = _findings("def test_x():\n    system = sys.platform\n")
+    assert len(found) == 1 and "`sys.platform`" in found[0]
+
+
+def test_a_platform_literal_passed_to_a_pure_function_is_not_a_finding() -> None:
+    # meiva:note
+    # `has_display_vars(system='linux')` states the input the test decides on - data in, decisions
+    # out. What this rule judges is the definition a caller inherits, not a literal a test picks.
+    src = "def test_x():\n    assert has_display_vars(system='linux', display=None)\n"
+    assert _findings(src) == []
+
+
+def test_choosing_a_platform_at_the_call_is_not_a_finding() -> None:
+    src = (
+        "def test_x(crontab):\n"
+        "    host = fake_host(crontab, platform=DARWIN_ARM64, programs={})\n"
+        "    assert host.platform.system == 'darwin'\n"
+    )
+    assert _findings(src) == []
+
+
+def test_an_exempt_constant_says_why_it_is_another_platform() -> None:
+    src = (
+        'DARWIN = Platform("darwin", "arm64", "/usr/bin/python3")  '
+        "# host-ok: a canned platform a test chooses (`base/host/system/tests/fake_commands.py`)\n"
+    )
+    assert _findings(src) == []
+
+
+def test_a_module_mark_covers_the_constants_below_it() -> None:
+    src = 'import pytest\n\npytestmark = pytest.mark.requires_host("darwin")\n\nSYSTEM = "darwin"\n'
+    assert _findings(src) == []
+
+
+def test_a_name_outside_the_platform_vocabulary_is_not_a_finding() -> None:
+    # meiva:note
+    # `Platform` refuses anything but linux and darwin, so `"macos"` cannot become a receipt's
+    # platform. Counting spellings the type cannot hold would only cost exemptions.
+    assert _findings('SPELLING = "macos"\n') == []
+
+
+def test_the_vocabulary_is_the_one_platform_accepts() -> None:
+    # meiva:note
+    # The rule counts a closed set, and the set is `Platform`'s, not a copy of today's spellings:
+    # a third system in `Platform.system` reddens this test instead of silently escaping the lint.
+    from typing import get_args, get_type_hints
+
+    from base.native_process.os_platform import Platform
+
+    accepted = get_args(get_type_hints(Platform)["system"])
+    assert set(accepted) == set(_lint.PLATFORM_NAMES)
+    with pytest.raises(ValueError):
+        Platform.from_sys_platform("macos", machine="arm64", executable="/usr/bin/python3")
 
 
 def test_a_baseline_entry_allows_exactly_its_count(tmp_path: Path) -> None:

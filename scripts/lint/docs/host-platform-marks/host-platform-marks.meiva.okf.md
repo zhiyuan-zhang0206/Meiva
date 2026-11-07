@@ -1,7 +1,7 @@
 ---
 type: doc
 title: Host-platform marks
-description: Why a test injects a Host instead of reading the machine it runs on, the two rules the lint applies, and how the frozen baseline shrinks.
+description: Why a test injects a Host instead of reading the machine it runs on, the three rules the lint applies, and how the frozen baseline shrinks.
 tags:
 - scripts
 - lint
@@ -59,6 +59,14 @@ decides the verdict. Its remedy is not the marker: the test builds a `Host` whos
 `which` returns the program, so it states what the machine has instead of asking
 it. When the program belongs to a lane that provisions it (`uv`, `node`, a
 database binary), the test states that with `# host-ok: <lane>`.
+
+## Rule 3 — the platform written down
+
+A launch receipt's platform is compared with the process's when it is read back, so a test may not
+write it down: no lane can redden on a literal (on Linux it equals the process's), and macOS
+refuses it. The three judged positions, the closed vocabulary and the two boundaries it does not
+see: [[scripts/lint/docs/host-platform-marks/written-platform.meiva.okf.md|the platform written
+down]].
 
 ## Exemption
 

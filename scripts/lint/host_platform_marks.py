@@ -2,9 +2,9 @@
 # A test that branches on the machine it runs on injects a host, or names the one it needs.
 #
 # Run: `.venv/bin/python scripts/lint/host_platform_marks.py [--write-baseline] [--only FILE...] [PATH ...]`;
-# also the `lint-host-platform-marks` pre-commit hook. The two rules, the exemption and the
+# also the `lint-host-platform-marks` pre-commit hook. The three rules, the exemption and the
 # baseline are owned by the linked document.
-# meiva:link scripts/lint/docs/host-platform-marks.meiva.okf.md
+# meiva:link scripts/lint/docs/host-platform-marks/host-platform-marks.meiva.okf.md
 
 from __future__ import annotations
 
@@ -86,6 +86,13 @@ _WHICH = "shutil.which"
 # that runs it, which makes the lane that provisions it the one deciding the verdict.
 _IMPORTORSKIP = "pytest.importorskip"
 
+# meiva:note
+# The platform a launch receipt is written for is a `Platform.system`, and `Platform` holds
+# exactly these two values (`base/native_process/os_platform.py` refuses anything else). A
+# rule over a closed vocabulary has no ceiling: `"macos"` or `"osx"` never reach a receipt, so
+# counting the spellings the type cannot hold would only produce noise.
+PLATFORM_NAMES = frozenset({"linux", "darwin"})
+
 
 def _dotted(node: ast.expr) -> str | None:
     parts: list[str] = []
@@ -147,6 +154,60 @@ def _path_read(node: ast.AST) -> str | None:
     return None
 
 
+# meiva:note
+# A platform written down at a definition is the value every caller inherits: a module or class
+# constant (`NATIVE_TEST_SYSTEM = "linux"`, #8660) or a parameter default (the fixture whose
+# `platform: Platform = LINUX_X86` every caller that omits the argument receives, #8659). A
+# platform a test chooses is written where the test uses it, so the definition is the only place
+# these two shapes are judged. A `Platform(...)` construction counts as a platform: an object
+# built from the name is the name with a machine attached.
+def _platform_written(node: ast.expr) -> bool:
+    if isinstance(node, ast.Constant):
+        return isinstance(node.value, str) and node.value in PLATFORM_NAMES
+    if not isinstance(node, ast.Call):
+        return False
+    return (_dotted(node.func) or "").rsplit(".", maxsplit=1)[-1] == "Platform"
+
+
+# meiva:note
+# The `system=` argument of a start or bring-up call is the platform a launch receipt is written
+# for, and a host object in a test is a double: its platform is the canned one, so the receipt it
+# writes is refused the moment a read compares it with this process (#8659: `system=
+# command_runtime.host.platform.system`). Reading it off the host hides the substitution; the
+# value that can be read back is `Platform.current().system`.
+def _host_platform_argument(node: ast.AST) -> str | None:
+    if not isinstance(node, ast.Call):
+        return None
+    for keyword in node.keywords:
+        if keyword.arg == "system" and _is_host_platform(keyword.value):
+            return "system=<host>.platform"
+    return None
+
+
+# meiva:note
+# The attribute names of an expression, outermost first, whatever the chain is rooted in: `_dotted`
+# stops at a name, and the host a test reads the platform from is as often built inline
+# (`fake_host(uid=os.geteuid()).platform.system`, which is how `cli/commands/tests/test_single_box.py`
+# wrote a Linux receipt nobody could read back on macOS). Reading the tail rather than the root is
+# what makes both spellings one finding.
+def _attribute_names(node: ast.expr) -> list[str]:
+    names: list[str] = []
+    while isinstance(node, ast.Attribute):
+        names.append(node.attr)
+        node = node.value
+    return names
+
+
+def _is_host_platform(node: ast.expr) -> bool:
+    # meiva:note
+    # `sys.platform` and `os.name` are this process's own platform, which read 1 already judges:
+    # counting them here would report one fact twice and make the remedy ambiguous.
+    if _dotted(node) in ("sys.platform", _OS_NAME):
+        return False
+    names = _attribute_names(node)
+    return names[:2] == ["system", "platform"] or names[:1] == ["platform"]
+
+
 def _message(kind: str, what: str) -> str:
     if kind == "platform":
         return (
@@ -156,11 +217,29 @@ def _message(kind: str, what: str) -> str:
             '(launchd, TCC, codesign, swiftc), declare it with @pytest.mark.requires_host("darwin") '
             "and make a CI lane run it there. `# host-ok: <reason>` exempts what this rule cannot judge."
         )
+    if kind == "path":
+        return (
+            f"`{what}` resolves a program or module through the environment of whatever machine "
+            "runs the test, so a developer's macOS and the CI runner disagree. Build the `Host` the "
+            "test wants (`fake_host(programs={...})`) and assert through `host.which`; a lane that "
+            "provisions the program instead is declared with `# host-ok: <lane>`."
+        )
+    return _written_platform_message(what)
+
+
+# meiva:note
+# The rule-3 remedy, written once per kind because the site list is one line each: what the receipt
+# compares the value with, the two shapes that reach it, and the one declaration that keeps a value
+# that really is another platform. A reader of a red finds the sentence before the list.
+def _written_platform_message(what: str) -> str:
     return (
-        f"`{what}` resolves a program or module through the environment of whatever machine "
-        "runs the test, so a developer's macOS and the CI runner disagree. Build the `Host` the "
-        "test wants (`fake_host(programs={...})`) and assert through `host.which`; a lane that "
-        "provisions the program instead is declared with `# host-ok: <lane>`."
+        f"`{what}` writes down the platform the process is observed on. A launch receipt is read "
+        "back against `Platform.current().system` (`base/cluster/postgres.py` `read_receipt`), so a "
+        "written-down value is refused on the host it does not name: green in CI, red on macOS "
+        "(2026-11-08, #8659/#8660). Read it where it is used (`Platform.current().system`); a "
+        "platform the test chooses belongs at the call that chooses it "
+        '(`fake_host(platform=Platform("linux", ...))`); when a name really is another platform, '
+        "declare it with `# host-ok: <reason>` and record the reason."
     )
 
 
@@ -197,12 +276,90 @@ def _findings_in_tree(tree: ast.Module, src: str) -> list[tuple[int, str, str]]:
                     for kind, what in (
                         ("platform", _platform_read(child)),
                         ("path", _path_read(child)),
+                        ("system", _host_platform_argument(child)),
                     ):
                         if what is not None:
                             out.append((child.lineno, what, _message(kind, what)))
             visit(child, marked=marked, span=span)
 
-    visit(tree, marked=_module_marked(tree), span=None)
+    marked = _module_marked(tree)
+    visit(tree, marked=marked, span=None)
+    out.extend(_definition_findings(tree, lines, exempt_anywhere=exempt_anywhere, marked=marked))
+    return out
+
+
+# meiva:note
+# The shapes one statement can write a platform down in, without judging whether it is allowed. A
+# function is asked for its defaults and for the names its body binds, an assignment for its value.
+# Kept apart from the walk so the walk stays one loop, and so a statement added to Python lands
+# here, where it can be answered.
+def _written_platforms(statement: ast.stmt) -> list[tuple[int, int, str]]:
+    if isinstance(statement, ast.FunctionDef | ast.AsyncFunctionDef):
+        return _function_platforms(statement)
+    value = statement.value if isinstance(statement, ast.Assign | ast.AnnAssign) else None
+    if value is None or not _platform_written(value):
+        return []
+    return [(statement.lineno, statement.end_lineno or statement.lineno, "platform constant")]
+
+
+# meiva:note
+# A default every caller that omits the argument inherits, and a name the body binds from a host's
+# platform before handing it on — `system = fake_host(uid=os.geteuid()).platform.system`, which is
+# how one fixture wrote a Linux receipt that macOS refused at setup
+# (`cli/commands/tests/test_single_box.py`). `sys.platform` and `os.name` are the process's own
+# platform, so they are read 1's finding rather than a host's.
+def _function_platforms(
+    definition: ast.FunctionDef | ast.AsyncFunctionDef,
+) -> list[tuple[int, int, str]]:
+    found = [
+        (default.lineno, default.end_lineno or default.lineno, "platform default")
+        for default in (*definition.args.defaults, *definition.args.kw_defaults)
+        if default is not None and _platform_written(default)
+    ]
+    for node in ast.walk(definition):
+        if not isinstance(node, ast.Assign | ast.AnnAssign) or node.value is None:
+            continue
+        if _is_host_platform(node.value):
+            found.append((node.lineno, node.end_lineno or node.lineno, "host platform bound"))
+    return found
+
+
+# meiva:note
+# Rule 3 judges the definitions, not the uses: `fake_host(platform=DARWIN_ARM64)` is a test
+# choosing the host it wants and stays silent, while a constant, a default or a bound name carrying
+# the platform hands every caller the same answer and is judged here. The walk mirrors
+# `_findings_in_tree` so a `# host-ok:` inside a function, or a module/class `requires_host` mark,
+# means the same thing.
+def _definition_findings(
+    tree: ast.Module, lines: list[str], *, exempt_anywhere: bool, marked: bool
+) -> list[tuple[int, str, str]]:
+    out: list[tuple[int, str, str]] = []
+
+    def visit(
+        owner: ast.Module | ast.ClassDef, span: tuple[int, int] | None, *, skip: bool
+    ) -> None:
+        for statement in owner.body:
+            if isinstance(statement, ast.ClassDef):
+                inner = (statement.lineno, statement.end_lineno or statement.lineno)
+                visit(
+                    statement,
+                    inner,
+                    skip=skip or any(_marked(d) for d in statement.decorator_list),
+                )
+                continue
+            decorators = (
+                statement.decorator_list
+                if isinstance(statement, ast.FunctionDef | ast.AsyncFunctionDef)
+                else ()
+            )
+            if skip or any(_marked(d) for d in decorators):
+                continue
+            for start, end, what in _written_platforms(statement):
+                if exempt_anywhere and _exempt(lines, span or (start, end)):
+                    continue
+                out.append((start, what, _message("written", what)))
+
+    visit(tree, None, skip=marked)
     return out
 
 
@@ -571,7 +728,7 @@ def _verdict(
     print(
         "\nHost-platform violations. A test injects the host it wants; only a subject that IS "
         "the host (launchd, TCC, codesign, swiftc) takes @pytest.mark.requires_host. The rules "
-        "are owned by scripts/lint/docs/host-platform-marks.meiva.okf.md.",
+        "are owned by scripts/lint/docs/host-platform-marks/host-platform-marks.meiva.okf.md.",
         file=sys.stderr,
     )
     return 1

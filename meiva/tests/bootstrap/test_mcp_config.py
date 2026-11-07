@@ -17,8 +17,23 @@ from base.packages.plugins.mcp_enabled import (
 from base.paths import meiva_home
 from meiva.tests.fixtures.pin_agent import pin_agent
 
-_MACOS = Platform("darwin", "arm64", "/usr/bin/python3")
-_LINUX = Platform("linux", "x86_64", "/usr/bin/python3")
+# meiva:note
+# The two platforms this module's cases choose between; they drive the branch a machine takes, so
+# they are inputs, not this process's platform.
+_MACOS = Platform(
+    # meiva:note
+    # host-ok: the two platforms this module's cases choose between; a value that must equal the one this process is observed on reads `Platform.current()` (`base/native_process/os_platform.py`)
+    "darwin",
+    "arm64",
+    "/usr/bin/python3",
+)
+_LINUX = Platform(
+    # meiva:note
+    # host-ok: the two platforms this module's cases choose between; a value that must equal the one this process is observed on reads `Platform.current()` (`base/native_process/os_platform.py`)
+    "linux",
+    "x86_64",
+    "/usr/bin/python3",
+)
 
 
 def _write(path: Path, servers: dict[str, dict[str, str]]) -> None:

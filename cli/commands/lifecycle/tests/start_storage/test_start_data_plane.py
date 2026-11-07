@@ -120,7 +120,7 @@ def test_gateway_data_plane_refuses_a_home_without_a_ledger_before_any_effect(
             retained_children=[],
             database_factory=operator_database,
             machine=command_runtime.machine,
-            system=command_runtime.host.platform.system,
+            system=NATIVE_TEST_SYSTEM,
             timers=command_runtime.timers,
             environ=command_runtime.config.process_environment(),
         )
@@ -149,7 +149,7 @@ def test_gateway_data_plane_no_record_is_error(
             retained_children=[],
             database_factory=operator_database,
             machine=command_runtime.machine,
-            system=command_runtime.host.platform.system,
+            system=NATIVE_TEST_SYSTEM,
             timers=command_runtime.timers,
             environ=command_runtime.config.process_environment(),
         )
@@ -175,7 +175,7 @@ def test_local_launch_without_owner_cannot_publish_authority(
             retained_children=None,
             database_factory=operator_database,
             machine=command_runtime.machine,
-            system=command_runtime.host.platform.system,
+            system=NATIVE_TEST_SYSTEM,
             timers=command_runtime.timers,
             environ=command_runtime.config.process_environment(),
         )

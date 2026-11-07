@@ -1,6 +1,8 @@
 {
   "Host.system()": 7,
   "is_linux()": 1,
+  "platform constant": 3,
+  "platform default": 3,
   "shutil.which(...)": 29,
   "sys.platform": 26
 }

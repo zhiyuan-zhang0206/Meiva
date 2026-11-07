@@ -4,7 +4,7 @@
 # The plugin is the only place a platform-specific test may be skipped: the test names the
 # host it needs and this module turns that into the skip, so a reader sees the declaration
 # rather than a `skipif(sys.platform ...)` nobody rereads.
-# meiva:link scripts/lint/docs/host-platform-marks.meiva.okf.md
+# meiva:link scripts/lint/docs/host-platform-marks/host-platform-marks.meiva.okf.md
 
 from __future__ import annotations
 
