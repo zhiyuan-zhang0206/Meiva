@@ -32,6 +32,7 @@ from base.cluster.dataplane.pg_tools import pg_tool
 from base.host.env import port_lease
 from base.host.system.hostport import Host
 from base.host.system.tests.fake_commands import real_commands_host
+from base.native_process.os_platform import Platform
 from base.paths import meiva_home
 from cli.commands.data_plane import cluster_instance as instance
 from cli.commands.data_plane.config import DataPlaneConfig
@@ -68,11 +69,21 @@ _PG_TEMPLATE_KEY = pytest.StashKey[Path]()
 # `instance/test_redis_launch_argv.py`.
 NATIVE_TEST_MACOS = False
 
+
 # meiva:note
 # The operating system a launch receipt is written for: `postgres.start` takes it as a value, and a
-# receipt that names another system is refused when it is read back. This suite drives the real
-# server the way the Linux lane does, which is the same stand-in `NATIVE_TEST_MACOS` above names.
-NATIVE_TEST_SYSTEM = "linux"
+# receipt that names another system is refused when it is read back — against the platform this
+# process is observed on, not against a stand-in. A canned `"linux"` therefore made every one of
+# these receipts unreadable on macOS: ten tests failed there on a tree CI passes (#6472, #6452).
+# Only the receipt's platform follows the process; `NATIVE_TEST_MACOS` above still says which
+# branch of binary resolution the suite drives, so the servers started are the same ones as before.
+def _native_test_system() -> str:
+    # meiva:note
+    # host-ok: the launch receipt is read back by base/cluster/postgres.py `read_receipt` against Platform.current().system, so the value must be the platform this process is observed on (#6472)
+    return Platform.current().system
+
+
+NATIVE_TEST_SYSTEM = _native_test_system()
 
 
 # meiva:note
