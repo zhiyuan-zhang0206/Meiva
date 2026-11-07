@@ -54,6 +54,7 @@ class HarnessTurnProjector:
         self._text_item: TimelineItem | None = None
         self._text = ""
         self._has_assistant_text = False
+        self._last_chat_raw = ""
         self._tools: dict[str, tuple[TimelineItem, datetime]] = {}
         self._seen_tools: set[str] = set()
         self._pending: dict[str, TimelineItem] = {}
@@ -81,6 +82,7 @@ class HarnessTurnProjector:
 
     async def record_control(self, text: str, *, error: bool = False) -> None:
         async with self._lock:
+            self._last_chat_raw = ""
             prefix = "error:" if error else "status:"
             self._new_item("system_marker", f"{prefix}{text}", self._clock.now())
             await self._flush()
@@ -89,6 +91,7 @@ class HarnessTurnProjector:
         self, commit: Callable[[], Awaitable[list[TimelineItem]]]
     ) -> list[TimelineItem]:
         async with self._lock:
+            self._last_chat_raw = ""
             await self._flush()
             items = await commit()
             for item in items:
@@ -127,31 +130,66 @@ class HarnessTurnProjector:
                 self._new_item("system_marker", f"error:Harness execution stopped: {error}", now)
             await self._flush()
 
+    async def _on_late_reasoning(
+        self, event: ReasoningDelta | ReasoningText | TextDelta | AssistantText, now: datetime
+    ) -> bool:
+        if (
+            isinstance(event, ReasoningText)
+            and event.text
+            and self._text_item is not None
+            and self._text_item.kind == "agent_chat"
+        ):
+            self._new_item("agent_reasoning", event.text, now)
+            self._reasoning_ended = now
+            await self._flush()
+            return True
+        return False
+
+    def _is_duplicate_assistant_text(self, event: BridgeEvent, *, started: bool) -> bool:
+        return bool(
+            started
+            and isinstance(event, AssistantText)
+            and self._last_chat_raw
+            and (
+                self._last_chat_raw == event.text
+                or self._last_chat_raw.strip() == (event.text or "").strip()
+            )
+        )
+
+    def _step_text_item(
+        self, current: TimelineItem | None, *, reasoning: bool, complete: bool, now: datetime
+    ) -> TimelineItem:
+        if current is None:
+            self._text_started = self._activity_started
+            return (
+                self._new_item("agent_reasoning", self._text, now)
+                if reasoning
+                else self._new_chat(self._text, now, pending=not complete)
+            )
+        if reasoning:
+            return self._revise(current, self._text)
+        payload, user_facing = self._reply(self._text)
+        return self._revise(current, payload, user_facing=user_facing)
+
     async def _on_text(
         self, event: ReasoningDelta | ReasoningText | TextDelta | AssistantText, now: datetime
     ) -> None:
+        if await self._on_late_reasoning(event, now):
+            return
         reasoning = isinstance(event, (ReasoningDelta, ReasoningText))
         complete = isinstance(event, (ReasoningText, AssistantText))
         kind = "agent_reasoning" if reasoning else "agent_chat"
         if self._text_item is not None and self._text_item.kind != kind:
             self._close_text(now)
         started = self._text_item is None
-        if started and not event.text:
+        if (started and not event.text) or self._is_duplicate_assistant_text(
+            event, started=started
+        ):
             return
         self._text = (event.text or self._text) if complete else self._text + event.text
-        current = self._text_item
-        if current is None:
-            self._text_started = self._activity_started
-            self._text_item = (
-                self._new_item("agent_reasoning", self._text, now)
-                if reasoning
-                else self._new_chat(self._text, now, pending=not complete)
-            )
-        elif reasoning:
-            self._text_item = self._revise(current, self._text)
-        else:
-            payload, user_facing = self._reply(self._text)
-            self._text_item = self._revise(current, payload, user_facing=user_facing)
+        self._text_item = self._step_text_item(
+            self._text_item, reasoning=reasoning, complete=complete, now=now
+        )
         self._has_assistant_text |= not reasoning
         if complete:
             self._close_text(now)
@@ -168,6 +206,7 @@ class HarnessTurnProjector:
             self._check_visibility(self._text)
             if self._text_item.activity_pending:
                 self._revise(self._text_item, self._text_item.payload, activity_pending=False)
+            self._last_chat_raw = self._text
         self._text_item = None
         self._text = ""
 
@@ -176,6 +215,7 @@ class HarnessTurnProjector:
             return
         self._seen_tools.add(event.tool_use_id)
         self._close_text(now)
+        self._last_chat_raw = ""
         code_ms = _elapsed(self._reasoning_ended or self._activity_started, now)
         self._new_item(
             "agent_code",
