@@ -69,6 +69,10 @@ def suite_is_not_inside_an_exec_domain(monkeypatch: pytest.MonkeyPatch) -> None:
 # port that no longer listened) reached an unrelated test as a bare `Connection refused`. Clearing
 # the slot at teardown makes "an earlier test is still pinned" impossible; a test that needs a
 # context pins its own, and one that binds a wire keeps it for its own body.
+#
+# This must stay the first autouse fixture declared in this module. A fixture declared earlier sets
+# up earlier and therefore tears down later, so a guard declared after `gateway_wire` would run
+# after that fixture restored its previous binding in its own teardown — and the leak would be back.
 @pytest.fixture(autouse=True)
 def no_pinned_sdk_context_leaks() -> Iterator[None]:
     yield
