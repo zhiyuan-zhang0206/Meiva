@@ -2052,6 +2052,7 @@ INSERT INTO schema_migrations (name) VALUES ('20261101T091332_retire-display-and
 INSERT INTO schema_migrations (name) VALUES ('20261102T140800_add-notice-source-verified-by');
 INSERT INTO schema_migrations (name) VALUES ('20261106T032125_user-delivery-messages');
 INSERT INTO schema_migrations (name) VALUES ('20261107T080823_drop-agent-pages');
+INSERT INTO schema_migrations (name) VALUES ('20261107T103459_delete-inbound-reminders');
 INSERT INTO schema_migrations (name) VALUES ('20261107T103500_drop-agent-impersonations');
 
 -- Domain receipts never expire into fresh notice effects.
