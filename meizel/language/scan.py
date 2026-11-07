@@ -238,6 +238,7 @@ class Scanner(AmbientAccess):
         self.argv_wrappers = _argv_wrappers(policy)
         self.injected_sites = frozenset(policy.reasons("injected-calls", "sites"))
         self.injected: list[str] = []
+        self.refused_sites: dict[str, str] = {}
         self.fixture_state = fixtures.FixtureState()
         self.fn_depth = 0
         self.qualnames: list[str] = []
@@ -286,13 +287,18 @@ class Scanner(AmbientAccess):
         self.children(self.tree)
         self.purity_state.record_module(self.tree)
         # meiva:note
-        # A declared site this file did not honour (the call is gone, the receiver is not a parameter)
-        # approves nothing: the problem rides the file, so a run that reads only this file says it.
+        # A declared site this file did not honour approves nothing, and the problem rides the file so a
+        # run that reads only this file says it. When the call is still there and a condition refused
+        # it, the refusal is named: a receiver that is not a parameter and one annotated a path each
+        # keep their read, and the two need different edits.
         declared = {s for s in self.injected_sites if s.startswith(f"{self.path}#")}
         for site in sorted(declared - set(self.injected)):
+            why = self.refused_sites.get(
+                site, "the function makes no call with that receiver and method"
+            )
             self.problem(
                 1,
-                f"[injected-calls.sites] {site!r} approves no injected call at that function",
+                f"[injected-calls.sites] {site!r} approves no injected call: {why}",
                 Code.STALE_APPROVAL,
             )
         return FileScan(
@@ -684,9 +690,16 @@ class Scanner(AmbientAccess):
         if not isinstance(func, ast.Attribute) or not isinstance(func.value, ast.Name):
             return False
         site = f"{self.path}#{'.'.join(self.qualnames)}#{func.value.id}.{func.attr}"
-        if func.value.id not in self.scope.parameters or site not in self.injected_sites:
+        if site not in self.injected_sites:
             return False
-        if purity.path_annotated(self.scope.parameters[func.value.id]):
+        receiver = func.value.id
+        if receiver not in self.scope.parameters:
+            self.refused_sites[site] = f"`{receiver}` is not a parameter of the function"
+            return False
+        if purity.path_annotated(self.scope.parameters[receiver]):
+            self.refused_sites[site] = (
+                f"`{receiver}` is annotated a path type, so a call on it reads"
+            )
             return False
         self.injected.append(site)
         return True

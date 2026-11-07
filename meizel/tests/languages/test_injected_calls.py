@@ -67,6 +67,10 @@ def test_a_declared_real_read_is_refused(make_repo: RepoFactory) -> None:
     site = "app/mod.py#read#Path.read_text"
     root = repo(make_repo, REAL, {site: "claims the read is injected"})
     assert ("stale-approval", "app/mod.py") in failures(root)
+    assert [d.message for d in diagnostics(root, "stale-approval")] == [
+        f"[injected-calls.sites] {site!r} approves no injected call: "
+        "the function makes no call with that receiver and method"
+    ]
     assert ("impure-call", "app/mod.py") in failures(root)
 
 
@@ -81,6 +85,10 @@ def test_a_declared_read_through_a_local_path_is_refused(make_repo: RepoFactory)
     site = "app/mod.py#read#p.read_text"
     root = repo(make_repo, source, {site: "claims the read is injected"})
     assert [d.code.value for d in diagnostics(root, "stale-approval")] == ["stale-approval"]
+    assert [d.message for d in diagnostics(root, "stale-approval")] == [
+        f"[injected-calls.sites] {site!r} approves no injected call: "
+        "`p` is not a parameter of the function"
+    ]
     assert [d.code.value for d in diagnostics(root, "impure-call")] == ["impure-call"]
 
 
@@ -95,6 +103,10 @@ def test_a_declared_read_on_a_path_parameter_is_refused(make_repo: RepoFactory) 
     site = "app/mod.py#read#path.read_text"
     root = repo(make_repo, source, {site: "claims the read is injected"})
     assert [d.code.value for d in diagnostics(root, "stale-approval")] == ["stale-approval"]
+    assert [d.message for d in diagnostics(root, "stale-approval")] == [
+        f"[injected-calls.sites] {site!r} approves no injected call: "
+        "`path` is annotated a path type, so a call on it reads"
+    ]
     assert [d.code.value for d in diagnostics(root, "impure-call")] == ["impure-call"]
 
 
