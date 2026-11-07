@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from typing import NamedTuple
 
 from meizel.contracts.debt import PURITY_CODES, file_key, source_of
-from meizel.contracts.manifest import Manifest, effective_purity, manifest_path, within
+from meizel.contracts.manifest import Manifest, effective_purity, manifest_path, unlicensed, within
 from meizel.contracts.policy import Policy
 from meizel.graph.graphs import reachable
 from meizel.graph.model import Code, DebtKey, Diagnostic, Fact, FactKind
@@ -328,7 +328,7 @@ def _module_purity_diagnostics(
                     _purity_debt(owner, scan.path, fact.dst, mode),
                 )
             )
-    for item in scan.purity:
+    for item in unlicensed(manifests, scan):
         if item.code is Code.NESTED_PATCH_TARGET and is_test_file(scan.path):
             continue
         found.append(

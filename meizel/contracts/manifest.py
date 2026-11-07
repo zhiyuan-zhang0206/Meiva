@@ -20,9 +20,11 @@ from meizel.contracts.debt import (
     parse_debt,
     total,
 )
+from meizel.graph import judged
 from meizel.graph.graphs import cycle_through, strongly_connected, unneeded_back_edges
-from meizel.graph.model import OS_KINDS, Code, Diagnostic, KindName
+from meizel.graph.model import OS_KINDS, Code, Diagnostic, KindName, PurityItem, covered_kinds
 from meizel.graph.universe import MANIFEST, SOURCE_EXTENSIONS, Universe, is_private_module
+from meizel.language.scan import FileScan
 from meizel.roles import check_table
 
 __all__ = [
@@ -32,6 +34,7 @@ __all__ = [
     "first",
     "load_manifests",
     "manifest_path",
+    "unlicensed",
     "within",
 ]
 
@@ -142,6 +145,16 @@ class Manifest:
                     return number
         return 1
 
+    # meiva:note
+    # The kinds this manifest's `[roots]` declaration for `file` licenses, each with the kinds that
+    # kind covers. One read of the relation, shared by the rule that reports an acquisition and the
+    # purity rule that would otherwise record the same call as debt.
+    def licensed_kinds(self, file: str) -> frozenset[KindName]:
+        root = self.roots.get(file)
+        if root is None:
+            return frozenset()
+        return frozenset(covered for declared in root.kinds for covered in covered_kinds(declared))
+
     def debt_line(self, code: Code, key: str) -> int:
         """Line of a recorded debt, or of its table when the key is written differently."""
         header = re.compile(rf"^\s*\[\s*debt\s*\.\s*{re.escape(code.value)}\s*\]")
@@ -207,6 +220,47 @@ class Manifest:
             "must only shrink. Fix this violation rather than recording it; `python -m meizel debt "
             "record` exists for deliberate exceptions."
         )
+
+
+# meiva:note
+# The purity items a directory's `[roots]` declarations do not license: one call seen by two rules,
+# `ambient-read` leaving the acquisition alone and `impure-call` charging for it again. A call is
+# licensed on the line its acquisition is recorded on (any language, so a TypeScript call with no
+# name the ambient table knows is covered), or on its name when that table judges it an
+# unconditional reader of a licensed kind; a call of another kind keeps its record (`time.sleep`
+# under a `clock` root is an effect of the clock's own door, not a read of the clock).
+def unlicensed(manifests: Mapping[str, Manifest], scan: FileScan) -> list[PurityItem]:
+    owner, _, name = scan.path.rpartition("/")
+    manifest = manifests.get(owner)
+    allowed = frozenset[KindName]() if manifest is None else manifest.licensed_kinds(name)
+    return [
+        item
+        for item in scan.purity
+        if not (item.code is Code.IMPURE_CALL and allowed and _licensed(allowed, scan, item))
+    ]
+
+
+# meiva:note
+# The kinds one purity item's call is licensed by, empty when the declaration does not reach it. The
+# purity rule keeps the short spelling a call canonicalises to (`datetime.now` for the table's
+# `datetime.datetime.now`), so the table's own spelling is the second candidate -- the same name, not
+# a second rule -- and a call reached only when given no value reads nothing once handed the value,
+# so an `unless` clause names no kind here.
+def _licensed(kinds: frozenset[KindName], scan: FileScan, item: PurityItem) -> frozenset[KindName]:
+    on_line = frozenset(
+        acquisition.kind
+        for acquisition in scan.ambient
+        if acquisition.line == item.line and acquisition.kind in kinds
+    )
+    if on_line or "#" in item.key:
+        return on_line
+    reading = judged(item.key)
+    if reading is None and "." in item.key:
+        head, _, _ = item.key.partition(".")
+        reading = judged(f"{head}.{item.key}")
+    if reading is None or reading.judgment.unless is not None:
+        return frozenset()
+    return frozenset(reading.judgment.kinds) & kinds
 
 
 class _Reader:

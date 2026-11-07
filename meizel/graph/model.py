@@ -29,6 +29,7 @@ __all__ = [
     "Sources",
     "TypeCastSite",
     "Unless",
+    "covered_kinds",
     "known_kind",
 ]
 
@@ -141,6 +142,28 @@ class AmbientKind(StrEnum):
 # meiva:note
 # The names of `AmbientKind`: the kinds no repository declares, which a state kind may not reuse.
 OS_KINDS: tuple[KindName, ...] = tuple(kind.value for kind in AmbientKind)
+
+# meiva:note
+# The kinds a `[roots]` declaration of one kind also licenses, and why the relation has one direction.
+#
+# `clock` covers `monotonic`: a file already allowed the instant is allowed the duration, because a
+# reading of `time.monotonic` says less about the world than the wall clock the same root reads — it
+# orders events inside one process and is compared with deadlines that process wrote.
+#
+# `monotonic` does not cover `clock`, and that direction is the reason the kind exists: a root
+# declared only for `monotonic` still fails on `time.time()` and `datetime.now()`. Making this map
+# symmetric, or dropping `monotonic` back into `clock`, would silently license the wall clock in every
+# poll loop that times a wait — the exact read the narrow kind was introduced to keep out — so a
+# change here needs the failing case, not a tidy-up.
+#
+# The kinds a declaration of `kind` licenses are therefore `kind` itself and what it covers.
+_COVERED_KINDS: dict[KindName, frozenset[KindName]] = {
+    AmbientKind.CLOCK: frozenset({AmbientKind.MONOTONIC})
+}
+
+
+def covered_kinds(kind: KindName) -> frozenset[KindName]:
+    return _COVERED_KINDS.get(kind, frozenset()) | {kind}
 
 
 # meiva:note
