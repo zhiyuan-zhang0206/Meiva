@@ -65,12 +65,15 @@ def load_harness_message_count(conn: Connection, agent_id: int) -> int:
         return _int_from_row(cur.fetchone())
 
 
-def has_harness_messages(conn: Connection, agent_id: int) -> bool:
+def has_harness_messages(conn: Connection, agent_id: int, *, since: str | None = None) -> bool:
+    query = "SELECT 1 FROM agent_harness_messages WHERE agent_id = %s"
+    params: list[object] = [agent_id]
+    if since is not None:
+        query += " AND created_at >= %s"
+        params.append(since)
+    query += " LIMIT 1"
     with conn.cursor() as cur:
-        cur.execute(
-            "SELECT 1 FROM agent_harness_messages WHERE agent_id = %s LIMIT 1",
-            (agent_id,),
-        )
+        cur.execute(query, tuple(params))
         return cur.fetchone() is not None
 
 
@@ -95,12 +98,16 @@ def load_harness_timeline_items(
     *,
     limit: int | None = None,
     before_seq: int | None = None,
+    since: str | None = None,
 ) -> list[TimelineItem]:
     query = "SELECT item FROM agent_harness_messages WHERE agent_id = %s"
     params: list[object] = [agent_id]
     if before_seq is not None:
         query += " AND seq < %s"
         params.append(before_seq)
+    if since is not None:
+        query += " AND created_at >= %s"
+        params.append(since)
     query += " ORDER BY seq ASC"
     if limit is not None:
         query += " LIMIT %s"
@@ -116,12 +123,16 @@ async def aload_harness_timeline_items(
     *,
     limit: int | None = None,
     before_seq: int | None = None,
+    since: str | None = None,
 ) -> list[TimelineItem]:
     query = "SELECT item FROM agent_harness_messages WHERE agent_id = %s"
     params: list[object] = [agent_id]
     if before_seq is not None:
         query += " AND seq < %s"
         params.append(before_seq)
+    if since is not None:
+        query += " AND created_at >= %s"
+        params.append(since)
     query += " ORDER BY seq ASC"
     if limit is not None:
         query += " LIMIT %s"

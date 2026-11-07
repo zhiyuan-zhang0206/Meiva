@@ -227,6 +227,13 @@ def load_current_messages(db: Database, agent_id: int) -> list[BaseMessage]:
         raise _read_unavailable(agent_id, exc) from exc
 
 
+def _compact_cutoff(checkpoint_items: Sequence[TimelineItem]) -> str | None:
+    for it in checkpoint_items:
+        if it.kind == "inbound_compact_summary" and it.created_at:
+            return it.created_at
+    return None
+
+
 def _merge_cross_harness_items(
     checkpoint_items: Sequence[TimelineItem],
     harness_items: list[TimelineItem],
@@ -235,6 +242,14 @@ def _merge_cross_harness_items(
         return list(harness_items)
     if not harness_items:
         return list(checkpoint_items)
+
+    compact_ts = _compact_cutoff(checkpoint_items)
+    if compact_ts is not None:
+        harness_items = [
+            it for it in harness_items if it.created_at and it.created_at >= compact_ts
+        ]
+        if not harness_items:
+            return list(checkpoint_items)
 
     prompt_item = (
         checkpoint_items[0]
@@ -265,13 +280,12 @@ def load_current_timeline_items(
                 return harness_items
             items, _ = build_timeline_items(messages, inputs=inputs)
             return _merge_cross_harness_items(items, harness_items)
-        if not has_harness:
-            messages = load_current_messages(db, agent_id)
-            items, _ = build_timeline_items(messages, inputs=inputs)
-            return items
         messages = load_current_messages(db, agent_id)
         items, _ = build_timeline_items(messages, inputs=inputs)
-        harness_items = load_harness_timeline_items(conn, agent_id)
+        compact_ts = _compact_cutoff(items)
+        if not has_harness_messages(conn, agent_id, since=compact_ts):
+            return items
+        harness_items = load_harness_timeline_items(conn, agent_id, since=compact_ts)
         return _merge_cross_harness_items(items, harness_items)
 
 
@@ -608,22 +622,24 @@ def _meiva_harness_response(
     if early is not None:
         return early
 
+    messages = (
+        preloaded_messages
+        if preloaded_messages is not None
+        else load_current_messages(db, agent_id)
+    )
+    items_cp, msg_count = _current_items(request, agent_id, messages, limit, before, read=read)
+    compact_ts = _compact_cutoff(items_cp)
+
     with gateway_state(request).db_pool.connection() as conn:
-        has_harness = has_harness_messages(conn, agent_id)
+        has_harness = has_harness_messages(conn, agent_id, since=compact_ts)
 
     if not has_harness:
-        messages = (
-            preloaded_messages
-            if preloaded_messages is not None
-            else load_current_messages(db, agent_id)
-        )
         if before is None:
             return _head_response(request, agent_id, messages, limit, boundary_ids, read=read)
-        items, msg_count = _current_items(request, agent_id, messages, limit, before, read=read)
-        paged = _current_page_before(items, cursor, limit, depth, boundary_ids, msg_count)
+        paged = _current_page_before(items_cp, cursor, limit, depth, boundary_ids, msg_count)
         if isinstance(paged, TimelineResponse):
             return paged
-        del messages, items
+        del messages, items_cp
         older_window, has_more = _load_history_tail(
             db, agent_id, boundary_ids, 1, limit, depth, read=read
         )
@@ -631,14 +647,8 @@ def _meiva_harness_response(
             items=[*paged, *older_window], msg_count=msg_count, has_more=has_more
         )
 
-    messages = (
-        preloaded_messages
-        if preloaded_messages is not None
-        else load_current_messages(db, agent_id)
-    )
-    items_cp, msg_count = _current_items(request, agent_id, messages, limit, before, read=read)
     with gateway_state(request).db_pool.connection() as conn:
-        items_harness = load_harness_timeline_items(conn, agent_id)
+        items_harness = load_harness_timeline_items(conn, agent_id, since=compact_ts)
     merged = _merge_cross_harness_items(items_cp, items_harness)
 
     if before is None:
