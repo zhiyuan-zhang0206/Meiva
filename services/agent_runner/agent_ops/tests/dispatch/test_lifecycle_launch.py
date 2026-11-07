@@ -104,7 +104,12 @@ async def test_lifecycle_enqueues_the_termination_of_a_real_agent(
 
     assert (status, result) == (
         "completed",
-        {"status": "enqueued", "open_tasks": None, "shell_sessions": None},
+        {
+            "status": "enqueued",
+            "open_tasks": None,
+            "shell_sessions": None,
+            "attached": None,
+        },
     )
 
 

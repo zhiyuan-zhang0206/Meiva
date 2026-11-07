@@ -46,6 +46,14 @@ def local_machine(
     return set_machine_identity(role="agent-runner")
 
 
+_ENQUEUED = {
+    "status": "enqueued",
+    "open_tasks": None,
+    "shell_sessions": None,
+    "attached": None,
+}
+
+
 def _set_agent_machine(db_conn: psycopg.Connection, agent_id: int, machine: str) -> None:
     with db_conn.cursor() as cur:
         cur.execute(
@@ -121,7 +129,7 @@ class TestTerminateRouting:
                 json={"message": "retain this note"},
             )
         assert resp.status_code == 200
-        assert resp.json() == {"status": "enqueued", "open_tasks": None, "shell_sessions": None}
+        assert resp.json() == _ENQUEUED
         (call,) = runner.calls_of("lifecycle")
         assert call.payload["path"] == f"/api/agents/{agent_id}/terminate"
         assert call.payload["body"]["message"] == "retain this note"
@@ -148,7 +156,7 @@ class TestTerminateRouting:
                 json={"force": True, "source": "user"},
             )
         assert resp.status_code == 200
-        assert resp.json() == {"status": "enqueued", "open_tasks": None, "shell_sessions": None}
+        assert resp.json() == _ENQUEUED
         (body,) = [payload["body"] for payload in runner.payloads("lifecycle")]
         assert body["force"] is True
         assert body["source"] == "user"
@@ -222,7 +230,7 @@ def test_remote_home_machine_is_forwarded(
         _set_agent_machine(db_conn, agent_id, "stale-runner")
         resp = client.post(f"/api/agents/{agent_id}/terminate")
     assert resp.status_code == 200
-    assert resp.json() == {"status": "enqueued", "open_tasks": None, "shell_sessions": None}
+    assert resp.json() == _ENQUEUED
 
 
 # meiva:note
@@ -329,7 +337,7 @@ class TestTerminateOpenTasksHint:
             _set_agent_machine(db_conn, agent_id, gateway_local_runner.name)
             resp = client.post(f"/api/agents/{agent_id}/terminate")
         assert resp.status_code == 200
-        assert resp.json() == {"status": "enqueued", "open_tasks": None, "shell_sessions": None}
+        assert resp.json() == _ENQUEUED
 
     def test_open_tasks_reported_newest_first(
         self,

@@ -17,6 +17,13 @@ from gateway.tests.support.runner_ops.ops_stub import OpsReply, RunnerOps, runne
 
 pytestmark = pytest.mark.usefixtures("gateway_local_runner")
 
+_ENQUEUED = {
+    "status": "enqueued",
+    "open_tasks": None,
+    "shell_sessions": None,
+    "attached": None,
+}
+
 
 @pytest.fixture
 def withdrawn_model(add_models: AddModels, model_catalog: ModelCatalog) -> tuple[str, ModelCatalog]:
@@ -388,7 +395,7 @@ class TestTerminate:
             ]
             resp = client.post(f"/api/agents/{agent_id}/terminate")
         assert resp.status_code == 200
-        assert resp.json() == {"status": "enqueued", "open_tasks": None, "shell_sessions": None}
+        assert resp.json() == _ENQUEUED
         assert inbound_rows(db_conn, agent_id) == [("", "terminate", "user")]
 
     def test_terminate_already_terminated_is_noop(self, db_conn: psycopg.Connection) -> None:
@@ -407,6 +414,7 @@ class TestTerminate:
             "status": "already_terminated",
             "open_tasks": None,
             "shell_sessions": None,
+            "attached": None,
         }
         assert inbound_rows(db_conn, agent_id) == []
 
@@ -428,7 +436,7 @@ class TestTerminate:
             ]
             resp = client.post(f"/api/agents/{agent_id}/terminate", json={"force": True})
         assert resp.status_code == 200
-        assert resp.json() == {"status": "enqueued", "open_tasks": None, "shell_sessions": None}
+        assert resp.json() == _ENQUEUED
 
         row = _agent_row(db_conn, agent_id)
         assert row is not None and row[4] == "terminated"
@@ -446,7 +454,7 @@ class TestTerminate:
                 f"/api/agents/{agent_id}/terminate",
                 json={"force": True, "source": "agent:42"},
             )
-        assert resp.json() == {"status": "enqueued", "open_tasks": None, "shell_sessions": None}
+        assert resp.json() == _ENQUEUED
 
         rows = inbound_rows(db_conn, agent_id)
         assert rows == [("", "terminate", "agent:42")]
@@ -471,7 +479,7 @@ class TestTerminate:
                 )
                 before = cur.fetchone()
             resp = client.post(f"/api/agents/{agent_id}/terminate", json={"force": True})
-        assert resp.json() == {"status": "enqueued", "open_tasks": None, "shell_sessions": None}
+        assert resp.json() == _ENQUEUED
         with db_conn.cursor() as cur:
             cur.execute(
                 "SELECT status_changed_at FROM agents_meta WHERE id = %s",

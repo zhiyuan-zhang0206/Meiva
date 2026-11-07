@@ -44,6 +44,7 @@ from meiva import gateway_client
 from meiva.agents import peers, schedule_capability
 from meiva.agents.contracts import (
     CommandInfo,
+    HarnessAttachment,
     HarnessAvailability,
     Machine,
     Neighbor,
@@ -62,6 +63,7 @@ from meiva.agents.gateway_rows import (
     OpenTasksHint as OpenTasksHint,
 )
 from meiva.agents.gateway_rows import (
+    harness_attachment_from_dict,
     machines_from_rows,
     neighbor_from_row,
     object_rows,
@@ -81,6 +83,7 @@ __all_for_meiva__ = [
     "CancelResult",
     "CommandInfo",
     "Harness",
+    "HarnessAttachment",
     "HarnessAvailability",
     "Machine",
     "Neighbor",
@@ -115,14 +118,17 @@ class TerminateOutcome(str):
     """What a terminate call returned: the acceptance status as a string —
     compare it directly ("enqueued" / "already_terminated") — plus `status` as
     the enum, `open_tasks`: the tasks the agent still owned as it went down, or
-    None, and `shell_sessions`: what `kill_all_shell_sessions` did, or None
-    when no shell session was killed on request."""
+    None, `shell_sessions`: what `kill_all_shell_sessions` did, or None when no
+    shell session was killed on request, and `attached`: the harness
+    registration its home machine held when the call ran, or None when there was
+    none or it could not be read."""
 
-    __slots__ = ("open_tasks", "shell_sessions", "status")
+    __slots__ = ("attached", "open_tasks", "shell_sessions", "status")
 
     status: TerminateResult
     open_tasks: OpenTasksHint | None
     shell_sessions: ShellSessionsKill | None
+    attached: HarnessAttachment | None
 
     def __new__(
         cls,
@@ -130,17 +136,20 @@ class TerminateOutcome(str):
         open_tasks: OpenTasksHint | None = None,
         *,
         shell_sessions: ShellSessionsKill | None = None,
+        attached: HarnessAttachment | None = None,
     ) -> TerminateOutcome:
         self = super().__new__(cls, status.value)
         self.status = status
         self.open_tasks = open_tasks
         self.shell_sessions = shell_sessions
+        self.attached = attached
         return self
 
     def __repr__(self) -> str:
         return (
             f"TerminateOutcome(status={self.status.value!r}, "
-            f"open_tasks={self.open_tasks!r}, shell_sessions={self.shell_sessions!r})"
+            f"open_tasks={self.open_tasks!r}, shell_sessions={self.shell_sessions!r}, "
+            f"attached={self.attached!r})"
         )
 
 
@@ -417,8 +426,11 @@ def terminate(
     shell session it owns, watchers included, silently.
 
     The result equals its status string and carries `open_tasks` (up to five
-    tasks it still owns, most recently updated first, or None) and
-    `shell_sessions` (a `ShellSessionsKill`, or None when no kill ran)."""
+    tasks it still owns, most recently updated first, or None),
+    `shell_sessions` (a `ShellSessionsKill`, or None when no kill ran) and
+    `attached` (a `HarnessAttachment` naming the controller driving the agent,
+    or None). `attached` is advisory: a controller still attached never blocks
+    the terminate."""
     agent_id = coerce_typed(agent_id, "agent_id", int)
     schedule_capability.assert_schedule_capability("agents.terminate", target_agent_id=agent_id)
     message = coerce_str(message, "message", allow_none=True)
@@ -436,6 +448,7 @@ def terminate(
         TerminateResult(text(data["status"], "status")),
         open_tasks_from_dict(data.get("open_tasks")),
         shell_sessions=shell_sessions_from_dict(data.get("shell_sessions")),
+        attached=harness_attachment_from_dict(data.get("attached")),
     )
 
 

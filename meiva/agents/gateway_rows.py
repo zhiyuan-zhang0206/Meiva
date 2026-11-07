@@ -15,13 +15,14 @@ from datetime import datetime
 from base.api_contracts.agent_contract import AgentStatus, ShellSessionKillTiming
 from base.host.boundary.json_values import is_object_dict, is_object_list
 from meiva.agents import row_text
-from meiva.agents.contracts import Machine, Neighbor, ShellSessionsKill
+from meiva.agents.contracts import HarnessAttachment, Machine, Neighbor, ShellSessionsKill
 
 __all_for_meiva__ = [
     "AgentDirectoryPage",
     "AgentRow",
     "OpenTaskRow",
     "OpenTasksHint",
+    "harness_attachment_from_dict",
     "machines_from_rows",
     "neighbor_from_row",
     "object_rows",
@@ -200,6 +201,18 @@ def neighbor_from_row(row: Mapping[str, object]) -> Neighbor:
         status=AgentStatus(text(row["status"], "status")),
         depth=integer(row["depth"], "depth"),
         score=number(row["score"], "score"),
+    )
+
+
+def harness_attachment_from_dict(data: object) -> HarnessAttachment | None:
+    if data is None:
+        return None
+    if not is_object_dict(data):
+        raise TypeError(f"attached must be an object, got {type(data).__name__}")
+    return HarnessAttachment(
+        agent_id=integer(data["agent_id"], "agent_id"),
+        controller_pid=integer(data["controller_pid"], "controller_pid"),
+        expires_at=optional_text(data.get("expires_at"), "expires_at"),
     )
 
 

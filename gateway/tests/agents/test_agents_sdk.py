@@ -374,6 +374,7 @@ class TestTerminate:
         assert result.shell_sessions == meiva.agents.ShellSessionsKill(
             when=ShellSessionKillTiming.AT_EXIT, killed=[]
         )
+        assert result.attached is None
         assert db_conn.execute(
             "SELECT payload FROM inbound_messages WHERE agent_id = %s AND kind = 'terminate'",
             (peer_id,),

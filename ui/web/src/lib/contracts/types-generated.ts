@@ -3018,6 +3018,11 @@ export interface components {
             detail?: components["schemas"]["ValidationError"][];
         };
         Harness: "meiva" | "claude_code" | "codex" | "antigravity";
+        HarnessAttachment: {
+            agent_id: number;
+            controller_pid: number;
+            expires_at?: string | null;
+        };
         HarnessAvailability: {
             harness: components["schemas"]["Harness"];
             status: "available" | "unavailable" | "unknown";
@@ -4085,6 +4090,7 @@ export interface components {
             status: components["schemas"]["TerminateResult"];
             open_tasks?: components["schemas"]["OpenTasksHint"] | null;
             shell_sessions?: components["schemas"]["ShellSessionsKill"] | null;
+            attached?: components["schemas"]["HarnessAttachment"] | null;
         };
         TerminateResult: "enqueued" | "already_terminated";
         TextQuestion: {

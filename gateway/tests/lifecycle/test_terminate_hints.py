@@ -26,7 +26,12 @@ from gateway.tests.support.runner_ops.ops_stub import (
 )
 from ops.rpc_schemas import TerminateAgentRequest
 
-_ACCEPTED = {"status": "enqueued", "open_tasks": None, "shell_sessions": None}
+_ACCEPTED = {
+    "status": "enqueued",
+    "open_tasks": None,
+    "shell_sessions": None,
+    "attached": None,
+}
 
 
 def _agent_on(db_conn: psycopg.Connection, machine: str) -> int:

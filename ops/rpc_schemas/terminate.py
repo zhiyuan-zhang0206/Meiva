@@ -102,6 +102,27 @@ class ShellSessionsKill(BaseModel):
     killed: list[int] = Field(default_factory=list[int])
 
 
+# meiva:note
+# The registration row an agent's home machine holds for it, reported by `terminate` as
+# `attached`.
+#
+# A bridge session writes one row when it starts a provider runtime as this agent and retires it
+# when the session closes, so a row still on disk names the process driving that session.
+# `expires_at` is the instant after which the row is stale — null when it never expires — and the
+# caller judges it against its own clock rather than this machine's.
+#
+# The read filters on nothing, expiry included: a row whose `expires_at` has passed is still
+# reported with that same past instant, so a caller can tell "nobody is attached" (null) from
+# "a session was attached and its claim has lapsed" (a past `expires_at`).
+#
+# Advisory only: termination proceeds whether or not a row is present, and nothing refuses a
+# request because somebody is attached. A response that could not read one carries null.
+class HarnessAttachment(BaseModel):
+    agent_id: int
+    controller_pid: int
+    expires_at: str | None = None
+
+
 class TerminateAgentResponse(BaseModel):
     """POST /api/agents/{id}/terminate response.
 
@@ -124,3 +145,4 @@ class TerminateAgentResponse(BaseModel):
     status: TerminateResult
     open_tasks: OpenTasksHint | None = None
     shell_sessions: ShellSessionsKill | None = None
+    attached: HarnessAttachment | None = None

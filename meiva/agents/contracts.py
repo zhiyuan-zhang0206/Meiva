@@ -12,6 +12,7 @@ from base.api_contracts.agent_contract import (
 
 __all_for_meiva__ = [
     "CommandInfo",
+    "HarnessAttachment",
     "HarnessAvailability",
     "Machine",
     "Neighbor",
@@ -29,6 +30,31 @@ class CommandInfo:
         hint = f" {self.instruction_hint}" if self.instruction_hint else ""
         desc = f"  — {self.description}" if self.description else ""
         return f"/{self.name}{hint}{desc}"
+
+
+@dataclass(frozen=True)
+class HarnessAttachment:
+    """The harness registration the agent's home machine held when the call ran.
+
+    A bridge session writes one row when it starts a provider runtime as the agent
+    and retires it when the session closes, so a row that is still there names the
+    process driving that session. `controller_pid` is that process and `expires_at`
+    the instant after which the row is stale (None when it never expires); judge it
+    against your own clock, not the agent's machine.
+
+    The read filters on nothing, expiry included: a row whose `expires_at` has passed is
+    still reported with that past instant, so None and a lapsed row are different answers.
+
+    Advisory, like `TerminateOutcome.open_tasks`: it refuses nothing, and a
+    terminate carries it without changing what the call did."""
+
+    agent_id: int
+    controller_pid: int
+    expires_at: str | None
+
+    def __str__(self) -> str:
+        expires = self.expires_at if self.expires_at is not None else "never"
+        return f"controller pid {self.controller_pid}, expires {expires}"
 
 
 @dataclass(frozen=True)

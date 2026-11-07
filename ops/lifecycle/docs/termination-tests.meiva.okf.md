@@ -41,3 +41,11 @@ repeatable launches are observed through a Redis subscription. Restart overlay
 validation runs in separate gateway and runner processes, asserts the selected
 profile and its absent agent domain, and accepts/rejects both agent and sandbox
 overlays. The gateway also asserts its sandbox domain is absent.
+
+`ops/lifecycle/tests/test_terminate_attachment.py` covers the one row a terminate request reads
+besides the database. The registration is written through the bridge's own writer
+(`base.lm.harness.registration.RegistrationStore`), and the response reports exactly the
+controller pid and expiry it holds. A missing row, a row that is not JSON, and a row missing a
+required field all answer None while the terminate result stays what it was — the hint is
+advisory, so no read of it may change what the call did. The unit cases and the op-level case
+share the mutation: forcing the read to None turns exactly the two "carries it" assertions red.

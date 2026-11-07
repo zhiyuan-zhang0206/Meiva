@@ -68,7 +68,11 @@ _TOOL_DESCRIPTIONS: dict[str, str] = {
         work. `message` saves a final instruction for that later revival
         without asking the agent to respond before exiting. The result also
         reports `open_tasks` — the tasks the agent still owns as it goes down
-        (at most five, most recently updated first; null when it owns none).
+        (at most five, most recently updated first; null when it owns none) —
+        and `attached`, the harness registration its home machine held when the
+        call ran (the controller pid and that row's expiry; null when there is
+        none). `attached` is advisory: an agent somebody is still driving is
+        terminated all the same.
         """,
     "cluster_status": """Report the health of the Meiva cluster itself — which host answered,
         what it is capable of running, and whether it is paused.
