@@ -157,6 +157,26 @@ def _tracked_notes(pool: Path) -> list[str] | None:
     return sorted(n for n in names if Path(n).name not in RESERVED and (pool / n).is_file())
 
 
+# meiva:note
+# The notes the index does not carry: the ones `collect` skips. The generator reads the index on
+# purpose (2026-11-06, see `collect`), and that has a silent edge -- a note written but never
+# `git add`-ed simply does not appear, while the run still reports success. 2026-11-07 (2697,
+# relayed from 6111): eleven notes written, ten indexed, and neither `validate.py` nor the index
+# check said anything, because the missing note was never part of the bundle they inspect. The
+# index stays the source and a draft stays invisible to the validator; this function exists so
+# the tool can *say* what it skipped instead of leaving the gap to be found by counting by hand.
+def untracked_notes(pool: Path) -> list[str]:
+    listed = subprocess.run(  # noqa: S603
+        ["git", "-C", str(pool), "ls-files", "--others", "--exclude-standard", "-z", "--", "*.md"],
+        capture_output=True,
+        check=False,
+    )
+    if listed.returncode != 0:
+        return []
+    names = [n for n in listed.stdout.decode("utf-8", "replace").split("\0") if n]
+    return sorted(n for n in names if Path(n).name not in RESERVED and (pool / n).is_file())
+
+
 def _walk_notes(pool: Path) -> list[str]:
     files: list[str] = []
     for dirpath, _dirnames, filenames in os.walk(pool):
