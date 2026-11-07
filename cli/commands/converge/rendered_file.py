@@ -4,6 +4,7 @@ import hashlib
 import json
 import sys
 from collections.abc import Iterable
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
@@ -68,6 +69,14 @@ def write_rendered_guarded(
 
 
 # meiva:note
+# One root's admitted seals, and whether the probe could confirm it runs.
+@dataclass(frozen=True, slots=True)
+class RootAdmission:
+    seals: tuple[tuple[Path, str], ...]
+    liveness_known: bool
+
+
+# meiva:note
 # The units whose sealed path covers `path` — the path itself or anything beneath it. A sealed
 # file and a sealed directory are the two shapes the root admits.
 def sealed_units(path: Path, seals: Iterable[tuple[Path, str]]) -> tuple[str, ...]:
@@ -75,17 +84,24 @@ def sealed_units(path: Path, seals: Iterable[tuple[Path, str]]) -> tuple[str, ..
 
 
 # meiva:note
-# The sealed paths of the units a live root owns, or none when no root runs: a home whose root is
-# down re-admits every input when it next starts, so a warning there would be noise.
+# What a root may have sealed on this home, and whether its liveness could be read at all. `None`
+# is a home with no root — its next start re-admits every input, so a warning there would be
+# noise. `liveness_known=False` is the case the cost says must not go quiet: an unreadable
+# instance lock means either no root (a surplus warning, costing one look) or a running root whose
+# drift we would otherwise swallow (costing a blind window and a host restart). The warning fires
+# and says it is guessing.
 #
 # Liveness is the instance lock, not a request: a converge pass must not reach the service tree it
 # runs next to — not even to ask whether it is up — and the root holds this lock exclusively for
-# its whole life. An unreadable lock is treated as no root for the same reason: a warning that
-# cannot name a generation is not worth the doubt it plants.
-def live_root_seals(home: Path) -> tuple[tuple[Path, str], ...]:
-    if root_running(home) is not True:
-        return ()
-    return admitted_seals(run_dir(home) / "meiva-root" / "manifests.json")
+# its whole life.
+def read_root_admission(home: Path) -> RootAdmission | None:
+    running = root_running(home)
+    if running is False:
+        return None
+    return RootAdmission(
+        seals=admitted_seals(run_dir(home) / "meiva-root" / "manifests.json"),
+        liveness_known=running is True,
+    )
 
 
 # meiva:note
@@ -127,26 +143,34 @@ def admitted_seals(record: Path) -> tuple[tuple[Path, str], ...]:
 # wrote them, so the line names the run the reader can retrace.
 def warn_sealed_inputs(home: Path, changed: Iterable[Path], *, writer: str) -> None:
     files = tuple(changed)
-    seals = live_root_seals(home)
-    if not seals or not files:
+    admission = read_root_admission(home) if files else None
+    if admission is None:
         return
-    units = sorted({unit for path in files for unit in sealed_units(path, seals)})
-    if not units:
+    units = sorted({unit for path in files for unit in sealed_units(path, admission.seals)})
+    # meiva:note
+    # An unreadable lock still speaks: the units may be unknown, the hazard is not.
+    if not units and admission.liveness_known:
         return
-    joined = ", ".join(units)
+    joined = ", ".join(units) if units else "a unit this pass cannot name"
+    paths = ", ".join(str(path) for path in files)
+    caveat = (
+        ""
+        if admission.liveness_known
+        else " (root liveness unknown: this home's instance lock was unreadable)"
+    )
     from base.log import logger
 
-    paths = ", ".join(str(path) for path in files)
     logger.warning(
-        "{writer} wrote a sealed input of {units}: this root generation can no longer spawn them "
-        "— re-admit the inputs or restart the host before they are needed",
+        f"{writer} wrote a sealed input of {joined}: this root generation can no longer spawn "
+        f"them — re-admit the inputs or restart the host before they are needed{caveat}",
         event="converge_sealed_input_changed",
         writer=writer,
         units=joined,
         paths=paths,
+        liveness="live" if admission.liveness_known else "unknown",
     )
     print(
         f"  ! {writer} changed a sealed input of {joined} — this root generation can no longer "
-        "spawn them; restart the host (or re-admit the inputs) before they are needed",
+        f"spawn them; restart the host (or re-admit the inputs) before they are needed{caveat}",
         file=sys.stderr,
     )

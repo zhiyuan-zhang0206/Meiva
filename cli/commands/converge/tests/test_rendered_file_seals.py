@@ -13,8 +13,9 @@ from base.native_process.root_control.instance_lock import (
 )
 from base.paths import run_dir
 from cli.commands.converge.rendered_file import (
+    RootAdmission,
     admitted_seals,
-    live_root_seals,
+    read_root_admission,
     sealed_units,
 )
 
@@ -59,8 +60,8 @@ def test_a_file_beneath_a_sealed_directory_belongs_to_its_unit() -> None:
     assert sealed_units(Path("/h/elsewhere"), seals) == ()
 
 
-def test_a_home_with_no_root_answers_with_no_seals(tmp_path: Path) -> None:
-    assert live_root_seals(tmp_path) == ()
+def test_a_home_with_no_root_answers_with_no_admission(tmp_path: Path) -> None:
+    assert read_root_admission(tmp_path) is None
 
 
 # meiva:note
@@ -74,11 +75,34 @@ def test_a_held_instance_lock_makes_the_record_live(tmp_path: Path) -> None:
         [{"id": "grafana", "inputs": [{"path": "/h/lgtm/native/config", "digest": "a" * 64}]}],
     )
     (root_dir / "manifests.json").write_bytes(seals.read_bytes())
-    assert live_root_seals(tmp_path) == ()
+    assert read_root_admission(tmp_path) is None
 
     fd = acquire_instance_lock(root_dir)
     try:
-        assert live_root_seals(tmp_path) == ((Path("/h/lgtm/native/config"), "grafana"),)
+        assert read_root_admission(tmp_path) == RootAdmission(
+            seals=((Path("/h/lgtm/native/config"), "grafana"),), liveness_known=True
+        )
     finally:
         release_instance_lock(fd)
-    assert live_root_seals(tmp_path) == ()
+    assert read_root_admission(tmp_path) is None
+
+
+# meiva:note
+# An unreadable lock is the one case that must not go quiet: it is either no root (a surplus
+# warning) or a running root whose drift would otherwise be swallowed (task #6403).
+def test_an_unreadable_lock_still_answers_the_seals_it_can_read(tmp_path: Path) -> None:
+    root_dir = run_dir(tmp_path) / "meiva-root"
+    root_dir.mkdir(parents=True)
+    seals = _record(
+        tmp_path,
+        [{"id": "grafana", "inputs": [{"path": "/h/lgtm/native/config", "digest": "a" * 64}]}],
+    )
+    (root_dir / "manifests.json").write_bytes(seals.read_bytes())
+    # meiva:note
+    # A directory where the lock file belongs opens as a directory: an OSError the probe cannot
+    # read, which is exactly the unreadable case.
+    (root_dir / "meiva-root.lock").mkdir()
+
+    assert read_root_admission(tmp_path) == RootAdmission(
+        seals=((Path("/h/lgtm/native/config"), "grafana"),), liveness_known=False
+    )

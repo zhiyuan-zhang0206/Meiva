@@ -317,11 +317,14 @@ class BootRetriesExhausted(TypedDict):
 
 # meiva:note
 # One render wrote a file that a live root sealed as a unit's input: the units it names are the ones
-# this generation can no longer spawn, and `writer` is the command that wrote them (task #6403).
+# this generation can no longer spawn, and `writer` is the command that wrote them. `liveness` is
+# `live`, or `unknown` when the instance lock could not be read — the warning then names a hazard
+# it could not confirm, rather than swallowing a drift (task #6403).
 class ConvergeSealedInputChanged(TypedDict):
     writer: str
     units: str
     paths: str
+    liveness: str
 
 
 class ConvergeFilePreserved(TypedDict):
