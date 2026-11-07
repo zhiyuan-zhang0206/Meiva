@@ -11,6 +11,7 @@ from schedules.plans.watch.main_red import (
     FAILURE_INFRA,
     GATE_CHECK_STEPS,
     FAILURE_TEST,
+    FAILURE_UNNAMED,
     NIGHTLY_STALE_AFTER,
     STATE_CONFIRMED,
     STATE_SUSPECTED,
@@ -147,7 +148,89 @@ def test_a_red_naming_nothing_is_not_a_failure_it_can_confirm() -> None:
 
     assert plan.entries == ()
     assert plan.confirmed == ()
-    assert any("named no failure" in note for note in plan.notes)
+    assert any("had no failing job to parse" in note for note in plan.notes)
+
+
+# meiva:note
+# The positive control for the hole 2026-11-07 exposed: a release-gate structure lane failing on
+# `[note-link]` prints no `FAILED path::node`, and the step is in no workflow's check list, so this
+# used to return an empty tuple -- the run was red and the watch recorded nothing. The failing
+# steps are now the red's name, and the class says the watch could not classify it.
+def test_a_red_the_watch_cannot_name_still_names_itself() -> None:
+    log = (
+        "base/agents/context/external_attachment/plugin_state_codec.py:48: "
+        "[note-link] not an exact tracked path: meiva/impersonation/docs/attachment.meiva.okf.md\n"
+        "##[error]Process completed with exit code 1.\n"
+    )
+    failures = parse_failures(
+        log,
+        job_name="Full static checks (structure)",
+        suite_step_failed=True,
+        failed_steps=("Validate source notes, structural hooks and codegen freshness",),
+    )
+
+    assert [failure.kind for failure in failures] == [FAILURE_UNNAMED]
+    assert "Validate source notes" in failures[0].test_id
+
+
+# meiva:note
+# One card per unreadable shape, opened on the first red run rather than the second: two strikes
+# answer "is this case flaky?", and that question does not exist when the doubt is whether the
+# watch can read the log at all.
+def test_an_unnameable_red_opens_one_card_and_counts_the_rest() -> None:
+    failure = Failure(
+        "Full static checks (structure): unnamed failure (Validate source notes, structural hooks "
+        "and codegen freshness)",
+        FAILURE_UNNAMED,
+    )
+    first = apply_run(
+        {},
+        RunFacts(_GATE, "sha1", datetime(2026, 11, 7, 15, 36, tzinfo=UTC), "failure", (failure,)),
+    )
+    entries = dict(first.entries)
+    assert [entry.state for entry in entries.values()] == [STATE_CONFIRMED]
+    assert [entry.kind for entry in entries.values()] == [FAILURE_UNNAMED]
+    assert len(first.confirmed) == 1
+
+    second = apply_run(
+        entries,
+        RunFacts(_GATE, "sha2", datetime(2026, 11, 7, 21, 36, tzinfo=UTC), "failure", (failure,)),
+    )
+    assert second.confirmed == ()
+    assert [entry.red_count for entry in dict(second.entries).values()] == [2]
+
+    # meiva:note
+    # The card's exit condition has to be a predicate the watch itself evaluates, or the card joins
+    # the bare entries nobody ever closes: `covers_full_suite` and `last_red_at` are both fields of
+    # this entry's own record, so the reader can check the statement against the same numbers.
+    body = card_body(
+        entries[first.entries[0][0]],
+        latest_url=None,
+        job_names=("Full static checks (structure)",),
+        candidate_commits=(),
+    )
+    assert "Class: `unnamed`" in body
+    assert "covers_full_suite=true" in body and "last_red_at" in body
+    assert "Boundary: any full-suite workflow counts" in body
+
+
+# meiva:note
+# Neither half of the invariant is worth anything without the negative control: a green run must
+# stay silent, so the new class cannot turn ordinary green days into cards.
+def test_a_green_run_names_nothing_and_closes_an_unnameable_red() -> None:
+    failure = Failure("job: unnamed failure (Install Python deps)", FAILURE_UNNAMED)
+    red = apply_run(
+        {},
+        RunFacts(_GATE, "sha1", datetime(2026, 11, 7, 15, 36, tzinfo=UTC), "failure", (failure,)),
+    )
+    green = apply_run(
+        dict(red.entries),
+        RunFacts(_GATE, "sha2", datetime(2026, 11, 7, 21, 36, tzinfo=UTC), "success", ()),
+    )
+
+    assert red.entries != ()
+    assert green.entries == ()
+    assert green.confirmed == ()
 
 
 # meiva:note
@@ -188,6 +271,10 @@ def test_the_shapes_the_job_log_delivers_are_read() -> None:
     )
 
 
+# meiva:note
+# A suite that ran and printed a summary this parser could not read is the watch's own blindness,
+# not the runner's fault -- so it reports as `unnamed` on the first sighting rather than as infra
+# noise nobody is paged for.
 def test_a_pytest_summary_that_names_no_case_names_the_watch_instead() -> None:
     log = (
         "2026-11-06T00:37:36.2029581Z ============ short test summary info ============\n"
@@ -196,8 +283,10 @@ def test_a_pytest_summary_that_names_no_case_names_the_watch_instead() -> None:
 
     parsed = parse_failures(log, job_name="Backend", suite_step_failed=True)
 
-    assert [failure.kind for failure in parsed] == [FAILURE_INFRA]
-    assert parsed[0].test_id == "Backend: pytest summary without a parsable case"
+    assert [failure.kind for failure in parsed] == [FAILURE_UNNAMED]
+    assert parsed[0].test_id == (
+        "Backend: pytest summary without a parsable case (no failed step reported)"
+    )
 
 
 def test_both_failure_line_shapes_are_read() -> None:
@@ -307,7 +396,13 @@ def test_a_failed_gate_check_step_names_the_red_instead_of_going_infra() -> None
 
     assert [failure.kind for failure in named] == [FAILURE_TEST]
     assert "Locality gate (full meizel check)" in named[0].test_id
-    assert [failure.kind for failure in unnamed] == [FAILURE_INFRA]
+    # meiva:note
+    # 2026-11-07 changed what an unnamed step means. It used to be infra -- "installs fail for
+    # reasons that are nobody's regression" -- and that judgement is what let a red structure lane
+    # on `main` leave no record at all. It now reports as `unnamed`, naming the step, and the step
+    # name in the fingerprint is the list a mapping would have to cover.
+    assert [failure.kind for failure in unnamed] == [FAILURE_UNNAMED]
+    assert "Install Python deps" in unnamed[0].test_id
 
 
 # meiva:note

@@ -24,7 +24,14 @@ from schedules.jobs.watch.main_red_watch import (
     slot_round,
     watch_once,
 )
-from schedules.plans.watch.main_red import FAILURE_TEST, NIGHTLY_STALE_AFTER, Card, RunFacts
+from schedules.plans.watch.main_red import (
+    FAILURE_TEST,
+    FAILURE_UNNAMED,
+    NIGHTLY_STALE_AFTER,
+    Card,
+    Failure,
+    RunFacts,
+)
 from schedules.plans.watch.release_gate_slot import RELEASE_GATE_SLOT_CADENCE, SlotFacts
 
 # meiva:note
@@ -533,8 +540,41 @@ def test_one_unreadable_stream_leaves_the_others_read_and_the_round_whole(tmp_pa
     assert asked == ["release-gate.yml", "main-push.yml"]
     assert "stream main-push.yml unreadable" in line
     assert "HTTP 502" in line
-    assert heartbeats == [{"fingerprints": 1, "confirmed": 0, "infra": 0, "stale": 1}]
+    assert heartbeats == [{"fingerprints": 1, "confirmed": 0, "infra": 0, "stale": 1, "unnamed": 0}]
     assert len(load_state(tmp_path / STATE_FILE).entries) == 1
+
+
+# meiva:note
+# The count that watches the watch. An unnameable red opens one card and every repeat of the same
+# shape only increments it, so the card count stays quiet while the underlying gap -- a step no
+# mapping covers -- keeps producing reds. `unnamed` is the only place that still shows up.
+def test_the_round_counts_the_reds_it_could_not_name(tmp_path: Path) -> None:
+    heartbeats: list[dict[str, object]] = []
+    failure = Failure(
+        "Full static checks (structure): unnamed failure (Validate source notes)", FAILURE_UNNAMED
+    )
+    red = RunFacts(
+        "release-gate.yml", "sha1", datetime(2026, 11, 7, 15, 36, tzinfo=UTC), "failure", (failure,)
+    )
+    second = RunFacts(
+        "release-gate.yml", "sha2", datetime(2026, 11, 7, 21, 36, tzinfo=UTC), "failure", (failure,)
+    )
+
+    line = watch_once(
+        state_path=tmp_path / STATE_FILE,
+        now=datetime(2026, 11, 8, 0, tzinfo=UTC),
+        fetch=lambda _w: (red, second),
+        last_start=lambda _w: datetime(2026, 11, 7, 22, tzinfo=UTC),
+        open_card=lambda card: 900,
+        close_card=lambda task_id, reason: None,
+        emit=lambda payload: heartbeats.append(dict(payload)),
+        workflows=("release-gate.yml",),
+        liveness=(),
+    )
+
+    assert "unnamed=2" in line
+    assert heartbeats[0]["unnamed"] == 2
+    assert heartbeats[0]["confirmed"] == 1
 
 
 # meiva:note
@@ -559,7 +599,7 @@ def test_an_unreadable_liveness_stream_does_not_stop_the_round(tmp_path: Path) -
     )
 
     assert "stream refresh-test-durations.yml unreadable" in line
-    assert heartbeats == [{"fingerprints": 0, "confirmed": 0, "infra": 0, "stale": 1}]
+    assert heartbeats == [{"fingerprints": 0, "confirmed": 0, "infra": 0, "stale": 1, "unnamed": 0}]
 
 
 # meiva:note
