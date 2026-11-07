@@ -124,6 +124,18 @@ def _forked_late_child(child_file: str, ready: str) -> None:
     time.sleep(60)
 
 
+def _exit_soon(delay_s: str, hold: str) -> None:
+    # meiva:note
+    # A unit that dies on its own, and keeps dying on every replacement until a hold file exists:
+    # the one path to `absent`, because every replacement accepted the spawn and so recorded no
+    # failure. The hold file repairs it without changing the manifest (task #6345).
+    if pathlib.Path(hold).exists():
+        time.sleep(60)
+        return
+    time.sleep(float(delay_s))
+    sys.exit(1)
+
+
 def _fail_loudly(reason: str) -> None:
     # meiva:note
     # A wrapper that refuses the launch says why on stderr and nowhere else: the retirement
@@ -154,6 +166,7 @@ _SCENARIOS = {
     "restart_down": _restart_down,
     "forked_late_child": _forked_late_child,
     "code_gate_exit": _code_gate_exit,
+    "exit_soon": _exit_soon,
     "fail_loudly": _fail_loudly,
 }
 

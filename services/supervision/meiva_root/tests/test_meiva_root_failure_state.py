@@ -1,13 +1,17 @@
 from __future__ import annotations
 
 import asyncio
+import os
+import sys
 import time
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 
+import psutil
 import pytest
 
-from base.clock import SYSTEM_TIMERS, Timers
+from base.clock import SYSTEM_TIMERS, Clock, Timers
 from base.daemon.health import DaemonProbe
 from base.log.tests.log_records import LogRecords
 from base.log.tests.log_records import loguru_records as loguru_records
@@ -20,8 +24,12 @@ from services.supervision.meiva_root.failure_state import (
 )
 from services.supervision.meiva_root.health import HealthConfig, HealthGate, HealthMonitor
 from services.supervision.meiva_root.intent_store import IntentSource, RestartFailure, RestartStage
+from services.supervision.meiva_root.manifest import RestartPolicy, UnitManifest, UnitRegistry
 from services.supervision.meiva_root.probes import ProbeRegistry
+from services.supervision.meiva_root.supervisor import Supervisor, SupervisorConfig
 from services.supervision.meiva_root.tests.slices import clock_over
+
+_CHILD = Path(__file__).with_name("child_unit.py")
 
 
 class _Recorder:
@@ -144,6 +152,12 @@ class _Clock:
 
     async def asleep(self, seconds: float) -> None:
         await asyncio.sleep(seconds)
+
+    # meiva:note
+    # Move the fake clock to the next deadline the test cares about; a monitor reads time through
+    # its clock, so the fake is steered here rather than by assigning a fixture attribute.
+    def advance(self, seconds: float) -> None:
+        self.now += seconds
 
 
 @pytest.fixture
@@ -306,10 +320,10 @@ async def test_a_recovery_grant_survives_a_startup_grace(clock: _Clock) -> None:
     await _spend_the_budget(monitor, clock)
     supervisor.generation = (OwnedProcess(43, 101.0, None), clock.now)
     database.verdict = DaemonProbe.up("database answered")
-    clock.now += 60
+    clock.advance(60)
     await monitor.run_round()
     assert monitor.snapshot()["svc"].restart_attempts == 3
-    clock.now += 181
+    clock.advance(181)
     await monitor.run_round()
     assert monitor.snapshot()["svc"].restart_attempts == 4
 
@@ -321,7 +335,7 @@ async def test_a_recovery_grant_survives_a_terminal_observation(clock: _Clock) -
     await _spend_the_budget(monitor, clock)
     unit.verdict = DaemonProbe.port_taken("alien daemon")
     database.verdict = DaemonProbe.up("database answered")
-    clock.now += 60
+    clock.advance(60)
     await monitor.run_round()
     assert monitor.snapshot()["svc"].restart_attempts == 3
     unit.verdict = DaemonProbe.down("no")
@@ -335,7 +349,7 @@ async def test_the_first_database_observation_grants_exactly_one_attempt(clock: 
         _Supervisor(), _Cell(DaemonProbe.down("no")), database=database, timers=clock
     )
     await _spend_the_budget(monitor, clock)
-    clock.now += 60
+    clock.advance(60)
     await monitor.run_round()
     assert monitor.snapshot()["svc"].restart_attempts == 4
     await monitor.run_round()
@@ -349,7 +363,7 @@ async def test_a_database_that_fails_again_withdraws_the_grant(clock: _Clock) ->
     await _spend_the_budget(monitor, clock)
     unit.verdict = DaemonProbe.unavailable("inspection failed")
     database.verdict = DaemonProbe.up("database answered")
-    clock.now += 60
+    clock.advance(60)
     await monitor.run_round()
     database.verdict = DaemonProbe.down("database unreachable again")
     await monitor.run_round()
@@ -364,7 +378,7 @@ async def test_a_raising_database_probe_never_releases_the_breaker(clock: _Clock
     )
     await _spend_the_budget(monitor, clock)
     for _ in range(3):
-        clock.now += 60
+        clock.advance(60)
         await monitor.run_round()
     assert monitor.snapshot()["svc"].restart_attempts == 3
     assert monitor.snapshot()["svc"].breaker_open
@@ -521,3 +535,130 @@ async def test_a_changed_sealed_input_is_reported_while_the_unit_is_healthy(
     supervisor.facts = UnitFailureFacts(intent_running=False, restart_failed=None)
     await monitor.run_round()
     assert len(recorder.events("root_unit_inputs_changed")) == 2, "a stop is a decision"
+
+
+def _real_root(tmp_path: Path, clock: Clock, *scenario: str) -> Supervisor:
+    unit = UnitManifest(
+        "worker",
+        (sys.executable, "-u", str(_CHILD), *scenario),
+        RestartPolicy.ALWAYS,
+        "root",
+    )
+    return Supervisor(
+        UnitRegistry([unit]),
+        environ=dict(os.environ),
+        run_dir=tmp_path,
+        config=SupervisorConfig(stop_timeout_s=0.2),
+        clock=clock,
+        root_pid=os.getpid(),
+    )
+
+
+# meiva:note
+# The production probe shape for a unit that serves no port: does the generation this root owns
+# still answer as the process it recorded? A leftover of some other root answers nothing here.
+def _owned_identity_probe(owner: Supervisor) -> Callable[[], DaemonProbe]:
+    def probe() -> DaemonProbe:
+        generation = owner.health_generation("worker")
+        if generation is None:
+            return DaemonProbe.down("no owned generation answers")
+        identity, _started_at = generation
+        try:
+            alive = identity.birth_matches(psutil.Process(identity.pid))
+        except psutil.NoSuchProcess:
+            alive = False
+        if alive:
+            return DaemonProbe.up("the owned generation answers")
+        return DaemonProbe.down("the owned pid is gone")
+
+    return probe
+
+
+def _owned_probes(owner: Supervisor) -> ProbeRegistry:
+    registry = ProbeRegistry()
+    registry.register("worker", _owned_identity_probe(owner))
+    return registry
+
+
+# meiva:note
+# The exit is recorded by the generation's own watcher, a separate task: `observed_absent` turns
+# true as soon as the child is reaped, one scheduling step before `last_error` names the exit.
+# Waiting for the recording, not only for the absence, keeps the assertions off that race.
+async def _wait_recorded_exit(owner: Supervisor, timeout_s: float = 5.0) -> UnitFailureFacts:
+    deadline = time.monotonic() + timeout_s
+    while time.monotonic() < deadline:
+        facts = owner.unit_failure_facts("worker")
+        if facts.observed_absent and facts.last_error is not None:
+            return facts
+        await asyncio.sleep(0.01)
+    raise AssertionError("the child never recorded its own exit")
+
+
+# meiva:note
+# The positive control the production fleet cannot stage (task #6345): a real supervisor holds no
+# generation for a unit whose children die on their own, nothing records a replacement failure, and
+# only the third consecutive absent round reaches the alert. The repair is a file rather than a new
+# manifest, so the same unit proves the clearing edge too.
+async def test_a_crashing_unit_reaches_absent_in_real_processes(
+    clock: _Clock, recorder: _Recorder, tmp_path: Path
+) -> None:
+    hold = tmp_path / "hold"
+    timers = clock_over(clock)
+    owner = _real_root(tmp_path, timers, "exit_soon", "0.5", str(hold))
+    await owner.start()
+    try:
+        facts = await _wait_recorded_exit(owner)
+        assert facts.restart_failed is None, "a child that died on its own records no failure"
+        assert facts.last_error == "unexpected exit: exit 1"
+
+        monitor = HealthMonitor(
+            owner,
+            _owned_probes(owner),
+            config=HealthConfig(
+                interval_s=0.01,
+                startup_grace_s=0.0,
+                max_restart_attempts=3,
+                restart_backoff_s=(60.0, 300.0, 900.0),
+            ),
+            clock=timers,
+        )
+
+        await monitor.run_round()
+        assert monitor.snapshot()["worker"].restart_attempts == 1
+        await _wait_recorded_exit(owner)
+
+        clock.advance(60.0)
+        await monitor.run_round()
+        assert monitor.snapshot()["worker"].restart_attempts == 2
+        await _wait_recorded_exit(owner)
+
+        for _ in range(2):
+            clock.advance(60.0)
+            await monitor.run_round()
+        assert recorder.events("root_unit_failure_state") == [], "two rounds is not absence yet"
+
+        clock.advance(60.0)
+        await monitor.run_round()
+        assert [
+            (event["unit"], event["kind"], event["detail"])
+            for event in recorder.events("root_unit_failure_state")
+        ] == [("worker", "absent", "no owned generation answers")]
+
+        hold.touch()
+        clock.advance(300.0)
+        await monitor.run_round()
+        assert [event["kind"] for event in recorder.events("root_unit_failure_state")] == [
+            "absent",
+            "breaker_open",
+        ], "the third attempt spends the budget before readiness is observed"
+
+        clock.advance(60.0)
+        await monitor.run_round()
+        assert monitor.snapshot()["worker"].restart_attempts == 0
+        assert monitor.snapshot()["worker"].absent_rounds == 0
+        assert len(recorder.events("root_unit_breaker_closed")) == 1
+        clock.advance(60.0)
+        await monitor.run_round()
+        assert len(recorder.events("root_unit_failure_state")) == 2, "a repaired unit stays silent"
+    finally:
+        await owner.shutdown()
