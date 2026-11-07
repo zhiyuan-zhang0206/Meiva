@@ -199,6 +199,22 @@ def test_a_detached_head_says_the_pull_request_body_is_unreadable(
 
 
 # meiva:note
+# The other half of that split: a checked-out branch reaches the body, so the note stays out of its
+# output. A note that appears every run trains its reader to skip the one run that needed it.
+def test_a_checked_out_branch_reports_no_unreadable_body(repo: Path, tmp_path: Path) -> None:
+    git(repo, "remote", "add", "origin", "https://github.com/example/repo")
+    git(repo, "switch", "-q", "-c", "work")
+    (repo / "cli" / "x.py").write_text(LOCATOR, encoding="utf-8")
+    commit(repo, "Fetch from the application")
+    answered = fake_gh(tmp_path, body="Hint-Ack: service-locator cli/x.py:2 -- composition root")
+
+    result = run_with_gh(repo, answered, "branch")
+
+    assert result.returncode == 0
+    assert "unreadable on a detached HEAD" not in result.stderr
+
+
+# meiva:note
 # A body that does not answer the site answers nothing: reading the body must not become a way to
 # pass the check by having any PR at all.
 def test_a_pull_request_body_without_the_answer_still_blocks(repo: Path, tmp_path: Path) -> None:
