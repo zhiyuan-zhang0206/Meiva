@@ -39,6 +39,13 @@ async def hosted_resources() -> AsyncGenerator[HostedTurnResources]:
 
 # meiva:note
 # Clients over a snapshot of the process configuration, for a pinned agent whose test supplied none.
+#
+# A pin NEVER inherits the clients of the context it replaces. A ClientSet carries the
+# `ConfigBoot` snapshot it was built from, and the pinned context lives in a process-global slot (`process_context`): a test
+# that pinned while a service window was open would otherwise hand its frozen config to every
+# later test in the same worker. #6424 was exactly that — a stale snapshot dialing
+# `127.0.0.1:1` while `settings` named the provisioned port. Each pin re-reads the
+# configuration it is about to run under.
 def snapshot_clients() -> ClientSet:
     config = snapshot_process_config()
     return derived_clients(config, ConfiguredMachineIdentity(config))
@@ -75,9 +82,7 @@ def pin_agent(
             harness=harness,
             original_incarnation=incarnation,
             machine=machine if machine is not None else (None if bound is None else bound.machine),
-            clients=clients
-            if clients is not None
-            else (bound.clients if bound else snapshot_clients()),
+            clients=clients if clients is not None else snapshot_clients(),
             clock_factory=(
                 clock_factory
                 if clock_factory is not None
