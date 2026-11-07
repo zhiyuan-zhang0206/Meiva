@@ -19,8 +19,6 @@ export function PendingStrip({
 }: {
   items: PendingInbound[];
   deliveringBatch?: DeliveredUploadStatus | null;
-  /** Composer column cap — the strip floats above the composer and its
-   *  content aligns with the conversation column (user ruling 2026-08-06). */
   maxWidthCss?: string;
 }) {
   const t = useTranslations("pendingStrip");
@@ -29,13 +27,12 @@ export function PendingStrip({
   const totalCount = queued.length + (showDelivering ? 1 : 0);
   if (totalCount === 0) return null;
   return (
-    // User ruling 2026-08-06: same divider rhythm as the composer — px-4 on
-    // the root, divider on the inner wrapper (never edge to edge).
-    <div className="px-4 py-1.5 text-xs text-muted-foreground">
-      <div
-        style={maxWidthCss ? { maxWidth: maxWidthCss } : undefined}
-        className="mx-auto border-t border-border pt-1.5"
-      >
+    <div
+      data-testid="pending-strip"
+      style={maxWidthCss ? { maxWidth: maxWidthCss } : undefined}
+      className="mx-auto w-full px-4 py-1.5 text-xs text-muted-foreground"
+    >
+      <div className="border-t border-border pt-1.5">
         <div className={cn("items-center gap-1.5 font-medium", FLEX)}>
           <Clock className="size-3 shrink-0" />
           {t("pending", { count: totalCount })}
