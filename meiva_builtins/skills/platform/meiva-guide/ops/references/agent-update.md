@@ -8,7 +8,7 @@ new daemon or a Meiva schedule. A cluster-owned schedule stops with the cluster.
 
 ## Prepare the operation
 
-Use `python -m cli.fleet_update run --help` from a separate operator checkout
+Use `meiva update run --help` from a separate operator checkout
 that already contains `run`, with its own real `.venv`. Keep that checkout and
 venv unchanged until the job finishes; do not execute from a unit's production
 `$HOME/.meiva/source`, which the update switches. The command targets each SSH
@@ -34,7 +34,7 @@ Replace the checkout, target selection (`--channel stable` for standard producti
 preview-only `--track-branch BRANCH`), natural-language `--message` (who is
 updating and why, delivered to running and idle agents on affected hosts; or
 `--no-message`) and SSH aliases below, along with all required stop/start flags
-from `python -m cli.fleet_update run --help`. Repeat runner
+from `meiva update run --help`. Repeat runner
 aliases as needed, or use `--no-runners` for a gateway-only roster. The operator checkout
 must already have fetched the certified release and channel tags (`git fetch --tags origin`).
 Uncertified or tampered targets exit 2 before contacting any host. The Python below uses only the
@@ -57,7 +57,7 @@ from pathlib import Path
 checkout, directory, label, channel, gateway, *runners = sys.argv[1:]
 root = Path(directory)
 command = [
-    str(Path(checkout) / ".venv/bin/python"), "-m", "cli.fleet_update", "run",
+    str(Path(checkout) / ".venv/bin/meiva"), "update", "run",
     "--channel", channel, "--gateway", gateway, "--log-dir", str(root / "logs"),
 ]
 for runner in runners:

@@ -11,13 +11,12 @@ class SchemaVersionMismatch(MigrationError):  # noqa: N818 — "state descriptio
     pending migrations, to catch up."""
 
 
+# meiva:note
+# DB has applied migrations this checkout does not carry — local code is stale; the central DB
+# has already been migrated. Multi-machine: an agent-runner missed the fleet update while offline;
+# on coming online, local code is still on the old SHA. Update its checkout (`meiva update`).
 class CodeBehindSchema(MigrationError):  # noqa: N818
-    """DB has applied migrations this checkout does **not** carry — local
-    code is stale; the central DB has already been migrated. Multi-
-    machine: an agent-runner missed the fleet update while offline; on coming
-    online, local code is still on the old SHA. Update its checkout
-    (`python -m cli.fleet_update`).
-    """
+    pass
 
 
 class MigrationFailed(MigrationError):  # noqa: N818

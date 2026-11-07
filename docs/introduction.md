@@ -12,7 +12,7 @@ Meiva agents act by **writing code**, not by picking from a menu of tools. They
 form a **fleet** — a graph of peers that spawn, fork, and message one another —
 and they can **read and modify their own source**, shipping changes through
 PR → CI → merge and then rolling the new code across the running cluster with
-the fleet update script (`python -m cli.fleet_update`).
+`meiva update`.
 
 The core is deliberately small. From day one every layer is built asking *can
 this scaffolding be stripped once the model is strong enough to not need it?* —
@@ -32,8 +32,8 @@ screenshots, and FAQ: **[QUICKSTART.md](../QUICKSTART.md)**.
 
 ### 1. Self-Evolving — the cluster upgrades itself
 
-Meiva's cluster upgrades itself. New code lands on `main`, and the fleet update
-script (`python -m cli.fleet_update run`) updates every unit: agents
+Meiva's cluster upgrades itself. New code lands on `main`, and
+`meiva update run` updates every unit: agents
 drain at their turn boundary (a wedged process holds the stop until its
 timeout; only the operator's explicit `--force` cuts it short), the cluster
 stops, each unit's source checkout switches to the released commit, and the
@@ -239,7 +239,7 @@ for the full surface.
 | `meiva stop` / `meiva restart` | tear down / bounce this host; every keep-or-stop choice, `--mode` and `--timeout` is an explicit argument (see the [runbook](conventions/runbook.md#start--check--restart)) |
 | `meiva status` | one-screen view: sessions, pg/redis/pgbouncer, healthchecks |
 | `meiva logs` | list live service sessions or tail one |
-| `python -m cli.fleet_update` | roll the latest merged code across a networked cluster over SSH (`down`, then `up`) — the only update path |
+| `meiva update` | roll the latest merged code across a networked cluster over SSH (`run`, or `down` then `up`) — the only update path |
 | `meiva cluster status/destroy` | multi-machine roster + decommission of this host's cluster |
 | `.venv/bin/meiva init --no-serve-gateway --serve-agent-runner --gateway-url <url> --db-capability <bundle>` | init of a split-deployment agent-runner joining a gateway, then `meiva start --all-services` (its checkout's CLI — `meiva` on PATH does not exist yet; with the bundle's `MEIVA_DB_CAPABILITY_KEY` exported) |
 | `meiva agents` | observe + control agents (ls / timeline / send / cancel / restart / terminate) |

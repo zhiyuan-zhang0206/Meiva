@@ -2,8 +2,7 @@
 # What a window reads locally and on each host before it stops anything: the certified release
 # target in the operator's repository, the host probe, and the helper facts of the commit it
 # switches to. The decisions on what these reads refuse live in `plan/release_target.py`,
-# `plan/host_probe.py` and `plan/helper_gate.py`. Like the rest of `cli.fleet_update`, nothing here
-# imports application code, so a window still runs from a bare operator checkout.
+# `plan/host_probe.py` and `plan/helper_gate.py`.
 # meiva:link cli/docs/fleet-update.meiva.okf.md
 
 from __future__ import annotations

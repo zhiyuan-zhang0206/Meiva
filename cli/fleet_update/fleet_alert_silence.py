@@ -1,23 +1,25 @@
-"""The deploy window's alert silence: one Grafana silence over every rule, opened by
-`cli.fleet_update down` and expired by `up`.
-
-An update stops the whole cluster on purpose, so every rule that watches a service would fire
-for a planned outage. Notification policy owns merging and repetition; this is the one place a
-planned window is expressed: a silence in the co-located Grafana's Alertmanager whose matcher
-covers every alert but the disk ones (`alertname=~".+"`, `metric!="host_disk"`, `attributes_check!="disk_usage"`), carrying an expiry and a comment, created before the
-first stop and deleted after `up` succeeds. A silenced rule still evaluates, so a condition that
-outlives the window notifies as soon as the silence ends.
-
-`cli.fleet_update` pipes this file's source to `python -` on the gateway host (the same way it
-ships its roster program), so the first update that carries this change already has it and the
-program needs nothing from the host's checkout but `base.config`. Opening is idempotent (a rerun
-of `down` extends the silence it already owns instead of stacking another) and every failure is
-reported, never raised: a window without a silence is noisy, not unsafe, so it must not strand
-an update.
-
-    python - open --hours 4 --comment "..."   # prints `SILENCE opened ...`
-    python - close                            # prints `SILENCE closed N`
-"""
+# meiva:note
+# The deploy window's alert silence: one Grafana silence over every rule, opened by
+# `meiva update down` and expired by `up`.
+#
+# An update stops the whole cluster on purpose, so every rule that watches a service would fire
+# for a planned outage. Notification policy owns merging and repetition; this is the one place a
+# planned window is expressed: a silence in the co-located Grafana's Alertmanager whose matcher
+# covers every alert but the disk ones (`alertname=~".+"`, `metric!="host_disk"`,
+# `attributes_check!="disk_usage"`), carrying an expiry and a comment, created before the
+# first stop and deleted after `up` succeeds. A silenced rule still evaluates, so a condition that
+# outlives the window notifies as soon as the silence ends.
+#
+# `cli.fleet_update` pipes this file's source to `python -` on the gateway host (the same way it
+# ships its roster program), so the first update that carries this change already has it and the
+# program needs nothing from the host's checkout but `base.config`. Opening is idempotent (a rerun
+# of `down` extends the silence it already owns instead of stacking another) and every failure is
+# reported, never raised: a window without a silence is noisy, not unsafe, so it must not strand
+# an update.
+#
+#     python - open --hours 4 --comment "..."   # prints `SILENCE opened ...`
+#     python - close                            # prints `SILENCE closed N`
+# meiva:link cli/docs/fleet-update-window/fleet-update-window.meiva.okf.md
 
 from __future__ import annotations
 
@@ -37,6 +39,7 @@ from typing import TypeGuard
 CREATED_BY = "meiva-fleet-update"
 SILENCES = "/api/alertmanager/grafana/api/v2/silences"
 _SILENCE = "/api/alertmanager/grafana/api/v2/silence"
+# meiva:note
 # Every alert but a full disk: the disk fills the same during an update, so the host filesystem rules
 # (`metric=host_disk`) and the health probe's disk check must still page.
 _MATCH_EVERY_ALERT = [
@@ -48,8 +51,10 @@ _TIMEOUT_S = 15.0
 _LIVE_STATES = ("active", "pending")
 
 
+# meiva:note
+# Grafana could not be reached or refused the call.
 class GrafanaError(RuntimeError):
-    """Grafana could not be reached or refused the call."""
+    pass
 
 
 def _is_object_dict(value: object) -> TypeGuard[dict[str, object]]:
@@ -79,13 +84,15 @@ def _read_body(
         return response.read()
 
 
+# meiva:note
+# Call the co-located Grafana's Alertmanager API with its Basic credential and decode the JSON body.
 def _call(base: str, credential: str, method: str, path: str, body: object = None) -> object:
     token = base64.b64encode(f"admin:{credential}".encode()).decode()
     headers = {"Authorization": f"Basic {token}"}
     data = None if body is None else json.dumps(body).encode()
     if data is not None:
         headers["Content-Type"] = "application/json"
-    request = urllib.request.Request(base + path, data=data, method=method, headers=headers)  # noqa: S310 — the operator's own Grafana
+    request = urllib.request.Request(base + path, data=data, method=method, headers=headers)  # noqa: S310
     try:
         raw = _read_body(partial(urllib.request.urlopen, timeout=_TIMEOUT_S), request)
     except urllib.error.HTTPError as error:
@@ -95,8 +102,9 @@ def _call(base: str, credential: str, method: str, path: str, body: object = Non
     return _object_of(json.loads, raw) if raw else None
 
 
+# meiva:note
+# Every live silence this program created.
 def _owned(base: str, credential: str) -> list[dict[str, object]]:
-    """Every live silence this program created."""
     rows = _call(base, credential, "GET", SILENCES)
     items = rows if _is_object_list(rows) else []
     owned: list[dict[str, object]] = []
@@ -109,8 +117,9 @@ def _owned(base: str, credential: str) -> list[dict[str, object]]:
     return owned
 
 
+# meiva:note
+# Create (or extend the one already owned) silence over every alert; its id.
 def open_window(base: str, credential: str, *, hours: float, comment: str, now: datetime) -> str:
-    """Create (or extend the one already owned) silence over every alert; its id."""
     ends_at = (now + timedelta(hours=hours)).astimezone(UTC).isoformat(timespec="seconds")
     silence: dict[str, object] = {
         "matchers": _MATCH_EVERY_ALERT,
@@ -129,8 +138,9 @@ def open_window(base: str, credential: str, *, hours: float, comment: str, now: 
     return str(created["silenceID"])
 
 
+# meiva:note
+# Expire every live silence this program created; the ids expired.
 def close_window(base: str, credential: str) -> list[str]:
-    """Expire every live silence this program created; the ids expired."""
     expired: list[str] = []
     for row in _owned(base, credential):
         _call(base, credential, "DELETE", f"{_SILENCE}/{row['id']}")
@@ -138,8 +148,9 @@ def close_window(base: str, credential: str) -> list[str]:
     return expired
 
 
+# meiva:note
+# The co-located Grafana's base URL and admin credential; None when this home has no credential.
 def colocated_grafana() -> tuple[str, str] | None:
-    """The co-located Grafana's base URL and admin credential; None when this home has no credential."""
     from base.config import settings
 
     secret = settings.alerts.grafana_admin_password

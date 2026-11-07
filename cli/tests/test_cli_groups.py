@@ -9,6 +9,8 @@ from typing import cast
 
 import pytest
 
+from cli import main as _main
+from cli.database import open_operator_database
 from cli.parsers import build_parser
 
 
@@ -29,8 +31,51 @@ def _cluster_choices() -> set[str]:
     return set(cast("dict[str, object]", sub.choices))
 
 
+def _update_choices() -> set[str]:
+    p = build_parser()
+    cmd = next(a for a in p._actions if a.dest == "cmd")
+    update_p = cast("dict[str, argparse.ArgumentParser]", cmd.choices)["update"]
+    sub = next(a for a in update_p._actions if a.dest == "half")
+    return set(cast("dict[str, object]", sub.choices))
+
+
 def test_core_verbs_exist() -> None:
-    assert {"start", "stop", "status", "pty", "cluster"} <= _top_choices()
+    assert {"start", "stop", "status", "pty", "cluster", "update"} <= _top_choices()
+
+
+def test_update_group_has_run_down_and_up() -> None:
+    assert _update_choices() == {"run", "down", "up"}
+
+
+def test_update_binds_window_inputs_without_touching_local_home(tmp_path: Path) -> None:
+    captured: dict[str, argparse.Namespace] = {}
+
+    def _fake(args: argparse.Namespace) -> int:
+        captured["args"] = args
+        return 0
+
+    argv = ["update", "up", "--gateway", "gw", "--log-dir", str(tmp_path / "logs")]
+    args = _main.parse_command_args(argv)
+    args.func = _fake
+    declared = tmp_path / "untouched-home"
+    checkout = Path(_main.__file__).resolve().parents[1]
+    assert (
+        _main.dispatch_parsed(
+            args,
+            argv,
+            declared=declared,
+            checkout=checkout,
+            producer_factory=_main.operator_producer,
+            open_database=open_operator_database,
+        )
+        == 0
+    )
+    assert not declared.exists()
+    inputs = captured["args"].update_inputs
+    assert inputs.repo == checkout
+    assert inputs.python == sys.executable
+    assert inputs.operation_id
+    assert inputs.initiator.startswith("user:")
 
 
 def test_cluster_group_has_status_and_destroy() -> None:

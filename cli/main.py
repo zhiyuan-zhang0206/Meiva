@@ -61,6 +61,7 @@ __all__ = [
     "ProducerFactory",
     "bind_entry_facts",
     "bind_init_inputs",
+    "bind_update_inputs",
     "deliver_lite_api_token",
     "dispatch_parsed",
     "entry",
@@ -175,6 +176,40 @@ def bind_init_inputs(args: argparse.Namespace) -> None:
     )
     if init.ssl_cert_file is not None:
         os.environ["SSL_CERT_FILE"] = init.ssl_cert_file
+
+
+def _update_initiator() -> str:
+    import getpass
+    import socket
+
+    try:
+        user = getpass.getuser()
+    except (KeyError, OSError):
+        user = str(os.getuid())
+    return f"user:{user}@{socket.gethostname()}"
+
+
+# meiva:note
+# Hand `meiva update` the ambient window inputs read once at the process entry (`cli.main`), so
+# nothing inside `cli.fleet_update` reads `os.environ`, the clock, the host identity, or
+# `sys.executable` for itself.
+def bind_update_inputs(args: argparse.Namespace, *, checkout: Path) -> None:
+    from uuid import uuid4
+
+    from cli.fleet_update import UpdateWindowInputs
+    from cli.fleet_update.session import Pacing
+    from cli.fleet_update.timers import ProcessTimers
+
+    args.update_inputs = UpdateWindowInputs(
+        repo=checkout,
+        env=dict(os.environ),
+        now=datetime.now(UTC),
+        pacing=Pacing(),
+        timers=ProcessTimers(),
+        operation_id=uuid4().hex,
+        initiator=_update_initiator(),
+        python=sys.executable,
+    )
 
 
 # meiva:note
@@ -341,6 +376,9 @@ def dispatch_parsed(
             return 1
     if tuple(args_in[:1]) == ("init",):
         bind_init_inputs(args)
+        return _invoke(args)
+    if tuple(args_in[:1]) == ("update",):
+        bind_update_inputs(args, checkout=checkout)
         return _invoke(args)
     if tuple(args_in[:1]) == ("start",):
         from cli.start_identity import require_initialized

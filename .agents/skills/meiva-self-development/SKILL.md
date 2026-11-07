@@ -41,7 +41,7 @@ protection; the old orchestrator controls the first rollout of a new safeguard.
 ## Deployment gates
 
 Use the runbook's "Updating a networked cluster in source mode" procedure
-(`python -m cli.fleet_update --help`). Do not copy historical
+(`meiva update --help`). Do not copy historical
 drain timeouts or assume old code understands a new flag. Record before rollout:
 
 - Exact machine, user, unit home and ports. Local process listings cannot

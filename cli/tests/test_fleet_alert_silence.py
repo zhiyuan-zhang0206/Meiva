@@ -18,7 +18,7 @@ from typing import Any
 import pytest
 
 from base.host.proc import run_bounded
-from cli import fleet_alert_silence as silence
+from cli.fleet_update import fleet_alert_silence as silence
 
 _NOW = datetime(2026, 10, 4, 4, 0, tzinfo=UTC)
 
@@ -156,7 +156,7 @@ def _run(home: Path, base: str, credential: str | None, *argv: str) -> str:
         "MEIVA_TIMEZONE": "UTC",
     }
     child = run_bounded(
-        [sys.executable, "-I", "-m", "cli.fleet_alert_silence", *argv],
+        [sys.executable, "-I", "-m", "cli.fleet_update.fleet_alert_silence", *argv],
         env=env,
         capture_output=True,
         text=True,

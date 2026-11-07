@@ -49,7 +49,7 @@ executes the plan; a dial is a real `status_probe` round trip to the row's regis
 
 The cluster router exposes no source-checkout update, rollout, restart or
 update-check endpoint. The status page displays observations and does not
-launch deployments; a fleet update is the operator script `python -m cli.fleet_update`.
+launch deployments; a fleet update is `meiva update`.
 
 ## `GET /api/stats/dashboard?hours=`
 

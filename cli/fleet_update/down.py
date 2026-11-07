@@ -133,8 +133,9 @@ def _preflight(s: Session, args: FleetArgs, new: str) -> _Preflight:
             frozenset(serving),
             legacy_stop=frozenset(legacy_stop),
         )
-    helper_facts = s.run_all(hosts, lambda alias: _fetch_and_probe(s, alias, new))
-    probes = dict(zip(hosts, helper_facts, strict=True))
+    gw_facts = _fetch_and_probe(s, args.gateway, new)
+    runner_facts = s.run_all(tuple(args.runner), lambda alias: _fetch_and_probe(s, alias, new))
+    probes = dict(zip(hosts, (gw_facts, *runner_facts), strict=True))
     rebuild = args.rebuild_extras
     table = baselines(s.repo)
     try:

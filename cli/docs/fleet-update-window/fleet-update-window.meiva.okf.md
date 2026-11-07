@@ -1,13 +1,13 @@
 ---
 type: doc
 title: Fleet update window guarantees
-description: What refuses, gates and surrounds the cli.fleet_update stops — preflight, stored schedules, the silence and the log.
+description: What refuses, gates and surrounds the meiva update stops — preflight, stored schedules, the silence and the log.
 tags: [cli, updates, operations]
 ---
 
 # Fleet update window guarantees
 
-The promises `cli.fleet_update` makes around the stops themselves
+The promises `meiva update` makes around the stops themselves
 ([[cli/docs/fleet-update.meiva.okf.md]] owns the halves and their order): what
 refuses the window, what gates it, what it silences, and what must not leak.
 What stops and what starts is never decided here: every choice is the operator's

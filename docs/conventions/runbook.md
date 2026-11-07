@@ -43,7 +43,7 @@ prod runtime and dev workspace are split at the filesystem level:
 
 | Path | Role | Notes |
 |---|---|---|
-| `$MEIVA_HOME/source/` (default `~/.meiva/source/`) | **prod** — cwd of the long-running service sessions | git working tree; upgrades go through `python -m cli.fleet_update` ([Updating a networked cluster in source mode](#updating-a-networked-cluster-in-source-mode)) |
+| `$MEIVA_HOME/source/` (default `~/.meiva/source/`) | **prod** — cwd of the long-running service sessions | git working tree; upgrades go through `meiva update` ([Updating a networked cluster in source mode](#updating-a-networked-cluster-in-source-mode)) |
 | `<development-checkout>/` | **dev clone** — root of worktree-driven development; dev worktrees live under `.worktrees/<task>/` (made by `scripts/setup-worktree.sh <task>`) or `.claude/worktrees/<task>/` (Claude Code's native worktree tool; complete it with `scripts/setup-worktree.sh` inside it) | freely checkout any branch, decoupled from prod |
 
 ### Worktree uv iron rule (Tasks #1572, #5638)
@@ -455,7 +455,7 @@ Merging a PR does not deploy it. `meiva stop` asks for confirmation with `--prom
 A cluster whose units span machines, each running from `$HOME/.meiva/source`, is
 updated by stopping every unit, switching every checkout and starting again
 ([decision](../decisions/runtime/updates/release/2026-09-30-networked-cluster-stays-on-source-updates.md)).
-`python -m cli.fleet_update run` runs the complete update from the operator's
+`meiva update run` runs the complete update from the operator's
 separate development checkout over key-based SSH. Keep that checkout and its
 venv unchanged until completion. When the operator's Mac is itself a host, it must be able to `ssh` to
 itself (its own public key in its own `authorized_keys`):
@@ -468,11 +468,11 @@ gateway's stop only. Choose what survives the window yourself — the fleet does
 not compare your choices with the diff. A complete command:
 
 ```bash
-.venv/bin/python -m cli.fleet_update run --channel stable \
+.venv/bin/meiva update run --channel stable \
   --gateway GATEWAY --runner RUNNER --runner RUNNER2 --log-dir DIR --execute \
   --close-shell-sessions --keep-browser --keep-extras --keep-infra --keep-no-services \
   --mode smooth --stop-timeout 600 --message "Operator rolling out stable release: reason" \
-  --refuse-python-change --refuse-red-schedules --silence-hours 4 --lease-confirm-seconds 0 \
+  --refuse-python-change --refuse-red-schedules --silence-hours 4 \
   --all-services --start-timeout 1800 --roster-timeout 90
 ```
 
@@ -519,14 +519,14 @@ When the release needs intermediate manual work, or when recovering a failed
 half, use the separate commands:
 
 ```bash
-.venv/bin/python -m cli.fleet_update down --channel stable \
+.venv/bin/meiva update down --channel stable \
   --gateway GATEWAY --runner RUNNER --log-dir DIR --execute \
   --close-shell-sessions --keep-browser --keep-extras --keep-infra --keep-no-services \
   --mode smooth --stop-timeout 600 --message "Operator rolling out stable release: reason" \
-  --refuse-python-change --refuse-red-schedules --silence-hours 4 --lease-confirm-seconds 0 \
+  --refuse-python-change --refuse-red-schedules --silence-hours 4 \
   --all-services --start-timeout 1800
 # manual release steps, if any
-.venv/bin/python -m cli.fleet_update up --gateway GATEWAY --runner RUNNER --log-dir DIR --execute \
+.venv/bin/meiva update up --gateway GATEWAY --runner RUNNER --log-dir DIR --execute \
   --all-services --start-timeout 1800 --roster-timeout 90
 ```
 
@@ -601,7 +601,7 @@ half, use the separate commands:
   checks. A silenced rule keeps evaluating, so a condition that outlives the window notifies
   when the silence ends. A rerun of `down` extends the silence it owns; a failed `up`
   leaves it to its expiry (the cluster stays quiet while you fix the cause); `down --dry-run`
-  only prints the command. The program (`cli/fleet_alert_silence.py`) ships on stdin, so the
+  only prints the command. The program (`cli/fleet_update/fleet_alert_silence.py`) ships on stdin, so the
   first update carrying it already has it; a host without `GRAFANA_ADMIN_PASSWORD`, or a
   Grafana that does not answer, prints a `WARNING: alert silence not open/close` line and
   the half goes on (a window without a silence is noisy, not unsafe). Expire a stuck silence

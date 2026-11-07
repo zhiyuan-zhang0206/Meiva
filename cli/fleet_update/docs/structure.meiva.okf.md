@@ -7,8 +7,8 @@ tags: [cli, updates, architecture]
 
 # Fleet update structure
 
-`main` is a shell around decisions. Every ambient fact reaches it as a value read once by the
-entry (`__main__`): the repository the NEW commit is resolved in, the environment (the `PATH`
+`main` and `run_parsed` are a shell around decisions. Every ambient fact reaches them as a value read once by the
+entry (`cli.main`): the repository the NEW commit is resolved in, the environment (the `PATH`
 that finds `ssh`, and the agent marker that refuses a run from inside an agent), the time the log
 and the one-shot job names are stamped with, the pacing of its waits, and the clock those waits
 are spent on. Nothing below reads the environment, the clock or `sys.argv`.
@@ -16,8 +16,7 @@ are spent on. Nothing below reads the environment, the clock or `sys.argv`.
 - `session.py` owns the connection to the hosts: the operator's own `ssh`, found on the `PATH` the
   process was started with, and the one redacted log. `FailedError` is a step that cannot
   complete; `RefusedError` is a window that refused before touching anything (exit 2). It also
-  declares the `Timers` port — the module's own, because nothing here imports application code —
-  and carries the clock the window's waits are spent on.
+  declares the `Timers` port and carries the clock the window's waits are spent on.
 - `timers.py` is the process clock behind that port: the entry point builds one and hands it to
   the session, so the roster wait reads `Session.timers` and no module here reads `time` for
   itself.

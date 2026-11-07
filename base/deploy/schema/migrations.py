@@ -193,7 +193,7 @@ def check_schema_version(conn: psycopg.Connection, *, migrations_dir: Path) -> N
             detail += f"; and is missing {len(missing)}: {sorted(missing)} (divergent)"
         raise CodeBehindSchema(
             f"Schema ahead of code: {detail}. Update this checkout to the cluster's "
-            "commit (`python -m cli.fleet_update`) and start it again."
+            "commit (`meiva update`) and start it again."
         )
     if missing:
         raise SchemaVersionMismatch(

@@ -12,6 +12,7 @@
 # One module per domain:
 #
 # - ``host`` — init/start/stop/restart/status/converge/firewall
+# - ``update`` — whole-cluster source-mode rollout over SSH (run/down/up)
 # - ``observability`` — lgtm/trace
 # - ``cluster`` — the whole-cluster verbs
 # - ``auth`` — the web login password
@@ -53,6 +54,7 @@ from cli.parsers.management import (
 from cli.parsers.observability import add_lgtm_parser, add_trace_parser
 from cli.parsers.permissions import add_permissions_parser
 from cli.parsers.pty import add_pty_parser
+from cli.parsers.update import add_update_parser
 
 __all__ = ["build_parser", "command_options", "parse_args"]
 
@@ -74,6 +76,7 @@ def build_parser(
     add_start_parser(sub, retained_children=retained_children)
     add_stop_parser(sub, retained_children=retained_children)
     add_restart_parser(sub, retained_children=retained_children)
+    add_update_parser(sub)
     add_status_parser(sub)
     add_pty_parser(sub)
     add_harness_parser(sub)

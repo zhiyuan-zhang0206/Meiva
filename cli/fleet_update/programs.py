@@ -13,8 +13,8 @@ from .plan.silence_replies import silence_command, silence_warnings
 from .session import Session
 
 VERIFY_SCRIPTS = Path(__file__).resolve().parents[1] / "commands" / "management"
-CHECK_ROWS_SCRIPT = Path(__file__).with_name("schedules_verify_check_rows.py")
-ALERT_SILENCE_SCRIPT = Path(__file__).resolve().parents[1] / "fleet_alert_silence.py"
+CHECK_ROWS_SCRIPT = Path(__file__).resolve().parents[1] / "schedules_verify_check_rows.py"
+ALERT_SILENCE_SCRIPT = Path(__file__).resolve().with_name("fleet_alert_silence.py")
 
 
 def program_text(path: Path) -> str:

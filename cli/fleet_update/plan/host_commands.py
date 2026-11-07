@@ -58,9 +58,13 @@ _VENV_DIRS = (
 
 # meiva:note
 # Make NEW's commit present on the host, so a host that cannot get it is found before anything
-# stops.
+# stops, and pin `refs/fleet-update/target` to NEW so a runner whose `origin` is the gateway's
+# checkout can fetch NEW by SHA over git-upload-pack even while the gateway checkout is detached.
 def fetch_command(new: str) -> str:
-    return f'{HOME}; git cat-file -e "{new}^{{commit}}" || git fetch -q origin {new}'
+    return (
+        f'{HOME}; (git cat-file -e "{new}^{{commit}}" || git fetch -q origin {new}) '
+        f"&& git update-ref refs/fleet-update/target {new}"
+    )
 
 
 # meiva:note
