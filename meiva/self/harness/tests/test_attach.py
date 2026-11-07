@@ -14,6 +14,7 @@ import pytest
 from base.agents.context import MeivaContext
 from base.agents.context.identity import AgentIdentity, ExternalLease
 from meiva.sdk_surface import process_context
+from meiva.self import harness
 from meiva.self.harness.admission import ProcessLineage, descends, require_live_registration
 from meiva.self.harness.attachment import (
     attachable_context,
@@ -213,3 +214,22 @@ def test_an_unknown_handle_finds_no_registration(tmp_path: Path) -> None:
 # only its digest, so the value itself is the test's to choose.
 def _handle() -> str:
     return base64.urlsafe_b64encode(secrets.token_bytes(32)).rstrip(b"=").decode()
+
+
+# meiva:note
+# An exported-but-empty handle is not a handle: the bridge exports the variable per launch or does
+# not export it at all, so an empty value has to reach the same "no handle" error as a missing one.
+# Anything else would send the reader after an identity this process never had.
+@pytest.mark.parametrize("handle", [None, ""])
+def test_an_empty_handle_is_reported_as_missing(handle: str | None) -> None:
+    error = harness.no_identity_error(handle)
+
+    assert isinstance(error, RegistrationError)
+    assert "needs the session handle" in str(error)
+
+
+def test_a_present_handle_is_reported_as_the_borrowed_identity_failure() -> None:
+    error = harness.no_identity_error("issued-handle")
+
+    assert type(error) is RuntimeError
+    assert "found no identity to borrow" in str(error)

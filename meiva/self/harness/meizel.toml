@@ -6,7 +6,7 @@ exports = ["attachment.py", "registration.py", "store.py"]
 "attachment.py" = ["admission.py", "registration.py", "store.py"]
 "registration.py" = []
 "store.py" = ["registration.py"]
-"tests" = ["admission.py", "attachment.py", "registration.py", "store.py"]
+"tests" = ["__init__.py", "admission.py", "attachment.py", "registration.py", "store.py"]
 
 [purity]
 "admission.py" = "strict"

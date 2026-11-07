@@ -101,12 +101,20 @@ def attach(handle: str | None = None) -> object:
     attachment = ensure_identity()
     if attachment is not None:
         return attachment
-    if os.environ.get(HANDLE_ENV) is None:
-        raise _registration_error(
+    raise no_identity_error(os.environ.get(HANDLE_ENV))
+
+
+# meiva:note
+# Which failure a call without an identity reports: a process the bridge did not start has no
+# handle at all -- the variable is exported per launch or not exported -- so an empty value is the
+# same answer as a missing one, and only a handle that is there makes this the borrow failure.
+def no_identity_error(handle: str | None) -> BaseException:
+    if not handle:
+        return _registration_error(
             "meiva.attach needs the session handle: run inside a process the bridge "
             f"started, which exports {HANDLE_ENV}"
         )
-    raise RuntimeError(
+    return RuntimeError(
         "meiva.attach found no identity to borrow: this process already has one, or it "
         "runs the shared host"
     )
