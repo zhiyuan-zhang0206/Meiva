@@ -16,10 +16,19 @@ tags:
 - **ToastHost**: root-level renderer for the store's toast slot, so error toasts reach the user on every route (not just Home).
 - **OpenTasksNoticeHost** (#3374): root-level renderer for the store's open-tasks notice slot — a terminate response carrying `open_tasks` (wire #2488) raises a dialog (count + up to five rows + "and N more"); dismissal is explicit; lazily imported.
 - **VisualViewportHeightSync** (#4779): with the on-screen keyboard up, pins `<html>` to `visualViewport.height`, publishes `--visual-viewport-height` and `--safe-area-bottom: 0px` on `<html>`, and resets root scroll to `(0, 0)` so fixed overlays, modals, and bottom bars stay inside the remaining area above an iOS/iPadOS `WKWebView` keyboard — the WebKit half of the contract whose Blink/Android half is `interactive-widget=resizes-content`. See [[ui/web/src/docs/mobile-and-tablet-ux.meiva.okf.md|Mobile, tablet and coarse-pointer UX]].
-- **AppConnectionBanner** (#648): root-mounted and renders nothing; drives cluster health polling (`useClusterHealth`) and mirrors SSE status into store (`ConnectionNotice`); self-gated by `useAuth().status`. All Providers self-gate on auth state — no outer auth guard layer.
+- **AppConnectionBanner** (#648): root-mounted and renders nothing; drives cluster health polling (`useClusterHealth`) and owns the store state consumed by `ConnectionNotice`; self-gated by `useAuth().status`. All Providers self-gate on auth state — no outer auth guard layer.
 
 Root composition tests keep authentication pending and assert that alert reads,
 SSE subscriptions and cluster polling stay blocked. Settings and theme readers
 still run against explicit pending API boundaries. They mount the real alert
 provider, observe the root query client and unmount before clearing its cache;
 this is initial composition evidence, not live stream acceptance.
+
+The connection notice counts failures only while the stream's page is visible.
+Hiding cancels its 15s escalation timer and clears a previous error to
+`reconnecting`. Returning, or initially mounting while visible, starts a fresh
+15s recovery window; repeated errors and duplicate visibility events keep the
+same deadline. An `open` clears the timer and error immediately, including when
+it arrives before the notice's visibility listener. Hidden pages ignore stream
+errors. Sustained visible failure displays an error while automatic transport
+retries continue; Retry requests a local reconnect through `bumpReconnect`.

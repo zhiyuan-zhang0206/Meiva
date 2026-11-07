@@ -9,6 +9,7 @@ import { useStore } from "@/lib/state/store";
 import { useClusterHealth } from "@/lib/notifications/use-cluster-health";
 import type { ConnectionEvent } from "@/lib/transport/useEventStream";
 import { useEventStream } from "@/lib/transport/useEventStream";
+import { useStreamHub } from "@/lib/transport/transport-context";
 
 export function AppConnectionBanner() {
   const { status } = useAuth();
@@ -21,45 +22,62 @@ export function AppConnectionBanner() {
 function ConnectionHealthProvider() {
   const setConnState = useStore((s) => s.setConnState);
   const pendingRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const { page } = useStreamHub().transport;
+  const visibleRef = useRef<boolean | null>(null);
 
   // Poll cluster status + drive the reconnect-on-update-done edge. Single mount.
   useClusterHealth();
 
-  useEffect(() => {
-    return () => {
-      if (pendingRef.current !== null) clearTimeout(pendingRef.current);
-      pendingRef.current = null;
-    };
+  const clearPending = useCallback(() => {
+    if (pendingRef.current !== null) clearTimeout(pendingRef.current);
+    pendingRef.current = null;
   }, []);
 
+  const startRecovery = useCallback(() => {
+    if (pendingRef.current !== null) return;
+    setConnState("reconnecting");
+    pendingRef.current = setTimeout(() => {
+      pendingRef.current = null;
+      if (page.visibilityState === "visible") setConnState("closed");
+    }, CONNECTION_ERROR_DELAY_MS);
+  }, [page, setConnState]);
+
   // meiva:note
-  // The store's connection state is what the user is told, not raw transport events.
-  // Transient drops (reconnecting or closed) auto-retry silently via backoff;
-  // publishing them immediately produced annoying yellow flashing.
-  // Drops lasting >= CONNECTION_ERROR_DELAY_MS (15s) escalate directly to "closed",
-  // which surfaces the floating red error notice. An "open" event immediately
-  // cancels any pending escalation and restores "open".
-  // meiva:link ui/web/src/docs/frontend-components/frontend-components.meiva.okf.md
+  // Hidden pages deliberately leave SSE. Give each visible participation a fresh
+  // recovery window, including an initial connection that never emits an error.
+  // Repeated transport errors retain the same deadline; only open or hide ends it.
+  // meiva:link ui/web/src/docs/provider-composition.meiva.okf.md
+  const syncVisibility = useCallback(() => {
+    const visible = page.visibilityState === "visible";
+    if (visible === visibleRef.current) return;
+    visibleRef.current = visible;
+    clearPending();
+    if (visible) startRecovery();
+    else setConnState("reconnecting");
+  }, [page, clearPending, startRecovery, setConnState]);
+
+  useEffect(() => {
+    syncVisibility();
+    page.addEventListener("visibilitychange", syncVisibility);
+    return () => {
+      clearPending();
+      page.removeEventListener("visibilitychange", syncVisibility);
+    };
+  }, [page, clearPending, syncVisibility]);
+
   const onSystemEvent = useCallback(() => undefined, []);
   const onConnectionEvent = useCallback(
     (ev: ConnectionEvent) => {
-      if (ev.type === "parse-failed") return;
+      syncVisibility();
+      if (page.visibilityState !== "visible" || ev.type === "parse-failed") return;
       if (ev.type === "reconnecting" || ev.type === "closed") {
-        if (useStore.getState().connState === "closed") return;
-        if (pendingRef.current !== null) return;
-        pendingRef.current = setTimeout(() => {
-          pendingRef.current = null;
-          setConnState("closed");
-        }, CONNECTION_ERROR_DELAY_MS);
+        if (useStore.getState().connState !== "closed") startRecovery();
         return;
       }
-      if (pendingRef.current !== null) {
-        clearTimeout(pendingRef.current);
-        pendingRef.current = null;
-      }
+      clearPending();
       setConnState("open");
     },
-    [setConnState],
+    [page, clearPending, startRecovery, setConnState, syncVisibility],
   );
   useEventStream(onSystemEvent, onConnectionEvent);
 
