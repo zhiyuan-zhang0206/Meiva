@@ -6,10 +6,13 @@ import type { SavedScroll } from "@/lib/layout/scroll-memory";
 import { parseItemIdParts } from "@/lib/timeline/timeline";
 import type { BackendTimelineItem } from "@/lib/contracts/types";
 import { useDisplayLimit } from "@/lib/format/display-limits";
+import { TIMELINE_TURN_ROW_GAP_PX } from "@/lib/layout/layout";
 
 import { materializeBeforeAnchor } from "./materialize-prefix";
 
-const GAP = 12; // space-y-3 on the timeline and expanded turn body
+// meiva:note
+// Matches space-y-3 between timeline groups; details use the shared work-row gap.
+const GAP = 12;
 // KEEP (task #3696 exception inventory): task #4709 fixes one viewport of buffer on each side as window geometry, not an operator limit.
 const BUFFER_VIEWPORTS = 1;
 // KEEP (task #3696 exception inventory): 24 is roughly three 8-row screens before geometry exists; it caps initial DOM mounts, not a user window.
@@ -329,27 +332,27 @@ export function useTimelineWindow({
     const childSizes = rows.map((key) => heights.get(key) ?? 80);
     if (view.height <= 0) {
       const childPin = groupIndex === pinnedIndex && pin
-        ? rows.findIndex((key) => key.endsWith(`:${pin.id}`)) : -1;
+        ? rows.findIndex((key) => key.endsWith(`:${pin.rank}:${pin.id}`)) : -1;
       if (childPin >= 0) {
         const start = Math.max(0, childPin - BOOTSTRAP_PIN_LEAD_ROWS);
         const end = Math.min(rows.length, start + BOOTSTRAP_WINDOW_ROWS);
-        return { start, end, before: span(childSizes, 0, start), after: span(childSizes, end, rows.length) };
+        return { start, end, before: span(childSizes, 0, start, TIMELINE_TURN_ROW_GAP_PX), after: span(childSizes, end, rows.length, TIMELINE_TURN_ROW_GAP_PX) };
       }
-      if (restoreTop !== null) return windowForSizes(childSizes, restoreTop, UNMEASURED_VIEWPORT_HEIGHT_PX, view.origin + 60);
+      if (restoreTop !== null) return windowForSizes(childSizes, restoreTop, UNMEASURED_VIEWPORT_HEIGHT_PX, view.origin + 60, TIMELINE_TURN_ROW_GAP_PX);
       const start = Math.max(0, rows.length - BOOTSTRAP_WINDOW_ROWS);
-      return { start, end: rows.length, before: span(childSizes, 0, start), after: 0 };
+      return { start, end: rows.length, before: span(childSizes, 0, start, TIMELINE_TURN_ROW_GAP_PX), after: 0 };
     }
     const groupTop = view.origin + span(sizes, 0, groupIndex) + (groupIndex ? GAP : 0);
     const childOrigin = groupTop + 60;
     let top = view.top;
     const childPin = groupIndex === pinnedIndex && pin
-      ? rows.findIndex((key) => key.endsWith(`:${pin.id}`)) : -1;
+      ? rows.findIndex((key) => key.endsWith(`:${pin.rank}:${pin.id}`)) : -1;
     if (childPin >= 0) {
-      const pinTop = childOrigin + span(childSizes, 0, childPin) + (childPin ? GAP : 0);
+      const pinTop = childOrigin + span(childSizes, 0, childPin, TIMELINE_TURN_ROW_GAP_PX) + (childPin ? TIMELINE_TURN_ROW_GAP_PX : 0);
       const pinBottom = pinTop + childSizes[childPin];
       if (pinBottom < top - view.height || pinTop > top + view.height * 2) top = pinTop;
     }
-    return windowForSizes(childSizes, top, view.height, childOrigin);
+    return windowForSizes(childSizes, top, view.height, childOrigin, TIMELINE_TURN_ROW_GAP_PX);
   };
 
   useLayoutEffect(() => {

@@ -76,7 +76,7 @@ describe("TurnBlock component", () => {
     expect(container.querySelector('[data-turn-scroll="true"]')).toBeNull();
   });
 
-  it("renders expanded turn block with unified unboxed header and max-height bounded scrollport", () => {
+  it("renders the expanded trailing turn with a sticky header and bounded scrollport", () => {
     const { container } = render(
       <TurnBlock
         id="turn-1"
@@ -95,7 +95,8 @@ describe("TurnBlock component", () => {
 
     const toggle = screen.getByTestId("turn-toggle");
     expect(toggle.getAttribute("data-expanded")).toBe("true");
-    expect(toggle.className).not.toContain("sticky");
+    expect(toggle.className).toContain("sticky");
+    expect(toggle.className).toContain("top-[52px]");
 
     const viewport = screen.getByTestId("turn-scroll-viewport");
     expect(viewport.className).toContain("max-h-[var(--timeline-turn-max-h,50dvh)]");

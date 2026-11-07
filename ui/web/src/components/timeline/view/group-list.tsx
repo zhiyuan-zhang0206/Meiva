@@ -18,6 +18,7 @@ export interface GroupEntry {
   groupKey: string;
   virtualKey: string;
   isLiveTurn: boolean;
+  isLastTurn: boolean;
   runExpanded: boolean;
 }
 
@@ -198,16 +199,18 @@ export function useTimelineGroupWindow({
     const runExpanded = group.kind === "turn" && (turnOverrides.has(groupKey)
       ? (turnOverrides.get(groupKey) ?? false)
       : isLiveTurn && expandWorkingBlock);
-    return { group, groupKey, virtualKey, isLiveTurn, runExpanded };
+    return { group, groupKey, virtualKey, isLiveTurn, isLastTurn, runExpanded };
   }), [groups, activeTurnKeys, turnOverrides, turnActive, expandWorkingBlock]);
 
   const renderedRows = groupEntries.reduce(
-    (total, { group, runExpanded }) =>
-      total + (group.kind === "turn" && runExpanded ? Math.min(group.members.length, turnRows) : 1),
+    (total, { group, runExpanded, isLastTurn }) =>
+      total + (group.kind === "turn" && runExpanded
+        ? isLastTurn ? Math.min(group.members.length, turnRows) : group.members.length
+        : 1),
     0,
   );
   const virtualEnabled = renderedRows > activationRows;
-  const virtualGroups = useMemo(() => groupEntries.map(({ group, virtualKey, runExpanded }) => {
+  const virtualGroups = useMemo(() => groupEntries.map(({ group, virtualKey, runExpanded, isLastTurn }) => {
     const members = group.kind === "single" ? [group.member] : group.members;
     return {
       key: virtualKey,
@@ -215,7 +218,9 @@ export function useTimelineGroupWindow({
       itemIds: members.map((m) => m.item.item_id),
       memberRankKeys: members.map((m) => `${m.rank}:${m.item.item_id}`),
       estimatedHeight: group.kind === "turn" ? (runExpanded ? 264 : 32) : 80,
-      expandedRows: null,
+      expandedRows: group.kind === "turn" && runExpanded && !isLastTurn
+        ? members.map((m) => `${virtualKey}:${m.source}:${m.rank}:${m.item.item_id}`)
+        : null,
     };
   }), [groupEntries]);
 
@@ -241,7 +246,7 @@ export function useTimelineGroupWindow({
     return null;
   })();
 
-  const { range: virtualRange } = useTimelineWindow({
+  const { range: virtualRange, rowRange } = useTimelineWindow({
     groups: virtualGroups,
     enabled: virtualEnabled,
     turnRows,
@@ -254,7 +259,7 @@ export function useTimelineGroupWindow({
     restoreTop,
   });
 
-  return { groups, groupEntries, virtualEnabled, virtualRange, turnRows };
+  return { groups, groupEntries, virtualEnabled, virtualRange, rowRange, turnRows };
 }
 
 export function TimelineGroupList({
@@ -271,6 +276,7 @@ export function TimelineGroupList({
   groupEntries,
   virtualEnabled,
   virtualRange,
+  rowRange,
   turnRows,
 }: {
   items: BackendTimelineItem[];
@@ -286,6 +292,7 @@ export function TimelineGroupList({
   groupEntries: GroupEntry[];
   virtualEnabled: boolean;
   virtualRange: { start: number; end: number; before: number; after: number };
+  rowRange: (index: number) => { start: number; end: number; before: number; after: number };
   turnRows: number;
 }) {
   const renderRow = (
@@ -355,7 +362,7 @@ export function TimelineGroupList({
         <div data-timeline-spacer="before" style={{ height: virtualRange.before }} aria-hidden="true" />
       ) : null}
       <LiveClockGate value={turnActive}>
-        {groupEntries.slice(virtualRange.start, virtualRange.end).map(({ group, groupKey, virtualKey, isLiveTurn, runExpanded }) => {
+        {groupEntries.slice(virtualRange.start, virtualRange.end).map(({ group, groupKey, virtualKey, isLiveTurn, isLastTurn, runExpanded }, offset) => {
           const renderedGroup = (() => {
             if (group.kind === "single") {
               const { item, index, source, rank } = group.member;
@@ -364,9 +371,10 @@ export function TimelineGroupList({
 
             const first = group.members[0];
             const turnId = first.item.item_id;
-            const isLastTurn = group === groups[groups.length - 1];
-            const shouldWindowTurn = runExpanded && group.members.length > turnRows;
+            const shouldWindowTurn = isLastTurn && runExpanded && group.members.length > turnRows;
             const forceChildExpand = isLiveTurn;
+            const rows = !isLastTurn ? rowRange(virtualRange.start + offset)
+              : { start: 0, end: group.members.length, before: 0, after: 0 };
             return (
               <TurnBlock
                 id={turnId}
@@ -376,6 +384,7 @@ export function TimelineGroupList({
                 memberSources={group.members.map((m) => `${m.source}:${m.rank}:${m.item.item_id}`)}
                 summary={group.summary}
                 expanded={runExpanded}
+                bounded={isLastTurn}
                 onToggle={toggleTurn}
                 turnActive={turnActive && isLastTurn}
                 liveWindow={isLiveTurn}
@@ -394,16 +403,18 @@ export function TimelineGroupList({
                 timelineSource={first.source}
                 displayRank={first.rank}
               >
+                {runExpanded && rows.before > 0 ? <div data-timeline-spacer="turn-before" style={{ height: rows.before }} aria-hidden="true" /> : null}
                 {runExpanded && !shouldWindowTurn ? (
-                  group.members.map((m) => {
+                  group.members.slice(rows.start, rows.end).map((m) => {
                     const rowKey = `${virtualKey}:${m.source}:${m.rank}:${m.item.item_id}`;
                     return (
-                      <div key={rowKey}>
+                      <div key={rowKey} data-virtual-row={!isLastTurn ? rowKey : undefined}>
                         {renderRow(m.item, m.index, m.source, m.rank, forceChildExpand)}
                       </div>
                     );
                   })
                 ) : null}
+                {runExpanded && rows.after > 0 ? <div data-timeline-spacer="turn-after" style={{ height: rows.after }} aria-hidden="true" /> : null}
               </TurnBlock>
             );
           })();

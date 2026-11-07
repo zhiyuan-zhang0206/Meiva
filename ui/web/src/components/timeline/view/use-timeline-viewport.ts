@@ -95,7 +95,7 @@ export function useTimelineViewport({
     });
 
     // meiva:note
-    // Cap every expanded TurnBlock's inner ScrollArea at half of the visible
+    // Cap the trailing TurnBlock's inner ScrollArea at half of the visible
     // timeline message area (excluding the floating HeaderBar when measured).
     // meiva:link ui/web/src/docs/frontend-components/timeline-view/timeline-view.meiva.okf.md
     const syncTurnMaxHeight = () => {

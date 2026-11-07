@@ -83,9 +83,9 @@ describe("TimelineView bounded work blocks during scroll", () => {
     expect(container.querySelector("[data-testid='python-code'] .token")).toBeNull();
   });
 
-  it("keeps work headers non-sticky across rapid scroll gestures while bounding the inner scrollport", () => {
+  it("keeps the expanded trailing header sticky across rapid scroll gestures while bounding its body", () => {
     const { container, viewport, toggle } = setupExpandedBlock();
-    expect(toggle.className).not.toContain("sticky");
+    expect(toggle.className).toContain("sticky");
     expect(screen.getByTestId("turn-scroll-viewport").className).toContain(
       "max-h-[var(--timeline-turn-max-h,50dvh)]",
     );
@@ -95,7 +95,7 @@ describe("TimelineView bounded work blocks during scroll", () => {
     viewport.scrollTop = 1000;
     act(() => { fireEvent.scroll(viewport); });
 
-    expect(toggle.className).not.toContain("sticky");
+    expect(toggle.className).toContain("sticky");
     expect(container.querySelector("[data-fast-scrolling]")).toBeNull();
   });
 });

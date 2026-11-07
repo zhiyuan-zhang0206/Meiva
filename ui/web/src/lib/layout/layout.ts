@@ -57,6 +57,10 @@ export const BAR_CLEAR_TOP_OFFSET_CLASS = "top-[52px]";
 export const OVERFLOW_CLIP = "overflow-clip";
 
 // meiva:note
+// Matches space-y-1 in work-block bodies for both inner and timeline row windows.
+export const TIMELINE_TURN_ROW_GAP_PX = 4;
+
+// meiva:note
 // Pending answers overlay the conversation above its composer. Bound the inner
 // viewport against the visible height, including an open on-screen keyboard;
 // the ScrollArea root is auto-height and must not clip its unbounded viewport.
