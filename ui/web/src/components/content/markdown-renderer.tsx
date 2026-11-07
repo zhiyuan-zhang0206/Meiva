@@ -5,7 +5,6 @@
 
 import { createContext, memo, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import ReactMarkdown, { type Components, type UrlTransform } from "react-markdown";
-import { FileCode } from "lucide-react";
 import rehypeRaw from "rehype-raw";
 import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
 import rehypeSlug from "rehype-slug";
@@ -145,11 +144,9 @@ const createDefaultComponents = (onOpenFile: (path: string, lineRange?: string) 
             e.preventDefault();
             onOpenFile(fileMatch.path, fileMatch.lineRange);
           }}
-          className={cn("inline-flex items-center gap-1 font-mono text-primary underline underline-offset-2 hover:opacity-80 cursor-pointer", props.className)}
-          title={`Open ${fileMatch.path}${fileMatch.lineRange ? ` (Line ${fileMatch.lineRange})` : ""}`}
+          className={cn("cursor-pointer", props.className)}
         >
-          <FileCode className="size-3.5 inline-block opacity-70" />
-          <span>{children}</span>
+          {children}
         </a>
       );
     }
@@ -171,19 +168,29 @@ const createDefaultComponents = (onOpenFile: (path: string, lineRange?: string) 
       const fileMatch = isFilePath(text);
       if (fileMatch.isPath) {
         return (
-          <button
-            type="button"
-            data-testid="file-path-pill"
+          <span
+            role="link"
+            tabIndex={0}
+            data-testid="file-path-code"
             onClick={(e) => {
+              if (e.currentTarget.closest("a")) return;
               e.stopPropagation();
               onOpenFile(fileMatch.path, fileMatch.lineRange);
             }}
-            className="inline-flex items-center gap-1 mx-0.5 px-1.5 py-0.5 rounded text-[12px] font-mono bg-primary/10 hover:bg-primary/20 text-primary border border-primary/20 hover:border-primary/40 transition-colors cursor-pointer align-baseline"
-            title={`Open ${fileMatch.path}${fileMatch.lineRange ? ` (Line ${fileMatch.lineRange})` : ""}`}
+            onKeyDown={(e) => {
+              if (e.currentTarget.closest("a")) return;
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                e.stopPropagation();
+                onOpenFile(fileMatch.path, fileMatch.lineRange);
+              }
+            }}
+            className="underline underline-offset-2 cursor-pointer"
           >
-            <FileCode className="size-3 shrink-0 opacity-70" />
-            <code className={className}>{text}</code>
-          </button>
+            <code className={className} {...props}>
+              {children}
+            </code>
+          </span>
         );
       }
       return (
@@ -214,19 +221,25 @@ const createInlineComponents = (onOpenFile: (path: string, lineRange?: string) =
     const fileMatch = isFilePath(text);
     if (fileMatch.isPath) {
       return (
-        <button
-          type="button"
-          data-testid="file-path-pill"
+        <span
+          role="link"
+          tabIndex={0}
+          data-testid="file-path-code"
           onClick={(e) => {
             e.stopPropagation();
             onOpenFile(fileMatch.path, fileMatch.lineRange);
           }}
-          className="inline-flex items-center gap-1 mx-0.5 px-1.5 py-0.5 rounded text-[12px] font-mono bg-primary/10 hover:bg-primary/20 text-primary border border-primary/20 hover:border-primary/40 transition-colors cursor-pointer align-baseline"
-          title={`Open ${fileMatch.path}${fileMatch.lineRange ? ` (Line ${fileMatch.lineRange})` : ""}`}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" || e.key === " ") {
+              e.preventDefault();
+              e.stopPropagation();
+              onOpenFile(fileMatch.path, fileMatch.lineRange);
+            }
+          }}
+          className="underline underline-offset-2 cursor-pointer"
         >
-          <FileCode className="size-3 shrink-0 opacity-70" />
-          <code>{text}</code>
-        </button>
+          <code>{children}</code>
+        </span>
       );
     }
     return <code>{children}</code>;
