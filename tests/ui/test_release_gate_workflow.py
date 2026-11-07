@@ -119,11 +119,26 @@ def test_certify_mints_git_native_certificate_without_reverse_pr() -> None:
     assert certify["permissions"] == {"contents": "write"}
 
     mint = _step(certify["steps"], "Mint annotated release certificate")
-    publish = _step(certify["steps"], "Publish release tag, channel/latest, and GitHub Release")
+    publish = _step(certify["steps"], "Publish release tag and channel/latest")
     assert "scripts/host_ops/release/certify.py mint" in mint["run"]
     assert "refs/tags/channel/latest" in publish["run"]
-    assert "gh release create" in publish["run"]
     assert "gh pr create" not in _RELEASE_GATE.read_text(encoding="utf-8")
+
+
+def test_cluster_release_workflows_publish_no_github_release() -> None:
+    # meiva:note
+    # A certified cluster release is a Git tag plus channel pointers; no consumer in this
+    # repository reads a `v*` Release object, and re-creating one per train leaves empty shells
+    # and takes the single `Latest` badge away from the `android-v*` artifact release.
+    # meiva:link docs/decisions/engineering/tooling/2026-11-07-cluster-releases-stay-git-only.md
+    for path in (_RELEASE_GATE, _PROMOTE_RELEASE):
+        scripts = [
+            step["run"]
+            for job in _yaml(path)["jobs"].values()
+            for step in job.get("steps", [])
+            if "run" in step
+        ]
+        assert all("gh release" not in script for script in scripts), path
 
 
 def test_promote_workflow_verifies_certificate_and_updates_channel_stable() -> None:
@@ -136,7 +151,6 @@ def test_promote_workflow_verifies_certificate_and_updates_channel_stable() -> N
     verify_step = _step(
         promote_job["steps"], "Verify release certificate and update channel/stable"
     )
-    push_step = _step(promote_job["steps"], "Push channel/stable and mark GitHub Release latest")
+    push_step = _step(promote_job["steps"], "Push channel/stable")
     assert "scripts/host_ops/release/promote.py" in verify_step["run"]
     assert "refs/tags/channel/stable:refs/tags/channel/stable" in push_step["run"]
-    assert "--latest" in push_step["run"]

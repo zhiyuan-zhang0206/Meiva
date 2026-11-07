@@ -2,6 +2,11 @@
 
 Supersedes [2026-10-03-delete-dated-release-tag-cadence.md](../../../runtime/updates/release/2026-10-03-delete-dated-release-tag-cadence.md).
 
+Superseded in part by
+[2026-11-07-cluster-releases-stay-git-only.md](2026-11-07-cluster-releases-stay-git-only.md): the
+GitHub Release published per certified version, and the `--latest` mark applied on promotion, are
+gone; the tags, certificates and channel pointers below stand.
+
 ## Context
 
 Meiva previously combined three mechanisms that worked against fast, safe delivery:

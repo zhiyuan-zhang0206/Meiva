@@ -10,9 +10,12 @@
 #   - immutable annotated tag `vYYYY.MM.DD.HHMMSS` (or `vYYYY.MM.DD.HHMMSS-hf<N>`) carrying a
 #     `meiva-release/v1` JSON certificate bound to the peeled commit SHA;
 #   - moving annotated tag `channel/latest` carrying a `meiva-channel/v1` JSON pointer when
-#     certifying `refs/heads/main` (non-hotfix);
-#   - a corresponding GitHub Release (`--latest=false`; `promote-release.yml` promotes to
-#     `channel/stable` and `--latest`).
+#     certifying `refs/heads/main` (non-hotfix).
+#
+# Nothing is published to the GitHub Releases page. A certified cluster release is a Git tag plus
+# channel pointers, nothing in this repository reads a `v*` Release object, and a repository has a
+# single `Latest` badge that belongs to the artifact release (`android-v*`). `promote-release.yml`
+# promotes to `channel/stable` the same way.
 #
 # A cron slot GitHub never started is backfilled with `main-typecheck.yml` (`workflow_dispatch`),
 # which runs the full-tree type check and publishes nothing.
@@ -656,14 +659,12 @@ jobs:
           --reason "$REASON"
           --github-output "$GITHUB_OUTPUT"
 
-      - name: Publish release tag, channel/latest, and GitHub Release
+      - name: Publish release tag and channel/latest
         env:
-          GH_TOKEN: ${{ github.token }}
           VERSION: ${{ steps.mint.outputs.version }}
           SHA: ${{ steps.mint.outputs.sha }}
           TAG_ACTION: ${{ steps.mint.outputs.tag_action }}
           ADVANCE_LATEST: ${{ steps.mint.outputs.advance_latest }}
-          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           if [ "$TAG_ACTION" = "create" ]; then
             git push origin "refs/tags/$VERSION"
@@ -671,10 +672,4 @@ jobs:
           if [ "$ADVANCE_LATEST" = "true" ]; then
             git push --force origin refs/tags/channel/latest:refs/tags/channel/latest
           fi
-          if ! gh release view "$VERSION" >/dev/null 2>&1; then
-            gh release create "$VERSION" \
-              --verify-tag \
-              --latest=false \
-              --title "$VERSION" \
-              --notes "Certified commit \`$SHA\` via Release gate ($RUN_URL)."
-          fi
+          echo "Certified commit \`$SHA\` as \`$VERSION\`." >> "$GITHUB_STEP_SUMMARY"
