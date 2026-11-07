@@ -2,8 +2,9 @@
 # The merge gate for the pyright/debt lanes: five conditions, one fail-closed verdict.
 #
 # `python3 scripts/ci/pull_requests/merge_gate.py <PR number|url>`, from a checkout of the
-# repository whose pull requests it judges. It prints the evidence per condition and one verdict
-# line; exit 0 = GO, 1 = NO-GO, and an unreadable check is NO-GO.
+# repository whose pull requests it judges -- the `repos/{owner}/{repo}` call resolves from the
+# current directory, so a wrapper has to start inside a checkout. It prints the evidence per
+# condition and one verdict line; exit 0 = GO, 1 = NO-GO, and an unreadable check is NO-GO.
 #
 #   1 head    the PR body pins `Preflight on head <headRefOid>:` and carries `PREFLIGHT PASS`
 #   2 checks  every check run is green (Trunk queue rows ignored; no check run at all = NO-GO)

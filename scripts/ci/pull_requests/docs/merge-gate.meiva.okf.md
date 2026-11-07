@@ -71,6 +71,24 @@ only that observes the result.
 waived and 2 and 3 still must hold, since those are the two the machine can prove
 about any pull request.
 
+## What a NO-GO does and does not mean
+
+A NO-GO says this lane may not merge that pull request: either one of the four
+machine-checkable conditions fails, or condition 5 says the grant does not cover
+its author. It is **not** a claim that the pull request is bad, and it does not
+bind anyone else. A pull request from outside the grant can be perfectly good and
+still be refused here by construction; the coordinator merges those on green CI
+and their own review, and the gate's refusal stands beside that merge rather than
+contradicting it. Reading such a merge as a bypass is the mistake this paragraph
+exists to prevent.
+
+## Run it from the repository it judges
+
+`gh api repos/{owner}/{repo}` resolves the placeholder from the current
+directory, so the process has to start inside the checkout; from anywhere else
+every condition fails with `fatal: not a git repository`. An operator wrapper
+should change directory to its checkout before handing over.
+
 ## Not this tool's job
 
 The gate decides; it does not merge. The `gh` wrapper that calls it runs the real
