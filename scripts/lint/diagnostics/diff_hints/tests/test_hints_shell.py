@@ -181,6 +181,24 @@ def test_the_branch_check_reads_an_answer_from_the_pull_request_body(
 
 
 # meiva:note
+# A detached head is how CI checks a pull request, and the body is unreachable from it: the run has
+# to say so, or an empty answer reads as a body that carried none and its author edits the wrong
+# field.
+def test_a_detached_head_says_the_pull_request_body_is_unreadable(
+    repo: Path, tmp_path: Path
+) -> None:
+    git(repo, "remote", "add", "origin", "https://github.com/example/repo")
+    (repo / "cli" / "x.py").write_text(LOCATOR, encoding="utf-8")
+    commit(repo, "Fetch from the application")
+    git(repo, "checkout", "-q", "--detach")
+    answered = fake_gh(tmp_path, body="Hint-Ack: service-locator cli/x.py:2 -- composition root")
+
+    result = run_with_gh(repo, answered, "branch")
+
+    assert "unreadable on a detached HEAD" in result.stderr
+
+
+# meiva:note
 # A body that does not answer the site answers nothing: reading the body must not become a way to
 # pass the check by having any PR at all.
 def test_a_pull_request_body_without_the_answer_still_blocks(repo: Path, tmp_path: Path) -> None:
