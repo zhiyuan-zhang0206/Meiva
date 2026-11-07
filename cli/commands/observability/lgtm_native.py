@@ -596,7 +596,7 @@ def ensure_lgtm_native(
         if password is not None:
             changed.append(password)
         (native_dir / "grafana/telegram.env").unlink(missing_ok=True)
-    warn_sealed_inputs(meiva_home, changed, writer="meiva lgtm")
+    warn_sealed_inputs(meiva_home, changed, writer="the lgtm render")
     if "loki" in services:
         verify_loki(meiva_home, host=host)
 
