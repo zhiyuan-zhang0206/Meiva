@@ -9,8 +9,10 @@ from typing import Literal
 
 from pydantic import TypeAdapter
 
+from base.deploy.lifecycle.pause_markers import root_running
 from base.host.atomic_io import write_text_atomic
 from base.host.boundary.json_values import is_object_dict, is_object_list
+from base.paths import run_dir
 from base.telemetry.converge_report import report_converge_overwrite, report_converge_preserve
 from cli.boundary.json_body import loads
 
@@ -73,19 +75,17 @@ def sealed_units(path: Path, seals: Iterable[tuple[Path, str]]) -> tuple[str, ..
 
 
 # meiva:note
-# The sealed paths of the units a live root owns, or none when no root answers: a home whose root
-# is down re-admits every input when it next starts, so a warning there would be noise.
+# The sealed paths of the units a live root owns, or none when no root runs: a home whose root is
+# down re-admits every input when it next starts, so a warning there would be noise.
+#
+# Liveness is the instance lock, not a request: a converge pass must not reach the service tree it
+# runs next to — not even to ask whether it is up — and the root holds this lock exclusively for
+# its whole life. An unreadable lock is treated as no root for the same reason: a warning that
+# cannot name a generation is not worth the doubt it plants.
 def live_root_seals(home: Path) -> tuple[tuple[Path, str], ...]:
-    from base.native_process.root_control.client import RootClient, RootClientError
-
-    socket = home / "run/meiva-root/meiva-root.sock"
-    if not socket.exists():
+    if root_running(home) is not True:
         return ()
-    try:
-        _ = RootClient(socket, timeout=2.0).status()
-    except RootClientError:
-        return ()
-    return admitted_seals(home / "run/meiva-root/manifests.json")
+    return admitted_seals(run_dir(home) / "meiva-root" / "manifests.json")
 
 
 # meiva:note

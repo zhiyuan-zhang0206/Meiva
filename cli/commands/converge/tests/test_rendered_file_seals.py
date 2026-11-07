@@ -7,6 +7,11 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from base.native_process.root_control.instance_lock import (
+    acquire_instance_lock,
+    release_instance_lock,
+)
+from base.paths import run_dir
 from cli.commands.converge.rendered_file import (
     admitted_seals,
     live_root_seals,
@@ -54,5 +59,26 @@ def test_a_file_beneath_a_sealed_directory_belongs_to_its_unit() -> None:
     assert sealed_units(Path("/h/elsewhere"), seals) == ()
 
 
-def test_no_root_socket_answers_with_no_seals(tmp_path: Path) -> None:
+def test_a_home_with_no_root_answers_with_no_seals(tmp_path: Path) -> None:
+    assert live_root_seals(tmp_path) == ()
+
+
+# meiva:note
+# Liveness is the instance lock the root holds for its whole life, read without a request: a
+# converge pass must not reach the service tree it runs next to (task #6403).
+def test_a_held_instance_lock_makes_the_record_live(tmp_path: Path) -> None:
+    root_dir = run_dir(tmp_path) / "meiva-root"
+    root_dir.mkdir(parents=True)
+    seals = _record(
+        tmp_path,
+        [{"id": "grafana", "inputs": [{"path": "/h/lgtm/native/config", "digest": "a" * 64}]}],
+    )
+    (root_dir / "manifests.json").write_bytes(seals.read_bytes())
+    assert live_root_seals(tmp_path) == ()
+
+    fd = acquire_instance_lock(root_dir)
+    try:
+        assert live_root_seals(tmp_path) == ((Path("/h/lgtm/native/config"), "grafana"),)
+    finally:
+        release_instance_lock(fd)
     assert live_root_seals(tmp_path) == ()
