@@ -725,6 +725,15 @@ def throwaway_postgres(
 
     admin = f"postgresql://meiva@127.0.0.1:{port}/postgres"
     url = f"postgresql://meiva@127.0.0.1:{port}/meiva_citest"
+    # TEMPORARY DEBUG PROBE (#6424) — debug/6424-dburl-probe only, never merge.
+    import os as _os
+    import sys as _sys
+
+    _sys.stderr.write(
+        "PROBE-LAYOUT test=%r port=%r attempts=%r id=%s\n"
+        % (_os.environ.get("PYTEST_CURRENT_TEST"), port, attempt, id(url))
+    )
+    _sys.stderr.flush()
 
     try:
         with psycopg.connect(admin, autocommit=True) as conn, conn.cursor() as cur:

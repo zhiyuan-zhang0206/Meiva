@@ -93,7 +93,24 @@ def url_with_port(url: str, port: int) -> str:
             userinfo += f":{quote(parts.password, safe='')}"
         userinfo += "@"
     netloc = f"{userinfo}{host}:{port}"
-    return urlunsplit((parts.scheme, netloc, parts.path, parts.query, parts.fragment))
+    result = urlunsplit((parts.scheme, netloc, parts.path, parts.query, parts.fragment))
+    # TEMPORARY DEBUG PROBE (#6424) — debug/6424-dburl-probe only, never merge.
+    if ":1/" in result and "meiva_citest" in result:
+        import os
+        import sys
+        import traceback
+
+        sys.stderr.write(
+            "PROBE-REWRITE test=%r in=%r out=%r\n%s\n"
+            % (
+                os.environ.get("PYTEST_CURRENT_TEST"),
+                url,
+                result,
+                "".join(traceback.format_stack()[-10:]),
+            )
+        )
+        sys.stderr.flush()
+    return result
 
 
 def url_with_host(url: str, host: str) -> str:
