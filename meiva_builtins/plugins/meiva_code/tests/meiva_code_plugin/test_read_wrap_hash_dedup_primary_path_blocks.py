@@ -79,17 +79,17 @@ async def test_after_init_initializes_each_host_workspace_without_sdk_slot(
             for config, ctx in zip(configs, contexts, strict=True)
         )
     )
-    assert [result["meiva_code__cwd"] for result in results] == [
+    assert [result["cwd"] for result in results] == [
         str(unit_home / "workspaces" / str(aid)) for aid in (11, 22)
     ]
     for aid, config, ctx in zip((11, 22), configs, contexts, strict=True):
         snapshot = await graph.aget_state(config)
-        assert snapshot.values["meiva_code__cwd"] == str(unit_home / "workspaces" / str(aid))
+        assert snapshot.values["cwd"] == str(unit_home / "workspaces" / str(aid))
         await graph.ainvoke({"turn_active": False}, config, context=ctx)
     home = str(Path.home())
-    await graph.ainvoke({"meiva_code__cwd": home}, configs[0], context=contexts[0])
+    await graph.ainvoke({"cwd": home}, configs[0], context=contexts[0])
     resumed = await graph.ainvoke({"turn_active": False}, configs[0], context=contexts[0])
-    assert resumed["meiva_code__cwd"] == home
+    assert resumed["cwd"] == home
     assert not hasattr(meiva, "context")
 
 
@@ -104,9 +104,8 @@ async def test_after_init_no_agent_initializes_home(has_identity: bool, no_sdk_c
     )
     state_cls = build_agent_state(ExtensionRegistry((("meiva_code", agent_runtime.contribute()),)))
     state = state_cls(messages=[], halted=False)
-    assert "meiva_code__cwd" not in state.model_fields_set
     result = await agent_runtime.ValidateCwdAfterInitHook()(state, runtime, None)
-    assert result == {"meiva_code__cwd": str(Path.home())}
+    assert result == {"cwd": str(Path.home())}
     assert not hasattr(meiva, "context")
 
 
@@ -148,22 +147,6 @@ def test_read_wrap_hash_dedup_primary_path_blocks_identical_copy(
 
         # Zero NEW auto-injections: both copies are hash/path-deduped now
         assert len(get_injected_context_notes(meiva.state_update)) == 1
-    finally:
-        process_context.unbind_exec_turn()
-
-
-def test_set_cwd_no_skills_clears_project_skills_note(tmp_path: Path):
-    """set_cwd into a directory with no project skills sets
-    project_skills_note to None (clears any previous note)."""
-    state = make_state_with_cwd(str(tmp_path))
-    # Pre-set project_skills_note to mimic a previous cwd with skills
-    object.__setattr__(state, "meiva_code__project_skills_note", "stale note")
-    object.__setattr__(state, "meiva_code__project_skills_seen_compact", 0)
-    process_context.set_state(state)
-    process_context.set_state_update({})
-    try:
-        meiva.cwd.set(tmp_path)
-        assert meiva.state.meiva_code__project_skills_note is None  # type: ignore[union-attr]
     finally:
         process_context.unbind_exec_turn()
 
@@ -232,7 +215,7 @@ async def test_after_init_hook_falls_back_when_cwd_missing(tmp_path: Path, unit_
 
     # Hook returned a state update that overwrites the stale cwd.
     assert result is not None
-    assert result["meiva_code__cwd"] == fallback_dir
+    assert result["cwd"] == fallback_dir
     assert Path(fallback_dir).is_dir()
     assert Path.cwd() == process_cwd
 
@@ -267,7 +250,7 @@ async def test_after_init_hook_falls_back_when_cwd_is_file(tmp_path: Path, unit_
         make_state_with_cwd(str(persisted_file)), _cwd_runtime(9999), None
     )
 
-    assert result == {"meiva_code__cwd": str(fallback_dir)}
+    assert result == {"cwd": str(fallback_dir)}
     assert fallback_dir.is_dir()
     assert Path.cwd() == process_cwd
 
@@ -285,7 +268,7 @@ async def test_after_init_rehomes_when_inherited_cwd_is_another_agents_workspace
         make_state_with_cwd(str(source_workspace)), _cwd_runtime(6720), None
     )
 
-    assert result == {"meiva_code__cwd": str(own_workspace)}
+    assert result == {"cwd": str(own_workspace)}
 
 
 async def test_after_init_rehomes_when_inherited_cwd_is_inside_another_agents_workspace(
@@ -300,7 +283,7 @@ async def test_after_init_rehomes_when_inherited_cwd_is_inside_another_agents_wo
         make_state_with_cwd(str(inherited)), _cwd_runtime(6720), None
     )
 
-    assert result == {"meiva_code__cwd": str(unit_home / "workspaces" / "6720")}
+    assert result == {"cwd": str(unit_home / "workspaces" / "6720")}
 
 
 async def test_after_init_keeps_the_workspaces_root_itself(unit_home: Path):
@@ -356,7 +339,7 @@ async def test_after_init_rehomes_through_a_symlink_into_another_agents_workspac
         make_state_with_cwd(str(link)), _cwd_runtime(6720), None
     )
 
-    assert result == {"meiva_code__cwd": str(unit_home / "workspaces" / "6720")}
+    assert result == {"cwd": str(unit_home / "workspaces" / "6720")}
 
 
 async def test_after_init_keeps_an_inherited_project_cwd(tmp_path: Path):

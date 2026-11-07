@@ -67,6 +67,7 @@ _SURFACE: dict[str, list[str]] = {
     "web": ["ReasoningEffort", "SearchResult", "fetch", "search"],
     "skills": [],
     "files": ["append", "delete", "edit", "glob", "read", "write"],
+    "cwd": ["get", "set"],
     "shell": ["SessionHandle", "run", "run_background", "sessions"],
     # Not a top-level namespace: the scan the other namespaces run their results through. Its
     # three names are still what `meiva.help` and the docs lint treat as its surface.
@@ -77,6 +78,7 @@ _TOP_LEVEL = [
     "agents",
     "attach",
     "context",
+    "cwd",
     "files",
     "help",
     "mcps",
@@ -100,6 +102,7 @@ def test_the_agent_visible_names_of_a_core_namespace_are_pinned(namespace: str) 
         "web": meiva.web,
         "skills": meiva.skills,
         "files": meiva.files,
+        "cwd": meiva.cwd,
         "shell": meiva.shell,
         "security": security,
     }[namespace]

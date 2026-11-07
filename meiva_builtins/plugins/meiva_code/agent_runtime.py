@@ -1,151 +1,19 @@
 from __future__ import annotations
 
-import stat
-from pathlib import Path
-
-from langchain_core.messages import BaseMessage
-from langgraph.runtime import Runtime
-
-from agent.hooks import Hook
-from agent.messages import NoteTag, system_note_message
-from agent.state import AgentState, PluginStateHandle
-from base.agents.context import MeivaContext
-from base.log import logger
+from agent.graph.hooks.cwd import ValidateCwdAfterInitHook as ValidateCwdAfterInitHook
+from agent.state import PluginStateHandle
 from base.packages.plugins.extensions import PluginContributions
-from base.paths import workspace_dir, workspaces_root
 
 from ._prompt_sections import coding_tools_section, engineering_workflow_section
 from ._state import MeivaCodeState
 
 
 def state_handle() -> PluginStateHandle[MeivaCodeState]:
-
     return PluginStateHandle(MeivaCodeState, "meiva_code")
 
 
-# meiva:note
-# The after-exec hook returns a messages delta containing pending cwd and project-skills notes. It consumes cwd_note and emits the project-skills note once per compaction version; without pending notes it returns None.
-# meiva:link meiva_builtins/plugins/meiva_code/docs/runtime-notes.meiva.okf.md
-class _InjectCwdNotesAfterExecHook(Hook):
-    async def __call__(
-        self,
-        state: AgentState,
-        runtime: Runtime[MeivaContext],
-        _config: object,
-        /,
-    ) -> dict[str, object] | None:
-
-        current = state_handle().view(state)
-        notes: list[BaseMessage] = []
-        update: dict[str, object] = {}
-
-        now = runtime.context.require_clock().now()
-        if current.cwd_note is not None:
-            notes.append(
-                system_note_message(
-                    content=current.cwd_note,
-                    tag=NoteTag.CONTEXT,
-                    picked_up_at=now,
-                    created_at=now,
-                )
-            )
-            update["cwd_note"] = None
-
-        if current.project_skills_note is not None:
-            compact_v = state.compact.version
-            if compact_v > current.project_skills_seen_compact:
-                notes.append(
-                    system_note_message(
-                        content=current.project_skills_note,
-                        tag=NoteTag.PROJECT_SKILLS,
-                        picked_up_at=now,
-                        created_at=now,
-                    )
-                )
-                update["project_skills_seen_compact"] = compact_v
-
-        if notes:
-            logger.info("[meiva_code] injecting {} finding(s) as system notes", len(notes))
-            update["messages"] = notes
-            return state_handle().delta(update)
-        return None
-
-
-def _logical_cwd_error(cwd: Path) -> OSError | None:
-
-    try:
-        mode = cwd.stat().st_mode
-    except OSError as exc:
-        return exc
-    if not stat.S_ISDIR(mode):
-        return NotADirectoryError(f"persisted meiva.cwd is not a directory: {cwd}")
-    return None
-
-
-def _foreign_workspace(cwd: Path, agent_id: int, root: Path) -> str | None:
-    try:
-        relative = cwd.resolve().relative_to(root.resolve())
-    except ValueError:
-        return None
-    if not relative.parts:
-        return None
-    owner = relative.parts[0]
-    return owner if owner.isdigit() and owner != str(agent_id) else None
-
-
-# meiva:note
-# After initialization, a valid persisted logical cwd is preserved, except a cwd inside another agent's workspace (a fork inherits the source's cwd channel): that one is replaced by the invoking agent's workspace, because a workspace is agent identity rather than project context. An absent or unusable cwd is likewise replaced by the invoking agent's workspace, or home when no agent identity exists. The workspaces root comes from `base.paths.workspaces_root()`, its single owner. This does not change the Python process cwd.
-# meiva:link meiva_builtins/plugins/meiva_code/docs/runtime-notes.meiva.okf.md
-class ValidateCwdAfterInitHook(Hook):
-    async def __call__(
-        self,
-        state: AgentState,
-        runtime: Runtime[MeivaContext],
-        _config: object,
-        /,
-    ) -> dict[str, object] | None:
-        initialized = "meiva_code__cwd" in state.model_fields_set
-        cwd = Path(state_handle().view(state).cwd)
-        home = runtime.context.require_meiva_home()
-        identity = runtime.context.identity
-        aid = None if identity is None else identity.agent_id
-        exc = _logical_cwd_error(cwd) if initialized else None
-        owner = (
-            _foreign_workspace(cwd, aid, workspaces_root(home=home))
-            if initialized and exc is None and aid is not None
-            else None
-        )
-        if initialized and exc is None and owner is None:
-            return None
-
-        fallback = str(
-            runtime.context.require_user_home() if aid is None else workspace_dir(aid, home=home)
-        )
-        if exc is not None:
-            logger.warning(
-                "[meiva_code] after_init: persisted cwd {cwd!r} failed validation "
-                "({exc!r}), falling back to {fallback!r} — state updated so "
-                "future restarts use the new cwd",
-                cwd=str(cwd),
-                exc=exc,
-                fallback=fallback,
-            )
-        elif owner is not None:
-            logger.warning(
-                "[meiva_code] after_init: inherited cwd {cwd!r} belongs to agent "
-                "{owner}'s workspace, re-homing to {fallback!r}",
-                cwd=str(cwd),
-                owner=owner,
-                fallback=fallback,
-            )
-        return {"meiva_code__cwd": fallback}
-
-
 def contribute() -> PluginContributions:
-
     return PluginContributions(
         system_prompt_sections=(coding_tools_section, engineering_workflow_section),
-        after_init=(ValidateCwdAfterInitHook(),),
-        after_exec=(_InjectCwdNotesAfterExecHook(),),
         state=(MeivaCodeState,),
     )

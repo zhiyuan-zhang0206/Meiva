@@ -6,22 +6,8 @@
     "meiva": ">=2026.10.1"
   },
   "contributions": {
-    "hooks": [
-      "after_init",
-      "after_exec"
-    ],
-    "sdkNamespaces": [
-      "cwd"
-    ],
     "sdkWraps": [
-      "files.read",
-      "shell.run",
-      "files.edit",
-      "files.write",
-      "files.append",
-      "files.delete",
-      "files.glob",
-      "understand"
+      "files.read"
     ],
     "systemPromptSections": [
       "coding_tools_section",

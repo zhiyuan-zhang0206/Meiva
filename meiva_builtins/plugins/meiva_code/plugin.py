@@ -4,7 +4,8 @@ Two pieces, cwd and context-file injection:
 - cwd: `meiva_code__cwd` state field (default: the agent's workspace dir; $HOME
   when no process identity is bound); the agent reads/writes via
   `meiva.cwd.get` / `set`; the wraps use it to resolve relative paths in
-  `meiva.files.*` / `meiva.shell.run` / each `meiva.understand` target's `paths`.
+  `meiva.files.*` / `meiva.shell.run` / each `meiva.understand` target's `paths` /
+  `meiva.ui.serve`'s `dir`.
 - context-file auto-injection: wraps `meiva.files.read`, walks up the resolved
   path to git root or `$HOME` (whichever is farther), and surfaces any AGENTS.md
   / CLAUDE.md files along the way as a system note (tag=CONTEXT) so the agent
@@ -41,7 +42,6 @@ outside an exec turn.
 from __future__ import annotations
 
 import hashlib
-from typing import TypeGuard
 
 __description__ = "Meiva Code conventions — maintains cwd and auto-injects project AGENTS.md / CLAUDE.md (walking up from meiva.files.read paths)"
 
@@ -50,22 +50,16 @@ from pathlib import Path
 
 import meiva.files as _meiva_files_mod
 from base.log import logger
-from base.packages.plugins.extensions import PluginContributions, SdkNamespace, SdkWrap
+from base.packages.plugins.extensions import PluginContributions, SdkWrap
 from base.packages.skills import project_skill_roots
 from meiva.sdk_surface import process_context
 from meiva.sdk_surface.agent_identity import require_agent_id
 from meiva.sdk_surface.validation import coerce_str
 
-from . import _code_namespace
 from ._state_access import read_state, update_state
 from ._walk import find_context_files_along_path
 
 _files_resolve = _meiva_files_mod.resolve
-
-# ── meiva.cwd SDK namespace — declared in `contribute()` at the bottom of this file.
-# Promote cwd into the system prompt's expanded SDK reference, ahead of the
-# configured framework list — it is the top coding surface, and a framework
-# default cannot name a plugin namespace (issue #1011).
 
 
 # ── project-local skill source ───────────────────────────────────────────
@@ -76,7 +70,9 @@ _files_resolve = _meiva_files_mod.resolve
 def _project_skill_source() -> list[Path]:
     if not process_context.in_exec_turn():
         return []
-    return project_skill_roots(Path(read_state().cwd))
+    from meiva import cwd
+
+    return project_skill_roots(cwd.get())
 
 
 # ── wrap meiva.files.read ───────────────────────────────────────────────────
@@ -216,10 +212,7 @@ def _wrapped_read(
     if not process_context.in_exec_turn():
         return inner(path, start, end, limit=limit, with_line_numbers=with_line_numbers)
 
-    # 1. Resolve path against plugin cwd
-    p = Path(path).expanduser()
-    cwd = _code_namespace.get()
-    p = (cwd / p).resolve() if not p.is_absolute() else p.resolve()
+    p = _files_resolve(path)
 
     # 2. Walk up the path collecting context files (AGENTS.md / CLAUDE.md)
     candidates = find_context_files_along_path(
@@ -268,173 +261,12 @@ def _wrapped_read(
     if update_dict:
         update_state(update_dict)
 
-    # 6. Actual read — pass the plugin-cwd-resolved absolute path; do not rely
-    # on the system cwd. Line-range params thread straight through.
     return inner(str(p), start, end, limit=limit, with_line_numbers=with_line_numbers)
-
-
-# ── wrap meiva.shell.run ────────────────────────────────────────────────────
-# Inject the plugin-tracked cwd so the agent's one-off commands run in the
-# working directory by default, instead of having to `cd <path> && ...` every
-# time. `inner` is the wrapped `meiva.shell.run`.
-def wrapped_shell_run(
-    inner: Callable[..., str],
-    cmd: str,
-    *,
-    cwd: str | None = None,
-    timeout: float = 30.0,
-) -> str:
-    """Non-zero exit does not raise; the command is killed after `timeout`
-    seconds. The returned string carries read-only `.returncode`
-    (0 = success) and `.stderr`; string operations on it return a plain
-    `str` without them.
-
-    Runs in your tracked working directory (`meiva.cwd`) unless `cwd` is passed.
-    """
-    # Same by-design fast-path as _wrapped_read: outside a turn (test / dev
-    # REPL), pass through; do not depend on plugin cwd state.
-    if not process_context.in_exec_turn() or cwd is not None:
-        return inner(cmd, cwd=cwd, timeout=timeout)
-    return inner(cmd, cwd=str(_code_namespace.get()), timeout=timeout)
-
-
-# ── wrap meiva.files.edit / write / append / delete / glob ──────────────────
-# The SDK core (meiva.files.resolve) resolves relative paths against the
-# agent's workspace; these wraps layer cwd *tracking* on top — after
-# `meiva.cwd.set("<repo>")` every file op follows the tracked cwd instead of
-# staying pinned to the workspace.
-# Uniform wrap: when a turn is active, fast-path cwd resolution matches
-# _wrapped_read; outside a turn (`in_exec_turn()` is False) pass through to the
-# original function.
-def _resolve_for_cwd(path: str | Path) -> Path:
-    """Resolve path against plugin cwd; outside a turn defer to the SDK core
-    resolution (workspace, or HOME before an identity is bound)."""
-    if not process_context.in_exec_turn():
-        return _files_resolve(str(path))
-    p = Path(path).expanduser()
-    cwd = _code_namespace.get()
-    return (cwd / p).resolve() if not p.is_absolute() else p.resolve()
-
-
-# These wraps only change path resolution, so none carries its own docstring —
-# The wrap install keeps the wrapped function's contract when the wrapper has
-# none, so the rendered SDK stub still shows the original `files.*` docstrings.
-# `inner` is the wrapped op.
-
-
-# ── edit ──
-def _wrapped_edit(
-    inner: Callable[..., None], path: str | Path, old: str, new: str, *, replace_all: bool = False
-) -> None:
-    path = coerce_str(path, "path", allow_types=(Path,))
-    p = _resolve_for_cwd(path)
-    return inner(str(p), old, new, replace_all=replace_all)
-
-
-# ── write ──
-def _wrapped_write(inner: Callable[..., None], path: str | Path, content: str) -> None:
-    path = coerce_str(path, "path", allow_types=(Path,))
-    p = _resolve_for_cwd(path)
-    return inner(str(p), content)
-
-
-# ── append ──
-def _wrapped_append(inner: Callable[..., None], path: str | Path, content: str) -> None:
-    path = coerce_str(path, "path", allow_types=(Path,))
-    p = _resolve_for_cwd(path)
-    return inner(str(p), content)
-
-
-# ── delete ──
-def _wrapped_delete(inner: Callable[..., None], path: str | Path) -> None:
-    path = coerce_str(path, "path", allow_types=(Path,))
-    p = _resolve_for_cwd(path)
-    return inner(str(p))
-
-
-# ── glob ──
-def _wrapped_glob(inner: Callable[..., list[Path]], pattern: str = "*") -> list[Path]:
-    pattern = coerce_str(pattern, "pattern")
-    # glob is not a simple path — the pattern may contain ** / * wildcards.
-    # Resolve cwd base first, concatenate the pattern (preserving wildcard
-    # semantics), then call the wrapped glob with the normalized pattern.
-    if not process_context.in_exec_turn():
-        return inner(pattern)
-    p_pattern = Path(pattern).expanduser()
-    if p_pattern.is_absolute():
-        return inner(pattern)
-    cwd = _code_namespace.get()
-    # Concatenate cwd + pattern, preserve wildcards — resolve() would treat
-    # ** as a real filename and break glob semantics, so use literal `cwd /
-    # pattern` concatenation without resolve().
-    full_pattern = str(cwd / p_pattern)
-    return inner(full_pattern)
-
-
-# Deliberately no `meiva.files.__doc__` override: the SDK core's claim —
-# "Relative paths resolve to your workspace folder" — is the single source of
-# truth for path resolution (user ruling 2026-08-01, memory-leak audit #577).
-# This plugin's cwd tracking is a runtime layer on top of that default, not a
-# contract the rendered SDK should state.
-
-
-# meiva:note
-# The wrap of meiva.understand, shaped like the meiva.files wraps and applied per target: each
-# target's `paths` entries are resolved against the tracked cwd during a turn (workspace or
-# pre-identity HOME otherwise, via _resolve_for_cwd), then handed to `inner` (the wrapped
-# understand) as absolute paths. A `text` target has no paths to resolve and passes through
-# untouched. Anything malformed (a non-list batch, a target carrying both `paths` and `text`, a
-# `paths` value that is not a list of path strings) also passes through untouched, so the wrapped
-# function's canonical TypeError / ValueError fires before any path resolution. `effort` mirrors
-# the core signature (default "max", forwarded verbatim; the core validates it).
-# `UnderstandError` rides on the function object; the wrap install carries it (and the
-# docstring) forward, so `meiva.understand.UnderstandError` survives the wrap.
-def wrapped_understand(
-    inner: Callable[..., list[str]],
-    targets: object,
-    effort: str = "max",
-    max_concurrent: int | None = None,
-) -> list[str]:
-    if not _is_object_list(targets):
-        return inner(targets, effort=effort, max_concurrent=max_concurrent)
-    resolved = [_with_resolved_paths(t) for t in targets]
-    return inner(resolved, effort=effort, max_concurrent=max_concurrent)
-
-
-def _is_object_list(value: object) -> TypeGuard[list[object]]:
-    return isinstance(value, list)
-
-
-def _is_object_dict(value: object) -> TypeGuard[dict[str, object]]:
-    return isinstance(value, dict)
-
-
-def _with_resolved_paths(target: object) -> object:
-    """One `paths` target with its paths made absolute; anything else comes back untouched."""
-    if not _is_object_dict(target) or "paths" not in target or "text" in target:
-        return target
-    paths = target["paths"]
-    if not _is_object_list(paths):
-        return target
-    path_values = [p for p in paths if isinstance(p, (str, Path))]
-    if len(path_values) != len(paths):
-        return target
-    return {**target, "paths": [str(_resolve_for_cwd(p)) for p in path_values]}
 
 
 def contribute() -> PluginContributions:
     """What this plugin declares for the SDK surface."""
     return PluginContributions(
-        sdk_namespaces=(SdkNamespace("cwd", _code_namespace, expand=True),),
-        sdk_wraps=(
-            SdkWrap("files.read", _wrapped_read),
-            SdkWrap("shell.run", wrapped_shell_run),
-            SdkWrap("files.edit", _wrapped_edit),
-            SdkWrap("files.write", _wrapped_write),
-            SdkWrap("files.append", _wrapped_append),
-            SdkWrap("files.delete", _wrapped_delete),
-            SdkWrap("files.glob", _wrapped_glob),
-            SdkWrap("understand", wrapped_understand),
-        ),
+        sdk_wraps=(SdkWrap("files.read", _wrapped_read),),
         skill_sources=(_project_skill_source,),
     )

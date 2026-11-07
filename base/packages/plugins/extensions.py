@@ -49,7 +49,7 @@ class GraphHook(Protocol):
 PLUGIN_WRITABLE_BASE_FIELDS: frozenset[str] = frozenset({"messages"})
 
 SDK_WRITTEN_BASE_FIELDS: frozenset[str] = frozenset(
-    {"security_findings", "attach", "skill_reads", "ended_with", "ended_with_reason"}
+    {"security_findings", "attach", "skill_reads", "ended_with", "ended_with_reason", "cwd"}
 )
 
 DEFAULT_NOTE_RANK = 100

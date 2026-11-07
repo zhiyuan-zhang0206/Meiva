@@ -229,7 +229,8 @@ def agent_skill_view_inputs(
         )
         checkpoint = saver.get({"configurable": {"thread_id": str(agent_id)}})
 
-    cwd = checkpoint["channel_values"].get("meiva_code__cwd") if checkpoint else None
+    channel_values = checkpoint["channel_values"] if checkpoint else {}
+    cwd = channel_values.get("cwd") or channel_values.get("meiva_code__cwd")
     narrowed = wanted if _is_str_list(wanted) else None
     return (Path(cwd) if isinstance(cwd, str) else None), narrowed, harness
 

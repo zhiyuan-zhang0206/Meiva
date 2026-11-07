@@ -54,7 +54,7 @@ def test_a_plugin_load_leaves_no_namespace_behind(
     installation = installed()
     assert installation is not None
     names = [ns.name for _p, c in installation.registry.plugins for ns in c.sdk_namespaces]
-    assert "cwd" in names, "the leak this guards is gone"
+    assert "memory" in names, "the leak this guards is gone"
     # The install stamps `_qualname` on each namespace module, which outlives the test.
     stamped = [vars(meiva)[name] for name in names]
     assert all("_qualname" in vars(module) for module in stamped)

@@ -5,7 +5,6 @@
 # outside an exec turn.
 # meiva:link meiva_builtins/plugins/meiva_code/docs/meiva_code.meiva.okf.md
 from collections.abc import Iterator
-from pathlib import Path
 
 import pytest
 
@@ -34,12 +33,12 @@ def _installed_surface() -> Iterator[None]:
 # meiva:note
 # A slot that binds the real state only when asked, like the child's lazy slot.
 class _LazySlot:
-    def __init__(self, cwd: str) -> None:
+    def __init__(self, paths: set[str]) -> None:
         state_cls = build_agent_state(
             ExtensionRegistry((("meiva_code", agent_runtime.contribute()),))
         )
         self._state = state_cls.model_validate(
-            {"messages": [], "halted": False, "meiva_code__cwd": cwd}
+            {"messages": [], "halted": False, "meiva_code__injected_paths": paths}
         )
         self.materialized = 0
 
@@ -48,24 +47,24 @@ class _LazySlot:
         process_context.set_state(self._state)
 
 
-def test_read_state_materializes_the_lazy_slot_first(tmp_path: Path) -> None:
-    slot = _LazySlot(str(tmp_path))
+def test_read_state_materializes_the_lazy_slot_first() -> None:
+    slot = _LazySlot({"foo.py"})
     process_context.set_state(slot)
     process_context.set_state_update({})
 
-    assert _state_access.read_state().cwd == str(tmp_path)
+    assert _state_access.read_state().injected_paths == {"foo.py"}
     assert slot.materialized == 1
 
 
-def test_update_state_materializes_the_lazy_slot_and_records_the_delta(tmp_path: Path) -> None:
-    slot = _LazySlot(str(tmp_path))
+def test_update_state_materializes_the_lazy_slot_and_records_the_delta() -> None:
+    slot = _LazySlot({"foo.py"})
     process_context.set_state(slot)
     process_context.set_state_update({})
 
-    _state_access.update_state({"cwd": "/elsewhere"})
+    _state_access.update_state({"injected_paths": {"bar.py"}})
 
     assert slot.materialized == 1
-    assert _state_access.read_state().cwd == "/elsewhere"
+    assert _state_access.read_state().injected_paths == {"bar.py"}
 
 
 def test_state_access_outside_an_exec_turn_raises() -> None:

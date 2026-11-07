@@ -56,7 +56,23 @@ class _AttachmentCheckpointSerializer(JsonPlusSerializer):
         encoding, blob = data
         if encoding == "msgpack" and is_retired_checkpoint_value(blob):
             return None
-        return object_of(super().loads_typed, data)
+        result = object_of(super().loads_typed, data)
+        if is_object_dict(result):
+            channel_values = result.get("channel_values")
+            if (
+                is_object_dict(channel_values)
+                and "cwd" not in channel_values
+                and "meiva_code__cwd" in channel_values
+            ):
+                channel_values["cwd"] = channel_values["meiva_code__cwd"]
+            channel_versions = result.get("channel_versions")
+            if (
+                is_object_dict(channel_versions)
+                and "cwd" not in channel_versions
+                and "meiva_code__cwd" in channel_versions
+            ):
+                channel_versions["cwd"] = channel_versions["meiva_code__cwd"]
+        return result
 
 
 # meiva:link meiva/impersonation/docs/attachment.meiva.okf.md

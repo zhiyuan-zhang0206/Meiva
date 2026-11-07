@@ -41,11 +41,11 @@ Together with SDK wraps (a plugin's declared `SdkWrap`, applied by `meiva/sdk_su
 
 ## Notes
 
-- **after_init** is the earliest hook point: its container node sits right after `START` and before `init_context`, so its state edits land before the standing message head is laid down (see [[agent/graph/docs/graph.meiva.okf.md]] for placement). Example: the meiva_code plugin registers `validate_cwd_after_init` here to repair a persisted logical cwd that cannot be statted or is not a directory, without mutating the Python process cwd.
+- **after_init** is the earliest hook point: its container node sits right after `START` and before `init_context`, so its state edits land before the standing message head is laid down (see [[agent/graph/docs/graph.meiva.okf.md]] for placement). Example: core registers `ValidateCwdAfterInitHook` here to repair a persisted logical cwd that cannot be statted or is not a directory, without mutating the Python process cwd.
 - A hook returning `None` means "no modification"—it produces no state update
 - Hook signatures are uniform, not distinguishing between nodes—the same `Hook` subclass instance can theoretically be registered at multiple hook points
 - Built-in before_llm hooks (compact / repair / capability-index drift) — the three unconditional built-ins and their registration order: [[agent/graph/hooks/docs/builtin-before-llm.meiva.okf.md]].
-- Plugin hooks are also `Hook` subclasses (e.g., `meiva_builtins/plugins/meiva_sdk_reminder/agent_runtime.py:_SdkReminderAfterExecHook`, `meiva_builtins/plugins/meiva_code/agent_runtime.py:_InjectCwdNotesAfterExecHook`, `plugins/meiva_memory`'s recall hook, etc.), written in the same style as built-in hooks—plugin authors don't need to care about built-in vs plugin distinction
+- Plugin hooks are also `Hook` subclasses (e.g., `meiva_builtins/plugins/meiva_sdk_reminder/agent_runtime.py:_SdkReminderAfterExecHook`, `plugins/meiva_memory`'s recall hook, etc.), written in the same style as built-in hooks—plugin authors don't need to care about built-in vs plugin distinction
 - The permission hook example (`demos/permission-hooks/sensitive_op_gate.py:_SensitiveOpGateHook`) demonstrates the hook system's access control application: two-stage interception (block/warn), intercepting sensitive operations (force push, delete files, external sends, etc.) in before_exec; when blocking, returns `goto: "after_exec"` to skip the exec node
 
 `tests/fakes.py` gives fake cursors `fetchone=None` and `fetchall=[]` to mean no

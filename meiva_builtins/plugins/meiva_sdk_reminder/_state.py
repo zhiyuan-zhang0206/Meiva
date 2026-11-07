@@ -93,13 +93,16 @@ _HINTS: dict[str, str] = {
         "`subprocess`, you should favor your Meiva SDK. The `meiva.shell.run` "
         "command:\n"
         "\n"
-        "    def run(cmd: str, *, cwd: str | None = None, timeout: float = 30.0) -> str:\n"
-        '        """Non-zero exit does not raise; the command is killed after `timeout` seconds. '
-        "The returned string carries read-only `.returncode` (0 = success) and `.stderr`; "
-        "string operations on it return a plain `str` without them.\n"
+        "    def run(cmd: str, *, cwd: str | None = None, timeout: float = 30.0) -> meiva.shell.ShellResult:\n"
+        '        """Non-zero exit does not raise; exceeding `timeout` seconds kills the '
+        "command and raises `subprocess.TimeoutExpired`. `cwd` defaults to your "
+        "tracked working directory (`meiva.cwd`).\n"
         "\n"
-        "        Runs in your tracked working directory (`meiva.cwd`) unless `cwd` is passed."
-        '"""'
+        "        Returns the output as a `str` carrying read-only `.returncode` (0 = success) "
+        "and `.stderr` — check `.returncode`, not stdout, to tell success from "
+        "failure; string operations return a plain `str` without them. For commands "
+        "that may outlive the timeout use `run_background`, which reports back when "
+        'the command finishes."""'
     ),
     "wait": (
         "Instead of a timed wait or sleep loop there is a handier "

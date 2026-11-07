@@ -26,22 +26,13 @@ from . import sdk
 
 
 def _absolute(path: str | Path) -> Path:
-    """The absolute path a `files.*` call on `path` resolves to.
-
-    The memory wraps sit outside the cwd-tracking wraps of `meiva_code` (plugins stack in name
-    order), so they see the caller's raw path: a relative one resolves against the tracked
-    `meiva.cwd` when that plugin is on, else against the workspace like the core."""
     target = Path(coerce_str(path, "path", allow_types=(os.PathLike,))).expanduser()
     if target.is_absolute():
         return target
-    # meiva:note
-    # `meiva.cwd` exists only while the meiva_code plugin is enabled, so it is looked up by name and
-    # used when it answers with a path; without it the file namespace resolves the path.
-    current = object_of(getattr, object_of(getattr, meiva, "cwd", None), "get", None)
-    if callable(current):
-        base_dir = current()
-        if isinstance(base_dir, Path):
-            return base_dir / target
+    if process_context.in_exec_turn():
+        from meiva import cwd
+
+        return cwd.get() / target
     return _meiva_files.resolve(target)
 
 

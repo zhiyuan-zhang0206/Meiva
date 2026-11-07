@@ -68,7 +68,7 @@ def make_state_with_cwd(
 
     state_cls = build_agent_state(ExtensionRegistry((("meiva_code", agent_runtime.contribute()),)))
     kwargs: dict[str, Any] = {
-        "meiva_code__cwd": cwd,
+        "cwd": cwd,
         "meiva_code__last_seen_compact": last_seen_compact,
     }
     if injected is not None:
@@ -165,7 +165,7 @@ def test_get_cwd_outside_turn_raises():
 # In a bootstrapped process the default cwd is the agent's own workspace dir (already created),
 # under the home the bound context carries - a directory that is not the process's own home.
 def test_default_cwd_is_workspace_when_bootstrapped(unit_home: Path, tmp_path: Path):
-    from meiva_builtins.plugins.meiva_code._state import default_cwd
+    from meiva.files import default_cwd
 
     carried = tmp_path / "carried-home"
     pin_agent(5, owns_loop=True, meiva_home=carried)
@@ -176,19 +176,18 @@ def test_default_cwd_is_workspace_when_bootstrapped(unit_home: Path, tmp_path: P
 
 def test_default_cwd_home_without_bootstrap():
     """No process identity (test/REPL directly construct state) → keep $HOME placeholder behavior."""
-    from meiva_builtins.plugins.meiva_code._state import default_cwd
+    from meiva.files import default_cwd
 
     pin_agent(None)
     assert default_cwd() == str(Path.home())
 
 
 def test_set_cwd_writes_state_update(tmp_path: Path):
-    """set_cwd writes new path into state_update["meiva_code__cwd"]."""
     process_context.set_state(make_state_with_cwd(str(Path.home())))
     process_context.set_state_update({})
     try:
         meiva.cwd.set(tmp_path)
-        assert meiva.state_update["meiva_code__cwd"] == str(tmp_path.resolve())
+        assert meiva.state_update["cwd"] == str(tmp_path.resolve())
     finally:
         process_context.unbind_exec_turn()
 
@@ -201,7 +200,7 @@ def test_set_cwd_nonexistent_raises(tmp_path: Path):
     try:
         with pytest.raises(FileNotFoundError):
             meiva.cwd.set(fake)
-        assert "meiva_code__cwd" not in meiva.state_update
+        assert "cwd" not in meiva.state_update
     finally:
         process_context.unbind_exec_turn()
 

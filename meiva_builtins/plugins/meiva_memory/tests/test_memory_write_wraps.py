@@ -90,7 +90,6 @@ def _recorded(key: str) -> set[str]:
 def test_wraps_stack_over_the_cwd_wraps_of_the_same_targets(exec_turn: Path) -> None:
     for target in ("files.write", "files.append", "files.edit"):
         assert [plugin for plugin, _ in meiva.extend.stack(target)] == [
-            "meiva_code",
             "meiva_memory",
         ]
 
