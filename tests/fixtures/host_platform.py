@@ -6,7 +6,7 @@
 # on macOS and nowhere else — so those tests name the host they need and this plugin skips
 # them everywhere else, at collection time, with one consistent reason. `--collect-only`
 # still lists the test, which is what a CI lane gate compares between Linux and macOS.
-# meiva:link scripts/lint/docs/host-platform-marks.meiva.okf.md
+# meiva:link scripts/lint/docs/host-platform-marks/host-platform-marks.meiva.okf.md
 
 from __future__ import annotations
 

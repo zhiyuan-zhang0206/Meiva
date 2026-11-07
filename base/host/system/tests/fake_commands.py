@@ -10,8 +10,24 @@ from base.host.proc import CommandRunner, PopenOptions, run_bounded
 from base.host.system.hostport import Host
 from base.native_process.os_platform import Platform
 
-LINUX_X86 = Platform("linux", "x86_64", "/usr/bin/python3")
-DARWIN_ARM64 = Platform("darwin", "arm64", "/usr/bin/python3")
+# meiva:note
+# The two platforms a test picks between. They are values a test chooses, never this process's
+# platform: a caller that must name the platform it is observed on reads
+# `Platform.current().system`, because a launch receipt is read back against it (#8659).
+LINUX_X86 = Platform(
+    # meiva:note
+    # host-ok: a canned platform a test chooses; the value that must equal the one this process is observed on reads `Platform.current()`, which is what `base/cluster/postgres.py` `read_receipt` compares a launch receipt with (#8659)
+    "linux",
+    "x86_64",
+    "/usr/bin/python3",
+)
+DARWIN_ARM64 = Platform(
+    # meiva:note
+    # host-ok: a canned platform a test chooses; the value that must equal the one this process is observed on reads `Platform.current()`, which is what `base/cluster/postgres.py` `read_receipt` compares a launch receipt with (#8659)
+    "darwin",
+    "arm64",
+    "/usr/bin/python3",
+)
 
 
 @dataclass(frozen=True)

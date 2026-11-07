@@ -27,6 +27,7 @@ from cli.commands.data_plane.tests.data_plane_records import remote_cluster_reco
 from cli.commands.data_plane.tests.data_plane_records import (
     remote_data_plane_config as remote_data_plane_config,
 )
+from cli.commands.data_plane.tests.native_cluster import NATIVE_TEST_SYSTEM
 from cli.commands.lifecycle.tests.start_storage.owned_postgres import write_record
 from cli.database import OperatorDatabaseFactory
 from cli.database.runtime import CommandRuntime
@@ -73,7 +74,7 @@ def test_start_remote_skips_local_instance_and_probes(
         retained_children=None,
         database_factory=operator_database,
         machine=command_runtime.machine,
-        system=command_runtime.host.platform.system,
+        system=NATIVE_TEST_SYSTEM,
         timers=command_runtime.timers,
         environ=command_runtime.config.process_environment(),
     )
@@ -104,7 +105,7 @@ def test_start_remote_unreachable_fails_fast_with_dial_detail(
         retained_children=None,
         database_factory=operator_database,
         machine=command_runtime.machine,
-        system=command_runtime.host.platform.system,
+        system=NATIVE_TEST_SYSTEM,
         timers=command_runtime.timers,
         environ=command_runtime.config.process_environment(),
     )
@@ -137,7 +138,7 @@ def test_start_remote_redis_unreachable_fails_after_the_database_answers(
         retained_children=None,
         database_factory=operator_database,
         machine=command_runtime.machine,
-        system=command_runtime.host.platform.system,
+        system=NATIVE_TEST_SYSTEM,
         timers=command_runtime.timers,
         environ=command_runtime.config.process_environment(),
     )

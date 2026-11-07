@@ -65,6 +65,7 @@ from cli.commands.data_plane.instance.storage_plan import (
 from cli.commands.data_plane.native import start_bounds
 from cli.commands.data_plane.tests.data_plane_records import data_plane_config as data_plane_config
 from cli.commands.data_plane.tests.native_cluster import (
+    NATIVE_TEST_SYSTEM,
     cached_pg_template,
     seed_pg_template,
     shutdown_redis,
@@ -568,7 +569,7 @@ def test_ordinary_start_refuses_a_home_without_a_ledger_before_any_effect(
             retained_children=configured.retained_children,
             database_factory=operator_database,
             machine=command_runtime.machine,
-            system=command_runtime.host.platform.system,
+            system=NATIVE_TEST_SYSTEM,
             timers=command_runtime.timers,
             environ=command_runtime.config.process_environment(),
         )

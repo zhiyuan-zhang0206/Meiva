@@ -1,8 +1,10 @@
 {
-  "allowed": 5,
+  "allowed": 7,
   "exemptions": {
+    "base/host/system/tests/fake_commands.py::<module>": "a canned platform a test chooses; the value that must equal the one this process is observed on reads `Platform.current()`, which is what `base/cluster/postgres.py` `read_receipt` compares a launch receipt with (#8659)",
     "cli/commands/data_plane/tests/native_cluster.py::_native_test_system": "the launch receipt is read back by base/cluster/postgres.py `read_receipt` against Platform.current().system, so the value must be the platform this process is observed on (#6472)",
     "cli/commands/tests/test_single_box.py::_prepare_schema": "the custody receipt it writes is read back by base/cluster/postgres.py `read_receipt` against Platform.current().system, so a fixture platform makes it unreadable on macOS (#6452)",
+    "meiva/tests/bootstrap/test_mcp_config.py::<module>": "the two platforms this module's cases choose between; a value that must equal the one this process is observed on reads `Platform.current()` (`base/native_process/os_platform.py`)",
     "meiva_builtins/plugins/meiva_syntax_fix/tests/child_ruff_without_path.py::_assert_ruff_unreachable": "meiva_builtins/plugins/meiva_syntax_fix/tests/test_syntax_fix.py empties PATH",
     "tests/ci/test_host_platform_marker.py::test_the_named_host_runs_and_every_other_host_skips_with_the_reason": "the assertion is about the skip `tests/fixtures/host_platform.py` produces here.",
     "tests/fixtures/host_platform.py::_current_system": "this module IS the translation `tests/ci/test_host_platform_marker.py` checks."

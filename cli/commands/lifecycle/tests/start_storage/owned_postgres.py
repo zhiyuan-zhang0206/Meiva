@@ -24,6 +24,7 @@ from base.host.system.tests.fake_commands import real_commands_host
 from base.paths import meiva_home
 from cli.commands.data_plane import cluster_instance as ci
 from cli.commands.data_plane.config import DataPlaneConfig
+from cli.commands.data_plane.tests.native_cluster import NATIVE_TEST_SYSTEM
 from cli.commands.lifecycle.start.migrations import cmd_migrations_apply
 from cli.database import OperatorDatabaseFactory
 from cli.database.runtime import CommandRuntime
@@ -67,7 +68,7 @@ def owned_pg(
                 host=real_commands_host(),
                 retained_children=children,
                 machine=command_runtime.machine,
-                system=command_runtime.host.platform.system,
+                system=NATIVE_TEST_SYSTEM,
                 timers=command_runtime.timers,
                 environ=os.environ,
             )
