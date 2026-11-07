@@ -59,6 +59,21 @@ def test_derive_kind_priority_and_the_intent_gate() -> None:
     assert derive_kind(stopped, restart_limit_reached=True) is None
 
 
+# meiva:note
+# Absence is the third state and the weakest claim: it reports "intent says running and
+# nothing answers", which is only the finding when no recorded failure explains it. It must
+# lose to both recorded states, and it must still be gated by the intent — a stopped unit that
+# is not running is a decision, not an absence (task #6345).
+def test_derive_kind_reports_absence_and_ranks_it_last() -> None:
+    absent = UnitFailureFacts(intent_running=True, restart_failed=None, observed_absent=True)
+    assert derive_kind(absent, restart_limit_reached=False) is FailureKind.ABSENT
+    assert derive_kind(absent, restart_limit_reached=True) is FailureKind.BREAKER_OPEN
+    both = UnitFailureFacts(intent_running=True, restart_failed=_failure(), observed_absent=True)
+    assert derive_kind(both, restart_limit_reached=False) is FailureKind.RESTART_FAILED
+    stopped = UnitFailureFacts(intent_running=False, restart_failed=None, observed_absent=True)
+    assert derive_kind(stopped, restart_limit_reached=False) is None
+
+
 def test_describe_carries_the_kind_evidence() -> None:
     failed = UnitFailureFacts(
         intent_running=True, restart_failed=_failure(RestartStage.DOWN, "stop refused")
@@ -74,6 +89,9 @@ def test_describe_carries_the_kind_evidence() -> None:
     assert describe(failed, FailureKind.BREAKER_OPEN) == (
         "replacement failed at its down half: stop refused; circuit breaker open"
     )
+    absent = UnitFailureFacts(intent_running=True, restart_failed=None, observed_absent=True)
+    assert describe(absent, FailureKind.ABSENT) == "intent says running; no process is running"
+    assert describe(absent, FailureKind.ABSENT, "pid 123 is gone") == "pid 123 is gone"
 
 
 class _Supervisor:
