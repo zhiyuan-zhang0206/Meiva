@@ -1,5 +1,8 @@
 # Promote an already-certified CalVer release tag (`vYYYY.MM.DD.HHMMSS` or `-hf<N>`) to
 # `channel/stable` without re-running tests or opening reverse pull requests.
+#
+# Promotion moves a Git tag and nothing else: the GitHub Releases page stays reserved for artifact
+# releases (`android-v*`, `app-v*`), whose `Latest` badge a cluster release must not take.
 
 name: Promote release to stable
 
@@ -47,19 +50,10 @@ jobs:
           --reason "$REASON"
           --github-output "$GITHUB_OUTPUT"
 
-      - name: Push channel/stable and mark GitHub Release latest
+      - name: Push channel/stable
         env:
-          GH_TOKEN: ${{ github.token }}
           VERSION: ${{ steps.promote.outputs.version }}
           SHA: ${{ steps.promote.outputs.sha }}
         run: |
           git push --force origin refs/tags/channel/stable:refs/tags/channel/stable
-          if gh release view "$VERSION" >/dev/null 2>&1; then
-            gh release edit "$VERSION" --latest
-          else
-            gh release create "$VERSION" \
-              --verify-tag \
-              --latest \
-              --title "$VERSION" \
-              --notes "Promoted certified commit \`$SHA\` to \`channel/stable\`."
-          fi
+          echo "Promoted \`$VERSION\` (\`$SHA\`) to \`channel/stable\`." >> "$GITHUB_STEP_SUMMARY"
