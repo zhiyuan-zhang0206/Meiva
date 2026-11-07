@@ -130,7 +130,7 @@ def test_ensure_local_bin_on_path_writes_the_block_once_into_the_users_rc(
     zshenv = user_home / ".zshenv"
     assert zshenv.exists()
     zshenv_text = zshenv.read_text()
-    assert zshenv_text.count(PATH_BEGIN) == 1
+    assert zshenv_text.count(PATH_BEGIN) == 0
     assert zshenv_text.count(ZSHENV_BEGIN) == 1
     assert "unsetopt nomatch bang_hist" in zshenv_text
     assert str(user_home / ".local" / "bin") in zshenv_text

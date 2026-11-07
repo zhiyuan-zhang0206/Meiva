@@ -61,10 +61,25 @@ def with_path_block(
 
 # meiva:note
 # `existing` with the zshenv block present exactly once. Disables nomatch and bang_hist
-# so raw `zsh -c` invocations never fail on unmatched patterns or history expansion.
-def with_zshenv_block(existing: str) -> str:
-    line = "unsetopt nomatch bang_hist 2>/dev/null || true"
-    block = f"{ZSHENV_BEGIN}\n{line}\n{ZSHENV_END}"
+# and ensures ~/.local/bin and GNU tools are present so non-interactive `zsh -c` invocations
+# never fail on unmatched patterns or missing binaries.
+def with_zshenv_block(
+    existing: str,
+    local_bin: Path | None = None,
+    *,
+    gnu_bin_dirs: Sequence[str] = MACOS_GNU_BIN_DIRS,
+) -> str:
+    lines = ["unsetopt nomatch bang_hist 2>/dev/null || true"]
+    for gnu_dir in gnu_bin_dirs:
+        lines.append(
+            f'[ -d "{gnu_dir}" ] && case ":$PATH:" in *":{gnu_dir}:"*) ;; *) export PATH="{gnu_dir}:$PATH" ;; esac'
+        )
+    if local_bin is not None:
+        lines.append(
+            f'case ":$PATH:" in *":{local_bin}:"*) ;; *) export PATH="{local_bin}:$PATH" ;; esac'
+        )
+    body = "\n".join(lines)
+    block = f"{ZSHENV_BEGIN}\n{body}\n{ZSHENV_END}"
     pattern = re.compile(re.escape(ZSHENV_BEGIN) + r".*?" + re.escape(ZSHENV_END), re.DOTALL)
     if pattern.search(existing):
         return pattern.sub(lambda _match: block, existing)

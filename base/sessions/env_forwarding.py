@@ -59,13 +59,14 @@ from base.host.env.harness_binaries import MACOS_GNU_BIN_DIRS
 from base.host.system.backend import get_backend
 
 # Keep this in sync with the provisioned Node locations in scripts/provision/node.sh.
-_FRONTEND_TOOLCHAIN_DIRS = (
+FRONTEND_TOOLCHAIN_DIRS: tuple[str, ...] = (
     *MACOS_GNU_BIN_DIRS,
     "/opt/homebrew/bin",
     "/usr/local/bin",
     "/usr/bin",
     "/bin",
 )
+_FRONTEND_TOOLCHAIN_DIRS = FRONTEND_TOOLCHAIN_DIRS
 
 
 # meiva:note

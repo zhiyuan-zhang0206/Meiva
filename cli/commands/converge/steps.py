@@ -51,8 +51,7 @@ def ensure_local_bin_on_path(ctx: ConvergeCtx) -> None:
 
     zshenv = ctx.session.user_home / ".zshenv"
     existing_zshenv = zshenv.read_text() if zshenv.exists() else ""
-    updated_zshenv = with_path_block(existing_zshenv, local_bin)
-    updated_zshenv = with_zshenv_block(updated_zshenv)
+    updated_zshenv = with_zshenv_block(existing_zshenv, local_bin)
     if updated_zshenv != existing_zshenv:
         _ = zshenv.write_text(updated_zshenv)
 
