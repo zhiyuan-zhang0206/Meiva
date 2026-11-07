@@ -52,13 +52,13 @@ from base.lm.harness.process import (
 
 # meiva:note
 # One session is one turn engine with three boundaries. Inbound is synchronous and
-# ordered: a message that arrives mid-turn waits for the running turn's
-# `ResultMessage`, because a `query()` written earlier is folded into the pending
-# tool result and the model treats it as injected content. Outbound is one event
-# stream with one consumer; text deltas are droppable under lag, control events are
-# not. Cancellation is a control message plus an assertion: `interrupt()` reports
-# whether the tool's child processes were actually reaped, and `settled=None` when
-# the CLI pid is unobservable — never a silent pass.
+# ordered for submitted turns: ordinary `submit()` waits for the running turn's
+# `ResultMessage`. Mid-turn steering (`ForegroundSteering`) writes directly to the
+# active session via `query()`, which the model receives in its ongoing turn context.
+# Outbound is one event stream with one consumer; text deltas are droppable under lag,
+# control events are not. Cancellation is a control message plus an assertion:
+# `interrupt()` reports whether the tool's child processes were actually reaped, and
+# `settled=None` when the CLI pid is unobservable — never a silent pass.
 # meiva:link base/lm/harness/claude/docs/claude.meiva.okf.md
 CANCEL_POLL_SECONDS = 0.02
 _EVENT_STREAM_END = EVENT_STREAM_END
@@ -119,6 +119,8 @@ class ClaudeSession(BaseHarnessSession[BridgeConfig]):
         # The tasks the CLI says are running: started and not yet reported terminal.
         # `close()` is their one stop caller, and the note there says why.
         self._background = BackgroundTasks()
+        self._pending_steers: set[tuple[str, str]] = set()
+        self._steered_keys: set[tuple[str, str]] = set()
 
     async def start(self, *, resume: str | None = None, handoff: Handoff | None = None) -> None:
         if self._client is not None:
@@ -151,6 +153,8 @@ class ClaudeSession(BaseHarnessSession[BridgeConfig]):
         # meiva:link base/lm/harness/claude/docs/claude.meiva.okf.md
         client, live = self._client, list(self._background.open_task_ids)
         self._background = BackgroundTasks()
+        self._pending_steers.clear()
+        self._steered_keys.clear()
         if client is not None and live:
             await asyncio.gather(
                 *(client.stop_task(task_id) for task_id in live), return_exceptions=True
@@ -176,6 +180,46 @@ class ClaudeSession(BaseHarnessSession[BridgeConfig]):
     @property
     def cli_pid(self) -> int | None:
         return self._cli_pid
+
+    # meiva:note
+    # Foreground steering writes mid-turn input directly into the running CLI session
+    # via `query()`, relaxing the RPC-ACK requirement to transport write confirmation.
+    # It is available while an active turn is running and not interrupted. Ordinary
+    # `submit()` continues to queue one turn at a time.
+    # meiva:link base/lm/harness/claude/docs/claude.meiva.okf.md
+    @property
+    def steering_available(self) -> bool:
+        ticket = self._active
+        return (
+            not self._closed
+            and self._client is not None
+            and ticket is not None
+            and not ticket.interrupt_requested
+            and ticket.interrupt_ready.is_set()
+        )
+
+    async def steer(self, text: str, *, key: str) -> bool:
+        if not text.strip() or not key:
+            raise ValueError("steering requires nonempty text and a message key")
+        if not self.steering_available:
+            return False
+        ticket = self._active
+        client = self._client
+        if ticket is None or client is None:
+            return False
+        turn_id = ticket.turn_id
+        identity = (turn_id, key)
+        if identity in self._pending_steers:
+            raise RuntimeError("steer request already pending for this message key")
+        if identity in self._steered_keys or (ticket.key is not None and key == ticket.key):
+            return True
+        self._pending_steers.add(identity)
+        try:
+            await client.query(text)
+            self._steered_keys.add(identity)
+            return True
+        finally:
+            self._pending_steers.discard(identity)
 
     async def interrupt(self, *, turn_id: str | None = None) -> CancelReport:
         ticket = await self._interrupt_target(turn_id)
@@ -338,6 +382,7 @@ class ClaudeSession(BaseHarnessSession[BridgeConfig]):
             self._emit(result_output(fields))
             self._release_dispatch()
             return
+        self._steered_keys = {item for item in self._steered_keys if item[0] != ticket.turn_id}
         settlement = settle_result(
             fields,
             turn=RunningTurn(

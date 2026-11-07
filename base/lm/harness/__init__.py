@@ -7,7 +7,7 @@ from base.lm.harness.bridge import (
     HarnessTurnFaultedError,
     ScopedSessionRegistry,
 )
-from base.lm.harness.engine import HarnessSession, HarnessTurn, TurnEngine
+from base.lm.harness.engine import ForegroundSteering, HarnessSession, HarnessTurn, TurnEngine
 from base.lm.harness.events import (
     AssistantText,
     BridgeEvent,
@@ -48,6 +48,7 @@ __all__ = [
     "EntryPoint",
     "FileSessionRegistry",
     "ForegroundAccepted",
+    "ForegroundSteering",
     "Handoff",
     "HandoffInjected",
     "HarnessBridge",
