@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 
+from schedules.plans.watch.workflow_graph import downstream_failing_jobs
 from schedules.plans.watch.main_red import (
     FAILURE_INFRA,
     GATE_CHECK_STEPS,
@@ -526,3 +527,118 @@ def test_a_stale_note_ends_with_the_make_up_the_stream_supplies() -> None:
     assert supplied is not None
     assert supplied.endswith("Make-up: `gh workflow run ci.yml --ref main` (full suite).")
     assert absent is not None and "Make-up" not in absent
+
+
+# meiva:note
+# One run, three red jobs, one event (405, 2026-11-08: `#6476`/`#6477`/`#6478`). The shard is the
+# root; the two jobs after it in the graph only report that the shard failed. `needs` says so, and
+# the folded names still reach the card through `job_names`.
+_WORKFLOW = """
+jobs:
+  classify:
+    name: classify change
+  e2e-shard:
+    name: e2e shard (${{ matrix.group }}/4)
+    needs: [classify]
+  e2e:
+    name: e2e (Playwright happy path)
+    needs: [classify, e2e-shard]
+  e2e-gate:
+    name: e2e gate
+    needs: [classify, e2e]
+"""
+_SHARD = "e2e shard (3/4)"
+_HAPPY = "e2e (Playwright happy path)"
+_GATE_JOB = "e2e gate"
+
+
+def test_the_workflow_needs_fold_the_jobs_downstream_of_a_red() -> None:
+    assert downstream_failing_jobs(_WORKFLOW, (_SHARD, _HAPPY, _GATE_JOB)) == (_HAPPY, _GATE_JOB)
+
+
+def test_two_shards_of_one_matrix_are_not_downstream_of_each_other() -> None:
+    # meiva:note
+    # The false suppression that timing would have caused: on 2026-11-07 run 42418213748 shards 1,
+    # 2 and 4 finished by 22:03:54 and shard 3 only started at 22:07:22, because five suites share
+    # four workers. Both shards are real reds and neither `needs` the other.
+    assert downstream_failing_jobs(_WORKFLOW, ("e2e shard (1/4)", _SHARD)) == ()
+
+
+def test_an_unreadable_workflow_folds_nothing() -> None:
+    assert downstream_failing_jobs("", (_HAPPY,)) == ()
+    assert downstream_failing_jobs("jobs: [", (_HAPPY,)) == ()
+    assert downstream_failing_jobs("jobs: {}", (_HAPPY,)) == ()
+
+
+def test_a_downstream_job_is_folded_into_one_card_and_still_named() -> None:
+    run = RunFacts(
+        workflow=_MACOS,
+        head_sha=_SHA,
+        created_at=datetime.fromisoformat("2026-11-07T22:40:47+00:00"),
+        conclusion="failure",
+        failures=(
+            Failure(f"{_SHARD}: unnamed failure (Run e2e tests)", FAILURE_UNNAMED, _SHARD),
+            Failure(f"{_HAPPY}: unnamed failure (Verify shard results)", FAILURE_UNNAMED, _HAPPY),
+            Failure(
+                f"{_GATE_JOB}: unnamed failure (Report the end-to-end suite outcome)",
+                FAILURE_UNNAMED,
+                _GATE_JOB,
+            ),
+        ),
+        job_names=(_SHARD, _HAPPY, _GATE_JOB),
+        downstream_jobs=(_HAPPY, _GATE_JOB),
+    )
+    plan = apply_run({}, run)
+    assert [entry.fingerprint for _, entry in plan.entries] == [
+        fingerprint(_MACOS, f"{_SHARD}: unnamed failure (Run e2e tests)")
+    ]
+    assert len(plan.confirmed) == 1
+    body = card_body(
+        plan.confirmed[0],
+        latest_url="https://example.invalid/run",
+        job_names=run.job_names,
+        candidate_commits=(),
+    )
+    assert _HAPPY in body
+    assert _GATE_JOB in body
+
+
+def test_a_named_failure_is_never_folded_as_downstream() -> None:
+    run = RunFacts(
+        workflow=_MACOS,
+        head_sha=_SHA,
+        created_at=datetime.fromisoformat("2026-11-07T22:40:47+00:00"),
+        conclusion="failure",
+        failures=(
+            Failure(_SEMAPHORE, FAILURE_TEST, _SHARD),
+            Failure(f"{_HAPPY}: unnamed failure (Verify shard results)", FAILURE_UNNAMED, _HAPPY),
+        ),
+        downstream_jobs=(_HAPPY,),
+    )
+    entries = dict(apply_run({}, run).entries)
+    assert list(entries) == [fingerprint(_MACOS, _SEMAPHORE)]
+    # meiva:note
+    # A named failure from a downstream job is evidence in its own right, so it is never folded.
+    named_downstream = RunFacts(
+        workflow=_MACOS,
+        head_sha=_SHA,
+        created_at=datetime.fromisoformat("2026-11-07T22:40:47+00:00"),
+        conclusion="failure",
+        failures=(Failure(_SEMAPHORE, FAILURE_TEST, _HAPPY),),
+        downstream_jobs=(_HAPPY,),
+    )
+    assert len(dict(apply_run({}, named_downstream).entries)) == 1
+
+
+def test_a_workflow_with_a_trigger_key_is_still_read() -> None:
+    # meiva:note
+    # YAML 1.1 reads a bare `on:` as the boolean True, so a workflow with a trigger has a
+    # non-string key at the top level. The first version rejected the whole document and folded
+    # nothing on every real workflow; the sample above has no `on:` and could not show it.
+    workflow = (
+        "on:\n  push:\n    branches: [main]\n"
+        "jobs:\n"
+        "  a:\n    name: a\n"
+        "  b:\n    name: b\n    needs: [a]\n"
+    )
+    assert downstream_failing_jobs(workflow, ("a", "b")) == ("b",)

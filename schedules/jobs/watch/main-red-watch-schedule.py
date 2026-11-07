@@ -46,6 +46,7 @@ from schedules.plans.watch.main_red import (
     NIGHTLY_STALE_AFTER,
     RunFacts,
 )
+from schedules.plans.watch.workflow_graph import downstream_failing_jobs
 from schedules.plans.watch.release_gate_slot import RELEASE_GATE_SLOT_CADENCE, SlotFacts
 
 RunProcess = Callable[..., subprocess.CompletedProcess[str]]
@@ -146,12 +147,39 @@ def _job_log(job_id: int, run_process: RunProcess) -> str:
     return result.stdout if result.returncode == 0 else ""
 
 
+# meiva:note
+# The workflow definition at the commit the run executed, so `needs` describes the graph that run
+# actually used rather than the tree checked out here. An unreadable file yields "": the plan then
+# folds no failure, which reports every job instead of dropping one -- the cheap direction.
+def _workflow_text(workflow: str, sha: str, run_process: RunProcess) -> str:
+    import base64
+    import binascii
+    import json
+
+    if not sha:
+        return ""
+    try:
+        payload = json.loads(
+            _api(f"repos/{_REPO}/contents/.github/workflows/{workflow}?ref={sha}", run_process)
+        )
+    except (RuntimeError, ValueError):
+        return ""
+    content = payload.get("content") if is_object_dict(payload) else None
+    if not isinstance(content, str):
+        return ""
+    try:
+        return base64.b64decode(content).decode("utf-8", "replace")
+    except (binascii.Error, ValueError):
+        return ""
+
+
 def fetch_runs(workflow: str, run_process: RunProcess) -> tuple[RunFacts, ...]:
     import json
 
     from schedules.plans.watch.main_red import parse_failures
 
     listing = json.loads(_api(_runs_path(workflow, 10), run_process))
+    definitions: dict[str, str] = {}
     facts: list[RunFacts] = []
     for item in listing.get("workflow_runs", []):
         conclusion = item.get("conclusion")
@@ -159,6 +187,7 @@ def fetch_runs(workflow: str, run_process: RunProcess) -> tuple[RunFacts, ...]:
             continue
         failures: tuple[Failure, ...] = ()
         job_names: tuple[str, ...] = ()
+        downstream: tuple[str, ...] = ()
         if conclusion == "failure":
             jobs = json.loads(
                 _api(f"repos/{_REPO}/actions/runs/{item['id']}/jobs?per_page=100", run_process)
@@ -187,6 +216,11 @@ def fetch_runs(workflow: str, run_process: RunProcess) -> tuple[RunFacts, ...]:
                     )
                 )
             failures = tuple(parsed)
+            sha = item.get("head_sha", "")
+            if sha not in definitions:
+                definitions[sha] = _workflow_text(workflow, sha, run_process)
+            if definitions[sha]:
+                downstream = downstream_failing_jobs(definitions[sha], job_names)
         facts.append(
             RunFacts(
                 workflow=workflow,
@@ -196,6 +230,7 @@ def fetch_runs(workflow: str, run_process: RunProcess) -> tuple[RunFacts, ...]:
                 failures=failures,
                 html_url=item.get("html_url"),
                 job_names=job_names,
+                downstream_jobs=downstream,
                 covers_full_suite=workflow in _FULL_SUITE_WORKFLOWS,
                 head_title=_commit_subject(item.get("head_sha", ""), run_process)
                 if conclusion == "failure"
