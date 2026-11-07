@@ -4,6 +4,7 @@ exports = ["log_records.py", "own_sink_child.py", "redaction_child.py", "startup
 "conftest.py" = ["log_records.py"]
 "test_genai_no_parts_warning_filter.py" = ["log_records.py"]
 "test_log_records.py" = ["log_records.py"]
+"test_log_diagnose_guard.py" = ["diagnose_guard_child.py"]
 "test_log_redaction.py" = ["own_sink_child.py", "redaction_child.py"]
 "test_stdlib_first_party_debug.py" = ["log_records.py"]
 "test_startup_record_buffer.py" = ["startup_record_child.py"]

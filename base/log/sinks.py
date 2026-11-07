@@ -13,6 +13,7 @@ from typing import Protocol, TextIO
 
 from loguru import logger
 
+from base.log.diagnose import disable_frame_variable_rendering
 from base.log.redaction import install_log_redaction
 
 
@@ -232,6 +233,12 @@ def add_sink(
     never honored, so failing loud beats a silently-ignored kwarg.
     """
     install_log_redaction()
+    # meiva:note
+    # The handlers registered before this sink opens are disabled rather than trusted: this is the
+    # one funnel our sinks pass, so it is also where a sink somebody else registered — loguru's
+    # default one when `prepare_process_logging` never ran, a library's own — stops rendering frame
+    # locals. `add_sink`'s own call passes `diagnose=False`; this covers the ones it did not create.
+    _ = disable_frame_variable_rendering()
     if kwargs.pop("diagnose", False):
         raise ValueError(
             "diagnose=True is forbidden on log sinks: it renders local variable "

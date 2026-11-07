@@ -22,15 +22,35 @@ interception; the event-pipeline sink stays in `base/log/process.py`.
 
 ## Registration
 
-- **`diagnose` is always off.** Every sink goes through `add_sink`, which
-  forces `diagnose=False` and refuses `diagnose=True`; the
-  `lint-logger-add-diagnose` hook (`scripts/lint/diagnostics/logger_add_diagnose.py`)
-  rejects any non-test `logger.add` without a literal `diagnose=False`,
-  `add_sink`'s own included. loguru's default renders
-  each traceback frame's local variables into the sink, which put a
+- **No sink renders frame variables.** loguru's `diagnose` defaults to True and
+  renders each traceback frame's local variables into the sink, which put a
   `RoleSecret` password and a password-bearing DSN into the journal and
   `release-executor.log`. `backtrace` (which frames show, never their values)
   stays at loguru's default.
+  - `add_sink` forces `diagnose=False` and refuses `diagnose=True`.
+  - `add_sink` also disables it on every handler already registered at that
+    moment. loguru creates its own default stderr handler at `import loguru`, and
+    a process that never calls `prepare_process_logging` — an exec host or the
+    MCP daemon with its own sink, the pty session server, the exec child — keeps
+    it; its output went to `<home>/run/*/logs/<unit>/output.log`. Every process
+    this repository starts opens a sink or runs the prelude, so this seam covers
+    them all; a process that logs without opening a sink is outside the guard,
+    exactly as it is outside redaction. A call at import would reach it and is
+    refused: meizel's `import-time-call` rule rejects an effect that belongs to
+    importing a module.
+  - `diagnosing_handler_ids()` (`base/log/diagnose.py`) is the invariant read as
+    a set: empty. It reads loguru's private `_exception_formatter._diagnose`
+    because loguru exposes no accessor, and raises rather than report a safety it
+    could not check.
+  - A child process that opens its own sink and logs a failure holding a
+    sentinel writes nothing but the traceback; the direct `logger.add` beside it
+    is the positive control that still prints the value.
+  - The `lint-logger-add-diagnose` hook
+    (`scripts/lint/diagnostics/logger_add_diagnose.py`) refuses a non-test
+    `logger.add` outside `base/log/` — a sink registered beside the funnel reaches
+    neither the `diagnose` forcing nor the redaction patcher, and no runtime hook
+    sees it after startup — and refuses one without a literal `diagnose=False`,
+    `add_sink`'s own call included.
 - **stderr opens first.** `init_gateway_process` and `init_cli_process` open
   it before importing `base.paths`, because that import builds Settings, and
   the build logs (a runner continuing on a stale bootstrap snapshot warns).

@@ -82,6 +82,9 @@ def _is_test_file(rel_path: str) -> bool:
     return any(p.search(rel_path) for p in _TEST_PATTERNS)
 
 
+_SINK_OWNER = "base/log/"
+
+
 def _is_logger_add_call(func: ast.expr) -> bool:
     """True for `logger.add(...)` / `_logger.add(...)` / `self.logger.add(...)` —
     an attribute call named `add` on an object whose own name ends in `logger`,
@@ -140,6 +143,35 @@ def violations_in_source(src: str, filename: str = "<source>") -> list[tuple[int
     return violations
 
 
+# meiva:note
+# A `logger.add` outside `base/log/` is refused even when it passes `diagnose=False`: it also skips
+# the redaction patcher, and it is the one sink shape no runtime hook can reach. `base.log` disables
+# frame-variable rendering on the handlers that exist when it is imported, and `add_sink` on the
+# ones registered since, but a direct `logger.add` after startup is invisible to both — nothing of
+# ours runs before that handler formats a record. Refusing the call in source is the only place left
+# to catch it. The rule is a directory rather than a name so a second sink module inside `base/log/`
+# needs no exemption to review; it takes the repository-relative path as an argument (the scan
+# passes the one it computed, a test passes a made-up one) so it never guesses the file's place.
+def sink_placement_violations_in_source(src: str, rel_path: str) -> list[tuple[int, str]]:
+    if rel_path.startswith(_SINK_OWNER):
+        return []
+    try:
+        tree = ast.parse(src, filename=rel_path)
+    except SyntaxError as exc:
+        return [(exc.lineno or 1, f"could not parse: {exc}")]
+
+    return [
+        (
+            node.lineno,
+            "logger.add(...) outside base/log/: sinks are registered through "
+            "base.log.sinks.add_sink, the one funnel that forces diagnose=False and installs "
+            "the redaction patcher — a sink registered here gets neither",
+        )
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call) and _is_logger_add_call(node.func)
+    ]
+
+
 def _scan_file(path: Path, rel_path: str) -> list[tuple[int, str]]:
     """`violations_in_source` for one file, minus test files."""
     if _is_test_file(rel_path):
@@ -148,7 +180,9 @@ def _scan_file(path: Path, rel_path: str) -> list[tuple[int, str]]:
         text = path.read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError):
         return []  # unreadable entry (e.g. a dangling symlink) or binary content
-    return violations_in_source(text, str(path))
+    return sorted(
+        violations_in_source(text, str(path)) + sink_placement_violations_in_source(text, rel_path)
+    )
 
 
 def _iter_py_files(roots: list[Path], repo_root: Path) -> list[Path]:
