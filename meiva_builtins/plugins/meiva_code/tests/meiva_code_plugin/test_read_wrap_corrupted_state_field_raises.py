@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import inspect
 import json
-import subprocess
 from collections.abc import Callable
 from dataclasses import replace
 from functools import partial
@@ -79,7 +78,7 @@ def test_set_cwd_relative_resolves_against_current_cwd(tmp_path: Path):
     process_context.set_state_update({})
     try:
         meiva.cwd.set("src")  # relative path
-        assert meiva.state_update["meiva_code__cwd"] == str(sub.resolve())
+        assert meiva.state_update["cwd"] == str(sub.resolve())
     finally:
         process_context.unbind_exec_turn()
 
@@ -93,7 +92,7 @@ def test_set_cwd_expanduser_supported(tmp_path: Path, default_home: Path):
     process_context.set_state_update({})
     try:
         meiva.cwd.set("~/project")
-        assert meiva.state_update["meiva_code__cwd"] == str(sub.resolve())
+        assert meiva.state_update["cwd"] == str(sub.resolve())
     finally:
         process_context.unbind_exec_turn()
 
@@ -117,15 +116,14 @@ def test_uninstall_restores_original(tmp_path: Path):
     assert wraps.stack("files.read") == []  # registry emptied
     assert meiva.files.read is not wrapped  # restored to the original object
     assert meiva.files.read.__module__ == "meiva.files"
-    assert not hasattr(meiva, "cwd")
 
 
 def test_duplicate_namespace_refuses_the_second_plugin_whole(
     model_catalog: ModelCatalog, config_authority: ConfigAuthority
 ):
-    """A second plugin declaring `cwd` is refused and rolled back whole: its earlier namespace and
-    its wrap are not installed, and meiva_code's own surface is untouched."""
-    from meiva_builtins.plugins.meiva_code import _code_namespace
+    import types
+
+    dummy = types.ModuleType("dummy")
 
     def _other_wrap(inner: Callable[..., object], path: str, *args: object, **kwargs: object):
         return inner(path, *args, **kwargs)
@@ -133,8 +131,8 @@ def test_duplicate_namespace_refuses_the_second_plugin_whole(
     install.uninstall()
     other = PluginContributions(
         sdk_namespaces=(
-            SdkNamespace("other_ns", _code_namespace),
-            SdkNamespace("cwd", _code_namespace),
+            SdkNamespace("other_ns", dummy),
+            SdkNamespace("cwd", dummy),
         ),
         sdk_wraps=(SdkWrap("files.read", _other_wrap),),
     )
@@ -171,19 +169,10 @@ def test_second_wrap_stacks_instead_of_asserting(
     assert [p for p, _ in after] == ["meiva_code", "other_plugin"]  # stacked, no assert
 
 
-def test_plugin_wraps_all_files_ops_for_cwd():
-    """plugin meiva_code wraps all meiva.files.* operations (+ shell.run / understand) —
-    not just read.
-
-    read additionally handles AGENTS.md auto-injection; write / append / edit / delete / glob
-    only do cwd path resolution (no AGENTS.md injection), ensuring that after agent meiva.cwd.set(), all
-    file operation paths are consistent. Use introspection via `meiva.extend.stack` to verify each target
-    is wrapped by meiva_code — the chained wrapper masquerades __module__ as the original, so a
-    `__module__ != "meiva.files"` probe fails; wrap fact lives in registry.
-    """
-    # fixture already installed meiva_code plugin
+def test_plugin_wraps_files_read():
+    stack = meiva.extend.stack("files.read")
+    assert [p for p, _ in stack] == ["meiva_code"]
     for target in (
-        "files.read",
         "files.write",
         "files.append",
         "files.edit",
@@ -191,40 +180,14 @@ def test_plugin_wraps_all_files_ops_for_cwd():
         "files.delete",
         "shell.run",
         "understand",
+        "ui.serve",
     ):
-        stack = meiva.extend.stack(target)
-        assert [p for p, _ in stack] == ["meiva_code"], target
-
-
-def echo_run(cmd: str, *, cwd: str | None, timeout: float) -> str:
-    return json.dumps([cmd, cwd, timeout])
-
-
-def test_shell_run_wrap_passes_logical_cwd_without_changing_process_cwd(tmp_path: Path):
-    """The shell wrapper passes logical state as an explicit subprocess cwd;
-    it never relies on or mutates the Python process cwd."""
-    from meiva_builtins.plugins.meiva_code.plugin import wrapped_shell_run
-
-    logical_cwd = tmp_path / "logical"
-    logical_cwd.mkdir()
-    process_cwd = Path.cwd()
-
-    process_context.set_state(make_state_with_cwd(str(logical_cwd)))
-    process_context.set_state_update({})
-    try:
-        assert json.loads(wrapped_shell_run(echo_run, "pwd", timeout=7.0)) == [
-            "pwd",
-            str(logical_cwd),
-            7.0,
-        ]
-        assert Path.cwd() == process_cwd
-    finally:
-        process_context.unbind_exec_turn()
+        assert not meiva.extend.stack(target)
 
 
 # meiva:note
-# The wrapped `meiva.shell.run` starts the command in the tracked directory.
-def test_shell_run_wrap_runs_in_the_logical_cwd(tmp_path: Path):
+# meiva.shell.run starts the command in the tracked directory.
+def test_shell_run_runs_in_the_logical_cwd(tmp_path: Path):
     logical_cwd = tmp_path / "logical"
     logical_cwd.mkdir()
 
@@ -243,48 +206,6 @@ def test_shell_run_wrap_runs_in_the_logical_cwd(tmp_path: Path):
         process_context.unbind_exec_turn()
 
 
-def test_set_cwd_surfaces_and_stores_cwd_note(tmp_path: Path):
-    """set_cwd into a repo with `.agents/skills/` surfaces those skills under
-    `meiva.skills.*` (via the provider the plugin registered) and stores a
-    cwd_note for the after-exec hook to inject as a system reminder."""
-    import meiva.skills as meiva_skills
-
-    repo = tmp_path / "repo"
-    demo = repo / ".meiva" / "skills" / "demo-proj"
-    demo.mkdir(parents=True)
-    (demo / "SKILL.md").write_text(
-        "---\nname: demo-proj\ndescription: a project-local demo\n---\nbody",
-        encoding="utf-8",
-    )
-    subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
-
-    process_context.set_state(make_state_with_cwd(str(tmp_path)))
-    process_context.set_state_update({})
-    try:
-        meiva.cwd.set(repo)
-        # No print output — cwd_note is set in state for the after-exec hook
-        assert meiva.state.meiva_code__cwd_note is not None  # type: ignore[union-attr]
-        assert f"Working directory set to {repo}" in meiva.state.meiva_code__cwd_note  # type: ignore[union-attr]
-        assert "demo-proj" in {s["name"] for s in meiva_skills.names()}
-    finally:
-        process_context.unbind_exec_turn()
-
-
-def test_set_cwd_non_git_stores_cwd_note(tmp_path: Path):
-    """A cwd not under a git repo sets cwd_note with just the path
-    (no project-skills listing)."""
-    process_context.set_state(make_state_with_cwd(str(tmp_path)))
-    process_context.set_state_update({})
-    try:
-        meiva.cwd.set(tmp_path)
-        # No print output — cwd_note is set in state
-        note = meiva.state.meiva_code__cwd_note  # type: ignore[union-attr]
-        assert note is not None
-        assert f"Working directory set to {tmp_path}" == note
-    finally:
-        process_context.unbind_exec_turn()
-
-
 def test_coding_tools_section_skips_framework_expanded_modules():
     """A module in the effective expand view (settings + plugin registrations)
     is already rendered (full contract) by the framework section — the plugin
@@ -296,13 +217,15 @@ def test_coding_tools_section_skips_framework_expanded_modules():
 
     text = coding_tools_section(
         AgentSlices.resolve(
-            default_reader=defaults(agent__sdk_expand_in_system_prompt=["files", "shell.sessions"]),
+            default_reader=defaults(
+                agent__sdk_expand_in_system_prompt=["cwd", "files", "shell.sessions"]
+            ),
         ),
         catalog=build_model_catalog(home=meiva_home()),
     )
     assert "## meiva.files" not in text  # expanded by the framework -> skipped
     assert "## meiva.shell" in text  # only the child is expanded -> parent stays
-    assert "## meiva.cwd" not in text  # plugin-registered expand -> skipped too
+    assert "## meiva.cwd" not in text
     assert "Use the Meiva file and shell tools" in text  # preamble always renders
 
 
@@ -520,17 +443,6 @@ def test_understand_wrap_resolves_every_entry_in_a_paths_list(
 
 
 def test_understand_wrap_forwards_max_concurrent(tmp_path: Path, understand_script: Script):
-    """`max_concurrent` passes through the wrap to the core — a call with the
-    knob completes, and the core's own validation still fires on a bad value
-    (regression: the wrap used to drop the keyword and raise TypeError)."""
-    from meiva_builtins.plugins.meiva_code.plugin import wrapped_understand
-
-    targets: list[dict[str, str | list[str]]] = [{"prompt": "p", "text": "t"}]
-    assert forwarded(wrapped_understand(echo_understand, targets, max_concurrent=2)) == {
-        "targets": targets,
-        "effort": "max",
-        "max_concurrent": 2,
-    }
     (tmp_path / "rel.txt").write_text("cwd material", encoding="utf-8")
     process_context.set_state(make_state_with_cwd(str(tmp_path)))
     process_context.set_state_update({})
@@ -580,33 +492,6 @@ def test_read_wrap_dedup_by_content_hash_across_paths(tmp_path: Path, default_ho
         # The hash set records the single hash
         assert "meiva_code__injected_hashes" in meiva.state_update
         assert len(meiva.state_update["meiva_code__injected_hashes"]) == 1
-    finally:
-        process_context.unbind_exec_turn()
-
-
-def test_set_cwd_with_skills_stores_project_skills_note(tmp_path: Path):
-    """set_cwd into a repo with project skills stores a summary string in
-    project_skills_note for the after-exec hook to inject as a system note."""
-    repo = tmp_path / "repo"
-    demo = repo / ".meiva" / "skills" / "demo-proj"
-    demo.mkdir(parents=True)
-    (demo / "SKILL.md").write_text(
-        "---\nname: demo-proj\ndescription: a project-local demo\n---\nbody",
-        encoding="utf-8",
-    )
-    import subprocess
-
-    subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
-
-    process_context.set_state(make_state_with_cwd(str(tmp_path)))
-    process_context.set_state_update({})
-    try:
-        meiva.cwd.set(repo)
-        note = meiva.state.meiva_code__project_skills_note  # type: ignore[union-attr]
-        assert note is not None
-        assert "Skills available in this repo" in note
-        assert "demo-proj" in note
-        assert "a project-local demo" in note
     finally:
         process_context.unbind_exec_turn()
 

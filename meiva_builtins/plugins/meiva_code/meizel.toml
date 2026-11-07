@@ -1,14 +1,10 @@
 exports = ["agent_runtime.py", "plugin.py"]
 
 [uses]
-"_code_namespace.py" = ["_state_access.py"]
 "_state_access.py" = ["agent_runtime.py"]
 "agent_runtime.py" = ["_prompt_sections.py", "_state.py"]
-"plugin.py" = ["_code_namespace.py", "_state_access.py", "_walk.py"]
-"tests" = ["_code_namespace.py", "_prompt_sections.py", "_state.py", "_state_access.py", "_walk.py", "agent_runtime.py", "plugin.py"]
+"plugin.py" = ["_state_access.py", "_walk.py"]
+"tests" = ["_prompt_sections.py", "_state_access.py", "_walk.py", "agent_runtime.py", "plugin.py"]
 
 [purity]
 "__init__.py" = "strict"
-
-[debt.ambient-read]
-"_state.py#home pathlib.Path.home" = { count = 1, owner = "#5816", until = "waits for the state schema to take its default cwd from a caller: `cwd` is a pydantic field default factory (`Field(default_factory=default_cwd)`), constructed with no arguments by the state class itself; the host's after-init fills an absent channel from the invocation's Runtime, and a direct child construction has an SDK identity and lands in `agent_workspace`, so the branch without that identity is this process's own home -- the only cwd a state built outside both can be given" }

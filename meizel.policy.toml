@@ -338,6 +338,7 @@ config-readers = [
 [ambient-state.sites]
 "agent/startup/__init__.py::ambient-instance:_PUSH" = "LangGraph's PUSH channel name, a constant fixed by the library, read once through object_of so the module __getattr__'s Any never binds to a name; measured alternatives: reading it inline at the comparison costs a module __getattr__ per write and raised 56 LangGraph deprecation warnings in the 61-test selection (6 with this constant), and a zero-argument @cache reader is hidden-singleton and needs this same entry plus a function"
 "meiva/__init__.py::ambient-instance:extend" = "a namespace of functions built once and never rebound or filled afterwards"
+"meiva/files.py::ambient-instance:cwd" = "a namespace of functions built once and never rebound or filled afterwards"
 "meiva_builtins/plugins/meiva_memory/sdk.py::hidden-cache:_documented_pool" = "wraps one home's pool path in a documented constant"
 "base/config/admin/candidate.py::hidden-cache:_candidate_validation_model" = "builds a validation subclass of a given Settings class"
 "base/config/config_registry.py::hidden-singleton:build_registry" = "the static config registry derived from the Settings classes"

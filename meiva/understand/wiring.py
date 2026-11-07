@@ -40,12 +40,18 @@ def _output_site(context: MeivaContext) -> OutputSite | None:
 # The deps for one `meiva.understand` call, read from this process's SDK installation.
 def understand_deps() -> UnderstandDeps:
     context = process_context.current_context()
+    if process_context.in_exec_turn():
+        from meiva.files import cwd as _cwd
+
+        base_dir = _cwd.get()
+    else:
+        base_dir = files.workspace_base_for(context)
     return understand_deps_for(
         sdk_settings.config_authority(),
         catalog=sdk_settings.model_catalog(),
         keys=sdk_settings.provider_keys(),
         overrides=sdk_settings.model_overrides(),
-        base_dir=files.workspace_base_for(context),
+        base_dir=base_dir,
         output=_output_site(context),
     )
 

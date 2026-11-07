@@ -8,7 +8,7 @@ import subprocess
 from pathlib import Path
 
 from meiva.files import agent_workspace
-from meiva.sdk_surface import agent_identity
+from meiva.sdk_surface import agent_identity, process_context
 from meiva.sdk_surface.validation import coerce_str, coerce_typed
 from meiva.security import scan_content
 
@@ -70,7 +70,7 @@ def run(
 ) -> ShellResult:
     """Non-zero exit does not raise; exceeding `timeout` seconds kills the
     command and raises `subprocess.TimeoutExpired`. `cwd` defaults to your
-    workspace.
+    tracked working directory (`meiva.cwd`).
 
     Returns the output as a `str` carrying read-only `.returncode` (0 = success)
     and `.stderr` — check `.returncode`, not stdout, to tell success from
@@ -90,9 +90,14 @@ def run(
     # back to $HOME — the same base files.resolve uses, never the process
     # cwd, so the two surfaces agree in every state.
     if cwd is None:
-        aid = agent_identity.agent_id()
-        # agent_id() is None until a bootstrap establishes it.
-        cwd = str(Path.home() if aid is None else agent_workspace(aid))
+        if process_context.in_exec_turn():
+            from meiva.files import cwd as _cwd
+
+            cwd = str(_cwd.get())
+        else:
+            aid = agent_identity.agent_id()
+            # agent_id() is None until a bootstrap establishes it.
+            cwd = str(Path.home() if aid is None else agent_workspace(aid))
     completed = subprocess.run(  # noqa: S602
         cmd,
         shell=True,

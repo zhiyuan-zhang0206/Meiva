@@ -18,9 +18,6 @@ from meiva.sdk_surface import process_context
 
 class _StateSnapshot(Protocol):
     @property
-    def cwd(self) -> str: ...
-
-    @property
     def last_seen_compact(self) -> int: ...
 
     @property

@@ -178,7 +178,7 @@ def _craft_stateful_envelope(tmp_path: Path) -> Path:
 
     from agent.execution.protocol import dumps_typed
 
-    tag, blob = dumps_typed({"meiva_code__cwd": str(tmp_path)})
+    tag, blob = dumps_typed({"cwd": str(tmp_path)})
     req = tmp_path / "req-state.json"
     req.write_text(
         json.dumps(
@@ -240,8 +240,7 @@ def test_fresh_child_cwd_set_absolute_first_touch_lands_both_updates(tmp_path: P
     )
     keys = cast("list[str]", report["state_update_keys"])
     assert report["set"] == "ok", f"cwd.set as the first state touch failed: {report['set']}"
-    assert "meiva_code__cwd" in keys, f"the cwd update never reached state_update: {keys}"
-    assert "meiva_code__cwd_note" in keys, f"the cwd_note update never reached state_update: {keys}"
+    assert "cwd" in keys, f"the cwd update never reached state_update: {keys}"
     assert report["cwd_after"] == str(target.resolve())
 
 
@@ -252,6 +251,5 @@ def test_fresh_child_cwd_set_relative_first_touch_resolves_against_snapshot(
     report = _run_probe("child_cwd_set_first_touch", str(_craft_stateful_envelope(tmp_path)), "sub")
     keys = cast("list[str]", report["state_update_keys"])
     assert report["set"] == "ok", f"cwd.set as the first state touch failed: {report['set']}"
-    assert "meiva_code__cwd" in keys, f"the cwd update never reached state_update: {keys}"
-    assert "meiva_code__cwd_note" in keys, f"the cwd_note update never reached state_update: {keys}"
+    assert "cwd" in keys, f"the cwd update never reached state_update: {keys}"
     assert report["cwd_after"] == str((tmp_path / "sub").resolve())

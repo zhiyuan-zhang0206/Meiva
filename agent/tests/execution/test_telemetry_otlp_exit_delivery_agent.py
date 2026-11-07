@@ -114,8 +114,7 @@ def _assert_external_sdk_call(
     delivered: list[dict[str, Any]], mirror: list[dict[str, Any]], agent_id: int
 ) -> None:
     """Check every public entry preserves its borrower and exact mirror identity."""
-    # meiva_code's files.read wrapper enters the public cwd.get helper as well.
-    expected = Counter({"files.read": 1, "cwd.get": 1})
+    expected = Counter({"files.read": 1})
     assert Counter(event["attributes"]["fn"] for event in delivered) == expected, delivered
     mirrored = [row for row in mirror if row["event_name"] == "sdk_call"]
     assert Counter(event["attributes"]["fn"] for event in mirrored) == expected, mirrored

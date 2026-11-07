@@ -10,6 +10,7 @@ order in which their returned deltas merge changes. At other edges, plugins run 
 
 from agent.graph.hooks.capabilities import newly_installed_skills
 from agent.graph.hooks.compact import compact_reminder
+from agent.graph.hooks.cwd import ValidateCwdAfterInitHook
 from agent.graph.hooks.skill_recall import SkillRecallHook
 from agent.hooks import Hook
 from agent.hooks.repair import repair_dangling_tool_pairing
@@ -20,7 +21,7 @@ from base.packages.plugins.extensions import ExtensionRegistry, GraphHook, HookP
 
 def framework_hooks() -> dict[HookPoint, tuple[Hook, ...]]:
     return {
-        "after_init": (),
+        "after_init": (ValidateCwdAfterInitHook(),),
         "before_llm": (
             repair_dangling_tool_pairing,
             compact_reminder,

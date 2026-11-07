@@ -10,6 +10,7 @@ __all_for_meiva__ = [
     "write",
 ]
 
+import contextlib
 import difflib
 import errno
 import glob as _glob
@@ -17,11 +18,14 @@ import os
 import stat
 import uuid
 from pathlib import Path
+from types import SimpleNamespace
+from typing import TypeGuard
 
 from base.agents.context import MeivaContext
 from base.host.atomic_io import write_text_atomic
 from base.log import logger
 from base.paths import workspace_dir
+from base.paths.home import user_home
 from meiva.sdk_surface import agent_identity, process_context
 from meiva.sdk_surface.pure.media.attach.attach_plan import resolve_in
 from meiva.sdk_surface.validation import coerce_str, coerce_typed
@@ -80,11 +84,120 @@ def workspace_base_for(context: MeivaContext) -> Path:
     return workspace_dir(aid, home=context.require_meiva_home())
 
 
+def default_cwd() -> str:
+    """Initial cwd for a fresh agent state: the agent's own workspace."""
+    aid = agent_identity.agent_id()
+    if aid is not None:
+        with contextlib.suppress(RuntimeError):
+            return str(
+                workspace_dir(aid, home=process_context.current_context().require_meiva_home())
+            )
+    return str(user_home())
+
+
+def _is_object_dict(val: object) -> TypeGuard[dict[str, object]]:
+    return isinstance(val, dict)
+
+
+def _cwd_get() -> Path:
+    """Return the current agent logical working directory as a `Path`."""
+    if not process_context.in_exec_turn():
+        raise process_context.outside_exec_turn("cwd.get")
+    update = process_context.get_state_update()
+    if _is_object_dict(update) and "cwd" in update:
+        cwd_entry = update["cwd"]
+        if cwd_entry:
+            return Path(str(cwd_entry))
+    slot = process_context.get_state()
+    cwd_val = getattr(slot, "cwd", None)
+    if not cwd_val:
+        aid = agent_identity.agent_id()
+        if aid is not None:
+            with contextlib.suppress(RuntimeError):
+                return workspace_dir(
+                    aid, home=process_context.current_context().require_meiva_home()
+                )
+        return user_home()
+    return Path(cwd_val)
+
+
+def _cwd_set(path: str | Path) -> None:
+    """Set the persistent logical working directory across turns and restarts.
+
+    Relative paths in Meiva file and shell operations resolve against this
+    directory. Python's process working directory is unchanged.
+
+    Args:
+        path: relative paths resolve against the current logical directory;
+            `~/...` is expanded.
+    """
+    path = coerce_str(path, "path", allow_types=(os.PathLike,))
+    agent_identity.validate_external_identity()
+    if not process_context.in_exec_turn():
+        raise process_context.outside_exec_turn("cwd.set")
+    target = Path(path).expanduser()
+    if not target.is_absolute():
+        target = _cwd_get() / target
+    try:
+        mode = target.stat().st_mode
+    except OSError as exc:
+        raise FileNotFoundError(f"cannot set cwd to {target!r}: {exc}") from exc
+    if not stat.S_ISDIR(mode):
+        raise NotADirectoryError(f"cannot set cwd to {target!r}: not a directory")
+
+    resolved = str(target.resolve())
+    slot = process_context.get_state()
+    channel = "cwd"
+    with contextlib.suppress(AttributeError, TypeError):
+        setattr(slot, channel, resolved)
+
+    update = process_context.get_state_update()
+    if isinstance(update, dict):
+        update["cwd"] = resolved
+    else:
+        process_context.set_state_update({"cwd": resolved})
+
+
+class CwdNamespace(SimpleNamespace):
+    """Your persistent logical working directory; starts at your workspace."""
+
+    __all_for_meiva__: tuple[str, ...] = ("get", "set")
+
+    def __init__(self) -> None:
+        super().__init__(
+            get=_cwd_get,
+            set=_cwd_set,
+            __all_for_meiva__=["get", "set"],
+            __doc__="Your persistent logical working directory; starts at your workspace.",
+        )
+
+    @staticmethod
+    def get() -> Path:
+        """Return the current agent logical working directory as a `Path`."""
+        return _cwd_get()
+
+    @staticmethod
+    def set(path: str | Path) -> None:
+        """Set the persistent logical working directory across turns and restarts.
+
+        Relative paths in Meiva file and shell operations resolve against this
+        directory. Python's process working directory is unchanged.
+        """
+        _cwd_set(path)
+
+
+cwd: CwdNamespace = CwdNamespace()
+
+
 def resolve(path: str | Path) -> Path:
-    """Resolve a path: expand `~`, then prepend the agent's workspace
-    (`$HOME` before a process identity is bound) if still relative."""
+    """Resolve a path: expand `~`, then prepend cwd when in an active turn/attachment,
+    otherwise the agent's workspace (`$HOME` before a process identity is bound) if still relative."""
     expanded = Path(path).expanduser()
-    return expanded if expanded.is_absolute() else resolve_in(workspace_base(), expanded)
+    if expanded.is_absolute():
+        return expanded
+    if process_context.in_exec_turn():
+        return resolve_in(_cwd_get(), expanded)
+    return resolve_in(workspace_base(), expanded)
 
 
 def _record_skill_read(path: Path) -> None:

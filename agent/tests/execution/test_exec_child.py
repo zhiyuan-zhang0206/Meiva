@@ -435,8 +435,7 @@ print("process cwd stable:", Path.cwd() == process_cwd)
     payload = read_result(result)
     assert payload.kind == "done"
     assert payload.state_update is not None
-    assert payload.state_update.get("meiva_code__cwd") == str(proj)
-    assert payload.state_update.get("meiva_code__cwd_note") is not None
+    assert payload.state_update.get("cwd") == str(proj)
 
 
 def test_child_lifecycle_envelope(tmp_path: Path) -> None:

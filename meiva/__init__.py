@@ -288,6 +288,7 @@ from . import skills as skills
 from . import ui as ui
 from . import watcher as watcher
 from . import web as web
+from .files import cwd as cwd
 from .sdk_surface import attachment_transport as attachment_transport
 from .sdk_surface import wraps as _wraps
 from .understand import understand as understand
@@ -316,6 +317,7 @@ __all_for_meiva__ = [
     "agents",
     "attach",
     "context",
+    "cwd",
     "files",
     "help",
     "mcps",

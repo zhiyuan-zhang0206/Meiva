@@ -8,7 +8,7 @@ from langchain_core.messages import AnyMessage
 from langgraph.channels.delta import DeltaChannel
 from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 from langgraph.graph.message import add_messages
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 from pydantic.fields import FieldInfo
 
 from base.agents.context.external_attachment.state_channels import (
@@ -26,7 +26,7 @@ from base.agents.history.checkpoint_serde import STATIC_CHECKPOINT_MSGPACK_TYPES
 from base.agents.history.checkpoint_serializer import CheckpointSerializer
 from base.agents.messages.guard import guarded_add_messages, guarded_delta_reducer
 from base.agents.messages.security_finding import SecurityFindingEntry
-from base.host.boundary.json_values import is_object_list
+from base.host.boundary.json_values import is_object_dict, is_object_list
 from base.host.boundary.untyped import object_mapping, object_of, object_sequence
 from base.packages.plugins.extensions import (
     PLUGIN_WRITABLE_BASE_FIELDS,
@@ -46,6 +46,10 @@ def _new_any_messages() -> list[AnyMessage]:
 
 def _new_security_findings() -> list[SecurityFindingEntry]:
     return []
+
+
+def default_cwd() -> str:
+    return ""
 
 
 # meiva:link agent/docs/state.meiva.okf.md
@@ -80,6 +84,8 @@ class BaseAgentState(BaseModel):
     impersonation_handoff_id: str | None = None
     impersonation_applied: dict[str, object] = Field(default_factory=dict)
 
+    cwd: str = Field(default="")
+
     compact: CompactState = Field(default_factory=CompactState)
     circuit: CircuitState = Field(default_factory=CircuitState)
     attach: AttachState = Field(default_factory=AttachState)
@@ -87,6 +93,15 @@ class BaseAgentState(BaseModel):
     context_reset: ContextReset = Field(default_factory=ContextReset)
     capabilities: CapabilitiesState = Field(default_factory=CapabilitiesState)
     skill_recall: SkillRecallState = Field(default_factory=SkillRecallState)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _migrate_legacy_cwd(cls, data: object) -> object:
+        if is_object_dict(data) and "cwd" not in data and "meiva_code__cwd" in data:
+            raw = dict(data)
+            raw["cwd"] = data["meiva_code__cwd"]
+            return raw
+        return data
 
 
 BaseAgentState.__module__ = "agent.state"
@@ -331,6 +346,7 @@ __all__ = [
     "build_agent_state",
     "build_checkpoint_serde",
     "checkpoint_msgpack_allowlist",
+    "default_cwd",
     "guarded_add_messages",
     "guarded_delta_reducer",
     "is_messages_reducer_form",
