@@ -142,6 +142,7 @@ class TestForkConfigStability:
             fork = r.json()["id"]
         overlay = _row(db_conn, fork)
         assert overlay == {
+            "llm_model": "deepseek-flash",
             "skills_to_inject_into_system_prompt": ["a", "b"],
             "skills_to_expand_at_start": ["e", "b"],
         }
