@@ -8,13 +8,14 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping
+from collections.abc import Collection, Iterable, Mapping
 from pathlib import Path, PurePosixPath
 
 __all__ = [
     "DIRECTORY_CEILING",
     "HARD_CEILING",
-    "ceiling_violations",
+    "NEAR_CEILING_BAND",
+    "ceiling_report",
     "entry_candidate",
     "is_python_file",
     "judged_directories",
@@ -24,6 +25,11 @@ __all__ = [
 
 HARD_CEILING = 800
 DIRECTORY_CEILING = 20
+# meiva:note
+# How close to the file ceiling a changed file has to be before the run says so: ten lines is a
+# change small enough to make somewhere else, so it is the last width at which a warning can still
+# move the code instead of merely reporting the crossing.
+NEAR_CEILING_BAND = 10
 
 _PYTHON_SUFFIX = ".py"
 _MANIFEST = "meizel.toml"
@@ -161,15 +167,22 @@ def judged_path(target: Path, scope: Path, repo_root: Path) -> Path | None:
 # meiva:note
 # Both ceilings' report for one run, in the order the ceilings have always been printed in: a line
 # per file over the hard ceiling, ordered by path *parts* (so `app/a/b.py` precedes `app/a.py`, as
-# walking `Path` objects did), then a line per judged directory over the entry cap, by name.
-def ceiling_violations(
-    texts: Mapping[Path, str], repo_root: Path, judged: Mapping[str, int]
-) -> list[str]:
+# walking `Path` objects did), then a line per judged directory over the entry cap, by name. The
+# second list is the band below the file ceiling, which names a file only when the change itself
+# touches it: a repository where hundreds of files already sit near the ceiling would otherwise warn
+# about all of them on every run, and a warning nobody can act on is noise. Over the ceiling the
+# violation already speaks, so the band stops there.
+def ceiling_report(
+    texts: Mapping[Path, str],
+    repo_root: Path,
+    judged: Mapping[str, int],
+    changed: Collection[str] = frozenset(),
+) -> tuple[list[str], list[str]]:
     files = sorted(
         ((_label(path, repo_root), _line_count(text)) for path, text in texts.items()),
         key=lambda named: PurePosixPath(named[0]).parts,
     )
-    return [
+    violations = [
         *(
             f"{name}:{count}: file is {count} lines, over the {HARD_CEILING}-line hard ceiling"
             f" — {_FILE_CEILING_GUIDANCE}; {_FILE_CEILING_WHY}. See {_DOC}."
@@ -183,6 +196,14 @@ def ceiling_violations(
             if count > DIRECTORY_CEILING
         ),
     ]
+    warnings = [
+        f"meizel: warning: {name}:{count}: within {NEAR_CEILING_BAND} lines of the"
+        f" {HARD_CEILING}-line hard ceiling — the next change to this file needs a boundary, not"
+        f" more lines. See {_DOC}."
+        for name, count in files
+        if name in changed and HARD_CEILING - NEAR_CEILING_BAND < count <= HARD_CEILING
+    ]
+    return violations, warnings
 
 
 # meiva:note

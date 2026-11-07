@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Collection
 from pathlib import Path
 
 from meizel.budgets import budget_plans, directory_budget
@@ -38,15 +39,19 @@ def budget_files(
 
 
 # meiva:note
-# Both ceilings' violations for the given targets, read from one directory walk, one read per judged
+# Both ceilings' report for the given targets, read from one directory walk, one read per judged
 # file and one Git listing of the tracked paths; a file that cannot be read keeps the shared lint
-# contract of being skipped. Raises when Git cannot list the tree.
+# contract of being skipped. Raises when Git cannot list the tree. The violations fail the run and
+# the warnings do not; which files the band names is `changed`, the paths this run's comparison
+# commit saw the change touch.
 def check(
     targets: list[Path],
     directory_targets: list[Path],
     repo_root: Path,
     structure_dirs: tuple[str, ...],
-) -> list[str]:
+    *,
+    changed: Collection[str] = frozenset(),
+) -> tuple[list[str], list[str]]:
     texts: dict[Path, str] = {}
     for path in sorted(budget_files(targets, repo_root, structure_dirs)):
         text = read_utf8_text(path)
@@ -54,8 +59,9 @@ def check(
             continue
         texts[path] = text
     children = budget_plans.tracked_children(GitRepo(repo_root).run_text("ls-files", "-z"))
-    return budget_plans.ceiling_violations(
+    return budget_plans.ceiling_report(
         texts,
         repo_root,
         budget_plans.judged_directories(children, directory_targets, repo_root),
+        changed,
     )

@@ -160,6 +160,17 @@ def _git(repo_root: Path, *args: str) -> subprocess.CompletedProcess[str]:
     )
 
 
+# meiva:note
+# The paths the comparison commit has seen change, staged and unstaged alike: the file band below the
+# ceiling names a file only when this run has a reason to talk about it, so a full-repository gate
+# stays silent about files the change never touches.
+def _changed_paths(repo_root: Path, base: str) -> frozenset[str]:
+    listing = _git(repo_root, "diff", "--name-only", "--no-renames", base)
+    if listing.returncode != 0:
+        raise MeizelError(f"cannot list changed paths against {base}: {listing.stderr.strip()}")
+    return frozenset(line for line in listing.stdout.splitlines() if line)
+
+
 def _baseline_base(
     repo_root: Path,
     explicit: str | None,
@@ -576,15 +587,21 @@ def main(
             use_env_base=use_env_base,
         )
         renames = _rename_map(repo_root, base)
-    except (OSError, subprocess.CalledProcessError, ValueError) as exc:
+        changed = _changed_paths(repo_root, base)
+    except (MeizelError, OSError, subprocess.CalledProcessError, ValueError) as exc:
         print(f"{baseline_shards.SHARD_DIR}: cannot establish baseline comparison: {exc}")
         return 1
     errors = _baseline_guard(baseline, repo_root=repo_root, base=base, table=table, renames=renames)
     try:
-        errors.extend(limits.check(targets, directory_targets, repo_root, _STRUCTURE_DIRS))
+        violations, warnings = limits.check(
+            targets, directory_targets, repo_root, _STRUCTURE_DIRS, changed=changed
+        )
     except (MeizelError, OSError, subprocess.CalledProcessError, ValueError) as exc:
         print(f"cannot read tracked directory structure: {exc}", file=sys.stderr)
         return 1
+    errors.extend(violations)
+    for warning in warnings:
+        print(warning)
     errors.extend(
         _check_ast_and_quality(
             argv,

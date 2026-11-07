@@ -43,6 +43,16 @@ package does not make it a public SDK capability; see [SDK and skill ownership](
 Every over-limit file fails the gate. File-budget baselines have been removed
 and cannot be reintroduced. Enforced by `scripts/lint/code_structure.py`.
 
+A file **the change touches** within ten lines of the ceiling prints one
+`meizel: warning:` line naming it and its count. The warning never fails a run,
+and it never names a file the change leaves alone: the files it considers are
+those the comparison commit saw change, so lines parked at 795 elsewhere stay
+quiet on every run. Its sentence is about the next change needing a boundary, not
+about the lines that are left, because a note that counts the room out loud
+invites filling it. The size ceilings for `AGENTS.md` and `SKILL.md` have no such
+band for the same reason; here the band is what lets a change choose the boundary
+while it still has room to.
+
 ## Directory budget: ≤20 direct entries
 
 Every directory except the repository root may have at most 20 direct
