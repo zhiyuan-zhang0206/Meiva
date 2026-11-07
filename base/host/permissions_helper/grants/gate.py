@@ -93,9 +93,7 @@ class GateReport:
         for status in self.items:
             if not status.item.required or status.grant is Grant.GRANTED:
                 continue
-            if status.item.mode is RequestMode.SYSTEM_SETTINGS or (
-                status.item.mode is RequestMode.PROMPT and status.grant is Grant.DENIED
-            ):
+            if status.item.mode is RequestMode.PROMPT and status.grant is Grant.DENIED:
                 rows.append(status.item)
         return tuple(rows)
 

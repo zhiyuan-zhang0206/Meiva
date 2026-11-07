@@ -377,7 +377,7 @@ switch a host whose deployment still runs older code.
 
 The certificate *is* the helper's identity. If this keychain is destroyed, the
 designated requirement changes, and every grant -- Screen Recording,
-Accessibility, AppleEvents, App Management -- must be given again by hand on
+Accessibility, AppleEvents -- must be given again by hand on
 every Mac that shares this identity. The build refuses to sign rather than
 quietly minting a replacement, so the loss is loud.
 

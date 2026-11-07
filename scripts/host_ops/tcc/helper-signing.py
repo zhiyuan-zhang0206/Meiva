@@ -261,7 +261,7 @@ def switch(*, env: BuildEnv, start: bool) -> int:
             print(f"  {line}")
     print(
         "\nNext: `meiva start` to load the helper, then grant Screen Recording, "
-        "Accessibility, AppleEvents and App Management in System Settings -- this is a new\n"
+        "Accessibility and AppleEvents in System Settings -- this is a new\n"
         "code identity, so those grants are asked again exactly once."
     )
     if start:

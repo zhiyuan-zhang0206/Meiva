@@ -23,7 +23,6 @@ _OPTIONAL_LABEL = "not granted -- not requested by Meiva"
 
 _MODE_LABELS: dict[RequestMode, str] = {
     RequestMode.PROMPT: "a dialog can grant it",
-    RequestMode.SYSTEM_SETTINGS: "System Settings only",
     RequestMode.LIVE_EVENT: "granted per app, on first use",
     RequestMode.REPORT_ONLY: "reported, never requested",
 }

@@ -9,8 +9,6 @@ HELPER_HOLDER = "com.meiva.permissions-helper"
 class RequestMode(StrEnum):
     PROMPT = "prompt"
 
-    SYSTEM_SETTINGS = "system_settings"
-
     LIVE_EVENT = "live_event"
 
     REPORT_ONLY = "report_only"
@@ -132,35 +130,6 @@ ACCESSIBILITY_ITEM = PermissionItem(
 )
 
 # meiva:note
-# No request path exists for this row, and the obstacle is the client, not a missing API:
-# tccd refuses to prompt this service for an unentitled binary. Asked through
-# TCCAccessRequest it answers "Service kTCCServiceSystemPolicyAppBundles does not allow
-# prompting for unentitled binaries; returning denied" (authValue=0, authReason=2) and
-# records that policy denial against the asking identity -- a self-signed or ad-hoc helper
-# carries no team identity, so it is unentitled. Calling the request anyway raises no
-# dialog and stamps a fresh denial on every rebuilt helper, so the row is SYSTEM_SETTINGS:
-# the pane toggle is the only path that grants it (#5481; measured 2026-10-21).
-# meiva:link base/host/permissions_helper/grants/docs/grants.meiva.okf.md
-APP_MANAGEMENT_ITEM = PermissionItem(
-    id="app-management",
-    group="desktop",
-    title="App Management",
-    why=(
-        "Replace or update another app's bundle, and install components into it, without"
-        ' macOS answering "Meiva would like to access data from other apps" and then'
-        " refusing the install."
-    ),
-    mode=RequestMode.SYSTEM_SETTINGS,
-    pane="Privacy_AppBundles",
-    verify=(
-        "Privacy & Security > App Management shows Meiva's row turned on, and a real"
-        " install or update of another app no longer fails. macOS offers this helper no"
-        " dialog for the service, so the row is turned on here by hand."
-    ),
-    services=("kTCCServiceSystemPolicyAppBundles",),
-)
-
-# meiva:note
 # No request path exists for this row, and the obstacle is the platform: macOS exposes no
 # `TCCAccessRequest` for `kTCCServiceLocalNetwork`, so the system writes the row the first
 # time the helper itself sends local-network traffic -- which on this cluster is every
@@ -191,7 +160,6 @@ LOCAL_NETWORK_ITEM = PermissionItem(
 DESKTOP_ITEMS: tuple[PermissionItem, ...] = (
     SCREEN_ITEM,
     ACCESSIBILITY_ITEM,
-    APP_MANAGEMENT_ITEM,
     LOCAL_NETWORK_ITEM,
 )
 
