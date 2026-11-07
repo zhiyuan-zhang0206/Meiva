@@ -250,7 +250,7 @@ export function handleComposerKeyDown(
     !e.altKey &&
     !e.metaKey
   ) {
-    if (e.key === "ArrowRight") {
+    if (e.key === "ArrowRight" || e.key === "Tab") {
       e.preventDefault();
       opts.acceptSuggestion(opts.offeredSuggestion);
       return;

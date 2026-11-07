@@ -11,6 +11,6 @@
     ]
   },
   "displayName": "Anthropic",
-  "userToggleable": false,
+  "userToggleable": true,
   "category": "provider"
 }

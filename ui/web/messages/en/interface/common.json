@@ -25,7 +25,7 @@
   "composerInput": "Message your agent",
   "composerPlaceholder": "Send a message",
   "composerPlaceholderResurrect": "Send a message to resurrect this agent",
-  "replySuggestionKeys": "Up and Down choose a reply. Right fills the input. Enter sends after accepting.",
+  "replySuggestionKeys": "Up/Down to choose, Tab or Right Arrow to apply, then Enter to send.",
   "failed": "Failed",
   "filesUploadingHint": "Uploading file(s) — Enter sends the text now; files are delivered when the upload finishes.",
   "modelCapabilitiesUnavailable": "Model capabilities are unavailable. You can still send text or request a stop.",

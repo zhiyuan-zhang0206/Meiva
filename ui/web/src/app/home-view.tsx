@@ -9,6 +9,7 @@ import type { AgentSidebar as AgentSidebarComponent } from "@/components/agent-s
 import { ErrorBoundary } from "@/components/connection/error-boundary";
 import { CodeHighlighterPreloader } from "@/components/content/code-highlighter-preloader";
 import type { Composer as ComposerComponent, StageQueueBatch } from "@/components/conversation/composer";
+import { PendingQuestions } from "@/components/conversation/pending-questions";
 import { PendingStrip } from "@/components/conversation/pending-strip";
 import type { UploadButton as UploadButtonComponent } from "@/components/conversation/upload-button";
 import type { SharedContextPanel as ContextPanelComponent } from "@/components/context/shared-context-panel";
@@ -154,7 +155,6 @@ export function HomePageView(props: HomePageProps) {
   } = agents;
   const diagnostics = useStreamHub().transport.diagnostics;
   const toUser = useToUser(activeId);
-  const noticeFeed = useNotices();
   const [mobileContextOpen, setMobileContextOpen] = useState(false);
   const sidebarEntryResetDone = useRef(false);
 
@@ -169,9 +169,6 @@ export function HomePageView(props: HomePageProps) {
     if (sidebar.collapsed) sidebar.setCollapsed(false);
   }, [sidebar]);
 
-  const activeNotices = [...noticeFeed.awaiting, ...noticeFeed.open]
-    .filter((notice) => notice.agent_id === activeId)
-    .sort((a, b) => PRIORITY_RANK[a.priority] - PRIORITY_RANK[b.priority] || b.created_at.localeCompare(a.created_at));
   // meiva:link ui/web/src/docs/frontend-state/shared-context/shared-context.meiva.okf.md
   // meiva:note
   // The mode owns the panel: entering inspector while the shared-context column
@@ -250,8 +247,6 @@ export function HomePageView(props: HomePageProps) {
         <ContextPanel
           agentId={activeId}
           document={toUser}
-          notices={activeNotices}
-          noticesFailed={noticeFeed.error}
           mobile={!isLarge}
           onClose={() => {
             useWorkspaceFileStore.getState().closeFile();
@@ -441,12 +436,15 @@ function HomeContent({
     activeId == null ? "disabled" : agentBusy ? "busy" : "idle";
   const publications = useUserMessages(activeId);
   const questions = useNotices();
-  const displayedItems = useMemo(() => withQuestions(withUserMessages(items, publications.data?.items ?? []), [...questions.awaiting, ...questions.resolved].filter((item) => item.agent_id === activeId)), [items, publications.data, questions.awaiting, questions.resolved, activeId]);
+  const pendingQuestions = useMemo(() => questions.awaiting.filter((item) => item.agent_id === activeId)
+    .sort((a, b) => PRIORITY_RANK[a.priority] - PRIORITY_RANK[b.priority] || a.created_at.localeCompare(b.created_at)), [questions.awaiting, activeId]);
+  const displayedItems = useMemo(() => withQuestions(withUserMessages(items, publications.data?.items ?? []), questions.resolved.filter((item) => item.agent_id === activeId)), [items, publications.data, questions.resolved, activeId]);
+  const suggestionItems = useMemo(() => withQuestions(displayedItems, pendingQuestions), [displayedItems, pendingQuestions]);
   const replySuggestion = useReplySuggestion({
     agentId: activeId,
     status: activeAgent?.status,
     busy: agentBusy,
-    items: displayedItems,
+    items: suggestionItems,
     enabled: !userSettingsLoading && userSettings["behavior.replySuggestions"] === true,
   });
 
@@ -511,31 +509,34 @@ function HomeContent({
                 {t("modelCapabilitiesUnavailable")}
               </p>
             )}
-            <Composer
-              diagnostics={diagnostics}
-              maxWidthCss={composerMaxWidth}
-              mode={composerMode}
-              onSend={handleSend}
-              onStop={handleStop}
-              stageQueue={stageQueue}
-              onDeliveringBatchChange={setDeliveringBatch}
-              onUploadSent={() => timelineStore.requestScrollToBottom()}
-              onUploadError={handleUploadError}
-              focusToken={store.composerFocusToken}
-              agentId={activeId}
-              agentTerminated={activeAgent?.status === "terminated"}
-              suggestions={replySuggestion?.suggestions}
-              suggestionOfferId={replySuggestion?.offer_id}
-            >
-              <UploadButton
+            <div className="relative">
+              {activeId !== null && <PendingQuestions key={activeId} questions={pendingQuestions} failed={questions.error} maxWidthCss={composerMaxWidth} />}
+              <Composer
+                diagnostics={diagnostics}
+                maxWidthCss={composerMaxWidth}
+                mode={composerMode}
+                onSend={handleSend}
+                onStop={handleStop}
+                stageQueue={stageQueue}
+                onDeliveringBatchChange={setDeliveringBatch}
+                onUploadSent={() => timelineStore.requestScrollToBottom()}
+                onUploadError={handleUploadError}
+                focusToken={store.composerFocusToken}
                 agentId={activeId}
-                onUpload={uploadHandler}
-                uploading={false}
-                progress={0}
-                count={0}
-                error={uploadError}
-              />
-            </Composer>
+                agentTerminated={activeAgent?.status === "terminated"}
+                suggestions={replySuggestion?.suggestions}
+                suggestionOfferId={replySuggestion?.offer_id}
+              >
+                <UploadButton
+                  agentId={activeId}
+                  onUpload={uploadHandler}
+                  uploading={false}
+                  progress={0}
+                  count={0}
+                  error={uploadError}
+                />
+              </Composer>
+            </div>
           </div>
         </div>
       </ErrorBoundary>

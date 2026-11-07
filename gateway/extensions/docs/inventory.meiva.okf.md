@@ -52,8 +52,9 @@ does not redirect that installer. Per-agent tool exposure is a separate choice.
 
 `/api/plugins` projects manifest `displayName`, `category`, `userToggleable` and provider kinds
 from declared `providers` / `decisionProviders` contributions. Providers occupy
-read-only LLM and Decision groups alongside Built-in and Extensions on the same
-Plugins page. Category is presentation metadata, independent from registry trust;
+LLM and Decision groups alongside Built-in and Extensions on the same Plugins
+page. Shipped LLM providers declare `userToggleable: true`; their cluster switch
+uses the same durable policy as functional plugins. Category is presentation metadata, independent from registry trust;
 other non-toggleable plugins have no switch.
 PUT refuses non-toggleable manifests before changing policy. This capability flag
 does not alter startup policy or separate service gates.

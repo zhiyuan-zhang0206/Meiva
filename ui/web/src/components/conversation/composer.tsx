@@ -489,7 +489,7 @@ export function Composer({
               disabled={mode === "disabled"}
               focusVisible={false}
               className={cn(
-                "font-mono text-base md:text-base resize-none max-h-[min(50vh,calc(var(--visual-viewport-height,100dvh)*0.45))] overflow-y-auto min-h-9 py-1.5 leading-5",
+                "font-mono text-base md:text-base text-foreground placeholder:text-muted-foreground/60 resize-none max-h-[min(50vh,calc(var(--visual-viewport-height,100dvh)*0.45))] overflow-y-auto min-h-9 py-1.5 leading-5",
                 FLEX_1,
               )}
               suppressHydrationWarning

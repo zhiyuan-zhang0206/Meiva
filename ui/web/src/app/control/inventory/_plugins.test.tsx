@@ -37,9 +37,9 @@ it("keeps the saved switch value and reports a rejected write", async () => {
 });
 
 
-it("groups declared LLM and Decision providers without switches, regardless of ID", async () => {
+it("groups providers by declarations and offers only manifest-authorized switches", async () => {
   transport.getPlugins.mockResolvedValue({ plugins: [
-    { name: "anthropic_adapter", display_name: "Anthropic", enabled: true, description: "", user_toggleable: false, category: "provider", provider_kinds: ["llm"] },
+    { name: "anthropic_adapter", display_name: "Anthropic", enabled: true, description: "", user_toggleable: true, category: "provider", provider_kinds: ["llm"] },
     { name: "lm_typesafe", display_name: "TypeSafe", enabled: true, description: "", user_toggleable: false, category: "provider", provider_kinds: ["decision"] },
     { name: "lm_regular", enabled: true, description: "Functional plugin", provider_kinds: [], user_toggleable: true, category: "builtin" },
     { name: "protected_tool", enabled: true, description: "Read-only plugin", category: "extension", provider_kinds: [], user_toggleable: false },
@@ -52,7 +52,8 @@ it("groups declared LLM and Decision providers without switches, regardless of I
   expect(screen.getByText("Decision · Dual")).toBeTruthy();
   expect(screen.getByRole("region", { name: "LLM providers" })).toBeTruthy();
   expect(screen.getByRole("region", { name: "Decision model providers" })).toBeTruthy();
-  expect(screen.getAllByRole("switch")).toHaveLength(1);
+  expect(screen.getAllByRole("switch")).toHaveLength(2);
+  expect(screen.getByRole("switch", { name: "Toggle anthropic_adapter" })).toBeTruthy();
   expect(screen.getByRole("switch", { name: "Toggle lm_regular" })).toBeTruthy();
   expect(screen.getByText("protected_tool")).toBeTruthy();
   expect(screen.getByRole("region", { name: "Built-in plugins" })).toBeTruthy();

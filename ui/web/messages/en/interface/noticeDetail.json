@@ -19,5 +19,8 @@
   "noLongerAvailable": "This question is no longer available. Refresh to see its current status.",
   "originalOptions": "Original numbered options",
   "selected": "Selected",
-  "comment": "Note (optional)"
+  "comment": "Note (optional)",
+  "pendingQuestions": "{count, plural, one {# question waiting} other {# questions waiting}}",
+  "questionsUnavailable": "Could not load pending questions.",
+  "suggestionKeys": "Press Tab or Right Arrow to apply the suggestion."
 }

@@ -189,9 +189,9 @@ describe("Composer reply suggestion", () => {
     expect(input().getAttribute("placeholder")).toBe(SUGGESTION);
     expect(input().value).toBe("");
   });
-  it("ArrowRight accepts it: the input holds the text and the caret is at the end", async () => {
+  it.each(["ArrowRight", "Tab"])("%s accepts it: the input holds the text and the caret is at the end", async (key) => {
     renderComposerTree(<Composer {...baseProps} mode="idle" suggestions={[SUGGESTION]} />);
-    const notPrevented = fireEvent.keyDown(input(), { key: "ArrowRight" });
+    const notPrevented = fireEvent.keyDown(input(), { key });
     expect(notPrevented).toBe(false);
     await waitFor(() => {
       expect(input().value).toBe(SUGGESTION);

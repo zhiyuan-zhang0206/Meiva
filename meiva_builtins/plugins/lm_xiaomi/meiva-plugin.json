@@ -11,6 +11,6 @@
     ]
   },
   "displayName": "Xiaomi",
-  "userToggleable": false,
+  "userToggleable": true,
   "category": "provider"
 }

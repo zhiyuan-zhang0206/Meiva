@@ -11,6 +11,6 @@
     ]
   },
   "displayName": "DeepSeek",
-  "userToggleable": false,
+  "userToggleable": true,
   "category": "provider"
 }

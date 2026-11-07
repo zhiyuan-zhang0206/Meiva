@@ -11,6 +11,6 @@
     ]
   },
   "displayName": "Zhipu",
-  "userToggleable": false,
+  "userToggleable": true,
   "category": "provider"
 }

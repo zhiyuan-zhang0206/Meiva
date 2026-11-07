@@ -11,6 +11,6 @@
     ]
   },
   "displayName": "Moonshot",
-  "userToggleable": false,
+  "userToggleable": true,
   "category": "provider"
 }

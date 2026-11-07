@@ -1,11 +1,12 @@
 "use client";
 
-import { useEffect, useId, useRef, useState, type ReactNode } from "react";
+import { useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { useTranslations } from "next-intl";
 
 import { ChatMarkdown } from "@/components/content/markdown";
 import { AutoExpandTextarea } from "@/components/ui/auto-expand-textarea";
 import type { NoticeAnswer, NoticeQuestion } from "@/lib/contracts/types";
+import { isImeComposition } from "@/lib/input/enter-to-send";
 import { cn } from "@/lib/format/utils";
 import { FLEX, FLEX_1, MIN_W_0 } from "@/lib/layout/layout";
 
@@ -18,7 +19,7 @@ interface Draft {
 function answerFromDraft(question: NoticeQuestion, draft: Draft): NoticeAnswer | null {
   const comment = draft.comment.trim();
   if (question.type === "text") {
-    return draft.text.trim() ? { text: draft.text.trim(), ...(comment ? { comment } : {}) } : null;
+    return draft.text.trim() ? { text: draft.text.trim() } : null;
   }
   // meiva:note
   // Choosing nothing is allowed in both kinds: a comment alone is a whole answer
@@ -59,7 +60,7 @@ export function NoticeQuestionForm({
   const fieldId = useId();
   const textRef = useRef<HTMLTextAreaElement>(null);
   const [draft, setDraft] = useState<Draft>({
-    optionIds: [], text: "", comment: question.note_suggestion ?? "",
+    optionIds: [], text: "", comment: "",
   });
 
   useEffect(() => {
@@ -80,7 +81,7 @@ export function NoticeQuestionForm({
     if (focusAnswer) textRef.current?.focus();
   }, [focusAnswer]);
 
-  const inputClass = cn("min-h-9 resize-none py-2 font-mono text-[13px] leading-snug md:text-[13px] pointer-coarse:text-base md:pointer-coarse:text-base", FLEX_1);
+  const inputClass = cn("min-h-9 text-foreground placeholder:text-muted-foreground/60 resize-none py-2 font-mono text-[13px] leading-snug md:text-[13px] pointer-coarse:text-base md:pointer-coarse:text-base", FLEX_1);
   const single = question.type === "single_select";
   const choose = (id: string, checked: boolean) => {
     setDraft({
@@ -92,57 +93,70 @@ export function NoticeQuestionForm({
   };
   const optionClass = cn(FLEX, "-mx-2 cursor-pointer items-start gap-2 rounded px-2 py-1.5 text-[13px] leading-snug hover:bg-muted/40 has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-ring");
 
+  const applySuggestion = (field: "text" | "comment", event: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (!draft[field] && question.note_suggestion && !pending && !isImeComposition(event)
+      && !event.shiftKey && !event.ctrlKey && !event.altKey && !event.metaKey
+      && (event.key === "Tab" || event.key === "ArrowRight")) {
+      event.preventDefault();
+      setDraft({ ...draft, [field]: question.note_suggestion });
+    }
+  };
+
   return (
     <div className="space-y-3">
-      {question.type === "text" ? <AutoExpandTextarea
-        id={fieldId} aria-label={t("openQuestion")} ref={textRef} rows={1}
-        focusVisible={false} value={draft.text}
-        onChange={(e) => setDraft({ ...draft, text: e.target.value })}
-        onSend={send} placeholder={t("openPlaceholder")} disabled={pending} className={inputClass}
-      /> : <fieldset disabled={pending} className="disabled:opacity-60">
-        <legend className="sr-only">{single ? t("singleSelect") : t("multiSelect")}</legend>
-        {question.options.map((option, index) => {
-          const selected = draft.optionIds.includes(option.id);
-          return (
-            <label key={option.id} className={optionClass}>
-              <input
-                type={single ? "radio" : "checkbox"}
-                name={fieldId}
-                checked={selected}
-                onChange={(e) => choose(option.id, e.target.checked)}
-                onClick={() => { if (single && selected) choose(option.id, false); }}
-                onKeyDown={(e) => {
-                  if (single && selected && (e.key === " " || e.key === "Enter")) {
-                    e.preventDefault();
-                    choose(option.id, false);
-                  }
-                }}
-                className="mt-0.5 size-3.5 shrink-0 accent-primary"
-              />
-              <span className={cn("break-words", MIN_W_0)}>
-                <span className={selected ? "font-medium" : undefined}><span className="text-muted-foreground">{index + 1}.</span> <ChatMarkdown content={option.label} inline /></span>
-                {option.description && <span className="mt-0.5 block text-xs leading-snug text-muted-foreground"><ChatMarkdown content={option.description} inline /></span>}
-              </span>
-            </label>
-          );
-        })}
-
-      </fieldset>}
-      <div className={cn("items-end gap-2", FLEX)}>
+      {question.type === "text" ? <div className={cn("items-end gap-2", FLEX)}>
         <AutoExpandTextarea
-          id={`${fieldId}-comment`}
-          aria-label={t("comment")}
-          rows={1}
-          focusVisible={false}
-          value={draft.comment}
-          onChange={(e) => setDraft({ ...draft, comment: e.target.value })}
-          onSend={send}
-          disabled={pending}
-          placeholder={t("comment")}
-          className={inputClass}
+          id={fieldId} aria-label={t("openQuestion")} ref={textRef} rows={1}
+          focusVisible={false} value={draft.text}
+          onChange={(e) => setDraft({ ...draft, text: e.target.value })}
+          onKeyDown={(event) => applySuggestion("text", event)}
+          aria-description={question.note_suggestion && !draft.text ? t("suggestionKeys") : undefined}
+          onSend={send} placeholder={question.note_suggestion ?? t("openPlaceholder")}
+          disabled={pending} className={inputClass}
         />
         {submitAction}
-      </div>
+      </div> : <>
+        <fieldset disabled={pending} className="disabled:opacity-60">
+          <legend className="sr-only">{single ? t("singleSelect") : t("multiSelect")}</legend>
+          {question.options.map((option, index) => {
+            const selected = draft.optionIds.includes(option.id);
+            return (
+              <label key={option.id} className={optionClass}>
+                <input
+                  type={single ? "radio" : "checkbox"}
+                  name={fieldId}
+                  checked={selected}
+                  onChange={(e) => choose(option.id, e.target.checked)}
+                  onClick={() => { if (single && selected) choose(option.id, false); }}
+                  onKeyDown={(e) => {
+                    if (single && selected && (e.key === " " || e.key === "Enter")) {
+                      e.preventDefault();
+                      choose(option.id, false);
+                    }
+                  }}
+                  className="mt-0.5 size-3.5 shrink-0 accent-primary"
+                />
+                <span className={cn("break-words", MIN_W_0)}>
+                  <span className={selected ? "font-medium" : undefined}><span className="text-muted-foreground">{index + 1}.</span> <ChatMarkdown content={option.label} inline /></span>
+                  {option.description && <span className="mt-0.5 block text-xs leading-snug text-muted-foreground"><ChatMarkdown content={option.description} inline /></span>}
+                </span>
+              </label>
+            );
+          })}
+        </fieldset>
+        <div className={cn("items-end gap-2", FLEX)}>
+          <AutoExpandTextarea
+            id={`${fieldId}-comment`} aria-label={t("comment")} rows={1} focusVisible={false}
+            value={draft.comment} onChange={(e) => setDraft({ ...draft, comment: e.target.value })}
+            onKeyDown={(event) => applySuggestion("comment", event)}
+            onSend={send} disabled={pending}
+            placeholder={question.note_suggestion ?? t("comment")}
+            aria-description={question.note_suggestion && !draft.comment ? t("suggestionKeys") : undefined}
+            className={inputClass}
+          />
+          {submitAction}
+        </div>
+      </>}
     </div>
   );
 }

@@ -13,7 +13,7 @@ import { FLEX, FLEX_1, FLEX_COL, MIN_H_0, MIN_W_0 } from "@/lib/layout/layout";
 import { LAYOUT_INVARIANTS, LAYOUT_VIEWPORT_TIERS } from "@/lib/layout/layout";
 import { transport } from "@/test-support/fake-api";
 import { deferred } from "@/test-support/deferred";
-import { cleanupHomePageTest, HomePageBound as HomePage, homePageProps, HomePageView, hooksState, inspectorMockState, makeAgent, makeItem, resetHomePageTestState, setReplySuggestions, wrap } from "./page-test-mock";
+import { cleanupHomePageTest, HomePageBound as HomePage, homePageProps, HomePageView, hooksState, inspectorMockState, makeAgent, makeItem, resetHomePageTestState, setReplySuggestions, setPendingQuestions, wrap } from "./page-test-mock";
 
 afterEach(cleanupHomePageTest);
 beforeEach(resetHomePageTestState);
@@ -386,4 +386,26 @@ describe("HomePage top-level render", () => {
     expect(setContextOpen).toHaveBeenCalledWith(false);
     expect(toggleInspector).toHaveBeenCalledOnce();
   });
+});
+
+it("places only the active agent's pending questions above the composer, outside the timeline", async () => {
+  hooksState.activeId = 7;
+  hooksState.agents = [makeAgent({ agent_id: 7 })];
+  hooksState.timelineItems = [makeItem({ item_id: "2.0", kind: "agent_chat", payload: "Read this update" })];
+  setPendingQuestions([7, 8].map((agent_id) => ({
+    id: agent_id, agent_id, agent_label: null, title: `Question for ${agent_id}`, content: null,
+    priority: "P1", require_response: true, blocking: false,
+    created_at: "2026-11-07T00:00:00Z", expire_at: null, resolved_at: null,
+    question: { type: "text", note_suggestion: "Suggested answer" },
+  })));
+  wrap(<HomePage />);
+  const toggle = await screen.findByRole("button", { name: "1 question waiting" });
+  expect(screen.getByTestId("timeline").getAttribute("data-item-count")).toBe("1");
+  const queue = screen.getByTestId("pending-questions");
+  expect(screen.getByTestId("timeline").contains(queue)).toBe(false);
+  expect(Boolean(queue.compareDocumentPosition(screen.getByTestId("composer")) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
+  fireEvent.click(toggle);
+  expect(screen.getByRole("heading", { name: "Question for 7" })).toBeTruthy();
+  expect(screen.queryByText("Question for 8")).toBeNull();
+  expect(queue.querySelectorAll("textarea")).toHaveLength(1);
 });

@@ -57,17 +57,12 @@ export const BAR_CLEAR_TOP_OFFSET_CLASS = "top-[52px]";
 export const OVERFLOW_CLIP = "overflow-clip";
 
 // meiva:note
-// The right column's question region is pinned under the reading area, so its
-// height stops at 70% of the visible viewport (`--visual-viewport-height` while
-// an on-screen keyboard is open, falling back to `100dvh`): tall notices and
-// multi-option questions get generous room before scrolling while keeping the
-// title bar and reading area above reachable (user 2026-10-30, raised from 45vh
-// on 2026-11-02). Pass on ScrollArea's `viewportClassName`, never `className`:
-// ScrollArea's root has `height: auto`, so `size-full` (`height: 100%`) on the
-// inner viewport resolves to `auto` unless the max-height sits on the viewport itself.
+// Pending answers overlay the conversation above its composer. Bound the inner
+// viewport against the visible height, including an open on-screen keyboard;
+// the ScrollArea root is auto-height and must not clip its unbounded viewport.
 // meiva:link ui/web/src/docs/frontend-state/shared-context/shared-context.meiva.okf.md
 export const QUESTION_REGION_MAX_HEIGHT_CLASS =
-  "max-h-[calc(var(--visual-viewport-height,100dvh)*0.7)]";
+  "max-h-[calc(var(--visual-viewport-height,100dvh)*0.45)]";
 
 // ── The named invariants (I1–I6) ───────────────────────────────────────
 // One entry per invariant; `pages` says which page each applies to. Tests
