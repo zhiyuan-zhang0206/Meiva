@@ -89,7 +89,7 @@ X" and lost its history on every process restart.
 ## Reading a past window
 
 Live, past and per-process readings, and the one metric that survives a starved
-host: [[infra-metrics/reading-a-past-window.meiva.okf.md|reading a past window]].
+host: [[base/telemetry/otlp/docs/telemetry-otlp/infra-metrics/reading-a-past-window.meiva.okf.md|reading a past window]].
 
 ## Not gated by the OTLP kill switch
 

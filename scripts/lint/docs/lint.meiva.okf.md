@@ -33,19 +33,7 @@ guards are a separate group: [[scripts/content_lint/docs/content_lint.meiva.okf.
 
 ## `async_no_sync_blocking.py`
 
-The gateway is a single event loop; one sync psycopg / subprocess / psutil
-call inside an `async def` handler freezes every other request (the
-2026-08-03 incident: `/api/memory/search` ran a synchronous embedding on the
-loop and the gateway hung for hours).
-
-Flags, inside an `async def` body (not a nested `def` — presumed threaded):
-DB connection/cursor/execute/fetch/commit/rollback calls, known sync DB
-helpers and sync ops, process/session backend calls, filesystem calls,
-`shutil.`/`subprocess.`/`psutil.` module calls, `os.system`, `time.sleep`,
-and any bare `*_blocking`-suffixed helper (those exist to be wrapped in
-`asyncio.to_thread`). Inline opt-out: `# async-blocking-ok: <reason>`.
-
-Scope: `gateway/` and `ops/` (the event-loop surfaces); pre-commit hook `lint-async-no-sync-blocking`.
+[[scripts/lint/docs/async-no-sync-blocking.meiva.okf.md]].
 
 ## `logger_add_diagnose.py`
 
