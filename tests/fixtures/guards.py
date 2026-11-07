@@ -61,6 +61,25 @@ def suite_is_not_inside_an_exec_domain(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(proc, "hosting_exec_domain", lambda: None)
 
 
+# meiva:note
+# No test starts with an SDK context some earlier test pinned. `pin_agent` writes its context into
+# a process-global slot and nothing cleared it, so a context a test pinned (carrying that test's own
+# `ClientSet`) stayed bound for every later test in the same worker — and `pin_agent` without an
+# explicit `clients=` inherits `bound.clients`. That is how #6424's frozen `DbConfig` (a captured
+# port that no longer listened) reached an unrelated test as a bare `Connection refused`. Clearing
+# the slot at teardown makes "an earlier test is still pinned" impossible; a test that needs a
+# context pins its own, and one that binds a wire keeps it for its own body.
+@pytest.fixture(autouse=True)
+def no_pinned_sdk_context_leaks() -> Iterator[None]:
+    yield
+    surface = sys.modules.get("meiva.sdk_surface.process_context")
+    if surface is None:
+        return
+    unbind = getattr(surface, "unbind_context", None)
+    if callable(unbind):
+        unbind()
+
+
 @pytest.fixture(autouse=True)
 def _otlp_export_off(request: pytest.FixtureRequest) -> None:
     """Keep the test session hermetic: the OTLP dual-write (base.telemetry ->
