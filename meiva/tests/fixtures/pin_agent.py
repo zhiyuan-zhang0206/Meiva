@@ -66,6 +66,22 @@ def pin_agent(
     meiva_home: Path | None = None,
 ) -> None:
     bound = getattr(meiva, "context", None)
+    # TEMPORARY DEBUG PROBE (#6424) — debug/6424-dburl-probe only, never merge.
+    _probe_target = clients if clients is not None else (bound.clients if bound else None)
+    if _probe_target is not None:
+        try:
+            _probe_target._probe_pinned_by = os.environ.get("PYTEST_CURRENT_TEST")
+        except Exception:
+            pass
+        print(
+            "PROBE-BIND test=%r clients=%s inherited=%s"
+            % (
+                os.environ.get("PYTEST_CURRENT_TEST"),
+                id(_probe_target),
+                clients is None and bound is not None,
+            ),
+            flush=True,
+        )
     process_context.bind_context(
         MeivaContext(
             meiva_home=resolve_meiva_home() if meiva_home is None else meiva_home,

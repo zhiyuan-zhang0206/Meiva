@@ -37,6 +37,34 @@ def _connection_dead(conn: object) -> bool:
     return bool(getattr(conn, "broken", False))
 
 
+# TEMPORARY DEBUG PROBE (#6424) — debug/6424-dburl-probe only, never merge.
+def _probe_port_one(handle: object, owner: object) -> None:
+    import os
+
+    cfg = getattr(handle, "_config", None)
+    url = getattr(cfg, "db_url", "")
+    if ":1/" not in url:
+        return
+    settings_url = ""
+    try:
+        from base.config import get_field
+
+        settings_url = get_field("db_url")
+    except Exception as exc:  # pragma: no cover - debug only
+        settings_url = f"<{type(exc).__name__}>"
+    print(
+        "PROBE-DIAL test=%r clients=%s pinned_by=%r url=%r settings=%r"
+        % (
+            os.environ.get("PYTEST_CURRENT_TEST"),
+            id(owner),
+            getattr(owner, "_probe_pinned_by", None),
+            url,
+            settings_url,
+        ),
+        flush=True,
+    )
+
+
 class LazyConnection:
     """A connection proxy: attribute access is forwarded to a connection built on first use.
 
@@ -314,7 +342,10 @@ class ClientSet:
     # ── builders ─────────────────────────────────────────────────────────
 
     def _connect_sql(self) -> psycopg.Connection:
-        return self.database().connect(autocommit=True)
+        # TEMPORARY DEBUG PROBE (#6424) — debug/6424-dburl-probe only, never merge.
+        handle = self.database()
+        _probe_port_one(handle, self)
+        return handle.connect(autocommit=True)
 
     def _connect_redis(self) -> object:
         if self._redis_factory is None:
