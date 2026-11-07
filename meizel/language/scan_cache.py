@@ -216,6 +216,7 @@ def _scan_to_raw_sites(scan: FileScan, out: dict[str, object]) -> None:
     _put_if(out, "type_checking", list(scan.type_checking))
     _put_if(out, "symbols", [[s[0], s[1], s[2]] for s in scan.symbols])
     _put_if(out, "deps", list(scan.deps))
+    _put_if(out, "injected", list(scan.injected))
 
 
 def _scan_to_raw(scan: FileScan) -> dict[str, object]:
@@ -367,6 +368,7 @@ def _scan_from_raw(value: object, kinds: Collection[str]) -> FileScan:
         type_checking=tuple(_integer(item) for item in _opt_list(raw, "type_checking")),
         symbols=_decode_symbols(raw),
         deps=tuple(_text(item) for item in _opt_list(raw, "deps")),
+        injected=tuple(_text(item) for item in _opt_list(raw, "injected")),
     )
 
 

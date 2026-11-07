@@ -125,7 +125,7 @@ class Analysis:
         scope = "" if self.changed is None else f"{len(self.changed)} changed paths, "
         return (
             f"meizel: ok ({scope}{len(self.facts)} fact edges, "
-            f"{len(self.manifests)} manifests{account_line(self.manifests)}); "
+            f"{len(self.manifests)} manifests{account_line(self.manifests, self.scans)}); "
             "implemented checks passed for the reported scope; "
             "not a semantic purity proof or test-resource assessment"
         )

@@ -19,6 +19,7 @@ from meizel.graph.imports import (
 from meizel.graph.model import (
     Acquisition,
     AnyCollaboratorSite,
+    Code,
     EntropySite,
     EnumSubsetUse,
     Fact,
@@ -219,6 +220,7 @@ class FileScan:
     type_checking: tuple[int, ...] = ()
     symbols: tuple[tuple[str, int, int], ...] = ()
     deps: tuple[str, ...] = ()
+    injected: tuple[str, ...] = ()
 
 
 class Scanner(AmbientAccess):
@@ -234,6 +236,8 @@ class Scanner(AmbientAccess):
     ) -> None:
         super().__init__(universe, path, tree, walrus=walrus, sources=sources)
         self.argv_wrappers = _argv_wrappers(policy)
+        self.injected_sites = frozenset(policy.reasons("injected-calls", "sites"))
+        self.injected: list[str] = []
         self.fixture_state = fixtures.FixtureState()
         self.fn_depth = 0
         self.qualnames: list[str] = []
@@ -281,6 +285,16 @@ class Scanner(AmbientAccess):
         self.purity_state.mark_annotations(self.tree)
         self.children(self.tree)
         self.purity_state.record_module(self.tree)
+        # meiva:note
+        # A declared site this file did not honour (the call is gone, the receiver is not a parameter)
+        # approves nothing: the problem rides the file, so a run that reads only this file says it.
+        declared = {s for s in self.injected_sites if s.startswith(f"{self.path}#")}
+        for site in sorted(declared - set(self.injected)):
+            self.problem(
+                1,
+                f"[injected-calls.sites] {site!r} approves no injected call at that function",
+                Code.STALE_APPROVAL,
+            )
         return FileScan(
             self.path,
             facts=list(dict.fromkeys(self.facts)),
@@ -298,6 +312,7 @@ class Scanner(AmbientAccess):
             any_collaborators=self.any_collaborators,
             type_checking=tuple(self.type_checking),
             deps=tuple(sorted(self.binding_files - {self.path})),
+            injected=tuple(self.injected),
         )
 
     def visit_if(self, node: ast.If) -> None:
@@ -652,9 +667,29 @@ class Scanner(AmbientAccess):
             and self.scope.find("open") == (None, False)
         )
         purity.record_call(
-            self.purity_state, node, callee, self.dotted, unshadowed_open=unshadowed_open
+            self.purity_state,
+            node,
+            callee,
+            self.dotted,
+            unshadowed_open=unshadowed_open,
+            injected=self.injected_site(node),
         )
         self.children(node)
+
+    # meiva:note
+    # A call the policy declares an injected callable: the site is listed and the receiver is a
+    # parameter of the enclosing function, where one built here (`Path("x")`, `self.path`) is a path.
+    def injected_site(self, node: ast.Call) -> bool:
+        func = node.func
+        if not isinstance(func, ast.Attribute) or not isinstance(func.value, ast.Name):
+            return False
+        site = f"{self.path}#{'.'.join(self.qualnames)}#{func.value.id}.{func.attr}"
+        if func.value.id not in self.scope.parameters or site not in self.injected_sites:
+            return False
+        if purity.path_annotated(self.scope.parameters[func.value.id]):
+            return False
+        self.injected.append(site)
+        return True
 
     def spawn_call(self, callee: str | None, node: ast.Call) -> None:
         """A call that starts a process: judge its argument list when that starts a Python interpreter."""

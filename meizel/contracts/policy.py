@@ -70,6 +70,8 @@ def check(manifests: dict[str, Manifest], policy: Policy) -> list[Diagnostic]:
     """Every `[external]` and `[loads]` site in a manifest that the policy does not list."""
     found: list[Diagnostic] = []
     found.extend(_approved_budget(policy))
+    found.extend(_injected_shapes(policy))
+    found.extend(_injected_budget(policy))
     for _, manifest in sorted(manifests.items()):
         for name in manifest.external:
             if _site(manifest, name) not in policy.external:
@@ -86,27 +88,27 @@ def check(manifests: dict[str, Manifest], policy: Policy) -> list[Diagnostic]:
 
 
 # meiva:note
-# The approved list is a budget, not a door. Every file in it hides every patch it holds from the
-# baseline, so the list is paid down or grown by an edit a reviewer reads: `max-files` states the
-# ceiling, and a run that finds more entries than the ceiling refuses rather than recording one more
-# exemption. A ceiling the run cannot read as a count is a finding too - an allowance that cannot be
-# measured must not pass for an absent one.
-def _approved_budget(policy: Policy) -> list[Diagnostic]:
-    ceiling = policy.names("approved-patches", "max-files")
+# A ceiling the policy states for one of its own lists: the count must be readable, and a list past it
+# refuses rather than recording one more exemption. A ceiling the run cannot read as a count is a
+# finding too - an allowance that cannot be measured must not pass for an absent one.
+def _budget(
+    policy: Policy, rule: str, section: str, ceiling_key: str, what: str, action: str
+) -> list[Diagnostic]:
+    ceiling = policy.names(rule, ceiling_key)
     if not ceiling:
         return []
-    line = policy.line_of("max-files", "approved-patches")
+    line = policy.line_of(ceiling_key, rule)
     if not (len(ceiling) == 1 and ceiling[0].isdigit()):
         return [
             Diagnostic(
                 POLICY,
                 line,
                 Code.POLICY_SYNTAX,
-                f"[approved-patches] max-files must be one count, not {list(ceiling)!r}",
-                ('state the ceiling as a single number, e.g. max-files = ["6"]',),
+                f"[{rule}] {ceiling_key} must be one count, not {list(ceiling)!r}",
+                (f'state the ceiling as a single number, e.g. {ceiling_key} = ["6"]',),
             )
         ]
-    listed = policy.reasons("approved-patches", "files")
+    listed = policy.reasons(rule, section)
     if len(listed) <= int(ceiling[0]):
         return []
     return [
@@ -114,13 +116,66 @@ def _approved_budget(policy: Policy) -> list[Diagnostic]:
             POLICY,
             line,
             Code.APPROVED_BUDGET,
-            f"{len(listed)} files are approved to patch; [approved-patches] max-files is {ceiling[0]}",
-            (
-                "repay one approved file's patches and drop its entry, or raise the ceiling in "
-                "the same change and say in review what the new file hides",
-            ),
+            f"{len(listed)} {what}; [{rule}] {ceiling_key} is {ceiling[0]}",
+            (action,),
         )
     ]
+
+
+# meiva:note
+# The approved list is a budget, not a door: every file in it hides every patch it holds from the
+# baseline, so the list is paid down or grown by an edit a reviewer reads.
+def _approved_budget(policy: Policy) -> list[Diagnostic]:
+    return _budget(
+        policy,
+        "approved-patches",
+        "files",
+        "max-files",
+        "files are approved to patch",
+        "repay one approved file's patches and drop its entry, or raise the ceiling in the same "
+        "change and say in review what the new file hides",
+    )
+
+
+# meiva:note
+# The same ceiling for the sites declared an injected callable: every site in the list hides an
+# `impure-call` the rule would otherwise report, so the list is paid down or grown by a reviewed edit.
+def _injected_budget(policy: Policy) -> list[Diagnostic]:
+    return _budget(
+        policy,
+        "injected-calls",
+        "sites",
+        "max-sites",
+        "sites are declared injected calls",
+        "repay one site (convert the call to a handed value) and drop its entry, or raise the "
+        "ceiling in the same change and say in review what the new site hides",
+    )
+
+
+# meiva:note
+# A declared injected call is a site, not a name: `path.py#function#receiver.method`. The receiver is
+# the parameter the callable arrived in, which is what makes the claim checkable -- the scanner can
+# point at that call, and a receiver built in the function is not a parameter and cannot be declared.
+def _injected_shapes(policy: Policy) -> list[Diagnostic]:
+    found: list[Diagnostic] = []
+    for key in sorted(policy.reasons("injected-calls", "sites")):
+        path, _, rest = key.partition("#")
+        function, _, method = rest.rpartition("#")
+        if path.endswith(".py") and function and "." in method and " " not in key:
+            continue
+        found.append(
+            Diagnostic(
+                POLICY,
+                policy.line_of(key, "injected-calls.sites"),
+                Code.POLICY_SYNTAX,
+                f"[injected-calls.sites] {key!r} is not `path.py#function#receiver.method`",
+                (
+                    "name the file, the function and the call whose receiver is a parameter of that "
+                    "function; a site that names no call the scanner can find is a stale approval",
+                ),
+            )
+        )
+    return found
 
 
 def _unlisted(manifest: Manifest, name: str, table: str, detail: str) -> Diagnostic:

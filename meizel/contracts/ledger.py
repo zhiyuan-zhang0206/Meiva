@@ -30,6 +30,7 @@ from meizel.contracts.debt import (
 )
 from meizel.contracts.manifest import Manifest
 from meizel.graph.model import Code, Diagnostic
+from meizel.language.scan import FileScan
 
 __all__ = [
     "Tally",
@@ -359,7 +360,9 @@ def _counted(count: int, one: str, many: str) -> str:
 # strict-to-be directories, then how many entries name no owner and how much they carry. Either
 # clause disappears when it is zero, so a clean tree's line stays short; the unowned entries are what
 # a backfill has to touch.
-def account_line(manifests: dict[str, Manifest]) -> str:
+def account_line(
+    manifests: dict[str, Manifest], scans: Mapping[str, FileScan] | None = None
+) -> str:
     debts = sum(total(m.debt) for m in manifests.values())
     recorded = sum(1 for m in manifests.values() if m.debt)
     entries = occurrences = 0
@@ -403,7 +406,19 @@ def account_line(manifests: dict[str, Manifest]) -> str:
         f"({_counted(unread_occurrences, 'occurrence', 'occurrences')}) "
         f"{'carries' if unread == 1 else 'carry'} an unreviewed exit condition"
     )
-    return carried + ownerless + unstated_line + unread_line
+    return carried + ownerless + unstated_line + unread_line + _declared_clause(scans)
+
+
+# meiva:note
+# The sites a run declared injected callables, counted apart from the reads they do not excuse: the
+# number is what tells a reader that a quiet `impure-call` count is not a narrower rule.
+def _declared_clause(scans: Mapping[str, FileScan] | None) -> str:
+    if not scans:
+        return ""
+    injected = sum(len(scan.injected) for scan in scans.values())
+    if not injected:
+        return ""
+    return f"; {_counted(injected, 'site', 'sites')} declared an injected callable, not a read"
 
 
 _DEBT_TABLE = re.compile(r"^\[\s*debt\.([^\]\s]+)\s*\]\s*(?:#.*)?$")
