@@ -11,6 +11,8 @@ import io
 # The SDK itself is introspected (`meiva.sdk_surface.help.render(meiva)`), not called.
 import meiva
 
+from .sdk_scope import fence_sdk_stub
+
 
 def capture_meiva_overview() -> str:
     """Emit the `# meiva` overview — the public SDK surface as a name + docstring index.
@@ -48,7 +50,7 @@ def capture_meiva_overview() -> str:
         # knows the agent's model. Keeps the overview byte-stable across models
         # and processes.
         render_help(meiva, profile=ModelHelpProfile())
-    return buf.getvalue()
+    return fence_sdk_stub(buf.getvalue()) + "\n"
 
 
 # At module top-level execution time, meiva plugins are not yet loaded (order: import

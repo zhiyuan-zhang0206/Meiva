@@ -28,6 +28,7 @@ from .sdk_scope import (
     SkippedExpand,
     disabled_by_sdk_config,
     expand_plan,
+    fence_sdk_stub,
 )
 from .skill_selection import SkillView, resolve_prompt_skills
 
@@ -315,7 +316,7 @@ def render_expanded_reference(
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
             render_help(target, compact_classes=True, profile=profile)
-        pieces.append(buf.getvalue().rstrip())
+        pieces.append(fence_sdk_stub(buf.getvalue()))
     if not pieces:
         return ""
     body = "\n\n".join(pieces)

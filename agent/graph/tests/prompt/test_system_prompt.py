@@ -295,3 +295,18 @@ def test_section_keeps_attach_for_media_capable_model(model_catalog: ModelCatalo
 
     assert "## meiva.self" in text
     assert "def attach(" in text
+
+
+def test_sdk_overview_and_expanded_stubs_are_fenced_python_code_blocks(
+    model_catalog: ModelCatalog,
+) -> None:
+    from agent.graph.prompt.system_prompt import get_meiva_overview
+
+    overview = get_meiva_overview()
+    assert overview.startswith("# meiva\n\n```python\n")
+    assert overview.endswith("\n```\n")
+
+    expanded = sdk_expand_section(SectionInputs(_slices(["cwd", "self"]), model_catalog, _live()))
+    assert "## meiva.cwd\n\n```python\n" in expanded
+    assert "## meiva.self\n\n```python\n" in expanded
+    assert expanded.endswith("\n```")

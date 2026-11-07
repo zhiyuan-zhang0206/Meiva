@@ -167,6 +167,7 @@ class CwdNamespace(SimpleNamespace):
         super().__init__(
             get=_cwd_get,
             set=_cwd_set,
+            _qualname="meiva.cwd",
             __all_for_meiva__=["get", "set"],
             __doc__="Your persistent logical working directory; starts at your workspace.",
         )

@@ -1,6 +1,7 @@
 exports = ["capabilities.py", "compaction.py", "context_notes.py", "conversation.py", "live.py", "note_text.py", "sdk_scope.py", "skill_selection.py", "system_prompt.py"]
 
 [uses]
+"_base_prompt.py" = ["sdk_scope.py"]
 "capabilities.py" = ["sdk_scope.py", "skill_selection.py"]
 "_codeact.py" = ["live.py"]
 "context_notes.py" = ["live.py", "note_text.py", "sdk_scope.py", "skill_selection.py"]
