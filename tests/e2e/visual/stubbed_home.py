@@ -136,13 +136,13 @@ API_STUBS: dict[str, object] = {
     "/api/agents/roster": {"agents": [_AGENT], "ancestors": []},
     "/api/agents/1": {
         **_AGENT,
-        "notices_awaiting_response": _AWAITING_NOTICES,
+        "notices_awaiting_response": [],
         "fork_source_checkpoint_id": None,
         "last_probe_at": None,
     },
     "/api/notices": {
         "open": [_FYI_NOTICE],
-        "awaiting": _AWAITING_NOTICES,
+        "awaiting": [],
         "resolved_page": [_RESOLVED_NOTICE],
         "next_cursor": None,
     },
