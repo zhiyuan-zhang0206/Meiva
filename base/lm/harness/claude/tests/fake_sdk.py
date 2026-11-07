@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from types import SimpleNamespace
 from typing import Any
@@ -178,6 +179,8 @@ class FakeClaudeSDKClient:
         self.on_interrupt: Any = None
         self.interrupt_ack_gate: asyncio.Event | None = None
         self.interrupt_acknowledged = asyncio.Event()
+        self.on_query: Callable[[str], None] | None = None
+        self.query_error: Exception | None = None
         self._queue: asyncio.Queue[Any] = asyncio.Queue()
         self._turn: asyncio.Task[None] | None = None
         self._blocker = asyncio.Event()
@@ -206,9 +209,18 @@ class FakeClaudeSDKClient:
             self._sdk.probe.reap(self._sdk.cli_pid)
         self._queue.put_nowait(_END)
 
+    def unblock(self) -> None:
+        self._blocker.set()
+
     async def query(self, prompt: str) -> None:
+        if self.query_error is not None:
+            raise self.query_error
         self.queries.append(prompt)
         self.timeline.append(("query", prompt))
+        if self.on_query is not None:
+            self.on_query(prompt)
+        if self._turn is not None and not self._turn.done():
+            return
         self._blocker = asyncio.Event()
         script = self._sdk.scripts.pop(0) if self._sdk.scripts else []
         self._turn = asyncio.create_task(self._run(script))

@@ -45,6 +45,14 @@ class Harness:
             await asyncio.sleep(0.002)
         raise AssertionError(f"no matching event within {timeout}s; saw {self.events!r}")
 
+    async def turn_started(self, *, timeout: float = 2.0) -> None:
+        deadline = asyncio.get_running_loop().time() + timeout
+        while asyncio.get_running_loop().time() < deadline:
+            if self.session.steering_available:
+                return
+            await asyncio.sleep(0.002)
+        raise AssertionError("turn did not start within timeout")
+
     async def detach_consumer(self) -> None:
         self._drain.cancel()
         await asyncio.gather(self._drain, return_exceptions=True)

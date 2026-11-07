@@ -24,7 +24,7 @@ decides differently from another provider.
 
 | Module | Owns |
 |---|---|
-| `session.py` | the effect shell of `ClaudeSession`: start / resume / close, ordered inbound queue, one event stream, interrupt, totals — it awaits the SDK and holds the state, and every decision it makes comes from the modules below |
+| `session.py` | the effect shell of `ClaudeSession`: start / resume / close, ordered inbound queue, mid-turn foreground steering, one event stream, interrupt, totals — it awaits the SDK and holds the state, and every decision it makes comes from the modules below |
 | `inbound.py` | what one inbound message is (dispatch by class name), which result may claim the running turn, what a step and a turn's text are, the background-task set, and whether a task report goes to the sink or the stream |
 | `options.py` | the keyword values handed to the SDK's option class, including the two that ride only when resolved or supported |
 | `settle.py` | how one result settles a turn: the outcome, the stream event, the new session id and the running totals |
@@ -75,9 +75,13 @@ and the CLI reports its end on its own:
 
 ## Claude-specific invariants
 
-- **One turn at a time.** A message submitted mid-turn waits for the running
-  turn's `ResultMessage`; writing it earlier is folded into the pending tool
-  result, where the model treats it as injected content.
+- **One turn at a time for submission; mid-turn steering via `query()`.**
+  Ordinary inbound messages submitted via `submit()` wait for the running
+  turn's `ResultMessage` boundary before starting. Foreground steering
+  (`ForegroundSteering`) relaxes the RPC-ACK requirement to transport write
+  confirmation: when a turn is active, `steer(text, key=key)` writes directly
+  to the CLI transport via `query()`, which folds the message into the ongoing
+  turn's model context while preserving turn boundaries.
 - **Cancellation is asserted.** `interrupt()` reports whether the tool's child
   processes were reaped, and `settled=None` when the CLI pid is unobservable. A
   result attributed to the foreground confirms cancellation when its
