@@ -597,8 +597,8 @@ describe("line breaks (remark-breaks)", () => {
     expect(link?.textContent).toBe("\u7b2c\u4e09\u884c\u94fe\u63a5");
   });
 
-  describe("workspace file links and path pills", () => {
-    it("preserves file:// URLs and workspace-relative paths without rewriting to about:blank", () => {
+  describe("workspace file links and inline code paths", () => {
+    it("preserves file:// URLs and workspace-relative paths without rewriting to about:blank or adding icons", () => {
       const { container } = renderMarkdown(
         <ChatMarkdown content={"[code](file:///Users/dev/workspace/main.py) and [doc](docs/readme.md#L10)"} />,
       );
@@ -606,19 +606,23 @@ describe("line breaks (remark-breaks)", () => {
       expect(links).toHaveLength(2);
       expect(links[0].getAttribute("href")).toBe("file:///Users/dev/workspace/main.py");
       expect(links[1].getAttribute("href")).toBe("docs/readme.md#L10");
+      expect(container.querySelector("svg")).toBeNull();
     });
 
-    it("renders inline code file paths as interactive pills", () => {
+    it("renders inline code file paths as underlined code without button wrappers or icons", () => {
       const { container } = renderMarkdown(
         <ChatMarkdown content={"Check `src/index.ts#L10-L20` and `to_user.md` for status"} />,
       );
-      const pills = container.querySelectorAll('[data-testid="file-path-pill"]');
-      expect(pills).toHaveLength(2);
-      expect(pills[0].textContent).toContain("src/index.ts#L10-L20");
-      expect(pills[1].textContent).toContain("to_user.md");
+      const codePaths = container.querySelectorAll('[data-testid="file-path-code"]');
+      expect(codePaths).toHaveLength(2);
+      expect(codePaths[0].querySelector("code")).not.toBeNull();
+      expect(codePaths[0].className).toContain("underline");
+      expect(codePaths[0].textContent).toBe("src/index.ts#L10-L20");
+      expect(codePaths[1].textContent).toBe("to_user.md");
+      expect(container.querySelector("button, svg")).toBeNull();
     });
 
-    it("triggers onOpenFile when clicking a file link or file pill", () => {
+    it("triggers onOpenFile when clicking a file link or inline code file path", () => {
       const onOpenFile = vi.fn();
       const { container } = renderMarkdown(
         <ChatMarkdown
@@ -632,10 +636,26 @@ describe("line breaks (remark-breaks)", () => {
       link?.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
       expect(onOpenFile).toHaveBeenCalledWith("src/foo.py", "42");
 
-      const pill = container.querySelector('[data-testid="file-path-pill"]');
-      expect(pill).not.toBeNull();
-      pill?.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+      const codePath = container.querySelector('[data-testid="file-path-code"]');
+      expect(codePath).not.toBeNull();
+      codePath?.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
       expect(onOpenFile).toHaveBeenCalledWith("components/bar.tsx", undefined);
+    });
+
+    it("lets the parent link handle clicks when inline code is nested inside a markdown link", () => {
+      const onOpenFile = vi.fn();
+      const { container } = renderMarkdown(
+        <ChatMarkdown
+          content={"[`foo.py`](file:///Users/dev/workspace/src/foo.py#L42)"}
+          onOpenFile={onOpenFile}
+        />,
+      );
+
+      const codeEl = container.querySelector("a code");
+      expect(codeEl).not.toBeNull();
+      codeEl?.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+      expect(onOpenFile).toHaveBeenCalledTimes(1);
+      expect(onOpenFile).toHaveBeenCalledWith("file:///Users/dev/workspace/src/foo.py", "42");
     });
   });
 });
