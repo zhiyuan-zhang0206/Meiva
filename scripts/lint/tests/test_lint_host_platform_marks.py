@@ -272,7 +272,7 @@ def test_the_vocabulary_is_the_one_platform_accepts() -> None:
     accepted = get_args(get_type_hints(Platform)["system"])
     assert set(accepted) == set(_lint.PLATFORM_NAMES)
     with pytest.raises(ValueError):
-        Platform("macos", "arm64", "/usr/bin/python3")
+        Platform.from_sys_platform("macos", machine="arm64", executable="/usr/bin/python3")
 
 
 def test_a_baseline_entry_allows_exactly_its_count(tmp_path: Path) -> None:

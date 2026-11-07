@@ -317,8 +317,9 @@ def _function_platforms(
         if default is not None and _platform_written(default)
     ]
     for node in ast.walk(definition):
-        bound = node.value if isinstance(node, ast.Assign | ast.AnnAssign) else None
-        if bound is not None and _is_host_platform(bound):
+        if not isinstance(node, ast.Assign | ast.AnnAssign) or node.value is None:
+            continue
+        if _is_host_platform(node.value):
             found.append((node.lineno, node.end_lineno or node.lineno, "host platform bound"))
     return found
 
@@ -346,7 +347,12 @@ def _definition_findings(
                     skip=skip or any(_marked(d) for d in statement.decorator_list),
                 )
                 continue
-            if skip or any(_marked(d) for d in getattr(statement, "decorator_list", ())):
+            decorators = (
+                statement.decorator_list
+                if isinstance(statement, ast.FunctionDef | ast.AsyncFunctionDef)
+                else ()
+            )
+            if skip or any(_marked(d) for d in decorators):
                 continue
             for start, end, what in _written_platforms(statement):
                 if exempt_anywhere and _exempt(lines, span or (start, end)):
