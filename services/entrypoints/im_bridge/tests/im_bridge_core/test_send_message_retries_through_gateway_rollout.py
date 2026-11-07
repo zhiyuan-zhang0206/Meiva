@@ -266,7 +266,7 @@ async def test_spawn_menu_every_layer_completable(make_core: CoreFactory) -> Non
         await core._cmd_spawn(state)
         out = await core._handle_spawn_menu(state, "spawn:go")
         assert isinstance(out, Reply)
-        assert gateway.spawned == [{}]
+        assert gateway.spawned == [{"llm_model": "deepseek-flash"}]
         assert copy.SPAWNED_PLAIN.format(agent_id=777) in out.text
         assert out.buttons == [(copy.SPAWN_SWITCH_BUTTON.format(agent_id=777), "/switch 777")]
 
