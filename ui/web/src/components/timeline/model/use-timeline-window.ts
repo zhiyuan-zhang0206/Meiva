@@ -332,7 +332,7 @@ export function useTimelineWindow({
     const childSizes = rows.map((key) => heights.get(key) ?? 80);
     if (view.height <= 0) {
       const childPin = groupIndex === pinnedIndex && pin
-        ? rows.findIndex((key) => key.endsWith(`:${pin.id}`)) : -1;
+        ? rows.findIndex((key) => key.endsWith(`:${pin.rank}:${pin.id}`)) : -1;
       if (childPin >= 0) {
         const start = Math.max(0, childPin - BOOTSTRAP_PIN_LEAD_ROWS);
         const end = Math.min(rows.length, start + BOOTSTRAP_WINDOW_ROWS);
@@ -346,7 +346,7 @@ export function useTimelineWindow({
     const childOrigin = groupTop + 60;
     let top = view.top;
     const childPin = groupIndex === pinnedIndex && pin
-      ? rows.findIndex((key) => key.endsWith(`:${pin.id}`)) : -1;
+      ? rows.findIndex((key) => key.endsWith(`:${pin.rank}:${pin.id}`)) : -1;
     if (childPin >= 0) {
       const pinTop = childOrigin + span(childSizes, 0, childPin, TIMELINE_TURN_ROW_GAP_PX) + (childPin ? TIMELINE_TURN_ROW_GAP_PX : 0);
       const pinBottom = pinTop + childSizes[childPin];

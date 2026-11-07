@@ -1,4 +1,4 @@
-import { act, fireEvent, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, renderHook, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { BackendTimelineItem } from "@/lib/contracts/types";
@@ -9,7 +9,7 @@ vi.mock("@/components/content/markdown", () => ({ ChatMarkdown: ChatMarkdownMock
 vi.mock("@/components/ui/scroll-area", () => ({ ScrollArea: ScrollAreaMock }));
 import { TimelineView } from "..";
 import { ItemView } from "../item";
-import { resolveSavedTimelineAnchor } from "../model/use-timeline-window";
+import { resolveSavedTimelineAnchor, useTimelineWindow } from "../model/use-timeline-window";
 
 afterEach(cleanupTimelineTest);
 describe("deep history DOM window", () => {
@@ -146,6 +146,20 @@ describe("deep history DOM window", () => {
     expect(viewport.querySelectorAll("[data-virtual-row]").length).toBeGreaterThan(0);
     expect(viewport.querySelector('[data-timeline-spacer="turn-before"]')).not.toBeNull();
     expect(screen.getByText("Done")).toBeTruthy();
+  });
+
+  it("restores the intended historical child when compact ranks share an item ID", () => {
+    const rows = Array.from({ length: 60 }, (_, i) => i === 0 ? "turn:buffer:0:shared"
+      : i === 50 ? "turn:canonical:1:shared" : `turn:canonical:1:${i}.0`);
+    const { result } = renderHook(() => useTimelineWindow({
+      groups: [{ key: "turn", rank: 0, itemIds: ["shared"], memberRankKeys: ["0:shared", "1:shared"], estimatedHeight: 6000, expandedRows: rows }],
+      enabled: true, turnRows: 20, measureRows: 10, identity: "ranked-history",
+      viewportRef: { current: null }, contentRef: { current: null },
+      isFollowing: () => false, pendingAnchor: { id: "shared", rank: 1 }, restoreTop: null,
+    }));
+    const range = result.current.rowRange(0);
+    expect(range.start).toBe(38);
+    expect(range.end).toBe(60);
   });
 
   it("starts measuring at the configured row count before activation", () => {
