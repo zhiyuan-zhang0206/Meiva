@@ -179,12 +179,33 @@ def _host_platform_argument(node: ast.AST) -> str | None:
     if not isinstance(node, ast.Call):
         return None
     for keyword in node.keywords:
-        if keyword.arg != "system":
-            continue
-        name = _dotted(keyword.value) or ""
-        if name.endswith((".platform", ".platform.system")):
+        if keyword.arg == "system" and _is_host_platform(keyword.value):
             return "system=<host>.platform"
     return None
+
+
+# meiva:note
+# The attribute names of an expression, outermost first, whatever the chain is rooted in: `_dotted`
+# stops at a name, and the host a test reads the platform from is as often built inline
+# (`fake_host(uid=os.geteuid()).platform.system`, which is how `cli/commands/tests/test_single_box.py`
+# wrote a Linux receipt nobody could read back on macOS). Reading the tail rather than the root is
+# what makes both spellings one finding.
+def _attribute_names(node: ast.expr) -> list[str]:
+    names: list[str] = []
+    while isinstance(node, ast.Attribute):
+        names.append(node.attr)
+        node = node.value
+    return names
+
+
+def _is_host_platform(node: ast.expr) -> bool:
+    # meiva:note
+    # `sys.platform` and `os.name` are this process's own platform, which read 1 already judges:
+    # counting them here would report one fact twice and make the remedy ambiguous.
+    if _dotted(node) in ("sys.platform", _OS_NAME):
+        return False
+    names = _attribute_names(node)
+    return names[:2] == ["system", "platform"] or names[:1] == ["platform"]
 
 
 def _message(kind: str, what: str) -> str:
@@ -268,16 +289,13 @@ def _findings_in_tree(tree: ast.Module, src: str) -> list[tuple[int, str, str]]:
 
 
 # meiva:note
-# The shapes one statement can write a platform down in, without judging whether it is allowed: a
-# function is asked for its defaults and an assignment for its value. Kept apart from the walk so
-# the walk stays one loop, and so a statement added to Python lands here, where it can be answered.
+# The shapes one statement can write a platform down in, without judging whether it is allowed. A
+# function is asked for its defaults and for the names its body binds, an assignment for its value.
+# Kept apart from the walk so the walk stays one loop, and so a statement added to Python lands
+# here, where it can be answered.
 def _written_platforms(statement: ast.stmt) -> list[tuple[int, int, str]]:
     if isinstance(statement, ast.FunctionDef | ast.AsyncFunctionDef):
-        return [
-            (default.lineno, default.end_lineno or default.lineno, "platform default")
-            for default in (*statement.args.defaults, *statement.args.kw_defaults)
-            if default is not None and _platform_written(default)
-        ]
+        return _function_platforms(statement)
     value = statement.value if isinstance(statement, ast.Assign | ast.AnnAssign) else None
     if value is None or not _platform_written(value):
         return []
@@ -285,10 +303,32 @@ def _written_platforms(statement: ast.stmt) -> list[tuple[int, int, str]]:
 
 
 # meiva:note
+# A default every caller that omits the argument inherits, and a name the body binds from a host's
+# platform before handing it on — `system = fake_host(uid=os.geteuid()).platform.system`, which is
+# how one fixture wrote a Linux receipt that macOS refused at setup
+# (`cli/commands/tests/test_single_box.py`). `sys.platform` and `os.name` are the process's own
+# platform, so they are read 1's finding rather than a host's.
+def _function_platforms(
+    definition: ast.FunctionDef | ast.AsyncFunctionDef,
+) -> list[tuple[int, int, str]]:
+    found = [
+        (default.lineno, default.end_lineno or default.lineno, "platform default")
+        for default in (*definition.args.defaults, *definition.args.kw_defaults)
+        if default is not None and _platform_written(default)
+    ]
+    for node in ast.walk(definition):
+        bound = node.value if isinstance(node, ast.Assign | ast.AnnAssign) else None
+        if bound is not None and _is_host_platform(bound):
+            found.append((node.lineno, node.end_lineno or node.lineno, "host platform bound"))
+    return found
+
+
+# meiva:note
 # Rule 3 judges the definitions, not the uses: `fake_host(platform=DARWIN_ARM64)` is a test
-# choosing the host it wants and stays silent, while a constant or a default carrying the platform
-# hands every caller the same answer and is judged here. The walk mirrors `_findings_in_tree` so a
-# `# host-ok:` inside a function, or a module/class `requires_host` mark, means the same thing.
+# choosing the host it wants and stays silent, while a constant, a default or a bound name carrying
+# the platform hands every caller the same answer and is judged here. The walk mirrors
+# `_findings_in_tree` so a `# host-ok:` inside a function, or a module/class `requires_host` mark,
+# means the same thing.
 def _definition_findings(
     tree: ast.Module, lines: list[str], *, exempt_anywhere: bool, marked: bool
 ) -> list[tuple[int, str, str]]:

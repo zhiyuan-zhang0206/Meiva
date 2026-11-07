@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import contextlib
 import getpass
-import os
 import shutil
 import subprocess
 from collections.abc import Callable, Iterator
@@ -46,7 +45,7 @@ from base.host.db_authority import delivery, ledger, model
 from base.host.db_authority.api import API_TOKEN_ENV, ensure_telemetry_token
 from base.host.env.registry import process_environment
 from base.host.net.url_secret import url_with_userinfo
-from base.host.system.tests.fake_commands import fake_host, real_commands_host
+from base.host.system.tests.fake_commands import real_commands_host
 from base.native_process.child_env import daemon_process_env
 from base.native_process.os_platform import Platform
 from base.paths import meiva_home
@@ -267,7 +266,7 @@ def _born_readonly_cluster(
         home, distinct_free_ports, data_plane_config_from_boot(config), template_seed=seed
     )
     machine = ConfiguredMachineIdentity(config)
-    system = fake_host(uid=os.geteuid()).platform.system
+    system = NATIVE_TEST_SYSTEM
     db = operator_database_factory(
         local_host=machine.host, home=home, open_database=open_operator_database
     )

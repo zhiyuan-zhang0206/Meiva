@@ -207,6 +207,23 @@ def test_a_host_platform_handed_to_a_receipt_is_a_finding() -> None:
     assert len(found) == 1 and "`system=<host>.platform`" in found[0]
 
 
+def test_a_host_platform_bound_to_a_name_is_a_finding() -> None:
+    # meiva:note
+    # The shape one fixture used to write a Linux receipt macOS refused at setup: the host is built
+    # inline, so the attribute names are read from the tail rather than from a name.
+    src = "def test_x():\n    system = fake_host(uid=os.geteuid()).platform.system\n"
+    found = _findings(src)
+    assert len(found) == 1 and "`host platform bound`" in found[0]
+
+
+def test_the_process_platform_bound_to_a_name_is_rule_ones_finding_only() -> None:
+    # meiva:note
+    # `sys.platform` is this process's own platform, so it is one finding (`sys.platform`) - the
+    # rule-1 remedy - and not a second one about a host double.
+    found = _findings("def test_x():\n    system = sys.platform\n")
+    assert len(found) == 1 and "`sys.platform`" in found[0]
+
+
 def test_a_platform_literal_passed_to_a_pure_function_is_not_a_finding() -> None:
     # meiva:note
     # `has_display_vars(system='linux')` states the input the test decides on - data in, decisions

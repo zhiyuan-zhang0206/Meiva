@@ -22,9 +22,9 @@ it into the receipt, and `base/cluster/postgres.py::read_receipt` refuses a rece
 is not `Platform.current().system` — so a written-down value is unreadable on every host it does
 not name.
 
-## The three positions
+## The four positions
 
-All three are a *definition*, never a use:
+All four are a *definition*, never a use:
 
 - **A constant.** A module-level or class-level binding whose value is a platform name (`"linux"`,
   `"darwin"`) or a `Platform(...)` construction — `#8660`'s `NATIVE_TEST_SYSTEM = "linux"`, and the
@@ -32,6 +32,11 @@ All three are a *definition*, never a use:
 - **A default.** A parameter default that is one of those, because it is the value every caller
   that omits the argument inherits — `#8659`'s `platform: Platform = LINUX_X86` default on
   `fake_host`.
+- **A bound name.** A name inside a test's body bound from a host's platform
+  (`system = fake_host(uid=os.geteuid()).platform.system`), which is how one fixture wrote a Linux
+  receipt that macOS then refused at setup. The attribute names are read from the tail, so the
+  inline host and the fixture parameter are one finding; `sys.platform` and `os.name` are excluded
+  — they are the process's own platform, which rule 1 already judges.
 - **A host object's platform.** A `system=` argument whose value is read off a host (`.platform`,
   `.platform.system`). A host a test builds is a double, so its platform is the canned one:
   `#8659`'s failing line passed `command_runtime.host.platform.system` to a bring-up that wrote it
@@ -55,7 +60,9 @@ test instead of slipping past the lint.
 - A default spelled as a **name** (`platform: Platform = LINUX_X86`) is not reported at the default;
   the constant it names is the site that is judged, and that is where the remedy goes. Resolving
   names across modules would be a rule of its own.
-- A platform assigned to a variable and carried into a receipt call is **invisible** to this rule:
-  it judges the three positions above, not data flow. That is a known hole, not coverage.
+- A platform that travels further than one binding is **invisible**: `host.platform.system` bound
+  to `system` is judged, and `other = system` handed on from there is not. This rule judges the
+  four positions above, not data flow — a known hole, not coverage, and the reason the daily macOS
+  lane exists beside it.
 
 Parent: [[scripts/lint/docs/host-platform-marks/host-platform-marks.meiva.okf.md|host-platform marks]].
