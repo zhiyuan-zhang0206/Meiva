@@ -47,7 +47,6 @@ from zoneinfo import ZoneInfo
 
 from psycopg_pool import ConnectionPool
 
-from base import telemetry
 from base.agents.impersonation.maintenance import (
     reap_impersonations,
     reclaim_abandoned_event_logs,
@@ -61,7 +60,6 @@ from base.db.rows import query_all
 from base.db.transaction import write_transaction
 from base.events.live.announce import publish_agent_updated_sync
 from base.events.live.bus import EventBus
-from base.events.live.projection import PageClosed
 from ops import lifecycle
 from services.upkeep.ttl_reaper import cadence, owner_text
 from services.upkeep.ttl_reaper.config import TtlReaperConfig
@@ -90,14 +88,6 @@ class _NoticeRow:
     created_at: datetime
     expire_at: datetime
     replied: bool
-
-
-@dataclass(frozen=True)
-class _PageRow:
-    id: int
-    agent_id: int
-    name: str
-    serve_dir: str | None
 
 
 def reap_expired_notices_blocking(
@@ -165,63 +155,6 @@ def reap_expired_notices_blocking(
     wake_owners(db, bus, queued)
     for aid in updated_agents:
         publish_agent_updated_sync(bus, aid)
-    return reaped
-
-
-def reap_expired_pages_blocking(
-    pool: ConnectionPool, db: Database, bus: EventBus
-) -> list[tuple[int, str, int]]:
-    """Terminalize page rows past their deadline; return (agent_id, name, id).
-
-    Runs on one connection (via to_thread — the gateway event loop never
-    blocks on psycopg). Each row is a CAS so an explicit close() or a parallel
-    reaper pass wins the race instead of double-terminalizing.
-    """
-    with write_transaction(pool) as conn:
-        rows = query_all(
-            conn,
-            _PageRow,
-            "SELECT id, agent_id, name, serve_dir FROM agent_pages "
-            "WHERE expires_at IS NOT NULL AND expires_at <= now() "
-            "AND closed_at IS NULL AND expired_at IS NULL "
-            "ORDER BY id LIMIT %s",
-            (PASS_BATCH,),
-        )
-        reaped: list[tuple[int, str, int]] = []
-        queued: list[OwnerMessage] = []
-        for page in rows:
-            page_id, agent_id, name = page.id, page.agent_id, page.name
-            with conn.cursor() as cur:
-                cur.execute(
-                    "UPDATE agent_pages SET expired_at = now() "
-                    "WHERE id = %s AND closed_at IS NULL AND expired_at IS NULL",
-                    (page_id,),
-                )
-                if cur.rowcount == 0:
-                    continue
-            reaped.append((agent_id, name, page_id))
-            message = notify_owner(
-                conn,
-                agent_id,
-                owner_text.page_expired_message(
-                    name, agent_id, shown_by_agent=page.serve_dir is None
-                ),
-            )
-            if message is not None:
-                queued.append(message)
-            telemetry.emit(
-                "log",
-                "page_ttl_expired",
-                level="info",
-                agent_id=agent_id,
-                attributes={"agent_id": agent_id, "name": name, "page_id": page_id},
-            )
-    wake_owners(db, bus, queued)
-    # PageClosed is a live-UI event: publish outside the DB transaction so a
-    # Redis hiccup cannot roll back the terminal UPDATE.
-    for agent_id, name, _page_id in reaped:
-        event = PageClosed(agent_id=agent_id, name=name)
-        bus.publish_best_effort_sync(event.model_dump_json(), context="ttl_reaper_page")
     return reaped
 
 
@@ -309,8 +242,6 @@ async def sweep_round(
         repeat_interval_seconds=config.impersonation_event_report_interval_s,
     )
     progress.beat()
-    pages = await asyncio.to_thread(reap_expired_pages_blocking, pool, db, bus)
-    progress.beat()
     sessions = await asyncio.to_thread(reap_expired_web_sessions_blocking, pool)
     progress.beat()
     notices = await asyncio.to_thread(
@@ -327,13 +258,12 @@ async def sweep_round(
         await lifecycle.publish_notice_resolved(bus, agent_id, nid, facts=details)
     progress.beat()
     pruned_fire_log = await _slow_phases(pool, config)
-    if pages or sessions or impersonations or notices or reminded or pruned_fire_log or abandoned:
+    if sessions or impersonations or notices or reminded or pruned_fire_log or abandoned:
         _log.info(
-            "[ttl-reaper] reclaimed %d page(s), %d web session(s), %d impersonation(s), "
+            "[ttl-reaper] reclaimed %d web session(s), %d impersonation(s), "
             "%d notice(s); reminded %d impersonation lease(s); "
             "sealed %d abandoned impersonation event source(s); "
             "pruned %d schedule fire-log row(s)",
-            len(pages),
             sessions,
             impersonations,
             len(notices),

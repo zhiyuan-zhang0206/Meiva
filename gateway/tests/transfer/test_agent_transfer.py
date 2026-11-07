@@ -148,15 +148,11 @@ def _assert_transferred_meta_and_cleanup(db_conn: psycopg.Connection, agent_id: 
     ).fetchone()
     assert meta_row == ("runner-b", "idling", None, None)
 
-    open_pages = db_conn.execute(
-        "SELECT count(*) FROM agent_pages WHERE agent_id = %s AND closed_at IS NULL",
-        (agent_id,),
-    ).fetchone()
     shell_ttls = db_conn.execute(
         "SELECT count(*) FROM agent_shell_ttls WHERE agent_id = %s",
         (agent_id,),
     ).fetchone()
-    assert (open_pages, shell_ttls) == ((0,), (0,))
+    assert shell_ttls == (0,)
 
 
 def _assert_transferred_db_records(
@@ -185,7 +181,7 @@ def _assert_transferred_db_records(
         audit[2]["from_machine"],
         audit[2]["to_machine"],
         audit[2]["closed_pages"],
-    ) == ("runner-a", "runner-b", ["board"])
+    ) == ("runner-a", "runner-b", [])
 
 
 def test_transfer_idling_agent_moves_workspace_and_resurrects_on_target(
@@ -202,10 +198,6 @@ def test_transfer_idling_agent_moves_workspace_and_resurrects_on_target(
     tool.chmod(0o700)
     (ws_a / "collect_link").symlink_to("reports/collect.sh")
 
-    db_conn.execute(
-        "INSERT INTO agent_pages (agent_id, name, port, title) VALUES (%s, 'board', 19400, 'Board')",
-        (agent_id,),
-    )
     db_conn.execute(
         "INSERT INTO agent_shell_ttls (agent_id, session_id, expires_at) "
         "VALUES (%s, 0, now() + interval '1 hour')",
@@ -230,7 +222,7 @@ def test_transfer_idling_agent_moves_workspace_and_resurrects_on_target(
         body["agent_status"],
         body["files_transferred"],
         body["closed_pages"],
-    ) == (agent_id, "runner-a", "runner-b", "idling", 2, ["board"])
+    ) == (agent_id, "runner-a", "runner-b", "idling", 2, [])
 
     ws_b = paths.workspace_path(two_runners.home_b, agent_id)
     assert (ws_b / "to_user.md").read_text(encoding="utf-8") == "# Output Owner\nAll green.\n"

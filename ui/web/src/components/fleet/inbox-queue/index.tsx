@@ -6,8 +6,7 @@ import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { useBrowser } from "@/lib/browser/browser-provider";
 import { PRIORITY_RANK } from "@/lib/notifications/notices";
 import { groupByTaskSubtree } from "@/lib/notifications/task-notify";
-import type { AgentRow, PublicAgentStatus, NoticeItem, PageRow } from "@/lib/contracts/types";
-import { useAllPages } from "@/lib/agents/use-all-pages";
+import type { AgentRow, PublicAgentStatus, NoticeItem } from "@/lib/contracts/types";
 import { useNotices } from "@/lib/notifications/use-notices";
 import { useTasks } from "@/lib/notifications/use-tasks";
 import { cn } from "@/lib/format/utils";
@@ -91,16 +90,6 @@ export const InboxQueue = memo(function InboxQueue({
     return m;
   }, [agents]);
 
-  // Each agent's single live page (meiva.ui.show), indexed by agent_id — the inbox
-  // surfaces a direct entry to it. One fetch of GET /api/pages kept live by SSE
-  // (useAllPages), so a many-agent queue never fans out per-row requests.
-  const allPages = useAllPages();
-  const activePageByAgent = useMemo(() => {
-    const m = new Map<number, PageRow>();
-    for (const p of allPages) if (!m.has(p.agent_id)) m.set(p.agent_id, p);
-    return m;
-  }, [allPages]);
-
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const [resolvedOpen, setResolvedOpen] = useState(false);
   const [anchorHighlightKey, setAnchorHighlightKey] = useState<string | null>(null);
@@ -109,15 +98,19 @@ export const InboxQueue = memo(function InboxQueue({
   const anchorFrameRef = useRef<number | null>(null);
   const anchorTimerRef = useRef<number | null>(null);
 
+  const openItemsRef = useRef(openItems);
+  openItemsRef.current = openItems;
+  const selectedKeyRef = useRef(selectedKey);
+  selectedKeyRef.current = selectedKey;
+
   // When an external selection arrives (tree/graph click), select the first open
   // notice from that agent so the list syncs bidirectionally.
   useEffect(() => {
     if (selectedAgentId == null) return;
-    const cur = openItems.find((it) => openKey(it.notice.id) === selectedKey);
+    const cur = openItemsRef.current.find((it) => openKey(it.notice.id) === selectedKeyRef.current);
     if (cur?.agentId === selectedAgentId) return;
-    const first = openItems.find((it) => it.agentId === selectedAgentId);
+    const first = openItemsRef.current.find((it) => it.agentId === selectedAgentId);
     if (first) setSelectedKey(openKey(first.notice.id));
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- openItems changes on every refresh; only react to selectedAgentId
   }, [selectedAgentId]);
 
   // A route anchor is attempted once after the initial notice load. It only
@@ -196,18 +189,21 @@ export const InboxQueue = memo(function InboxQueue({
       ? resolvedKey(selectedResolved.id)
       : null;
 
+  const effectiveAgentId = selectedOpen
+    ? selectedOpen.agentId
+    : selectedResolved
+      ? selectedResolved.agent_id
+      : null;
+
   const total = openItems.length;
 
   // Sync effective selection to the parent so the graph auto-focuses the right
   // node on tab switch / initial load.
   useEffect(() => {
-    if (selectedOpen) {
-      onSelectAgent?.(selectedOpen.agentId);
-    } else if (selectedResolved) {
-      onSelectAgent?.(selectedResolved.agent_id);
+    if (effectiveAgentId != null) {
+      onSelectAgent?.(effectiveAgentId);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- effectiveKey derives from selectedOpen/selectedResolved
-  }, [effectiveKey, onSelectAgent]);
+  }, [effectiveAgentId, onSelectAgent]);
 
   const listProps = {
     units,
@@ -215,7 +211,6 @@ export const InboxQueue = memo(function InboxQueue({
     resolvedOpen,
     setResolvedOpen,
     agentStatus,
-    activePageByAgent,
     onSelect: setSelectedKey,
     onSelectAgent,
     hasNextPage,
@@ -258,7 +253,6 @@ export const InboxQueue = memo(function InboxQueue({
               item={openSel}
               openItems={openItems}
               agentStatus={agentStatus.get(openSel.agentId) ?? null}
-              agentPage={activePageByAgent.get(openSel.agentId)}
               onAdvance={setSelectedKey}
               onSelectAgent={onSelectAgent}
             />
@@ -300,7 +294,6 @@ export const InboxQueue = memo(function InboxQueue({
             item={selectedOpen}
             openItems={openItems}
             agentStatus={agentStatus.get(selectedOpen.agentId) ?? null}
-            agentPage={activePageByAgent.get(selectedOpen.agentId)}
             onAdvance={setSelectedKey}
             onSelectAgent={onSelectAgent}
           />

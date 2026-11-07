@@ -12,7 +12,7 @@ tags:
 Policy: `base/api_contracts/contracts.py`.
 `natural` means repeatable effects; `keyed` requires a receipt;
 `one-shot` forbids ambiguous automatic retries.
-Versioned routes: [[guarded-creation.meiva.okf.md]], [[guarded-pages.meiva.okf.md]] and
+Versioned routes: [[guarded-creation.meiva.okf.md]],
 [[guarded-notices.meiva.okf.md]] and [[guarded-uploads.meiva.okf.md]].
 
 Schedule receipts are optional; their routes remain `NON_IDEMPOTENT`.

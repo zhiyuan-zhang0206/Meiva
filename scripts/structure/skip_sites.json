@@ -57,9 +57,6 @@
     "skipif(sys.version_info < (3, 12))",
     "skipif(sys.version_info < (3, 12))"
   ],
-  "meiva_builtins/skills/tests/test_page_reply.py": [
-    "skip('Node.js is required to execute the shipped browser resource')"
-  ],
   "scripts/provision/tests/test_apt_lock.py": [
     "skipif(not Path('/proc').is_dir())"
   ],

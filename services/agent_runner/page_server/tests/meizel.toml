@@ -1,6 +1,3 @@
 [uses]
 "conftest.py" = ["page_pty.py"]
-"page_server_daemon" = ["page_pty.py"]
-"test_dead_pages.py" = ["page_pty.py", "slices.py"]
-"test_page_server_daemon.py" = ["page_pty.py"]
 "test_page_server_occupants.py" = ["page_pty.py"]

@@ -34,7 +34,6 @@ full Gmail client.
 
 | Skill | Purpose | Detail |
 |-------|---------|--------|
-| meiva-guide.pages | Compose page publishing and user input with reusable frontend resources | [[meiva_builtins/skills/platform/meiva-guide/pages/docs/pages.meiva.okf.md]] |
 | gmail | Full Gmail client (read/search/send/reply/forward/draft + newsletter, pure stdlib IMAP/SMTP) | [[meiva_builtins/skills/integrations/gmail/docs/gmail.meiva.okf.md]] |
 | meiva-immersive-mode | Run a tight-loop live session across a shared perceptual surface while heavy work runs in the background | [[meiva_builtins/skills/coordination/meiva-immersive-mode/docs/meiva-immersive-mode.meiva.okf.md]] |
 

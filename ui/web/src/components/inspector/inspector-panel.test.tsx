@@ -6,7 +6,6 @@ import type {
   AgentInspectLive,
   AgentInspectStatistics,
   InspectWidget,
-  PageRow,
 } from "@/lib/contracts/types";
 import { AGENTS_QUERY_KEY } from "@/lib/fold/agents";
 import {
@@ -23,8 +22,6 @@ import {
   renderWithGlobalRetries,
   rosterFixture,
   setupInspectorTest,
-  inspectorPageReads,
-  setInspectorPages,
 } from "./inspector-test-mock";
 
 
@@ -191,36 +188,6 @@ describe("InspectorPanel", () => {
     render(<InspectorPanel agentId={1} />);
     await waitFor(() => expect(screen.getByText("Persistent shells")).toBeTruthy());
     expect(screen.queryByText("Alerts")).toBeNull();
-  });
-
-  it("renders the open page title and URL without a redundant Open badge", async () => {
-    const page = {
-      id: 7,
-      agent_id: 1,
-      name: "task-dashboard",
-      port: 4173,
-      title: "Task dashboard",
-      serve_dir: null,
-      url: "http://gateway.test/pages/7-task-dashboard/",
-      created_at: "2026-08-24T12:00:00Z",
-      closed_at: null,
-    } satisfies PageRow;
-    setInspectorPages([page]);
-
-    render(<InspectorPanel agentId={1} />);
-
-    await waitFor(() => expect(screen.getByText(page.title)).toBeTruthy());
-    const pageSection = screen.getByText("Page").closest("section");
-    expect(pageSection).not.toBeNull();
-    expect(within(pageSection!).getByText(page.url)).toBeTruthy();
-    expect(within(pageSection!).queryByText("Open")).toBeNull();
-  });
-
-  it("hides the Page section when no page is open", async () => {
-    render(<InspectorPanel agentId={1} />);
-
-    await waitFor(() => expect(inspectorPageReads()).toHaveLength(1));
-    expect(screen.queryByText("Page")).toBeNull();
   });
 
   it("renders in-place metric breathing bars for persistent sections without speculative sparse sections while pending", () => {

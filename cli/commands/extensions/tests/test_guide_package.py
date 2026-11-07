@@ -65,7 +65,6 @@ def test_converged_namespaces_load_real_task_instructions(
         (guide.plugins.develop, "plugin.py"),
         (guide.schedules, "resumable"),
         (guide.external_agents, "Mode B"),
-        (guide.pages, "user input"),
         (meiva.skills.meiva_workflow.capability_timescale, "Gather evidence"),
     )
     for skill, instruction in expected:
@@ -161,9 +160,6 @@ def test_external_guide_preserves_legacy_copies_and_publishes_nested_resources(
         "packages/install/SKILL.md",
         "schedules/SKILL.md",
         "external-agents/scripts/spawn_codex.py",
-        "pages/widgets/meiva_reply/reply.js",
-        "pages/widgets/markdown/md.html",
-        "pages/widgets/markdown/vendor/katex.min.js",
         "external-agents/references/collaboration_protocol.md",
         "external-agents/scripts/spawn_antigravity.py",
     ):

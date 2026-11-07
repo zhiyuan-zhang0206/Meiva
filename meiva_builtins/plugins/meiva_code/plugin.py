@@ -4,8 +4,7 @@ Two pieces, cwd and context-file injection:
 - cwd: `meiva_code__cwd` state field (default: the agent's workspace dir; $HOME
   when no process identity is bound); the agent reads/writes via
   `meiva.cwd.get` / `set`; the wraps use it to resolve relative paths in
-  `meiva.files.*` / `meiva.shell.run` / each `meiva.understand` target's `paths` /
-  `meiva.ui.serve`'s `dir`.
+  `meiva.files.*` / `meiva.shell.run` / each `meiva.understand` target's `paths`.
 - context-file auto-injection: wraps `meiva.files.read`, walks up the resolved
   path to git root or `$HOME` (whichever is farther), and surfaces any AGENTS.md
   / CLAUDE.md files along the way as a system note (tag=CONTEXT) so the agent
@@ -423,26 +422,6 @@ def _with_resolved_paths(target: object) -> object:
     return {**target, "paths": [str(_resolve_for_cwd(p)) for p in path_values]}
 
 
-# ── wrap meiva.ui.serve ────────────────────────────────────────────────────
-# serve(dir) registers the served directory with the platform; a relative
-# dir must resolve against the plugin-tracked cwd like every other SDK path
-# (files / shell / understand), not the agent process cwd — otherwise the
-# page-server daemon reports serve_dir missing and the page degrades
-# (Task #1523).
-def wrapped_serve[R](
-    inner: Callable[..., R],
-    dir: str,
-    name: str,
-    port: int | None = None,
-    title: str | None = None,
-    *,
-    ttl: float | None = None,
-) -> R:
-    dir = coerce_str(dir, "dir", allow_types=(Path,))
-    p = _resolve_for_cwd(dir)
-    return inner(str(p), name, port=port, title=title, ttl=ttl)
-
-
 def contribute() -> PluginContributions:
     """What this plugin declares for the SDK surface."""
     return PluginContributions(
@@ -456,7 +435,6 @@ def contribute() -> PluginContributions:
             SdkWrap("files.delete", _wrapped_delete),
             SdkWrap("files.glob", _wrapped_glob),
             SdkWrap("understand", wrapped_understand),
-            SdkWrap("ui.serve", wrapped_serve),
         ),
         skill_sources=(_project_skill_source,),
     )

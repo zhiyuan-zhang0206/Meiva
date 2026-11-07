@@ -8,4 +8,4 @@
 "plans.py" = "strict"
 
 [roots]
-"__init__.py" = { kinds = ["random"], why = "The meiva.gateway_client SDK facade mints per-call idempotency UUIDs for send_message, register_page, and close_page before building pure request plans" }
+"__init__.py" = { kinds = ["random"], why = "The meiva.gateway_client SDK facade mints per-call idempotency UUIDs for send_message before building pure request plans" }

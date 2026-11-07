@@ -109,7 +109,6 @@ beforeEach(() => {
   transport.getSettings.mockImplementation(() => new Promise(() => undefined));
   transport.putSetting.mockImplementation(() => new Promise(() => undefined));
   transport.getToUser.mockImplementation(() => new Promise(() => undefined));
-  transport.listPages.mockResolvedValue([]);
   transport.getAgentRoster.mockResolvedValue({ agents: [], ancestors: [] });
   transport.getAgentInspectLive.mockImplementation(() => new Promise(() => undefined));
   transport.getAgentInspectStatistics.mockImplementation(() => new Promise(() => undefined));

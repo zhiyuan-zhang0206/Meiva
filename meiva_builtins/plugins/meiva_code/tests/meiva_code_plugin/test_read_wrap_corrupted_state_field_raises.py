@@ -243,53 +243,6 @@ def test_shell_run_wrap_runs_in_the_logical_cwd(tmp_path: Path):
         process_context.unbind_exec_turn()
 
 
-def echo_serve(
-    dir: str,
-    name: str,
-    port: int | None = None,
-    title: str | None = None,
-    *,
-    ttl: float | None = None,
-) -> tuple[str, str, int | None, str | None, float | None]:
-    return dir, name, port, title, ttl
-
-
-def test_serve_wrap_resolves_relative_dir_against_cwd(tmp_path: Path):
-    from meiva_builtins.plugins.meiva_code.plugin import wrapped_serve
-
-    process_context.set_state(make_state_with_cwd(str(tmp_path)))
-    process_context.set_state_update({})
-    try:
-        assert wrapped_serve(echo_serve, "site", "preview", port=8123, title="Preview") == (
-            str((tmp_path / "site").resolve()),
-            "preview",
-            8123,
-            "Preview",
-            None,
-        )
-    finally:
-        process_context.unbind_exec_turn()
-
-
-def test_serve_wrap_passes_absolute_dir_through(tmp_path: Path):
-    from meiva_builtins.plugins.meiva_code.plugin import wrapped_serve
-
-    logical_cwd = tmp_path / "cwd"
-    logical_cwd.mkdir()
-    absolute_dir = tmp_path / "site"
-    process_context.set_state(make_state_with_cwd(str(logical_cwd)))
-    process_context.set_state_update({})
-    try:
-        served = wrapped_serve(echo_serve, str(absolute_dir), "preview")
-        assert served[0] == str(absolute_dir.resolve())
-    finally:
-        process_context.unbind_exec_turn()
-
-
-def test_serve_wrap_registered():
-    assert meiva.extend.stack("ui.serve")
-
-
 def test_set_cwd_surfaces_and_stores_cwd_note(tmp_path: Path):
     """set_cwd into a repo with `.agents/skills/` surfaces those skills under
     `meiva.skills.*` (via the provider the plugin registered) and stores a

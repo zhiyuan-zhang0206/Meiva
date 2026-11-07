@@ -8,7 +8,6 @@ import { Fragment, useCallback, useEffect, useRef, type ReactNode } from "react"
 
 import { InspectWidgetSection } from "@/components/inspector/inspector-widgets";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { useAgentPages } from "@/lib/agents/use-agent-pages";
 import type {
   AgentInspectStatistics,
   SystemEvent,
@@ -35,7 +34,6 @@ import {
 import {
   ConfigOverlaySection,
   LivenessSection,
-  PageSection,
   ShellsSection,
 } from "./inspector-live-sections";
 import { useApi } from "@/lib/transport/transport-context";
@@ -122,8 +120,6 @@ export function InspectorPanel({ agentId }: { agentId: number }) {
     if (viewport) viewport.scrollTop = 0;
   }, [agentId]);
 
-  const pages = useAgentPages(agentId);
-
   const onSystemEvent = useCallback(
     (ev: SystemEvent) => {
       if (!open || ev.agent_id !== agentId) return;
@@ -195,7 +191,6 @@ export function InspectorPanel({ agentId }: { agentId: number }) {
     key: "context",
     node: <ContextSection agentId={agentId} />,
   });
-  sections.push({ order: INSPECT_SECTION_ORDER.page, tie: 0, key: "page", node: <PageSection pages={pages} /> });
   sections.push({
     order: INSPECT_SECTION_ORDER.liveness,
     tie: 0,

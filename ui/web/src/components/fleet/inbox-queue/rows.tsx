@@ -1,6 +1,5 @@
 "use client";
 
-import { AppWindow } from "lucide-react";
 import { useTranslations } from "next-intl";
 
 import { STATUS_DOT } from "@/components/agents/agent-row";
@@ -8,7 +7,7 @@ import { ChatMarkdown } from "@/components/content/markdown";
 import { PRIORITY_BG } from "@/lib/notifications/notices";
 import { formatRelativeTime } from "@/lib/agents/sidebar";
 import { useWallDate } from "@/lib/format/now/use-wall-date";
-import type { PublicAgentStatus, OpenNotice, PageRow } from "@/lib/contracts/types";
+import type { PublicAgentStatus, OpenNotice } from "@/lib/contracts/types";
 import { cn } from "@/lib/format/utils";
 import { FLEX, FLEX_1, MIN_W_0 } from "@/lib/layout/layout";
 
@@ -35,40 +34,6 @@ export function AgentStatusDot({ status }: { status: PublicAgentStatus | null })
   );
 }
 
-// A direct link to an agent's live page (meiva.ui.show), opened in a new tab — the
-// inbox's entry point to what the agent is showing. Icon-only on a queue row,
-// icon + title in a detail header. Stops click propagation so opening the page
-// never also selects the row it sits on.
-
-export function AgentPageLink({
-  page,
-  showLabel,
-  className,
-}: {
-  page: PageRow;
-  showLabel?: boolean;
-  className?: string;
-}) {
-  const t = useTranslations("fleet.inboxPanel");
-  return (
-    <a
-      href={page.url}
-      target="_blank"
-      rel="noopener noreferrer"
-      onClick={(e) => e.stopPropagation()}
-      aria-label={t("openLivePage", { title: page.title ?? page.name })}
-      className={cn(
-        "inline-flex items-center gap-1 text-muted-foreground hover:text-primary",
-        className,
-      )}
-    >
-      <AppWindow className="size-3.5 shrink-0" aria-hidden />
-      {showLabel && <span className="truncate">{page.title ?? page.name}</span>}
-    </a>
-  );
-}
-
-
 export function NoticeListRow({
   priority,
   blocking,
@@ -76,7 +41,6 @@ export function NoticeListRow({
   agentLabel,
   agentId,
   agentStatus,
-  agentPage,
   createdAt,
   muted,
   indent,
@@ -92,7 +56,6 @@ export function NoticeListRow({
   agentLabel: string;
   agentId: number;
   agentStatus: PublicAgentStatus | null;
-  agentPage?: PageRow;
   createdAt?: string;
   muted?: boolean;
   indent?: boolean;
@@ -146,7 +109,6 @@ export function NoticeListRow({
           </span>
         </span>
       </button>
-      {agentPage && <AgentPageLink page={agentPage} className="shrink-0 px-2.5" />}
     </li>
   );
 }
@@ -158,12 +120,10 @@ export function NoticeListRow({
 export function AgentContextHeader({
   agentLabel,
   agentStatus,
-  agentPage,
   createdAt,
 }: {
   agentLabel: string;
   agentStatus: PublicAgentStatus | null;
-  agentPage?: PageRow;
   createdAt?: string;
 }) {
   const now = useWallDate();
@@ -175,9 +135,6 @@ export function AgentContextHeader({
           {agentLabel}
           {createdAt ? ` · ${formatRelativeTime(createdAt, now)}` : ""}
         </span>
-        {agentPage && (
-          <AgentPageLink page={agentPage} showLabel className={cn("ml-auto text-[10px]", MIN_W_0)} />
-        )}
       </div>
     </div>
   );

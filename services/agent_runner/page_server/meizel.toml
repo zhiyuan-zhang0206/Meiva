@@ -5,7 +5,7 @@ exports = ["daemon.py", "resources.py"]
 "dead_pages.py" = ["config.py"]
 "degradation.py" = ["page_plan.py"]
 "occupant_plan.py" = ["page_plan.py"]
-"tests" = ["config.py", "daemon.py", "dead_pages.py", "occupant_plan.py", "page_plan.py", "resources.py", "server.py"]
+"tests" = ["config.py", "daemon.py", "occupant_plan.py", "page_plan.py", "resources.py", "server.py"]
 
 [purity]
 "__init__.py" = "strict"

@@ -9,7 +9,6 @@
 
 from __future__ import annotations
 
-import itertools
 from collections.abc import Generator, Iterator
 from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
@@ -20,9 +19,7 @@ import pytest
 import redis
 from psycopg_pool import ConnectionPool
 
-from base.clock import SYSTEM_TIMERS
 from base.clock.tests.fakes import system_clock
-from base.clock.tests.seeded_rng import seeded_rng
 from base.cluster import inbound_channel
 from base.config import settings
 from base.daemon.loop_health import LoopProgress
@@ -33,7 +30,6 @@ from base.events.live.tests.live_capture import recorded_events
 from base.telemetry.tests.capture.event_capture import emitted_events as emitted_events
 from services.upkeep.ttl_reaper import cadence, sweep
 from services.upkeep.ttl_reaper.sweep import (
-    reap_expired_pages_blocking,
     reap_expired_web_sessions_blocking,
 )
 from services.upkeep.ttl_reaper.tests.slices import reaper_config
@@ -47,44 +43,6 @@ def reaper_pool(db_url: str, *, database_gate: ProcessDbGate) -> Iterator[Connec
     pool = base.db.pool(max_size=2, gate=database_gate)
     yield pool
     pool.close()
-
-
-# One distinct port per row: an open (host, port) pair is unique since
-# agent_pages_unique_live_port (20260920) — the reaper never cares about the
-# port value, and a shared fixed port now collides between pages.
-_PAGE_PORTS = itertools.count(8001)
-
-
-def _open_page(
-    conn: psycopg.Connection,
-    agent_id: int,
-    name: str,
-    *,
-    expires_at: datetime | None,
-) -> int:
-    with conn.cursor() as cur:
-        cur.execute(
-            "INSERT INTO agent_pages (agent_id, name, port, host, expires_at) "
-            "VALUES (%s, %s, %s, '127.0.0.1', %s) RETURNING id",
-            (agent_id, name, next(_PAGE_PORTS), expires_at),
-        )
-        row = cur.fetchone()
-    conn.commit()
-    assert row is not None
-    return row[0]
-
-
-def _page_state(
-    conn: psycopg.Connection, agent_id: int, name: str
-) -> tuple[datetime | None, datetime | None]:
-    with conn.cursor() as cur:
-        cur.execute(
-            "SELECT closed_at, expired_at FROM agent_pages WHERE agent_id = %s AND name = %s",
-            (agent_id, name),
-        )
-        row = cur.fetchone()
-    assert row is not None
-    return row[0], row[1]
 
 
 def _agent(conn: psycopg.Connection, status: str) -> int:
@@ -219,78 +177,6 @@ def test_reap_expired_web_sessions_is_limited_to_one_pass_batch(
             (["older-expired-session", "newer-expired-session", "live-session"],),
         )
         assert [row[0] for row in cur.fetchall()] == ["live-session", "newer-expired-session"]
-
-
-def test_reap_expired_pages_terminalizes_only_past_deadlines(
-    db_conn: psycopg.Connection,
-    reaper_pool: ConnectionPool,
-    database: Database,
-    event_bus: EventBus,
-) -> None:
-    aid = _running_agent(db_conn)
-    _open_page(db_conn, aid, "expired", expires_at=datetime.now(UTC) - timedelta(seconds=5))
-    _open_page(db_conn, aid, "future", expires_at=datetime.now(UTC) + timedelta(hours=1))
-    closed_id = _open_page(
-        db_conn, aid, "closed", expires_at=datetime.now(UTC) - timedelta(seconds=5)
-    )
-    with db_conn.cursor() as cur:
-        cur.execute("UPDATE agent_pages SET closed_at = now() WHERE id = %s", (closed_id,))
-    db_conn.commit()
-
-    reaped = reap_expired_pages_blocking(reaper_pool, database, event_bus)
-
-    assert [(aid, "expired")] == [(a, n) for a, n, _i in reaped]
-    expired_closed, expired_marked = _page_state(db_conn, aid, "expired")
-    assert expired_closed is None and expired_marked is not None
-    future_closed, future_marked = _page_state(db_conn, aid, "future")
-    assert future_closed is None and future_marked is None
-    closed_closed, closed_marked = _page_state(db_conn, aid, "closed")
-    assert closed_closed is not None and closed_marked is None
-
-
-def test_reap_expired_pages_skips_already_terminal(
-    db_conn: psycopg.Connection, reaper_pool: ConnectionPool, database: Database
-) -> None:
-    aid = _running_agent(db_conn)
-    _open_page(db_conn, aid, "expired", expires_at=datetime.now(UTC) - timedelta(seconds=5))
-    with db_conn.cursor() as cur:
-        cur.execute(
-            "UPDATE agent_pages SET expired_at = now() WHERE agent_id = %s AND name = 'expired'",
-            (aid,),
-        )
-    db_conn.commit()
-
-    assert (
-        reap_expired_pages_blocking(
-            reaper_pool, database, EventBus.from_settings(rng=seeded_rng(), timers=SYSTEM_TIMERS)
-        )
-        == []
-    )
-
-
-def test_reap_expired_pages_notifies_only_live_agents(
-    db_conn: psycopg.Connection,
-    reaper_pool: ConnectionPool,
-    database: Database,
-    event_bus: EventBus,
-) -> None:
-    live = _running_agent(db_conn)
-    dead = create_agent(db_conn)
-    with db_conn.cursor() as cur:
-        cur.execute(
-            "INSERT INTO agents_meta (id, spawner, status) VALUES (%s, 'user', 'terminated')",
-            (dead,),
-        )
-    db_conn.commit()
-    _open_page(db_conn, live, "live-page", expires_at=datetime.now(UTC) - timedelta(seconds=5))
-    _open_page(db_conn, dead, "dead-page", expires_at=datetime.now(UTC) - timedelta(seconds=5))
-
-    reap_expired_pages_blocking(reaper_pool, database, event_bus)
-
-    live_msgs = _system_inbounds(db_conn, live)
-    assert len(live_msgs) == 1
-    assert "reclaimed after its TTL" in live_msgs[0]
-    assert _system_inbounds(db_conn, dead) == []
 
 
 def _new_schedule(conn: psycopg.Connection, name: str) -> int:

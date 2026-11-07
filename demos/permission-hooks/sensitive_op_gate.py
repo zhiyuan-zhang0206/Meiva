@@ -30,6 +30,7 @@ from agent.hooks import Hook
 from agent.messages import NoteTag, system_note_message
 from agent.state import AgentState
 from base.agents.context import MeivaContext, agent_id_from_config
+from base.host.boundary.json_values import is_object_dict, is_object_list
 from base.log import logger
 from base.packages.plugins.extensions import PluginContributions
 
@@ -208,18 +209,23 @@ class _SensitiveOpGateHook(Hook):
         runtime: Runtime[MeivaContext],
         config: RunnableConfig,
         /,
-    ) -> dict | None:
+    ) -> dict[str, object] | None:
         agent_id = agent_id_from_config(config)
 
         # Extract code from the last AIMessage tool_calls
         last_msg = state.messages[-1] if state.messages else None
         if not isinstance(last_msg, AIMessage):
             return None
-        tool_calls = getattr(last_msg, "tool_calls", None) or []
+        raw_tool_calls: object = getattr(last_msg, "tool_calls", None)
+        tool_calls: list[object] = raw_tool_calls if is_object_list(raw_tool_calls) else []
         code = ""
         for tc in tool_calls:
-            if tc.get("name") == "execute_code":
-                code = tc.get("args", {}).get("code", "")
+            if is_object_dict(tc) and tc.get("name") == "execute_code":
+                args = tc.get("args")
+                if is_object_dict(args):
+                    raw_code = args.get("code")
+                    if isinstance(raw_code, str):
+                        code = raw_code
                 break
         if not code:
             return None

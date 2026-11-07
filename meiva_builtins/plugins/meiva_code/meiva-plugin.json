@@ -21,8 +21,7 @@
       "files.append",
       "files.delete",
       "files.glob",
-      "understand",
-      "ui.serve"
+      "understand"
     ],
     "systemPromptSections": [
       "coding_tools_section",

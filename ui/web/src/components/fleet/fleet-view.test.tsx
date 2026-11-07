@@ -112,9 +112,7 @@ function wrap(
   for (const window of ["24h", "7d", "30d", "all"] as const) {
     qc.setQueryData(["tasks", "graph", window], { tasks: [] });
   }
-  qc.setQueryData(["all-pages"], []);
   transport.getTasks.mockResolvedValue({ tasks: [] });
-  transport.listAllPages.mockResolvedValue([]);
   transport.getFleetGraph.mockResolvedValue({
     nodes: [],
     edges: [],

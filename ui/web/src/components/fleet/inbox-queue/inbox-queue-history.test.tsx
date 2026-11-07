@@ -5,7 +5,7 @@ import { WallClockProvider } from "@/lib/transport/transport-context";
 import type { ComponentProps } from "react";
 import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
 
-import type { AgentRow, NoticeItem, OpenNotice, PageRow, TaskSummaryRow } from "@/lib/contracts/types";
+import type { AgentRow, NoticeItem, OpenNotice, TaskSummaryRow } from "@/lib/contracts/types";
 import {
   NOTICES_QUERY_KEY,
   NOTICES_RESOLVED_QUERY_KEY,
@@ -29,7 +29,6 @@ interface QueueSeed {
   nextPage?: NoticeItem[];
   tasks?: TaskSummaryRow[];
   tasksWindow?: string;
-  pages?: PageRow[];
   cold?: boolean;
   openFails?: boolean;
   openPending?: boolean;
@@ -95,19 +94,6 @@ function ni(over: Partial<NoticeItem> & { id: number; title: string }): NoticeIt
   };
 }
 
-function mkPage(over: Partial<PageRow> & { agent_id: number; name: string }): PageRow {
-  return {
-    id: 1,
-    port: 10000,
-    title: over.name,
-    serve_dir: null,
-    url: `http://host/${over.name}`,
-    created_at: "2026-01-01T00:00:00Z",
-    closed_at: null,
-    ...over,
-  };
-}
-
 function agent(over: {
   agent_id: number;
   label?: string;
@@ -165,11 +151,9 @@ function renderQueue(
     });
   }
   qc.setQueryData(["tasks", "summary", "7d"], { tasks: seed.tasksWindow === undefined || seed.tasksWindow === "7d" ? (seed.tasks ?? []) : [] });
-  qc.setQueryData(["all-pages"], seed.pages ?? []);
   transport.getTasks.mockImplementation((opts?: { window?: string }) =>
     Promise.resolve({ tasks: (opts?.window ?? "all") === (seed.tasksWindow ?? "7d") ? (seed.tasks ?? []) : [] }),
   );
-  transport.listAllPages.mockImplementation(() => Promise.resolve(seed.pages ?? []));
   transport.getNotices.mockImplementation((params?: { beforeAt?: string }) => {
     // meiva:note
     // The open feed asks with no cursor; the history asks with one, so the same endpoint answers
@@ -446,32 +430,5 @@ describe("InboxQueue — terminated agent", () => {
     renderQueue([agent({ agent_id: 7, label: "dead", status: "terminated" })]);
     expect(screen.getAllByText("Q?").length).toBeGreaterThan(0);
     expect(screen.queryByRole("button", { name: /Resurrect Agent #7/ })).toBeNull();
-  });
-});
-
-describe("InboxQueue — agent live-page entry", () => {
-  it("a queue row links to the agent's live page (fleet-wide, no per-row fetch)", () => {
-    setFeed({ pages: [mkPage({ agent_id: 7, name: "dash", url: "http://host/dash" })], awaiting: [n({ id: 99, title: "Q?" })] });
-    renderQueue([agent({ agent_id: 7, label: "lead" })]);
-    const list = screen.getByRole("list", { name: /ask queue/i });
-    const link = within(list).getByRole("link", { name: /open live page/i });
-    expect(link.getAttribute("href")).toBe("http://host/dash");
-    expect(link.getAttribute("target")).toBe("_blank");
-  });
-
-  it("no page link on a row whose agent has no open page", () => {
-    setFeed({ pages: [mkPage({ agent_id: 2, name: "other" })] });
-    setFeed({ awaiting: [n({ id: 99, title: "Q?" })] });
-    renderQueue([agent({ agent_id: 7, label: "lead" })]);
-    const list = screen.getByRole("list", { name: /ask queue/i });
-    expect(within(list).queryByRole("link", { name: /open live page/i })).toBeNull();
-  });
-
-  it("the detail header also links the selected agent's live page", () => {
-    setFeed({ pages: [mkPage({ agent_id: 7, name: "dash", url: "http://host/dash" })], awaiting: [n({ id: 99, title: "Q?" })] });
-    renderQueue([agent({ agent_id: 7, label: "lead" })]);
-    const links = screen.getAllByRole("link", { name: /open live page/i });
-    expect(links.length).toBe(2);
-    expect(links.every((l) => l.getAttribute("href") === "http://host/dash")).toBe(true);
   });
 });

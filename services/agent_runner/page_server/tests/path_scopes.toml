@@ -3,8 +3,3 @@
 "services.backup.artifact.tests.passphrase" = [
     ".",
 ]
-"meiva.tests.fixtures.sdk" = [
-    "page_server_daemon/test_changed_port_or_directory_kills_then_recreates.py",
-    "test_dead_pages.py",
-    "test_page_server_daemon.py"
-]

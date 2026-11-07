@@ -44,12 +44,6 @@ def test_runner_grant_matrix(runner_db: str) -> None:  # noqa: PLR0915 -- one gr
         ).fetchone()
         assert inbound_row is not None
         inbound_id: int = inbound_row[0]
-        # An open page row (the runner only UPDATEs pages — INSERT stays with
-        # the gateway API's meiva.ui.serve/show path)
-        conn.execute(
-            "INSERT INTO agent_pages (agent_id, name, port) VALUES (%s, 'p', 8000)",
-            (agent_id,),
-        )
 
     with psycopg.connect(runner_url(runner_db), autocommit=True) as conn:
         # ── allowed: the audited runner surface ──
@@ -102,9 +96,6 @@ def test_runner_grant_matrix(runner_db: str) -> None:  # noqa: PLR0915 -- one gr
         # added one DELETE surface, not a blanket delete on writable tables.
         with pytest.raises(psycopg.errors.InsufficientPrivilege):
             conn.execute("DELETE FROM agent_tasks WHERE title = 't1'")
-        # ... and the show-page close at exit (agent_pages UPDATE; the row
-        # itself was seeded by the gateway side above)
-        conn.execute("UPDATE agent_pages SET closed_at = now() WHERE agent_id = %s", (agent_id,))
         # meiva.self.pause_heartbeat: the pause trail (SELECT the previous
         # window + INSERT the new row — regression for task #1932, where the
         # table shipped without a runner grant and every pause_heartbeat

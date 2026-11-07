@@ -10,7 +10,7 @@ import { NoticeQuestionSummary } from "@/components/notifications/notice-questio
 import { formatRelativeTime } from "@/lib/agents/sidebar";
 import { useWallDate } from "@/lib/format/now/use-wall-date";
 import { dropOpenNotices } from "@/lib/notifications/use-notices";
-import type { PublicAgentStatus, NoticeItem, PageRow } from "@/lib/contracts/types";
+import type { PublicAgentStatus, NoticeItem } from "@/lib/contracts/types";
 
 import { fmtLabel, openKey, type OpenItem } from "./keys";
 import { AgentContextHeader, PriorityBadge } from "./rows";
@@ -49,14 +49,12 @@ export function OpenDetail({
   item,
   openItems,
   agentStatus,
-  agentPage,
   onAdvance,
   onSelectAgent,
 }: {
   item: OpenItem;
   openItems: OpenItem[];
   agentStatus: PublicAgentStatus | null;
-  agentPage?: PageRow;
   onAdvance: (key: string | null) => void;
   onSelectAgent?: (agentId: number | null) => void;
 }) {
@@ -91,7 +89,6 @@ export function OpenDetail({
         <AgentContextHeader
           agentLabel={item.agentLabel}
           agentStatus={agentStatus}
-          agentPage={agentPage}
           createdAt={item.notice.created_at}
         />
         <OpenNoticeDetail

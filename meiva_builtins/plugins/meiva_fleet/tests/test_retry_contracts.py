@@ -186,38 +186,6 @@ def test_task_patch_rejects_invalid_caller_key_before_network(
     assert retry_gateway.received == []
 
 
-@pytest.mark.parametrize("operation", ["register", "close"])
-@pytest.mark.parametrize("failure", ["timeout", "server_error"])
-def test_public_page_call_retries_an_ambiguous_effect_under_one_key(
-    retry_gateway: GatewayStub, lost_response: Event, operation: str, failure: str
-) -> None:
-    from meiva.gateway_client import close_page, register_page
-
-    retry_gateway.reply("GET", "/api/agents/7/pages", [{"id": 5, "name": "report"}])
-    path = "/api/keyed/v1/agents/7/pages" + ("/report/close" if operation == "close" else "")
-    _ambiguous_response(retry_gateway, "POST", path, failure, lost_response)
-    error = GatewayUnavailable if failure == "timeout" else httpx.HTTPStatusError
-    with pytest.raises(error):
-        if operation == "register":
-            register_page(7, name="report", port=8001, host="test-host", title=None)
-        else:
-            close_page(7, "report")
-    writes = [request for request in retry_gateway.received if request.method != "GET"]
-    _assert_one_logical_key(writes)
-    assert {write.method for write in writes} == {"POST"}
-    assert {write.path for write in writes} == {path}
-    if operation == "close":
-        assert {write.body["expected_page_id"] for write in writes} == {5}
-
-
-def test_close_page_without_an_open_page_sends_no_write(retry_gateway: GatewayStub) -> None:
-    from meiva.gateway_client import close_page
-
-    retry_gateway.reply("GET", "/api/agents/7/pages", [])
-    assert close_page(7, "report") is False
-    assert [request.method for request in retry_gateway.received] == ["GET"]
-
-
 @pytest.mark.parametrize("operation", ["edit", "dismiss"])
 @pytest.mark.parametrize("failure", ["timeout", "server_error"])
 def test_fleet_current_notice_call_retries_its_observed_intent_under_one_key(

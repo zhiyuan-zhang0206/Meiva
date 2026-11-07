@@ -6,7 +6,7 @@ import { useTranslations } from "next-intl";
 
 import { BAR_HEIGHT_CLASS, FLEX, FLEX_1, MIN_W_0 } from "@/lib/layout/layout";
 import type { QueueUnit } from "@/lib/notifications/task-notify";
-import type { PublicAgentStatus, NoticeItem, PageRow } from "@/lib/contracts/types";
+import type { PublicAgentStatus, NoticeItem } from "@/lib/contracts/types";
 import { InlineError } from "@/components/ui/inline-error";
 import { cn } from "@/lib/format/utils";
 
@@ -80,7 +80,6 @@ export function QueueList({
   resolvedOpen,
   setResolvedOpen,
   agentStatus,
-  activePageByAgent,
   effectiveKey,
   onSelect,
   onSelectAgent,
@@ -97,7 +96,6 @@ export function QueueList({
   resolvedOpen: boolean;
   setResolvedOpen: (fn: (o: boolean) => boolean) => void;
   agentStatus: Map<number, PublicAgentStatus>;
-  activePageByAgent: Map<number, PageRow>;
   effectiveKey: string | null;
   onSelect: (key: string) => void;
   onSelectAgent?: (agentId: number | null) => void;
@@ -115,7 +113,6 @@ export function QueueList({
       <OpenUnits
         units={units}
         agentStatus={agentStatus}
-        activePageByAgent={activePageByAgent}
         effectiveKey={effectiveKey}
         onSelect={onSelect}
         onSelectAgent={onSelectAgent}
@@ -184,7 +181,6 @@ export function QueueList({
 export function OpenUnits({
   units,
   agentStatus,
-  activePageByAgent,
   effectiveKey,
   onSelect,
   onSelectAgent,
@@ -192,7 +188,6 @@ export function OpenUnits({
 }: {
   units: QueueUnit<OpenItem>[];
   agentStatus: Map<number, PublicAgentStatus>;
-  activePageByAgent: Map<number, PageRow>;
   effectiveKey: string | null;
   onSelect: (key: string) => void;
   onSelectAgent?: (agentId: number | null) => void;
@@ -214,7 +209,6 @@ export function OpenUnits({
               agentLabel={it.agentLabel}
               agentId={it.agentId}
               agentStatus={agentStatus.get(it.agentId) ?? null}
-              agentPage={activePageByAgent.get(it.agentId)}
               createdAt={it.notice.created_at}
               indent={u.root !== null}
               selected={effectiveKey === key}

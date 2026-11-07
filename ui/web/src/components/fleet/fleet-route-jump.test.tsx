@@ -166,9 +166,7 @@ function wrap(
     qc.setQueryData(["tasks", "graph", window], { tasks });
   }
   qc.setQueryData(["tasks", "summary", "7d"], { tasks });
-  qc.setQueryData(["all-pages"], []);
   transport.getTasks.mockResolvedValue({ tasks });
-  transport.listAllPages.mockResolvedValue([]);
   transport.getFleetGraph.mockResolvedValue({
     nodes: [],
     edges: [],
