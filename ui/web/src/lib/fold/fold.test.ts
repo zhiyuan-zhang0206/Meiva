@@ -29,7 +29,6 @@ const baseAgent: AgentRow = {
   unread_notice_count: 0,
   unread_user_message_count: 0,
   heartbeat_paused_until: null,
-  open_impersonation_session_id: null,
   liveness_state: "online",
 };
 

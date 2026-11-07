@@ -22,13 +22,12 @@ from base.telemetry.audit_events import prepare_event_log, record_audit_async
 @dataclass(frozen=True)
 class _ReapedRow:
     agent_id: int
-    handoff_unapplied: bool
 
     @classmethod
     def from_row(cls, row: tuple[object, ...]) -> _ReapedRow:
         match row:
-            case (int() as agent_id, bool() as handoff_unapplied):
-                return cls(agent_id, handoff_unapplied)
+            case (int() as agent_id,):
+                return cls(agent_id)
             case _:
                 raise TypeError("a reaped agents_meta row has columns of unexpected types")
 
@@ -63,11 +62,7 @@ async def reap_crash_corpses(
                 "WHERE machine = %s AND status = 'idling' "
                 "AND last_turn_fatal_at IS NOT NULL "
                 "AND last_turn_fatal_at <= now() - make_interval(secs => %s) "
-                "RETURNING id, EXISTS ("
-                "  SELECT 1 FROM agent_impersonations owed "
-                "  WHERE owed.agent_id = agents_meta.id "
-                "    AND owed.status IN ('released','rejected','expired') "
-                "    AND owed.handoff_applied_at IS NULL) AS handoff_unapplied",
+                "RETURNING id",
                 (machine, CORPSE_REAP_GRACE_S),
             )
         ).fetchall()
@@ -75,17 +70,11 @@ async def reap_crash_corpses(
         recorded: list[Event] = []
         for row in rows:
             corpse = _ReapedRow.from_row(row)
-            # meiva:note
-            # A reaped row that still owed a handoff receipt is a different failure from an
-            # ordinary corpse: the held path settled nothing, so the reaper is the only thing
-            # that noticed (#5468). The flag is read at reap time, so an operator can tell the
-            # two apart without replaying lease history.
-            # meiva:link docs/conventions/agents/agent-impersonation.md
             event = prepare_event_log(
                 event_type="status_change",
                 agent_id=corpse.agent_id,
                 source="system",
-                payload=reaped_payload(handoff_unapplied=corpse.handoff_unapplied),
+                payload=reaped_payload(),
             )
             recorded.append(await record_audit_async(conn, event))
             reaped.append(

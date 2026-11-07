@@ -140,7 +140,7 @@ def test_launch_command_can_explicitly_declare_external_caller(tmp_path: Path) -
 def test_a_prompt_launch_plans_no_files_and_pastes_the_prompt(tmp_path: Path) -> None:
     workspace = tmp_path / "workspace"
     workspace.mkdir()
-    prompt = "Please run meiva impersonate request --agent 41 --name 'Fix login' --provider claude"
+    prompt = "Please fix the login bug without reading files"
 
     plan = plan_claude_launch(_request(workspace, prompt=prompt), _facts(tmp_path / "marker"))
 
@@ -220,7 +220,7 @@ def test_a_prompt_launch_delivers_the_prompt_without_creating_files(
     install_claude(unit_home, received)
     workspace = short_dir / "workspace"
     workspace.mkdir()
-    prompt = "Please run meiva impersonate request --agent 41 --name 'Fix login' --provider claude"
+    prompt = "Please fix the login bug without reading files"
     plan = replace(
         plan_claude_launch(_request(workspace, prompt=prompt), _facts(short_dir / "marker")),
         ready=_FAST,

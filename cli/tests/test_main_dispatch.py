@@ -101,8 +101,6 @@ def test_every_leaf_subcommand_binds_a_handler_from_its_parser_module() -> None:
         module = getattr(func, "__module__", "")
         if leaf.prog.startswith(("meiva agents ", "meiva notices ")):
             assert module == "cli.commands.agents.parsers", (leaf.prog, module)
-        elif leaf.prog.startswith("meiva impersonate "):
-            assert module == "cli.commands.agents.impersonation_parsers", (leaf.prog, module)
         elif leaf.prog.startswith(
             ("meiva mcp ", "meiva memory ", "meiva packages ", "meiva plugins ", "meiva skill ")
         ):

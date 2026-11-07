@@ -17,10 +17,6 @@
   "base/tests/test_qwen_live_smoke.py": [
     "skipif(not _LIVE_KEY)"
   ],
-  "cli/commands/agents/tests/test_impersonation_dsh_relay.py": [
-    "skipif(shutil.which('node') is None)",
-    "skipif(shutil.which('node') is None)"
-  ],
   "cli/commands/data_plane/tests/pooler/test_pooler_clients.py": [
     "skipif(not pgbouncer_available())"
   ],

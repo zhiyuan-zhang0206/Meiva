@@ -16,7 +16,6 @@ from pathlib import Path
 from typing import TypeGuard
 from urllib.parse import urlsplit
 
-from base.agents.impersonation import live_lease_on_machine
 from base.clock import Clock
 from base.cluster.machine import MachineIdentityReader
 from base.cluster.record import ClusterRecord
@@ -49,7 +48,6 @@ from services.supervision.healthchecks.redis_acl import (
 from services.supervision.healthchecks.redis_acl import (
     ping as _default_redis_ping,
 )
-from services.supervision.meiva_root.health import LeaseProbe
 from services.supervision.meiva_root_glue.diagnostics import DIAGNOSTIC_TIMEOUT_S, Diagnostic
 
 
@@ -405,18 +403,6 @@ def task_telemetry(database: Callable[[], Database]) -> Callable[[], DaemonProbe
             f"{delivered} reminder notice(s) delivered and {stored} task telemetry row(s) "
             f"stored in {TASK_TELEMETRY_WINDOW_HOURS}h"
         )
-
-    return probe
-
-
-# meiva:note
-# The watchdog asks "would restarting this unit strand a live takeover?" and gets
-# `(lease_id, holder)` or None. The answer is read here, on the glue side, so the monitor
-# keeps no database client of its own: a database outage must not make the watchdog blind.
-def live_lease_probe(database: Callable[[], Database], machine: str) -> LeaseProbe:
-    def probe() -> tuple[str, str] | None:
-        with database().connect(autocommit=True) as conn:
-            return live_lease_on_machine(conn, machine)
 
     return probe
 

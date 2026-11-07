@@ -16,7 +16,7 @@ def _stub(_db: Database, _bus: EventBus, *args: object, **kwargs: object) -> Non
 
 
 def test_alias_scan_does_not_probe_module_getattr(monkeypatch: pytest.MonkeyPatch) -> None:
-    from base.agents.impersonation import wake
+    from base.agents.inbox import wake
 
     touched: list[str] = []
 
@@ -37,7 +37,7 @@ def test_alias_scan_does_not_trigger_the_mcps_servers_probe(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     import meiva.mcps
-    from base.agents.impersonation import wake
+    from base.agents.inbox import wake
 
     calls: list[str] = []
     target_code = meiva.mcps.servers.__code__
@@ -57,7 +57,7 @@ def test_alias_scan_does_not_trigger_the_mcps_servers_probe(
 
 
 def test_alias_scan_still_rebinds_a_frozen_alias(monkeypatch: pytest.MonkeyPatch) -> None:
-    from base.agents.impersonation import wake
+    from base.agents.inbox import wake
 
     real = wake.publish_inbound_wake
     holder = types.ModuleType("stub_everywhere_alias_scan_holder")

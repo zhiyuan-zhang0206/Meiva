@@ -23,7 +23,6 @@ def test_note_tag_value_set() -> None:
         "non_human_wake",
         "reply_visibility",
         "task",
-        "impersonation",
         "compact_reminder",
         "history_dump",
         "silent_idle_continue",

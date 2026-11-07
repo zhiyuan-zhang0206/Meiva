@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Literal, TypedDict
+from typing import TypedDict
 
 from base.events.vocabulary import EventSpec, telemetry_event
 
@@ -39,27 +39,6 @@ class HostDatabaseBeatRecovered(TypedDict):
     failures_cleared: int
 
 
-class ImpersonationTerminalNoticeFailed(TypedDict):
-    """`impersonation_terminal_notice_failed` payload — agent/impersonation.py.
-
-    One event per ended lease whose single notice submission was not accepted;
-    nothing retries it. The agent is the event's `agent_id`."""
-
-    lease_id: str
-    error: str
-
-
-# meiva:note
-# `impersonation_event_log_incomplete` payload, produced by
-# base/agents/impersonation/event_signals.py. At most one event per lease and condition per report
-# cadence (default daily), never one per pass: each report is written as an `event_log_incomplete`
-# entry into that lease's log, and passes inside the cadence stay quiet. A condition that never
-# clears therefore keeps re-reporting for as long as it holds. `seal_stuck` is an ended lease still waiting on an open event
-# source (clears when the source seals, or when the abandoned-receipt pass reclaims it);
-# `capture_failed` a lease with a failed source (permanent — a failed source never completes its
-# lease). The agent is the event's `agent_id`, and `pending_sources` names the receipts behind the
-# condition.
-# meiva:link base/agents/impersonation/docs/event-log.meiva.okf.md
 # meiva:note
 # `host_exit_idle_notes_failed` payload — the passive lifecycle notes a draining host owed.
 # One event per drain that could not write them; `reason` carries the failure or
@@ -69,24 +48,7 @@ class HostExitIdleNotesFailed(TypedDict):
     reason: str
 
 
-class ImpersonationEventLogIncomplete(TypedDict):
-    condition: Literal["seal_stuck", "capture_failed"]
-    lease_id: str
-    lease_machine: str
-    pending_reason: str
-    pending_sources: list[str]
-    session: str
-
-
 EVENTS: dict[str, EventSpec] = {
-    "impersonation_event_log_incomplete": telemetry_event(
-        "impersonation_event_log_incomplete",
-        "an impersonation event log cannot complete on its own (ended lease with an "
-        "open source, or a failed capture source); reported per lease and condition at "
-        "most once per report cadence, each report recorded in that lease's log",
-        payload=ImpersonationEventLogIncomplete,
-        tier="anomaly",
-    ),
     # Hosted runner dispatcher and turns (future/infra/lifecycle/agent-runner-as-server.md).
     "host_stale_running_settled": telemetry_event(
         "host_stale_running_settled",
@@ -284,61 +246,6 @@ EVENTS: dict[str, EventSpec] = {
         "reaper cannot see this death",
         tier="anomaly",
     ),
-    # meiva:note
-    # Held-path settle ladder (#5468): the wake that ends a takeover owes one checkpoint write,
-    # retried inside its own budget before the row is marked crash-dead.
-    "hosted_handoff_settle_retry": telemetry_event(
-        "hosted_handoff_settle_retry",
-        "a held-path handoff settle failed inside the wake and is being retried there; "
-        "carries attempt, delay_s and error_class",
-        tier="noise",
-    ),
-    "hosted_handoff_settle_failed": telemetry_event(
-        "hosted_handoff_settle_failed",
-        "the held-path handoff settle exhausted its retry budget: the row is marked "
-        "crash-dead and settled to idling so the heartbeat's narrow exception or the "
-        "reaper can reach it; carries budget_s and error_class",
-        tier="anomaly",
-    ),
-    "hosted_handoff_settle_raced": telemetry_event(
-        "hosted_handoff_settle_raced",
-        "a held-path settle failed after its receipt had already landed (the write "
-        "commits in a thread, the failure lands on a later await); the row is NOT "
-        "marked and the wake reports success",
-        tier="anomaly",
-    ),
-    "hosted_handoff_settle_read_failed": telemetry_event(
-        "hosted_handoff_settle_read_failed",
-        "the read that decides whether a landed receipt survived a failed settle could "
-        "not answer; the wake fails closed because a read failure is not evidence "
-        "either way",
-        tier="anomaly",
-    ),
-    "hosted_settle_failed": telemetry_event(
-        "hosted_settle_failed",
-        "settling a crash-marked row to idling failed after a failed held-path settle — "
-        "the row stays running and the reaper cannot see it",
-        tier="anomaly",
-    ),
-    "hosted_turn_corpse_marker_cleared": telemetry_event(
-        "hosted_turn_corpse_marker_cleared",
-        "a crash marker was cleared by the wake that settled the row's receipt (no "
-        "ended lease of the row owes one any more)",
-        tier="noise",
-    ),
-    "hosted_turn_corpse_clear_failed": telemetry_event(
-        "hosted_turn_corpse_clear_failed",
-        "clearing the crash marker after a landed receipt failed — the marker stays "
-        "until a completed turn clears it",
-        tier="anomaly",
-    ),
-    "hosted_handoff_marker_cleared_while_ineligible": telemetry_event(
-        "hosted_handoff_marker_cleared_while_ineligible",
-        "a marker was cleared on a row the heartbeat will not pick up (a permanent "
-        "reject streak or a heartbeat paused past now), so no automatic path re-checks "
-        "it; carries permanent_reject_streak and heartbeat_paused",
-        tier="anomaly",
-    ),
     "corpse_reaper_terminated": telemetry_event(
         "corpse_reaper_terminated",
         "the corpse reaper terminated crash-marked idling rows past the grace "
@@ -412,15 +319,6 @@ EVENTS: dict[str, EventSpec] = {
         "the immediate inbound reconcile at a finished hosted turn raised "
         "— the host does not treat it as fatal and the next cold admission "
         "retries the disposal of the claimed rows",
-        tier="anomaly",
-    ),
-    "impersonation_terminal_notice_failed": telemetry_event(
-        "impersonation_terminal_notice_failed",
-        "the host's single submission of an ended impersonation lease's notice to its "
-        "Codex thread was not accepted; carries the agent, the lease and the failure "
-        "reason. Nothing retries it: the external controller learns the lease ended "
-        "only on its next relay call",
-        payload=ImpersonationTerminalNoticeFailed,
         tier="anomaly",
     ),
     "host_admission_wait_exceeded": telemetry_event(

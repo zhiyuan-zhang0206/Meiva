@@ -113,16 +113,3 @@ def test_tiers_select_audit_rows_by_level(db_conn: psycopg.Connection) -> None:
     assert [item["event_name"] for item in anomaly] == ["env_unauthorized_write"]
     assert {item["tier"] for item in anomaly} == {"anomaly"}
     assert observation == []
-
-
-def test_the_impersonation_session_filter_matches_the_recorded_attribute(
-    db_conn: psycopg.Connection,
-) -> None:
-    audit_event(
-        db_conn, "send_message", minutes_ago=5, attributes='{"impersonation_session": "7:1"}'
-    )
-    audit_event(db_conn, "send_message", minutes_ago=6)
-
-    items = _get(category="audit", impersonation_session="7:1")["items"]
-
-    assert len(items) == 1

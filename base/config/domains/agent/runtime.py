@@ -271,36 +271,6 @@ class AgentRuntimeSettings(EnvSettings):
         },
     )
 
-    impersonation_ack_window_seconds: int = Field(
-        title="Impersonation delivery acknowledgement timeout (seconds)",
-        default=180,
-        alias="MEIVA_IMPERSONATION_ACK_WINDOW_SECONDS",
-        description="Seconds to ACK each impersonation delivery attempt. Snapshotted when a lease is requested; config edits apply to new leases, including after relay restart.",
-        gt=0,
-        le=2147483647,
-        json_schema_extra={
-            "restart_required": "",
-            "writable": True,
-            "sensitive": False,
-            "scope": "cluster-pinned",
-        },
-    )
-
-    impersonation_max_delivery_attempts: int = Field(
-        title="Maximum impersonation delivery attempts",
-        default=2,
-        alias="MEIVA_IMPERSONATION_MAX_DELIVERY_ATTEMPTS",
-        description="Maximum total delivery attempts per impersonation message, including the initial submission. Exhaustion pauses automatic delivery of that message; the lease and late ACK remain valid. Snapshotted at request; config edits apply to new leases.",
-        gt=0,
-        le=2147483647,
-        json_schema_extra={
-            "restart_required": "",
-            "writable": True,
-            "sensitive": False,
-            "scope": "cluster-pinned",
-        },
-    )
-
     heartbeat_pause_max_seconds: float = Field(
         title="Maximum heartbeat pause (seconds)",
         default=86400.0,

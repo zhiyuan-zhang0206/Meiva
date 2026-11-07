@@ -8,7 +8,7 @@ exports = ["agents", "api_contracts", "clock", "cluster", "config", "daemon", "d
 "config" = ["api_contracts", "host", "log", "native_process", "paths"]
 "daemon" = ["clock", "cluster", "config", "db", "deploy", "host", "log", "native_process", "packages", "paths", "telemetry"]
 "db" = ["config", "host", "log", "native_process", "paths"]
-"deploy" = ["agents", "clock", "cluster", "config", "db", "events", "host", "log", "native_process", "paths", "sessions"]
+"deploy" = ["clock", "cluster", "config", "db", "host", "log", "native_process", "paths", "sessions"]
 "events" = ["api_contracts", "clock", "cluster", "config", "db", "host", "log"]
 "host" = ["log", "native_process", "paths"]
 "lm" = ["api_contracts", "clock", "config", "host", "log", "telemetry"]
@@ -18,7 +18,7 @@ exports = ["agents", "api_contracts", "clock", "cluster", "config", "daemon", "d
 "packages" = ["api_contracts", "cluster", "config", "db", "host", "lm", "log", "native_process", "paths", "telemetry"]
 "sessions" = ["clock", "cluster", "config", "host", "log", "native_process", "paths"]
 "telemetry" = ["api_contracts", "cluster", "config", "db", "events", "host", "log", "native_process", "paths"]
-"tests" = ["agents", "api_contracts", "clock", "cluster", "config", "daemon", "db", "deploy", "events", "host", "lm", "log", "native_process", "packages", "paths", "sessions", "telemetry"]
+"tests" = ["agents", "clock", "cluster", "config", "daemon", "db", "deploy", "events", "host", "lm", "log", "native_process", "packages", "paths", "sessions", "telemetry"]
 
 [purity]
 "__init__.py" = "strict"

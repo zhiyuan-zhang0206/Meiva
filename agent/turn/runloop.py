@@ -472,7 +472,7 @@ async def settle_turn_failure(
     # no turn_end value: a declaration it carried is dropped here instead of being inherited
     # by the next turn (`agent/graph/claim/turn_end.py`).
     await graph.aupdate_state(config, {**pending.prepared_update, **_NO_TURN_END})
-    from agent.impersonation_handoff import flush_checkpoint
+    from agent.checkpoint import flush_checkpoint
 
     await flush_checkpoint(checkpointer, agent_id)
 

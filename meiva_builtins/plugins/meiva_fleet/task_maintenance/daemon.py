@@ -12,8 +12,8 @@ import psycopg
 from psycopg_pool import ConnectionPool
 
 from base import telemetry
-from base.agents.impersonation.wake import publish_inbound_wake
 from base.agents.inbox.insert import insert_inbound_message_in_transaction
+from base.agents.inbox.wake import publish_inbound_wake
 from base.api_contracts.agent_contract import AgentStatus
 from base.clock import SYSTEM_TIMERS
 from base.cluster.dataplane.direct_url import ClusterDirectUrl

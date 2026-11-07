@@ -15,7 +15,6 @@ from services.wake.heartbeat.selection import select_idle_agents_needing_heartbe
 from services.wake.heartbeat.tests.heartbeat_support import (
     BACKOFF_MAX_INTERVAL_S,
     THRESHOLD_S,
-    lease,
     make_idle,
 )
 from services.wake.heartbeat.tests.heartbeat_support import pool as pool
@@ -129,131 +128,6 @@ class TestSelectIdleAgents:
             )
         db_conn.commit()
         assert aid not in _selected(pool)
-
-    @pytest.mark.parametrize("status", ["requested", "accepted"])
-    def test_agent_under_open_impersonation_lease_excluded(
-        self,
-        redis_url: str,
-        pool: ConnectionPool,
-        db_conn: psycopg.Connection,
-        status: str,
-        *,
-        model_catalog: ModelCatalog,
-        config_authority: ConfigAuthority,
-        database_gate: ProcessDbGate,
-        machine_identity: MachineIdentityReader,
-    ) -> None:
-        aid = make_idle(
-            db_conn,
-            status_changed_s_ago=400,
-            model_catalog=model_catalog,
-            config_authority=config_authority,
-            database_gate=database_gate,
-            local_machine=machine_identity,
-        )
-        lease(db_conn, aid, status=status, local_machine=machine_identity)
-        assert aid not in _selected(pool)
-
-    def test_terminal_impersonation_lease_does_not_block_checkin(
-        self,
-        redis_url: str,
-        pool: ConnectionPool,
-        db_conn: psycopg.Connection,
-        *,
-        model_catalog: ModelCatalog,
-        config_authority: ConfigAuthority,
-        database_gate: ProcessDbGate,
-        machine_identity: MachineIdentityReader,
-    ) -> None:
-        aid = make_idle(
-            db_conn,
-            status_changed_s_ago=400,
-            model_catalog=model_catalog,
-            config_authority=config_authority,
-            database_gate=database_gate,
-            local_machine=machine_identity,
-        )
-        lease(db_conn, aid, status="expired", handoff_applied=True, local_machine=machine_identity)
-        assert aid in _selected(pool)
-
-    def test_unapplied_impersonation_delta_excludes_agent(
-        self,
-        redis_url: str,
-        pool: ConnectionPool,
-        db_conn: psycopg.Connection,
-        *,
-        model_catalog: ModelCatalog,
-        config_authority: ConfigAuthority,
-        database_gate: ProcessDbGate,
-        machine_identity: MachineIdentityReader,
-    ) -> None:
-        aid = make_idle(
-            db_conn,
-            status_changed_s_ago=400,
-            model_catalog=model_catalog,
-            config_authority=config_authority,
-            database_gate=database_gate,
-            local_machine=machine_identity,
-        )
-        lease(
-            db_conn,
-            aid,
-            status="expired",
-            delta_version=3,
-            applied_version=2,
-            local_machine=machine_identity,
-        )
-        assert aid not in _selected(pool)
-
-    def test_unapplied_handoff_excludes_agent(
-        self,
-        redis_url: str,
-        pool: ConnectionPool,
-        db_conn: psycopg.Connection,
-        *,
-        model_catalog: ModelCatalog,
-        config_authority: ConfigAuthority,
-        database_gate: ProcessDbGate,
-        machine_identity: MachineIdentityReader,
-    ) -> None:
-        aid = make_idle(
-            db_conn,
-            status_changed_s_ago=400,
-            model_catalog=model_catalog,
-            config_authority=config_authority,
-            database_gate=database_gate,
-            local_machine=machine_identity,
-        )
-        lease(db_conn, aid, status="expired", local_machine=machine_identity)
-        assert aid not in _selected(pool)
-
-    def test_applied_handoff_does_not_block_checkin(
-        self,
-        redis_url: str,
-        pool: ConnectionPool,
-        db_conn: psycopg.Connection,
-        *,
-        model_catalog: ModelCatalog,
-        config_authority: ConfigAuthority,
-        database_gate: ProcessDbGate,
-        machine_identity: MachineIdentityReader,
-    ) -> None:
-        aid = make_idle(
-            db_conn,
-            status_changed_s_ago=400,
-            model_catalog=model_catalog,
-            config_authority=config_authority,
-            database_gate=database_gate,
-            local_machine=machine_identity,
-        )
-        lease(
-            db_conn,
-            aid,
-            status="expired",
-            handoff_applied=True,
-            local_machine=machine_identity,
-        )
-        assert aid in _selected(pool)
 
     def test_active_pause_suppresses_even_when_idle_past_threshold(
         self,

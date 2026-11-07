@@ -3,7 +3,6 @@
 "services.backup.artifact.tests.passphrase" = [
     "test_heartbeat_daemon.py",
     "test_heartbeat_checkin.py",
-    "test_impersonation_heartbeat.py",
     "test_heartbeat_liveness.py",
     "test_heartbeat_checkin_retry.py",
     "test_station_healthcheck.py",

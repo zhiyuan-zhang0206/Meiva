@@ -33,7 +33,7 @@ GUIDE = REPO / "meiva_builtins" / "skills" / "platform" / "meiva-guide"
 
 def _repo(tmp_path: Path) -> Path:
     repo = tmp_path / "repo"
-    for name in ("meiva-guide", "impersonator-guide"):
+    for name in ("meiva-guide",):
         shutil.copytree(
             REPO / "meiva_builtins" / "skills" / "platform" / name,
             repo / "meiva_builtins" / "skills" / "platform" / name,
@@ -64,7 +64,7 @@ def test_converged_namespaces_load_real_task_instructions(
         (guide.packages.install, "Find candidates"),
         (guide.plugins.develop, "plugin.py"),
         (guide.schedules, "resumable"),
-        (guide.external_agents, "Mode B"),
+        (guide.external_agents, "Delegated workers"),
         (meiva.skills.meiva_workflow.capability_timescale, "Gather evidence"),
     )
     for skill, instruction in expected:

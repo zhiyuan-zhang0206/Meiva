@@ -36,11 +36,7 @@ the database layer imports none of them.
 
 - [[base/agents/messages/docs/inbound-provenance.meiva.okf.md]] — provenance facts stored with an
   inbound row.
-- `base/agents/impersonation` — `record_central_event` for the borrowed-identity event log, and the
-  relay liveness alert `publish_inbound_wake` runs first. `base.agents.impersonation` imports
-  `wake.py` at load time, so that one import stays inside the function.
-
 ## Entry points
 
 - `base/agents/inbox/insert.py:insert_inbound_message`
-- `base/agents/impersonation/wake.py:publish_inbound_wake`
+- `base/agents/inbox/wake.py:publish_inbound_wake`

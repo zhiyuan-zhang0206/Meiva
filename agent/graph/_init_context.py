@@ -12,7 +12,6 @@ from langgraph.runtime import Runtime
 from langgraph.types import Command
 
 from agent import state as _state
-from agent.impersonation_handoff import introduction_note, note_stamp
 from agent.nodes import INIT_CONTEXT, NodeName
 from agent.state import CapabilitiesState, ContextReset
 from base.agents.context import MeivaContext, agent_id_from_config
@@ -267,17 +266,6 @@ async def init_context_node(
             if runtime.context.ops_pool is None
             else context_notes(runtime.context.plugin_registry(), runtime.context)
         )
-        if state.impersonation_introduced:
-            notes.append(
-                introduction_note(
-                    note_stamp(
-                        runtime.context.require_clock(),
-                        timestamps=runtime.context.require_agent().read(
-                            "general", "message_timestamps"
-                        ),
-                    )
-                )
-            )
         logger.info(
             "[init-context] establishing: {} note(s) + {} tail message(s), resume={}",
             len(notes),

@@ -234,7 +234,7 @@ describe("MessageCard", () => {
 describe("CardHeader", () => {
   it("carries no item timestamp", () => {
     const event = item("system_marker", {
-      source: "impersonation",
+      source: "sdk_hint",
       created_at: "2026-10-06T13:39:25+00:00",
     });
     const { container, getByTestId } = renderWithQuery(

@@ -80,9 +80,6 @@ class BaseAgentState(BaseModel):
     exit_requested: bool = False
     restart_requested: bool = False
     turn_idle: bool = False
-    impersonation_introduced: bool = False
-    impersonation_handoff_id: str | None = None
-    impersonation_applied: dict[str, object] = Field(default_factory=dict)
 
     cwd: str = Field(default="")
 

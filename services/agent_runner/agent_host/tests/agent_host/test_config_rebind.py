@@ -439,7 +439,6 @@ class TestTurnLoop:
         await task
         [ctx] = graph.contexts
         assert ctx.turn_progress is host.turn_progress
-        assert ctx.relays is host.relays
 
     async def test_a_skipped_wake_still_starts_a_fresh_progress_window(self, wired: Build) -> None:
         """The reset must precede every await in `_run_turn`.

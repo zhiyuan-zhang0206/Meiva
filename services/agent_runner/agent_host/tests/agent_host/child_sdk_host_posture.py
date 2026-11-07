@@ -45,7 +45,7 @@ def host_refuses_env_context_and_attachment() -> None:
     assert process_context.is_host_process()
     assert agent_identity.is_launched_child() is False
     assert getattr(meiva, "context", None) is None
-    _expect_refusal(lambda: meiva.impersonation.attach("must-not-be-read"), "native agent runtime")
+    _expect_refusal(lambda: meiva.attach("must-not-be-read"), "shared host")
     _expect_refusal(
         lambda: process_context.bind_context(
             boot.launched_context(env=os.environ, config=config.ConfigBoot())  # pyright: ignore[reportArgumentType]

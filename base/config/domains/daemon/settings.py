@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import Field, model_validator
+from pydantic import Field
 
 from base.config.base import EnvSettings
 from base.config.domains.daemon.delivery_watchdog_fields import DeliveryWatchdogFields
@@ -129,21 +129,6 @@ class DaemonSettings(
         },
     )
 
-    held_settle_budget_s: float = Field(
-        title="Takeover checkpoint settlement timeout (seconds)",
-        default=5.0,
-        gt=0,
-        alias="MEIVA_HOST_HELD_SETTLE_BUDGET_S",
-        description="Hosted agent-runner: the whole wall-clock budget the wake that ends a takeover may spend settling its one owed checkpoint write before it fails closed (three synchronous attempts inside that wake, geometric backoff). Five seconds — the deploy family's HANDOFF_SETTLE_RETRY_BUDGET_S — because the retry runs inside a wake that already holds the incarnation and single-flight: it must finish while the wake is still the wake. This is the knob that turns 'slow' into an error event, so raise it when a cold pool's first dial or a cross-machine checkpoint read legitimately outlasts five seconds; it costs wall clock on the failing path only. The value must stay below the turn's own no-progress bound (MEIVA_HOST_TURN_NO_PROGRESS_TIMEOUT_SECONDS) and below the deploy family's NO_PROGRESS_TIMEOUT_S and CORPSE_REAP_GRACE_S, and above the two backoffs the retry pays before its third attempt: this domain refuses the turn bound, and the host root refuses the rest at boot through the clock lattice's declared orderings.",
-        json_schema_extra={
-            "capability": "agent-runner",
-            "restart_required": "all",
-            "writable": True,
-            "sensitive": False,
-            "scope": "cluster-pinned",
-        },
-    )
-
     harness_registration_ttl_seconds: float = Field(
         title="External harness registration lifetime (seconds)",
         default=3600.0,
@@ -259,7 +244,7 @@ class DaemonSettings(
         title="Expired resource cleanup interval (seconds)",
         default=60.0,
         alias="MEIVA_TTL_REAPER_POLL_INTERVAL_SECONDS",
-        description="TTL reaper service poll interval in seconds for expired pages, browser sessions, notices, impersonation leases and explicitly time-limited persistent shell sessions.",
+        description="TTL reaper service poll interval in seconds for expired pages, browser sessions, notices and explicitly time-limited persistent shell sessions.",
         json_schema_extra={
             "capability": "gateway",
             "restart_required": "all",
@@ -294,21 +279,6 @@ class DaemonSettings(
             "writable": True,
             "sensitive": False,
             "scope": "cluster-pinned",
-        },
-    )
-
-    health_restart_lease_grace_s: float = Field(
-        title="Restart delay for active impersonation (seconds)",
-        default=30.0,
-        ge=0,
-        alias="MEIVA_HEALTH_RESTART_LEASE_GRACE_S",
-        description="Seconds the root health monitor holds the FIRST restart of one outage when this machine carries a live impersonation lease, so a takeover session is not cut off mid-work; the probe is re-read when the window ends and a unit that answers again cancels the restart. Zero disables the courtesy, and later attempts of the same outage are never held (task #5551).",
-        json_schema_extra={
-            "restart_required": "all",
-            "writable": True,
-            "sensitive": False,
-            "scope": "host",
-            "remote_writable": False,
         },
     )
 
@@ -630,20 +600,3 @@ class DaemonSettings(
             "remote_writable": True,
         },
     )
-
-    @model_validator(mode="after")
-    def _the_settle_budget_stays_under_the_turns_stall_bound(self) -> DaemonSettings:
-        # meiva:note
-        # The two deploy-family orderings are the clock lattice's (declared in `base.deploy.timing`
-        # and checked at the host root, which may read that module); this is the bound only the
-        # configuration knows. A settle that outlives the turn's own no-progress bound would spend
-        # a budget the host never gets back.
-        budget = self.held_settle_budget_s
-        turn_bound = self.host_turn_no_progress_timeout_seconds
-        if budget >= turn_bound:
-            raise ValueError(
-                f"MEIVA_HOST_HELD_SETTLE_BUDGET_S={budget:g}s must stay below "
-                f"MEIVA_HOST_TURN_NO_PROGRESS_TIMEOUT_SECONDS={turn_bound:g}s: a settle that "
-                "outlives the turn's own no-progress bound spends a budget the host never gets back"
-            )
-        return self

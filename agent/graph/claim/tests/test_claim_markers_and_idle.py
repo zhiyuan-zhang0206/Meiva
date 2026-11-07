@@ -89,33 +89,15 @@ async def test_claim_node_idle_enter_publishes_full_window_snapshot(
 
 
 def test_claim_will_idle_shares_the_impl_and_wrapper_contract() -> None:
-    from datetime import UTC, datetime
 
     from langchain_core.messages import HumanMessage, SystemMessage
 
     from agent.graph.claim.node import claim_will_idle
-    from agent.messages import system_note_message
     from agent.state_channels import CIRCUIT_REASON_BILLING, CircuitState
-    from base.agents.messages.kwargs import NoteTag
 
     fresh = AgentState()
     fresh.messages = [SystemMessage(content="prompt")]
     assert claim_will_idle(fresh)
-
-    resume = AgentState()
-    resume.impersonation_handoff_id = "7:0"
-    note = system_note_message(
-        content="session ended",
-        tag=NoteTag.IMPERSONATION,
-        created_at=datetime.now(UTC),
-        picked_up_at=_PICKED_UP_AT,
-    )
-    note.id = "impersonation-handoff:7:0"
-    resume.messages = [SystemMessage(content="prompt"), note]
-    assert not claim_will_idle(resume)
-
-    resume.halted = True
-    assert claim_will_idle(resume)
 
     parked = AgentState()
     parked.messages = [HumanMessage(content="hello")]

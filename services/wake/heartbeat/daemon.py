@@ -1,23 +1,3 @@
-"""Heartbeat daemon — gateway-owned idle-agent check-in dispatcher.
-
-It sends due, unpaused check-ins to idle native agents and active impersonators.
-Native clocks start at the last completed turn; impersonation clocks run from
-lease activation regardless of external activity. Each check-in is a durable
-`heartbeat` inbound. The inbound-insert trigger wakes the agent anywhere in the
-cluster. It runs once per cluster on the gateway and never touches local sessions.
-
-Dispatch is paced for fleet scale: rather than checking in on every due agent in
-one batch per idle window (which would wake 100-300 idle agents simultaneously —
-a decompression + LLM thundering herd, self-perpetuating because the check-in
-resets each agent's idle clock in lockstep), it polls on a fine cadence (min of
-`MEIVA_HEARTBEAT_INTERVAL_SECONDS` and `_DISPATCH_STEP_S`), de-phases due-times with a
-deterministic per-agent jitter, and caps check-ins per step for a hard global
-wake-rate ceiling. See the "Wakeup-storm flattening" note below.
-
-Usage: .venv/bin/python -m services.wake.heartbeat.daemon. Kept alive by the root
-supervisor through the roster's `/healthz` probe; repeated failed rounds end the process.
-"""
-
 import asyncio
 import logging
 import math
@@ -35,7 +15,7 @@ from psycopg import sql as pgsql
 from psycopg_pool import ConnectionPool
 
 from base import telemetry
-from base.agents.impersonation.wake import publish_inbound_wake
+from base.agents.inbox.wake import publish_inbound_wake
 from base.agents.messages.inbound import not_passive_inbound
 from base.clock import Clock, Timers
 from base.cluster.dataplane.direct_url import ClusterDirectUrl
@@ -183,6 +163,7 @@ def send_heartbeat_checkin(
     wait SELECT recheck. Delivered as a system note (kind='heartbeat') — the claim
     node wraps it via system_note_message(tag=NoteTag.HEARTBEAT). `idle_minutes`
     rides the telemetry event only; the inbound content is the plain check-in."""
+    _ = reason
     content = (
         "Heartbeat. Review your existing responsibilities and continue actionable work. "
         "For a known wait, pause your heartbeat; if your role is complete, end it."
@@ -209,22 +190,16 @@ def send_heartbeat_checkin(
         # A check-in that exists because a held-path settle failed is a different fact
         # from a routine nudge: it costs a model turn that nothing else would have spent,
         # so it is counted under its own event with the reason attached (#5468).
-        # meiva:link docs/conventions/agents/agent-impersonation.md
         telemetry.emit(
             "telemetry",
-            "impersonation_handoff_checkin" if reason else "heartbeat_nudged",
+            "heartbeat_nudged",
             level="info",
             agent_id=agent_id,
             source="system",
-            attributes={"idle_minutes": round(idle_minutes), "reason": reason}
-            if reason
-            else {"idle_minutes": round(idle_minutes)},
+            attributes={"idle_minutes": round(idle_minutes)},
         )
-    # The inbound is committed on `with` exit (the emit above is enqueued and
-    # lands on the emitter's next batch — best-effort, JSONL-mirrored). The wake
-    # is published after the inbound row is durable. Best-effort wake (see
-    # base.agents.impersonation.wake.publish_inbound_wake); heartbeat carries no user-facing inbound
-    # id, so "0".
+    # meiva:note
+    # The inbound is committed on exit. The wake is published after the inbound row is durable.
     publish_inbound_wake(db, bus, agent_id, "0")
 
 
@@ -235,7 +210,6 @@ class _AgentRow:
     level: int
     paused: bool
     real_inbound: bool
-    impersonated: bool
 
 
 @dataclass(frozen=True)
@@ -273,15 +247,12 @@ def _reconcile_agent(
             "  WHERE im.agent_id = agents_meta.id AND im.kind <> 'heartbeat' "
             "    AND {not_passive} "
             "    AND im.created_at > agents_meta.last_heartbeat_at)) AS real_inbound "
-            ", EXISTS (SELECT 1 FROM agent_impersonations lease "
-            "WHERE lease.agent_id=agents_meta.id AND lease.status='active') AS impersonated "
             "FROM agents_meta WHERE id = %s"
         ).format(not_passive=pgsql.SQL(not_passive_inbound("im"))),
         (agent_id,),
     )
     sent_at = pending_checkin.pop(agent_id, None)
-    if row is None or row.status not in ("idling", "running") or row.impersonated:
-        # External progress is not measured by native turns; never penalize it.
+    if row is None or row.status not in ("idling", "running"):
         failure_streak.pop(agent_id, None)
         noop_streak.pop(agent_id, None)
         return

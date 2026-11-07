@@ -1,16 +1,15 @@
 ---
 type: doc
 title: Agent contracts and evidence
-description: Cross-process agent identity, messages, impersonation, observation and history.
+description: Cross-process agent identity, messages, observation and history.
 tags: [base]
 ---
 
 # Agent contracts and evidence
 
-`base/agents/` owns cross-process agent identity, messages, impersonation, observation and history.
+`base/agents/` owns cross-process agent identity, messages, observation and history.
 Its component nodes describe the current contracts and implementation.
-`recovery/` groups shared page-recovery notices and durable automatic-recovery gates;
-`base/cluster/authority/event_grants.py` owns runner grants for the impersonation event log.
+`recovery/` groups shared page-recovery notices and durable automatic-recovery gates.
 
 ## Documented components
 
@@ -19,7 +18,6 @@ Its component nodes describe the current contracts and implementation.
   [[harness/harness-models.meiva.okf.md|which models a harness runs]]).
 - [[base/agents/history/hierarchy/docs/hierarchy.meiva.okf.md]] — Hierarchical Understanding.
 - [[base/agents/history/docs/message-tokens.meiva.okf.md]] — Per-message true tokens.
-- [[base/agents/impersonation/docs/impersonation.meiva.okf.md]] — Named agent impersonation sessions.
 - [[base/agents/inbox/docs/inbox.meiva.okf.md]] — Agent inbox.
 - [[base/agents/messages/docs/external_caller.meiva.okf.md]] — External Caller Profiles.
 - [[base/agents/messages/docs/inbound-provenance.meiva.okf.md]] — Inbound Provenance Facts.

@@ -1,7 +1,7 @@
 ---
 type: doc
 title: Fleet update window guarantees
-description: What refuses, gates and surrounds the cli.fleet_update stops — preflight, the lease announcement, stored schedules, the silence and the log.
+description: What refuses, gates and surrounds the cli.fleet_update stops — preflight, stored schedules, the silence and the log.
 tags: [cli, updates, operations]
 ---
 
@@ -21,12 +21,9 @@ Each listed host is probed in its own shell before anything is touched. The
 probe uses `printf` because zsh's and dash's `echo` reinterprets backslashes,
 which once mangled a record carrying a quoted `$HOME`.
 
-## The leases and the failed stop
+## The failed stop
 
-Two facts are read over SSH before the window can hurt anything, and each has
-its own node: the active impersonation leases the stops would end
-([[cli/docs/fleet-update-window/lease-announcement.meiva.okf.md]]), and — only
-after a stop fails — which hosts the window took down and must bring back
+Only after a stop fails — which hosts the window took down and must bring back
 ([[cli/docs/fleet-update-window/failed-stop-recovery.meiva.okf.md]]).
 
 ## The stored-schedule gate
@@ -69,7 +66,7 @@ down refuses before touching anything — exit 2, no effects — when a listed h
 
 Before anything stops — under --dry-run too — down runs NEW's offline verify over the gateway's stored schedule table from a throwaway worktree: the read step runs on the home's OLD checkout by signature dispatch, the check goes through NEW's schedules CLI under a throwaway home, VERIFY_RC separates a crashed check from a red, a host that has not fetched NEW is reported as not checked, and a red or unevaluable table refuses with the rows listed unless --allow-red-schedules; when the rows cannot be read, a receipt of an earlier pass of the same NEW younger than --silence-hours is reused and reported instead.
 
-Before anything stops — under --dry-run too — down names the active impersonation leases and, after a failed stop, recovers the hosts that stop took down: [[cli/docs/fleet-update-window/lease-announcement.meiva.okf.md]], [[cli/docs/fleet-update-window/failed-stop-recovery.meiva.okf.md]].
+After a failed stop, down recovers the hosts that stop took down: [[cli/docs/fleet-update-window/failed-stop-recovery.meiva.okf.md]].
 
 down opens one Grafana silence on the gateway host before the first stop, its comment naming NEW and its expiry the required --silence-hours; up expires it after the drift checks; a silence that cannot open only warns and the half goes on; a failed up leaves the silence to its expiry; --dry-run prints the command without opening.
 

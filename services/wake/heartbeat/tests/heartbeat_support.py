@@ -1,10 +1,7 @@
 from __future__ import annotations
 
-from uuid import uuid4
-
 import psycopg
 import pytest
-from psycopg.types.json import Jsonb
 from psycopg_pool import ConnectionPool
 
 from base.agents.tests.units import spawn_agent
@@ -71,35 +68,3 @@ def make_idle(
             )
     db.commit()
     return aid
-
-
-def lease(
-    db: psycopg.Connection,
-    agent_id: int,
-    *,
-    status: str = "active",
-    delta_version: int = 0,
-    applied_version: int = 0,
-    handoff_applied: bool = False,
-    local_machine: MachineIdentityReader,
-) -> None:
-    with db.cursor() as cur:
-        cur.execute(
-            "INSERT INTO agent_impersonations(id,agent_id,source,machine,status,"
-            "ttl_seconds,expires_at,session_id,plugin_delta,delta_version,"
-            "applied_version,handoff_applied_at) "
-            "VALUES(%s,%s,'external_agent:codex:test',%s,%s,300,"
-            "clock_timestamp()+interval '5 minutes',0,%s,%s,%s,"
-            "CASE WHEN %s THEN clock_timestamp() ELSE NULL END)",
-            (
-                uuid4(),
-                agent_id,
-                local_machine.name(),
-                status,
-                Jsonb([{} for _ in range(delta_version)]),
-                delta_version,
-                applied_version,
-                handoff_applied,
-            ),
-        )
-    db.commit()

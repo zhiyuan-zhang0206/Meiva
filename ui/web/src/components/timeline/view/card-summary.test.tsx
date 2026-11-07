@@ -327,20 +327,3 @@ describe("CardHeader non-sticky header", () => {
     expect(onToggle).toHaveBeenCalledTimes(1);
   });
 });
-
-describe("impersonation provenance", () => {
-  it.each(["agent_chat", "inbound_chat"] as const)("never surfaces the external executor on %s cards", (kind) => {
-    const message = item(kind, {
-      source: kind === "inbound_chat" ? "user" : "agent:42",
-      impersonation: {
-        agent_id: 42, session_id: 0, name: "Fix login", executor_name: "Codex: my helper",
-        provider: "codex", seq: 2,
-      },
-    });
-    const { getByTestId, queryByTestId } = renderWithQuery(
-      <CardHeader item={message} config={messageCardConfig(message)!} expanded onToggle={noop} />,
-    );
-    expect(getByTestId("card-toggle")).toBeTruthy();
-    expect(queryByTestId("impersonation-badge")).toBeNull();
-  });
-});

@@ -27,7 +27,6 @@ BARE = EventsRequest(
     event_name=None,
     agent_id=None,
     trace_id=None,
-    impersonation_session=None,
     machine=None,
     level=None,
     tier=None,
@@ -94,13 +93,6 @@ def test_filters_are_normalized() -> None:
     assert result.filters.tiers == ["business", "anomaly"]
 
 
-def test_the_impersonation_session_becomes_an_attribute_filter() -> None:
-    assert plan(impersonation_session="7:1").filters.attribute_filters == {
-        "impersonation_session": "7:1"
-    }
-    assert plan().filters.attribute_filters is None
-
-
 def test_an_explicit_window_is_passed_through() -> None:
     result = plan(from_=datetime(2026, 8, 1, tzinfo=UTC), to=datetime(2026, 8, 2, tzinfo=UTC))
     assert result.filters.from_ == datetime(2026, 8, 1, tzinfo=UTC)
@@ -134,7 +126,6 @@ def test_with_total_is_carried() -> None:
             {"from_": datetime(2026, 8, 4, tzinfo=UTC), "hours": 1.0},
             "mutually exclusive",
         ),
-        ({"impersonation_session": "7"}, "agent_id:session_id"),
     ],
 )
 def test_an_illegal_request_is_refused_with_its_reason(

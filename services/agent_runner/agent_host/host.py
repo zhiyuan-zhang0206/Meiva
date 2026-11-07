@@ -24,18 +24,9 @@ from psycopg_pool import AsyncConnectionPool, PoolTimeout
 from pydantic import BaseModel
 
 from agent.graph.node_log import flush_node_exit_aggregate
-from agent.impersonation import (
-    active_lease,
-    handoff_landed,
-    handoff_owed,
-    native_status,
-    supervise_relay,
-)
-from agent.impersonation_handoff import flush_checkpoint
 from agent.ownership.hosted import (
     admit_hosted_runtime,
     explain_admission_refusal,
-    settle_hosted_runtime,
 )
 from agent.startup import consume_claimed_inbounds
 from agent.state import BaseAgentState
@@ -49,7 +40,6 @@ from base.agents.context.clients import ClientSet
 from base.agents.context.identity import AgentIdentity
 from base.agents.history.delta_read_compat import recovery_reconstruction_scope
 from base.agents.messages.timestamp_policy import TimestampSource
-from base.agents.observation.relay_supervision import RelaySupervision
 from base.agents.observation.turn_progress import TurnProgress
 from base.api_contracts.agent_contract import Harness
 from base.cluster.machine import MachineIdentityReader
@@ -72,20 +62,15 @@ from base.packages.plugins.config_view import resolve_agent_plugin_pins
 from base.packages.plugins.extensions import EMPTY, ExtensionRegistry
 from base.paths import harness_registrations_dir, harness_sessions_dir
 from base.telemetry.tracing import turn_span
-from services.agent_runner.agent_host.held_settle import HeldSettle, settle_owed_handoff
 from services.agent_runner.agent_host.invocation import (
-    HandoffSettlement,
     InvocationHooks,
     PendingWorkResult,
     TurnCheckpoints,
     finish_completed_invocation,
     finish_pending_failure,
-    settle_handoff_before_invocation,
 )
 from services.agent_runner.agent_host.invocation.driver import drive_context
-from services.agent_runner.agent_host.lifecycle.lease_controls import require_lifecycle_claim
 from services.agent_runner.agent_host.lifecycle.shells import (
-    apply_lifecycle_command,
     reap_and_announce_corpses,
 )
 from services.agent_runner.agent_host.lifecycle.shutdown import close_host_resources
@@ -191,33 +176,8 @@ class AgentHost:
         self.turn_fingerprints: dict[int, str] = {}
         # What the graph and this host share across turns: handed to every turn's context.
         self.turn_progress = TurnProgress()
-        self.relays = RelaySupervision()
-        # meiva:note
-        # Handoff invocations share this immutable carrier of the host's injected dependencies;
-        # its process values are bound once, so the settlement and the settle path agree.
-        environ = policy.environ
-        python = policy.python
-        self._handoff_settlement = HandoffSettlement(
-            db, bus, self.relays, handoff_stamping, self._machine, home, policy.rng, environ, python
-        )
         self.admission = TurnAdmission(policy.max_concurrent_turns)
         self.stats = HostStats()
-        self._held_settle = HeldSettle(
-            graph=graph,
-            db=db,
-            bus=bus,
-            relays=self.relays,
-            pool=self._control_pool,
-            timestamps=handoff_stamping,
-            machine=self._machine,
-            home=home,
-            environ=policy.environ,
-            stats=self.stats,
-            rng=policy.rng,
-            receipt_landed=handoff_landed,
-            budget_s=policy.held_settle_budget_s,
-            python=policy.python,
-        )
         self._resource_service = HostedServiceResources()
 
     @property
@@ -264,12 +224,6 @@ class AgentHost:
             self.stats.wakes_skipped += 1
             return
         self.turn_fingerprints[agent_id] = stored.fingerprint
-
-        # An active external lease owns decisions; no native graph or plugin
-        # initialization may start on a dispatcher wake or a host restart.
-        if await active_lease(self._control_pool, agent_id):
-            await self._run_lease_controls(agent_id)
-            return
 
         async with self.admission.admit(agent_id):
             pins = resolve_agent_config_pins(stored.config_overlay, stored.birth_config)
@@ -381,80 +335,7 @@ class AgentHost:
                 )
 
     # meiva:note
-    # Lease controls keep ownership and apply admin intent without a graph turn. The one
-    # graph write they owe is a takeover this wake ends itself: its checkpoint handoff
-    # must land before the agent idles (#5467).
-    # meiva:link docs/conventions/agents/agent-impersonation.md
-    async def _run_lease_controls(self, agent_id: int) -> None:
-        incarnation = await admit_hosted_runtime(
-            self._control_pool,
-            agent_id,
-            self._machine,
-            self._owner,
-            db=self._db,
-            home=self._home,
-        )
-        if incarnation is None:
-            return
-        await self._apply_lease_controls(agent_id, incarnation)
-
-    async def _apply_lease_controls(self, agent_id: int, incarnation: RuntimeIncarnation) -> None:
-        from agent.db import claim_inbound_batch
-
-        # meiva:note
-        # An external lease owns decisions; these wakes alone supervise its relays.
-        # One native_status read checks known exits/heartbeats without models or polling.
-        # Confirmed exit/staleness triggers recovery; failures use the scheduler's error handling.
-        session = await native_status(self._db, self._bus, agent_id, incarnation=incarnation)
-        await supervise_relay(
-            self._db,
-            self._bus,
-            session,
-            agent_id,
-            self.relays,
-            incarnation=incarnation,
-            clock=self._handoff_stamping.clock,
-            home=self._home,
-        )
-        # meiva:note
-        # An earlier ordinary failure can leave a buffered tail. Preserve
-        # it before accepting lifecycle intent, without replaying graph work.
-        await flush_checkpoint(self._checkpointer, agent_id)
-        # meiva:note
-        # This wake can be the one that ends a takeover: the admission above closes a
-        # predecessor's lease as expired, and relay supervision closes one whose relay
-        # died. An ended automatic lease owes the native checkpoint the end-of-session
-        # note and the receipt that releases the agent's next request. Settling it only
-        # after the lifecycle command was applied missed every restart — the common
-        # path, where the release clears the incarnation and an unsettled lease then
-        # refuses every new takeover (#5467, #5492). Supervision runs first, so this
-        # settles the lease this wake actually leaves behind.
-        # meiva:link docs/conventions/agents/agent-impersonation.md
-        ended = await native_status(self._db, self._bus, agent_id, incarnation=incarnation)
-        if handoff_owed(ended):
-            await settle_owed_handoff(self._held_settle, agent_id, incarnation)
-        batch = await claim_inbound_batch(
-            self._control_pool,
-            agent_id,
-            lifecycle_only=True,
-            incarnation=incarnation,
-        )
-        require_lifecycle_claim([item.durable_lifecycle for item in batch])
-        # meiva:note
-        # No graph ran here, so nothing says whether the agent's last turn was finished;
-        # a restart applied under a lease never queues a continuation.
-        kind = await apply_lifecycle_command(
-            self._control_pool, incarnation, bus=self._bus, resume_turn=False, home=self._home
-        )
-        if kind is None:
-            await settle_hosted_runtime(
-                self._control_pool,
-                incarnation,
-                bus=self._bus,
-            )
-        else:
-            self.drop_agent(agent_id)
-
+    # Build a cold or stale model runtime from this turn's slices, or retain its cache.
     async def _runtime_for(
         self,
         agent_id: int,
@@ -576,7 +457,6 @@ class AgentHost:
         runtime = self._runtimes.pop(agent_id, None)
         if runtime is not None:
             self._sessions.retire(agent_id, runtime)
-        self.relays.drop(agent_id)
 
     # meiva:note
     # Shutdown retires what the cache still holds: an external session is a child
@@ -637,7 +517,6 @@ class AgentHost:
             extensions=self._extensions,
             commands=self._commands,
             turn_progress=self.turn_progress,
-            relays=self.relays,
             identity=AgentIdentity(agent_id=agent_id, owns_loop=True),
             original_incarnation=incarnation,
             hosted_resources=resources,
@@ -709,9 +588,9 @@ class AgentHost:
                         ctx,
                         PendingWorkResult(prepared),
                         InvocationHooks(
-                            self._handoff_settlement,
-                            self.drop_agent,
-                            self._wake_resumed,
+                            drop_agent=self.drop_agent,
+                            wake_resumed=self._wake_resumed,
+                            home=self._home,
                         ),
                     )
                     if outcome is not None:
@@ -727,12 +606,6 @@ class AgentHost:
                 finally:
                     flush_node_exit_aggregate(agent_id)
 
-    # meiva:note
-    # Settle the handoff checkpoint, then run the graph once.
-    #
-    #         A turn's first invocation sets `halted` so that a continuation left by
-    #         an interrupted predecessor is abandoned and waits for fresh input.
-    #         An unhalted, unprocessed handoff note is already that fresh input.
     async def _invoke_graph(
         self,
         agent_id: int,
@@ -742,19 +615,12 @@ class AgentHost:
         *,
         fresh_input: bool,
     ) -> dict[str, object] | PendingTurnFailure:
-        resume_handoff = await settle_handoff_before_invocation(
-            checkpoints.graph,
-            ctx,
-            agent_id,
-            fresh_input=fresh_input,
-            settlement=self._handoff_settlement,
-        )
         return await self._invoke_native_graph(
             agent_id,
             config,
             ctx,
             {
-                **({"halted": True} if fresh_input and not resume_handoff else {}),
+                **({"halted": True} if fresh_input else {}),
                 "turn_active": False,
                 "exit_requested": False,
                 "turn_idle": False,

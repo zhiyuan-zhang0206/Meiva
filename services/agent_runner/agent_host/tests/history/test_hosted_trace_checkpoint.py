@@ -12,7 +12,7 @@ from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from langgraph.graph import END, START, StateGraph
 from psycopg_pool import AsyncConnectionPool
 
-from agent.impersonation_handoff import flush_checkpoint
+from agent.checkpoint import flush_checkpoint
 from agent.startup import wrap_saver_writes_with_nstep_interval
 from agent.state import BaseAgentState
 from agent.tests.claim.test_inbound_ownership import admit_owner, agent_row

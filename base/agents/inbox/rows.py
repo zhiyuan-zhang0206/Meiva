@@ -38,9 +38,7 @@ NOTICE_FYI_TTL_DAYS = 30
 # harness moves to the conversation at claim. External chats remain visible
 # here during pickup and leave when provider acceptance is committed or delivery
 # uncertainty is recorded.
-#
-# An active takeover's trail or relay read counts as display delivery only
-# while the lease is live. The strip also needs the payload for attachments.
+# The strip also needs the payload for attachments.
 # meiva:link base/agents/inbox/docs/inbox.meiva.okf.md
 def list_pending_inbounds(db: psycopg.Connection, agent_id: int) -> list[InboundRow]:
     with db.cursor() as cur:
@@ -52,21 +50,6 @@ def list_pending_inbounds(db: psycopg.Connection, agent_id: int) -> list[Inbound
             "AND (ib.status = 'pending' OR (ib.status = 'claimed' AND EXISTS ("
             "  SELECT 1 FROM agents_meta am WHERE am.id = ib.agent_id AND am.harness <> 'meiva'"
             "))) "
-            "AND NOT EXISTS ("
-            "  SELECT 1 FROM agent_impersonations lease "
-            "  WHERE lease.agent_id = ib.agent_id "
-            "    AND lease.status = 'active' "
-            "    AND lease.expires_at > clock_timestamp() "
-            "    AND (EXISTS ("
-            "      SELECT 1 FROM agent_impersonation_messages relay_read "
-            "      WHERE relay_read.lease_id = lease.id AND relay_read.inbound_id = ib.id"
-            "    ) OR EXISTS ("
-            "      SELECT 1 FROM agent_impersonation_entries transcribed "
-            "      WHERE transcribed.lease_id = lease.id "
-            "        AND transcribed.kind = 'message' "
-            "        AND transcribed.event_key = 'inbound:' || ib.id::text"
-            "    ))"
-            ") "
             "ORDER BY ib.created_at ASC, ib.id ASC",
             (agent_id,),
         )

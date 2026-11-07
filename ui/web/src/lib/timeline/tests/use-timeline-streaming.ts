@@ -331,23 +331,4 @@ describe("useTimeline SSE batch path", () => {
   });
 });
 
-describe("impersonation timeline refresh", () => {
-  it("loads committed external replies through the normal timeline query", async () => {
-    const anchor = snapshotItem({ item_id: "4.0", kind: "inbound_chat", payload: "Session started" });
-    const reply = snapshotItem({ item_id: "4.2", payload: "Fix verified", source: "agent:42",
-      impersonation: { agent_id: 42, session_id: 0, name: "Fix login", executor_name: "Codex: helper",
-        provider: "codex", anchor_item_id: "4.0", seq: 1 } });
-    timeline.queue(resolves(tlResp([anchor])));
-    timeline.always(resolves(tlResp([anchor, reply])));
-    const { result } = renderHook(() => useTimeline(42, vi.fn()), { wrapper });
-    await waitFor(() => expect(result.current.items).toHaveLength(1));
-    pushEvent({ role: "impersonation_changed", agent_id: 42 });
-    await waitFor(() => expect(result.current.items.map((entry) => entry.payload)).toContain("Fix verified"));
-    pushEvent({ role: "impersonation_changed", agent_id: 42 });
-    await waitFor(() => expect(timelineReads).toHaveLength(3));
-    expect(result.current.items.filter((entry) => entry.item_id === "4.2")).toHaveLength(1);
-    expect(result.current.items.find((entry) => entry.item_id === "4.2")?.impersonation?.executor_name).toBe("Codex: helper");
-  });
-});
-
 }

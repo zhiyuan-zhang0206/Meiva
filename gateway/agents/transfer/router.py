@@ -35,7 +35,6 @@ from base.telemetry.audit_events import prepare_event_log, record_audit
 from gateway.agents.transfer.bundle_store import TransferBundleStore
 from gateway.agents.transfer.rows import (
     AgentMetaRow,
-    ImpersonationRow,
     LifecycleRow,
     MachineRow,
     TargetGateRow,
@@ -44,7 +43,6 @@ from gateway.agents.transfer.rows import (
 from gateway.agents.transfer.transfer_plan import (
     AgentRowFacts,
     AgentTransferSnapshot,
-    ImpersonationConflictFact,
     MachineFacts,
     PendingLifecycleFact,
     PendingUploadFact,
@@ -146,7 +144,7 @@ def _query_agent_facts(
 
 def _query_blocking_facts(
     conn: psycopg.Connection, agent_id: int
-) -> tuple[PendingLifecycleFact | None, ImpersonationConflictFact | None, PendingUploadFact | None]:
+) -> tuple[PendingLifecycleFact | None, PendingUploadFact | None]:
     lc = query_one(
         conn,
         LifecycleRow,
@@ -157,28 +155,6 @@ def _query_blocking_facts(
     )
     pending_lc = PendingLifecycleFact(kind=lc.kind, status=lc.status) if lc else None
 
-    imp = query_one(
-        conn,
-        ImpersonationRow,
-        "SELECT session_id, status, delta_version > applied_version AS delta_unapplied, "
-        "handoff_applied_at IS NULL AS handoff_unapplied "
-        "FROM agent_impersonations WHERE agent_id = %s AND ("
-        "  status IN ('requested', 'accepted', 'active') "
-        "  OR delta_version > applied_version OR handoff_applied_at IS NULL"
-        ") ORDER BY session_id DESC LIMIT 1",
-        (agent_id,),
-    )
-    imp_conflict = (
-        ImpersonationConflictFact(
-            session_id=imp.session_id,
-            status=imp.status,
-            delta_unapplied=imp.delta_unapplied,
-            handoff_unapplied=imp.handoff_unapplied,
-        )
-        if imp
-        else None
-    )
-
     up = query_one(
         conn,
         UploadBatchRow,
@@ -187,7 +163,7 @@ def _query_blocking_facts(
         (agent_id,),
     )
     pending_up = PendingUploadFact(batch_id=up.batch_id, state=up.state) if up else None
-    return pending_lc, imp_conflict, pending_up
+    return pending_lc, pending_up
 
 
 def _query_machine_facts(conn: psycopg.Connection, name: str) -> MachineFacts | None:
@@ -218,14 +194,13 @@ def _precheck_blocking(
             return evaluate_precheck(
                 TransferPrecheckFacts(agent=None, agent_id=agent_id, to_machine=to_machine)
             )
-        pending_lc, imp_conflict, pending_up = _query_blocking_facts(conn, agent_id)
+        pending_lc, pending_up = _query_blocking_facts(conn, agent_id)
         return evaluate_precheck(
             TransferPrecheckFacts(
                 agent=agent,
                 agent_id=agent_id,
                 to_machine=to_machine,
                 pending_lifecycle=pending_lc,
-                impersonation=imp_conflict,
                 pending_upload=pending_up,
                 source_machine=_query_machine_facts(conn, agent.machine),
                 target_machine=_query_machine_facts(conn, to_machine),
@@ -249,14 +224,13 @@ def _guard_idling_pre_termination_blocking(
         if isinstance(state_refusal, TransferRefusal):
             raise HTTPException(state_refusal.status_code, state_refusal.detail)
 
-        pending_lc, imp_conflict, pending_up = _query_blocking_facts(conn, agent_id)
+        pending_lc, pending_up = _query_blocking_facts(conn, agent_id)
         activity_refusal = check_blocking_activity(
             TransferPrecheckFacts(
                 agent=agent,
                 agent_id=agent_id,
                 to_machine="",
                 pending_lifecycle=pending_lc,
-                impersonation=imp_conflict,
                 pending_upload=pending_up,
             )
         )
@@ -371,14 +345,10 @@ def commit_cutover_blocking(
         if cas_error is not None:
             raise CutoverConflictError(cas_error)
 
-        pending_lc, imp_conflict, pending_up = _query_blocking_facts(conn, snapshot.agent_id)
+        pending_lc, pending_up = _query_blocking_facts(conn, snapshot.agent_id)
         if pending_lc is not None:
             raise CutoverConflictError(
                 f"agent {snapshot.agent_id} queued a {pending_lc.kind!r} command during transfer"
-            )
-        if imp_conflict is not None:
-            raise CutoverConflictError(
-                f"agent {snapshot.agent_id} opened an impersonation session during transfer"
             )
         if pending_up is not None:
             raise CutoverConflictError(
@@ -761,8 +731,8 @@ async def get_staged_transfer_bundle(
     description=(
         "Transfer a settled (`idling` or `terminated`) native Meiva agent — including its "
         "workspace directory and central placement — to another live `agent-runner` machine. "
-        "Running agents, external-harness agents, and agents with open or unsettled impersonation "
-        "leases are refused with HTTP 409."
+        "Running agents, external-harness agents, and agents with in-flight commands or uploads "
+        "are refused with HTTP 409."
     ),
 )
 async def post_agent_transfer(

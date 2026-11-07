@@ -11,14 +11,6 @@ tags: []
 
 Meiva agent's LangGraph state management system. Base `BaseAgentState` carries conversation and lifecycle channels, plus nested `compact`, `circuit`, `attach`, `memory`, `context_reset`, `capabilities`, and `skill_recall` state. Plugins declare whole Pydantic BaseModel chunks in `PluginContributions.state`, and the framework merges them into `AgentState`.
 
-`impersonation_introduced` retains the native conversation's first-takeover
-explanation receipt across compaction; context establishment restores that
-standing explanation only after a takeover has occurred.
-
-`impersonation_applied` records the external lease and plugin-log version applied
-in the same checkpoint as its delta; recovery uses it to avoid repeating reducers
-after an acknowledgement failure. See [[base/agents/impersonation/docs/impersonation.meiva.okf.md]].
-
 ## Core Responsibilities
 
 - **BaseAgentState**: `messages` (delta channel since the 2026-09-14 write switch — guarded reducer pair `guarded_delta_reducer` / `guarded_add_messages`), lifecycle and turn flags (including `non_human_wake: bool = False`, resolved in `claim` from inbound sender polarity, sticky `False` once any human inbound participates in the active run, preserved across mid-run compaction/cancel/restart-resume, and reset to `False` when parking idle), takeover receipts. Nested last-value channels are `compact` (`CompactState`: version, reminder marks, understanding-chunk cut — [[base/agents/history/hierarchy/docs/chunks.meiva.okf.md]]) / `circuit` (`CircuitState`) / `attach` (`AttachState`) / `context_reset` (`ContextReset`) / `capabilities` (`CapabilitiesState`) / `skill_recall` (`SkillRecallState`, beside the `skill_reads` list); `memory` (`MemoryState`) has a per-window union reducer. `agent/state.py:_BASE_STATE_FIELDS` derives from `BaseAgentState.model_fields` (`state._BASE_FIELDS`), auto-syncing the plugin-write guard with base fields.

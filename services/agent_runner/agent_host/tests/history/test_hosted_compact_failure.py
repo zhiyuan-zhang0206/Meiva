@@ -13,9 +13,9 @@ from langgraph.types import Command
 from psycopg_pool import AsyncConnectionPool
 
 from agent import state as states
+from agent.checkpoint import flush_checkpoint
 from agent.graph.claim.node import claim_node
 from agent.graph.hooks.compact import COMPACT_MAX_ATTEMPTS
-from agent.impersonation_handoff import flush_checkpoint
 from agent.startup import wrap_saver_writes_with_nstep_interval
 from base.agents.context import MeivaContext
 from base.agents.history.delta_read_compat import wrap_saver_reads_with_delta_reconstruction

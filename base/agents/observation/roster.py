@@ -15,7 +15,6 @@ import psycopg
 from psycopg import sql
 from pydantic import BaseModel, TypeAdapter
 
-from base.agents.impersonation.status import OpenImpersonationStatus
 from base.agents.observation.evidence import (
     AgentAvailability,
     AgentObservation,
@@ -59,13 +58,6 @@ class AgentCard(AgentLineage):
     unread_user_message_count: int = 0
     unread_notice_count: int
     heartbeat_paused_until: datetime | None
-    open_impersonation_session_id: int | None
-    # Lease status for the open session above ("requested" | "accepted" |
-    # "active"), or None with no open lease. Only "active" means the agent is
-    # actually taken over — a requested/accepted lease still runs the native
-    # agent until activation at its next safe boundary (see
-    # base/agents/impersonation/status.py's OPEN tuple).
-    open_impersonation_status: OpenImpersonationStatus | None
     # meiva:note
     # Same three states as the snapshot (task #5616): None = running / never recorded
     # (the built-in meiva loop has no child), 0 = normal exit, non-zero = abnormal.
@@ -101,9 +93,7 @@ _CARD_COLUMNS = """
     attention.awaiting_response_count, attention.has_pending_question,
     attention.highest_notice_priority,
     fyi.unread_notice_count,
-    deliveries.unread_user_message_count,
-    open_impersonation.session_id AS open_impersonation_session_id,
-    open_impersonation.status AS open_impersonation_status
+    deliveries.unread_user_message_count
 """
 _CARD_FROM = """
     FROM selected s
@@ -130,10 +120,6 @@ _CARD_FROM = """
         WHERE agent_id = a.id AND NOT require_response AND resolved_at IS NULL
           AND created_at > now() - interval '30 days'
     ) fyi ON true
-    LEFT JOIN LATERAL (
-        SELECT session_id, status FROM agent_impersonations
-        WHERE agent_id = a.id AND status IN ('requested', 'accepted', 'active')
-    ) open_impersonation ON true
 """
 # UNION (not UNION ALL) deduplicates ancestors shared by many live agents and
 # terminates even on corrupt cyclic links. Fork-source existence takes priority;

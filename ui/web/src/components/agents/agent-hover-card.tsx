@@ -35,7 +35,6 @@ export const AGENT_HOVER_WARMUP_MS = 300;
 export const STATUS_DOT: Record<PublicAgentStatus, string> = {
   running: "bg-sky-500",
   idling: "bg-emerald-500",
-  impersonated: "bg-indigo-400",
   terminated: "bg-destructive",
 };
 
@@ -44,7 +43,6 @@ type AgentRowKey = Parameters<ReturnType<typeof useTranslations<"agentRow">>>[0]
 const STATUS_LABEL_KEY: Record<PublicAgentStatus, AgentRowKey> = {
   running: "statusRunning",
   idling: "statusIdling",
-  impersonated: "statusImpersonated",
   terminated: "statusTerminated",
 };
 
@@ -248,7 +246,7 @@ export function AgentHoverCard({
 
         <div className="mt-1.5 space-y-1 text-[11px]">
           <p className={cn("items-center gap-1.5 text-muted-foreground", MIN_W_0, FLEX)}>
-            {offline || agent.status === "impersonated" || agent.status === "terminated" ? (
+            {offline || agent.status === "terminated" ? (
               <span
                 className={cn(
                   "size-1.5 rounded-full shrink-0",

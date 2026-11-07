@@ -664,9 +664,6 @@ root = "base/agents/history/hierarchy/tests"
 root = "base/agents/history/tests"
 
 [[tool.pyright.executionEnvironments]]
-root = "base/agents/impersonation/tests"
-
-[[tool.pyright.executionEnvironments]]
 root = "base/agents/inbox/tests"
 
 [[tool.pyright.executionEnvironments]]
@@ -1382,11 +1379,6 @@ reportAny = "error"
 reportExplicitAny = "error"
 
 [[tool.pyright.executionEnvironments]]
-root = "meiva/impersonation"
-reportAny = "error"
-reportExplicitAny = "error"
-
-[[tool.pyright.executionEnvironments]]
 root = "meiva/mcps"
 reportAny = "error"
 reportExplicitAny = "error"
@@ -1518,11 +1510,6 @@ reportExplicitAny = "error"
 
 [[tool.pyright.executionEnvironments]]
 root = "meiva_builtins/skills/integrations/gmail"
-reportAny = "error"
-reportExplicitAny = "error"
-
-[[tool.pyright.executionEnvironments]]
-root = "meiva_builtins/skills/platform/impersonator-guide"
 reportAny = "error"
 reportExplicitAny = "error"
 

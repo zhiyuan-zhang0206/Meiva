@@ -96,11 +96,3 @@ def lifecycle_follow_up(kind: str | None, *, resume_turn: bool) -> LifecycleFoll
             return LifecycleFollowUp(wake_resumed=False, exited=False)
         case _:
             raise ValueError(f"unknown lifecycle command kind: {kind!r}")
-
-
-# meiva:note
-# Whether a fresh invocation must ask the checkpoint if a handoff is waiting to resume: only the
-# first invocation of a turn (`fresh_input`) of an agent that has an original incarnation can have
-# one.
-def handoff_resume_wanted(*, fresh_input: bool, has_original_incarnation: bool) -> bool:
-    return fresh_input and has_original_incarnation

@@ -7,8 +7,8 @@ persisted into `~/.claude/settings.json` / `~/.claude.json`, backed up and
 idempotent) so an unattended spawn cannot park on one, and sends the
 contract message. The session resolves `claude` from its PATH, then tries
 `$HOME/.local/bin/claude`. If Claude's UI does not appear, or `claude auth
-status` reports it signed out, the launcher stops before sending the contract
-or takeover bootstrap. The standalone CLI keeps its own login, separate from a
+status` reports it signed out, the launcher stops before sending the contract.
+The standalone CLI keeps its own login, separate from a
 desktop app's; run `claude auth login` once as the host user
 (`claude auth status` shows it):
 
@@ -22,12 +22,6 @@ it as `claude_session=<uuid>`; the conversation lives in
 `spawn_claude.py <workspace-dir> --resume <uuid>` (same mode and files) reopens
 it with `claude --resume` after a stop or crash closed the shell — see [Resume
 after an interruption](resume_after_interruption.md).
-
-For a takeover (`--prompt '<text>'`) the script is file-less: no task/work
-files and nothing to watch. The spawned session reads `impersonator-guide`,
-requests the lease (`meiva impersonate request --provider claude ...`), and starts
-its `Monitor` watch. The full procedure is [Let the coding agent take over your
-identity](impersonate_self.md).
 
 Manual launch (for full control):
 

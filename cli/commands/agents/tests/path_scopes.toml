@@ -3,11 +3,3 @@
 "cli.database.tests.cli_tests" = [
     ".",
 ]
-"meiva.tests.fixtures.sdk" = [
-    "test_delivery.py",
-    "test_impersonation_agents.py",
-    "test_relay_budget.py",
-    "test_relay_command.py",
-    "test_relay_shell.py",
-    "test_relay_supervision.py",
-]

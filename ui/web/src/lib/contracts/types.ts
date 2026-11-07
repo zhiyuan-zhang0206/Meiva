@@ -31,7 +31,6 @@ export {
   type ExecOutputChunkEvent,
   type ExecOutputEvent,
   type ExecStartEvent,
-  type ImpersonationChangedEvent,
   type InboundArrivedEvent,
   type InboundCommittedEvent,
   type LLMDoneEvent,
@@ -90,39 +89,26 @@ export interface AgentDirectoryPage { agents: AgentRow[]; next_cursor: number | 
 export type WireAgentRoster = Schemas["AgentRoster"];
 export type WireAgentDirectoryPage = Schemas["AgentDirectoryPage"];
 
-/** The lease phase behind an open impersonation session (only present on the
- *  card-shaped roster/directory rows — the selected-agent detail read has no
- *  impersonation projection at all). Only `active` means the agent is
- *  actually taken over; `requested`/`accepted` still run the native agent
- *  until activation reaches its next safe boundary. */
-export type OpenImpersonationStatus = NonNullable<WireAgentCard["open_impersonation_status"]>;
-
-/** The console's complete, user-facing agent status model. Liveness remains a
- *  separate `AgentRow.liveness_state` axis, so an idling agent whose runner
- *  is unreachable still renders as `idling` + `offline`, rather than hiding
- *  the outage.
- *  `impersonated` is a card-level projection (see `projectAgentStatus`), not
- *  a wire lifecycle state — the backend `AgentStatus` enum never changes. */
-export type PublicAgentStatus =
-  | Extract<WireAgentStatus, "running" | "idling" | "terminated">
-  | "impersonated";
+// meiva:note
+// The console's complete, user-facing agent status model. Liveness remains a
+// separate `AgentRow.liveness_state` axis, so an idling agent whose runner
+// is unreachable still renders as `idling` + `offline`, rather than hiding
+// the outage.
+export type PublicAgentStatus = Extract<WireAgentStatus, "running" | "idling" | "terminated">;
 export type AgentRow = Omit<
   WireAgentCard,
-  "status" | "observation" | "open_impersonation_session_id" | "open_impersonation_status"
+  "status" | "observation"
 > & {
   readonly status: PublicAgentStatus;
   readonly observation?: WireAgentCard["observation"] | null;
-  readonly open_impersonation_session_id?: number | null;
-  readonly open_impersonation_status?: OpenImpersonationStatus | null;
 };
 
-/** Collapse every known wire lifecycle state into the public three-state model.
- *  The switch is deliberately exhaustive: adding a backend enum member fails
- *  type-checking here, and an unknown runtime value throws instead of silently
- *  inventing a display fallback. Never yields `impersonated` — that
- *  projection needs the card's lease status, not just the lifecycle enum
- *  (see `projectAgentStatus`). */
-export function projectAgentStatusValue(status: WireAgentStatus): Extract<WireAgentStatus, "running" | "idling" | "terminated"> {
+// meiva:note
+// Collapse every known wire lifecycle state into the public three-state model.
+// The switch is deliberately exhaustive: adding a backend enum member fails
+// type-checking here, and an unknown runtime value throws instead of silently
+// inventing a display fallback.
+export function projectAgentStatusValue(status: WireAgentStatus): PublicAgentStatus {
   switch (status) {
     case "running":
       return "running";
@@ -137,19 +123,10 @@ export function projectAgentStatusValue(status: WireAgentStatus): Extract<WireAg
   }
 }
 
-/** Project one gateway card or selected detail before it enters frontend state.
- *  A card whose open lease has reached `active` projects to `impersonated`
- *  instead of the lifecycle-derived status — an external tool has taken the
- *  agent over, so `idling` would misrepresent it. `requested`/`accepted`
- *  leases (the native agent still runs until activation) and the
- *  selected-agent detail read (no lease field at all) fall through to the
- *  ordinary lifecycle projection. */
+// meiva:note
+// Project one gateway card or selected detail before it enters frontend state.
 export function projectAgentStatus(row: WireAgentCard | WireAgentRow): AgentRow {
-  const openImpersonationStatus = "open_impersonation_status" in row ? row.open_impersonation_status : null;
-  const status: PublicAgentStatus =
-    openImpersonationStatus === "active" && row.status !== "terminated"
-      ? "impersonated"
-      : projectAgentStatusValue(row.status);
+  const status: PublicAgentStatus = projectAgentStatusValue(row.status);
   if ("awaiting_response_count" in row) {
     return status === row.status ? row : { ...row, status };
   }
@@ -167,8 +144,6 @@ export function projectAgentStatus(row: WireAgentCard | WireAgentRow): AgentRow 
     awaiting_response_count: notices_awaiting_response.length,
     has_pending_question: notices_awaiting_response.some((notice) => notice.question != null),
     highest_notice_priority: notices_awaiting_response.map((n) => n.priority).sort()[0] ?? null,
-    open_impersonation_session_id: null,
-    open_impersonation_status: openImpersonationStatus,
   };
 }
 // OpenNotice rides the agent snapshot (notices_awaiting_response — the open

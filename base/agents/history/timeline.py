@@ -13,7 +13,6 @@ from langchain_core.messages import (
 )
 
 from base.agents.history.timeline_item import TimelineItem as TimelineItem
-from base.agents.impersonation.status import ImpersonationMetadata
 from base.agents.messages.inbound_images import kwargs_upload_files
 from base.agents.messages.kwargs import (
     MeivaMessageKwargs,
@@ -37,7 +36,7 @@ __all__ = [
 
 
 # meiva:note
-# system_marker.show_timestamp hides the ts for ambient context and the one-time guidance notes (compact reminder, SDK hint, agent reply, silent idle-continue, security, exec timeout, timezone, the to_user soft limit, skipped SDK-expand entries); heartbeats, lifecycle_* transitions, task notifications, impersonation and NEW_SKILLS keep it. NEW_SKILLS stays visible deliberately: the drift note is the only place that mid-window install is visible. The split is closed over NoteTag — a new member needs an explicit decision.
+# system_marker.show_timestamp hides the ts for ambient context and the one-time guidance notes (compact reminder, SDK hint, agent reply, silent idle-continue, security, exec timeout, timezone, the to_user soft limit, skipped SDK-expand entries); heartbeats, lifecycle_* transitions, task notifications, and NEW_SKILLS keep it. NEW_SKILLS stays visible deliberately: the drift note is the only place that mid-window install is visible. The split is closed over NoteTag — a new member needs an explicit decision.
 # meiva:link base/agents/history/docs/timeline/note-timestamp-policy.meiva.okf.md
 _NO_TIMESTAMP_NOTE_TAGS = frozenset(
     {
@@ -160,8 +159,6 @@ def _message_items(
         return [_exec_output_item(msg_idx, content, created_at, kwargs.get("meiva_exec_ms"))]
     if meiva_type == MeivaMsgType.SYSTEM_NOTE:
         item = _system_note_item(msg_idx, content, kwargs.get("meiva_note_tag"), created_at)
-        if "meiva_impersonation" in kwargs:
-            item.impersonation = ImpersonationMetadata.model_validate(kwargs["meiva_impersonation"])
         return [item]
     if meiva_type == MeivaMsgType.COMPACT_SUMMARY:
         return [

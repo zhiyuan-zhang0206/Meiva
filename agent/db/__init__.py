@@ -13,7 +13,7 @@ from psycopg.rows import class_row
 from psycopg_pool import AsyncConnectionPool, PoolTimeout
 
 from agent.ownership.inbound import lock_inbound_owner
-from base.agents.impersonation.wake import publish_inbound_wake
+from base.agents.inbox.wake import publish_inbound_wake
 from base.agents.messages.inbound import InterruptReason, InterruptScope
 from base.api_contracts.agent_contract import AgentStatus
 from base.db import Database

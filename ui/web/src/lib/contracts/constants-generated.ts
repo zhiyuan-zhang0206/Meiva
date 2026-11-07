@@ -14,7 +14,6 @@ export const HIDE_FROM_USER = "MEIVA_HIDE_FROM_USER";
 
 // meiva:link base/agents/messages/kwargs.py
 export const NOTE_TAGS = [
-  "impersonation",
   "sdk_hint",
   "agent_reply",
   "reply_visibility",

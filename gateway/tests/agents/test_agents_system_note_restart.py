@@ -590,37 +590,6 @@ class TestRestart:
                 row = cur.fetchone()
             assert row is not None and row[0] == "codex"
 
-    # meiva:note
-    # An open or unsettled impersonation lease owns the agent's identity, so a switch must not move it
-    # out from under the impersonator: the refusal comes before any status check.
-    def test_a_switch_under_an_open_lease_is_refused(self, db_conn: psycopg.Connection) -> None:
-        with gateway_test_client() as client:
-            agent_id = spawn_via_http(client, {}).json()["id"]
-            with db_conn.cursor() as cur:
-                cur.execute(
-                    "INSERT INTO agent_impersonations "
-                    "(id, agent_id, source, machine, status, ttl_seconds, expires_at, activated_at) "
-                    "VALUES (%s, %s, 'external_agent:codex', 'test-machine', 'active', 3600, "
-                    "clock_timestamp() + interval '1 hour', clock_timestamp())",
-                    (str(uuid4()), agent_id),
-                )
-            db_conn.commit()
-
-            resp = client.post(
-                f"/api/agents/{agent_id}/restart",
-                json={
-                    "message": "switch under a lease",
-                    "config_overlay": {"harness": "codex", "llm_model": "gpt-6.1-sol"},
-                },
-            )
-            assert resp.status_code == 409
-            assert resp.json()["detail"] == "Agent has an active impersonation lease"
-
-            with db_conn.cursor() as cur:
-                cur.execute("SELECT harness FROM agents_meta WHERE id = %s", (agent_id,))
-                row = cur.fetchone()
-            assert row is not None and row[0] == "meiva"
-
     @pytest.mark.parametrize(
         ("old_harness", "old_model"),
         [("meiva", None), ("codex", "gpt-6.1-sol"), ("claude_code", "claude-opus-4-6")],

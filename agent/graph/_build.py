@@ -36,7 +36,6 @@ from langgraph.types import Command
 
 from agent.graph.hooks.framework import hooks_at
 from agent.graph.hooks.node import hook_node
-from agent.impersonation import protect_native_hooks
 from agent.nodes import (
     AFTER_EXEC,
     AFTER_INIT,
@@ -153,41 +152,39 @@ def build_graph(
 
     g.add_node(  # type: ignore[arg-type]
         AFTER_INIT,
-        protect_native_hooks(
-            hook_node(
-                "after_init", default_next=INIT_CONTEXT, hooks=hooks_at("after_init", extensions)
-            )
+        hook_node(  # pyright: ignore[reportArgumentType]
+            "after_init", default_next=INIT_CONTEXT, hooks=hooks_at("after_init", extensions)
         ),
         input_schema=state_cls,
     )
     g.add_node(  # type: ignore[arg-type]
-        INIT_CONTEXT, protect_native_hooks(init_context_node), input_schema=state_cls
+        INIT_CONTEXT,
+        init_context_node,  # pyright: ignore[reportArgumentType]
+        input_schema=state_cls,
     )
     g.add_node(CLAIM, claim_node, input_schema=state_cls)  # type: ignore[arg-type]
     g.add_node(  # type: ignore[arg-type]
         BEFORE_LLM,
-        protect_native_hooks(
-            hook_node("before_llm", default_next=LLM, hooks=hooks_at("before_llm", extensions))
+        hook_node(  # pyright: ignore[reportArgumentType]
+            "before_llm", default_next=LLM, hooks=hooks_at("before_llm", extensions)
         ),
         input_schema=state_cls,
     )
     g.add_node(LLM, llm, input_schema=state_cls)  # type: ignore[arg-type]
     g.add_node(  # type: ignore[arg-type]
         BEFORE_EXEC,
-        protect_native_hooks(
-            hook_node("before_exec", default_next=EXEC, hooks=hooks_at("before_exec", extensions))
+        hook_node(  # pyright: ignore[reportArgumentType]
+            "before_exec", default_next=EXEC, hooks=hooks_at("before_exec", extensions)
         ),
         input_schema=state_cls,
     )
-    g.add_node(EXEC, protect_native_hooks(execute), input_schema=state_cls)  # type: ignore[arg-type]
+    g.add_node(EXEC, execute, input_schema=state_cls)  # type: ignore[arg-type]
     g.add_node(  # type: ignore[arg-type]
         AFTER_EXEC,
-        protect_native_hooks(
-            hook_node(
-                "after_exec",
-                default_next=_after_exec_default_next,
-                hooks=hooks_at("after_exec", extensions),
-            )
+        hook_node(  # pyright: ignore[reportArgumentType]
+            "after_exec",
+            default_next=_after_exec_default_next,
+            hooks=hooks_at("after_exec", extensions),
         ),
         input_schema=state_cls,
     )

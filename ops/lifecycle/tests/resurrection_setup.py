@@ -5,7 +5,7 @@ from uuid import uuid4
 import psycopg
 
 from base.agents.birth.spawn import create_agent_row
-from base.agents.impersonation.wake import publish_inbound_wake
+from base.agents.inbox.wake import publish_inbound_wake
 from base.clock import SYSTEM_TIMERS
 from base.clock.tests.seeded_rng import seeded_rng
 from base.cluster.machine import MachineIdentityReader

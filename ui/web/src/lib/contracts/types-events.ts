@@ -134,9 +134,6 @@ export interface ErrorEvent extends BaseEvent {
 export interface CancelledEvent extends BaseEvent {
   readonly role: "cancelled";
 }
-export interface ImpersonationChangedEvent extends BaseEvent {
-  readonly role: "impersonation_changed";
-}
 export interface InboundArrivedEvent extends BaseEvent {
   readonly role: "inbound_arrived";
   readonly inbound_id: number;
@@ -249,7 +246,6 @@ export type SystemEvent =
   | ExecOutputEvent
   | ErrorEvent
   | CancelledEvent
-  | ImpersonationChangedEvent
   | InboundArrivedEvent
   | InboundCommittedEvent
   | LabelUpdatedEvent

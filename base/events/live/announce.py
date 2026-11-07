@@ -16,7 +16,6 @@ from base.events.live.bus import EventBus
 from base.events.live.projection import (
     AgentSpawned,
     AgentUpdated,
-    ImpersonationChanged,
     TaskCreated,
     TaskUpdated,
 )
@@ -47,12 +46,6 @@ def publish_agent_updated_sync(bus: EventBus, agent_id: int) -> None:
     """Publish a committed lifecycle/display-state hint without a database read."""
     ev = AgentUpdated(agent_id=agent_id)
     bus.publish_best_effort_sync(ev.model_dump_json(), context="agent_updated")
-
-
-def publish_impersonation_changed_sync(bus: EventBus, agent_id: int) -> None:
-    """Refresh the selected timeline after a committed lease change."""
-    ev = ImpersonationChanged(agent_id=agent_id)
-    bus.publish_best_effort_sync(ev.model_dump_json(), context="impersonation_changed")
 
 
 def publish_task_created_sync(bus: SyncPublisher, agent_id: int, task_id: int) -> None:

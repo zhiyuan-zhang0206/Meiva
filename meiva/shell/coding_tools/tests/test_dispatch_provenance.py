@@ -189,20 +189,6 @@ def test_the_block_is_generated_from_validated_flags() -> None:
 
 
 @pytest.mark.usefixtures("no_agent")
-def test_a_takeover_gets_the_three_line_form() -> None:
-    parser = _parser()
-    args = parser.parse_args(["--why", "because"])
-
-    text = require_lineage(parser, args, now=NOW, takeover=True)
-
-    lines = text.splitlines()
-    assert len(lines) == 3
-    assert lines[1] == "why: because"
-    assert lines[0].startswith("requested_by:")
-    assert lines[2].startswith("return_to:")
-
-
-@pytest.mark.usefixtures("no_agent")
 def test_facts_without_an_agent_identity_name_nobody() -> None:
     assert _common.read_dispatch_facts() == DispatchFacts(
         parent_agent_id=None, ancestor_ids=None, directory=None

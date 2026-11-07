@@ -67,13 +67,12 @@ class _LineageOptions:
 
 
 # meiva:note
-# A missing --why is a usage error: the reason is the one field the launcher cannot derive, and a worker without it cannot judge whether the work fits. Takeover launches get the three-line form because they create no task or work file. The facts of who dispatched the launch are read from the cluster here, once; the block itself is a pure function of them.
+# A missing --why is a usage error: the reason is the one field the launcher cannot derive, and a worker without it cannot judge whether the work fits. The facts of who dispatched the launch are read from the cluster here, once; the block itself is a pure function of them.
 def require_lineage(
     parser: argparse.ArgumentParser,
     args: argparse.Namespace,
     *,
     now: datetime,
-    takeover: bool = False,
 ) -> str:
     from base.host.boundary.options import options
     from base.sessions import provenance as provenance_block
@@ -97,7 +96,7 @@ def require_lineage(
         priority=priority,
         now=now,
     )
-    return provenance_block.render_takeover(block) if takeover else provenance_block.render(block)
+    return provenance_block.render(block)
 
 
 # meiva:note

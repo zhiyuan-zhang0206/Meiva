@@ -19,7 +19,6 @@ MAX_BLOCK_CHARS = 800
 # inside the block budget. No real label is near this (the longest in the cluster is 67 characters);
 # the bound exists so a self-chosen long label can never truncate the return address.
 MAX_LABEL_CHARS = 80
-MAX_TAKEOVER_CHARS = 400
 _MUST_REPORT = (
     "must_report: for_task id + absolute path of every deliverable + a one-line conclusion"
 )
@@ -111,19 +110,6 @@ def render(prov: DispatchProvenance) -> str:
         return bare
     shortened = _degrade(prov, why=_why(prov)[: spare - 1].rstrip() + "\u2026")
     return _render(shortened, compact=3)
-
-
-def render_takeover(prov: DispatchProvenance) -> str:
-    parent = f"agent {prov.parent_agent_id}" if prov.parent_agent_id else "unknown"
-    label = _line(prov.parent_label or "")
-    requested_by = f"requested_by: {parent}" + (f' "{label}"' if label else "")
-    text = "\n".join([requested_by, f"why: {_why(prov)}", f"return_to: {parent}"])
-    if len(text) <= MAX_TAKEOVER_CHARS:
-        return text
-    fixed = len(text) - len(_why(prov))
-    budget = max(MAX_TAKEOVER_CHARS - fixed - 1, 0)
-    shortened = _why(prov)[:budget].rstrip() + "\u2026"
-    return "\n".join([requested_by, f"why: {shortened}", f"return_to: {parent}"])
 
 
 def has_marker(text: str) -> bool:

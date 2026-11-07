@@ -11,8 +11,8 @@ import psycopg
 import pytest
 import redis
 
-from base.agents.impersonation.wake import publish_inbound_wake
 from base.agents.inbox.insert import insert_inbound_message
+from base.agents.inbox.wake import publish_inbound_wake
 from base.clock import SYSTEM_TIMERS
 from base.clock.tests.seeded_rng import seeded_rng
 from base.cluster import redis_channel_prefix

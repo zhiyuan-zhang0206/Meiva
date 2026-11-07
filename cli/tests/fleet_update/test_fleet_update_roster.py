@@ -31,7 +31,7 @@ def test_a_roster_that_never_agrees_fails_with_its_last_state(
     cluster, run = env
     assert run("down") == 0
     cluster.roster_lag = 10**6
-    cluster.pacing = Pacing(roster_poll_s=0.25, lease_tick_s=0.25)
+    cluster.pacing = Pacing(roster_poll_s=0.25)
     assert run("up", "--roster-timeout", "1") == 3
     assert cluster.roster_reads >= 1
     out = capsys.readouterr().out
@@ -76,7 +76,7 @@ def test_a_listed_machine_that_is_offline_fails(
     assert run("down") == 0
     cluster.laptop = _LAPTOP_OFF
     cluster.silent.add("lin")
-    cluster.pacing = Pacing(roster_poll_s=0.25, lease_tick_s=0.25)
+    cluster.pacing = Pacing(roster_poll_s=0.25)
     assert run("up", "--roster-timeout", "1") == 3
     out = capsys.readouterr().out
     assert "roster after 1s: offline ['lin']" in out

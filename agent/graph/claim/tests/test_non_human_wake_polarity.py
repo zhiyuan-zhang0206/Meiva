@@ -15,7 +15,7 @@ from agent.graph.claim.harness_activity import HarnessTurnProjector
 from agent.graph.claim.node import claim_node_impl, settle_claimed_batch
 from agent.graph.claim.tests.claim_support import make_runtime, thread_config
 from agent.graph.claim.turn_stamp import persist_last_active
-from agent.messages import NoteTag, system_note_message
+from agent.messages import NoteTag
 from agent.state import AgentState
 from base.agents.history.timeline_item import TimelineItem
 from base.agents.messages.kwargs import read_meiva_kwargs
@@ -203,28 +203,6 @@ async def test_claim_node_impl_idle_reset_and_handoff_resume_polarity(
     )
     assert cmd_restart.update is not None
     assert "non_human_wake" not in cmd_restart.update
-
-    receipt = f"{tid}:1"
-    handoff_note = system_note_message(
-        content="External takeover session ended; resume user conversation.",
-        tag=NoteTag.IMPERSONATION,
-        picked_up_at=START,
-    )
-    handoff_note.id = f"impersonation-handoff:{receipt}"
-    cmd_handoff = await claim_node_impl(
-        AgentState(
-            messages=[SystemMessage(content="sys"), handoff_note],
-            impersonation_handoff_id=receipt,
-            halted=False,
-            turn_active=False,
-            non_human_wake=True,
-        ),
-        runtime,
-        cfg,
-    )
-    assert cmd_handoff.goto != "END"
-    assert cmd_handoff.update is not None
-    assert cmd_handoff.update.get("non_human_wake") is False
 
 
 async def test_settle_claimed_batch_appends_recency_reminder_only_on_fresh_non_human_wake(

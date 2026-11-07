@@ -7,9 +7,6 @@ and the event write (`emit`).
 from __future__ import annotations
 
 import asyncio
-import os
-import subprocess
-import sys
 from pathlib import Path
 from typing import Any
 
@@ -624,44 +621,12 @@ def test_sdk_calls_by_tool_call_id_respects_the_start_window() -> None:
     assert set(sdk_usage_telemetry.sdk_calls_by_tool_call_id(messages, start=1)) == {"tc-2"}
 
 
-# meiva:note
-# Invokes `_sdk_cold_child.py` with a fixed argument vector to verify that a cold capture
-# import failure rejects the metered body before executing it.
-@pytest.mark.parametrize("error_type", [ImportError, RuntimeError])
-@pytest.mark.parametrize("async_call", [False, True])
-def test_local_capture_import_failure_rejects_body_with_original_exception(
-    tmp_path: Path,
-    error_type: type[Exception],
-    async_call: bool,
-) -> None:
-    result = subprocess.run(  # noqa: S603
-        [
-            sys.executable,
-            "-I",
-            str(Path(__file__).with_name("_sdk_cold_child.py")),
-            "capture_import_failure",
-        ],
-        cwd=tmp_path,
-        env={
-            **{key: value for key, value in os.environ.items() if key != "MEIVA_CONFIG_BOOT"},
-            "MEIVA_HOME": str(tmp_path / "absent-home"),
-            "MEIVA_CONFIG_FETCH": "skip",
-            "TEST_CAPTURE_ERROR": error_type.__name__,
-            "TEST_CAPTURE_ASYNC": "1" if async_call else "0",
-        },
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    assert result.returncode == 0, result.stderr
-
-
 def test_no_local_participant_uses_the_real_optional_gate(
     emitted_events: EmittedEvents, sampling_owner: call_policy.SamplingPolicyOwner
 ) -> None:
-    from base.agents.impersonation import manifest
+    from base.agents.sdk import capture
 
-    with manifest.admitted_local_sdk_call() as admission:
+    with capture.admitted_local_sdk_call() as admission:
         assert admission is None
 
     def body() -> str:
@@ -679,26 +644,3 @@ def test_no_local_participant_uses_the_real_optional_gate(
         == "without-participant"
     )
     assert _emitted_calls(emitted_events) == [("capture.call", None)]
-
-
-@pytest.mark.parametrize("error_type", ["ImportError", "RuntimeError"])
-def test_cold_capture_import_failure_rejects_body(tmp_path: Path, error_type: str) -> None:
-    result = subprocess.run(  # noqa: S603 — fixed argv, this interpreter runs the child script
-        [
-            sys.executable,
-            "-I",
-            str(Path(__file__).with_name("_sdk_cold_child.py")),
-            "capture_import_failure",
-        ],
-        cwd=tmp_path,
-        env={
-            **{key: value for key, value in os.environ.items() if key != "MEIVA_CONFIG_BOOT"},
-            "MEIVA_HOME": str(tmp_path / "absent-home"),
-            "MEIVA_CONFIG_FETCH": "skip",
-            "TEST_CAPTURE_ERROR": error_type,
-        },
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    assert result.returncode == 0, result.stderr

@@ -839,56 +839,6 @@
         }
       }
     },
-    "/api/agents/{agent_id}/impersonation/force-expire": {
-      "post": {
-        "summary": "Post Force Expire Impersonation",
-        "description": "End the caller's observed takeover without terminating the native agent.",
-        "operationId": "post_force_expire_impersonation_api_agents__agent_id__impersonation_force_expire_post",
-        "parameters": [
-          {
-            "name": "agent_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "integer",
-              "title": "Agent Id"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ForceExpireImpersonationRequest"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ForceExpireImpersonationResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/api/agents/{agent_id}/terminate": {
       "post": {
         "summary": "Post Agent Terminate",
@@ -1120,7 +1070,7 @@
     "/api/agents/{agent_id}/transfer": {
       "post": {
         "summary": "Post Agent Transfer",
-        "description": "Transfer a settled (`idling` or `terminated`) native Meiva agent — including its workspace directory and central placement — to another live `agent-runner` machine. Running agents, external-harness agents, and agents with open or unsettled impersonation leases are refused with HTTP 409.",
+        "description": "Transfer a settled (`idling` or `terminated`) native Meiva agent — including its workspace directory and central placement — to another live `agent-runner` machine. Running agents, external-harness agents, and agents with in-flight commands or uploads are refused with HTTP 409.",
         "operationId": "post_agent_transfer_api_agents__agent_id__transfer_post",
         "parameters": [
           {
@@ -5984,22 +5934,6 @@
             }
           },
           {
-            "name": "impersonation_session",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Impersonation Session"
-            }
-          },
-          {
             "name": "machine",
             "in": "query",
             "required": false,
@@ -8597,33 +8531,6 @@
             ],
             "title": "Heartbeat Paused Until"
           },
-          "open_impersonation_session_id": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Open Impersonation Session Id"
-          },
-          "open_impersonation_status": {
-            "anyOf": [
-              {
-                "type": "string",
-                "enum": [
-                  "requested",
-                  "accepted",
-                  "active"
-                ]
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Open Impersonation Status"
-          },
           "harness_exit_code": {
             "anyOf": [
               {
@@ -8667,9 +8574,7 @@
           "has_pending_question",
           "highest_notice_priority",
           "unread_notice_count",
-          "heartbeat_paused_until",
-          "open_impersonation_session_id",
-          "open_impersonation_status"
+          "heartbeat_paused_until"
         ],
         "title": "AgentCard",
         "description": "Scalar list state; selected-agent details and notice bodies are separate reads."
@@ -12557,42 +12462,6 @@
         "title": "FleetGraphResponse",
         "description": "GET /api/fleet/graph response.\n\n`telemetry_stale` says the heartbeat guard was old or missing while this\notherwise complete graph was read. `snapshot_at` records when the graph\nsnapshot was produced; a response served from the short poll cache keeps\nthat timestamp so clients can show its age."
       },
-      "ForceExpireImpersonationRequest": {
-        "properties": {
-          "session_id": {
-            "type": "integer",
-            "minimum": 0.0,
-            "title": "Session Id"
-          }
-        },
-        "type": "object",
-        "required": [
-          "session_id"
-        ],
-        "title": "ForceExpireImpersonationRequest"
-      },
-      "ForceExpireImpersonationResponse": {
-        "properties": {
-          "session_id": {
-            "type": "integer",
-            "title": "Session Id"
-          },
-          "status": {
-            "type": "string",
-            "enum": [
-              "expired",
-              "not_open"
-            ],
-            "title": "Status"
-          }
-        },
-        "type": "object",
-        "required": [
-          "session_id",
-          "status"
-        ],
-        "title": "ForceExpireImpersonationResponse"
-      },
       "GuardedNoticeEdit": {
         "properties": {
           "observed_notice_id": {
@@ -12908,68 +12777,6 @@
           "items"
         ],
         "title": "HostPermissionsPayload"
-      },
-      "ImpersonationMetadata": {
-        "properties": {
-          "agent_id": {
-            "type": "integer",
-            "title": "Agent Id"
-          },
-          "session_id": {
-            "type": "integer",
-            "title": "Session Id"
-          },
-          "name": {
-            "type": "string",
-            "title": "Name"
-          },
-          "executor_name": {
-            "type": "string",
-            "title": "Executor Name"
-          },
-          "provider": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Provider"
-          },
-          "anchor_item_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Anchor Item Id"
-          },
-          "seq": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Seq"
-          }
-        },
-        "type": "object",
-        "required": [
-          "agent_id",
-          "session_id",
-          "name",
-          "executor_name",
-          "provider"
-        ],
-        "title": "ImpersonationMetadata"
       },
       "InspectMetricsMetadata": {
         "properties": {
@@ -19867,16 +19674,6 @@
               }
             ],
             "title": "Created At"
-          },
-          "impersonation": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/ImpersonationMetadata"
-              },
-              {
-                "type": "null"
-              }
-            ]
           },
           "inbound_id": {
             "anyOf": [

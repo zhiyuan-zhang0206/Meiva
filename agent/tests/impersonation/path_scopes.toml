@@ -1,3 +1,0 @@
-"agent.tests.agent_tests" = [
-    "test_impersonation_integration.py",
-]

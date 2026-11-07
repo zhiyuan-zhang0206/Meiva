@@ -27,18 +27,6 @@ CODE_ROOT = Path(__file__).resolve().parents[2]
 
 
 # meiva:note
-# A whole, non-negative number of seconds: a negative window is a typo, not a policy.
-def _seconds(text: str) -> int:
-    try:
-        value = int(text)
-    except ValueError as exc:
-        raise argparse.ArgumentTypeError(f"{text!r} is not a whole number of seconds") from exc
-    if value < 0:
-        raise argparse.ArgumentTypeError(f"{text!r} is not a number of seconds >= 0")
-    return value
-
-
-# meiva:note
 # Before any host: names must be in this checkout's roster; shells and browser have own choices.
 # The roster is this checkout's own module, run by the interpreter the entry point named.
 def _service_problems(
@@ -93,7 +81,6 @@ _HALF_VALUES: dict[str, tuple[tuple[str, Callable[[str], object]], ...]] = {
         ("--mode", str),
         ("--stop-timeout", int),
         ("--silence-hours", float),
-        ("--lease-confirm-seconds", _seconds),
     ),
     "up": (("--roster-timeout", int),),
 }
@@ -382,7 +369,6 @@ class DownChoices:
     mode: str
     stop_timeout: int
     silence_hours: float
-    lease_confirm_seconds: int
     python: str
     red: str
 
@@ -459,7 +445,6 @@ def _down_choices(args: argparse.Namespace) -> DownChoices:
         mode=_text(args, "mode"),
         stop_timeout=_whole(args, "stop_timeout"),
         silence_hours=_real(args, "silence_hours"),
-        lease_confirm_seconds=_whole(args, "lease_confirm_seconds"),
         python=_text(args, "python"),
         red=_text(args, "red"),
     )

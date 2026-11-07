@@ -54,7 +54,7 @@ from cli.commands.extensions.external_skill_host.records import (
     Transaction,
 )
 
-SKILL_NAMES: tuple[str, ...] = ("meiva-guide", "impersonator-guide")
+SKILL_NAMES: tuple[str, ...] = ("meiva-guide",)
 _MARKER_NAME = ".meiva-managed.json"
 # meiva:note
 # How long a converge waits for another converge of the same client and skill before it

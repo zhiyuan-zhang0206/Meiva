@@ -26,14 +26,6 @@ class PendingLifecycleFact:
 
 
 @dataclass(frozen=True)
-class ImpersonationConflictFact:
-    session_id: int
-    status: str
-    delta_unapplied: bool
-    handoff_unapplied: bool
-
-
-@dataclass(frozen=True)
 class PendingUploadFact:
     batch_id: str
     state: str
@@ -74,7 +66,6 @@ class TransferPrecheckFacts:
     agent_id: int
     to_machine: str
     pending_lifecycle: PendingLifecycleFact | None = None
-    impersonation: ImpersonationConflictFact | None = None
     pending_upload: PendingUploadFact | None = None
     source_machine: MachineFacts | None = None
     target_machine: MachineFacts | None = None
@@ -117,21 +108,6 @@ def check_blocking_activity(facts: TransferPrecheckFacts) -> TransferRefusal | N
             409,
             f"agent {agent_id} has an in-flight {facts.pending_lifecycle.kind!r} command "
             f"({facts.pending_lifecycle.status}); wait for it to settle before transferring",
-        )
-    if facts.impersonation is not None:
-        imp = facts.impersonation
-        if imp.status in ("requested", "accepted", "active"):
-            return TransferRefusal(
-                409,
-                f"agent {agent_id} has an open impersonation session "
-                f"(session {imp.session_id}, status={imp.status!r}); "
-                "release or force-expire it before transferring",
-            )
-        return TransferRefusal(
-            409,
-            f"agent {agent_id} has an unsettled impersonation handoff "
-            f"(session {imp.session_id}, status={imp.status!r}); "
-            "let its home runner settle the handoff before transferring",
         )
     if facts.pending_upload is not None:
         return TransferRefusal(

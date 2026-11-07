@@ -28,7 +28,6 @@ from base.agents.context import MeivaContext
 from base.agents.context.clients import ClientSet
 from base.agents.context.external_attachment.identity import AttachmentCodec, IdentitySource
 from base.agents.context.external_attachment.state_schema import BaseAgentState
-from base.agents.impersonation.manifest import LocalCaptureGate
 from base.host.boundary.json_values import is_object_dict, is_object_list
 from base.log import logger
 from base.telemetry import Event
@@ -87,7 +86,6 @@ class ExternalAttachment:
         self._closed = False
         self._closing = False
         self._stack = ExitStack()
-        self._event_gate: LocalCaptureGate | None = None
         self._call_lock = Lock()
         self._prior_context: MeivaContext | None = None
         self._bound = False
@@ -171,15 +169,8 @@ class ExternalAttachment:
         with self._call_lock:
             if self._closed or self._closing:
                 raise RuntimeError("external attachment is closing or closed")
-            gate = self._event_gate
-            if gate is None:
-                self._validate()
-                return None
-            with gate.condition:
-                if self._closed or self._closing or gate.admission_closed:
-                    raise RuntimeError("external attachment is closing or closed")
-                self._validate()
-                return gate.admit()
+            self._validate()
+            return None
 
     def capture_local_event(self, event: Event) -> Event:
         return event

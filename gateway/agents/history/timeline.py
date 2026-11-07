@@ -32,7 +32,6 @@ from base.agents.history.harness_messages import (
     load_harness_timeline_items,
 )
 from base.agents.history.timeline import TimelineItem, build_timeline_items, tail_window
-from base.agents.history.timeline_item import hydrate
 from base.agents.messages.timestamp_policy import TimestampPolicy
 from base.db import Database, agent_exists
 from gateway.agents.eval_guard import deny_isolated_result_read
@@ -138,6 +137,7 @@ def _load_history_segment(
     before: str | None = None,
 ) -> list[TimelineItem] | None:
     """Load and render one persisted segment; read/render failures stay visible."""
+    _ = before
     if limit is None:
         limit = read.default_limit
     try:
@@ -148,7 +148,7 @@ def _load_history_segment(
         return None
     prefix = f"s{rank}.{checkpoint_id}"
     items, _ = build_timeline_items(messages, inputs=read.rendering, segment_prefix=prefix)
-    return hydrate(db, items, agent_id, limit=limit, before=before)
+    return items
 
 
 def _load_boundary_ids(db: Database, agent_id: int, depth: int) -> list[str]:
@@ -297,9 +297,8 @@ def _current_items(
     read: TimelineRead,
 ) -> tuple[list[TimelineItem], int]:
     """The current segment's rendered, hydrated items in item-id order + msg_count."""
-    db: Database = gateway_state(request).db
+    _ = (request, agent_id, limit, before)
     items, msg_count = build_timeline_items(messages, inputs=read.rendering)
-    items = hydrate(db, items, agent_id, limit=limit, before=before)
     items.sort(key=lambda it: item_sort_key(it.item_id))
     return items, msg_count
 
@@ -307,10 +306,7 @@ def _current_items(
 # meiva:note
 # The facts the windowing rules read of each rendered item, in order.
 def _rows(items: Sequence[TimelineItem]) -> list[Row]:
-    return [
-        Row(item.item_id, item.kind, item.source is not None and item.impersonation is None)
-        for item in items
-    ]
+    return [Row(item.item_id, item.kind, item.source is not None) for item in items]
 
 
 # meiva:note

@@ -28,7 +28,6 @@ const wireCard: Required<WireAgentCard> = {
   label: "card", machine: "test-host", supports_vision: true, liveness_state: "unknown",
   availability, observation: { runtime_owner: "unknown" }, awaiting_response_count: 3, has_pending_question: false,
   highest_notice_priority: "P2", unread_notice_count: 2, unread_user_message_count: 0, heartbeat_paused_until: null,
-  open_impersonation_session_id: null, open_impersonation_status: null,
   harness_exit_code: null, harness_exit_at: null,
 };
 function card(overrides: Partial<WireAgentCard>): Required<WireAgentCard> {
@@ -36,20 +35,8 @@ function card(overrides: Partial<WireAgentCard>): Required<WireAgentCard> {
 }
 
 it("keeps every card field and input identity when status is unchanged", () => {
-  const input = card({ status: "idling", open_impersonation_status: "requested" });
+  const input = card({ status: "idling" });
   expect(projectAgentStatus(input)).toBe(input);
-});
-it("keeps optional extensions and every card field when an active lease remaps status", () => {
-  const input: Required<WireAgentCard> & { future_optional?: string } = {
-    ...card({ open_impersonation_session_id: 8, open_impersonation_status: "active" }),
-    future_optional: "card-extension",
-  };
-  const before = structuredClone(input);
-  const projected = projectAgentStatus(input);
-  expect(projected).toEqual({ ...input, status: "impersonated" });
-  expect(projected).not.toBe(input);
-  expect(input).toEqual(before);
-  expect(projected.availability?.reason).toBe("launch_unreachable");
 });
 it("keeps optional detail extensions while dropping detail-only fields and aggregating notices", () => {
   const notices: WireAgentRow["notices_awaiting_response"] = (["P3", "P1", "P2"] as const).map(
@@ -67,7 +54,6 @@ it("keeps optional detail extensions while dropping detail-only fields and aggre
   const { notices_awaiting_response: _notices, fork_source_checkpoint_id: _fork, last_probe_at: _probe, ...shared } = input;
   expect(projected).toEqual({
     ...shared, awaiting_response_count: 3, has_pending_question: true, highest_notice_priority: "P1",
-    open_impersonation_session_id: null, open_impersonation_status: null,
   });
   for (const excluded of ["notices_awaiting_response", "fork_source_checkpoint_id", "last_probe_at"]) {
     expect(projected).not.toHaveProperty(excluded);
@@ -75,24 +61,10 @@ it("keeps optional detail extensions while dropping detail-only fields and aggre
   expect(input).toEqual(before);
   expect(projected.availability?.reason).toBe("launch_unreachable");
 });
-it("a requested or accepted lease preserves the native status and card identity", () => {
-  for (const phase of ["requested", "accepted"] as const) {
-    const input = card({ status: "idling", open_impersonation_session_id: 7, open_impersonation_status: phase });
-    expect(projectAgentStatus(input)).toBe(input);
-    expect(projectAgentStatus(input).status).toBe("idling");
-  }
-});
-it("a terminated agent stays terminated even with a stale active lease flag", () => {
-  const input = card({ status: "terminated", open_impersonation_session_id: 7, open_impersonation_status: "active" });
-  expect(projectAgentStatus(input)).toBe(input);
-  expect(projectAgentStatus(input).status).toBe("terminated");
-});
-it("a detail without a lease retains native status and the empty-notice aggregate", () => {
+it("a detail retains native status and the empty-notice aggregate", () => {
   const projected = projectAgentStatus({ ...detail, status: "running" });
   expect(projected.status).toBe("running");
   expect(projected.awaiting_response_count).toBe(0);
   expect(projected.has_pending_question).toBe(false);
   expect(projected.highest_notice_priority).toBeNull();
-  expect(projected.open_impersonation_session_id).toBeNull();
-  expect(projected.open_impersonation_status).toBeNull();
 });

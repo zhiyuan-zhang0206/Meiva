@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SETTINGS_QUERY_KEY } from "@/lib/state/use-user-settings";
 import { useTimelineStore } from "@/lib/timeline/timeline-store";
 import { formatAbsolute, formatRelative, formatUpcoming } from "@/lib/format/time";
-import { AGENTS_QUERY_KEY, AGENT_DETAIL_QUERY_KEY } from "@/lib/fold/agents";
+import { AGENT_DETAIL_QUERY_KEY } from "@/lib/fold/agents";
 import {
   cleanupInspectorTest,
   createInspectorQueryClient,
@@ -251,89 +251,6 @@ describe("InspectorPanel birth (cell in the merged Liveness section, Task #1195)
     expect(
       screen.getByText(`${formatRelative(spawned, new Date())}, ${formatAbsolute(spawned)}`),
     ).toBeTruthy();
-  });
-});
-
-
-describe("InspectorPanel takeover status", () => {
-  it("shows Impersonated for an active lease while the native lifecycle is idling", async () => {
-    getAgentRoster.mockResolvedValue(rosterFixture());
-    getAgentInspectLive.mockResolvedValue(liveFixture({ status: "idling", liveness_state: "offline" }));
-    const { container } = render(<InspectorPanel agentId={1} />);
-
-    await waitFor(() => expect(screen.getByText("Impersonated")).toBeTruthy());
-    expect(screen.queryByText("Idling")).toBeNull();
-    expect(container.querySelector(".text-destructive")).not.toBeNull();
-  });
-
-  it("reacts to activation and release without retaining the takeover status", async () => {
-    const qc = createInspectorQueryClient();
-    qc.setQueryData(AGENTS_QUERY_KEY, rosterFixture({ open_impersonation_status: "requested" }));
-    getAgentInspectLive.mockResolvedValue(liveFixture({ status: "idling" }));
-    render(<InspectorPanel agentId={1} />, qc);
-    await waitFor(() => expect(screen.getByText("Idling")).toBeTruthy());
-
-    act(() => { qc.setQueryData(AGENTS_QUERY_KEY, rosterFixture()); });
-    await waitFor(() => expect(screen.getByText("Impersonated")).toBeTruthy());
-    act(() => {
-      qc.setQueryData(AGENTS_QUERY_KEY, rosterFixture({
-        open_impersonation_session_id: null,
-        open_impersonation_status: null,
-      }));
-    });
-    await waitFor(() => expect(screen.getByText("Idling")).toBeTruthy());
-    expect(screen.queryByText("Impersonated")).toBeNull();
-    expect(getAgentRoster).not.toHaveBeenCalled();
-    expect(getAgentInspectLive).toHaveBeenCalledTimes(1);
-  });
-
-  it.each(["requested", "accepted", null] as const)(
-    "keeps the lifecycle status for a %s lease",
-    async (phase) => {
-      const qc = createInspectorQueryClient();
-      getAgentRoster.mockResolvedValue(rosterFixture({ open_impersonation_status: phase }));
-      getAgentInspectLive.mockResolvedValue(liveFixture({ status: "idling" }));
-      render(<InspectorPanel agentId={1} />, qc);
-
-      await waitFor(() => expect(qc.getQueryState(AGENTS_QUERY_KEY)?.status).toBe("success"));
-      await waitFor(() => expect(screen.getByText("Idling")).toBeTruthy());
-      expect(screen.queryByText("Impersonated")).toBeNull();
-    },
-  );
-
-  it("keeps a terminated Inspector status even if an active roster card is still cached", async () => {
-    const qc = createInspectorQueryClient();
-    qc.setQueryData(AGENTS_QUERY_KEY, rosterFixture());
-    getAgentInspectLive.mockResolvedValue(liveFixture({ status: "terminated" }));
-    render(<InspectorPanel agentId={1} />, qc);
-
-    await waitFor(() => expect(screen.getByText("Terminated")).toBeTruthy());
-    expect(screen.queryByText("Impersonated")).toBeNull();
-  });
-
-  it("keeps takeover status scoped to the selected agent across switches and roster removal", async () => {
-    const qc = createInspectorQueryClient();
-    qc.setQueryData(AGENTS_QUERY_KEY, rosterFixture());
-    getAgentInspectLive.mockImplementation((id) => Promise.resolve(liveFixture({ agent_id: id, status: "idling" })));
-    getAgentInspectStatistics.mockImplementation((id) => Promise.resolve(fixture({ agent_id: id })));
-    const panel = (id: number) => (
-      <QueryClientProvider client={qc}><InspectorPanel agentId={id} /></QueryClientProvider>
-    );
-    const view = renderWithBrowser(panel(2));
-    await waitFor(() => expect(screen.getByText("Idling")).toBeTruthy());
-    expect(screen.queryByText("Impersonated")).toBeNull();
-
-    view.rerender(panel(1));
-    await waitFor(() => expect(screen.getByText("Impersonated")).toBeTruthy());
-    view.rerender(panel(2));
-    await waitFor(() => expect(screen.getByText("Idling")).toBeTruthy());
-    expect(screen.queryByText("Impersonated")).toBeNull();
-
-    view.rerender(panel(1));
-    await waitFor(() => expect(screen.getByText("Impersonated")).toBeTruthy());
-    act(() => { qc.setQueryData(AGENTS_QUERY_KEY, { agents: [], ancestors: [] }); });
-    await waitFor(() => expect(screen.getByText("Idling")).toBeTruthy());
-    expect(screen.queryByText("Impersonated")).toBeNull();
   });
 });
 

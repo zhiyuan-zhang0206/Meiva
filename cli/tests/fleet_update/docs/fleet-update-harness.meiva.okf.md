@@ -23,8 +23,7 @@ supplies a default for every required choice (a test overrides one by passing th
 never collide on a log name, and fails the test on any order production forbids.
 
 `test_fleet_update.py` covers the halves' behavior, `test_fleet_update_choices.py` the
-explicit-argument forwarding and refusals, `test_fleet_update_leases.py` the lease announcement and
-its confirm window, `test_fleet_update_recovery.py` the failed-stop recovery,
+explicit-argument forwarding and refusals, `test_fleet_update_recovery.py` the failed-stop recovery,
 `test_fleet_update_helper_gate.py` the helper gate, and `test_fleet_update_programs.py` runs the
 shipped `cli/commands/management/fleet_gateway.py` roster program for real against a local HTTP
 server standing in for the gateway API. `plan/` holds the tests of the strict decision modules: their
@@ -32,9 +31,9 @@ inputs are the text a host printed and their outputs are values, so they need no
 `local_ssh.py` is the other `ssh`: it ignores the alias and runs the command in a real `zsh` or
 `sh`, for the tests that check what a host's own shell does with a window's command.
 
-The waits are real but short. `Cluster.pacing` hands the window tiny roster-poll and lease-tick
+The waits are real but short. `Cluster.pacing` hands the window tiny roster-poll
 intervals, and the tests that exercise a wait pass the smallest whole-second timeout the command
-accepts (`--roster-timeout 1`, `--lease-confirm-seconds 1`).
+accepts (`--roster-timeout 1`).
 
 ## Contracts
 
@@ -42,6 +41,6 @@ The fake `ssh` refuses production's forbidden order at the offending command —
 
 Because `host_commands.HOME` resolves `$HOME/.meiva/source` directly on target machines rather than reading `MEIVA_HOME`, `conftest.py` isolates `os.environ["HOME"]` to a fresh `tmp_path / "isolated-user-home"` directory for every test in `cli/tests/fleet_update/`, restoring it on teardown. `run_host_shell`, `assert_isolated_home`, `Cluster.process_env` and `local_ssh.py` also refuse to execute when `HOME` (or `FLEET_LOCAL_HOME`) resolves to the operator's `pwd.getpwuid(os.getuid()).pw_dir` home, and `write_executable` refuses to write stub binaries through symlinks.
 
-`hosts`, `names`, `silent`, `hidden`, `roster_lag`, `stored_schedules`, `silence_reply`, `leases`, `lease_reply` and `fail` are per-test knobs. `lease_reads` records how many effects the cluster had already accepted at each lease read, so a test can prove the leases are named before anything stops; a read is never an effect, so `--dry-run` stays effect-free.
+`hosts`, `names`, `silent`, `hidden`, `roster_lag`, `stored_schedules`, `silence_reply` and `fail` are per-test knobs.
 
 Parent: [[cli/docs/cli.meiva.okf.md]].

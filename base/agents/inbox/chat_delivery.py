@@ -17,7 +17,6 @@ import psycopg
 from psycopg.pq import TransactionStatus
 
 from base import telemetry
-from base.agents.impersonation.manifest import record_central_event
 from base.agents.messages.inbound_provenance import (
     InboundProvenance,
     content_sha256,
@@ -129,6 +128,10 @@ def reconcile_chat_inbound(
     )
 
 
+# meiva:note
+# Insert one logical chat, or return its existing same-key inbound id.
+# `publish_wake(agent_id, payload)` is the best-effort wake for a newly inserted inbound
+# (`base.agents.inbox.wake.publish_inbound_wake` bound to the caller's handles).
 def insert_chat_inbound_once(
     db: psycopg.Connection,
     *,
@@ -141,10 +144,6 @@ def insert_chat_inbound_once(
     publish_wake: Callable[[int, str], bool],
     emit_event: Callable[[telemetry.Event], None] = telemetry.emit_prepared,
 ) -> ChatInboundReceipt:
-    """Insert one logical chat, or return its existing same-key inbound id.
-
-    `publish_wake(agent_id, payload)` is the best-effort wake for a newly inserted inbound
-    (`base.agents.impersonation.wake.publish_inbound_wake` bound to the caller's handles)."""
     with db.transaction():
         receipt, prepared_event = insert_chat_inbound_in_transaction(
             db,
@@ -245,6 +244,6 @@ def insert_chat_inbound_in_transaction(
             target_agent_id=sender_id,
             attributes={"inbound_id": receipt.inbound_id, "content": content},
         )
-        prepared_event = record_audit(db, record_central_event(db, prepared_event))
+        prepared_event = record_audit(db, prepared_event)
 
     return receipt, prepared_event

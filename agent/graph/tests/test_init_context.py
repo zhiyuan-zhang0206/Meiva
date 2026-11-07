@@ -653,31 +653,3 @@ def test_capabilities_snapshot_survives_the_checkpoint_round_trip() -> None:
     # they take opposite branches in the drift check.
     assert serde.loads_typed(serde.dumps_typed(CapabilitiesState())).indexed is None
     assert serde.loads_typed(serde.dumps_typed(CapabilitiesState(indexed=set()))).indexed == set()
-
-
-async def test_compacted_takeover_context_restores_explanation_before_summary(
-    database_gate: ProcessDbGate,
-) -> None:
-    from agent.graph.hooks.compact import build_compact_transition
-
-    prior = AgentState(
-        messages=[SystemMessage(content="sys"), HumanMessage(content="Prior work")],
-        impersonation_introduced=True,
-    )
-    transition = build_compact_transition("Finished the fix", resume="before_llm")
-    compacted = prior.model_copy(
-        update={"messages": [], "context_reset": transition["context_reset"]}
-    )
-    cmd = await init_context_node(
-        compacted, _runtime(None, database_gate=database_gate), _config(42)
-    )
-    messages = cast(list[Any], cmd.update["messages"])  # type: ignore[index]
-    assert isinstance(messages[0], SystemMessage)
-    assert messages[1].id == "impersonation-introduction"
-    assert "Impersonation means" in messages[1].content
-    assert "Finished the fix" in messages[2].content
-    restored = compacted.model_copy(update=cmd.update)
-    assert restored.impersonation_introduced is True
-    assert (
-        await init_context_node(restored, _runtime(None, database_gate=database_gate), _config(42))
-    ).update is None

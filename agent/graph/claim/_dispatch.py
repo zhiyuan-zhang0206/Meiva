@@ -572,14 +572,6 @@ async def _dispatch_item(
             await _handle_resurrect(ctx, item, st)
     elif kind == InboundKind.FORK:
         await _handle_fork(agent_id, item, st, ctx.require_agent(), ctx.plugin_registry(), ctx)
-    elif kind == InboundKind.REMINDER:
-        # Lease-expiry reminders are dismissed in the lease's release/expiry
-        # transaction, so one reaching the claim node means that invariant
-        # broke. Render it as a system-sourced chat message instead of
-        # failing the batch: the content is harmless ("lease N expires
-        # at ..."), and a ValueError here would wedge the claim loop on a
-        # stale row.
-        await _handle_chat(ctx, item, st)
     else:
         raise ValueError(f"Unknown inbound kind: {kind!r} (id={item.id})")
 
@@ -633,7 +625,7 @@ def _is_dispatched_for_polarity(
 ) -> bool:
     if item.kind in ROUTING_KINDS and not routing.is_winner(item):
         return False
-    return not (has_compact and item.kind in (InboundKind.CHAT, InboundKind.REMINDER))
+    return not (has_compact and item.kind == InboundKind.CHAT)
 
 
 # meiva:note

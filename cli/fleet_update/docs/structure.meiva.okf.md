@@ -28,7 +28,7 @@ are spent on. Nothing below reads the environment, the clock or `sys.argv`.
   flags each host gets (`stop_wave`, `wave_order`), the journal reading that says whether a stop
   finished (`journal`), what a failed stop brings back (`recovery`), what the probes refuse on
   (`host_probe`, `helper_gate`, `old_target`), how the shipped programs' replies are read
-  (`stored_schedules`, `lease_announcement`, `silence_replies`), the roster gate and the
+  (`stored_schedules`, `silence_replies`), the roster gate and the
   verification steps (`roster`, `verify_steps`, `host_failures`), and the command text each host
   receives (`host_commands`, `gateway_commands`, `prestage`, `oneshot`). The shell reads facts,
   runs the commands and prints the lines these return.

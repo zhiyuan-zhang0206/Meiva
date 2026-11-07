@@ -541,8 +541,7 @@ def cmd_agents_compact(access: GatewayAccess, agent_id: int) -> int:
 #
 # Moves a quiescent (`idling` or `terminated`) native agent and its runner workspace to
 # `to_machine` with a fenced Postgres cutover. Surfaces HTTP 4xx/5xx bodies on stderr
-# before raising so operators see why a transfer was refused (e.g. running turn or open
-# impersonation lease).
+# before raising so operators see why a transfer was refused (e.g. running turn).
 def cmd_agents_transfer(
     access: GatewayAccess,
     agent_id: int,

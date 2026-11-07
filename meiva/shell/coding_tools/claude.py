@@ -1,17 +1,3 @@
-"""Launch, inspect, or stop a Claude Code session in a persistent shell.
-
-A supervised worker (the default) keeps the two-file collaboration: a task
-file, a work file, and a session the launcher's owner follows with the skill's
-``watch_work.py``. An interactive prompt launch (``prompt``) starts Claude Code
-without task/work files and delivers the prompt as its first message; an Meiva
-agent that wants Claude Code to impersonate it simply spawns a session and
-sends it a message with the impersonation instructions.
-
-The ``meiva-guide.external-agents`` skill's ``spawn_claude.py`` is the command-line
-entry; it passes its own skill directory, whose ``references/`` holds the
-collaboration contract.
-"""
-
 from __future__ import annotations
 
 import tempfile

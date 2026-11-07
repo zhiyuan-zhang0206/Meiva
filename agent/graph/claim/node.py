@@ -52,8 +52,6 @@ from agent.db import ClaimedInbound, claim_inbound_batch
 from agent.graph._attach_drain import build_attach_drain
 from agent.graph.hooks.user_delivery import delivery_baseline
 from agent.graph.node_log import StallConfig, flush_node_exit_aggregate, node_lifecycle
-from agent.impersonation import claim_gate
-from agent.impersonation_handoff import resume_note_pending
 from agent.messages import NoteTag, has_conversation, system_note_message
 from agent.nodes import BEFORE_LLM, CLAIM, END
 from agent.ownership.inbound import RuntimeOwnershipLostError
@@ -102,11 +100,7 @@ def claim_will_idle(state: _state.AgentState, *, harness: Harness = Harness.MEIV
     """
     if harness is not Harness.MEIVA:
         return not bool(state.harness_pending_input)
-    return (
-        state.halted
-        or (not has_conversation(state.messages) and not resume_note_pending(state))
-        or state.circuit.parks_idle
-    )
+    return state.halted or not has_conversation(state.messages) or state.circuit.parks_idle
 
 
 async def claim_node_impl(
@@ -128,9 +122,6 @@ async def claim_node_impl(
         return Command[ClaimGoto](update={"halted": False}, goto=route_target(ctx, BEFORE_LLM))
 
     agent_id = agent_id_from_config(config)
-    control = await claim_gate(state, agent_id, ctx)
-    if control is not None:
-        return control  # pyright: ignore[reportReturnType]
 
     # ── First SELECT: try uncontended claim before pub/sub wait ──
     try:
@@ -164,11 +155,8 @@ async def claim_node_impl(
             return Command[ClaimGoto](
                 update={"turn_active": False, "turn_idle": True, **idle_reset}, goto=END
             )
-        continuation_update: dict[str, object] = {"halted": False, "turn_active": True}
-        if resume_note_pending(state):
-            continuation_update["non_human_wake"] = False
         return Command[ClaimGoto](
-            update=continuation_update,
+            update={"halted": False, "turn_active": True},
             goto=route_target(ctx, BEFORE_LLM),
         )
 
