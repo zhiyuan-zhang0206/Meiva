@@ -1,7 +1,6 @@
 "use client";
 
 import { useUserMessages, withUserMessages, withQuestions } from "@/lib/context/use-user-messages";
-import { useQuery } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ComponentProps, ComponentType } from "react";
@@ -152,7 +151,6 @@ export function HomePageView(props: HomePageProps) {
     pendingSpawnCount,
     isLoading: agentsLoading,
   } = agents;
-  const client = useApi();
   const diagnostics = useStreamHub().transport.diagnostics;
   const toUser = useToUser(activeId);
   const noticeFeed = useNotices();
@@ -202,16 +200,6 @@ export function HomePageView(props: HomePageProps) {
     },
     [spawn, focusComposer],
   );
-
-  useQuery({
-    queryKey: ["agent-pages", activeId] as const,
-    queryFn: () => {
-      if (activeId == null) throw new Error("pages preload: activeId is null");
-      return client.listPages(activeId);
-    },
-    enabled: activeId != null,
-    staleTime: 10_000,
-  });
 
   const sidebarColumn = (
     <ErrorBoundary diagnostics={diagnostics}>

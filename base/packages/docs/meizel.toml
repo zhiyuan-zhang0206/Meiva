@@ -1,4 +1,4 @@
-exports = ["frontmatter.py", "notes.py", "okf_graph.py", "pages_copy.py"]
+exports = ["frontmatter.py", "notes.py", "okf_graph.py"]
 
 [uses]
 "notes.py" = ["frontmatter.py"]

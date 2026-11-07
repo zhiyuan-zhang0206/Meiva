@@ -394,52 +394,6 @@ def resurrect(agent_id: int, *, prompt: str, resurrected_by: str | None = None) 
     return _StatusAnswer.model_validate(_transport.json_object(_run(plan, _ctx(None)))).status
 
 
-def register_page(
-    agent_id: int,
-    *,
-    name: str,
-    port: int,
-    host: str,
-    title: str | None,
-    serve_dir: str | None = None,
-    ttl_seconds: int | None = None,
-) -> dict[str, object]:
-    """POST /api/keyed/v1/agents/{id}/pages → PageRow dict (id/name/port/title/...).
-
-    One key per call: transport-level retries share it, so the gateway
-    replays the original acceptance instead of replacing a newer page.
-
-    `serve_dir`: directory the page server serves — recorded so agent boot
-    can re-serve a dead page server after resurrect/restart. Only
-    serve() sets it; show() leaves it None.
-    """
-    page = agent_plans.PageIntent(
-        name=name, port=port, host=host, title=title, serve_dir=serve_dir, ttl_seconds=ttl_seconds
-    )
-    plan = agent_plans.register_page_request(agent_id, page, uuid.uuid4().hex)
-    return _transport.json_object(_run(plan, _ctx(None)))
-
-
-def close_page(agent_id: int, name: str) -> bool:
-    """Close the agent's open page `name`; False when no such page is open.
-
-    Observes the open page list first, then closes exactly that registry row
-    through POST /api/keyed/v1/agents/{id}/pages/{name}/close. A registration
-    that replaces the observed row in between fails the close with 409
-    (httpx.HTTPStatusError) instead of closing the newer page.
-    """
-    observed = agent_plans.open_page(list_open_pages(agent_id), name)
-    if observed is None:
-        return False
-    _run(agent_plans.close_page_request(agent_id, observed, uuid.uuid4().hex), _ctx(None))
-    return True
-
-
-def list_open_pages(agent_id: int) -> list[dict[str, object]]:
-    """GET /api/agents/{id}/pages → the agent's open PageRow dicts."""
-    return _transport.json_rows(_run(Request("GET", f"/api/agents/{agent_id}/pages"), _ctx(None)))
-
-
 def list_machines() -> list[dict[str, object]]:
     """GET /api/cluster/machines → list of {name, description, live} dicts."""
     return _transport.json_rows(_run(Request("GET", "/api/cluster/machines"), _ctx(None)))

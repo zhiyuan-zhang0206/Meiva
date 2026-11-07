@@ -312,26 +312,6 @@ class ShellInfo(BaseModel):
     expires_at: datetime | None = None
 
 
-class PageRow(BaseModel):
-    """Single agent_pages row view — element of GET /api/agents/{aid}/pages +
-    return of register/close endpoints.
-
-    `url`: absolute gateway reverse-proxy URL
-    (`http://<gateway>/pages/<id>-<name>/`) — the gateway serves
-    the page content, so this is the only address the browser needs; the
-    page server's host:port stays inside the gateway."""
-
-    id: int
-    agent_id: int
-    name: str
-    port: int
-    title: str | None
-    serve_dir: str | None
-    url: str
-    created_at: datetime
-    closed_at: datetime | None
-
-
 class SessionInfo(BaseModel):
     """A single live session entry — name, creation time, uptime seconds."""
 

@@ -3,9 +3,7 @@
 import { modelLabel } from "@/lib/contracts/models";
 
 import {
-  ExternalLink,
   HeartPulse,
-  LayoutPanelTop,
   SlidersHorizontal,
   Terminal,
 } from "lucide-react";
@@ -17,7 +15,6 @@ import { useAgentRoster } from "@/lib/agents/use-agents";
 import type {
   AgentInspectLive,
   HeartbeatInfo,
-  PageRow,
   ShellInfo,
 } from "@/lib/contracts/types";
 import { formatRelative, formatUptime } from "@/lib/format/time";
@@ -25,37 +22,9 @@ import { useNow } from "@/lib/format/now/use-now";
 import { useTimeFormat } from "@/lib/format/use-time-format";
 import { cn } from "@/lib/format/utils";
 import { harnessLabel } from "@/lib/harness/harness";
-import { FLEX, FLEX_1, FLEX_COL, MIN_W_0 } from "@/lib/layout/layout";
 import { useWallNow } from "@/lib/transport/transport-context";
 
 import { formatInterval, InspectReadError } from "./inspector-cost-section";
-
-export function PageSection({ pages }: { pages: PageRow[] }) {
-  const t = useTranslations("inspector");
-  if (pages.length === 0) return null;
-
-  return (
-    <Section icon={<LayoutPanelTop className="size-3" />} title={t("sectionPage")}>
-      {pages.map((p) => (
-        <a
-          key={p.name}
-          href={p.url}
-          target="_blank"
-          rel="noopener noreferrer"
-          className={cn("items-center gap-2 rounded bg-sidebar-accent/40 dark:bg-[#2a2926] px-2.5 py-1.5 font-mono text-[11px] leading-[16px] hover:bg-sidebar-accent group", FLEX)}
-        >
-          <ExternalLink className="size-3 shrink-0 text-muted-foreground group-hover:text-foreground" />
-          <span className={cn(FLEX, FLEX_COL, MIN_W_0, FLEX_1)}>
-            <span className="truncate text-foreground dark:text-[#f0ede7]">{p.title ?? p.name}</span>
-            <span className="truncate text-[10px] text-muted-foreground">
-              {p.url}
-            </span>
-          </span>
-        </a>
-      ))}
-    </Section>
-  );
-}
 
 export function ShellsSection({ inspect }: { inspect: AgentInspectLive }) {
   const { shells } = inspect;

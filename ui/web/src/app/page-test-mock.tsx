@@ -330,7 +330,6 @@ export async function resetHomePageTestState() {
   transport.deleteStagedUploadFile.mockResolvedValue(undefined);
   transport.submitUploadedFiles.mockResolvedValue(undefined);
   transport.getUploadDeliveryStatus.mockResolvedValue(undefined);
-  transport.listPages.mockResolvedValue([]);
   homePageApi = {
     ...homePageRig.api,
     // meiva:note
@@ -344,7 +343,6 @@ export async function resetHomePageTestState() {
     deleteStagedUploadFile: transport.deleteStagedUploadFile,
     submitUploadedFiles: transport.submitUploadedFiles,
     getUploadDeliveryStatus: transport.getUploadDeliveryStatus,
-    listPages: transport.listPages,
     getReplySuggestion: transport.getReplySuggestion,
     getUserMessages: transport.getUserMessages,
   };

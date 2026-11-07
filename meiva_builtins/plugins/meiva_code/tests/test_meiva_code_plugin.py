@@ -1,7 +1,7 @@
-"""`plugins.meiva_code` integration tests — meiva.cwd namespace, files.read and ui.serve wraps,
-AGENTS.md injection dedup, end to end: the surface installed from `plugin.contribute()`, state declared
-through `agent_runtime.contribute()`.
-"""
+# meiva:note
+# `plugins.meiva_code` integration tests — meiva.cwd namespace, files.read wraps,
+# AGENTS.md injection dedup, end to end: the surface installed from `plugin.contribute()`, state declared
+# through `agent_runtime.contribute()`.
 
 import io
 import subprocess

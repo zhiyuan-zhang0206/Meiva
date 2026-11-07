@@ -6,10 +6,6 @@ from typing import cast
 import pytest
 
 from meiva.gateway_client.agent_plans import (
-    PageIntent,
-    close_page_request,
-    open_page,
-    register_page_request,
     restart_request,
     resurrect_request,
     terminate_request,
@@ -168,41 +164,4 @@ def test_restart_and_resurrect_carry_their_provenance() -> None:
         "POST",
         "/api/agents/7/resurrect",
         body={"prompt": "wake", "resurrected_by": "agent:1"},
-    )
-
-
-def test_a_page_registration_is_keyed_and_sends_only_what_was_given() -> None:
-    bare = register_page_request(
-        3, PageIntent("main", 8080, "127.0.0.1", None, None, None), "page-key"
-    )
-    assert bare == Request(
-        "POST",
-        "/api/keyed/v1/agents/3/pages",
-        body={"name": "main", "port": 8080, "host": "127.0.0.1"},
-        idempotency_key="page-key",
-    )
-    full = register_page_request(
-        3, PageIntent("main", 8080, "127.0.0.1", "Title", "/srv", 60), "page-key"
-    )
-    assert full.body == {
-        "name": "main",
-        "port": 8080,
-        "host": "127.0.0.1",
-        "title": "Title",
-        "serve_dir": "/srv",
-        "ttl_seconds": 60,
-    }
-
-
-def test_a_page_is_closed_only_by_the_row_that_was_observed() -> None:
-    pages = [{"id": 11, "name": "a"}, {"id": 12, "name": "main"}]
-    observed = open_page(pages, "main")
-    assert observed == {"id": 12, "name": "main"}
-    assert open_page(pages, "gone") is None
-    assert observed is not None
-    assert close_page_request(3, observed, "close-key") == Request(
-        "POST",
-        "/api/keyed/v1/agents/3/pages/main/close",
-        body={"expected_page_id": 12},
-        idempotency_key="close-key",
     )

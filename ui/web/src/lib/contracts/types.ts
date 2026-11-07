@@ -290,11 +290,6 @@ export const inspectLiveQueryKey = (agentId: number) =>
 
 // --- Shell monitor page (GET /api/agents/{id}/shell/{sid}) ---
 //
-// --- meiva.ui.show panel ---
-
-export type PageRow = Schemas["PageRow"];
-export type PageRegisterRequest = Schemas["PageRegisterRequest"];
-
 // GET /api/agents/{id}/conversation-snapshot response (task #3900 batch 2) —
 // the three conversation read models composed into one switch-refresh read
 // (agent-reconcile.ts). Sections are the same frontend types the standalone

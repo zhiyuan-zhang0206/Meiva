@@ -18,7 +18,6 @@ from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
 from meiva import files as _files
-from meiva import ui as _ui
 from meiva import watcher as _watcher
 from meiva.tests.fixtures.pin_agent import pin_agent
 
@@ -77,39 +76,6 @@ class TestFilesEntries:
     ) -> None:
         p = tmp_path / "z.txt"
         _files.write(str(p), "x")  # ensure the read anchor exists
-        with pytest.raises(TypeError, match=match):
-            call()
-
-
-class TestUiEntries:
-    def test_show_unwraps_name_and_title(self) -> None:
-        request = _ui.show_request(("mypage",), 9999, ("My Page",), None)  # pyright: ignore[reportArgumentType]
-        assert (request.name, request.title, request.port) == ("mypage", "My Page", 9999)
-
-    def test_serve_unwraps_dir_and_name(self, tmp_path: Path) -> None:
-        request = _ui.serve_request((str(tmp_path),), ("served",), 9998, None, None)  # pyright: ignore[reportArgumentType]
-        assert (request.name, request.port, request.dir) == ("served", 9998, str(tmp_path))
-
-    def test_close_unwraps_name(self) -> None:
-        assert _ui.close_request(("mypage",)) == "mypage"  # pyright: ignore[reportArgumentType]
-
-    @pytest.mark.parametrize(
-        ("call", "match"),
-        [
-            pytest.param(
-                lambda: _ui.show(("a", "b"), 9999),  # pyright: ignore[reportArgumentType]
-                "name must be a string",
-                id="show-multi",
-            ),
-            pytest.param(lambda: _ui.show("x", port=("80",)), "port must be int", id="show-port"),  # pyright: ignore[reportArgumentType]
-            pytest.param(
-                lambda: _ui.serve(("a", "b"), "n", 9999),  # pyright: ignore[reportArgumentType]
-                "dir must be a string",
-                id="serve-multi",  # pyright: ignore[reportArgumentType]
-            ),  # pyright: ignore[reportArgumentType]
-        ],
-    )
-    def test_multi_element_type_errors(self, call: Any, match: str) -> None:
         with pytest.raises(TypeError, match=match):
             call()
 

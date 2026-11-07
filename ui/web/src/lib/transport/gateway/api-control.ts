@@ -22,7 +22,6 @@ import type {
   NotificationCategoriesResponse,
   PackageDraftResponse,
   PackageKind,
-  PageRow,
   ResolvedConfigView,
   ResolveNoticeIn,
   RestartAgentResponse,
@@ -102,14 +101,6 @@ export function createControlApi(http: Http) {
 
     getToUser: (agentId: number, signal?: AbortSignal, references: string[] = []): Promise<ToUserDocument> => {
       return f(toUserPath(agentId, references), { signal }).then(ok<ToUserDocument>);
-    },
-
-    listPages: (agentId: number): Promise<PageRow[]> => {
-      return f(`/api/agents/${agentId}/pages`).then(ok<PageRow[]>);
-    },
-
-    listAllPages: (): Promise<PageRow[]> => {
-      return f(`/api/pages`).then(ok<PageRow[]>);
     },
 
     getFleetGraph: (opts?: { hours?: number; decayLambda?: number }): Promise<WireFleetGraph> => {

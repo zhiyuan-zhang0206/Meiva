@@ -27,7 +27,7 @@
 --     (claiming and self-lifecycle); agents_meta and agents (process state and
 --     its own label); machine_units and machines (unit registration);
 --     api_idempotency (runner /ops dedupe);
---     agent_tasks, agent_pages, and agent_shell_ttls (SDK
+--     agent_tasks and agent_shell_ttls (SDK
 --     lifecycle); heartbeat_pause_log (pause history); and the LangGraph
 --     checkpoints, checkpoint_blobs, and checkpoint_writes (agent state).
 --   - `base.cluster.authority.groups.ensure_groups` is the sole grant list and
@@ -831,50 +831,6 @@ CREATE UNIQUE INDEX event_dismissals_one_active_class_idx
     ON event_dismissals (category, level, event_name, source, process, agent_id) NULLS NOT DISTINCT
     WHERE status = 'dismissed';
 
--- ─────────────── agent_pages ───────────────
--- HTML UI server registry. meiva.ui.show(name, port) registers an agent-owned
--- server, while meiva.ui.serve() rows are supervised by the
--- page-server daemon in persistent sessions that outlive the agent process.
-CREATE TABLE agent_pages (
-    id         BIGSERIAL PRIMARY KEY,
-    agent_id   BIGINT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
-    name       TEXT NOT NULL,
-    port       INTEGER NOT NULL CHECK (port > 0 AND port < 65536),
-    host       TEXT,
-    title      TEXT,
-    serve_dir  TEXT,  -- set by meiva.ui.serve(); NULL for meiva.ui.show().
-    server_token TEXT, -- durable per-page /health identity, minted by the page-server daemon.
-    session_name TEXT, -- daemon-owned persistent shell; NULL for show() and pre-session rows.
-    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    closed_at  TIMESTAMPTZ,
-    expires_at TIMESTAMPTZ,
-    expired_at TIMESTAMPTZ
-);
-
-COMMENT ON COLUMN agent_pages.serve_dir IS
-    'Directory the page server serves, set by meiva.ui.serve(); NULL for meiva.ui.show().';
-
-CREATE UNIQUE INDEX agent_pages_unique_open
-    ON agent_pages (agent_id, name)
-    WHERE closed_at IS NULL;
-
--- One live page per (host, port): a page server binds its row's socket
--- exclusively. Registration refuses a port another live page holds
--- (ops.pages.assert_port_free) and this index enforces the same rule against
--- concurrent registrations. Expired rows are excluded — they no longer serve
--- and must not block a fresh registration.
-CREATE UNIQUE INDEX agent_pages_unique_live_port
-    ON agent_pages (host, port)
-    WHERE closed_at IS NULL AND expired_at IS NULL;
-
-CREATE INDEX agent_pages_per_agent_open
-    ON agent_pages (agent_id, created_at)
-    WHERE closed_at IS NULL;
-
-CREATE INDEX agent_pages_expiry_idx
-    ON agent_pages (expires_at)
-    WHERE closed_at IS NULL AND expired_at IS NULL;
-
 CREATE TABLE agent_shell_ttls (
     agent_id        BIGINT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
     session_id      BIGINT NOT NULL,
@@ -904,35 +860,6 @@ CREATE INDEX agent_shell_ttl_renewals_agent_session_idx
 
 COMMENT ON TABLE agent_shell_ttl_renewals IS
     'Append-only shell-TTL renewal trail: one row per meiva.shell.sessions.renew call, in the same transaction as the deadline UPDATE. prev/new_expires_at carry the before/after deadlines. No FK to agent_shell_ttls — the reaper deletes that row on reclamation while the audit history must survive.';
-
-CREATE OR REPLACE FUNCTION cascade_close_agent_pages() RETURNS TRIGGER AS $$
-BEGIN
-    IF NEW.status = 'terminated' AND OLD.status IS DISTINCT FROM 'terminated' THEN
-        UPDATE agent_pages SET closed_at = now()
-        WHERE agent_id = NEW.id AND closed_at IS NULL AND serve_dir IS NULL;
-    END IF;
-    RETURN NEW;
-END;
-$$ LANGUAGE plpgsql;
-
-CREATE TRIGGER agents_meta_terminate_cascade_pages
-    AFTER UPDATE OF status ON agents_meta
-    FOR EACH ROW EXECUTE FUNCTION cascade_close_agent_pages();
-
-CREATE OR REPLACE FUNCTION cascade_open_agent_pages() RETURNS TRIGGER AS $$
-BEGIN
-    IF NEW.status IS DISTINCT FROM 'terminated' AND OLD.status = 'terminated' THEN
-        UPDATE agent_pages SET closed_at = NULL
-        WHERE agent_id = NEW.id
-          AND closed_at = OLD.status_changed_at;
-    END IF;
-    RETURN NEW;
-END;
-$$ LANGUAGE plpgsql;
-
-CREATE TRIGGER agents_meta_resurrect_cascade_open_pages
-    AFTER UPDATE OF status ON agents_meta
-    FOR EACH ROW EXECUTE FUNCTION cascade_open_agent_pages();
 
 -- Stamp status_changed_at on every real status transition. BEFORE UPDATE so the
 -- value lands in the same row write; the WHEN guard keeps pid/index-only updates
@@ -2819,14 +2746,6 @@ CREATE TABLE agent_launch_retry_receipts (
 );
 COMMENT ON TABLE agent_launch_retry_receipts IS
 'Immutable guarded retry-launch intents; retain after target deletion, no TTL.';
-
--- Historical page acceptance survives registry/agent cleanup.
-CREATE TABLE page_operation_receipts (
-    operation_key text PRIMARY KEY,
-    request_hash text NOT NULL CHECK (length(request_hash) = 64),
-    acceptance jsonb NOT NULL,
-    accepted_at timestamptz NOT NULL DEFAULT now()
-);
 
 CREATE TABLE im_bridge_alert_acceptances (
     group_id BIGINT PRIMARY KEY CHECK (group_id > 0),

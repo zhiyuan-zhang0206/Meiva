@@ -27,7 +27,7 @@ from base import telemetry
 from base.clock.ids import new_uuid
 from base.cluster.machine import GatewayAccess, gateway_auth_headers
 from base.db import Database
-from base.db.rows import query_all, query_one
+from base.db.rows import query_one
 from base.db.transaction import write_transaction
 from base.events.live.announce import publish_agent_updated
 from base.events.live.bus import EventBus
@@ -38,7 +38,6 @@ from gateway.agents.transfer.rows import (
     ImpersonationRow,
     LifecycleRow,
     MachineRow,
-    PageNameRow,
     TargetGateRow,
     UploadBatchRow,
 )
@@ -69,7 +68,6 @@ from ops.agent_transfer import (
 from ops.agent_transfer.limits import workspace_transfer_limits_from_read_model
 from ops.cluster.rpc import ClusterOpFailed, ClusterOpUnreachable, RpcClient
 from ops.lifecycle.events import publish_page_closed
-from ops.pages import close_all_agent_pages_in_transaction
 from ops.rpc_schemas import (
     ResurrectAgentRequest,
     TerminateAgentRequest,
@@ -265,15 +263,7 @@ def _guard_idling_pre_termination_blocking(
         if activity_refusal is not None:
             raise HTTPException(activity_refusal.status_code, activity_refusal.detail)
 
-        open_pages = [
-            row.name
-            for row in query_all(
-                conn,
-                PageNameRow,
-                "SELECT name FROM agent_pages WHERE agent_id = %s AND closed_at IS NULL",
-                (agent_id,),
-            )
-        ]
+        open_pages: list[str] = []
         conn.execute(
             "UPDATE agents_meta SET status = 'terminated', termination_source = 'user', "
             "heartbeat_paused_until = NULL WHERE id = %s",
@@ -395,20 +385,9 @@ def commit_cutover_blocking(
                 f"agent {snapshot.agent_id} started an upload delivery batch during transfer"
             )
 
-        cutover_closed_pages = close_all_agent_pages_in_transaction(conn, snapshot.agent_id)
-        closed_pages = list(dict.fromkeys(s1_closed + cutover_closed_pages))
+        closed_pages = list(dict.fromkeys(s1_closed))
         killed_shell_sessions = sorted(set(s1_shells + manifest.killed_shell_sessions))
 
-        # meiva:note
-        # Unlink only pages tied to the current status_changed_at so resurrect on to_machine
-        # does not reopen host-local pages from from_machine, preserving older history.
-        conn.execute(
-            "UPDATE agent_pages SET closed_at = closed_at - interval '1 millisecond' "
-            "WHERE agent_id = %s AND closed_at = ("
-            "  SELECT status_changed_at FROM agents_meta WHERE id = %s"
-            ")",
-            (snapshot.agent_id, snapshot.agent_id),
-        )
         conn.execute("DELETE FROM agent_shell_ttls WHERE agent_id = %s", (snapshot.agent_id,))
         conn.execute(
             "UPDATE agents_meta SET machine = %s, runtime_owner = NULL, "

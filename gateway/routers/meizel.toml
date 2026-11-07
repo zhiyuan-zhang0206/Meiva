@@ -1,10 +1,9 @@
-exports = ["commands.py", "configuration", "fleet", "frontend_telemetry.py", "guide.py", "host_permissions.py", "memory_api", "notifications.py", "page_serving", "proxies", "receipts", "settings.py", "shell.py", "tasks.py", "upload"]
+exports = ["commands.py", "configuration", "fleet", "frontend_telemetry.py", "guide.py", "host_permissions.py", "memory_api", "notifications.py", "proxies", "receipts", "settings.py", "shell.py", "tasks.py", "upload"]
 
 [uses]
 "configuration" = ["refusal.py"]
-"page_serving" = ["refusal.py"]
 "tasks.py" = ["receipts"]
-"tests" = ["memory_api", "page_serving", "refusal.py"]
+"tests" = ["memory_api"]
 
 [purity]
 "__init__.py" = "strict"

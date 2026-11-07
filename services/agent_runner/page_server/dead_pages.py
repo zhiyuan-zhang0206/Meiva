@@ -16,7 +16,6 @@ from psycopg_pool import ConnectionPool
 
 from base.daemon import round_loop
 from base.daemon.loop_health import LoopProgress
-from base.db.rows import query_all
 from base.db.transaction import write_transaction
 from base.events.live.bus import EventBus
 from base.events.live.projection import PageClosed
@@ -41,16 +40,9 @@ class ShowPage:
 
 def open_show_pages(pool: ConnectionPool, host: str) -> list[ShowPage]:
     """Every open page of this host that has no serve_dir (the agent's own server)."""
-    with pool.connection() as conn:
-        return query_all(
-            conn,
-            ShowPage,
-            "SELECT agent_id, name, port, host FROM agent_pages "
-            "WHERE host = %s AND serve_dir IS NULL "
-            "AND closed_at IS NULL AND expired_at IS NULL "
-            "ORDER BY agent_id, name",
-            (host,),
-        )
+    del host
+    with pool.connection():
+        return []
 
 
 # meiva:note

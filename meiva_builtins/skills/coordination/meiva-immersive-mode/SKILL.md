@@ -1,6 +1,6 @@
 ---
 name: meiva-immersive-mode
-description: "Runs a tight-loop live session with the human present across a shared perceptual surface (chat, live preview page, or device/audio output) while heavy work runs in the background. Use when the human explicitly starts a live session (immersive on, live pairing) — offer once when live steering helps, never enter on your own."
+description: "Runs a tight-loop live session with the human present across a shared perceptual surface (chat, live preview, or device/audio output) while heavy work runs in the background. Use when the human explicitly starts a live session (immersive on, live pairing) — offer once when live steering helps, never enter on your own."
 ---
 
 # Immersive Mode — Tight-Loop Shared-Surface Control
@@ -15,9 +15,8 @@ asynchronously in the background.
 When the human is live, their attention anchors on one **primary surface**:
 
 - **Conversation stream**: direct rapid Q&A, alignment, or live triage in chat.
-- **Live visual or app surface**: a hot-reloading dev server registered with
-  `meiva.ui.show(name, port, ...)` or a static/prototype directory served via
-  `meiva.ui.serve(dir, name, port, ...)`.
+- **Live visual or app surface**: a hot-reloading dev server URL, or the shared
+  context panel (`to_user.md` / `meiva.ui.publish()`).
 - **Physical or multimodal output**: audio test tones on speakers, GUI actions,
   or hardware probes the human perceives directly.
 
@@ -74,11 +73,11 @@ Two distinct clocks govern the loop:
      ledger, and enforce the same hot/cold split by discipline alone.
 4. **Establish the live feedback rig first**: When the primary surface is
    non-text, your first operational move is a minimal tracer bullet that stands
-   up the live target the human perceives — start the HMR/dev server and register
-   it with `meiva.ui.show`, or fire a 1-second audio/device probe to verify the
-   output path. If initial build or setup is slow, immediately dispatch the heavy
-   setup to the background while aligning details in chat or serving a lightweight
-   static prototype via `meiva.ui.serve`, switching over once the live rig boots.
+   up the live target the human perceives — start the HMR/dev server (e.g. running
+   in the background and sharing the local URL), update `<workspace>/to_user.md`,
+   or fire a 1-second audio/device probe to verify the output path. If initial
+   build or setup is slow, immediately dispatch the heavy setup to the background
+   while aligning details in chat, switching over once the live rig boots.
 
 ## Foreground inline (hot path) vs. background delegate (cold path)
 
@@ -106,16 +105,13 @@ Two distinct clocks govern the loop:
 
 1. **Human preempts**: A new human message preempts — finish at most the current
    fast inline step, answer or steer immediately, then continue.
-2. **Sub-orchestrate fan-outs (>2 concurrent background tasks)**: Every
-   `send_message` to the foreground agent wakes it for a turn. When background
-   work needs more than two parallel tasks, do **not** attach leaf workers
-   directly to the foreground; spawn **one background sub-orchestrator** (or a
-   `meiva-dynamic-workflow` coordinator) to manage all leaf workers. Leaf workers
-   report only to that sub-orchestrator; only aggregated milestones,
-   human-authority blockers, or verified deliverables reach the foreground.
-3. **Protect the loop**: Batch non-urgent fleet arrivals into natural session
-   pauses; surface immediately only what needs human judgment now.
-4. **Signal, never filler**: Every chat turn carries an observable-delta cue, a
+2. **Protect the loop**: Now that user delivery (`user_facing` / explicit delivery)
+   is decoupled from internal agent turns, leaf worker `send_message` wakes do
+   not spam the user's primary surface. The foreground agent can manage leaf
+   workers directly and filter/batch what reaches the human. Batch non-urgent
+   fleet arrivals into natural session pauses; surface immediately only what
+   needs human judgment now.
+3. **Signal, never filler**: Every chat turn carries an observable-delta cue, a
    finding, a decision, or an explicit wait notice. Never manufacture chatter,
    rush verification, or spawn cosmetic workers to look busy.
 

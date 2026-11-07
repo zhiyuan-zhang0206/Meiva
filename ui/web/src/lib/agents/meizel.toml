@@ -1,4 +1,4 @@
-exports = ["agent-reconcile.ts", "agent-tree.ts", "sidebar.ts", "use-agent-pages.ts", "use-agent-read-repair.ts", "use-agents.ts", "use-all-pages.ts", "use-fleet-agents.ts", "use-pending-messages.ts"]
+exports = ["agent-reconcile.ts", "agent-tree.ts", "sidebar.ts", "use-agent-read-repair.ts", "use-agents.ts", "use-fleet-agents.ts", "use-pending-messages.ts"]
 
 [uses]
 "agent-reconcile.test.ts" = ["agent-reconcile.ts"]
@@ -6,10 +6,8 @@ exports = ["agent-reconcile.ts", "agent-tree.ts", "sidebar.ts", "use-agent-pages
 "sidebar.test.ts" = ["sidebar.ts"]
 "sidebar.ts" = ["sidebar-stats.ts"]
 "use-agent-actions.test.tsx" = ["use-agent-actions.ts"]
-"use-agent-pages.test.ts" = ["use-agent-pages.ts"]
 "use-agents.test.ts" = ["use-agents.ts"]
 "use-agents.ts" = ["use-agent-actions.ts"]
-"use-all-pages.test.ts" = ["use-all-pages.ts"]
 "use-fleet-agents.test.tsx" = ["use-fleet-agents.ts"]
 "use-fleet-agents.ts" = ["use-agents.ts"]
 "use-pending-messages.test.ts" = ["use-pending-messages.ts"]

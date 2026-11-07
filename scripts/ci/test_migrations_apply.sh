@@ -187,10 +187,6 @@ psql -d "$TEST_DB" -v ON_ERROR_STOP=1 <<'SQL'
 INSERT INTO agents (label) VALUES ('smoke-agent');
 INSERT INTO agents_meta (id, status, machine)
     VALUES ((SELECT max(id) FROM agents), 'running', 'smoke-machine');
-INSERT INTO agent_pages (agent_id, name, port)
-    VALUES ((SELECT max(id) FROM agents), 'show', 9001);
-INSERT INTO agent_pages (agent_id, name, port, serve_dir)
-    VALUES ((SELECT max(id) FROM agents), 'serve', 9002, '/tmp/serve');
 UPDATE agents_meta SET status = 'terminated'
     WHERE id = (SELECT max(id) FROM agents);
 
@@ -204,22 +200,8 @@ BEGIN
         RAISE EXCEPTION 'termination did not close the lifecycle interval';
     END IF;
 END $$;
-DO $$
-DECLARE show_closed_count INT;
-DECLARE serve_open_count INT;
-BEGIN
-    SELECT COUNT(*) FILTER (WHERE name = 'show' AND closed_at IS NOT NULL),
-           COUNT(*) FILTER (WHERE name = 'serve' AND closed_at IS NULL)
-      INTO show_closed_count, serve_open_count
-        FROM agent_pages
-        WHERE name IN ('show', 'serve');
-    IF show_closed_count <> 1 OR serve_open_count <> 1 THEN
-        RAISE EXCEPTION 'cascade_close_agent_pages wrong result — show_closed_count=%, serve_open_count=%',
-            show_closed_count, serve_open_count;
-    END IF;
-END $$;
 
--- Check resurrection only after termination's page closure; it reopens pages.
+-- Check resurrection only after termination.
 UPDATE agents_meta SET status = 'idling'
     WHERE id = (SELECT max(id) FROM agents);
 UPDATE agents_meta SET status = 'running'

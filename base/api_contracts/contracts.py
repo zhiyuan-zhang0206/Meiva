@@ -266,22 +266,6 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
         Idempotency.AT_LEAST_ONCE_WITH_KEY,
         note="raw draft identity and original immutable birth snapshot",
     ),
-    ("GET", "/api/pages"): RouteContract(),
-    ("GET", "/pages/{page_key}"): RouteContract(note="page reverse proxy"),
-    ("GET", "/pages/{page_key}/{rest:path}"): RouteContract(note="page reverse proxy"),
-    ("POST", "/pages/{page_key}/reply"): RouteContract(
-        Idempotency.NON_IDEMPOTENT,
-        note="one submitted page answer is one message; a repeat is a second message, not a repair",
-    ),
-    ("POST", "/api/keyed/v1/agents/{agent_id}/pages"): RouteContract(
-        Idempotency.AT_LEAST_ONCE_WITH_KEY,
-        note="versioned page registration commits replacement and original acceptance together",
-    ),
-    ("POST", "/api/keyed/v1/agents/{agent_id}/pages/{name}/close"): RouteContract(
-        Idempotency.AT_LEAST_ONCE_WITH_KEY,
-        note="versioned page close requires observed row identity; replay cannot close a later page",
-    ),
-    ("GET", "/api/agents/{agent_id}/pages"): RouteContract(note="list open pages"),
     ("GET", "/api/plugin-ui/{plugin}"): RouteContract(
         note="plugin page mount — trailing-slash redirect"
     ),

@@ -42,7 +42,7 @@ from base.daemon.shutdown import cancel_and_drain, install_graceful_shutdown
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.db.config import db_config_from_boot
-from base.db.rows import query_all, query_one
+from base.db.rows import query_one
 from base.db.transaction import write_transaction
 from base.events.live.bus import EventBus
 from base.host.exit_codes import hard_exit
@@ -127,32 +127,15 @@ def _read(opener: Callable[[str], AbstractContextManager[HTTPResponse]], url: st
 
 def open_rows(pool: ConnectionPool, host: str) -> list[PageRow]:
     """Every open serve row supervised by this host's daemon."""
-    with pool.connection() as conn:
-        return query_all(
-            conn,
-            PageRow,
-            "SELECT id, agent_id, name, port, host, serve_dir, server_token, session_name "
-            "FROM agent_pages "
-            "WHERE closed_at IS NULL AND expired_at IS NULL "
-            "AND serve_dir IS NOT NULL AND host = %s "
-            "ORDER BY agent_id, name",
-            (host,),
-        )
+    del host
+    with pool.connection():
+        return []
 
 
 def _closed_page_sessions(pool: ConnectionPool, host: str) -> list[str]:
     """Persisted page sessions whose rows closed while this daemon was away."""
-    with pool.connection() as conn:
-        rows = query_all(
-            conn,
-            _SessionRow,
-            "SELECT session_name FROM agent_pages "
-            "WHERE (closed_at IS NOT NULL OR expired_at IS NOT NULL) "
-            "AND serve_dir IS NOT NULL AND host = %s "
-            "AND session_name IS NOT NULL",
-            (host,),
-        )
-    return [row.session_name for row in rows]
+    del pool, host
+    return []
 
 
 def _allocate_session_index(pool: ConnectionPool, agent_id: int) -> int:

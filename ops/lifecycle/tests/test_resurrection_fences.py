@@ -37,8 +37,6 @@ class TestResurrectAgent:
         database_gate: ProcessDbGate,
         machine_identity: MachineIdentityReader,
     ) -> None:
-        """A repeated force creates a newer intent fence without changing the
-        real status-transition epoch used to reopen pages on manual resurrect."""
         agent_id = hosted_agent(
             db_conn,
             config_authority=config_authority,
@@ -46,12 +44,6 @@ class TestResurrectAgent:
             database_gate=database_gate,
             local_machine=machine_identity,
         )
-        with db_conn.cursor() as cur:
-            cur.execute(
-                "INSERT INTO agent_pages (agent_id, name, port) VALUES (%s, 'work', 8765)",
-                (agent_id,),
-            )
-        db_conn.commit()
 
         with make_test_pool() as pool:
             force_mark_terminated(database, event_bus, agent_id, pool)
@@ -63,13 +55,7 @@ class TestResurrectAgent:
                     (agent_id,),
                 )
                 first_agent_row = cur.fetchone()
-                cur.execute(
-                    "SELECT closed_at FROM agent_pages WHERE agent_id = %s AND name = 'work'",
-                    (agent_id,),
-                )
-                first_page_row = cur.fetchone()
-            assert first_agent_row is not None and first_page_row is not None
-            assert first_page_row[0] == first_agent_row[0]
+            assert first_agent_row is not None
 
             force_mark_terminated(database, event_bus, agent_id, pool)
 
@@ -81,15 +67,9 @@ class TestResurrectAgent:
                 (agent_id,),
             )
             repeated_agent_row = cur.fetchone()
-            cur.execute(
-                "SELECT closed_at FROM agent_pages WHERE agent_id = %s AND name = 'work'",
-                (agent_id,),
-            )
-            repeated_page_row = cur.fetchone()
-        assert repeated_agent_row is not None and repeated_page_row is not None
+        assert repeated_agent_row is not None
         assert repeated_agent_row[0] == first_agent_row[0]
         assert repeated_agent_row[1] > first_agent_row[1]
-        assert repeated_page_row[0] == first_page_row[0]
 
         resurrect_agent(
             database,
@@ -97,14 +77,6 @@ class TestResurrectAgent:
             agent_id,
             resurrected_by="user",
         )
-
-        with db_conn.cursor() as cur:
-            cur.execute(
-                "SELECT closed_at FROM agent_pages WHERE agent_id = %s AND name = 'work'",
-                (agent_id,),
-            )
-            reopened_page_row = cur.fetchone()
-        assert reopened_page_row == (None,)
 
     async def test_guarded_resurrect_rejects_chat_below_latest_force_fence(
         self,

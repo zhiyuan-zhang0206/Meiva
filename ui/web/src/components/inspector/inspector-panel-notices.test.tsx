@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { foldNotices } from "@/lib/fold/notices";
 import { inspectLiveQueryKey } from "@/lib/inspector/inspector-queries";
 import { useTimelineStore } from "@/lib/timeline/timeline-store";
-import type { PageRow, SystemEvent } from "@/lib/contracts/types";
+import type { SystemEvent } from "@/lib/contracts/types";
 import {
   cleanupInspectorTest,
   createInspectorQueryClient,
@@ -20,7 +20,6 @@ import {
   render,
   rosterFixture,
   setupInspectorTest,
-  setInspectorPages,
   streamHandlers,
   widgetFixture,
 } from "./inspector-test-mock";
@@ -237,30 +236,15 @@ describe("InspectorPanel plugin widgets", () => {
     );
   });
 
-  it("puts the fleet task list below the page section and above the runtime sections", async () => {
-    const page = {
-      id: 7,
-      agent_id: 1,
-      name: "task-dashboard",
-      port: 4173,
-      title: "Task dashboard",
-      serve_dir: null,
-      url: "http://gateway.test/pages/7-task-dashboard/",
-      created_at: "2026-08-24T12:00:00Z",
-      closed_at: null,
-    } satisfies PageRow;
-    setInspectorPages([page]);
+  it("puts the fleet task list above the runtime sections", async () => {
     getAgentInspectWidgets.mockResolvedValue([widgetFixture()]);
     render(<InspectorPanel agentId={1} />);
 
-    const pageSection = await screen.findByText("Page");
     const tasks = await screen.findByText("Tasks");
     const shells = await screen.findByText("Persistent shells");
     const before = (first: Node, second: Node) =>
       first.compareDocumentPosition(second) & Node.DOCUMENT_POSITION_FOLLOWING;
-    expect(before(pageSection, tasks)).toBeTruthy();
     expect(before(tasks, shells)).toBeTruthy();
-    setInspectorPages([]);
   });
 
   it("slots a widget into the section order (750: between context and activity)", async () => {

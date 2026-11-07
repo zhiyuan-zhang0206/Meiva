@@ -19,7 +19,6 @@ from base.events.live.bus import EventBus
 from base.log import logger
 from base.telemetry.audit_events import prepare_event_log, record_audit
 from ops.lifecycle.events import publish_page_closed as publish_page_closed
-from ops.pages import list_open_page_names
 
 
 # meiva:note
@@ -244,7 +243,7 @@ def force_terminate_transaction(
         if row is None:
             raise AgentNotFound(f"agent {agent_id} does not exist")
         old_status = AgentStatus(row[0])
-        page_names = list_open_page_names(conn, agent_id)
+        page_names: list[str] = []
         _, terminate_inbound_id = _insert_termination_inbounds(
             conn,
             agent_id,

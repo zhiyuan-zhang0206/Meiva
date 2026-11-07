@@ -77,5 +77,3 @@ handler/mounting split, and boundary typing:
 ## Notes
 
 New endpoint → add it to its feature package, or create `gateway/routers/<domain>.py` for a new single-module surface; then `include_router` in `app.py`. Frontend/CLI/SDK share the same endpoints.
-
-Guarded page registry receipts: [[gateway/routers/docs/page-acceptance.meiva.okf.md]].

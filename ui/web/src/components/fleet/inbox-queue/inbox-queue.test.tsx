@@ -129,9 +129,7 @@ function renderQueue(
     pageParams: [undefined],
   });
   qc.setQueryData(["tasks", "summary", "7d"], { tasks: [] });
-  qc.setQueryData(["all-pages"], []);
   transport.getTasks.mockResolvedValue({ tasks: [] });
-  transport.listAllPages.mockResolvedValue([]);
   return renderWithBrowser(
     // meiva:note
     // The queue's rows age against the page's clock; the app's own answer (the system clock) is

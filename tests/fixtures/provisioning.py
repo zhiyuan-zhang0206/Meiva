@@ -269,7 +269,6 @@ _PER_TEST_TRUNCATE_TABLES = (
     "agent_launch_retry_receipts",
     "agent_creation_snapshots",
     "resource_creation_receipts",
-    "page_operation_receipts",
 )
 
 

@@ -6,7 +6,6 @@ import { useTimelineStore } from "@/lib/timeline/timeline-store";
 import type {
   AgentInspectLive,
   AgentInspectStatistics,
-  PageRow,
 } from "@/lib/contracts/types";
 import {
   cleanupInspectorTest,
@@ -24,7 +23,6 @@ import {
   rosterFixture,
   setInspectorOpen,
   setupInspectorTest,
-  setInspectorPages,
 } from "./inspector-test-mock";
 
 import { InspectorPanel } from "./inspector-panel";
@@ -237,19 +235,7 @@ describe("InspectorPanel manual refresh", () => {
 });
 
 describe("InspectorPanel section layout", () => {
-  it("renders the run timeline entry first, then page and the runtime sections, with Activity last", async () => {
-    const page = {
-      id: 7,
-      agent_id: 1,
-      name: "task-dashboard",
-      port: 4173,
-      title: "Task dashboard",
-      serve_dir: null,
-      url: "http://gateway.test/pages/7-task-dashboard/",
-      created_at: "2026-08-24T12:00:00Z",
-      closed_at: null,
-    } satisfies PageRow;
-    setInspectorPages([page]);
+  it("renders the run timeline entry first, then the runtime sections, with Activity last", async () => {
     getAgentRoster.mockResolvedValue(rosterFixture({ harness: "meiva" }));
     act(() => {
       useTimelineStore.getState().applyTokenUsage(109_600, 0, 1_000_000, 374_000, 512_000);
@@ -262,19 +248,16 @@ describe("InspectorPanel section layout", () => {
     const liveness = screen.getByText("Liveness");
     const configOverlay = screen.getByText("Configuration overlay");
     const runLink = screen.getByRole("link", { name: "Open run timeline" });
-    const pageSection = await screen.findByText("Page");
     const context = screen.getByText("Context");
     const activity = screen.getByText("Activity");
     const before = (first: Node, second: Node) =>
       first.compareDocumentPosition(second) & Node.DOCUMENT_POSITION_FOLLOWING;
-    expect(before(runLink, pageSection)).toBeTruthy();
-    expect(before(pageSection, shells)).toBeTruthy();
+    expect(before(runLink, shells)).toBeTruthy();
     expect(before(shells, liveness)).toBeTruthy();
     expect(before(liveness, configOverlay)).toBeTruthy();
     expect(before(configOverlay, context)).toBeTruthy();
     expect(before(context, activity)).toBeTruthy();
     act(() => { useTimelineStore.getState().applyTokenUsage(0, 0, 0, 0, 0); });
-    setInspectorPages([]);
   });
 
   it("renders without its own header bar or category selector", async () => {

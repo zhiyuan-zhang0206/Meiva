@@ -37,8 +37,6 @@ sub-skills carry executable procedures and their bundled resources.
 - `mcp`, `plugins` / `plugins.develop`: MCP management and native plugin development.
 - `agents`, `models`: agent concepts, configuration, and model choice.
 - `schedules`: persistent work; [[meiva_builtins/skills/platform/meiva-guide/schedules/docs/schedules.meiva.okf.md]].
-- `pages`: artifact publishing, user input, and frontend resources;
-  [[meiva_builtins/skills/platform/meiva-guide/pages/docs/pages.meiva.okf.md]].
 - `external-agents`: delegated workers and identity takeover;
   [[meiva_builtins/skills/platform/meiva-guide/external-agents/docs/external-agents.meiva.okf.md]].
 - `workspace-cleanup`, `onboarding`: workspace disposal and first use/migration.

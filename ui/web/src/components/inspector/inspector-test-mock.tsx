@@ -17,7 +17,6 @@ import type {
   AgentRoster,
   AgentRow,
   InspectWidget,
-  PageRow,
   WireAgentCard,
 } from "@/lib/contracts/types";
 import { useStore } from "@/lib/state/store";
@@ -66,15 +65,6 @@ export const getSettings = vi.fn(() =>
 let pageGateway: TestGateway;
 let pageRig: HttpRig;
 let pageApi: Api;
-let pageRows: readonly PageRow[];
-
-export function setInspectorPages(rows: readonly PageRow[]): void {
-  pageRows = [...rows];
-}
-
-export function inspectorPageReads() {
-  return pageGateway.requests;
-}
 
 // meiva:note
 // Stands in for the library's QueryClientProvider in the inspector tests: the same
@@ -121,12 +111,8 @@ export function createInspectorQueryClient(
 }
 
 export async function setupInspectorTest() {
-  pageRows = [];
-  pageGateway = await startGateway(realNetwork.createServer, (request) => {
-    const match = /^\/api\/agents\/(\d+)\/pages$/.exec(request.path);
-    return match === null
-      ? { kind: "text", status: 404, body: "unexpected route" }
-      : { kind: "json", body: pageRows.filter((row) => row.agent_id === Number(match[1])) };
+  pageGateway = await startGateway(realNetwork.createServer, () => {
+    return { kind: "text", status: 404, body: "unexpected route" };
   });
   pageRig = gatewayRig(pageGateway);
   // meiva:note

@@ -11,7 +11,6 @@ __all__ = [
     "ImpersonationRow",
     "LifecycleRow",
     "MachineRow",
-    "PageNameRow",
     "TargetGateRow",
     "UploadBatchRow",
 ]
@@ -50,13 +49,6 @@ class ImpersonationRow:
 class UploadBatchRow:
     batch_id: str
     state: str
-
-
-# meiva:note
-# The name of a page the agent still has open.
-@dataclass(frozen=True)
-class PageNameRow:
-    name: str
 
 
 # meiva:note

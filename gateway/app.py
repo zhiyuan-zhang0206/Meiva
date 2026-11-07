@@ -135,9 +135,6 @@ from gateway.routers.configuration import default_model as default_model_router
 from gateway.routers.configuration import runtime as config_router
 from gateway.routers.fleet import fleet_graph as fleet_graph_router
 from gateway.routers.memory_api import memory as memory_router
-from gateway.routers.page_serving import page_reply as page_reply_router
-from gateway.routers.page_serving import page_target
-from gateway.routers.page_serving import pages as pages_router
 from gateway.routers.proxies import grafana as grafana_router
 from gateway.routers.proxies import insights as insights_router
 from gateway.routers.upload import router as uploads_router
@@ -166,7 +163,6 @@ class GatewayServerState(
     grafana_router.GrafanaAppState,
     insights_router.InsightsAppState,
     memory_router.MemoryAppState,
-    pages_router.PageServingAppState,
     cluster_router.HarnessAppState,
     upload_delivery_router.UploadAppState,
     status_router.StatusAppState,
@@ -305,7 +301,6 @@ async def lifespan(
             state.session_keys = SessionKeys(state.gateway_config.rng)
             state.login_passwords = LoginPasswords(state.gateway_config.rng)
             state.session_touch = SessionTouchThrottle()
-            state.page_host_cache = page_target.PageHostCache()
             state.telemetry_rate_limiter = frontend_telemetry_router.SessionRateLimiter()
 
             control_db_pool = state.db.pool(min_size=1, max_size=2, timeout=2.0)
@@ -520,8 +515,6 @@ def create_app(
         suggestion_feedback_router.router,
         system_router.router,
         host_permissions_router.router,
-        pages_router.router,
-        page_reply_router.router,
         notices_router.router,
         guarded_notices_router.router,
         cluster_router.router,
