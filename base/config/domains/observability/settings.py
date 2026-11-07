@@ -82,6 +82,7 @@ class ObservabilitySettings(EnvSettings):
     # converge - on 2026-11-05 an update reverted a seven-day policy to the older tiers
     # eight minutes after it was applied.
     log_family_days: str = Field(
+        title="Log retention by family (days)",
         default="agent=7,shell=7,gateway=7,ops=7,watchdog=7,snapshot=7,other=7",
         alias="MEIVA_LOG_FAMILY_DAYS",
         description=(

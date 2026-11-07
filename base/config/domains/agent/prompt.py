@@ -13,6 +13,7 @@ from base.config.base import EnvSettings
 
 class AgentPromptSettings(EnvSettings):
     user_delivery_mode: UserDeliveryMode = Field(
+        title="User-facing message delivery mode",
         default=UserDeliveryMode.PREFIX,
         alias="MEIVA_USER_DELIVERY_MODE",
         description=(
