@@ -1,13 +1,13 @@
 ---
 type: doc
 title: Fleet update up half and completion gates
-description: Ordered steps and completion invariants of cli.fleet_update up — host starts, roster convergence, package refresh, drift checks and silence expiry.
+description: Ordered steps and completion invariants of meiva update up — host starts, roster convergence, package refresh, drift checks and silence expiry.
 tags: [cli, updates, operations]
 ---
 
 # Fleet update up half and completion gates
 
-`cli.fleet_update up` brings a cluster back after `down` switched every checkout to `NEW` (either inside `cli.fleet_update run` or as a standalone half after manual release work or recovery).
+`meiva update up` brings a cluster back after `down` switched every checkout to `NEW` (either inside `meiva update run` or as a standalone half after manual release work or recovery).
 
 ## Steps, in order
 

@@ -31,17 +31,14 @@ Operator inputs are described in [[cli/database/docs/database.meiva.okf.md]].
 | `meiva restart` | Stop + start with an explicit scope: `--only agent-host` (`--mode`, `--timeout`, `--message`/`--no-message`) or a start selection plus the shell-session, browser and extras choices, `--mode`, `--timeout` and `--message`/`--no-message`; the data plane stays up |
 | `meiva status` | status (services, pg/redis, the end-to-end private-network Redis bridge view and an incomplete converge), settings-lite |
 | `meiva converge` | replays idempotent host wiring (symlink/PATH/dirs/plugin images and the macOS Redis bridge), usually via `meiva start`; it never touches the memory pool |
-| `meiva firewall status` / `meiva firewall sync` | macOS Application Firewall allowlist manifest: `status` renders each manifest purpose, glob, resolved path, and Allow/Block/Missing state; `sync` applies it (repair + prune stale rules). Unprivileged mutation was empirically verified on the macmini running macOS 15.3.1, then falls back to non-interactive `sudo -n` and finally reports the exact manual commands on platforms that still require elevation |
+| `meiva firewall status` / `meiva firewall sync` | macOS Application Firewall allowlist manifest: `status` renders each manifest purpose, glob, resolved path, and Allow/Block/Missing state; `sync` applies it (repair + prune stale rules), falling back to non-interactive `sudo -n` and reporting manual commands when elevation is required |
+| `meiva update run` / `meiva update down` / `meiva update up` | Updates listed source-mode units over SSH from a separate operator checkout (`run` executes `down` then `up`; see [[cli/docs/fleet-update.meiva.okf.md]]) |
 
 ### `meiva cluster` Subcommands
 
 Verbs that act on the cluster rather than on this host's services, on the home
 `MEIVA_HOME` names (else `~/.meiva`): `status` / `destroy` / `health-probe` /
 `cron-*` / other registered commands. Enumerated in [[cli/docs/cluster.meiva.okf.md]].
-
-The standalone `python -m cli.fleet_update run` updates all listed source-mode
-units over SSH; [[cli/docs/fleet-update.meiva.okf.md]] owns the full command
-and its separate `down`/`up` recovery halves.
 
 ### Agent & Ops
 
@@ -96,6 +93,6 @@ See [[entry.meiva.okf.md|fresh executable and embedded entry points]].
 
 ## Notes
 
-- Bare `meiva` = `~/.local/bin/meiva`, a plain link to the production checkout's `.venv/bin/meiva` that converge maintains; it acts on `MEIVA_HOME`, else `~/.meiva`, like every CLI. A checkout's own `.venv/bin/meiva` runs that checkout's code. A home that carries its own `<home>/source` is operated only by that checkout's CLI: `cli.preflight.check_own_checkout` refuses every command from any other checkout, before anything loads the home (an argv of nothing, or a lone `-h`/`--help`, only parses and passes).
+- Bare `meiva` = `~/.local/bin/meiva`, a plain link to the production checkout's `.venv/bin/meiva` that converge maintains; it acts on `MEIVA_HOME`, else `~/.meiva`, like every CLI. A checkout's own `.venv/bin/meiva` runs that checkout's code. A home that carries its own `<home>/source` is operated only by that checkout's CLI: `cli.preflight.check_own_checkout` refuses every command from any other checkout, before anything loads the home (an argv of nothing, a lone `-h`/`--help`, or `meiva update`, which operates remote hosts over SSH, only parses and passes).
 - Each cluster has its own pg/redis; isolation is home-directory isolation (instances under `$MEIVA_HOME` on the fixed port table), not db names / redis indexes in a shared instance.
 - Children: [[cli/docs/cluster.meiva.okf.md]] (the `meiva cluster` verb group) · [[cli/docs/start_identity.meiva.okf.md]] (idempotent cluster start) · [[cli/commands/docs/commands.meiva.okf.md]] (the module split) · [[cli/commands/extensions/packages/docs/packages.meiva.okf.md]] (the plugins / skill / mcp package surface).

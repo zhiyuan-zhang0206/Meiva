@@ -39,7 +39,7 @@ When the shape is known, prefer a pydantic model or a module-level `TypeAdapter`
 helpers; they are for the value whose shape the reader checks by hand.
 
 `cli/fleet_update/untyped.py`, `cli/commands/management/schedules_verify_read_rows.py` and
-`cli/fleet_alert_silence.py` keep their own copies on purpose: they are shipped to hosts that
+`cli/fleet_update/fleet_alert_silence.py` keep their own copies on purpose: they are shipped to hosts that
 predate `base`, and their file headers say so.
 
 Rows read from Postgres are not here: `base/db/rows.py` (`query_one`, `query_all`,

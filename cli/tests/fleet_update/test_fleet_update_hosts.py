@@ -1,6 +1,6 @@
 # meiva:note
 # The per-host pieces a window builds and reads: the macOS one-shot start script and its plist,
-# the updater's own import surface, and the PROBE program run through the host's real shell.
+# and the PROBE program run through the host's real shell.
 # meiva:link cli/docs/fleet-update-window/fleet-update-window.meiva.okf.md
 
 from __future__ import annotations
@@ -18,7 +18,6 @@ from pathlib import Path
 import pytest
 
 from base.native_process.root_control import instance_lock
-from base.paths import repo_root
 from cli.fleet_update import fleet_verify, oneshot
 from cli.fleet_update.plan.host_commands import HOME, PROBE
 from cli.fleet_update.plan.operation import OperationIdentity
@@ -70,20 +69,6 @@ def test_the_macos_one_shot_start_passes_the_home_and_os_job_gates(default_home:
     assert mechanics.owns_os_job_home(
         "autostart", roots=JobRoots(home=home, repo=home / "source", user_home=default_home)
     )
-
-
-# meiva:note
-# A window runs from a bare operator checkout, whatever generation the cluster runs: importing
-# every module of the package loads none of the application's own packages.
-def test_the_updater_imports_no_application_code() -> None:
-    done = subprocess.run(
-        [sys.executable, "-S", str(Path(__file__).with_name("import_probe.py"))],
-        env={"PYTHONPATH": str(repo_root())},
-        capture_output=True,
-        text=True,
-        check=True,
-    )
-    assert done.stdout.splitlines() == ["[]", "True", "[]", "cli.fleet_update.__main__"]
 
 
 _ERROR_WITH_BACKSLASHES = r'["sh", "-c", "\$HOME\n"]'

@@ -18,7 +18,7 @@ coordination. Its design rationale is recorded in
 | RPC | `ops/rpc_schemas/` (wire vocabulary); `ops/cluster/rpc.py` (gateway client) and `ops/cluster/rpc_plans.py` (its decisions) |
 | Op clusters the ops server dispatches | `ops/lifecycle/`, `ops/cluster/operations.py`, `ops/host_config.py`, `ops/inventory/` |
 | Stop and restart | CLI stop orchestration; the agent host settles its own running turns on SIGTERM |
-| Fleet update | `cli/fleet_update.py` (down and up scripts per unit, gated by the code version) |
+| Fleet update | `cli/fleet_update/` (`meiva update`, down and up scripts per unit, gated by the code version) |
 
 Each package door is the module it grew from; `ops.agents`,
 `ops.rpc_schemas` and `ops.cluster.operations_status`
@@ -53,7 +53,7 @@ admitted before it exits (`agent_ops/in_flight.py`). Timeout fails without impli
 force. The complete operator contract is in
 [graceful maintenance](../../docs/conventions/operations/graceful-maintenance.md).
 
-A fleet update is `python -m cli.fleet_update`. What the update path still lacks
+A fleet update is `meiva update`. What the update path still lacks
 is recorded in the
 [unified lifecycle plan](../../future/infra/lifecycle/unified-cluster-lifecycle.md).
 

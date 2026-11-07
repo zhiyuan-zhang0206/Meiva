@@ -1,7 +1,7 @@
 ---
 type: doc
 title: Fleet update choices
-description: "The flags cli.fleet_update requires and the modes they select: target selection verified before any SSH, the stop and start choices forwarded verbatim, and the agent-update refusals."
+description: "The flags meiva update requires and the modes they select: target selection verified before any SSH, the stop and start choices forwarded verbatim, and the agent-update refusals."
 tags: [cli, updates, operations]
 ---
 
@@ -32,8 +32,7 @@ and start choices are forwarded unchanged, never checked against the diff.
   `--keep-infra|--stop-infra` goes to the gateway's stop only.
   `--yes` is always sent (non-interactive SSH).
 - `down` / `run`, for the fleet itself: `--allow-python-change|--refuse-python-change`,
-  `--allow-red-schedules|--refuse-red-schedules`, `--silence-hours`,
-  `--lease-confirm-seconds` (0 reports the leases and never waits).
+  `--allow-red-schedules|--refuse-red-schedules`, `--silence-hours`.
 - Every half, forwarded to every host's `meiva start` (over SSH, or in the macOS
   one-shot LaunchAgent) by `up` and by a failed `down`'s recovery: `--all-services`,
   `--only-service NAME` or `--disable-service NAME` (repeatable), and `--start-timeout`.

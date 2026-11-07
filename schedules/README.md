@@ -341,7 +341,7 @@ Every schedule row records a target `machine` (defaulting to the gateway machine
   copies; a changed signature — `catch_up()` gaining a required `db`, 2026-10-03 —
   leaving calls that raise `TypeError` on the first fire) are caught by its
   `RED id=<id> name=<name> missing=<module|compile-error:<l>:<m>|undefined-name:<l> <name>|call-signature:<l> <call>(): <why>|...>`
-  lines before they can fire. `python -m cli.fleet_update down` runs it with the NEW
+  lines before they can fire. `meiva update down` runs it with the NEW
   checkout's code before stopping anything, and `up` runs it again on the gateway. Exit codes: 0 clean / 1 red / 2 tool error. Run it on the
   host that runs the schedules, or from a dev worktree to check the same table
   against in-development code. `--check-file PATH` checks one script file

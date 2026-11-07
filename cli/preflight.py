@@ -17,15 +17,16 @@ from pathlib import Path
 # A home that carries its own `<home>/source` checkout is operated only by that checkout's CLI
 # (`base.paths.home.home_checkout_error`); a home with none (a test home) accepts any checkout.
 # There is no read-only exemption: a development CLI that needs a home names a temporary
-# `MEIVA_HOME`. The one pass is an argv of nothing or of a lone `-h`/`--help`, which only parses
-# and never reaches a verb. Returns None to proceed, an error rc to refuse. `repo` is the checkout
-# the running CLI belongs to. This gate is settings-free and runs before every other one, so a
-# foreign checkout is stopped before anything loads the home's configuration. The refusal does
-# not echo the argv: it can carry a secret (`meiva config set KEY=...`).
+# `MEIVA_HOME`. The passes are an argv of nothing, a lone `-h`/`--help` (which only parses and
+# never reaches a verb), and `meiva update` (which runs from a separate operator checkout over SSH
+# and never operates on the local `home`). Returns None to proceed, an error rc to refuse. `repo` is
+# the checkout the running CLI belongs to. This gate is settings-free and runs before every other
+# one, so a foreign checkout is stopped before anything loads the home's configuration. The refusal
+# does not echo the argv: it can carry a secret (`meiva config set KEY=...`).
 def check_own_checkout(args_in: Sequence[str], repo: Path, *, home: Path) -> int | None:
     from base.paths.home import home_checkout_error
 
-    if tuple(args_in) in ((), ("-h",), ("--help",)):
+    if tuple(args_in) in ((), ("-h",), ("--help",)) or tuple(args_in[:1]) == ("update",):
         return None
     error = home_checkout_error(repo, home=home)
     if error is None:

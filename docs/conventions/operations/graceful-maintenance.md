@@ -123,7 +123,7 @@ the external effect but before its result becomes durable.
 
 ## Updating and moving the data plane
 
-`python -m cli.fleet_update run` executes the complete update. Its `down` half
+`meiva update run` executes the complete update. Its `down` half
 stops every unit with `meiva stop --yes` and the operator's explicit stop choices
 (shell sessions, browser, extras, `--keep-service` or `--keep-no-services`, mode,
 timeout; the gateway also gets its data-plane choice), and `up` starts them with the

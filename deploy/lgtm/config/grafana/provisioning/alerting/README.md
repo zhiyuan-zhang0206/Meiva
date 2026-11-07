@@ -372,7 +372,7 @@ gate beyond the rule's own `notify_im="false"`). It is the only writer of that t
 writes alert rows, posts to the endpoint or pushes an alert to IM on its own
 (`tests/scripts/test_alert_single_path.py`).
 
-A planned outage is a silence, not a gate in the services: `python -m cli.fleet_update down` creates
+A planned outage is a silence, not a gate in the services: `meiva update down` creates
 one silence in this Grafana (matcher `alertname=~".+"`, disk alerts excepted: `metric="host_disk"`,
 `attributes_check="disk_usage"`; createdBy `meiva-fleet-update`; expiry and a comment naming the
 target) and `up` expires it. Silenced rules keep evaluating, so a condition that outlives the window

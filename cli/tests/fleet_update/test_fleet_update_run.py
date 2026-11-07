@@ -21,8 +21,11 @@ def _effect_aliases(cluster: Cluster, *wanted: str) -> list[str]:
 
 
 def _assert_wave_order(cluster: Cluster) -> None:
+    fetches = _effect_aliases(cluster, "fetch")
     stops = _effect_aliases(cluster, "stop")
     starts = _effect_aliases(cluster, "start", "oneshot")
+    assert fetches[0] == "gw"
+    assert set(fetches[1:]) == {"mac", "lin"}
     assert set(stops[:-1]) == {"mac", "lin"}
     assert stops[-1] == "gw"
     assert starts[0] == "gw"

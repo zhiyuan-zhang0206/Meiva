@@ -1,13 +1,13 @@
 ---
 type: doc
 title: Fleet update over SSH
-description: Complete and split cli.fleet_update commands — stop, switch and start a networked source-mode cluster — and their ordering.
+description: Complete and split meiva update commands — stop, switch and start a networked source-mode cluster — and their ordering.
 tags: [cli, updates, operations]
 ---
 
 # Fleet update over SSH
 
-`cli.fleet_update run` updates a networked source-mode cluster over key-based SSH
+`meiva update run` updates a networked source-mode cluster over key-based SSH
 in one invocation: `down` stops every host and switches its checkout to NEW,
 then `up` starts the cluster and proves it. The separate `down` and `up`
 commands remain for intermediate manual work and recovery. The operator-facing procedure is
@@ -18,8 +18,7 @@ this node owns the code-side order, and the window's guards are
 The halves are idempotent: after a failure, fix the cause and rerun the failed
 half. `run` accepts both halves' options, requires one explicit target selection, uses one log and
 stops at the first failure; a failed `down` never enters `up`. A failed `up`
-does not require repeating `down`. The package imports no application code, so
-it runs from a bare operator checkout, whatever generation the cluster runs; its
+does not require repeating `down`. Its
 shape is [[cli/fleet_update/docs/structure.meiva.okf.md]].
 
 ## Every choice is an explicit argument
@@ -33,28 +32,26 @@ before any SSH. The flags, their modes and the forwarded stop and start choices 
 
 1. Preflight all listed hosts in parallel. OLD (the one commit every host shares that is not
    NEW) only feeds the `.python-version` refusal.
-2. Read the gateway's active impersonation leases and name them: a stop ends
-   every takeover in flight. `--lease-confirm-seconds` holds the stops open
-   for that long first.
-3. Fetch NEW and probe helper facts across every host in parallel, so a host
-   that cannot get it is found before anything stops.
-4. NEW's offline `meiva schedules verify` over the gateway's stored schedule
+2. Fetch NEW (updating `refs/fleet-update/target` to NEW) and probe helper facts on the gateway
+   first, then across all runners in parallel, so runners whose `origin` is the gateway's
+   checkout can fetch NEW from it and any host that cannot get NEW is found before anything stops.
+3. NEW's offline `meiva schedules verify` over the gateway's stored schedule
    table — a red or an unevaluable check refuses `down` before any stop.
-5. Pre-stage NEW across every host in parallel while the cluster is still serving:
+4. Pre-stage NEW across every host in parallel while the cluster is still serving:
    warm changed Python wheels (`uv.lock` or `.python-version`, seeded from `$S/.venv`
    via APFS CoW clone on macOS, with `UV_HTTP_TIMEOUT` defaulted to 120s) and `pnpm`
    store entries (`ui/web/pnpm-lock.yaml`) in a temporary directory — failing fast if
    either cache warm exits non-zero — and converge external agent harness CLIs
    (`claude`, `codex`, `agy`, `dsh`) on `agent-runner` hosts so neither `switch` nor
    `meiva start` spends the outage downloading packages or harness binaries.
-6. Open the window's Grafana silence on the gateway host.
-7. `meiva stop --yes` with the operator's flags across all runners in parallel,
+5. Open the window's Grafana silence on the gateway host.
+6. `meiva stop --yes` with the operator's flags across all runners in parallel,
    waiting for every in-flight runner stop to finish before stopping the gateway
    (which also gets `--keep-infra` or `--stop-infra`). A stop must exit 0 and leave
    a completed stop in the host's journal; a failure prints the retry step and brings back, with the
    operator's start selection, the hosts this run already stopped
    ([[cli/docs/fleet-update-window/failed-stop-recovery.meiva.okf.md]]).
-8. Switch every checkout in parallel: check out NEW detached, repair legacy read-only
+7. Switch every checkout in parallel: check out NEW detached, repair legacy read-only
    `.venv` directories (early converge passes left them 0555, which `uv sync`
    cannot write through), `uv sync --frozen --compile-bytecode --reinstall-package meiva`, then require a clean tree. The
    check shows a dirty tree and never cleans it: untracked files are the

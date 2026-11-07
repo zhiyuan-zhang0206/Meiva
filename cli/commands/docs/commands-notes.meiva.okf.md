@@ -23,7 +23,7 @@ tags:
 - What `meiva start` treats as already-up, what it waits for, and when an unready
   service becomes exit code 4 are one subject, in
   [[cli/commands/lifecycle/docs/start-readiness.meiva.okf.md]].
-- A fleet update is `python -m cli.fleet_update run` (`cli/fleet_update.py`):
+- A fleet update is `meiva update run` (`cli/fleet_update/`):
   one invocation stops, switches, starts and verifies all listed units. Separate
   `down` and `up` commands support manual release work and recovery; see
   [[cli/docs/fleet-update.meiva.okf.md]].

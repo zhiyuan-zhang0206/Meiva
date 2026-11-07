@@ -1,10 +1,13 @@
 # meiva:note
-# cli.fleet_update imports no application code — no base, cli, gateway, services, agent or meiva modules — so the halves run from a bare operator checkout.
+# `meiva update {run,down,up}` — cluster-wide source-mode rollout over SSH.
 # meiva:link cli/docs/fleet-update.meiva.okf.md
 
 from __future__ import annotations
 
+import argparse
+import sys
 from collections.abc import Mapping
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
@@ -17,17 +20,28 @@ from .session import FailedError, Pacing, RefusedError, Session, Timers
 from .up import up
 
 
+@dataclass(frozen=True)
+class UpdateWindowInputs:
+    repo: Path
+    env: Mapping[str, str]
+    now: datetime
+    pacing: Pacing
+    timers: Timers
+    operation_id: str
+    initiator: str
+    python: str
+
+
 # meiva:note
-# One window, from argv to exit code. Every ambient fact arrives as a value, read once by the
-# entry point: the repository the NEW commit is resolved in, the environment (the PATH that finds
-# `ssh`, and the agent marker that refuses a run from inside an agent), the time the log and the
-# one-shot job names are stamped with, how often to look again while waiting, the clock those
-# waits are spent on, and the interpreter this window runs on -- the one the service-roster
-# check, which decides whether a named service exists, starts as a child.
+# One window, from validated `FleetArgs` to exit code. Every ambient fact arrives as a value, read
+# once by the entry point: the repository the NEW commit is resolved in, the environment (the PATH
+# that finds `ssh`, and the agent marker that refuses a run from inside an agent), the time the log
+# and the one-shot job names are stamped with, how often to look again while waiting, and the clock
+# those waits are spent on.
 # Exit codes: 0 done, 1 failed after the first effect, 2 refused before any, 3 a partial `up`.
 # meiva:link cli/docs/fleet-update.meiva.okf.md
-def main(
-    argv: list[str],
+def run_window(
+    args: choices.FleetArgs,
     *,
     repo: Path,
     env: Mapping[str, str],
@@ -36,12 +50,10 @@ def main(
     timers: Timers,
     operation_id: str,
     initiator: str,
-    python: str,
 ) -> int:
-    args = choices.parse(argv, env, python=python)
     # meiva:note
-    # The updater imports no application module, so the agent-shell marker is spelled out here;
-    # its owner is `base.host.env.agent_env.AGENT_ID_ENV` (a test pins the two together).
+    # The agent-shell marker is spelled out here; its owner is
+    # `base.host.env.agent_env.AGENT_ID_ENV` (a test pins the two together).
     if "MEIVA_AGENT_ID" in env:
         print(
             "refused: run from a plain login shell or an OS-owned job, not an Meiva "
@@ -117,3 +129,45 @@ def main(
     finally:
         s.log.close()
     return 0
+
+
+def run_parsed(args: argparse.Namespace, inputs: UpdateWindowInputs) -> int:
+    outcome = choices.validate_parsed(args, inputs.env, python=inputs.python)
+    if isinstance(outcome, str):
+        sys.stderr.write(outcome)
+        return 2
+    return run_window(
+        outcome,
+        repo=inputs.repo,
+        env=inputs.env,
+        now=inputs.now,
+        pacing=inputs.pacing,
+        timers=inputs.timers,
+        operation_id=inputs.operation_id,
+        initiator=inputs.initiator,
+    )
+
+
+def main(
+    argv: list[str],
+    *,
+    repo: Path,
+    env: Mapping[str, str],
+    now: datetime,
+    pacing: Pacing,
+    timers: Timers,
+    operation_id: str,
+    initiator: str,
+    python: str,
+) -> int:
+    args = choices.parse(argv, env, python=python)
+    return run_window(
+        args,
+        repo=repo,
+        env=env,
+        now=now,
+        pacing=pacing,
+        timers=timers,
+        operation_id=operation_id,
+        initiator=initiator,
+    )

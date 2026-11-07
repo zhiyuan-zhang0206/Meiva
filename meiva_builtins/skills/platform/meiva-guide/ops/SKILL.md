@@ -141,7 +141,7 @@ installed on the stopped runner with `meiva cluster db-authority install-unit
 
 A production cluster runs every unit from its own source checkout and is updated
 by stopping every unit, switching every checkout and starting again:
-`python -m cli.fleet_update run` completes that sequence and verifies the cluster.
+`meiva update run` completes that sequence and verifies the cluster.
 Use separate `down` and `up` commands only for intermediate release work or
 recovery; each half is idempotent. See the runbook's "Updating a networked cluster
 in source mode". A result from anywhere else does not replace CI, review or

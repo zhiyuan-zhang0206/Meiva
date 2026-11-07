@@ -88,12 +88,17 @@ _NAMED = {"--only-service", "--disable-service", "--keep-service"}
 _SCOPES = {"run": ("both", "down", "up"), "down": ("both", "down"), "up": ("both", "up")}
 
 
-def _parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
-        prog="python -m cli.fleet_update",
-        description="Update a networked source-mode cluster over SSH. Every choice is an explicit "
-        "flag, forwarded unchanged to each host's `meiva stop` / `meiva start`.",
-    )
+UPDATE_DESCRIPTION = (
+    "Update a networked source-mode cluster over SSH. Every choice is an explicit "
+    "flag, forwarded unchanged to each host's `meiva stop` / `meiva start`."
+)
+
+
+def populate_update_parser(
+    parser: argparse.ArgumentParser,
+    *,
+    handler: Callable[[argparse.Namespace], int] | None,
+) -> None:
     halves = parser.add_subparsers(dest="half", required=True)
     for half, help_text in (
         ("run", "complete the update: down, then up and verification"),
@@ -160,6 +165,16 @@ def _parser() -> argparse.ArgumentParser:
                         p.add_argument(flag, dest=dest, action="append_const", const=flag)
             for flag, kind in _HALF_VALUES[scope]:
                 p.add_argument(flag, type=kind, default=None)
+        if handler is not None:
+            p.set_defaults(func=handler)
+
+
+def _parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="meiva update",
+        description=UPDATE_DESCRIPTION,
+    )
+    populate_update_parser(parser, handler=None)
     return parser
 
 
@@ -474,18 +489,28 @@ def _fleet_args(args: argparse.Namespace) -> FleetArgs:
 
 
 # meiva:note
+# Validate a parsed `meiva update` namespace: return its `FleetArgs`, or the refusal text naming
+# every missing or conflicting choice at once before any host is touched.
+def validate_parsed(
+    args: argparse.Namespace, env: Mapping[str, str], *, python: str
+) -> FleetArgs | str:
+    if problems := _missing_choices(args, env, python=python):
+        listed = "".join(f"\n  {problem}" for problem in problems)
+        return f"refused: every choice is explicit; missing or conflicting:{listed}\n"
+    if _attr(args, "rebuild_extras") is True and _attr(args, "extras") == "--keep-extras":
+        return (
+            "refused: --rebuild-extras retires and rebuilds the helper; it excludes --keep-extras\n"
+        )
+    return _fleet_args(args)
+
+
+# meiva:note
 # Parse and validate the whole argv. A refusal exits 2 with every missing or conflicting choice
 # listed at once, before any host is touched.
 def parse(argv: list[str], env: Mapping[str, str], *, python: str) -> FleetArgs:
     parser = _parser()
     args = parser.parse_args(argv)
-    if problems := _missing_choices(args, env, python=python):
-        listed = "".join(f"\n  {problem}" for problem in problems)
-        parser.exit(2, f"refused: every choice is explicit; missing or conflicting:{listed}\n")
-    if _attr(args, "rebuild_extras") is True and _attr(args, "extras") == "--keep-extras":
-        parser.exit(
-            2,
-            "refused: --rebuild-extras retires and rebuilds the helper; it excludes "
-            "--keep-extras\n",
-        )
-    return _fleet_args(args)
+    outcome = validate_parsed(args, env, python=python)
+    if isinstance(outcome, str):
+        parser.exit(2, outcome)
+    return outcome

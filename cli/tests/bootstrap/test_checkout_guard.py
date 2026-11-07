@@ -133,7 +133,16 @@ def test_gate_does_not_echo_the_argv(tmp_path: Path) -> None:
     assert "sk-not-for-the-terminal" not in error
 
 
-@pytest.mark.parametrize("argv", [[], ["--help"], ["-h"]])
+@pytest.mark.parametrize(
+    "argv",
+    [
+        [],
+        ["--help"],
+        ["-h"],
+        ["update", "--help"],
+        ["update", "run", "--gateway", "gw", "--rev", "0" * 40],
+    ],
+)
 def test_gate_passes_bare_meiva_and_a_lone_help_flag(argv: list[str], tmp_path: Path) -> None:
     home = _home_with_source(tmp_path)
     assert _gate(argv, tmp_path / "dev", user_home=tmp_path, home=home) == (None, "")

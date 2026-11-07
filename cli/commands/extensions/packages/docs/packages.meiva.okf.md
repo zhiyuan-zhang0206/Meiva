@@ -49,7 +49,7 @@ meiva skill trust <name> [--revoke]             # record that a human read it (t
 Runs the fail-soft loader (`meiva.sdk_surface.extensions.load_extensions`) and exits 1 when it skipped a plugin:
 `RESULT enabled=N failed=M rc=R`, then `RED plugin=<name> <error> (at <file>:<line>)`. Read-only (no hook
 runs, nothing written, no failure telemetry); covers the agent-boot load path, not a plugin's `services.py`
-or `provider.py`. `python -m cli.fleet_update up` runs it on every host.
+or `provider.py`. `meiva update up` runs it on every host.
 
 ## `meiva plugins inspect` — the catalog
 

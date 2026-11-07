@@ -43,6 +43,7 @@ from cli.parsers import cluster as _cluster
 from cli.parsers import host as _host
 from cli.parsers import logs as _logs
 from cli.parsers import pty as _pty
+from cli.parsers import update as _update
 from cli.preflight import check_own_checkout
 from cli.start_runtime import HomeSite
 from cli.startup.service_path import CallerHost
@@ -157,6 +158,7 @@ _HANDLERS: tuple[tuple[list[str], types.ModuleType, str], ...] = (
     (["memory", "search", "context"], _mcp, "h_memory_search"),
     (["logs", "retention"], _logs, "_h_logs_retention"),
     (["logs", "rotate"], _logs, "_h_logs_rotate"),
+    (["update", "up", "--gateway", "gw", "--log-dir", "logs"], _update, "_h_update"),
 )
 
 

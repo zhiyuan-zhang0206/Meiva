@@ -2,8 +2,7 @@
 # The window's one connection to its hosts and the one log it keeps. Every command goes to a host
 # through the operator's own `ssh`, found on the PATH the process was started with; every line
 # the hosts print, and every line the window says, is redacted and written to both the console
-# and a log only its owner can read. Nothing here imports application code, so a window runs from
-# a bare operator checkout.
+# and a log only its owner can read.
 # meiva:link cli/docs/fleet-update.meiva.okf.md
 
 from __future__ import annotations

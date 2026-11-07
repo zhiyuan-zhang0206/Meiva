@@ -59,8 +59,48 @@ def test_the_switch_checks_new_out_detached_syncs_the_venv_and_requires_a_clean_
 
 def test_the_fetch_is_skipped_when_the_commit_is_already_there() -> None:
     assert fetch_command(_NEW).endswith(
-        f'git cat-file -e "{_NEW}^{{commit}}" || git fetch -q origin {_NEW}'
+        f'(git cat-file -e "{_NEW}^{{commit}}" || git fetch -q origin {_NEW}) '
+        f"&& git update-ref refs/fleet-update/target {_NEW}"
     )
+
+
+def test_gateway_fetch_advertises_new_to_downstream_runner_checkouts(tmp_path: Path) -> None:
+    upstream = tmp_path / "upstream"
+    upstream.mkdir()
+    _git_in(upstream, "init", "-q", "--initial-branch=main")
+    (upstream / "f.txt").write_text("old\n", encoding="utf-8")
+    _git_in(upstream, "add", "f.txt")
+    _git_in(upstream, "commit", "-q", "-m", "old")
+    old_sha = _git_in(upstream, "rev-parse", "HEAD")
+
+    gw_home = tmp_path / "gw-home"
+    gw_source = gw_home / ".meiva" / "source"
+    gw_source.parent.mkdir(parents=True)
+    _git_in(tmp_path, "clone", "-q", str(upstream), str(gw_source))
+    _git_in(gw_source, "checkout", "-q", "--detach", old_sha)
+
+    runner_home = tmp_path / "runner-home"
+    runner_source = runner_home / ".meiva" / "source"
+    runner_source.parent.mkdir(parents=True)
+    _git_in(tmp_path, "clone", "-q", str(gw_source), str(runner_source))
+    _git_in(runner_source, "checkout", "-q", "--detach", old_sha)
+
+    (upstream / "f.txt").write_text("new\n", encoding="utf-8")
+    _git_in(upstream, "add", "f.txt")
+    _git_in(upstream, "commit", "-q", "-m", "new")
+    new_sha = _git_in(upstream, "rev-parse", "HEAD")
+
+    gw_res = run_host_shell(
+        ["bash", "-c", fetch_command(new_sha)],
+        env={**os.environ, "HOME": str(gw_home)},
+    )
+    assert gw_res.returncode == 0, gw_res.stderr
+    runner_res = run_host_shell(
+        ["bash", "-c", fetch_command(new_sha)],
+        env={**os.environ, "HOME": str(runner_home)},
+    )
+    assert runner_res.returncode == 0, runner_res.stderr
+    assert _git_in(runner_source, "rev-parse", f"{new_sha}^{{commit}}") == new_sha
 
 
 def test_a_start_carries_the_operators_selection() -> None:

@@ -227,4 +227,4 @@ def test_code_behind_schema_hint_names_working_commands(
             conn.commit()
     err = capsys.readouterr().err
     assert "gateway's revision" in err
-    assert _named_commands(err) == {"meiva start"}
+    assert _named_commands(err) == {"meiva start", "meiva update"}

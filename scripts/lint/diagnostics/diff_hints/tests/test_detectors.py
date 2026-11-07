@@ -461,7 +461,7 @@ HOME_ROOT = frozenset({AmbientKind.HOME})
         ("cli/database/runtime.py", HOME_ROOT, 18, 0, False),
         ("gateway/app.py", HOME_ROOT, 6, 0, False),
         ("cli/main.py", HOME_ROOT, 6, 0, False),
-        ("cli/fleet_update/__main__.py", HOME_ROOT, 6, 0, False),
+        ("cli/__main__.py", HOME_ROOT, 6, 0, False),
         ("cli/commands/tests/test_home.py", HOME_ROOT, 9, 0, False),
     ],
 )

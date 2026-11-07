@@ -329,11 +329,7 @@ def test_the_real_cli_checks_a_rows_file_offline_under_a_throwaway_home(tmp_path
     proc = subprocess.run(
         [
             sys.executable,
-            str(
-                Path(__file__).resolve().parents[2]
-                / "fleet_update"
-                / "schedules_verify_check_rows.py"
-            ),
+            str(Path(__file__).resolve().parents[2] / "schedules_verify_check_rows.py"),
             str(rows),
         ],
         cwd=repo_root(),

@@ -7,7 +7,7 @@
 # The receiving side already reads these names: `base/native_process/root_control/client.py`
 # builds the caller block from `MEIVA_OPERATION_ID` and the trio below, and every lifecycle
 # command's audit row carries them (`cli/database/lifecycle_audit.py`). This module only mints
-# and spells them; stdlib only, so a window still runs from a bare operator checkout.
+# and spells them.
 # meiva:link cli/docs/fleet-update.meiva.okf.md
 
 from __future__ import annotations

@@ -29,7 +29,7 @@ User ruling 2026-10-20: no automatic judgement and no default parameter;
 everything is specified explicitly
 ([decision](../../decisions/runtime/updates/release/2026-10-20-explicit-lifecycle-choices.md),
 which also records what each verb fixes by its own meaning). It covers every lifecycle verb — `meiva stop`, `meiva start`,
-`meiva restart` and `python -m cli.fleet_update run|down|up` — and the `cmd_*` /
+`meiva restart` and `meiva update run|down|up` — and the `cmd_*` /
 `do_*` functions they call.
 
 - **Every choice is a required argument.** A keep-or-stop choice is a pair of
@@ -38,8 +38,8 @@ which also records what each verb fixes by its own meaning). It covers every lif
   `--keep-infra`/`--stop-infra`, `--keep-service NAME…`/`--keep-no-services`,
   `--yes`/`--prompt`); a mode, a budget or a service selection is a required
   value. A missing choice is a usage error (exit 2) that names **every** missing
-  choice at once (`refuse_usage` in `cli/parsers/host.py`; fleet's own copy in
-  `cli/fleet_update.py`, which imports no application code), so an operator
+  choice at once (`refuse_usage` in `cli/parsers/host.py` and
+  `cli/fleet_update/choices.py`), so an operator
   never discovers them one retry at a time.
 - **Machine facts only refuse.** A host's capabilities decide which choices
   apply — a gateway requires `--keep-infra|--stop-infra`, any other host refuses

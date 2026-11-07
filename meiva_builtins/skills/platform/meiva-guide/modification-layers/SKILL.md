@@ -16,7 +16,7 @@ unreviewed change through a shortcut that does not exist. The design record is
 | **L1 — install** | Add an existing extension: `meiva plugins install <url>`, `meiva skill install <url>`, `meiva mcp install <url>` | Next skill scan / next use — no restart | Deployment owner (install-time supply-chain scan) |
 | **L2 — skill edit** | A SKILL.md under `$MEIVA_HOME/skills/` (or a repo/plugin source synced there) | Immediately at the next invocation — skill bodies are read fresh (mtime-cached) each time a skill is loaded | The agent / deployment owner |
 | **L3 — plugin development** | A plugin package (its own repo or `~/.meiva/plugins/<name>/`) | The agent process's `self.restart` boundary — no in-process hot reload (user ruling 2026-08-13) | Deployment owner |
-| **L4 — kernel change** | The Meiva kernel repo itself | PR → CI → human merge → operator update (`python -m cli.fleet_update`) | Upstream maintainer + CI |
+| **L4 — kernel change** | The Meiva kernel repo itself | PR → CI → human merge → operator update (`meiva update`) | Upstream maintainer + CI |
 
 An operator cluster update belongs to **L4 only** (plus routine version tracking).
 If your change never touches the kernel repo, no PR pipeline and no cluster
