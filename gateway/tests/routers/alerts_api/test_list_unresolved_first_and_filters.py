@@ -8,6 +8,7 @@ import pytest
 from fastapi.testclient import TestClient
 from pydantic import TypeAdapter
 
+from base.db.rows import IdRow, query_one
 from base.events.live.bus import EventBus
 from gateway.events.sse import event_stream
 from gateway.events.sse_frames import SseCadence
@@ -345,3 +346,73 @@ def test_a_resolved_group_is_one_recovery_message(alerts_im: ImBridge) -> None:
         sent.clear()
         assert ingest(client, webhook(status="resolved", alerts=resolved)).json()["notified"] == 3
     assert len(sent) == 1 and "×3" in sent[0]
+
+
+def test_watchdog_synthetic_heartbeat_excluded_from_list_and_counts(
+    db_conn: psycopg.Connection, client: TestClient
+) -> None:
+    now = datetime.now(UTC)
+    seed_alert_rows(
+        db_conn,
+        [
+            {
+                "status": "unresolved",
+                "severity": "warning",
+                "alertname": "Alert pipeline watchdog (synthetic heartbeat)",
+                "labels": {"metric": "alert_pipeline_watchdog", "team": "meiva-ops"},
+                "starts_at": now - timedelta(days=3),
+                "ends_at": None,
+                "fingerprint": "watchdog-1",
+            },
+            {
+                "status": "unresolved",
+                "severity": "error",
+                "alertname": "Real alert",
+                "labels": {"metric": "real_metric", "team": "meiva-ops"},
+                "starts_at": now - timedelta(minutes=10),
+                "ends_at": None,
+                "fingerprint": "real-1",
+            },
+        ],
+    )
+
+    resp = client.get("/api/alerts")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert [a["fingerprint"] for a in body["alerts"]] == ["real-1"]
+    assert body["meta"]["unresolved_count"] == 1
+    assert body["meta"]["total"] == 1
+
+
+def test_stopped_schedule_alerts_resolved_on_ingest(
+    db_conn: psycopg.Connection, client: TestClient
+) -> None:
+    sched_row = query_one(
+        db_conn,
+        IdRow,
+        "INSERT INTO schedules (name, script, command, enabled, status, machine) "
+        "VALUES ('test-stopped', 'pass', 'python schedule.py', false, 'stopped', 'box') "
+        "RETURNING id",
+    )
+    assert sched_row is not None
+    sid = sched_row.id
+    db_conn.commit()
+
+    sched_alert = alert(
+        alertname="Schedule lost its session",
+        fingerprint="sched-loss-1",
+    )
+    sched_alert["labels"]["attributes_schedule_id"] = str(sid)
+    sched_alert["labels"]["metric"] = "schedule_process_lost"
+    ingest(client, webhook(alerts=[sched_alert]))
+
+    alert_row = query_one(
+        db_conn,
+        AlertRow,
+        "SELECT id, status, severity, alertname, labels, annotations, starts_at, "
+        "ends_at, fingerprint, generator_url, source, notified_at, created_at, updated_at "
+        "FROM alerts WHERE fingerprint = 'sched-loss-1'",
+    )
+    assert alert_row is not None
+    assert alert_row.status == "resolved"
+    assert alert_row.ends_at is not None

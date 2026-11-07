@@ -1683,7 +1683,7 @@ groups:
       - uid: meiva-ops-root-health-stale
         title: "Root stopped completing health rounds"
         condition: D
-        for: 0m
+        for: 5m
         keepFiringFor: *recovery-window
         missing_series_evals_to_resolve: *fast-missing-evals
         noDataState: OK
@@ -4965,6 +4965,7 @@ groups:
                 max by (attributes_route) (max_over_time({service_name="unknown_service", event_name="gateway_latency"}
                 | json | cluster=".meiva" | category=~"telemetry|log"
                 | attributes_route_class="fast"
+                | attributes_count >= 10
                 | unwrap attributes_p95_ms [5m]))
               instant: true
               range: false
@@ -5037,6 +5038,7 @@ groups:
                 max by (attributes_route) (max_over_time({service_name="unknown_service", event_name="gateway_latency"}
                 | json | cluster=".meiva" | category=~"telemetry|log"
                 | attributes_route_class="fast"
+                | attributes_count >= 10
                 | unwrap attributes_p95_ms [5m]))
               instant: true
               range: false

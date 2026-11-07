@@ -129,6 +129,8 @@ def test_emit_bucket_distinguishes_tail_percentiles(emitted_events: EmittedEvent
         ("/api/agents/42/terminate", "slow"),
         ("/api/agents/42/resurrect", "slow"),
         ("/api/agents/42/neighbors", "slow"),
+        ("/api/agents/42/files/content", "slow"),
+        ("/api/agents/42/inspect/live", "slow"),
         ("/api/health", "fast"),
         ("/api/agents", "fast"),
         ("/api/metrics/summary", "fast"),
