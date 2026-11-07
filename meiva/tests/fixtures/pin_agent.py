@@ -73,15 +73,6 @@ def pin_agent(
             _probe_target._probe_pinned_by = os.environ.get("PYTEST_CURRENT_TEST")
         except Exception:
             pass
-        print(
-            "PROBE-BIND test=%r clients=%s inherited=%s"
-            % (
-                os.environ.get("PYTEST_CURRENT_TEST"),
-                id(_probe_target),
-                clients is None and bound is not None,
-            ),
-            flush=True,
-        )
     process_context.bind_context(
         MeivaContext(
             meiva_home=resolve_meiva_home() if meiva_home is None else meiva_home,
