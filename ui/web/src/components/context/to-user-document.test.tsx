@@ -9,6 +9,7 @@ import { ApiError } from "@/lib/transport/api";
 import { WallClockProvider } from "@/lib/transport/transport-context";
 
 import { preloadChatMarkdown } from "@/components/content/markdown";
+import { useWorkspaceFileStore } from "@/lib/context/workspace-file-store";
 import { BAR_DIVIDER_CLASS, BAR_MIN_HEIGHT_CLASS } from "@/lib/layout/layout";
 import { ToUserDocumentView } from "./to-user-document";
 
@@ -117,6 +118,16 @@ describe("To user Markdown", () => {
     fireEvent.click(link, { ctrlKey: true });
     expect(chain(browser)).toEqual([]);
     expect(transport.getToUser).not.toHaveBeenCalled();
+  });
+  it("opens non-markdown registered file links in the workspace file viewer", () => {
+    useWorkspaceFileStore.getState().closeFile();
+    show(document("[report](file:///tmp/file.pdf)"));
+    fireEvent.click(screen.getByRole("link", { name: "report" }));
+    expect(useWorkspaceFileStore.getState().activeFile).toEqual({
+      agentId: 7,
+      path: report,
+      lineRange: undefined,
+    });
   });
   it("draws the panel title rule on the shared column title bar", () => {
     show(document("body"));

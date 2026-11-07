@@ -16,7 +16,7 @@ from base.paths import workspace_path
 from ops.to_user import read_to_user
 from services.agent_runner.agent_ops.in_flight import RequestTokens, WorkerFutures
 from services.agent_runner.agent_ops.tests.ops_support import Ops
-from services.agent_runner.agent_ops.to_user_resource import resource_route
+from services.agent_runner.agent_ops.to_user_resource import resource_route, workspace_file_route
 
 # meiva:note
 # The read caps the route and the door take as a value, at the configured numbers.
@@ -121,3 +121,78 @@ async def test_a_refused_document_read_reports_its_class(
     )
     assert gone["status"] == "failed"
     assert gone["result"]["reason"] == "gone"
+
+
+@pytest.mark.asyncio
+async def test_workspace_file_route_content_and_raw(
+    database: Database, unit_home: Path, op_executor: ThreadPoolExecutor
+) -> None:
+    with database.connect() as conn:
+        agent_id = create_agent(conn)
+        conn.execute(
+            "INSERT INTO agents_meta (id, machine, status) VALUES (%s, 'source-host', 'idling')",
+            (agent_id,),
+        )
+        conn.commit()
+    workspace = unit_home / "workspaces" / str(agent_id)
+    workspace.mkdir(parents=True)
+    (workspace / "hello.py").write_text("print('remote')\n", encoding="utf-8")
+    (workspace / "icon.png").write_bytes(b"\x89PNG\r\n\x1a\nraw")
+
+    requests: RequestTokens = set()
+    workers: WorkerFutures = set()
+    with database.pool() as pool:
+        handler = partial(
+            workspace_file_route,
+            pool=pool,
+            machine="source-host",
+            home=unit_home,
+            limits=LIMITS,
+            executor=op_executor,
+            dispatch_sem=asyncio.Semaphore(1),
+            requests=requests,
+            workers=workers,
+        )
+        server = await start_daemon_http(
+            host="127.0.0.1",
+            port=0,
+            health_response=lambda: (200, b"{}"),
+            extra_routes={("POST", "/to-user/workspace-file"): handler},
+            auth_digests=frozenset({hashlib.sha256(b"test-token").hexdigest()}),
+        )
+        async with server:
+            port = server.sockets[0].getsockname()[1]
+            async with httpx.AsyncClient(
+                base_url=f"http://127.0.0.1:{port}", trust_env=False
+            ) as client:
+                client.headers["Authorization"] = "Bearer test-token"
+                content_resp = await client.post(
+                    "/to-user/workspace-file",
+                    json={"agent_id": agent_id, "path": "hello.py#L1", "mode": "content"},
+                )
+                assert content_resp.status_code == 200
+                body = content_resp.json()
+                assert body["name"] == "hello.py"
+                assert body["content"] == "print('remote')\n"
+                assert body["binary"] is False
+
+                raw_resp = await client.post(
+                    "/to-user/workspace-file",
+                    json={"agent_id": agent_id, "path": "icon.png", "mode": "raw"},
+                )
+                assert raw_resp.status_code == 200
+                assert raw_resp.content == b"\x89PNG\r\n\x1a\nraw"
+
+                traversal_resp = await client.post(
+                    "/to-user/workspace-file",
+                    json={"agent_id": agent_id, "path": "../../etc/passwd", "mode": "content"},
+                )
+                assert traversal_resp.status_code == 403
+
+                missing_resp = await client.post(
+                    "/to-user/workspace-file",
+                    json={"agent_id": agent_id, "path": "missing.py", "mode": "content"},
+                )
+                assert missing_resp.status_code == 404
+    assert not requests
+    assert not workers

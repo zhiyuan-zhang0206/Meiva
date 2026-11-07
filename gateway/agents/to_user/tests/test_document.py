@@ -1,10 +1,18 @@
+from datetime import UTC, datetime
+
 import httpx
 import pytest
 from fastapi import HTTPException
 
-from base.agents.to_user import ToUserReadRequest
+from base.agents.to_user import ToUserReadRequest, WorkspaceFileRequest, WorkspaceFileResponse
 from base.config import settings
-from gateway.agents.to_user.document import fetch_resource, resource_request, resource_response
+from gateway.agents.to_user.document import (
+    fetch_resource,
+    fetch_workspace_file_content,
+    fetch_workspace_file_raw,
+    resource_request,
+    resource_response,
+)
 
 
 def test_html_renders_inline_in_a_script_only_sandbox() -> None:
@@ -116,3 +124,58 @@ async def test_missing_file_and_oversize_fail_explicitly() -> None:
                     limit=settings.to_user.max_resource_bytes,
                 )
             assert error.value.status_code == expected
+
+
+@pytest.mark.asyncio
+async def test_workspace_file_proxy_content_and_raw() -> None:
+    expected_payload = WorkspaceFileResponse(
+        path="src/main.py",
+        name="main.py",
+        extension=".py",
+        content="print(42)\n",
+        size=10,
+        binary=False,
+        modified_at=datetime(2026, 11, 7, 12, 0, tzinfo=UTC),
+    )
+
+    def serve(request: httpx.Request) -> httpx.Response:
+        assert request.headers["authorization"] == "Bearer test"
+        assert request.url.path == "/to-user/workspace-file"
+        body = WorkspaceFileRequest.model_validate_json(request.content)
+        if body.path == "missing.py":
+            return httpx.Response(404, text="File 'missing.py' not found")
+        if body.mode == "content":
+            return httpx.Response(
+                200,
+                content=expected_payload.model_dump_json().encode("utf-8"),
+                headers={"content-type": "application/json"},
+            )
+        return httpx.Response(200, content=b"print(42)\n")
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(serve)) as client:
+        res = await fetch_workspace_file_content(
+            client,
+            "http://runner/to-user/workspace-file",
+            WorkspaceFileRequest(agent_id=1, path="src/main.py", mode="content"),
+            {"Authorization": "Bearer test"},
+        )
+        assert res == expected_payload
+
+        raw = await fetch_workspace_file_raw(
+            client,
+            "http://runner/to-user/workspace-file",
+            WorkspaceFileRequest(agent_id=1, path="src/main.py", mode="raw"),
+            {"Authorization": "Bearer test"},
+            limit=settings.to_user.max_resource_bytes,
+        )
+        assert raw == b"print(42)\n"
+
+        with pytest.raises(HTTPException) as exc_info:
+            await fetch_workspace_file_content(
+                client,
+                "http://runner/to-user/workspace-file",
+                WorkspaceFileRequest(agent_id=1, path="missing.py", mode="content"),
+                {"Authorization": "Bearer test"},
+            )
+        assert exc_info.value.status_code == 404
+        assert "missing.py" in str(exc_info.value.detail)
