@@ -10,7 +10,7 @@ def _workflow() -> str:
 
 def test_desktop_matrix_compiles_on_every_supported_host_platform() -> None:
     text = _workflow()
-    assert "macos-14" in text
+    assert "macos-15" in text
     assert "ubuntu-24.04" in text
 
 

@@ -85,7 +85,7 @@ jobs:
       matrix:
         include:
           - label: macOS (universal dmg)
-            runner: macos-14
+            runner: macos-15
             target: universal-apple-darwin
             rust-targets: aarch64-apple-darwin,x86_64-apple-darwin
             bundles: app,dmg
