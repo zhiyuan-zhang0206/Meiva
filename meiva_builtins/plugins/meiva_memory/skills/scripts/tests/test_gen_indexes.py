@@ -32,6 +32,19 @@ def _generate(tmp_path: Path) -> None:
     assert res.returncode == 0, res.stderr
 
 
+def _generate_result(tmp_path: Path) -> subprocess.CompletedProcess[str]:
+    env = {k: v for k, v in os.environ.items() if not k.startswith("MEIVA_")}
+    env["MEIVA_HOME"] = str(tmp_path)
+    return subprocess.run(
+        [sys.executable, str(SCRIPT)],
+        capture_output=True,
+        text=True,
+        env=env,
+        timeout=30,
+        check=False,
+    )
+
+
 def test_the_script_writes_the_directory_indexes_of_the_pool_under_its_home(
     tmp_path: Path,
 ) -> None:
@@ -112,3 +125,34 @@ def test_a_pool_nested_in_another_checkout_walks_the_filesystem(tmp_path: Path) 
 
     assert res.returncode == 0, res.stderr
     assert "* [topics/](topics/) - 1 notes" in (pool / "index.md").read_text(encoding="utf-8")
+
+
+# meiva:note
+# The index cannot see a draft, and the run used to look identical either way (2026-11-07: 6111
+# wrote eleven notes, ten reached the index, and neither `validate.py` nor `gen --check` said a
+# word -- the missing note was never part of the bundle they inspect). The generator now names the
+# skipped files on stderr. It still does not index them: an untracked draft stays invisible to the
+# validator too, so the two sides keep agreeing.
+def test_an_untracked_draft_is_named_on_stderr_and_never_indexed(tmp_path: Path) -> None:
+    pool = tmp_path / "memory"
+    (pool / "topics").mkdir(parents=True)
+    (pool / "topics" / "draft.md").write_text(_note("Draft rule", "held back"), encoding="utf-8")
+    (pool / "topics" / "kept.md").write_text(_note("Kept rule", "staged"), encoding="utf-8")
+    _git(pool, "init", "-q")
+    _git(pool, "add", "topics/kept.md")
+
+    res = _generate_result(tmp_path)
+
+    assert res.returncode == 0, res.stderr
+    assert "1 untracked .md not indexed" in res.stderr
+    assert "topics/draft.md" in res.stderr
+    index = (pool / "topics" / "index.md").read_text(encoding="utf-8")
+    assert "Draft rule" not in index
+
+    _git(pool, "add", "topics/draft.md")
+    res = _generate_result(tmp_path)
+
+    assert "untracked .md not indexed" not in res.stderr
+    assert "* [Draft rule](draft.md) - held back" in (pool / "topics" / "index.md").read_text(
+        encoding="utf-8"
+    )
