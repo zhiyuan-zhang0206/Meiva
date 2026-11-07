@@ -9,6 +9,7 @@ import { useStore } from "@/lib/state/store";
 import { useClusterHealth } from "@/lib/notifications/use-cluster-health";
 import type { ConnectionEvent } from "@/lib/transport/useEventStream";
 import { useEventStream } from "@/lib/transport/useEventStream";
+import { useStreamHub } from "@/lib/transport/transport-context";
 
 export function AppConnectionBanner() {
   const { status } = useAuth();
@@ -20,46 +21,88 @@ export function AppConnectionBanner() {
 
 function ConnectionHealthProvider() {
   const setConnState = useStore((s) => s.setConnState);
+  const bumpReconnect = useStore((s) => s.bumpReconnect);
   const pendingRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const { page } = useStreamHub().transport;
+  const foregroundRef = useRef<boolean | null>(null);
 
   // Poll cluster status + drive the reconnect-on-update-done edge. Single mount.
   useClusterHealth();
 
-  useEffect(() => {
-    return () => {
-      if (pendingRef.current !== null) clearTimeout(pendingRef.current);
-      pendingRef.current = null;
-    };
+  const clearPending = useCallback(() => {
+    if (pendingRef.current !== null) clearTimeout(pendingRef.current);
+    pendingRef.current = null;
   }, []);
 
+  const isForeground = useCallback(
+    () => page.visibilityState === "visible" && page.hasFocus(),
+    [page],
+  );
+
+  const startRecovery = useCallback(() => {
+    if (pendingRef.current !== null) return;
+    setConnState("reconnecting");
+    pendingRef.current = setTimeout(() => {
+      pendingRef.current = null;
+      if (isForeground()) setConnState("closed");
+    }, CONNECTION_ERROR_DELAY_MS);
+  }, [isForeground, setConnState]);
+
   // meiva:note
-  // The store's connection state is what the user is told, not raw transport events.
-  // Transient drops (reconnecting or closed) auto-retry silently via backoff;
-  // publishing them immediately produced annoying yellow flashing.
-  // Drops lasting >= CONNECTION_ERROR_DELAY_MS (15s) escalate directly to "closed",
-  // which surfaces the floating red error notice. An "open" event immediately
-  // cancels any pending escalation and restores "open".
-  // meiva:link ui/web/src/docs/frontend-components/frontend-components.meiva.okf.md
+  // Hidden pages leave SSE; an unfocused but visible WebView may keep it alive.
+  // Count failure only in the foreground, using the transport's own document.
+  // Repeated errors retain one deadline. Returning to a failed visible stream
+  // requests immediate repair; a healthy stream survives focus changes untouched.
+  // meiva:link ui/web/src/docs/provider-composition.meiva.okf.md
+  const syncForeground = useCallback(() => {
+    const foreground = isForeground();
+    const previous = foregroundRef.current;
+    if (foreground === previous) return;
+    foregroundRef.current = foreground;
+    clearPending();
+    const state = useStore.getState().connState;
+    if (foreground) {
+      if (previous === null || state !== "open") startRecovery();
+    } else if (previous === null || page.visibilityState !== "visible" || state === "closed") {
+      setConnState("reconnecting");
+    }
+  }, [page, isForeground, clearPending, startRecovery, setConnState]);
+
+  useEffect(() => {
+    syncForeground();
+    const onFocus = () => {
+      const wasForeground = foregroundRef.current;
+      syncForeground();
+      if (!wasForeground && isForeground() && useStore.getState().connState !== "open") {
+        bumpReconnect();
+      }
+    };
+    page.addEventListener("visibilitychange", syncForeground);
+    page.defaultView?.addEventListener("blur", syncForeground);
+    page.defaultView?.addEventListener("focus", onFocus);
+    return () => {
+      clearPending();
+      foregroundRef.current = null;
+      page.removeEventListener("visibilitychange", syncForeground);
+      page.defaultView?.removeEventListener("blur", syncForeground);
+      page.defaultView?.removeEventListener("focus", onFocus);
+    };
+  }, [page, clearPending, syncForeground, isForeground, bumpReconnect]);
+
   const onSystemEvent = useCallback(() => undefined, []);
   const onConnectionEvent = useCallback(
     (ev: ConnectionEvent) => {
-      if (ev.type === "parse-failed") return;
+      syncForeground();
+      if (page.visibilityState !== "visible" || ev.type === "parse-failed") return;
       if (ev.type === "reconnecting" || ev.type === "closed") {
-        if (useStore.getState().connState === "closed") return;
-        if (pendingRef.current !== null) return;
-        pendingRef.current = setTimeout(() => {
-          pendingRef.current = null;
-          setConnState("closed");
-        }, CONNECTION_ERROR_DELAY_MS);
+        if (!isForeground()) setConnState("reconnecting");
+        else if (useStore.getState().connState !== "closed") startRecovery();
         return;
       }
-      if (pendingRef.current !== null) {
-        clearTimeout(pendingRef.current);
-        pendingRef.current = null;
-      }
+      clearPending();
       setConnState("open");
     },
-    [setConnState],
+    [page, isForeground, clearPending, startRecovery, setConnState, syncForeground],
   );
   useEventStream(onSystemEvent, onConnectionEvent);
 
