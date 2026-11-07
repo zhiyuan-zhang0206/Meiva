@@ -34,6 +34,7 @@ def _prior_attempt(
         machine=machine_identity.name(),
         catalog=build_model_catalog(home=meiva_home()),
         authority=config_authority,
+        config={"llm_model": "deepseek-flash"},
     )
     return agent_id, attempt
 

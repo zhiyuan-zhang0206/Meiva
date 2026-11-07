@@ -56,6 +56,7 @@ def agent_id(
         machine=machine_identity.name(),
         catalog=build_model_catalog(home=meiva_home()),
         authority=config_authority,
+        config={"llm_model": "deepseek-flash"},
     )
     db_conn.commit()
     return new_id

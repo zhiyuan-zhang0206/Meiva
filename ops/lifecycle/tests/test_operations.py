@@ -63,17 +63,21 @@ class TestSpawnAgentRequestSourceValidation:
             SpawnAgentRequest(prompt="hi", prompt_source="ui:web")
 
     def test_accepts_user_source(self) -> None:
-        body = SpawnAgentRequest(prompt="hi", prompt_source="user")
+        body = SpawnAgentRequest(
+            prompt="hi", prompt_source="user", config={"llm_model": "deepseek-flash"}
+        )
         assert body.prompt_source == "user"
 
     def test_accepts_agent_source(self) -> None:
-        body = SpawnAgentRequest(prompt="hi", prompt_source="agent:3")
+        body = SpawnAgentRequest(
+            prompt="hi", prompt_source="agent:3", config={"llm_model": "deepseek-flash"}
+        )
         assert body.prompt_source == "agent:3"
 
     def test_no_source_validation_without_prompt(self) -> None:
         # prompt_source is only meaningful alongside a prompt; a spawn without a
         # prompt (fork / blank agent) carries no source to validate.
-        body = SpawnAgentRequest(spawner="user")
+        body = SpawnAgentRequest(spawner="user", config={"llm_model": "deepseek-flash"})
         assert body.prompt_source is None
 
 
@@ -203,7 +207,7 @@ class TestSpawnPrechecksBlocking:
         model_catalog: ModelCatalog,
     ) -> None:
         checkpoint = launch.spawn_prechecks_blocking(
-            SpawnAgentRequest(spawner="user"),
+            SpawnAgentRequest(spawner="user", config={"llm_model": "deepseek-flash"}),
             db_pool,
             catalog=model_catalog,
             keys=inert_keys(model_catalog),

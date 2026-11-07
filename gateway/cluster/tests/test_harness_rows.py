@@ -30,7 +30,6 @@ _PROBED = [
                 "reasoning_effort_default": "high",
             }
         ],
-        "default_model": "claude-sonnet-5-5",
     },
     {"harness": "codex", "status": "unknown", "reason": "installed; login state unknown"},
     {"harness": "antigravity", "status": "unavailable", "reason": "not installed"},
@@ -96,7 +95,7 @@ def test_rows_carry_status_and_reason_through() -> None:
     ]
 
 
-def test_rows_carry_probed_models_and_default_through() -> None:
+def test_rows_carry_probed_models_through() -> None:
     probed = availability_rows(
         HarnessProbeResult(
             machine="remote-host",
@@ -105,6 +104,4 @@ def test_rows_carry_probed_models_and_default_through() -> None:
         LAUNCHABLE_HARNESSES,
     )
     assert probed[0].models == []
-    assert probed[0].default_model is None
-    assert probed[1].default_model == "claude-sonnet-5-5"
     assert [m.id for m in probed[1].models] == ["claude-sonnet-5-5"]

@@ -23,7 +23,14 @@ def failed_provider_agent(
     machine_identity: MachineIdentityReader,
 ) -> Iterator[tuple[GatewayTestClient, int]]:
     with gateway_test_client(machine=machine_identity) as client:
-        born = spawn_via_http(client, {"prompt": "keep this agent", "prompt_source": "user"})
+        born = spawn_via_http(
+            client,
+            {
+                "prompt": "keep this agent",
+                "prompt_source": "user",
+                "config": {"llm_model": "deepseek-flash"},
+            },
+        )
         assert born.status_code == 201, born.text
         agent_id = born.json()["id"]
     provider_plugin(dir_name="z_broken_provider")
@@ -38,12 +45,15 @@ def test_unavailable_model_cannot_change_defaults_or_spawn(
     failed_provider_agent: tuple[GatewayTestClient, int], db_conn: psycopg.Connection
 ) -> None:
     client, _agent_id = failed_provider_agent
-    original_default = db_conn.execute("SELECT * FROM cluster_defaults").fetchall()
-    change_default = client.put("/api/config/default-model", json={"model": "deepseek-flash"})
-    assert change_default.status_code == 503
-    assert db_conn.execute("SELECT * FROM cluster_defaults").fetchall() == original_default
     before = db_conn.execute("SELECT count(*) FROM agents").fetchone()
-    spawn = spawn_via_http(client, {"prompt": "blocked", "prompt_source": "user"})
+    spawn = spawn_via_http(
+        client,
+        {
+            "prompt": "blocked",
+            "prompt_source": "user",
+            "config": {"llm_model": "deepseek-flash"},
+        },
+    )
     assert spawn.status_code == 503, spawn.text
     assert db_conn.execute("SELECT count(*) FROM agents").fetchone() == before
 
@@ -68,24 +78,45 @@ def test_normal_birth_pin_keeps_list_and_detail_capabilities_consistent(
     machine_identity: MachineIdentityReader,
 ) -> None:
     with gateway_test_client(machine=machine_identity) as client:
-        chosen = client.put("/api/config/default-model", json={"model": "claude-sonnet-5"})
-        assert chosen.status_code == 200, chosen.text
-        born = spawn_via_http(client, {"prompt": "retain the birth model", "prompt_source": "user"})
+        born = spawn_via_http(
+            client,
+            {
+                "prompt": "retain the birth model",
+                "prompt_source": "user",
+                "config": {"llm_model": "claude-sonnet-5"},
+            },
+        )
         assert born.status_code == 201, born.text
         agent_id = born.json()["id"]
         pins = db_conn.execute(
             "SELECT config_overlay ->> 'llm_model', birth_config ->> 'llm_model' FROM agents_meta WHERE id=%s",
             (agent_id,),
         ).fetchone()
-        assert pins == (None, "claude-sonnet-5")
-        changed = client.put("/api/config/default-model", json={"model": "deepseek-flash"})
-        assert changed.status_code == 200, changed.text
+        assert pins == ("claude-sonnet-5", None)
         detail = client.get(f"/api/agents/{agent_id}")
         assert detail.status_code == 200 and detail.json()["supports_vision"] is True
         for path in ("/api/agents", "/api/agents/roster"):
             response = client.get(path)
             assert response.status_code == 200, response.text
             assert response.json()["agents"][0]["supports_vision"] is True
+
+        child = spawn_via_http(
+            client,
+            {
+                "prompt": "inherit parent model",
+                "prompt_source": "user",
+                "spawner": f"agent:{agent_id}",
+            },
+        )
+        assert child.status_code == 201, child.text
+        child_id = child.json()["id"]
+        child_pins = db_conn.execute(
+            "SELECT config_overlay ->> 'llm_model', birth_config ->> 'llm_model' FROM agents_meta WHERE id=%s",
+            (child_id,),
+        ).fetchone()
+        assert child_pins == (None, "claude-sonnet-5")
+        child_detail = client.get(f"/api/agents/{child_id}")
+        assert child_detail.status_code == 200 and child_detail.json()["supports_vision"] is True
 
 
 def test_existing_agent_projection_survives_provider_failure(
@@ -114,7 +145,6 @@ def test_model_requests_report_unavailable(
     client, agent_id = failed_provider_agent
     for path in (
         "/api/models",
-        "/api/config/default-model",
         "/api/config/resolved",
         f"/api/agents/{agent_id}/token-usage",
         f"/api/agents/{agent_id}/context-breakdown",

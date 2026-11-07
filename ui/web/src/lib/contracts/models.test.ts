@@ -24,7 +24,7 @@ function modelsResponse(
       }),
     ),
   );
-  return { providers, models, default: "" };
+  return { providers, models };
 }
 
 describe("providerLabel", () => {
@@ -194,7 +194,6 @@ describe("isSuperseded", () => {
         context_window: 128_000,
       },
     },
-    default: "deepseek-flash",
   };
 
   it("returns true when the registry supplies a replacement", () => {

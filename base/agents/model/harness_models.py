@@ -18,7 +18,6 @@ _AGY_EFFORT_RANK = {level: index for index, level in enumerate(_AGY_EFFORT_ORDER
 
 class CatalogProbeResult(NamedTuple):
     models: tuple[ProbedHarnessModel, ...] = ()
-    default_model: str | None = None
     error: str | None = None
 
 
@@ -96,7 +95,6 @@ def _parse_codex_item(item: object) -> tuple[ProbedHarnessModel, bool] | None:
 def parse_codex_model_list(pages: Sequence[object]) -> CatalogProbeResult:
     models: list[ProbedHarnessModel] = []
     seen: set[str] = set()
-    default_model: str | None = None
 
     for page in pages:
         if not _is_mapping(page):
@@ -108,16 +106,13 @@ def parse_codex_model_list(pages: Sequence[object]) -> CatalogProbeResult:
             parsed = _parse_codex_item(item)
             if parsed is None or parsed[0].id in seen:
                 continue
-            model, is_default = parsed
+            model, _is_default = parsed
             seen.add(model.id)
             models.append(model)
-            if is_default and default_model is None:
-                default_model = model.id
 
     if not models:
         return CatalogProbeResult(error="codex model/list returned no visible models")
-    resolved_default = default_model if default_model in seen else models[0].id
-    return CatalogProbeResult(models=tuple(models), default_model=resolved_default)
+    return CatalogProbeResult(models=tuple(models))
 
 
 def _claude_model_id(entry: Mapping[str, object]) -> str | None:
@@ -188,12 +183,9 @@ def parse_claude_initialize(payload: object) -> CatalogProbeResult:
 
     by_id: dict[str, ProbedHarnessModel] = {}
     order: list[str] = []
-    default_model: str | None = None
     for item in raw_models:
         if not _is_mapping(item):
             continue
-        if item.get("value") == "default":
-            default_model = _non_empty_str(item.get("resolvedModel")) or default_model
         parsed = _claude_entry_model(item)
         if parsed is not None:
             _merge_claude_model(by_id, order, parsed)
@@ -201,8 +193,7 @@ def parse_claude_initialize(payload: object) -> CatalogProbeResult:
     if not order:
         return CatalogProbeResult(error="claude initialize returned no usable models")
     models = tuple(by_id[model_id] for model_id in order)
-    resolved_default = default_model if default_model in by_id else models[0].id
-    return CatalogProbeResult(models=models, default_model=resolved_default)
+    return CatalogProbeResult(models=models)
 
 
 def _extract_agy_cli_id(line: str) -> str | None:
@@ -258,29 +249,20 @@ def parse_antigravity_models(stdout: str) -> CatalogProbeResult:
     if not order:
         return CatalogProbeResult(error="agy models listed no models")
     models = tuple(_build_agy_model(base_id, efforts_by_base[base_id]) for base_id in order)
-    if "gemini-4-argon" in efforts_by_base:
-        default_model = "gemini-4-argon"
-    else:
-        default_model = next(
-            (item.id for item in models if item.id.startswith("gemini-")),
-            models[0].id,
-        )
-    return CatalogProbeResult(models=models, default_model=default_model)
+    return CatalogProbeResult(models=models)
 
 
 def _select_probed_model(
     harness: Harness,
     models: Sequence[ProbedHarnessModel],
-    default_model: str | None,
     requested_model: object,
 ) -> ProbedHarnessModel:
     if not models:
         raise InvalidModelConfig(f"harness {harness.value!r} reported no available models")
     if requested_model is None or requested_model == "":
-        by_id = {item.id: item for item in models}
-        if default_model is not None and default_model in by_id:
-            return by_id[default_model]
-        return models[0]
+        raise InvalidModelConfig(
+            f"no model configured for harness {harness.value!r} — pass config.llm_model in the spawn request"
+        )
     if not isinstance(requested_model, str):
         raise InvalidModelConfig("llm_model must be a string")
     selected = next((item for item in models if item.id == requested_model), None)
@@ -323,11 +305,10 @@ def _select_probed_effort(
 def resolve_probed_harness_selection(
     harness: Harness,
     models: Sequence[ProbedHarnessModel],
-    default_model: str | None,
     *,
     requested_model: object = None,
     requested_effort: object = None,
 ) -> tuple[str, str | None]:
-    selected = _select_probed_model(harness, models, default_model, requested_model)
+    selected = _select_probed_model(harness, models, requested_model)
     resolved_effort = _select_probed_effort(harness, selected, requested_effort)
     return (selected.id, resolved_effort)

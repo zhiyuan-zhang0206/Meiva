@@ -360,7 +360,7 @@
     "/api/models": {
       "get": {
         "summary": "Get Models",
-        "description": "List selectable LLM models (grouped by provider) + the cluster default.\n\nRoster and tuning come from the model registry; current rates come from\nthe versioned pricing catalog. The default uses the same DB/config\nresolution as the birth stamp and spawn preflight.",
+        "description": "List selectable LLM models (grouped by provider).\n\nRoster and tuning come from the model registry; current rates come from\nthe versioned pricing catalog.",
         "operationId": "get_models_api_models_get",
         "responses": {
           "200": {
@@ -4504,62 +4504,6 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ConversationSnapshotResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/config/default-model": {
-      "get": {
-        "summary": "Get Default Model",
-        "description": "The model a new agent is born on, and where that value came from.",
-        "operationId": "get_default_model_api_config_default_model_get",
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/DefaultModelView"
-                }
-              }
-            }
-          }
-        }
-      },
-      "put": {
-        "summary": "Put Default Model",
-        "description": "Set the cluster's default model.\n\n400 when the id is not a spawnable model in the model catalog.\nTakes effect for agents born after the write; every existing agent keeps the\nmodel stamped on its own row.",
-        "operationId": "put_default_model_api_config_default_model_put",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/DefaultModelWrite"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/DefaultModelView"
                 }
               }
             }
@@ -11894,46 +11838,6 @@
         "title": "CostEstimateOut",
         "description": "The cold-cache price of building what a session (or a request) still lacks.\n\n`cost_usd` is None when the agent's model has no price. See `cost_basis` of the response."
       },
-      "DefaultModelSource": {
-        "type": "string",
-        "enum": [
-          "cluster",
-          "config"
-        ],
-        "title": "DefaultModelSource"
-      },
-      "DefaultModelView": {
-        "properties": {
-          "model": {
-            "type": "string",
-            "title": "Model"
-          },
-          "source": {
-            "$ref": "#/components/schemas/DefaultModelSource"
-          }
-        },
-        "type": "object",
-        "required": [
-          "model",
-          "source"
-        ],
-        "title": "DefaultModelView",
-        "description": "GET/PUT /api/config/default-model — the model a new agent is born on.\n\n`source` names where `model` came from, because the two cases behave\ndifferently on the next `.env` edit: `cluster` is the DB row (a deliberate\nchoice through this endpoint, which outranks `.env`), `config` is the ordinary\nchain (`.env` MEIVA_MODEL, else the code default) showing through because no\ncluster choice has been made."
-      },
-      "DefaultModelWrite": {
-        "properties": {
-          "model": {
-            "type": "string",
-            "title": "Model"
-          }
-        },
-        "type": "object",
-        "required": [
-          "model"
-        ],
-        "title": "DefaultModelWrite",
-        "description": "PUT /api/config/default-model body. `model` must be a spawnable id from the\nregistry roster; anything else is rejected rather than stored."
-      },
       "DeliveryStatus": {
         "properties": {
           "batch_id": {
@@ -12830,17 +12734,6 @@
             },
             "type": "array",
             "title": "Models"
-          },
-          "default_model": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Default Model"
           }
         },
         "type": "object",
@@ -14620,17 +14513,12 @@
             },
             "type": "object",
             "title": "Models"
-          },
-          "default": {
-            "type": "string",
-            "title": "Default"
           }
         },
         "type": "object",
         "required": [
           "providers",
-          "models",
-          "default"
+          "models"
         ],
         "title": "ModelsResponse",
         "description": "GET /api/models — model picker source for the spawn UI."

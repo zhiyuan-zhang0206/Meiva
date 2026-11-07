@@ -47,6 +47,12 @@ def spawn_agent(
     database_gate: ProcessDbGate,
     local_machine: MachineIdentityReader,
 ) -> int:
+    if (
+        fork_from is None
+        and not spawner.startswith("agent:")
+        and (not config or "llm_model" not in config)
+    ):
+        config = {**(config or {}), "llm_model": "deepseek-flash"}
     agent_id, _birth_config, _prompt_id, _attempt_id = create_agent_row(
         Database.from_settings(gate=database_gate),
         EventBus.from_settings(rng=seeded_rng(), timers=SYSTEM_TIMERS),

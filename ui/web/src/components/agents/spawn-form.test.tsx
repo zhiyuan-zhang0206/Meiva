@@ -118,7 +118,6 @@ const singleMachineStatus = () =>
 const modelsDefault = (): ModelsResponse => ({
   providers: { deepseek: ["deepseek-v4-pro"], claude: ["claude-opus-4-8"] },
   models: {},
-  default: "deepseek-v4-pro",
 });
 
 const modelsWithEffort = (): ModelsResponse => ({
@@ -138,7 +137,6 @@ const modelsWithEffort = (): ModelsResponse => ({
       reasoning_effort_default: null,
     },
   },
-  default: "deepseek-v4-pro",
 });
 
 const modelsWithTwoLadders = (): ModelsResponse => ({
@@ -157,7 +155,6 @@ const modelsWithTwoLadders = (): ModelsResponse => ({
       reasoning_effort_default: "medium",
     },
   },
-  default: "deepseek-v4-pro",
 });
 
 const harnessAllAvailable = () => [
@@ -168,7 +165,6 @@ const harnessAllAvailable = () => [
     launchable: true,
     billing: "api" as const,
     models: [],
-    default_model: null,
   },
   {
     harness: "claude_code" as const,
@@ -177,7 +173,6 @@ const harnessAllAvailable = () => [
     launchable: true,
     billing: "subscription" as const,
     models: [{ id: "claude-opus-4-8", reasoning_effort_options: [], reasoning_effort_default: null }],
-    default_model: "claude-opus-4-8",
   },
   {
     harness: "codex" as const,
@@ -186,7 +181,6 @@ const harnessAllAvailable = () => [
     launchable: true,
     billing: "subscription" as const,
     models: [{ id: "gpt-5.6", reasoning_effort_options: ["low", "medium", "high"], reasoning_effort_default: "medium" }],
-    default_model: "gpt-5.6",
   },
   {
     harness: "antigravity" as const,
@@ -198,7 +192,6 @@ const harnessAllAvailable = () => [
       { id: "gemini-4-argon", reasoning_effort_options: ["low", "medium", "high"], reasoning_effort_default: "high" },
       { id: "gpt-oss-120b", reasoning_effort_options: ["medium"], reasoning_effort_default: "medium" },
     ],
-    default_model: "gemini-4-argon",
   },
 ];
 

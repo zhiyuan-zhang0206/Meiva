@@ -290,7 +290,6 @@ export const MODELS: ModelsResponse = {
       reasoning_effort_options: null,
     },
   },
-  default: "deepseek-v4-pro",
 };
 
 export const RESOLVED: ResolvedConfigView = {
@@ -359,8 +358,4 @@ export function setupConfigTest() {
   transport.getSystemStatus.mockResolvedValue(STATUS);
   transport.getModels.mockResolvedValue(MODELS);
   transport.getResolvedConfig.mockResolvedValue(RESOLVED);
-  transport.getDefaultModel.mockResolvedValue({
-    model: "deepseek-v4-pro",
-    source: "cluster",
-  });
 }

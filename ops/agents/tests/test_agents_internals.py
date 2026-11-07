@@ -81,6 +81,8 @@ def spawn_agent(
     local_machine: MachineIdentityReader,
 ) -> int:
     bus = EventBus.from_settings(rng=seeded_rng(), timers=SYSTEM_TIMERS)
+    if config is None and fork_from is None and not spawner.startswith("agent:"):
+        config = {"llm_model": "deepseek-flash"}
     agent_id, _birth_config, _prompt_id, _attempt_id = create_agent_row(
         Database.from_settings(gate=database_gate),
         bus,
@@ -320,7 +322,7 @@ class TestSpawnAgent:
         )
         for agent_id, stamped in ((born_vision, "claude-sonnet-5"), (born_text, "glm-5.3")):
             db_conn.execute(
-                "UPDATE agents_meta SET birth_config = %s::jsonb WHERE id = %s",
+                "UPDATE agents_meta SET config_overlay = '{}'::jsonb, birth_config = %s::jsonb WHERE id = %s",
                 (f'{{"llm_model": "{stamped}"}}', agent_id),
             )
         db_conn.commit()
@@ -476,8 +478,15 @@ class TestSpawnerValidation:
         database_gate: ProcessDbGate,
         machine_identity: MachineIdentityReader,
     ) -> None:
+        parent_id = spawn_agent(
+            spawner="user",
+            config_authority=config_authority,
+            model_catalog=model_catalog,
+            database_gate=database_gate,
+            local_machine=machine_identity,
+        )
         new_id = spawn_agent(
-            spawner="agent:42",
+            spawner=f"agent:{parent_id}",
             config_authority=config_authority,
             model_catalog=model_catalog,
             database_gate=database_gate,
@@ -485,7 +494,7 @@ class TestSpawnerValidation:
         )
         row = _agents_row(db_conn, new_id)
         assert row is not None
-        assert row[1] == "agent:42"
+        assert row[1] == f"agent:{parent_id}"
 
     def test_user_spawner_accepted(
         self,

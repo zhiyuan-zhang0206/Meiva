@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import json
-import re
 from collections.abc import Mapping
 from dataclasses import dataclass
+from typing import TypeGuard
 from uuid import UUID
 
 import psycopg
@@ -22,10 +22,16 @@ from base.agents.model.birth_config import (
     HARNESS_MODEL_SELECTION_VERSION,
     resolve_birth_config,
 )
+from base.api_contracts.agent_contract import (
+    AgentNotFound,
+    Harness,
+    InvalidModelConfig,
+    is_spawner_agent_id_malformed,
+    parse_spawner_agent_id,
+)
 from base.config.service_read import ConfigAuthority
 from base.db import fetch_one
 from base.db.rows import IdRow, query_one
-from base.host.boundary.json_values import is_object_dict
 from base.lm.catalog import ModelCatalog
 from base.lm.registry import normalize_overlay_llm_model
 from base.log import logger
@@ -46,23 +52,6 @@ class AgentBirth:
     def row_result(self) -> tuple[int, dict[str, object] | None, int | None, UUID]:
         """The public create_agent_row result, including replay's absent prompt."""
         return self.agent_id, self.birth_config, self.prompt_inbound_id, self.launch_attempt_id
-
-
-_SPAWNER_AGENT_RE = re.compile(r"^agent:(\d+)$")
-
-
-def _spawner_agent_id_malformed(spawner: str) -> bool:
-    """Return True when a spawner that starts with 'agent:' has a
-    non-numeric or non-positive id part — a sign of a caller bug where
-    the spawning process's own agent id was None/unset.
-
-    Accepts: "agent:1", "agent:405" etc.
-    Rejects: "agent:None", "agent:", "agent:abc", "agent:0".
-    """
-    m = _SPAWNER_AGENT_RE.match(spawner)
-    if m is None:
-        return True
-    return int(m.group(1)) <= 0
 
 
 def record_birth_event(
@@ -111,7 +100,7 @@ def validate_spawn_args(
         raise ValueError(
             "prompt and prompt_source must be provided as a pair (both None or both given)"
         )
-    if spawner.startswith("agent:") and _spawner_agent_id_malformed(spawner):
+    if is_spawner_agent_id_malformed(spawner):
         raise ValueError(
             f"spawner has agent: prefix but the id part is not a valid agent id: "
             f"{spawner!r}. This is often caused by an un-bootstrapped process "
@@ -165,42 +154,156 @@ def _apply_birth_harness_defaults(
     return cleaned, inherited
 
 
+def _is_str_mapping(value: object) -> TypeGuard[Mapping[str, object]]:
+    return isinstance(value, Mapping)
+
+
+def _as_mapping(value: object) -> Mapping[str, object]:
+    return value if _is_str_mapping(value) else {}
+
+
+def _default_reasoning_effort(
+    model: str | None,
+    catalog: ModelCatalog,
+    harness_enum: Harness,
+) -> str | None:
+    if harness_enum is not Harness.MEIVA or not model:
+        return None
+    from base.lm.registry import explain_setting
+
+    setting = explain_setting("reasoning_effort", model=model, explicit=None, models=catalog.models)
+    return str(setting.value) if setting.value else None
+
+
+def _resolve_same_harness_inheritance(
+    parent_model: object | None,
+    parent_effort: object | None,
+    req_model: object | None,
+    req_effort: object | None,
+    catalog: ModelCatalog,
+    harness_enum: Harness,
+) -> dict[str, object] | None:
+    inherited: dict[str, object] = {}
+    effective_model = req_model or parent_model
+    if not req_model:
+        inherited["llm_model"] = parent_model
+    if req_effort in (None, ""):
+        if (req_model is None or req_model == parent_model) and parent_effort is not None:
+            inherited["reasoning_effort"] = parent_effort
+        else:
+            effort = _default_reasoning_effort(
+                str(effective_model) if effective_model else None, catalog, harness_enum
+            )
+            if effort:
+                inherited["reasoning_effort"] = effort
+    return inherited or None
+
+
+def _resolve_parent_spawn_inheritance(
+    cur: psycopg.Cursor[tuple[object, ...]],
+    parent_id: int,
+    config: dict[str, object] | None,
+    harness: str,
+    catalog: ModelCatalog,
+) -> dict[str, object] | None:
+    harness_enum = Harness(harness)
+    cur.execute(
+        "SELECT harness, config_overlay, birth_config FROM agents_meta WHERE id = %s",
+        (parent_id,),
+    )
+    p_row = cur.fetchone()
+    if p_row is None:
+        raise AgentNotFound(f"parent agent {parent_id} does not exist")
+    parent_harness = str(p_row[0])
+    parent_overlay = _as_mapping(p_row[1])
+    parent_birth = _as_mapping(p_row[2])
+    parent_model = (
+        parent_overlay.get("llm_model")
+        if "llm_model" in parent_overlay
+        else parent_birth.get("llm_model")
+    )
+    parent_effort = (
+        parent_overlay.get("reasoning_effort")
+        if "reasoning_effort" in parent_overlay
+        else parent_birth.get("reasoning_effort")
+    )
+    req_model = config.get("llm_model") if config else None
+    req_effort = config.get("reasoning_effort") if config else None
+
+    if harness != parent_harness:
+        if not req_model:
+            raise ValueError(
+                f"llm_model must be explicitly provided when spawning on a different harness ({harness} != {parent_harness})"
+            )
+        if req_effort in (None, ""):
+            effort = _default_reasoning_effort(str(req_model), catalog, harness_enum)
+            if effort:
+                return {"reasoning_effort": effort}
+        return None
+
+    return _resolve_same_harness_inheritance(
+        parent_model, parent_effort, req_model, req_effort, catalog, harness_enum
+    )
+
+
+def _resolve_fork_overlay_and_inherited(
+    cur: psycopg.Cursor[tuple[object, ...]],
+    fork_from: int,
+    config: dict[str, object] | None,
+) -> tuple[dict[str, object] | None, dict[str, object] | None]:
+    cur.execute("SELECT config_overlay, birth_config FROM agents_meta WHERE id = %s", (fork_from,))
+    stored = fetch_one(cur, "spawn: read fork source config")
+    s_overlay = _as_mapping(stored[0])
+    s_birth = _as_mapping(stored[1])
+    if stored[1] is not None and not isinstance(stored[1], dict):
+        raise TypeError(f"agents_meta.birth_config of agent {fork_from} is not a JSON object")
+    resolved_config = dict(s_overlay) if (config is None and s_overlay) else config
+    inherited = dict(s_birth) if stored[1] is not None else None
+    return resolved_config, inherited
+
+
+def _resolve_root_spawn_inherited(
+    config: dict[str, object] | None,
+    harness_enum: Harness,
+    catalog: ModelCatalog,
+) -> dict[str, object] | None:
+    req_model = config.get("llm_model") if config else None
+    req_effort = config.get("reasoning_effort") if config else None
+    if not req_model:
+        raise ValueError("llm_model must be explicitly provided for root/non-agent spawn")
+    if req_effort in (None, ""):
+        effort = _default_reasoning_effort(str(req_model), catalog, harness_enum)
+        if effort:
+            return {"reasoning_effort": effort}
+    return None
+
+
 def _resolve_birth_overlay(
     cur: psycopg.Cursor[tuple[object, ...]],
     config: dict[str, object] | None,
     fork_from: int | None,
     *,
+    spawner: str = "user",
     catalog: ModelCatalog,
     authority: ConfigAuthority,
     harness: str,
     harness_defaults: Mapping[str, object] | None = None,
 ) -> tuple[dict[str, object] | None, dict[str, object]]:
-    # THE spawn boundary is this INSERT — every spawn in the system funnels
-    # through it (SDK / frontend / scripts all POST /api/keyed/v1/agents, which
-    # dispatches the launch to the target runner), so it is the one place
-    # the frozen-field stamp is taken. A fork carries its parent's stamp over
-    # verbatim: a fork is the same identity continuing, so it must not silently
-    # re-resolve its brain against today's cluster defaults.
-    from base.api_contracts.agent_contract import Harness, InvalidModelConfig
     from base.config.agent_pins import resolve_agent_config_pins
     from base.lm.factory import validate_model_config
 
     harness_enum = Harness(harness)
-    inherited: dict[str, object] | None = None
     if fork_from is not None:
-        cur.execute("SELECT birth_config FROM agents_meta WHERE id = %s", (fork_from,))
-        stored = fetch_one(cur, "spawn: read fork source birth_config")[0]
-        if stored is not None and not is_object_dict(stored):
-            raise TypeError(f"agents_meta.birth_config of agent {fork_from} is not a JSON object")
-        inherited = stored
-    elif harness_defaults:
-        config, inherited = _apply_birth_harness_defaults(config, harness_defaults)
+        config, inherited = _resolve_fork_overlay_and_inherited(cur, fork_from, config)
+    elif (parent_id := parse_spawner_agent_id(spawner)) is not None:
+        inherited = _resolve_parent_spawn_inheritance(cur, parent_id, config, harness, catalog)
+    else:
+        inherited = _resolve_root_spawn_inherited(config, harness_enum, catalog)
+
+    if harness_defaults:
+        config, h_inherited = _apply_birth_harness_defaults(config, harness_defaults)
+        inherited = {**(inherited or {}), **h_inherited}
     if config and harness_enum is Harness.MEIVA:
-        # Last-mile settlement (task #4306): the gateway preflight already
-        # normalized + reported a withdrawn llm_model; keeping the rewrite
-        # at the row itself means a withdrawn id never lands in
-        # agents_meta.config_overlay, whatever client path composed the map
-        # (a bare fork copies the source overlay over verbatim).
         config = dict(config)
         model_receipt = normalize_overlay_llm_model(config, models=catalog.models)
         if model_receipt is not None:
@@ -211,9 +314,7 @@ def _resolve_birth_overlay(
                 requested=model_receipt[0],
                 resolved=model_receipt[1],
             )
-    birth_config = resolve_birth_config(
-        cur, config, inherited=inherited, catalog=catalog, authority=authority
-    )
+    birth_config = resolve_birth_config(config, inherited=inherited, authority=authority)
 
     try:
         pins = resolve_agent_config_pins(config, birth_config)
@@ -303,12 +404,13 @@ def insert_agent_birth(
     # source is refused here, so a caller that skipped request validation cannot
     # bypass the rule.
     # meiva:link base/agents/docs/harness/harness.meiva.okf.md
-    born_harness = resolve_birth_harness(cur, harness, fork_from)
+    born_harness = resolve_birth_harness(cur, harness, fork_from, spawner=spawner)
     new_id = _insert_agent_identity(conn, label)
     config, birth_config = _resolve_birth_overlay(
         cur,
         config,
         fork_from,
+        spawner=spawner,
         catalog=catalog,
         authority=authority,
         harness=born_harness,

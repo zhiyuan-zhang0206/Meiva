@@ -46,7 +46,6 @@ def test_parse_codex_model_list_extracts_live_models_efforts_and_defaults() -> N
     page_2 = {"data": [{"id": "gpt-6.1-terra", "supportedReasoningEfforts": ["low"]}]}
     result = parse_codex_model_list([page_1, page_2])
     assert result.error is None
-    assert result.default_model == "gpt-6.1-terra"
     assert result.models == (
         ProbedHarnessModel(
             id="gpt-6.1-sol",
@@ -92,7 +91,6 @@ def test_parse_claude_initialize_keeps_uncatalogued_and_effortless_models() -> N
     }
     result = parse_claude_initialize(payload)
     assert result.error is None
-    assert result.default_model == "claude-sonnet-5-5"
     assert result.models == (
         ProbedHarnessModel(
             id="claude-sonnet-5-5",
@@ -119,7 +117,6 @@ def test_parse_claude_initialize_preserves_a_separate_one_million_context_option
         }
     )
 
-    assert result.default_model == "claude-sonnet-4-6"
     assert [model.id for model in result.models] == [
         "claude-sonnet-4-6",
         "sonnet[1M]",
@@ -139,7 +136,6 @@ def test_parse_antigravity_models_groups_effort_suffixes_and_uncatalogued_rows()
     )
     result = parse_antigravity_models(stdout)
     assert result.error is None
-    assert result.default_model == "gemini-4-argon"
     assert result.models == (
         ProbedHarnessModel(
             id="gemini-4-argon",
@@ -170,22 +166,25 @@ def test_resolve_probed_harness_selection_enforces_live_models_and_efforts() -> 
         ),
         ProbedHarnessModel(id="claude-haiku-4-5-20251001"),
     )
-    assert resolve_probed_harness_selection(Harness.ANTIGRAVITY, models, "gpt-oss-120b") == (
+    assert resolve_probed_harness_selection(
+        Harness.ANTIGRAVITY, models, requested_model="gpt-oss-120b"
+    ) == (
         "gpt-oss-120b",
         "medium",
     )
     assert resolve_probed_harness_selection(
         Harness.CLAUDE_CODE,
         models,
-        "gpt-oss-120b",
         requested_model="claude-haiku-4-5-20251001",
     ) == ("claude-haiku-4-5-20251001", None)
+
+    with pytest.raises(InvalidModelConfig, match="no model configured"):
+        resolve_probed_harness_selection(Harness.ANTIGRAVITY, models)
 
     with pytest.raises(InvalidModelConfig, match="does not accept reasoning_effort"):
         resolve_probed_harness_selection(
             Harness.CLAUDE_CODE,
             models,
-            "gpt-oss-120b",
             requested_model="claude-haiku-4-5-20251001",
             requested_effort="low",
         )
@@ -194,7 +193,6 @@ def test_resolve_probed_harness_selection_enforces_live_models_and_efforts() -> 
         resolve_probed_harness_selection(
             Harness.ANTIGRAVITY,
             models,
-            "gpt-oss-120b",
             requested_model="gpt-6.1-terra",
         )
 
@@ -202,7 +200,6 @@ def test_resolve_probed_harness_selection_enforces_live_models_and_efforts() -> 
         resolve_probed_harness_selection(
             Harness.ANTIGRAVITY,
             models,
-            "gpt-oss-120b",
             requested_model="gpt-oss-120b",
             requested_effort="high",
         )

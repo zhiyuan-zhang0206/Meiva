@@ -61,10 +61,7 @@ export const CONTROL_SECTIONS: ControlSectionDef[] = [
     labelKey: "config",
     subs: [
       // meiva:note
-      // Neither of these is a field bucket (see config-groups.ts): the default
-      // model edits a DB row rather than a `.env` field, and the per-model view is
-      // read-only. Both render their own element above the editable groups.
-      { id: "config-default-model", label: "Default model", labelKey: "config-default-model" },
+      // The per-model view is read-only. It renders its own element above the editable groups.
       { id: "config-per-model", label: "Per-model values", labelKey: "config-per-model" },
       { id: "config-llm", label: "LLM settings", labelKey: "config-llm" },
       { id: "config-prompts", label: "System prompts", labelKey: "config-prompts" },

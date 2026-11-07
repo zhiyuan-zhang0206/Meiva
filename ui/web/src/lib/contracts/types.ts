@@ -236,7 +236,6 @@ export type SpawnAgentRequest = Omit<Schemas["SpawnAgentRequest"], "spawner"> & 
 export type SpawnedAgent = Schemas["SpawnedAgent"];
 
 export type ModelsResponse = Schemas["ModelsResponse"];
-export type DefaultModelView = Schemas["DefaultModelView"];
 
 export type MemoryNoteResponse = Schemas["MemoryNoteResponse"];
 

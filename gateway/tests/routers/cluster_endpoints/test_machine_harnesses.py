@@ -40,7 +40,6 @@ _WIRE: dict[str, Any] = {
                     "reasoning_effort_default": "high",
                 }
             ],
-            "default_model": "claude-sonnet-5-5",
         },
         {
             "harness": "codex",
@@ -152,7 +151,6 @@ def test_route_serves_the_cached_rows(set_machine_identity: MachineIdentitySette
             "launchable": True,
             "billing": "api",
             "models": [],
-            "default_model": None,
         }
     ]
 

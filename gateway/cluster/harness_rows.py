@@ -46,7 +46,6 @@ def availability_rows(
                 )
                 for model in row.models
             ],
-            default_model=row.default_model,
         )
         for row in probed.harnesses
     ]

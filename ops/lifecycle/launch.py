@@ -88,7 +88,6 @@ def spawn_prechecks_blocking(
     keys: ProviderKeys,
     authority: ConfigAuthority,
     probed_models: Sequence[ProbedHarnessModel] | None = None,
-    probed_default_model: str | None = None,
 ) -> str | None:
     """Sync spawn pre-checks — via to_thread: model-config validation (may read
     provider API keys) + fork checkpoint lookup. Returns the fork checkpoint
@@ -96,18 +95,21 @@ def spawn_prechecks_blocking(
     from base.agents.model.model_config import validate_spawn_model_config
 
     with db_pool.connection() as conn, conn.cursor() as cur:
-        resolve_birth_harness(cur, body.harness, body.fork_from)
+        effective_harness_str = resolve_birth_harness(
+            cur, body.harness, body.fork_from, spawner=body.spawner
+        )
+        effective_harness = Harness(effective_harness_str)
         validate_spawn_model_config(
             cur,
             body.config,
             body.fork_from,
+            spawner=body.spawner,
             catalog=catalog,
             keys=keys,
             authority=authority,
             llm_override=authority.service_field_value("llm_override"),
-            harness=body.harness or Harness.MEIVA,
+            harness=effective_harness,
             probed_models=probed_models,
-            probed_default_model=probed_default_model,
         )
     fork_checkpoint: str | None = None
     if body.fork_from is not None:

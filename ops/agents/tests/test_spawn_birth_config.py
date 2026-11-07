@@ -18,7 +18,6 @@ import psycopg
 import pytest
 
 from base.agents.birth.spawn import create_agent_row
-from base.agents.model.birth_config import set_cluster_default_model
 from base.clock import SYSTEM_TIMERS
 from base.clock.tests.seeded_rng import seeded_rng
 from base.cluster.machine import MachineIdentityReader
@@ -46,6 +45,8 @@ def _spawn_agent(
     (runner-side; the autouse guard spy records the launch so tests can assert
     the stamp rides out to the child)."""
 
+    if config is None and kw.get("fork_from") is None and not spawner.startswith("agent:"):
+        config = {"llm_model": "deepseek-flash"}
     agent_id, _birth_config, _prompt_id, _attempt_id = create_agent_row(
         Database.from_settings(gate=database_gate),
         EventBus.from_settings(rng=seeded_rng(), timers=SYSTEM_TIMERS),
@@ -95,14 +96,22 @@ class TestSpawnStamping:
         database_gate: ProcessDbGate,
         machine_identity: MachineIdentityReader,
     ) -> None:
-        agent_id = _spawn_agent(
+        parent_id = _spawn_agent(
             spawner="test",
+            config={"llm_model": "deepseek-flash"},
             config_authority=config_authority,
             model_catalog=model_catalog,
             database_gate=database_gate,
             local_machine=machine_identity,
         )
-        assert set(_birth_config(db_conn, agent_id) or {}) == frozen_field_names()
+        child_id = _spawn_agent(
+            spawner=f"agent:{parent_id}",
+            config_authority=config_authority,
+            model_catalog=model_catalog,
+            database_gate=database_gate,
+            local_machine=machine_identity,
+        )
+        assert set(_birth_config(db_conn, child_id) or {}) == frozen_field_names()
 
     def test_overlay_present_frozen_field_is_not_stamped(
         self,
@@ -126,7 +135,7 @@ class TestSpawnStamping:
         assert "llm_model" not in stamped
         assert set(stamped) == frozen_field_names() - {"llm_model"}
 
-    def test_the_cluster_default_model_is_what_gets_frozen(
+    def test_the_parent_model_is_what_gets_frozen(
         self,
         redis_url: str,
         db_conn: psycopg.Connection,
@@ -136,19 +145,24 @@ class TestSpawnStamping:
         database_gate: ProcessDbGate,
         machine_identity: MachineIdentityReader,
     ) -> None:
-        with db_conn.cursor() as cur:
-            set_cluster_default_model(cur, "claude-sonnet-5", updated_by="test")
-        db_conn.commit()
-        agent_id = _spawn_agent(
+        parent_id = _spawn_agent(
             spawner="test",
+            config={"llm_model": "claude-sonnet-5"},
             config_authority=config_authority,
             model_catalog=model_catalog,
             database_gate=database_gate,
             local_machine=machine_identity,
         )
-        assert (_birth_config(db_conn, agent_id) or {})["llm_model"] == "claude-sonnet-5"
+        child_id = _spawn_agent(
+            spawner=f"agent:{parent_id}",
+            config_authority=config_authority,
+            model_catalog=model_catalog,
+            database_gate=database_gate,
+            local_machine=machine_identity,
+        )
+        assert (_birth_config(db_conn, child_id) or {})["llm_model"] == "claude-sonnet-5"
 
-    def test_a_later_default_flip_does_not_move_an_existing_agent(
+    def test_root_spawn_without_model_fails(
         self,
         redis_url: str,
         db_conn: psycopg.Connection,
@@ -158,20 +172,15 @@ class TestSpawnStamping:
         database_gate: ProcessDbGate,
         machine_identity: MachineIdentityReader,
     ) -> None:
-        """The whole point of the feature, end to end."""
-        agent_id = _spawn_agent(
-            spawner="test",
-            config_authority=config_authority,
-            model_catalog=model_catalog,
-            database_gate=database_gate,
-            local_machine=machine_identity,
-        )
-        born_with = (_birth_config(db_conn, agent_id) or {})["llm_model"]
-        with db_conn.cursor() as cur:
-            set_cluster_default_model(cur, "claude-sonnet-5", updated_by="test")
-        db_conn.commit()
-        assert (_birth_config(db_conn, agent_id) or {})["llm_model"] == born_with
-        assert born_with != "claude-sonnet-5"
+        with pytest.raises(ValueError, match="llm_model must be explicitly provided"):
+            _spawn_agent(
+                spawner="test",
+                config={},
+                config_authority=config_authority,
+                model_catalog=model_catalog,
+                database_gate=database_gate,
+                local_machine=machine_identity,
+            )
 
 
 class TestReplayOnWake:
@@ -235,9 +244,6 @@ class TestForkInheritance:
             local_machine=machine_identity,
         )
         ckpt = _first_checkpoint(db_conn, parent)
-        with db_conn.cursor() as cur:
-            set_cluster_default_model(cur, "claude-sonnet-5", updated_by="test")
-        db_conn.commit()
         child = _spawn_agent(
             spawner="test",
             fork_from=parent,
@@ -281,4 +287,4 @@ class TestForkInheritance:
             database_gate=database_gate,
             local_machine=machine_identity,
         )
-        assert set(_birth_config(db_conn, child) or {}) == frozen_field_names()
+        assert set(_birth_config(db_conn, child) or {}) == frozen_field_names() - {"llm_model"}

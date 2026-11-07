@@ -35,14 +35,15 @@ def _as_mapping(value: object) -> Mapping[str, object]:
 
 
 def _resolve_and_check_model(
-    pins: Mapping[str, object], catalog: ModelCatalog, default_model: str
+    pins: Mapping[str, object], catalog: ModelCatalog, default_model: str | None = None
 ) -> str:
     raw_model = pins.get("llm_model")
-    effective_model = raw_model if isinstance(raw_model, str) else default_model
+    effective_model = (
+        raw_model if isinstance(raw_model, str) and raw_model else (default_model or "")
+    )
     if not effective_model:
         raise InvalidModelConfig(
-            "no model configured — set llm_model in cluster config or pass "
-            "config.llm_model in the spawn request"
+            "no model configured — pass config.llm_model in the restart request"
         )
     effective_model = resolve_available_model(effective_model, models=catalog.models)
     if effective_model in catalog.decision_models:
@@ -73,7 +74,6 @@ def _validate_model_effort_and_harness(
 class RestartHarnessTarget:
     harness: Harness
     probed_models: Sequence[ProbedHarnessModel] | None = None
-    probed_default_model: str | None = None
 
 
 def _reject_decision_model_id(candidate: str, catalog: ModelCatalog) -> None:
@@ -88,7 +88,6 @@ def _validate_external_restart_pins(
     pins: Mapping[str, object],
     *,
     catalog: ModelCatalog,
-    default_model: str,
     effort_str: str | None,
     target: RestartHarnessTarget,
 ) -> tuple[str, str | None] | None:
@@ -96,31 +95,26 @@ def _validate_external_restart_pins(
     if raw_model is not None and not isinstance(raw_model, str):
         raise InvalidModelConfig("llm_model must be a string")
     candidate = raw_model if isinstance(raw_model, str) and raw_model else None
-    if candidate is not None:
-        _reject_decision_model_id(candidate, catalog)
+    if candidate is None:
+        raise InvalidModelConfig("no model configured — pass config.llm_model in config_overlay")
+    _reject_decision_model_id(candidate, catalog)
     if target.probed_models is not None:
         resolved_model, resolved_effort = resolve_probed_harness_selection(
             target.harness,
             target.probed_models,
-            target.probed_default_model,
             requested_model=candidate,
             requested_effort=effort_str,
         )
         _reject_decision_model_id(resolved_model, catalog)
         return (resolved_model, resolved_effort)
-    if not candidate and not default_model:
-        raise InvalidModelConfig(
-            "no model configured — set llm_model in cluster config or pass "
-            "config.llm_model in the spawn request"
-        )
-    return None
+    return (candidate, effort_str)
 
 
 def validate_restart_model_config_pins(
     pins: Mapping[str, object],
     *,
     catalog: ModelCatalog,
-    default_model: str,
+    default_model: str | None = None,
     target: RestartHarnessTarget | None = None,
 ) -> tuple[str, str | None] | None:
     effort = pins.get("reasoning_effort")
@@ -132,7 +126,6 @@ def validate_restart_model_config_pins(
         return _validate_external_restart_pins(
             pins,
             catalog=catalog,
-            default_model=default_model,
             effort_str=effort_str,
             target=target,
         )
@@ -141,6 +134,15 @@ def validate_restart_model_config_pins(
     effective_model = _resolve_and_check_model(pins, catalog, default_model)
     spec = catalog.models[effective_model]
     _validate_model_effort_and_harness(spec, effective_model, effective_harness, effort_str)
+    if effort_str is None:
+        from base.lm.registry import explain_setting
+
+        effort_str = (
+            explain_setting(
+                "reasoning_effort", model=effective_model, explicit=None, models=catalog.models
+            ).value
+            or None
+        )
     return (effective_model, effort_str)
 
 
@@ -167,7 +169,7 @@ def validate_restart_model_config(
     overlay: Mapping[str, object],
     *,
     catalog: ModelCatalog,
-    default_model: str,
+    default_model: str | None = None,
     target: RestartHarnessTarget | None = None,
 ) -> tuple[str, str | None] | None:
     if not {"llm_model", "reasoning_effort", "harness"}.intersection(overlay):
@@ -182,6 +184,10 @@ def validate_restart_model_config(
     current_harness = coerce_harness(row[2])
     effective_harness = _resolve_target_harness(target, overlay, row[2])
     if effective_harness != current_harness:
+        if not overlay.get("llm_model"):
+            raise InvalidModelConfig(
+                "llm_model must be explicitly provided in config_overlay when switching harnesses"
+            )
         effective_pins: Mapping[str, object] = overlay
     else:
         effective_pins = {**_as_mapping(row[1]), **_as_mapping(row[0]), **overlay}

@@ -40,6 +40,7 @@ async def test_new_launch_attempt_is_repeatable_without_prompt_insertion(
         prompt_source="user",
         catalog=build_model_catalog(home=meiva_home()),
         authority=config_authority,
+        config={"llm_model": "deepseek-flash"},
     )
     body = LaunchAgentRequest(
         agent_id=agent_id, launch_attempt_id=attempt, birth_config=birth_config

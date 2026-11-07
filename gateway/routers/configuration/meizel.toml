@@ -1,4 +1,4 @@
-exports = ["default_model.py", "runtime.py"]
+exports = ["runtime.py"]
 
 [uses]
 "runtime.py" = ["write_plan.py"]

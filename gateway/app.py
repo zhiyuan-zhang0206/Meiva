@@ -132,7 +132,6 @@ from gateway.routers import (
 from gateway.routers import (
     tasks as tasks_router,
 )
-from gateway.routers.configuration import default_model as default_model_router
 from gateway.routers.configuration import runtime as config_router
 from gateway.routers.fleet import fleet_graph as fleet_graph_router
 from gateway.routers.memory_api import memory as memory_router
@@ -524,7 +523,6 @@ def create_app(
         commands_router.router,
         config_router.router,
         conversation_router.router,
-        default_model_router.router,
         settings_router.router,
         notifications_router.router,
         schedules_router.router,

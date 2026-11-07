@@ -97,7 +97,11 @@ def test_invalid_admission_has_no_birth(
 def test_fork_without_source_checkpoint_has_no_birth(
     client: TestClient, db_conn: psycopg.Connection
 ) -> None:
-    parent = client.post(PATH, json={}, headers={**HEADERS, "Idempotency-Key": "parent"})
+    parent = client.post(
+        PATH,
+        json={"config": {"llm_model": "deepseek-flash"}},
+        headers={**HEADERS, "Idempotency-Key": "parent"},
+    )
     assert parent.status_code == 201, parent.text
     assert (
         client.post(PATH, json={"fork_from": parent.json()["id"]}, headers=HEADERS).status_code
@@ -110,7 +114,12 @@ def test_lost_response_and_concurrency_replay_one_birth(
     client: TestClient,
     db_conn: psycopg.Connection,
 ) -> None:
-    body = {"machine": "local-test", "prompt": "one goal", "prompt_source": "user"}
+    body = {
+        "machine": "local-test",
+        "prompt": "one goal",
+        "prompt_source": "user",
+        "config": {"llm_model": "deepseek-flash"},
+    }
     accepted = client.post(PATH, json=body, headers=HEADERS)
     assert accepted.status_code == 201, accepted.text
     with ThreadPoolExecutor(max_workers=3) as executor:
@@ -130,7 +139,14 @@ def test_revoked_credential_cannot_replay_guarded_receipt(
     client: GatewayTestClient,
     db_conn: psycopg.Connection,
 ) -> None:
-    assert client.post(PATH, json={"machine": "local-test"}, headers=HEADERS).status_code == 201
+    assert (
+        client.post(
+            PATH,
+            json={"machine": "local-test", "config": {"llm_model": "deepseek-flash"}},
+            headers=HEADERS,
+        ).status_code
+        == 201
+    )
     with gateway_test_client(
         process=client.app.state.gateway_process,
         config=replace(

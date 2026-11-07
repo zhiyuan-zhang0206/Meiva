@@ -254,7 +254,6 @@ def harness_availability() -> list[HarnessAvailability]:
             binary=row.binary,
             on_path=row.on_path,
             models=row.models,
-            default_model=row.default_model,
         )
         for row in probe_local_harnesses(
             now=sdk_settings.clock().now(),
@@ -312,6 +311,50 @@ def spawn(
     )
 
 
+def _check_spawn_model_required(
+    fork_from: int | None,
+    spawner: str,
+    config: dict[str, object] | None,
+) -> None:
+    if fork_from is not None or spawner.startswith("agent:"):
+        return
+    if not config or not config.get("llm_model"):
+        raise ValueError("config.llm_model must be explicitly provided in spawn request")
+
+
+def _validate_spawn_config_overlay(
+    config: dict[str, object],
+    coerced_harness: Harness | None,
+) -> None:
+    from base.packages.plugins.config_registration import validate_config_overlay
+    from meiva.sdk_surface import settings as sdk_settings
+    from meiva.sdk_surface.installation import installed
+
+    installation = installed()
+    effective_harness = coerced_harness or Harness.MEIVA
+    if effective_harness is Harness.MEIVA:
+        catalog = sdk_settings.model_catalog()
+        models_map = catalog.models
+        decision_models = catalog.decision_models
+        prices = catalog.prices
+    else:
+        models_map = None
+        decision_models = (
+            None
+            if installation is None or installation.catalog is None
+            else installation.catalog.decision_models
+        )
+        prices = None
+    validate_config_overlay(
+        config,
+        None if installation is None else installation.configs,
+        models=models_map,
+        decision_models=decision_models,
+        prices=prices,
+        home=process_context.current_context().require_meiva_home(),
+    )
+
+
 def spawn_impl(
     *,
     prompt: str | None,
@@ -340,34 +383,9 @@ def spawn_impl(
         )
     harness = None if coerced_harness is None else coerced_harness.value
     spawner = meiva.sdk_surface.agent_identity.require_actor()
+    _check_spawn_model_required(fork_from, spawner, config)
     if config:
-        from base.packages.plugins.config_registration import validate_config_overlay
-        from meiva.sdk_surface import settings as sdk_settings
-        from meiva.sdk_surface.installation import installed
-
-        installation = installed()
-        effective_harness = coerced_harness or Harness.MEIVA
-        if effective_harness is Harness.MEIVA:
-            catalog = sdk_settings.model_catalog()
-            models_map = catalog.models
-            decision_models = catalog.decision_models
-            prices = catalog.prices
-        else:
-            models_map = None
-            decision_models = (
-                None
-                if installation is None or installation.catalog is None
-                else installation.catalog.decision_models
-            )
-            prices = None
-        validate_config_overlay(
-            config,
-            None if installation is None else installation.configs,
-            models=models_map,
-            decision_models=decision_models,
-            prices=prices,
-            home=process_context.current_context().require_meiva_home(),
-        )
+        _validate_spawn_config_overlay(config, coerced_harness)
     return gateway_client.spawn(
         spawner=spawner,
         prompt=prompt,

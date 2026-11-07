@@ -397,6 +397,5 @@ function defaultModels(): ModelsResponse {
         pricing: { input: 1.65, cache_read: 0.14, output: 6.6 },
       },
     },
-    default: "deepseek-v4-pro",
   };
 }

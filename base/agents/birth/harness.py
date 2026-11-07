@@ -22,6 +22,7 @@ from base.api_contracts.agent_contract import (
     HarnessStatus,
     ProbedHarnessModel,
     coerce_harness,
+    parse_spawner_agent_id,
 )
 from base.host.boundary.json_values import is_object_dict
 from base.host.boundary.untyped import object_of
@@ -40,7 +41,6 @@ class HarnessProbe(NamedTuple):
     binary: str | None = None
     on_path: bool = False
     models: tuple[ProbedHarnessModel, ...] = ()
-    default_model: str | None = None
 
 
 @dataclass(frozen=True)
@@ -96,8 +96,18 @@ def resolve_birth_harness(
     fork_from: int | None,
     *,
     launchable: Collection[Harness] = LAUNCHABLE_HARNESSES,
+    spawner: str | None = None,
 ) -> str:
     if fork_from is None:
+        if (
+            requested is None
+            and spawner
+            and (parent_id := parse_spawner_agent_id(spawner)) is not None
+        ):
+            cur.execute("SELECT harness FROM agents_meta WHERE id = %s", (parent_id,))
+            p_row = cur.fetchone()
+            if p_row is not None and isinstance(p_row[0], str):
+                requested = p_row[0]
         return _require_launchable(coerce_harness(requested), fork_from, launchable).value
     cur.execute("SELECT harness FROM agents_meta WHERE id = %s", (fork_from,))
     row = cur.fetchone()
@@ -541,7 +551,6 @@ def _probe_external(
                 path,
                 on_path,
                 models=probed.models,
-                default_model=probed.default_model,
             )
         failure = probed.error or "no models returned"
         return HarnessProbe(
