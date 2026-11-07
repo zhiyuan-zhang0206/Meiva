@@ -50,7 +50,7 @@ def _as_dict_row_conn(value: object) -> TypeGuard[Connection[DictRow]]:
 # writes. Attachment projects onto the current state schema, which has no consumer for
 # those values. Drop exact retired root envelopes before the upstream decoder sees them.
 # Other values still go through the regular allowlist.
-# meiva:link meiva/impersonation/docs/attachment.meiva.okf.md
+# meiva:link base/agents/context/external_attachment/docs/external-attachment.meiva.okf.md
 class _AttachmentCheckpointSerializer(JsonPlusSerializer):
     def loads_typed(self, data: tuple[str, bytes]) -> object:
         encoding, blob = data
@@ -75,7 +75,7 @@ class _AttachmentCheckpointSerializer(JsonPlusSerializer):
         return result
 
 
-# meiva:link meiva/impersonation/docs/attachment.meiva.okf.md
+# meiva:link base/agents/context/external_attachment/docs/external-attachment.meiva.okf.md
 def serializer() -> JsonPlusSerializer:
     return _AttachmentCheckpointSerializer(
         allowed_msgpack_modules=agent_state.checkpoint_msgpack_allowlist(
@@ -102,7 +102,7 @@ def _validate_messages_delta(delta: Mapping[str, object]) -> None:
 # meiva:note
 # Serializes a reducer input validated against `state_cls` without coercing it to a
 # field value, preserving partial mappings, sets, nested models and message objects.
-# meiva:link meiva/impersonation/docs/attachment.meiva.okf.md
+# meiva:link base/agents/context/external_attachment/docs/external-attachment.meiva.okf.md
 def encode_plugin_delta(delta: Mapping[str, object], state_cls: type[BaseModel]) -> dict[str, str]:
     checked = agent_state.validate_plugin_state_keys(dict(delta), state_cls)
     _validate_messages_delta(checked)
@@ -110,7 +110,7 @@ def encode_plugin_delta(delta: Mapping[str, object], state_cls: type[BaseModel])
     return {"encoding": encoding, "data": base64.b64encode(payload).decode("ascii")}
 
 
-# meiva:link meiva/impersonation/docs/attachment.meiva.okf.md
+# meiva:link base/agents/context/external_attachment/docs/external-attachment.meiva.okf.md
 def decode_plugin_delta(
     encoded: Mapping[str, object], state_cls: type[BaseModel]
 ) -> dict[str, object]:
@@ -126,7 +126,7 @@ def decode_plugin_delta(
     return checked
 
 
-# meiva:link meiva/impersonation/docs/attachment.meiva.okf.md
+# meiva:link base/agents/context/external_attachment/docs/external-attachment.meiva.okf.md
 def apply_plugin_delta(state: BaseModel, delta: Mapping[str, object]) -> None:
     agent_state.validate_plugin_state_keys(dict(delta), type(state))
     _validate_messages_delta(delta)
@@ -156,7 +156,7 @@ def _object_or_none(value: object, column: str) -> dict[str, object] | None:
 # Reads native state and pinned config using the loaded plugin state classes as the
 # checkpoint decode allowlist, reconstructing delta-written messages without writing
 # or updating a checkpoint.
-# meiva:link meiva/impersonation/docs/attachment.meiva.okf.md
+# meiva:link base/agents/context/external_attachment/docs/external-attachment.meiva.okf.md
 def load_snapshot(
     agent_id: int, *, database: Database, home: Path
 ) -> tuple[BaseAgentState, dict[str, object] | None, dict[str, object] | None]:
