@@ -57,8 +57,12 @@ from services.pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfi
 # resurrect a terminated agent and never address one either: a dead owner's due
 # reminder is rerouted to its manager, or into the human queue when no live agent
 # owns an ancestor task (user ruling 2026-10-25 — a dead owner's queue had held the
-# reminders nobody read). The escalate pass fires at `reminder_count ==
-# task_escalate_n`, reaches the same manager, and `escalated_at` keeps the
+# reminders nobody read). The escalate pass fires once a task has gone
+# `task_escalate_n` of its own cadence periods without a state change and at least
+# one reminder reached its owner — counting cadence silence rather than delivered
+# reminders, because the per-owner digest window throttles delivery and would
+# otherwise stretch the wait (2026-11-07, task #6354). It reaches the same manager,
+# and `escalated_at` keeps the
 # delegator leg at most once per overdue window; a write this home's policy counts clears
 # `escalated_at` with the reminder counters and re-arms it, and the default counts a note,
 # so answering a reminder with one re-arms it (the criterion is
@@ -536,7 +540,13 @@ def announce_reminder(
 # ── Escalate pass ────────────────────────────────────────────────────────────
 
 
-def run_escalate(pool: ConnectionPool, db: Database, bus: EventBus, escalate_n: int) -> int:
+def run_escalate(
+    pool: ConnectionPool,
+    db: Database,
+    bus: EventBus,
+    escalate_n: int,
+    backoff_seconds: float,
+) -> int:
     """Accept current escalation state atomically, then announce committed work."""
     from base.events.notifications.publish import announce_sync
     from meiva_builtins.plugins.meiva_fleet.task_maintenance.escalation import accept_escalations
@@ -544,6 +554,7 @@ def run_escalate(pool: ConnectionPool, db: Database, bus: EventBus, escalate_n: 
     receipts = accept_escalations(
         pool,
         escalate_n,
+        backoff_seconds,
         notice_ttl_limit_seconds=notice_ttl_limit_seconds(),
     )
     for receipt in receipts:
@@ -625,7 +636,7 @@ async def dispatch_loop(
                 digest_window_p1_seconds=config.task_reminder_digest_window_p1_seconds,
                 digest_window_p2_seconds=config.task_reminder_digest_window_p2_seconds,
             )
-            run_escalate(pool, db, bus, escalate_n)
+            run_escalate(pool, db, bus, escalate_n, backoff_seconds)
         except asyncio.CancelledError:
             raise
         except psycopg.ProgrammingError:

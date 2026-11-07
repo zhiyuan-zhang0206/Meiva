@@ -90,7 +90,13 @@ class FleetConfig(BaseModel):
 
     task_escalate_n: int = Field(
         default=3,
-        description="Number of unanswered reminders before the daemon escalates to the parent task's owner.",
+        description=(
+            "Cadence periods a task may stay without a state change before the daemon escalates "
+            "to the nearest live manager or the human queue. One cadence period is the task's own "
+            "`max(task_reminder_backoff_seconds, remind_interval_seconds)`, so the count follows the "
+            "task, not the per-owner delivery window; a task is only escalated once at least one "
+            "reminder has actually reached its owner."
+        ),
         json_schema_extra={
             "env_var": "MEIVA_TASK_ESCALATE_N",
             "restart_required": "all",

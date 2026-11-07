@@ -201,12 +201,12 @@ class TestEscalate:
             for owner in (first_owner, second_owner)
         ]
 
-        assert run_escalate(pool, database, event_bus, 3) == 1
+        assert run_escalate(pool, database, event_bus, 3, 0.0) == 1
         assert len(deliver.deliveries()) == 1
         delivered_owner, message = deliver.deliveries()[0]
         assert delivered_owner == delegator
         assert (
-            "Subtasks still open after repeated reminders — task state unchanged "
+            "Subtasks still open with no state change "
             "(a note or a change on the task would have restarted the reminders):"
         ) in message
         assert all(f"#{task_id}" in message for task_id in task_ids)
@@ -249,11 +249,11 @@ class TestEscalate:
             updated_s_ago=7200,
             reminder_count=3,
         )
-        assert run_escalate(pool, database, event_bus, 3) == 1
+        assert run_escalate(pool, database, event_bus, 3, 0.0) == 1
         assert len(deliver.deliveries()) == 1
         delivered_owner, message = deliver.deliveries()[0]
         assert delivered_owner == parent_owner
-        assert "3 reminders" in message
+        assert "no state change for 2.0h" in message
 
     # meiva:note
     # The reminder skip is scoped to the reminder candidate query: a task with an open child that
@@ -280,7 +280,7 @@ class TestEscalate:
         )
         _make_task(db_conn, owner=stalled, parent_id=container, updated_s_ago=0)
 
-        assert run_escalate(pool, database, event_bus, 3) == 1
+        assert run_escalate(pool, database, event_bus, 3, 0.0) == 1
         assert len(deliver.deliveries()) == 1
         delivered_owner, message = deliver.deliveries()[0]
         assert delivered_owner == delegator
@@ -290,7 +290,7 @@ class TestEscalate:
         assert daemon.run_reminders(pool, database, event_bus, 3600.0) == 0
         assert deliver.deliveries() == []
 
-    def test_below_threshold_is_skipped(
+    def test_a_short_silence_is_skipped(
         self,
         pool: ConnectionPool,
         db_conn: psycopg.Connection,
@@ -298,6 +298,10 @@ class TestEscalate:
         database: Database,
         event_bus: EventBus,
     ) -> None:
+        # meiva:note
+        # The threshold counts cadence periods, so `escalate_n=3` over a 1800s cadence
+        # needs 5400s of silence. The reminder count does not gate it: one delivered
+        # reminder is enough, two are not required (2026-11-07, task #6354).
         parent_owner = _make_agent(db_conn)
         parent = _make_task(db_conn, owner=parent_owner, remind_interval_seconds=None)
         owner = _make_agent(db_conn)
@@ -306,10 +310,10 @@ class TestEscalate:
             owner=owner,
             parent_id=parent,
             remind_interval_seconds=1800,
-            updated_s_ago=7200,
-            reminder_count=2,
+            updated_s_ago=1800,
+            reminder_count=3,
         )
-        assert run_escalate(pool, database, event_bus, 3) == 0
+        assert run_escalate(pool, database, event_bus, 3, 0.0) == 0
         assert deliver.deliveries() == []
 
     def test_above_threshold_escalates_once_per_window(
@@ -333,7 +337,7 @@ class TestEscalate:
             updated_s_ago=7200,
             reminder_count=5,
         )
-        assert run_escalate(pool, database, event_bus, 3) == 1
+        assert run_escalate(pool, database, event_bus, 3, 0.0) == 1
         assert len(deliver.deliveries()) == 1
 
     def test_no_parent_no_escalation(
@@ -352,7 +356,7 @@ class TestEscalate:
             updated_s_ago=7200,
             reminder_count=3,
         )
-        assert run_escalate(pool, database, event_bus, 3) == 0
+        assert run_escalate(pool, database, event_bus, 3, 0.0) == 0
         assert deliver.deliveries() == []
 
     def test_user_task_escalates_to_human_queue(
@@ -380,7 +384,7 @@ class TestEscalate:
             reminder_count=3,
             priority="P1",
         )
-        assert run_escalate(pool, database, event_bus, 3) == 1
+        assert run_escalate(pool, database, event_bus, 3, 0.0) == 1
         assert deliver.deliveries() == []
         notices = _open_notices(db_conn, owner)
         assert len(notices) == 1
@@ -388,7 +392,7 @@ class TestEscalate:
         assert require_response is True
         assert task_id == child
         assert priority == "P1"  # inherits the task's priority
-        assert "3 reminders with no state change" in title
+        assert "no state change for 2.0h" in title
         assert "reassign or cancel" in title
         assert _maintenance_events(emitted_events) == [
             (
@@ -424,7 +428,7 @@ class TestEscalate:
             priority="P1",
         )
         _seed_notice(db_conn, owner)
-        assert run_escalate(pool, database, event_bus, 3) == 0
+        assert run_escalate(pool, database, event_bus, 3, 0.0) == 0
         notices = _open_notices(db_conn, owner)
         assert len(notices) == 1
         assert notices[0][0] == "pre-existing"
@@ -452,7 +456,7 @@ class TestEscalate:
             reminder_count=5,  # already past escalate_n=3
             priority="P1",
         )
-        assert run_escalate(pool, database, event_bus, 3) == 1
+        assert run_escalate(pool, database, event_bus, 3, 0.0) == 1
         assert deliver.deliveries() == []
         notices = _open_notices(db_conn, owner)
         assert len(notices) == 1
@@ -480,9 +484,9 @@ class TestEscalate:
             reminder_count=3,
             priority="P2",
         )
-        assert run_escalate(pool, database, event_bus, 3) == 1  # first sweep posts
+        assert run_escalate(pool, database, event_bus, 3, 0.0) == 1  # first sweep posts
         assert (
-            run_escalate(pool, database, event_bus, 3) == 0
+            run_escalate(pool, database, event_bus, 3, 0.0) == 0
         )  # second sweep: escalation notice still open → skip
         assert len(_open_notices(db_conn, owner)) == 1
 
@@ -560,5 +564,5 @@ class TestPausedTasks:
         )
         _pause(db_conn, tid, seconds_ahead=3600)
 
-        assert run_escalate(pool, database, event_bus, 3) == 0
+        assert run_escalate(pool, database, event_bus, 3, 0.0) == 0
         assert deliver.deliveries() == []
