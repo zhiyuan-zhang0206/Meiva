@@ -25,9 +25,16 @@ async def test_compaction_preserves_fast_accounting_id(loguru_records: LogRecord
         [HumanMessage(content="history")],
         llm,
         slices,
+        agent_id=228,
         catalog=build_model_catalog(home=meiva_home()),
     )
 
     assert summary == "summary"
     (usage,) = loguru_records.events("llm_usage")
     assert usage["extra"]["model"] == "gpt-6.1-sol-fast"
+    # meiva:note
+    # The row names the agent whose context is being compacted: this process serves several
+    # agents, so an ambient identity is None here and the row would read `unattributed`
+    # (task #6444).
+    assert usage["extra"]["agent_id"] == 228
+    assert usage["extra"]["attribution"] == "caller"
