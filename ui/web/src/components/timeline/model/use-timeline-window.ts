@@ -385,6 +385,9 @@ export function useTimelineWindow({
           // re-arms the pre-commit capture, and re-applying the same shift there writes
           // scrollTop on every commit, renders again from the new `top`, and repeats until
           // React gives up with "Maximum update depth exceeded".
+          // The vitest case "does not roll back user scroll" cannot see this branch: its mocked
+          // geometry leaves docTop equal to the captured value, so delta is always 0. What covers
+          // delta != 0 is tests/e2e/_timeline.py::assert_timeline_surface (#8663).
           preserveRef.current = { ...preserved, docTop };
         }
       }
