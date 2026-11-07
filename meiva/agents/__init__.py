@@ -414,8 +414,7 @@ def terminate(
     `force=True` interrupts work; an `enqueued` result confirms acceptance, not
     exit. A terminated agent wakes on any new message, including from its own
     shell sessions or watchers; `kill_all_shell_sessions=True` also kills every
-    shell session it owns, watchers included, silently. Pages opened with
-    `meiva.ui.serve` keep running.
+    shell session it owns, watchers included, silently.
 
     The result equals its status string and carries `open_tasks` (up to five
     tasks it still owns, most recently updated first, or None) and
