@@ -30,6 +30,12 @@ a dynamic value can be `None`, and the checker does not infer its runtime value 
 This is static evidence of a possible ambient
 seed, not proof that every execution reads the machine. A class reference alone acquires nothing.
 
+## Several channels in one call
+
+One call can read several channels and then acquires each of them: `getpass.getuser()` is `environ` and
+`pid`, `tempfile.mkdtemp()` is `environ` and `random`. Each kind is a debt of its own, and a root
+declares all of them.
+
 ## What a root licence settles
 
 A call a file's `[roots]` declaration licenses is not that file's impurity. `ambient-read` has
@@ -38,12 +44,18 @@ purity rule must not charge for the same call again, so `impure-call` neither re
 it, and a `[debt.impure-call]` entry that still holds it fails as `legal-read-recorded` until
 `debt prune` drops it — the number falls, the code still makes the call, and nothing was repaid.
 
-The two rules meet in one of two ways. They meet on the line: the scan records an acquisition of a
+The two rules meet in one of three ways. They meet on the line: the scan records an acquisition of a
 licensed kind on the line the purity rule recorded the call on, which is the same call in whatever
 language judged it (a TypeScript `crypto.randomUUID()` under a `random` root). They meet on the
 name: the ambient table judges the recorded call a reader of a licensed kind, and the call is
-unconditional — one with an `unless` clause reads nothing once it is handed the value. A call of
-another kind keeps its record: `time.sleep` under a `clock` root is an effect of the clock's own
-door, not a read of the clock's kind, so the wait stays on the books.
+unconditional — one with an `unless` clause reads nothing once it is handed the value. They meet on
+the filesystem's name: a read of a file is no acquisition at all, so `filesystem` is the kind whose
+declaration reaches the purity rule alone, and `FILESYSTEM_READS` in `meizel/graph/licensing.py` is
+the whole of what it reaches — the reads, never a write, never an `open` whose mode decides, never a
+descriptor or a listing given no path.
+
+A call of another kind keeps its record: `time.sleep` under a `clock` root is an effect of the
+clock's own door, not a read of the clock's kind, so the wait stays on the books, and
+`Path.write_text` beside a licensed `Path.read_text` stays one too.
 
 Parent: [[meizel/docs/ambient-kinds.meiva.okf.md|the ambient kinds node]].
