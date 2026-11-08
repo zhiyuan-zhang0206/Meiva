@@ -7,10 +7,8 @@ tags: [scripts, operations, memory]
 
 # Admission run
 
-`scripts/host_ops/admission_run.py` prices a job before it starts — per-worker
-peak RSS times the requested workers, against the free space on the data volume —
-and starts it at the concurrency that fits. Above the disk floor it lowers the concurrency
-and always starts; below it, the gate refuses to start at all — see "The disk floor".
+`scripts/host_ops/admission_run.py` provides passthrough runner compatibility
+for host jobs with optional historical admission flags.
 
 The rule exists because a host cannot absorb an arbitrary number of
 memory-heavy workers. On 2026-10-20 four starts of one eval on a macOS host grew
@@ -62,12 +60,6 @@ job continuously and a second invented threshold would drift from the kernel.
 `swap used/total` is printed and never enters the formula — on 2026-10-20 12:55
 the macOS host showed 29.7 GB of swap with 6.77 GB of process RSS: that is stale
 paged-out data occupying disk, not live memory demand.
-
-## The disk floor
-
-Below 23 GiB free on the data volume the gate refuses to start a job at all; below 24 GiB it
-warns first. Reasons, lines and coverage:
-[[scripts/host_ops/docs/admission-run/disk-floor.meiva.okf.md|The disk floor]].
 
 ## Who else is running
 

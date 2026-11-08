@@ -18,7 +18,7 @@ from __future__ import annotations
 import abc
 from pathlib import Path
 
-from base.host.brew_pin import brew_prefix
+from base.host.tool_pins import brew_prefix
 from base.native_process.os_platform import is_linux, is_macos
 
 PG_BIN_LINUX = Path("/usr/lib/postgresql/17/bin")

@@ -25,7 +25,7 @@ from gateway.tests.support.runner_ops.ops_stub import (
     register_machine,
     runner_ops,
 )
-from ops import env_audit as audit
+from ops.host_config import record_env_write
 
 
 def test_get_explicit_self_is_host_view_not_cluster(
@@ -186,14 +186,14 @@ def test_get_config_audit_last_is_bounded() -> None:
 def _record_two_writes() -> None:
     env_path = unit_env_path()
     env_path.write_text("MEIVA_MODEL=audit-one\n")
-    audit.record_env_write(
+    record_env_write(
         env_path,
         {"MEIVA_MODEL"},
         set(),
         site="test-one",
         changes=[{"alias": "MEIVA_MODEL", "old": "old", "new": "audit-one"}],
     )
-    audit.record_env_write(
+    record_env_write(
         env_path,
         {"MEIVA_MODEL"},
         set(),
@@ -216,7 +216,7 @@ def test_get_config_audit_reads_own_records(
 ) -> None:
     env_path = unit_env_path()
     env_path.write_text("MEIVA_MODEL=audit-self\n")
-    audit.record_env_write(
+    record_env_write(
         env_path,
         {"MEIVA_MODEL"},
         set(),

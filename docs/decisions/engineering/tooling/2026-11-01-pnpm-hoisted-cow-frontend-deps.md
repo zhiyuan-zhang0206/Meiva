@@ -20,7 +20,7 @@ cache ([`docs/conventions/technology-selection.md`](../../../conventions/technol
 
 ## Decision
 
-Adopt `pnpm` (pinned at `11.9.0` in `base/host/brew_pin.py`, `ui/web/package.json`,
+Adopt `pnpm` (pinned at `11.9.0` in `base/host/tool_pins.py`, `ui/web/package.json`,
 `scripts/provision/node.sh`, and CI's `pnpm/action-setup`) as the single frontend
 package manager, configured in `ui/web/pnpm-workspace.yaml` with:
 
@@ -39,7 +39,7 @@ The five questions:
    host-global content-addressed store, and materializing `ui/web/node_modules` via
    APFS Copy-on-Write `clonefile(2)` on macOS and hardlinks/copies on Linux, plus
    `pnpm audit --json` advisory reporting. Meiva owns the version pin
-   (`base/host/brew_pin.py:PNPM_VERSION`), canonical-registry lockfile linting
+   (`base/host/tool_pins.py:PNPM_VERSION`), canonical-registry lockfile linting
    (`scripts/lint/locks/package_lock.py`), `meizel`'s exact TypeScript compiler lock
    verification (`meizel/language/typescript_compiler/compiler.mjs`,
    `meizel/source_evidence/loader.py`), and production converge drift detection

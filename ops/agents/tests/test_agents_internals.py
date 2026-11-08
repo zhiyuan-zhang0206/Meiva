@@ -21,7 +21,7 @@
 #   `agent:` spawner values (`agent:None`, `agent:`, `agent:abc`, `agent:0`,
 #   `agent:-1`) raise `ValueError` while valid `agent:<positive-id>`, `user`, and
 #   external spawner strings succeed.
-# meiva:link ops/docs/env-audit.meiva.okf.md
+# meiva:link ops/docs/ops-module.md
 
 from __future__ import annotations
 

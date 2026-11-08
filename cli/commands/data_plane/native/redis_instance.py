@@ -26,10 +26,10 @@ from base.clock import Timers
 from base.cluster import ensure_cluster_redis_acl, port_preflight
 from base.cluster.machine import MachineIdentityReader
 from base.host.boundary.process import stderr_text, stdout_text
-from base.host.brew_pin import brew_prefix
 from base.host.net.url_secret import url_host
 from base.host.private_storage import write_private_bytes
 from base.host.system.hostport import Host
+from base.host.tool_pins import brew_prefix
 from base.native_process.child_env import filter_daemon_env, inherit_env
 from cli.commands.data_plane.config import DataPlaneConfig
 from cli.commands.data_plane.instance import redis_plan

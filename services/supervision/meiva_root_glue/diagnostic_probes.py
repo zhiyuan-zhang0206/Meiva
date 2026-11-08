@@ -7,8 +7,6 @@ an ensure, start, stop, launchd repair, or session command.
 from __future__ import annotations
 
 import shutil
-import subprocess
-import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from functools import partial
@@ -21,8 +19,6 @@ from base.cluster.machine import MachineIdentityReader
 from base.cluster.record import ClusterRecord
 from base.daemon.health import DaemonProbe
 from base.db import Database
-from base.host import brew_pin, proc
-from base.host.boundary.process import stdout_text
 from base.host.boundary.untyped import object_of
 from base.host.db_authority.api import read_telemetry_token
 from base.host.net.ports import SYSTEM_URL_OPENER, UrlOpener
@@ -85,58 +81,6 @@ PROBE_DEADLINE_S: float = 18.0
 
 
 # meiva:note
-# `deadline_s` is the whole deadline the diagnostic gives this check, never a per-command literal,
-# and each query may spend an even share of what the queries before it left — the same rule the venv
-# legs follow, so one hung query cannot hide the answer the other one still has: its finding is
-# reported when it finds one, and only the queries that never answered make the check inconclusive.
-#
-# `HOMEBREW_NO_AUTO_UPDATE` is pinned in the child's environment because brew updates its own
-# formulae on demand otherwise, which takes tens of seconds and is not what this check measures:
-# with it pinned, the sample measures the pin set rather than brew's maintenance.
-def brew_pins(
-    *,
-    environment: Mapping[str, str],
-    brew_binary: str = "brew",
-    deadline_s: float = PROBE_DEADLINE_S,
-) -> DaemonProbe:
-    deadline = time.monotonic() + deadline_s
-    options = ("--pinned", "--formula")
-    observed: list[set[str]] = []
-    unmeasured: list[str] = []
-    for index, option in enumerate(options):
-        share = (deadline - time.monotonic()) / (len(options) - index)
-        if share <= 0:
-            unmeasured.append(
-                f"brew list {option} was never started: the {deadline_s:g}s observation deadline "
-                f"was already spent"
-            )
-            continue
-        try:
-            result = proc.run_bounded(
-                [brew_binary, "list", option],
-                timeout=share,
-                capture_output=True,
-                text=True,
-                env={**environment, "HOMEBREW_NO_AUTO_UPDATE": "1"},
-            )
-        except subprocess.TimeoutExpired as exc:
-            unmeasured.append(
-                f"brew list {option} did not finish within its share of the {deadline_s:g}s "
-                f"observation deadline; stderr={exc.stderr!r}"
-            )
-            continue
-        result.check_returncode()
-        observed.append(set(stdout_text(result).splitlines()))
-    if unmeasured:
-        return DaemonProbe.inconclusive("; ".join(unmeasured))
-    pinned, installed = observed
-    missing = sorted((brew_pin.PINNED_BREW_FORMULAE & installed) - pinned)
-    if missing:
-        return DaemonProbe.down(f"approved Homebrew formulae are unpinned: {', '.join(missing)}")
-    return DaemonProbe.up("installed approved Homebrew formulae are pinned")
-
-
-# meiva:note
 # The checkout this process's root is actually executing. Another cluster's production checkout is
 # a different environment and is never the subject of this observation; a caller that inspects a
 # different tree says so.
@@ -144,7 +88,7 @@ _ROOT_CHECKOUT = Path(__file__).resolve().parents[3]
 
 
 # meiva:note
-# `deadline_s` is the whole deadline, as in `brew_pins`; the legs share it.
+# `deadline_s` is the whole deadline; the legs share it.
 def venv(
     *,
     environment: Mapping[str, str],
@@ -510,14 +454,6 @@ def build_diagnostics(
     # A host check spends one deadline (`PROBE_DEADLINE_S`) and the observer allows it a longer one
     # (`DIAGNOSTIC_TIMEOUT_S`), so the probe always returns its own verdict — including "no verdict"
     # — before the sample is killed and reported as a deadline miss.
-    if macos:
-        checks.append(
-            Diagnostic(
-                "brew-pin",
-                partial(brew_pins, environment=config.environment, deadline_s=PROBE_DEADLINE_S),
-                timeout_s=DIAGNOSTIC_TIMEOUT_S,
-            )
-        )
     checks.append(
         Diagnostic(
             "venv",

@@ -336,12 +336,6 @@ EVENTS: dict[str, EventSpec] = {
     "inbound_reconcile": telemetry_event(
         "inbound_reconcile", "claimed inbounds consumed after interruption", tier="noise"
     ),
-    "brew_pin": telemetry_event(
-        "brew_pin",
-        "the brew-pin assertion could not judge this host: brew list (--pinned) raised or "
-        "exited non-zero, so the installed and pinned sets are unknown, not empty",
-        tier="anomaly",
-    ),
     "launchd_retirement": telemetry_event(
         "launchd_retirement",
         "launchctl print still lists a job after its bootout; the retired job keeps running "

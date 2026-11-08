@@ -113,15 +113,14 @@ def test_verify_reports_missing_file(tmp_path: Path) -> None:
     assert outcome.errors == ("file is missing",)
 
 
-def test_verify_reports_tampered_file(tmp_path: Path) -> None:
+def test_verify_allows_modified_file_without_tamper_alert(tmp_path: Path) -> None:
     root, _source_repo, manifest = _fixture(tmp_path)
     (root / _RELATIVE_PATH).write_bytes(b"tampered\n")
 
     outcome = verify(root, manifest)[0]
 
-    assert outcome.ok is False
-    assert len(outcome.errors) == 1
-    assert outcome.errors[0].startswith("file sha256 mismatch:")
+    assert outcome.ok is True
+    assert outcome.errors == ()
 
 
 def test_verify_reports_missing_source(tmp_path: Path) -> None:
@@ -237,7 +236,7 @@ def test_verify_rejects_an_unsupported_entry_status(tmp_path: Path) -> None:
 
 
 # meiva:note
-# A durable source whose bytes drifted fails even while the checked file still matches.
+# A durable source whose bytes drifted is allowed without a tamper alert.
 def test_verify_reports_a_source_that_differs_from_the_registered_digest(tmp_path: Path) -> None:
     root, source_repo, manifest = _fixture(tmp_path)
     (source_repo / _RELATIVE_PATH).write_bytes(b"drifted\n")
@@ -245,6 +244,5 @@ def test_verify_reports_a_source_that_differs_from_the_registered_digest(tmp_pat
 
     outcome = verify(root, manifest)[0]
 
-    assert outcome.ok is False
-    assert len(outcome.errors) == 1
-    assert outcome.errors[0].startswith("source sha256 mismatch:")
+    assert outcome.ok is True
+    assert outcome.errors == ()

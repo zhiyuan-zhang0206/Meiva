@@ -32,7 +32,6 @@ from base.host.system.probes import browser_incapability, permissions_helper_inc
 from base.paths.home import is_prod_install
 from base.telemetry import EventPipeline
 from base.telemetry.lgtm_local import BACKENDS
-from cli.commands.converge.brew_pin import ensure_brew_pin
 from cli.commands.converge.firewall import ensure_firewall_allowlist
 from cli.commands.converge.frontend_env import ensure_no_frontend_env_overrides
 from cli.commands.converge.harness_clis import ensure_external_harness_clis
@@ -533,9 +532,6 @@ CONVERGE_STEPS: tuple[ConvergeStep, ...] = (
     # fallback; both capabilities (a gateway serves HTTP, a runner serves its
     # ops port), and silent on every host that cannot have the defect.
     ConvergeStep("macOS firewall allow list", ensure_firewall_allowlist),
-    # Warning-only assertion of the operator-approved Homebrew pins. Both roles
-    # may share the same macOS host; drift is detected, never repaired here.
-    ConvergeStep("Homebrew formula pins", ensure_brew_pin),
     # Warning-only assertion of the local Git hook installations (a drifted
     # INSTALL_PYTHON or a missing stage silently disables local checks).
     # Drift is detected, never repaired here.

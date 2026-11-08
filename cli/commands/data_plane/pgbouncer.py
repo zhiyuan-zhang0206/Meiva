@@ -516,7 +516,6 @@ def converge_pgbouncer(config: DataPlaneConfig, home: Path) -> str | None:
 
     from base.cluster import get_record
     from base.host.env.dotenv_file import upsert_env
-    from ops.env_audit import EnvWriteAudit
 
     if config.is_remote:
         # meiva:note
@@ -536,9 +535,7 @@ def converge_pgbouncer(config: DataPlaneConfig, home: Path) -> str | None:
         pooler_enabled=config.pgbouncer_enabled,
     )
     if normalized:
-        upsert_env(
-            env_path, {"MEIVA_DB_URL": normalized}, audit=EnvWriteAudit(site="converge_pgbouncer")
-        )
+        upsert_env(env_path, {"MEIVA_DB_URL": normalized})
     if not config.pgbouncer_enabled:
         return None
     binary = pooler_files.pgbouncer_bin()

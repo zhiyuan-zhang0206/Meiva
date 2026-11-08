@@ -1,7 +1,7 @@
 # meiva:note
 # The uv and pnpm versions every install path uses come from one canonical source.
 #
-# `base.host.brew_pin` (UV_VERSION / UV_ASSET_SHA256 / PNPM_VERSION) is canonical.
+# `base.host.tool_pins` (UV_VERSION / UV_ASSET_SHA256 / PNPM_VERSION) is canonical.
 # toolchain.sh and node.sh embed the same values because they run as standalone shell
 # scripts; every CI workflow pins setup-uv and pnpm/action-setup with the same
 # versions, and ui/web/package.json matches. These tests fail when any of the copies
@@ -18,7 +18,7 @@ from typing import Any, cast
 
 import yaml
 
-from base.host import brew_pin
+from base.host import tool_pins
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _TOOLCHAIN = _REPO_ROOT / "scripts" / "provision" / "toolchain.sh"
@@ -35,25 +35,25 @@ def test_toolchain_embeds_the_canonical_version() -> None:
     text = _TOOLCHAIN.read_text(encoding="utf-8")
     match = re.search(r'^UV_VERSION="([0-9][0-9.]*)"', text, re.MULTILINE)
     assert match is not None, "toolchain.sh must define UV_VERSION"
-    assert match.group(1) == brew_pin.UV_VERSION
+    assert match.group(1) == tool_pins.UV_VERSION
 
 
 def test_ci_runner_image_pins_the_canonical_uv_version() -> None:
     text = (_REPO_ROOT / ".github" / "ci-image" / "Dockerfile").read_text(encoding="utf-8")
-    assert re.findall(r'^ARG UV_VERSION="([^"]+)"$', text, re.MULTILINE) == [brew_pin.UV_VERSION]
+    assert re.findall(r'^ARG UV_VERSION="([^"]+)"$', text, re.MULTILINE) == [tool_pins.UV_VERSION]
 
 
 def test_ci_runner_image_pins_the_canonical_pnpm_version() -> None:
     text = (_REPO_ROOT / ".github" / "ci-image" / "Dockerfile").read_text(encoding="utf-8")
     assert re.findall(r'^ARG PNPM_VERSION="([^"]+)"$', text, re.MULTILINE) == [
-        brew_pin.PNPM_VERSION
+        tool_pins.PNPM_VERSION
     ]
 
 
 def test_toolchain_sha256_map_matches_the_canonical_set() -> None:
     text = _TOOLCHAIN.read_text(encoding="utf-8")
     embedded = dict(_TAG_SHA_ARM.findall(text))
-    assert embedded == brew_pin.UV_ASSET_SHA256
+    assert embedded == tool_pins.UV_ASSET_SHA256
 
 
 def _workflow_document(workflow: Path) -> dict[str, Any]:
@@ -84,11 +84,11 @@ def test_every_workflow_setup_uv_pins_the_canonical_version() -> None:
                 pinned = with_.get("version") if with_ is not None else None
                 assert pinned is not None, (
                     f"{workflow.name}: {job_name}: {step.get('name', 'unnamed')!r} uses "
-                    f"setup-uv without a `version:` input — expected {brew_pin.UV_VERSION!r}"
+                    f"setup-uv without a `version:` input — expected {tool_pins.UV_VERSION!r}"
                 )
-                assert str(pinned) == brew_pin.UV_VERSION, (
+                assert str(pinned) == tool_pins.UV_VERSION, (
                     f"{workflow.name}: {job_name}: pins setup-uv version {pinned!r}, "
-                    f"expected {brew_pin.UV_VERSION!r}"
+                    f"expected {tool_pins.UV_VERSION!r}"
                 )
     assert checked > 0, "no setup-uv steps found — the workflow glob or the pin moved"
 
@@ -115,11 +115,11 @@ def test_toolchain_refuses_a_uv_of_the_wrong_version(tmp_path: Path) -> None:
     done = _run_toolchain_with_uv(_fake_uv(tmp_path, "uv 9.9.9 (imposter)"), tmp_path)
     assert done.returncode == 2, done.stdout + done.stderr
     assert "9.9.9" in done.stderr
-    assert brew_pin.UV_VERSION in done.stderr
+    assert tool_pins.UV_VERSION in done.stderr
 
 
 def test_toolchain_accepts_a_uv_of_the_pinned_version(tmp_path: Path) -> None:
-    done = _run_toolchain_with_uv(_fake_uv(tmp_path, f"uv {brew_pin.UV_VERSION} (fake)"), tmp_path)
+    done = _run_toolchain_with_uv(_fake_uv(tmp_path, f"uv {tool_pins.UV_VERSION} (fake)"), tmp_path)
     assert done.returncode == 0, done.stdout + done.stderr
     assert "already present" in done.stdout
 
@@ -136,7 +136,7 @@ def test_node_provision_embeds_the_canonical_pnpm_version() -> None:
     text = _NODE_PROVISION.read_text(encoding="utf-8")
     match = re.search(r'^PNPM_VERSION="([0-9][0-9.]*)"', text, re.MULTILINE)
     assert match is not None, "node.sh must define PNPM_VERSION"
-    assert match.group(1) == brew_pin.PNPM_VERSION
+    assert match.group(1) == tool_pins.PNPM_VERSION
     subprocess.run(  # noqa: S603
         ["bash", "-n", str(_NODE_PROVISION)], check=True
     )
@@ -144,7 +144,7 @@ def test_node_provision_embeds_the_canonical_pnpm_version() -> None:
 
 def test_frontend_package_matches_the_canonical_pnpm_version() -> None:
     pkg = json.loads((_REPO_ROOT / "ui" / "web" / "package.json").read_text(encoding="utf-8"))
-    assert pkg["packageManager"] == f"pnpm@{brew_pin.PNPM_VERSION}"
+    assert pkg["packageManager"] == f"pnpm@{tool_pins.PNPM_VERSION}"
 
 
 def test_every_workflow_setup_pnpm_pins_the_canonical_version() -> None:
@@ -162,10 +162,10 @@ def test_every_workflow_setup_pnpm_pins_the_canonical_version() -> None:
                 pinned = with_.get("version") if with_ is not None else None
                 assert pinned is not None, (
                     f"{workflow.name}: {job_name}: {step.get('name', 'unnamed')!r} uses "
-                    f"pnpm/action-setup without a `version:` input — expected {brew_pin.PNPM_VERSION!r}"
+                    f"pnpm/action-setup without a `version:` input — expected {tool_pins.PNPM_VERSION!r}"
                 )
-                assert str(pinned) == brew_pin.PNPM_VERSION, (
+                assert str(pinned) == tool_pins.PNPM_VERSION, (
                     f"{workflow.name}: {job_name}: pins pnpm version {pinned!r}, "
-                    f"expected {brew_pin.PNPM_VERSION!r}"
+                    f"expected {tool_pins.PNPM_VERSION!r}"
                 )
     assert checked > 0, "no pnpm/action-setup steps found — the workflow glob or the pin moved"

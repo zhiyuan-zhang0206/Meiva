@@ -45,5 +45,4 @@ rows that duplicate Settings aliases are rejected.
 ## Related owners
 
 - [[base/docs/configuration/configuration.meiva.okf.md]] — Settings composition and configuration fields.
-- [[ops/docs/env-audit.meiva.okf.md]] — environment file writes and audit integrity.
 - [[base/host/docs/host.meiva.okf.md]] — host primitives.

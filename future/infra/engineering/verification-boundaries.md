@@ -242,7 +242,7 @@ Linux Redis was unpinned: `database.sh` installed whatever `packages.redis.io` s
 macOS pins `redis@8.2`. AGENTS.md approves Redis 8.2. This slice pins the provisioning
 script to the 8.2 series: `redis-server` and `redis-tools` at `6:8.2.*` (the newest 8.2
 patch release redis.io serves; 8.2.10 at this writing), held with `apt-mark hold`, the
-canonical value in `base/host/brew_pin.py` and a test that keeps the two copies equal.
+canonical value in `base/host/tool_pins.py` and a test that keeps the two copies equal.
 The effect is on hosts provisioned with this script from now on; a host that already has
 `redis-server` skips the install (the presence gate) and is unchanged. CI's install action
 still takes Ubuntu's `redis-server`, so the fidelity this boundary claims does not extend
@@ -550,7 +550,7 @@ the project commits no run, so this is what the run established, not a log):
   PgBouncer 1.25.2, uv 0.10.2, Python 3.12.12, Node v24.20.0 and Next.js 16.3.4. Node comes
   from the base image; `scripts/provision/node.sh` is not run on macOS, and the frontend
   built and answered on 24. The Linux image installs Node 22. Homebrew's PgBouncer is
-  1.25.2, not the 1.26.0 the Linux image pins: on macOS `base/host/brew_pin.py` names the
+  1.25.2, not the 1.26.0 the Linux image pins: on macOS `base/host/tool_pins.py` names the
   formulae and `brew install` takes the version Homebrew serves.
 - **Memory.** The guest has 8 GB, and a macOS guest has no cgroup, so no peak is recorded;
   after the start the guest reported 81% free and no swap in use.

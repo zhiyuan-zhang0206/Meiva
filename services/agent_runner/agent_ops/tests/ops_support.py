@@ -36,7 +36,7 @@ from base.lm.catalog import ModelCatalog
 from base.native_process.loaded_commit import LoadedCommit
 from base.native_process.os_platform import file_lock
 from base.paths import meiva_home, run_dir
-from ops.env_audit import read_env_write_records
+from ops.host_config import read_env_write_records
 from ops.rpc_schemas import OpStatus
 from ops.upload_delivery import ReceiverConfig
 from services.agent_runner.agent_ops import daemon, in_flight

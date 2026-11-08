@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from base.host import brew_pin
+from base.host import tool_pins
 from cli.commands.data_plane.host_dependencies import table
 from cli.commands.data_plane.host_dependencies.diagnosis import (
     Absent,
@@ -426,7 +426,7 @@ def test_macos_remediation_names_homebrew_instead_of_the_provision_scripts() -> 
     assert isinstance(plan, Refuse)
     assert "    macOS needs Homebrew first: https://brew.sh" in plan.refusal
     assert "    brew install postgresql@17 redis@8.2 pgbouncer pgvector" in plan.refusal
-    assert f"    brew install node && npm install -g pnpm@{brew_pin.PNPM_VERSION}" in plan.refusal
+    assert f"    brew install node && npm install -g pnpm@{tool_pins.PNPM_VERSION}" in plan.refusal
     assert "    brew install git gh" in plan.refusal
     assert not any("Debian/Ubuntu" in line for line in plan.refusal)
 

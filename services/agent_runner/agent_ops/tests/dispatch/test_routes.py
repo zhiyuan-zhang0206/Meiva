@@ -10,7 +10,7 @@ import pytest
 from psycopg_pool import ConnectionPool
 
 from base.cluster.machine import MachineIdentityReader
-from ops.env_audit import read_env_write_records
+from ops.host_config import read_env_write_records
 from services.agent_runner.agent_ops.tests.ops_support import Ops, config_write
 
 

@@ -613,7 +613,7 @@ def test_config_audit_local_reads_newest_first_and_filters(
     capsys: pytest.CaptureFixture[str],
     machine_identity: ConfiguredMachineIdentity,
 ) -> None:
-    from ops.env_audit import record_env_write
+    from ops.host_config import record_env_write
 
     env_path = local_env_home / ".env"
     env_path.write_text("MEIVA_MODEL=m\n")

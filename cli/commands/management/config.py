@@ -14,7 +14,6 @@ remote agent-runner's host fields.
 from __future__ import annotations
 
 import argparse
-import getpass
 import sys
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
@@ -33,7 +32,6 @@ from base.api_contracts.config import (
 from base.cluster.machine import MachineIdentityReader
 from base.host.boundary.options import options
 from cli.boundary.json_body import response_object
-from ops.env_audit import EnvWriteAudit, read_env_write_records
 
 _HTTP_TIMEOUT_S = 15.0
 
@@ -470,6 +468,7 @@ def cmd_config_audit(
         return 1
     if machine is None:
         from base.host.env.dotenv_file import env_file_path
+        from ops.host_config import read_env_write_records
 
         records = [
             {**record, "machine": identity.name()}
@@ -627,7 +626,6 @@ def _edit_local_config(
             writes,
             removals,
             expected_digest=candidate.expected_digest,
-            audit=EnvWriteAudit(site="cli_config_local", actor=f"cli:{getpass.getuser()}"),
             path=env_path,
         )
     except RuntimeError as e:

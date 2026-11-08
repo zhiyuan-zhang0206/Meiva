@@ -1,7 +1,6 @@
-exports = ["atomic_io.py", "boundary", "brew_pin.py", "config_validators.py", "converge", "db_authority", "env", "exit_codes.py", "git", "net", "permissions_helper", "private_storage.py", "proc.py", "resource", "runtime_interpreter.py", "system", "tests"]
+exports = ["atomic_io.py", "boundary", "config_validators.py", "converge", "db_authority", "env", "exit_codes.py", "git", "net", "permissions_helper", "private_storage.py", "proc.py", "resource", "runtime_interpreter.py", "system", "tests", "tool_pins.py"]
 
 [uses]
-"brew_pin.py" = ["proc.py"]
 "config_validators.py" = ["system"]
 "converge" = ["boundary", "system"]
 "db_authority" = ["boundary", "net", "private_storage.py"]
@@ -9,7 +8,7 @@ exports = ["atomic_io.py", "boundary", "brew_pin.py", "config_validators.py", "c
 "git" = ["boundary", "proc.py"]
 "net" = ["__init__.py", "boundary"]
 "permissions_helper" = ["boundary", "converge", "net"]
-"system" = ["atomic_io.py", "boundary", "brew_pin.py", "env", "proc.py", "runtime_interpreter.py"]
+"system" = ["atomic_io.py", "boundary", "env", "proc.py", "runtime_interpreter.py", "tool_pins.py"]
 "tests" = ["atomic_io.py", "config_validators.py", "env", "private_storage.py", "proc.py", "resource", "system"]
 
 [roots]

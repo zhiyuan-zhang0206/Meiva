@@ -1,16 +1,19 @@
-exports = ["agent_transfer", "agents", "alerts.py", "cluster", "cluster_status", "env_audit", "host_config.py", "inventory", "lifecycle", "pty_close_notices", "rpc_schemas", "tests", "to_user.py", "upload_delivery"]
+exports = ["agent_transfer", "agents", "alerts.py", "cluster", "cluster_status", "host_config.py", "inventory", "lifecycle", "pty_close_notices", "rpc_schemas", "tests", "to_user.py", "upload_delivery"]
 
 [uses]
 "agent_transfer" = ["cluster_status", "rpc_schemas"]
 "agents" = ["rpc_schemas"]
 "cluster" = ["cluster_status", "rpc_schemas"]
 "cluster_status" = ["rpc_schemas"]
-"host_config.py" = ["env_audit", "rpc_schemas"]
+"host_config.py" = ["rpc_schemas"]
 "inventory" = ["rpc_schemas"]
 "lifecycle" = ["agents", "cluster", "cluster_status", "rpc_schemas", "tests"]
 "pty_close_notices" = ["cluster_status", "rpc_schemas", "tests"]
-"tests" = ["alerts.py", "cluster", "cluster_status", "env_audit", "host_config.py", "rpc_schemas", "to_user.py"]
+"tests" = ["alerts.py", "cluster", "cluster_status", "host_config.py", "rpc_schemas", "to_user.py"]
 "upload_delivery" = ["tests"]
 
 [purity]
 "__init__.py" = "strict"
+
+[debt.ambient-read]
+"host_config.py#clock datetime.datetime.now" = { count = 1, owner = "#5816", until = "permanently: the write record's `ts` is the moment this process wrote the file — the audit trail's whole value is that the writer stamped it, and a caller-supplied clock would be that same clock read one frame earlier" }

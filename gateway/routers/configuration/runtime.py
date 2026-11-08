@@ -42,8 +42,7 @@ from gateway.routers.refusal import HttpFailure
 from ops import host_config
 from ops.cluster import rpc as cluster_rpc
 from ops.cluster.rpc import RpcClient
-from ops.env_audit import EnvWriteAudit, check_env_integrity
-from ops.host_config import SENSITIVE_MASK
+from ops.host_config import SENSITIVE_MASK, EnvWriteAudit
 from ops.rpc_schemas import ConfigAuditReadResult, ConfigReadResult, ConfigWriteOpResult
 
 router = APIRouter()
@@ -258,12 +257,6 @@ async def _dispatch_config_write(
     description="Return metadata + current value + the override set for all config items.\n\nHost-scope fields come from `machine` (default = this gateway): their\neffective value + read-time capability hint are produced by a config_read on\nthat host. Cluster + agent fields are always the gateway's own\n(machine-independent), masked here. `raw_overrides` is the editable set the\npanel deltas against, and it is keyed on whether `machine` was GIVEN, not on\nwhether the target is this gateway: the Cluster view (machine omitted) deltas\nagainst this gateway's manageable cluster + writable-host .env set; a\nmachine-addressed view (`?machine=<name>`, even == this gateway on a dual-role\nbox) deltas against that host's remotely-writable host set.",
 )
 async def get_config(request: Request, machine: str | None = None) -> ConfigView:
-
-    await asyncio.to_thread(
-        check_env_integrity,
-        env_path=gateway_state(request).config_authority.env_path,
-        machine_name=gateway_state(request).machine.name(),
-    )
     target = machine or gateway_state(request).machine.name()
     await asyncio.to_thread(
         _assert_machine_known,

@@ -11,7 +11,6 @@ from pathlib import Path
 
 import pytest
 
-import cli.commands.converge.brew_pin as cbp
 import cli.commands.converge.steps as csteps
 import cli.commands.lifecycle.converge_host as cv
 from base.host.proc import run_bounded
@@ -95,13 +94,15 @@ def _checkout_with_checker(ctx: ConvergeCtx, *, stdout: str, code: int) -> Conve
     return replace(ctx, host=host)
 
 
-def test_step_is_registered_after_brew_pin() -> None:
+def test_step_is_registered_after_firewall() -> None:
     steps = cv.CONVERGE_STEPS
     hooks_index = next(
         i for i, step in enumerate(steps) if step.apply is csteps.ensure_local_git_hooks
     )
-    brew_index = next(i for i, step in enumerate(steps) if step.apply is cbp.ensure_brew_pin)
-    assert hooks_index > brew_index
+    firewall_index = next(
+        i for i, step in enumerate(steps) if step.name == "macOS firewall allow list"
+    )
+    assert hooks_index > firewall_index
     step = steps[hooks_index]
     assert step.roles == ALL_ROLES
     assert step.requires_unit_config is False

@@ -9,7 +9,6 @@ coordination. Its design rationale is recorded in
 | Service specification | not in `ops`: the service roster, its `ServiceSpec` contract and gating live in `services/supervision/roster/` (the supervised services own their own declarations) |
 | Observation and status | `ops/cluster_status/` (host snapshot and the persistent-shell operations, `schema_mismatch` diagnosis) |
 | Alerts | `ops/alerts.py` (the alert row and its SSE publish, shared by the gateway alert endpoints and the events-maintenance reconciler) |
-| `.env` write audit | `ops/env_audit/` ([audit and integrity guard](env-audit.meiva.okf.md)); the shell reads files and the registry, strict modules decide redaction, the record and the integrity plan |
 | Upload delivery receiver | `ops/upload_delivery/` (`copy_batch` takes a `ReceiverConfig` of values and executes the plan `copy_plan` returns; the ops daemon's entry builds that config once at start: the unit, the OS user's home, the gateway access and the quota constants) |
 | Shell close notices | `ops/pty_close_notices/` (`notice` and `delivery_plan` decide which closed sessions notify which live owners; the shell writes the batch in one transaction) |
 | Plugin and MCP inventory | `ops/inventory/` (`toggles` judges the all-or-nothing toggle request; the shell reads the host and writes the toggles) |

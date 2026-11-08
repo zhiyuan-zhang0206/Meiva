@@ -1,15 +1,13 @@
-exports = ["admission_floor.py", "check_worktree_remove.py", "onboarding", "release"]
+exports = ["check_worktree_remove.py", "onboarding", "release"]
 
 [uses]
-"admission_options.py" = ["admission_floor.py"]
-"admission_run.py" = ["admission_floor.py", "admission_ledger.py", "admission_options.py"]
-"tests" = ["admission_floor.py", "admission_run.py", "guard_editable_venv.py", "host_memory_sample.py", "run_with_token.py", "set_schedule_owner.py", "update_schedule_script.py", "watchdog_sentinel.py"]
+"tests" = ["admission_run.py", "guard_editable_venv.py", "host_memory_sample.py", "run_with_token.py", "set_schedule_owner.py", "update_schedule_script.py", "watchdog_sentinel.py"]
 
 [external]
 "update_schedule_script.py" = "compiles a user-written schedule script before replacing the stored copy"
 
 [roots]
-"admission_run.py" = { kinds = ["clock", "home", "pid", "platform", "argv"], why = "host admission wrapper CLI samples live host resources, stamps reservations with current PID/boot/time, and logs under ~/.meiva/admission; it also reads its command line (argv) once, as the process entry" }
+"admission_run.py" = { kinds = ["argv", "home"], why = "host admission wrapper CLI passthrough runner reads its command line (argv) once and resolves admission home, as the process entry" }
 "check_worktree_remove.py" = { kinds = ["home", "pid", "argv"], why = "Entry point of the pre-removal guard: it names itself by its pid and process group for the process scan and resolves the home whose pty-sessions socket it asks; it also reads its command line (argv) in `main()` (the argument count and the worktree path), as the process entry" }
 "guard_editable_venv.py" = { kinds = ["cwd", "environ", "home", "argv"], why = "Dependency-free pre-uv preflight entry: main() reads the inherited VIRTUAL_ENV, defaults to the current checkout directory before Settings can import, and expands the `~` the operator names in the checkout and VIRTUAL_ENV exactly once, then hands both values down; it also reads its command line (argv): the `__main__` guard reads argv[1:] once and hands it to main" }
 "host_memory_sample.py" = { kinds = ["clock", "home", "pid", "argv"], why = "host memory sampler CLI reads the current user slice by UID, timestamps the sample, and appends to ~/.meiva/logs/host-memory.jsonl; the __main__ guard reads argv[1:] once and hands it to main" }

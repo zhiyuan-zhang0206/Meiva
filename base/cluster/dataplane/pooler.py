@@ -16,8 +16,8 @@ from base.cluster.dataplane.pg_tools import is_macos
 from base.cluster.listener_plan import public_listener_bound
 from base.cluster.machine import MachineIdentityReader
 from base.host.boundary.untyped import object_mapping
-from base.host.brew_pin import brew_prefix
 from base.host.db_authority.delivery import POOLER_ADMIN
+from base.host.tool_pins import brew_prefix
 
 
 def pgbouncer_bin() -> str:

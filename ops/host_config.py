@@ -12,6 +12,11 @@
 
 from __future__ import annotations
 
+import contextlib
+import json
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 
 from base.config import field_domain, runtime_config
@@ -21,6 +26,8 @@ from base.config.admin.metadata import ConfigFieldMeta
 from base.config.env_changed import EnvChangedError
 from base.config.service_read import ConfigAuthority
 from base.host import config_validators
+from base.host.boundary.json_values import is_object_dict, is_object_list
+from base.host.boundary.untyped import object_of
 from base.host.env.dotenv_file import capture_env_bytes, process_env_file
 from base.host.system.hostport import Host
 from base.packages.plugin_config_admin import (
@@ -31,7 +38,6 @@ from base.packages.plugin_config_admin import (
 )
 from base.packages.plugin_config_images import PluginConfigChangedError, PluginConfigOwner
 from base.packages.plugins.plugin_errors import InvalidConfigOverlay
-from ops.env_audit import EnvWriteAudit, read_env_write_records
 from ops.rpc_schemas import (
     ConfigAuditReadResult,
     ConfigReadResult,
@@ -39,6 +45,86 @@ from ops.rpc_schemas import (
     FieldWriteResult,
     HostConfigField,
 )
+
+
+def read_env_write_records(limit: int, env_path: Path) -> list[dict[str, object]]:
+    audit_file = env_path.parent / ".env.audit.jsonl"
+    if not audit_file.exists():
+        return []
+    records: list[dict[str, object]] = []
+    try:
+        lines = audit_file.read_text(encoding="utf-8").splitlines()
+        for line in reversed(lines):
+            if not line.strip():
+                continue
+            with contextlib.suppress(json.JSONDecodeError, ValueError, TypeError):
+                rec: object = object_of(json.loads, line)
+                if is_object_dict(rec):
+                    records.append(rec)
+            if len(records) >= limit:
+                break
+    except OSError:
+        return []
+    return records
+
+
+def record_env_write(
+    env_path: Path,
+    written: set[str],
+    removed: set[str],
+    *,
+    site: str = "ops_config_write",
+    actor: str | None = None,
+    trace_id: str | None = None,
+    changes: Sequence[Mapping[str, object]] | None = None,
+) -> None:
+    audit_file = env_path.parent / ".env.audit.jsonl"
+    record: dict[str, object] = {
+        "ts": datetime.now(UTC).isoformat(),
+        "site": site,
+        "actor": actor,
+        "trace_id": trace_id,
+        "keys_written": sorted(written),
+        "keys_removed": sorted(removed),
+    }
+    if changes is not None:
+        record["changed"] = [
+            {
+                "alias": c.get("alias"),
+                "scope": c.get("scope"),
+                "sensitive": c.get("sensitive", False),
+                "old": c.get("old"),
+                "new": c.get("new"),
+            }
+            for c in changes
+        ]
+    with contextlib.suppress(OSError), audit_file.open("a", encoding="utf-8") as f:
+        _ = f.write(json.dumps(record) + "\n")
+
+
+@dataclass(frozen=True)
+class EnvWriteAudit:
+    site: str
+    actor: str | None = None
+    trace_id: str | None = None
+
+    def prepare(self, changes: Sequence[Mapping[str, object]]) -> list[dict[str, object]]:
+        return [dict(c) for c in changes]
+
+    def record(self, path: Path, written: set[str], removed: set[str], prepared: object) -> None:
+        changes: list[dict[str, object]] | None = (
+            [x for x in prepared if is_object_dict(x)] if is_object_list(prepared) else None
+        )
+        record_env_write(
+            path,
+            written,
+            removed,
+            site=self.site,
+            actor=self.actor,
+            trace_id=self.trace_id,
+            changes=changes,
+        )
+
 
 SENSITIVE_MASK = "••••••••"
 
@@ -142,7 +228,7 @@ def _field_verdicts(
             continue
         if meta.owner is not None:
             try:
-                coerce_config_scalar(meta.field_type, value, meta.choices)
+                _ = coerce_config_scalar(meta.field_type, value, meta.choices)
                 results[field] = FieldWriteResult(ok=True, reason=None)
             except (ValueError, TypeError):
                 results[field] = FieldWriteResult(ok=False, reason="invalid declared scalar")
@@ -192,7 +278,7 @@ def _apply_patch(
     applied = True
     if writes or removals:
         try:
-            runtime_config.write_fields(
+            _ = runtime_config.write_fields(
                 writes,
                 removals,
                 expected_digest=candidate.expected_digest,

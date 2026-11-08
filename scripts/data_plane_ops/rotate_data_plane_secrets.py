@@ -44,7 +44,6 @@ from base.host.boundary.untyped import object_of
 from base.host.env.dotenv_file import upsert_env
 from base.host.net.url_secret import url_host, url_with_password
 from base.paths import meiva_home
-from ops.env_audit import EnvWriteAudit
 
 _TOKEN_BYTES = 32
 _GATEWAY_CONTEXT_ERROR = (
@@ -417,7 +416,6 @@ def write_env(state: RotationState, context: GatewayContext) -> None:
             REDIS_PASSWORD_ENV: state.redis_password,
             "MEIVA_REDIS_URL": redis_url,
         },
-        audit=EnvWriteAudit(site="rotate_data_plane_secrets"),
     )
 
 

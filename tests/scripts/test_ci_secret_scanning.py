@@ -8,7 +8,7 @@ from typing import Any, cast
 
 import yaml
 
-from base.host import brew_pin
+from base.host import tool_pins
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _WORKFLOW = _REPO_ROOT / ".github" / "workflows" / "ci.yml"
@@ -62,10 +62,10 @@ def _assert_dependency_audit_job_runs_both_audits(workflow: dict[object, Any]) -
     dependency_audit = workflow["jobs"]["dependency-audit"]
     assert dependency_audit.get("continue-on-error") is not True
     audit_steps = dependency_audit["steps"]
-    assert audit_steps[1]["with"]["version"] == brew_pin.UV_VERSION
+    assert audit_steps[1]["with"]["version"] == tool_pins.UV_VERSION
     assert audit_steps[2]["run"] == "uv audit --frozen"
     assert audit_steps[2]["continue-on-error"] is True
-    assert audit_steps[4]["with"]["version"] == brew_pin.PNPM_VERSION
+    assert audit_steps[4]["with"]["version"] == tool_pins.PNPM_VERSION
     assert audit_steps[5]["working-directory"] == "ui/web"
     assert audit_steps[5]["run"] == "pnpm audit"
     assert audit_steps[5]["continue-on-error"] is True
