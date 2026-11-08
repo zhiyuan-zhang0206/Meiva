@@ -1,6 +1,6 @@
 "use client";
 
-import { useUserMessages, withUserMessages, withQuestions } from "@/lib/context/use-user-messages";
+import { useUserMessages, withUserMessages } from "@/lib/context/use-user-messages";
 import { useTranslations } from "next-intl";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ComponentProps, ComponentType } from "react";
@@ -448,13 +448,12 @@ function HomeContent({
   const questions = useNotices();
   const pendingQuestions = useMemo(() => questions.awaiting.filter((item) => item.agent_id === activeId)
     .sort((a, b) => PRIORITY_RANK[a.priority] - PRIORITY_RANK[b.priority] || a.created_at.localeCompare(b.created_at)), [questions.awaiting, activeId]);
-  const displayedItems = useMemo(() => withQuestions(withUserMessages(items, publications.data?.items ?? []), questions.resolved.filter((item) => item.agent_id === activeId)), [items, publications.data, questions.resolved, activeId]);
-  const suggestionItems = useMemo(() => withQuestions(displayedItems, pendingQuestions), [displayedItems, pendingQuestions]);
+  const displayedItems = useMemo(() => withUserMessages(items, publications.data?.items ?? []), [items, publications.data]);
   const replySuggestion = useReplySuggestion({
     agentId: activeId,
     status: activeAgent?.status,
     busy: agentBusy,
-    items: suggestionItems,
+    items: displayedItems,
     enabled: !userSettingsLoading && userSettings["behavior.replySuggestions"] === true,
   });
 

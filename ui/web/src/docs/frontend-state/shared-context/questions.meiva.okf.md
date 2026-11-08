@@ -22,11 +22,10 @@ refreshes resolved history. A failed feed preserves stale questions and visibly
 reports the failure.
 
 Pending forms appear here once. The right panel remains a document/Inspector
-surface, and the timeline keeps resolved question/answer history. Suggestion
-requests still receive pending-question context, even though those questions
-are outside the visible timeline. The former right-column card and timeline
-form were rejected because they duplicated the answer surface and separated it
-from the place the user composes a reply. A full stacked footer was rejected because expansion would shrink the message
+surface, and resolved questions arrive in the message list as ordinary system
+notes rather than synthetic timeline cards. The former right-column card and
+timeline form were rejected because they duplicated the answer surface and
+separated it from the place the user composes a reply. A full stacked footer was rejected because expansion would shrink the message
 viewport; overlaying the collapsed bar was rejected because it obscured the last
 message and scroll-to-bottom control.
 
