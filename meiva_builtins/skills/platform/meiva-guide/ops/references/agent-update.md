@@ -29,14 +29,13 @@ both halves' effects; it is not a successful deployment.
 
 ## Submit from the agent's shell
 
-Replace the checkout, target selection (`--channel stable` for standard production rollouts,
-`--channel latest`, `--release vYYYY.MM.DD.HHMMSS` / `-hf<N>`, certified `--new SHA`, or
+Replace the checkout, target selection (`--channel latest` by default, `--channel stable`, or
 preview-only `--track-branch BRANCH`), natural-language `--message` (who is
 updating and why, delivered to running and idle agents on affected hosts; or
 `--no-message`) and SSH aliases below, along with all required stop/start flags
 from `meiva update run --help`. Repeat runner
 aliases as needed, or use `--no-runners` for a gateway-only roster. The operator checkout
-must already have fetched the certified release and channel tags (`git fetch --tags origin`).
+must already have fetched the certified release and channel tags (`git fetch --tags --force origin`).
 Uncertified or tampered targets exit 2 before contacting any host. The Python below uses only the
 standard library; it generates a private job directory, runner and plist without importing
 Meiva or copying the agent's environment into the job.
@@ -49,7 +48,7 @@ UPDATE_LABEL="com.meiva.fleet-operator.$(uuidgen)"
 
 "$OPERATOR_CHECKOUT/.venv/bin/python" - \
   "$OPERATOR_CHECKOUT" "$UPDATE_DIR" "$UPDATE_LABEL" \
-  stable GATEWAY RUNNER_1 RUNNER_2 <<'PY'
+  latest GATEWAY RUNNER_1 RUNNER_2 <<'PY'
 import plistlib
 import sys
 from pathlib import Path

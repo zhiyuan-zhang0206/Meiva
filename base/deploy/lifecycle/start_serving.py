@@ -184,7 +184,7 @@ def mark_serving(
         if current is None or current.state != "starting" or current.generation != generation:
             return False
         birth = observe(home)
-        if birth.runtime != runtime:
+        if not birth.runtime.same_checkout(runtime):
             raise RuntimeError("serving root differs from the admitted loaded runtime")
         write_state(
             home,

@@ -11,14 +11,13 @@ Each choice below is a required flag; a missing or conflicting one exits 2, all
 listed together, before any host is touched or log written. The operator's stop
 and start choices are forwarded unchanged, never checked against the diff.
 
-- `down` / `run`, target selection (mutually exclusive modes, verified locally before any SSH):
+- `down` / `run`, target selection (mutually exclusive modes, verified locally before any SSH;
+  defaults to `--channel latest` when neither flag is given):
   `--channel stable|latest` (verifies `refs/tags/channel/<name>` `meiva-channel/v1` pointer and
-  its target `meiva-release/v1` tag certificate), `--release TAG` (`vYYYY.MM.DD.HHMMSS` or
-  `-hf<N>` with a verified `meiva-release/v1` certificate), `--new SHA` (40-hex commit carrying
-  a verified `meiva-release/v1` tag certificate), or `--track-branch BRANCH` (optionally paired
-  with `--new SHA` for an ancestor commit on `origin/BRANCH`, printing
+  its target `meiva-release/v1` tag certificate) or `--track-branch BRANCH` (tracks the latest
+  commit on `origin/BRANCH`, printing
   `target: UNRELEASED branch <branch> @ <sha> (preview / rapid-iteration mode)`). Uncertified or
-  tampered tags, pointers, or commits refuse with exit 2 before contacting any host.
+  tampered tags or channel pointers refuse with exit 2 before contacting any host.
 - Both halves: `--runner ALIAS` (repeatable) or `--no-runners`; `--dry-run` or
   `--execute`.
 - `down` / `run`, forwarded to every host's `meiva stop --yes`:

@@ -115,6 +115,15 @@ class LoadedRuntimeIdentity(EvidenceModel):
             raise ValueError("release runtime requires complete captured artifact identity")
         return self
 
+    def same_checkout(self, other: LoadedRuntimeIdentity) -> bool:
+        return (
+            self.kind == other.kind
+            and self.code_root == other.code_root
+            and self.interpreter == other.interpreter
+            and self.prefix == other.prefix
+            and self.cwd == other.cwd
+        )
+
 
 def loaded_runtime() -> tuple[Path, Path, Path, bool]:
     """Read actual imports without importing Settings or a higher application layer."""

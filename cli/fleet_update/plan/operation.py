@@ -24,11 +24,11 @@ GATE_REASON_ENV = "MEIVA_OPERATION_GATE_REASON"
 Gate = Literal["satisfied", "overridden"]
 
 # meiva:note
-# The target modes that verify a `meiva-release/v1` certificate before anything stops: the
-# channel pointer, an explicit CalVer release, and a commit only when a certificate covers it.
-# `track-branch` is the one mode that deliberately ships an unreleased branch, so it is the one
-# that records `overridden` — the bypass becomes a queryable fact instead of an assumption.
-GATED_MODES = frozenset({"channel", "release", "commit"})
+# The target mode that verifies a `meiva-release/v1` certificate before anything stops: the
+# channel pointer (`stable` or `latest`). `track-branch` is the one mode that deliberately ships
+# an unreleased branch, so it is the one that records `overridden` — the bypass becomes a
+# queryable fact instead of an assumption.
+GATED_MODES = frozenset({"channel"})
 
 
 @dataclass(frozen=True)

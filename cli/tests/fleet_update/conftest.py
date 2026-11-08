@@ -103,7 +103,6 @@ def env(tmp_path: Path) -> tuple[Cluster, Callable[..., int]]:
     git(repo, "add", "-A")
     git(repo, "commit", "-qm", "baselines")
     logs = str(tmp_path / "logs")
-    target_flags = {"--channel", "--release", "--track-branch", "--new"}
 
     def run(half: str, *extra: str) -> int:
         # meiva:note
@@ -111,10 +110,7 @@ def env(tmp_path: Path) -> tuple[Cluster, Callable[..., int]]:
         given = set(extra)
         groups = (*_BOTH, *(_STOP if half != "up" else ()), *(_START if half != "down" else ()))
         chosen = [token for flags, tokens in groups if not given & flags for token in tokens]
-        new = (
-            ["--new", cluster.new] if half in ("run", "down") and not (given & target_flags) else []
-        )
-        argv = [half, "--gateway", "gw", "--log-dir", logs, *new, *chosen, *extra]
+        argv = [half, "--gateway", "gw", "--log-dir", logs, *chosen, *extra]
         return cluster.invoke(argv)
 
     return cluster, run

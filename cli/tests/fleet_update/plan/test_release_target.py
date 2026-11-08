@@ -162,26 +162,6 @@ def test_channel_pointer_requires_matching_channel_and_certified_release_tag() -
 
 
 def test_commit_and_release_and_branch_resolution_modes() -> None:
-    c1 = _cert("v2026.11.01.120000", _SHA_A)
-    c2 = _cert("v2026.11.01.143022", _SHA_A)
-    tags: dict[str, str | None] = {
-        "m2-full": None,
-        c1.version: format_tag_message(c1),
-        c2.version: format_tag_message(c2),
-    }
-
-    by_sha, _ = resolve_update_target(
-        TargetRequest(target_mode="commit", commit_rev=_SHA_A[:12]),
-        TargetSnapshot(repo_display="/repo", peeled_sha=_SHA_A, candidate_tags=tags),
-    )
-    assert by_sha is not None and by_sha.certificate == c2
-
-    by_rel, _ = resolve_update_target(
-        TargetRequest(target_mode="release", release_tag=c1.version),
-        TargetSnapshot(repo_display="/repo", peeled_sha=_SHA_A, tag_body=tags[c1.version]),
-    )
-    assert by_rel is not None and by_rel.certificate == c1
-
     by_branch, mode = resolve_update_target(
         TargetRequest(target_mode="track-branch", branch="feat/x"),
         TargetSnapshot(repo_display="/repo", branch_tip_sha=_SHA_B),

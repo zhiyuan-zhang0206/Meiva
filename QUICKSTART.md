@@ -236,7 +236,7 @@ is updated from the operator's development checkout by stopping every unit,
 switching every checkout and starting again:
 
 ```bash
-.venv/bin/meiva update down --new NEW_SHA --gateway GATEWAY --runner RUNNER --log-dir DIR
+.venv/bin/meiva update down --channel latest --gateway GATEWAY --runner RUNNER --log-dir DIR
 .venv/bin/meiva update up --gateway GATEWAY --runner RUNNER --log-dir DIR
 ```
 

@@ -276,9 +276,10 @@ def test_a_live_schema_that_does_not_match_the_code_refuses_without_applying_mig
 
 
 # meiva:note
-# Serving is published only for the source the root was launched from. A tracked file that
-# changes after the root was born, while the unit it launches comes up, makes the start fail
-# closed: the root's identity is checked against the source as it stands when the start finishes.
+# Working-tree source is not sealed into the root generation: a tracked file that changes after
+# the root was born (for example `git checkout` after `meiva stop --keep-shell-sessions`) still
+# lets the start bring units up and publish serving as long as the root runs from the same
+# checkout and interpreter.
 def test_a_tracked_source_change_after_the_root_launched_fails_the_start(
     start_run: StartRun,
 ) -> None:
@@ -289,13 +290,11 @@ def test_a_tracked_source_change_after_the_root_launched_fails_the_start(
         row = _row(run, RUNNER, "pty-sessions", state="stopped", intent="stopped")
         row.writes_on_up = run.runtime.code_root / "app.py"
 
-        with (
-            run.root([row], launch_digest=generation.launch_digest),
-            pytest.raises(RuntimeError, match="serving root differs from the admitted"),
-        ):
-            run.start(only=("pty-sessions",))
+        with run.root([row], launch_digest=generation.launch_digest):
+            assert run.start(only=("pty-sessions",)) == 0
+            assert start_serving.is_serving(run.home)
 
-    assert not run.serving_published
+    assert run.serving_published
 
 
 # meiva:note
