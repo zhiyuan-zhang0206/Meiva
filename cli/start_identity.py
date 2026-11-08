@@ -167,12 +167,15 @@ def _validate_intent_record(raw: object, home: Path, *, gateway: bool) -> None:
     if not _is_object_dict(raw_ports):
         raise TypeError("invalid start port reservation")
     ports = raw_ports
-    if set(ports) != set(cluster.FIXED_PORTS):
+    missing = sorted(set(cluster.FIXED_PORTS) - set(ports))
+    if missing:
         raise RuntimeError(
             "invalid start port reservation: slots differ from the fixed port table "
-            f"(unexpected {sorted(set(ports) - set(cluster.FIXED_PORTS))}, "
-            f"missing {sorted(set(cluster.FIXED_PORTS) - set(ports))})"
+            f"(missing {missing})"
         )
+    for slot in list(ports):
+        if slot not in cluster.FIXED_PORTS:
+            del ports[slot]
     if any(type(p) is not int or not 1 <= p <= 65535 for p in ports.values()):
         raise RuntimeError("invalid start port number")
     if len(set(ports.values())) != len(ports):
