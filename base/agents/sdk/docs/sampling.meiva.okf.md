@@ -15,15 +15,15 @@ No module cache, current-context registry or event pipeline supplies it.
 `telemetry.py` admits each public SDK entry with one policy snapshot before its body
 executes. The final `sdk_call` emission uses that same snapshot: a refresh during
 the call cannot replace its policy or mask the SDK's return, exception or cancellation.
-Nested public SDK fan-out gets its own policy snapshot, event and tally entry.
+Nested public SDK fan-out gets its own policy snapshot, event and tally.
 Plugin wrap layers share one final installed recorder for the same public function.
 A direct `emit()` validates policy and propagates errors from its emitter call.
 
 ## Refresh and failures
 
-Sampling is opt-in. The default records every event; the execution owner still tallies
+Sampling is opt-in: the default records every event, and the execution owner still tallies
 every executed public entry even when its event is sampled out. An invalid policy
-rejects a call before execution and therefore adds no tally.
+rejects a call before execution, adding no tally.
 
 The owner is built from a `SamplingSource` value: the launch environment, the home's `.env`
 path, the gateway-fetch tuning and the wait between refreshes. A composition root builds it
@@ -32,19 +32,21 @@ passes a dict, a file in `tmp_path` or a loopback gateway. Until the first refre
 serves the policy the environment already carries (`policy_from_aliases`), and it refreshes at
 most once per `refresh_seconds` (five by default), the first one due that long after the owner
 is built, without performing network I/O on the SDK call path. Enrolled runners fetch with a
-two-second timeout and one attempt; local processes read their `.env`. The environment is the
+two-second timeout and one attempt; local processes read their `.env`, as does a runner with no
+delivered machine API token (its bearer-less request could only be 401, so it is never sent). A
+present token that is rejected stays fatal. The environment is the
 live one, so a gateway URL, token or flag that appears after install is seen at the next
-refresh. The read that finds a refresh due starts a retained attempt. Admission and its real
-thread handle prevent another attempt while it remains alive. Each attempt records
+refresh. The read that finds a refresh due starts a retained attempt; admission and its real
+thread handle prevent another while it stays alive. Each attempt records
 completion and its original error; worker-boundary failures are immediately
 reported through the no-emitter logger and raised on the owner's next read or stop.
 
 HTTP timeout, network and remote-protocol failures, and HTTP 429, may retain the
-last valid policy. Authentication/status errors other than 429, malformed JSON
-or configuration, and an unreadable `.env` are not transient recovery. The cache
-records them and raises on every subsequent read until a successful refresh
-provides a new valid snapshot. Failed reads can still trigger a refresh when due;
-a later network outage cannot clear an already-recorded configuration error.
+last valid policy. Rejected authentication, any other status error, malformed JSON
+or configuration, and an unreadable `.env` are not: the cache records them and
+raises on every subsequent read until a successful refresh provides a valid
+snapshot. A failed read can still trigger a refresh when due; a later outage
+cannot clear an already-recorded error.
 
 Refresh diagnostics use the existing no-emitter logger path; they do not start
 an event pipeline to report policy failures. The fixed lazy import of local capture
@@ -77,11 +79,11 @@ the diagnostic and retained attempt express the separate shutdown outcome. Slow
 sampling does not turn code execution into a timeout or retry its side effects.
 
 The host stops sampling after turn drain and before checkpoint pools close, including
-failed boot. Bare SDK and CLI roots register finite `atexit` cleanup. A same-owner reload
-preserves that registration through success or failure; the root retains cleanup.
-An ordinary `uninstall()` unregisters the installed owner. A service owner gains no exit
-registration. Exit cleanup reports failures but promises neither a nonzero exit nor a join
-or delivery after hard exit. Refresh starts no telemetry pipeline.
+failed boot. Bare SDK and CLI roots register finite `atexit` cleanup; a same-owner reload
+preserves it through success or failure, and the root retains cleanup. An ordinary
+`uninstall()` unregisters the installed owner; a service owner gains no exit registration.
+Exit cleanup reports failures but promises neither a nonzero exit nor a join or delivery
+after hard exit. Refresh starts no telemetry pipeline.
 
 The SDK recorder snapshots caller identity at entry and explicitly passes it through
 `run_metered` / `run_metered_async` to the final event. The call retains its own copy;
@@ -99,8 +101,7 @@ original receipt/gate until its final event; attachment closure rejects new publ
 entries and seals only after admitted work drains. Calls retain raw gate references
 without a current-participant registry or ContextVar. Ordinary SDK/child contexts
 have no attachment capture owner, while external attachment contexts carry theirs.
-The unused implicit `annotate()` channel has been removed; direct `emit()` can
-still receive explicit semantic details.
+A direct `emit()` can still receive explicit semantic details.
 
 See the accepted public-entry counting decision in
 `docs/decisions/engineering/design/simplification/2026-10-09-explicit-runtime-ownership-boundaries.md`.
@@ -111,7 +112,7 @@ The SDK emitter call owns no network retry or generic sink fallback. An error af
 an admitted body succeeds propagates to the caller without executing that body again.
 When the body already raised, its exact exception and original cause remain primary;
 an emission or receipt-failure recording error is attached as an exception note.
-Both outcomes still count the body that executed in the unsampled execution tally.
+Both outcomes still count the executed body in the unsampled tally.
 
 The original call admission reports capture failure against its own gate, even if
 an attachment has closed or another receipt has become bound. Failure is recorded
