@@ -20,7 +20,7 @@ real repo-development workflow and Meiva-cluster-operations skills since
 fleet-wide, so those skills load exactly when the agent works inside the
 checkout (`meiva.cwd` under the repo) and never enter Meiva's fleet-wide runtime
 skill load directory. One deliberately narrower host integration copies the complete
-`meiva-guide` package and `impersonator-guide` into the global skill roots of the
+`meiva-guide` package into the global skill roots of the
 supported external agent clients present on the host; it is an external-client
 projection, not an Meiva runtime skill source — see
 [[docs/skills/external-agent-operator-bridge.meiva.okf.md]].

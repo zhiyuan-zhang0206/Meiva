@@ -58,7 +58,7 @@ Personal-index injection and `PERSONAL_PATH` resolve the current SDK identity:
 an attached external lease takes precedence over a hosted turn, then the process
 identity. External lease validity is checked before reading or creating memory
 files. A note written with `meiva.files` takes effect on the filesystem immediately;
-it is not a plugin state journal entry and does not wait for the impersonation handoff.
+it is not a plugin state journal entry and does not wait for any handoff.
 
 ## Writing a note
 

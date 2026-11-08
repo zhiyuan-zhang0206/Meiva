@@ -67,7 +67,7 @@ outage is reported once and its end once; any other refusal ends the supervisor 
 
 ## Published copies
 
-`meiva start` publishes this sub-skill's parent guide and `impersonator-guide`
+`meiva start` publishes this sub-skill's parent guide
 into the global skill directory of each external agent surface it finds (Codex,
 Claude Code, Gemini CLI, Grok, Qwen Code, Cursor Agent, Antigravity App/IDE and
 CLI, DeepSeek Harness), so a session can read them without the Meiva checkout. `references/supported-clients.md` is the matrix of

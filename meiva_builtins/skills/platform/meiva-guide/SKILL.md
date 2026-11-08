@@ -50,7 +50,7 @@ checkout, not the installed skill copy. For a deployment, that source is
 | Inspect, message, create, or manage agents, commands, and config overlays | [agents](agents/SKILL.md) |
 | Choose a model for an agent | [models](models/SKILL.md) |
 | Write, create, inspect, or change persistent scheduled work | [schedules](schedules/SKILL.md) |
-| Launch and supervise an external coding agent, or arrange a takeover | [external-agents](external-agents/SKILL.md) |
+| Launch and supervise an external harness agent (Claude Code, Codex, Antigravity) | [external-agents](external-agents/SKILL.md) |
 | Ask why a harness shows unavailable when spawning an agent | [external-agents](external-agents/SKILL.md), then [harness availability](external-agents/references/harness-availability.md) |
 | Dispose of dead agents' workspaces | [workspace-cleanup](workspace-cleanup/SKILL.md) |
 | Begin using Meiva or migrate from another tool | [onboarding](onboarding/SKILL.md) |
@@ -71,10 +71,13 @@ integration and operator rollout are separate actions. Guide membership does
 not grant operator authority: use the authorization and verification rules
 for the action you are taking.
 
-External agents may operate Meiva through the CLI without borrowing an agent
-identity. A takeover is a separate mode: its launcher follows
-[external-agents](external-agents/SKILL.md), and its executor follows the
-built-in `impersonator-guide` under `meiva_builtins/skills/platform/impersonator-guide/`.
+External harness agents are first-class Meiva agents. Claude Code, Codex,
+Antigravity and the Meiva runtime each drive the agent loop in their own process,
+and the agent they run has its own agent id, the whole `meiva.*` surface, and a
+turn lifecycle `agent-host` owns like a native loop's — a smooth stop drains it,
+checkpoints it and resumes it from a continuation note. Launch and supervise them
+through [external-agents](external-agents/SKILL.md); no agent borrows another's
+identity.
 
 ## Design intent
 
