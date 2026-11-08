@@ -11,6 +11,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 
 __all__ = [
+    "STANDING_HEAD_NOTE_TAGS",
     "Row",
     "Selection",
     "boundary_read_limit",
@@ -22,6 +23,18 @@ __all__ = [
 ]
 
 _REATTACHED_KINDS = frozenset({"system_prompt", "inbound_compact_summary"})
+
+STANDING_HEAD_NOTE_TAGS = frozenset(
+    {
+        "exec_timeout",
+        "timezone",
+        "memory",
+        "agent_id",
+        "agent_memory",
+        "inherited_memory",
+        "preloaded_skills",
+    }
+)
 
 
 # meiva:note

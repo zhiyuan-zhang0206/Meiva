@@ -105,6 +105,18 @@ describe("standingHeadNoteIds", () => {
       new Set(["h1.0", "h2.0", "h3.0", "h4.0", "h5.0"]),
     );
   });
+
+  it("stops the run at lifecycle_* or unknown system_marker sources", () => {
+    const items = [
+      item({ item_id: "0.0", kind: "system_prompt" }),
+      item({ item_id: "1.0", kind: "system_marker", source: "exec_timeout" }),
+      item({ item_id: "2.0", kind: "system_marker", source: "lifecycle_resurrect" }),
+      item({ item_id: "3.0", kind: "system_marker", source: "lifecycle_restart" }),
+      item({ item_id: "4.0", kind: "system_marker", source: "impersonation" }),
+      item({ item_id: "5.0", kind: "system_marker", source: "memory" }),
+    ];
+    expect(standingHeadNoteIds(items)).toEqual(new Set(["1.0"]));
+  });
 });
 
 describe("parseItemId", () => {
