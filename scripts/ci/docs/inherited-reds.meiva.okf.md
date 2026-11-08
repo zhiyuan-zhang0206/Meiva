@@ -39,6 +39,9 @@ expires = 2026-11-15
   this file's.
 - An entry excuses a failure only while that identity also failed in the nightly this gate read. A
   declaration is a signature on top of the evidence, never a replacement for it.
+- The residual risk this accepts, and why the expiry is the answer to it: a red the nightly saw,
+  that someone fixed after it, and that a pull request then re-broke, is excused until the entry
+  expires. The entry names the card, so the fix and the re-break are one investigation, not two.
 - `nodeid` is the watch's own fingerprint, `<file>::<test name>`, built by
   `schedules/plans/watch/junit.py` from the JUnit `file`/`classname` attribute. One test keeps one
   identity whichever job ran it: `e2e shard (3/4)` on this workflow and `e2e full matrix (3/4)` on
@@ -89,7 +92,7 @@ message instead of excusing nothing.
 ```
 e2e gate: PASS - every failure is inherited from run 100000001
 nightly: run 100000001 attempt 2 sha 0a1b2c3d4e5f completed 2026-11-08T02:31:00+00:00 (5.2h ago)
-base is an ancestor of the nightly head: yes
+nightly head is an ancestor of this base: yes
 inherited red 1:
   - tests/e2e/state/test_timeline_virtualization.py::test_parked_deep_history_mounts_a_bounded_window[agent_chat] (card #6475, expires 2026-11-15)
 ```
