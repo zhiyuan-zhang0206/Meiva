@@ -27,17 +27,18 @@ from meiva_builtins.plugins.meiva_fleet import task_registry
 from base.clock import SYSTEM_TIMERS
 from base.daemon.schedules.inputs import ScheduleInputs
 from base.host.boundary.json_values import is_object_dict, is_object_list
+from base.config import settings
 from base.paths.home import resolve_meiva_home
 from schedules.jobs.entry import cluster_timezone, open_schedule_entry
 from schedules.jobs.loop import CronSchedule, Trigger, run_loop
 from schedules.jobs.watch.api_read import read_api
+from schedules.jobs.watch.main_red_slot import slot_round
 from schedules.jobs.watch.main_red_watch import (
     LivenessStream,
     already_read,
     STATE_FILE,
     card_operation_key,
     listing_attempt,
-    slot_round,
     watch_once,
 )
 from schedules.jobs.telemetry_event import emit_system_event
@@ -598,7 +599,7 @@ def _close_card(task_id: int, reason: str) -> None:
         meiva.context,
         task_id,
         status="done",
-        results=f"red ended: {reason}",
+        results=reason,
         operation_key=f"main-red-close-{task_id}",
     )
 
@@ -630,6 +631,8 @@ def watch_round(
         workflows=(_RELEASE_GATE, _NIGHTLY, _CI_NIGHTLY, _MAIN_PUSH),
         compare=partial(compare_commits, run_process=run_process),
         attempt_of=partial(latest_attempt_jobs, run_process=run_process),
+        blind_min_streams=settings.daemon.main_red_watch_blind_streams,
+        blind_stream_rounds=settings.daemon.main_red_watch_blind_stream_rounds,
         liveness=(
             LivenessStream("nightly", _NIGHTLY, NIGHTLY_STALE_AFTER),
             LivenessStream(

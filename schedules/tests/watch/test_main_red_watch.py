@@ -14,6 +14,7 @@ from typing import cast
 
 from base.db import Database
 from schedules.jobs.watch.main_red_liveness import liveness_once
+from schedules.jobs.watch.main_red_slot import slot_round
 from schedules.jobs.watch.main_red_watch import (
     ATTEMPT_GREEN,
     no_opportunity_notes,
@@ -30,7 +31,6 @@ from schedules.jobs.watch.main_red_watch import (
     WatchState,
     load_state,
     save_state,
-    slot_round,
     watch_once,
 )
 from schedules.plans.watch.main_red import (
@@ -632,6 +632,16 @@ def test_one_unreadable_stream_leaves_the_others_read_and_the_round_whole(tmp_pa
         "unnamed": 0,
         "suspects": None,
         "suspects_dropped": None,
+        "unreadable": 1,
+        "stream_errors": [
+            {
+                "workflow": "main-push.yml",
+                "error": (
+                    "RuntimeError: gh api repos/o/r/actions/runs/1/jobs failed: "
+                    "gh: Server Error (HTTP 502)"
+                ),
+            }
+        ],
     }
     assert len(load_state(tmp_path / STATE_FILE).entries) == 1
 
@@ -1324,7 +1334,7 @@ def test_a_card_closes_when_its_own_run_is_re_run_green(tmp_path: Path) -> None:
         attempt_of=port,
     )
 
-    assert closed == [(900, "e2e full matrix (1/4) passed in attempt 2 of run 702")]
+    assert closed == [(900, "red ended: e2e full matrix (1/4) passed in attempt 2 of run 702")]
     assert "closed card 900" in line
     assert port.calls == [702], "the card is asked about the run that last reported its red"
     assert load_state(tmp_path / STATE_FILE).entries == {}, "the entry goes with the card"

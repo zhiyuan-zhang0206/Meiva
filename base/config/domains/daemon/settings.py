@@ -6,10 +6,12 @@ from pydantic import Field
 
 from base.config.base import EnvSettings
 from base.config.domains.daemon.delivery_watchdog_fields import DeliveryWatchdogFields
+from base.config.domains.daemon.main_red_watch_fields import MainRedWatchFields
 
 
 class DaemonSettings(
     DeliveryWatchdogFields,
+    MainRedWatchFields,
     EnvSettings,
 ):
     host_max_concurrent_turns: int = Field(

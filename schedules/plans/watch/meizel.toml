@@ -1,5 +1,6 @@
 exports = [
     "agent_watch_rule.py",
+    "blind_window.py",
     "keepalive_rule.py",
     "release_gate_slot.py",
     "stall_rule.py",
@@ -10,6 +11,7 @@ exports = [
 
 [purity]
 "agent_watch_rule.py" = "strict"
+"blind_window.py" = "strict"
 "keepalive_rule.py" = "strict"
 "release_gate_slot.py" = "strict"
 "stall_rule.py" = "strict"
@@ -19,3 +21,4 @@ exports = [
 
 [uses]
 "release_gate_slot.py" = ["main_red.py"]
+"blind_window.py" = ["main_red.py"]

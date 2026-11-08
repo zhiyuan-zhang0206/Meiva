@@ -80,6 +80,19 @@ cron has not come round yet — and a stream that cannot be read at all (a
 renamed workflow, a busy API) is one named note in the round, never the end of
 the round or of the process that would report it next time.
 
+One unreadable stream is a note. A round that cannot read **two or more** of its
+streams, or a single stream that has been unreadable for **six consecutive
+rounds** (three hours at this cadence), is a card: while that window lasts, a
+red on `main` opens nothing, so an empty card list means "nobody was reading",
+not "nothing is red". The card names the streams, quotes what each one answered
+and says that anything merged inside the window is unjudged rather than green;
+it closes on the first round that reads every stream again, and its closing line
+records the interval and whether the runs that landed inside it were actually
+re-read — a listing that cannot reach back over the window is reported as `NOT
+covered`, never as covered. One window is one card however many streams join it,
+and a single stream failing once stays a note, so a flaky API never becomes
+furniture on the board.
+
 Two things it reads run part of the tree rather than the population: the narrow
 `main-push.yml` gate (two checks) and the `data plane (macOS)` job inside the
 nightly `ci.yml` verdict (two test directories, on a hosted Mac). Their reds are
