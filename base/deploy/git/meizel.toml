@@ -4,12 +4,8 @@ exports = ["check_git_hooks.py", "cluster_drift.py", "github_pr.py", "memory_rep
 "tests" = ["cluster_drift.py", "github_pr.py", "memory_repo.py", "repo_change.py", "source_tree_guard.py", "worktree_guard.py"]
 
 [roots]
-"check_git_hooks.py" = { kinds = ["argv"], why = "the __main__ guard reads argv[1:] once and hands it to main" }
+"check_git_hooks.py" = { kinds = ["argv", "cwd", "home"], why = "the __main__ guard reads argv[1:] once and hands it to main; the script also judges the checkout it was started in (`Path.cwd()`) and scans the invoking user's home for this machine's checkouts (`Path.home()`): both are the operands the operator chose" }
 
 [purity]
 "__init__.py" = "strict"
 "repo_change.py" = "strict"
-
-[debt.ambient-read]
-"check_git_hooks.py#cwd pathlib.Path.cwd" = { count = 1, owner = "#5816", until = "permanently: the script checks the hooks of the checkout it was started in, and that cwd is the operand the operator chose" }
-"check_git_hooks.py#home pathlib.Path.home" = { count = 1, owner = "#5816", until = "permanently: machine_checkouts() scans the invoking user's home for checkout directories, and that home is the user's own" }

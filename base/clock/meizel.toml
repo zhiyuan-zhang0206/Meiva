@@ -14,10 +14,7 @@ exports = ["configuration.py", "ids.py", "tests"]
 "tests" = ["__init__.py", "configuration.py", "ids.py"]
 
 [roots]
-"__init__.py" = { kinds = ["clock"], why = "the wall clock's owner: every component that needs the time asks this module (Clock, Timers, SYSTEM_TIMERS), so the one read of the host clock happens here and nowhere below it. A caller can still hand in its own `Clock` — the constructor takes the `now` callable — but the default that other modules must not re-derive lives at this door" }
-
-[debt.ambient-read]
-"__init__.py#settings base.config.settings" = { count = 1, owner = "#5816", until = "permanently: clock_config_from_settings() is the door Clock.from_settings() uses for code that was handed no clock, and it is the fallback construction the clock lattice names (clock_lattice_cli.py); the read is the door itself, not a shortcut around it" }
+"__init__.py" = { kinds = ["clock", "settings"], why = "the wall clock's owner: every component that needs the time asks this module (Clock, Timers, SYSTEM_TIMERS), so the one read of the host clock happens here and nowhere below it. A caller can still hand in its own `Clock` — the constructor takes the `now` callable — but the default that other modules must not re-derive lives at this door; it also reads the settings singleton in `clock_config_from_settings()`, the one door `Clock.from_settings()` uses when code was handed no clock: the fallback construction the clock lattice names, so the config read happens here rather than at each caller that needs a default clock" }
 
 [debt.impure-call]
 "__init__.py#time.sleep" = { count = 1, owner = "#7240", until = "permanently: the wait belongs to the same SYSTEM_TIMERS value, and sleeping is an effect rather than a read of the clock (meizel/graph/ambient_process_table.py, the `time` table), so no [roots] kind covers it and this record is the clock door's own; a module that sleeps takes a Timers it was handed" }
