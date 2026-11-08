@@ -20,6 +20,7 @@ from schedules.jobs.watch.main_red_watch import (
     ATTEMPT_PENDING,
     AttemptOf,
     LivenessStream,
+    already_read,
     job_attempt_verdict,
     listing_attempt,
     card_operation_key,
@@ -90,7 +91,9 @@ def _watch(
     starts: Mapping[str, datetime | None] | None = None,
     attempt_of: AttemptOf | None = None,
 ) -> str:
-    def fetch(_workflow: str) -> tuple[RunFacts, ...]:
+    def fetch(
+        _workflow: str, _seen_at: datetime | None, _seen_attempt: int | None
+    ) -> tuple[RunFacts, ...]:
         return tuple(runs)
 
     def open_card(card: Card) -> int:
@@ -278,7 +281,7 @@ def test_a_stale_schedule_is_reported_in_the_round_line(tmp_path: Path) -> None:
     late = watch_once(
         state_path=tmp_path / STATE_FILE,
         now=now,
-        fetch=lambda _w: (),
+        fetch=lambda _w, _s=None, _a=None: (),
         last_start=last_start,
         open_card=lambda _c: 1,
         close_card=lambda _t, _r: None,
@@ -465,7 +468,7 @@ def test_a_red_nightly_full_run_opens_a_card_and_its_silence_is_reported(tmp_pat
     silent = watch_once(
         state_path=tmp_path / "other" / STATE_FILE,
         now=second,
-        fetch=lambda _w: (),
+        fetch=lambda _w, _s=None, _a=None: (),
         open_card=lambda _c: 1,
         close_card=lambda _t, _r: None,
         emit=lambda _p: None,
@@ -562,7 +565,7 @@ def test_a_stream_first_seen_now_is_not_reported_until_a_threshold_passes(tmp_pa
         return watch_once(
             state_path=tmp_path / STATE_FILE,
             now=now,
-            fetch=lambda _w: (),
+            fetch=lambda _w, _s=None, _a=None: (),
             last_start=lambda _w: None,
             open_card=lambda _c: 1,
             close_card=lambda _t, _r: None,
@@ -587,7 +590,9 @@ def test_one_unreadable_stream_leaves_the_others_read_and_the_round_whole(tmp_pa
     heartbeats: list[dict[str, object]] = []
     asked: list[str] = []
 
-    def fetch(workflow: str) -> tuple[RunFacts, ...]:
+    def fetch(
+        workflow: str, _seen_at: datetime | None, _seen_attempt: int | None
+    ) -> tuple[RunFacts, ...]:
         asked.append(workflow)
         if workflow == "main-push.yml":
             raise RuntimeError(
@@ -633,7 +638,7 @@ def test_the_round_counts_the_reds_it_could_not_name(tmp_path: Path) -> None:
     line = watch_once(
         state_path=tmp_path / STATE_FILE,
         now=datetime(2026, 11, 8, 0, tzinfo=UTC),
-        fetch=lambda _w: (red, second),
+        fetch=lambda _w, _s=None, _a=None: (red, second),
         last_start=lambda _w: datetime(2026, 11, 7, 22, tzinfo=UTC),
         open_card=lambda card: 900,
         close_card=lambda task_id, reason: None,
@@ -659,7 +664,7 @@ def test_an_unreadable_liveness_stream_does_not_stop_the_round(tmp_path: Path) -
     line = watch_once(
         state_path=tmp_path / STATE_FILE,
         now=datetime(2026, 11, 2, 12, tzinfo=UTC),
-        fetch=lambda _w: (),
+        fetch=lambda _w, _s=None, _a=None: (),
         last_start=last_start,
         open_card=lambda _c: 1,
         close_card=lambda _t, _r: None,
@@ -780,7 +785,7 @@ def test_a_confirmed_red_lists_the_commits_since_the_last_green(tmp_path: Path) 
         return watch_once(
             state_path=tmp_path / STATE_FILE,
             now=datetime(2026, 11, 2, 12, tzinfo=UTC),
-            fetch=lambda _workflow: tuple(runs),
+            fetch=lambda _workflow, _s=None, _a=None: tuple(runs),
             last_start=lambda _workflow: datetime(2026, 11, 2, 11, tzinfo=UTC),
             open_card=lambda card: (opened.append(card), 899 + len(opened))[1],
             close_card=lambda _task, _reason: None,
@@ -816,7 +821,7 @@ def test_an_unreadable_range_still_opens_the_card_and_says_so(tmp_path: Path) ->
         return watch_once(
             state_path=tmp_path / STATE_FILE,
             now=datetime(2026, 11, 2, 12, tzinfo=UTC),
-            fetch=lambda _workflow: tuple(runs),
+            fetch=lambda _workflow, _s=None, _a=None: tuple(runs),
             last_start=lambda _workflow: datetime(2026, 11, 2, 11, tzinfo=UTC),
             open_card=lambda card: (opened.append(card), 899 + len(opened))[1],
             close_card=lambda _task, _reason: None,
@@ -1356,3 +1361,50 @@ def test_a_card_without_a_run_id_is_not_asked_about(tmp_path: Path) -> None:
 
     assert closed == []
     assert port.calls == [], "no run id means no run to ask about"
+
+
+# meiva:note
+# The boundary is one judgement used twice: the round applies it to a run it has read, and the fetch
+# applies it to a listing row before spending a jobs read and a log download on it (task #6509). This
+# table is the whole rule -- older is read, newer is not, and at the same instant the attempt decides
+# while an unknown attempt means the row counts as read.
+def test_the_watermark_boundary_is_the_same_for_a_run_and_a_row() -> None:
+    seen = datetime(2026, 11, 2, 12, tzinfo=UTC)
+    older = datetime(2026, 11, 2, 11, tzinfo=UTC)
+
+    assert already_read(older, 9, seen, 1) is True
+    assert already_read(seen, 1, seen, 1) is True
+    assert already_read(seen, 2, seen, 1) is False, "a newer attempt of the same run is unread"
+    assert already_read(seen, 1, seen, None) is True, "an unknown attempt means already read"
+    assert already_read(datetime(2026, 11, 2, 13, tzinfo=UTC), 1, seen, 9) is False
+    assert already_read(older, 1, None, None) is False, "no watermark yet"
+
+
+# meiva:note
+# The port carries the watermark, or the fetch cannot skip anything: this asserts what the round
+# hands over, and that the first round hands over nothing at all.
+def test_the_round_tells_the_fetch_where_its_watermark_is(tmp_path: Path) -> None:
+    seen: list[tuple[datetime | None, int | None]] = []
+    when = datetime(2026, 11, 2, 10, tzinfo=UTC)
+
+    def fetch(
+        _workflow: str, seen_at: datetime | None, seen_attempt: int | None
+    ) -> tuple[RunFacts, ...]:
+        seen.append((seen_at, seen_attempt))
+        return (replace(_red("release-gate.yml", "a" * 40, when), run_id=701, attempt=2),)
+
+    for _round in range(2):
+        watch_once(
+            state_path=tmp_path / STATE_FILE,
+            now=datetime(2026, 11, 2, 12, tzinfo=UTC),
+            fetch=fetch,
+            last_start=lambda _workflow: datetime(2026, 11, 2, 11, tzinfo=UTC),
+            open_card=lambda _card: 900,
+            close_card=lambda _task, _reason: None,
+            emit=lambda _payload: None,
+            workflows=("release-gate.yml",),
+            liveness=_LIVENESS,
+        )
+
+    assert seen[0] == (None, None), "the first round has no watermark to offer"
+    assert seen[1] == (when, 2), "the second names the newest (created_at, attempt) it read"

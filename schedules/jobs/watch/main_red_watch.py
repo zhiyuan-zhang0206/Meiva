@@ -54,6 +54,7 @@ __all__ = [
     "LivenessStream",
     "SlotLedger",
     "WatchState",
+    "already_read",
     "card_operation_key",
     "job_attempt_verdict",
     "listing_attempt",
@@ -174,14 +175,29 @@ def _format_watermark(seen_at: datetime, attempt: int | None) -> str:
     return f"{seen_at.isoformat()}{_WATERMARK_SEPARATOR}{attempt}"
 
 
-def _already_read(run: RunFacts, seen_at: datetime | None, seen_attempt: int | None) -> bool:
+# meiva:note
+# Whether a run is at or behind the watermark. It takes the two facts rather than a `RunFacts`
+# because the same question is asked twice with different inputs: the round asks it of a run it has
+# already read, and the fetch asks it of a listing row *before* spending a jobs read and a log
+# download on it (task #6509). One judgement, two callers -- a second copy of this comparison is how
+# the two sides would drift apart.
+def already_read(
+    created_at: datetime,
+    attempt: int,
+    seen_at: datetime | None,
+    seen_attempt: int | None,
+) -> bool:
     if seen_at is None:
         return False
-    if run.created_at < seen_at:
+    if created_at < seen_at:
         return True
-    if run.created_at > seen_at:
+    if created_at > seen_at:
         return False
-    return seen_attempt is None or run.attempt <= seen_attempt
+    return seen_attempt is None or attempt <= seen_attempt
+
+
+def _already_read(run: RunFacts, seen_at: datetime | None, seen_attempt: int | None) -> bool:
+    return already_read(run.created_at, run.attempt, seen_at, seen_attempt)
 
 
 # meiva:note
@@ -508,7 +524,7 @@ def watch_once(
     *,
     state_path: Path,
     now: datetime,
-    fetch: Callable[[str], tuple[RunFacts, ...]],
+    fetch: Callable[[str, datetime | None, int | None], tuple[RunFacts, ...]],
     last_start: Callable[[str], datetime | None],
     open_card: Callable[[Card], int],
     close_card: Callable[[int, str], None],
@@ -533,7 +549,7 @@ def watch_once(
     for workflow in workflows:
         seen_at, seen_attempt = _read_watermark(watermarks.get(workflow))
         try:
-            runs = fetch(workflow)
+            runs = fetch(workflow, seen_at, seen_attempt)
         except Exception as exc:
             notes.append(f"stream {workflow} unreadable: {type(exc).__name__}: {exc}")
             stale += 1
