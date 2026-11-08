@@ -46,8 +46,9 @@ first).
 The gateway, the roster, the config surface and the frontend lose a product
 feature. `notified_at` becomes a column with no writer: new rows keep NULL, so
 "notified" reads false for everything, which is the truth. `notify_im` labels in
-the Grafana rules are inert. Historical rows and their `native-v1` origin stay
-readable; historical decision and incident records stay as evidence.
+the Grafana rules are inert: the ingest no longer reads the label, and those rules
+record transitions like every other rule. Historical rows and their `native-v1`
+origin stay readable; historical decision and incident records stay as evidence.
 
 Any future IM return starts from the recorded requirements rather than from this
 code, and needs its own decision.

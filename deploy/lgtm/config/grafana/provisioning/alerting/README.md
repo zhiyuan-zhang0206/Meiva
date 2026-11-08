@@ -204,15 +204,15 @@ R19 gives slow-by-design routes separate 5s/10s thresholds calibrated against
 baseline ×2) rather than single long turns. The emitter's single
 route-classification source is `gateway/http/middleware/latency.py`. All five carry
 `notify_im: "false"` — the PM slow-request convention is warning-first and no
-IM fan-out (alert-fatigue ruling 2026-08-22); the gateway honors the label once
-the IM gating PR (#3219) lands, until then they reach IM like the rest.
+fan-out to the user (alert-fatigue ruling 2026-08-22). The label is history: the
+IM channels retired on 2026-11-08 and the ingest no longer reads it.
 
 Severity follows the alert-system vocabulary (Task #1224):
-critical/warning/error — all three push to IM, no gate. Thresholds are
+critical/warning/error — none of the three is gated. Thresholds are
 calibrated against live data (2026-08-04, see header comment in
 `rules.yml`). R7 (trace-disk-watermark) is a chronic-condition alert: any
 degradation event in the trailing 24h keeps it firing, so one episode = one
-onset + one recovery IM instead of one per event.
+onset and one recovery record instead of one per event.
 
 R13 (llm-billing-quota) is the one rule with no threshold and no `for`
 window: an out-of-credit API key fails every turn in the fleet and only a
@@ -314,7 +314,7 @@ and trailing window carry the debounce. A condition that stops resolves itself w
 | `meiva-ops-llm-usage-metering-failed` | `llm_usage_metering_failed` per model (1h) | 0m | warning | nothing: the call ran and its `llm_usage` row was dropped, so the spend happened and the ledger never saw it (#6400) |
 | `meiva-ops-exec-node-timeout` | `exec_node_timeout` (30m) | 0m | warning | nothing: the node timeout killed the call and no rule read the event (#6400) |
 | `meiva-ops-exec-subprocess-killed` | `exec_subprocess_killed` (1h) | 0m | warning | nothing: a child that outlived the signal grace may have left partial output behind (#6400) |
-| `meiva-ops-alert-pipeline-watchdog` | Prometheus `vector(1)` — always firing, carries `notify_im: "false"` | 0s | warning | synthetic heartbeat: it exists only so R28 has something whose absence means something. Its route repeats every 5m and does not fall through, so it costs one webhook POST per period and no IM |
+| `meiva-ops-alert-pipeline-watchdog` | Prometheus `vector(1)` — always firing | 0s | warning | synthetic heartbeat: it exists only so R28 has something whose absence means something. Its route repeats every 5m and does not fall through, so it costs one webhook POST per period |
 | `meiva-ops-alert-pipeline-silent` | `time() - meiva_alerts_last_ingest_timestamp_seconds` > 900 (three watchdog periods) | 5m | error | nothing: a rotated webhook token or a misrouted contact point silences **every** rule at once, and no rule rode a path that could report it (2026-11-04). Routes to the gateway webhook |
 
 Unhealthy-for-3-minutes and unhealthy-for-10-minutes are two coexisting rules per condition
@@ -334,7 +334,7 @@ the silence looks exactly like a quiet night. Two rules close that hole and noth
 - `meiva-ops-alert-pipeline-watchdog` fires unconditionally (`vector(1)`) every evaluation. It asserts
   nothing about the system; its only job is to walk the whole path and refresh one row. Its route
   repeats every 5 minutes and carries `continue: false`, so the heartbeat costs one POST per period
-  and never reaches the catch-all or the user's IM (`notify_im: "false"`).
+  and never reaches the catch-all.
 - `meiva-ops-alert-pipeline-silent` reads the gauge the ingest refreshes
   (`alerts_last_ingest_timestamp_seconds`, emitted by `gateway/alerts/router.py:ingest_alerts` on every
   accepted POST) and fires when it is older than 900 s — three missed periods — for 5 minutes. It routes

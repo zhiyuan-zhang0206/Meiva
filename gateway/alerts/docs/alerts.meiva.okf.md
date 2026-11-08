@@ -108,7 +108,9 @@ The ingest transaction freezes immutable revision/group/member snapshots through
 `base.telemetry.alerts.shadow.AlertShadowBatch`; fingerprint gates preserve
 input-order instance resolution. Repeated observations retain the original group.
 `notification_revision` advances on each frozen transition; `notified_at` has no
-writer left and stays NULL. Shadow history is never proof of non-delivery and
+writer left and stays NULL. The Grafana label `notify_im: "false"` is inert: it gated a
+delivery, the ingest does not read it any more, and a rule that carries it records its
+transitions like every other rule. Shadow history is never proof of non-delivery and
 cannot be automatically dispatched. See
 [[alert-shadow-facts]] for transaction ownership and the retained history boundary.
 

@@ -68,7 +68,7 @@ __all__ = [
 # `base.host.db_authority.admission.admission_inputs`, called by the daemon that owns the admission.
 #
 # The acceptor's half of `gateway_bearer(access)`: the daemons that take calls from the
-# gateway (the ops server, im_bridge's `/send`) accept machine API tokens, never the
+# gateway (the ops server) accept machine API tokens, never the
 # human cluster secret.
 #
 # The gateway dials with its gateway-class token and a runner-class process of the unit with its
