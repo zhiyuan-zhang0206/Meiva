@@ -1,17 +1,8 @@
-import { existsSync, readdirSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-// The console deliberately ships no favicon or icon (task #3286). Next only
-// injects an icon <link> when one of its icon conventions exists, and the
-// state has slipped back once already — a branded favicon was restored
-// inside an unrelated polish PR (#1858). Lock the empty state at the file
-// level by mirroring Next's strict metadata-file scanner
-// (node_modules/next/dist/lib/metadata/is-metadata-route.js): `favicon.ico`
-// is exact; `icon`/`apple-icon` accept a single-digit variant (`\d?` —
-// `icon12` is not a convention) over the image or page extensions; no hash
-// suffix survives the strict match.
 const ICON_CONVENTION =
   /^(favicon\.ico|icon\d?\.(ico|jpe?g|png|svg|tsx?|jsx?)|apple-icon\d?\.(jpe?g|png|tsx?|jsx?))$/i;
 
@@ -23,20 +14,21 @@ function iconConventionFiles(dir: string): string[] {
   });
 }
 
-describe("no favicon", () => {
-  it("ships no icon-convention file under src/app", () => {
-    expect(iconConventionFiles("src/app")).toEqual([]);
-  });
-
-  it("ships no public favicon fallback", () => {
+describe("brand favicon and app icons", () => {
+  it("ships the official brand icon.svg under src/app", () => {
+    expect(iconConventionFiles("src/app")).toEqual(["src/app/icon.svg"]);
     expect(existsSync("public/favicon.ico")).toBe(false);
+    const svg = readFileSync("src/app/icon.svg", "utf8");
+    expect(svg).toContain('viewBox="0 0 1000 1000"');
+    expect(svg).toContain("#ED8755");
+    expect(svg).toContain("#427C6E");
+    expect(svg).toContain("#2276B5");
   });
 
   it("matches every icon convention Next accepts", () => {
     for (const name of ["favicon.ico", "icon.png", "icon1.png", "apple-icon1.tsx"]) {
       expect(ICON_CONVENTION.test(name), name).toBe(true);
     }
-    // Two digits, favicon variants, and hash suffixes are not conventions.
     for (const name of ["icon12.png", "favicon1.ico", "icon-abc123.png"]) {
       expect(ICON_CONVENTION.test(name), name).toBe(false);
     }

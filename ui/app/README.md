@@ -35,11 +35,11 @@ path.
 
 ## Icons
 
-The app ships without branding icons (task #3286). `bundle.icon` is empty by
-design, so a macOS bundle takes the system default icon. The one file kept
-under `icons/` is a blank placeholder the toolchain requires, not artwork:
-`icon.png` is what `tauri-codegen` embeds as the default window icon. Deleting
-it breaks the build without changing anything else.
+Desktop bundles and the tray item use the brand `M` monogram assets under
+`src-tauri/icons/` (`32x32.png`, `128x128.png`, `128x128@2x.png`, `icon.icns`,
+`icon.ico`, and `icon.png`). Android launcher icons (`mipmap-*` and the
+Coal Black `#292824` `ic_launcher_background.xml`) live under `android/res/`
+and are copied into the generated Gradle project by `android/apply_overlay.py`.
 
 ## Android
 

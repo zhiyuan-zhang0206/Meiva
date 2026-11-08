@@ -28,13 +28,13 @@ export function RowActions({
     return (
       <div className={wrapperCls}>
         {pending === "resurrecting" ? (
-          <Spinner color="text-emerald-500" />
+          <Spinner color="text-muted-foreground" />
         ) : (
           <button
             type="button"
             onClick={onResurrect}
             disabled={pending !== undefined}
-            className="p-0.5 rounded hover:bg-emerald-500/20 hover:text-emerald-500 text-muted-foreground disabled:opacity-30"
+            className="p-0.5 rounded hover:bg-accent hover:text-foreground text-muted-foreground disabled:opacity-30"
             aria-label={t("resurrectConfirm", { id: agent.agent_id })}
           >
             <RotateCw className="size-3" />
@@ -47,7 +47,7 @@ export function RowActions({
   if (pending === "restarting") {
     return (
       <div className={wrapperCls}>
-        <Spinner color="text-emerald-500" />
+        <Spinner color="text-muted-foreground" />
       </div>
     );
   }
@@ -61,7 +61,7 @@ export function RowActions({
   if (pending === "compacting") {
     return (
       <div className={wrapperCls}>
-        <Spinner color="text-amber-500" />
+        <Spinner color="text-muted-foreground" />
       </div>
     );
   }

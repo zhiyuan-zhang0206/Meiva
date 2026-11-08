@@ -300,3 +300,17 @@ def test_apply_patches_the_generated_activity(tmp_path: Path) -> None:
     overlay.apply(_OVERLAY.parent, tmp_path)
     source = (main / "java" / Path(*overlay.PACKAGE.split(".")) / "MainActivity.kt").read_text()
     assert "WindowInsetsCompat.Type.systemBars()" in source
+
+
+def test_apply_copies_the_brand_launcher_icons_into_generated_resources(
+    tmp_path: Path,
+) -> None:
+    main = _write_generated(tmp_path)
+    overlay.apply(_OVERLAY.parent, tmp_path)
+    bg_xml = (main / "res" / "values" / "ic_launcher_background.xml").read_text()
+    assert "#292824" in bg_xml
+    for density in ("mdpi", "hdpi", "xhdpi", "xxhdpi", "xxxhdpi"):
+        mip = main / "res" / f"mipmap-{density}"
+        assert (mip / "ic_launcher.png").is_file()
+        assert (mip / "ic_launcher_round.png").is_file()
+        assert (mip / "ic_launcher_foreground.png").is_file()

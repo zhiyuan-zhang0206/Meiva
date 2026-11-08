@@ -146,7 +146,7 @@ function ThinkingSummary({
 
   return (
     <span className={cn("items-center gap-1.5", FLEX, MIN_W_0)}>
-      <Sparkles className={cn("size-3.5 shrink-0", live && "text-sky-500")} />
+      <Sparkles className="size-3.5 shrink-0" />
       <span className="truncate tabular-nums">{label}</span>
     </span>
   );
@@ -176,7 +176,7 @@ function CodeSummary({
   if (isExternalTool) {
     return (
       <span className={cn("items-center gap-1.5", FLEX, MIN_W_0)}>
-        {renderToolIcon(item.source, cn("size-3.5 shrink-0", liveCode && "text-sky-500"))}
+        {renderToolIcon(item.source, "size-3.5 shrink-0")}
         <span className="truncate tabular-nums">
           {timing ? <>{timing}<span className="opacity-60">{" · "}</span></> : null}
           <span className="text-foreground/80">{item.source}</span>
@@ -187,7 +187,7 @@ function CodeSummary({
 
   return (
     <span className={cn("items-center gap-1.5", FLEX, MIN_W_0)}>
-      <Code2 className={cn("size-3.5 shrink-0", liveCode && "text-sky-500")} />
+      <Code2 className="size-3.5 shrink-0" />
       <span className="truncate tabular-nums">
         {calls.length > 0 ? (
           <>
@@ -237,7 +237,7 @@ function OutputSummary({ item, now }: { item: BackendTimelineItem; now: number }
   }
   return (
     <span className={cn("items-center gap-1.5", FLEX, MIN_W_0)}>
-      <Terminal className={cn("size-3.5 shrink-0", liveExec && "text-sky-500")} />
+      <Terminal className="size-3.5 shrink-0" />
       <span className="truncate tabular-nums">{ran ?? t("output")}</span>
     </span>
   );

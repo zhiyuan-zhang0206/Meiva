@@ -15,33 +15,33 @@
 /* ---- tokens ------------------------------------------------------------ */
 
 :root {
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.145 0 0);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.205 0 0);
-  --primary-foreground: oklch(0.985 0 0);
-  --muted-foreground: oklch(0.556 0 0);
+  --background: #F0F2F4;
+  --foreground: #292824;
+  --card: #F7F8FA;
+  --card-foreground: #292824;
+  --primary: #292824;
+  --primary-foreground: #F0F2F4;
+  --muted-foreground: #686660;
   --destructive: oklch(0.577 0.245 27.325);
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
-  --ring: oklch(0.708 0 0);
+  --border: #DCE0E5;
+  --input: #DCE0E5;
+  --ring: #ED8755;
   --radius: 0.625rem;
   color-scheme: light;
 }
 
 html.dark {
-  --background: oklch(0.145 0 0);
-  --foreground: oklch(0.985 0 0);
-  --card: oklch(0.205 0 0);
-  --card-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.922 0 0);
-  --primary-foreground: oklch(0.205 0 0);
-  --muted-foreground: oklch(0.708 0 0);
+  --background: #292824;
+  --foreground: #F0F2F4;
+  --card: #302F2A;
+  --card-foreground: #F0F2F4;
+  --primary: #F0F2F4;
+  --primary-foreground: #292824;
+  --muted-foreground: #B2B4B8;
   --destructive: oklch(0.704 0.191 22.216);
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.556 0 0);
+  --border: #403F39;
+  --input: #4D4B45;
+  --ring: #ED8755;
   color-scheme: dark;
 }
 
@@ -50,17 +50,17 @@ html.dark {
    preference — this block applies only when the class never arrived. */
 @media (prefers-color-scheme: dark) {
   html:not(.light):not(.dark) {
-    --background: oklch(0.145 0 0);
-    --foreground: oklch(0.985 0 0);
-    --card: oklch(0.205 0 0);
-    --card-foreground: oklch(0.985 0 0);
-    --primary: oklch(0.922 0 0);
-    --primary-foreground: oklch(0.205 0 0);
-    --muted-foreground: oklch(0.708 0 0);
+    --background: #292824;
+    --foreground: #F0F2F4;
+    --card: #302F2A;
+    --card-foreground: #F0F2F4;
+    --primary: #F0F2F4;
+    --primary-foreground: #292824;
+    --muted-foreground: #B2B4B8;
     --destructive: oklch(0.704 0.191 22.216);
-    --border: oklch(1 0 0 / 10%);
-    --input: oklch(1 0 0 / 15%);
-    --ring: oklch(0.556 0 0);
+    --border: #403F39;
+    --input: #4D4B45;
+    --ring: #ED8755;
     color-scheme: dark;
   }
 }

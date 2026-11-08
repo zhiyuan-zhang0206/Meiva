@@ -39,6 +39,11 @@
   --color-popover: var(--popover);
   --color-card-foreground: var(--card-foreground);
   --color-card: var(--card);
+  --color-meiva-mountain-green: var(--meiva-mountain-green);
+  --color-meiva-sunset-orange: var(--meiva-sunset-orange);
+  --color-meiva-ocean-blue: var(--meiva-ocean-blue);
+  --color-meiva-moonlight-white: var(--meiva-moonlight-white);
+  --color-meiva-coal-black: var(--meiva-coal-black);
   --radius-sm: calc(var(--radius) * 0.6);
   --radius-md: calc(var(--radius) * 0.8);
   --radius-lg: var(--radius);
@@ -50,33 +55,44 @@
 
 :root {
   color-scheme: light;
+  /* Official Meiva Brand Design System v1.0 tokens:
+     - Mountain Green:  #427C6E
+     - Sunset Orange:   #ED8755
+     - Ocean Blue:      #2276B5
+     - Moonlight White: #F0F2F4
+     - Coal Black:      #292824 */
+  --meiva-mountain-green: #427C6E;
+  --meiva-sunset-orange: #ED8755;
+  --meiva-ocean-blue: #2276B5;
+  --meiva-moonlight-white: #F0F2F4;
+  --meiva-coal-black: #292824;
   /* Browser chrome (Android status/toolbar and navigation bar areas) reads this
      through <meta name="theme-color">; the palette owns it so a surface change
      cannot leave the system bars on the old colour. */
-  --theme-color: #ffffff;
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.145 0 0);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.205 0 0);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
-  --accent: oklch(0.97 0 0);
-  --accent-foreground: oklch(0.205 0 0);
+  --theme-color: #F0F2F4;
+  --background: #F0F2F4;
+  --foreground: #292824;
+  --card: #F7F8FA;
+  --card-foreground: #292824;
+  --popover: #FAFBFD;
+  --popover-foreground: #292824;
+  --primary: #292824;
+  --primary-foreground: #F0F2F4;
+  --secondary: #E6E9ED;
+  --secondary-foreground: #292824;
+  --muted: #E6E9ED;
+  --muted-foreground: #686660;
+  --accent: #E6E9ED;
+  --accent-foreground: #292824;
   --destructive: oklch(0.577 0.245 27.325);
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
-  --ring: oklch(0.708 0 0);
-  --chart-1: oklch(0.87 0 0);
-  --chart-2: oklch(0.556 0 0);
-  --chart-3: oklch(0.439 0 0);
-  --chart-4: oklch(0.371 0 0);
-  --chart-5: oklch(0.269 0 0);
+  --border: #DCE0E5;
+  --input: #DCE0E5;
+  --ring: #ED8755;
+  --chart-1: #D4D7DC;
+  --chart-2: #686660;
+  --chart-3: #52504B;
+  --chart-4: #3D3C37;
+  --chart-5: #292824;
   --radius: 0.625rem;
   /* ops panel chart series — categorical slots, contrast-checked against the
      light surface and distinguishable under common color-vision deficiencies.
@@ -111,14 +127,14 @@
   --strip-compact: rgb(56 189 248 / 60%);
   --strip-prompt: rgb(129 140 248 / 40%);
   --strip-other: rgb(228 231 236);
-  --sidebar: oklch(0.985 0 0);
-  --sidebar-foreground: oklch(0.145 0 0);
-  --sidebar-primary: oklch(0.205 0 0);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.97 0 0);
-  --sidebar-accent-foreground: oklch(0.205 0 0);
-  --sidebar-border: oklch(0.922 0 0);
-  --sidebar-ring: oklch(0.708 0 0);
+  --sidebar: #EAECEF;
+  --sidebar-foreground: #292824;
+  --sidebar-primary: #292824;
+  --sidebar-primary-foreground: #F0F2F4;
+  --sidebar-accent: #E2E5E9;
+  --sidebar-accent-foreground: #292824;
+  --sidebar-border: #DCE0E5;
+  --sidebar-ring: #ED8755;
   /* syntax highlight (VSCode Light+) */
   --syntax-keyword: #af00db;
   --syntax-string: #a31515;
@@ -132,40 +148,34 @@
 .dark {
   color-scheme: dark;
   /* meiva:note
-     Warm graphite (user picks, 2026-10-19). The conversation canvas is the
-     DARKEST surface and the sidebar sits one small step above it: content is the
-     quiet field the eye reads, chrome recedes into it. Cards and popovers rise
-     above the canvas instead, so depth still comes from lightness rather than
-     heavier borders: canvas < sidebar < card < popover. The canvas-to-sidebar
-     step is deliberately tiny (1.06:1) - a wider gap reads as two competing
-     surfaces (user report 2026-10-19). Chroma stays at 0.005 so nothing reads
-     yellow. Text pairs: foreground 15.6:1, muted-foreground 8.0:1 on the
-     canvas; 11.7:1 and 6.0:1 on a popover.
+     Brand Coal Black (#292824) & Moonlight White (#F0F2F4) dark palette with
+     Sunset Orange (#ED8755) focus ring. Cards and popovers rise above the
+     Coal Black canvas while the sidebar sits a subtle half-step deeper.
      meiva:link ui/web/src/docs/frontend-components/palette.meiva.okf.md */
-  --theme-color: #1e1d1b;
-  --background: #1e1d1b;
-  --foreground: #f9f6f2;
-  --card: #2b2a27;
-  --card-foreground: #f9f6f2;
-  --popover: #35332f;
-  --popover-foreground: #f9f6f2;
-  --primary: #e5dfd6;
-  --primary-foreground: #1a1918;
-  --secondary: #2f2d2a;
-  --secondary-foreground: #f9f6f2;
-  --muted: #2f2d2a;
-  --muted-foreground: #b5b2ae;
-  --accent: #3a3835;
-  --accent-foreground: #f9f6f2;
+  --theme-color: #292824;
+  --background: #292824;
+  --foreground: #F0F2F4;
+  --card: #302F2A;
+  --card-foreground: #F0F2F4;
+  --popover: #383731;
+  --popover-foreground: #F0F2F4;
+  --primary: #F0F2F4;
+  --primary-foreground: #292824;
+  --secondary: #33322D;
+  --secondary-foreground: #F0F2F4;
+  --muted: #33322D;
+  --muted-foreground: #B2B4B8;
+  --accent: #3C3B35;
+  --accent-foreground: #F0F2F4;
   --destructive: oklch(0.704 0.191 22.216);
-  --border: #3f3d3a;
-  --input: #4d4a47;
-  --ring: #90887c;
-  --chart-1: #d9d7d5;
-  --chart-2: #a6a4a1;
-  --chart-3: #82807d;
-  --chart-4: #5d5a57;
-  --chart-5: #3a3835;
+  --border: #403F39;
+  --input: #4D4B45;
+  --ring: #ED8755;
+  --chart-1: #F0F2F4;
+  --chart-2: #B2B4B8;
+  --chart-3: #858688;
+  --chart-4: #5C5B56;
+  --chart-5: #3C3B35;
   /* ops panel chart series - the dark-surface pair of the light block above
      (same hues, re-tuned for contrast on dark). Keep the two in sync. */
   --series-1: #3987e5;
@@ -192,14 +202,14 @@
   --strip-compact: rgb(56 189 248 / 68%);
   --strip-prompt: rgb(129 140 248 / 55%);
   --strip-other: rgb(113 113 122 / 55%);
-  --sidebar: #232220;
-  --sidebar-foreground: #f9f6f2;
-  --sidebar-primary: #e5dfd6;
-  --sidebar-primary-foreground: #1a1918;
-  --sidebar-accent: #333130;
-  --sidebar-accent-foreground: #f9f6f2;
-  --sidebar-border: #3f3d3a;
-  --sidebar-ring: #90887c;
+  --sidebar: #23221F;
+  --sidebar-foreground: #F0F2F4;
+  --sidebar-primary: #F0F2F4;
+  --sidebar-primary-foreground: #292824;
+  --sidebar-accent: #33322D;
+  --sidebar-accent-foreground: #F0F2F4;
+  --sidebar-border: #403F39;
+  --sidebar-ring: #ED8755;
   /* syntax highlight (VSCode Dark+) */
   --syntax-keyword: #c586c0;
   --syntax-string: #ce9178;
@@ -540,25 +550,11 @@
 
 @media (prefers-reduced-motion: no-preference) and (forced-colors: none) {
   .agent-title-working {
-    --working-glint: color-mix(in oklab, currentColor 42%, var(--color-sky-600));
-    background-image: linear-gradient(
-      105deg,
-      currentColor 36%,
-      var(--working-glint) 50%,
-      currentColor 64%
-    );
-    background-size: 270% 100%;
-    background-clip: text;
-    -webkit-text-fill-color: transparent;
-    animation: agent-title-sweep 6s linear infinite;
-  }
-
-  .dark .agent-title-working {
-    --working-glint: color-mix(in oklab, currentColor 42%, var(--color-sky-300));
+    animation: agent-title-breathe 2.8s ease-in-out infinite;
   }
 }
 
-@keyframes agent-title-sweep {
-  0% { background-position: 100% 0; }
-  72%, 100% { background-position: 0 0; }
+@keyframes agent-title-breathe {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.45; }
 }

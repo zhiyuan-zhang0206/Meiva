@@ -168,6 +168,9 @@ def apply(overlay_dir: Path, gen_dir: Path) -> None:
         overlay_dir / "network_security_config.xml",
         xml_dir / "network_security_config.xml",
     )
+    res_overlay = overlay_dir / "res"
+    if res_overlay.is_dir():
+        shutil.copytree(res_overlay, main / "res", dirs_exist_ok=True)
 
     manifest = main / "AndroidManifest.xml"
     manifest.write_text(patch_manifest(manifest.read_text(encoding="utf-8")) + "\n")

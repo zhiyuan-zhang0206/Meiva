@@ -163,7 +163,14 @@ THEME_TOKENS = (
 # `:root` properties a theme pack may NOT set, with the reason. A skin is a
 # color pack; `--radius` is a length that the component geometry is tuned
 # around, so re-valuing it is a layout change wearing a theme's clothes.
-NON_THEMABLE_TOKENS = ("--radius",)
+NON_THEMABLE_TOKENS = (
+    "--radius",
+    "--meiva-mountain-green",
+    "--meiva-sunset-orange",
+    "--meiva-ocean-blue",
+    "--meiva-moonlight-white",
+    "--meiva-coal-black",
+)
 
 _THEME_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9_-]*$")
 

@@ -17,7 +17,7 @@ export const PRIORITY_RANK: Record<OpenNotice["priority"], number> = {
 // color (white reads on all four; this theme has no destructive-foreground token).
 export const PRIORITY_BG: Record<OpenNotice["priority"], string> = {
   P0: "bg-destructive",
-  P1: "bg-amber-500",
-  P2: "bg-sky-600",
+  P1: "bg-[#ED8755]",
+  P2: "bg-[#2276B5]",
   P3: "bg-slate-500",
 };

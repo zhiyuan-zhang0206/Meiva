@@ -33,8 +33,8 @@ export const AGENT_HOVER_OPEN_DELAY_MS = 400;
 export const AGENT_HOVER_WARMUP_MS = 300;
 
 export const STATUS_DOT: Record<PublicAgentStatus, string> = {
-  running: "bg-sky-500",
-  idling: "bg-emerald-500",
+  running: "bg-[#ED8755]",
+  idling: "bg-[#427C6E]",
   terminated: "bg-destructive",
 };
 
@@ -296,7 +296,7 @@ export function AgentHoverCard({
                   "size-1.5 rounded-full shrink-0",
                   agent.highest_notice_priority
                     ? PRIORITY_BG[agent.highest_notice_priority]
-                    : "bg-sky-500",
+                    : "bg-[#ED8755]",
                 )}
               />
               <span>
