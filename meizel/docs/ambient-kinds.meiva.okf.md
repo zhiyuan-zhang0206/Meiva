@@ -30,12 +30,7 @@ other root kind.
 | `platform` | which machine and which platform this is | `sys.platform`, `os.name`, `os.uname`, `os.cpu_count`, `os.getloadavg`, `os.sysconf`, `socket.gethostname`, `uuid.getnode`, `uuid.uuid1`, `email.utils.make_msgid`, `multiprocessing.cpu_count`, `time.get_clock_info`, `platform.*` except the `python_*` functions, which describe the pinned build |
 | `pid` | what the process says about itself: its ids, its interpreter, its terminal | `os.getpid` and the other id readers, `sys.executable`, `sys.prefix`, `sys.stdin`, `input()`, `isatty`, `shutil.get_terminal_size`, `getpass.getuser`, `email.utils.make_msgid`, `netrc.netrc()` without a file, `site.check_enableusersite`, `fileinput.input()` without files (standard input), `os.getlogin`, `pwd`/`grp` lookups, `threading.get_ident`, `psutil.Process()` without a pid |
 | `random` | entropy | `random.*` (literal non-None seeded generators and class references excluded), `secrets.*` (not `secrets.compare_digest`), `uuid.*` except the name-derived ones, `email.utils.make_msgid`, `tempfile.mkdtemp` and the other temporary-file constructors without a `dir` (the name is random), `ssl.RAND_bytes`, `os.urandom`, `os.getrandom` |
-| `filesystem` | the contents and metadata of files: the one kind whose reads derive no
-acquisition of their own, because a read of a file is an effect the purity layer already charges | a
-`[roots]` declaration licenses the read by its name (`Path.read_bytes`, `os.stat`, the
-`os.path` metadata readers); `open` (its mode decides), a call on a descriptor, a listing given
-no path and every write stay effects ([[meizel/docs/ambient-kinds-calls.meiva.okf.md|what a call
-depends on]]) |
+| `filesystem` | the contents and metadata of files: the one kind whose reads derive no acquisition of their own, because a read of a file is an effect the purity layer already charges | a `[roots]` declaration licenses the read by its name (`Path.read_bytes`, `os.stat`, the `os.path` metadata readers); `open` (its mode decides), a call on a descriptor, a listing given no path and every write stay effects ([[meizel/docs/ambient-kinds-calls.meiva.okf.md|what a call depends on]]) |
 | a state kind of the policy's `[ambient]` | the state the repository keeps itself | the names that table lists for it, resolved against the modules whose `[state]` declares the kind ([[meizel/docs/checker/ambient.meiva.okf.md|the ambient reads node]]) |
 
 ## The channels
