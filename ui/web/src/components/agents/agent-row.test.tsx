@@ -325,7 +325,7 @@ describe("AgentRow lifecycle markers", () => {
     expect(statusDot(container)).toBeNull();
   });
 
-  it("offline: grey dot shown even with the status opt-in off (Task #1174)", () => {
+  it("offline: renders no grey dot and suppresses working title shimmer", () => {
     const { container } = render(
       <AgentRow
         {...baseProps}
@@ -334,12 +334,11 @@ describe("AgentRow lifecycle markers", () => {
         ancestorsIsLast={[]}
       />,
     );
-    const d = statusDot(container);
-    expect(d).toBeTruthy();
-    expect(d!.className).toContain("bg-muted-foreground/50");
+    expect(statusDot(container)).toBeNull();
+    expect(container.querySelector(".agent-title-working")).toBeNull();
   });
 
-  it("offline: grey dot overrides the status color and carries a tooltip", () => {
+  it("offline: omits the grey dot even with additional status markers enabled", () => {
     const { container } = renderWithSettings(
       <AgentRow
         {...baseProps}
@@ -349,11 +348,8 @@ describe("AgentRow lifecycle markers", () => {
       />,
       { "display.show_agent_status": true },
     );
-    const d = statusDot(container);
-    expect(d).toBeTruthy();
-    expect(d!.className).toContain("bg-muted-foreground/50");
+    expect(statusDot(container)).toBeNull();
     expect(container.querySelector(".agent-title-working")).toBeNull();
-    expect(d!.getAttribute("title")).toBeTruthy();
   });
 });
 
@@ -425,6 +421,31 @@ describe("AgentRow single-line truncation and hover peek card", () => {
 
     fireEvent.mouseLeave(row);
     expect(screen.queryByTestId("agent-hover-card")).toBeNull();
+  });
+
+  it("shows Offline instead of Running in the hover peek card without a grey dot or duplicate line", async () => {
+    vi.useFakeTimers();
+    const { container } = render(
+      <AgentRow
+        {...baseProps}
+        label="offline-agent"
+        agent={ag(405, { status: "running", liveness_state: "offline" })}
+        depth={0}
+        ancestorsIsLast={[]}
+      />,
+    );
+
+    const row = container.querySelector("li > button")!;
+    fireEvent.mouseEnter(row);
+    await act(() => vi.advanceTimersByTimeAsync(AGENT_HOVER_OPEN_DELAY_MS));
+
+    const card = screen.getByTestId("agent-hover-card");
+    expect(card.textContent).toContain("Offline — machine unreachable or process lost");
+    expect(card.textContent).not.toContain("Running");
+    expect(card.querySelector(".bg-muted-foreground\\/50")).toBeNull();
+    expect(
+      card.textContent.split("Offline — machine unreachable or process lost").length,
+    ).toBe(2);
   });
 
   // meiva:note
