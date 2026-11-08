@@ -105,7 +105,7 @@ class HealthSource(Protocol):
 
 
 # meiva:note
-# The self-check slice `status()` embeds (W1.2b's `TreeSelfCheck`): the B7 metrics block, which is
+# The self-check slice `status()` embeds: the B7 metrics block, which is
 # the chain gauges.
 class MetricsSource(Protocol):
     def metrics_snapshot(self) -> dict[str, object]: ...

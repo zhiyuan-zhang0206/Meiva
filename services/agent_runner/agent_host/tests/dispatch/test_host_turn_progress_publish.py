@@ -161,7 +161,6 @@ async def test_hung_progress_set_does_not_stop_repeated_corpse_reap(
                 cast(host_daemon.TurnScheduler, FakeScheduler()),
                 "runner-a",
                 _bus(HungRedis),
-                require_helper_chain=lambda: None,
                 read_alert_seconds=lambda: 30.0,
                 publish_timeout_s=0.01,
                 beat_step_s=0.01,
@@ -334,7 +333,6 @@ async def test_corpse_reap_timeout_logs_failure_with_traceback(
             cast(host_daemon.TurnScheduler, FakeScheduler()),
             "runner-a",
             _bus(_OkRedis),
-            require_helper_chain=lambda: None,
             read_alert_seconds=lambda: 30.0,
             beat_db_timeout_s=0.01,
             beat_step_s=0.0,
@@ -385,7 +383,6 @@ async def test_agent_host_beats_liveness_before_reaping_corpses() -> None:
             cast(host_daemon.TurnScheduler, FakeScheduler()),
             "runner-a",
             _bus(FakeRedis),
-            require_helper_chain=lambda: None,
             read_alert_seconds=lambda: 30.0,
             beat_step_s=0.0,
         )
@@ -428,7 +425,6 @@ async def test_agent_host_liveness_continues_when_corpse_reap_hangs() -> None:
             cast(host_daemon.TurnScheduler, FakeScheduler()),
             "runner-a",
             _bus(_OkRedis),
-            require_helper_chain=lambda: None,
             read_alert_seconds=lambda: 30.0,
             beat_db_timeout_s=0.01,
             beat_step_s=0.0,
@@ -481,7 +477,6 @@ async def test_agent_host_liveness_continues_when_corpse_reap_raises(
             cast(host_daemon.TurnScheduler, FakeScheduler()),
             "runner-a",
             _bus(_OkRedis),
-            require_helper_chain=lambda: None,
             read_alert_seconds=lambda: 30.0,
             beat_step_s=0.01,
         )
@@ -527,7 +522,6 @@ async def test_unknown_reap_error_exits_its_task_group(
                     cast(host_daemon.TurnScheduler, object()),
                     "runner-a",
                     EventBus.from_settings(rng=seeded_rng(), timers=SYSTEM_TIMERS),
-                    require_helper_chain=lambda: None,
                     read_alert_seconds=lambda: 30.0,
                 )
             )
@@ -580,7 +574,6 @@ async def test_three_database_reap_failures_exit_host_heartbeat() -> None:
                 cast(host_daemon.TurnScheduler, FakeScheduler()),
                 "runner-a",
                 _bus(_OkRedis),
-                require_helper_chain=lambda: None,
                 read_alert_seconds=lambda: 30.0,
                 beat_step_s=0.001,
             ),

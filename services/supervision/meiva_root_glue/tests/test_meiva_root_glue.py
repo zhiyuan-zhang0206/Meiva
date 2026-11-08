@@ -94,7 +94,7 @@ async def test_reference_wiring_registers_gated_specs(tmp_path: Path) -> None:
     )
     await context.supervisor.start()
     try:
-        assert len(participants) == 2
+        assert len(participants) == 1
         monitor = participants[0]
         assert isinstance(monitor, RootHealthRounds)
         await monitor.run_round()
@@ -105,7 +105,7 @@ async def test_reference_wiring_registers_gated_specs(tmp_path: Path) -> None:
         assert isinstance(health["observer:root-health"]["last_completed_at"], float)
         assert health["svc-a"]["last_verdict"] == "alive"
         status = await context.supervisor.status()
-        assert "health" in status and "metrics" in status
+        assert "health" in status
     finally:
         await context.supervisor.shutdown()
 
@@ -163,7 +163,7 @@ async def test_drill_wiring_verifies_claims(tmp_path: Path) -> None:
     await context.supervisor.start()
     try:
         participants = drill.build_drill_wiring(context)
-        assert len(participants) == 2
+        assert len(participants) == 1
         monitor = participants[0]
         assert isinstance(monitor, HealthMonitor)
         await monitor.run_round()

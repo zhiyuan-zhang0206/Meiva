@@ -15,7 +15,6 @@ from services.supervision.meiva_root.manifest import (
     load_manifests,
 )
 from services.supervision.meiva_root.probes import ProbeError, ProbeRegistry
-from services.supervision.meiva_root.selfcheck import SelfCheckConfig, TreeSelfCheck
 from services.supervision.meiva_root.server import ControlServer
 from services.supervision.meiva_root.supervisor import Supervisor, SupervisorConfig
 from services.supervision.meiva_root.wiring import (
@@ -35,10 +34,8 @@ __all__ = [
     "ProbeError",
     "ProbeRegistry",
     "RestartPolicy",
-    "SelfCheckConfig",
     "Supervisor",
     "SupervisorConfig",
-    "TreeSelfCheck",
     "UnitManifest",
     "UnitRegistry",
     "UnitState",

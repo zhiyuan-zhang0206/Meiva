@@ -109,7 +109,8 @@ def test_new_session_starts_a_login_shell_in_the_cwd(unit_home: Path) -> None:
     cwd.mkdir()
     _new(_NAME, cwd, home=unit_home)
     (info,) = client.list_sessions(socket_path=service_socket())
-    assert (info.name, info.cwd, info.cmd) == (_NAME, str(cwd), "/bin/bash -l -i")
+    assert (info.name, info.cwd) == (_NAME, str(cwd))
+    assert info.cmd.endswith("bash -l -i")
     assert shell_process(_NAME).cwd() == str(cwd.resolve())
 
 

@@ -22,7 +22,6 @@ from services.supervision.healthchecks.tests.helper_endpoint import (
     live_root,
     serving,
     socket_dir,
-    under_other_parent,
     wire_reply,
 )
 
@@ -197,40 +196,6 @@ def test_ping_reports_a_pong_that_is_not_true() -> None:
             assert hc.ping(sock_path=sock_path, root=root) is False
 
 
-@pytest.mark.parametrize("answering_pid", [None, 1])
-def test_ping_refuses_a_reply_that_does_not_name_the_root_parent(answering_pid: int | None) -> None:
-    with socket_dir() as directory, live_root() as root:
-        sock_path = directory / "helper.sock"
-        with (
-            serving(sock_path, wire_reply(answering_pid)),
-            pytest.raises(hc.ParentEvidenceError, match="lost captured parent identity"),
-        ):
-            hc.ping(sock_path=sock_path, root=root)
-
-
-def test_ping_refuses_a_peer_that_is_not_the_native_parent_of_the_root() -> None:
-    with socket_dir() as directory, under_other_parent() as root:
-        sock_path = directory / "helper.sock"
-        with (
-            serving(sock_path, wire_reply(os.getpid())) as received,
-            pytest.raises(hc.ParentEvidenceError, match="not the captured root parent"),
-        ):
-            hc.ping(sock_path=sock_path, root=root)
-        assert all(b"ping" not in request for request in received)
-
-
-def test_ping_refuses_a_root_that_no_longer_exists() -> None:
-    with socket_dir() as directory:
-        with live_root() as root:
-            pass
-        sock_path = directory / "helper.sock"
-        with (
-            serving(sock_path, wire_reply(os.getpid())),
-            pytest.raises(hc.ParentEvidenceError, match="evidence unavailable"),
-        ):
-            hc.ping(sock_path=sock_path, root=root)
-
-
 def test_ping_dials_the_socket_it_is_given() -> None:
     with socket_dir() as directory:
         sock_path = directory / "nobody-listens.sock"
@@ -269,7 +234,7 @@ def test_an_answered_ping_is_up_whatever_launchd_says() -> None:
     assert result.detail == "ping answered; helper serving"
 
 
-def test_probe_is_up_when_the_native_parent_of_the_root_answers(tmp_path: Path) -> None:
+def test_probe_is_up_when_helper_answers(tmp_path: Path) -> None:
     launchctl = _Launchctl()
     with socket_dir() as directory, live_root() as root:
         sock_path = directory / "helper.sock"
@@ -311,19 +276,6 @@ def test_probe_reads_a_pong_that_is_not_true_as_a_failure_of_the_helper(tmp_path
     assert not result.alive
     assert result.detail.startswith(hc.ABSENT)
     assert "pong was not true" in result.detail
-
-
-def test_probe_never_reports_health_for_a_peer_it_cannot_bind_to_the_root(tmp_path: Path) -> None:
-    launchctl = _Launchctl(_RUNNING_JOB)
-    with socket_dir() as directory, under_other_parent() as root:
-        sock_path = directory / "helper.sock"
-        with serving(sock_path, wire_reply(os.getpid())):
-            result = hc.probe(
-                home=tmp_path, facts=_DARWIN, run=launchctl, sock_path=sock_path, root=root
-            )
-    assert result.verdict.value == "unavailable"
-    assert "ParentEvidenceError" in result.detail
-    assert launchctl.commands == []
 
 
 def test_probe_is_unavailable_when_the_job_cannot_be_read(tmp_path: Path) -> None:

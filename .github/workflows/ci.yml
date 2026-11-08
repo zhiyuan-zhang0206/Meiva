@@ -297,7 +297,6 @@ jobs:
                   p.startswith(
                       (
                           "services/desktop/permissions_helper/",
-                          "base/helper_chain_guard",
                           "scripts/ci/helper_smoke/",
                       )
                   )

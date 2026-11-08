@@ -13,15 +13,12 @@ import asyncio
 import logging
 import os
 import signal
-from collections.abc import Callable, Mapping, Sequence
-from contextlib import suppress
-from dataclasses import dataclass, field
+from collections.abc import Callable, Sequence
+from dataclasses import dataclass
 from pathlib import Path
 
 from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
 from base.host.boundary.options import options
-from base.host.exit_codes import HELPER_CHAIN_BROKEN_EXIT_CODE
-from base.log import logger
 from base.log.process import buffer_startup_records
 from base.native_process.root_control.instance_lock import (
     AlreadyRunningError,
@@ -35,12 +32,6 @@ from base.native_process.root_control.ipc import (
     Verb,
     error_response,
     ok_response,
-)
-from base.sessions.helper_chain_guard import helper_marker_pid, parent_chain_intact
-from services.supervision.meiva_root.helper_chain_plan import (
-    HelperChainConfig,
-    evidence_line,
-    observe_round,
 )
 from services.supervision.meiva_root.manifest import ManifestError, load_manifests
 from services.supervision.meiva_root.server import ControlServer
@@ -57,50 +48,6 @@ from services.supervision.meiva_root.wiring import (
 _log = logging.getLogger("meiva_root")
 
 
-# meiva:note
-# The root's helper-chain watch: every `interval_s` it reads whether this process is still
-# anchored to the process that spawned it (`base.sessions.helper_chain_guard`) and, once enough
-# consecutive readings are broken, retires the root. The decisions are
-# `helper_chain_plan`.
-# meiva:link services/supervision/meiva_root/docs/ancestry.meiva.okf.md
-class HelperChainWatch:
-    def __init__(
-        self,
-        *,
-        retire: Callable[[str], None],
-        stop: asyncio.Event,
-        config: HelperChainConfig,
-        root_pid: int,
-        environ: Mapping[str, str],
-    ) -> None:
-        self._retire = retire
-        self._stop = stop
-        self._config = config
-        self._root_pid = root_pid
-        self._environ = environ
-
-    async def run(self) -> None:
-        broken_rounds = 0
-        while not self._stop.is_set():
-            reading = observe_round(
-                broken_rounds=broken_rounds,
-                intact=parent_chain_intact(self._root_pid, environ=self._environ),
-                confirm_rounds=self._config.confirm_rounds,
-            )
-            broken_rounds = reading.broken_rounds
-            if reading.retire:
-                self._retire(
-                    evidence_line(
-                        root_pid=self._root_pid,
-                        marker=helper_marker_pid(self._environ),
-                        broken_rounds=broken_rounds,
-                    )
-                )
-                return
-            with suppress(TimeoutError):
-                await asyncio.wait_for(self._stop.wait(), timeout=self._config.interval_s)
-
-
 _SOCKET_NAME = "meiva-root.sock"
 
 
@@ -109,8 +56,6 @@ class _Arguments:
     run_dir: Path
     manifests: Path
     wiring: str | None
-    helper_chain_interval: float
-    helper_chain_confirm_rounds: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -120,7 +65,6 @@ class DaemonOptions:
     run_dir: Path
     manifests_path: Path
     wiring: str | None = None
-    helper_chain: HelperChainConfig = field(default_factory=HelperChainConfig)
 
 
 def parse_args(argv: Sequence[str]) -> DaemonOptions:
@@ -146,45 +90,12 @@ def parse_args(argv: Sequence[str]) -> DaemonOptions:
         default=None,
         help="optional 'module:attribute' wiring hook, driven with the daemon lifecycle",
     )
-    parser.add_argument(
-        "--helper-chain-interval",
-        type=float,
-        default=HelperChainConfig.interval_s,
-        help="seconds between helper-ancestry readings",
-    )
-    parser.add_argument(
-        "--helper-chain-confirm-rounds",
-        type=int,
-        default=HelperChainConfig.confirm_rounds,
-        help="consecutive broken ancestry readings before this root retires",
-    )
     parsed = options(parser.parse_args(argv), _Arguments)
     return DaemonOptions(
         run_dir=parsed.run_dir,
         manifests_path=parsed.manifests,
         wiring=parsed.wiring,
-        helper_chain=HelperChainConfig(
-            interval_s=parsed.helper_chain_interval,
-            confirm_rounds=parsed.helper_chain_confirm_rounds,
-        ),
     )
-
-
-class RootRetirement:
-    def __init__(self, request_stop: Callable[[], None]) -> None:
-        self._request_stop = request_stop
-        self.exit_code = 0
-
-    def retire(self, detail: str) -> None:
-        self.exit_code = HELPER_CHAIN_BROKEN_EXIT_CODE
-        logger.warning(
-            "[root] helper ancestry is gone — retiring this root "
-            "so the helper keeper seeds a replacement ({detail})",
-            event="helper_chain_broken",
-            process="root",
-            detail=detail,
-        )
-        self._request_stop()
 
 
 def install_signal_handlers(
@@ -231,8 +142,6 @@ async def run(options: DaemonOptions) -> int:
             retiring = True
             stop.set()
 
-        retirement = RootRetirement(request_stop)
-
         async def dispatch(request: RequestPayload) -> ResponsePayload:
             if request["verb"] == Verb.SHUTDOWN:
                 return ok_response({"shutdown_requested": True})
@@ -273,15 +182,6 @@ async def run(options: DaemonOptions) -> int:
                 socket_path,
                 len(started),
             )
-            participant_tasks.create_task(
-                HelperChainWatch(
-                    retire=retirement.retire,
-                    stop=stop,
-                    config=options.helper_chain,
-                    root_pid=root_pid,
-                    environ=os.environ,
-                ).run()
-            )
             await stop.wait()
         except BaseException as primary:
             try:
@@ -297,8 +197,8 @@ async def run(options: DaemonOptions) -> int:
             # (and the control server) still exist. A failing stop never blocks the
             # tree shutdown below.
             await finish(started, server, supervisor, lock_fd)
-        _log.info("meiva-root exiting with code %d", retirement.exit_code)
-        return retirement.exit_code
+        _log.info("meiva-root exiting with code 0")
+        return 0
 
 
 async def finish(

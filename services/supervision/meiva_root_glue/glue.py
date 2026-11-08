@@ -41,7 +41,6 @@ from base.telemetry.lgtm_local import LgtmSettings, backend_urls
 from services.desktop.permissions_helper.launchd_job import LaunchdFacts
 from services.supervision.meiva_root.health import HealthConfig, HealthMonitor
 from services.supervision.meiva_root.probes import Probe, ProbeError, ProbeRegistry, ProbeSource
-from services.supervision.meiva_root.selfcheck import SelfCheckConfig, TreeSelfCheck
 from services.supervision.meiva_root.supervisor import Supervisor
 from services.supervision.meiva_root.wiring import (
     WiringContext,
@@ -477,17 +476,17 @@ def build_wiring(
     )
 
 
+# meiva:note
+# Build the monitor over `registry` and attach its status surface.
 def assemble(
     context: WiringContext,
     registry: ProbeRegistry,
     *,
     health_config: HealthConfig | None = None,
-    selfcheck_config: SelfCheckConfig | None = None,
     rounds: RoundsInputs | None = None,
     startup_graces: Mapping[str, float] | None = None,
     db_recovery_probe: Probe | None = None,
 ) -> list[WiringParticipant]:
-    """Build the two monitors over `registry` and attach their status surfaces."""
     monitor = HealthMonitor(
         context.supervisor,
         registry,
@@ -496,12 +495,6 @@ def assemble(
         startup_graces=startup_graces,
         db_recovery_probe=db_recovery_probe,
         clock=context.clock,
-    )
-    check = TreeSelfCheck(
-        context.supervisor,
-        timers=context.clock,
-        config=selfcheck_config,
-        tasks=context.participant_tasks,
     )
     if rounds is not None:
         health_rounds = RootHealthRounds(
@@ -515,8 +508,6 @@ def assemble(
             tasks=context.participant_tasks,
         )
         context.supervisor.attach_health(health_rounds)
-        context.supervisor.attach_metrics(check)
-        return [health_rounds, check]
+        return [health_rounds]
     context.supervisor.attach_health(monitor)
-    context.supervisor.attach_metrics(check)
-    return [monitor, check]
+    return [monitor]

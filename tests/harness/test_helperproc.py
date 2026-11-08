@@ -1,9 +1,6 @@
 from __future__ import annotations
 
-import ast
 import contextlib
-import functools
-import inspect
 import json
 import os
 import signal
@@ -11,12 +8,10 @@ import socket
 import subprocess
 import sys
 import tempfile
-import textwrap
 import threading
 from collections.abc import Callable, Generator
 from dataclasses import replace
 from pathlib import Path
-from typing import Any, cast
 
 import psutil
 import pytest
@@ -25,7 +20,6 @@ from base.clock import SYSTEM_TIMERS
 from base.host.permissions_helper.client import PermissionsHelperClient
 from base.native_process.kernel_identity import pid_starttime_ticks
 from base.sessions import helperproc
-from base.sessions.helper_chain_guard import parent_chain_intact
 from base.sessions.record import SessionRecord
 
 
@@ -390,198 +384,12 @@ def test_permissions_helper_spawn_defaults_off() -> None:
     }
 
 
-def _check_parent_chain(
-    links: dict[str, int],
-    *,
-    marker: str | None,
-) -> bool:
-    # meiva:note
-    # Run the parent-chain check in a child process with an explicit environment dict so tests do not mutate os.environ.
-    env = dict(os.environ)
-    if marker is None:
-        env.pop("MEIVA_PERMISSIONS_HELPER_PID", None)
-    else:
-        env["MEIVA_PERMISSIONS_HELPER_PID"] = marker
-    res = subprocess.run(  # noqa: S603
-        [sys.executable, __file__, "parent-chain", json.dumps(links)],
-        env=env,
-        capture_output=True,
-        text=True,
-        timeout=30,
-        check=True,
-    )
-    return res.stdout.strip() == "1"
-
-
-def test_parent_chain_guard_allows_unmanaged_and_rejects_malformed_markers() -> None:
-    links = {"self": 100}
-    assert _check_parent_chain(links, marker=None)
-    assert _check_parent_chain(links, marker="100")
-    assert not _check_parent_chain(links, marker="not-an-int")
-    assert not _check_parent_chain(links, marker="0")
-    assert not _check_parent_chain(links, marker="-3")
-
-
-def test_parent_chain_guard_rejects_a_helper_outside_the_chain() -> None:
-    assert not _check_parent_chain({"self": 100, "100": 1}, marker="101")
-
-
-# meiva:note
-# A root supervisor between a unit and the permissions helper does not break the helper ancestry check; malformed markers, broken intermediate links and an unrelated helper are rejected.
-# meiva:link tests/harness/docs/helper-process-tests.meiva.okf.md
-def test_parent_chain_guard_accepts_the_helper_above_an_intermediate() -> None:
-    assert _check_parent_chain({"self": 101, "101": 100}, marker="100")
-
-
-def test_parent_chain_guard_rejects_a_broken_intermediate_link() -> None:
-    assert not _check_parent_chain({"self": 101}, marker="100")
-
-
-def test_parent_chain_guard_stops_at_the_depth_bound() -> None:
-    links: dict[str, int] = {"self": 7000}
-    for step in range(40):
-        links[str(7000 + step)] = 7001 + step
-
-    assert _check_parent_chain(links, marker="7030")
-    assert not _check_parent_chain(links, marker="7040")
-
-
-# meiva:note
-# The real ancestor-chain probe launches the current interpreter with a fixed repository probe script and test-owned paths, then checks the reported ancestry for an intact or unrelated helper.
-# meiva:link tests/harness/docs/helper-process-tests.meiva.okf.md
-def _run_probe_chain(marker_dir: Path, *, marker_value: str | None = None) -> str:
-    env = None
-    if marker_value is not None:
-        env = {**os.environ, "MEIVA_TEST_HELPER_MARKER_VALUE": marker_value}
-    result = subprocess.run(  # noqa: S603
-        [
-            sys.executable,
-            str(Path(__file__).parents[1] / "components" / "base" / "helper_chain_probe.py"),
-            "helper",
-            str(marker_dir / "marker"),
-        ],
-        capture_output=True,
-        text=True,
-        timeout=60,
-        check=True,
-        env=env,
-    )
-    return result.stdout.strip()
-
-
-def test_parent_chain_guard_on_a_real_process_chain(tmp_path: Path) -> None:
-    assert _run_probe_chain(tmp_path) == "intact"
-
-
-def test_parent_chain_guard_rejects_an_outside_pid_on_a_real_chain(tmp_path: Path) -> None:
-    outsider = _spawn_sleep_child()
-    try:
-        assert _run_probe_chain(tmp_path, marker_value=str(outsider.pid)) == "broken"
-    finally:
-        outsider.kill()
-        outsider.wait(timeout=10)
-
-
-async def test_beat_runs_the_parent_chain_check_before_the_liveness_beat() -> None:
-    from services.agent_runner.agent_host import host_beat
-
-    calls: list[str] = []
-
-    class BrokenChain(BaseException):
-        pass
-
-    class FakeLiveness:
-        def beat(self) -> None:
-            calls.append("beat")
-
-    def broken_chain() -> None:
-        calls.append("chain")
-        raise BrokenChain
-
-    # meiva:note
-    # The beat reads no process identity itself: the host hands it the check that does,
-    # and every tick runs that check before the liveness beat.
-    with pytest.raises(BrokenChain):
-        await host_beat.beat_forever(
-            cast(Any, FakeLiveness()),
-            cast(Any, object()),
-            cast(Any, object()),
-            "runner-a",
-            cast(Any, object()),
-            require_helper_chain=broken_chain,
-            read_alert_seconds=lambda: 30.0,
-        )
-
-    assert calls == ["chain"]
-
-
-def test_host_boot_checks_the_parent_chain_first() -> None:
-    from services.agent_runner.agent_host import daemon
-
-    assert "require_helper_parent_chain(" in inspect.getsource(daemon.main)
-
-
-def _beat_construction(function: Callable[..., object]) -> ast.Call:
-    # meiva:note
-    # The `ownership_beat_completion(...)` call inside `function`'s body: the one place that
-    # decides which chain check a running host's beat gets.
-    tree = ast.parse(textwrap.dedent(inspect.getsource(function)))
-    [call] = [
-        node
-        for node in ast.walk(tree)
-        if isinstance(node, ast.Call)
-        and isinstance(node.func, ast.Name)
-        and node.func.id == "ownership_beat_completion"
-    ]
-    return call
-
-
-def test_run_hands_the_real_parent_chain_check_to_the_beat() -> None:
-    from services.agent_runner.agent_host import daemon
-
-    keywords = {keyword.arg: keyword.value for keyword in _beat_construction(daemon.run).keywords}
-    [check] = [value for name, value in keywords.items() if name == "require_helper_chain"]
-
-    assert isinstance(check, ast.Call)
-    assert isinstance(check.func, ast.Name)
-    assert daemon.run.__globals__[check.func.id] is functools.partial
-    [target] = check.args
-    assert isinstance(target, ast.Name)
-    # meiva:note
-    # `run` resolves the bound function from the daemon's own globals: the object `main` also checks
-    # with at boot, never a same-named no-op.
-    assert daemon.run.__globals__[target.id] is daemon.require_helper_parent_chain
-
-
-def test_broken_parent_chain_exits_host_with_software_error() -> None:
-    # meiva:note
-    # Execute `require_helper_parent_chain` in a real child process so `os._exit(70)` is observed via its actual exit status.
-    res = subprocess.run(  # noqa: S603
-        [sys.executable, __file__, "require-parent-chain"],
-        env={**os.environ, "MEIVA_PERMISSIONS_HELPER_PID": "not-an-int"},
-        capture_output=True,
-        text=True,
-        timeout=30,
-        check=False,
-    )
-    assert res.returncode == 70
-
-
 def _child_main() -> None:
     import time
 
     mode = sys.argv[1]
     if mode == "sleep":
         time.sleep(60)
-    elif mode == "parent-chain":
-        spec = json.loads(sys.argv[2])
-        pid = os.getpid()
-        links = {pid if k == "self" else int(k): int(v) for k, v in spec.items()}
-        sys.stdout.write("1" if parent_chain_intact(pid, environ=os.environ, ppids=links) else "0")
-    elif mode == "require-parent-chain":
-        from services.agent_runner.agent_host import daemon
-
-        daemon.require_helper_parent_chain(pid=os.getpid(), environ=os.environ)
     else:
         raise ValueError(f"unknown child mode {mode!r}")
 

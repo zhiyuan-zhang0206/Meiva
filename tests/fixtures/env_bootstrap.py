@@ -418,11 +418,12 @@ os.environ["MEIVA_TELEGRAM_OWNER_ID"] = "0"
 # The root permissions-helper guard forbids those native effects separately.
 # A shell-session transport test can deliberately patch its own helper capability.
 os.environ["MEIVA_PERMISSIONS_HELPER_SPAWN"] = "false"
+# meiva:note
 # The spawn-attribution marker rides a second channel the pin above cannot
 # close: the signed helper stamps MEIVA_PERMISSIONS_HELPER_PID (its own pid)
 # into every direct child (services/desktop/permissions_helper/helper/main.swift),
-# descendants inherit it, and base/helper_chain_guard.parent_chain_intact
-# treats a marked process whose ancestor chain lacks the helper as an
+# descendants inherit it, and ancestry checks
+# treat a marked process whose ancestor chain lacks the helper as an
 # orphaned child — the agent-host heartbeat then self-terminates with os._exit(70),
 # killing an in-process test run (test_host_turn_progress_publish.py,
 # 2026-09-12; 4 passed then rc=70). Popped, never set empty: an empty value

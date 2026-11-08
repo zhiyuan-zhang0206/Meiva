@@ -109,7 +109,6 @@ async def _run_beat(host: object) -> list[dict[str, object]]:
                 timers=SYSTEM_TIMERS,
                 open_async_redis=async_redis_factory(_OkRedis),
             ),
-            require_helper_chain=lambda: None,
             read_alert_seconds=lambda: 30.0,
             publish_timeout_s=0.001,
             beat_step_s=0.001,
