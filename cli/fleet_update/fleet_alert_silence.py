@@ -1,14 +1,18 @@
 # meiva:note
 # The deploy window's alert silence: one Grafana silence over every rule, opened by
-# `meiva update down` and expired by `up`.
+# `meiva update down` and shortened to a post-`up` settle grace by `up`.
 #
 # An update stops the whole cluster on purpose, so every rule that watches a service would fire
 # for a planned outage. Notification policy owns merging and repetition; this is the one place a
 # planned window is expressed: a silence in the co-located Grafana's Alertmanager whose matcher
 # covers every alert but the disk ones (`alertname=~".+"`, `metric!="host_disk"`,
 # `attributes_check!="disk_usage"`), carrying an expiry and a comment, created before the
-# first stop and deleted after `up` succeeds. A silenced rule still evaluates, so a condition that
-# outlives the window notifies as soon as the silence ends.
+# first stop and shortened to `SETTLE_WINDOW` (10 minutes) after `up` succeeds. A silenced rule
+# still evaluates and enters `Firing` during the `down` window, and Grafana rules hold firing
+# instances through `keepFiringFor: 5m` / `missing_series_evals_to_resolve: 6` (plus the 5-minute
+# cron health probe and resume claim tail) before resolving; keeping the silence for `SETTLE_WINDOW`
+# after `up` lets outage-induced firings resolve quietly while any condition that truly outlives
+# the settle window notifies as soon as the window ends.
 #
 # `cli.fleet_update` pipes this file's source to `python -` on the gateway host (the same way it
 # ships its roster program), so the first update that carries this change already has it and the
@@ -38,7 +42,7 @@ from typing import TypeGuard
 
 CREATED_BY = "meiva-fleet-update"
 SILENCES = "/api/alertmanager/grafana/api/v2/silences"
-_SILENCE = "/api/alertmanager/grafana/api/v2/silence"
+SETTLE_WINDOW = timedelta(minutes=10)
 # meiva:note
 # Every alert but a full disk: the disk fills the same during an update, so the host filesystem rules
 # (`metric=host_disk`) and the health probe's disk check must still page.
@@ -139,13 +143,31 @@ def open_window(base: str, credential: str, *, hours: float, comment: str, now: 
 
 
 # meiva:note
-# Expire every live silence this program created; the ids expired.
-def close_window(base: str, credential: str) -> list[str]:
-    expired: list[str] = []
+# Shorten every live silence this program created to the post-`up` settle window (`now + SETTLE_WINDOW`)
+# so rules that entered `Firing` during `down` can complete their 5m `keepFiringFor` / 6-evaluation
+# recovery window and 5m health-probe cron tick before Alertmanager unsilences them; the ids updated.
+def close_window(base: str, credential: str, *, now: datetime) -> list[str]:
+    ends_at = (now + SETTLE_WINDOW).astimezone(UTC).isoformat(timespec="seconds")
+    closed: list[str] = []
     for row in _owned(base, credential):
-        _call(base, credential, "DELETE", f"{_SILENCE}/{row['id']}")
-        expired.append(str(row["id"]))
-    return expired
+        updated = _call(
+            base,
+            credential,
+            "POST",
+            SILENCES,
+            {
+                "id": row["id"],
+                "matchers": row.get("matchers", _MATCH_EVERY_ALERT),
+                "startsAt": row["startsAt"],
+                "endsAt": ends_at,
+                "createdBy": CREATED_BY,
+                "comment": row.get("comment", ""),
+            },
+        )
+        if not _is_object_dict(updated):
+            raise GrafanaError(f"POST {SILENCES}: unexpected response payload")
+        closed.append(str(updated["silenceID"]))
+    return closed
 
 
 # meiva:note
@@ -181,15 +203,15 @@ def main(argv: list[str]) -> int:
         return 0
     base, credential = grafana
     try:
+        now = datetime.now(UTC)
         if args.verb == "open":
-            now = datetime.now(UTC)
             silence_id = open_window(
                 base, credential, hours=args.hours, comment=args.comment, now=now
             )
             until = (now + timedelta(hours=args.hours)).isoformat(timespec="minutes")
             print(f"SILENCE opened id={silence_id} until={until}")
         else:
-            print(f"SILENCE closed {len(close_window(base, credential))}")
+            print(f"SILENCE closed {len(close_window(base, credential, now=now))}")
     except GrafanaError as error:
         print(f"SILENCE failed: {error}")
     return 0
