@@ -1,10 +1,11 @@
 //! App settings — `settings.json` in the platform config directory.
 //!
 //! The file carries the connection keys (`entryUrl`, `gatewayUrl`, `autoLogin`)
-//! plus the two Android residency switches. Android credentials deliberately
-//! live outside this file in Keystore. Every key is optional: a missing or
-//! unparseable file falls back to [`Settings::default`] rather than failing the
-//! launch — an app that cannot start is worse than an app on defaults.
+//! plus the notification consent switch (`notifications`). Android credentials
+//! deliberately live outside this file in Keystore. Every key is optional: a
+//! missing or unparseable file falls back to [`Settings::default`] rather than
+//! failing the launch — an app that cannot start is worse than an app on
+//! defaults.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -34,9 +35,6 @@ pub struct Settings {
     /// Desktop only: log in with the local cluster secret when one exists.
     /// Android starts from its Keystore-held secret instead.
     pub auto_login: bool,
-    /// Android only: keep a foreground service alive so the console stays
-    /// connected while the app is backgrounded.
-    pub background_service: bool,
     /// Raise local notifications for the events the gateway's notification
     /// spine decides to deliver. Android and macOS both render them.
     pub notifications: bool,
@@ -52,10 +50,9 @@ impl Default for Settings {
             entry_url: Some(DEFAULT_ENTRY_URL.to_string()),
             gateway_url: None,
             auto_login: true,
-            // Mobile residency and notifications are opt-in on onboarding;
-            // in particular, do not raise Android's permission prompt before
-            // the user has seen the switch that explains it.
-            background_service: false,
+            // Notifications are opt-in on onboarding; do not raise Android's
+            // permission prompt before the user has seen the switch that
+            // explains it.
             notifications: false,
         }
     }
@@ -111,7 +108,6 @@ mod tests {
     #[test]
     fn mobile_features_are_opt_in_by_default() {
         let settings = Settings::default();
-        assert!(!settings.background_service);
         assert!(!settings.notifications);
     }
 
@@ -123,7 +119,6 @@ mod tests {
             entry_url: Some("http://box:3000".into()),
             gateway_url: Some("http://box:8123".into()),
             auto_login: false,
-            background_service: false,
             notifications: false,
         };
         settings.save(&dir).expect("save");
@@ -136,7 +131,11 @@ mod tests {
         let dir = std::env::temp_dir().join("meiva-app-settings-partial");
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).expect("mkdir");
-        fs::write(dir.join(FILE_NAME), r#"{"autoLogin": false}"#).expect("write");
+        fs::write(
+            dir.join(FILE_NAME),
+            r#"{"autoLogin": false, "backgroundService": true}"#,
+        )
+        .expect("write");
         let loaded = Settings::load(&dir);
         assert!(!loaded.auto_login);
         assert_eq!(loaded.gateway_url, Settings::default().gateway_url);

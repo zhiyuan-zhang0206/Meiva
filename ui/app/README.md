@@ -15,8 +15,8 @@ cargo tauri dev
 ```
 
 The persisted `settings.json` lives in Tauri's platform app-config directory.
-It accepts `entryUrl`, optional advanced `gatewayUrl`, `autoLogin`,
-`backgroundService`, and `notifications`; it never stores a cluster secret.
+It accepts `entryUrl`, optional advanced `gatewayUrl`, `autoLogin`, and
+`notifications`; it never stores a cluster secret.
 Desktop auto-login reads `MEIVA_CLUSTER_SECRET` from `$MEIVA_HOME/.env` only when
 `autoLogin` is enabled.
 
@@ -55,9 +55,10 @@ cd ui/app
 cargo tauri android build --apk
 ```
 
-The overlay adds the foreground service, notification/network permissions,
-network-security configuration, JNI/reflection-safe ProGuard rules, and
-optional release signing. A CI keystore is enabled only when
+The overlay adds the Keystore, cookie, click, and update plugins,
+notification/install permissions, network-security configuration,
+JNI/reflection-safe ProGuard rules, system-bar inset handling, and optional
+release signing. A CI keystore is enabled only when
 `src-tauri/gen/android/keystore.properties` exists; see the release workflow
 for the three Android signing secrets.
 

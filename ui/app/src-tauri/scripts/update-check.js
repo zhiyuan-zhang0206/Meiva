@@ -1,5 +1,5 @@
 // meiva:note
-// The injected prompt asks the native check once per session, renders the bar only for an available build, and falls back to the download page when an install fails. Each case runs the checked-in script in a Node VM with canned command results.
+// The injected prompt asks the native check once per session, publishes an available build on window.__MEIVA_APP__.update (notifying the console via 'meiva-app-update'), and falls back to the download page when an install fails. Each case runs the checked-in script in a Node VM with canned command results.
 // meiva:link ui/app/docs/android-updates.meiva.okf.md
 (function () {
   var cfg = window.__MEIVA_APP__;
@@ -11,86 +11,87 @@
   window.sessionStorage.setItem(MARKER, "1");
 
   function invoke(command, args) {
-    return window.__TAURI_INTERNALS__.invoke(command, args);
+    var target = cfg && typeof cfg.invoke === "function" ? cfg : window.__TAURI_INTERNALS__;
+    return target.invoke(command, args);
+  }
+
+  function emit(update) {
+    cfg.update = update;
+    if (typeof window.dispatchEvent === "function" && typeof Event === "function") {
+      window.dispatchEvent(new Event("meiva-app-update"));
+    }
   }
 
   function label(check) {
     return "Meiva " + check.latestVersionName + " (build " + check.latestVersionCode + ") is available";
   }
 
-  function banner(check) {
-    var bar = document.createElement("div");
-    bar.setAttribute("data-meiva-app", "update-banner");
-    bar.style.cssText = [
-      "position:fixed",
-      "left:0",
-      "right:0",
-      "top:52px",
-      "z-index:2147483647",
-      "display:flex",
-      "gap:12px",
-      "align-items:center",
-      "justify-content:space-between",
-      "padding:10px 14px",
-      "font:14px system-ui,sans-serif",
-      "background:#1b1b22",
-      "color:#f4f4f5",
-      "box-shadow:0 2px 12px rgba(0,0,0,.35)",
-    ].join(";");
-
-    var text = document.createElement("span");
-    text.textContent = label(check);
-
-    var actions = document.createElement("span");
-    actions.style.cssText = "display:flex;gap:8px;flex:none";
-
-    var update = document.createElement("button");
-    update.type = "button";
-    update.textContent = "Update";
-    update.style.cssText =
-      "border:0;border-radius:6px;padding:6px 12px;background:#4f46e5;color:#fff;font:inherit";
-    update.addEventListener("click", function () {
-      update.disabled = true;
-      update.textContent = "Updating…";
+  function publishUpdate(check) {
+    var downloadPage = check.downloadPage || null;
+    function dismiss() {
+      emit(null);
+    }
+    function openDownloadPage() {
+      if (!downloadPage) return;
+      invoke("app_open_external", { url: downloadPage }).catch(function (error) {
+        console.error("[meiva-app] update download page failed", error);
+      });
+    }
+    function install() {
+      var current = cfg.update;
+      if (!current || current.status === "installing") return;
+      if (current.status === "download-fallback") {
+        openDownloadPage();
+        return;
+      }
+      emit({
+        status: "installing",
+        versionName: check.latestVersionName,
+        versionCode: check.latestVersionCode,
+        text: label(check),
+        actionLabel: "Updating\u2026",
+        downloadPage: downloadPage,
+        install: install,
+        dismiss: dismiss,
+      });
       invoke("app_install_update")
         .then(function (outcome) {
           if (outcome && outcome.status !== "failed") {
-            bar.remove();
+            emit(null);
             return;
           }
-          var page = outcome && outcome.downloadPage;
-          if (!page) {
-            bar.remove();
+          downloadPage = (outcome && outcome.downloadPage) || downloadPage;
+          if (!downloadPage) {
+            emit(null);
             return;
           }
-          update.disabled = false;
-          update.textContent = "Open download page";
-          update.addEventListener("click", function () {
-            invoke("app_open_external", { url: page }).catch(function (error) {
-              console.error("[meiva-app] update download page failed", error);
-            });
+          emit({
+            status: "download-fallback",
+            versionName: check.latestVersionName,
+            versionCode: check.latestVersionCode,
+            text: label(check),
+            actionLabel: "Open download page",
+            downloadPage: downloadPage,
+            install: install,
+            dismiss: dismiss,
           });
         })
         .catch(function (error) {
           console.error("[meiva-app] update install failed", error);
-          bar.remove();
+          emit(null);
         });
-    });
+    }
 
-    var dismiss = document.createElement("button");
-    dismiss.type = "button";
-    dismiss.textContent = "Later";
-    dismiss.style.cssText =
-      "border:0;border-radius:6px;padding:6px 12px;background:transparent;color:#a1a1aa;font:inherit";
-    dismiss.addEventListener("click", function () {
-      bar.remove();
+    emit({
+      status: "available",
+      versionName: check.latestVersionName,
+      versionCode: check.latestVersionCode,
+      text: label(check),
+      actionLabel: "Update",
+      downloadPage: downloadPage,
+      install: install,
+      dismiss: dismiss,
     });
-
-    actions.appendChild(update);
-    actions.appendChild(dismiss);
-    bar.appendChild(text);
-    bar.appendChild(actions);
-    document.body.appendChild(bar);
   }
 
   invoke("app_check_update")
@@ -104,7 +105,7 @@
           console.error("[meiva-app] update notification failed", error);
         });
       }
-      if (document.body) banner(check);
+      publishUpdate(check);
     })
     .catch(function (error) {
       console.error("[meiva-app] update check failed", error);

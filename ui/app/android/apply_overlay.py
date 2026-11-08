@@ -1,26 +1,5 @@
 #!/usr/bin/env python3
-"""Apply the app's Android customisations onto a freshly generated project.
-
-`cargo tauri android init` writes `src-tauri/gen/android/` from the Tauri
-version's own templates. That tree is a build output, not source: committing it
-would freeze a generated Gradle project against one Tauri version and make every
-upgrade a merge. So the release workflow regenerates it and this script layers
-the four things the app needs on top:
-
-  1. the Kotlin foreground service, Keystore, and cookie plugins (`java/`);
-  2. ProGuard rules that preserve the JNI/reflection surface (`proguard-meiva.pro`);
-  3. the network security config (`network_security_config.xml`);
-  4. the manifest edits that make (1) and (3) take effect — permissions, the
-     `<service>` declaration, and the `android:networkSecurityConfig` attribute.
-
-Only (4) is delicate, because it edits a generated file. It is written to be
-idempotent (re-running changes nothing) and to fail loudly if the generated
-manifest stops looking the way it does today, rather than silently producing an
-APK with no background residency.
-
-Usage:
-    python ui/app/android/apply_overlay.py [--gen-dir src-tauri/gen/android]
-"""
+# meiva:link ui/app/docs/app.meiva.okf.md
 
 from __future__ import annotations
 
@@ -37,25 +16,10 @@ ET.register_namespace("android", ANDROID_NS)
 #: tauri.conf.json, and hard-coded in the Kotlin sources' `package` line.
 PACKAGE = "com.meiva.app"
 
-#: Permissions the app adds on top of the template's INTERNET.
-#:
-#: FOREGROUND_SERVICE_SPECIAL_USE is the API 34+ typed companion to
-#: FOREGROUND_SERVICE. The app's persistent, user-visible SSE connection is
-#: not media, location, a bounded data sync, or any other named service type;
-#: Android reserves specialUse for exactly that gap. POST_NOTIFICATIONS is the
-#: API 33+ runtime grant the notification bridge needs.
 PERMISSIONS = (
     "android.permission.POST_NOTIFICATIONS",
-    "android.permission.FOREGROUND_SERVICE",
-    "android.permission.FOREGROUND_SERVICE_SPECIAL_USE",
     "android.permission.REQUEST_INSTALL_PACKAGES",
 )
-
-#: The foreground service, declared relative to the app package.
-SERVICE_NAME = ".MeivaBackgroundService"
-SERVICE_TYPE = "specialUse"
-SPECIAL_USE_PROPERTY = "android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
-SPECIAL_USE_DESCRIPTION = "Persistent user-enabled Meiva agent event connection"
 
 _GRADLE_SIGNING_MARKER = "// Meiva release signing overlay."
 
@@ -66,13 +30,6 @@ def _android(attr: str) -> str:
 
 
 def patch_manifest(manifest_xml: str) -> str:
-    """Return `manifest_xml` with the app's permissions, service and network
-    security config applied. Idempotent.
-
-    Raises `ValueError` when the manifest does not have the shape the Tauri
-    template produces — an unrecognised manifest means the assumptions here are
-    stale, and a silently unpatched manifest is the failure this guards.
-    """
     # Input is Tauri's locally generated build file, never network/user XML.
     root = ET.fromstring(manifest_xml)  # noqa: S314
     if root.tag != "manifest":
@@ -94,39 +51,6 @@ def patch_manifest(manifest_xml: str) -> str:
     # The network security config is the finer-grained statement; leaving the
     # blanket flag next to it would just be a second, contradictory answer.
     application.attrib.pop(_android("usesCleartextTraffic"), None)
-
-    service = next(
-        (
-            element
-            for element in application.findall("service")
-            if element.get(_android("name")) == SERVICE_NAME
-        ),
-        None,
-    )
-    if service is None:
-        service = ET.SubElement(
-            application,
-            "service",
-            {
-                _android("name"): SERVICE_NAME,
-                _android("exported"): "false",
-                _android("foregroundServiceType"): SERVICE_TYPE,
-            },
-        )
-    service.set(_android("exported"), "false")
-    service.set(_android("foregroundServiceType"), SERVICE_TYPE)
-    properties = {element.get(_android("name")): element for element in service.findall("property")}
-    if SPECIAL_USE_PROPERTY not in properties:
-        ET.SubElement(
-            service,
-            "property",
-            {
-                _android("name"): SPECIAL_USE_PROPERTY,
-                _android("value"): SPECIAL_USE_DESCRIPTION,
-            },
-        )
-    else:
-        properties[SPECIAL_USE_PROPERTY].set(_android("value"), SPECIAL_USE_DESCRIPTION)
 
     ET.indent(root, space="    ")
     return ET.tostring(root, encoding="unicode", xml_declaration=True)

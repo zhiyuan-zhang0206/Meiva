@@ -1,17 +1,16 @@
 ---
 type: doc
 title: User interfaces
-description: Web and desktop interfaces to Meiva.
+description: Shared web console and cross-platform native host shell (macOS and Android) over gateway HTTP/SSE contracts.
 tags: []
 ---
 
 # User interfaces
 
-The UI domain contains two client implementations:
+The UI domain is organized around a strict three-layer boundary:
 
-- [[ui/web/docs/web.meiva.okf.md]] — the web frontend and its component, state and data-flow documentation.
-- [[ui/app/docs/app.meiva.okf.md]] — the desktop application.
+1. **Core HTTP/SSE contracts** ([[gateway/docs/gateway.meiva.okf.md]]) — authentication, agent lifecycle, timeline, fleet supervision, and delivered notification events.
+2. **Shared web console** ([[ui/web/docs/web.meiva.okf.md]]) — the single Next.js product UI served behind the gate for both browser tabs and native shells.
+3. **Native host shell** ([[ui/app/docs/app.meiva.okf.md]]) — one thin Tauri 2 application for **macOS and Android** that loads the remote web console and adds only platform-native capabilities (window/tray residency, Keystore/env auto-login, event-driven local notifications, and native updates) across the typed `window.__MEIVA_APP__` host bridge (`ui/web/src/components/app/bridge.ts`).
 
-The clients use the gateway APIs described by
-[[gateway/docs/gateway.meiva.okf.md]]. Their component nodes own implementation
-details; this overview groups the clients without duplicating them.
+Their component nodes own implementation details; this overview defines the layer boundary without duplicating them.

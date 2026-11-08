@@ -2,58 +2,20 @@
 
 import { Smartphone } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { useState, useSyncExternalStore } from "react";
+import { useState } from "react";
 
 import { Button } from "@/components/ui/button";
-import { FLEX, FLEX_COL } from "@/lib/layout/layout";
 import { cn } from "@/lib/format/utils";
+import { FLEX, FLEX_COL } from "@/lib/layout/layout";
 
-interface TauriInternals {
-  invoke: (command: string, args?: unknown) => Promise<unknown>;
-}
+import {
+  type AppBridge,
+  type AppUpdatePrompt,
+  readAppBridge,
+  useAppBridge,
+} from "./bridge";
 
-// meiva:note
-// The desktop host installs this object on the page before the app boots; declaring it on Window is
-// the one place the shape is stated, so the reader below needs no assertion.
-declare global {
-  interface Window {
-    readonly __TAURI_INTERNALS__?: TauriInternals;
-  }
-}
-
-export interface AppBridge {
-  openSettings: () => Promise<unknown>;
-}
-
-let lastInternals: TauriInternals | null = null;
-let lastBridge: AppBridge | null = null;
-
-export function readAppBridge(): AppBridge | null {
-  if (typeof window === "undefined") return null;
-  const internals = window.__TAURI_INTERNALS__;
-  if (!internals || typeof internals.invoke !== "function") {
-    lastInternals = null;
-    lastBridge = null;
-    return null;
-  }
-  if (internals !== lastInternals) {
-    lastInternals = internals;
-    lastBridge = { openSettings: () => internals.invoke("app_open_settings") };
-  }
-  return lastBridge;
-}
-
-function subscribeToNothing(): () => void {
-  return () => undefined;
-}
-
-function serverSnapshot(): AppBridge | null {
-  return null;
-}
-
-export function useAppBridge(): AppBridge | null {
-  return useSyncExternalStore(subscribeToNothing, readAppBridge, serverSnapshot);
-}
+export { type AppBridge, type AppUpdatePrompt, readAppBridge, useAppBridge };
 
 export function AppSettingsEntry({ bridge }: { bridge: AppBridge }) {
   const t = useTranslations("control");
@@ -76,6 +38,37 @@ export function AppSettingsEntry({ bridge }: { bridge: AppBridge }) {
           {t("appOpenSettingsFailed")}
         </p>
       ) : null}
+    </div>
+  );
+}
+
+export function AppUpdateBanner() {
+  const bridge = useAppBridge();
+  const update = bridge?.update;
+  if (!update) return null;
+  return (
+    <div
+      role="region"
+      aria-label="App update"
+      data-meiva-app="update-banner"
+      className={cn(
+        "shrink-0 items-center justify-between gap-3 border-b border-border bg-muted/40 px-4 py-2 text-sm text-foreground",
+        FLEX,
+      )}
+    >
+      <span>{update.text}</span>
+      <div className={cn("shrink-0 items-center gap-2", FLEX)}>
+        <Button
+          size="sm"
+          disabled={update.status === "installing"}
+          onClick={() => update.install()}
+        >
+          {update.actionLabel}
+        </Button>
+        <Button size="sm" variant="ghost" onClick={() => update.dismiss()}>
+          Later
+        </Button>
+      </div>
     </div>
   );
 }

@@ -15,7 +15,6 @@ window.MEIVA_APP_I18N['en'] =
   "advancedTitle": "Advanced options",
   "gatewayLabel": "Gateway address override",
   "gatewayPlaceholder": "Derived from the server address by default",
-  "backgroundLabel": "Run in background",
   "notificationsLabel": "Notifications",
   "connectButton": "Connect",
   "cancelButton": "Cancel",

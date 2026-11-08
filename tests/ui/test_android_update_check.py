@@ -14,55 +14,43 @@ const scenario = JSON.parse(process.argv[1]);
 
 const appended = [];
 const invocations = [];
+const events = [];
 
-function element() {
-  return {
-    children: [],
-    handlers: {},
-    style: {},
-    textContent: "",
-    disabled: false,
-    removed: false,
-    setAttribute() {},
-    addEventListener(type, handler) {
-      this.handlers[type] = handler;
-    },
-    appendChild(child) {
-      this.children.push(child);
-    },
-    remove() {
-      this.removed = true;
-    },
-  };
+function invoke(command, args) {
+  invocations.push({ command: command, args: args });
+  if (command === "app_check_update") return Promise.resolve(scenario.check);
+  if (command === "app_install_update") return Promise.resolve(scenario.install);
+  return Promise.resolve({});
 }
 
-const body = element();
-body.appendChild = function (child) {
-  appended.push(child);
-};
+const config = Object.assign({}, scenario.config, { invoke: invoke });
 
 const window = {
-  __MEIVA_APP__: scenario.config,
-  __TAURI_INTERNALS__: {
-    invoke: async function (command, args) {
-      invocations.push({ command: command, args: args });
-      if (command === "app_check_update") return scenario.check;
-      if (command === "app_install_update") return scenario.install;
-      return {};
-    },
-  },
+  __MEIVA_APP__: config,
   sessionStorage: {
     getItem() {
       return null;
     },
     setItem() {},
   },
+  dispatchEvent(ev) {
+    events.push(ev.type);
+  },
 };
 window.top = window;
 
 vm.runInNewContext(fs.readFileSync(process.argv[2], "utf8"), {
   window: window,
-  document: { body: body, createElement: element },
+  Event: function (type) {
+    this.type = type;
+  },
+  document: {
+    body: {
+      appendChild(child) {
+        appended.push(child);
+      },
+    },
+  },
   location: { protocol: "https:", hostname: "console.test" },
   console: { error() {}, log() {} },
 });
@@ -71,25 +59,26 @@ const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
 
 (async function () {
   await tick();
-  const banner = appended[0] || null;
+  const update = window.__MEIVA_APP__.update || null;
   const result = {
-    banner: banner !== null,
-    style: banner ? banner.style.cssText : "",
-    text: banner ? banner.children[0].textContent : "",
-    actions: banner ? banner.children[1].children.map((child) => child.textContent) : [],
+    domMutated: appended.length > 0,
+    banner: update !== null,
+    text: update ? update.text : "",
+    actions: update ? [update.actionLabel, "Later"] : [],
     commands: invocations.map((call) => call.command),
+    events: events.slice(),
     notifications: invocations
       .filter((call) => call.command === "app_notify")
       .map((call) => call.args),
   };
-  if (banner && scenario.interact) {
-    const update = banner.children[1].children[0];
-    update.handlers.click();
+  if (update && scenario.interact) {
+    update.install();
     await tick();
-    result.afterInstall = update.textContent;
-    result.removed = banner.removed;
-    if (!banner.removed) {
-      update.handlers.click();
+    const after = window.__MEIVA_APP__.update || null;
+    result.afterInstall = after ? after.actionLabel : "";
+    result.removed = after === null;
+    if (after) {
+      after.install();
       await tick();
       result.downloadPage = invocations
         .filter((call) => call.command === "app_open_external")
@@ -134,7 +123,7 @@ def _run(
     platform: str = "android",
 ) -> dict[str, object]:
     # meiva:note
-    # Each Android update prompt case executes the checked-in injected script with canned native command results and reads only the elements it appended.
+    # Each Android update prompt case executes the checked-in injected script with canned native command results and reads the state published on window.__MEIVA_APP__.update.
     # meiva:link tests/docs/tests.meiva.okf.md
     scenario = {
         "config": {
@@ -155,10 +144,10 @@ def _run(
     return json.loads(result.stdout)
 
 
-def test_the_banner_stays_out_of_the_composer_band() -> None:
-    style = str(_run(check=_available())["style"])
-    assert "top:52px" in style
-    assert "bottom:0" not in style
+def test_publishes_update_state_on_the_host_bridge_without_mutating_the_dom() -> None:
+    result = _run(check=_available())
+    assert result["domMutated"] is False
+    assert result["events"] == ["meiva-app-update"]
 
 
 def test_offers_a_newer_build_with_an_install_action() -> None:

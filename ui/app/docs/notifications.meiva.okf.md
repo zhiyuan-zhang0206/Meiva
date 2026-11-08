@@ -51,7 +51,11 @@ connected — is served the newest ten and skips the rest, which is the right
 trade for a ping: the console keeps the full log.
 
 Android posts through the notification plugin's mobile path off the main looper
-(`android::show_notification`); macOS and Linux post through the same plugin from
+(`android::show_notification`) with **zero persistent foreground-service
+notification**: notifications appear only when a real agent notification is
+delivered over active/recent-background SSE or caught up from
+`GET /api/notifications?after_id=<cursor>` when the app resumes (`visibilitychange`
+/ `EventSource.onopen`). macOS and Linux post through the same plugin from
 `desktop::show_notification`, where the permission prompt follows the switch in
 settings rather than the first event. Neither platform decides *what* is worth
 notifying — `app_notify` rechecks the persisted consent and the bridge carries no

@@ -140,20 +140,13 @@ def test_requests_the_package_install_permission(patched: ET.Element) -> None:
     assert "android.permission.REQUEST_INSTALL_PACKAGES" in names
 
 
-def test_declares_the_foreground_service(patched: ET.Element) -> None:
+def test_does_not_declare_a_foreground_service(patched: ET.Element) -> None:
     application = patched.find("application")
     assert application is not None
-    services = [
-        e for e in application.findall("service") if _attr(e, "name") == overlay.SERVICE_NAME
-    ]
-    assert len(services) == 1
-    assert _attr(services[0], "foregroundServiceType") == overlay.SERVICE_TYPE
-    # A service another app can start is a service another app can abuse.
-    assert _attr(services[0], "exported") == "false"
-    properties = services[0].findall("property")
-    assert len(properties) == 1
-    assert _attr(properties[0], "name") == overlay.SPECIAL_USE_PROPERTY
-    assert _attr(properties[0], "value") == overlay.SPECIAL_USE_DESCRIPTION
+    assert application.findall("service") == []
+    names = {_attr(e, "name") for e in patched.findall("uses-permission")}
+    assert "android.permission.FOREGROUND_SERVICE" not in names
+    assert "android.permission.FOREGROUND_SERVICE_SPECIAL_USE" not in names
 
 
 def test_points_the_application_at_the_network_security_config(patched: ET.Element) -> None:
