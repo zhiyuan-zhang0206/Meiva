@@ -163,13 +163,67 @@ fn explicit_port(raw: &str) -> Option<u16> {
 
 /// The gateway that goes with an entry URL: same scheme and host, gateway port.
 pub fn derive_gateway(entry: &Url) -> Url {
+    derive_gateway_with_port(entry, DEFAULT_GATEWAY_PORT)
+}
+
+fn derive_gateway_with_port(entry: &Url, port: u16) -> Url {
     let mut gateway = entry.clone();
     gateway.set_path("");
     gateway.set_query(None);
     gateway.set_fragment(None);
     // set_port only fails for cannot-be-a-base URLs, which parse_entry rejects.
-    let _ = gateway.set_port(Some(DEFAULT_GATEWAY_PORT));
+    let _ = gateway.set_port(Some(port));
     gateway
+}
+
+/// Derive the console (gate) URL that goes with a gateway URL: same scheme and
+/// host on port 3000.
+fn derive_entry_from_gateway(gateway: &Url) -> Url {
+    let mut entry = gateway.clone();
+    entry.set_path("");
+    entry.set_query(None);
+    entry.set_fragment(None);
+    let _ = entry.set_port(Some(GATE_PORT));
+    entry
+}
+
+/// Discover the cluster's entry (gate) and gateway URLs from a desktop host's
+/// `.env` text (`$MEIVA_HOME/.env`).
+///
+/// * **Gateway host** (`MEIVA_MACHINE_SERVE_GATEWAY=true`): the gate and gateway
+///   run locally on this machine. The entry URL comes from
+///   `MEIVA_FRONTEND_HEALTHCHECK_URL` (default `http://localhost:3000/`), and
+///   the gateway is the same host on `MEIVA_GATEWAY_PORT` (default `8000`).
+/// * **Agent Runner host** (`MEIVA_MACHINE_SERVE_GATEWAY` is false or absent, and
+///   `MEIVA_GATEWAY_URL` is configured): the machine does not run a local gate;
+///   its cluster lives at `MEIVA_GATEWAY_URL` (e.g. `http://10.0.0.5:8000`).
+///   The entry URL is derived on the same scheme and host at port `3000`
+///   (`http://10.0.0.5:3000/`), and the gateway URL is `MEIVA_GATEWAY_URL`.
+pub fn endpoints_from_env_text(text: &str) -> Option<Endpoints> {
+    use crate::autologin::parse_env_value;
+
+    let serve_gateway = parse_env_value(text, "MEIVA_MACHINE_SERVE_GATEWAY")
+        .is_some_and(|v| matches!(v.to_ascii_lowercase().as_str(), "true" | "1" | "yes"));
+    let gateway_port = parse_env_value(text, "MEIVA_GATEWAY_PORT")
+        .and_then(|v| v.parse::<u16>().ok())
+        .unwrap_or(DEFAULT_GATEWAY_PORT);
+
+    if serve_gateway {
+        let entry = parse_env_value(text, "MEIVA_FRONTEND_HEALTHCHECK_URL")
+            .and_then(|v| parse_entry(&v))
+            .unwrap_or_else(|| {
+                parse_entry("http://localhost:3000").expect("default loopback entry URL")
+            });
+        let gateway = derive_gateway_with_port(&entry, gateway_port);
+        return Some(Endpoints { entry, gateway });
+    }
+
+    let mut gateway = parse_env_value(text, "MEIVA_GATEWAY_URL").and_then(|v| parse_entry(&v))?;
+    gateway.set_path("");
+    gateway.set_query(None);
+    gateway.set_fragment(None);
+    let entry = derive_entry_from_gateway(&gateway);
+    Some(Endpoints { entry, gateway })
 }
 
 /// Resolve the configured settings into a usable endpoint pair, or `None` when
@@ -499,5 +553,36 @@ mod tests {
     #[test]
     fn an_unresolvable_host_is_refused_rather_than_assumed_private() {
         assert!(!is_private_host(&url("http://no-such-host.invalid:3000/")));
+    }
+
+    #[test]
+    fn gateway_host_env_resolves_to_local_gate_and_gateway() {
+        let env = "\
+MEIVA_GATEWAY_URL=http://10.0.0.46:8000
+MEIVA_GATEWAY_PORT=8000
+MEIVA_FRONTEND_HEALTHCHECK_URL=http://localhost:3000
+MEIVA_MACHINE_SERVE_GATEWAY=true
+";
+        let resolved = endpoints_from_env_text(env).expect("gateway host endpoints");
+        assert_eq!(resolved.entry.to_string(), "http://localhost:3000/");
+        assert_eq!(resolved.gateway.to_string(), "http://localhost:8000/");
+    }
+
+    #[test]
+    fn agent_runner_host_env_derives_remote_gate_from_gateway_url() {
+        let env = "\
+MEIVA_GATEWAY_URL=http://10.0.0.46:8000
+MEIVA_GATEWAY_PORT='8000'
+MEIVA_FRONTEND_HEALTHCHECK_URL=http://localhost:3000
+MEIVA_MACHINE_SERVE_GATEWAY='false'
+";
+        let resolved = endpoints_from_env_text(env).expect("agent-runner endpoints");
+        assert_eq!(resolved.entry.to_string(), "http://10.0.0.46:3000/");
+        assert_eq!(resolved.gateway.to_string(), "http://10.0.0.46:8000/");
+    }
+
+    #[test]
+    fn empty_host_env_yields_no_discovered_endpoints() {
+        assert!(endpoints_from_env_text("MEIVA_MACHINE_NAME=bare\n").is_none());
     }
 }

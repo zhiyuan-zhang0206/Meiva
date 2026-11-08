@@ -13,8 +13,16 @@ tags:
 
 `settings.json` in the platform app-config directory is the persisted
 non-credential configuration. `entryUrl` names the gate; `gatewayUrl` is
-optional and otherwise derives from the same host on port 8000. Desktop defaults
-to `localhost:3000`; Android starts on onboarding. Android's primary server
+optional and otherwise derives from the same host on port 8000. On desktop, when
+`settings.json` still carries the uncustomized loopback default
+(`localhost:3000` without an explicit `gatewayUrl`), startup inspects
+`$MEIVA_HOME/.env`: a gateway host (`MEIVA_MACHINE_SERVE_GATEWAY=true`) resolves
+to `MEIVA_FRONTEND_HEALTHCHECK_URL` (default `http://localhost:3000/`) and local
+`MEIVA_GATEWAY_PORT` (default `8000`), while an agent runner host
+(`MEIVA_MACHINE_SERVE_GATEWAY=false` with `MEIVA_GATEWAY_URL`) derives the
+console gate on the gateway host's port `3000` and pairs it with
+`MEIVA_GATEWAY_URL`. When no `.env` is present, desktop falls back to
+`localhost:3000`; Android starts on onboarding. Android's primary server
 field normalizes a bare host or a default gateway URL into the console origin
 on 3000, preserves `https`, and removes paths, queries, and fragments. Other
 Android primary-field ports are refused with an advanced-options hint; the
@@ -34,8 +42,12 @@ with a four-second HTTP GET rather than TCP, treats
 2xx/3xx/401/403 as healthy, and sends a final `reason=unreachable|http|update-window`
 query into the bundled failure screen within the retry budget.
 
-`src-tauri/src/window.rs` builds one webview and makes bounded HTTP probes of
-the gate while it connects. Native navigation accepts only the exact gate
+`src-tauri/src/window.rs` builds one webview, matches the native window
+background color (`#F0F2F4` Moonlight White in light mode, `#292824` Coal Black
+in dark mode) to the OS theme (updating on `WindowEvent::ThemeChanged` on
+desktop) alongside `prefers-color-scheme` CSS tokens in `app-ui/index.html`, and
+makes bounded HTTP probes of the gate while it connects. Native navigation
+accepts only the exact gate
 and gateway origins plus bundled Tauri assets. New-window links leave through
 `src-tauri/src/external.rs`: local headed cluster Chrome first on supported Unix
 desktops, then the system browser. Only HTTP(S), `mailto:`, and `tel:` may cross

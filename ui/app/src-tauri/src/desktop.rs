@@ -29,14 +29,19 @@ pub fn show_main_window(app: &AppHandle) {
     }
 }
 
-/// Close hides instead of quitting — the app stays resident.
+/// Close hides instead of quitting — the app stays resident — and the native
+/// webview background tracks OS light/dark theme switches.
 pub fn attach_window_behavior(window: &WebviewWindow) {
     let handle = window.clone();
-    window.on_window_event(move |event| {
-        if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+    window.on_window_event(move |event| match event {
+        tauri::WindowEvent::CloseRequested { api, .. } => {
             api.prevent_close();
             let _ = handle.hide();
         }
+        tauri::WindowEvent::ThemeChanged(theme) => {
+            let _ = handle.set_background_color(Some(window::theme_background_color(*theme)));
+        }
+        _ => {}
     });
 }
 

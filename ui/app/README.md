@@ -7,7 +7,14 @@ Rust application targets macOS and Android.
 ## Local desktop development
 
 Prerequisites are Rust stable plus the platform libraries required by Tauri 2.
-The default desktop entry is `http://localhost:3000`.
+When `$MEIVA_HOME/.env` is present and `settings.json` has not been customized,
+desktop startup discovers endpoints from `.env` (local gate on a gateway machine
+with `MEIVA_MACHINE_SERVE_GATEWAY=true`, or the remote cluster gate on port
+`3000` plus `MEIVA_GATEWAY_URL` on an agent runner machine); otherwise the
+default desktop entry is `http://localhost:3000`. Both the native window
+background and the bundled pre-auth screens (`#setup`, `#connecting`,
+`#unreachable`) adapt to the OS light/dark theme (`#F0F2F4` Moonlight White in
+light mode, `#292824` Coal Black in dark mode).
 
 ```bash
 cd ui/app

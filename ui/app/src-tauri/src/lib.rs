@@ -72,7 +72,9 @@ pub fn run() {
         .setup(|app| {
             let handle = app.handle();
             let config_dir = settings::config_dir(handle);
-            let settings = Settings::load(&config_dir);
+            let mut settings = Settings::load(&config_dir);
+            #[cfg(desktop)]
+            settings.apply_env_endpoints(autologin::discover_env_endpoints().as_ref());
             app.manage(AppState::new(config_dir, settings));
 
             window::open_entry(handle);
