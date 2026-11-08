@@ -77,8 +77,8 @@ def names_of(modules: dict[str, types.ModuleType]) -> dict[str, list[str]]:
     return {
         name: [
             member
-            for member in dir(module)
-            if not inspect.ismodule(getattr(module, member)) and getattr(module, member) is not None
+            for member, value in inspect.getmembers(module)
+            if not inspect.ismodule(value) and value is not None
         ]
         for name, module in modules.items()
     }

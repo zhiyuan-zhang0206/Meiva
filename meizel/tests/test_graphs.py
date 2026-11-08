@@ -136,8 +136,8 @@ def test_the_model_defines_no_shell_name() -> None:
 def test_the_shell_implements_every_method_the_model_declares() -> None:
     declared = {
         name
-        for name in model.Checkout.__dict__
-        if not name.startswith("_") and callable(getattr(model.Checkout, name, None))
+        for name, member in vars(model.Checkout).items()
+        if not name.startswith("_") and callable(member)
     }
     assert declared != set()
     shell = next(

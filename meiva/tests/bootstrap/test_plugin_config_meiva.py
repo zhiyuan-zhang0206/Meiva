@@ -8,9 +8,9 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from base.agents.sdk.tests.sampling_owners import fixed_sampling_owner
 from base.packages.plugin_config_images import PluginConfigOwner
-from base.packages.plugins.config_face import disk_image_path
 from base.packages.plugins.config_registration import (
     bind_plugin_config,
+    disk_image_path,
 )
 from meiva.sdk_surface.installation import Installation
 from meiva.sdk_surface.tests.installation_holder import held_installation

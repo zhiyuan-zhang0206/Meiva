@@ -8,14 +8,35 @@ from typing import TypeGuard
 from pydantic import BaseModel, ValidationError
 
 from base.host.boundary.untyped import object_of
-from base.packages.plugins import enable_config
+from base.packages.plugins import config_from_image, enable_config
 from base.packages.plugins.config_face import (
     declared_config_class,
-    disk_image_path,
     enabled_config_classes,
-    read_config_image,
 )
 from base.packages.plugins.plugin_errors import InvalidConfigData, SchemaDriftError
+
+
+def disk_image_path(plugin: str, *, home: Path) -> Path:
+    from base.packages.plugin_config_images import config_image_path
+
+    return config_image_path(plugin, home=home)
+
+
+def read_config_image[C: BaseModel](cls: type[C], config_path: Path) -> C:
+    try:
+        content = config_path.read_text()
+    except FileNotFoundError:
+        return cls()
+
+    return config_from_image(cls, content, config_path)
+
+
+def write_default_disk_image(plugin: str, cls: type[BaseModel], *, home: Path) -> Path:
+    from base.packages.plugin_config_images import PluginConfigOwner
+
+    config_path = disk_image_path(plugin, home=home)
+    PluginConfigOwner(plugin, cls, config_path).create_default()
+    return config_path
 
 
 # meiva:note

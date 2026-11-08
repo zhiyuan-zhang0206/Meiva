@@ -202,19 +202,24 @@ def test_a_pattern_names_something_and_an_entry_names_a_name_that_exists() -> No
     assert stale == []
 
 
+_CLASS_OWNERS: dict[str, object] = {
+    "builtins": builtins,
+    "datetime.date": datetime.date,
+    "datetime.datetime": datetime.datetime,
+    "datetime.time": datetime.time,
+}
+
+
 def test_a_member_of_a_class_judged_in_the_table_exists() -> None:
     missing: list[str] = []
     for group in groups():
         if group.module in CHANNEL_MODULES or group.module == "psutil":
             continue
-        head, *path = group.module.split(".")
-        owner: object = builtins if head == "builtins" else _MODULES[head]
-        for part in path:
-            owner = getattr(owner, part)
+        members = set(dir(_CLASS_OWNERS[group.module]))
         missing.extend(
             f"{group.module}.{name}"
             for name in group.names
-            if "*" not in name and not hasattr(owner, name)
+            if "*" not in name and name not in members
         )
     assert missing == []
 

@@ -9,7 +9,7 @@ from meizel.graph.ambient_surface import (
     unjudged,
 )
 from meizel.graph.impacted import python_reverse_closure
-from meizel.graph.licensing import FILESYSTEM_READS, licensed
+from meizel.graph.licensing import FILESYSTEM_READS, SLEEP_CALLS, licensed
 from meizel.graph.python_layout import project_metadata_paths, standalone_projects
 from meizel.graph.reachability import (
     DEFAULT_PROD_ROLES,
@@ -27,6 +27,7 @@ __all__ = [
     "LOOP_CLOCK",
     "METHOD_READS",
     "SEEDABLE_GENERATORS",
+    "SLEEP_CALLS",
     "IslandCluster",
     "ReachabilityReport",
     "ReachabilityScope",

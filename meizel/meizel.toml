@@ -27,7 +27,7 @@ exports = ["__main__.py", "allowances.py", "budgets", "checkout.py", "contracts"
 "entry.py" = { kinds = ["cwd", "clock", "platform"], why = "the process entry: when argv names no --repo it reads the working directory once and hands the resolved repository root down to the commands, it reads the day once for the placeholder `debt record` writes into an entry nobody has reviewed, and when argv names no --jobs it reads the processor count once and hands the worker count down, so that no command below decides how parallel it is" }
 
 [purity]
-"." = "strict-to-be"
+"." = "strict"
 "frontend_deps.py" = "strict"
 "frontend_install.py" = { mode = "none", why = "the process form of the verdict: it reads argv once, asks the checkout shell for one observation and prints what the pure classifier decided, so a caller outside the checker (`check.sh` before the whole-tree index) gets the same answer as the analyzer’s preflight" }
 "checkout.py" = { mode = "none", why = "the shell of the checkout: it runs git for a universe (ls-files, grep, merge-base, show), reads and writes the files a plan names, stages them, and removes the temporary checkout a comparison runs in; what a checkout contains, whether a name is a module, and which writes a command decided on are decided by graph/universe.py and the contracts modules that build an EditPlan" }
@@ -36,6 +36,3 @@ exports = ["__main__.py", "allowances.py", "budgets", "checkout.py", "contracts"
 "allowances.py" = "strict"
 "entry.py" = { mode = "none", why = "the process entry: it parses argv, asks where this installation and this checkout are, and builds the one GitRepo every command is handed; the commands below it take those values, so no decision module reads them again" }
 "roles.py" = "strict"
-
-[debt.impure-call]
-"lint_common.py#import subprocess" = { count = 1, owner = "#5921", until = "permanently: launching the TypeScript analyzer is what `run_node_analyzer()` is for — it owns the `node` command line, the 180s timeout and the 'install Node' error, and its one production caller (meizel/language/typescript_compiler/runtime.py) holds no better copy of any of them. Reopens if the analysis stops being an out-of-process program: an in-process analyzer, or a caller that arrives holding a runner (the shape `host.run` has), lets this function take the runner instead of spawning" }

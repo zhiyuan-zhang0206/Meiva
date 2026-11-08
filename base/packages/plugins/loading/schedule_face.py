@@ -15,7 +15,7 @@ from typing import TypeGuard
 from pydantic import BaseModel
 
 from base.host.boundary.untyped import object_of
-from base.packages.plugins import config_face, enable_config, load_report
+from base.packages.plugins import config_face, config_view, enable_config, load_report
 from base.packages.plugins.manifest import load_manifest
 from base.packages.plugins.surface.schedules import ScheduleSpec, StatCardSpec
 
@@ -36,7 +36,7 @@ def resolve_plugin_config_for_face(
     cls = config_face.declared_config_class(plugin, plugin_dir)
     if cls is None:
         return None
-    return config_face.read_config_image(cls, config_face.disk_image_path(plugin, home=home))
+    return config_view.read_config_image(cls, config_view.disk_image_path(plugin, home=home))
 
 
 def declared_schedules(plugin: str, plugin_dir: Path, *, home: Path) -> tuple[ScheduleSpec, ...]:

@@ -18,7 +18,7 @@ from collections.abc import Iterable, Mapping
 from meizel.contracts.debt import file_key
 from meizel.contracts.manifest import Manifest, effective_purity, unlicensed
 from meizel.contracts.policy import POLICY, Policy
-from meizel.graph import FILESYSTEM_READS
+from meizel.graph import FILESYSTEM_READS, SLEEP_CALLS
 from meizel.graph.imports import Scope, collect_scope
 from meizel.graph.model import (
     OS_KINDS,
@@ -62,6 +62,7 @@ _WHAT: dict[str, str] = {
     AmbientKind.RANDOM: "randomness",
     AmbientKind.ARGV: "the command line",
     AmbientKind.FILESYSTEM: "the contents of files",
+    AmbientKind.SLEEP: "a wait",
 }
 # meiva:note
 # The three lines every ambient-read carries: the principle, the recipe and the rule.
@@ -217,9 +218,10 @@ def _legal_calls_recorded(
 
 
 # meiva:note
-# A declared root kind that its file no longer acquires; only a whole run can know. `filesystem` is
-# no acquisition, so it is acquired where the purity rule charges a read of it: a root of that kind
-# whose file reads no file is stale like any other, and a declaration cannot outlive the code.
+# A declared root kind that its file no longer acquires; only a whole run can know. `filesystem` and
+# `sleep` derive no acquisition, so they are acquired where the purity rule charges a call of them: a
+# root of either kind whose file makes no such call is stale like any other, and a declaration cannot
+# outlive the code.
 def stale_roots(
     scans: Mapping[str, FileScan], manifests: Mapping[str, Manifest]
 ) -> list[Diagnostic]:
@@ -230,9 +232,11 @@ def stale_roots(
             scan = scans.get(path)
             if scan is None:
                 continue
-            acquired = {acquisition.kind for acquisition in scan.ambient} | {
-                AmbientKind.FILESYSTEM for item in scan.purity if item.key in FILESYSTEM_READS
-            }
+            acquired = (
+                {acquisition.kind for acquisition in scan.ambient}
+                | {AmbientKind.FILESYSTEM for item in scan.purity if item.key in FILESYSTEM_READS}
+                | {AmbientKind.SLEEP for item in scan.purity if item.key in SLEEP_CALLS}
+            )
             found.extend(
                 Diagnostic(
                     manifest.path,

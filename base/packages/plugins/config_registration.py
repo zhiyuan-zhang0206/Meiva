@@ -19,17 +19,15 @@ from base.packages.plugins import (
     process_plugin_config,
     service_config_packet,
 )
-from base.packages.plugins.config_face import (
-    disk_image_path,
-    read_config_image,
-    write_default_disk_image,
-)
 from base.packages.plugins.config_view import (
+    disk_image_path,
     overlay_config_classes,
     plugin_bootstrap_config,
+    read_config_image,
     read_plugin_config,
     read_service_config,
     with_cluster_policy,
+    write_default_disk_image,
 )
 from base.packages.plugins.plugin_errors import (
     DuplicateRegistration,

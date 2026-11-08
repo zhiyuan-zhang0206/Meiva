@@ -63,8 +63,8 @@ def _load_one(
 def _declaration(
     module: ModuleType, *, name: str, plugin_dir: Path, home: Path
 ) -> PluginContributions:
-    from base.packages.plugins.config_face import declared_config_class, disk_image_path
-    from base.packages.plugins.config_view import read_plugin_config
+    from base.packages.plugins.config_face import declared_config_class
+    from base.packages.plugins.config_view import disk_image_path, read_plugin_config
     from base.packages.plugins.data_registry import declaration_of
 
     if not hasattr(module, "configure"):

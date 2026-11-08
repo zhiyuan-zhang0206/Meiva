@@ -17,7 +17,7 @@ from collections.abc import Iterable
 from meizel.graph.ambient_surface import judged
 from meizel.graph.model import Acquisition, AmbientKind, KindName, PurityItem
 
-__all__ = ["FILESYSTEM_READS", "licensed"]
+__all__ = ["FILESYSTEM_READS", "SLEEP_CALLS", "licensed"]
 
 # meiva:note
 # The calls a `filesystem` root licenses: the ones whose name decides that it reads. A read of a
@@ -79,6 +79,13 @@ FILESYSTEM_READS: frozenset[str] = frozenset(
     }
 )
 
+# meiva:note
+# The call a `sleep` root licenses: the synchronous process wait at the timer door (`time.sleep`).
+# `clock` does not cover `sleep`, so a clock root that waits without declaring `sleep` still owes
+# the `impure-call` record; coroutine and synchronisation waits (`asyncio.sleep`, `Event.wait`) are
+# not in this set.
+SLEEP_CALLS: frozenset[str] = frozenset({"time.sleep"})
+
 
 # meiva:note
 # The purity rule keeps the short spelling a call canonicalises to (`datetime.now` for the table's
@@ -98,6 +105,8 @@ def licensed(
         return on_line
     if item.key in FILESYSTEM_READS:
         return frozenset({AmbientKind.FILESYSTEM}) & kinds
+    if item.key in SLEEP_CALLS:
+        return frozenset({AmbientKind.SLEEP}) & kinds
     reading = judged(item.key)
     if reading is None and "." in item.key:
         head, _, _ = item.key.partition(".")
