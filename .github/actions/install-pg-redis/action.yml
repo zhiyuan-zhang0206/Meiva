@@ -80,7 +80,7 @@ runs:
         # Redis comes from the same source as production (redis.io apt repo, the
         # 8.2 series scripts/provision/database.sh installs and holds); Ubuntu's
         # own archive ships a different major line. Asserted equal to
-        # base.host.brew_pin.REDIS_APT_VERSION by tests/ci/test_redis_pin.py.
+        # base.host.tool_pins.REDIS_APT_VERSION by tests/ci/test_redis_pin.py.
         redis_version="6:8.2.*"
         # Postgres: the server a test cluster runs is the vendored zonky tree
         # production vendors (base/cluster/dataplane/runtime_binaries.py), not

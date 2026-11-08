@@ -15,5 +15,5 @@ exports = ["agent_transfer", "agents", "alerts.py", "cluster", "cluster_status",
 [purity]
 "__init__.py" = "strict"
 
-[debt.ambient-read]
-"host_config.py#clock datetime.datetime.now" = { count = 1, owner = "#5816", until = "permanently: the write record's `ts` is the moment this process wrote the file — the audit trail's whole value is that the writer stamped it, and a caller-supplied clock would be that same clock read one frame earlier" }
+[roots]
+"host_config.py" = { kinds = ["clock"], why = "Host config write audit stamps the host wall-clock instant" }
