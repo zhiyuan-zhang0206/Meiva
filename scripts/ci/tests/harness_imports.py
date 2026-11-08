@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-from base import cluster, config
+from base import cluster, config, telemetry
 from base.clock import SYSTEM_TIMERS
+from base.clock.tests.fakes import system_clock
 from base.clock.tests.seeded_rng import seeded_rng
 from base.cluster.dataplane.direct_url import ClusterDirectUrl
 from base.cluster.dataplane.pg_stall_watchdog import StallWatchdogConfig, stall_guard
@@ -83,4 +84,6 @@ __all__ = [
     "stall_guard",
     "stdlib_logging_isolated",
     "sync_redis",
+    "system_clock",
+    "telemetry",
 ]

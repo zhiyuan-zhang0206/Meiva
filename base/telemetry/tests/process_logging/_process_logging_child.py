@@ -9,6 +9,7 @@ import threading
 from functools import partial
 from pathlib import Path
 
+from base.clock.tests.fakes import system_clock
 from base.log import logger, prepare_process_logging
 from base.log.process import init_subprocess_logger
 from base.native_process.loaded_commit import LoadedCommit
@@ -21,7 +22,7 @@ from base.telemetry.process_logging import init_cli_process, init_gateway_proces
 def main(role: str, home: Path) -> None:
     prepare_process_logging()
     events: list[Event] = []
-    pipeline = EventPipeline(writer=events.extend)
+    pipeline = EventPipeline(now=system_clock().now, writer=events.extend)
     before = set(threading.enumerate())
     try:
         for _ in range(3):

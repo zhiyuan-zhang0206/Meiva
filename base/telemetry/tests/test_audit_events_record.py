@@ -9,6 +9,7 @@ import pytest
 from psycopg_pool import AsyncConnectionPool
 
 from base import telemetry
+from base.clock.tests.fakes import system_clock
 from base.db import Database
 from base.db.transaction import async_write_transaction
 from base.paths import meiva_home
@@ -141,7 +142,7 @@ def test_standalone_commits_the_row_before_it_emits(
             if event.source == marker:
                 seen_at_emit.append(len(_rows(db_conn, event.source)))
 
-    pipe = telemetry.EventPipeline(writer=writer, batch_size=1)
+    pipe = telemetry.EventPipeline(now=system_clock().now, writer=writer, batch_size=1)
     try:
         telemetry.init_telemetry(home=meiva_home(), process="test-audit", pipeline=pipe)
         record_audit_standalone(database, _event(marker))
@@ -192,7 +193,7 @@ async def test_async_standalone_commits_the_row_before_it_emits(
             if event.source == marker:
                 seen_at_emit.append(len(_rows(db_conn, event.source)))
 
-    pipe = telemetry.EventPipeline(writer=writer, batch_size=1)
+    pipe = telemetry.EventPipeline(now=system_clock().now, writer=writer, batch_size=1)
     try:
         telemetry.init_telemetry(home=meiva_home(), process="test-audit-async", pipeline=pipe)
         await audit_events.record_audit_standalone_async(aops_pool, _event(marker))
@@ -243,7 +244,7 @@ def test_standalone_many_commits_every_row_together_and_emits_after(
             if event.source in {first, second}:
                 seen_at_emit.append(len(_rows(db_conn, event.source)))
 
-    pipe = telemetry.EventPipeline(writer=writer, batch_size=2)
+    pipe = telemetry.EventPipeline(now=system_clock().now, writer=writer, batch_size=2)
     try:
         telemetry.init_telemetry(home=meiva_home(), process="test-audit-many", pipeline=pipe)
         audit_events.record_audit_standalone_many(database, [_event(first), _event(second)])

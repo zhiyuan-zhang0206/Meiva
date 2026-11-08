@@ -15,6 +15,7 @@ import sys
 from pathlib import Path
 from typing import NoReturn
 
+from base.clock.tests.fakes import system_clock
 from base.host.proc import run_bounded
 from base.host.system.tests.fake_commands import fake_host
 from cli.database.lifecycle_audit import (
@@ -38,6 +39,7 @@ def main(argv: list[str]) -> int:
     gone.rmdir()
     try:
         with operator_lifecycle_audit(
+            now=system_clock().now,
             database_factory=_refuse_database,
             host=fake_host(commands=run_bounded, environ=dict(os.environ)),
             home=Path(os.environ["MEIVA_HOME"]),

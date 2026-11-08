@@ -10,6 +10,7 @@ from collections.abc import Generator
 
 import pytest
 
+from base.clock.tests.fakes import system_clock
 from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import as_machine as as_machine
 from base.paths import meiva_home
@@ -45,6 +46,7 @@ def operator_pipeline(
         operator_database,
         machine=command_runtime.machine,
         home=meiva_home(),
+        now=system_clock().now,
         otlp_enabled=command_runtime.otlp_enabled,
         otlp_endpoint=command_runtime.otlp_endpoint,
     )

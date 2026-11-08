@@ -10,6 +10,7 @@ import pytest
 
 from base.agents.context.clients import ClientSet
 from base.clock import SYSTEM_TIMERS
+from base.clock.tests.fakes import system_clock
 from base.clock.tests.seeded_rng import seeded_rng
 from base.cluster.machine import MachineFacts
 from base.cluster.machine.configured import ConfiguredMachineIdentity
@@ -78,7 +79,7 @@ async def test_host_release_runs_and_first_original_failure_remains_primary(
     def writer(batch: list[Event]) -> None:
         raise writer_error
 
-    pipe = EventPipeline(writer=writer, batch_size=1)
+    pipe = EventPipeline(now=system_clock().now, writer=writer, batch_size=1)
     clients = ClientSet(pipeline_factory=lambda: pipe)
     host = AgentHost(
         runtime_owner=uuid4(),
@@ -124,7 +125,7 @@ async def test_boot_before_host_closes_writer_even_if_it_failed_and_still_closes
     def writer(batch: list[Event]) -> None:
         raise original
 
-    pipe = EventPipeline(writer=writer, batch_size=1)
+    pipe = EventPipeline(now=system_clock().now, writer=writer, batch_size=1)
     clients = ClientSet(pipeline_factory=lambda: pipe)
     closed_pools: list[str] = []
     pidfile = (
@@ -177,7 +178,7 @@ async def test_boot_primary_survives_a_failed_constructed_writer_cleanup(
     def writer(batch: list[Event]) -> None:
         raise writer_error
 
-    pipe = EventPipeline(writer=writer, batch_size=1)
+    pipe = EventPipeline(now=system_clock().now, writer=writer, batch_size=1)
     clients = ClientSet(pipeline_factory=lambda: pipe)
 
     def fail_during_boot() -> None:

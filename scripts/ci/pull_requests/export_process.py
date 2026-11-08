@@ -4,6 +4,8 @@ from collections.abc import Generator
 from contextlib import contextmanager
 from pathlib import Path
 
+from base.clock import SYSTEM_TIMERS, Clock
+from base.clock.configuration import clock_config_from_boot
 from base.cluster.dataplane.direct_url import ClusterDirectUrl
 from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.config import ConfigBoot
@@ -63,6 +65,7 @@ def owned_event_pipeline(
         database=database,
         machine=machine,
         home=home,
+        now=Clock(clock_config_from_boot(config), timers=SYSTEM_TIMERS).now,
         otlp_enabled=lambda: config.view.observability.telemetry_otlp_enabled,
         otlp_endpoint=lambda: config.view.observability.telemetry_otlp_endpoint,
     )

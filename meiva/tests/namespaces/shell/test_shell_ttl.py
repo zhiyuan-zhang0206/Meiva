@@ -10,6 +10,7 @@ import pytest
 
 import meiva
 from base import telemetry
+from base.clock.tests.fakes import system_clock
 from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.db import Database
@@ -29,6 +30,7 @@ def event_pipeline(
     database: Database, machine_identity: MachineIdentityReader, unit_home: Path
 ) -> Iterator[telemetry.EventPipeline]:
     pipeline = telemetry.build_pipeline(
+        now=system_clock().now,
         database=lambda: database,
         machine=machine_identity,
         home=unit_home,

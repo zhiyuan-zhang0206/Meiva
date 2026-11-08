@@ -50,9 +50,16 @@ its original worker error is collected before replacement. Downstream exit
 cleanup still runs through the last concrete binding.
 
 The public `EventPipeline` resource lives in `delivery/pipeline.py`; construction starts
-its worker and requires the root's writer. `build_pipeline(database=..., machine=..., home=..., otlp_enabled=..., otlp_endpoint=...,
-flush_interval_s=0.5)` binds
+its worker and requires the root's writer and the stream's clock. `build_pipeline(database=..., machine=..., home=..., now=...,
+otlp_enabled=..., otlp_endpoint=..., flush_interval_s=0.5)` binds
 ordinary sinks to that root's database factory and owns one lazy OTLP backend.
+
+`now` is the process clock the stream stamps with: the write instant and retention cutoff of every
+JSONL mirror batch, the loss alarm of a saturated queue, and the default timestamp of an event whose
+producer passed none. The root reads the clock once and hands it down, and `init_telemetry` binds it
+beside the pipeline (`process_state["now"]`), so the stream has one time source: a process that binds
+a stream but no clock raises at its first default-stamped event instead of reading the host clock a
+second time.
 The backend reads its machine eligibility only when enabled export is requested;
 no global machine identity or exporter is discovered. Its eligibility verdict is
 frozen within that backend, so independent attachment owners cannot share it. Controlled host/exec logging binds

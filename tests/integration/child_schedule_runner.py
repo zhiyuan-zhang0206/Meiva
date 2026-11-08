@@ -18,6 +18,8 @@ import threading
 import time
 from pathlib import Path
 
+from base.clock import SYSTEM_TIMERS, Clock
+from base.clock.configuration import clock_config_from_boot
 from base.clock.tests.seeded_rng import seeded_rng
 from base.host.exit_codes import hard_exit
 
@@ -110,6 +112,7 @@ def completion_during_stall(schedule_id: int) -> None:
             database=lambda: database,
             machine=machine,
             home=meiva_home(),
+            now=Clock(clock_config_from_boot(config), timers=SYSTEM_TIMERS).now,
             otlp_enabled=lambda: config.view.observability.telemetry_otlp_enabled,
             otlp_endpoint=lambda: config.view.observability.telemetry_otlp_endpoint,
         ),

@@ -14,6 +14,7 @@ from typing import Any
 import pytest
 
 from base.agents.context.clients import DatabaseHandle
+from base.clock.tests.fakes import system_clock
 from base.host.net.tests.local_http import closed_port_url
 from base.telemetry import DrainStatus, EventPipeline
 from cli.commands.observability import _lgtm_provisioning as provisioning
@@ -48,7 +49,7 @@ def _repo(tmp_path: Path, reference: Any = _REFERENCE) -> Path:
 
 def _render(repo: Path, native: Path, dashboard: DashboardOutcome = _BROKEN) -> list[Any]:
     written: list[Any] = []
-    pipeline = EventPipeline(writer=written.extend)
+    pipeline = EventPipeline(now=system_clock().now, writer=written.extend)
     try:
         provisioning.render_provisioning(
             repo, native, dashboard=dashboard, producer=lambda: pipeline
@@ -290,7 +291,7 @@ def test_a_render_answers_the_destinations_it_changed(tmp_path: Path) -> None:
 
     def render() -> tuple[Path, ...]:
         written: list[Any] = []
-        pipeline = EventPipeline(writer=written.extend)
+        pipeline = EventPipeline(now=system_clock().now, writer=written.extend)
         try:
             return provisioning.render_provisioning(
                 repo, native, dashboard=dashboard, producer=lambda: pipeline

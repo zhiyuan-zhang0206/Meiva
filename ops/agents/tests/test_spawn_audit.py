@@ -16,6 +16,7 @@ import pytest
 from base import telemetry
 from base.agents.birth.spawn import create_agent_row
 from base.agents.inbox.insert import insert_inbound_message
+from base.clock.tests.fakes import system_clock
 from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config.service_read import ConfigAuthority
@@ -173,6 +174,7 @@ def fork_events(
 ) -> Generator[telemetry.EventPipeline]:
     """Retain the actual writer only for fork event delivery contracts."""
     pipeline = telemetry.build_pipeline(
+        now=system_clock().now,
         database=lambda: Database.from_settings(gate=database_gate),
         machine=machine_identity,
         home=unit_home,

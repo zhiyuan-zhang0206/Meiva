@@ -212,6 +212,7 @@ def cmd_stop(
         host=env.command.host_after_config(),
         home=env.command.home,
         pid=env.command.pid,
+        now=env.command.clock.now,
     ) as audit:
         code = do_stop(request, env, retained_children)
         audit.exited(code)

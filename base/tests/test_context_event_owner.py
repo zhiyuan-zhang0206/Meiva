@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 import pytest
 
 from base.agents.context.clients import ClientSet
+from base.clock.tests.fakes import system_clock
 from base.telemetry.delivery.pipeline import EventPipeline
 from base.telemetry.delivery.receipts import DrainStatus, Event
 
@@ -49,7 +50,7 @@ def test_unfinished_close_retains_the_actual_writer_until_late_completion() -> N
         written.extend(batch)
 
     def factory() -> EventPipeline:
-        pipe = EventPipeline(writer=writer, batch_size=1)
+        pipe = EventPipeline(now=system_clock().now, writer=writer, batch_size=1)
         built.append(pipe)
         return pipe
 
@@ -83,7 +84,7 @@ def test_late_writer_error_retains_original_error_after_other_client_cleanup() -
         assert release.wait(3)
         raise original
 
-    pipe = EventPipeline(writer=writer, batch_size=1)
+    pipe = EventPipeline(now=system_clock().now, writer=writer, batch_size=1)
     clients = ClientSet(pipeline_factory=lambda: pipe)
 
     class OtherClient:
@@ -122,7 +123,7 @@ def test_sync_observes_the_owned_writer_failure_without_reconstructing_it() -> N
     built: list[EventPipeline] = []
 
     def factory() -> EventPipeline:
-        pipe = EventPipeline(writer=writer, batch_size=1)
+        pipe = EventPipeline(now=system_clock().now, writer=writer, batch_size=1)
         built.append(pipe)
         return pipe
 

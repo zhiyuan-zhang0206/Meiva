@@ -12,6 +12,7 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
+from base.clock.tests.fakes import system_clock
 from base.clock.tests.manual_timers import ManualTimers
 from base.telemetry import EventPipeline
 from scripts.ci.pull_requests import runs_api, runs_contracts, runs_export
@@ -209,7 +210,7 @@ def test_dry_run_prints_snapshot_without_writes_or_emission(
 ) -> None:
     replies = [("actions/runs?", "[]", 0), ("pulls?", "[]", 0)]
     observed: list[object] = []
-    pipeline = EventPipeline(writer=observed.extend)
+    pipeline = EventPipeline(now=system_clock().now, writer=observed.extend)
     try:
         assert (
             runs_export.main(
@@ -232,7 +233,7 @@ def test_dry_run_prints_snapshot_without_writes_or_emission(
 def test_failed_authoritative_pr_walk_aborts_before_emission(tmp_path: Path) -> None:
     replies = [("actions/runs?", "[]", 0), ("pulls?", "", 1)]
     observed: list[object] = []
-    pipeline = EventPipeline(writer=observed.extend)
+    pipeline = EventPipeline(now=system_clock().now, writer=observed.extend)
     try:
         assert (
             runs_export.main(
@@ -273,7 +274,7 @@ def test_transient_gh_errors_retry_raw_commands_with_existing_budget() -> None:
 
 def test_the_state_directory_defaults_to_the_home_the_entry_resolved(tmp_path: Path) -> None:
     observed: list[object] = []
-    pipeline = EventPipeline(writer=observed.extend)
+    pipeline = EventPipeline(now=system_clock().now, writer=observed.extend)
     try:
         assert (
             runs_export.main(

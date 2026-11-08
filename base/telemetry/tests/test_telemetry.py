@@ -29,6 +29,7 @@ from opentelemetry import trace as otel_trace
 from opentelemetry.trace import NonRecordingSpan, SpanContext
 
 from base import cluster, telemetry
+from base.clock.tests.fakes import system_clock
 from base.db import Database
 from base.paths import meiva_home
 from base.paths.tests.homes import unit_home as unit_home
@@ -82,6 +83,7 @@ def _mirror_last(event_name: str, agent: int | None = None) -> dict[str, Any]:
 def bind_telemetry(database: Database, unit_home: Path) -> Iterator[None]:
     """Bind a stable identity to this test's explicit native writer owner."""
     pipeline = telemetry.build_pipeline(
+        now=system_clock().now,
         database=lambda: database,
         machine=machine_identity(),
         home=unit_home,
@@ -304,7 +306,7 @@ def test_the_mirror_holds_every_event_in_one_file_and_no_filtered_copy(
         for event_name in event_names
     ]
 
-    telemetry.append_jsonl(events, target_dir=tmp_path)
+    telemetry.append_jsonl(events, target_dir=tmp_path, now=now)
 
     day = now.strftime("%Y%m%d")
     full_rows = [
@@ -326,7 +328,7 @@ def test_jsonl_mirror_prunes_by_the_full_retention_and_sweeps_retired_rollup_lef
     for path in (full_old, full_kept, rollup_old, rollup_kept, malformed):
         path.write_text("{}\n", encoding="utf-8")
 
-    telemetry.prune_jsonl_mirror(target_dir=tmp_path, retention_days=2)
+    telemetry.prune_jsonl_mirror(target_dir=tmp_path, now=today, retention_days=2)
 
     assert not full_old.exists()
     assert full_kept.exists()
@@ -482,7 +484,9 @@ def test_regular_events_shed_immediately_when_full() -> None:
         entered.set()
         assert release.wait(2)
 
-    pipe = telemetry.EventPipeline(writer=writer, batch_size=1, queue_maxsize=1)
+    pipe = telemetry.EventPipeline(
+        now=system_clock().now, writer=writer, batch_size=1, queue_maxsize=1
+    )
     try:
         pipe.enqueue(_mk_event("telemetry", "turn_end"))
         assert entered.wait(1)
@@ -502,7 +506,9 @@ def test_audit_events_are_shed_like_any_other_event_on_a_full_queue() -> None:
         entered.set()
         assert release.wait(2)
 
-    pipe = telemetry.EventPipeline(writer=writer, batch_size=1, queue_maxsize=1)
+    pipe = telemetry.EventPipeline(
+        now=system_clock().now, writer=writer, batch_size=1, queue_maxsize=1
+    )
     try:
         pipe.enqueue(_mk_event("audit", "send_message"))
         assert entered.wait(1)
@@ -515,7 +521,7 @@ def test_audit_events_are_shed_like_any_other_event_on_a_full_queue() -> None:
 
 
 def test_explicit_capture_precedes_closed_projection_admission() -> None:
-    pipe = telemetry.EventPipeline(writer=lambda _batch: None)
+    pipe = telemetry.EventPipeline(now=system_clock().now, writer=lambda _batch: None)
     pipe.stop(timeout=1)
     captured: list[telemetry.Event] = []
 
@@ -559,9 +565,12 @@ def test_a_reader_that_answers_wins_over_the_home_file(tmp_path: Path) -> None:
 # not rename it, and a label bound early must lose to the boot seam that comes later. Only the pair
 # keeps `sdk` from quietly outranking `agent_host` on the day someone reorders startup (task #6347).
 def test_an_unbound_label_never_renames_a_bound_process(unit_home: Path) -> None:
-    telemetry.bind_identity(process="agent_host", home=unit_home)
+    telemetry.bind_identity(now=system_clock().now, process="agent_host", home=unit_home)
 
-    assert telemetry.bind_identity_if_unbound(process="sdk", home=unit_home) is False
+    assert (
+        telemetry.bind_identity_if_unbound(now=system_clock().now, process="sdk", home=unit_home)
+        is False
+    )
     assert telemetry.process_name() == "agent_host"
 
 
@@ -573,9 +582,12 @@ def test_a_late_boot_seam_replaces_the_unbound_label(
     monkeypatch.setitem(emitter.process_state, "home", None)
     monkeypatch.setitem(emitter.process_state, "cluster", None)
 
-    assert telemetry.bind_identity_if_unbound(process="sdk", home=unit_home) is True
+    assert (
+        telemetry.bind_identity_if_unbound(now=system_clock().now, process="sdk", home=unit_home)
+        is True
+    )
     assert telemetry.process_name() == "sdk"
 
-    telemetry.bind_identity(process="agent_host", home=unit_home)
+    telemetry.bind_identity(now=system_clock().now, process="agent_host", home=unit_home)
 
     assert telemetry.process_name() == "agent_host"

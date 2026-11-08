@@ -7,6 +7,11 @@ from pathlib import Path
 
 SINK_SENTINEL = "start-gate-no-sink-sentinel"
 
+# meiva:note
+# This child is run from a checkout whose `cli` package is not installed, so the import below
+# follows the sys.path bootstrap above it rather than sitting in the module header.
+from base.clock.tests.fakes import system_clock  # noqa: E402
+
 
 def main(home: Path, checkout: Path) -> None:
     from base.log import prepare_process_logging
@@ -32,6 +37,7 @@ def main(home: Path, checkout: Path) -> None:
         database,
         machine=command.machine,
         home=home,
+        now=system_clock().now,
         otlp_enabled=command.otlp_enabled,
         otlp_endpoint=command.otlp_endpoint,
     )

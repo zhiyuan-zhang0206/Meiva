@@ -16,7 +16,7 @@ exports = ["accounting.py", "classify_paths.py", "commands.py", "export_process.
 "accounting.py" = { kinds = ["clock", "environ", "platform", "argv"], why = "CLI entrypoint resolves the current UTC timestamp for --report rollups; builds the host of this process with Host.system(), handing it the process environment; the __main__ guard reads argv[1:] once and hands it to main" }
 "classify_paths.py" = { kinds = ["cwd", "argv"], why = "CI classify entrypoint resolves the checked-out repository root from cwd; it also reads its command line (argv) in its `__main__` guard, as the process entry" }
 "commands.py" = { kinds = ["environ"], why = "CLI entrypoint hands the process environment to the owner-operations dispatch; it is not deployment configuration" }
-"export_process.py" = { kinds = ["db", "settings"], why = "Tool entry composes its process resources from the launch configuration" }
+"export_process.py" = { kinds = ["db", "settings", "clock"], why = "Tool entry composes its process resources from the launch configuration; builds the process clock from SYSTEM_TIMERS for the event stream it composes" }
 "plan_file_shards.py" = { kinds = ["argv"], why = "CI script entry: its __main__ block raises SystemExit with main(sys.argv[1:])" }
 "pr_flow_export.py" = { kinds = ["clock", "environ", "home", "pid", "settings", "argv"], why = "CLI entrypoint resolves the current UTC timestamp, builds the process clock from the settings, resolves the home it operates once in its __main__ block; the __main__ guard reads argv[1:] once and hands it to main" }
 "pyright_scope.py" = { kinds = ["argv"], why = "the __main__ guard reads argv[1:] once and hands it to main" }

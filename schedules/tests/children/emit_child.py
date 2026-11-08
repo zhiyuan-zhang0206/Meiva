@@ -11,6 +11,7 @@ import json
 import sys
 from pathlib import Path
 
+from base.clock.tests.fakes import system_clock
 from base.log import logger, prepare_process_logging
 from base.native_process.loaded_commit import LoadedCommit
 from base.paths import logs_dir
@@ -22,7 +23,7 @@ from schedules.jobs.telemetry_event import emit_system_event
 def main(process: str, home: Path) -> None:
     prepare_process_logging()
     events: list[Event] = []
-    pipeline = EventPipeline(writer=events.extend)
+    pipeline = EventPipeline(now=system_clock().now, writer=events.extend)
     try:
         for _ in range(2):
             emit_system_event(

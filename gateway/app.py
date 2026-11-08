@@ -16,7 +16,8 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from base import paths, telemetry
 from base.api_contracts.agent_contract import MeivaAgentError
-from base.clock import SYSTEM_TIMERS, Clock
+from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
+from base.clock.configuration import clock_config_from_boot
 from base.cluster.machine.boot import gateway_access_from_boot
 from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.cluster.rate_limit import LoginRateLimitConfig, LoginRateLimiter
@@ -611,6 +612,7 @@ def create_app_from_environment() -> FastAPI:
         image=LOADED_IMAGE,
         machine=ConfiguredMachineIdentity(config),
         host=Host.system(environ=config.process_environment()),
+        now=Clock(clock_config_from_boot(config), timers=SYSTEM_TIMERS).now,
     )
     gateway_config_value = process_config(process.config, home=home)
     return create_app(
@@ -634,6 +636,10 @@ def openapi_schema() -> dict[str, object]:
 
 # meiva:note
 # The OpenAPI document of an app built cold: no configuration field is read.
+#
+# The process clock is the same place that rule reaches: a clock built from this configuration
+# would read it, and this app serves no request that could be stamped, so the fixed UTC clock is
+# what a document build can honestly state.
 def openapi_schema_of(config: ConfigBoot, *, home: Path) -> dict[str, object]:
     process = GatewayProcess(
         home=home,
@@ -641,6 +647,12 @@ def openapi_schema_of(config: ConfigBoot, *, home: Path) -> dict[str, object]:
         image=LOADED_IMAGE,
         machine=ConfiguredMachineIdentity(config),
         host=Host.system(environ=config.process_environment()),
+        now=Clock(
+            ClockConfig(
+                timezone="UTC", authoritative_timezone="UTC", message_timestamp_weekday=False
+            ),
+            timers=SYSTEM_TIMERS,
+        ).now,
     )
     with process.lifetime():
         app = create_app(

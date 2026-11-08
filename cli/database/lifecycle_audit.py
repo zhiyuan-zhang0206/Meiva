@@ -11,6 +11,7 @@ import time
 from collections.abc import Callable, Generator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Literal
 
@@ -165,6 +166,7 @@ def operator_lifecycle_audit(
     host: Host,
     home: Path,
     pid: int,
+    now: Callable[[], datetime],
     enabled: bool = True,
 ) -> Generator[CommandAudit, None, None]:
     if not enabled:
@@ -180,7 +182,7 @@ def operator_lifecycle_audit(
     # the stderr of a start that must stay silent.
     from base.telemetry import bind_identity
 
-    bind_identity(process="cli-lifecycle", home=home)
+    bind_identity(process="cli-lifecycle", home=home, now=now)
     environ = host.environ
     try:
         caller = _caller_identity(environ, pid=pid)

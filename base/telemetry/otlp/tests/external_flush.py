@@ -11,6 +11,7 @@ import pytest
 from opentelemetry.sdk._logs import ReadableLogRecord
 from opentelemetry.sdk._logs.export import InMemoryLogRecordExporter, LogRecordExportResult
 
+from base.clock.tests.fakes import system_clock
 from base.telemetry.delivery.receipts import Event as TelemetryEvent
 from base.telemetry.otlp import telemetry_otlp
 
@@ -40,6 +41,7 @@ def paused_otlp_record(tmp_path: Path) -> Iterator[tuple[Event, InMemoryLogRecor
     logger_provider.add_log_record_processor(SimpleLogRecordProcessor(exporter))
 
     backend = telemetry_otlp.OtlpBackend(
+        now=system_clock().now,
         export_allowed=lambda: True,
         enabled=lambda: True,
         providers=(logger_provider, MeterProvider(metric_readers=[InMemoryMetricReader()])),

@@ -4,6 +4,7 @@ from pathlib import Path
 import pytest
 
 from base import telemetry
+from base.clock.tests.fakes import system_clock
 from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config.tests.config_authority import config_authority as config_authority
@@ -25,6 +26,7 @@ def event_pipeline(
 ) -> Iterator[telemetry.EventPipeline]:
     """Own the process writer a delivered inbound and a service operation share."""
     pipeline = telemetry.build_pipeline(
+        now=system_clock().now,
         database=lambda: database,
         machine=machine_identity,
         home=unit_home,

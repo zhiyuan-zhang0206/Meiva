@@ -7,6 +7,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from base.clock.tests.fakes import system_clock
 from base.cluster.dataplane.direct_url import ClusterDirectUrl
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
@@ -160,6 +161,7 @@ def test_command_pipeline_is_lazy_and_retains_the_same_database_factory(
         factory,
         machine=command_runtime.machine,
         home=command_home,
+        now=system_clock().now,
         otlp_enabled=command_runtime.otlp_enabled,
         otlp_endpoint=command_runtime.otlp_endpoint,
     )

@@ -15,6 +15,7 @@ from fastapi.testclient import TestClient
 from base import paths
 from base.api_contracts.idempotency import PRINCIPAL_SCOPE, SCOPE_HEADER
 from base.clock import SYSTEM_TIMERS
+from base.clock.tests.fakes import system_clock
 from base.clock.tests.seeded_rng import seeded_rng
 from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.configured import ConfiguredMachineIdentity
@@ -143,6 +144,7 @@ def gateway_test_process(
             ConfiguredMachineIdentity(resolved_config) if machine is None else machine
         )
         process = GatewayProcess(
+            now=system_clock().now,
             home=paths.meiva_home() if home is None else home,
             config=resolved_config,
             image=LOADED_IMAGE,
@@ -173,6 +175,7 @@ def gateway_test_app(
         resolved_boot = _resolve_boot(boot, fields)
         resolved_machine = ConfiguredMachineIdentity(resolved_boot) if machine is None else machine
         process = GatewayProcess(
+            now=system_clock().now,
             home=paths.meiva_home() if home is None else home,
             config=resolved_boot,
             image=LOADED_IMAGE,

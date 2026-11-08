@@ -11,6 +11,7 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
+from base.clock.tests.fakes import system_clock
 from base.paths import meiva_home
 from base.telemetry import Event, EventPipeline
 from scripts.ci.pull_requests import pr_flow_export as pr_flow
@@ -261,7 +262,7 @@ def test_save_json_failed_replace_keeps_the_prior_file_and_no_tmp(tmp_path: Path
 
 def test_emit_snapshot_skips_the_pipeline_in_dry_run() -> None:
     emitted: list[Event] = []
-    writer = EventPipeline(writer=emitted.extend)
+    writer = EventPipeline(now=system_clock().now, writer=emitted.extend)
     snapshot = pr_flow.Snapshot(
         version=1,
         generated_at="2026-09-13T00:25:00+00:00",

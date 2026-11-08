@@ -15,6 +15,7 @@ from typing import Any
 
 import pytest
 
+from base.clock.tests.fakes import system_clock
 from base.telemetry.delivery.defer_plan import (
     CHILD_DEFER_MAX_AGE_DEFAULT_S,
     ChildDeferPlan,
@@ -67,6 +68,7 @@ def _make_backend(*, mirror_dir: Path, queue_maxsize: int = 8) -> tuple[Any, Any
     metric_reader = InMemoryMetricReader()
     metric_provider = MeterProvider(metric_readers=[metric_reader])
     backend = telemetry_otlp.OtlpBackend(
+        now=system_clock().now,
         export_allowed=lambda: True,
         enabled=lambda: True,
         providers=(logger_provider, metric_provider),
@@ -276,6 +278,7 @@ def test_invalid_eligibility_preserves_deferred_records_and_propagates(tmp_path:
         raise error
 
     backend = telemetry_otlp.OtlpBackend(
+        now=system_clock().now,
         export_allowed=invalid,
         enabled=lambda: True,
         mirror_dir=tmp_path,

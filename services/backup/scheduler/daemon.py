@@ -15,7 +15,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from base import telemetry
-from base.clock import SYSTEM_TIMERS
+from base.clock import SYSTEM_TIMERS, Clock
+from base.clock.configuration import clock_config_from_boot
 from base.cluster.dataplane.direct_url import ClusterDirectUrl
 from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.configured import ConfiguredMachineIdentity
@@ -266,6 +267,7 @@ def main() -> None:
     version = CodeVersion(image)
     gate = ProcessDbGate(version=version.get, process="pg_backup", end_process=hard_exit)
     pipeline = build_pipeline(
+        now=Clock(clock_config_from_boot(config), timers=SYSTEM_TIMERS).now,
         otlp_enabled=lambda: config.view.observability.telemetry_otlp_enabled,
         otlp_endpoint=lambda: config.view.observability.telemetry_otlp_endpoint,
         database=lambda: scheduler_database(config, machine, gate, home=process_home),

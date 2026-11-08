@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Any
 
 from base import telemetry
+from base.clock.tests.fakes import system_clock
 from base.log.tests.log_records import LogRecords
 from base.telemetry.delivery import loss, mirror
 
@@ -100,6 +101,7 @@ def _make_sink(
     maxsize: int,
 ) -> telemetry.EventPipeline:
     return telemetry.EventPipeline(
+        now=system_clock().now,
         writer=writer,
         batch_size=batch,
         flush_interval_s=interval,
@@ -215,6 +217,7 @@ def test_shed_records_report_one_event_log_drop() -> None:
     import threading
 
     pipe = telemetry.EventPipeline.__new__(telemetry.EventPipeline)
+    pipe._now = system_clock().now
     pipe._queue = queue.Queue(maxsize=1)
     pipe._admission_lock = threading.Lock()
     pipe._stop_requested = threading.Event()
@@ -265,7 +268,7 @@ def test_jsonl_mirror_failure_is_reported_not_silent(unit_home: Path) -> None:
     )
     try:
         for index in range(50):
-            telemetry.append_jsonl([_event(index)], target_dir=mirror_dir)
+            telemetry.append_jsonl([_event(index)], target_dir=mirror_dir, now=system_clock().now())
     finally:
         logger.remove(sink_id)
         bad_file.rmdir()
@@ -318,6 +321,8 @@ def test_delayed_loss_summary_preserves_actual_drop_time() -> None:
     from datetime import timedelta
 
     dropped_at = datetime.now(UTC) - timedelta(minutes=10)
-    report = loss.loss_event(_event(1), 3, "emitter", dropped_at=dropped_at)
+    report = loss.loss_event(
+        _event(1), 3, "emitter", now=system_clock().now(), dropped_at=dropped_at
+    )
     assert report.attributes["last_dropped_at"] == dropped_at.timestamp()
     assert report.ts > dropped_at

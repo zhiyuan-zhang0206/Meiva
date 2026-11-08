@@ -7,6 +7,8 @@ order of the environment edits against the first `import meiva` is part of what 
 import os
 import sys
 
+from base.clock.tests.fakes import system_clock
+
 
 def config_lite() -> None:
     import base.config as c
@@ -42,7 +44,9 @@ def telemetry_overflow() -> None:
         entered.set()
         assert release.wait(5)
 
-    pipe = telemetry.EventPipeline(writer=write, batch_size=1, queue_maxsize=1)  # pyright: ignore[reportArgumentType]
+    pipe = telemetry.EventPipeline(
+        now=system_clock().now, writer=write, batch_size=1, queue_maxsize=1
+    )  # pyright: ignore[reportArgumentType]
     event = telemetry.Event(
         ts=datetime.now(UTC),
         trace_id=None,

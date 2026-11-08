@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 from pydantic import BaseModel, ConfigDict, Field
 
+from base.clock.tests.fakes import system_clock
 from base.paths import meiva_home
 
 
@@ -70,7 +71,7 @@ def failed_report_writer() -> None:
 
     records = LogRecords()
     sink = logger.add(lambda message: records.append(dict(message.record)))
-    pipeline = EventPipeline(writer=unavailable, flush_interval_s=0.01)
+    pipeline = EventPipeline(now=system_clock().now, writer=unavailable, flush_interval_s=0.01)
     init_telemetry(home=meiva_home(), pipeline=pipeline)
     try:
         report_plugin_load_failure("demo", RuntimeError("boom"))

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import contextlib
 import json
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
 from hashlib import blake2b
 from pathlib import Path
 
@@ -37,13 +37,14 @@ def is_expired_mirror_filename(filename: str, *, cutoff: str) -> bool:
     return len(day) == 8 and day.isdigit() and day < cutoff
 
 
-def _utc_now() -> datetime:
-    return datetime.now(UTC)
-
-
+# meiva:note
+# `now` is the instant of the write this prune follows, handed in by the writer that observed it: a
+# retention window is measured from when the file stopped being written, never from a clock this
+# module reads for itself.
 def prune_jsonl_mirror(
     *,
     target_dir: Path,
+    now: datetime,
     retention_days: int = JSONL_RETENTION_DAYS,
 ) -> None:
     """Delete day-stamped mirror files older than their retention tier.
@@ -52,7 +53,7 @@ def prune_jsonl_mirror(
     durable fallback for audit events; log-stream lines are also held by the
     loguru file sinks, so the mirror's own retention is what bounds its disk
     footprint."""
-    cutoff = (_utc_now() - timedelta(days=retention_days)).strftime("%Y%m%d")
+    cutoff = (now - timedelta(days=retention_days)).strftime("%Y%m%d")
     # meiva:note
     # Only plain `.jsonl` matches here, and that is deliberate: an older day may be
     # stored compressed as `events-YYYYMMDD.jsonl.zst` (recipe and recovery steps in
@@ -69,7 +70,11 @@ def prune_jsonl_mirror(
                 path.unlink()
 
 
-def append_jsonl(events: list[Event], *, target_dir: Path) -> None:
+# meiva:note
+# `now` is when the batch is written, not when its events happened: a replayed or migrated row
+# reconstructs an old instant and would otherwise land in that day's file, where the next real
+# prune deletes it.
+def append_jsonl(events: list[Event], *, target_dir: Path, now: datetime) -> None:
     """Append the batch to today's mirror file, one JSON line per event.
 
     Each row carries the stable surrogate ``id`` derived from its id-free body
@@ -82,7 +87,7 @@ def append_jsonl(events: list[Event], *, target_dir: Path) -> None:
     otherwise degrade it without a trace. Single write() per line with
     O_APPEND semantics (opened in append mode) keeps concurrent processes
     from interleaving."""
-    day = _utc_now().strftime("%Y%m%d")
+    day = now.strftime("%Y%m%d")
     try:
         lines = [
             json.dumps(event_row(e), default=str, separators=(",", ":"), ensure_ascii=False) + "\n"
@@ -109,7 +114,7 @@ def append_jsonl(events: list[Event], *, target_dir: Path) -> None:
         if process_state["jsonl_day"] != day:
             process_state["jsonl_day"] = day
             with failure_isolated("jsonl mirror prune"):
-                prune_jsonl_mirror(target_dir=target_dir)
+                prune_jsonl_mirror(target_dir=target_dir, now=now)
 
 
 # ── drain-thread failure visibility ─────────────────────────────────────────

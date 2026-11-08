@@ -20,6 +20,7 @@ import os
 import random
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, replace
+from datetime import datetime
 from pathlib import Path
 from typing import Protocol, assert_never
 
@@ -192,6 +193,7 @@ def process_clients(
             database=database,
             machine=machine,
             home=resolve_meiva_home(),
+            now=Clock(clock_config_from_boot(config), timers=SYSTEM_TIMERS).now,
             otlp_enabled=lambda: config.view.observability.telemetry_otlp_enabled,
             otlp_endpoint=lambda: config.view.observability.telemetry_otlp_endpoint,
         )
@@ -352,13 +354,30 @@ SDK_PROCESS = "sdk"
 
 
 # meiva:note
+# The clock an SDK process states before it has resolved any configuration: the callable resolves
+# the settings clock the first time an event is actually stamped, so binding the identity reads no
+# settings. Importing `meiva` and sharing a boot must stay cold — a test makes `MEIVA_TIMEZONE`
+# invalid and requires the import to succeed — and a process that never stamps anything never pays
+# for the read.
+def _deferred_clock_now() -> datetime:
+    return Clock.from_settings().now()
+
+
+# meiva:note
 # The label a process gets when the SDK is what brought it here: `process_name()` documents
 # `sdk` as "a process that used the SDK without running a boot seam". Bound on plugin load, not
 # on `import meiva` — an import that never asks for a namespace has not started working.
 def bind_sdk_identity(home: Path) -> bool:
     from base import telemetry
 
-    return telemetry.bind_identity_if_unbound(process=SDK_PROCESS, home=home)
+    # meiva:note
+    # The process clock this binding establishes: `_deferred_clock_now` states how to read it
+    # without reading it, and the load rebinds the clock it builds from its own configuration once
+    # it has one. An event whose producer passed no `ts` is stamped with that clock rather than
+    # with a second time source read behind the caller's back.
+    return telemetry.bind_identity_if_unbound(
+        process=SDK_PROCESS, home=home, now=_deferred_clock_now
+    )
 
 
 def ensure_plugins_loaded(
@@ -386,7 +405,7 @@ def ensure_plugins_loaded(
     # plugin surface is exactly the moment such a process begins acting as an SDK client, and this
     # is the composition root that already resolves the home. It never renames a process that
     # bound its own identity, and a later `init_telemetry` replaces the `sdk` label.
-    bind_sdk_identity(home)
+    named_here = bind_sdk_identity(home)
     state = _slot_facts()
     plan = plan_load(
         LoadFacts(
@@ -423,6 +442,14 @@ def ensure_plugins_loaded(
     except BaseException as exc:
         _sdk_install.mark_load_failed(exc)
         raise
+    if named_here:
+        # meiva:note
+        # The clock this load built from its own configuration replaces the deferred one the
+        # identity bound: an SDK process given an explicit `ConfigBoot` must stamp with that
+        # configuration's clock, not with the process settings the deferred callable would read.
+        from base import telemetry
+
+        telemetry.bind_process_clock(inputs.clock.now)
     load_surface(inputs)
     _bind_installed_catalog(inputs.context)
 

@@ -9,6 +9,7 @@ from pathlib import Path
 
 sys.path.insert(0, sys.argv[1])
 import base.telemetry.process_logging
+from base.clock.tests.fakes import system_clock
 
 assert "base.config" not in sys.modules
 pipelines: list[object] = []
@@ -17,7 +18,7 @@ pipelines: list[object] = []
 def producer() -> object:
     from base.telemetry.delivery.pipeline import EventPipeline
 
-    pipeline = EventPipeline(writer=lambda _batch: None)
+    pipeline = EventPipeline(now=system_clock().now, writer=lambda _batch: None)
     pipelines.append(pipeline)
     return pipeline
 

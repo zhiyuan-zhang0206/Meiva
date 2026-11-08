@@ -423,7 +423,7 @@ async def test_root_logging_owns_only_the_started_pipeline(
     made: list[EventPipeline] = []
 
     def producer() -> EventPipeline:
-        pipeline = EventPipeline(writer=lambda _events: None)
+        pipeline = EventPipeline(now=system_clock().now, writer=lambda _events: None)
         made.append(pipeline)
         return pipeline
 
@@ -474,7 +474,7 @@ async def test_logging_startup_error_stops_its_constructed_writer(
     error = ValueError("root logging failed after constructing its writer")
 
     def producer() -> EventPipeline:
-        pipeline = EventPipeline(writer=lambda _events: None)
+        pipeline = EventPipeline(now=system_clock().now, writer=lambda _events: None)
         made.append(pipeline)
         return pipeline
 

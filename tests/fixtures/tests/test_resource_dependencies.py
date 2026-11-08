@@ -46,12 +46,14 @@ def drained_tail(provisioned_db):
 def tail_pipeline(database, process_config):
     from pathlib import Path
     from base import telemetry
+    from base.clock.tests.fakes import system_clock
     from base.cluster.machine.configured import ConfiguredMachineIdentity
     machine = ConfiguredMachineIdentity(process_config)
     pipeline = telemetry.build_pipeline(
         database=lambda: database,
         machine=machine,
         home=Path(os.environ["MEIVA_HOME"]),
+        now=system_clock().now,
         otlp_enabled=lambda: False,
         otlp_endpoint="http://127.0.0.1:4318",
     )

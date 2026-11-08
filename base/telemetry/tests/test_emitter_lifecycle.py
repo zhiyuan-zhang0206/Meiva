@@ -11,6 +11,7 @@ from pathlib import Path
 import pytest
 
 from base import telemetry
+from base.clock.tests.fakes import system_clock
 from base.host import proc
 from base.log.tests.log_records import LogRecords
 from base.log.tests.log_records import loguru_records as loguru_records
@@ -97,6 +98,34 @@ def test_process_binding_rejects_replacing_a_live_owner() -> None:
     assert child.returncode == 0, child.stderr
 
 
+# meiva:note
+# The other half of "an unbound process drops what it emits": the decision is taken before the event
+# is built, but it never becomes a place to hide a caller's defect. A machine reader that fails for
+# any reason other than a missing name propagates out of `emit()` even though nothing would read the
+# event, and a reader that reports only a missing name still degrades to the home's own name — the
+# exact pair `resolve_machine` draws. Reintroducing an early return that skips the reader turns the
+# first half red; nothing else in the suite would.
+def test_a_dropped_event_still_surfaces_a_broken_machine_reader(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from base.cluster.machine import MachineNameMissing
+
+    monkeypatch.setitem(telemetry.process_state, "pipeline", None)
+    failure = RuntimeError("machine reader exploded")
+
+    def broken() -> str:
+        raise failure
+
+    with pytest.raises(RuntimeError) as raised:
+        telemetry.emit("telemetry", "sdk_call", machine_reader=broken)
+    assert raised.value is failure
+
+    def missing() -> str:
+        raise MachineNameMissing("this unit names no machine")
+
+    telemetry.emit("telemetry", "sdk_call", machine_reader=missing)
+
+
 def test_full_queue_stop_is_finite_and_closes_admission() -> None:
     entered, release = threading.Event(), threading.Event()
     written: list[telemetry.Event] = []
@@ -106,7 +135,9 @@ def test_full_queue_stop_is_finite_and_closes_admission() -> None:
         assert release.wait(3)
         written.extend(batch)
 
-    pipe = telemetry.EventPipeline(writer=writer, batch_size=1, queue_maxsize=1)
+    pipe = telemetry.EventPipeline(
+        now=system_clock().now, writer=writer, batch_size=1, queue_maxsize=1
+    )
     try:
         pipe.enqueue(event(1))
         assert entered.wait(1)
@@ -132,7 +163,9 @@ def test_sync_deadline_expires_in_marker_while_every_slot_is_taken() -> None:
         entered.set()
         assert release.wait(3)
 
-    pipe = telemetry.EventPipeline(writer=writer, batch_size=1, queue_maxsize=1)
+    pipe = telemetry.EventPipeline(
+        now=system_clock().now, writer=writer, batch_size=1, queue_maxsize=1
+    )
     try:
         pipe.enqueue(event(1))
         assert entered.wait(1)
@@ -154,7 +187,9 @@ def test_sync_deadline_expires_in_drain_while_the_writer_blocks() -> None:
         entered.set()
         assert release.wait(3)
 
-    pipe = telemetry.EventPipeline(writer=writer, batch_size=1, queue_maxsize=2)
+    pipe = telemetry.EventPipeline(
+        now=system_clock().now, writer=writer, batch_size=1, queue_maxsize=2
+    )
     try:
         pipe.enqueue(event(1))
         assert entered.wait(1)
@@ -184,7 +219,9 @@ def test_concurrent_sync_receipts_wait_for_their_own_fifo_batch() -> None:
             entered.set()
             assert release.wait(3)
 
-    pipe = telemetry.EventPipeline(writer=writer, batch_size=100, flush_interval_s=60)
+    pipe = telemetry.EventPipeline(
+        now=system_clock().now, writer=writer, batch_size=100, flush_interval_s=60
+    )
     try:
         pipe.enqueue(event(1))
         with ThreadPoolExecutor(max_workers=2) as callers:
@@ -213,7 +250,9 @@ def test_worker_failure_reports_immediately_and_never_acknowledges(
     def writer(batch: list[telemetry.Event]) -> None:
         raise failure
 
-    pipe = telemetry.EventPipeline(writer=writer, batch_size=100, flush_interval_s=60)
+    pipe = telemetry.EventPipeline(
+        now=system_clock().now, writer=writer, batch_size=100, flush_interval_s=60
+    )
     pipe.enqueue(event(1))
     with pytest.raises(type(failure)) as observed:
         pipe.sync(timeout=1)
@@ -240,7 +279,7 @@ def test_explicit_sink_isolation_preserves_successful_barrier(
         with reporting.failure_isolated("documented exporter"):
             raise RuntimeError("optional sink failure")
 
-    pipe = telemetry.EventPipeline(writer=writer, flush_interval_s=60)
+    pipe = telemetry.EventPipeline(now=system_clock().now, writer=writer, flush_interval_s=60)
     try:
         pipe.enqueue(event(1))
         assert pipe.sync(timeout=1).status is telemetry.DrainStatus.COMPLETED
@@ -257,7 +296,7 @@ def test_unreleasable_writer_cannot_make_stop_unbounded() -> None:
 
 @pytest.mark.parametrize("timeout", [-1.0, float("inf"), float("nan")])
 def test_invalid_timeout_cannot_create_an_unbounded_close(timeout: float) -> None:
-    pipe = telemetry.EventPipeline(writer=lambda _batch: None)
+    pipe = telemetry.EventPipeline(now=system_clock().now, writer=lambda _batch: None)
     try:
         with pytest.raises(ValueError, match="finite and non-negative"):
             pipe.sync(timeout=timeout)

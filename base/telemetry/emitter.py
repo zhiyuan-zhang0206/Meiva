@@ -129,15 +129,39 @@ def capture_trace_ids() -> tuple[str | None, str | None]:
 # identity it bound here. The machine comes from the home's own record; a home that cannot name
 # it still yields `unknown`, announced once. A caller holding a better identity (the health probe
 # carries the configured machine) resolves that itself with `resolve_machine`.
+#
+# `now` is the process clock the same binding establishes: the instant an event gets when its
+# producer passed no `ts` of its own. It is not a convenience default — a process that binds no
+# clock and emits such an event fails loudly (`_process_now`) rather than reading the host clock
+# a second time behind the caller's back.
+# meiva:note
+# Bind the clock this process stamps an event with, without binding who it is.
+#
+# `bind_identity` establishes it beside the identity, and a boot seam that only needs the clock
+# calls this directly: the operator CLI's composition root builds an invocation clock for every
+# command, and a verb like `meiva config set` writes its audit row (and stages the event for it)
+# on a host that runs no daemon, so it binds no stream and no process label but still states the
+# instant its row was written at. The caller hands in a clock it built; nothing here reads one.
+def bind_process_clock(now: Callable[[], datetime]) -> None:
+    process_state["now"] = now
+
+
 def bind_identity(
     *,
     process: str,
     home: Path,
+    now: Callable[[], datetime],
     agent_id: int | None = None,
 ) -> None:
     process_state["process"] = process
     process_state["agent_id"] = agent_id
     process_state["home"] = home
+    # meiva:note
+    # The process clock, beside every other fact this binding establishes. `emit()` stamps an
+    # event whose producer passed no `ts` with it, so a process that binds an identity binds the
+    # time source that identity speaks in — the caller that builds the process resources reads the
+    # clock once and hands it in, and no module below here reaches for the host clock.
+    bind_process_clock(now)
     if process_state["machine"] is None:
         process_state["machine"] = resolve_machine(home=home)
     # meiva:note
@@ -155,10 +179,10 @@ def bind_identity(
 # Returns True when this call is what named the process, False when it already had a name; one of
 # the bounded values is `sdk`, bound where the plugin surface loads (`meiva/boot.py`) and never at
 # `import meiva`.
-def bind_identity_if_unbound(*, process: str, home: Path) -> bool:
+def bind_identity_if_unbound(*, process: str, home: Path, now: Callable[[], datetime]) -> bool:
     if process_state["process"] != UNKNOWN_PROCESS:
         return False
-    bind_identity(process=process, home=home)
+    bind_identity(process=process, home=home, now=now)
     return True
 
 
@@ -186,7 +210,7 @@ def init_telemetry(
         # original failure before admitting the next concrete entry resource.
         bound.stop(timeout=0)
         process_state["pipeline"] = pipeline
-    bind_identity(process=process, home=home, agent_id=agent_id)
+    bind_identity(process=process, home=home, now=pipeline.now, agent_id=agent_id)
     if machine_reader is not None:
         process_state["machine"] = resolve_machine(machine_reader, home=home)
     if process_state["pipeline"] is None:
@@ -203,25 +227,64 @@ def pipeline_bound() -> bool:
     return process_state["pipeline"] is not None
 
 
-def _as_utc(ts: datetime | None) -> datetime:
-    """Normalize one event timestamp onto the stream's single clock: UTC.
+# meiva:note
+# The process clock this stream stamps with, or the error that says none was bound.
+#
+# A process establishes its clock at the seam that establishes its identity (`bind_identity`,
+# reached from `init_telemetry` with the pipeline's own clock), so a value is there for every
+# process that can emit. When it is not, the event has no honest instant: reading the host clock
+# here would be a second time source beside the one the process bound, and silently dropping the
+# row would hide a boot seam that forgot to hand its clock in.
+def _process_now() -> Callable[[], datetime]:
+    now = process_state["now"]
+    if now is None:
+        raise RuntimeError(
+            "this process bound no event clock: an event emitted without `ts` is stamped with the "
+            "process clock `init_telemetry`/`bind_identity` hands in, and neither has run here"
+        )
+    return now
 
-    `emit()`'s default is `datetime.now(UTC)`; an explicit `ts` — the loguru
-    adapter passes loguru's local-zone record time, replay/migration passes
-    stored rows — is converted to UTC here so the Event and every
-    serialization of it (the JSONL mirror `ts` field, the OTLP body) carries
-    one offset. A naive `ts` is UTC by contract (the one-time-source rule);
-    treating it as local would mix clocks. The 2026-08-25 mirror audit: loguru
-    rows wrote +08:00 into the mirror while direct emits wrote +00:00, which
-    made any local-wall-clock filter of the mirror misread gateway telemetry
-    as missing since the UTC-day rollover (task #1638)."""
+
+# meiva:note
+# Normalize one event timestamp onto the stream's single clock: UTC.
+#
+# `emit()`'s default is the process clock `_process_now()` returns; an explicit `ts` — the loguru
+# adapter passes loguru's local-zone record time, replay/migration passes stored rows — is converted
+# to UTC here so the Event and every serialization of it (the JSONL mirror `ts` field, the OTLP
+# body) carries one offset. A naive `ts` is UTC by contract (the one-time-source rule); treating it
+# as local would mix clocks. The 2026-08-25 mirror audit: loguru rows wrote +08:00 into the mirror
+# while direct emits wrote +00:00, which made any local-wall-clock filter of the mirror misread
+# gateway telemetry as missing since the UTC-day rollover (task #1638).
+def _as_utc(ts: datetime | None) -> datetime:
     if ts is None:
-        return datetime.now(UTC)
+        return _process_now()()
     if ts.tzinfo is None:
         return ts.replace(tzinfo=UTC)
     return ts.astimezone(UTC)
 
 
+# meiva:note
+# Enqueue one event into the unified stream. Never raises — except for a contract violation
+# (R2-C): an `event_name` with no `EventSpec` in `base/events/declarations`, or a category that
+# contradicts the declaration, raises `ValueError` (AGENTS.md "explode on unknown enums"), and
+# an event with no `ts` in a process that bound no clock raises `RuntimeError` (`_process_now`)
+# instead of stamping a second time source. An explicitly supplied producer capture callback
+# also propagates its errors before observation delivery; no current participant is inferred.
+# The loguru adapter wraps its call with `catch=True`, so a logging line that drifts
+# off-contract stays visible (JSONL mirror) without crashing the producer.
+#
+# An event is a named log record (OTel LogRecord semantics: events = logs with names);
+# `event_name` is that name — the `event.name` field, and the registry key (`EVENTS`).
+#
+# `trace_id`/`span_id` are captured from the active OTel span at this point (enqueue time — the
+# drain thread runs outside the span context). `agent_id` falls back to the process-bound value
+# (init_telemetry); explicit wins. `ts` defaults to the PROCESS clock at enqueue time — the one
+# `bind_identity` was handed — the single time source for the entire stream, and an explicit
+# `ts` is normalized to UTC before enqueue (`_as_utc`), so every serialization of the Event
+# (the JSONL mirror `ts` field, the OTLP body) carries one offset. Callers pass an explicit `ts`
+# only for loguru-adapter records (loguru stamps local zone — normalized here) and
+# replayed/migrated rows; a DB-derived timestamp would silently mix two clocks (W7 rewired the
+# last DB-clock writers, heartbeat + delivery watchdog, onto this path).
 def emit(
     category: Category,
     event_name: str,
@@ -236,31 +299,18 @@ def emit(
     capture: Callable[[Event], Event] | None = None,
     producer: Callable[[], EventSink] | None = None,
 ) -> None:
-    """Enqueue one event into the unified stream. Never raises — except for a
-    contract violation (R2-C): an `event_name` with no `EventSpec` in
-    `base/events/declarations`, or a category that contradicts the
-    declaration, raises `ValueError` (AGENTS.md "explode on unknown enums").
-    An explicitly supplied producer capture callback also propagates its errors
-    before observation delivery; no current participant is inferred.
-    The loguru adapter wraps its call with `catch=True`, so a logging line
-    that drifts off-contract stays visible (JSONL mirror) without crashing
-    the producer.
-
-    An event is a named log record (OTel LogRecord semantics: events = logs
-    with names); `event_name` is that name — the `event.name` field, and the
-    registry key (`EVENTS`).
-
-    `trace_id`/`span_id` are captured from the active OTel span at this point
-    (enqueue time — the drain thread runs outside the span context). `agent_id`
-    falls back to the process-bound value (init_telemetry); explicit wins.
-    `ts` defaults to the PROCESS clock at enqueue time (`datetime.now(UTC)`) —
-    the one time source for the entire stream, and an explicit `ts` is
-    normalized to UTC before enqueue (`_as_utc`), so every serialization of
-    the Event (the JSONL mirror `ts` field, the OTLP body) carries one offset.
-    Callers pass an explicit `ts` only for loguru-adapter records (loguru
-    stamps local zone — normalized here) and replayed/migrated rows; a
-    DB-derived timestamp would silently mix two clocks (W7 rewired the last
-    DB-clock writers, heartbeat + delivery watchdog, onto this path)."""
+    # meiva:note
+    # A process that bound no event stream drops what it emits, as it always has, and says so once
+    # (`emit_prepared` reports the same absence below). The decision is taken before the event is
+    # built — an event nobody can read owes nobody a timestamp — but the call's own contract is
+    # still answered: an unregistered name, a category contradicting the registry, or a broken
+    # `machine_reader` is this caller's bug whether or not a sink exists.
+    if producer is None and process_state["pipeline"] is None:
+        _declared(category, event_name)
+        if machine_reader is not None:
+            resolve_machine(machine_reader, home=process_state["home"])
+        _report_unbound_emission(_NO_PRODUCER, event_name)
+        return
     event = prepare_event(
         category,
         event_name,
@@ -273,6 +323,25 @@ def emit(
         machine_reader=machine_reader,
     )
     emit_prepared(event, capture=capture, producer=producer)
+
+
+# meiva:note
+# Reject an event name or category the registry does not declare (R2-C): an unregistered name and a
+# category contradicting the declaration are programming errors of the caller, so they raise here
+# rather than becoming a row someone has to reverse-engineer from its payload.
+def _declared(category: Category, event_name: str) -> None:
+    spec = EVENTS.get(event_name)
+    if spec is None:
+        raise ValueError(
+            f"emit() got unregistered event_name={event_name!r} — declare an "
+            "EventSpec in a base/events/declarations module first (base/events/"
+            "registry.md is generated from it)"
+        )
+    if category != spec.category and category not in spec.extra_categories:
+        raise ValueError(
+            f"emit() category={category!r} contradicts the registry for "
+            f"event_name={event_name!r} (declared {spec.category!r})"
+        )
 
 
 def prepare_event(
@@ -296,18 +365,7 @@ def prepare_event(
     preserves one canonical byte representation across their manifest receipt
     and the eventually exported telemetry line.
     """
-    spec = EVENTS.get(event_name)
-    if spec is None:
-        raise ValueError(
-            f"emit() got unregistered event_name={event_name!r} — declare an "
-            "EventSpec in a base/events/declarations module first (base/events/"
-            "registry.md is generated from it)"
-        )
-    if category != spec.category and category not in spec.extra_categories:
-        raise ValueError(
-            f"emit() category={category!r} contradicts the registry for "
-            f"event_name={event_name!r} (declared {spec.category!r})"
-        )
+    _declared(category, event_name)
     trace_id, span_id = capture_trace_ids()
     return Event(
         ts=_as_utc(ts),

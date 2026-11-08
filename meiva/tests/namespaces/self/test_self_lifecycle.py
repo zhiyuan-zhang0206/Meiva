@@ -18,6 +18,7 @@ import meiva
 from base.agents.context.identity import ExternalLease
 from base.agents.lifecycle import AgentRestart, AgentTermination, SystemHalt
 from base.agents.tests.units import spawn_agent
+from base.clock.tests.fakes import system_clock
 from base.cluster import inbound_channel
 from base.cluster.machine import MachineIdentityReader
 from base.config import settings
@@ -345,7 +346,7 @@ def test_pause_heartbeat_routes_its_event_to_the_contexts_pipeline_when_unbound(
 
     agent_id = _spawned(model_catalog, config_authority, database_gate, machine_identity)
     written: list[Event] = []
-    pipeline = EventPipeline(writer=written.extend, batch_size=1)
+    pipeline = EventPipeline(now=system_clock().now, writer=written.extend, batch_size=1)
 
     def build_pipeline() -> EventPipeline:
         return pipeline

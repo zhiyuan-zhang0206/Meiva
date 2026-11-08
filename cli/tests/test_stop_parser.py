@@ -301,6 +301,7 @@ def _refusing_args(argv: list[str], home: Path, command: CommandRuntime) -> argp
         database,
         machine=runtime.machine,
         home=home,
+        now=runtime.clock.now,
         otlp_enabled=runtime.otlp_enabled,
         otlp_endpoint=runtime.otlp_endpoint,
     )

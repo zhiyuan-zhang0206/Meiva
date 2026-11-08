@@ -15,6 +15,7 @@ import pytest
 
 from base import paths
 from base.agents.context.clients import ClientSet
+from base.clock.tests.fakes import system_clock
 from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
@@ -67,6 +68,7 @@ _NEVER_READ = {
 def test_gateway_owner_construction_is_cold(*, machine_identity: MachineIdentityReader) -> None:
     config = ConfigBoot()
     process = GatewayProcess(
+        now=system_clock().now,
         home=meiva_home(),
         config=config,
         image=LoadedCommit(Path("unknown-source"), None),
@@ -85,6 +87,7 @@ def test_gateway_handles_retain_the_same_entry_gate(
     db_conn: psycopg.Connection, *, machine_identity: MachineIdentityReader
 ) -> None:
     process = GatewayProcess(
+        now=system_clock().now,
         home=meiva_home(),
         config=snapshot_process_config(),
         image=LOADED_IMAGE,
@@ -112,7 +115,7 @@ def _failing_writer(_batch: list[Event]) -> None:
 
 
 def _pipeline_whose_writer_failed() -> EventPipeline:
-    pipeline = EventPipeline(writer=_failing_writer, batch_size=1)
+    pipeline = EventPipeline(now=system_clock().now, writer=_failing_writer, batch_size=1)
     pipeline.enqueue(
         Event(
             ts=datetime.now(UTC),
@@ -137,6 +140,7 @@ def test_gateway_cleanup_preserves_a_startup_primary(
 ) -> None:
     primary = ValueError("startup failed")
     process = GatewayProcess(
+        now=system_clock().now,
         home=meiva_home(),
         config=ConfigBoot(),
         image=LOADED_IMAGE,
@@ -232,6 +236,7 @@ def test_asgi_health_keeps_its_explicit_entry_image(
     assert image.sha is not None
     assert image.sha != LOADED_IMAGE.sha
     process = GatewayProcess(
+        now=system_clock().now,
         home=meiva_home(),
         config=snapshot_process_config(),
         image=image,
@@ -302,6 +307,7 @@ _ROOT_READS = frozenset({"meiva_home", "resolve_meiva_home"})
 def _rooted_app(home: Path) -> Any:
     boot = snapshot_process_config()
     process = GatewayProcess(
+        now=system_clock().now,
         home=home,
         config=boot,
         image=LOADED_IMAGE,

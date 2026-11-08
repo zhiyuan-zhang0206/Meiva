@@ -15,6 +15,8 @@ from pathlib import Path
 
 from loguru import logger
 
+from base.clock.tests.fakes import system_clock
+
 
 def emit(text: object) -> None:
     sys.stdout.write(f"{text}\n")
@@ -82,7 +84,7 @@ def role_initialization(role: str, root: str) -> None:
     from base.telemetry.process_logging import init_cli_process, init_gateway_process
 
     rows: list[object] = []
-    pipeline = EventPipeline(writer=rows.extend)
+    pipeline = EventPipeline(now=system_clock().now, writer=rows.extend)
 
     def producer() -> EventPipeline:
         return pipeline

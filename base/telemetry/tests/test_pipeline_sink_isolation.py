@@ -10,6 +10,7 @@ from opentelemetry.sdk.metrics import MeterProvider
 from opentelemetry.sdk.metrics.export import InMemoryMetricReader
 
 from base import telemetry
+from base.clock.tests.fakes import system_clock
 from base.db import Database
 from base.log.tests.log_records import LogRecords
 from base.log.tests.log_records import loguru_records as loguru_records
@@ -39,6 +40,7 @@ def test_projection_failure_keeps_jsonl_and_otlp_and_never_emits_recursively(
     logs.add_log_record_processor(SimpleLogRecordProcessor(log_exporter))
     metric_provider = MeterProvider(metric_readers=[InMemoryMetricReader()], shutdown_on_exit=False)
     exporter = telemetry_otlp.OtlpBackend(
+        now=system_clock().now,
         export_allowed=lambda: True,
         enabled=lambda: True,
         providers=(logs, metric_provider),
@@ -64,6 +66,7 @@ def test_projection_failure_keeps_jsonl_and_otlp_and_never_emits_recursively(
     db_conn.execute("LOCK TABLE agent_metric_observations IN ACCESS EXCLUSIVE MODE")
     with telemetry_otlp.bind_exporter(exporter):
         pipeline = telemetry.build_pipeline(
+            now=system_clock().now,
             database=lambda: database,
             machine=machine_identity(),
             home=tmp_path,
@@ -96,6 +99,7 @@ def _no_database() -> Database:
 def test_a_relative_home_is_refused_before_any_sink_is_built() -> None:
     with pytest.raises(ValueError, match="absolute home"):
         telemetry.build_pipeline(
+            now=system_clock().now,
             database=_no_database,
             machine=machine_identity(),
             home=Path(".meiva"),
@@ -111,6 +115,7 @@ def test_the_pipeline_builds_its_exporter_over_its_own_home(tmp_path: Path) -> N
     home = tmp_path / "pipeline-home"
     home.mkdir()
     pipeline = telemetry.build_pipeline(
+        now=system_clock().now,
         database=_no_database,
         machine=machine_identity(),
         home=home,

@@ -12,6 +12,7 @@ import pytest
 
 from base.agents.context import MeivaContext
 from base.agents.context.clients import ClientSet
+from base.clock.tests.fakes import system_clock
 from base.telemetry.delivery.pipeline import EventPipeline
 
 
@@ -243,7 +244,7 @@ def test_a_built_event_pipeline_is_returned_while_another_thread_builds_a_client
     """
     build_started = threading.Event()
     release_build = threading.Event()
-    pipeline = EventPipeline(writer=lambda _batch: None)
+    pipeline = EventPipeline(now=system_clock().now, writer=lambda _batch: None)
 
     def slow_gateway(url: str) -> httpx.Client:
         build_started.set()
@@ -276,7 +277,7 @@ def test_a_derived_set_keeps_the_event_pipeline_factory_of_its_parent() -> None:
     built: list[EventPipeline] = []
 
     def pipeline() -> EventPipeline:
-        built.append(EventPipeline(writer=lambda _batch: None))
+        built.append(EventPipeline(now=system_clock().now, writer=lambda _batch: None))
         return built[-1]
 
     parent = ClientSet(pipeline_factory=pipeline)
@@ -296,8 +297,8 @@ def test_event_producer_answers_the_set_pipeline_only_when_no_process_pipeline_i
 
     assert ClientSet().event_producer() is None
 
-    set_pipeline = EventPipeline(writer=lambda _batch: None)
-    process_pipeline = EventPipeline(writer=lambda _batch: None)
+    set_pipeline = EventPipeline(now=system_clock().now, writer=lambda _batch: None)
+    process_pipeline = EventPipeline(now=system_clock().now, writer=lambda _batch: None)
 
     def build_set_pipeline() -> EventPipeline:
         return set_pipeline

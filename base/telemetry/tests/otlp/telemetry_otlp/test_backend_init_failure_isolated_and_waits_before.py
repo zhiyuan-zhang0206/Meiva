@@ -24,6 +24,7 @@ from opentelemetry.sdk.metrics import MeterProvider
 from opentelemetry.sdk.metrics.export import InMemoryMetricReader
 
 from base import telemetry
+from base.clock.tests.fakes import system_clock
 from base.db import Database
 from base.paths import logs_path, meiva_home
 from base.telemetry.delivery import loss
@@ -89,6 +90,7 @@ def test_backend_init_failure_isolated_and_waits_before_retry(tmp_path: Path) ->
     logs = _NoopProvider()
     metrics = _FailingMetricsProvider(attempts, message="collector unreachable")
     backend = telemetry_otlp.OtlpBackend(
+        now=system_clock().now,
         export_allowed=lambda: True,
         enabled=lambda: True,
         endpoint=lambda: "http://127.0.0.1:4318",
@@ -116,6 +118,7 @@ def test_backend_retry_recovers_and_emits_real_status_events(
     logs = _NoopProvider()
     metrics = _FailingMetricsProvider(attempts, fail_times=1, message="collector booting")
     backend = telemetry_otlp.OtlpBackend(
+        now=system_clock().now,
         export_allowed=lambda: True,
         enabled=lambda: True,
         endpoint=lambda: "http://127.0.0.1:4318",
@@ -159,6 +162,7 @@ def test_backend_unreachable_probe_emits_specific_disabled_reason(
         port = sock.getsockname()[1]
     endpoint = f"http://127.0.0.1:{port}"
     backend = telemetry_otlp.OtlpBackend(
+        now=system_clock().now,
         export_allowed=lambda: True,
         enabled=lambda: True,
         endpoint=lambda: endpoint,
@@ -187,6 +191,7 @@ def test_queue_full_sheds_counted_not_blocking(tmp_path: Path) -> None:
     )
     metric_provider = MeterProvider(metric_readers=[InMemoryMetricReader()])
     backend = telemetry_otlp.OtlpBackend(
+        now=system_clock().now,
         export_allowed=lambda: True,
         enabled=lambda: True,
         providers=(logger_provider, metric_provider),
@@ -241,6 +246,7 @@ def test_pipeline_mirror_survives_otlp_failure(database: Database, tmp_path: Pat
     holds the batch (the PG copy is gone, task #1197)."""
     attempts: list[int] = []
     backend = telemetry_otlp.OtlpBackend(
+        now=system_clock().now,
         export_allowed=lambda: True,
         enabled=lambda: True,
         providers=(
@@ -256,6 +262,7 @@ def test_pipeline_mirror_survives_otlp_failure(database: Database, tmp_path: Pat
         existing.stop(timeout=2)
     with telemetry_otlp.bind_exporter(backend):
         pipeline = telemetry.build_pipeline(
+            now=system_clock().now,
             database=lambda: database,
             machine=machine_identity(),
             home=tmp_path,
@@ -283,6 +290,7 @@ def test_handshake_env_no_longer_gates_export(tmp_path: Path) -> None:
     must no longer disable OTLP — the export flag is the only authority."""
     assert (
         telemetry_otlp.OtlpBackend(
+            now=system_clock().now,
             export_allowed=lambda: True,
             enabled=lambda: True,
             mirror_dir=tmp_path,
@@ -302,6 +310,7 @@ def test_flush_force_flushes_sdk_batch_records(tmp_path: Path) -> None:
     logger_provider.add_log_record_processor(BatchLogRecordProcessor(log_exporter))
     metric_provider = MeterProvider(metric_readers=[InMemoryMetricReader()])
     backend = telemetry_otlp.OtlpBackend(
+        now=system_clock().now,
         export_allowed=lambda: True,
         enabled=lambda: True,
         providers=(logger_provider, metric_provider),
@@ -327,6 +336,7 @@ def test_warmup_builds_backend_when_enabled(tmp_path: Path) -> None:
     logger_provider = LoggerProvider()
     logger_provider.add_log_record_processor(SimpleLogRecordProcessor(log_exporter))
     backend = telemetry_otlp.OtlpBackend(
+        now=system_clock().now,
         export_allowed=lambda: True,
         enabled=lambda: True,
         providers=(
@@ -354,6 +364,7 @@ def test_queue_loss_metric_survives_full_log_lane(tmp_path: Path) -> None:
     reader = InMemoryMetricReader()
     metric_provider = MeterProvider(metric_readers=[reader])
     backend = telemetry_otlp.OtlpBackend(
+        now=system_clock().now,
         export_allowed=lambda: True,
         enabled=lambda: True,
         providers=(logger_provider, metric_provider),

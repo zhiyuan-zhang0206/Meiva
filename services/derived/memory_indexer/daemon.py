@@ -14,7 +14,8 @@ from typing import assert_never
 import httpx
 import numpy as np
 
-from base.clock import SYSTEM_TIMERS, Timers
+from base.clock import SYSTEM_TIMERS, Clock, Timers
+from base.clock.configuration import clock_config_from_boot
 from base.cluster.dataplane.direct_url import ClusterDirectUrl
 from base.cluster.machine import MachineRoles
 from base.cluster.machine.configured import ConfiguredMachineIdentity
@@ -626,6 +627,7 @@ def main() -> None:
         database=database,
         machine=machine,
         home=process_home,
+        now=Clock(clock_config_from_boot(config), timers=SYSTEM_TIMERS).now,
         otlp_enabled=lambda: config.view.observability.telemetry_otlp_enabled,
         otlp_endpoint=lambda: config.view.observability.telemetry_otlp_endpoint,
     )

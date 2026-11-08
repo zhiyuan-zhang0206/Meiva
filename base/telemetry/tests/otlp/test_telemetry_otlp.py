@@ -13,6 +13,7 @@ from opentelemetry.sdk._logs.export import InMemoryLogRecordExporter
 from opentelemetry.sdk.metrics.export import InMemoryMetricReader
 
 from base import telemetry
+from base.clock.tests.fakes import system_clock
 from base.config import settings
 from base.db import Database
 from base.paths import meiva_home
@@ -77,6 +78,7 @@ def otlp_backend(
     metric_provider = MeterProvider(metric_readers=[metric_reader])
 
     backend = telemetry_otlp.OtlpBackend(
+        now=system_clock().now,
         export_allowed=lambda: True,
         enabled=lambda: True,
         providers=(logger_provider, metric_provider),
@@ -596,6 +598,7 @@ def test_export_batch_builds_backend_once(
 
 def test_flush_without_init_is_noop(tmp_path: Path) -> None:
     backend = telemetry_otlp.OtlpBackend(
+        now=system_clock().now,
         export_allowed=lambda: True,
         mirror_dir=tmp_path,
         home=tmp_path,
@@ -618,6 +621,7 @@ def test_flag_off_disables_export(emitted_events: EmittedEvents, tmp_path: Path)
     metric_reader = InMemoryMetricReader()
     metric_provider = MeterProvider(metric_readers=[metric_reader])
     backend = telemetry_otlp.OtlpBackend(
+        now=system_clock().now,
         export_allowed=lambda: True,
         enabled=lambda: False,
         providers=(logger_provider, metric_provider),
@@ -645,6 +649,7 @@ def bind_telemetry(
     db_conn: psycopg.Connection, database: Database, tmp_path: Path
 ) -> Iterator[None]:
     pipeline = telemetry.build_pipeline(
+        now=system_clock().now,
         database=lambda: database,
         machine=machine_identity(),
         home=tmp_path,
@@ -683,6 +688,7 @@ def test_the_providers_are_built_for_the_exporters_own_home_and_mirror(tmp_path:
     sdk_logger = logging.getLogger("opentelemetry.sdk._shared_internal")
     old_filters = list(sdk_logger.filters)
     backend = telemetry_otlp.OtlpBackend(
+        now=system_clock().now,
         export_allowed=lambda: True,
         endpoint=lambda: "file:///collector",
         mirror_dir=mirror,

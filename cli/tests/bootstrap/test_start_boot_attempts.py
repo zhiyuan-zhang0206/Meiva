@@ -6,6 +6,7 @@ from pathlib import Path
 import psutil
 import pytest
 
+from base.clock.tests.fakes import system_clock
 from base.host.system import boot_policy
 from base.telemetry.tests.capture.event_capture import EmittedEvents
 from base.telemetry.tests.capture.event_capture import emitted_events as emitted_events
@@ -86,6 +87,7 @@ def _run_start(
         operator_database,
         machine=command_runtime.machine,
         home=site.home,
+        now=system_clock().now,
         otlp_enabled=command_runtime.otlp_enabled,
         otlp_endpoint=command_runtime.otlp_endpoint,
     )

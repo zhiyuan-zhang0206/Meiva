@@ -353,6 +353,7 @@ def cmd_restart(
         host=command.host_after_config(),
         home=command.home,
         pid=command.pid,
+        now=command.clock.now,
     ) as audit:
         code = _cmd_restart_body(
             request,
@@ -475,6 +476,7 @@ def cmd_restart_agent_host(
         host=command.host_after_config(),
         home=command.home,
         pid=command.pid,
+        now=command.clock.now,
     ) as audit:
         try:
             refuse_hosted_stop(command.home)

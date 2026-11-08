@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import atexit
 from collections.abc import Callable
+from datetime import datetime
 from pathlib import Path
 
 from base.cluster.machine import MachineIdentityReader
@@ -27,6 +28,7 @@ def write_batch(
     database: Callable[[], object],
     export: Callable[[list[Event]], None],
     target_dir: Path,
+    now: datetime,
 ) -> None:
     """Mirror first, then the telemetry_events record, the compact metric projection
     and OTLP export.
@@ -37,7 +39,7 @@ def write_batch(
     """
     if not events:
         return
-    append_jsonl(events, target_dir=target_dir)
+    append_jsonl(events, target_dir=target_dir, now=now)
     # meiva:note
     # The factory is typed `object`: naming `Database` at module level would load the settings stack
     # with `base.telemetry`, which every cold process imports. The check is made here, where the
@@ -76,11 +78,17 @@ def write_batch(
 # mirror and the exporter's loss reports land under `home`, so `home` must be absolute: a relative
 # one would put them under whatever directory the process happens to be in. Raises ValueError when
 # it is not.
+#
+# `now` is the clock this stream stamps with — the write instant of every mirror batch, the loss
+# alarm, and the default timestamp of an event whose producer passed none. It is the process clock
+# the root already builds, read once there and handed down: the stream has exactly one time source,
+# and a module below this one never reaches for the host clock.
 def build_pipeline(
     *,
     database: Callable[[], object],
     machine: MachineIdentityReader,
     home: Path,
+    now: Callable[[], datetime],
     otlp_enabled: Callable[[], bool],
     otlp_endpoint: Callable[[], str],
     flush_interval_s: float = 0.5,
@@ -88,8 +96,11 @@ def build_pipeline(
     if not home.is_absolute():
         raise ValueError(f"the event pipeline needs an absolute home, got {str(home)!r}")
     from base.host.env.registry import process_environment
-    from base.telemetry.observability import endpoint_override_is_explicit
-    from base.telemetry.otlp.telemetry_otlp import default_exporter, observability_export_allowed
+    from base.telemetry.observability import (
+        endpoint_override_is_explicit,
+        observability_export_allowed,
+    )
+    from base.telemetry.otlp.telemetry_otlp import default_exporter
     from base.telemetry.otlp.telemetry_otlp_exporting import ExportingEventPipeline
 
     # meiva:note
@@ -105,6 +116,7 @@ def build_pipeline(
         endpoint=otlp_endpoint,
         mirror_dir=mirror_dir,
         home=home,
+        now=now,
     )
     return ExportingEventPipeline(
         writer=lambda events, owned: write_batch(
@@ -112,8 +124,10 @@ def build_pipeline(
             database=database,
             export=owned.export_batch,
             target_dir=mirror_dir,
+            now=now(),
         ),
         exporter=exporter,
+        now=now,
         flush_interval_s=flush_interval_s,
     )
 

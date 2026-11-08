@@ -3,6 +3,7 @@ from __future__ import annotations
 import math
 import time
 from collections.abc import Callable
+from datetime import datetime
 
 from base.telemetry.delivery.defer_plan import ChildDeferPlan
 from base.telemetry.delivery.pipeline import EventPipeline
@@ -18,12 +19,15 @@ class ExportingEventPipeline(EventPipeline):
         *,
         writer: Callable[[list[Event], OtlpBackend], None],
         exporter: OtlpBackend,
+        now: Callable[[], datetime],
         flush_interval_s: float = 0.5,
     ) -> None:
         self._exporter = exporter
         self._exports_finished = False
         super().__init__(
-            writer=lambda events: writer(events, self._exporter), flush_interval_s=flush_interval_s
+            writer=lambda events: writer(events, self._exporter),
+            now=now,
+            flush_interval_s=flush_interval_s,
         )
 
     @property

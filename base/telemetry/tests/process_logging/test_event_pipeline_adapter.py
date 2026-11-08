@@ -13,6 +13,7 @@ from typing import Any, cast
 import pytest
 
 from base import telemetry
+from base.clock.tests.fakes import system_clock
 from base.cluster.machine import MachineIdentityReader
 from base.db import Database
 from base.paths import logs_dir, meiva_home
@@ -27,6 +28,7 @@ def logging_pipeline(
 ) -> Iterator[None]:
     """The adapter test explicitly owns its native writer for its whole record."""
     pipeline = telemetry.build_pipeline(
+        now=system_clock().now,
         database=lambda: database,
         machine=machine_identity,
         home=unit_home,
@@ -96,6 +98,7 @@ def test_add_event_sink_registers_at_most_once(
     from base.log import logger as _g
 
     pipeline = telemetry.build_pipeline(
+        now=system_clock().now,
         database=lambda: database,
         machine=machine_identity,
         home=unit_home,

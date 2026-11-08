@@ -9,6 +9,7 @@ import pytest
 import meiva
 from base import telemetry
 from base.agents.context.identity import AgentIdentity
+from base.clock.tests.fakes import system_clock
 from base.paths import meiva_home
 from meiva.sdk_surface import process_context
 
@@ -16,7 +17,7 @@ from meiva.sdk_surface import process_context
 @pytest.fixture(autouse=True)
 def restore_process_binding() -> Generator[telemetry.EventPipeline, None, None]:
     previous = telemetry.prepare_event("log", "log")
-    pipeline = telemetry.EventPipeline(writer=lambda _batch: None)
+    pipeline = telemetry.EventPipeline(now=system_clock().now, writer=lambda _batch: None)
     try:
         yield pipeline
     finally:

@@ -21,6 +21,7 @@ from typing import Any
 import psycopg
 import pytest
 
+from base.clock.tests.fakes import system_clock
 from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config.tests.configuration import snapshot_process_config
@@ -83,6 +84,7 @@ async def test_process_ownership_borrowed_vs_owned_controls_client_close_count(
     assert borrowed_process.clients.exports_deferred() is None
 
     owned_process = GatewayProcess(
+        now=system_clock().now,
         home=meiva_home(),
         config=snapshot_process_config(),
         image=LOADED_IMAGE,
@@ -102,6 +104,7 @@ async def test_owned_process_startup_failure_closes_its_clients_and_raises_the_f
     *, machine_identity: MachineIdentityReader
 ) -> None:
     process = GatewayProcess(
+        now=system_clock().now,
         home=Path("relative-home"),
         config=snapshot_process_config(),
         image=LOADED_IMAGE,
@@ -118,6 +121,7 @@ async def test_owned_process_startup_failure_closes_its_clients_and_raises_the_f
 def test_invalid_process_ownership_rejected(*, machine_identity: MachineIdentityReader) -> None:
     boot = snapshot_process_config()
     process = GatewayProcess(
+        now=system_clock().now,
         home=meiva_home(),
         config=boot,
         image=LOADED_IMAGE,
@@ -299,6 +303,7 @@ async def test_the_lifespan_registers_the_health_probe_for_its_home_checkout_and
     boot = snapshot_process_config()
     boot.set_field("os_jobs_enabled", True)
     process = GatewayProcess(
+        now=system_clock().now,
         home=home,
         config=boot,
         image=LOADED_IMAGE,

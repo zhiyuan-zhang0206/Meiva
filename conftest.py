@@ -101,6 +101,7 @@ pytest_plugins = [
     "tests.fixtures.env_bootstrap",
     "tests.fixtures.leak_guard",
     "tests.fixtures.identity_restore",
+    "tests.fixtures.process_clock",
     "tests.fixtures.plugin_registrations",
     "tests.fixtures.static_environment",
     "tests.fixtures.provisioning",
