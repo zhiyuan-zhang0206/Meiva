@@ -115,7 +115,7 @@ function TreeGuides({
         data-testid="tree-guide"
         data-depth={d}
         style={{ left: BAR_X_BASE + d * INDENT }}
-        className="pointer-events-none absolute inset-y-0 w-px bg-muted-foreground/20 dark:bg-muted-foreground/40"
+        className="z-10 pointer-events-none absolute inset-y-0 w-px bg-muted-foreground/20 dark:bg-muted-foreground/40"
       />,
     );
   }
@@ -241,7 +241,7 @@ export function AgentRow({
     >
       <Popover.Anchor asChild>
       <ContextMenuTrigger asChild>
-        <li className="group relative">
+        <li className="agent-row-item group relative">
           {/* Adjacent rows' bars at the same x naturally stack into a
               continuous vertical line — this is why the "path" looks
               contiguous, and the hard reason buttons can't be
@@ -265,13 +265,13 @@ export function AgentRow({
               // cursor-default: the global button cursor:pointer rule (#709)
               // gives this row a hand cursor; a switching row is a list item,
               // not a button — user ruling (#723) keeps the default arrow.
-              "w-full text-left py-2.5 pr-4 font-mono text-xs items-center gap-2 cursor-default select-none [-webkit-touch-callout:none]",
+              "agent-row-pill w-full text-left pr-2.5 font-mono text-xs leading-4 items-center gap-2 cursor-default select-none [-webkit-touch-callout:none]",
               FLEX,
               active
-                ? "bg-sidebar-accent text-sidebar-accent-foreground"
+                ? "agent-row-pill-active bg-sidebar-accent text-sidebar-accent-foreground"
                 : "text-muted-foreground hover:bg-sidebar-accent/50 hover:text-foreground",
             )}
-            style={{ paddingLeft: `${16 + indentPx}px` }}
+            style={{ paddingLeft: `${10 + indentPx}px` }}
           >
             {statusMarker ? (
               <span

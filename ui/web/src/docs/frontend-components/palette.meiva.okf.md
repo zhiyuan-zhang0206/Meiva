@@ -12,13 +12,13 @@ tags:
 in `base/packages/plugins/surface/ui_contributions.py:THEME_TOKENS`, a test keeps
 the two lists equal, and a skin (plugin theme pack) may repaint any of them.
 
-## The light block: Moonlight White & Coal Black
+## The light block: Crisp Daylight
 
-Anchored on the Meiva Brand Design System v1.0 tokens (`--meiva-moonlight-white: #F0F2F4`, `--meiva-coal-black: #292824`, `--meiva-sunset-orange: #ED8755`, `--meiva-mountain-green: #427C6E`, `--meiva-ocean-blue: #2276B5`):
-- Canvas (`--background` / `--theme-color`) is Moonlight White `#F0F2F4`;
-- Foreground and primary text/chrome are Coal Black `#292824`;
-- Cards (`#F7F8FA`) and popovers (`#FAFBFD`) rise slightly above the canvas while the sidebar (`#EAECEF`) sits a half-step deeper;
-- Focus rings (`--ring` / `--sidebar-ring`) use Sunset Orange `#ED8755`.
+Achromatic neutral daylight ramp (`R = G = B`, zero yellow cast and zero blue cast) anchored with Brand Sunset Orange (`--meiva-sunset-orange: #ED8755`) focus rings:
+- Canvas (`--background` / `--theme-color`), cards (`--card`), and popovers (`--popover`) are pure `#FFFFFF`;
+- Sidebar (`--sidebar`) sits on neutral `#F7F7F7` so `#FFFFFF` Crisp Card pills (`--sidebar-accent`) lift cleanly above the rail;
+- Muted/secondary surfaces (`--muted` / `--secondary` / `--accent`) use `#F3F3F3` and borders (`--border` / `--input` / `--sidebar-border`) use `#E5E5E5`;
+- Primary foreground (`--foreground` / `--primary`) uses `#2E2E2E`, muted foreground (`--muted-foreground`) uses `#666666`, and sidebar active foreground (`--sidebar-foreground` / `--sidebar-accent-foreground`) uses softened charcoal `#3B3B3B`.
 
 ## The dark block: Coal Black & Moonlight White
 

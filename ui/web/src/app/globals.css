@@ -69,30 +69,30 @@
   /* Browser chrome (Android status/toolbar and navigation bar areas) reads this
      through <meta name="theme-color">; the palette owns it so a surface change
      cannot leave the system bars on the old colour. */
-  --theme-color: #F0F2F4;
-  --background: #F0F2F4;
-  --foreground: #292824;
-  --card: #F7F8FA;
-  --card-foreground: #292824;
-  --popover: #FAFBFD;
-  --popover-foreground: #292824;
-  --primary: #292824;
-  --primary-foreground: #F0F2F4;
-  --secondary: #E6E9ED;
-  --secondary-foreground: #292824;
-  --muted: #E6E9ED;
-  --muted-foreground: #686660;
-  --accent: #E6E9ED;
-  --accent-foreground: #292824;
+  --theme-color: #FFFFFF;
+  --background: #FFFFFF;
+  --foreground: #2E2E2E;
+  --card: #FFFFFF;
+  --card-foreground: #2E2E2E;
+  --popover: #FFFFFF;
+  --popover-foreground: #2E2E2E;
+  --primary: #2E2E2E;
+  --primary-foreground: #FFFFFF;
+  --secondary: #F3F3F3;
+  --secondary-foreground: #2E2E2E;
+  --muted: #F3F3F3;
+  --muted-foreground: #666666;
+  --accent: #F3F3F3;
+  --accent-foreground: #2E2E2E;
   --destructive: oklch(0.577 0.245 27.325);
-  --border: #DCE0E5;
-  --input: #DCE0E5;
+  --border: #E5E5E5;
+  --input: #E5E5E5;
   --ring: #ED8755;
-  --chart-1: #D4D7DC;
-  --chart-2: #686660;
-  --chart-3: #52504B;
-  --chart-4: #3D3C37;
-  --chart-5: #292824;
+  --chart-1: #D4D4D4;
+  --chart-2: #737373;
+  --chart-3: #525252;
+  --chart-4: #404040;
+  --chart-5: #2E2E2E;
   --radius: 0.625rem;
   /* ops panel chart series — categorical slots, contrast-checked against the
      light surface and distinguishable under common color-vision deficiencies.
@@ -127,13 +127,13 @@
   --strip-compact: rgb(56 189 248 / 60%);
   --strip-prompt: rgb(129 140 248 / 40%);
   --strip-other: rgb(228 231 236);
-  --sidebar: #EAECEF;
-  --sidebar-foreground: #292824;
-  --sidebar-primary: #292824;
-  --sidebar-primary-foreground: #F0F2F4;
-  --sidebar-accent: #E2E5E9;
-  --sidebar-accent-foreground: #292824;
-  --sidebar-border: #DCE0E5;
+  --sidebar: #F7F7F7;
+  --sidebar-foreground: #3B3B3B;
+  --sidebar-primary: #3B3B3B;
+  --sidebar-primary-foreground: #FFFFFF;
+  --sidebar-accent: #FFFFFF;
+  --sidebar-accent-foreground: #3B3B3B;
+  --sidebar-border: #E5E5E5;
   --sidebar-ring: #ED8755;
   /* syntax highlight (VSCode Light+) */
   --syntax-keyword: #af00db;
@@ -206,7 +206,7 @@
   --sidebar-foreground: #F0F2F4;
   --sidebar-primary: #F0F2F4;
   --sidebar-primary-foreground: #292824;
-  --sidebar-accent: #33322D;
+  --sidebar-accent: #35342E;
   --sidebar-accent-foreground: #F0F2F4;
   --sidebar-border: #403F39;
   --sidebar-ring: #ED8755;
@@ -544,17 +544,94 @@
   background-color: color-mix(in oklab, var(--muted-foreground) 65%, transparent);
 }
 
+/* Sidebar row compactness, Crisp Card floating pill, and Silver Glint working shimmer */
+.agent-row-item {
+  padding: 1px 6px;
+}
+
+.agent-row-pill {
+  padding-top: 4px;
+  padding-bottom: 4px;
+  border-radius: 6px;
+  color: #525252;
+}
+
+.dark .agent-row-pill {
+  color: #A8ABB0;
+}
+
+.agent-row-pill-active {
+  background-color: var(--sidebar-accent);
+  color: #3B3B3B;
+  font-weight: 450;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05), 0 0 0 1px rgba(0, 0, 0, 0.075);
+}
+
+.dark .agent-row-pill-active {
+  background-color: #35342E;
+  color: #E2E4E8;
+  font-weight: 450;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.28), 0 0 0 1px rgba(255, 255, 255, 0.09);
+}
+
+.agent-row-pill:not(.agent-row-pill-active):hover {
+  background-color: rgba(255, 255, 255, 0.85);
+  color: #3B3B3B;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03), 0 0 0 1px rgba(0, 0, 0, 0.045);
+}
+
+.dark .agent-row-pill:not(.agent-row-pill-active):hover {
+  background-color: rgba(255, 255, 255, 0.06);
+  color: #E2E4E8;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.05);
+}
+
 .agent-title-working {
-  color: var(--foreground);
+  color: inherit;
 }
 
 @media (prefers-reduced-motion: no-preference) and (forced-colors: none) {
   .agent-title-working {
-    animation: agent-title-breathe 2.8s ease-in-out infinite;
+    --working-base: #525252;
+    --working-mid: #8C9098;
+    --working-peak: #C6CBD4;
+    background-image: linear-gradient(
+      105deg,
+      var(--working-base) 22%,
+      var(--working-mid) 38%,
+      var(--working-peak) 50%,
+      var(--working-mid) 62%,
+      var(--working-base) 78%
+    );
+    background-size: 240% 100%;
+    background-clip: text;
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    animation: agent-title-sweep 2.2s linear infinite;
+  }
+
+  .agent-row-pill-active .agent-title-working,
+  .agent-row-pill:not(.agent-row-pill-active):hover .agent-title-working {
+    --working-base: #3B3B3B;
+    --working-mid: #787C84;
+    --working-peak: #B6BBC4;
+  }
+
+  .dark .agent-title-working {
+    --working-base: #A8ABB0;
+    --working-mid: #D0D4D9;
+    --working-peak: #F2F4F8;
+  }
+
+  .dark .agent-row-pill-active .agent-title-working,
+  .dark .agent-row-pill:not(.agent-row-pill-active):hover .agent-title-working {
+    --working-base: #E2E4E8;
+    --working-mid: #F0F2F6;
+    --working-peak: #FFFFFF;
   }
 }
 
-@keyframes agent-title-breathe {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.45; }
+@keyframes agent-title-sweep {
+  0% { background-position: 120% 0; }
+  100% { background-position: -20% 0; }
 }
