@@ -49,10 +49,11 @@ licensed kind on the line the purity rule recorded the call on, which is the sam
 language judged it (a TypeScript `crypto.randomUUID()` under a `random` root). They meet on the
 name: the ambient table judges the recorded call a reader of a licensed kind, and the call is
 unconditional — one with an `unless` clause reads nothing once it is handed the value. They meet on
-the filesystem's name: a read of a file is no acquisition at all, so `filesystem` is the kind whose
-declaration reaches the purity rule alone, and `FILESYSTEM_READS` in `meizel/graph/licensing.py` is
-the whole of what it reaches — the reads, never a write, never an `open` whose mode decides, never a
-descriptor or a listing given no path.
+the filesystem's name: a read of a file derives no acquisition, so a `filesystem` declaration reaches
+the purity rule through `FILESYSTEM_READS` in `meizel/graph/licensing.py` — the reads, never a write,
+never an `open` whose mode decides, never a descriptor or a listing given no path. A repository that
+wants the acquisition records it where the read belongs: a function listed under
+`[ambient-readers.filesystem]` in the policy.
 
 A call of another kind keeps its record: `time.sleep` under a `clock` root is an effect of the
 clock's own door, not a read of the clock's kind, so the wait stays on the books, and
