@@ -1,7 +1,8 @@
 # meiva:note
 # What a run's JUnit artifact says that its log did not: the cases that failed when the log named
 # none, and which artifact belongs to which job. It lives apart from `main_red`, whose decisions are
-# about cards and entries: this file only turns names into names (task #6487).
+# about cards and entries: this file only turns names into names (task #6487). The `e2e gate` reads
+# the same fingerprint from here, so a red is spelled one way on a card and at the merge gate.
 #
 # The id is built the way the log builds it -- `file::name` -- so one test keeps one fingerprint
 # whichever route named it. A dotted `classname` would make the same case look like two, and the

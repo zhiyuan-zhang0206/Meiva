@@ -1,4 +1,4 @@
-exports = ["agent_watch.py", "api_read.py", "ci_metrics.py", "qa_keepalive.py", "stall_watch.py", "main-red-watch-schedule.py", "main_red_watch.py", "main_red_liveness.py", "main_red_blind.py", "main_red_slot.py"]
+exports = ["agent_watch.py", "api_read.py", "ci_metrics.py", "qa_keepalive.py", "stall_watch.py", "inherited_reds.py", "main-red-watch-schedule.py", "main_red_watch.py", "main_red_liveness.py", "main_red_blind.py", "main_red_slot.py"]
 
 [uses]
 "main-red-watch-schedule.py" = ["api_read.py", "main_red_watch.py", "main_red_liveness.py", "main_red_slot.py"]
@@ -6,4 +6,5 @@ exports = ["agent_watch.py", "api_read.py", "ci_metrics.py", "qa_keepalive.py", 
 "main_red_slot.py" = ["main_red_watch.py"]
 
 [roots]
+"inherited_reds.py" = { kinds = ["argv", "clock", "environ"], why = "CI tool entry: the `__main__` guard reads argv[1:] and the process environment once and hands main() both, and it reads the wall clock once, because a declared red expires against today and the nightly's age is measured from now" }
 "main-red-watch-schedule.py" = { kinds = ["clock", "environ", "home", "argv", "settings"], why = "The watch entry is the composition root of its own loop: it reads the home it runs under, the card-owner override, its scheduler identity and the start instant before the first round; it also reads its command line (argv) once, as the process entry, and the two blindness thresholds from the cluster configuration (task #6523), which it passes into the round rather than letting the judgement read the world itself" }
