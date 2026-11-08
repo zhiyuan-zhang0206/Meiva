@@ -18,21 +18,25 @@ from dataclasses import dataclass
 from pathlib import Path
 from time import monotonic, sleep
 from typing import Any
+from uuid import uuid4
 
 import psycopg
 import pytest
 
 from base.clock import SYSTEM_TIMERS
 from base.clock.tests.seeded_rng import seeded_rng
+from base.cluster.dataplane.direct_url import ClusterDirectUrl
 from base.daemon.endpoints import ServiceEndpoint
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.host.env import port_lease
 from base.host.env.registry import SERVICE_PLUGIN_CONFIG_ENV
+from base.host.exit_codes import hard_exit
 from base.native_process.code_version import CodeVersion
 from base.native_process.loaded_commit import LoadedCommit
 from base.packages.plugin_config_images import config_image_path
+from base.paths import meiva_home
 from meiva_builtins.plugins.meiva_fleet.default_config import FleetConfig
 from meiva_builtins.plugins.meiva_fleet.task_maintenance import daemon
 
@@ -85,6 +89,10 @@ def running_daemon_process(tmp_path: Path) -> Iterator[subprocess.Popen[bytes]]:
         holder.wait()
 
 
+# meiva:note
+# How many backends this daemon holds, read from the cluster it alone talks to: the gate name is
+# the file's own (`daemon_gate`), so the count is that daemon's sessions and nothing else's — not
+# "every session this pytest process ever opened".
 def _sessions(db_conn: psycopg.Connection[Any], gate: ProcessDbGate) -> int:
     row = db_conn.execute(
         "SELECT count(*) FROM pg_stat_activity WHERE application_name = %s",
@@ -113,10 +121,36 @@ def _assert_released(endpoint: ServiceEndpoint) -> None:
         pass
 
 
+# meiva:note
+# The gate this file's daemon runs under, named so no other test in the session shares it. The
+# session-wide pytest gate spells `meiva:pytest:v<count>`, the same string in every process of one
+# shard; a `pg_stat_activity` count by that name also counts a sibling test's leftover connection,
+# so the judgment depended on what else the shard happened to leave open. That is how this file
+# went red on attempt 1 and green on attempt 2 of the same SHA (2026-11-08, task #6331).
+@pytest.fixture
+def daemon_gate() -> ProcessDbGate:
+    return ProcessDbGate(
+        process=f"pytest-task-maintenance-{uuid4().hex[:8]}",
+        version=CodeVersion(LoadedCommit.capture()).get,
+        end_process=hard_exit,
+    )
+
+
+# meiva:note
+# The daemon's own handle on the throwaway cluster — the same config the `database` fixture builds,
+# under the gate above, so every session this daemon opens carries a name only it uses.
+@pytest.fixture
+def daemon_database(db_url: str, daemon_gate: ProcessDbGate) -> Database:
+    return Database.from_settings(
+        gate=daemon_gate,
+        direct_url=ClusterDirectUrl(lambda: "127.0.0.1", home=meiva_home()),
+    )
+
+
 async def test_run_binds_pidfile_and_health_before_the_database_and_releases_all_when_stopped(
     tmp_path: Path,
-    database: Database,
-    database_gate: ProcessDbGate,
+    daemon_database: Database,
+    daemon_gate: ProcessDbGate,
     event_bus: EventBus,
     db_conn: psycopg.Connection[Any],
 ) -> None:
@@ -126,7 +160,7 @@ async def test_run_binds_pidfile_and_health_before_the_database_and_releases_all
         assert endpoint.pidfile.read_text().strip() == str(os.getpid())
         with closing(socket.create_connection(("127.0.0.1", endpoint.health_port), 1)):
             pass
-        return database
+        return daemon_database
 
     serving = asyncio.create_task(
         daemon.run(
@@ -139,7 +173,7 @@ async def test_run_binds_pidfile_and_health_before_the_database_and_releases_all
     )
     try:
         await _until_healthy(endpoint)
-        await _until_sessions(db_conn, database_gate, open_=True)
+        await _until_sessions(db_conn, daemon_gate, open_=True)
         assert endpoint.pidfile.read_text().strip() == str(os.getpid())
     finally:
         serving.cancel()
@@ -147,13 +181,13 @@ async def test_run_binds_pidfile_and_health_before_the_database_and_releases_all
         await serving
 
     _assert_released(endpoint)
-    await _until_sessions(db_conn, database_gate, open_=False)
+    await _until_sessions(db_conn, daemon_gate, open_=False)
 
 
 async def test_a_schema_drift_ends_the_run_with_the_error_and_releases_everything(
     tmp_path: Path,
-    database: Database,
-    database_gate: ProcessDbGate,
+    daemon_database: Database,
+    daemon_gate: ProcessDbGate,
     event_bus: EventBus,
     db_conn: psycopg.Connection[Any],
 ) -> None:
@@ -165,7 +199,7 @@ async def test_a_schema_drift_ends_the_run_with_the_error_and_releases_everythin
             await asyncio.wait_for(
                 daemon.run(
                     FleetConfig(),
-                    database=lambda: database,
+                    database=lambda: daemon_database,
                     bus=event_bus,
                     image=LoadedCommit.capture(),
                     endpoint=endpoint,
@@ -178,7 +212,7 @@ async def test_a_schema_drift_ends_the_run_with_the_error_and_releases_everythin
         db_conn.commit()
 
     _assert_released(endpoint)
-    await _until_sessions(db_conn, database_gate, open_=False)
+    await _until_sessions(db_conn, daemon_gate, open_=False)
 
 
 def test_run_refuses_to_start_while_a_daemon_holds_the_pidfile(
