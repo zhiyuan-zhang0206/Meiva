@@ -95,7 +95,10 @@ changes never re-sort it. Each row renders as a compact inset Crisp Card pill
 idle text (`#525252` light / `#A8ABB0` dark). A running agent's title sweeps
 with a lighter monochrome Silver Glint highlight (`agent-title-sweep`) over its
 normal row base color so running items never darken or bolden relative to idle
-rows (and stays at static row emphasis under reduced motion).
+rows (and stays at static row emphasis under reduced motion); every working row
+shares a fixed-pixel horizontal gradient coordinate space (offset by
+`--agent-indent-px` for tree depth) and locks its CSS animation `startTime` to
+`0` so all working titles sweep in unison along the same vertical column.
 Offline agents suppress the working title shimmer on the row without rendering a
 gray row dot, and report their offline state in the hover peek card's status slot. At the right edge, an unresolved structured
 question shows a Sunset Orange (`#ED8755`) circled question mark, and an ordinary

@@ -604,7 +604,7 @@
       var(--working-base) 60%,
       var(--working-base) 100%
     );
-    background-size: 220% 100%;
+    background-size: 560px 100%;
     background-clip: text;
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
@@ -619,7 +619,7 @@
 }
 
 @keyframes agent-title-sweep {
-  0% { background-position: 125% 0; }
-  84% { background-position: -25% 0; }
-  100% { background-position: -25% 0; }
+  0% { background-position: calc(-340px - var(--agent-indent-px, 0px)) 0; }
+  84% { background-position: calc(-20px - var(--agent-indent-px, 0px)) 0; }
+  100% { background-position: calc(-20px - var(--agent-indent-px, 0px)) 0; }
 }

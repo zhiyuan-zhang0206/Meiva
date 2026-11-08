@@ -43,6 +43,7 @@ beforeAll(() => {
   Element.prototype.setPointerCapture = () => undefined;
   Element.prototype.releasePointerCapture = () => undefined;
   Element.prototype.scrollIntoView = () => undefined;
+  Element.prototype.getAnimations = () => [];
 });
 
 // meiva:note
@@ -312,9 +313,26 @@ describe("AgentRow lifecycle markers", () => {
     const { container, queryByRole } = render(
       <AgentRow {...baseProps} agent={ag(1, { status: "running", unread_user_message_count: 3 })} depth={0} ancestorsIsLast={[]} />,
     );
-    expect(container.querySelector(".agent-title-working")?.textContent).toBe("#1");
+    const title = container.querySelector<HTMLElement>(".agent-title-working");
+    expect(title?.textContent).toBe("#1");
+    expect(title?.style.getPropertyValue("--agent-indent-px")).toBe("0px");
     expect(queryByRole("img", { name: "Awaiting a reply" })).toBeNull();
     expect(statusDot(container)).toBeNull();
+  });
+
+  it("synchronizes working title shimmer horizontal offset and animation startTime across rows", () => {
+    const anim = { startTime: 1234 } as unknown as Animation;
+    Element.prototype.getAnimations = () => [anim];
+    try {
+      const { container } = render(
+        <AgentRow {...baseProps} agent={ag(2, { status: "running" })} depth={2} ancestorsIsLast={[false, true]} />,
+      );
+      const title = container.querySelector<HTMLElement>(".agent-title-working");
+      expect(title?.style.getPropertyValue("--agent-indent-px")).toBe("28px");
+      expect(anim.startTime).toBe(0);
+    } finally {
+      Element.prototype.getAnimations = () => [];
+    }
   });
 
   it.each(["running", "idling"] as const)("omits the legacy %s dot even with additional markers enabled", (status) => {
