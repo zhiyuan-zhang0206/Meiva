@@ -6,6 +6,7 @@ with the agent row or neither does.
 
 from __future__ import annotations
 
+import random
 from collections.abc import Generator
 from pathlib import Path
 from typing import Any
@@ -180,6 +181,7 @@ def fork_events(
         home=unit_home,
         otlp_enabled=lambda: False,
         otlp_endpoint=lambda: "http://127.0.0.1:4318",
+        rng=random.SystemRandom(),
     )
     try:
         telemetry.init_telemetry(

@@ -499,6 +499,7 @@ def operator_producer(
         now=command.clock.now,
         otlp_enabled=command.otlp_enabled,
         otlp_endpoint=command.otlp_endpoint,
+        rng=command.rng,
     )
 
 

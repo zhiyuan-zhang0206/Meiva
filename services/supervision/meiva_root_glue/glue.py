@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import logging
 import os
+import random
 import subprocess
 import tempfile
 from collections.abc import Callable, Mapping, MutableMapping, Sequence
@@ -68,6 +69,14 @@ _log = logging.getLogger(__name__)
 # meiva:note
 # An aggregate memory budget for one unit's whole process tree, in MiB; the swap cap
 # belongs to it because a budget without one is not a budget.
+# meiva:note
+# The process's random generator, built once at its entry: the event pipeline mints its
+# `service.instance.id` from it, and an identifier is not a secret, so it is a plain
+# `random.Random`.
+def _new_rng() -> random.Random:
+    return random.Random()  # noqa: S311
+
+
 @dataclass(frozen=True, slots=True)
 class UnitMemoryCap:
     max_mb: int
@@ -427,6 +436,7 @@ def build_wiring(
             now=Clock(clock_config_from_boot(config), timers=SYSTEM_TIMERS).now,
             otlp_enabled=lambda: config.view.observability.telemetry_otlp_enabled,
             otlp_endpoint=lambda: config.view.observability.telemetry_otlp_endpoint,
+            rng=_new_rng(),
         ),
     )
     registry = ProbeRegistry()

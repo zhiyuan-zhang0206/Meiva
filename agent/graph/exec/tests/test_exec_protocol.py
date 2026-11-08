@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import os
+import random
 import stat
 import time
 from datetime import UTC, datetime
@@ -182,6 +183,7 @@ def test_request_envelope_transfers_emit_size_and_serialize_time(
         home=meiva_home(),
         otlp_enabled=lambda: False,
         otlp_endpoint=lambda: "http://127.0.0.1:4318",
+        rng=random.SystemRandom(),
     )
     sink_id = add_event_sink(
         home=meiva_home(),

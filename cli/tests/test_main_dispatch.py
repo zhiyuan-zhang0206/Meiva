@@ -194,6 +194,7 @@ def test_dispatch_invokes_per_subcommand_handler(
             log_sinks=[],
             otlp_enabled=command.otlp_enabled,
             otlp_endpoint=command.otlp_endpoint,
+            rng=command.rng,
         ),
         open_database=open_operator_database,
     )

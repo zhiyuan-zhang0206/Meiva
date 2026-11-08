@@ -8,4 +8,4 @@ exports = ["daemon.py", "tests"]
 "launch_plan.py" = "strict"
 
 [roots]
-"daemon.py" = { kinds = ["clock", "home", "pid", "settings", "argv"], why = "Service process entry boots configuration and reads its pid and the home it runs under before composing its resources; builds the process clock from SYSTEM_TIMERS for the event stream it composes; it also reads its command line (argv) once, as the process entry" }
+"daemon.py" = { kinds = ["argv", "clock", "home", "pid", "random", "settings"], why = "Service process entry boots configuration and reads its pid and the home it runs under before composing its resources; builds the process clock from SYSTEM_TIMERS for the event stream it composes; it also reads its command line (argv) once, as the process entry; builds the random generator its event pipeline mints the process's `service.instance.id` from" }

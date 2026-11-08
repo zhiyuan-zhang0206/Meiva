@@ -417,6 +417,7 @@ def test_real_sdk_partial_build_threads_are_owned_and_closed(tmp_path: Path) -> 
             endpoint=lambda: f"http://127.0.0.1:{port}",
             home=tmp_path / "missing-home",
             mirror_dir=tmp_path,
+            instance_id="test-instance",
         )
         assert backend._ensure() is False
         worker = backend._worker
@@ -510,6 +511,7 @@ def test_empty_exporting_pipeline_stops_without_reading_identity(tmp_path: Path)
             home=tmp_path,
             enabled=lambda: True,
             endpoint=lambda: "http://127.0.0.1:4318",
+            instance_id="test-instance",
         ),
     )
     assert pipeline.stop(timeout=1).status is DrainStatus.COMPLETED
@@ -532,6 +534,7 @@ def test_stop_refuses_non_finite_and_negative_timeout(tmp_path: Path) -> None:
             home=tmp_path,
             enabled=lambda: True,
             endpoint=lambda: "http://127.0.0.1:4318",
+            instance_id="test-instance",
         ),
     )
     for bad in (float("nan"), -1.0):
@@ -647,6 +650,7 @@ def test_zero_timeout_stage_one_leaves_the_exporter_untouched(tmp_path: Path) ->
             home=tmp_path,
             enabled=lambda: True,
             endpoint=lambda: "http://127.0.0.1:4318",
+            instance_id="test-instance",
         ),
     )
     backend = pipeline._exporter
@@ -708,6 +712,7 @@ def test_stop_from_the_writer_thread_is_refused(tmp_path: Path) -> None:
             home=tmp_path,
             enabled=lambda: True,
             endpoint=lambda: "http://127.0.0.1:4318",
+            instance_id="test-instance",
         ),
     )
     pipeline.enqueue(otlp_test_event())

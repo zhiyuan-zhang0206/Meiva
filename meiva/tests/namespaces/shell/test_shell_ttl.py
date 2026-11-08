@@ -1,6 +1,7 @@
 """Explicit TTL tracking for persistent shell sessions."""
 
 import contextlib
+import random
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -36,6 +37,7 @@ def event_pipeline(
         home=unit_home,
         otlp_enabled=lambda: False,
         otlp_endpoint=lambda: "http://127.0.0.1:4318",
+        rng=random.SystemRandom(),
     )
     try:
         telemetry.init_telemetry(home=meiva_home(), process="test-sdk-operation", pipeline=pipeline)

@@ -43,6 +43,7 @@ def main() -> None:
         now=system_clock().now,
         otlp_enabled=command.otlp_enabled,
         otlp_endpoint=command.otlp_endpoint,
+        rng=command.rng,
     )
     try:
         cold = ColdStart(

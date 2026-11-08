@@ -16,6 +16,7 @@ import pytest
 from base import paths
 from base.agents.context.clients import ClientSet
 from base.clock.tests.fakes import system_clock
+from base.clock.tests.seeded_rng import seeded_rng
 from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
@@ -69,6 +70,7 @@ def test_gateway_owner_construction_is_cold(*, machine_identity: MachineIdentity
     config = ConfigBoot()
     process = GatewayProcess(
         now=system_clock().now,
+        rng=seeded_rng(0),
         home=meiva_home(),
         config=config,
         image=LoadedCommit(Path("unknown-source"), None),
@@ -88,6 +90,7 @@ def test_gateway_handles_retain_the_same_entry_gate(
 ) -> None:
     process = GatewayProcess(
         now=system_clock().now,
+        rng=seeded_rng(0),
         home=meiva_home(),
         config=snapshot_process_config(),
         image=LOADED_IMAGE,
@@ -141,6 +144,7 @@ def test_gateway_cleanup_preserves_a_startup_primary(
     primary = ValueError("startup failed")
     process = GatewayProcess(
         now=system_clock().now,
+        rng=seeded_rng(0),
         home=meiva_home(),
         config=ConfigBoot(),
         image=LOADED_IMAGE,
@@ -237,6 +241,7 @@ def test_asgi_health_keeps_its_explicit_entry_image(
     assert image.sha != LOADED_IMAGE.sha
     process = GatewayProcess(
         now=system_clock().now,
+        rng=seeded_rng(0),
         home=meiva_home(),
         config=snapshot_process_config(),
         image=image,
@@ -308,6 +313,7 @@ def _rooted_app(home: Path) -> Any:
     boot = snapshot_process_config()
     process = GatewayProcess(
         now=system_clock().now,
+        rng=seeded_rng(0),
         home=home,
         config=boot,
         image=LOADED_IMAGE,

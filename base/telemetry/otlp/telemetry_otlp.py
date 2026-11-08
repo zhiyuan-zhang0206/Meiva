@@ -230,6 +230,7 @@ class OtlpBackend:
         mirror_dir: Path,
         home: Path,
         now: Callable[[], datetime],
+        instance_id: str | None = None,
     ) -> None:
         self._export_allowed = export_allowed
         self._enabled_flag = enabled
@@ -238,6 +239,12 @@ class OtlpBackend:
         self._mirror_dir = mirror_dir
         self._home = home
         self._now = now
+        # meiva:note
+        # A backend handed `providers` never builds the real pair; one that builds them needs the
+        # `service.instance.id` the pipeline root minted once.
+        if providers is None and instance_id is None:
+            raise ValueError("OtlpBackend requires instance_id when providers is None")
+        self._instance_id: str = instance_id or ""
         self._export_decision: bool | None = None
         self._eligibility_lock = threading.Lock()
         self._queue: queue.Queue[QueueItem] = queue.Queue(maxsize=queue_maxsize)
@@ -558,6 +565,7 @@ class OtlpBackend:
                     keep_metrics=keep_metrics,
                     mirror_dir=self._mirror_dir,
                     home=self._home,
+                    instance_id=self._instance_id,
                 )
             meter = worker.metrics.get_meter("meiva.telemetry")
             self._logs, self._metric_provider, self._meter = worker.logs, worker.metrics, meter
@@ -764,6 +772,7 @@ def default_exporter(
     mirror_dir: Path,
     home: Path,
     now: Callable[[], datetime],
+    instance_id: str,
 ) -> OtlpBackend:
     bound = OtlpBackend._bound_default
     if bound is not None:
@@ -775,4 +784,5 @@ def default_exporter(
         mirror_dir=mirror_dir,
         home=home,
         now=now,
+        instance_id=instance_id,
     )

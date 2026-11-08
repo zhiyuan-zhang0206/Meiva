@@ -1,3 +1,4 @@
+import random
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Protocol, cast
@@ -72,6 +73,7 @@ def test_projection_failure_keeps_jsonl_and_otlp_and_never_emits_recursively(
             home=tmp_path,
             otlp_enabled=lambda: False,
             otlp_endpoint=lambda: "http://127.0.0.1:4318",
+            rng=random.SystemRandom(),
         )
     try:
         telemetry.emit_prepared(event, producer=lambda: pipeline)
@@ -105,6 +107,7 @@ def test_a_relative_home_is_refused_before_any_sink_is_built() -> None:
             home=Path(".meiva"),
             otlp_enabled=lambda: False,
             otlp_endpoint=lambda: "http://127.0.0.1:4318",
+            rng=random.SystemRandom(),
         )
 
 
@@ -121,6 +124,7 @@ def test_the_pipeline_builds_its_exporter_over_its_own_home(tmp_path: Path) -> N
         home=home,
         otlp_enabled=lambda: False,
         otlp_endpoint=lambda: "http://127.0.0.1:4318",
+        rng=random.SystemRandom(),
     )
     try:
         exporter = cast(

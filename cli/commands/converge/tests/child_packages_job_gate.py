@@ -44,6 +44,7 @@ def main() -> None:
         now=system_clock().now,
         otlp_enabled=lambda: config.view.observability.telemetry_otlp_enabled,
         otlp_endpoint=lambda: config.view.observability.telemetry_otlp_endpoint,
+        rng=random.SystemRandom(),
     )
     context = ConvergeCtx(
         secure_rng=random.SystemRandom(),

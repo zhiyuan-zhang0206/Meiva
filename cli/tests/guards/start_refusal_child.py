@@ -40,6 +40,7 @@ def main(home: Path, checkout: Path) -> None:
         now=system_clock().now,
         otlp_enabled=command.otlp_enabled,
         otlp_endpoint=command.otlp_endpoint,
+        rng=command.rng,
     )
     args = build_parser().parse_args(["start", "--all-services"])
     args.runtime = command

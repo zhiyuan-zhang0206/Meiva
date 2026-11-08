@@ -284,6 +284,7 @@ def test_invalid_eligibility_preserves_deferred_records_and_propagates(tmp_path:
         mirror_dir=tmp_path,
         home=tmp_path,
         endpoint=lambda: "http://127.0.0.1:4318",
+        instance_id="test-instance",
     )
     backend.defer_until_exit(CHILD_DEFER)
     backend.export_batch([_event()])

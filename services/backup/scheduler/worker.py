@@ -5,6 +5,7 @@ from __future__ import annotations
 import dataclasses
 import hashlib
 import os
+import random
 import shutil
 import sys
 import tempfile
@@ -53,6 +54,14 @@ from services.backup.scheduler.settings import DumpSettings, SchedulerSettings
 Job = Literal["dump", "restore"]
 
 WORKER_MODULE = "services.backup.scheduler.worker"
+
+
+# meiva:note
+# The process's random generator, built once at its entry: the event pipeline mints its
+# `service.instance.id` from it, and an identifier is not a secret, so it is a plain
+# `random.Random`.
+def _new_rng() -> random.Random:
+    return random.Random()  # noqa: S311
 
 
 # meiva:note
@@ -332,6 +341,7 @@ def main() -> None:
         now=Clock(clock_config_from_boot(config), timers=SYSTEM_TIMERS).now,
         otlp_enabled=lambda: config.view.observability.telemetry_otlp_enabled,
         otlp_endpoint=lambda: config.view.observability.telemetry_otlp_endpoint,
+        rng=_new_rng(),
     )
     init_gateway_process(
         name="pg-backup-worker",

@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import random
 import signal
 import sys
 import time
@@ -54,6 +55,14 @@ from services.derived.memory_indexer.patrol_status import PatrolStatus, emit_pat
 from services.pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
 
 _log = logging.getLogger("services.derived.memory_indexer.daemon")
+
+
+# meiva:note
+# The process's random generator, built once at its entry: the event pipeline mints its
+# `service.instance.id` from it, and an identifier is not a secret, so it is a plain
+# `random.Random`.
+def _new_rng() -> random.Random:
+    return random.Random()  # noqa: S311
 
 
 def memory_root(*, roles: MachineRoles, home: Path) -> Path:
@@ -634,6 +643,7 @@ def main() -> None:
         now=now,
         otlp_enabled=lambda: config.view.observability.telemetry_otlp_enabled,
         otlp_endpoint=lambda: config.view.observability.telemetry_otlp_endpoint,
+        rng=_new_rng(),
     )
     code = 0
     try:

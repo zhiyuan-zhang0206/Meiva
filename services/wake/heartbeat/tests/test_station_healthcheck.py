@@ -9,6 +9,7 @@ MEIVA_OBSERVABILITY_URL configured the check is a no-op.
 
 from __future__ import annotations
 
+import random
 from pathlib import Path
 from typing import Any
 
@@ -288,6 +289,7 @@ def test_main_shares_one_captured_gate_with_the_probe_and_log_factory(
         home=unit_home,
         otlp_enabled=lambda: False,
         otlp_endpoint=lambda: "http://127.0.0.1:4318",
+        rng=random.SystemRandom(),
     )
     try:
         assert _application_name(database()) == database_gate.application_name()

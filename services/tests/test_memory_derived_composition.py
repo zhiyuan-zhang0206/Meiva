@@ -108,6 +108,7 @@ def test_memory_entries_share_gate_with_pipeline_and_read_config_owner_when_buil
         home=tmp_path,
         otlp_enabled=lambda: False,
         otlp_endpoint=lambda: "http://127.0.0.1:4318",
+        rng=random.SystemRandom(),
     )
     try:
         assert _application_name(database()) == database_gate.application_name()

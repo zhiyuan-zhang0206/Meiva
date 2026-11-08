@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import random
 import re
 from collections.abc import Awaitable, Callable
 from contextlib import AsyncExitStack, suppress
@@ -758,6 +759,7 @@ def main() -> None:
         database=wiring.database,
         machine=wiring.machine,
         home=wiring.process_home,
+        rng=random.SystemRandom(),
     )
     init_gateway_process(
         name=wiring.process_name,

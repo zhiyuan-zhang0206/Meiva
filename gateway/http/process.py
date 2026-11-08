@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import random
 from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from datetime import datetime
@@ -34,6 +35,7 @@ class GatewayProcess:
         machine: MachineIdentityReader,
         host: Host,
         now: Callable[[], datetime],
+        rng: random.Random,
         observe: Callable[[Path], start_serving.RootBirth] = start_serving.observe_root,
     ) -> None:
         self.home = home
@@ -59,6 +61,7 @@ class GatewayProcess:
                 machine=self.machine,
                 home=self.home.resolve(),
                 now=now,
+                rng=rng,
             ),
         )
 

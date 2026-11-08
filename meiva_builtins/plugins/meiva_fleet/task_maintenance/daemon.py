@@ -743,6 +743,7 @@ def main() -> None:
         now=Clock(clock_config_from_boot(boot), timers=SYSTEM_TIMERS).now,
         otlp_enabled=lambda: boot.view.observability.telemetry_otlp_enabled,
         otlp_endpoint=lambda: boot.view.observability.telemetry_otlp_endpoint,
+        rng=_new_rng(),
     )
     init_gateway_process(
         name="task_maintenance",

@@ -90,6 +90,7 @@ def _run_start(
         now=system_clock().now,
         otlp_enabled=command_runtime.otlp_enabled,
         otlp_endpoint=command_runtime.otlp_endpoint,
+        rng=command_runtime.rng,
     )
     return start_intent.run_start(
         _start_args(command_runtime, *flags),

@@ -144,6 +144,7 @@ def gateway_test_process(
         )
         process = GatewayProcess(
             now=system_clock().now,
+            rng=seeded_rng(0),
             home=paths.meiva_home() if home is None else home,
             config=resolved_config,
             image=LOADED_IMAGE,
@@ -175,6 +176,7 @@ def gateway_test_app(
         resolved_machine = ConfiguredMachineIdentity(resolved_boot) if machine is None else machine
         process = GatewayProcess(
             now=system_clock().now,
+            rng=seeded_rng(0),
             home=paths.meiva_home() if home is None else home,
             config=resolved_boot,
             image=LOADED_IMAGE,

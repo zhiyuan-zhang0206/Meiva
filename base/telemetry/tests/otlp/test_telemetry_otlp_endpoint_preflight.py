@@ -91,7 +91,10 @@ def test_production_otlp_provider_construction_contract(tmp_path: Path) -> None:
     assert plan.shutdown_on_exit is False
 
     logs, metrics = telemetry_otlp_sdk.build_providers(
-        "http://127.0.0.1:4318", mirror_dir=tmp_path, home=tmp_path
+        "http://127.0.0.1:4318",
+        mirror_dir=tmp_path,
+        home=tmp_path,
+        instance_id="test-instance",
     )
     try:
         # Both providers must NOT register their own atexit shutdown: it would fire
@@ -102,3 +105,65 @@ def test_production_otlp_provider_construction_contract(tmp_path: Path) -> None:
     finally:
         logs.shutdown()
         metrics.shutdown()
+
+
+# meiva:note
+# `service.instance.id` names the process instance, not a single provider build: when the process's
+# pipeline builds its OTLP providers a second time (for example after a worker restart), both
+# `MeterProvider` resources carry the same id minted once from the root's generator at
+# `build_pipeline`. An `OtlpBackend` that builds its own providers without an `instance_id` is
+# refused at construction time.
+def test_building_providers_twice_in_one_process_preserves_service_instance_id(
+    tmp_path: Path,
+) -> None:
+    import logging
+    from types import SimpleNamespace
+
+    from base import telemetry
+    from base.clock.ids import new_uuid
+    from base.clock.tests.fakes import system_clock
+    from base.clock.tests.seeded_rng import seeded_rng
+    from base.cluster.machine import MachineFacts
+    from base.telemetry.otlp.telemetry_otlp_exporting import ExportingEventPipeline
+
+    with pytest.raises(ValueError, match="instance_id"):
+        telemetry_otlp.OtlpBackend(
+            export_allowed=lambda: True,
+            enabled=lambda: True,
+            endpoint=lambda: "file:///collector",
+            mirror_dir=tmp_path,
+            home=tmp_path,
+            now=system_clock().now,
+        )
+
+    sdk_logger = logging.getLogger("opentelemetry.sdk._shared_internal")
+    old_filters = list(sdk_logger.filters)
+    pipeline = telemetry.build_pipeline(
+        database=object,
+        machine=MachineFacts.of(name="test-runner", role=frozenset({"agent-runner"})),
+        home=tmp_path,
+        now=system_clock().now,
+        otlp_enabled=lambda: True,
+        otlp_endpoint=lambda: "file:///collector",
+        rng=seeded_rng(7),
+    )
+    assert isinstance(pipeline, ExportingEventPipeline)
+    backend = pipeline._exporter
+    first = SimpleNamespace(logs=None, metrics=None, metric_reader=None)
+    second = SimpleNamespace(logs=None, metrics=None, metric_reader=None)
+    try:
+        assert backend._initialize_worker(first)  # pyright: ignore[reportArgumentType]
+        assert backend._initialize_worker(second)  # pyright: ignore[reportArgumentType]
+        assert first.metrics is not None and second.metrics is not None
+        assert first.metrics is not second.metrics
+        first_id = first.metrics._sdk_config.resource.attributes["service.instance.id"]
+        second_id = second.metrics._sdk_config.resource.attributes["service.instance.id"]
+        assert first_id == second_id == str(new_uuid(seeded_rng(7)))
+    finally:
+        sdk_logger.filters[:] = old_filters
+        for worker in (first, second):
+            if worker.logs is not None:
+                worker.logs.shutdown()
+            if worker.metrics is not None:
+                worker.metrics.shutdown()
+        pipeline.stop(timeout=2)

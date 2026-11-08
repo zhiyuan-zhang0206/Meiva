@@ -116,6 +116,7 @@ def test_each_backend_freezes_only_its_own_eligibility(tmp_path: Path) -> None:
         mirror_dir=tmp_path,
         home=tmp_path,
         endpoint=lambda: "http://127.0.0.1:4318",
+        instance_id="test-instance",
     )
     assert first._enabled() is False
     decision = True
@@ -127,6 +128,7 @@ def test_each_backend_freezes_only_its_own_eligibility(tmp_path: Path) -> None:
         mirror_dir=tmp_path,
         home=tmp_path,
         endpoint=lambda: "http://127.0.0.1:4318",
+        instance_id="test-instance",
     )
     assert second._enabled() is True
     assert calls == [False, True]
@@ -147,6 +149,7 @@ def test_backend_does_not_cache_identity_defects_as_disabled(
         mirror_dir=tmp_path,
         home=tmp_path,
         endpoint=lambda: "http://127.0.0.1:4318",
+        instance_id="test-instance",
     )
     with pytest.raises(error, match="bad identity"):
         backend.warmup()
@@ -166,6 +169,7 @@ def test_disabled_backend_does_not_read_identity(tmp_path: Path) -> None:
             mirror_dir=tmp_path,
             home=tmp_path,
             endpoint=lambda: "http://127.0.0.1:4318",
+            instance_id="test-instance",
         )._enabled()
         is False
     )
@@ -195,6 +199,7 @@ def test_stop_marks_the_exporter_closing_before_the_drain(tmp_path: Path) -> Non
             home=tmp_path,
             enabled=lambda: True,
             endpoint=lambda: "http://127.0.0.1:4318",
+            instance_id="test-instance",
         ),
     )
     pipeline.enqueue(
@@ -264,6 +269,7 @@ def test_atexit_executor_shutdown_without_bound_pipeline_emits_no_error_or_statu
         endpoint=lambda: "http://127.0.0.1:1",
         mirror_dir=tmp_path,
         home=tmp_path,
+        instance_id="test-instance",
     )
     process_state["pipeline"] = None
     try:
