@@ -1,7 +1,7 @@
-exports = ["agent_watch.py", "ci_metrics.py", "qa_keepalive.py", "stall_watch.py", "main-red-watch-schedule.py", "main_red_watch.py", "main_red_liveness.py"]
+exports = ["agent_watch.py", "api_read.py", "ci_metrics.py", "qa_keepalive.py", "stall_watch.py", "main-red-watch-schedule.py", "main_red_watch.py", "main_red_liveness.py"]
 
 [uses]
-"main-red-watch-schedule.py" = ["main_red_watch.py", "main_red_liveness.py"]
+"main-red-watch-schedule.py" = ["api_read.py", "main_red_watch.py", "main_red_liveness.py"]
 
 [roots]
 "main-red-watch-schedule.py" = { kinds = ["clock", "environ", "home", "argv"], why = "The watch entry is the composition root of its own loop: it reads the home it runs under, the card-owner override, its scheduler identity and the start instant before the first round; it also reads its command line (argv) once, as the process entry" }
