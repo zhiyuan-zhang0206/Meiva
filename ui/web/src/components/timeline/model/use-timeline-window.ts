@@ -199,7 +199,7 @@ export function useTimelineWindow({
   const readingRef = useRef<{ node: HTMLElement; top: number; id: string; rank: number; identity: string | null } | null>(null);
   const preserveRef = useRef<typeof readingRef.current>(null);
   const tracking = enabled || groups.reduce((count, group) =>
-    count + (group.expandedRows?.length ?? 1), 0) >= measureRows;
+    count + Math.max(group.itemIds.length, group.expandedRows?.length ?? 1), 0) >= measureRows;
   const rememberVisible = useCallback(() => {
     if (isFollowing()) {
       readingRef.current = null;

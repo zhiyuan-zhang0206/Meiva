@@ -248,6 +248,13 @@ export interface StickyController {
   // block closes (or collapses) pins as usual.
   // meiva:link ui/web/src/docs/frontend-components/timeline-view/deep-collapse.meiva.okf.md
   notifyLiveBlock(open: boolean): void;
+  // meiva:note
+  // Reports that the reader manually expanded a work block to inspect its
+  // contents. Opening a block stops following and marks the departure as
+  // deliberate so the layout growth from that expansion does not re-stick or pin
+  // the viewport to the bottom while the reader is hovering over the block.
+  // meiva:link ui/web/src/docs/frontend-components/timeline-view/deep-collapse.meiva.okf.md
+  notifyBlockExpanded(): void;
   // There is deliberately no notify() for non-pin programmatic scrolls
   // (prepend compensation). They need none: the only reader of the
   // baseline is handleScroll, which re-syncs it on every event, so the
@@ -531,6 +538,7 @@ export function createStickyController(
       // hide behind and unsticks.
       sticky = true;
       anchored = false;
+      upwardRun = 0;
     },
 
     notifyPinnedToBottom(view, freshRun = false) {
@@ -591,6 +599,11 @@ export function createStickyController(
         unstick();
         upwardRun = 0;
       }
+    },
+
+    notifyBlockExpanded() {
+      unstick();
+      upwardRun = Number.POSITIVE_INFINITY;
     },
 
     notifyAnchored(view) {

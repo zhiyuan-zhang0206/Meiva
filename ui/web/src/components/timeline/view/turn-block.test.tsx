@@ -287,7 +287,7 @@ describe("TurnBlock component", () => {
         <div>detail rows</div>
       </TurnBlock>,
     );
-    const grid = container.querySelector('[class*="grid-template-rows"]');
+    const grid = container.querySelector('[class*="grid-rows-"]');
     const clip = grid?.firstElementChild;
     expect(grid).not.toBeNull();
     expect(clip?.className).toContain("overflow-hidden");

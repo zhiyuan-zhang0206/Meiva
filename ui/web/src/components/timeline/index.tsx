@@ -504,6 +504,14 @@ export const TimelineView = memo(function TimelineView({
     controller.notifyLiveBlock(liveBlockExpanded);
   }, [controller, liveBlockExpanded]);
 
+  const handleToggleTurn = useCallback(
+    (id: string, currentlyExpanded: boolean) => {
+      if (!currentlyExpanded) controller.notifyBlockExpanded();
+      toggleTurn(id, currentlyExpanded);
+    },
+    [controller, toggleTurn],
+  );
+
   const handleScrollToBottom = useCallback(() => {
     const viewport =
       viewportRef.current ??
@@ -561,7 +569,7 @@ export const TimelineView = memo(function TimelineView({
             lastEventAt={lastEventAt}
             overrides={overrides}
             toggleExpanded={toggleExpanded}
-            toggleTurn={toggleTurn}
+            toggleTurn={handleToggleTurn}
             groups={groups}
             groupEntries={groupEntries}
             virtualEnabled={virtualEnabled}
