@@ -157,9 +157,8 @@ export function AgentRow({
   const showAgentStatus = userSettings["display.show_agent_status"] === true;
   const offline = agent.liveness_state === "offline";
   const working = agent.status === "running" && !offline;
-  const statusMarker = offline
-    ? "bg-muted-foreground/50"
-    : showAgentStatus && agent.status === "terminated"
+  const statusMarker =
+    showAgentStatus && agent.status === "terminated"
       ? STATUS_DOT[agent.status]
       : null;
   const replyLabel = agent.has_pending_question
@@ -275,7 +274,6 @@ export function AgentRow({
           >
             {statusMarker ? (
               <span
-                title={offline ? t("statusOffline") : undefined}
                 className={cn("size-1.5 rounded-full shrink-0", statusMarker)}
               />
             ) : null}

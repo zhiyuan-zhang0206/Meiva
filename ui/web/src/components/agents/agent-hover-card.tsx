@@ -254,16 +254,16 @@ export function AgentHoverCard({
 
         <div className="mt-1.5 space-y-1 text-[11px]">
           <p className={cn("items-center gap-1.5 text-muted-foreground", MIN_W_0, FLEX)}>
-            {offline || agent.status === "terminated" ? (
+            {!offline && agent.status === "terminated" ? (
               <span
                 className={cn(
                   "size-1.5 rounded-full shrink-0",
-                  offline ? "bg-muted-foreground/50" : STATUS_DOT[agent.status],
+                  STATUS_DOT[agent.status],
                 )}
               />
             ) : null}
             <span className="text-popover-foreground">
-              {t(STATUS_LABEL_KEY[agent.status])}
+              {offline ? t("statusOffline") : t(STATUS_LABEL_KEY[agent.status])}
             </span>
             <span aria-hidden>·</span>
             <span>{harnessLabel(agent.harness)}</span>
@@ -296,12 +296,6 @@ export function AgentHoverCard({
           ) : spawnerAgentId != null ? (
             <p className="font-mono text-[10.5px] text-muted-foreground">
               {t("hoverSpawnedBy", { id: spawnerAgentId })}
-            </p>
-          ) : null}
-
-          {offline ? (
-            <p className="text-[10.5px] text-muted-foreground">
-              {t("statusOffline")}
             </p>
           ) : null}
 

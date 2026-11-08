@@ -96,7 +96,8 @@ idle text (`#525252` light / `#A8ABB0` dark). A running agent's title sweeps
 with a lighter monochrome Silver Glint highlight (`agent-title-sweep`) over its
 normal row base color so running items never darken or bolden relative to idle
 rows (and stays at static row emphasis under reduced motion).
-Offline agents retain a gray marker. At the right edge, an unresolved structured
+Offline agents suppress the working title shimmer on the row without rendering a
+gray row dot, and report their offline state in the hover peek card's status slot. At the right edge, an unresolved structured
 question shows a Sunset Orange (`#ED8755`) circled question mark, and an ordinary
 response-required notice shows a Sunset Orange (`#ED8755`) dot. The question
 takes precedence when both are pending, independently of the working title.
