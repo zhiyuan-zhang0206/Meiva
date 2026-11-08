@@ -66,10 +66,7 @@ pub fn setup_tray(app: &AppHandle) -> tauri::Result<()> {
         ],
     )?;
 
-    TrayIconBuilder::with_id("meiva")
-        // No branded glyph: the app ships without a logo (task #3286). The
-        // status item keeps its tooltip, menu, and click behavior; it just
-        // renders without an image.
+    let mut tray = TrayIconBuilder::with_id("meiva")
         .tooltip("Meiva")
         .menu(&menu)
         // A left click opens the window; the menu is the right-click surface.
@@ -81,8 +78,11 @@ pub fn setup_tray(app: &AppHandle) -> tauri::Result<()> {
                 }
             }
         })
-        .on_menu_event(on_menu_event)
-        .build(app)?;
+        .on_menu_event(on_menu_event);
+    if let Some(icon) = app.default_window_icon() {
+        tray = tray.icon(icon.clone());
+    }
+    tray.build(app)?;
     Ok(())
 }
 

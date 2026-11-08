@@ -41,8 +41,8 @@ export const viewport: Viewport = {
   // in globals.css) and `ThemeColorSync` follows an in-app theme override.
   // meiva:link ui/web/src/docs/frontend.meiva.okf.md
   themeColor: [
-    { media: "(prefers-color-scheme: light)", color: "#ffffff" },
-    { media: "(prefers-color-scheme: dark)", color: "#222222" },
+    { media: "(prefers-color-scheme: light)", color: "#F0F2F4" },
+    { media: "(prefers-color-scheme: dark)", color: "#292824" },
   ],
   // Android Chrome shrinks the LAYOUT viewport (and with it the h-full shell)
   // for the on-screen keyboard when asked to; the default `resizes-visual`

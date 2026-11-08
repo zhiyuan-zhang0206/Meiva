@@ -82,10 +82,11 @@ silently disappear on a phone.
 
 Collapsed hides the column entirely; the title bar's PanelLeft button restores
 it. The list is stably sorted by agent ID descending and status or activity
-changes never re-sort it. A running agent's title has a slow highlight sweep
-with a static emphasis under reduced motion. Offline agents retain a gray marker.
-At the right edge, an unresolved structured question shows a circled question
-mark, and an ordinary response-required notice shows a blue dot. The question
+changes never re-sort it. A running agent's title pulses with a calm monochrome
+opacity shift (and stays at static foreground emphasis under reduced motion).
+Offline agents retain a gray marker. At the right edge, an unresolved structured
+question shows a Sunset Orange (`#ED8755`) circled question mark, and an ordinary
+response-required notice shows a Sunset Orange (`#ED8755`) dot. The question
 takes precedence when both are pending, independently of the working title.
 Unread publications and FYI notices do not need a reply. Additional lifecycle
 markers and the header's aggregate reply count remain opt-in through

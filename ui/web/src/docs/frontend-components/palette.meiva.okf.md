@@ -12,23 +12,24 @@ tags:
 in `base/packages/plugins/surface/ui_contributions.py:THEME_TOKENS`, a test keeps
 the two lists equal, and a skin (plugin theme pack) may repaint any of them.
 
-## The light block
+## The light block: Moonlight White & Coal Black
 
-The neutral shadcn ramp. Nothing special: surfaces differ by small lightness steps
-and borders carry the separation.
+Anchored on the Meiva Brand Design System v1.0 tokens (`--meiva-moonlight-white: #F0F2F4`, `--meiva-coal-black: #292824`, `--meiva-sunset-orange: #ED8755`, `--meiva-mountain-green: #427C6E`, `--meiva-ocean-blue: #2276B5`):
+- Canvas (`--background` / `--theme-color`) is Moonlight White `#F0F2F4`;
+- Foreground and primary text/chrome are Coal Black `#292824`;
+- Cards (`#F7F8FA`) and popovers (`#FAFBFD`) rise slightly above the canvas while the sidebar (`#EAECEF`) sits a half-step deeper;
+- Focus rings (`--ring` / `--sidebar-ring`) use Sunset Orange `#ED8755`.
 
-## The dark block: warm graphite
+## The dark block: Coal Black & Moonlight White
 
-User pick 2026-10-19. One near-neutral warm family (OKLCH hue 75, chroma 0.005) and
-a four-step elevation ladder. The **canvas is the darkest surface** and the sidebar
-sits just above it; cards and popovers rise above the canvas:
+Anchored on Brand Coal Black `#292824` for the main canvas and Moonlight White `#F0F2F4` for foreground text:
 
 | Surface | Token | Value |
 |---|---|---|
-| canvas | `--background` | `#1e1d1b` |
-| sidebar | `--sidebar` | `#232220` |
-| card | `--card` | `#2b2a27` |
-| popover | `--popover` | `#35332f` |
+| sidebar | `--sidebar` | `#23221F` |
+| canvas | `--background` | `#292824` |
+| card | `--card` | `#302F2A` |
+| popover | `--popover` | `#383731` |
 
 The order matters. The conversation is the field the eye reads, so it is the
 quietest, deepest surface; chrome recedes into it rather than floating above it.

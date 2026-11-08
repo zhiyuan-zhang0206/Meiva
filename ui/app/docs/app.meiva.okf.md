@@ -31,10 +31,10 @@ and the scoped remote IPC capability live in their own node:
 ## Desktop
 
 `src-tauri/src/desktop.rs` provides one-instance behavior, tray open/quit,
-close-to-tray, launch-at-login, and Tauri updater checks. The app ships without
-branding icons: the bundle declares none, the tray item renders without an
-image, and `icons/` keeps only the blank `.png` placeholder the
-toolchain requires. Auto-login reads the
+close-to-tray, launch-at-login, and Tauri updater checks. The bundle and tray
+item use the brand `M` monogram assets in `src-tauri/icons/`, while Android
+launcher icons live in `android/res/` and are installed by
+`android/apply_overlay.py`. Auto-login reads the
 local `$MEIVA_HOME/.env` secret, performs the gateway login outside web content,
 and reloads after its native cookie store receives the session.
 

@@ -345,9 +345,9 @@ export function AgentRow({
                 className="grid size-4 shrink-0 place-items-center"
               >
                 {agent.has_pending_question ? (
-                  <CircleQuestionMark aria-hidden className="size-3.5" />
+                  <CircleQuestionMark aria-hidden className="size-3.5 text-[#ED8755]" />
                 ) : (
-                  <span aria-hidden className="size-1.5 rounded-full bg-sky-600 dark:bg-sky-400" />
+                  <span aria-hidden className="size-1.5 rounded-full bg-[#ED8755]" />
                 )}
               </span>
             ) : null}
@@ -402,7 +402,7 @@ export function AgentRow({
                 onSelect={confirmRestart}
                 disabled={pending !== undefined}
               >
-                <RotateCw className="text-emerald-500" /> {t("restart")}
+                <RotateCw /> {t("restart")}
               </ContextMenuItem>
             )}
             <ContextMenuItem
@@ -414,7 +414,7 @@ export function AgentRow({
             {agent.harness === "meiva" && (
               <>
                 <ContextMenuItem onSelect={onCompact} disabled={pending !== undefined}>
-                  <Shrink className="text-amber-500" /> {t("compact")}
+                  <Shrink /> {t("compact")}
                 </ContextMenuItem>
                 <ContextMenuItem onSelect={() => onFork()}>
                   <GitFork /> {t("fork")}
