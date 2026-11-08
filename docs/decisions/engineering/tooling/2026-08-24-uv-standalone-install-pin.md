@@ -6,7 +6,7 @@ and CI setup-uv versions were pinned by the brew-pin-hardening work.
 
 `scripts/provision/toolchain.sh` now downloads the uv 0.10.2 release asset for
 the host platform and refuses to install it when its sha256 does not match the
-approved value. `shared/brew_pin.py` is the canonical pin; toolchain.sh embeds
+approved value. `base/host/tool_pins.py` is the canonical pin; toolchain.sh embeds
 the same values because it runs before Python exists, and a contract test keeps
 the copies consistent.
 

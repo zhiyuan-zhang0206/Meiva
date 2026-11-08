@@ -46,7 +46,6 @@ from base.host.boundary.options import options
 from base.host.boundary.untyped import object_of
 from base.host.env.dotenv_file import upsert_env
 from base.host.private_storage import write_private_bytes
-from ops.env_audit import EnvWriteAudit
 from services.backup.artifact import passphrase
 
 _TOKEN_BYTES = 32
@@ -153,7 +152,7 @@ def write_secret(home: Path, rotation: Rotation) -> None:
     staged = _staged(home)
     if staged is None or bearer_fingerprint(staged) != rotation.new:
         raise RotationRefusedError(f"{pending_path(home)} is missing or is not the staged secret")
-    upsert_env(home / ".env", {_SECRET_ENV: staged}, audit=EnvWriteAudit(site=_AUDIT))
+    upsert_env(home / ".env", {_SECRET_ENV: staged})
     if bearer_fingerprint(_current_secret(home)) != rotation.new:
         raise RuntimeError("the new secret did not read back from .env")
 

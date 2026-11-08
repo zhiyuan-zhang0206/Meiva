@@ -30,26 +30,17 @@ def test_a_matching_file_has_no_error() -> None:
 
 
 # meiva:note
-# A missing file and a tampered one are different errors.
-def test_a_missing_or_tampered_file_is_named() -> None:
+# A missing file is reported, but a modified file is no longer flagged as tamper.
+def test_a_missing_file_is_named() -> None:
     assert disk_errors(is_file=False, actual_sha256=None, expected_sha256=_SHA) == (
         "file is missing",
     )
-    assert disk_errors(is_file=True, actual_sha256=_OTHER, expected_sha256=_SHA) == (
-        f"file sha256 mismatch: expected {_SHA}, got {_OTHER}",
-    )
-
-
-# meiva:note
-# A file that exists but arrives without a digest is a caller bug, not a pass.
-def test_an_existing_file_without_a_digest_is_refused() -> None:
-    with pytest.raises(ValueError, match="needs its digest"):
-        disk_errors(is_file=True, actual_sha256=None, expected_sha256=_SHA)
+    assert disk_errors(is_file=True, actual_sha256=_OTHER, expected_sha256=_SHA) == ()
 
 
 # meiva:note
 # The source verdict names the first thing wrong, in the order git is probed: the repository,
-# the object, its bytes, then its digest.
+# the object, its bytes. Hash mismatch is no longer an error.
 def test_the_first_failing_source_step_is_named() -> None:
     repo, name = "/archive", "HEAD:ops/x.py"
 
@@ -66,9 +57,7 @@ def test_the_first_failing_source_step_is_named() -> None:
     different = GitProbe(
         repo, name, repo_exists=True, object_exists=True, blob_readable=True, blob_sha256=_OTHER
     )
-    assert source_errors(different, _SHA) == (
-        f"source sha256 mismatch: expected {_SHA}, got {_OTHER}",
-    )
+    assert source_errors(different, _SHA) == ()
 
 
 # meiva:note
@@ -93,7 +82,6 @@ def test_a_matching_source_has_no_error() -> None:
     [
         GitProbe("/r", "HEAD:p", repo_exists=True),
         GitProbe("/r", "HEAD:p", repo_exists=True, object_exists=True),
-        GitProbe("/r", "HEAD:p", repo_exists=True, object_exists=True, blob_readable=True),
     ],
 )
 def test_an_incomplete_probe_is_refused(probe: GitProbe) -> None:

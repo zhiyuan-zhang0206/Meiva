@@ -123,21 +123,19 @@ def test_a_venv_leg_the_host_could_not_start_is_no_verdict(tmp_path: Path) -> No
 async def test_consecutive_no_verdict_rounds_are_reported_without_a_verdict(
     loguru_records: LogRecords,
 ) -> None:
-    failed = DaemonProbe.down("approved Homebrew formulae are unpinned: redis")
+    failed = DaemonProbe.down("venv dependency drift")
     current: DaemonProbe = failed
     reported: list[DaemonProbe] = []
     monitor = DiagnosticMonitor(
-        [Diagnostic("brew-pin", lambda: current, interval_s=0.001, report=reported.append)],
+        [Diagnostic("venv", lambda: current, interval_s=0.001, report=reported.append)],
         clock=system_clock(),
     )
     await monitor.run_round()
     await asyncio.sleep(0.002)
     busy = (
-        DaemonProbe.inconclusive(
-            "brew list --pinned did not finish within the 18s observation deadline"
-        ),
-        DaemonProbe.unavailable("brew list --pinned could not start: Permission denied"),
-        DaemonProbe.inconclusive("brew list --formula was never started"),
+        DaemonProbe.inconclusive("venv import did not finish within the 18s observation deadline"),
+        DaemonProbe.unavailable("uv could not start: Permission denied"),
+        DaemonProbe.inconclusive("venv import was never started"),
     )
     for verdict in busy:
         current = verdict
@@ -155,4 +153,4 @@ async def test_consecutive_no_verdict_rounds_are_reported_without_a_verdict(
     assert [row["level"].name for row in rows] == ["WARNING", "INFO", "INFO", "INFO"]
     assert reported == [failed]
     snapshot = cast("dict[str, dict[str, object]]", monitor.health_snapshot())
-    assert snapshot["diagnostic:brew-pin"]["last_verdict"] == "inconclusive"
+    assert snapshot["diagnostic:venv"]["last_verdict"] == "inconclusive"

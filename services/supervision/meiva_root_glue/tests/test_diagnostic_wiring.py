@@ -53,7 +53,6 @@ def test_every_diagnostic_the_roster_builds_has_all_its_required_arguments_bound
         config=probe_config(pgbouncer_enabled=True, observability_url="http://127.0.0.1:3000"),
     )
     assert {check.name for check in checks} == {
-        "brew-pin",
         "venv",
         "permissions-helper",
         "redis-acl",

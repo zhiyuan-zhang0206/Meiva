@@ -206,7 +206,6 @@ above (or when its name is unregistered); otherwise it stays in the JSONL mirror
 | `host_turn_reconcile_failed` | the immediate inbound reconcile at a finished hosted turn raised — the host does not treat it as fatal and the next cold admission retries the disposal of the claimed rows | anomaly | — | — | events | — |
 | `host_admission_wait_exceeded` | a hosted turn has queued at the host admission gate (MEIVA_HOST_MAX_CONCURRENT_TURNS) for at least MEIVA_HOST_ADMISSION_WAIT_ALERT_SECONDS — carries the agent, its current wait, the limit and the queue depth; reported once per wait episode. Queueing is the configured memory/runtime trade-off working, not an error; a wait this long means the queue is backing up (raise the limit or inspect the turns holding slots). The wait is exempt from stall cancellation — cancelling it would only re-queue it at the tail | anomaly | — | — | events | — |
 | `inbound_reconcile` | claimed inbounds consumed after interruption | noise | — | — | events | — |
-| `brew_pin` | the brew-pin assertion could not judge this host: brew list (--pinned) raised or exited non-zero, so the installed and pinned sets are unknown, not empty | anomaly | — | — | events | — |
 | `launchd_retirement` | launchctl print still lists a job after its bootout; the retired job keeps running the code it was loaded with while its plist is already gone | anomaly | — | — | events | — |
 | `node_enter` | LangGraph node entered — sink-filtered out of the event stream (PR #1758); log files only | noise | — | — | file | — |
 | `node_exit` | LangGraph node exited | noise | count, nodes | — | events | — |
@@ -300,7 +299,6 @@ above (or when its name is unregistered); otherwise it stays in the JSONL mirror
 | `audit_write_failed` | an audit event could not be recorded in audit_events (the record is missing; the Loki projection of the same event still went out) | anomaly | event_name, error_class, error | — | events | — |
 | `audit_machine_unknown` | audit rows written by a process that could not name its machine | anomaly | user_rows, agent_rows, window_rows, day_rows, window_seconds | — | events | — |
 | `telemetry_store_failed` | a batch of telemetry/log events did not land in telemetry_events (the JSONL mirror and Loki still hold them) | anomaly | rows, consecutive_failures, error_class, error | — | events | — |
-| `env_audit_history` | the env-write audit history holds unreadable records in its tail window; the listing is incomplete | anomaly | — | — | events | — |
 | `lgtm_dashboard` | a provisioned LGTM dashboard JSON could not be read or is not a JSON object; it is not provisioned this pass | anomaly | — | — | events | — |
 | `lgtm_dashboard_render_failed` | meiva-ops dashboard render failed during converge; the previous provisioning file was kept | anomaly | — | — | events | — |
 | `converge_file_preserved` | converge kept a locally modified destination instead of overwriting — the current content no longer matches the recorded render; repeats every converge until resolved | anomaly | path, key, surface | — | events | — |

@@ -81,9 +81,6 @@ SIGNALS: dict[str, Signal] = {
         "root_unit_stop_escalated", "meiva-ops", "0m", "error"
     ),
     "meiva-ops-root-diagnostic-venv": Signal("root_diagnostic", "meiva-ops", "0m", "warning", 0),
-    "meiva-ops-root-diagnostic-brew-pin": Signal(
-        "root_diagnostic", "meiva-ops", "0m", "warning", 0
-    ),
     # meiva:note
     # The no-verdict debounce: one diagnostic sample per 60s, so three rounds is the three-minute
     # window the query carries, and a single round of "no verdict" is not worth an alert (2026-10-27).
@@ -205,7 +202,7 @@ def test_grafana_owns_five_minute_recovery_and_missing_series_grace() -> None:
         assert "keep_firing_for" not in rule
 
 
-@pytest.mark.parametrize("diagnostic", ["venv", "brew-pin", "browser-reach", "task-telemetry"])
+@pytest.mark.parametrize("diagnostic", ["venv", "browser-reach", "task-telemetry"])
 def test_root_diagnostics_keep_the_machine_identity(diagnostic: str) -> None:
     rule = _rules()["meiva-ops-root-diagnostic-" + diagnostic][1]
     assert "sum by (machine)" in _query(rule)

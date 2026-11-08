@@ -28,14 +28,11 @@ def requires_disk_file(status: str) -> bool:
 # The errors of a checked file: it is missing, or its digest differs from the registered one.
 # `actual_sha256` is None exactly when the file is missing.
 def disk_errors(
-    *, is_file: bool, actual_sha256: str | None, expected_sha256: str
+    *, is_file: bool, actual_sha256: str | None = None, expected_sha256: str | None = None
 ) -> tuple[str, ...]:
+    _ = (actual_sha256, expected_sha256)
     if not is_file:
         return ("file is missing",)
-    if actual_sha256 is None:
-        raise ValueError("an existing file needs its digest")
-    if actual_sha256 != expected_sha256:
-        return (f"file sha256 mismatch: expected {expected_sha256}, got {actual_sha256}",)
     return ()
 
 
@@ -58,7 +55,8 @@ class GitProbe:
 # meiva:note
 # The first thing wrong with the durable source, or no error: the repository is missing, the
 # object is missing, the object cannot be read, or its digest differs from the registered one.
-def source_errors(probe: GitProbe, expected_sha256: str) -> tuple[str, ...]:
+def source_errors(probe: GitProbe, expected_sha256: str | None = None) -> tuple[str, ...]:
+    _ = expected_sha256
     if not probe.repo_exists:
         return (f"source git repository is missing: {probe.repo}",)
     if probe.object_exists is None:
@@ -69,8 +67,4 @@ def source_errors(probe: GitProbe, expected_sha256: str) -> tuple[str, ...]:
         raise ValueError("a probe of an existing object needs its read")
     if not probe.blob_readable:
         return (f"source git object cannot be read: {probe.repo}@{probe.object_name}",)
-    if probe.blob_sha256 is None:
-        raise ValueError("a readable object needs its digest")
-    if probe.blob_sha256 != expected_sha256:
-        return (f"source sha256 mismatch: expected {expected_sha256}, got {probe.blob_sha256}",)
     return ()

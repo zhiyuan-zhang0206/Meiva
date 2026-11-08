@@ -36,7 +36,6 @@ fails, and root teardown preserves its primary and secondary errors.
 
 | Diagnostic | Registration | Evidence |
 |---|---|---|
-| `brew-pin` | macOS | Bounded Homebrew installed/pinned queries with `HOMEBREW_NO_AUTO_UPDATE` pinned, so the sample measures the pin set, not brew's own maintenance. Missing pins are DOWN; a query that expires or cannot start is INCONCLUSIVE. No package changes. |
 | `venv` | POSIX | This executing checkout's dependency metadata and isolated `-I -B` imports of Meiva, Pydantic, Psycopg, and FastAPI, a heavy import. Both legs share the check's deadline; no inherited PYTHONPATH or VIRTUAL_ENV. Missing uv is unavailable; a leg that expires, cannot start or is killed is INCONCLUSIVE; only a run that finished with a violation is DOWN. |
 | `permissions-helper` | Every macOS root | Connected Unix peer and ping PID must match the live native parent of the root process, with birth/lineage rechecked after reply; failures retain launchd classification. One `permissions_helper_unhealthy` event per episode; no helper bootout, bootstrap, or upgrade. |
 | `redis-acl` | gateway with local data plane | Runtime-credential authenticated PING. No ACL writes or instance start. |
@@ -74,7 +73,7 @@ A leg that expires, cannot start or is killed without a return code is *never
 read*: the check answers INCONCLUSIVE naming it — a fourth answer, not a quieter
 DOWN, that forbids a respawn like UNAVAILABLE and never resolves an open
 condition. With UNAVAILABLE it forms the *no verdict* class, reported at INFO.
-Venv and brew-pin alert on the first sample that measured damage; three
+Venv alerts on the first sample that measured damage; three
 no-verdict samples in three minutes are
 `meiva-ops-root-diagnostic-no-verdict`.
 

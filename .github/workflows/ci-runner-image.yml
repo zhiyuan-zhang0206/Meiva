@@ -19,7 +19,7 @@ on:
       - '.github/actions/install-pg-redis/**'
       - '.github/actions/install-playwright-deps/**'
       - 'base/cluster/dataplane/runtime_binaries.py'
-      - 'base/host/brew_pin.py'
+      - 'base/host/tool_pins.py'
       - '.python-version'
   pull_request:
     paths:
@@ -28,7 +28,7 @@ on:
       - '.github/actions/install-pg-redis/**'
       - '.github/actions/install-playwright-deps/**'
       - 'base/cluster/dataplane/runtime_binaries.py'
-      - 'base/host/brew_pin.py'
+      - 'base/host/tool_pins.py'
       - '.python-version'
   workflow_dispatch:
 

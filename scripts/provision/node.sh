@@ -10,7 +10,7 @@
 # letting the frontend session die on a missing binary.
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_lib.sh"
 
-# Canonical pin lives in base/host/brew_pin.py; contract-tested in test_toolchain_uv_pin.py.
+# Canonical pin lives in base/host/tool_pins.py; contract-tested in test_toolchain_uv_pin.py.
 PNPM_VERSION="11.9.0"
 
 OS="$(prov_os)"

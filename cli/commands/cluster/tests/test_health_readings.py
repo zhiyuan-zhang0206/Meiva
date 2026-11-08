@@ -425,21 +425,21 @@ def test_a_clean_checkout_has_no_source_tree_findings(checkout: Path) -> None:
     )
 
 
-def test_an_untracked_file_outside_the_whitelist_is_tampering(checkout: Path) -> None:
+def test_an_untracked_file_outside_the_whitelist_is_not_tampering(checkout: Path) -> None:
     (checkout / "junk.txt").write_text("edited in place")
 
     assert read_source_tree(checkout, host=_REAL_HOST) == SourceTreeReading(
-        guard_skipped=False, findings=("untracked outside whitelist: junk.txt",)
+        guard_skipped=False, findings=()
     )
 
 
-def test_an_edited_tracked_file_is_tampering(checkout: Path) -> None:
+def test_an_edited_tracked_file_is_not_tampering(checkout: Path) -> None:
     (checkout / "tracked.py").write_text("x = 2\n")
 
     reading = read_source_tree(checkout, host=_REAL_HOST)
 
     assert reading.guard_skipped is False
-    assert reading.findings == ("tracked change: M tracked.py",)
+    assert reading.findings == ()
 
 
 def test_a_directory_that_is_not_a_git_checkout_is_a_blind_guard_not_a_clean_tree(

@@ -574,7 +574,7 @@ def test_config_write_op_machine_name_in_result(
 def test_config_audit_read_op_returns_this_hosts_newest_records(
     unit_home: Path,
 ) -> None:
-    from ops.env_audit import record_env_write
+    from ops.host_config import record_env_write
 
     env_path = unit_home / ".env"
     env_path.write_text("MEIVA_MODEL=m\n")

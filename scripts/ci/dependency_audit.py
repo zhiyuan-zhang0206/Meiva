@@ -35,8 +35,8 @@ from base.host.boundary.untyped import object_of  # noqa: E402
 
 MARKER = "<!-- weekly-dependency-audit -->"
 _TITLE = "Weekly dependency audit: findings need attention"
-_UV_PIN = ("uv", "base/host/brew_pin.py", r'^UV_VERSION = "([^"]+)"')
-_PNPM_PIN = ("pnpm", "base/host/brew_pin.py", r'^PNPM_VERSION = "([^"]+)"')
+_UV_PIN = ("uv", "base/host/tool_pins.py", r'^UV_VERSION = "([^"]+)"')
+_PNPM_PIN = ("pnpm", "base/host/tool_pins.py", r'^PNPM_VERSION = "([^"]+)"')
 _SEVERITY_RANK = {"critical": 4, "high": 3, "moderate": 2, "low": 1, "unknown": 0}
 _ACTIONABLE_SEVERITIES = frozenset({"critical", "high", "unknown"})
 
@@ -555,7 +555,7 @@ def sync_issue(repo: str, body: str, *, actionable: bool, gh: Callable[[list[str
 
 
 # meiva:note
-# A run renders the marker-prefixed three-section report from the audit tools and the canonical pins, and runs `uv audit` with the uv version pinned in base/host/brew_pin.py.
+# A run renders the marker-prefixed three-section report from the audit tools and the canonical pins, and runs `uv audit` with the uv version pinned in base/host/tool_pins.py.
 # meiva:link scripts/ci/docs/dependency-audit.meiva.okf.md
 def main(argv: list[str], *, run: AuditProcess, open_url: UrlOpener) -> int:
     parser = argparse.ArgumentParser(description="Weekly dependency audit report")

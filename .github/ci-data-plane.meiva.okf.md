@@ -25,7 +25,7 @@ change pooled-session semantics the wire fixtures assert, so moving the pin is a
 dependency upgrade that needs the maintainer's approval.
 
 Redis comes from the redis.io apt repo at the 8.2 series production installs and
-holds (`base.host.brew_pin.REDIS_APT_VERSION`); the action fails when another
+holds (`base.host.tool_pins.REDIS_APT_VERSION`); the action fails when another
 series ends up installed. The Postgres server a test cluster runs is the
 vendored zonky tree production vendors (`runtime_binaries`), built once per job
 by `actions/vendor-pg-runtime` (`scripts/ci/vendor_pg_runtime.py`, after the

@@ -96,7 +96,7 @@ uses its configured transport; only the audit's advisory request selects
 `https://registry.npmjs.org`. A registry/tool error is an incomplete failed run,
 never a clean report or permission to close the tracked issue.
 
-The canonical uv and pnpm pins live in `base/host/brew_pin.py`; provisioning and
+The canonical uv and pnpm pins live in `base/host/tool_pins.py`; provisioning and
 every `setup-uv` and `pnpm/action-setup` input mirror those versions. The weekly
 report derives its isolated `uvx` audit runner from that same uv pin, including
 when an operator invokes the report with an older installed toolchain. PR-time CI

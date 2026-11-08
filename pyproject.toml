@@ -353,7 +353,7 @@ check-typed-exception = true
 "base/packages/plugins/surface/inspector.py" = ["N818"]
 # brew_prefix resolves the Homebrew prefix through a fixed argv; the optional
 # formula name is a local literal, not external input.
-"base/host/brew_pin.py" = ["S603"]
+"base/host/tool_pins.py" = ["S603"]
 # meiva_syntax_fix uses fullwidth chars in docstrings as examples of what the fixer targets,
 # and carries Chinese notes from data analysis of real error corpora.
 "meiva_builtins/plugins/meiva_syntax_fix/*" = ["RUF001", "RUF002", "RUF003"]
@@ -917,9 +917,6 @@ root = "ops/agents/tests"
 
 [[tool.pyright.executionEnvironments]]
 root = "ops/cluster_status/tests"
-
-[[tool.pyright.executionEnvironments]]
-root = "ops/env_audit/tests"
 
 [[tool.pyright.executionEnvironments]]
 root = "ops/inventory/tests"

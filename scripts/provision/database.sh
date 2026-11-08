@@ -18,12 +18,12 @@
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_lib.sh"
 
 # The operator-approved PgBouncer build (pgdg, Ubuntu 24.04). The CI install
-# action pins the same string; base/host/brew_pin.py holds the canonical value and
+# action pins the same string; base/host/tool_pins.py holds the canonical value and
 # tests/ci/test_pgbouncer_pin.py asserts the copies match.
 PGBOUNCER_APT_VERSION="1.26.0-1.pgdg24.04+1"
 
 # The operator-approved Redis series (8.2, as macOS pins `redis@8.2`): the newest
-# patch release redis.io serves for it. base/host/brew_pin.py holds the canonical
+# patch release redis.io serves for it. base/host/tool_pins.py holds the canonical
 # value; tests/ci/test_redis_pin.py asserts the copies match.
 REDIS_APT_VERSION="6:8.2.*"
 

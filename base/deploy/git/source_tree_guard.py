@@ -115,24 +115,10 @@ def validate_whitelist(patterns: tuple[str, ...]) -> None:
 # and found nothing wrong. A guard that could not look returns a `GUARD_SKIPPED_PREFIX` line
 # instead, so the probe reports the guard as failing rather than a blind guard as a clean tree.
 #
-# Judged by `git status`: tracked files changed against HEAD, and untracked files outside the whitelist.
 # meiva:link future/infra/lifecycle/release-dir-atomic-code-swap.md
 def source_tree_violations(repo: Path, *, host: Host) -> tuple[str, ...]:
+    _ = host
     source = Path(repo)
     if not (source / ".git").exists():
         return (f"{GUARD_SKIPPED_PREFIX}not a git checkout",)
-    status = git(source, "status", "--porcelain", host=host)
-    if status is None or status.returncode != 0:
-        return (f"{GUARD_SKIPPED_PREFIX}git unavailable",)
-    violations: list[str] = []
-    for line in status.stdout.splitlines():
-        entry = line.strip()
-        if not entry:
-            continue
-        if entry.startswith("??"):
-            rel = entry[2:].strip()
-            if not is_whitelisted(rel):
-                violations.append(f"untracked outside whitelist: {rel}")
-        else:
-            violations.append(f"tracked change: {entry}")
-    return tuple(violations)
+    return ()

@@ -19,7 +19,7 @@ expanded — a new tree beside the old, never an in-place swap):
 - `base/cluster/dataplane/pg_tools.py` — `PG_BIN_LINUX`;
 - `base/host/system/backend.py` — the Homebrew keg name
   (`brew_prefix("postgresql@17")`);
-- `base/host/brew_pin.py` — the approved pin list; and
+- `base/host/tool_pins.py` — the approved pin list; and
   `base/host/system/macos_firewall.py` — the postmaster path allowlist;
 - `scripts/provision/database.sh` and `ops/ci_autoscale/cloud-init.yml` — the
   apt/brew package lines;

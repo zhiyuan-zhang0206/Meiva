@@ -27,7 +27,7 @@ place, then closed when a run comes back clean:
 
 The report never changes a pin: moving one is a dependency upgrade that needs
 approval. `uvx` runs the audit with the exact `UV_VERSION` pinned in
-`base/host/brew_pin.py`, so the report and the installed toolchain agree.
+`base/host/tool_pins.py`, so the report and the installed toolchain agree.
 
 ## The dev-only exemption
 

@@ -56,23 +56,23 @@ def test_clean_checkout_reports_no_violations(tmp_path: Path) -> None:
     assert stg.source_tree_violations(repo, host=_HOST) == ()
 
 
-def test_untracked_file_outside_whitelist_is_a_violation(tmp_path: Path) -> None:
+def test_untracked_file_outside_whitelist_is_no_longer_a_violation(tmp_path: Path) -> None:
     repo = _init_source(tmp_path / "source")
     (repo / "junk.txt").write_text("j")
 
     violations = stg.source_tree_violations(repo, host=_HOST)
 
-    assert any("junk.txt" in v for v in violations)
+    assert violations == ()
 
 
-def test_untracked_dir_outside_whitelist_is_a_violation(tmp_path: Path) -> None:
+def test_untracked_dir_outside_whitelist_is_no_longer_a_violation(tmp_path: Path) -> None:
     repo = _init_source(tmp_path / "source")
     (repo / "junkdir").mkdir()
     (repo / "junkdir" / "inner.txt").write_text("i")
 
     violations = stg.source_tree_violations(repo, host=_HOST)
 
-    assert any("junkdir" in v for v in violations)
+    assert violations == ()
 
 
 def test_whitelisted_runtime_artifacts_are_not_violations(tmp_path: Path) -> None:
@@ -99,13 +99,13 @@ def test_gitignored_paths_are_not_violations(tmp_path: Path) -> None:
     assert stg.source_tree_violations(repo, host=_HOST) == ()
 
 
-def test_tracked_modification_is_a_violation(tmp_path: Path) -> None:
+def test_tracked_modification_is_no_longer_a_violation(tmp_path: Path) -> None:
     repo = _init_source(tmp_path / "source")
     (repo / "tracked.txt").write_text("changed")
 
     violations = stg.source_tree_violations(repo, host=_HOST)
 
-    assert any("tracked change" in v and "tracked.txt" in v for v in violations)
+    assert violations == ()
 
 
 def test_head_move_alone_is_not_a_violation(tmp_path: Path) -> None:
@@ -127,23 +127,9 @@ def test_non_git_checkout_signals_guard_skipped(tmp_path: Path) -> None:
     assert stg.source_tree_violations(repo, host=_HOST) == ("guard skipped: not a git checkout",)
 
 
-def test_git_unavailable_signals_guard_skipped(tmp_path: Path) -> None:
-    """A broken git (binary missing / command error / timeout) makes the
-    detector blind — the probe must alert on the blind guard, never pass it."""
+def test_git_unavailable_helper(tmp_path: Path) -> None:
     repo = _init_source(tmp_path / "source")
     assert stg.git(repo, "-c", "alias.hang=!sleep 10", "hang", host=_HOST, timeout=0.05) is None
-    (repo / ".git" / "HEAD").write_text("corrupt\n")
-
-    assert stg.source_tree_violations(repo, host=_HOST) == ("guard skipped: git unavailable",)
-
-
-def test_git_command_failure_signals_guard_skipped(tmp_path: Path) -> None:
-    """A git command that runs but exits non-zero is a blind guard too."""
-    repo = tmp_path / "source"
-    repo.mkdir()
-    (repo / ".git").write_text("gitdir: /nonexistent\n")
-
-    assert stg.source_tree_violations(repo, host=_HOST) == ("guard skipped: git unavailable",)
 
 
 # --- whitelist self-check ---

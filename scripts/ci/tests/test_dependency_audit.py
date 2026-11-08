@@ -9,10 +9,10 @@ from pathlib import Path
 
 import pytest
 
-from base.host.brew_pin import UV_VERSION
 from base.host.net.tests.fake_url_opener import Answer, FakeUrlOpener
 from base.host.proc import run_bounded
 from base.host.system.tests.fake_commands import FakeCommands, Reply
+from base.host.tool_pins import UV_VERSION
 from scripts.ci import dependency_audit as audit
 
 

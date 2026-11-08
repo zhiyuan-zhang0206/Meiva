@@ -537,7 +537,7 @@ def test_helper_diagnostics_are_macos_only(*, machine_identity: ConfiguredMachin
             config=probe_config(),
         )
     }
-    assert names == {"venv", "brew-pin", "permissions-helper"}
+    assert names == {"venv", "permissions-helper"}
 
 
 def test_station_no_credential_is_unknown_and_does_not_send(unit_home: Path) -> None:
@@ -593,13 +593,6 @@ def test_station_resolution_failure_is_unavailable_and_does_not_send(unit_home: 
     assert probe.probe().verdict.value == "unavailable"
     create.assert_called_once_with()
     assert opener.calls == []
-
-
-def test_missing_brew_probe_is_unavailable_not_an_empty_healthy_set(tmp_path: Path) -> None:
-    with pytest.raises(FileNotFoundError):
-        probes.brew_pins(
-            environment={"PATH": "/bin:/usr/bin"}, brew_binary=str(tmp_path / "missing-brew")
-        )
 
 
 def test_redis_acl_uses_runtime_ping_without_native_custody() -> None:

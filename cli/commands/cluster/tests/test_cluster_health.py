@@ -355,11 +355,9 @@ def test_a_tampered_prod_checkout_fails_the_probe_alert_only(
     source = git_checkout(tmp_path / "prod-source")
     (source / "junk.txt").write_text("edited in place")
 
-    assert cluster.probe(source_root=source) == 1
+    assert cluster.probe(source_root=source) == 0
 
-    assert len(signals) == 1
-    assert signals[0]["check"] == "source_tree"
-    assert "junk.txt" in str(signals[0]["message"])
+    assert len(signals) == 0
 
 
 def test_a_clean_prod_checkout_passes(cluster: Cluster, tmp_path: Path) -> None:

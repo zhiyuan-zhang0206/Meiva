@@ -125,7 +125,7 @@ def _toolchain_macos(home: Path) -> tuple[dict[str, str], str]:
     """The Homebrew kegs, resolved the way the start resolves them."""
     from base.cluster.dataplane.pg_tools import pg_tool
     from base.cluster.dataplane.pooler import pgbouncer_bin
-    from base.host.brew_pin import brew_prefix
+    from base.host.tool_pins import brew_prefix
 
     postgres = pg_tool("postgres", home=home)
     versions = {
