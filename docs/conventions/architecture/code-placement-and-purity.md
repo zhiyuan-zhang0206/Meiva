@@ -90,7 +90,7 @@ Every directory's `meizel.toml` is a closed contract:
 - **`[roots]` is a closed set of true composition roots**:
   - Only process entrypoints, CLI runtime factories, and `wiring.py` modules belong in `[roots]`, with the minimal `kinds = [...]` they actually read.
   - **Never add a file to `[roots]` to silence an `[debt.ambient-read]` entry.** Repay `ambient-read` debt by lifting the read in code to an existing composition root and passing the resolved value or collaborator down.
-  - **A root that reads files declares `filesystem`.** A read of a file is an effect, so no scan records it as a read of the world and the purity rule charges it like any other call; the kind licenses it by name instead (`Path.read_bytes`, `os.stat`, the `os.path` metadata readers: `meizel/graph/licensing.py`). Only the read: a write, a rename, a descriptor call (`os.read`, `os.fstat`), an `open` whose mode decides and a listing given no path stay effects, so declaring the kind never becomes a waiver for writing.
+  - **A root that reads files declares `filesystem`; a root that owns the synchronous timer door declares `sleep`.** A read of a file or a call to `time.sleep` is an effect, so no scan records it as a read of the world and the purity rule charges it like any other call; the kind licenses it by name instead (`FILESYSTEM_READS` and `SLEEP_CALLS` in `meizel/graph/licensing.py`). Only those calls: a write, a rename, a descriptor call (`os.read`, `os.fstat`), an `open` whose mode decides and a listing given no path stay effects under `filesystem`, and `clock` alone does not license `time.sleep`.
 
 ## Fast verification loop
 

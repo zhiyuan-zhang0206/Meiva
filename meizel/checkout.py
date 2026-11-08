@@ -35,20 +35,17 @@ from meizel.graph.universe import (
 from meizel.roles import parse_roles
 from meizel.source_text import object_of, object_pairs
 from meizel.test_graph import (
-    build_test_checkout,
-    decode_raw_facts,
-    encode_raw_facts,
+    fact_cache_keys,
     hash_test_tree,
     is_test_config_file,
-    resolve_test_facts,
+    resolve_cached_raw_facts,
+    resolve_test_checkout,
     scan_raw_test_facts,
 )
 from meizel.test_graph.impact import select_impacted_tests
 from meizel.test_graph.lanes import derive_test_lanes
 from meizel.test_graph.model import (
     FileTestFacts,
-    ModuleTable,
-    RawFileTestFacts,
     TestCheckout,
     TestLanes,
     TestSelection,
@@ -57,11 +54,9 @@ from meizel.test_graph.model import (
 __all__ = [
     "GitRepo",
     "apply_plan",
-    "has_file",
     "lanes_at",
     "load_universe",
     "python_reverse_closure_at",
-    "read_bytes",
     "read_roles",
     "read_text",
     "roles_at",
@@ -105,6 +100,25 @@ def read_text(root: Path, rel: str) -> str:
     return (root / rel).read_bytes().decode("utf-8")
 
 
+def _run_node(producer: Path, payload: str) -> tuple[int, str, str]:
+    # meiva:note
+    # Fixed node argv with bounded heap and timeout against a tool-owned producer script.
+    try:
+        done = subprocess.run(  # noqa: S603
+            ["node", "--max-old-space-size=4096", str(producer)],
+            input=payload,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=180,
+        )
+    except (OSError, subprocess.TimeoutExpired) as error:
+        raise MeizelError(
+            f"TypeScript compiler unavailable: {error}; install Node and the tool's locked package dependencies"
+        ) from error
+    return done.returncode, done.stdout, done.stderr
+
+
 # meiva:note
 # This checkout's filesystem as a value: `pathlib` bound to the fields `meizel.graph.universe`
 # declares, so a module that decides over a checkout reads it without importing this shell. Binding
@@ -121,19 +135,8 @@ def source_tree(root: Path) -> SourceTree:
         read_bytes=Path.read_bytes,
         tracked=partial(tracked_files, root),
         roles=partial(roles_at, root),
+        run_node=_run_node,
     )
-
-
-# meiva:note
-# The bytes of `rel` under `root`.
-def read_bytes(root: Path, rel: str) -> bytes:
-    return (root / rel).read_bytes()
-
-
-# meiva:note
-# Whether `rel` under `root` is a regular file reachable by name.
-def has_file(root: Path, rel: str) -> bool:
-    return (root / rel).is_file()
 
 
 def _write_bytes(path: Path, data: bytes) -> None:
@@ -193,15 +196,15 @@ class GitRepo:
     _memo: dict[str, object] = field(default_factory=dict[str, object], repr=False, compare=False)
 
     def has_file(self, rel: str) -> bool:
-        return has_file(self.root, rel)
+        return (self.root / rel).is_file()
 
     def load_text(self, rel: str, *, default: str | None = None) -> str:
-        if default is not None and not has_file(self.root, rel):
+        if default is not None and not (self.root / rel).is_file():
             return default
         return read_text(self.root, rel)
 
     def load_bytes(self, rel: str) -> bytes:
-        return read_bytes(self.root, rel)
+        return (self.root / rel).read_bytes()
 
     # meiva:note
     # This seat as a value: a module that only decides reads the checkout through it, and building
@@ -705,50 +708,28 @@ def _git_test_digests(root: Path) -> dict[str, str]:
     return {k: v for k, v in digests.items() if k in regular}
 
 
-def _resolve_graph_state(
-    all_files: list[str], root: Path, raw_map: Mapping[str, RawFileTestFacts]
-) -> tuple[TestCheckout, dict[str, FileTestFacts]]:
-    configs = {rel: read_text(root, rel) for rel in all_files if is_test_config_file(rel)}
-    checkout = build_test_checkout(all_files, configs, raw_map)
-    table = ModuleTable.build(checkout.python_files, checkout.top_packages)
-    return checkout, resolve_test_facts(checkout, raw_map, table)
-
-
-def _load_cached_raw_facts(
-    root: Path, repo: GitRepo, py_files: Sequence[str], tree_digests: Mapping[str, str]
-) -> dict[str, RawFileTestFacts]:
-    ver = _process_scanner_digest()
-    keys = {rel: f"pytest-facts:v1:{ver}:{rel}:{tree_digests[rel]}" for rel in py_files}
-    cached = repo.cache_get_many(keys.values())
-    raw_map: dict[str, RawFileTestFacts] = {}
-    updates: dict[str, str] = {}
-    for rel, ckey in keys.items():
-        if (hit := cached.get(ckey)) is not None:
-            raw_map[rel] = decode_raw_facts(hit)
-        else:
-            raw_map[rel] = scanned = scan_raw_test_facts(rel, read_text(root, rel))
-            updates[ckey] = encode_raw_facts(scanned)
-    repo.cache_put_many(updates)
-    return raw_map
-
-
 def _load_test_graph_state(
     root: Path, repo: GitRepo, digests: dict[str, str] | None = None
 ) -> tuple[TestCheckout, dict[str, FileTestFacts]]:
     if _common_git_dir(root) is None:
         all_files = _walk_non_git_files(root)
+        configs = {rel: read_text(root, rel) for rel in all_files if is_test_config_file(rel)}
         raw_map = {
             rel: scan_raw_test_facts(rel, read_text(root, rel))
             for rel in all_files
             if rel.endswith(".py") and not rel.startswith("tests/e2e/")
         }
-        return _resolve_graph_state(all_files, root, raw_map)
+        return resolve_test_checkout(all_files, configs, raw_map)
     tree_digests = digests if digests is not None else _git_test_digests(root)
     all_files = sorted(tree_digests)
+    configs = {rel: read_text(root, rel) for rel in all_files if is_test_config_file(rel)}
     py_files = [r for r in all_files if r.endswith(".py") and not r.startswith("tests/e2e/")]
-    return _resolve_graph_state(
-        all_files, root, _load_cached_raw_facts(root, repo, py_files, tree_digests)
+    keys = fact_cache_keys(_process_scanner_digest(), py_files, tree_digests)
+    raw_map, updates = resolve_cached_raw_facts(
+        keys, repo.cache_get_many(keys.values()), partial(read_text, root)
     )
+    repo.cache_put_many(updates)
+    return resolve_test_checkout(all_files, configs, raw_map)
 
 
 def lanes_at(root: Path, *, repo: GitRepo | None = None) -> TestLanes:

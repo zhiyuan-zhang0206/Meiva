@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import functools
-import subprocess
 import sys
 from collections.abc import Callable, Iterable
 from pathlib import Path
@@ -268,22 +267,10 @@ def run_node_analyzer(
         state = classify(observe(tree, frontend))
         if state is not FrontendDeps.READY:
             raise FrontendDepsError(refusal(state))
-    try:
-        result = subprocess.run(  # noqa: S603
-            ["node", "--max-old-space-size=4096", str(producer)],
-            input=payload,
-            capture_output=True,
-            text=True,
-            check=False,
-            timeout=180,
-        )
-    except (OSError, subprocess.TimeoutExpired) as error:
-        raise MeizelError(
-            f"TypeScript compiler unavailable: {error}; install Node and the tool's locked package dependencies"
-        ) from error
-    if result.returncode != 0:
-        hint = _missing_frontend_dependencies(result.stderr)
+    returncode, stdout, stderr = tree.run_node(producer, payload)
+    if returncode != 0:
+        hint = _missing_frontend_dependencies(stderr)
         if hint is not None:
             raise MeizelError(f"TypeScript compiler failed: {hint}")
-        raise MeizelError(f"TypeScript compiler failed: {result.stderr.strip()}")
-    return result.stdout
+        raise MeizelError(f"TypeScript compiler failed: {stderr.strip()}")
+    return stdout

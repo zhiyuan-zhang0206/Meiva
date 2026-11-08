@@ -4,14 +4,29 @@ import configparser
 import hashlib
 import tomllib
 from collections import deque
-from collections.abc import Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from typing import TypeGuard
 
 from meizel.roles import parse_roles, pytest_test_hosts, select_packages
 from meizel.source_text import object_mapping
-from meizel.test_graph.model import ModuleTable, RawFileTestFacts, TestCheckout
+from meizel.test_graph.model import (
+    FileTestFacts,
+    ModuleTable,
+    RawFileTestFacts,
+    TestCheckout,
+    decode_raw_facts,
+    encode_raw_facts,
+)
+from meizel.test_graph.scan_facts import resolve_test_facts, scan_raw_test_facts
 
-__all__ = ["build_test_checkout", "hash_test_tree", "is_test_config_file"]
+__all__ = [
+    "build_test_checkout",
+    "fact_cache_keys",
+    "hash_test_tree",
+    "is_test_config_file",
+    "resolve_cached_raw_facts",
+    "resolve_test_checkout",
+]
 
 _CODE_ROLE_NAMES = ("application", "standalone", "templates", "examples", "tooling")
 _CONFIG_EXACT = frozenset(
@@ -286,3 +301,35 @@ def build_test_checkout(
         manifests=manifests,
         native_spawners=native_spawners,
     )
+
+
+def fact_cache_keys(
+    scanner_ver: str, py_files: Iterable[str], digests: Mapping[str, str]
+) -> dict[str, str]:
+    return {rel: f"pytest-facts:v1:{scanner_ver}:{rel}:{digests[rel]}" for rel in py_files}
+
+
+def resolve_cached_raw_facts(
+    keys: Mapping[str, str],
+    cached: Mapping[str, str],
+    read_source: Callable[[str], str],
+) -> tuple[dict[str, RawFileTestFacts], dict[str, str]]:
+    raw_map: dict[str, RawFileTestFacts] = {}
+    updates: dict[str, str] = {}
+    for rel, ckey in keys.items():
+        if (hit := cached.get(ckey)) is not None:
+            raw_map[rel] = decode_raw_facts(hit)
+        else:
+            raw_map[rel] = scanned = scan_raw_test_facts(rel, read_source(rel))
+            updates[ckey] = encode_raw_facts(scanned)
+    return raw_map, updates
+
+
+def resolve_test_checkout(
+    all_files: Iterable[str],
+    config_texts: Mapping[str, str],
+    raw_by_file: Mapping[str, RawFileTestFacts],
+) -> tuple[TestCheckout, dict[str, FileTestFacts]]:
+    checkout = build_test_checkout(all_files, config_texts, raw_by_file)
+    table = ModuleTable.build(checkout.python_files, checkout.top_packages)
+    return checkout, resolve_test_facts(checkout, raw_by_file, table)

@@ -88,6 +88,9 @@ class SourceTree:
     read_bytes: Callable[[Path], bytes]
     tracked: Callable[..., list[str]]
     roles: Callable[[], Mapping[str, tuple[str, ...]]]
+    run_node: Callable[[Path, str], tuple[int, str, str]] = field(
+        default=lambda _producer, _payload: (1, "", "node runner not configured")
+    )
 
 
 # meiva:note

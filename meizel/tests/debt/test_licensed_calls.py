@@ -2,10 +2,14 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from meizel.graph import SLEEP_CALLS
+from meizel.graph.model import OS_KINDS, AmbientKind
+from meizel.language import DEFAULT_IMPURE_CALLS
 from meizel.tests.synthetic import RepoFactory, analysis_of, diagnostics, failures
 
 ROOT = '[roles]\napplication = ["app"]\n'
 CLOCK_CALL = "import time\n\ndef now() -> float:\n    return time.time()\n"
+SLEEP_SOURCE = "import time\n\ndef pause(seconds: float) -> None:\n    time.sleep(seconds)\n"
 
 
 def repo(make_repo: RepoFactory, files: dict[str, str], manifest: str = "") -> Path:
@@ -89,3 +93,76 @@ def test_a_call_with_no_judged_name_is_licensed_on_its_line(make_repo: RepoFacto
     assert analysis_of(root).verdict == []
     scan = analysis_of(root).scans["app/mod.py"]
     assert [(a.kind, a.target) for a in scan.ambient] == [("home", "pathlib.Path.expanduser")]
+
+
+def test_sleep_is_an_os_kind_and_names_only_time_sleep() -> None:
+    assert AmbientKind.SLEEP in OS_KINDS
+    assert frozenset({"time.sleep"}) == SLEEP_CALLS
+    assert SLEEP_CALLS <= DEFAULT_IMPURE_CALLS
+
+
+def test_a_sleep_root_licenses_time_sleep(make_repo: RepoFactory) -> None:
+    strict_manifest = (
+        '[purity]\n"mod.py" = "strict"\n'
+        '[roots]\n"mod.py" = { kinds = ["sleep"], why = "the timer door" }\n'
+    )
+    root = repo(make_repo, {"app/mod.py": SLEEP_SOURCE}, strict_manifest)
+    assert analysis_of(root).verdict == []
+
+
+def test_a_sleep_root_rejects_duplicate_debt(make_repo: RepoFactory) -> None:
+    conflict_manifest = (
+        '[purity]\n"mod.py" = "strict-to-be"\n'
+        '[roots]\n"mod.py" = { kinds = ["sleep"], why = "the timer door" }\n'
+        '\n[debt.impure-call]\n"mod.py#time.sleep" = 1\n'
+    )
+    conflict_root = repo(make_repo, {"app/mod.py": SLEEP_SOURCE}, conflict_manifest)
+    assert [d.code.value for d in diagnostics(conflict_root, "impure-call")] == []
+    assert ("legal-read-recorded", "app/meizel.toml") in failures(conflict_root)
+
+
+def test_a_sleep_root_that_never_sleeps_is_stale(make_repo: RepoFactory) -> None:
+    manifest = (
+        '[purity]\n"mod.py" = "strict"\n'
+        '[roots]\n"mod.py" = { kinds = ["sleep"], why = "the timer door" }\n'
+    )
+    root = repo(make_repo, {"app/mod.py": "def one() -> int:\n    return 1\n"}, manifest)
+    assert [d.code.value for d in diagnostics(root, "stale-root")] == ["stale-root"]
+
+
+def test_a_sleep_root_does_not_license_async_waits_or_other_impure_calls(
+    make_repo: RepoFactory,
+) -> None:
+    manifest = (
+        '[purity]\n"mod.py" = "strict"\n'
+        '[roots]\n"mod.py" = { kinds = ["sleep"], why = "the timer door" }\n'
+    )
+    source = (
+        "import asyncio\nimport time\n\n"
+        "async def pause(seconds: float) -> None:\n"
+        "    time.sleep(seconds)\n"
+        "    await asyncio.sleep(seconds)\n"
+    )
+    root = repo(make_repo, {"app/mod.py": source}, manifest)
+    assert [d.message for d in diagnostics(root, "impure-call")] == [
+        "async function `pause` in strict module"
+    ]
+
+
+def test_a_sleep_root_does_not_license_ambient_reads(make_repo: RepoFactory) -> None:
+    manifest = (
+        '[purity]\n"mod.py" = "strict"\n'
+        '[roots]\n"mod.py" = { kinds = ["sleep"], why = "the timer door" }\n'
+    )
+    source = (
+        "import os\nimport time\n\n"
+        "def pause() -> float:\n"
+        "    time.sleep(0.0)\n"
+        "    _ = os.environ\n"
+        "    return time.time()\n"
+    )
+    root = repo(make_repo, {"app/mod.py": source}, manifest)
+    assert [d.code.value for d in diagnostics(root, "ambient-read")] == [
+        "ambient-read",
+        "ambient-read",
+    ]

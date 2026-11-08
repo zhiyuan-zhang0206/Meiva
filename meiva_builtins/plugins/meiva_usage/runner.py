@@ -17,8 +17,7 @@ from base.daemon.schedules.inputs import ScheduleInputs
 from base.db import Database
 from base.db.rows import query_one
 from base.log import logger
-from base.packages.plugins.config_face import disk_image_path
-from base.packages.plugins.config_view import read_plugin_config
+from base.packages.plugins.config_view import disk_image_path, read_plugin_config
 from base.packages.plugins.plugin_errors import InvalidConfigData, SchemaDriftError
 from base.packages.plugins.surface import stats
 from meiva_builtins.plugins.meiva_usage.default_config import CollectorConfig, UsageConfig

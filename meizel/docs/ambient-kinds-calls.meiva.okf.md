@@ -49,14 +49,14 @@ licensed kind on the line the purity rule recorded the call on, which is the sam
 language judged it (a TypeScript `crypto.randomUUID()` under a `random` root). They meet on the
 name: the ambient table judges the recorded call a reader of a licensed kind, and the call is
 unconditional — one with an `unless` clause reads nothing once it is handed the value. They meet on
-the filesystem's name: a read of a file derives no acquisition, so a `filesystem` declaration reaches
+an effect kind's name (`filesystem` or `sleep`): a read of a file or a synchronous timer wait derives no acquisition, so a `filesystem` declaration reaches
 the purity rule through `FILESYSTEM_READS` in `meizel/graph/licensing.py` — the reads, never a write,
-never an `open` whose mode decides, never a descriptor or a listing given no path. A repository that
-wants the acquisition records it where the read belongs: a function listed under
-`[ambient-readers.filesystem]` in the policy.
+never an `open` whose mode decides, never a descriptor or a listing given no path — and a `sleep` declaration reaches `SLEEP_CALLS` (`time.sleep`). A repository that
+wants the acquisition records it where the call belongs: a function listed under
+`[ambient-readers.<kind>]` in the policy.
 
-A call of another kind keeps its record: `time.sleep` under a `clock` root is an effect of the
-clock's own door, not a read of the clock's kind, so the wait stays on the books, and
+A call of another kind keeps its record: `time.sleep` under a `clock`-only root (without `sleep`) is an effect of the
+clock's own door, not a read of the clock's kind, so the wait stays on the books unless `sleep` is declared, and
 `Path.write_text` beside a licensed `Path.read_text` stays one too.
 
 Parent: [[meizel/docs/ambient-kinds.meiva.okf.md|the ambient kinds node]].

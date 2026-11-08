@@ -10,7 +10,7 @@ from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config.service_read import ConfigAuthority
 from base.host.system.tests.fake_commands import fake_host
-from base.packages.plugins.config_face import disk_image_path
+from base.packages.plugins.config_registration import disk_image_path
 from base.packages.plugins.extensions import PluginContributions
 from base.paths import meiva_home
 from gateway.tests.auth.gateway_config import gateway_test_client
