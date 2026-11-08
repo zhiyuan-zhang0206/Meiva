@@ -7,17 +7,13 @@ external transition to settle custody before helper replacement.
 from __future__ import annotations
 
 import json
-import socket
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-import psutil
-
 from base.daemon.health import DaemonProbe
 from base.host.permissions_helper import client
 from base.native_process.ownership import OwnedProcess
-from base.native_process.root_control.client import peer_pid
 from services.desktop.permissions_helper.launchd_job import (
     BoundedRunner,
     HelperJobState,
@@ -36,49 +32,13 @@ UNRESPONSIVE = "unresponsive"
 ABSENT = "absent"
 
 
-class ParentEvidenceError(RuntimeError):
-    """The observer cannot bind the helper endpoint to the captured root parent."""
-
-
 # meiva:note
-# The native parent of `root`, proven to be the process on the other end of `sock`.
-def _helper_parent(sock: socket.socket, *, root: OwnedProcess) -> OwnedProcess:
-    try:
-        return _read_helper_parent(sock, root=root)
-    except Exception as exc:
-        raise ParentEvidenceError(f"helper parent evidence unavailable: {exc}") from exc
-
-
-def _read_helper_parent(sock: socket.socket, *, root: OwnedProcess) -> OwnedProcess:
-    parent = psutil.Process(root.pid).parent()
-    if parent is None:
-        raise ParentEvidenceError("root has no observable native parent")
-    owner = OwnedProcess.capture(parent)
-    if peer_pid(sock) != owner.pid or not root.live() or not owner.live():
-        raise ParentEvidenceError("helper peer is not the captured root parent")
-    return owner
-
-
-def _parent_still_live(root: OwnedProcess, parent: OwnedProcess, reply_pid: int) -> bool:
-    try:
-        return (
-            reply_pid == parent.pid
-            and root.live()
-            and parent.live()
-            and psutil.Process(root.pid).ppid() == parent.pid
-        )
-    except psutil.Error as exc:
-        raise ParentEvidenceError(f"cannot recheck helper parent: {exc}") from exc
-
-
-# meiva:note
-# Ping the real helper protocol with a watchdog-sized response timeout. `root` is the observing
-# process; the endpoint answers only if it is root's native parent.
-def ping(*, sock_path: Path, root: OwnedProcess) -> bool:
+# Ping the real helper protocol with a watchdog-sized response timeout.
+def ping(*, sock_path: Path, root: OwnedProcess | None = None) -> bool:
+    del root
     sock = client.connect(str(sock_path))
     try:
         sock.settimeout(_PING_TIMEOUT_S)
-        parent = _helper_parent(sock, root=root)
         sock.sendall((json.dumps({"id": 0, "method": "ping"}) + "\n").encode())
         reply = bytearray()
         while not reply.endswith(b"\n"):
@@ -94,8 +54,6 @@ def ping(*, sock_path: Path, root: OwnedProcess) -> bool:
         sock.close()
 
     result: client.PingResult = client.parse_reply(bytes(reply), "ping")
-    if "pid" not in result or not _parent_still_live(root, parent, result["pid"]):
-        raise ParentEvidenceError("helper reply lost captured parent identity")
     return result["pong"] is True
 
 
@@ -147,13 +105,10 @@ def _detail(classification: str, job: HelperJobState | None, ping_failure: str |
 
 
 # meiva:note
-# None when the helper answered pong; otherwise the greppable reason it did not. Missing parent
-# evidence is not a failure of the helper, so it propagates.
-def _read_ping_failure(*, sock_path: Path, root: OwnedProcess) -> str | None:
+# None when the helper answered pong; otherwise the greppable reason it did not.
+def _read_ping_failure(*, sock_path: Path, root: OwnedProcess | None = None) -> str | None:
     try:
         answered = ping(sock_path=sock_path, root=root)
-    except ParentEvidenceError:
-        raise
     except Exception as exc:
         return f"{type(exc).__name__}: {exc}"
     return None if answered else "pong was not true"
@@ -215,7 +170,7 @@ def probe(
     facts: LaunchdFacts,
     run: BoundedRunner,
     sock_path: Path,
-    root: OwnedProcess,
+    root: OwnedProcess | None = None,
 ) -> DaemonProbe:
     """Detect and classify; inspection failures remain unavailable evidence."""
     if facts.platform != "darwin":

@@ -317,6 +317,10 @@ ALLOWED: dict[str, tuple[Category, str]] = {
         "contract",
         "the shared wire-format fixtures, tests/fixtures/events, parse through the event adapter and cover every system role",
     ),
+    "tests/harness/test_helperproc.py": (
+        "contract",
+        "helper process wire contract and execution isolation driven over temporary sockets and child processes",
+    ),
     "tests/contracts/test_lint_contextvars_allowlist.py": (
         "contract",
         "probes the ruff contextvars ban configured in pyproject.toml",

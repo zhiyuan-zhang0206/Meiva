@@ -28,7 +28,6 @@ from base.host.boundary.json_values import is_object_dict, is_object_list
 from base.host.proc import process_alive
 from services.supervision.meiva_root.health import HealthConfig
 from services.supervision.meiva_root.probes import Probe, ProbeRegistry
-from services.supervision.meiva_root.selfcheck import SelfCheckConfig
 from services.supervision.meiva_root.wiring import WiringContext, WiringParticipant
 from services.supervision.meiva_root_glue.glue import assemble
 
@@ -57,7 +56,6 @@ def build_drill_wiring(context: WiringContext) -> list[WiringParticipant]:
         context,
         registry,
         health_config=HealthConfig(interval_s=_DRILL_INTERVAL_S),
-        selfcheck_config=SelfCheckConfig(interval_s=_DRILL_INTERVAL_S),
     )
 
 

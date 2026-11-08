@@ -1,15 +1,11 @@
 # meiva:note
 # Agent-host beat — the host's liveness and ownership heartbeat, and the checks that ride it.
 #
-# Every tick runs the permissions-helper chain check, beats the liveness probe, reaps
+# Every tick beats the liveness probe, reaps
 # crash corpses, republishes the gateway's out-of-process breaker snapshot and reports
 # admission queues that outlast their live alert bound. `serve_host_lifecycle` arms the
 # group that runs this loop once, before boot settlement; the turn drain joins it before
 # the pools close.
-#
-# The chain check arrives as `require_helper_chain`: it reads the process identity, so
-# `daemon.py` — this package's composition root — reads that once and passes the check
-# down, exactly as it passes the admission-alert reader.
 #
 # It lives beside `daemon.py` rather than inside it because the loop is what the host arms
 # and joins, and its wiring is testable without booting the dispatcher.
@@ -153,7 +149,6 @@ async def beat_forever(
     machine: str,
     bus: EventBus,
     *,
-    require_helper_chain: Callable[[], None],
     read_alert_seconds: Callable[[], float],
     beat_db_timeout_s: float = BEAT_DB_TIMEOUT_S,
     beat_step_s: float = LIVENESS_BEAT_STEP_S,
@@ -162,7 +157,6 @@ async def beat_forever(
     heartbeat_ok = True
     beat_failures = 0
     while True:
-        require_helper_chain()
         liveness.beat()
         try:
             await asyncio.wait_for(host.reap_corpses(), timeout=beat_db_timeout_s)
@@ -197,7 +191,6 @@ async def ownership_beat_completion(
     machine: str,
     bus: EventBus,
     *,
-    require_helper_chain: Callable[[], None],
     read_alert_seconds: Callable[[], float],
 ) -> Exception | None:
     await beat_forever(
@@ -206,7 +199,6 @@ async def ownership_beat_completion(
         scheduler,
         machine,
         bus,
-        require_helper_chain=require_helper_chain,
         read_alert_seconds=read_alert_seconds,
     )
     return None

@@ -65,8 +65,7 @@ Primary failures and concrete shutdown refusals retain their exception leaves.
 Child-exit watchers retain their separate supervisor ownership so participant
 failure does not cancel native exit observation before bounded child teardown.
 
-`TreeSelfCheck` separately checks process-tree integrity. Their snapshots attach
-to root status; deployment drills can assemble the generic monitors without the
+Deployment drills can assemble the generic health monitor without the
 host diagnostic roster.
 
 On macOS the permissions helper is the root's ancestor and carries the permission

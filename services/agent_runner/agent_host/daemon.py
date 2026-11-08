@@ -35,7 +35,7 @@ import random
 import secrets
 import signal
 import sys
-from collections.abc import Awaitable, Callable, Collection, Coroutine, Iterable, Mapping
+from collections.abc import Awaitable, Callable, Collection, Coroutine, Iterable
 from functools import partial
 from pathlib import Path
 from uuid import UUID
@@ -84,7 +84,7 @@ from base.deploy.lifecycle.host_exit_message import (
 from base.deploy.release import editable_install
 from base.deploy.timing import assert_clock_lattice, clock_values
 from base.events.live.bus import EventBus, EventBusConfig
-from base.host.exit_codes import HELPER_CHAIN_BROKEN_EXIT_CODE, hard_exit
+from base.host.exit_codes import hard_exit
 from base.host.exit_codes import hard_exit as _hard_exit
 from base.host.runtime_interpreter import external_plugin_read_root
 from base.lm.harness.registration import SecureRandom
@@ -93,7 +93,6 @@ from base.native_process.stop_timing import CANCEL_UNWIND_TIMEOUT_S
 from base.packages.composer_commands import CommandCatalog
 from base.paths import logs_dir, run_dir
 from base.paths.home import resolve_meiva_home
-from base.sessions.helper_chain_guard import helper_marker_pid, parent_chain_intact
 from meiva import skills as meiva_skills
 from meiva.boot import clients_over, process_disable_entries
 from meiva.sdk_surface import process_context
@@ -629,9 +628,6 @@ async def run(
                 scheduler,
                 local_machine,
                 bus,
-                require_helper_chain=partial(
-                    require_helper_parent_chain, pid=os.getpid(), environ=os.environ
-                ),
                 read_alert_seconds=lambda: config.view.daemon.host_admission_wait_alert_seconds,
             ),
             settle_coro=settle_running_rows_at_start(control_pool, local_machine),
@@ -694,19 +690,6 @@ async def run(
             host_log.info("[agent-host] daemon stopped")
 
 
-def require_helper_parent_chain(*, pid: int, environ: Mapping[str, str]) -> None:
-    if parent_chain_intact(pid, environ=environ):
-        return
-    logger.warning(
-        "[agent-host] permissions helper parent chain broken, self-terminating for helper respawn",
-        event="helper_chain_broken",
-        process="agent_host",
-        detail=f"agent host pid {pid} is no longer under the permissions helper "
-        f"that spawned it (marker pid {helper_marker_pid(environ) or 'absent'})",
-    )
-    os._exit(HELPER_CHAIN_BROKEN_EXIT_CODE)
-
-
 def main() -> None:
     """Entry point: SDK posture, schema gate, logging, graceful shutdown, then the loop."""
     process_context.bind_host_process()
@@ -718,7 +701,6 @@ def main() -> None:
     home = resolve_meiva_home()
     config = boot_process()
     disabled_entries = process_disable_entries()
-    require_helper_parent_chain(pid=os.getpid(), environ=os.environ)
     assert_schema_current(config.view.data_plane.db_url)
     machine = ConfiguredMachineIdentity(config)
     version = CodeVersion(process_context.loaded_code_image())

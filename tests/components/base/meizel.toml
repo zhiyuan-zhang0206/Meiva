@@ -1,4 +1,4 @@
-exports = ["helper_chain_probe.py"]
+exports = []
 
 [uses]
 "test_shutdown.py" = ["child_graceful_stop.py", "plugin_restart_probe.py"]

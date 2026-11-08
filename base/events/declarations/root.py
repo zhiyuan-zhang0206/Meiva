@@ -160,11 +160,6 @@ class RootDiagnostic(TypedDict):
     consecutive_failures: int
 
 
-class HelperChainBroken(TypedDict):
-    process: str
-    detail: str
-
-
 class RecoveryDrillFailed(TypedDict):
     """`recovery_drill_failed` payload — the scheduled logical restore drill.
 
@@ -336,22 +331,6 @@ EVENTS: dict[str, EventSpec] = {
         site=(
             "base/telemetry/converge_report.py:report_converge_overwrite "
             'telemetry.emit("telemetry", ...)'
-        ),
-    ),
-    # Root-owned chain episodes and service recovery policy.
-    "root_chain_broken": telemetry_event(
-        "root_chain_broken",
-        "root self-check found a managed unit no longer a live child of the root process — one alert per episode, held until intact",
-        tier="anomaly",
-    ),
-    "helper_chain_broken": telemetry_event(
-        "helper_chain_broken",
-        "a long-lived process found the permissions helper that seeded it gone from its ancestor chain — the agent host exits for respawn, the root retires so the helper keeper seeds a replacement (task #5292)",
-        payload=HelperChainBroken,
-        tier="anomaly",
-        site=(
-            "services/supervision/meiva_root/daemon.py:RootRetirement.retire; "
-            "services/agent_runner/agent_host/host_beat.py:require_helper_parent_chain"
         ),
     ),
     "root_restart_failed": telemetry_event(
