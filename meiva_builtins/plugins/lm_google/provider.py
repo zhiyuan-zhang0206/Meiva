@@ -64,14 +64,19 @@ def _media_resolution(setting: str | None) -> MediaResolution | None:
     # provider (the model catalog is built at boot) and never calls a model, so a module-level
     # import put that cost on each `execute_code` call. See
     # `docs/conventions/import-layering.md` and the exec-startup audit on #5831.
-    from google.genai.types import MediaResolution
+    #
+    # It loads through `base.lm.compat.provider_sdks.genai_sdk`: a provider build runs wherever its caller
+    # runs, and a thread that entered this SDK while another one was still importing it failed the
+    # import instead of waiting (#6538).
+    from base.lm.compat.provider_sdks.genai_sdk import genai
 
     if setting is None:
         return None
+    resolution = genai.types.MediaResolution
     resolutions = {
-        "low": MediaResolution.MEDIA_RESOLUTION_LOW,
-        "medium": MediaResolution.MEDIA_RESOLUTION_MEDIUM,
-        "high": MediaResolution.MEDIA_RESOLUTION_HIGH,
+        "low": resolution.MEDIA_RESOLUTION_LOW,
+        "medium": resolution.MEDIA_RESOLUTION_MEDIUM,
+        "high": resolution.MEDIA_RESOLUTION_HIGH,
     }
     try:
         return resolutions[setting]

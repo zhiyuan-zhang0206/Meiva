@@ -1,5 +1,6 @@
 purity = "strict"
-exports = ["anthropic_thinking.py", "openai_reasoning.py", "stop.py"]
+exports = ["anthropic_thinking.py", "openai_reasoning.py", "provider_sdks", "stop.py"]
 
 [uses]
+"anthropic_thinking.py" = ["provider_sdks"]
 "tests" = ["anthropic_thinking.py", "openai_reasoning.py"]

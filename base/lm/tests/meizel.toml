@@ -1,0 +1,2 @@
+[uses]
+"test_provider_sdk_imports.py" = ["_provider_sdk_child.py"]
