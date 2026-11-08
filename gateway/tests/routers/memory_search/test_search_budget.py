@@ -212,10 +212,23 @@ def _block_every_decision(rig: SearchRig) -> Judge:
     return rig.judge
 
 
+# meiva:note
+# The caller's `deadline_seconds` is the deadline that fires. Where the search stood when it did
+# is not this test's subject: that same 0.3s also covers the query embed, the vector-service
+# round trip and reading 30 note files, so counting the decision calls that had gone out by then
+# measures that pipeline's speed on this runner, not the budget boundary (CI hit 0 of 30 on a
+# loaded shard and failed the count while the response was exactly right). `embed_s` pins both
+# ends of the range the budget can land in: a search with its 30 decisions out, and one still
+# embedding. What is left to assert about the decision calls is the invariant that holds in either
+# state: whatever the deadline interrupted was cancelled, and none of it outlived the response.
+# "All 30 in flight, then cancelled" is pinned by the two tests below, which wait for the fan-out
+# without a deadline racing them.
+@pytest.mark.parametrize("embed_s", [0.0, 0.4], ids=["decisions-in-flight", "before-any-decision"])
 async def test_the_caller_deadline_bounds_the_search_below_the_gateway_deadline(
-    pool: _Pool, rig: SearchRig
+    pool: _Pool, rig: SearchRig, embed_s: float
 ) -> None:
-    blocked = _block_every_decision(rig)
+    _block_every_decision(rig)
+    rig.embedder.delay_s = embed_s
     rig.configure(memory_search_deadline_seconds=30.0)
     app = rig.asgi_app(pool.root, permits=2)
 
@@ -228,10 +241,9 @@ async def test_the_caller_deadline_bounds_the_search_below_the_gateway_deadline(
 
     assert resp.status_code == 503
     assert resp.json()["reason"] == "indexer_unavailable"
-    assert "0.3s deadline" in resp.json()["detail"]
+    assert "0.3s deadline" in resp.json()["detail"], "the caller's 0.3s, not the gateway's 30s"
     assert elapsed < 5
-    assert blocked.started == _CANDIDATES
-    assert blocked.cancelled == _CANDIDATES
+    assert rig.judge.cancelled == rig.judge.started
 
 
 async def test_a_caller_deadline_above_the_gateway_deadline_does_not_extend_it(
