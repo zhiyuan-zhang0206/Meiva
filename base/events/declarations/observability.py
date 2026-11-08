@@ -140,6 +140,21 @@ class AuditWriteFailed(TypedDict):
     error: str
 
 
+# meiva:note
+# `audit_machine_unknown` payload -- services/upkeep/events_maintenance/audit_identity.py. Audit rows
+# written by a process that could not resolve its own machine, so the row says `unknown` where a name
+# belongs. `user_rows` counts rows with no agent (a person's own lifecycle action); `agent_rows`
+# counts rows an agent's process wrote, which means that process lost its identity. `window_rows` is
+# the two sums -- the reading this event fires on; `day_rows` is the trailing 24-hour total, carried
+# as the day book's context. `window_seconds` is the window the first three were counted over.
+class AuditMachineUnknown(TypedDict):
+    user_rows: int
+    agent_rows: int
+    window_rows: int
+    day_rows: int
+    window_seconds: int
+
+
 class TelemetryStoreFailed(TypedDict):
     """`telemetry_store_failed` payload — base/telemetry/event_store.py.
 
@@ -281,6 +296,20 @@ EVENTS: dict[str, EventSpec] = {
         payload=AuditWriteFailed,
         tier="anomaly",
         site=('base/telemetry/audit_events.py:_report_unrecorded telemetry.emit("telemetry", ...)'),
+    ),
+    # meiva:note
+    # `#6089` made `audit_events.machine` either a canonical name or the literal `unknown`, so a
+    # writer that cannot resolve its machine is readable instead of plausible -- the column used to
+    # fall back to a hostname. Readable is not observed: nothing counted the value until task
+    # #6235, so identity loss only changed the data. One event per pass that saw such a row; the
+    # 24-hour total rides along as context and is deliberately not a trigger, because it stays
+    # non-zero for a day after a single row.
+    "audit_machine_unknown": telemetry_event(
+        "audit_machine_unknown",
+        "audit rows written by a process that could not name its machine",
+        payload=AuditMachineUnknown,
+        tier="anomaly",
+        site="services/upkeep/events_maintenance/audit_identity.py:report_unknown_writers",
     ),
     "telemetry_store_failed": telemetry_event(
         "telemetry_store_failed",
