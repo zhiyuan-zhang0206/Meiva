@@ -77,6 +77,7 @@ def cold_emit() -> None:
 def emit_without_a_factory() -> None:
     logger.remove()
     logger.add(sys.stderr, enqueue=False)
+    # meiva:note
     # The process this scenario is about: identity and its clock bound, no event stream.
     telemetry.bind_identity(process="no-stream", home=meiva_home(), now=system_clock().now)
 

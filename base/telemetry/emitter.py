@@ -245,18 +245,17 @@ def _process_now() -> Callable[[], datetime]:
     return now
 
 
+# meiva:note
+# Normalize one event timestamp onto the stream's single clock: UTC.
+#
+# `emit()`'s default is the process clock `_process_now()` returns; an explicit `ts` — the loguru
+# adapter passes loguru's local-zone record time, replay/migration passes stored rows — is converted
+# to UTC here so the Event and every serialization of it (the JSONL mirror `ts` field, the OTLP
+# body) carries one offset. A naive `ts` is UTC by contract (the one-time-source rule); treating it
+# as local would mix clocks. The 2026-08-25 mirror audit: loguru rows wrote +08:00 into the mirror
+# while direct emits wrote +00:00, which made any local-wall-clock filter of the mirror misread
+# gateway telemetry as missing since the UTC-day rollover (task #1638).
 def _as_utc(ts: datetime | None) -> datetime:
-    """Normalize one event timestamp onto the stream's single clock: UTC.
-
-    `emit()`'s default is the process clock `_process_now()` returns; an explicit `ts` — the loguru
-    adapter passes loguru's local-zone record time, replay/migration passes
-    stored rows — is converted to UTC here so the Event and every
-    serialization of it (the JSONL mirror `ts` field, the OTLP body) carries
-    one offset. A naive `ts` is UTC by contract (the one-time-source rule);
-    treating it as local would mix clocks. The 2026-08-25 mirror audit: loguru
-    rows wrote +08:00 into the mirror while direct emits wrote +00:00, which
-    made any local-wall-clock filter of the mirror misread gateway telemetry
-    as missing since the UTC-day rollover (task #1638)."""
     if ts is None:
         return _process_now()()
     if ts.tzinfo is None:
@@ -264,6 +263,28 @@ def _as_utc(ts: datetime | None) -> datetime:
     return ts.astimezone(UTC)
 
 
+# meiva:note
+# Enqueue one event into the unified stream. Never raises — except for a contract violation
+# (R2-C): an `event_name` with no `EventSpec` in `base/events/declarations`, or a category that
+# contradicts the declaration, raises `ValueError` (AGENTS.md "explode on unknown enums"), and
+# an event with no `ts` in a process that bound no clock raises `RuntimeError` (`_process_now`)
+# instead of stamping a second time source. An explicitly supplied producer capture callback
+# also propagates its errors before observation delivery; no current participant is inferred.
+# The loguru adapter wraps its call with `catch=True`, so a logging line that drifts
+# off-contract stays visible (JSONL mirror) without crashing the producer.
+#
+# An event is a named log record (OTel LogRecord semantics: events = logs with names);
+# `event_name` is that name — the `event.name` field, and the registry key (`EVENTS`).
+#
+# `trace_id`/`span_id` are captured from the active OTel span at this point (enqueue time — the
+# drain thread runs outside the span context). `agent_id` falls back to the process-bound value
+# (init_telemetry); explicit wins. `ts` defaults to the PROCESS clock at enqueue time — the one
+# `bind_identity` was handed — the single time source for the entire stream, and an explicit
+# `ts` is normalized to UTC before enqueue (`_as_utc`), so every serialization of the Event
+# (the JSONL mirror `ts` field, the OTLP body) carries one offset. Callers pass an explicit `ts`
+# only for loguru-adapter records (loguru stamps local zone — normalized here) and
+# replayed/migrated rows; a DB-derived timestamp would silently mix two clocks (W7 rewired the
+# last DB-clock writers, heartbeat + delivery watchdog, onto this path).
 def emit(
     category: Category,
     event_name: str,
@@ -278,33 +299,6 @@ def emit(
     capture: Callable[[Event], Event] | None = None,
     producer: Callable[[], EventSink] | None = None,
 ) -> None:
-    """Enqueue one event into the unified stream. Never raises — except for a
-    contract violation (R2-C): an `event_name` with no `EventSpec` in
-    `base/events/declarations`, or a category that contradicts the
-    declaration, raises `ValueError` (AGENTS.md "explode on unknown enums"), and an
-    event with no `ts` in a process that bound no clock raises `RuntimeError`
-    (`_process_now`) instead of stamping a second time source.
-    An explicitly supplied producer capture callback also propagates its errors
-    before observation delivery; no current participant is inferred.
-    The loguru adapter wraps its call with `catch=True`, so a logging line
-    that drifts off-contract stays visible (JSONL mirror) without crashing
-    the producer.
-
-    An event is a named log record (OTel LogRecord semantics: events = logs
-    with names); `event_name` is that name — the `event.name` field, and the
-    registry key (`EVENTS`).
-
-    `trace_id`/`span_id` are captured from the active OTel span at this point
-    (enqueue time — the drain thread runs outside the span context). `agent_id`
-    falls back to the process-bound value (init_telemetry); explicit wins.
-    `ts` defaults to the PROCESS clock at enqueue time — the one `bind_identity`
-    was handed — the single time source for the entire stream, and an explicit
-    `ts` is normalized to UTC before enqueue (`_as_utc`), so every serialization
-    of the Event (the JSONL mirror `ts` field, the OTLP body) carries one offset.
-    Callers pass an explicit `ts` only for loguru-adapter records (loguru
-    stamps local zone — normalized here) and replayed/migrated rows; a
-    DB-derived timestamp would silently mix two clocks (W7 rewired the last
-    DB-clock writers, heartbeat + delivery watchdog, onto this path)."""
     # meiva:note
     # A process that bound no event stream drops what it emits, as it always has, and says so once
     # (`emit_prepared` reports the same absence below). Taking that decision here keeps a process

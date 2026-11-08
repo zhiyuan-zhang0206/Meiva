@@ -37,6 +37,10 @@ def is_expired_mirror_filename(filename: str, *, cutoff: str) -> bool:
     return len(day) == 8 and day.isdigit() and day < cutoff
 
 
+# meiva:note
+# `now` is the instant of the write this prune follows, handed in by the writer that observed it: a
+# retention window is measured from when the file stopped being written, never from a clock this
+# module reads for itself.
 def prune_jsonl_mirror(
     *,
     target_dir: Path,
@@ -44,10 +48,6 @@ def prune_jsonl_mirror(
     retention_days: int = JSONL_RETENTION_DAYS,
 ) -> None:
     """Delete day-stamped mirror files older than their retention tier.
-
-    `now` is the instant of the write this prune follows, handed in by the writer that observed it:
-    a retention window is measured from when the file stopped being written, never from a clock
-    this module reads for itself.
 
     Runs once per day (guarded by the `jsonl_day` stamp). The mirror is the
     durable fallback for audit events; log-stream lines are also held by the
@@ -70,12 +70,12 @@ def prune_jsonl_mirror(
                 path.unlink()
 
 
+# meiva:note
+# `now` is when the batch is written, not when its events happened: a replayed or migrated row
+# reconstructs an old instant and would otherwise land in that day's file, where the next real
+# prune deletes it.
 def append_jsonl(events: list[Event], *, target_dir: Path, now: datetime) -> None:
     """Append the batch to today's mirror file, one JSON line per event.
-
-    `now` is when the batch is written, not when its events happened: a replayed or migrated row
-    reconstructs an old instant and would otherwise land in that day's file, where the next real
-    prune deletes it.
 
     Each row carries the stable surrogate ``id`` derived from its id-free body
     and timestamp, matching the id Loki's read path returns for the same event.

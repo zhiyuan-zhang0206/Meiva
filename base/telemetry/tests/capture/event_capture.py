@@ -114,6 +114,7 @@ def capturing_events() -> Generator[EmittedEvents]:
     previous = process_state["pipeline"]
     previous_now = process_state["now"]
     process_state["pipeline"] = pipeline
+    # meiva:note
     # The clock travels with the binding it was bound for: an event emitted without `ts` in this
     # block is stamped by the captured pipeline's clock, exactly as `init_telemetry` binds it.
     process_state["now"] = pipeline.now
