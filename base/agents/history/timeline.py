@@ -120,6 +120,11 @@ def build_timeline_items(
         else:
             items.extend(_message_items(msg, msg_idx, kwargs, sdk_by_id, inputs))
     _add_source_coordinates(items, messages)
+    for item in items:
+        msg_idx, _ = (int(part.removeprefix("h")) for part in item.item_id.split("."))
+        msg = messages[msg_idx]
+        if msg.id and msg.id.startswith("h"):
+            item.item_id = msg.id
     if segment_prefix:
         items = [
             item.model_copy(update={"item_id": f"{segment_prefix}.{item.item_id}"})
@@ -130,7 +135,7 @@ def build_timeline_items(
 
 def _add_source_coordinates(items: list[TimelineItem], messages: Sequence[BaseMessage]) -> None:
     for item in items:
-        msg_idx, block_idx = (int(part) for part in item.item_id.split("."))
+        msg_idx, block_idx = (int(part.removeprefix("h")) for part in item.item_id.split("."))
         message = messages[msg_idx]
         kwargs = read_meiva_kwargs(message)
         if message.id and not kwargs.get("meiva_ephemeral_message_id"):

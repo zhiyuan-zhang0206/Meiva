@@ -168,3 +168,22 @@ def test_a_mixed_kind_message_is_refused() -> None:
     ]
     with pytest.raises(ValueError, match="uncovered mix"):
         divide_timeline_items(items)
+
+
+def test_external_harness_consecutive_turn_steps_form_one_work_unit() -> None:
+    from base.agents.history.hierarchy.units import divide_timeline_items
+    from base.agents.history.timeline import TimelineItem
+
+    items = [
+        TimelineItem(item_id="h0.0", kind="inbound_chat", payload="hello", created_at=ts(1)),
+        TimelineItem(item_id="h1.0", kind="agent_reasoning", payload="planning", created_at=ts(2)),
+        TimelineItem(item_id="h2.0", kind="agent_code", payload="ls -la", created_at=ts(3)),
+        TimelineItem(item_id="h3.0", kind="code_output", payload="README.md", created_at=ts(4)),
+        TimelineItem(item_id="h4.0", kind="agent_chat", payload="here are files", created_at=ts(5)),
+    ]
+    units = divide_timeline_items(items)
+    assert shape(units) == [
+        ("inbound", 0, 0),
+        ("work", 1, 3),
+        ("text", 4, 4),
+    ]

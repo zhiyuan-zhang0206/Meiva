@@ -50,20 +50,13 @@ class LmSettings(EnvSettings):
     )
 
     hierarchy_model: str = Field(
-        title="Timeline summary fallback model",
+        title="Timeline summary model",
         default="deepseek-flash",
         alias="MEIVA_HIERARCHY_MODEL",
         description=(
-            "Fallback model for the understanding-layer generation pass "
-            "(hierarchical run-timeline node summaries, task #3704). The "
-            "worker and the manual build normally generate on the TARGET "
-            "agent's own effective model (task #4674) so requests hit the "
-            "same provider-side prefix cache as the agent's own calls; this "
-            "value is the last-resort fallback when that lookup fails. Cheap "
-            "tier by design: a full day's recap cards measure at 0.7-0.9% of "
-            "that day's agent input tokens at this tier. Staying inside "
-            "DeepSeek keeps the gateway's required-key surface unchanged "
-            "(same rationale as labeler_model)."
+            "Dedicated model for the understanding-layer generation pass "
+            "(hierarchical run-timeline node summaries, task #3704). Defaults to "
+            "deepseek-flash."
         ),
         json_schema_extra={
             "restart_required": "all",

@@ -162,13 +162,17 @@ class _Divider:
             self._work = None
 
     def agent_message(self, idx: int, group: list[TimelineItem]) -> None:
-        self.close_work()
         text = [item for item in group if item.kind == "agent_chat"]
         steps = [item for item in group if item.kind != "agent_chat"]
         if text:
+            self.close_work()
             self.units.append(_unit("text", idx, idx, text))
         if steps:
-            self._work = _OpenWork(idx, idx, tuple(steps))
+            if self._work is not None and not text and group[0].item_id.startswith("h"):
+                self._work = replace(self._work, i1=idx, items=(*self._work.items, *steps))
+            else:
+                self.close_work()
+                self._work = _OpenWork(idx, idx, tuple(steps))
 
     def tool_result(self, idx: int, group: list[TimelineItem]) -> None:
         if self._work is None:
@@ -443,6 +447,20 @@ def _output_block(
     return DisplayBlock("output", unit.i0, unit.i1, start or end, end, None, preview)
 
 
+def _work_blocks(
+    unit: MessageUnit, messages: Sequence[BaseMessage], read: Sequence[datetime | None]
+) -> list[DisplayBlock]:
+    blocks: list[DisplayBlock] = []
+    for i in range(unit.i0, unit.i1 + 1):
+        step_msg = messages[i]
+        if isinstance(step_msg, AIMessage):
+            turn = _turn_blocks(i, step_msg, read)
+            blocks.extend(b for k, b in turn.items() if k != "text")
+    if (output := _output_block(unit, messages, read)) is not None:
+        blocks.append(output)
+    return blocks
+
+
 def display_blocks(
     units: Sequence[MessageUnit],
     messages: Sequence[BaseMessage],
@@ -466,12 +484,9 @@ def display_blocks(
                         unit.preview,
                     )
                 )
-        elif isinstance(msg, AIMessage):
+        elif unit.kind == "text" and isinstance(msg, AIMessage):
             turn = _turn_blocks(unit.i0, msg, read)
-            if unit.kind == "text":
-                blocks.extend(b for k, b in turn.items() if k == "text")
-            else:
-                blocks.extend(b for k, b in turn.items() if k != "text")
-        if unit.kind == "work" and (output := _output_block(unit, messages, read)) is not None:
-            blocks.append(output)
+            blocks.extend(b for k, b in turn.items() if k == "text")
+        elif unit.kind == "work":
+            blocks.extend(_work_blocks(unit, messages, read))
     return blocks

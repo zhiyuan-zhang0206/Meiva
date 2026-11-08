@@ -11,9 +11,12 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from uuid import UUID
 
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage, ToolMessage
 from psycopg import AsyncConnection, Connection
 
+from base.agents.history.closing_request import FullHistory, single_segment_history
 from base.agents.history.timeline_item import TimelineItem
+from base.agents.messages.kwargs import MeivaMsgType, NoteTag
 from base.db.rows import aquery_all, aquery_one, query_all
 from base.native_process.runtime_incarnation import RuntimeIncarnation, StaleIncarnationError
 
@@ -331,3 +334,100 @@ async def _insert_harness_activity(
         (agent_id, seq, harness, item.model_dump_json(), item.inbound_id, item.created_at),
     )
     return item
+
+
+# meiva:note
+# Map one external harness timeline item to its normalized LangChain message representation.
+def harness_item_to_message(item: TimelineItem) -> BaseMessage:
+    ts = item.created_at
+    if item.kind == "inbound_chat":
+        kwargs: dict[str, object] = {
+            "meiva_msg_type": MeivaMsgType.INBOUND,
+            "meiva_created_at": ts,
+            "meiva_picked_up_at": ts,
+        }
+        if item.inbound_id is not None:
+            kwargs["meiva_inbound_id"] = item.inbound_id
+        return HumanMessage(
+            content=item.payload,
+            id=item.item_id,
+            additional_kwargs=kwargs,
+        )
+    if item.kind in ("system_marker", "attach"):
+        kwargs = {
+            "meiva_msg_type": MeivaMsgType.SYSTEM_NOTE,
+            "meiva_note_tag": NoteTag.TASK,
+            "meiva_created_at": ts,
+            "meiva_picked_up_at": ts,
+        }
+        if item.inbound_id is not None:
+            kwargs["meiva_inbound_id"] = item.inbound_id
+        return SystemMessage(
+            content=item.payload,
+            id=item.item_id,
+            additional_kwargs=kwargs,
+        )
+    if item.kind == "agent_reasoning":
+        return AIMessage(
+            content=[{"type": "thinking", "thinking": item.payload}],
+            id=item.item_id,
+            additional_kwargs={
+                "meiva_created_at": ts,
+                "meiva_picked_up_at": ts,
+                "meiva_reasoning_ms_by_block": {0: item.reasoning_ms or 0},
+            },
+        )
+    if item.kind == "agent_code":
+        return AIMessage(
+            content="",
+            tool_calls=[
+                {
+                    "name": item.source or "execute_code",
+                    "args": {"code": item.payload},
+                    "id": item.item_id,
+                }
+            ],
+            id=item.item_id,
+            additional_kwargs={
+                "meiva_created_at": ts,
+                "meiva_picked_up_at": ts,
+                "meiva_code_ms_by_block": {0: item.code_elapsed_ms or 0},
+            },
+        )
+    if item.kind == "code_output":
+        return ToolMessage(
+            content=item.payload,
+            tool_call_id=item.item_id,
+            id=item.item_id,
+            additional_kwargs={
+                "meiva_msg_type": MeivaMsgType.EXEC_OUTPUT,
+                "meiva_created_at": ts,
+                "meiva_picked_up_at": ts,
+                "meiva_exec_ms": item.exec_ms or 0,
+                "meiva_exec_body_start": 0,
+            },
+        )
+    if item.kind == "agent_chat":
+        return AIMessage(
+            content=item.payload,
+            id=item.item_id,
+            additional_kwargs={
+                "meiva_created_at": ts,
+                "meiva_picked_up_at": ts,
+            },
+        )
+    return SystemMessage(
+        content=item.payload,
+        id=item.item_id,
+        additional_kwargs={
+            "meiva_created_at": ts,
+            "meiva_picked_up_at": ts,
+        },
+    )
+
+
+# meiva:note
+# Convert external harness timeline items into an uncompacted FullHistory segment.
+def harness_timeline_to_full_history(items: Sequence[TimelineItem]) -> FullHistory:
+    messages = [harness_item_to_message(item) for item in items]
+    return single_segment_history(messages)

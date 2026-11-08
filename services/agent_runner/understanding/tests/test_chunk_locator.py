@@ -438,3 +438,66 @@ async def test_consumer_end_to_end_uses_default_single_segment_locator(
         ("failed", 1, "boundary checkpoint cp-gone is gone"),
     ]
     assert "understanding_chunk_failed" in emitted_events.names()
+
+
+def test_external_harness_chunk_location(database: Database) -> None:
+    from base.agents.history.timeline_item import TimelineItem
+
+    harness_agent = 8888
+    t0 = datetime(2026, 10, 5, tzinfo=UTC)
+    items = [
+        TimelineItem(
+            item_id="h0.0",
+            kind="inbound_chat",
+            payload="hello from user",
+            created_at=t0.isoformat(),
+        ),
+        TimelineItem(
+            item_id="h1.0",
+            kind="agent_reasoning",
+            payload="thinking about the task",
+            created_at=t0.isoformat(),
+            reasoning_ms=1000,
+        ),
+        TimelineItem(
+            item_id="h2.0",
+            kind="agent_code",
+            payload="ls",
+            created_at=t0.isoformat(),
+            code_elapsed_ms=500,
+        ),
+        TimelineItem(
+            item_id="h3.0",
+            kind="code_output",
+            payload="output.txt",
+            created_at=t0.isoformat(),
+            exec_ms=200,
+        ),
+        TimelineItem(
+            item_id="h4.0",
+            kind="agent_chat",
+            payload="finished",
+            created_at=t0.isoformat(),
+        ),
+    ]
+    with database.connect(autocommit=True) as conn:
+        conn.execute(
+            "INSERT INTO agents (id, label, created_at) VALUES (%s, 'test-external-chunk', now())"
+            " ON CONFLICT (id) DO NOTHING",
+            (harness_agent,),
+        )
+        conn.execute(
+            "INSERT INTO agents_meta (id, harness, status) VALUES (%s, 'claude_code', 'running')"
+            " ON CONFLICT (id) DO NOTHING",
+            (harness_agent,),
+        )
+        for seq, item in enumerate(items):
+            conn.execute(
+                "INSERT INTO agent_harness_messages (agent_id, seq, harness, item, created_at)"
+                " VALUES (%s, %s, 'claude_code', %s::jsonb, %s::timestamptz)",
+                (harness_agent, seq, item.model_dump_json(), item.created_at),
+            )
+    job = ChunkJob(1, harness_agent, 0, 0, 3, "h2.0", None, 1)
+    located = locate_job_chunk(database, job)
+    assert len(located.messages) == 3
+    assert located.messages[-1].id == "h2.0"

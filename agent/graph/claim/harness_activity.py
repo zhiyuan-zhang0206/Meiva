@@ -55,7 +55,7 @@ class HarnessTurnProjector:
         self._text = ""
         self._has_assistant_text = False
         self._last_chat_raw = ""
-        self._tools: dict[str, tuple[TimelineItem, datetime]] = {}
+        self._tools: dict[str, tuple[TimelineItem, TimelineItem, int, datetime]] = {}
         self._seen_tools: set[str] = set()
         self._pending: dict[str, TimelineItem] = {}
         self._dirty = asyncio.Event()
@@ -118,8 +118,14 @@ class HarnessTurnProjector:
         async with self._lock:
             now = self._clock.now()
             self._close_text(now, seal_chat=not interrupted and error is None)
-            for item, _ in self._tools.values():
-                self._revise(item, "Tool result unavailable")
+            for code_item, output_item, code_ms, _ in self._tools.values():
+                self._revise(
+                    code_item,
+                    code_item.payload,
+                    code_elapsed_ms=code_ms,
+                    activity_pending=False,
+                )
+                self._revise(output_item, "Tool result unavailable", activity_pending=False)
             self._tools.clear()
             if not self._has_assistant_text and not interrupted:
                 for turn in turns:
@@ -217,26 +223,34 @@ class HarnessTurnProjector:
         self._close_text(now)
         self._last_chat_raw = ""
         code_ms = _elapsed(self._reasoning_ended or self._activity_started, now)
-        self._new_item(
+        code_item = self._new_item(
             "agent_code",
             format_tool_use(event.name, event.tool_input),
             now,
             source=event.name if event.name != "execute_code" else None,
-            code_elapsed_ms=code_ms,
+            activity_pending=True,
             sdk_calls=[SdkCall(method=event.name, count=1)],
         )
-        self._tools[event.tool_use_id] = (self._new_item("code_output", "Tool running", now), now)
+        output_item = self._new_item("code_output", "Tool running", now, activity_pending=True)
+        self._tools[event.tool_use_id] = (code_item, output_item, code_ms, now)
         self._activity_started = now
         self._reasoning_ended = None
 
     def _on_tool_result(self, event: ToolResult, now: datetime) -> None:
         if (slot := self._tools.pop(event.tool_use_id, None)) is None:
             return
-        item, started = slot
+        code_item, output_item, code_ms, started = slot
         self._revise(
-            item,
+            code_item,
+            code_item.payload,
+            code_elapsed_ms=code_ms,
+            activity_pending=False,
+        )
+        self._revise(
+            output_item,
             event.content or ("Tool failed" if event.is_error else ""),
             exec_ms=_elapsed(started, now),
+            activity_pending=False,
             created_at=now.isoformat(),
         )
         self._activity_started = now

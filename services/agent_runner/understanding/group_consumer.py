@@ -101,7 +101,7 @@ def group_model(
         agent_id,
         fallback=config.view.lm.hierarchy_model,
         catalog=catalog,
-        default_model=config.view.lm.llm_model,
+        default_model=config.view.lm.hierarchy_model,
     )
 
 

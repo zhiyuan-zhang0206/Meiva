@@ -17,6 +17,10 @@ from base.agents.history.checkpoint_serde import STATIC_CHECKPOINT_MSGPACK_TYPES
 from base.agents.history.checkpoint_serializer import CheckpointSerializer
 from base.agents.history.closing_request import METADATA_KEY, ClosingRequest
 from base.agents.history.delta_read_compat import as_messages, reconstruct_delta_messages
+from base.agents.history.harness_messages import (
+    harness_timeline_to_full_history,
+    load_harness_timeline_items,
+)
 from base.agents.messages.kwargs import read_meiva_kwargs
 from base.db import Database
 from base.db.rows import query_all
@@ -323,7 +327,17 @@ def open_segment_reader(db: Database, agent_id: int) -> Generator[CheckpointSegm
         pool.close()
 
 
+# meiva:note
+# Read all persisted harness messages for an external harness agent as a FullHistory segment.
+def read_harness_segment(db: Database, agent_id: int) -> FullHistory:
+    with db.connect(autocommit=True) as conn:
+        items = load_harness_timeline_items(conn, agent_id)
+    return harness_timeline_to_full_history(items)
+
+
 def read_checkpoint_segment(db: Database, agent_id: int, checkpoint_id: str) -> FullHistory:
+    if checkpoint_id.startswith("h"):
+        return read_harness_segment(db, agent_id)
     with open_segment_reader(db, agent_id) as reader:
         segment = reader.read_segment(checkpoint_id)
     messages = [
