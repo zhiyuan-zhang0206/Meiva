@@ -251,6 +251,10 @@ def load_state(path: Path) -> WatchState:
             # gate skips it rather than guess which job its red belonged to.
             job=value.get("job") or "",
             # meiva:note
+            # Absent in a ledger written before the field: such an entry names no run, and the
+            # re-check that closes an open card skips it instead of asking about an older one.
+            run_id=int(value.get("run_id") or 0),
+            # meiva:note
             # A ledger written before the field existed holds full-suite reds (the push gate's were
             # the only partial ones), so the default keeps an upgrade from re-reading an old red as
             # something only its own lane may retire.
@@ -283,6 +287,7 @@ def save_state(path: Path, state: WatchState) -> None:
                 "task_id": entry.task_id,
                 "kind": entry.kind,
                 "job": entry.job,
+                "run_id": entry.run_id,
                 "covers_full_suite": entry.covers_full_suite,
             }
             for name, entry in state.entries.items()
@@ -416,6 +421,43 @@ def _attempt_decision(
 
 
 # meiva:note
+# The other half of the same gate (task #6488). A card opened before its run was re-run has no exit
+# that a re-run can reach: `apply_run` retires it on a *later green run*, and a card whose red was
+# cleared by attempt 2 of its own run can wait for a green run that may never come -- exactly the
+# "no exit" the task is about. So every round asks the run each open card stands on, and closes the
+# card when that job's newest attempt is green. A card that is still red, an attempt in progress, an
+# unreadable attempt, and an entry that names no run all leave it open: only a green closes it.
+def _recheck_open_cards(
+    entries: dict[str, Entry],
+    attempt_of: AttemptOf | None,
+    close_card: Callable[[int, str], None],
+    notes: list[str],
+) -> int:
+    if attempt_of is None:
+        return 0
+    closed = 0
+    for entry in list(entries.values()):
+        if entry.task_id is None or not entry.job or not entry.run_id:
+            continue
+        try:
+            attempt, jobs = attempt_of(entry.run_id)
+        except Exception as exc:
+            notes.append(f"attempt of run {entry.run_id} unreadable: {type(exc).__name__}: {exc}")
+            continue
+        verdict, _seen = job_attempt_verdict(jobs, entry.job)
+        if verdict != ATTEMPT_GREEN:
+            continue
+        close_card(
+            entry.task_id,
+            f"{entry.job} passed in attempt {attempt} of run {entry.run_id}",
+        )
+        del entries[entry.fingerprint]
+        closed += 1
+        notes.append(f"closed card {entry.task_id}: {entry.job} attempt {attempt} green")
+    return closed
+
+
+# meiva:note
 # One run's effects, kept out of the round so the round stays a loop over streams: what a run does
 # to the ledger is apply the verdict, keep the newest green, and act on the cards it confirms or
 # closes. `unnamed` is the count of reds the round could not put a name on -- a repeat of a shape
@@ -537,6 +579,12 @@ def watch_once(
         if alert is not None:
             notes.append(alert)
             stale += 1
+    # meiva:note
+    # After the runs are applied and before the state is written, so a card this round closed is not
+    # persisted as open. A card opened this same round is asked about again here, and that repeat is
+    # deliberate: it is a fresh read of a live attempt, so it can only close a card on a green that
+    # landed between the two reads -- never keep one open that the gate would have suppressed.
+    _recheck_open_cards(entries, attempt_of, close_card, notes)
     save_state(state_path, WatchState(entries, watermarks, first_seen, greens=greens))
     emit(
         {
@@ -548,7 +596,11 @@ def watch_once(
         }
     )
     return round_line(
-        entries=len(entries), confirmed=opened, infra=infra, notes=tuple(notes), unnamed=unnamed
+        entries=len(entries),
+        confirmed=opened,
+        infra=infra,
+        notes=tuple(notes),
+        unnamed=unnamed,
     )
 
 
