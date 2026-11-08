@@ -68,6 +68,7 @@ async def repair_once(
         catalog=catalog,
         usage_kind="chat",
         start_time_ns=int(started_at.timestamp() * 1_000_000_000),
+        now=clock.now(),
     )
     return strip_code_fence(extract_text(resp.content)).strip() or None
 

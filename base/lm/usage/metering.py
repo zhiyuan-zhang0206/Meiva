@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import threading
 import time
+from datetime import datetime
 from typing import Protocol
 from uuid import UUID
 
@@ -22,6 +23,7 @@ from loguru import logger
 from base.lm.catalog import ModelCatalog
 from base.lm.usage import UsageOptions, log_usage_from_message
 from base.lm.usage.reporting import FAILURE_REPORT_EVERY, should_report
+from base.telemetry import process_now
 from base.telemetry.delivery.reporting import report_sink_failure
 
 __all__ = ["DIRECT_USAGE_KIND", "LlmUsageMeter", "install_usage_meter", "unmeter"]
@@ -42,6 +44,7 @@ class UsageEmitter(Protocol):
         catalog: ModelCatalog,
         usage_kind: str,
         options: UsageOptions,
+        now: datetime,
     ) -> object: ...
 
 
@@ -108,6 +111,7 @@ class LlmUsageMeter(BaseCallbackHandler):
                 catalog=self._catalog,
                 usage_kind=DIRECT_USAGE_KIND,
                 options=options,
+                now=process_now(),
             )
         except Exception as exc:
             self._report_failure(exc)

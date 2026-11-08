@@ -118,6 +118,7 @@ def _finalize_turn_observability(
         model=model,
         agent_id=agent_id,
         catalog=catalog,
+        now=now,
         latency_ms=handler.llm_latency_ms,
         decode_ms=handler.llm_decode_ms,
     )

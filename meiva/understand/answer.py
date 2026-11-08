@@ -10,7 +10,9 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 
 from base.clock import Clock
@@ -95,6 +97,7 @@ class UnderstandDeps:
     retry: RetryPolicy
     base_dir: Path
     output: OutputSite | None
+    now: Callable[[], datetime]
 
 
 # meiva:note
@@ -307,4 +310,5 @@ def _invoke(deps: UnderstandDeps, call: ModelCall, content: list[dict[str, objec
         model=call.model,
         usage_source=call.usage_source,
         catalog=deps.catalog,
+        now=deps.now,
     )

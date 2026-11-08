@@ -191,6 +191,7 @@ def describe(
             clock,
             timestamps_enabled=config.view.general.message_timestamps,
         ),
+        now=clock.now,
     )
 
 

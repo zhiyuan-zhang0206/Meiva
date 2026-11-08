@@ -109,6 +109,7 @@ class SkillRecallHook(Hook):
             catalog=catalog,
             keys=runtime.context.require_provider_keys(),
             agent_id=agent_id_from_config(config),
+            now=runtime.context.require_clock().now,
         )
         return candidates if passed else []
 

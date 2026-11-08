@@ -10,8 +10,5 @@ exports = ["__init__.py", "metering.py", "reporting.py"]
 "reporting.py" = "strict"
 "metering.py" = { mode = "none", why = "the LangChain callback adapter: on a chat start it reads the interval clock and keeps the reading per run id, on the end it reads the clock again for latency_ms, and it emits one usage row per generation through the emitter the caller injected, reporting a failed row through the throttled best-effort channel; the row shape and UsageOptions.metered are decided in __init__.py and when a repeated failure is reported in reporting.should_report" }
 
-[debt.ambient-read]
-"__init__.py#clock time.time_ns" = { count = 1, owner = "#5816", until = "permanently: _now_ns() stamps the local start time of a usage record, the instant its caller cannot improve on" }
-
 [debt.impure-edge]
 "__init__.py#base/telemetry/__init__.py" = { count = 1, owner = "#7240", until = "waits for the billing span's emission to move into a none module (#6026): the id is one parameter away — build_chat_model_bound holds `agent_id` and both `_metered` call sites are inside it — but this file also stamps every span with its own `now`, and a strict module may not read a clock, so repaying the import alone makes the gate demand a graduation this file cannot take; the emission (`BillingSpan`, `emit_billing_event`, `emit_billing_from_message`) leaves in that architecture slice, and this file keeps the row" }

@@ -329,6 +329,7 @@ def _gen(llm: Any, *, model_catalog: ModelCatalog, **kw: Any) -> Any:
         **kw,
         catalog=model_catalog,
         timeline_inputs=_TIMELINE_INPUTS,
+        now=_CLOCK.now,
     )
 
 
@@ -347,6 +348,7 @@ def test_request_is_prefix_plus_one_instruction_with_tools_bound(
         tools=[{"name": "T"}],
         catalog=model_catalog,
         timeline_inputs=_TIMELINE_INPUTS,
+        now=_CLOCK.now,
     )
     assert out.groups == [UnitGroup(0, 1, "look"), UnitGroup(2, 2, "run")]
     assert [u.kind for u in out.units] == ["inbound", "work", "work"]
@@ -506,6 +508,7 @@ def test_a_chunk_is_numbered_from_its_own_first_unit(model_catalog: ModelCatalog
         tools=[{"name": "T"}],
         catalog=model_catalog,
         timeline_inputs=_TIMELINE_INPUTS,
+        now=_CLOCK.now,
     )
     catalog = llm.requests[0][-1].content.split("whole units):\n")[1]
     assert catalog.startswith("[1] ") and "pytest -x" in catalog and "[2]" not in catalog
@@ -527,6 +530,7 @@ def test_a_chunk_is_numbered_from_its_own_first_unit(model_catalog: ModelCatalog
             tools=[{"name": "T"}],
             catalog=model_catalog,
             timeline_inputs=_TIMELINE_INPUTS,
+            now=_CLOCK.now,
         )
 
 

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Awaitable, Callable, Mapping
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -133,6 +134,10 @@ def _catalog_for(judge: _FakeJudge) -> ModelCatalog:
     return builder.build()
 
 
+def _now() -> datetime:
+    return datetime(2026, 8, 17, tzinfo=UTC)
+
+
 async def _rank(
     tmp_path: Path,
     judge: _FakeJudge,
@@ -157,6 +162,7 @@ async def _rank(
         exclude=exclude,
         memory_root=tmp_path,
         reports=rerank.UnreadableReports(),
+        now=_now,
     )
 
 
@@ -590,13 +596,25 @@ async def test_ask_relevance_reads_the_true_probability_and_clamps(
     kind = "memory_write_dedup"
     assert (
         await rerank.ask_relevance(
-            _MODEL, "the state", question, catalog=cat, keys=inert_keys(cat), usage_kind=kind
+            _MODEL,
+            "the state",
+            question,
+            catalog=cat,
+            keys=inert_keys(cat),
+            usage_kind=kind,
+            now=_now,
         )
         == 1.0
     )
     assert (
         await rerank.ask_relevance(
-            _MODEL, "the state", question, catalog=cat, keys=inert_keys(cat), usage_kind=kind
+            _MODEL,
+            "the state",
+            question,
+            catalog=cat,
+            keys=inert_keys(cat),
+            usage_kind=kind,
+            now=_now,
         )
         == 0.3
     )
@@ -615,6 +633,7 @@ async def test_unknown_decision_model_is_a_clear_error(catalog: ModelCatalog) ->
             catalog=catalog,
             keys=inert_keys(catalog),
             usage_kind="memory_rerank",
+            now=_now,
         )
 
 

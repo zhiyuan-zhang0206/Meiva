@@ -262,6 +262,7 @@ def test_fetch_deps_reads_the_reader_setting(web_harness: WebHarness) -> None:
         overrides=web_harness.fetch_deps.fetch_model.overrides,
         delivery_active=False,
         agent_id=None,
+        now=web_harness.fetch_deps.fetch_model.now,
     )
 
     assert deps.reader is ReaderProvider(settings.web.web_fetch_reader)

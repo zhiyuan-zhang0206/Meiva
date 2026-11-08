@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from typing import Any
 
 import pytest
@@ -44,10 +45,20 @@ def _good() -> dict[str, Decision]:
 _QUESTIONS = {"spam": _YES_NO, "team": _CHOICE, "sev": _SCORE}
 
 
+def _now() -> datetime:
+    return datetime(2026, 8, 17, tzinfo=UTC)
+
+
 async def test_returns_the_providers_decisions_and_passes_state_and_questions() -> None:
     binding = FakeBinding(_good())
     result = await decide(
-        MODEL, "hello", _QUESTIONS, catalog=catalog_with(binding), keys=KEYS, usage_kind="test"
+        MODEL,
+        "hello",
+        _QUESTIONS,
+        catalog=catalog_with(binding),
+        keys=KEYS,
+        usage_kind="test",
+        now=_now,
     )
 
     assert result == _good()
@@ -64,6 +75,7 @@ async def test_unknown_model_id_fails_before_any_call() -> None:
             catalog=catalog_with(binding),
             keys=KEYS,
             usage_kind="test",
+            now=_now,
         )
     assert binding.calls == []
 
@@ -73,7 +85,15 @@ async def test_a_context_overflow_fails_before_the_request() -> None:
     catalog = catalog_with(binding, models={MODEL: DecisionModelSpec(context_window=50)})
 
     with pytest.raises(DecisionInputTooLargeError, match="context window"):
-        await decide(MODEL, "x" * 4_000, _QUESTIONS, catalog=catalog, keys=KEYS, usage_kind="test")
+        await decide(
+            MODEL,
+            "x" * 4_000,
+            _QUESTIONS,
+            catalog=catalog,
+            keys=KEYS,
+            usage_kind="test",
+            now=_now,
+        )
     assert binding.calls == []
 
 
@@ -83,7 +103,15 @@ async def test_the_total_request_limit_is_checked_separately() -> None:
     catalog = catalog_with(binding, models={MODEL: spec})
 
     with pytest.raises(DecisionInputTooLargeError, match="request limit"):
-        await decide(MODEL, "x" * 160, _QUESTIONS, catalog=catalog, keys=KEYS, usage_kind="test")
+        await decide(
+            MODEL,
+            "x" * 160,
+            _QUESTIONS,
+            catalog=catalog,
+            keys=KEYS,
+            usage_kind="test",
+            now=_now,
+        )
     assert binding.calls == []
 
 
@@ -100,7 +128,13 @@ async def test_invalid_inputs_are_rejected(state: str, questions: Any, match: st
     binding = FakeBinding(_good())
     with pytest.raises((ValueError, TypeError), match=match):
         await decide(
-            MODEL, state, questions, catalog=catalog_with(binding), keys=KEYS, usage_kind="test"
+            MODEL,
+            state,
+            questions,
+            catalog=catalog_with(binding),
+            keys=KEYS,
+            usage_kind="test",
+            now=_now,
         )
     assert binding.calls == []
 
@@ -116,7 +150,13 @@ async def test_missing_api_key_fails_before_the_binding_is_built() -> None:
     catalog = catalog_with(binding, build=build)
     with pytest.raises(DecisionKeyMissingError, match="FAKE_API_KEY not set") as excinfo:
         await decide(
-            MODEL, "hello", _QUESTIONS, catalog=catalog, keys=ProviderKeys({}), usage_kind="test"
+            MODEL,
+            "hello",
+            _QUESTIONS,
+            catalog=catalog,
+            keys=ProviderKeys({}),
+            usage_kind="test",
+            now=_now,
         )
     assert isinstance(excinfo.value.__cause__, RuntimeError)
     assert not isinstance(excinfo.value.__cause__, DecisionKeyMissingError)
@@ -130,7 +170,15 @@ async def test_a_build_failure_with_the_key_present_propagates_unchanged() -> No
 
     catalog = catalog_with(FakeBinding(_good()), build=build)
     with pytest.raises(RuntimeError, match="real bug in build") as excinfo:
-        await decide(MODEL, "hello", _QUESTIONS, catalog=catalog, keys=KEYS, usage_kind="test")
+        await decide(
+            MODEL,
+            "hello",
+            _QUESTIONS,
+            catalog=catalog,
+            keys=KEYS,
+            usage_kind="test",
+            now=_now,
+        )
     assert not isinstance(excinfo.value, DecisionKeyMissingError)
 
 
@@ -176,7 +224,15 @@ async def test_an_invalid_distribution_is_rejected(
 ) -> None:
     catalog = catalog_with(FakeBinding(_bad(mutation)))
     with pytest.raises(DecisionResponseError, match=match):
-        await decide(MODEL, "hello", _QUESTIONS, catalog=catalog, keys=KEYS, usage_kind="test")
+        await decide(
+            MODEL,
+            "hello",
+            _QUESTIONS,
+            catalog=catalog,
+            keys=KEYS,
+            usage_kind="test",
+            now=_now,
+        )
 
 
 async def test_missing_or_extra_answers_are_rejected() -> None:
@@ -186,7 +242,15 @@ async def test_missing_or_extra_answers_are_rejected() -> None:
     catalog = catalog_with(FakeBinding(answers))
 
     with pytest.raises(DecisionResponseError, match="missing \\['sev'\\], unknown \\['ghost'\\]"):
-        await decide(MODEL, "hello", _QUESTIONS, catalog=catalog, keys=KEYS, usage_kind="test")
+        await decide(
+            MODEL,
+            "hello",
+            _QUESTIONS,
+            catalog=catalog,
+            keys=KEYS,
+            usage_kind="test",
+            now=_now,
+        )
 
 
 async def test_each_call_writes_one_priced_usage_row_with_no_output_tokens(
@@ -201,6 +265,7 @@ async def test_each_call_writes_one_priced_usage_row_with_no_output_tokens(
         catalog=catalog,
         keys=KEYS,
         usage_kind="injection_check",
+        now=_now,
         source="web.fetch",
         for_agent_id=7,
     )
@@ -234,6 +299,7 @@ async def test_usage_is_still_written_when_the_response_proves_invalid(
             catalog=catalog_with(Failing()),
             keys=KEYS,
             usage_kind="test",
+            now=_now,
         )
 
     [record] = [r for r in loguru_records if r["extra"].get("event") == "llm_usage"]
@@ -255,6 +321,7 @@ async def test_a_provider_failure_without_billing_writes_no_usage(
             catalog=catalog_with(Failing()),
             keys=KEYS,
             usage_kind="test",
+            now=_now,
         )
     assert not [r for r in loguru_records if r["extra"].get("event") == "llm_usage"]
 

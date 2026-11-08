@@ -7,6 +7,7 @@ from __future__ import annotations
 import re
 import sys
 from collections.abc import Mapping
+from datetime import UTC, datetime, timedelta, timezone
 from typing import Literal
 
 import pytest
@@ -20,6 +21,8 @@ from base.packages.tests.lm.providers.billing_sensors import disabled, failing
 from base.packages.tests.lm.providers.invoke_billing import invoke
 from base.paths import meiva_home
 from base.telemetry.tests.capture.armed_tracing import BillingRuntime, armed_billing
+
+_NOW = datetime(2026, 8, 17, 12, 34, 56, tzinfo=UTC)
 
 
 def span_attributes(span: ReadableSpan) -> Mapping[str, AttributeValue]:
@@ -48,7 +51,8 @@ def schema(tracer: BillingRuntime) -> None:
             cost_usd=0.0003476,
             usage_kind="agent",
             start_time_ns=123456,
-        )
+        ),
+        now=_NOW,
     )
     assert len(tracer.spans) == 1
     span = tracer.spans[0]
@@ -90,11 +94,11 @@ def cache_write_ttls(tracer: BillingRuntime, model_catalog: ModelCatalog, path: 
     )
     if path == "message":
         emit_billing_from_message(
-            message, model="claude-opus-5-5", usage_kind="chat", catalog=model_catalog
+            message, model="claude-opus-5-5", usage_kind="chat", catalog=model_catalog, now=_NOW
         )
     else:
         log_usage_from_message(
-            message, model="claude-opus-5-5", usage_kind="agent", catalog=model_catalog
+            message, model="claude-opus-5-5", usage_kind="agent", catalog=model_catalog, now=_NOW
         )
     assert len(tracer.spans) == 1
     attrs = span_attributes(tracer.spans[0])
@@ -118,7 +122,7 @@ def unpriced(tracer: BillingRuntime, model_catalog: ModelCatalog) -> None:
         usage_metadata={"input_tokens": 20, "output_tokens": 5, "total_tokens": 25},
     )
     emit_billing_from_message(
-        message, model="deepseek-not-priced", usage_kind="chat", catalog=model_catalog
+        message, model="deepseek-not-priced", usage_kind="chat", catalog=model_catalog, now=_NOW
     )
     assert len(tracer.spans) == 1
     assert span_attributes(tracer.spans[0])["meiva.billing.vendor"] == "deepseek"
@@ -141,6 +145,7 @@ def missing_usage(tracer: BillingRuntime, model_catalog: ModelCatalog) -> None:
         model="deepseek-v4-pro",
         usage_kind="chat",
         catalog=model_catalog,
+        now=_NOW,
     )
     assert tracer.spans == []
 
@@ -161,11 +166,11 @@ def cache_read(
     )
     if path == "message":
         emit_billing_from_message(
-            message, model="deepseek-flash", usage_kind="chat", catalog=model_catalog
+            message, model="deepseek-flash", usage_kind="chat", catalog=model_catalog, now=_NOW
         )
     else:
         log_usage_from_message(
-            message, model="deepseek-flash", usage_kind="chat", catalog=model_catalog
+            message, model="deepseek-flash", usage_kind="chat", catalog=model_catalog, now=_NOW
         )
     [span] = tracer.spans
     assert span_attributes(span)["meiva.billing.tokens_in"] == 1000
@@ -176,6 +181,48 @@ def cache_read(
         assert "meiva.billing.cache_read_tokens" not in span_attributes(span)
     else:
         assert span_attributes(span)["meiva.billing.cache_read_tokens"] == 0
+
+
+def fixed_now(tracer: BillingRuntime, model_catalog: ModelCatalog, path: str) -> None:
+    from base.lm.usage import (
+        UsageFields,
+        UsageOptions,
+        log_usage_fields,
+        log_usage_from_message,
+    )
+
+    naive_utc = datetime(2026, 11, 9, 1, 2, 3, 456789, tzinfo=UTC).replace(tzinfo=None)
+    offset_tz = timezone(timedelta(hours=8))
+    aware_offset = datetime(2026, 11, 9, 9, 2, 3, 456789, tzinfo=offset_tz)
+    expected_now_ns = 1_794_186_123_456_789_000
+    latency_ms = 123.456
+    expected_start_ns = expected_now_ns - 123_456_000
+    for instant in (naive_utc, aware_offset):
+        if path == "message":
+            message = AIMessage(
+                content="answer",
+                usage_metadata={"input_tokens": 100, "output_tokens": 10, "total_tokens": 110},
+            )
+            log_usage_from_message(
+                message,
+                model="deepseek-v4-pro",
+                usage_kind="chat",
+                options=UsageOptions(latency_ms=latency_ms),
+                catalog=model_catalog,
+                now=instant,
+            )
+        else:
+            log_usage_fields(
+                "deepseek-v4-pro",
+                UsageFields(tok_in=100, tok_out=10, latency_ms=latency_ms),
+                usage_kind="chat",
+                catalog=model_catalog,
+                now=instant,
+            )
+    assert len(tracer.spans) == 2
+    for span in tracer.spans:
+        assert span.start_time == expected_start_ns
+        assert span_attributes(span)["meiva.billing.ts"] == "2026-11-09T01:02:03Z"
 
 
 def main(scenario: str, path: Literal["message", "durable"], cached: int | None) -> None:
@@ -197,6 +244,8 @@ def main(scenario: str, path: Literal["message", "durable"], cached: int | None)
                 missing_usage(tracer, catalog)
             case "cache_read":
                 cache_read(tracer, catalog, path, cached)
+            case "fixed_now":
+                fixed_now(tracer, catalog, path)
             case "failure":
                 failing(tracer)
             case _:

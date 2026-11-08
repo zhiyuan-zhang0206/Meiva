@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, MutableMapping, Sequence
+from datetime import datetime
 from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING, TypeGuard
@@ -145,11 +146,12 @@ def init_process_scope(
     trace: TraceConfig,
     environ: MutableMapping[str, str],
     readiness: TraceReadiness,
+    now: Callable[[], datetime],
 ) -> None:
     from base.telemetry.tracing import initialize_tracing
 
     environ.update(trace.traceloop_environment())
-    initialize_tracing(machine=machine, home=home, config=trace, readiness=readiness)
+    initialize_tracing(machine=machine, home=home, config=trace, readiness=readiness, now=now)
 
 
 def land_cluster_extensions(db: Database, *, home: Path) -> None:

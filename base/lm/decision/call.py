@@ -9,7 +9,8 @@ from __future__ import annotations
 
 import math
 import time
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
+from datetime import datetime
 
 from base.lm.catalog import ModelCatalog
 from base.lm.catalog.decide.types import (
@@ -57,6 +58,7 @@ async def decide(
     for_agent_id: int | None = None,
     timeout: float | None = DEFAULT_TIMEOUT_S,
     transport: AsyncTransport | None = None,
+    now: Callable[[], datetime],
 ) -> Mapping[str, Decision]:
     _check_inputs(state, questions)
     spec = _spec_of(model, catalog)
@@ -80,9 +82,20 @@ async def decide(
         result = await binding.decide(state, questions)
     except DecisionResponseError as exc:
         if exc.input_tokens is not None:
-            _log_usage(model, exc.input_tokens, started, usage_kind, source, for_agent_id, catalog)
+            _log_usage(
+                model,
+                exc.input_tokens,
+                started,
+                usage_kind,
+                source,
+                for_agent_id,
+                catalog,
+                now=now,
+            )
         raise
-    _log_usage(model, result.input_tokens, started, usage_kind, source, for_agent_id, catalog)
+    _log_usage(
+        model, result.input_tokens, started, usage_kind, source, for_agent_id, catalog, now=now
+    )
     validate_decisions(questions, result.decisions)
     return result.decisions
 
@@ -95,6 +108,8 @@ def _log_usage(
     source: str | None,
     for_agent_id: int | None,
     catalog: ModelCatalog,
+    *,
+    now: Callable[[], datetime],
 ) -> None:
     log_usage_fields(
         model,
@@ -107,6 +122,7 @@ def _log_usage(
         ),
         usage_kind=usage_kind,
         catalog=catalog,
+        now=now(),
     )
 
 

@@ -8,6 +8,7 @@ import sys
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 from typing import assert_never
 
@@ -505,6 +506,7 @@ async def run(
     image: LoadedCommit,
     root: Path,
     tuning: MemoryIndexerConfig,
+    now: Callable[[], datetime],
 ) -> None:
     inputs = MemoryIndexerInputs.from_boot(config)
     if _is_running(config, runtime=runtime):
@@ -527,6 +529,7 @@ async def run(
             timeout_s=inputs.embed_timeout_s,
             api_key=inputs.api_key,
             embeddinggemma_config=inputs.embeddinggemma_config,
+            now=now,
         )
     except ValueError as exc:
         _log.critical("[indexer] embedding provider config invalid: %s", exc)
@@ -623,11 +626,12 @@ def main() -> None:
             direct_url=ClusterDirectUrl(machine.host, home=process_home),
         )
 
+    now = Clock(clock_config_from_boot(config), timers=SYSTEM_TIMERS).now
     pipeline = build_pipeline(
         database=database,
         machine=machine,
         home=process_home,
-        now=Clock(clock_config_from_boot(config), timers=SYSTEM_TIMERS).now,
+        now=now,
         otlp_enabled=lambda: config.view.observability.telemetry_otlp_enabled,
         otlp_endpoint=lambda: config.view.observability.telemetry_otlp_endpoint,
     )
@@ -654,6 +658,7 @@ def main() -> None:
                     image=image,
                     root=memory_root(roles=machine.role(), home=process_home),
                     tuning=MemoryIndexerConfig(),
+                    now=now,
                 )
             )
         except KeyboardInterrupt:

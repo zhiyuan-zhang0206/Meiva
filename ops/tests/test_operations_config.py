@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 
+from base.clock.tests.fakes import system_clock
 from base.config import runtime_config
 from base.config.service_read import ConfigAuthority
 from base.host.env.tests.env_files import unit_env_aliases, unit_env_path
@@ -202,6 +203,7 @@ def test_config_write_op_rejects_unknown_field(
         local_machine=_MACHINE,
         host=fake_host(),
         home=unit_home,
+        now=system_clock().now,
     )
     assert result.applied is False
     assert result.results["totally_unknown_field"].ok is False
@@ -220,6 +222,7 @@ def test_config_write_op_rejects_non_host_field(
         local_machine=_MACHINE,
         host=fake_host(),
         home=unit_home,
+        now=system_clock().now,
     )
     assert result.applied is False
     assert result.results["llm_model"].ok is False
@@ -249,6 +252,7 @@ def test_config_write_op_rejects_non_remote_writable(
         local_machine=_MACHINE,
         host=fake_host(),
         home=unit_home,
+        now=system_clock().now,
     )
     assert result.applied is False
     assert result.results[non_writable[0]].ok is False
@@ -269,6 +273,7 @@ def test_config_write_op_local_accepts_writable_host_field(
         local_machine=_MACHINE,
         host=fake_host(),
         home=unit_home,
+        now=system_clock().now,
     )
     assert result.applied is True
     assert runtime_config.env_set_field_names(unit_env_path()) == {"cross_machine_transfer_backend"}
@@ -287,6 +292,7 @@ def test_config_write_op_remote_rejects_writable_only_host_field(
         local_machine=_MACHINE,
         host=fake_host(),
         home=unit_home,
+        now=system_clock().now,
     )
     assert result.applied is False
     assert "not remotely editable" in (
@@ -307,6 +313,7 @@ def test_config_write_op_rejects_failing_validator(
         local_machine=_MACHINE,
         host=fake_host(),
         home=unit_home,
+        now=system_clock().now,
     )
     assert result.applied is False
     assert result.results["ops_concurrency"].ok is False
@@ -327,6 +334,7 @@ def test_config_write_op_rejects_unknown_transfer_backend(
         local_machine=_MACHINE,
         host=fake_host(),
         home=unit_home,
+        now=system_clock().now,
     )
     assert result.applied is False
     assert result.results["cross_machine_transfer_backend"].ok is False
@@ -347,6 +355,7 @@ def test_config_write_op_atomic_one_bad_writes_nothing(
         local_machine=_MACHINE,
         host=fake_host(),
         home=unit_home,
+        now=system_clock().now,
     )
     assert result.applied is False
     # Nothing should be written to .env
@@ -365,6 +374,7 @@ def test_config_write_op_all_good_writes_file(
         local_machine=_MACHINE,
         host=fake_host(),
         home=unit_home,
+        now=system_clock().now,
     )
     assert result.applied is True
     assert runtime_config.env_set_field_names(unit_env_path()) == {
@@ -386,6 +396,7 @@ def test_config_write_op_none_unsets_field(
         local_machine=_MACHINE,
         host=fake_host(),
         home=unit_home,
+        now=system_clock().now,
     )
     assert runtime_config.env_set_field_names(unit_env_path()) == {
         "ops_concurrency",
@@ -398,6 +409,7 @@ def test_config_write_op_none_unsets_field(
         local_machine=_MACHINE,
         host=fake_host(),
         home=unit_home,
+        now=system_clock().now,
     )
     assert result.applied is True
     assert runtime_config.env_set_field_names(unit_env_path()) == {"ops_concurrency"}
@@ -418,6 +430,7 @@ def test_config_write_op_absent_key_left_untouched(
         local_machine=_MACHINE,
         host=fake_host(),
         home=unit_home,
+        now=system_clock().now,
     )
     # A patch touching only ops_concurrency must NOT drop machine_description.
     result = config_write_op(
@@ -426,6 +439,7 @@ def test_config_write_op_absent_key_left_untouched(
         local_machine=_MACHINE,
         host=fake_host(),
         home=unit_home,
+        now=system_clock().now,
     )
     assert result.applied is True
     assert runtime_config.env_set_field_names(unit_env_path()) == {
@@ -447,9 +461,15 @@ def test_config_write_op_empty_patch_is_noop(
         local_machine=_MACHINE,
         host=fake_host(),
         home=unit_home,
+        now=system_clock().now,
     )
     result = config_write_op(
-        {}, authority=config_authority, local_machine=_MACHINE, host=fake_host(), home=unit_home
+        {},
+        authority=config_authority,
+        local_machine=_MACHINE,
+        host=fake_host(),
+        home=unit_home,
+        now=system_clock().now,
     )
     assert result.applied is True
     assert runtime_config.env_set_field_names(unit_env_path()) == {"ops_concurrency"}
@@ -470,6 +490,7 @@ def test_config_write_op_does_not_disturb_non_managed_env(
         local_machine=_MACHINE,
         host=fake_host(),
         home=unit_home,
+        now=system_clock().now,
     )
     config_write_op(
         {"ops_concurrency": None},
@@ -477,6 +498,7 @@ def test_config_write_op_does_not_disturb_non_managed_env(
         local_machine=_MACHINE,
         host=fake_host(),
         home=unit_home,
+        now=system_clock().now,
     )  # explicit unset must not touch MEIVA_DB_URL
     assert unit_env_aliases()["MEIVA_DB_URL"] == "postgresql://x@127.0.0.1:1/x"
     assert "MEIVA_OPS_CONCURRENCY" not in unit_env_aliases()
@@ -494,6 +516,7 @@ def test_config_write_op_restart_required_union(
         local_machine=_MACHINE,
         host=fake_host(),
         home=unit_home,
+        now=system_clock().now,
     )
     assert result.applied is True
     # ops_concurrency.restart_required + machine_description.restart_required
@@ -516,7 +539,12 @@ def test_config_write_op_empty_overrides_applied_no_write(
 ) -> None:
     """Empty overrides dict -> applied=True, nothing written, restart_required=[]."""
     result = config_write_op(
-        {}, authority=config_authority, local_machine=_MACHINE, host=fake_host(), home=unit_home
+        {},
+        authority=config_authority,
+        local_machine=_MACHINE,
+        host=fake_host(),
+        home=unit_home,
+        now=system_clock().now,
     )
     assert result.applied is True
     assert result.restart_required == []
@@ -540,6 +568,7 @@ def test_config_write_op_rejects_an_invalid_candidate_without_writing(
         local_machine=_MACHINE,
         host=fake_host(),
         home=unit_home,
+        now=system_clock().now,
     )
 
     assert result.applied is False
@@ -556,7 +585,12 @@ def test_config_write_op_machine_name_in_result(
 ) -> None:
     """Result includes the explicitly supplied local machine name."""
     result = config_write_op(
-        {}, authority=config_authority, local_machine="my-host", host=fake_host(), home=unit_home
+        {},
+        authority=config_authority,
+        local_machine="my-host",
+        host=fake_host(),
+        home=unit_home,
+        now=system_clock().now,
     )
     assert result.machine == "my-host"
 
@@ -578,8 +612,8 @@ def test_config_audit_read_op_returns_this_hosts_newest_records(
 
     env_path = unit_home / ".env"
     env_path.write_text("MEIVA_MODEL=m\n")
-    record_env_write(env_path, {"MEIVA_MODEL"}, set(), site="one")
-    record_env_write(env_path, {"MEIVA_MODEL"}, set(), site="two")
+    record_env_write(env_path, {"MEIVA_MODEL"}, set(), site="one", now=system_clock().now)
+    record_env_write(env_path, {"MEIVA_MODEL"}, set(), site="two", now=system_clock().now)
 
     result = config_audit_read_op(1, local_machine=_MACHINE)
     assert result.machine == "test-machine"

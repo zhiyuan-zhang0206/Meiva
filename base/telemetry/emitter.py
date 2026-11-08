@@ -79,7 +79,9 @@ __all__ = [
     "flush",
     "init_telemetry",
     "prepare_event",
+    "process_now",
     "stop",
+    "sync",
 ]
 
 
@@ -243,6 +245,10 @@ def _process_now() -> Callable[[], datetime]:
             "process clock `init_telemetry`/`bind_identity` hands in, and neither has run here"
         )
     return now
+
+
+def process_now() -> datetime:
+    return _process_now()()
 
 
 # meiva:note

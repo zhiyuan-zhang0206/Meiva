@@ -14,6 +14,7 @@ def log_llm_usage(
     *,
     agent_id: int | None,
     catalog: ModelCatalog,
+    now: datetime,
     latency_ms: float | None = None,
     decode_ms: float | None = None,
     priced_at: datetime | None = None,
@@ -30,6 +31,7 @@ def log_llm_usage(
         model,
         catalog=catalog,
         usage_kind=usage_kind,
+        now=now,
         options=UsageOptions(
             latency_ms=latency_ms,
             decode_ms=decode_ms,

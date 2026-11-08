@@ -18,6 +18,7 @@ from base.api_contracts.config import (
     ConfigView,
     ConfigWriteResult,
 )
+from base.clock.tests.fakes import system_clock
 from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
@@ -44,7 +45,8 @@ def test_the_cli_and_the_sdk_reach_the_same_verdict_about_one_process(tmp_path: 
     fixture_secret = secrets.token_urlsafe(12)
     (tmp_path / ".env").write_text(f"MEIVA_CLUSTER_SECRET={fixture_secret}\n")
     process = cfg.ConfigProcess(
-        environ={"MEIVA_PROCESS_PROFILE": "agent", "MEIVA_HOME": str(tmp_path)}, home=tmp_path
+        environ={"MEIVA_PROCESS_PROFILE": "agent", "MEIVA_HOME": str(tmp_path)},
+        home=tmp_path,
     )
 
     with pytest.raises(SystemExit, match="no machine API token"):
@@ -622,9 +624,12 @@ def test_config_audit_local_reads_newest_first_and_filters(
         {"MEIVA_MODEL"},
         set(),
         site="first",
+        now=system_clock().now,
         changes=[{"alias": "MEIVA_MODEL", "old": "a", "new": "b"}],
     )
-    record_env_write(env_path, {"MEIVA_OPS_CONCURRENCY"}, set(), site="second")
+    record_env_write(
+        env_path, {"MEIVA_OPS_CONCURRENCY"}, set(), site="second", now=system_clock().now
+    )
     machine_identity.set(name="audit-fixture")
 
     process = _process(local_env_home)

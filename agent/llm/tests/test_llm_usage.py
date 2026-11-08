@@ -24,6 +24,8 @@ from base.log.tests.log_records import LogRecords
 from base.packages.plugin_providers import build_model_catalog
 from base.paths import meiva_home
 
+_NOW = datetime(2026, 8, 17, 0, 0, tzinfo=UTC)
+
 
 @pytest.fixture(scope="module", autouse=True)
 def _load_provider_plugins() -> None:
@@ -59,7 +61,11 @@ def test_deepseek_shape_logs(loguru_records: LogRecords):
         },
     )
     log_llm_usage(
-        msg, agent_id=7, model="deepseek-v4-pro", catalog=build_model_catalog(home=meiva_home())
+        msg,
+        agent_id=7,
+        model="deepseek-v4-pro",
+        catalog=build_model_catalog(home=meiva_home()),
+        now=_NOW,
     )
     out = _msgs(loguru_records)
     assert "in=1000 cached=800" in out
@@ -88,7 +94,11 @@ def test_anthropic_shape_logs(loguru_records: LogRecords):
         },
     )
     log_llm_usage(
-        msg, agent_id=7, model="claude-opus-5", catalog=build_model_catalog(home=meiva_home())
+        msg,
+        agent_id=7,
+        model="claude-opus-5",
+        catalog=build_model_catalog(home=meiva_home()),
+        now=_NOW,
     )
     out = _msgs(loguru_records)
     assert "in=2000 cached=1500" in out
@@ -105,7 +115,11 @@ def test_zero_input_no_pct(loguru_records: LogRecords):
         },
     )
     log_llm_usage(
-        msg, agent_id=7, model="claude-opus-5", catalog=build_model_catalog(home=meiva_home())
+        msg,
+        agent_id=7,
+        model="claude-opus-5",
+        catalog=build_model_catalog(home=meiva_home()),
+        now=_NOW,
     )
     out = _msgs(loguru_records)
     assert "in=0" in out
@@ -125,6 +139,7 @@ def test_latency_ms_rides_payload(loguru_records: LogRecords):
         model="deepseek-v4-pro",
         latency_ms=1234.5,
         catalog=build_model_catalog(home=meiva_home()),
+        now=_NOW,
     )
     out = _msgs(loguru_records)
     assert "in=100" in out
@@ -136,7 +151,11 @@ def test_latency_ms_rides_payload(loguru_records: LogRecords):
         usage_metadata={"input_tokens": 100, "output_tokens": 10, "total_tokens": 110},
     )
     log_llm_usage(
-        second, agent_id=7, model="deepseek-v4-pro", catalog=build_model_catalog(home=meiva_home())
+        second,
+        agent_id=7,
+        model="deepseek-v4-pro",
+        catalog=build_model_catalog(home=meiva_home()),
+        now=_NOW,
     )
     assert loguru_records[0]["extra"]["latency_ms"] is None
 
@@ -156,6 +175,7 @@ def test_decode_ms_rides_payload(loguru_records: LogRecords):
         latency_ms=1234.5,
         decode_ms=800.0,
         catalog=build_model_catalog(home=meiva_home()),
+        now=_NOW,
     )
     out = _msgs(loguru_records)
     assert "in=100" in out
@@ -173,6 +193,7 @@ def test_decode_ms_rides_payload(loguru_records: LogRecords):
         model="deepseek-v4-pro",
         latency_ms=1234.5,
         catalog=build_model_catalog(home=meiva_home()),
+        now=_NOW,
     )
     assert loguru_records[0]["extra"]["decode_ms"] is None
 
@@ -183,7 +204,11 @@ def test_usage_has_no_task_attribution(loguru_records: LogRecords) -> None:
         content="", usage_metadata={"input_tokens": 100, "output_tokens": 10, "total_tokens": 110}
     )
     log_llm_usage(
-        msg, agent_id=7, model="deepseek-v4-pro", catalog=build_model_catalog(home=meiva_home())
+        msg,
+        agent_id=7,
+        model="deepseek-v4-pro",
+        catalog=build_model_catalog(home=meiva_home()),
+        now=_NOW,
     )
     assert "task_id" not in loguru_records[0]["extra"]
 
@@ -191,7 +216,11 @@ def test_usage_has_no_task_attribution(loguru_records: LogRecords) -> None:
 def test_no_usage_metadata_silent(loguru_records: LogRecords):
     msg = AIMessage(content="")
     log_llm_usage(
-        msg, agent_id=7, model="claude-opus-5", catalog=build_model_catalog(home=meiva_home())
+        msg,
+        agent_id=7,
+        model="claude-opus-5",
+        catalog=build_model_catalog(home=meiva_home()),
+        now=_NOW,
     )
     assert loguru_records == []
 
@@ -217,6 +246,7 @@ def test_price_snapshot_rides_payload(loguru_records: LogRecords):
         model="deepseek-v4-pro",
         priced_at=datetime(2026, 8, 17, 0, 0, tzinfo=UTC),
         catalog=build_model_catalog(home=meiva_home()),
+        now=_NOW,
     )
     extra = loguru_records.extras()[0]
     assert _number(extra, "cost_usd") == pytest.approx(0.0003476)
@@ -279,7 +309,11 @@ def test_price_snapshot_absent_for_unpriced_model(
         usage_metadata={"input_tokens": 100, "output_tokens": 10, "total_tokens": 110},
     )
     log_llm_usage(
-        msg, agent_id=7, model="no-such-model", catalog=build_model_catalog(home=meiva_home())
+        msg,
+        agent_id=7,
+        model="no-such-model",
+        catalog=build_model_catalog(home=meiva_home()),
+        now=_NOW,
     )
     extra = loguru_records.extras(event="llm_usage")[0]
     assert "cost_usd" not in extra
@@ -326,7 +360,11 @@ def test_message_is_stamped_with_exactly_the_logged_figures(loguru_records: LogR
         },
     )
     log_llm_usage(
-        msg, agent_id=7, model="claude-opus-5", catalog=build_model_catalog(home=meiva_home())
+        msg,
+        agent_id=7,
+        model="claude-opus-5",
+        catalog=build_model_catalog(home=meiva_home()),
+        now=_NOW,
     )
     event = loguru_records.extras()[0]
     stamped = object_mapping(msg.additional_kwargs).get("meiva_usage")
@@ -346,7 +384,11 @@ def test_non_agent_logging_does_not_stamp(loguru_records: LogRecords):
         usage_metadata={"input_tokens": 10, "output_tokens": 1, "total_tokens": 11},
     )
     log_usage_from_message(
-        msg, "claude-opus-5", usage_kind="label", catalog=build_model_catalog(home=meiva_home())
+        msg,
+        "claude-opus-5",
+        usage_kind="label",
+        catalog=build_model_catalog(home=meiva_home()),
+        now=_NOW,
     )
     assert "meiva_usage" not in msg.additional_kwargs
 
@@ -357,13 +399,19 @@ def test_main_conversation_usage_refuses_missing_identity() -> None:
     )
     unchecked = cast(Callable[..., object], log_llm_usage)
     with pytest.raises(TypeError, match="agent_id"):
-        unchecked(msg, model="deepseek-v4-pro", catalog=build_model_catalog(home=meiva_home()))
+        unchecked(
+            msg,
+            model="deepseek-v4-pro",
+            catalog=build_model_catalog(home=meiva_home()),
+            now=_NOW,
+        )
     with pytest.raises(ValueError, match="explicit agent id"):
         unchecked(
             msg,
             model="deepseek-v4-pro",
             agent_id=None,
             catalog=build_model_catalog(home=meiva_home()),
+            now=_NOW,
         )
 
 
@@ -381,7 +429,11 @@ def test_missing_cache_metering_differs_from_a_measured_zero(
         },
     )
     log_llm_usage(
-        msg, agent_id=7, model="deepseek-v4-pro", catalog=build_model_catalog(home=meiva_home())
+        msg,
+        agent_id=7,
+        model="deepseek-v4-pro",
+        catalog=build_model_catalog(home=meiva_home()),
+        now=_NOW,
     )
     extra = loguru_records.extras(event="llm_usage")[0]
     message = loguru_records.messages()[-1]

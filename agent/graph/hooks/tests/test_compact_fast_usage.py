@@ -1,3 +1,4 @@
+from datetime import UTC, datetime
 from typing import cast
 
 from langchain_core.language_models.chat_models import BaseChatModel
@@ -27,6 +28,7 @@ async def test_compaction_preserves_fast_accounting_id(loguru_records: LogRecord
         slices,
         agent_id=228,
         catalog=build_model_catalog(home=meiva_home()),
+        now=lambda: datetime(2026, 8, 17, tzinfo=UTC),
     )
 
     assert summary == "summary"

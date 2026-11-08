@@ -636,7 +636,13 @@ def log_turn_usage(ctx: MeivaContext, agent_id: int, model: str | None, turn: Ha
                 for_agent_id=agent_id,
                 calls=calls,
             )
-            log_usage_fields(pricing_model, fields, usage_kind="agent", catalog=catalog)
+            log_usage_fields(
+                pricing_model,
+                fields,
+                usage_kind="agent",
+                catalog=catalog,
+                now=ctx.require_clock().now(),
+            )
     except Exception as error:
         # meiva:note
         # A bill that cannot be priced is a hole in an accounting row; the reply it

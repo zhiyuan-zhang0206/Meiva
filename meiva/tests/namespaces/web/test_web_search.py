@@ -200,6 +200,7 @@ def test_endpoint_defaults_pin_before_literals(
         overrides=web_harness.fetch_deps.fetch_model.overrides,
         delivery_active=False,
         agent_id=None,
+        now=web_harness.fetch_deps.fetch_model.now,
     )
 
     assert deps.brave.endpoint == "https://api.search.brave.com/res/v1/web/search"
@@ -330,6 +331,7 @@ def test_fetch_deps_read_no_brave_fields(tmp_path: Path, web_harness: WebHarness
         overrides=model.overrides,
         delivery_active=False,
         agent_id=None,
+        now=model.now,
     )
     deps_second = wiring.fetch_deps_for(
         ConfigAuthority(second, second, tmp_path / "second.env"),
@@ -338,6 +340,7 @@ def test_fetch_deps_read_no_brave_fields(tmp_path: Path, web_harness: WebHarness
         overrides=model.overrides,
         delivery_active=False,
         agent_id=None,
+        now=model.now,
     )
 
     assert deps_first == deps_second

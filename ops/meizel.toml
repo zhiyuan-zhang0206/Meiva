@@ -14,6 +14,3 @@ exports = ["agent_transfer", "agents", "alerts.py", "cluster", "cluster_status",
 
 [purity]
 "__init__.py" = "strict"
-
-[roots]
-"host_config.py" = { kinds = ["clock"], why = "Host config write audit stamps the host wall-clock instant" }

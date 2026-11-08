@@ -4,6 +4,7 @@
 
 import sys
 import time
+from datetime import UTC, datetime
 from types import FrameType
 from typing import Any
 
@@ -52,6 +53,7 @@ def main(error: Exception, provider_cause: bool) -> None:
                 error_type=RuntimeError,
                 retry_attempts=2,
                 catalog=model_catalog,
+                now=lambda: datetime(2026, 8, 17, tzinfo=UTC),
             )
         assert raised.value is error
         assert len(calls) == 1 and sleeps == []

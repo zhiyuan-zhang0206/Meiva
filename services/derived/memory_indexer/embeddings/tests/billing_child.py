@@ -8,6 +8,7 @@ import json
 import sys
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
+from datetime import UTC, datetime
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from typing import Any, cast
@@ -139,6 +140,7 @@ def scenario(name: str, directory: Path) -> None:
                 timeout_s=5,
                 api_key="fixture-gemini-key",
                 endpoint=f"http://127.0.0.1:{server.server_port}/embed",
+                now=lambda: datetime(2026, 8, 17, tzinfo=UTC),
             )
             exercise_provider(provider, name)
         finally:

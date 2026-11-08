@@ -11,6 +11,7 @@ from typing import Any
 
 import pytest
 
+from base.clock.tests.fakes import system_clock
 from base.log.tests.log_records import LogRecords
 from base.log.tests.log_records import loguru_records as loguru_records
 from base.telemetry import tracing as tracing_mod
@@ -184,6 +185,7 @@ def test_disabled_returns_early(tmp_path: Path, *, trace_readiness: TraceReadine
     home.mkdir()
     assert (
         initialize_tracing(
+            now=system_clock().now,
             machine=machine_identity(),
             home=home,
             config=trace_config(enabled=False),
@@ -226,6 +228,7 @@ def test_enabled_inits_traceloop_with_otlp_exporter(
     stub_traceloop_init(monkeypatch, record_init)
 
     initialize_tracing(
+        now=system_clock().now,
         machine=machine_identity(),
         home=home,
         config=trace_config(
@@ -278,7 +281,11 @@ def test_gateway_trace_recording_skips_without_lgtm_marker(
 
     machine = machine_identity(name="test-gateway", roles=frozenset({"gateway"}))
     initialize_tracing(
-        machine=machine, home=home, config=trace_config(enabled=True), readiness=trace_readiness
+        now=system_clock().now,
+        machine=machine,
+        home=home,
+        config=trace_config(enabled=True),
+        readiness=trace_readiness,
     )
 
     assert calls == []
@@ -301,7 +308,11 @@ def test_gateway_trace_recording_arms_with_lgtm_marker(
 
     machine = machine_identity(name="test-gateway", roles=frozenset({"gateway"}))
     initialize_tracing(
-        machine=machine, home=home, config=trace_config(enabled=True), readiness=trace_readiness
+        now=system_clock().now,
+        machine=machine,
+        home=home,
+        config=trace_config(enabled=True),
+        readiness=trace_readiness,
     )
     wait_init_resolved(trace_readiness=trace_readiness)
 
@@ -332,6 +343,7 @@ def test_sdk_initialize_failure_logs_and_state_unchanged(
 
     stub_traceloop_init(monkeypatch, _raise)
     initialize_tracing(
+        now=system_clock().now,
         machine=machine_identity(),
         home=home,
         config=trace_config(enabled=True),
@@ -364,6 +376,7 @@ def test_arm_failure_blocks_rearming(
     stub_traceloop_init(monkeypatch, _fail_then_record)
 
     initialize_tracing(
+        now=system_clock().now,
         machine=machine_identity(),
         home=home,
         config=trace_config(enabled=True),
@@ -373,6 +386,7 @@ def test_arm_failure_blocks_rearming(
     assert trace_readiness.resolved and not trace_readiness.ready
 
     initialize_tracing(
+        now=system_clock().now,
         machine=machine_identity(),
         home=home,
         config=trace_config(enabled=True),
@@ -396,12 +410,14 @@ def test_idempotent_second_call_is_noop(
     stub_traceloop_init(monkeypatch, record_init)
 
     initialize_tracing(
+        now=system_clock().now,
         machine=machine_identity(),
         home=home,
         config=trace_config(enabled=True),
         readiness=trace_readiness,
     )
     initialize_tracing(
+        now=system_clock().now,
         machine=machine_identity(),
         home=home,
         config=trace_config(enabled=True),
@@ -437,6 +453,7 @@ def test_collector_unreachable_retries_once_until_init_succeeds(
     stub_traceloop_init(monkeypatch, init_traceloop)
 
     initialize_tracing(
+        now=system_clock().now,
         machine=machine_identity(),
         home=home,
         config=cfg,
@@ -448,6 +465,7 @@ def test_collector_unreachable_retries_once_until_init_succeeds(
     assert isinstance(retry_thread, threading.Thread)
 
     initialize_tracing(
+        now=system_clock().now,
         machine=machine_identity(),
         home=home,
         config=cfg,
@@ -491,6 +509,7 @@ def test_arming_runs_off_the_caller_thread(
     stub_traceloop_init(monkeypatch, _slow_init)
 
     initialize_tracing(
+        now=system_clock().now,
         machine=machine_identity(),
         home=home,
         config=trace_config(enabled=True),
@@ -524,6 +543,7 @@ def test_teardown_drains_pending_arm_thread(
     stub_traceloop_init(monkeypatch, _slow_init)
 
     initialize_tracing(
+        now=system_clock().now,
         machine=machine_identity(),
         home=home,
         config=trace_config(enabled=True),

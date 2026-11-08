@@ -12,6 +12,7 @@ import dataclasses
 import json
 import threading
 from collections.abc import Mapping
+from datetime import UTC, datetime
 from typing import Any
 
 import pytest
@@ -202,6 +203,10 @@ def test_outside_an_exec_turn_the_check_is_not_run(web_harness: WebHarness) -> N
     assert web_harness.findings == []
 
 
+def _now() -> datetime:
+    return datetime(2026, 8, 17, tzinfo=UTC)
+
+
 def test_the_shipped_defaults_name_a_catalog_decision_model(
     config_authority: ConfigAuthority, model_catalog: ModelCatalog
 ) -> None:
@@ -211,6 +216,7 @@ def test_the_shipped_defaults_name_a_catalog_decision_model(
         keys=inert_keys(model_catalog),
         agent_id=7,
         delivery_active=True,
+        now=_now,
     )
 
     assert inputs.enabled is True
@@ -233,6 +239,7 @@ def test_the_inputs_follow_the_configured_fields(
         keys=inert_keys(model_catalog),
         agent_id=None,
         delivery_active=False,
+        now=_now,
     )
 
     assert (inputs.enabled, inputs.threshold, inputs.delivery_active) == (False, 0.9, False)

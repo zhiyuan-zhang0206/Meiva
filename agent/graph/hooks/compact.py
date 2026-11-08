@@ -1,5 +1,6 @@
 __description__ = "Auto-compact history when token count exceeds threshold"
 
+from collections.abc import Callable
 from datetime import datetime
 from typing import Any
 
@@ -156,6 +157,7 @@ async def generate_summary(
     *,
     agent_id: int,
     catalog: ModelCatalog,
+    now: Callable[[], datetime],
 ) -> SummaryText:
     has_system = bool(messages) and isinstance(messages[0], SystemMessage)
     system_head = messages[:1] if has_system else []
@@ -192,6 +194,7 @@ async def generate_summary(
             usage_kind="agent",
             options=UsageOptions(for_agent_id=agent_id, source="compaction", stamp_message=True),
             catalog=catalog,
+            now=now(),
         )
     summary = response.text
     closing = closing_request_of(response, instruction)
@@ -251,13 +254,14 @@ async def auto_compact_summary(
     *,
     agent_id: int,
     catalog: ModelCatalog,
+    now: Callable[[], datetime],
 ) -> str:
     summary: str = ""
     last_error: Exception | None = None
     for attempt in range(1, COMPACT_MAX_ATTEMPTS + 1):
         try:
             summary = await generate_summary(
-                messages, llm, slices, agent_id=agent_id, catalog=catalog
+                messages, llm, slices, agent_id=agent_id, catalog=catalog, now=now
             )
         except Exception as e:
             if not isinstance(e, EmptyCompactionSummaryError) and not is_retryable_provider_error(
@@ -350,6 +354,7 @@ async def auto_compact_for_llm(
                     runtime.context.require_agent(),
                     agent_id=agent_id,
                     catalog=catalog,
+                    now=runtime.context.require_clock().now,
                 ),
                 interrupted,
             )

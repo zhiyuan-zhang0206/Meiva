@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import time
 from collections.abc import Callable, Sequence
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import cast
 
@@ -512,6 +513,7 @@ def test_factory_worst_case_registry_complete() -> None:
             catalog=build_model_catalog(home=meiva_home()),
             timeout_s=EMBED_TIMEOUT_S,
             api_key=None,
+            now=lambda: datetime(2026, 8, 17, tzinfo=UTC),
         )
     with pytest.raises(ValueError) as budget_error:
         factory.worst_case_batch_seconds(unknown, timeout_seconds=EMBED_TIMEOUT_S)

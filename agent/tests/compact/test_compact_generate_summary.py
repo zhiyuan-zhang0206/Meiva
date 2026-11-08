@@ -3,6 +3,7 @@
 Split from `agent/tests/test_compact.py`, which holds the shared helpers and the auto-compact hook tests.
 """
 
+from datetime import UTC, datetime
 from typing import Any
 
 import pytest
@@ -79,6 +80,10 @@ async def test_stamp_compact_boundary_writes_the_closing_request(
 # The regression this catches is removing usage reporting from the compact path, which is the
 # largest individual agent provider call. The billing span that usage feeds is pinned by the
 # provider billing tests in `base/packages/tests/lm/providers`.
+def _now() -> datetime:
+    return datetime(2026, 8, 17, tzinfo=UTC)
+
+
 async def test_generate_summary_reports_the_compaction_call_as_agent_usage(
     model_catalog: ModelCatalog, loguru_records: LogRecords
 ) -> None:
@@ -96,7 +101,12 @@ async def test_generate_summary_reports_the_compaction_call_as_agent_usage(
 
     assert (
         await generate_summary(
-            [HumanMessage(content="conversation")], llm, slices, agent_id=228, catalog=model_catalog
+            [HumanMessage(content="conversation")],
+            llm,
+            slices,
+            agent_id=228,
+            catalog=model_catalog,
+            now=_now,
         )
         == "a complete summary"
     )
@@ -122,7 +132,12 @@ async def test_generate_summary_includes_whole_conversation():
 
     llm = make_fake_llm()
     await generate_summary(
-        convo, llm, pinned_slices(), agent_id=228, catalog=build_model_catalog(home=meiva_home())
+        convo,
+        llm,
+        pinned_slices(),
+        agent_id=228,
+        catalog=build_model_catalog(home=meiva_home()),
+        now=_now,
     )
 
     [llm_input] = llm.requests
@@ -143,6 +158,7 @@ async def test_generate_summary_reuses_conversation_prefix_for_cache():
         pinned_slices(),
         agent_id=228,
         catalog=build_model_catalog(home=meiva_home()),
+        now=_now,
     )
 
     assert llm.bound_tools == [[execute_code]]
@@ -164,6 +180,7 @@ async def test_generate_summary_raises_on_empty_llm_text():
             pinned_slices(),
             agent_id=228,
             catalog=build_model_catalog(home=meiva_home()),
+            now=_now,
         )
 
 
@@ -180,7 +197,12 @@ async def test_generate_summary_extracts_text_from_block_content():
 
     llm = make_fake_llm(response=block_response)
     summary = await generate_summary(
-        msgs, llm, pinned_slices(), agent_id=228, catalog=build_model_catalog(home=meiva_home())
+        msgs,
+        llm,
+        pinned_slices(),
+        agent_id=228,
+        catalog=build_model_catalog(home=meiva_home()),
+        now=_now,
     )
     assert summary == "the real summary"
 
@@ -200,6 +222,7 @@ async def test_generate_summary_raises_on_tool_use_only_block_content():
             pinned_slices(),
             agent_id=228,
             catalog=build_model_catalog(home=meiva_home()),
+            now=_now,
         )
 
 
@@ -212,4 +235,5 @@ async def test_generate_summary_raises_on_empty_conversation():
             pinned_slices(),
             agent_id=228,
             catalog=build_model_catalog(home=meiva_home()),
+            now=_now,
         )

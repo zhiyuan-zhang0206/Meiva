@@ -103,3 +103,10 @@ def test_billing_distinguishes_unmetered_cache_from_reported_zero(
     tmp_path: Path, path: str, cached: int | None
 ) -> None:
     run_billing(tmp_path, "cache_read", path, "none" if cached is None else str(cached))
+
+
+@pytest.mark.parametrize("path", ["message", "durable"])
+def test_fixed_now_computes_exact_start_time_ns_without_float_rounding_drift(
+    tmp_path: Path, path: str
+) -> None:
+    run_billing(tmp_path, "fixed_now", path, "none")

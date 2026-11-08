@@ -1,3 +1,4 @@
+from datetime import UTC, datetime
 from typing import Any
 
 import pytest
@@ -56,6 +57,7 @@ def test_openai_usage_snapshot_prices_writes_at_the_served_speed(
         "gpt-6.1-sol-fast",
         catalog=model_catalog,
         options=UsageOptions(stamp_message=True),
+        now=datetime(2026, 10, 8, tzinfo=UTC),
     )
     expected = (3 * 2 + 39_202 * 2.5 + 205 * 10) / 1_000_000 * multiplier
     assert result == pytest.approx((39_410, expected))

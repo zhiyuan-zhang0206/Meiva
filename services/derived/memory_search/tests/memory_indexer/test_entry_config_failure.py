@@ -1,4 +1,5 @@
 import socket
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -38,6 +39,7 @@ async def test_run_unknown_provider_fails_before_health_server(
             root=tmp_path / "memory",
             tuning=MemoryIndexerConfig(),
             home=meiva_home(),
+            now=lambda: datetime(2026, 8, 17, tzinfo=UTC),
         )
 
     assert exc.value.code == 1

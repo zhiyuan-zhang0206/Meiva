@@ -6,6 +6,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
+from datetime import datetime
 from pathlib import Path
 
 from base.agents.context import MeivaContext
@@ -53,6 +55,7 @@ def understand_deps() -> UnderstandDeps:
         overrides=sdk_settings.model_overrides(),
         base_dir=base_dir,
         output=_output_site(context),
+        now=sdk_settings.clock().now,
     )
 
 
@@ -64,6 +67,7 @@ def understand_deps_for(
     overrides: ModelOverrides,
     base_dir: Path,
     output: OutputSite | None,
+    now: Callable[[], datetime],
 ) -> UnderstandDeps:
     return UnderstandDeps(
         catalog=catalog,
@@ -88,4 +92,5 @@ def understand_deps_for(
         ),
         base_dir=base_dir,
         output=output,
+        now=now,
     )

@@ -86,6 +86,7 @@ def _answer(
         llm_override=fm.llm_override,
         overrides=fm.overrides,
         build_chat_model=factory.build_chat_model,
+        now=fm.now,
     )
 
 

@@ -141,7 +141,12 @@ async def test_generate_summary_returns_summary():
     slices = AgentSlices.resolve(None, default_reader=defaults())
     llm = _fake_llm(summary_text="a synthetic summary")
     summary = await generate_summary(
-        msgs, llm, slices, agent_id=228, catalog=build_model_catalog(home=meiva_home())
+        msgs,
+        llm,
+        slices,
+        agent_id=228,
+        catalog=build_model_catalog(home=meiva_home()),
+        now=Clock.from_settings().now,
     )
 
     assert summary == "a synthetic summary"
@@ -166,6 +171,7 @@ async def test_generate_summary_remembers_the_call_that_produced_it() -> None:
         slices,
         agent_id=228,
         catalog=build_model_catalog(home=meiva_home()),
+        now=Clock.from_settings().now,
     )
 
     closing = closing_of(summary)
@@ -181,6 +187,7 @@ async def test_generate_summary_remembers_the_call_that_produced_it() -> None:
         slices,
         agent_id=228,
         catalog=build_model_catalog(home=meiva_home()),
+        now=Clock.from_settings().now,
     )
     assert closing_of(bare) is None
     assert closing_of("an agent-written summary") is None

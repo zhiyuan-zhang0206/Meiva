@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from datetime import UTC, datetime
 from typing import Any
 
 from base.clock import SYSTEM_TIMERS
@@ -34,6 +35,7 @@ def model_inputs(catalog: ModelCatalog) -> dict[str, Any]:
     return {
         "catalog": catalog,
         "keys": inert_keys(catalog),
+        "now": lambda: datetime(2026, 8, 17, tzinfo=UTC),
         "llm_override": SCRIPTED_MODELS,
         "overrides": ModelOverrides.from_pins({}),
     }

@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import threading
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
 
+from base.clock.tests.fakes import system_clock
 from base.log.tests.log_records import LogRecords
 from base.log.tests.log_records import loguru_records as loguru_records
 from base.telemetry import tracing as tracing_mod
@@ -54,6 +56,7 @@ def test_arm_thread_base_exception_marks_attempt_spent(
     stub_traceloop_init(monkeypatch, _exit_sdk)
 
     initialize_tracing(
+        now=system_clock().now,
         machine=machine_identity(),
         home=home,
         config=trace_config(enabled=True),
@@ -65,6 +68,7 @@ def test_arm_thread_base_exception_marks_attempt_spent(
     assert trace_readiness.ready is False
 
     initialize_tracing(
+        now=system_clock().now,
         machine=machine_identity(),
         home=home,
         config=trace_config(enabled=True),
@@ -176,7 +180,7 @@ def test_prune_old_mirror_removes_stale_keeps_recent(tmp_path: Path) -> None:
     for p in (old, old_gz, recent, active, other):
         p.write_text("{}\n", encoding="utf-8")
 
-    prune_old_mirror(retention_days=14, traces_dir=tmp_path)
+    prune_old_mirror(retention_days=14, traces_dir=tmp_path, now=datetime.now(UTC))
 
     assert not old.exists()
     assert not old_gz.exists()
@@ -243,7 +247,7 @@ def test_prune_old_mirror_removes_stale_suffixed_and_gz(tmp_path: Path) -> None:
     for p in (old_suffixed, old_gz, old_cut, recent, active):
         p.write_text("{}\n", encoding="utf-8")
 
-    prune_old_mirror(retention_days=14, traces_dir=tmp_path)
+    prune_old_mirror(retention_days=14, traces_dir=tmp_path, now=datetime.now(UTC))
 
     assert not old_suffixed.exists()
     assert not old_gz.exists()
@@ -287,7 +291,7 @@ def test_gzip_old_mirror_compresses_rotated_keeps_active(tmp_path: Path) -> None
     cut.write_text('{"b":1}\n', encoding="utf-8")
     active.write_text('{"c":1}\n', encoding="utf-8")
 
-    assert gzip_old_mirror(grace_seconds=-1, traces_dir=tmp_path) == 2
+    assert gzip_old_mirror(grace_seconds=-1, traces_dir=tmp_path, now=datetime.now(UTC)) == 2
     assert rotated.exists() is False
     assert cut.exists() is False
     gz_rotated = tmp_path / "spans-2026-01-01T00-00-00.000-size.jsonl.gz"
@@ -301,7 +305,7 @@ def test_gzip_old_mirror_compresses_rotated_keeps_active(tmp_path: Path) -> None
     with gz.open(gz_cut, "rt", encoding="utf-8") as fh:
         assert fh.read() == '{"b":1}\n'
     # Idempotent: already-compressed files are skipped.
-    assert gzip_old_mirror(grace_seconds=-1, traces_dir=tmp_path) == 0
+    assert gzip_old_mirror(grace_seconds=-1, traces_dir=tmp_path, now=datetime.now(UTC)) == 0
 
 
 def test_gzip_old_mirror_skips_recently_written_files(tmp_path: Path) -> None:
@@ -320,11 +324,11 @@ def test_gzip_old_mirror_skips_recently_written_files(tmp_path: Path) -> None:
 
     os.utime(fresh, (now, now))
 
-    assert gzip_old_mirror(grace_seconds=3600, traces_dir=tmp_path) == 0
+    assert gzip_old_mirror(grace_seconds=3600, traces_dir=tmp_path, now=datetime.now(UTC)) == 0
     assert fresh.exists()
     assert not (tmp_path / "spans-2026-01-01T00-00-00.000-size.jsonl.gz").exists()
 
-    assert gzip_old_mirror(grace_seconds=-1, traces_dir=tmp_path) == 1
+    assert gzip_old_mirror(grace_seconds=-1, traces_dir=tmp_path, now=datetime.now(UTC)) == 1
     assert not fresh.exists()
 
 
@@ -334,7 +338,7 @@ def test_prune_old_mirror_disabled_when_nonpositive(tmp_path: Path) -> None:
 
     old = tmp_path / "spans-2020-01-01T00-00-00.000-size.jsonl"
     old.write_text("{}\n", encoding="utf-8")
-    prune_old_mirror(retention_days=0, traces_dir=tmp_path)
+    prune_old_mirror(retention_days=0, traces_dir=tmp_path, now=datetime.now(UTC))
     assert old.exists()
 
 
@@ -379,7 +383,7 @@ def test_gzip_old_mirror_failure_is_reported_not_swallowed(
     rotated.write_text('{"a":1}\n', encoding="utf-8")
     tmp_path.chmod(0o500)
     try:
-        assert gzip_old_mirror(grace_seconds=-1, traces_dir=tmp_path) == 0
+        assert gzip_old_mirror(grace_seconds=-1, traces_dir=tmp_path, now=datetime.now(UTC)) == 0
     finally:
         tmp_path.chmod(0o700)
 

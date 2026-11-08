@@ -5,6 +5,7 @@ import pytest
 from httpx2 import Response
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from base.clock.tests.fakes import system_clock
 from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config.service_read import ConfigAuthority
@@ -110,6 +111,7 @@ def write_request(
         local_machine=local_machine,
         host=fake_host(),
         home=meiva_home(),
+        now=system_clock().now,
     )
 
 

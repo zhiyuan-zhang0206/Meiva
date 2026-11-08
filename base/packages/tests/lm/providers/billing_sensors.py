@@ -10,6 +10,7 @@ from opentelemetry import trace
 from opentelemetry.context import Context
 from opentelemetry.sdk.trace import Span, SpanProcessor, TracerProvider
 
+from base.clock.tests.fakes import system_clock
 from base.cluster.machine import MachineFacts
 from base.config import settings
 from base.lm.usage import BillingSpan, emit_billing_event
@@ -25,7 +26,11 @@ def disabled() -> None:
     assert config.enabled is False
     machine = MachineFacts.of(name="billing-child", role=(), description="billing child")
     tracing.initialize_tracing(
-        machine=machine, home=meiva_home(), config=config, readiness=PROCESS_RECORDING
+        now=system_clock().now,
+        machine=machine,
+        home=meiva_home(),
+        config=config,
+        readiness=PROCESS_RECORDING,
     )
     assert not PROCESS_RECORDING.ready
     assert not isinstance(trace.get_tracer_provider(), TracerProvider)
@@ -37,7 +42,8 @@ def disabled() -> None:
             tok_out=1,
             cost_usd=0.0,
             usage_kind="chat",
-        )
+        ),
+        now=system_clock().now(),
     )
 
 
@@ -74,7 +80,8 @@ def failing(tracer: BillingRuntime) -> None:
                     tok_out=1,
                     cost_usd=0.0,
                     usage_kind="chat",
-                )
+                ),
+                now=system_clock().now(),
             )
             is None
         )

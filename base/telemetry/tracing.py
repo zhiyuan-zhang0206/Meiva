@@ -11,6 +11,7 @@ import math
 import threading
 import time
 from collections.abc import Callable, Generator, Sequence
+from datetime import datetime
 from functools import wraps
 from pathlib import Path
 from typing import TypedDict
@@ -20,7 +21,6 @@ from opentelemetry.sdk.trace import ReadableSpan
 from opentelemetry.sdk.trace.export import SpanExporter, SpanExportResult
 
 from base.cluster.machine import MachineIdentityReader
-from base.host.boundary.json_values import is_object_dict, is_object_list
 from base.log import logger
 from base.paths import traces_dir
 from base.telemetry.delivery.reporting import report_no_pipeline
@@ -31,6 +31,7 @@ from base.telemetry.otlp.telemetry_otlp import (
 from base.telemetry.otlp.telemetry_otlp import endpoint_reachable
 from base.telemetry.otlp.trace_config import TraceConfig
 from base.telemetry.otlp.trace_readiness import PROCESS_RECORDING, TRACE_INIT_WAIT_S, TraceReadiness
+from base.telemetry.otlp.trace_strip import strip_content_attributes
 from base.telemetry.otlp.trace_workers import CollectorRetry, TraceArm
 from base.telemetry.trace_mirror import (
     disk_usage,
@@ -80,118 +81,6 @@ _IDLE_WAIT_SPAN_NAME = "claim idle-wait"
 TRACE_EXPORT_TIMEOUT_S = 2.0
 TRACE_EXPORT_FAILURE_THRESHOLD = 3
 TRACE_EXPORT_COOLDOWN_S = 30.0
-
-
-# ── LLM content stripping (trace v2) ─────────────────────────────────────────
-#
-# Span attributes that carry LLM content — the 99.89% of the 2026-08-05 mirror
-# blowup (31 GB/h with MEIVA_TRACE_ENABLED=true). Chain metadata lives in the
-# `traceloop.association.properties.*` / `gen_ai.task.*` / `langgraph.*`
-# attributes and never appears here; these keys are pure payload.
-#
-# Blacklist (exact keys) + prefix rules (gen_ai.input.* / gen_ai.output.*):
-# the openllmetry instrumentors emit prompts/completions under gen_ai.* per
-# the GenAI semantic convention; traceloop's wrapper mirrors them as
-# traceloop.entity.*.
-_CONTENT_ATTR_KEYS: frozenset[str] = frozenset(
-    {
-        "gen_ai.task.input",
-        "gen_ai.task.output",
-        "gen_ai.system_instructions",
-        "gen_ai.tool_calls",
-        "traceloop.entity.input",
-        "traceloop.entity.output",
-        "messages",
-        "system_instructions",
-        "inputs",
-        "outputs",
-    }
-)
-_CONTENT_ATTR_PREFIXES: tuple[str, ...] = (
-    "gen_ai.input.",
-    "gen_ai.output.",
-)
-
-# Defensive size guard: a metadata attribute is tiny (names, ids, paths,
-# durations); anything bigger on a single string value is treated as content
-# even if an instrumentor invents a new key — bounds a future leak to a few
-# KB per span. 16 KB is above the largest real metadata (a long langgraph
-# path array) and far below the smallest real content (a prompt).
-MAX_ATTR_STRING_CHARS = 16 * 1024
-
-
-def _is_content_attribute(key: str) -> bool:
-    """True when an attribute key carries LLM content and must not reach disk."""
-    if key in _CONTENT_ATTR_KEYS:
-        return True
-    return any(key.startswith(p) for p in _CONTENT_ATTR_PREFIXES)
-
-
-# meiva:note
-# Decoded OTLP is checked as it is read: a value of another shape raises, since a skipped
-# attribute could leak content.
-def _as_object(value: object) -> dict[str, object]:
-    if not is_object_dict(value):
-        raise TypeError(f"OTLP export holds {type(value).__name__} where an object belongs")
-    return value
-
-
-def _objects_at(parent: dict[str, object], key: str) -> list[dict[str, object]]:
-    items = parent.get(key, [])
-    if not is_object_list(items):
-        raise TypeError(f"OTLP export holds {type(items).__name__} at {key!r} where a list belongs")
-    return [_as_object(item) for item in items]
-
-
-def _attribute_value_size(value: dict[str, object]) -> int:
-    """Approximate serialized size of one OTLP AnyValue dict (chars of the
-    dominant string payload). Used by the size guard; a content-free
-    attribute is a few hundred chars at most."""
-    for field in ("stringValue", "bytesValue", "intValue", "doubleValue", "boolValue"):
-        if field in value:
-            return len(str(value[field]))
-    if "arrayValue" in value:
-        return sum(
-            _attribute_value_size(v) for v in _objects_at(_as_object(value["arrayValue"]), "values")
-        )
-    if "kvlistValue" in value:
-        return sum(
-            _attribute_value_size(_as_object(kv.get("value", {}))) + len(str(kv.get("key", "")))
-            for kv in _objects_at(_as_object(value["kvlistValue"]), "values")
-        )
-    return 0
-
-
-# meiva:note
-# Keep on a span or event only the attributes that may reach disk (no content, within the guard).
-def _strip_attributes(owner: dict[str, object]) -> None:
-    kept = [
-        kv
-        for kv in _objects_at(owner, "attributes")
-        if not _is_content_attribute(str(kv.get("key", "")))
-        and _attribute_value_size(_as_object(kv.get("value", {}))) <= MAX_ATTR_STRING_CHARS
-    ]
-    if kept:
-        owner["attributes"] = kept
-    else:
-        owner.pop("attributes", None)
-
-
-def strip_content_attributes(otlp: dict[str, object]) -> None:
-    """Remove LLM-content attributes from a decoded OTLP export request, in place.
-
-    Walks resourceSpans -> scopeSpans -> spans (attributes + events) and drops
-    every attribute whose key is a known content key (or content prefix), plus
-    any attribute whose string payload exceeds `MAX_ATTR_STRING_CHARS` (the
-    size guard — metadata is never large). Span names, timestamps, status,
-    ids and `traceloop.*` / `gen_ai.task.*` / `langgraph.*` metadata survive.
-    """
-    for rs in _objects_at(otlp, "resourceSpans"):
-        for ss in _objects_at(rs, "scopeSpans"):
-            for span in _objects_at(ss, "spans"):
-                _strip_attributes(span)
-                for ev in _objects_at(span, "events"):
-                    _strip_attributes(ev)
 
 
 class _TraceState(TypedDict):
@@ -352,14 +241,19 @@ class OtlpJsonHttpSpanExporter(SpanExporter):
 
 
 def start_collector_retry(
-    machine: MachineIdentityReader, home: Path, config: TraceConfig, *, readiness: TraceReadiness
+    machine: MachineIdentityReader,
+    home: Path,
+    config: TraceConfig,
+    *,
+    readiness: TraceReadiness,
+    now: Callable[[], datetime],
 ) -> None:
     with _lifecycle_lock:
         if state.get("closed") or state.get("retry_owner") is not None:
             return
         owner = CollectorRetry(
             initialize=lambda: initialize_tracing(
-                machine=machine, home=home, config=config, readiness=readiness
+                machine=machine, home=home, config=config, readiness=readiness, now=now
             ),
             resolved=lambda: readiness.resolved,
             interval=lambda: config.retry_interval_s,
@@ -618,6 +512,7 @@ def initialize_tracing(
     home: Path,
     config: TraceConfig,
     readiness: TraceReadiness,
+    now: Callable[[], datetime],
     disk_stats: tuple[float, int] | None = None,
 ) -> None:
     if state.get("closed") or readiness.resolved:
@@ -635,11 +530,12 @@ def initialize_tracing(
     # skipping it there would let an over-watermark disk stay full.
     mirror_dir = traces_dir(home)
     mirror_dir.mkdir(parents=True, exist_ok=True)
+    instant = now()
     if config.gzip_grace_s is None:
-        gzip_old_mirror(traces_dir=mirror_dir)
+        gzip_old_mirror(traces_dir=mirror_dir, now=instant)
     else:
-        gzip_old_mirror(grace_seconds=config.gzip_grace_s, traces_dir=mirror_dir)
-    prune_old_mirror(config.retention_days, traces_dir=mirror_dir)
+        gzip_old_mirror(grace_seconds=config.gzip_grace_s, traces_dir=mirror_dir, now=instant)
+    prune_old_mirror(config.retention_days, traces_dir=mirror_dir, now=instant)
     enforce_dir_cap(config.max_dir_mb, traces_dir=mirror_dir)
 
     # Disk-watermark guard: if the data disk is over its watermark, skip
@@ -678,7 +574,7 @@ def initialize_tracing(
                 endpoint=endpoint,
             )
             state["collector_offline_reported"] = True
-        start_collector_retry(machine, home, config, readiness=readiness)
+        start_collector_retry(machine, home, config, readiness=readiness, now=now)
         return
 
     start_arm_thread(config, machine, home, readiness=readiness)

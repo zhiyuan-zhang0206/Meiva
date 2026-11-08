@@ -3,7 +3,6 @@
 
 from __future__ import annotations
 
-import time
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -101,6 +100,7 @@ def log_usage_from_message(
     usage_kind: str = "agent",
     options: UsageOptions = _DEFAULT_USAGE_OPTIONS,
     catalog: ModelCatalog,
+    now: datetime,
 ) -> tuple[int, float] | None:
     # meiva:note
     # Log one completed LangChain message's token usage and price snapshot.
@@ -157,6 +157,7 @@ def log_usage_from_message(
             emit_billing="input_tokens" in usage_metadata and "output_tokens" in usage_metadata,
             requested_model=model,
             catalog=catalog,
+            now=now,
         ),
         record_out=record,
     )
@@ -171,6 +172,7 @@ def log_usage_fields(
     *,
     usage_kind: str,
     catalog: ModelCatalog,
+    now: datetime,
 ) -> tuple[int, float]:
     # meiva:note
     # Log raw provider usage; absent cache metering stays absent, including on decisions.
@@ -190,6 +192,7 @@ def log_usage_fields(
             for_agent_id=fields.for_agent_id,
             calls=fields.calls,
             catalog=catalog,
+            now=now,
         )
     )
 
@@ -251,6 +254,7 @@ class _UsageEvent:
     latency_ms: float | None
     usage_kind: str
     catalog: ModelCatalog
+    now: datetime
     decode_ms: float | None = None
     priced_at: datetime | None = None
     source: str | None = None
@@ -330,10 +334,11 @@ def _log_usage(
                 cost_usd=priced.cost_usd if priced is not None else 0.0,
                 usage_kind=event.usage_kind,
                 unpriced=priced is None,
-                start_time_ns=(_now_ns() - int(event.latency_ms * 1_000_000))
+                start_time_ns=(_now_ns(event.now) - int(event.latency_ms * 1_000_000))
                 if event.latency_ms is not None
                 else None,
-            )
+            ),
+            now=event.now,
         )
 
     usage_logger = (
@@ -403,13 +408,19 @@ def vendor_of_model(model: str, *, catalog: ModelCatalog) -> str | None:
     return None
 
 
-def _now_ns() -> int:
-    return time.time_ns()
+# meiva:note
+# Convert the caller's instant to epoch nanoseconds without float64 rounding drift on the
+# sub-second part; a naive datetime is UTC by contract.
+def _now_ns(now: datetime) -> int:
+    utc = now.replace(tzinfo=UTC) if now.tzinfo is None else now.astimezone(UTC)
+    return int(utc.timestamp()) * 1_000_000_000 + utc.microsecond * 1_000
 
 
-def _utc_timestamp() -> str:
+def _utc_timestamp(now: datetime) -> str:
     return (
-        datetime.fromtimestamp(_now_ns() // 1_000_000_000, UTC).isoformat().replace("+00:00", "Z")
+        datetime.fromtimestamp(_now_ns(now) // 1_000_000_000, UTC)
+        .isoformat()
+        .replace("+00:00", "Z")
     )
 
 
@@ -430,7 +441,7 @@ class BillingSpan:
     start_time_ns: int | None = None
 
 
-def emit_billing_event(span_data: BillingSpan) -> None:
+def emit_billing_event(span_data: BillingSpan, *, now: datetime) -> None:
     # meiva:note
     # End one trace-safe billing span for a completed provider call.
     #
@@ -463,7 +474,7 @@ def emit_billing_event(span_data: BillingSpan) -> None:
         span.set_attribute(MEIVA_BILLING_ATTR_TOKENS_OUT, int(span_data.tok_out))
         span.set_attribute(MEIVA_BILLING_ATTR_COST, round(float(span_data.cost_usd), 6))
         span.set_attribute(MEIVA_BILLING_ATTR_USAGE_KIND, span_data.usage_kind)
-        span.set_attribute(MEIVA_BILLING_ATTR_TS, _utc_timestamp())
+        span.set_attribute(MEIVA_BILLING_ATTR_TS, _utc_timestamp(now))
         if span_data.tok_cached is not None:
             span.set_attribute(MEIVA_BILLING_ATTR_CACHE_READ_TOKENS, int(span_data.tok_cached))
         if span_data.cache_write_5m:
@@ -486,6 +497,7 @@ def emit_billing_from_message(
     usage_kind: str,
     start_time_ns: int | None = None,
     catalog: ModelCatalog,
+    now: datetime,
 ) -> None:
     # meiva:note
     # Price a LangChain message and emit its billing span when usage is known.
@@ -531,7 +543,8 @@ def emit_billing_from_message(
                 usage_kind=usage_kind,
                 unpriced=priced is None,
                 start_time_ns=start_time_ns,
-            )
+            ),
+            now=now,
         )
     except Exception as exc:
         report_sink_failure("pricing a provider message for billing (its span is dropped)", exc)

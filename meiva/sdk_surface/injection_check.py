@@ -14,8 +14,10 @@ highest probability decides.
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
+from datetime import datetime
 from typing import assert_never
 
 from loguru import logger
@@ -82,6 +84,7 @@ async def page_probability(
     keys: ProviderKeys,
     url: str,
     for_agent_id: int | None,
+    now: Callable[[], datetime],
 ) -> float | None:
     from base.lm.decision.call import decide
 
@@ -103,6 +106,7 @@ async def page_probability(
                 usage_kind=_USAGE_KIND,
                 source=_USAGE_SOURCE,
                 for_agent_id=for_agent_id,
+                now=now,
             )
             for chunk in chunks
         ),
@@ -138,6 +142,7 @@ class InjectionCheckInputs:
     keys: ProviderKeys
     agent_id: int | None
     delivery_active: bool
+    now: Callable[[], datetime]
 
 
 # meiva:note
@@ -193,6 +198,7 @@ def begin_check(
                     keys=inputs.keys,
                     url=url,
                     for_agent_id=inputs.agent_id,
+                    now=inputs.now,
                 ),
             )
             return PendingCheck(judged, worker)
