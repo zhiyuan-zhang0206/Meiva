@@ -265,7 +265,7 @@ def _emit_cycle(collector_id: str, outcome: str, reason: str, *, cycle: int) -> 
 # meiva:note
 # The loop, with its two effects handed in as required parameters. The public entry point below
 # supplies the real ones; a test supplies its own, which is why they carry no defaults — a default
-# reaching the real implementation is a seam no caller sees (diff-hints callable-default).
+# reaching the real implementation is a seam no caller sees.
 def run_collector_cycles(
     borrowed: ScheduleInputs | None,
     *,
@@ -350,7 +350,7 @@ def run_from_schedule(borrowed: ScheduleInputs | None, *, collector_id: str) -> 
     # meiva:note
     # The entry a generated schedule script calls. It supplies the loop's two effects; a test that
     # needs to control them calls `run_collector_cycles` with its own, which is why they are
-    # required parameters there instead of defaults here (diff-hints callable-default).
+    # required parameters there instead of defaults here.
     run_collector_cycles(
         borrowed, refresh=refresh_collector_once, sleep=time.sleep, collector_id=collector_id
     )

@@ -755,16 +755,6 @@ count. See [type assertion ratchet](../../meizel/docs/checker/type-cast.meiva.ok
 for source scope and baseline boundaries. This does not ban legitimate `object`
 raw inputs or introduce a general prohibition on every `Any` annotation.
 
-### Diff hints
-
-A commit that adds one of the shapes above, or an unmediated clock, environment or
-settings read, a callable with a default, a `None` fallback to a real implementation, a
-service locator, a non-exhaustive branch or a deleted test, is asked about it by the diff
-hints. The hook prints why the rule exists and the recipe for that shape in order of
-preference, and the commit is accepted when the code changes or when its message answers
-with `Hint-Ack: <hint-id> <path>[:<line>] -- <reason>`. The catalog, the trailer format and
-the measured noise are in [diff hints](../../scripts/lint/docs/diff-hints/diff-hints.meiva.okf.md).
-
 ## A function-local `import base.x` makes `base` local to the whole function
 
 A function that reaches a module as `base.deploy.lifecycle.start_serving.state_path()` through

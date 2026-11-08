@@ -71,9 +71,8 @@ criterion by watching it go red: a test whose red is unreadable is a test the ne
 ### Do not turn it green by editing it
 
 A motive-bearing test may only be weakened or deleted by someone who did not write it, with the reason
-in the PR body. The mechanism exists already: the `diff hints` gate asks a deleted test for a
-`Hint-Ack: deleted-test <path>:<line> -- <reason>` trailer. For the tests this document governs, the
-reason must say what replaced the coverage — a rewrite, a gate, or nothing (and then why nothing).
+in the PR body. For the tests this document governs, the reason must say what replaced the
+coverage — a rewrite, a gate, or nothing (and then why nothing).
 
 ### Worked example: the caller identity refusal
 

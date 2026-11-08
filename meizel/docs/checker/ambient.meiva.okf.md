@@ -94,9 +94,7 @@ fails on `time.time()` and `datetime.now()`, and that is what the narrow kind is
 A call it licenses is no `impure-call` either: [[meizel/docs/ambient-kinds-calls.meiva.okf.md|what a call depends on]].
 
 The reason says what the file reads, not that it is allowed to. A file that many modules outside the roots
-import is a middle layer, not a root: changing it asks the `root-middle-layer`
-[diff hint](../../../scripts/lint/docs/diff-hints/catalog.meiva.okf.md), whose answer is the value passed
-down from the real root.
+import is a middle layer, not a root: pass the value down from the real root.
 
 ## The rule
 
