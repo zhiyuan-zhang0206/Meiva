@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import random
 import signal
 import socket
 import stat
@@ -235,7 +236,7 @@ def test_the_root_builds_one_config_from_the_process_configuration() -> None:
 # every other live holder on the host, so two workers — or two runs of one shard on
 # one machine — cannot be given it.
 def _free_port() -> int:
-    return port_lease.lease_ports(1)[0]
+    return port_lease.lease_ports(1, rng=random.SystemRandom())[0]
 
 
 def _backend_names(db_conn: psycopg.Connection) -> set[str]:

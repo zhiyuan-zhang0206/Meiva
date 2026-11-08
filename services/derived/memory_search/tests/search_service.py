@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import random
 import threading
 import time
 from collections.abc import Generator
@@ -24,7 +25,7 @@ from services.derived.memory_search.store import MemoryStore
 # every other live holder on the host, so two workers — or two runs of one shard on
 # one machine — cannot be given it.
 def free_port() -> int:
-    return port_lease.lease_ports(1)[0]
+    return port_lease.lease_ports(1, rng=random.SystemRandom())[0]
 
 
 # meiva:note

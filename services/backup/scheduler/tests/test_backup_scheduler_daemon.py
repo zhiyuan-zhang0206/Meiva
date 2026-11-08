@@ -4,6 +4,7 @@ import asyncio
 import hashlib
 import json
 import os
+import random
 import subprocess
 import sys
 from datetime import UTC, datetime
@@ -38,7 +39,7 @@ _SUNDAY_WINDOW = datetime(2026, 8, 30, 3, tzinfo=UTC)
 # every other live holder on the host, so two workers — or two runs of one shard on
 # one machine — cannot be given it.
 def _find_free_port() -> int:
-    return port_lease.lease_ports(1)[0]
+    return port_lease.lease_ports(1, rng=random.SystemRandom())[0]
 
 
 def _settings(*, hour: int = 0) -> SchedulerSettings:

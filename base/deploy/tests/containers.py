@@ -20,6 +20,7 @@ RAM-backing takes contended host disk I/O off the path (the disk stall that was
 the e2e lifecycle flake).
 """
 
+import random
 import shutil
 import socket
 import subprocess
@@ -53,7 +54,7 @@ _TMPFS_BASE = "/dev/shm" if Path("/dev/shm").is_dir() else None  # noqa: S108 â€
 # server dying (then `wait_port` times out). The lease refuses the number to every
 # other live holder on the host, so that window no longer decides the outcome.
 def free_port() -> int:
-    return port_lease.lease_ports(1)[0]
+    return port_lease.lease_ports(1, rng=random.SystemRandom())[0]
 
 
 def wait_port(port: int, timeout: float = 30.0, host: str = "127.0.0.1") -> None:

@@ -4,6 +4,7 @@ from __future__ import annotations
 # Four upkeep and wake entries compose their database handle, health server, and cleanup from their owners.
 import asyncio
 import json
+import random
 import socket
 import time
 from collections.abc import Callable, Coroutine
@@ -53,7 +54,7 @@ def _application_name(database: Database) -> str:
 
 
 def _free_port() -> int:
-    return port_lease.lease_ports(1)[0]
+    return port_lease.lease_ports(1, rng=random.SystemRandom())[0]
 
 
 def _port_refuses(port: int) -> bool:

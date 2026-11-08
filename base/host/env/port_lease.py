@@ -51,7 +51,7 @@ from __future__ import annotations
 
 import json
 import os
-import secrets
+import random
 import socket
 import tempfile
 from pathlib import Path
@@ -83,15 +83,17 @@ def _own_pid() -> int:
 
 
 # meiva:note
-# `count` distinct ports no live holder on this host has leased.
-def lease_ports(count: int) -> list[int]:
+# `count` distinct ports no live holder on this host has leased. `rng` picks where in the band the
+# scan starts; the lease itself (host lock, probe, published registry) is what makes the numbers
+# unique, so a caller passes the process generator it already owns -- the system one in a test.
+def lease_ports(count: int, *, rng: random.Random) -> list[int]:
     if count < 1:
         raise ValueError(f"lease_ports needs a positive count, not {count}")
     root = _root()
     path = root / f"lease-{_own_pid()}.json"
     with _host_lock(root):
         _hold(path)
-        picked = _pick(count, _live_ports(root))
+        picked = _pick(count, _live_ports(root), rng=rng)
         _publish(path, _ports_of(path) + picked)
     return picked
 
@@ -298,14 +300,14 @@ def _publish(path: Path, ports: list[int]) -> None:
 #
 # One random start, then a forward scan with wrap: a rotating allocator that spreads
 # concurrent runs across the band instead of marching them into the same low numbers.
-def _pick(count: int, held: set[int]) -> list[int]:
+def _pick(count: int, held: set[int], *, rng: random.Random) -> list[int]:
     span = BAND_LAST - BAND_FIRST + 1
     if len(held) + count > span:
         raise RuntimeError(
             f"the lease band {BAND_FIRST}-{BAND_LAST} has {span} ports; "
             f"{len(held)} held and {count} more requested"
         )
-    start = BAND_FIRST + secrets.randbelow(span)
+    start = BAND_FIRST + rng.randrange(span)
     picked: list[int] = []
     for offset in range(span):
         if len(picked) == count:

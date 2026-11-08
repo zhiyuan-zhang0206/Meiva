@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import os
+import random
 import sys
 from pathlib import Path
 
@@ -31,7 +32,7 @@ _WORKER = "services.backup.scheduler.tests.shutdown_worker"
 # every other live holder on the host, so two workers — or two runs of one shard on
 # one machine — cannot be given it.
 def _free_port() -> int:
-    return port_lease.lease_ports(1)[0]
+    return port_lease.lease_ports(1, rng=random.SystemRandom())[0]
 
 
 def main(root: Path, mode: str, postgres_base: Path) -> None:

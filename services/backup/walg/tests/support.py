@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import os
+import random
 import shlex
 import shutil
 import signal
@@ -206,7 +207,7 @@ class PgInstance:
 # every other live holder on the host, so two workers — or two runs of one shard on
 # one machine — cannot be given it.
 def _free_port() -> int:
-    return port_lease.lease_ports(1)[0]
+    return port_lease.lease_ports(1, rng=random.SystemRandom())[0]
 
 
 # meiva:note

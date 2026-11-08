@@ -25,6 +25,7 @@ silently stopped reaching ``run()``'s cleanup.
 from __future__ import annotations
 
 import os
+import random
 import signal
 import subprocess
 import time
@@ -128,7 +129,7 @@ class Child:
 # every other live holder on the host, so two workers — or two runs of one shard on
 # one machine — cannot be given it.
 def _free_port() -> int:
-    return port_lease.lease_ports(1)[0]
+    return port_lease.lease_ports(1, rng=random.SystemRandom())[0]
 
 
 def spawn_child(

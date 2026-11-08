@@ -9,6 +9,7 @@ from __future__ import annotations
 import dataclasses
 import json
 import os
+import random
 import subprocess
 from collections.abc import Iterator, Mapping
 from pathlib import Path
@@ -37,7 +38,7 @@ __all__ = ["Plane", "free_port", "owned_pg", "plane", "write_record"]
 # every other live holder on the host, so two workers — or two runs of one shard on
 # one machine — cannot be given it.
 def free_port() -> int:
-    return port_lease.lease_ports(1)[0]
+    return port_lease.lease_ports(1, rng=random.SystemRandom())[0]
 
 
 # meiva:note
