@@ -110,7 +110,7 @@ describe("InsightsPage shell", () => {
     );
   });
 
-  it("disables opening and shows neutral unsupported explanation when external-harness agent ID is entered", async () => {
+  it("enables opening agent view for external-harness agents", async () => {
     const qc = new QueryClient({
       defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
     });
@@ -129,34 +129,24 @@ describe("InsightsPage shell", () => {
 
     const input = screen.getByRole("spinbutton", { name: "Agent ID" });
     fireEvent.change(input, { target: { value: "42" } });
-    expect(screen.getByRole("button", { name: "Open agent view" }).hasAttribute("disabled")).toBe(true);
-    expect(screen.queryByRole("link", { name: "Open agent view" })).toBeNull();
-    const explanation = screen.getByText(
-      "Run timeline is only available for native Meiva agents (this agent runs on Codex).",
+    expect(screen.getByRole("link", { name: "Open agent view" }).getAttribute("href")).toBe(
+      "/insights/run/42",
     );
-    expect(explanation).toBeTruthy();
-    expect(explanation.className).toContain("text-muted-foreground");
-    expect(explanation.className).not.toContain("text-destructive");
 
     fireEvent.change(input, { target: { value: "43" } });
-    expect(screen.getByRole("button", { name: "Open agent view" }).hasAttribute("disabled")).toBe(true);
-    expect(
-      screen.getByText(
-        "Run timeline is only available for native Meiva agents (this agent runs on Claude Code).",
-      ),
-    ).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Open agent view" }).getAttribute("href")).toBe(
+      "/insights/run/43",
+    );
 
     fireEvent.change(input, { target: { value: "10" } });
     expect(screen.getByRole("link", { name: "Open agent view" }).getAttribute("href")).toBe(
       "/insights/run/10",
     );
-    expect(screen.queryByText(/Run timeline is only available/)).toBeNull();
 
     fireEvent.change(input, { target: { value: "999" } });
     expect(screen.getByRole("link", { name: "Open agent view" }).getAttribute("href")).toBe(
       "/insights/run/999",
     );
-    expect(screen.queryByText(/Run timeline is only available/)).toBeNull();
   });
 
   it("does NOT render the Control-only sections (they live on /control)", () => {

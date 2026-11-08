@@ -60,6 +60,15 @@ def capture_source(conn: SyncConnection, agent_id: int) -> Source:
         row = cur.fetchone()
     if row is None:
         raise RuntimeError("timeline source query returned no aggregate row")
+    if row.head is None:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT max(seq) AS seq FROM agent_harness_messages WHERE agent_id = %s",
+                (agent_id,),
+            )
+            h_row = cur.fetchone()
+            if h_row and h_row[0] is not None:
+                return Source(f"h{h_row[0]}", None, 0, None)
     previous = Segment.model_validate(row.segment) if row.segment else None
     return Source(row.head, row.boundary, row.length, previous)
 

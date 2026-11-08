@@ -283,7 +283,7 @@ async def run_job(
         job.agent_id,
         fallback=config.view.lm.hierarchy_model,
         catalog=models.catalog,
-        default_model=config.view.lm.llm_model,
+        default_model=config.view.lm.hierarchy_model,
     )
     try:
         located = await asyncio.to_thread(locate_job_chunk, db, job)

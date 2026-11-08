@@ -299,7 +299,7 @@ def _model_target(
         agent_id,
         fallback=read.hierarchy_model,
         catalog=catalog,
-        default_model=read.default_model,
+        default_model=read.hierarchy_model,
     )
 
 

@@ -561,13 +561,12 @@ async def test_intra_turn_events_project_to_live_sse_and_committed_messages(
     assert command.update == {"halted": True, "harness_pending_input": None}
     events = await live_events.events()
     assert events[-1]["role"] == "llm_done"
-    assert [
-        (event["items"][0]["item_id"], event["items"][0]["payload"]) for event in events[:-1]
-    ] == [
+    assert [(e["items"][0]["item_id"], e["items"][0]["payload"]) for e in events[:-1]] == [
         ("h0.0", "Checking "),
         ("h0.0", "Checking files..."),
         ("h1.0", "ls -la"),
         ("h2.0", "Tool running"),
+        ("h1.0", "ls -la"),
         ("h2.0", "README.md\n"),
         ("h3.0", "all done"),
         ("h3.0", "all done"),

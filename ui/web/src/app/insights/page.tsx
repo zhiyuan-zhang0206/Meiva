@@ -30,8 +30,6 @@ import { ControlSection } from "@/app/control/section";
 import OpsPage from "@/app/insights/ops/page";
 import AlertsSection from "@/components/ops/alerts-section";
 import StatusPage from "@/app/insights/status/page";
-import { useAgentRoster } from "@/lib/agents/use-agents";
-import { harnessLabel } from "@/lib/harness/harness";
 import { FLEX, FLEX_1, FLEX_COL, MIN_H_0, MIN_W_0, OVERFLOW_HIDDEN } from "@/lib/layout/layout";
 import { useBrowser } from "@/lib/browser/browser-provider";
 import { cn } from "@/lib/format/utils";
@@ -148,16 +146,13 @@ function RunTimelineEntry() {
   const [agentId, setAgentId] = useState("");
   const parsed = Number(agentId);
   const validAgent = agentId.trim() !== "" && Number.isInteger(parsed) && parsed >= 0;
-  const { data: roster } = useAgentRoster();
-  const matched = validAgent ? roster?.agents.find((agent) => agent.agent_id === parsed) : undefined;
-  const unsupported = matched !== undefined && matched.harness !== "meiva";
 
   return (
     <form
       className="space-y-1.5"
-      action={validAgent && !unsupported ? `/insights/run/${parsed}` : ""}
+      action={validAgent ? `/insights/run/${parsed}` : ""}
       onSubmit={(event) => {
-        if (!validAgent || unsupported) {
+        if (!validAgent) {
           event.preventDefault();
         }
       }}
@@ -176,7 +171,7 @@ function RunTimelineEntry() {
             className="w-28 rounded border border-border bg-background px-2 py-1 font-mono text-xs text-foreground"
           />
         </label>
-        {validAgent && !unsupported ? (
+        {validAgent ? (
           <Link
             href={`/insights/run/${parsed}`}
             className="rounded bg-primary px-2 py-1 text-xs text-primary-foreground hover:bg-primary/90"
@@ -193,11 +188,6 @@ function RunTimelineEntry() {
           </button>
         )}
       </div>
-      {unsupported ? (
-        <p className="text-xs text-muted-foreground">
-          {t("externalHarnessUnsupported", { harness: harnessLabel(matched.harness) })}
-        </p>
-      ) : null}
     </form>
   );
 }
