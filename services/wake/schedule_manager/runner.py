@@ -128,6 +128,7 @@ def run(schedule_id: int, revision: int | None = None, *, config: ConfigBoot | N
                 plugins=engine.PluginInputs(config=config, machine=machine, clients=clients),
                 policy=StallPolicy(timeout_s=config.view.gateway.schedule_stall_timeout_seconds),
                 home=home,
+                rng=rng,
                 pid=os.getpid(),
                 # meiva:note
                 # This process entry records the thread the guard must watch once, before it

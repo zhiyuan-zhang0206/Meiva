@@ -41,6 +41,7 @@ import base64
 import binascii
 import json
 import os
+import random
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
@@ -69,7 +70,6 @@ from base.host.db_authority.ledger import (
     read_secret,
 )
 from base.host.db_authority.model import AuthorityRefusedError, Digest, RoleName
-from base.host.net.auth import random_bytes
 from base.host.net.url_secret import url_with_userinfo
 from base.host.private_storage import write_private_bytes
 
@@ -242,10 +242,6 @@ def _parse[M: BaseModel](model: type[M], body: bytes, path: Path) -> M:
         raise UnitCapabilityError(f"{path} is corrupt: {exc}") from exc
 
 
-def _random_bytes(size: int) -> bytes:
-    return random_bytes(size)
-
-
 # ── gateway: issuance ───────────────────────────────────────────────────────
 
 
@@ -278,6 +274,7 @@ def issue_bundle(
     endpoint: str,
     ttl_s: float,
     now: float,
+    rng: random.SystemRandom,
 ) -> IssuedBundle:
     if urlsplit(endpoint).password is not None:
         raise UnitCapabilityError("a capability names the credential-free endpoint")
@@ -309,7 +306,7 @@ def issue_bundle(
         ),
         role=secret.roles.runner.name,
         password=secret.roles.runner.password,
-        bundle=_random_bytes(16).hex(),
+        bundle=rng.randbytes(16).hex(),
         api=api,
     )
     bundle = Bundle(
@@ -321,8 +318,10 @@ def issue_bundle(
         expires_at=issued_at + ttl_s,
         capability=capability,
     )
-    key = _random_bytes(_KEY_BYTES)
-    return IssuedBundle(_seal(bundle, key), _b64(key), unit, generation.number, bundle.expires_at)
+    key = rng.randbytes(_KEY_BYTES)
+    return IssuedBundle(
+        _seal(bundle, key, rng), _b64(key), unit, generation.number, bundle.expires_at
+    )
 
 
 def _header(bundle: Bundle) -> _Header:
@@ -336,11 +335,11 @@ def _header(bundle: Bundle) -> _Header:
     )
 
 
-def _seal(bundle: Bundle, key: bytes) -> bytes:
+def _seal(bundle: Bundle, key: bytes, rng: random.SystemRandom) -> bytes:
     from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
     header = _header(bundle)
-    iv = _random_bytes(_IV_BYTES)
+    iv = rng.randbytes(_IV_BYTES)
     ciphertext = AESGCM(key).encrypt(iv, _canonical(bundle), _canonical(header))
     envelope = _Envelope(header=header, iv=_b64(iv), ciphertext=_b64(ciphertext))
     return json.dumps(envelope.model_dump(mode="json"), sort_keys=True, indent=2).encode() + b"\n"

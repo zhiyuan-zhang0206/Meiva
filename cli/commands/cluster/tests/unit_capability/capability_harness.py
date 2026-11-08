@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 
+import random
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -123,6 +124,7 @@ def seal_bundle(
         endpoint=endpoint,
         ttl_s=60,
         now=time.time(),
+        rng=random.SystemRandom(),
     )
     path.write_bytes(issued.envelope)
     return SealedBundle(path, issued.transport_key)

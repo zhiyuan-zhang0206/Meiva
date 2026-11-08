@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import random
 import time
 from collections.abc import Callable
 from pathlib import Path
@@ -52,6 +53,7 @@ def issue(
         endpoint=endpoint,
         ttl_s=ttl_s,
         now=time.time() if now is None else now,
+        rng=random.SystemRandom(),
     )
 
 

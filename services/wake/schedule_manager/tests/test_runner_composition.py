@@ -11,6 +11,7 @@ import psycopg
 import pytest
 
 from base.agents.context.clients import ClientSet
+from base.clock.tests.seeded_rng import seeded_rng
 from base.cluster.dataplane.direct_url import ClusterDirectUrl
 from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.config import ConfigBoot
@@ -154,6 +155,7 @@ def _engine_root() -> tuple[engine.RunnerRoot, ClientSet]:
         policy=StallPolicy(timeout_s=60.0),
         home=home,
         main_thread_id=threading.get_ident(),
+        rng=seeded_rng(),
     )
     return root, clients
 

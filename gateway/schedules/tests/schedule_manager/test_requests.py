@@ -18,6 +18,7 @@ from psycopg_pool import ConnectionPool
 
 import base.db
 from base.clock import SYSTEM_TIMERS
+from base.clock.tests.seeded_rng import seeded_rng
 from base.cluster import session_name
 from base.db.code_version_gate import ProcessDbGate
 from base.deploy.lifecycle import start_serving
@@ -40,7 +41,7 @@ def pool(*, database_gate: ProcessDbGate) -> Generator[ConnectionPool]:
 
 @pytest.fixture
 def backend(serving_root: start_serving.RootBirth, unit_home: Path) -> Backend:
-    generation = start_serving.begin_start(unit_home)
+    generation = start_serving.begin_start(unit_home, seeded_rng())
     assert start_serving.mark_serving(
         unit_home, generation, runtime=serving_root.runtime, observe=observe
     )

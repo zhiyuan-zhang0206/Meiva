@@ -23,6 +23,7 @@ import psycopg
 import pytest
 
 from base.clock import SYSTEM_TIMERS, Deadline
+from base.clock.tests.seeded_rng import seeded_rng
 from base.deploy.lifecycle import home_lifecycle_locks, start_serving
 from base.host.boundary.json_values import is_object_dict
 from base.host.boundary.untyped import object_of
@@ -400,10 +401,11 @@ def test_a_stop_revokes_the_serving_authority_of_the_prior_start(
     operator_pipeline: Callable[[], EventPipeline],
     stop_runtime: CommandRuntime,
 ) -> None:
-    start_serving.begin_start(home)
+    rng = seeded_rng()
+    start_serving.begin_start(home, rng)
     assert start_serving.state_path(home).exists()
     for force in (False, True):
-        start_serving.begin_start(home)
+        start_serving.begin_start(home, rng)
         rc = do_stop(
             stop_request(force=force, timeout=5),
             stop_environment(stop_runtime, operator_database, operator_pipeline),

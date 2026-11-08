@@ -27,6 +27,7 @@ from base.agents.context import MeivaContext
 from base.agents.context.clients import ClientSet
 from base.agents.context.gateway_client.transport import GatewayTransportInputs
 from base.agents.context.identity import AgentIdentity
+from base.clock.tests.seeded_rng import seeded_rng
 from meiva.sdk_surface import process_context
 
 CLIENT_TIMEOUT_SECONDS = 7.5
@@ -160,6 +161,10 @@ def wire_context(
     return MeivaContext(
         environ=os.environ,
         identity=None if agent_id is None else AgentIdentity(agent_id=agent_id, owns_loop=True),
+        # meiva:note
+        # A seeded generator, so a test that asserts the idempotency key a keyed POST or PATCH
+        # mints reads the draw this seed decides.
+        rng=seeded_rng(),
         clients=ClientSet(
             gateway_url=stub.url,
             gateway=lambda url: httpx.Client(

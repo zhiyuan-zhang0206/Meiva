@@ -1,3 +1,4 @@
+import random
 import time
 from pathlib import Path
 from typing import Any
@@ -74,6 +75,7 @@ def test_a_runners_first_join_reaches_the_gateway(
         )["MEIVA_DB_URL"],
         ttl_s=600,
         now=time.time(),
+        rng=random.SystemRandom(),
     )
     bundle = tmp_path / "mini.bundle"
     bundle.write_bytes(issued.envelope)

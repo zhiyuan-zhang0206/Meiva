@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import random
 import socket
 import subprocess
 import sys
@@ -17,6 +18,7 @@ import pytest
 from dotenv import dotenv_values
 
 from base import cluster
+from base.clock.tests.seeded_rng import seeded_rng
 from base.deploy.lifecycle import start_serving
 from base.host.db_authority.api import ensure_telemetry_token
 from base.host.net.tests.local_http import closed_port_url
@@ -437,6 +439,7 @@ def test_runner_without_a_capability_refuses_before_persisting(
             endpoint=_RUNNER_ENDPOINT,
             ttl_s=60,
             now=time.time(),
+            rng=random.SystemRandom(),
         )
         unit.install_bundle(
             home,
@@ -692,7 +695,7 @@ def test_failed_boot_publication_clears_serving_and_refuses_success(
     cgroup = proc / str(os.getpid()) / "cgroup"
     cgroup.parent.mkdir(parents=True)
     cgroup.write_text("0::/system.slice/meiva-boot.service\n")
-    start_serving.begin_start(inputs.home)
+    start_serving.begin_start(inputs.home, seeded_rng())
     assert start_serving.state_path(inputs.home).exists()
     with pytest.raises(RuntimeError, match="unobservable root"):
         start_intent.finish_start(

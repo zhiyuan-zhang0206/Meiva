@@ -18,7 +18,7 @@
 
 
 [roots]
-"adversarial-eval-weekly-schedule.py" = { kinds = ["clock", "environ", "home"], why = "Schedule process entry reads the home it runs under, its scheduler identity and start instant before composing the weekly batch loop" }
+"adversarial-eval-weekly-schedule.py" = { kinds = ["clock", "environ", "home", "random"], why = "Schedule process entry reads the home it runs under, its scheduler identity and start instant before composing the weekly batch loop, and builds the one random generator the batch mints each case's canary through" }
 "agent-watch-schedule.py" = { kinds = ["clock", "environ", "home", "argv"], why = "Schedule process entry reads the home it runs under, the report-agent override, scheduler identity and start instant before composing the ten-minute watching loop; it also reads its command line (argv) once, as the process entry" }
 "c9-daily-report-schedule.py" = { kinds = ["clock", "environ", "home", "platform"], why = "Schedule process entry reads the home it runs under, its report recipient, scheduler identity and start instant before constructing C9Report; builds the host of this process with Host.system()" }
 "db-write-stall-watch-schedule.py" = { kinds = ["clock", "environ", "home"], why = "Schedule process entry reads the home it runs under, its scheduler identity and supplies the stall watcher with a wall-clock reader" }

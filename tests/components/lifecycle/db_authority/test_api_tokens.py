@@ -14,6 +14,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import random
 import time
 from collections.abc import Callable, Iterator
 from dataclasses import replace
@@ -527,6 +528,7 @@ def runner_home(tmp_path: Path, gateway: Path, monkeypatch: pytest.MonkeyPatch) 
         endpoint=_ENDPOINT,
         ttl_s=600,
         now=time.time(),
+        rng=random.SystemRandom(),
     )
     unit.install_bundle(
         home,
@@ -590,6 +592,7 @@ def test_a_bundle_cannot_be_issued_before_the_gateway_published_its_telemetry_to
             endpoint=_ENDPOINT,
             ttl_s=600,
             now=time.time(),
+            rng=random.SystemRandom(),
         )
 
 

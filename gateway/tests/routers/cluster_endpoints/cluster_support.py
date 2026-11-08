@@ -15,6 +15,7 @@ import pytest
 from psycopg.types.json import Jsonb
 
 from base.clock.tests.fakes import system_clock
+from base.clock.tests.seeded_rng import seeded_rng
 from base.cluster.machine import MachineIdentityReader
 from base.config.service_read import ConfigAuthority
 from base.db import Database
@@ -195,7 +196,7 @@ def seed_in_progress_task(db_conn: psycopg.Connection, owner: int, title: str) -
 @pytest.fixture
 def serving_gate(serving_root: RootBirth) -> Generator[None]:
     home = resolve_meiva_home()
-    generation = start_serving.begin_start(home)
+    generation = start_serving.begin_start(home, seeded_rng())
     assert start_serving.mark_serving(
         home, generation, runtime=serving_root.runtime, observe=observe
     )

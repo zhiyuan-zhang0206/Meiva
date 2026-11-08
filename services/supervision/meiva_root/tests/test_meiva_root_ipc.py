@@ -10,6 +10,7 @@ from typing import Any, cast
 import psutil
 import pytest
 
+from base.clock.tests.seeded_rng import seeded_rng
 from base.native_process.ownership import OwnedProcess
 from base.native_process.root_control.client import RootClient, RootClientError, caller_identity
 from base.native_process.root_control.ipc import (
@@ -302,7 +303,7 @@ async def test_serving_reads_bound_runtime_from_native_peer(
     server = ControlServer(path, status)
     await server.start()
     try:
-        generation = start_serving.begin_start(short_tmp)
+        generation = start_serving.begin_start(short_tmp, seeded_rng())
         if bad is None:
             assert await asyncio.to_thread(
                 start_serving.mark_serving, short_tmp, generation, runtime=runtime

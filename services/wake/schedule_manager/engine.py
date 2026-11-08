@@ -36,6 +36,7 @@ from __future__ import annotations
 import dis
 import faulthandler
 import os
+import random
 import runpy
 import selectors
 import shlex
@@ -100,7 +101,9 @@ class PluginInputs:
 
 
 # meiva:note
-# What the runner's composition root hands the engine for one process execution.
+# What the runner's composition root hands the engine for one process execution, including the
+# generator that root built once: a script context this engine has to build carries it, so the
+# SDK calls a schedule script makes mint from the process's own generator.
 @dataclass(frozen=True)
 class RunnerRoot:
     database: Database
@@ -109,6 +112,7 @@ class RunnerRoot:
     policy: StallPolicy
     home: Path
     main_thread_id: int
+    rng: random.Random
     pid: int = 0
 
 
@@ -445,6 +449,7 @@ def script_context(schedule_id: int, root: RunnerRoot) -> MeivaContext:
         machine=root.plugins.machine,
         meiva_home=root.home,
         environ=root.plugins.config.process_environment(),
+        rng=root.rng,
     )
 
 

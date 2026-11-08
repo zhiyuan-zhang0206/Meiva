@@ -460,7 +460,7 @@ def _request_context(
 
     if not isinstance(config, ConfigBoot):
         raise TypeError("the child's request context needs its booted ConfigBoot")
-    rng = random.SystemRandom()
+    rng = context.require_rng()
     return replace(
         MeivaContext.from_description(
             request.context,
@@ -606,7 +606,13 @@ def main() -> None:
         config.boot()
         machine = ConfiguredMachineIdentity(config)
         clients = derived_clients(config, machine)
-        context = MeivaContext(clients=clients, machine=machine, environ=os.environ)
+        # meiva:note
+        # The generator this process reads once at start: the keyed SDK requests a child makes
+        # (pin-or-mint idempotency keys) mint through the context's `require_new_id`, and a
+        # context that can mint must own a generator.
+        context = MeivaContext(
+            clients=clients, machine=machine, environ=os.environ, rng=random.SystemRandom()
+        )
         run_child(request_path, result_path, boot_started_at, config=config, context=context)
     except BaseException as exc:
         write_crashed_result(result_path, exc)
