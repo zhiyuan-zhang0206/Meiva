@@ -124,14 +124,6 @@ release record (`meiva-source-release/v1`) and the manifest (`meiva-sealed-tree/
 
 - `base/native_process/loaded_commit.py` owns the release record; `capture` reads it and
   `CodeVersion` uses its count.
-- `base/deploy/sealed_release/` seals, unseals, writes the manifest and verifies a tree
-  (`lstat`, or full content); its `stage` entry stages a commit from a full clone into
-  `source-releases/<id>/` (archive, record, `uv sync --frozen --compile-bytecode`,
-  `compileall`, seal, manifest), switches the pointer atomically, and verifies; usable by
-  hand on one host. A phase-1 release has no frontend build, so it cannot yet serve a
-  gateway.
-- The health probe's source guard verifies the manifest when `source` points into
-  `source-releases/`, and keeps the `git status` guard for a checkout.
 
 **Phase 2 (fleet update).** `cli.fleet_update down` stages NEW on every host before the
 first stop (the stored-schedule check then runs from the staged release's own venv,

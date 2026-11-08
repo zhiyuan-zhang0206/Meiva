@@ -727,9 +727,6 @@ root = "base/deploy/release/tests"
 root = "base/deploy/schema/tests"
 
 [[tool.pyright.executionEnvironments]]
-root = "base/deploy/sealed_release/tests"
-
-[[tool.pyright.executionEnvironments]]
 root = "base/deploy/tests"
 
 [[tool.pyright.executionEnvironments]]
