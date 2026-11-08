@@ -717,6 +717,7 @@ def main(*, argv: list[str]) -> None:
             database=database,
             machine=machine,
             home=home.resolve(),
+            rng=_new_rng(),
         ),
     )
     code = 0

@@ -7,6 +7,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import random
 import signal
 import sys
 import time
@@ -52,6 +53,14 @@ _log = logging.getLogger("services.backup.scheduler.daemon")
 
 BACKUP_STALE_AFTER_S = 26 * 3600
 _FAILURE_DETAIL_CHARS = 500
+
+
+# meiva:note
+# The process's random generator, built once at its entry: the event pipeline mints its
+# `service.instance.id` from it, and an identifier is not a secret, so it is a plain
+# `random.Random`.
+def _new_rng() -> random.Random:
+    return random.Random()  # noqa: S311
 
 
 def _endpoint(config: ConfigBoot, *, runtime: Path) -> ServiceEndpoint:
@@ -273,6 +282,7 @@ def main() -> None:
         database=lambda: scheduler_database(config, machine, gate, home=process_home),
         machine=machine,
         home=process_home,
+        rng=_new_rng(),
     )
     init_gateway_process(
         name="pg_backup",

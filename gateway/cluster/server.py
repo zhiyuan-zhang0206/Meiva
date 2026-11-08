@@ -7,6 +7,7 @@ import faulthandler
 import logging
 import math
 import os
+import random
 import signal
 import socket
 import sys
@@ -138,6 +139,7 @@ def main(*, home: Path, config: ConfigBoot, build_app: Callable[[GatewayProcess]
         machine=machine,
         host=Host.system(environ=config.process_environment()),
         now=Clock(clock_config_from_boot(config), timers=SYSTEM_TIMERS).now,
+        rng=random.SystemRandom(),
     )
     with process.lifetime():
         _serve_process(process, plan, build_app)

@@ -60,6 +60,8 @@ def fresh_schedule_entry(
             direct_url=ClusterDirectUrl(machine.host, home=home),
         )
 
+    prior = getattr(meiva, "context", None)
+    rng = random.SystemRandom()
     clients = ClientSet(
         database=database,
         pipeline_factory=lambda: build_pipeline(
@@ -69,10 +71,9 @@ def fresh_schedule_entry(
             now=Clock(clock_config_from_boot(config), timers=SYSTEM_TIMERS).now,
             otlp_enabled=lambda: config.view.observability.telemetry_otlp_enabled,
             otlp_endpoint=lambda: config.view.observability.telemetry_otlp_endpoint,
+            rng=rng,
         ),
     )
-    prior = getattr(meiva, "context", None)
-    rng = random.SystemRandom()
     process_context.bind_context(
         MeivaContext(
             clients=clients,

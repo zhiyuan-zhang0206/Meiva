@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import random
 import time
 from collections.abc import Iterator
 from datetime import UTC, datetime
@@ -305,7 +306,7 @@ def test_metrics_resource_carries_cluster(tmp_path: Path) -> None:
     home = tmp_path / ".meiva-preview"
     home.mkdir()
 
-    resource = telemetry_otlp_sdk.metrics_resource(home=home)
+    resource = telemetry_otlp_sdk.metrics_resource(home=home, instance_id="test-instance")
 
     assert resource.attributes["cluster"] == ".meiva-preview"
 
@@ -604,6 +605,7 @@ def test_flush_without_init_is_noop(tmp_path: Path) -> None:
         home=tmp_path,
         enabled=lambda: True,
         endpoint=lambda: "http://127.0.0.1:4318",
+        instance_id="test-instance",
     )
     backend.flush()
     assert backend._thread is None
@@ -655,6 +657,7 @@ def bind_telemetry(
         home=tmp_path,
         otlp_enabled=lambda: False,
         otlp_endpoint=lambda: "http://127.0.0.1:4318",
+        rng=random.SystemRandom(),
     )
     try:
         telemetry.init_telemetry(home=meiva_home(), process="test-proc", pipeline=pipeline)
@@ -694,6 +697,7 @@ def test_the_providers_are_built_for_the_exporters_own_home_and_mirror(tmp_path:
         mirror_dir=mirror,
         home=home,
         enabled=lambda: True,
+        instance_id="test-instance",
     )
     worker = SimpleNamespace(logs=None, metrics=None, metric_reader=None)
 

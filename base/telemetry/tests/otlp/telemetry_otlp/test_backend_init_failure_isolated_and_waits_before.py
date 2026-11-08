@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import random
 import socket
 import threading
 import time
@@ -168,6 +169,7 @@ def test_backend_unreachable_probe_emits_specific_disabled_reason(
         endpoint=lambda: endpoint,
         mirror_dir=tmp_path,
         home=tmp_path,
+        instance_id="test-instance",
     )
     try:
         assert backend._ensure() is False
@@ -268,6 +270,7 @@ def test_pipeline_mirror_survives_otlp_failure(database: Database, tmp_path: Pat
             home=tmp_path,
             otlp_enabled=lambda: False,
             otlp_endpoint=lambda: "http://127.0.0.1:4318",
+            rng=random.SystemRandom(),
         )
     try:
         telemetry.init_telemetry(home=meiva_home(), process="test-proc", pipeline=pipeline)
@@ -296,6 +299,7 @@ def test_handshake_env_no_longer_gates_export(tmp_path: Path) -> None:
             mirror_dir=tmp_path,
             home=tmp_path,
             endpoint=lambda: "http://127.0.0.1:4318",
+            instance_id="test-instance",
         )._enabled()
         is True
     )

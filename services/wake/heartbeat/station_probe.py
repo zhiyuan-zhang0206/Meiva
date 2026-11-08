@@ -31,6 +31,7 @@ caught and logged; main() never raises.
 
 from __future__ import annotations
 
+import random
 import urllib.error
 import urllib.request
 from collections.abc import Callable
@@ -65,6 +66,14 @@ from base.telemetry.station_endpoint import StationTarget as _StationTarget
 # refuses fast (connect refused / blackhole), mirroring the status_probe
 # budget philosophy (MEIVA_STATUS_PROBE_TIMEOUT_SECONDS).
 _PROBE_TIMEOUT_S = 5.0
+
+
+# meiva:note
+# The process's random generator, built once at its entry: the event pipeline mints its
+# `service.instance.id` from it, and an identifier is not a secret, so it is a plain
+# `random.Random`.
+def _new_rng() -> random.Random:
+    return random.Random()  # noqa: S311
 
 
 # meiva:link services/wake/heartbeat/docs/station-probe.meiva.okf.md
@@ -179,6 +188,7 @@ def main(*, process_config: ConfigBoot, open_url: UrlOpener) -> None:
         now=Clock(clock_config_from_boot(process_config), timers=SYSTEM_TIMERS).now,
         otlp_enabled=lambda: process_config.view.observability.telemetry_otlp_enabled,
         otlp_endpoint=lambda: process_config.view.observability.telemetry_otlp_endpoint,
+        rng=_new_rng(),
     )
     init_gateway_process(
         name="station",

@@ -615,6 +615,7 @@ def create_app_from_environment() -> FastAPI:
         machine=ConfiguredMachineIdentity(config),
         host=Host.system(environ=config.process_environment()),
         now=Clock(clock_config_from_boot(config), timers=SYSTEM_TIMERS).now,
+        rng=secrets.SystemRandom(),
     )
     gateway_config_value = process_config(process.config, home=home)
     return create_app(
@@ -655,6 +656,7 @@ def openapi_schema_of(config: ConfigBoot, *, home: Path) -> dict[str, object]:
             ),
             timers=SYSTEM_TIMERS,
         ).now,
+        rng=secrets.SystemRandom(),
     )
     with process.lifetime():
         app = create_app(

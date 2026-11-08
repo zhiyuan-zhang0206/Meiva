@@ -61,6 +61,7 @@ def identity_child_record() -> dict[str, Any]:
                 home=Path(home),
                 enabled=lambda: True,
                 endpoint=lambda: "http://127.0.0.1:4318",
+                instance_id="test-instance",
             ),
         )
         clients = ClientSet(pipeline_factory=lambda: pipeline)

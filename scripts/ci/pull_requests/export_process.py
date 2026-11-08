@@ -1,5 +1,6 @@
 """The standalone CI samplers' database gate and finite event-writer lifetime."""
 
+import random
 from collections.abc import Generator
 from contextlib import contextmanager
 from pathlib import Path
@@ -18,6 +19,14 @@ from base.native_process.loaded_commit import LoadedCommit
 from base.telemetry import DrainStatus, EventPipeline, build_pipeline
 
 __all__ = ["drain_event_pipeline", "owned_event_pipeline", "process_gate"]
+
+
+# meiva:note
+# The process's random generator, built once at its entry: the event pipeline mints its
+# `service.instance.id` from it, and an identifier is not a secret, so it is a plain
+# `random.Random`.
+def _new_rng() -> random.Random:
+    return random.Random()  # noqa: S311
 
 
 def process_gate(process: str, *, image: LoadedCommit | None) -> ProcessDbGate:
@@ -68,6 +77,7 @@ def owned_event_pipeline(
         now=Clock(clock_config_from_boot(config), timers=SYSTEM_TIMERS).now,
         otlp_enabled=lambda: config.view.observability.telemetry_otlp_enabled,
         otlp_endpoint=lambda: config.view.observability.telemetry_otlp_endpoint,
+        rng=_new_rng(),
     )
     with drain_event_pipeline(process, pipeline):
         yield pipeline

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import random
 import time
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
@@ -34,6 +35,7 @@ def logging_pipeline(
         home=unit_home,
         otlp_enabled=lambda: False,
         otlp_endpoint=lambda: "http://127.0.0.1:4318",
+        rng=random.SystemRandom(),
     )
     try:
         telemetry.init_telemetry(home=meiva_home(), process="test-proc", pipeline=pipeline)
@@ -104,6 +106,7 @@ def test_add_event_sink_registers_at_most_once(
         home=unit_home,
         otlp_enabled=lambda: False,
         otlp_endpoint=lambda: "http://127.0.0.1:4318",
+        rng=random.SystemRandom(),
     )
     first = slog.add_event_sink(
         home=meiva_home(),

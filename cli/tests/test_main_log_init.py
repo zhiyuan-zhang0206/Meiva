@@ -134,6 +134,7 @@ def test_only_the_verbs_that_bring_a_unit_up_open_sinks_before_dispatch(
                 log_sinks=cli_log_sinks,
                 otlp_enabled=command.otlp_enabled,
                 otlp_endpoint=command.otlp_endpoint,
+                rng=command.rng,
             ),
             open_database=open_operator_database,
         )
@@ -169,6 +170,7 @@ def test_a_settings_failure_while_opening_sinks_keeps_its_actionable_message(
                 log_sinks=cli_log_sinks,
                 otlp_enabled=command.otlp_enabled,
                 otlp_endpoint=command.otlp_endpoint,
+                rng=command.rng,
             ),
             open_database=open_operator_database,
         )
@@ -277,6 +279,7 @@ def test_logging_and_dispatch_borrow_the_same_operator_factory(
             now=system_clock().now,
             otlp_enabled=command.otlp_enabled,
             otlp_endpoint=command.otlp_endpoint,
+            rng=command.rng,
         )
         owner.log_sinks = cli_log_sinks
         return owner
@@ -420,6 +423,7 @@ def test_cold_reporter_delivers_through_main_owned_pipeline(
             now=system_clock().now,
             otlp_enabled=command.otlp_enabled,
             otlp_endpoint=command.otlp_endpoint,
+            rng=command.rng,
         )
 
     def dispatch(args: argparse.Namespace) -> int:
@@ -467,6 +471,7 @@ def test_quiet_command_does_not_construct_pipeline(
         now=system_clock().now,
         otlp_enabled=command_runtime.otlp_enabled,
         otlp_endpoint=command_runtime.otlp_endpoint,
+        rng=command_runtime.rng,
     )
     assert owner.close() is None
 
@@ -517,6 +522,7 @@ def test_unfinished_command_writer_remains_owned_until_join(
         now=system_clock().now,
         otlp_enabled=command_runtime.otlp_enabled,
         otlp_endpoint=command_runtime.otlp_endpoint,
+        rng=command_runtime.rng,
     )
     try:
         telemetry.emit("telemetry", "schedule_verify_failed", producer=owner)
@@ -559,6 +565,7 @@ def test_command_close_preserves_original_writer_error_and_primary(
             now=system_clock().now,
             otlp_enabled=command.otlp_enabled,
             otlp_endpoint=command.otlp_endpoint,
+            rng=command.rng,
         )
 
     def dispatch(args: argparse.Namespace) -> int:

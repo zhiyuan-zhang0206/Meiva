@@ -61,10 +61,11 @@ def numeric_fields(payload: Mapping[str, object]) -> Iterator[tuple[str, int | f
 
 # meiva:note
 # The attributes of the metrics-side OTel Resource: `service.name=meiva-<process>` (the bounded
-# process dimension) plus a per-process-instance `service.instance.id`. They live here, with no SDK
-# import, and `telemetry_otlp_sdk.metrics_resource` builds the Resource from them.
-def metrics_resource_attributes(*, home: Path) -> dict[str, str]:
-    import uuid
+# process dimension) plus `instance_id`, the `service.instance.id` the process root minted once.
+# It arrives as data: this module reads no entropy, so a second provider built in the same process
+# cannot acquire a second identity. They live here, with no SDK import, and
+# `telemetry_otlp_sdk.metrics_resource` builds the Resource from them.
+def metrics_resource_attributes(*, home: Path, instance_id: str) -> dict[str, str]:
     from importlib.metadata import version
 
     from base.telemetry.delivery.state import process_name
@@ -76,7 +77,7 @@ def metrics_resource_attributes(*, home: Path) -> dict[str, str]:
     return {
         "service.namespace": "meiva",
         "service.name": f"meiva-{process_name()}",
-        "service.instance.id": str(uuid.uuid4()),
+        "service.instance.id": instance_id,
         "service.version": version("meiva"),
         "cluster": cluster_label(home),
     }

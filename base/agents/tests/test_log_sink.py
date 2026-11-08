@@ -15,6 +15,7 @@ object per line.
 from __future__ import annotations
 
 import json
+import random
 from collections.abc import Iterator
 from datetime import UTC, datetime
 from functools import partial
@@ -53,6 +54,7 @@ def sink_logger(database: Database, machine_identity: MachineIdentityReader) -> 
         home=meiva_home(),
         otlp_enabled=lambda: False,
         otlp_endpoint=lambda: "http://127.0.0.1:4318",
+        rng=random.SystemRandom(),
     )
 
     def producer() -> telemetry.EventPipeline:

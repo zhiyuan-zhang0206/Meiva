@@ -304,6 +304,7 @@ def _refusing_args(argv: list[str], home: Path, command: CommandRuntime) -> argp
         now=runtime.clock.now,
         otlp_enabled=runtime.otlp_enabled,
         otlp_endpoint=runtime.otlp_endpoint,
+        rng=runtime.rng,
     )
     return args
 

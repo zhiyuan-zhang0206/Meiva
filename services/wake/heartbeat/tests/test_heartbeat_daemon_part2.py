@@ -12,6 +12,7 @@ starts the normal idle clock, so after the window expires the agent still waits
 
 from __future__ import annotations
 
+import random
 import time
 from collections.abc import Iterator
 from pathlib import Path
@@ -52,6 +53,7 @@ def event_pipeline(
         home=unit_home,
         otlp_enabled=lambda: False,
         otlp_endpoint=lambda: "http://127.0.0.1:4318",
+        rng=random.SystemRandom(),
     )
     try:
         telemetry.init_telemetry(

@@ -8,6 +8,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from base.clock.tests.fakes import system_clock
+from base.clock.tests.seeded_rng import seeded_rng
 from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.config.tests.configuration import snapshot_process_config
 from base.host.system.tests.fake_commands import fake_host
@@ -34,6 +35,7 @@ def gateway_unit(
     machine_identity.set(role="gateway")
     process = GatewayProcess(
         now=system_clock().now,
+        rng=seeded_rng(0),
         home=paths.meiva_home(),
         config=config,
         image=LOADED_IMAGE,

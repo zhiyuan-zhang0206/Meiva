@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import random
 import sys
 from functools import partial
 
@@ -32,6 +33,7 @@ def main() -> None:
         home=meiva_home(),
         otlp_enabled=lambda: config.view.observability.telemetry_otlp_enabled,
         otlp_endpoint=lambda: config.view.observability.telemetry_otlp_endpoint,
+        rng=random.SystemRandom(),
     )
     telemetry.init_telemetry(home=meiva_home(), process="exit-seam-probe", pipeline=pipeline)
     telemetry.emit("log", "log", attributes={"seq": "early", "marker": marker})

@@ -115,6 +115,7 @@ def completion_during_stall(schedule_id: int) -> None:
             now=Clock(clock_config_from_boot(config), timers=SYSTEM_TIMERS).now,
             otlp_enabled=lambda: config.view.observability.telemetry_otlp_enabled,
             otlp_endpoint=lambda: config.view.observability.telemetry_otlp_endpoint,
+            rng=seeded_rng(),
         ),
     )
 

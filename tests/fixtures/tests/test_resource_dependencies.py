@@ -6,6 +6,7 @@ def test_failed_setup_and_late_effects_preserve_resource_windows(pytester: pytes
         """
 import os
 import pytest
+import random
 
 pytest_plugins = [
     "tests.fixtures.env_bootstrap",
@@ -56,6 +57,7 @@ def tail_pipeline(database, process_config):
         now=system_clock().now,
         otlp_enabled=lambda: False,
         otlp_endpoint="http://127.0.0.1:4318",
+        rng=random.SystemRandom(),
     )
     try:
         yield pipeline

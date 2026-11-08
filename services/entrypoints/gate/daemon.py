@@ -35,6 +35,7 @@ import contextlib
 import json
 import logging
 import os
+import random
 import re
 import sys
 import time
@@ -110,6 +111,14 @@ _FORWARD_RESPONSE_HEADERS = (
 )
 
 _FORWARDED_HOST_RE = re.compile(r"^[A-Za-z0-9.:-]+$")
+
+
+# meiva:note
+# The process's random generator, built once at its entry: the event pipeline mints its
+# `service.instance.id` from it, and an identifier is not a secret, so it is a plain
+# `random.Random`.
+def _new_rng() -> random.Random:
+    return random.Random()  # noqa: S311
 
 
 def _valid_forwarded_header(name: str, value: str) -> bool:
@@ -561,6 +570,7 @@ def main(argv: Sequence[str], *, process_config: ConfigBoot) -> None:
         ),
         machine=machine,
         home=home.resolve(),
+        rng=_new_rng(),
     )
     primary: BaseException | None = None
     try:

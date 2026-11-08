@@ -153,6 +153,7 @@ def main() -> None:
         now=Clock(clock_config_from_boot(config), timers=SYSTEM_TIMERS).now,
         otlp_enabled=lambda: config.view.observability.telemetry_otlp_enabled,
         otlp_endpoint=lambda: config.view.observability.telemetry_otlp_endpoint,
+        rng=_new_rng(),
     )
     init_gateway_process(
         name="insights",

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import random
 import sys
 from collections.abc import Callable
 from dataclasses import dataclass, replace
@@ -145,9 +146,14 @@ class OperatorEventPipeline:
         now: Callable[[], datetime],
         otlp_enabled: Callable[[], bool],
         otlp_endpoint: Callable[[], str],
+        rng: random.Random,
         flush_interval_s: float = 0.5,
     ) -> None:
         self._machine = machine
+        # meiva:note
+        # The command's one generator, built by `cli.main`'s runtime and handed down: the pipeline
+        # mints the process's `service.instance.id` from it, and an identifier is not a secret.
+        self._rng = rng
         self._home = home
         self._now = now
         self._otlp_enabled = otlp_enabled
@@ -171,6 +177,7 @@ class OperatorEventPipeline:
         now: Callable[[], datetime],
         otlp_enabled: Callable[[], bool],
         otlp_endpoint: Callable[[], str],
+        rng: random.Random,
     ) -> OperatorEventPipeline:
         owner = cls(
             database_factory,
@@ -179,6 +186,7 @@ class OperatorEventPipeline:
             now=now,
             otlp_enabled=otlp_enabled,
             otlp_endpoint=otlp_endpoint,
+            rng=rng,
         )
         owner._pipeline = pipeline
         owner._attach_process_logging = False
@@ -197,6 +205,7 @@ class OperatorEventPipeline:
         log_sinks: list[str],
         otlp_enabled: Callable[[], bool],
         otlp_endpoint: Callable[[], str],
+        rng: random.Random,
     ) -> OperatorEventPipeline:
         owner = cls(
             database_factory,
@@ -205,6 +214,7 @@ class OperatorEventPipeline:
             now=now,
             otlp_enabled=otlp_enabled,
             otlp_endpoint=otlp_endpoint,
+            rng=rng,
         )
         owner._attach_process_logging = False
         owner.log_sinks = log_sinks
@@ -222,6 +232,7 @@ class OperatorEventPipeline:
                 otlp_enabled=self._otlp_enabled,
                 otlp_endpoint=self._otlp_endpoint,
                 flush_interval_s=self._flush_interval_s,
+                rng=self._rng,
             )
         return self._pipeline
 
@@ -268,6 +279,7 @@ def operator_event_pipeline(
     *,
     otlp_enabled: Callable[[], bool],
     otlp_endpoint: Callable[[], str],
+    rng: random.Random,
 ) -> OperatorEventPipeline:
     """Construct a lazy command owner without opening a writer or database."""
     return OperatorEventPipeline(
@@ -277,6 +289,7 @@ def operator_event_pipeline(
         now=now,
         otlp_enabled=otlp_enabled,
         otlp_endpoint=otlp_endpoint,
+        rng=rng,
     )
 
 

@@ -164,6 +164,7 @@ def test_command_pipeline_is_lazy_and_retains_the_same_database_factory(
         now=system_clock().now,
         otlp_enabled=command_runtime.otlp_enabled,
         otlp_endpoint=command_runtime.otlp_endpoint,
+        rng=command_runtime.rng,
     )
     try:
         assert not opened

@@ -16,6 +16,7 @@ asynchronously).
 from __future__ import annotations
 
 import json
+import random
 import socket
 import threading
 from collections.abc import Iterator
@@ -89,6 +90,7 @@ def bind_telemetry(database: Database, unit_home: Path) -> Iterator[None]:
         home=unit_home,
         otlp_enabled=lambda: False,
         otlp_endpoint=lambda: "http://127.0.0.1:4318",
+        rng=random.SystemRandom(),
     )
     try:
         telemetry.init_telemetry(home=meiva_home(), process="test-proc", pipeline=pipeline)

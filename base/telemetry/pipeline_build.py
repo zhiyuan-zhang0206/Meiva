@@ -9,10 +9,12 @@ needs to import the emitter's composition.
 from __future__ import annotations
 
 import atexit
+import random
 from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
 
+from base.clock.ids import new_uuid
 from base.cluster.machine import MachineIdentityReader
 from base.paths import logs_path
 from base.telemetry.delivery.mirror import append_jsonl
@@ -92,9 +94,15 @@ def build_pipeline(
     otlp_enabled: Callable[[], bool],
     otlp_endpoint: Callable[[], str],
     flush_interval_s: float = 0.5,
+    rng: random.Random,
 ) -> EventPipeline:
     if not home.is_absolute():
         raise ValueError(f"the event pipeline needs an absolute home, got {str(home)!r}")
+    # meiva:note
+    # The `service.instance.id` this process's metrics carry: minted here, once, from the generator
+    # the root hands in, and then carried as a value -- a second provider built in this process
+    # reuses it rather than acquiring a second identity.
+    instance_id = str(new_uuid(rng))
     from base.host.env.registry import process_environment
     from base.telemetry.observability import (
         endpoint_override_is_explicit,
@@ -117,6 +125,7 @@ def build_pipeline(
         mirror_dir=mirror_dir,
         home=home,
         now=now,
+        instance_id=instance_id,
     )
     return ExportingEventPipeline(
         writer=lambda events, owned: write_batch(

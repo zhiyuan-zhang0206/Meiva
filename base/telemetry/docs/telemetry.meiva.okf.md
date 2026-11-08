@@ -51,7 +51,7 @@ cleanup still runs through the last concrete binding.
 
 The public `EventPipeline` resource lives in `delivery/pipeline.py`; construction starts
 its worker and requires the root's writer and the stream's clock. `build_pipeline(database=..., machine=..., home=..., now=...,
-otlp_enabled=..., otlp_endpoint=..., flush_interval_s=0.5)` binds
+otlp_enabled=..., otlp_endpoint=..., flush_interval_s=0.5, rng=...)` binds
 ordinary sinks to that root's database factory and owns one lazy OTLP backend.
 
 `now` is the process clock the stream stamps with: the write instant and retention cutoff of every

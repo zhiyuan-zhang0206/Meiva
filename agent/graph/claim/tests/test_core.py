@@ -11,6 +11,7 @@ not swallowed by `except Exception`; the difference is what kind is written to t
 
 from __future__ import annotations
 
+import random
 from collections.abc import Iterator
 from dataclasses import replace
 from pathlib import Path
@@ -52,6 +53,7 @@ def event_pipeline(
         home=unit_home,
         otlp_enabled=lambda: False,
         otlp_endpoint=lambda: "http://127.0.0.1:4318",
+        rng=random.SystemRandom(),
     )
     try:
         telemetry.init_telemetry(home=meiva_home(), process="test-sdk-operation", pipeline=pipeline)

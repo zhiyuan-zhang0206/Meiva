@@ -10,4 +10,4 @@ exports = ["diagnostic_probes.py", "manifests.py"]
 "__init__.py" = "strict"
 
 [roots]
-"glue.py" = { kinds = ["settings", "cwd", "home", "platform", "environ", "clock"], why = "Root supervisor startup composes process-owned handles and configuration, and checks that the root runs from the loaded runtime's cwd; builds the process clock from SYSTEM_TIMERS for the event stream it composes" }
+"glue.py" = { kinds = ["clock", "cwd", "environ", "home", "platform", "random", "settings"], why = "Root supervisor startup composes process-owned handles and configuration, and checks that the root runs from the loaded runtime's cwd; builds the process clock from SYSTEM_TIMERS for the event stream it composes; builds the random generator its event pipeline mints the process's `service.instance.id` from" }

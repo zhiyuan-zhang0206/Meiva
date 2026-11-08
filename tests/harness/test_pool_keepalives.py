@@ -37,6 +37,7 @@ socket-option test pins that the constant does what it claims.
 
 from __future__ import annotations
 
+import random
 import socket
 import subprocess
 import sys
@@ -184,6 +185,7 @@ def test_log_sink_pipeline_drain_thread_stays_alive(
         home=unit_home,
         otlp_enabled=lambda: False,
         otlp_endpoint=lambda: "http://127.0.0.1:4318",
+        rng=random.SystemRandom(),
     )
     sink_id = base.telemetry.process_logging.add_event_sink(
         home=meiva_home(), producer=lambda: pipeline, machine_reader=machine_identity.name

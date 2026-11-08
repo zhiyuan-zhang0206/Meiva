@@ -69,8 +69,8 @@ def metric_views() -> list[View]:
 # per-record agent_id/event_name resource attributes (set in EventDimensionResourceExporter) to
 # Loki index labels, and the read side era-slices its selector around the cutover
 # (base/telemetry/loki_index_labels.py), so no service_name rewrite is needed.
-def metrics_resource(*, home: Path) -> Resource:
-    return Resource.create(metrics_resource_attributes(home=home))
+def metrics_resource(*, home: Path, instance_id: str) -> Resource:
+    return Resource.create(metrics_resource_attributes(home=home, instance_id=instance_id))
 
 
 # meiva:note
@@ -84,6 +84,7 @@ def build_providers(
     keep_metrics: Callable[[MeterProvider], None] | None = None,
     mirror_dir: Path,
     home: Path,
+    instance_id: str,
 ) -> tuple[LoggerProvider, MeterProvider]:
     install_exporter_drop_observer(mirror_dir=mirror_dir)
     plan = provider_build_plan(
@@ -120,7 +121,7 @@ def build_providers(
     metrics = MeterProvider(
         shutdown_on_exit=plan.shutdown_on_exit,
         metric_readers=[reader],
-        resource=metrics_resource(home=home),
+        resource=metrics_resource(home=home, instance_id=instance_id),
         views=metric_views(),
     )
     if keep_metrics is not None:

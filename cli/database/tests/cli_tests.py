@@ -49,6 +49,7 @@ def operator_pipeline(
         now=system_clock().now,
         otlp_enabled=command_runtime.otlp_enabled,
         otlp_endpoint=command_runtime.otlp_endpoint,
+        rng=command_runtime.rng,
     )
     try:
         yield producer

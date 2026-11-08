@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import random
 import signal
 import sys
 
@@ -32,6 +33,14 @@ from services.derived.memory_search.store import MemoryStore
 from services.pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
 
 _log = logging.getLogger("services.derived.memory_search.daemon")
+
+
+# meiva:note
+# The process's random generator, built once at its entry: the event pipeline mints its
+# `service.instance.id` from it, and an identifier is not a secret, so it is a plain
+# `random.Random`.
+def _new_rng() -> random.Random:
+    return random.Random()  # noqa: S311
 
 
 def memory_search_config(*, config: ConfigBoot) -> MemorySearchConfig:
@@ -118,6 +127,7 @@ def main() -> None:
         now=Clock(clock_config_from_boot(boot), timers=SYSTEM_TIMERS).now,
         otlp_enabled=lambda: boot.view.observability.telemetry_otlp_enabled,
         otlp_endpoint=lambda: boot.view.observability.telemetry_otlp_endpoint,
+        rng=_new_rng(),
     )
     code = 0
     try:
