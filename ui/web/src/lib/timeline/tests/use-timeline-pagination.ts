@@ -110,6 +110,88 @@ describe("useTimeline mount + pagination", () => {
     expect(showError).not.toHaveBeenCalled();
   });
 
+  it("loadOlder skips external harness standing head notes (h0.0, h1.0..h5.0) and supports multi-step paging", async () => {
+    const showError = vi.fn();
+    timeline.queue(
+      resolves(
+        tlResp(
+          [
+            snapshotItem({ item_id: "h0.0", kind: "system_prompt", payload: "PROMPT" }),
+            snapshotItem({ item_id: "h1.0", kind: "system_marker", source: "exec_timeout", payload: "timeout" }),
+            snapshotItem({ item_id: "h2.0", kind: "system_marker", source: "timezone", payload: "tz" }),
+            snapshotItem({ item_id: "h3.0", kind: "system_marker", source: "memory", payload: "memory" }),
+            snapshotItem({ item_id: "h4.0", kind: "system_marker", source: "agent_id", payload: "id" }),
+            snapshotItem({ item_id: "h5.0", kind: "system_marker", source: "agent_memory", payload: "agent memory" }),
+            snapshotItem({ item_id: "h1161.0", kind: "agent_chat", payload: "recent chat" }),
+          ],
+          true,
+        ),
+      ),
+    );
+    timeline.queue(
+      resolves(
+        tlResp(
+          [
+            snapshotItem({ item_id: "h0.0", kind: "system_prompt", payload: "PROMPT" }),
+            snapshotItem({ item_id: "h1156.0", kind: "agent_chat", payload: "older chat 1" }),
+          ],
+          true,
+        ),
+      ),
+    );
+    timeline.queue(
+      resolves(
+        tlResp(
+          [
+            snapshotItem({ item_id: "h0.0", kind: "system_prompt", payload: "PROMPT" }),
+            snapshotItem({ item_id: "h1150.0", kind: "agent_chat", payload: "older chat 2" }),
+          ],
+          false,
+        ),
+      ),
+    );
+
+    const { result } = renderHook(() => useTimeline(405, showError), { wrapper });
+    await waitFor(() => expect(result.current.items).toHaveLength(7));
+    expect(result.current.hasMoreOlder).toBe(true);
+    timelineReads.length = 0;
+
+    act(() => result.current.loadOlder("reader"));
+
+    await waitFor(() => expect(result.current.items).toHaveLength(8));
+    expect(timelineReads).toEqual([{
+      agentId: 405,
+      before: "h1161.0",
+      limit: 50,
+      signal: expect.any(AbortSignal) as AbortSignal,
+    }]);
+    expect(result.current.hasMoreOlder).toBe(true);
+
+    timelineReads.length = 0;
+    act(() => result.current.loadOlder("reader"));
+
+    await waitFor(() => expect(result.current.items).toHaveLength(9));
+    expect(timelineReads).toEqual([{
+      agentId: 405,
+      before: "h1156.0",
+      limit: 100,
+      signal: expect.any(AbortSignal) as AbortSignal,
+    }]);
+    expect(result.current.hasMoreOlder).toBe(false);
+    expect(result.current.items.map((i) => i.item_id)).toEqual([
+      "h0.0",
+      "h1.0",
+      "h2.0",
+      "h3.0",
+      "h4.0",
+      "h5.0",
+      "h1150.0",
+      "h1156.0",
+      "h1161.0",
+    ]);
+    expect(showError).not.toHaveBeenCalled();
+  });
+
   it("loadOlder is a no-op when hasMoreOlder is false", async () => {
     const showError = vi.fn();
     timeline.queue(resolves(

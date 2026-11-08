@@ -32,7 +32,8 @@ export function parseItemIdParts(itemId: string): ItemIdParts | null {
   const [segment, checkpointId, msgPart, blockPart] = parts;
   if (!/^s[1-9]\d*$/.test(segment) || checkpointId.length === 0) return null;
   const rank = Number(segment.slice(1));
-  const msg = Number(msgPart);
+  const rawMsg = msgPart.startsWith("h") ? msgPart.slice(1) : msgPart;
+  const msg = Number(rawMsg);
   const block = Number(blockPart);
   if (
     !Number.isSafeInteger(rank) ||
@@ -76,13 +77,24 @@ export function sortByItemId(items: BackendTimelineItem[]): BackendTimelineItem[
   });
 }
 
+function isStandingPromptItem(it: BackendTimelineItem): boolean {
+  if (it.item_id === "0.0") return true;
+  if (it.kind !== "system_prompt") return false;
+  const parts = parseItemIdParts(it.item_id);
+  return parts !== null && parts.rank === 0 && parts.msg === 0;
+}
+
 export function isReattachedTimelineContext(item: BackendTimelineItem): boolean {
-  return item.kind === "system_prompt" || item.kind === "inbound_compact_summary";
+  return (
+    isStandingPromptItem(item) ||
+    item.kind === "system_prompt" ||
+    item.kind === "inbound_compact_summary"
+  );
 }
 
 export function standingHeadNoteIds(items: readonly BackendTimelineItem[]): Set<string> {
   const ids = new Set<string>();
-  const promptIdx = items.findIndex((it) => it.item_id === "0.0");
+  const promptIdx = items.findIndex(isStandingPromptItem);
   if (promptIdx < 0) return ids;
   let i = promptIdx + 1;
   while (i < items.length && items[i].kind === "system_marker" && items[i].source != null) {

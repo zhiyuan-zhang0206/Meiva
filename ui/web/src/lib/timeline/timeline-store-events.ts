@@ -239,8 +239,12 @@ export function applySseEvent(state: TimelineState, ev: SystemEvent, nowMs = 1):
       // should have armed the window for (SSE gap) — replace wholesale so the
       // compacted-away items cannot resurrect, same as the reset window.
       const crossedCompact =
-        snapItems.some((it) => it.item_id === "0.0") &&
-        crossedUnseenCompact(state.items, snapItems);
+        snapItems.some(
+          (it) =>
+            it.item_id === "0.0" ||
+            it.item_id === "h0.0" ||
+            (it.kind === "system_prompt" && parseItemIdParts(it.item_id)?.rank === 0),
+        ) && crossedUnseenCompact(state.items, snapItems);
       if (state.resetPending || crossedCompact) {
         if (snapItems.length === 0) return {};
         const epoch = state.compactEpoch + 1;
