@@ -15,7 +15,7 @@ import type { Harness } from "@/lib/harness/harness";
 import { FLEX } from "@/lib/layout/layout";
 import { cn } from "@/lib/format/utils";
 
-import { RunTimelineChartSkeleton } from "../run-timeline-skeleton";
+import { RunTimelineChartLoading } from "../run-timeline-loading";
 import { useApi } from "@/lib/transport/transport-context";
 
 function useAgentLabel(agentId: number): string | undefined {
@@ -111,7 +111,7 @@ export function AgentPending({
           </button>
         </div>
       ) : (
-        <RunTimelineChartSkeleton />
+        <RunTimelineChartLoading />
       )}
     </section>
   );

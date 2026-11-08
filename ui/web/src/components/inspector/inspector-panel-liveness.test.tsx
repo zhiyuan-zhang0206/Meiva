@@ -50,7 +50,7 @@ describe("InspectorPanel liveness identity rows", () => {
     await waitFor(() => expect(screen.queryByLabelText("Activity loading")).toBeNull());
     await screen.findByText("Codex");
     const activitySection = screen.getByText("Activity").closest("section");
-    expect(within(activitySection!).getByText("Cost")).toBeTruthy();
+    expect(within(activitySection!).getByText("Cost (API)")).toBeTruthy();
     expect(within(activitySection!).getByText("LLM calls")).toBeTruthy();
     expect(within(activitySection!).getByText("Idle")).toBeTruthy();
     expect(within(activitySection!).queryByText("TPS")).toBeNull();
@@ -101,12 +101,11 @@ describe("InspectorPanel heartbeat cells (merged into Liveness, Task #1195)", ()
     ).toBe("Tomorrow 15:21");
   });
 
-  it("renders the paused heartbeat on one line, absolute with day context by default", async () => {
+  it("renders an active pause as its end time alone, absolute with day context by default", async () => {
     // meiva:note
-    // The cell says a pause is on and when it ends, on ONE line: the relative
-    // span that used to sit under the value read as a second, smaller line
-    // (user 2026-10-29), and the default form is the date-context absolute one
-    // so the reader sees which day the pause ends on.
+    // The cell prints one instant and nothing else: no `paused` qualifier rides
+    // beside the time (user ruling 2026-11-08), and the default form is the
+    // date-context absolute one so the reader sees which day the pause ends on.
     // meiva:link ui/web/src/docs/frontend-components/inspector/section-details/liveness.meiva.okf.md
     useFrozenClock("2026-10-17T16:26:00Z");
     getAgentInspectLive.mockResolvedValue(
@@ -117,16 +116,19 @@ describe("InspectorPanel heartbeat cells (merged into Liveness, Task #1195)", ()
     render(<InspectorPanel agentId={1} />);
     await waitFor(() => expect(screen.queryByLabelText("Liveness loading")).toBeNull());
     const cell = screen.getByText("Next heartbeat").closest("div")!;
-    expect(within(cell).getByText("paused · Tomorrow 15:21")).toBeTruthy();
+    expect(within(cell).getByText("Tomorrow 15:21")).toBeTruthy();
+    // meiva:note
+    // Negative control: a paused agent's cell carries no state word.
+    expect(within(cell).queryByText(/paused/i)).toBeNull();
+    expect(within(cell).queryByText(/pending|due/i)).toBeNull();
     expect(cell.querySelectorAll("span")).toHaveLength(2);
     expect(within(cell).queryByText(/^in /)).toBeNull();
   });
 
-  it("follows display.date_format: a relative reader sees one relative line and no sub line", async () => {
+  it("follows display.date_format: a relative reader sees the span alone", async () => {
     // meiva:note
     // `display.date_format` is the one reader preference for absolute vs
-    // relative; `relative` keeps the cell to a single line too, so the setting
-    // picks the wording and never brings the second line back.
+    // relative; the cell stays a single line either way.
     // meiva:link ui/web/src/lib/format/docs/time.meiva.okf.md
     useFrozenClock("2026-10-17T16:26:00Z");
     getAgentInspectLive.mockResolvedValue(
@@ -139,11 +141,12 @@ describe("InspectorPanel heartbeat cells (merged into Liveness, Task #1195)", ()
     render(<InspectorPanel agentId={1} />, qc);
     await waitFor(() => expect(screen.queryByLabelText("Liveness loading")).toBeNull());
     const cell = screen.getByText("Next heartbeat").closest("div")!;
-    expect(within(cell).getByText("paused · in 22h")).toBeTruthy();
+    expect(within(cell).getByText("in 22h")).toBeTruthy();
+    expect(within(cell).queryByText(/paused/i)).toBeNull();
     expect(cell.querySelectorAll("span")).toHaveLength(2);
   });
 
-  it("keeps the pause as the answer for a running agent (user report 2026-10-28)", async () => {
+  it("keeps the pause end as the answer for a running agent (user report 2026-10-28)", async () => {
     useFrozenClock("2026-10-17T16:26:00Z");
     getAgentInspectLive.mockResolvedValue(
       liveFixture({
@@ -155,7 +158,8 @@ describe("InspectorPanel heartbeat cells (merged into Liveness, Task #1195)", ()
     await waitFor(() => expect(screen.queryByLabelText("Liveness loading")).toBeNull());
     const livenessSection = screen.getByText("Liveness").closest("section");
     const nextCell = within(livenessSection!).getByText("Next heartbeat").closest("div");
-    expect(within(nextCell!).getByText("paused · Tomorrow 15:21")).toBeTruthy();
+    expect(within(nextCell!).getByText("Tomorrow 15:21")).toBeTruthy();
+    expect(within(nextCell!).queryByText(/paused/i)).toBeNull();
     expect(nextCell!.querySelectorAll("span")).toHaveLength(2);
   });
 
@@ -169,7 +173,7 @@ describe("InspectorPanel heartbeat cells (merged into Liveness, Task #1195)", ()
     const qc = createInspectorQueryClient();
     qc.setQueryData(SETTINGS_QUERY_KEY, (old) => ({ ...(old as Record<string, unknown>), "display.date_format": "relative" }));
     render(<InspectorPanel agentId={1} />, qc);
-    await waitFor(() => expect(screen.getByText("paused · in 12m")).toBeTruthy());
+    await waitFor(() => expect(screen.getByText("in 12m")).toBeTruthy());
 
     // meiva:note
     // The value is computed from the panel's one-second clock, not once at open: a live query that
@@ -177,10 +181,10 @@ describe("InspectorPanel heartbeat cells (merged into Liveness, Task #1195)", ()
     // would print "in 6h" for the rest of the pause.
     // meiva:link ui/web/src/docs/frontend-components/inspector/section-details/liveness.meiva.okf.md
     vi.setSystemTime(new Date("2026-10-17T16:32:00Z"));
-    await waitFor(() => expect(screen.getByText("paused · in 6m")).toBeTruthy(), { timeout: 3000 });
+    await waitFor(() => expect(screen.getByText("in 6m")).toBeTruthy(), { timeout: 3000 });
   });
 
-  it("reads 'due' when a pause ran out between the last read and this tick", async () => {
+  it("shows an em dash when a pause ran out and no check-in is projected", async () => {
     useFrozenClock("2026-10-17T16:26:00Z");
     getAgentInspectLive.mockResolvedValue(
       liveFixture({
@@ -191,10 +195,11 @@ describe("InspectorPanel heartbeat cells (merged into Liveness, Task #1195)", ()
     await waitFor(() => expect(screen.queryByLabelText("Liveness loading")).toBeNull());
     const livenessSection = screen.getByText("Liveness").closest("section");
     const nextCell = within(livenessSection!).getByText("Next heartbeat").closest("div");
-    expect(within(nextCell!).getByText("due")).toBeTruthy();
+    expect(within(nextCell!).getByText("—")).toBeTruthy();
+    expect(within(nextCell!).queryByText(/due|paused/i)).toBeNull();
   });
 
-  it("shows 'pending' when a check-in is already queued but unprocessed", async () => {
+  it("shows an em dash for a queued check-in with no projected instant", async () => {
     getAgentInspectLive.mockResolvedValue(
       liveFixture({
         heartbeat: { interval_s: 300, next_at: null, paused_until: null, heartbeat_pending: true, last_pause: null },
@@ -202,11 +207,14 @@ describe("InspectorPanel heartbeat cells (merged into Liveness, Task #1195)", ()
     );
     render(<InspectorPanel agentId={1} />);
     await waitFor(() => expect(screen.queryByLabelText("Liveness loading")).toBeNull());
-    expect(screen.getByText("pending")).toBeTruthy();
+    const livenessSection = screen.getByText("Liveness").closest("section");
+    const nextCell = within(livenessSection!).getByText("Next heartbeat").closest("div");
+    expect(within(nextCell!).getByText("—")).toBeTruthy();
+    expect(screen.queryByText("pending")).toBeNull();
     expect(screen.getByText("never paused")).toBeTruthy();
   });
 
-  it("shows 'due' when the projected check-in is in the past", async () => {
+  it("prints a projected check-in that has already passed as its time, never 'due'", async () => {
     const nextAt = new Date(Date.now() - 240_000).toISOString();
     getAgentInspectLive.mockResolvedValue(
       liveFixture({
@@ -215,7 +223,10 @@ describe("InspectorPanel heartbeat cells (merged into Liveness, Task #1195)", ()
     );
     render(<InspectorPanel agentId={1} />);
     await waitFor(() => expect(screen.queryByLabelText("Liveness loading")).toBeNull());
-    expect(screen.getByText("due")).toBeTruthy();
+    const livenessSection = screen.getByText("Liveness").closest("section");
+    const nextCell = within(livenessSection!).getByText("Next heartbeat").closest("div");
+    expect(nextCell!.textContent).toContain(formatUpcoming(nextAt, new Date(), { clockFormat: "24h" }));
+    expect(within(nextCell!).queryByText(/due/i)).toBeNull();
   });
 
   it("shows an em dash for a running agent with no active pause, plus the last pause from history", async () => {

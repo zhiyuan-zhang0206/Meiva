@@ -10,10 +10,11 @@
 // retires the entry), or self-hides after a grace window so a missed terminal
 // can never leave it ticking forever.
 
-import { AlertCircle, Loader2 } from "lucide-react";
+import { AlertCircle } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useEffect, useState } from "react";
 
+import { Spinner } from "@/components/ui/spinner";
 import { formatDuration } from "@/lib/format/item-summary";
 import { FLEX } from "@/lib/layout/layout";
 import { useTimelineStore } from "@/lib/timeline/timeline-store";
@@ -99,7 +100,7 @@ function CompactingBlockBody({ compact }: { compact: LiveCompact }) {
       {isFailure ? (
         <AlertCircle aria-hidden className="size-3.5 shrink-0 text-destructive" />
       ) : settled ? null : (
-        <Loader2 aria-hidden className="size-3.5 shrink-0 animate-spin text-muted-foreground" />
+        <Spinner className="size-3.5" />
       )}
       <span className={cn("font-medium", isFailure ? "text-destructive" : "text-foreground")}>
         {label}

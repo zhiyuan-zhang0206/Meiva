@@ -20,6 +20,7 @@ import {
   MoveHorizontal,
   Palette,
 } from "lucide-react";
+import { Spinner } from "@/components/ui/spinner";
 import { cn } from "@/lib/format/utils";
 import { useQuery } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
@@ -74,7 +75,7 @@ export default function DisplaySettingsPage({ mode = "all" }: { mode?: "general"
   if (isLoading) {
     return (
       <div className={cn("justify-center py-12", FLEX)}>
-        <div className="size-5 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+        <Spinner className="size-5" />
       </div>
     );
   }

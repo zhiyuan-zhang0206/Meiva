@@ -1,3 +1,4 @@
+// meiva:note
 // Switch-cost policy for the conversation surface (tasks #3894 / #3900).
 //
 // One place names the numbers a steady-state switch budget is made of, so the
@@ -5,8 +6,8 @@
 //
 // - INSPECTOR_RETENTION_MS: per-agent inspector cache retention — matches the
 //   QueryClient global gcTime default. A switch back inside the window renders
-//   the cached snapshot immediately (no cold skeleton); past it the visit is
-//   cold again and a skeleton is allowed.
+//   the cached snapshot immediately, with no pending state at all; past it the
+//   visit is cold again and each pending cell shows the bare spinner.
 // - CONVERSATION_RETENTION_MS: per-agent retention for the conversation trio
 //   (timeline / token-usage / pending). With the trio retained, a re-attach
 //   needs no per-domain refresh read: the shared composed reconcile
@@ -23,9 +24,9 @@
 // most 5 requests per switch between two warm agents with the panel open —
 // the conversation side contributes the stream reconnect plus one composed
 // reconcile read, the inspector its two back-visit revalidations — and 0 cold
-// skeletons on a back-visit (the 2026-09-18 audit measured 9-10 before
+// pending tells on a back-visit (the 2026-09-18 audit measured 9-10 before
 // batch 1).
-
+// meiva:link ui/web/src/docs/frontend-components/inspector/queries-and-refresh.meiva.okf.md
 export const INSPECTOR_RETENTION_MS = 30 * 60_000;
 export const CONVERSATION_RETENTION_MS = 30 * 60_000;
 export const BACK_VISIT_REVALIDATE_MAX = 2;

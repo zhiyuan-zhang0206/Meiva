@@ -2368,7 +2368,11 @@ export interface components {
         };
         AgentCost: {
             cost_usd: number;
+            cost_usd_api: number;
+            cost_usd_subscription: number;
             unpriced_calls: number;
+            unpriced_calls_api: number;
+            unpriced_calls_subscription: number;
             llm_calls: number;
             tokens_in: number;
             tokens_out: number;

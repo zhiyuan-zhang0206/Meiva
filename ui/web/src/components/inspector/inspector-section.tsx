@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 
+import { Spinner } from "@/components/ui/spinner";
 import { FLEX, FLEX_COL } from "@/lib/layout/layout";
 import { cn } from "@/lib/format/utils";
 
@@ -61,7 +62,7 @@ export function Metric({
       <span className="text-[10.5px] tracking-wide text-muted-foreground">{label}</span>
       {value === undefined ? (
         <span className={cn("h-[17px] items-center", FLEX)} aria-hidden="true">
-          <span className="h-3 w-12 animate-pulse rounded-sm bg-muted-foreground/15" />
+          <Spinner className="size-3" />
         </span>
       ) : (
         <span className="font-mono text-[11.5px] leading-[17px] tabular-nums text-foreground dark:text-[#f0ede7]" data-testid={valueTestId}>

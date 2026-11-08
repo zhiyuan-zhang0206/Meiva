@@ -24,6 +24,7 @@ import {
   type SimNode,
 } from "@/lib/fleet/use-force-layout";
 import { useSvgZoomPan } from "@/lib/fleet/use-svg-zoom-pan";
+import { Spinner } from "@/components/ui/spinner";
 import { cn } from "@/lib/format/utils";
 import { useCoarsePointer } from "@/lib/input/use-coarse-pointer";
 
@@ -393,8 +394,8 @@ export const ForceGraph = memo(function ForceGraph({
         </g>
       </svg>
       ) : nodes.length > 0 ? (
-        <div className={cn("h-full items-center justify-center text-xs text-muted-foreground", FLEX)}>
-          {t("loading")}
+        <div className={cn("h-full items-center justify-center", FLEX)}>
+          <Spinner className="size-5" label={t("loading")} />
         </div>
       ) : null}
 

@@ -20,6 +20,7 @@ import { RunTimelineWorkspace } from "@/components/run-timeline/run-timeline-wor
 import { useViewport } from "@/components/run-timeline/viewport/use-viewport";
 import { viewportStore, type ViewportStore } from "@/components/run-timeline/viewport/viewport-store";
 import { PageHeader } from "@/components/shell/page-header";
+import { Spinner } from "@/components/ui/spinner";
 import { useTimeFormat } from "@/lib/format/use-time-format";
 import { categoryClass, classCategory } from "@/components/run-timeline/model/timeline-model-classes";
 import { clampViewport, MIN_VIEW_MS, viewportOf, type Viewport } from "@/components/run-timeline/model/timeline-model-viewport";
@@ -317,8 +318,9 @@ export default function AgentViewPage({
                 data-testid={`run-timeline-window-status-${ids[i]}`}
                 className={cn(FLEX, "h-4 items-center gap-1", read.windowError && "text-destructive")}
               >
+                {read.pending ? <Spinner className="size-3" label={t("windowLoading", { id: ids[i] })} /> : null}
                 <span className="truncate">
-                  {read.pending ? t("windowLoading", { id: ids[i] }) : read.windowError ? t("windowFailed", { id: ids[i] }) : ""}
+                  {read.windowError ? t("windowFailed", { id: ids[i] }) : ""}
                 </span>
                 {read.windowError && !read.pending ? <button type="button" className="shrink-0" onClick={() => retry(ids[i])}>{t("retry")}</button> : null}
               </p>

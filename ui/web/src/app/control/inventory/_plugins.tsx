@@ -6,6 +6,7 @@ import { useState } from "react";
 
 import { PackageDraftEntry } from "@/components/plugins/package-draft-entry";
 import { InlineError } from "@/components/ui/inline-error";
+import { Spinner } from "@/components/ui/spinner";
 import { Switch } from "@/components/ui/switch";
 import { errMsg } from "@/lib/contracts/errors";
 import { cn } from "@/lib/format/utils";
@@ -34,7 +35,7 @@ export function PluginsInventory() {
   return <div className="space-y-4">
     <PackageDraftEntry kind="plugin" />
     <p className="text-sm text-muted-foreground">{t("clusterPluginsHelp")}</p>
-    {plugins.isLoading && <p className="text-sm text-muted-foreground">{t("loadingPlugins")}</p>}
+    {plugins.isLoading && <Spinner className="size-4" label={t("loadingPlugins")} />}
     {plugins.error && <InlineError onRetry={() => void plugins.refetch()}>{t("couldntLoad")}</InlineError>}
     {plugins.data && (["llm", "decision", "builtin", "extension"] as const).map((group) => {
       const heading = { llm: "llmProviders", decision: "decisionProviders", builtin: "builtinPlugins", extension: "extensionPlugins" } as const;

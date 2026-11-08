@@ -5,7 +5,7 @@
 // listed first (the backend owns ordering; SSE invalidates snapshots). Alert is fully
 // separate from Notice.
 
-import { ChevronLeft, ChevronRight, Loader2 } from "lucide-react";
+import { ChevronLeft, ChevronRight } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useState } from "react";
 
@@ -20,6 +20,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { InlineError } from "@/components/ui/inline-error";
+import { Spinner } from "@/components/ui/spinner";
 import { formatDuration } from "@/lib/format/item-summary";
 import { useWallDate } from "@/lib/format/now/use-wall-date";
 import { FLEX, MIN_W_0 } from "@/lib/layout/layout";
@@ -129,7 +130,7 @@ export default function AlertsSection() {
       <div data-testid="alerts-body" className="h-[28rem] overflow-y-auto">
         {isLoading ? (
           <div className={cn("h-full items-center justify-center py-8", FLEX)}>
-            <Loader2 className="size-5 animate-spin text-muted-foreground" />
+            <Spinner className="size-5" />
           </div>
         ) : error ? (
           <div className={cn("px-3 py-4 justify-center", FLEX)}>

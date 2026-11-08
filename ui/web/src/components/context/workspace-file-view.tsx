@@ -15,6 +15,7 @@ import { isAudioExtension, isImageExtension, isVideoExtension, parseLineRange } 
 import { ChatMarkdown } from "@/components/content/markdown";
 import { ZoomableImage } from "@/components/content/zoomable-image";
 import { InlineError } from "@/components/ui/inline-error";
+import { Spinner } from "@/components/ui/spinner";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useWorkspaceFileStore, type WorkspaceFileTarget } from "@/lib/context/workspace-file-store";
 import { cn, formatFileSize } from "@/lib/format/utils";
@@ -220,8 +221,8 @@ export function WorkspaceFileView({
 
       <ScrollArea className={cn(MIN_H_0, FLEX_1)}>
         {isLoading ? (
-          <div className={cn("items-center justify-center p-8 text-center text-xs text-muted-foreground", FLEX, FLEX_1)}>
-            {t("loading")}
+          <div className={cn("items-center justify-center p-8", FLEX, FLEX_1)}>
+            <Spinner className="size-4" label={t("loading")} />
           </div>
         ) : error ? (
           <div className="p-6 space-y-3 text-center">

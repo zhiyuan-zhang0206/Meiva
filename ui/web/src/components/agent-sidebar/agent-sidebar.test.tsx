@@ -191,14 +191,16 @@ describe("SidebarBody empty / tree / spawning placeholder", () => {
     expect(rowButton(2).textContent).toContain("#2 · second");
   });
 
-  it("tree mode + roster still loading with live rows present → loading state, no tree rows (no hierarchy flip)", () => {
+  it("tree mode + roster still loading with live rows present → one spinner, no tree rows (no hierarchy flip)", () => {
     state.isLoading = true;
     state.agents = [
       makeAgent({ agent_id: 1, label: "first" }),
       makeAgent({ agent_id: 2, label: "second" }),
     ];
-    wrap(<AgentSidebar {...handlers} />);
-    expect(screen.getByText("Loading agents…")).toBeTruthy();
+    const { container } = wrap(<AgentSidebar {...handlers} />);
+    expect(screen.getByRole("status", { name: "Loading agents…" })).toBeTruthy();
+    expect(screen.queryByText("Loading agents…")).toBeNull();
+    expect(container.querySelectorAll(".animate-pulse")).toHaveLength(0);
     expect(screen.queryByText(/#1 · first/)).toBeNull();
     expect(screen.queryByText(/#2 · second/)).toBeNull();
   });

@@ -6,6 +6,7 @@ import { useTranslations } from "next-intl";
 
 import { Metric, Section } from "@/components/inspector/inspector-section";
 import { buttonVariants } from "@/components/ui/button";
+import { Spinner } from "@/components/ui/spinner";
 import { useTimeFormat } from "@/lib/format/use-time-format";
 
 import { useLinkKindLabels } from "./agent-view/agent-view-link-labels";
@@ -31,7 +32,7 @@ function LinkText({ link }: { link: ResolvedLink["link"] }) {
       </p>
     );
   }
-  if (read.data === undefined) return <p className="text-xs text-muted-foreground">{t("messagesLoading")}</p>;
+  if (read.data === undefined) return <Spinner label={t("messagesLoading")} />;
   return (
     <>
       {read.data.title !== null ? (

@@ -353,10 +353,11 @@ describe("GraphView lineage, hover, and empty states", () => {
     expect(screen.getByText("0 nodes · 0 edges")).toBeTruthy();
   });
 
-  it("empty graph while loading shows the loading placeholder", () => {
+  it("empty graph while loading shows a spinner and no loading sentence", () => {
     renderGraph(<GraphView selectedAgentId={null} onSelectAgent={vi.fn()} navigate={navigate} />, { fetch: "pending" });
 
-    expect(screen.getByText("Loading...")).toBeTruthy();
+    expect(screen.getByRole("status", { name: "Loading..." })).toBeTruthy();
+    expect(screen.queryByText("Loading...")).toBeNull();
   });
 
   it("error (endpoint absent / gateway down) shows the unavailable placeholder", async () => {

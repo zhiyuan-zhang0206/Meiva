@@ -3,12 +3,12 @@
 // meiva:link gateway/extensions/docs/inventory.meiva.okf.md
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Loader2 } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useState } from "react";
 
 import { PackageDraftEntry } from "@/components/plugins/package-draft-entry";
 import { InlineError } from "@/components/ui/inline-error";
+import { Spinner } from "@/components/ui/spinner";
 import { NativeSelect } from "@/components/ui/native-select";
 import { Switch } from "@/components/ui/switch";
 import { errMsg } from "@/lib/contracts/errors";
@@ -48,7 +48,7 @@ export function McpInventory() {
       <p className="text-xs text-muted-foreground">{t("mcpInstallScope")}</p>
     </div>
     <p className="text-sm text-muted-foreground">{t("machineMcpHelp")}</p>
-    {inventory.isLoading && <Loader2 className="size-6 animate-spin text-muted-foreground" aria-label={t("loadingMcp")} />}
+    {inventory.isLoading && <Spinner className="size-6" label={t("loadingMcp")} />}
     {inventory.error && <InlineError onRetry={() => void inventory.refetch()}>{t("couldntLoad")}</InlineError>}
     {data && <>
       <label className="block space-y-2 text-sm">

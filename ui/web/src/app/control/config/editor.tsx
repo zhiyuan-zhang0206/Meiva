@@ -10,6 +10,7 @@ import { useTranslations } from "next-intl";
 import { useCallback, useEffect, useState } from "react";
 
 import { DeferredMount } from "@/components/app/deferred-mount";
+import { Spinner } from "@/components/ui/spinner";
 import type { BrowserStorage } from "@/lib/browser/browser";
 import { useBrowser } from "@/lib/browser/browser-provider";
 
@@ -294,7 +295,7 @@ export default function ConfigEditor({ mode }: { mode: "general" | "advanced" | 
     : [];
 
   if (isLoading) {
-    return <p className="text-sm text-muted-foreground">{t("loading")}</p>;
+    return <Spinner className="size-4" label={t("loading")} />;
   }
   // meiva:note
   // stale-while-error (Task #1051): a failed post-write refetch (e.g. the

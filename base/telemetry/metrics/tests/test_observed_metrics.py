@@ -73,6 +73,29 @@ def test_absent_usage_price_and_optional_fields_stay_unknown() -> None:
     assert (fact.tokens_in, fact.tokens_out, fact.tokens_cached) == (0, 0, 0)
 
 
+def test_usage_splits_metered_and_subscription_spend_by_source() -> None:
+    # meiva:note
+    # `source` names the loop that ran the call: a subscription harness's usage-time price is list
+    # value consumed, every other source (and an absent one) is money owed.
+    for source, subscription in (
+        (None, False),
+        ("compaction", False),
+        ("claude_code", True),
+        ("codex", True),
+    ):
+        fact = metrics.observe_event(_event("llm_usage", model="m", cost_usd="0.5", source=source))
+        assert fact is not None
+        assert fact.cost_usd == Decimal("0.5")
+        assert fact.cost_usd_subscription == (Decimal("0.5") if subscription else Decimal(0))
+        assert fact.unpriced_calls_subscription == 0
+    unpriced = metrics.observe_event(_event("llm_usage", model="m", source="antigravity"))
+    assert unpriced is not None
+    assert (unpriced.unpriced_calls, unpriced.unpriced_calls_subscription) == (1, 1)
+    unpriced_api = metrics.observe_event(_event("llm_usage", model="m"))
+    assert unpriced_api is not None
+    assert (unpriced_api.unpriced_calls, unpriced_api.unpriced_calls_subscription) == (1, 0)
+
+
 def test_unrelated_large_logs_are_not_serialized_again() -> None:
     class _UnserializableBody:
         def __str__(self) -> str:
@@ -159,6 +182,27 @@ def test_sequential_and_concurrent_replay_add_each_fact_once(
     ).fetchone()
     assert row == (1, 17, Decimal("0.012345678901"), 1, 1, 1.23456789, 1.23456789, 1.23456789)
     assert db_conn.execute("SELECT count(*) FROM agent_metric_observations").fetchone() == (2,)
+
+
+def test_day_rollup_keeps_the_billing_split(db_conn: psycopg.Connection) -> None:
+    _agent(db_conn)
+    facts = [
+        metrics.MetricObservation(
+            event_id=101,
+            agent_id=71,
+            occurred_at=_AT,
+            kind="usage",
+            usage_calls=2,
+            unpriced_calls_subscription=1,
+            cost_usd=Decimal("1.5"),
+            cost_usd_subscription=Decimal("0.5"),
+        )
+    ]
+    assert metrics.write_observations(facts, db=db_conn) == 1
+    assert db_conn.execute(
+        "SELECT cost_usd, cost_usd_subscription, unpriced_calls_subscription "
+        "FROM agent_metric_days WHERE agent_id=71"
+    ).fetchone() == (Decimal("1.5"), Decimal("0.5"), 1)
 
 
 def test_day_boundaries_are_utc_and_durations_do_not_floor(db_conn: psycopg.Connection) -> None:

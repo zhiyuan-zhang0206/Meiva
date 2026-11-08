@@ -24,6 +24,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { WindowSelect } from "@/components/agents/window-select";
 import { InlineError } from "@/components/ui/inline-error";
+import { Spinner } from "@/components/ui/spinner";
 import { STATS_WINDOW_LABELS, STATS_WINDOWS, type StatsWindowHours } from "@/lib/agents/sidebar";
 import type { PublicAgentStatus } from "@/lib/contracts/types";
 import { useFleetGraph } from "@/lib/fleet/use-fleet-graph";
@@ -373,9 +374,9 @@ export function GraphView({
           2026-09-18, task #3893). */}
       {paintedNodes.length === 0 ? (
         loading || rosterPending ? (
-          <p className={cn("absolute inset-0 items-center justify-center text-xs text-muted-foreground", FLEX)}>
-            {t("loading")}
-          </p>
+          <span className={cn("absolute inset-0 items-center justify-center", FLEX)}>
+            <Spinner className="size-5" label={t("loading")} />
+          </span>
         ) : error ? (
           <div className={cn("absolute inset-0 items-center justify-center", FLEX)}>
             <InlineError>{t("unavailable")}</InlineError>

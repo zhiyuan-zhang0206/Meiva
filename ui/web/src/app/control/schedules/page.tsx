@@ -12,7 +12,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   CalendarClock,
-  Loader2,
   Plus,
   Sparkles,
 } from "lucide-react";
@@ -22,6 +21,7 @@ import { useRouter } from "next/navigation";
 import { useCallback, useState } from "react";
 
 import { Button } from "@/components/ui/button";
+import { Spinner } from "@/components/ui/spinner";
 import { InlineError } from "@/components/ui/inline-error";
 import { CodeHighlighterPreloader } from "@/components/content/code-highlighter-preloader";
 import { Input } from "@/components/ui/input";
@@ -145,7 +145,7 @@ export function SchedulesPageView({ navigate }: SchedulesPageViewProps) {
   if (isLoading) {
     return (
       <div className={cn("justify-center py-12", FLEX)}>
-        <Loader2 className="size-6 animate-spin text-muted-foreground" />
+        <Spinner className="size-6" />
       </div>
     );
   }
@@ -202,7 +202,7 @@ export function SchedulesPageView({ navigate }: SchedulesPageViewProps) {
           onClick={() => draftMutation.mutate(nl.trim())}
         >
           {draftMutation.isPending ? (
-            <Loader2 className="size-3.5 animate-spin mr-1" />
+            <Spinner className="mr-1 size-3.5" />
           ) : (
             <Sparkles className="size-3.5 mr-1" />
           )}

@@ -33,6 +33,7 @@ from datetime import UTC, date, datetime, timedelta
 
 import psycopg
 
+from base.api_contracts.agent_contract import SUBSCRIPTION_HARNESSES
 from base.clock import SYSTEM_TIMERS, Clock
 from base.clock.configuration import clock_config_from_boot
 from base.cluster.machine.configured import ConfiguredMachineIdentity
@@ -71,15 +72,23 @@ _COST = LLM_USAGE_KEYS["cost_usd"]
 _TOKENS_SQL = f"""
     INSERT INTO agent_model_tokens_daily
         (agent_id, day, model, llm_calls, tokens_in, tokens_out, tokens_cached,
-         tokens_reasoning, cost_usd, costed_calls, unpriced_calls)
+         tokens_reasoning, cost_usd, cost_usd_subscription, costed_calls, unpriced_calls,
+         unpriced_calls_subscription)
     SELECT t.agent_id, %(day)s, COALESCE({LLM_USAGE_KEYS["model"]}, ''), count(*),
            COALESCE(sum({_num(LLM_USAGE_KEYS["in_total"])}), 0)::bigint,
            COALESCE(sum({_num(LLM_USAGE_KEYS["out_total"])}), 0)::bigint,
            COALESCE(sum({_num(LLM_USAGE_KEYS["cache_read"])}), 0)::bigint,
            COALESCE(sum({_num(LLM_USAGE_KEYS["reasoning"])}), 0)::bigint,
            COALESCE(sum({_num(_COST)}), 0)::float8,
+           COALESCE(sum({_num(_COST)}) FILTER (
+               WHERE {LLM_USAGE_KEYS["source"]} = ANY(%(subscription)s)
+           ), 0)::float8,
            count(*) FILTER (WHERE COALESCE({_COST}, '') <> ''),
-           count(*) FILTER (WHERE COALESCE({_COST}, '') = '')
+           count(*) FILTER (WHERE COALESCE({_COST}, '') = ''),
+           count(*) FILTER (
+               WHERE COALESCE({_COST}, '') = ''
+                 AND {LLM_USAGE_KEYS["source"]} = ANY(%(subscription)s)
+           )
     FROM telemetry_events t
     JOIN agents a ON a.id = t.agent_id
     WHERE t.ts >= %(start)s AND t.ts < %(end)s AND t.event_name = 'llm_usage'
@@ -91,8 +100,10 @@ _TOKENS_SQL = f"""
         tokens_cached    = EXCLUDED.tokens_cached,
         tokens_reasoning = EXCLUDED.tokens_reasoning,
         cost_usd         = EXCLUDED.cost_usd,
+        cost_usd_subscription = EXCLUDED.cost_usd_subscription,
         costed_calls     = EXCLUDED.costed_calls,
-        unpriced_calls   = EXCLUDED.unpriced_calls
+        unpriced_calls   = EXCLUDED.unpriced_calls,
+        unpriced_calls_subscription = EXCLUDED.unpriced_calls_subscription
     WHERE EXCLUDED.llm_calls >= agent_model_tokens_daily.llm_calls
 """  # noqa: S608 — keys come from the registered payload constants
 
@@ -150,6 +161,7 @@ def roll_day(conn: psycopg.Connection, day: date) -> tuple[int, int]:
         "start": start,
         "end": start + timedelta(days=1),
         "fail": EXEC_FAILURE_EVENTS,
+        "subscription": list(SUBSCRIPTION_HARNESSES),
     }
     with conn.transaction():
         tokens = conn.execute(_TOKENS_SQL, params).rowcount  # type: ignore[arg-type]

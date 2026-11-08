@@ -4,7 +4,6 @@ import {
   Activity,
   AlertTriangle,
   BarChart3,
-  Loader2,
   RotateCw,
   Settings,
   Waypoints,
@@ -14,6 +13,7 @@ import Link from "next/link";
 import { useTranslations } from "next-intl";
 
 import { AlertsBadge } from "@/components/notifications/alerts-badge";
+import { Spinner } from "@/components/ui/spinner";
 import { PluginNavIcons } from "@/components/plugins/plugin-nav";
 import { WindowSelect } from "@/components/agents/window-select";
 import { errMsg as formatErrMsg } from "@/lib/contracts/errors";
@@ -177,12 +177,8 @@ export function StatusCards({
             {t("statusPanel")}
           </span>
           {fetching ? (
-            <span
-              role="status"
-              aria-label={t("statusPanelUpdating")}
-              title={t("statusPanelUpdating")}
-            >
-              <Loader2 className="size-3 animate-spin text-muted-foreground" aria-hidden />
+            <span title={t("statusPanelUpdating")}>
+              <Spinner className="size-3" label={t("statusPanelUpdating")} />
             </span>
           ) : null}
           {failedWithoutData ? (
@@ -211,10 +207,7 @@ export function StatusCards({
             {t("liveAgents")}
           </span>
           {firstLoad ? (
-            <span
-              className="h-4 w-8 animate-pulse rounded bg-muted-foreground/20"
-              aria-hidden
-            />
+            <Spinner className="size-3" />
           ) : (
             <span className={valueClass}>{stats ? String(stats.live_count) : placeholder}</span>
           )}
@@ -277,10 +270,7 @@ export function StatusCards({
                   {card.label}
                 </span>
                 {firstLoad ? (
-                  <span
-                    className="h-4 w-10 animate-pulse rounded bg-muted-foreground/20"
-                    aria-hidden
-                  />
+                  <Spinner className="size-3" />
                 ) : (
                   <span className={valueClass}>{card.value}</span>
                 )}
@@ -505,7 +495,7 @@ function WarningErrorCard({
     >
       <span className="text-[10px] tracking-wide text-muted-foreground">{t("warningsErrors")}</span>
       {firstLoad ? (
-        <span className="h-4 w-10 animate-pulse rounded bg-muted-foreground/20" aria-hidden />
+        <Spinner className="size-3" />
       ) : stats === undefined ? (
         <span className={placeholderClass}>{placeholder}</span>
       ) : (

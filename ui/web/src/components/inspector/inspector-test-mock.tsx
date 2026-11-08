@@ -203,7 +203,11 @@ export function fixture(overrides: Partial<AgentInspectStatistics> = {}): AgentI
     },
     cost: {
       cost_usd: 0.4213,
+      cost_usd_api: 0.4213,
+      cost_usd_subscription: 0,
       unpriced_calls: 1,
+      unpriced_calls_api: 1,
+      unpriced_calls_subscription: 0,
       llm_calls: 142,
       tokens_in: 1_200_000,
       tokens_out: 84_000,

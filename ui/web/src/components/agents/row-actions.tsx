@@ -1,7 +1,8 @@
-import { Loader2, RotateCw } from "lucide-react";
+import { RotateCw } from "lucide-react";
 import { useTranslations } from "next-intl";
 
 import type { AgentRow } from "@/lib/contracts/types";
+import { Spinner } from "@/components/ui/spinner";
 import { cn } from "@/lib/format/utils";
 import { FLEX } from "@/lib/layout/layout";
 import type { PendingAction } from "@/lib/agents/use-agents";
@@ -28,7 +29,7 @@ export function RowActions({
     return (
       <div className={wrapperCls}>
         {pending === "resurrecting" ? (
-          <Spinner color="text-muted-foreground" />
+          <ActionSpinner color="text-muted-foreground" />
         ) : (
           <button
             type="button"
@@ -47,21 +48,21 @@ export function RowActions({
   if (pending === "restarting") {
     return (
       <div className={wrapperCls}>
-        <Spinner color="text-muted-foreground" />
+        <ActionSpinner color="text-muted-foreground" />
       </div>
     );
   }
   if (pending === "terminating") {
     return (
       <div className={wrapperCls}>
-        <Spinner color="text-destructive" />
+        <ActionSpinner color="text-destructive" />
       </div>
     );
   }
   if (pending === "compacting") {
     return (
       <div className={wrapperCls}>
-        <Spinner color="text-muted-foreground" />
+        <ActionSpinner color="text-muted-foreground" />
       </div>
     );
   }
@@ -69,10 +70,10 @@ export function RowActions({
   return null;
 }
 
-function Spinner({ color }: { color: string }) {
+function ActionSpinner({ color }: { color: string }) {
   return (
     <span className="p-0.5 inline-flex items-center justify-center">
-      <Loader2 className={cn("size-3 animate-spin", color)} />
+      <Spinner className={cn("size-3", color)} />
     </span>
   );
 }

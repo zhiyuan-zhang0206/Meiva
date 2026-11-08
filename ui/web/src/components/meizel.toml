@@ -4,6 +4,7 @@ exports = ["agent-sidebar", "app", "auth", "connection", "content", "context", "
 "agent-sidebar" = ["agents", "notifications", "plugins", "ui"]
 "agents" = ["ui"]
 "app" = ["ui"]
+"auth" = ["ui"]
 "connection" = ["notifications"]
 "content" = ["ui"]
 "context" = ["content", "inspector", "ui"]

@@ -103,21 +103,25 @@ describe("ConfigPage restart reminder from write result", () => {
     );
     wrap(<ConfigEditor mode="advanced" />);
     await waitFor(() => screen.getByTestId("edit-log_level"));
-    expect(
-      screen.queryByRole("status"),
-    ).toBeNull();
+    // meiva:note
+    // The reminder is the only status region carrying the restart sentence;
+    // loading spinners are status regions too, so the assertion reads the text.
+    const reminder = () => screen.queryByText(/All processes/);
+    expect(reminder()).toBeNull();
     expect(screen.queryByText("Requires restart")).toBeNull();
     fireEvent.click(screen.getByTestId("edit-log_level"));
     const input = screen.getByTestId("input-log_level");
     fireEvent.change(input, { target: { value: "DEBUG" } });
-    expect(screen.queryByRole("status")).toBeNull();
+    expect(reminder()).toBeNull();
     fireEvent.keyDown(input, { key: "Enter" });
-    const banner = await waitFor(() =>
-      screen.getByRole("status"),
-    );
-    expect(banner.textContent).toMatch(/All processes/);
+    const banner = await waitFor(() => {
+      const text = reminder();
+      if (text === null) throw new Error("restart reminder not shown yet");
+      return text.closest('[role="status"]');
+    });
+    expect(banner?.textContent).toMatch(/All processes/);
     fireEvent.click(screen.getByRole("button", { name: "Dismiss restart reminder" }));
-    expect(screen.queryByRole("status")).toBeNull();
+    expect(reminder()).toBeNull();
   });
 
   it.each(["live", "rejected", "failed"])("does not suggest a restart for a %s write", async (outcome) => {

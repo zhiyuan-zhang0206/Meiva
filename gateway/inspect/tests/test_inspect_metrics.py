@@ -128,6 +128,53 @@ def test_numeric_facts_are_agent_scoped_and_prices_are_never_recomputed(
     assert snapshot.metadata.collection == "observed"
 
 
+def test_cost_splits_into_api_and_subscription_buckets(db_conn: psycopg.Connection) -> None:
+    # meiva:note
+    # One agent can run on both billing modes (a restart can move it to another harness), so the
+    # cost read keeps the metered and subscription-covered parts apart and still sums the total.
+    # A full past UTC day reads the day table; the edges read raw observations.
+    # A fixed past UTC day is the fixture input: the read must cover a whole day for the
+    # day-summary path, and the assertion is about the split, not about "now".
+    day = datetime(2026, 9, 15, tzinfo=UTC)  # time-bomb-ok: explicit fixture window input
+    aid = _agent(db_conn, day - timedelta(days=2))
+    write_observations(
+        [
+            MetricObservation(
+                1, aid, day + timedelta(hours=1), "usage", usage_calls=1, cost_usd=Decimal("0.25")
+            ),
+            MetricObservation(
+                2,
+                aid,
+                day + timedelta(hours=2),
+                "usage",
+                usage_calls=2,
+                cost_usd=Decimal("1.5"),
+                cost_usd_subscription=Decimal("1.5"),
+            ),
+            MetricObservation(
+                3,
+                aid,
+                day + timedelta(hours=3),
+                "usage",
+                usage_calls=1,
+                unpriced_calls=1,
+                unpriced_calls_subscription=1,
+            ),
+        ],
+        db=db_conn,
+    )
+    snapshot = _read(db_conn, aid, day, day + timedelta(days=1), collection=day - timedelta(days=1))
+    cost = snapshot.cost
+    assert cost is not None
+    assert (cost.cost_usd, cost.cost_usd_api, cost.cost_usd_subscription) == (1.75, 0.25, 1.5)
+    assert (cost.unpriced_calls, cost.unpriced_calls_api, cost.unpriced_calls_subscription) == (
+        1,
+        0,
+        1,
+    )
+    assert (cost.tokens_in, cost.llm_calls) == (0, 4)
+
+
 def test_half_open_window_has_exact_float_quantiles(db_conn: psycopg.Connection) -> None:
     end = datetime.now(UTC)
     start = end - timedelta(hours=1)

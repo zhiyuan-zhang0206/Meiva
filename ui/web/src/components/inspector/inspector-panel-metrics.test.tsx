@@ -2,6 +2,7 @@ import { act, screen, waitFor, within } from "@testing-library/react";
 import { renderWithBrowser } from "@/test-support/render";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import type { AgentCost } from "@/lib/contracts/types";
 import { BACK_VISIT_REVALIDATE_MAX } from "@/lib/layout/switch-budget";
 import {
   cleanupInspectorTest,
@@ -33,7 +34,11 @@ describe("InspectorPanel metrics and durations", () => {
       fixture({
         cost: {
           cost_usd: 0.0073,
+          cost_usd_api: 0.0073,
+          cost_usd_subscription: 0,
           unpriced_calls: 7,
+          unpriced_calls_api: 7,
+          unpriced_calls_subscription: 0,
           llm_calls: 8,
           tokens_in: 2_000_000,
           tokens_out: 0,
@@ -110,24 +115,23 @@ describe("InspectorPanel metrics and durations", () => {
   });
 });
 
-describe("Cost cell billing presentation (user ruling 2026-10-28)", () => {
+describe("Cost blocks by billing mode (user ruling 2026-11-08)", () => {
   // meiva:note
-  // A subscription's label rides the amount in parentheses on one text run; a
-  // metered (API) agent says nothing beyond the amount; an unresolved harness
-  // keeps the amount alone. The assertions read the metric cell's structure, not
-  // "the string appears somewhere": the cell is the label's parent (label span,
-  // amount span, and only when the number needs a note a sub-line span), so the
-  // old presentation's third row and a parenthetical split into its own element
-  // both fail here.
+  // One block per billing mode, each naming the mode in its label and the amount
+  // carrying no parenthetical: `Cost (subscription)` is the list value a
+  // subscription covered, `Cost (API)` the metered money owed. The assertions read
+  // the metric cell's own children (label, amount, and only when the mode has
+  // unpriced calls a sub-line), so a suffix riding the amount or a stray third row
+  // fails here.
   // meiva:link ui/web/src/docs/frontend-components/inspector/activity.meiva.okf.md
-  const costCell = (): HTMLElement => {
-    const cell = screen.getByText("Cost").parentElement;
-    if (cell === null) throw new Error("the Cost metric rendered no cell");
+  const metricCell = (label: string): HTMLElement => {
+    const cell = screen.getByText(label).parentElement;
+    if (cell === null) throw new Error(`the ${label} metric rendered no cell`);
     return cell;
   };
 
-  const costRows = (): (string | null)[] =>
-    [...costCell().children].map((child) => child.textContent);
+  const cellRows = (label: string): (string | null)[] =>
+    [...metricCell(label).children].map((child) => child.textContent);
 
   const activitySection = (): HTMLElement => {
     const section = screen.getByText("Activity").closest("section");
@@ -135,57 +139,45 @@ describe("Cost cell billing presentation (user ruling 2026-10-28)", () => {
     return section;
   };
 
-  const costWith = (unpricedCalls: number) =>
-    fixture({ cost: { ...fixture().cost!, unpriced_calls: unpricedCalls } });
+  const apiCost = (unpricedCalls: number) =>
+    fixture({
+      cost: {
+        ...fixture().cost!,
+        cost_usd_api: fixture().cost!.cost_usd,
+        unpriced_calls_api: unpricedCalls,
+      },
+    });
 
-  const awaitRosterHarness = (label: string) => screen.findByText(label);
+  const subscriptionCost = (unpricedCalls: number) =>
+    fixture({
+      cost: {
+        ...fixture().cost!,
+        cost_usd_api: 0,
+        cost_usd_subscription: fixture().cost!.cost_usd,
+        unpriced_calls_api: 0,
+        unpriced_calls_subscription: unpricedCalls,
+      },
+    });
 
-  it("shows only the amount for a metered agent, never the billing mode", async () => {
-    getAgentRoster.mockResolvedValue(rosterFixture({ harness: "meiva" }));
-    getAgentInspectStatistics.mockResolvedValue(costWith(0));
-    render(<InspectorPanel agentId={1} />);
-    await awaitRosterHarness("Meiva");
-
-    expect(costRows()).toEqual(["Cost", "$0.4213"]);
-    expect(activitySection().textContent).not.toMatch(/api/i);
-  });
-
-  it("keeps a subscription's label in the amount's text run, not on its own row", async () => {
+  it("names the mode in the label and keeps the amount alone on its own run", async () => {
     getAgentRoster.mockResolvedValue(rosterFixture({ harness: "claude_code" }));
-    getAgentInspectStatistics.mockResolvedValue(costWith(0));
+    getAgentInspectStatistics.mockResolvedValue(subscriptionCost(0));
     render(<InspectorPanel agentId={1} />);
+    await screen.findByText("Cost (subscription)");
 
-    const amount = await screen.findByText("$0.4213 (Subscription)");
-    expect(costRows()).toEqual(["Cost", "$0.4213 (Subscription)"]);
-    expect(amount.childNodes).toHaveLength(1);
-    expect(amount.childNodes[0].nodeType).toBe(Node.TEXT_NODE);
+    expect(cellRows("Cost (subscription)")).toEqual(["Cost (subscription)", "$0.4213"]);
+    expect(activitySection().textContent).not.toMatch(/\(Subscription\)/);
+    expect(screen.queryByText("Cost (API)")).toBeNull();
   });
 
-  it("leaves the amount alone when the harness is unresolved", async () => {
-    getAgentInspectStatistics.mockResolvedValue(costWith(0));
-    render(<InspectorPanel agentId={1} />);
-    await screen.findByText("$0.4213");
-
-    expect(costRows()).toEqual(["Cost", "$0.4213"]);
-  });
-
-  it("keeps unpriced calls on their own sub-line, beside the subscription amount", async () => {
-    getAgentRoster.mockResolvedValue(rosterFixture({ harness: "claude_code" }));
-    getAgentInspectStatistics.mockResolvedValue(costWith(3));
-    render(<InspectorPanel agentId={1} />);
-    await screen.findByText("$0.4213 (Subscription)");
-
-    expect(costRows()).toEqual(["Cost", "$0.4213 (Subscription)", "3 unpriced"]);
-  });
-
-  it("keeps unpriced calls on their own sub-line for a metered agent too", async () => {
+  it("keeps a metered agent's unpriced calls on the API block's own sub-line", async () => {
     getAgentRoster.mockResolvedValue(rosterFixture({ harness: "meiva" }));
-    getAgentInspectStatistics.mockResolvedValue(costWith(3));
+    getAgentInspectStatistics.mockResolvedValue(apiCost(3));
     render(<InspectorPanel agentId={1} />);
-    await awaitRosterHarness("Meiva");
+    await screen.findByText("Meiva");
 
-    expect(costRows()).toEqual(["Cost", "$0.4213", "3 unpriced"]);
-    expect(costCell().textContent).not.toMatch(/api/i);
+    expect(cellRows("Cost (API)")).toEqual(["Cost (API)", "$0.4213", "3 unpriced"]);
+    expect(screen.queryByText("Cost (subscription)")).toBeNull();
   });
 });
 
@@ -197,6 +189,7 @@ describe("Inspector read ownership", () => {
     expect(screen.getByText("$0.4213")).toBeTruthy();
     const changed = fixture();
     changed.cost!.cost_usd = 9;
+    changed.cost!.cost_usd_api = 9;
     getAgentInspectStatistics.mockResolvedValue(changed);
     act(() => {
       for (let index = 0; index < 20; index++) streamHandlers.connection?.({ type: "open" });
@@ -230,7 +223,7 @@ describe("Inspector read ownership", () => {
     expect(inspectorEntries()).toHaveLength(6);
   });
 
-  it("a back-switch revalidates at most the two live reads and never shows a cold skeleton", async () => {
+  it("a back-switch revalidates at most the two live reads and never shows a cold pending tell", async () => {
     getAgentInspectLive.mockImplementation((id) =>
       Promise.resolve(liveFixture(id === 1 ? { agent_id: id } : { agent_id: id, shells: [] })),
     );
@@ -332,5 +325,100 @@ describe("internal duration evidence never renders (task #3869)", () => {
       screen.queryByText("Some recorded turns have no duration; throughput is unavailable."),
     ).toBeNull();
     expect(screen.queryByText("42.5")).toBeNull();
+  });
+});
+
+
+describe("InspectorPanel cost blocks by billing mode (user ruling 2026-11-08)", () => {
+  // meiva:note
+  // `cost_usd_api` and `cost_usd_subscription` are the same agent's spend split by the billing
+  // mode of the loop that ran each call. A block shows only when its amount is above zero, so a
+  // mode the agent never ran — and a mode whose calls were all unpriced — has no block; the one
+  // that does show prints the amount alone, with no `(Subscription)` suffix riding beside it.
+  const cost = (overrides: Partial<AgentCost>) => fixture({
+    cost: {
+      cost_usd: 0,
+      cost_usd_api: 0,
+      cost_usd_subscription: 0,
+      unpriced_calls: 0,
+      unpriced_calls_api: 0,
+      unpriced_calls_subscription: 0,
+      llm_calls: 0,
+      tokens_in: 0,
+      tokens_out: 0,
+      tokens_cached: 0,
+      tokens_reasoning: 0,
+      cache_hit_pct: 0,
+      ...overrides,
+    },
+  });
+
+  it("renders only the API block when the agent never ran a subscription harness", async () => {
+    getAgentInspectStatistics.mockResolvedValue(
+      cost({ cost_usd: 1.25, cost_usd_api: 1.25, llm_calls: 3 }),
+    );
+    render(<InspectorPanel agentId={1} />);
+
+    await waitFor(() => expect(screen.getByText("$1.2500")).toBeTruthy());
+    expect(screen.getByText("Cost (API)")).toBeTruthy();
+    expect(screen.getByTestId("inspector-cost-api")).toBeTruthy();
+    expect(screen.queryByText("Cost (subscription)")).toBeNull();
+    expect(screen.queryByTestId("inspector-cost-subscription")).toBeNull();
+  });
+
+  it("renders only the subscription block when every call ran on a subscription harness", async () => {
+    getAgentInspectStatistics.mockResolvedValue(
+      cost({ cost_usd: 2.5, cost_usd_subscription: 2.5, llm_calls: 4 }),
+    );
+    render(<InspectorPanel agentId={1} />);
+
+    await waitFor(() => expect(screen.getByText("$2.5000")).toBeTruthy());
+    expect(screen.getByText("Cost (subscription)")).toBeTruthy();
+    expect(screen.getByTestId("inspector-cost-subscription")).toBeTruthy();
+    expect(screen.queryByText("Cost (API)")).toBeNull();
+    expect(screen.queryByTestId("inspector-cost-api")).toBeNull();
+    expect(screen.queryByText(/\(Subscription\)/)).toBeNull();
+  });
+
+  it("renders both blocks when the agent's history covers both modes", async () => {
+    getAgentInspectStatistics.mockResolvedValue(
+      cost({
+        cost_usd: 1.75,
+        cost_usd_api: 0.25,
+        cost_usd_subscription: 1.5,
+        llm_calls: 5,
+      }),
+    );
+    render(<InspectorPanel agentId={1} />);
+
+    await waitFor(() => expect(screen.getByText("$0.2500")).toBeTruthy());
+    expect(screen.getByText("Cost (API)")).toBeTruthy();
+    expect(screen.getByText("Cost (subscription)")).toBeTruthy();
+    expect(screen.getByText("$1.5000")).toBeTruthy();
+  });
+
+  it("hides a zero-amount block even when that mode logged unpriced calls", async () => {
+    // meiva:note
+    // The amount is the whole test: a mode that spent nothing has no block, and the panel never
+    // answers "$0.0000" to a question about cost (user ruling 2026-11-08, restated by 405). The
+    // visible mode keeps its own unpriced note on the sub-line.
+    getAgentInspectStatistics.mockResolvedValue(
+      cost({
+        cost_usd: 0.5,
+        cost_usd_api: 0.5,
+        unpriced_calls: 2,
+        unpriced_calls_api: 1,
+        unpriced_calls_subscription: 1,
+        llm_calls: 2,
+      }),
+    );
+    render(<InspectorPanel agentId={1} />);
+
+    await waitFor(() => expect(screen.getByText("Cost (API)")).toBeTruthy());
+    expect(screen.getByText("$0.5000")).toBeTruthy();
+    expect(screen.getByText("1 unpriced")).toBeTruthy();
+    expect(screen.queryByText("Cost (subscription)")).toBeNull();
+    expect(screen.queryByTestId("inspector-cost-subscription")).toBeNull();
+    expect(screen.queryByText("$0.0000")).toBeNull();
   });
 });

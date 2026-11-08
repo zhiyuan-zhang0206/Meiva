@@ -8,6 +8,7 @@ import { ChatMarkdown } from "@/components/content/markdown";
 import { isFilePath } from "@/components/content/file-path-utils";
 import { useWorkspaceFileStore } from "@/lib/context/workspace-file-store";
 import { InlineError } from "@/components/ui/inline-error";
+import { Spinner } from "@/components/ui/spinner";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { ZoomableImage } from "@/components/content/zoomable-image";
 import type { BrowserNavigation } from "@/lib/browser/browser";
@@ -199,7 +200,7 @@ export function ToUserDocumentView({ agentId, document, failure, pending, refres
           <>
             {!content ? (
               <div className={cn("items-center justify-center px-8 text-center text-[13px] text-muted-foreground", FLEX, FLEX_1)}>
-                {loading ? t("loading") : refusal ? (
+                {loading ? <Spinner className="size-4" label={t("loading")} /> : refusal ? (
                   <div data-testid="document-failure" className="space-y-1">
                     <InlineError>{t(refusal.text)}</InlineError>
                     {refusal.raw && files.length > 0 ? (

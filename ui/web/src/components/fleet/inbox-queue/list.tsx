@@ -8,6 +8,7 @@ import { BAR_HEIGHT_CLASS, FLEX, FLEX_1, MIN_W_0 } from "@/lib/layout/layout";
 import type { QueueUnit } from "@/lib/notifications/task-notify";
 import type { PublicAgentStatus, NoticeItem } from "@/lib/contracts/types";
 import { InlineError } from "@/components/ui/inline-error";
+import { Spinner } from "@/components/ui/spinner";
 import { cn } from "@/lib/format/utils";
 
 import { fmtLabel, openKey, resolvedKey, type OpenItem } from "./keys";
@@ -58,9 +59,9 @@ export function EmptyState({ failed, loading }: { failed: boolean; loading: bool
   }
   if (loading) {
     return (
-      <p className="px-4 py-8 text-center text-xs text-muted-foreground">
-        {t("loading")}
-      </p>
+      <div className={cn("justify-center px-4 py-8", FLEX)}>
+        <Spinner className="size-4" label={t("loading")} />
+      </div>
     );
   }
   return (
@@ -167,7 +168,7 @@ export function QueueList({
             disabled={isFetchingNextPage}
             className="w-full px-4 py-2 text-center text-[10px] text-muted-foreground hover:text-foreground disabled:opacity-50"
           >
-            {isFetchingNextPage ? t("loading") : t("showMore")}
+            {isFetchingNextPage ? <Spinner className="mx-auto size-3" label={t("loading")} /> : t("showMore")}
           </button>
         </li>
       )}

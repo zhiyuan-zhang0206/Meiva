@@ -8,6 +8,7 @@ import { useState } from "react";
 import { Section } from "@/components/inspector/inspector-section";
 import { cardConfigFor, TimelineRow } from "@/components/timeline/row";
 import { buttonVariants } from "@/components/ui/button";
+import { Spinner } from "@/components/ui/spinner";
 import { approx, formatTokensCompact } from "@/lib/format/format-number";
 import { FLEX } from "@/lib/layout/layout";
 import type { BackendTimelineItem, RunTimelineMessage, RunTimelineMessagePart, RunTimelineUnit } from "@/lib/contracts/types";
@@ -152,7 +153,7 @@ export function TimelineMessages({
   return (
     <Section icon={<MessagesSquare className="size-3" />} title={t("messagesHeading", { count: end - start + 1 })}>
       <div className="space-y-2" data-testid="run-timeline-messages">
-        {query.isPending ? <p className="text-xs text-muted-foreground">{t("messagesLoading")}</p> : null}
+        {query.isPending ? <Spinner label={t("messagesLoading")} /> : null}
         {query.isError ? (
           <p role="alert" className="text-xs text-destructive">
             {t("messagesFailed")}

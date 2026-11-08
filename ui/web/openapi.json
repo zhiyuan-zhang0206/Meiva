@@ -8596,10 +8596,34 @@
             "minimum": 0.0,
             "title": "Cost Usd"
           },
+          "cost_usd_api": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "Cost Usd Api",
+            "description": "Metered spend: money the account is billed for."
+          },
+          "cost_usd_subscription": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "Cost Usd Subscription",
+            "description": "List value the calls a subscription covered would have cost; not money owed."
+          },
           "unpriced_calls": {
             "type": "integer",
             "minimum": 0.0,
             "title": "Unpriced Calls"
+          },
+          "unpriced_calls_api": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Unpriced Calls Api",
+            "description": "Metered calls with no usage-time price snapshot; they contribute 0."
+          },
+          "unpriced_calls_subscription": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Unpriced Calls Subscription",
+            "description": "Subscription-covered calls with no usage-time price snapshot; they contribute 0."
           },
           "llm_calls": {
             "type": "integer",
@@ -8643,7 +8667,11 @@
         "type": "object",
         "required": [
           "cost_usd",
+          "cost_usd_api",
+          "cost_usd_subscription",
           "unpriced_calls",
+          "unpriced_calls_api",
+          "unpriced_calls_subscription",
           "llm_calls",
           "tokens_in",
           "tokens_out",
