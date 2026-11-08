@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import random
 from collections.abc import Callable
 from datetime import datetime
 
@@ -20,11 +21,14 @@ from meiva.web.errors import FetchError
 __all__ = ["fetch_deps", "fetch_deps_for", "injection_inputs", "search_deps", "search_deps_for"]
 
 
-def search_deps() -> SearchDeps:
-    return search_deps_for(sdk_settings.config_authority())
+# meiva:note
+# Both factories take the process generator as a required value: the read policy draws its retry
+# jitter from it, so the bundle that carries the endpoints carries the generator too.
+def search_deps(*, rng: random.Random) -> SearchDeps:
+    return search_deps_for(sdk_settings.config_authority(), rng=rng)
 
 
-def search_deps_for(authority: ConfigAuthority) -> SearchDeps:
+def search_deps_for(authority: ConfigAuthority, *, rng: random.Random) -> SearchDeps:
     timeout_s = authority.service_field_value("web_search_timeout_seconds")
     return SearchDeps(
         provider=search_provider(authority.service_field_value("web_search_provider")),
@@ -41,10 +45,11 @@ def search_deps_for(authority: ConfigAuthority) -> SearchDeps:
             max_count=authority.service_field_value("web_deepseek_max_results"),
             qps=authority.service_field_value("web_deepseek_qps"),
         ),
+        rng=rng,
     )
 
 
-def fetch_deps(delivery: FindingDelivery) -> FetchDeps:
+def fetch_deps(delivery: FindingDelivery, *, rng: random.Random) -> FetchDeps:
     authority = sdk_settings.config_authority()
     try:
         catalog = sdk_settings.model_catalog()
@@ -63,6 +68,7 @@ def fetch_deps(delivery: FindingDelivery) -> FetchDeps:
         delivery_active=delivery.active,
         agent_id=agent_identity.agent_id(),
         now=sdk_settings.clock().now,
+        rng=rng,
     )
 
 
@@ -75,6 +81,7 @@ def fetch_deps_for(
     delivery_active: bool,
     agent_id: int | None,
     now: Callable[[], datetime],
+    rng: random.Random,
 ) -> FetchDeps:
     fetch_timeout_s = authority.service_field_value("web_fetch_timeout_seconds")
     return FetchDeps(
@@ -113,6 +120,7 @@ def fetch_deps_for(
             delivery_active=delivery_active,
             now=now,
         ),
+        rng=rng,
     )
 
 

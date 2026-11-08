@@ -25,6 +25,7 @@ def search_one(
         error_type=SearchError,
         provider_json=False,
         pacer=None,
+        rng=deps.rng,
         policy=policy,
     )
     hits = wire.brave_hits(data)

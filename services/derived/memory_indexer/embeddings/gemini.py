@@ -39,6 +39,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import random
 from collections.abc import Awaitable, Callable
 from datetime import datetime
 
@@ -51,10 +52,10 @@ from base.host.net.resilience import (
     MAX_RETRY_AFTER_RESPECT_S,
     ExponentialBackoff,
     Policy,
-    aretry,
+    aretry_jittered,
     http_classifier,
-    retry,
     retry_asleep,
+    retry_jittered,
     retry_sleep,
 )
 from base.lm.catalog import ModelCatalog
@@ -235,6 +236,7 @@ def embed(
     transport: httpx.AsyncBaseTransport | None = None,
     sleep: Callable[[float], None] = retry_sleep,
     now: Callable[[], datetime],
+    rng: random.Random,
 ) -> np.ndarray:
     """Single batched `batchEmbedContents` call with retry; returns
     (N, DIM) float32. Raises after retries.
@@ -266,7 +268,7 @@ def embed(
         return run_sync(_attempt)
 
     try:
-        body = retry(policy, sleep=sleep)(_call)
+        body = retry_jittered(policy, rng=rng, sleep=sleep)(_call)
     except httpx.HTTPError as exc:
         raise EmbeddingAPIError(
             f"Gemini embed failed after {policy.max_attempts} attempts: {exc!r}"
@@ -287,6 +289,7 @@ async def embed_async(
     transport: httpx.AsyncBaseTransport | None = None,
     asleep: Callable[[float], Awaitable[None]] = retry_asleep,
     now: Callable[[], datetime],
+    rng: random.Random,
 ) -> np.ndarray:
     """Async twin of ``embed`` — native non-blocking I/O over
     ``httpx.AsyncClient`` with ``asyncio.sleep`` backoff. Same timeout /
@@ -311,7 +314,7 @@ async def embed_async(
             async def _call() -> object:
                 return await post_attempt_once(client, endpoint, timeout_s, headers, payload)
 
-            body = await aretry(policy, asleep=asleep)(_call)
+            body = await aretry_jittered(policy, rng=rng, asleep=asleep)(_call)
     except EmbeddingAPIError:
         raise
     except httpx.HTTPError as exc:
@@ -350,6 +353,7 @@ class GeminiEmbeddingProvider:
         sleep: Callable[[float], None] = retry_sleep,
         asleep: Callable[[float], Awaitable[None]] = retry_asleep,
         now: Callable[[], datetime],
+        rng: random.Random,
     ) -> None:
         self._catalog = catalog
         self._timeout_s = timeout_s
@@ -359,6 +363,7 @@ class GeminiEmbeddingProvider:
         self._sleep = sleep
         self._asleep = asleep
         self._now = now
+        self.rng = rng
 
     def embed_batch(self, texts: list[str]) -> np.ndarray:
         """Batch embed markdown file contents for indexing. (N, DIM) float32."""
@@ -372,6 +377,7 @@ class GeminiEmbeddingProvider:
             transport=self._transport,
             sleep=self._sleep,
             now=self._now,
+            rng=self.rng,
         )
 
     def embed_query(self, text: str) -> np.ndarray:
@@ -387,6 +393,7 @@ class GeminiEmbeddingProvider:
             transport=self._transport,
             sleep=self._sleep,
             now=self._now,
+            rng=self.rng,
         )
         return row_vectors(embedded)[0]
 
@@ -403,5 +410,6 @@ class GeminiEmbeddingProvider:
             transport=self._transport,
             asleep=self._asleep,
             now=self._now,
+            rng=self.rng,
         )
         return row_vectors(embedded)[0]

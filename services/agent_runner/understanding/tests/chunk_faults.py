@@ -16,6 +16,7 @@ from base.agents.messages.timestamp_policy import TimestampPolicy
 from base.clock import SYSTEM_TIMERS, Clock
 from base.clock.configuration import clock_config_from_boot
 from base.clock.tests.fakes import system_clock
+from base.clock.tests.seeded_rng import seeded_rng
 from base.config import ConfigBoot
 from base.db import Database
 from base.lm.catalog import ModelCatalog
@@ -135,4 +136,5 @@ async def run_rounds(
                 config=config,
                 describe=seams.describe,
                 locate_job_chunk=seams.locate_job_chunk,
+                rng=seeded_rng(),
             ).claim(tg)

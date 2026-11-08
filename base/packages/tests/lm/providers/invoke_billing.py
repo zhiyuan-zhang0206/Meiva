@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import random
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 from http.server import BaseHTTPRequestHandler, HTTPServer
@@ -69,6 +70,7 @@ def invoke(tracer: BillingRuntime, catalog: ModelCatalog) -> None:
                     error_type=ValueError,
                     catalog=catalog,
                     now=lambda: datetime(2026, 8, 17, tzinfo=UTC),
+                    rng=random.SystemRandom(),
                 )
                 == "answer"
             )

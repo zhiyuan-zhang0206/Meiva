@@ -2,6 +2,7 @@
 # Observe real sleep calls in this process while retaining nonzero production retry delays.
 # meiva:link base/packages/tests/lm/docs/contracts.meiva.okf.md
 
+import random
 import sys
 import time
 from datetime import UTC, datetime
@@ -54,6 +55,7 @@ def main(error: Exception, provider_cause: bool) -> None:
                 retry_attempts=2,
                 catalog=model_catalog,
                 now=lambda: datetime(2026, 8, 17, tzinfo=UTC),
+                rng=random.SystemRandom(),
             )
         assert raised.value is error
         assert len(calls) == 1 and sleeps == []

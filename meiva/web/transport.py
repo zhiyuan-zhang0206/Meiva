@@ -9,6 +9,7 @@ from __future__ import annotations
 import http.client
 import json
 import logging
+import random
 import threading
 import urllib.error
 import urllib.parse
@@ -17,7 +18,7 @@ import urllib.request
 from base.clock import Timers
 from base.host.boundary.json_values import is_object_dict
 from base.host.boundary.untyped import object_of
-from base.host.net.resilience import Policy, retry
+from base.host.net.resilience import Policy, retry_jittered
 from meiva.web.errors import WebError
 from meiva.web.failures import (
     connection_failed_message,
@@ -95,7 +96,9 @@ def _read(request: HttpRequest, timeout_s: float) -> bytes:
 # Send `request` and decode the JSON answer. A transient failure is retried by the shared web
 # read policy; an HTTP status, a refused connection or a body that is not JSON raises
 # `error_type` with the failure worded by `wire`. `provider_json` selects the message of a JSON
-# error body over the whole body; a `pacer` is awaited before every attempt.
+# error body over the whole body; a `pacer` is awaited before every attempt. The read policy
+# spreads its retries, so the loop draws from the caller's `rng` -- the process generator the
+# wiring hands every request through `FetchDeps`/`SearchDeps`.
 def send_json(
     request: HttpRequest,
     *,
@@ -104,6 +107,7 @@ def send_json(
     error_type: type[WebError],
     provider_json: bool,
     pacer: RateLimiter | None,
+    rng: random.Random,
     policy: Policy = WEB_READ_POLICY,
 ) -> dict[str, object]:
     def attempt() -> bytes:
@@ -112,7 +116,7 @@ def send_json(
         return _read(request, timeout_s)
 
     try:
-        answer = object_of(json.loads, retry(policy)(attempt))
+        answer = object_of(json.loads, retry_jittered(policy, rng=rng)(attempt))
     except urllib.error.HTTPError as e:
         detail = e.read().decode(errors="replace")
         _log.warning(

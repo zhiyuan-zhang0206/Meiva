@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import random
 import sys
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -212,7 +213,13 @@ async def _enqueue(db: Database, agent_id: int, planned: Sequence[PlannedChunk])
 
 
 async def _consume(
-    db: Database, agent_id: int, *, catalog: ModelCatalog, config: ConfigBoot, clock: Clock
+    db: Database,
+    agent_id: int,
+    *,
+    catalog: ModelCatalog,
+    config: ConfigBoot,
+    clock: Clock,
+    rng: random.Random,
 ) -> None:
     pool = db.async_pool(AsyncConnectionPool, min_size=1, max_size=32, timeout=30.0)
     await pool.open()
@@ -228,6 +235,7 @@ async def _consume(
             llm_override=config.view.lm.llm_override,
             config=config,
             clock=clock,
+            rng=rng,
         )
     finally:
         await pool.close()
@@ -267,7 +275,13 @@ def _report_jobs(db: Database, agent_id: int) -> None:
 
 
 async def _regroup(
-    db: Database, agent_id: int, *, catalog: ModelCatalog, config: ConfigBoot, clock: Clock
+    db: Database,
+    agent_id: int,
+    *,
+    catalog: ModelCatalog,
+    config: ConfigBoot,
+    clock: Clock,
+    rng: random.Random,
 ) -> None:
     pool = db.async_pool(AsyncConnectionPool, min_size=1, max_size=3, timeout=30.0)
     await pool.open()
@@ -283,6 +297,7 @@ async def _regroup(
             agent_id,
             config=config,
             clock=clock,
+            rng=rng,
         )
         print(f"agent {agent_id}: upper levels rebuilt over {leaves} leaves")
     finally:
@@ -406,13 +421,19 @@ def main(argv: Sequence[str], *, dockerenv: Path = DOCKERENV) -> None:
         return
     catalog = build_model_catalog(home=meiva_home())
     # meiva:note
-    # This operator CLI is one process entry: it builds the clock its replay passes stamp with.
+    # This operator CLI is one process entry: it builds the clock its replay passes stamp with
+    # and the generator its LLM retry passes jitter with.
     clock = Clock(clock_config_from_boot(config), timers=SYSTEM_TIMERS)
+    rng = random.Random()  # noqa: S311
     if args.command == "consume":
-        asyncio.run(_consume(db, args.agent_id, catalog=catalog, config=config, clock=clock))
+        asyncio.run(
+            _consume(db, args.agent_id, catalog=catalog, config=config, clock=clock, rng=rng)
+        )
         return
     if args.command == "regroup":
-        asyncio.run(_regroup(db, args.agent_id, catalog=catalog, config=config, clock=clock))
+        asyncio.run(
+            _regroup(db, args.agent_id, catalog=catalog, config=config, clock=clock, rng=rng)
+        )
         return
     history, boundaries = _load(db, args.agent_id)
     model, soft, threshold = _threshold(

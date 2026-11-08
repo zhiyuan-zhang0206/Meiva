@@ -17,6 +17,7 @@
 
 from __future__ import annotations
 
+import random
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
@@ -46,6 +47,7 @@ _ProviderEntry = tuple[
             httpx.AsyncBaseTransport | None,
             embeddinggemma.EmbeddingGemmaConfig | None,
             Callable[[], datetime],
+            random.Random,
         ],
         EmbeddingProvider,
     ],
@@ -64,8 +66,10 @@ def _require_gemma(
 
 PROVIDERS: dict[str, _ProviderEntry] = {
     gemini.GeminiEmbeddingProvider.name: (
-        lambda catalog, timeout_s, api_key, transport, _config, now: gemini.GeminiEmbeddingProvider(
-            catalog, timeout_s=timeout_s, api_key=api_key, transport=transport, now=now
+        lambda catalog, timeout_s, api_key, transport, _config, now, rng: (
+            gemini.GeminiEmbeddingProvider(
+                catalog, timeout_s=timeout_s, api_key=api_key, transport=transport, now=now, rng=rng
+            )
         ),
         gemini.worst_case_batch_seconds,
         lambda _revision: EmbeddingDescriptor(
@@ -75,7 +79,7 @@ PROVIDERS: dict[str, _ProviderEntry] = {
         ),
     ),
     embeddinggemma.NAME: (
-        lambda _catalog, timeout_s, _api_key, transport, config, _now: (
+        lambda _catalog, timeout_s, _api_key, transport, config, _now, _rng: (
             embeddinggemma.EmbeddingGemmaProvider(
                 _require_gemma(config), timeout_s=timeout_s, transport=transport
             )
@@ -107,12 +111,13 @@ def get_provider(
     catalog: ModelCatalog,
     timeout_s: float,
     api_key: str | None,
+    rng: random.Random,
     transport: httpx.AsyncBaseTransport | None = None,
     embeddinggemma_config: embeddinggemma.EmbeddingGemmaConfig | None = None,
     now: Callable[[], datetime],
 ) -> EmbeddingProvider:
     ctor, _, _ = _provider_entry(name)
-    return ctor(catalog, timeout_s, api_key, transport, embeddinggemma_config, now)
+    return ctor(catalog, timeout_s, api_key, transport, embeddinggemma_config, now, rng)
 
 
 def worst_case_batch_seconds(name: str, *, timeout_seconds: float) -> float:

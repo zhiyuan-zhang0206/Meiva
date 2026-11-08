@@ -463,7 +463,7 @@ def create_app(
     state.catalog = catalog
     if isinstance(catalog, ModelCatalog):
         state.memory_embedder = memory_router.build_embedder(
-            config.memory_search, catalog, now=state.clock.now
+            config.memory_search, catalog, now=state.clock.now, rng=config.rng
         )
     state.command_catalog = CommandCatalog.system(
         skills=partial(

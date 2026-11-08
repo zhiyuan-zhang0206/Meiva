@@ -8,6 +8,7 @@ from typing import Any
 
 import pytest
 
+from base.clock.tests.seeded_rng import seeded_rng
 from scripts.model_registry.tests.test_check_model_updates import (
     known_models,
     missing_environment_value,
@@ -115,15 +116,30 @@ def test_single_round_transient_error_and_its_recovery_stay_silent(
     fetcher = stub_fetcher(bare_tracker)
     args = ["--env-file", str(env_file), "--state-dir", str(tmp_path / "state")]
 
-    assert bare_tracker.main(args, env_lookup=missing_environment_value, model_fetcher=fetcher) == 0
+    assert (
+        bare_tracker.main(
+            args, env_lookup=missing_environment_value, model_fetcher=fetcher, rng=seeded_rng()
+        )
+        == 0
+    )
     write_env_file(bare_tracker, env_file, missing="GEMINI_API_KEY")
-    assert bare_tracker.main(args, env_lookup=missing_environment_value, model_fetcher=fetcher) == 0
+    assert (
+        bare_tracker.main(
+            args, env_lookup=missing_environment_value, model_fetcher=fetcher, rng=seeded_rng()
+        )
+        == 0
+    )
     state = json.loads((tmp_path / "state" / "state.json").read_text())
     assert state["providers"]["gemini"]["pending"]["rounds"] == 1
     assert state["providers"]["gemini"]["announced"] == "ok"
 
     write_env_file(bare_tracker, env_file)
-    assert bare_tracker.main(args, env_lookup=missing_environment_value, model_fetcher=fetcher) == 0
+    assert (
+        bare_tracker.main(
+            args, env_lookup=missing_environment_value, model_fetcher=fetcher, rng=seeded_rng()
+        )
+        == 0
+    )
     state = json.loads((tmp_path / "state" / "state.json").read_text())
     assert state["providers"]["gemini"]["status"] == "ok"
     assert "pending" not in state["providers"]["gemini"]
@@ -138,7 +154,9 @@ def test_persistent_status_change_announces_once_and_recovery_announces_too(
     args = ["--env-file", str(env_file), "--state-dir", str(tmp_path / "state")]
 
     def run_tracker() -> int:
-        return bare_tracker.main(args, env_lookup=missing_environment_value, model_fetcher=fetcher)
+        return bare_tracker.main(
+            args, env_lookup=missing_environment_value, model_fetcher=fetcher, rng=seeded_rng()
+        )
 
     assert run_tracker() == 0
     write_env_file(bare_tracker, env_file, missing="XAI_API_KEY")
@@ -172,7 +190,9 @@ def test_legacy_state_upgrade_baselines_the_loaded_status(
     args = ["--env-file", str(env_file), "--state-dir", str(state_dir)]
 
     def run_tracker() -> int:
-        return bare_tracker.main(args, env_lookup=missing_environment_value, model_fetcher=fetcher)
+        return bare_tracker.main(
+            args, env_lookup=missing_environment_value, model_fetcher=fetcher, rng=seeded_rng()
+        )
 
     assert run_tracker() == 0  # the first healthy round is pending, silent
     state = json.loads((state_dir / "state.json").read_text())
@@ -196,10 +216,20 @@ def test_empty_fetch_error_still_produces_a_valid_persisted_status(
 
     args = ["--env-file", str(env_file), "--state-dir", str(tmp_path / "state")]
 
-    assert bare_tracker.main(args, env_lookup=missing_environment_value, model_fetcher=fetch) == 0
+    assert (
+        bare_tracker.main(
+            args, env_lookup=missing_environment_value, model_fetcher=fetch, rng=seeded_rng()
+        )
+        == 0
+    )
     state = json.loads((tmp_path / "state" / "state.json").read_text())
     assert state["providers"]["glm"]["status"] == "error: ValueError"
-    assert bare_tracker.main(args, env_lookup=missing_environment_value, model_fetcher=fetch) == 2
+    assert (
+        bare_tracker.main(
+            args, env_lookup=missing_environment_value, model_fetcher=fetch, rng=seeded_rng()
+        )
+        == 2
+    )
 
 
 def test_write_report_persists_markdown_and_json(tmp_path: Path, bare_tracker: Any) -> None:
@@ -220,6 +250,7 @@ def test_write_report_persists_markdown_and_json(tmp_path: Path, bare_tracker: A
             ],
             env_lookup=missing_environment_value,
             model_fetcher=fetcher,
+            rng=seeded_rng(),
         )
         == 0
     )

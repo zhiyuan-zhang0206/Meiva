@@ -22,6 +22,7 @@ from base.agents.history.hierarchy.group_store import (
     write_groups,
 )
 from base.clock.tests.fakes import system_clock
+from base.clock.tests.seeded_rng import seeded_rng
 from base.config import ConfigBoot
 from base.db import Database
 from base.host.env.agent_slices import ModelOverrides
@@ -107,6 +108,7 @@ def test_generation_reads_late_policy_after_model_construction(
                 7,
                 config=config,
                 clock=clock,
+                rng=seeded_rng(),
             )
         [request] = [json.loads(body) for body in wire.requests]
         assert wire.build_efforts == ["high"]
@@ -222,6 +224,7 @@ async def test_the_cadence_setting_decides_when_a_level_is_due(
         clock=system_clock(),
         config=config,
         min_check_open=1,
+        rng=seeded_rng(),
     )
     assert _seams["asked"] == []
     await _add_leaf(aops_pool, 7)
@@ -233,6 +236,7 @@ async def test_the_cadence_setting_decides_when_a_level_is_due(
         clock=system_clock(),
         config=config,
         min_check_open=1,
+        rng=seeded_rng(),
     )
     assert len(_seams["asked"]) == 1
 
@@ -249,6 +253,7 @@ async def test_nothing_is_asked_below_five_open_nodes(
         clock=system_clock(),
         config=config,
         min_check_open=1,
+        rng=seeded_rng(),
     )
     assert _seams["asked"] == []
 
@@ -270,6 +275,7 @@ async def test_a_check_closes_groups_links_children_and_resets_the_baseline(
         clock=system_clock(),
         config=config,
         min_check_open=1,
+        rng=seeded_rng(),
     )
     assert _seams["asked"] == [ids]
     assert await _parents(aops_pool) == [(2, 0, 29, 3, "first three")]
@@ -296,6 +302,7 @@ async def test_a_declined_check_is_not_repeated_at_the_same_count(
         clock=system_clock(),
         config=config,
         min_check_open=1,
+        rng=seeded_rng(),
     )
     await gc.run_group_checks(
         aops_pool,
@@ -305,6 +312,7 @@ async def test_a_declined_check_is_not_repeated_at_the_same_count(
         clock=system_clock(),
         config=config,
         min_check_open=1,
+        rng=seeded_rng(),
     )
     assert len(_seams["asked"]) == 1 and await load_last_checked(aops_pool, AGENT, 1) == 5
     # meiva:note
@@ -318,6 +326,7 @@ async def test_a_declined_check_is_not_repeated_at_the_same_count(
         clock=system_clock(),
         config=config,
         min_check_open=1,
+        rng=seeded_rng(),
     )
     assert len(_seams["asked"]) == 1
     # meiva:note
@@ -331,6 +340,7 @@ async def test_a_declined_check_is_not_repeated_at_the_same_count(
         clock=system_clock(),
         config=config,
         min_check_open=1,
+        rng=seeded_rng(),
     )
     assert len(_seams["asked"]) == 2
 
@@ -356,6 +366,7 @@ async def test_closing_a_level_can_make_the_next_level_due(
         clock=system_clock(),
         config=config,
         min_check_open=1,
+        rng=seeded_rng(),
     )
     # meiva:note
     # level 1 closed one group; level 2 (now 6 open) was asked next
@@ -383,6 +394,7 @@ async def test_a_failed_check_emits_an_event_records_calls_and_waits_for_five_mo
         clock=system_clock(),
         config=config,
         min_check_open=1,
+        rng=seeded_rng(),
     )
     assert emitted_events.names() == ["understanding_group_failed"]
     assert await load_last_checked(aops_pool, AGENT, 1) == 5
@@ -400,6 +412,7 @@ async def test_a_failed_check_emits_an_event_records_calls_and_waits_for_five_mo
         clock=system_clock(),
         config=config,
         min_check_open=1,
+        rng=seeded_rng(),
     )
     # meiva:note
     # same count, not asked again
@@ -419,6 +432,7 @@ async def test_a_live_lease_blocks_a_second_checker(
         clock=system_clock(),
         config=config,
         min_check_open=1,
+        rng=seeded_rng(),
     )
     assert _seams["asked"] == []
     async with aops_pool.connection() as conn, conn.cursor() as cur:
@@ -433,6 +447,7 @@ async def test_a_live_lease_blocks_a_second_checker(
         clock=system_clock(),
         config=config,
         min_check_open=1,
+        rng=seeded_rng(),
     )
     assert len(_seams["asked"]) == 1
 
@@ -452,6 +467,7 @@ async def test_a_crash_inside_a_check_frees_the_lease(
         clock=system_clock(),
         config=config,
         min_check_open=1,
+        rng=seeded_rng(),
     )
     # meiva:note
     # the lease was released
@@ -488,7 +504,16 @@ def test_standalone_groupings_hand_the_reasoning_setting_to_the_model(
     for value in ("", "off", "high"):
         config.set_field("understanding_group_reasoning", value)
         gc.generate(
-            models, "deepseek-flash", none, 1, [], [], 7, config=config, clock=system_clock()
+            models,
+            "deepseek-flash",
+            none,
+            1,
+            [],
+            [],
+            7,
+            config=config,
+            clock=system_clock(),
+            rng=seeded_rng(),
         )
         assert models.gets[-1] == ("deepseek-flash", none, value)
 
@@ -514,6 +539,7 @@ async def test_two_checkers_of_one_level_make_one_call(
                 clock=system_clock(),
                 config=config,
                 min_check_open=1,
+                rng=seeded_rng(),
             )
             for _ in range(3)
         )
@@ -547,6 +573,7 @@ async def test_different_agents_are_checked_at_the_same_time(
                 clock=system_clock(),
                 config=config,
                 min_check_open=1,
+                rng=seeded_rng(),
             )
             for a in (7, 8)
         )
@@ -609,6 +636,7 @@ def test_an_open_set_past_three_checks_must_close_a_group(
         config=config,
         clock=system_clock(),
         min_check_open=1,
+        rng=seeded_rng(),
     )
     gc.generate(
         models,
@@ -621,6 +649,7 @@ def test_an_open_set_past_three_checks_must_close_a_group(
         config=config,
         clock=system_clock(),
         min_check_open=1,
+        rng=seeded_rng(),
     )
     config.set_field("understanding_group_check_open", 60)
     config.set_field("understanding_group_check_decay", 3)
@@ -637,6 +666,7 @@ def test_an_open_set_past_three_checks_must_close_a_group(
         config=config,
         clock=system_clock(),
         min_check_open=6,
+        rng=seeded_rng(),
     )
     gc.generate(
         models,
@@ -649,6 +679,7 @@ def test_an_open_set_past_three_checks_must_close_a_group(
         config=config,
         clock=system_clock(),
         min_check_open=6,
+        rng=seeded_rng(),
     )
     # meiva:note
     # 14 < 3 x 5, 15 = 3 x 5; per level: 59 < 60 = 3 x 20
@@ -711,6 +742,7 @@ async def test_single_groups_in_the_middle_close_and_no_level_ever_overlaps(
             clock=system_clock(),
             config=config,
             min_check_open=1,
+            rng=seeded_rng(),
         )
     rows, parents = await _tree(aops_pool)
     assert parents, "the plans must have closed some groups"

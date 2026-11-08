@@ -5,6 +5,7 @@ from unittest.mock import MagicMock
 
 import services.agent_runner.agent_host.daemon as daemon_mod
 from base.clock.tests.fakes import system_clock
+from base.clock.tests.seeded_rng import seeded_rng
 from base.config.tests.configuration import snapshot_process_config
 from meiva.sdk_surface.installation import Installation
 
@@ -18,6 +19,7 @@ def test_background_loops_are_the_plugin_watch_the_log_rotator_the_memory_guard_
         installation=model_installation,
         config=snapshot_process_config(),
         clock=system_clock(),
+        rng=seeded_rng(),
         plugins_root=tmp_path,
         stdout_log=tmp_path / "agent-host.out.log",
     )

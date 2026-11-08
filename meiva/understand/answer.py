@@ -10,8 +10,9 @@
 from __future__ import annotations
 
 import asyncio
+import random
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
@@ -98,6 +99,10 @@ class UnderstandDeps:
     base_dir: Path
     output: OutputSite | None
     now: Callable[[], datetime]
+    # meiva:note
+    # The process generator the model-call retry draws its jitter from, handed down by the wiring
+    # that builds these deps (a seeded one in a test); not part of what makes two deps equal.
+    rng: random.Random = field(compare=False, repr=False)
 
 
 # meiva:note
@@ -311,4 +316,5 @@ def _invoke(deps: UnderstandDeps, call: ModelCall, content: list[dict[str, objec
         usage_source=call.usage_source,
         catalog=deps.catalog,
         now=deps.now,
+        rng=deps.rng,
     )

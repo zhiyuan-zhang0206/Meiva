@@ -27,6 +27,7 @@ no language, length, audience or notion of what matters.
 
 from __future__ import annotations
 
+import random
 import re
 import time
 from collections.abc import Callable, Sequence
@@ -224,6 +225,7 @@ def generate_groups(
     agent_id: int,
     corrections: int,
     clock: Clock,
+    rng: random.Random,
     must_close: bool = False,
     retry_attempts: int = UNDERSTANDING_RETRY_ATTEMPTS,
     on_call: Callable[[GroupCall], None] | None = None,
@@ -255,6 +257,7 @@ def generate_groups(
                 usage_source="hierarchy.group",
                 usage_agent_id=agent_id,
                 now=clock.now,
+                rng=rng,
             )
         except Exception as exc:
             _record(

@@ -20,6 +20,7 @@ from PIL import Image
 
 from base.clock import Clock, ClockConfig
 from base.clock.tests.manual_timers import ManualTimers
+from base.clock.tests.seeded_rng import seeded_rng
 from base.config.service_read import ConfigAuthority
 from base.config.tests.configuration import model_overrides
 from base.lm.catalog import ModelCatalog
@@ -187,6 +188,7 @@ def understand_harness(
         base_dir=tmp_path,
         output=None,
         now=lambda: datetime(2026, 8, 17, tzinfo=UTC),
+        rng=seeded_rng(),
     )
     yield UnderstandHarness(dataclasses.replace(deps, llm_override=OVERRIDE), scripted_models)
     process_context.unbind_exec_turn()
