@@ -13,6 +13,7 @@ from base import telemetry
 from base.agents.context.clients import DatabaseFactory
 from base.host.atomic_io import write_text_atomic
 from base.log import logger
+from base.paths.scratch import ScratchSpace
 from base.telemetry import EventPipeline
 from cli.boundary.json_body import loads, response_value
 from cli.commands.converge.rendered_file import write_rendered_guarded
@@ -49,11 +50,13 @@ from cli.commands.observability.plans.lgtm.dashboard_plan import (
 # The plugin machinery is imported here, not at module level: the converge step table imports
 # this module on every CLI start, and the render is needed only when a station converges. A
 # render that raises is an outcome, not an error: converge installs a fallback instead.
-def render_dashboard(database_factory: DatabaseFactory) -> DashboardOutcome:
+def render_dashboard(
+    database_factory: DatabaseFactory, *, scratch: ScratchSpace
+) -> DashboardOutcome:
     from base.packages.dashboard_supply import render_dashboard_json
 
     try:
-        rendered, failed = render_dashboard_json(database_factory())
+        rendered, failed = render_dashboard_json(database_factory(), scratch=scratch)
     except Exception as exc:
         return FailedDashboardRender(str(exc))
     return RenderedDashboard(rendered, tuple(failed))

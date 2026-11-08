@@ -62,8 +62,8 @@ skill directory, whose `references/` holds the collaboration contract and whose
   refused on stderr instead of read from the user database; `LaunchSite`, the facts a
   launch takes from the bound context once (`meiva.context`: the user home, the cluster home,
   and the clock: the timers every wait spends and the instant a first-run preset is stamped
-  with), beside the agent's shell sessions, the directory a new session starts in and the
-  machine facts; a new owner generation
+  with), beside the agent's shell sessions, the directory a new session starts in, the machine
+  facts and the `ScratchSpace` a launch mints its failure marker in; a new owner generation
   for each launch, after the workspace's dead ones are reclaimed; owner-record status
   (every generation of the workspace) and cancel; and the lineage facts read from the
   cluster.

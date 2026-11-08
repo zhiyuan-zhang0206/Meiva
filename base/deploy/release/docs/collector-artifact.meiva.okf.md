@@ -28,9 +28,12 @@ function reads nothing, and the converge step hands it `ctx.host.platform`.
 ## Dependency closure
 
 The operation takes its own dependencies as required arguments: `open_url`
-(`base/host/net/ports.py`), `timers` (`base/clock`) and its numbers
-(`DownloadLimits`). The composition root passes `SYSTEM_URL_OPENER`,
-`SYSTEM_TIMERS` and the `otel_collector_download_*` settings. `download_with_retry`
+(`base/host/net/ports.py`), `timers` (`base/clock`), its numbers
+(`DownloadLimits`) and the `scratch` space the tarball is staged in
+(`base/paths/scratch.py`). The composition root passes `SYSTEM_URL_OPENER`,
+`SYSTEM_TIMERS`, the `otel_collector_download_*` settings and the space the
+converge invocation holds (`ConvergeCtx.scratch`), so the download directory is a
+value this module is handed rather than one it names. `download_with_retry`
 waits its backoff through the caller's clock — the `sleep` hook it hands to
 `retry()` calls `timers.sleep` — so a caller that passes `ManualTimers` records
 the waits and advances virtual time instead of blocking, and the reported
@@ -71,7 +74,8 @@ The regression tests scale every number down and keep the bound's shape:
 without `Content-Length`, a connection that never sends headers, a late close)
 and pins the wait accounting with `ManualTimers`.
 
-`install_binary` extracts the binary into a staging directory inside the destination and renames it over
+`install_binary` extracts the binary into a staging directory inside the destination (minted there by the
+same `scratch` space — a rename needs one filesystem) and renames it over
 `otelcol-contrib`, so an upgrade never writes into a collector that is running (Linux refuses to write to an
 executable in use, macOS would truncate it) and a failure part-way leaves the previous binary in place. The
 SHA256 is accumulated while the body streams (`DownloadProgress.record`), so verification does not read the

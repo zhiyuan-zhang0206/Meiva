@@ -57,6 +57,7 @@ from base.packages.dashboard_supply import (
     load_installed_plugin_specs,
     load_repo_plugin_specs,
 )
+from base.paths.tests.fake_scratch import FakeScratch
 from base.telemetry.metrics.core import catalog
 from base.telemetry.metrics.grafana_dashboard import (
     CORE_SECTIONS_PREFIX,
@@ -570,7 +571,7 @@ def test_installed_supplier_loads_a_registry_row(
             _metrics_module_source("installed_demo_calls", "Installed demo"),
             metric="installed_demo_calls",
         )
-        result = load_installed_plugin_specs(db_conn)
+        result = load_installed_plugin_specs(db_conn, scratch=FakeScratch(tmp_path / "scratch"))
     assert result.failed == []
     assert [spec.name for spec in result.specs] == ["installed_demo_calls"]
     assert result.specs[0].plugin == "installed_demo"
@@ -600,7 +601,7 @@ def test_collect_refuses_an_installed_plugin_claiming_a_repo_metric_name(
             _metrics_module_source("installed_fine_calls", "Fine"),
             metric="installed_fine_calls",
         )
-        result = collect_plugin_specs(db_conn)
+        result = collect_plugin_specs(db_conn, scratch=FakeScratch(tmp_path / "scratch"))
     assert result.failed == ["installed_thief"]
     assert "installed_thief" not in result.loaded
     assert "installed_fine" in result.loaded

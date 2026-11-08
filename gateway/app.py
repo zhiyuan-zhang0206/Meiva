@@ -32,6 +32,7 @@ from base.host.system.job_values import JobRoots
 from base.lm.catalog import ModelCatalog
 from base.packages.composer_commands import CommandCatalog, load_skill_names
 from base.packages.plugin_providers import build_model_catalog
+from base.paths.scratch import SYSTEM_SCRATCH
 from base.sessions.backend import get_shell_backend
 from gateway.agents import launch_retry as agents_launch_retry_router
 from gateway.agents import lifecycle as agents_lifecycle_router
@@ -460,6 +461,7 @@ def create_app(
     app.state = state
     state.gateway_config = config
     state.clock = Clock(config.clock, timers=SYSTEM_TIMERS)
+    state.scratch = SYSTEM_SCRATCH
     state.catalog = catalog
     if isinstance(catalog, ModelCatalog):
         state.memory_embedder = memory_router.build_embedder(

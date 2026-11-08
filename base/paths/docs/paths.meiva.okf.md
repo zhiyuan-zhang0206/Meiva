@@ -101,6 +101,13 @@ only itself.
   (`base.paths.home.home_checkout_error(repo, home=home)`; `prod_service_checkout_error` applies it to
   service launches). Cluster identity **is** this path — there is no cluster name;
   see [[base.meiva.okf.md|the base overview]].
+- **`scratch.py` owns the process's temporary space.** `ScratchSpace` is the port a module takes
+  when it needs a directory for one call that no caller holds (a per-install staging tree, a
+  per-request unpack, a probe's two files); `TempFileScratch` is the one implementation and
+  `SYSTEM_SCRATCH` the instance a process entry hands down. Its `[roots]` declaration covers the
+  environment's answer for the temp root and the OS's random name; a caller that already holds a
+  directory passes it as `make(parent=...)` and reads neither. A test uses
+  `base/paths/tests/fake_scratch.py:FakeScratch`, which mints under a root the test names.
 - `run/` exists so ephemeral runtime artifacts (pidfiles, sockets, session
   records) do not litter the home's top level.
 - Daemon pidfiles live only under `$MEIVA_HOME/run/`.

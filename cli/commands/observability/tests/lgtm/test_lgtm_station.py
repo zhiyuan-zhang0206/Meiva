@@ -64,6 +64,7 @@ def context(
         clock=runtime.clock,
         services=frozenset(BACKENDS),
         terminal=runtime.terminal,
+        scratch=unit.scratch,
     )
 
 
@@ -176,6 +177,7 @@ def test_the_native_data_volume_is_the_home_by_default_and_the_configured_direct
         producer=lgtm_unit.producer,
         machine=lgtm_unit.machine,
         host=host_on(DARWIN_ARM64),
+        scratch=lgtm_unit.scratch,
     )
 
     assert (storage / "loki").is_dir()

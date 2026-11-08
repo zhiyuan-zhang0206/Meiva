@@ -16,9 +16,10 @@ authentication and validation happen here like every other cluster operation.
 
 Body: `{source, source_ref, archive_b64}`, where `archive_b64` is the base64 of
 the deterministic tar `base/packages/extensions/registry.py:pack_tree` builds.
-The route unpacks it into a scratch directory (`unpack_tree` refuses entries
-that escape it), then calls `register_tree`, so the content hash and the stored
-blob derive from the bytes received, never from the client. `kind` is the closed
+The route unpacks it into a directory its app state's `scratch` space mints for
+this request (`unpack_tree` refuses entries that escape it), then calls
+`register_tree`, so the content hash and the stored blob derive from the bytes
+received, never from the client. `kind` is the closed
 `ExtensionKind` enum and `name` a path-safe token; both are 422 otherwise, as is
 an undecodable archive.
 

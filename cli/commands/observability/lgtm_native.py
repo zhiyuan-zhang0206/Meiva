@@ -13,7 +13,6 @@ import os
 import shutil
 import sys
 import tarfile
-import tempfile
 import time
 import zipfile
 from collections.abc import Callable
@@ -31,6 +30,7 @@ from base.host.net.ports import SYSTEM_URL_OPENER
 from base.host.net.resilience import Policy, retry
 from base.host.system.hostport import Host
 from base.paths.expand import expand_home
+from base.paths.scratch import ScratchSpace
 from base.telemetry import EventPipeline
 from base.telemetry.lgtm_local import BACKENDS, binary_path
 from base.telemetry.loki_index_labels import validate_loki_deploy_config
@@ -231,14 +231,16 @@ def _copy_tar_member(archive: Path, member: str, target: Path) -> None:
             shutil.copyfileobj(source, output)
 
 
-def _extract_member(name: str, archive: Path, destination: Path, member: str) -> None:
+def _extract_member(
+    name: str, archive: Path, destination: Path, member: str, *, scratch: ScratchSpace
+) -> None:
     # meiva:note
     # Staged where the result lands, so the move below is a rename on one filesystem rather than a
     # copy of the whole binary — the same reason `collector.install_binary` stages inside the
     # destination it replaces.
     destination.parent.mkdir(parents=True, exist_ok=True)
-    with tempfile.TemporaryDirectory(dir=destination.parent) as temporary_dir:
-        extracted = Path(temporary_dir) / name
+    with scratch.make(prefix="meiva-lgtm-member-", parent=destination.parent) as temporary_dir:
+        extracted = temporary_dir / name
         copy = _copy_zip_member if archive.suffix == ".zip" else _copy_tar_member
         try:
             copy(archive, member, extracted)
@@ -250,12 +252,12 @@ def _extract_member(name: str, archive: Path, destination: Path, member: str) ->
 
 # meiva:note
 # Install a release archive tree after stripping its top-level directory.
-def _extract_tree(name: str, archive: Path, destination: Path) -> None:
+def _extract_tree(name: str, archive: Path, destination: Path, *, scratch: ScratchSpace) -> None:
     # meiva:note
     # Unpacked beside the tree it replaces, so the final move is a rename; see `_extract_member`.
     destination.parent.mkdir(parents=True, exist_ok=True)
-    with tempfile.TemporaryDirectory(dir=destination.parent) as temporary_dir:
-        extracted = Path(temporary_dir) / "extracted"
+    with scratch.make(prefix="meiva-lgtm-tree-", parent=destination.parent) as temporary_dir:
+        extracted = temporary_dir / "extracted"
         extracted.mkdir()
         with tarfile.open(archive) as bundle:
             bundle.extractall(extracted, filter="data")
@@ -277,9 +279,10 @@ def download_and_verify(
     *,
     tag: str,
     limits: DownloadLimits,
+    scratch: ScratchSpace,
 ) -> tuple[Path, ...]:
-    with tempfile.TemporaryDirectory() as temporary_dir:
-        archive = Path(temporary_dir) / Path(asset["url"]).name
+    with scratch.make(prefix="meiva-lgtm-download-") as temporary_dir:
+        archive = temporary_dir / Path(asset["url"]).name
         print(f"  · lgtm native: downloading {name} {version} from {asset['url']}")
         download_with_retry(asset["url"], archive, limits=limits)
         problem = checksum_problem(
@@ -298,9 +301,9 @@ def download_and_verify(
         )
         match extraction:
             case ExtractTree(destination=destination):
-                _extract_tree(name, archive, native_dir / destination)
+                _extract_tree(name, archive, native_dir / destination, scratch=scratch)
             case ExtractMember(member=member, destination=destination):
-                _extract_member(name, archive, native_dir / destination, member)
+                _extract_member(name, archive, native_dir / destination, member, scratch=scratch)
             case _:
                 assert_never(extraction)
     return tuple(
@@ -541,6 +544,7 @@ def ensure_lgtm_native(
     producer: Callable[[], EventPipeline],
     machine: MachineIdentityReader,
     host: Host,
+    scratch: ScratchSpace,
 ) -> None:
     require_backend_selection(services, BACKENDS)
     tag = platform_tag(host.platform.system, host.platform.machine)
@@ -573,6 +577,7 @@ def ensure_lgtm_native(
                         native_dir,
                         tag=tag,
                         limits=settings.download,
+                        scratch=scratch,
                     )
                 )
                 print(f"  · lgtm native: installed {step.name} {asset['version']} ({tag})")
@@ -586,7 +591,7 @@ def ensure_lgtm_native(
             settings=settings,
             storage_dir=storage_dir,
             direct_db_url=database_factory().direct_resolution().url,
-            dashboard=render_dashboard(database_factory),
+            dashboard=render_dashboard(database_factory, scratch=scratch),
             producer=producer,
             machine=machine,
         )
@@ -651,4 +656,5 @@ def ensure_lgtm_native_step(ctx: ConvergeCtx) -> None:
         producer=ctx.producer,
         machine=ctx.machine,
         host=ctx.host,
+        scratch=ctx.scratch,
     )

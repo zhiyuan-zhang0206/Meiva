@@ -19,6 +19,7 @@ from base.config import ConfigBoot
 from base.host.permissions_helper.client import HelperFactory
 from base.host.system.hostport import Host
 from base.host.system.job_values import JobRoots
+from base.paths.scratch import ScratchSpace
 from base.telemetry import EventPipeline
 from cli.database.runtime import OsRandom, Terminal, UserSession
 
@@ -61,6 +62,12 @@ class ConvergeCtx:
     # is `session.interactive`'s decision, so this field carries the streams only; a real entry
     # hands in both from the same process, and they agree.
     terminal: Terminal
+    # meiva:note
+    # The temporary space of the invocation that runs this converge: a step that mints a directory
+    # for one call (the collector tarball's staging, a boot unit's install source, a backend
+    # download) takes it here and mints there, so no step reads where the host keeps temporary
+    # space and a test hands in a `FakeScratch` over its own directory.
+    scratch: ScratchSpace
     services: frozenset[str]
 
     # meiva:note

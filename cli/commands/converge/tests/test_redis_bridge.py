@@ -108,6 +108,7 @@ def _context(
         timers=command_runtime.timers,
         clock=command_runtime.clock,
         terminal=command_runtime.terminal,
+        scratch=command_runtime.scratch,
     )
 
 

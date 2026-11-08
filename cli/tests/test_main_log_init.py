@@ -40,6 +40,7 @@ from base.db.config import DbConfig
 from base.host.env.bootstrap import BootstrapFetchError
 from base.host.env.dotenv_boot import PLACEHOLDER_DB_URL
 from base.host.system.tests.fake_commands import DARWIN_ARM64, fake_host
+from base.paths.scratch import SYSTEM_SCRATCH
 from base.sessions.tests.refuse_helper import refuse_helper
 from base.telemetry import EventPipeline
 from cli.database import (
@@ -370,6 +371,7 @@ def _cold_report(
             ClockConfig("UTC", None, message_timestamp_weekday=False), timers=ManualTimers()
         ),
         terminal=args.runtime.terminal,
+        scratch=SYSTEM_SCRATCH,
     )
     lgtm_native.ensure_lgtm_native_step(context)
     return 0

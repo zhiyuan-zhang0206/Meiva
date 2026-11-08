@@ -1,22 +1,25 @@
-"""Acquire an install source into a package directory.
-
-Shared by `meiva plugins install` (git only) and `meiva mcp install` (git or local
-path). A git source is cloned into a fresh temp dir; a local path is used in
-place (never moved — the caller copies out of it). The caller resolves the
-`--path` subdir and then moves / copies the package into its load dir.
-"""
+# meiva:note
+# Acquire an install source into a package directory.
+#
+# Shared by `meiva plugins install` (git only) and `meiva mcp install` (git or local
+# path). A git source is cloned into a directory the caller holds for the command
+# (`parent`, minted from its `ScratchSpace`); a local path is used in place (never
+# moved — the caller copies out of it). The caller resolves the `--path` subdir and
+# then moves / copies the package into its load dir.
 
 from __future__ import annotations
 
-import shutil
 import subprocess
-import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
 from base.packages.extensions.install_registry import source_is_git_url
 
-_TEMP_PREFIX = "meiva-install-"
+# meiva:note
+# The prefix of the directory an install clones into. The caller mints it from its scratch space and
+# keeps it for the whole command, so this only keeps a leftover recognisable to whoever inspects
+# the temporary root.
+TEMP_PREFIX = "meiva-install-"
 
 
 class SourcePathNotFoundError(ValueError):
@@ -30,15 +33,12 @@ class SourcePathNotFoundError(ValueError):
     """
 
 
-def clone_git(url: str, ref: str | None) -> Path:
-    """Clone `url` into a fresh temp dir (checked out at `ref` when given);
-    return the cloned package directory. Caller cleans up with `cleanup_temp`.
-
-    Raises:
-        subprocess.CalledProcessError: git clone / checkout failed.
-    """
-    tmp = Path(tempfile.mkdtemp(prefix=_TEMP_PREFIX))
-    dest = tmp / "pkg"
+# meiva:note
+# Clone `url` under `parent` (checked out at `ref` when given) and return the cloned package
+# directory. `parent` is the directory the caller minted for this acquisition and keeps until it
+# is done with the clone (`parent/pkg`), never the load directory the package is installed into.
+def clone_git(url: str, ref: str | None, *, parent: Path) -> Path:
+    dest = parent / "pkg"
     subprocess.run(["git", "clone", url, str(dest)], check=True, capture_output=True, text=True)
     if ref:
         subprocess.run(
@@ -47,22 +47,11 @@ def clone_git(url: str, ref: str | None) -> Path:
     return dest
 
 
-def cleanup_temp(cloned: Path | None) -> None:
-    """Remove the temp parent created by `clone_git`, if any (no-op for a local
-    source, whose `root` the caller never owns)."""
-    if cloned is None:
-        return
-    parent = cloned.parent
-    if parent.name.startswith(_TEMP_PREFIX) and parent.exists():
-        shutil.rmtree(parent, ignore_errors=True)
-
-
+# meiva:note
+# A resolved install source: `root` is the package tree, and `cloned` is the clone under the
+# parent the caller minted (`None` for a local-path source, which is left untouched).
 @dataclass
 class AcquiredSource:
-    """A resolved install source. `root` is the package tree; `cloned` is the
-    cloned dir to pass to `cleanup_temp` (None for a local-path source, which is
-    left untouched)."""
-
     root: Path
     cloned: Path | None
 
@@ -70,15 +59,11 @@ class AcquiredSource:
 # meiva:note
 # `source` is already placed: the boundary that read it expanded a leading `~` against the home it
 # read (`base.paths.expand.expand_home`), so this takes a path this process can open or a URL it can
-# clone, never a `~` spelling.
-def acquire_source(source: str, ref: str | None) -> AcquiredSource:
-    """Resolve `source` (git URL or local dir) to a package tree on disk.
-
-    Raises:
-        subprocess.CalledProcessError: a git source failed to clone / checkout.
-    """
+# clone, never a `~` spelling. `parent` is the directory a git clone is made in, minted by the
+# caller for this acquisition; a local path is used where it is and leaves `parent` unused.
+def acquire_source(source: str, ref: str | None, *, parent: Path) -> AcquiredSource:
     if source_is_git_url(source):
-        cloned = clone_git(source, ref)
+        cloned = clone_git(source, ref, parent=parent)
         return AcquiredSource(root=cloned, cloned=cloned)
     local = Path(source)
     if local.is_dir():

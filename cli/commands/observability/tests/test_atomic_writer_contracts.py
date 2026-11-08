@@ -13,6 +13,7 @@ from pathlib import Path
 import pytest
 
 from base.agents.context.clients import DatabaseFactory
+from base.paths.tests.fake_scratch import FakeScratch
 from cli.commands.converge.rendered_file import write_rendered_guarded
 from cli.commands.observability import grafana_render
 from cli.database.tests.cli_tests import operator_database as operator_database
@@ -27,7 +28,11 @@ def test_lgtm_render_publishes_a_public_utf8_file_without_leaving_temporaries(
     old_umask = os.umask(0o077)
     try:
         rc = grafana_render.cmd_grafana_render(
-            home=tmp_path, force=True, repo_only=True, database_factory=operator_database
+            home=tmp_path,
+            force=True,
+            repo_only=True,
+            database_factory=operator_database,
+            scratch=FakeScratch(tmp_path / "scratch"),
         )
     finally:
         os.umask(old_umask)

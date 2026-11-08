@@ -9,6 +9,7 @@ import pytest
 
 from base.deploy.release.collector import artifact as artifact
 from base.deploy.release.collector import plan as collector_plan
+from base.paths.tests.fake_scratch import FakeScratch
 
 
 def _tarball(path: Path, *members: tuple[str, bytes]) -> Path:
@@ -21,18 +22,26 @@ def _tarball(path: Path, *members: tuple[str, bytes]) -> Path:
     return path
 
 
+@pytest.fixture
+def scratch(tmp_path: Path) -> FakeScratch:
+    """A space whose directories are visible in the test's own tree, not the host's."""
+    return FakeScratch(tmp_path)
+
+
 def _names(directory: Path) -> list[str]:
     return sorted(entry.name for entry in directory.iterdir())
 
 
-def test_a_fresh_install_puts_an_executable_binary_and_leaves_no_staging(tmp_path: Path) -> None:
+def test_a_fresh_install_puts_an_executable_binary_and_leaves_no_staging(
+    tmp_path: Path, scratch: FakeScratch
+) -> None:
     dest_dir = tmp_path / "otel"
     dest_dir.mkdir()
     tarball = _tarball(
         tmp_path / "c.tar.gz", ("LICENSE", b"license"), ("otelcol-contrib", b"collector-v2")
     )
 
-    artifact.install_binary(tarball, dest_dir)
+    artifact.install_binary(tarball, dest_dir, scratch=scratch)
 
     binary = dest_dir / collector_plan.BINARY_NAME
     assert binary.read_bytes() == b"collector-v2"
@@ -40,19 +49,21 @@ def test_a_fresh_install_puts_an_executable_binary_and_leaves_no_staging(tmp_pat
     assert _names(dest_dir) == [collector_plan.BINARY_NAME]
 
 
-def test_the_binary_is_found_below_a_directory_in_the_archive(tmp_path: Path) -> None:
+def test_the_binary_is_found_below_a_directory_in_the_archive(
+    tmp_path: Path, scratch: FakeScratch
+) -> None:
     dest_dir = tmp_path / "otel"
     dest_dir.mkdir()
     tarball = _tarball(tmp_path / "c.tar.gz", ("dist/otelcol-contrib", b"nested"))
 
-    artifact.install_binary(tarball, dest_dir)
+    artifact.install_binary(tarball, dest_dir, scratch=scratch)
 
     assert (dest_dir / collector_plan.BINARY_NAME).read_bytes() == b"nested"
     assert _names(dest_dir) == [collector_plan.BINARY_NAME]
 
 
 def test_an_upgrade_replaces_the_entry_and_never_writes_into_the_running_binary(
-    tmp_path: Path,
+    tmp_path: Path, scratch: FakeScratch
 ) -> None:
     dest_dir = tmp_path / "otel"
     dest_dir.mkdir()
@@ -61,14 +72,16 @@ def test_an_upgrade_replaces_the_entry_and_never_writes_into_the_running_binary(
     tarball = _tarball(tmp_path / "c.tar.gz", ("otelcol-contrib", b"collector-v2"))
 
     with binary.open("rb") as running:
-        artifact.install_binary(tarball, dest_dir)
+        artifact.install_binary(tarball, dest_dir, scratch=scratch)
         assert running.read() == b"collector-v1"
 
     assert binary.read_bytes() == b"collector-v2"
     assert _names(dest_dir) == [collector_plan.BINARY_NAME]
 
 
-def test_an_archive_without_the_binary_leaves_the_installed_one_alone(tmp_path: Path) -> None:
+def test_an_archive_without_the_binary_leaves_the_installed_one_alone(
+    tmp_path: Path, scratch: FakeScratch
+) -> None:
     dest_dir = tmp_path / "otel"
     dest_dir.mkdir()
     binary = dest_dir / collector_plan.BINARY_NAME
@@ -76,13 +89,15 @@ def test_an_archive_without_the_binary_leaves_the_installed_one_alone(tmp_path: 
     tarball = _tarball(tmp_path / "c.tar.gz", ("LICENSE", b"license"))
 
     with pytest.raises(RuntimeError, match="has no otelcol-contrib member"):
-        artifact.install_binary(tarball, dest_dir)
+        artifact.install_binary(tarball, dest_dir, scratch=scratch)
 
     assert binary.read_bytes() == b"collector-v1"
     assert _names(dest_dir) == [collector_plan.BINARY_NAME]
 
 
-def test_a_member_that_escapes_the_destination_fails_and_leaves_no_trace(tmp_path: Path) -> None:
+def test_a_member_that_escapes_the_destination_fails_and_leaves_no_trace(
+    tmp_path: Path, scratch: FakeScratch
+) -> None:
     dest_dir = tmp_path / "otel"
     dest_dir.mkdir()
     binary = dest_dir / collector_plan.BINARY_NAME
@@ -90,7 +105,7 @@ def test_a_member_that_escapes_the_destination_fails_and_leaves_no_trace(tmp_pat
     tarball = _tarball(tmp_path / "c.tar.gz", ("../otelcol-contrib", b"escaped"))
 
     with pytest.raises(tarfile.FilterError):
-        artifact.install_binary(tarball, dest_dir)
+        artifact.install_binary(tarball, dest_dir, scratch=scratch)
 
     assert binary.read_bytes() == b"collector-v1"
     assert _names(dest_dir) == [collector_plan.BINARY_NAME]

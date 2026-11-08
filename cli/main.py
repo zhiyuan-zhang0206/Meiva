@@ -36,6 +36,7 @@ from base.native_process.os_platform import (
     LockTimeoutError,
     ensure_line_buffered_stdio,
 )
+from base.paths.scratch import SYSTEM_SCRATCH
 
 # Only the settings-free parser composition entry is imported here. Domain
 # adapters lazy-import runtime commands when their bound handler is dispatched.
@@ -210,6 +211,7 @@ def bind_update_inputs(args: argparse.Namespace, *, checkout: Path) -> None:
         operation_id=uuid4().hex,
         initiator=_update_initiator(),
         python=sys.executable,
+        scratch=SYSTEM_SCRATCH,
     )
 
 

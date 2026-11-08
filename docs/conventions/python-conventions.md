@@ -613,6 +613,7 @@ falls back to `os.environ`.
 | A tuning constant (timeout, threshold, interval) | A field of that config whose default is today's constant. A test passes a small value. |
 | A client, a factory | A required parameter with no default. |
 | A path | A value (form 1). A test hands in `tmp_path`; it does not switch `MEIVA_HOME`. |
+| A directory for one call that no caller holds (a per-request unpack, a per-install staging tree, a probe's two files) | A `ScratchSpace` port (`base/paths/scratch.py`: `make`, and `root` for the space itself), handed in from the entry that has one — `SYSTEM_SCRATCH` at a process entry, `FakeScratch` from `base/paths/tests` in a test. A caller that already holds a directory passes it as `parent` and the space's own root is never read. The one file that names where the host keeps temporary space is the port's own, declared `[roots]`; a `tempfile` call in a module above it is an `ambient-read` the module has to record. |
 | An atomic file write, or a filesystem call whose failure a test must cause (`replace`, `fsync`, `fchmod`) | `base/host/atomic_io.AtomicWriter(Fs(...))`. Commit, cleanup and durability faults are injected only in `atomic_io`'s own tests, through the `Fs` a test builds. A caller whose own policy warns, suppresses or never syncs may take a required `AtomicWriter` to test that policy, as specified by the `atomic_io` owner; it does not retest the writer's mechanisms. Other components call `write_text_atomic` or `write_bytes_atomic` and their tests use real files under `tmp_path`; a fault the disk can produce (a target that is a directory, a read-only directory) is made on disk. A test never patches `os.replace`, `Path.replace`, `os.fsync` or `os.fchmod`. |
 | Time | Reading the clock is a value: `now` is a parameter of the function that decides on it, and backoff, due-slot and deadline logic are pure functions of `now` and the previous state (form 2). Waiting is an effect that stays in the shell loop. A loop whose behavior is the interleaving itself (liveness, heartbeat rounds, a deadline racing a child) takes a required `Timers` (`monotonic`, `sleep`, `asleep`) or `Clock` from `base/clock` (form 4), built by a root as `Clock(config, timers=SYSTEM_TIMERS)`; a test passes `ManualTimers` from `base/clock/tests` (`Clock(config, timers=manual, now=manual.now)`), which never waits and records each sleep in `sleeps`. A test never patches `time`, `asyncio.sleep` or `datetime`. |
 | A socket or a server | A real local service: a listener on port 0, a unix socket under `tmp_path`. Only fault injection (a refused or half-open connect) goes through a `connect` parameter, and only in the clients of `services/redis_bridge` and `base/host/permissions_helper`. |
@@ -764,11 +765,12 @@ the binding is decided statically, so a module-level import does not rescue it, 
 every `base.…` above that line raises `UnboundLocalError`:
 
 ```python
-import base.paths          # module scope: irrelevant to the function below
+import base.paths  # module scope: irrelevant to the function below
+
 
 def is_serving():
-    path = base.deploy.lifecycle.start_serving.state_path()     # UnboundLocalError
-    import base.db                            # <- makes `base` local for the whole body
+    path = base.deploy.lifecycle.start_serving.state_path()  # UnboundLocalError
+    import base.db  # <- makes `base` local for the whole body
 ```
 
 It fails at runtime, on that branch only, and ruff does not report it. Pyright does

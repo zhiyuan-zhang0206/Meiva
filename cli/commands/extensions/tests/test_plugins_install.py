@@ -16,6 +16,7 @@ import pytest
 import meiva.skills as skills_mod
 from base.cluster.machine import MachineIdentityReader
 from base.packages.extensions import install_registry as reg
+from base.paths.tests.fake_scratch import FakeScratch
 from cli.commands.extensions.plugins import (
     cmd_plugins_disable,
     cmd_plugins_enable,
@@ -151,11 +152,18 @@ def _install(
         home=home,
         now=datetime.now(UTC),
         environ=ENVIRON,
+        scratch=FakeScratch(home / "scratch"),
     )
 
 
 def _upgrade(name: str, *, home: Path) -> int:
-    return cmd_plugins_upgrade(name, binding=PROD_ELSEWHERE, home=home, now=datetime.now(UTC))
+    return cmd_plugins_upgrade(
+        name,
+        binding=PROD_ELSEWHERE,
+        home=home,
+        now=datetime.now(UTC),
+        scratch=FakeScratch(home / "scratch"),
+    )
 
 
 def test_install_skill_records_and_surfaces(

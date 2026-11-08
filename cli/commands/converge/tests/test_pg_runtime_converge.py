@@ -78,6 +78,7 @@ def test_start_converge_accepts_installed_pg17_where_no_artifact_exists(
             timers=command_runtime.timers,
             clock=command_runtime.clock,
             terminal=command_runtime.terminal,
+            scratch=command_runtime.scratch,
         ),
         system="FreeBSD",
         machine="riscv64",
@@ -122,6 +123,7 @@ def test_remote_managed_gateway_does_not_require_local_server_or_extension(
             timers=command_runtime.timers,
             clock=command_runtime.clock,
             terminal=command_runtime.terminal,
+            scratch=command_runtime.scratch,
         ),
         system="FreeBSD",
         machine="riscv64",
@@ -160,6 +162,7 @@ def test_pg_admission_uses_each_owners_live_remote_verdict(
                 timers=command_runtime.timers,
                 clock=command_runtime.clock,
                 terminal=command_runtime.terminal,
+                scratch=command_runtime.scratch,
             )
         )
     with pytest.raises(RuntimeError, match="no vendored Postgres"):

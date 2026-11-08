@@ -15,6 +15,7 @@ from base.config import ConfigBoot
 from base.host.system.tests.fake_commands import fake_host
 from base.host.system.tests.fake_crontab import FakeCrontab
 from base.paths import meiva_home
+from base.paths.scratch import SYSTEM_SCRATCH
 from base.sessions.tests.refuse_helper import refuse_helper
 from cli.commands.converge.os_jobs import ensure_packages_refresh_job
 from cli.commands.converge.spec import ConvergeCtx
@@ -64,6 +65,7 @@ def main() -> None:
             ClockConfig("UTC", None, message_timestamp_weekday=False), timers=ManualTimers()
         ),
         terminal=inert_terminal(),
+        scratch=SYSTEM_SCRATCH,
     )
     try:
         ensure_packages_refresh_job(context)

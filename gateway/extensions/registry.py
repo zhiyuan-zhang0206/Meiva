@@ -6,7 +6,6 @@ import base64
 import binascii
 import json
 import tarfile
-import tempfile
 from pathlib import Path
 from typing import Annotated
 
@@ -95,15 +94,15 @@ def put_extension(
         archive = base64.b64decode(body.archive_b64, validate=True)
     except binascii.Error as exc:
         raise HTTPException(status_code=422, detail=f"archive_b64 is not base64: {exc}") from exc
-    with tempfile.TemporaryDirectory(prefix="meiva-extension-") as scratch:
-        root = Path(scratch)
+    state = gateway_state(request)
+    with state.scratch.make(prefix="meiva-extension-") as root:
         try:
             registry.unpack_tree(archive, root)
         except (tarfile.TarError, ValueError) as exc:
             raise HTTPException(status_code=422, detail=f"unusable archive: {exc}") from exc
         try:
             digest = registry.register_tree(
-                gateway_state(request).db_pool,
+                state.db_pool,
                 root=root,
                 name=name,
                 kind=kind,

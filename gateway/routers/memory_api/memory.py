@@ -16,6 +16,7 @@ from base.db import Database
 from base.lm.catalog import ModelCatalog
 from base.lm.factory import process_provider_keys
 from base.packages.docs.notes import parse_note
+from base.paths.scratch import ScratchSpace
 from gateway.agents.eval_guard import deny_isolated_result_read
 from gateway.http.config import (
     GatewayAppState,
@@ -375,7 +376,7 @@ def get_memory_pool(request: Request) -> Response:
     if not root.is_dir():
         raise HTTPException(status_code=404, detail="gateway memory pool not initialized")
     try:
-        head, data = _build_pool_bundle(root)
+        head, data = _build_pool_bundle(root, scratch=gateway_state(request).scratch)
     except (OSError, subprocess.TimeoutExpired) as e:
         raise HTTPException(status_code=500, detail=f"memory pool bundle failed: {e}") from e
     return Response(
@@ -388,13 +389,11 @@ def get_memory_pool(request: Request) -> Response:
     )
 
 
-def _build_pool_bundle(root: Path) -> tuple[str, bytes]:
-    import tempfile
-
+def _build_pool_bundle(root: Path, *, scratch: ScratchSpace) -> tuple[str, bytes]:
     from base.host.proc import run_bounded
 
-    with tempfile.TemporaryDirectory(prefix="memory-pool-bundle-") as tmp:
-        bundle_path = Path(tmp) / "pool.bundle"
+    with scratch.make(prefix="memory-pool-bundle-") as bundle_dir:
+        bundle_path = bundle_dir / "pool.bundle"
         result: subprocess.CompletedProcess[str] = run_bounded(
             ["git", "-C", str(root), "bundle", "create", str(bundle_path), "HEAD"],
             timeout=60.0,

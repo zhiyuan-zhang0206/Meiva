@@ -10,6 +10,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+from base.paths.tests.fake_scratch import FakeScratch
 from cli import fleet_update
 from cli.fleet_update.plan.host_commands import CLEAN
 from cli.fleet_update.plan.release_target import (
@@ -300,6 +301,7 @@ class Cluster:
                 operation_id=f"op-{self.invocations:04d}",
                 initiator="user:test@test-host",
                 python=sys.executable,
+                scratch=FakeScratch(self.workdir / "scratch"),
             )
         finally:
             self._adopt(json.loads(self.state_path.read_text()))

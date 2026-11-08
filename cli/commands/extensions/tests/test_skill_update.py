@@ -16,6 +16,7 @@ import pytest
 from base.config import ConfigBoot
 from base.packages.extensions import install_registry as reg
 from base.paths import meiva_home
+from base.paths.tests.fake_scratch import FakeScratch
 from cli.commands.extensions.skill import cmd_skill_update, cmd_skill_upgrade
 from cli.commands.extensions.tests.support.source_bindings import PROD_ELSEWHERE, prod_home_is
 from cli.database.runtime import CommandRuntime
@@ -379,6 +380,7 @@ def _install_skill(
             home=home,
             now=datetime.now(UTC),
             environ=ENVIRON,
+            scratch=FakeScratch(home / "scratch"),
         )
         == 0
     )
@@ -391,7 +393,13 @@ def test_upgrade_skips_unupdatable(unit_home: Path, capsys: pytest.CaptureFixtur
         reg.InstalledPackage(name="local-skill", type="skill"), home=unit_home
     )  # no source
     assert (
-        cmd_skill_upgrade("local-skill", home=unit_home, user_home=unit_home, now=datetime.now(UTC))
+        cmd_skill_upgrade(
+            "local-skill",
+            home=unit_home,
+            user_home=unit_home,
+            now=datetime.now(UTC),
+            scratch=FakeScratch(unit_home / "scratch"),
+        )
         == 1
     )
     assert "no recorded source" in capsys.readouterr().err
@@ -413,7 +421,13 @@ def test_upgrade_refetches_from_source(
     _git(r, "add", ".")
     _git(r, "commit", "-qm", "v2")
     assert (
-        cmd_skill_upgrade("ext-skill", home=unit_home, user_home=unit_home, now=datetime.now(UTC))
+        cmd_skill_upgrade(
+            "ext-skill",
+            home=unit_home,
+            user_home=unit_home,
+            now=datetime.now(UTC),
+            scratch=FakeScratch(unit_home / "scratch"),
+        )
         == 0
     )
     body = (unit_home / "skills" / "ext-skill" / "SKILL.md").read_text(encoding="utf-8")
@@ -439,7 +453,13 @@ def test_upgrade_local_source_is_copied_never_moved(
         "---\nname: ext-skill\ndescription: d\n---\n\n# v2\n", encoding="utf-8"
     )
     assert (
-        cmd_skill_upgrade("ext-skill", home=unit_home, user_home=unit_home, now=datetime.now(UTC))
+        cmd_skill_upgrade(
+            "ext-skill",
+            home=unit_home,
+            user_home=unit_home,
+            now=datetime.now(UTC),
+            scratch=FakeScratch(unit_home / "scratch"),
+        )
         == 0
     )
 
@@ -475,12 +495,22 @@ def test_upgrade_places_a_recorded_tilde_source_against_the_callers_home(
 
     assert (
         cmd_skill_upgrade(
-            "ext-skill", home=unit_home, user_home=tmp_path / "elsewhere", now=datetime.now(UTC)
+            "ext-skill",
+            home=unit_home,
+            user_home=tmp_path / "elsewhere",
+            now=datetime.now(UTC),
+            scratch=FakeScratch(unit_home / "scratch"),
         )
         == 1
     )
     assert (
-        cmd_skill_upgrade("ext-skill", home=unit_home, user_home=tmp_path, now=datetime.now(UTC))
+        cmd_skill_upgrade(
+            "ext-skill",
+            home=unit_home,
+            user_home=tmp_path,
+            now=datetime.now(UTC),
+            scratch=FakeScratch(unit_home / "scratch"),
+        )
         == 0
     )
     body = (unit_home / "skills" / "ext-skill" / "SKILL.md").read_text(encoding="utf-8")
@@ -492,7 +522,13 @@ def test_upgrade_places_a_recorded_tilde_source_against_the_callers_home(
     with reg.mutate(home=unit_home) as registry:
         next(p for p in registry.packages if p.name == "ext-skill").source = "~someone/ext-src"
     assert (
-        cmd_skill_upgrade("ext-skill", home=unit_home, user_home=tmp_path, now=datetime.now(UTC))
+        cmd_skill_upgrade(
+            "ext-skill",
+            home=unit_home,
+            user_home=tmp_path,
+            now=datetime.now(UTC),
+            scratch=FakeScratch(unit_home / "scratch"),
+        )
         == 1
     )
     assert "no such local directory" in capsys.readouterr().err
@@ -518,7 +554,13 @@ def test_upgrade_replaces_a_local_edit(
     _git(r, "commit", "-qm", "v2")
 
     assert (
-        cmd_skill_upgrade("ext-skill", home=unit_home, user_home=unit_home, now=datetime.now(UTC))
+        cmd_skill_upgrade(
+            "ext-skill",
+            home=unit_home,
+            user_home=unit_home,
+            now=datetime.now(UTC),
+            scratch=FakeScratch(unit_home / "scratch"),
+        )
         == 0
     )
     out = capsys.readouterr().out

@@ -20,6 +20,7 @@ from typing import Any
 
 import pytest
 
+from base.paths.tests.fake_scratch import FakeScratch
 from meiva_builtins.skills.tests.skill_script import load_skill_script
 
 _YOUTUBE = ("integrations", "web-sources", "youtube", "scripts")
@@ -211,6 +212,7 @@ class FakeYtdlp:
             transcribe=(str(transcribe),),
             root=root,
             now=lambda: _STAMP,
+            scratch=FakeScratch(self.directory / "scratch"),
         )
 
     def calls(self) -> list[list[str]]:

@@ -53,7 +53,6 @@ import json
 import os
 import random
 import socket
-import tempfile
 from pathlib import Path
 from typing import TypeGuard
 
@@ -125,12 +124,21 @@ def live_holders() -> dict[int, list[int]]:
 # meiva:note
 # The host-wide meeting point: one directory per user, shared by every process —
 # never per home, because the port space belongs to the kernel, not to a cluster.
-# tmpfs when the platform has one (`/dev/shm`, the fixed host-wide path), else the
-# OS temp dir — the same choice the throwaway data plane makes for its instances, and
-# for the same reason: this is host coordination, not durable state.
+# tmpfs when the platform has one (`/dev/shm`), else the fixed host temporary root below.
+#
+# Nor is the environment's temporary-directory answer. Two processes meet here only if they
+# compute the same path, and TMPDIR is per process (an agent shell, a daemon started by root and a test runner
+# each carry their own): a registry that followed it would let two processes keep two
+# registries and each believe it owns the band, which is the failure this module exists to
+# end. `base/sessions/pty/paths.py` picks the fixed `/tmp` for its socket fallback for the
+# same reason, and `base/host/env/agent_env.py` records the same three keys as per-child
+# values rather than this process's answer.
+HOST_TEMP_ROOT = Path("/tmp")  # noqa: S108
+
+
 def _root() -> Path:
     shm = Path("/dev/shm")  # noqa: S108
-    base = shm if shm.is_dir() else Path(tempfile.gettempdir())
+    base = shm if shm.is_dir() else HOST_TEMP_ROOT
     return ensure_registry(base / f"meiva-port-lease-{os.getuid()}")
 
 

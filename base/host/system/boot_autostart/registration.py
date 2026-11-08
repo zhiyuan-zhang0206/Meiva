@@ -26,6 +26,7 @@ from base.host.system.cron.mechanics import (
 from base.host.system.hostport import Host
 from base.host.system.job_readings import read_launchd_path, read_meiva_binary
 from base.host.system.job_values import JobRoots, plist_path
+from base.paths.scratch import ScratchSpace
 
 # meiva:note
 # launchctl answers at once; the bound only keeps a wedged launchd from stalling.
@@ -84,12 +85,14 @@ def register_linux(
     *,
     context: BootUnitContext,
     host: Host,
+    scratch: ScratchSpace,
     unit_dir: Path = SYSTEM_UNIT_DIR,
     runtime_dir: Path = SYSTEMD_RUNTIME_DIR,
 ) -> int:
     install(
         context=context,
         host=host,
+        scratch=scratch,
         unit_dir=unit_dir,
         runtime_dir=runtime_dir,
     )
@@ -112,6 +115,7 @@ def register_autostart(
     enabled: bool,
     host: Host,
     roots: JobRoots,
+    scratch: ScratchSpace,
 ) -> None:
     # meiva:note
     # Register the host's boot-time autostart job for exactly `services`.
@@ -140,7 +144,9 @@ def register_autostart(
         "autostart",
         macos=lambda: register_macos(services=services, host=host, roots=roots),
         linux=lambda: register_linux(
-            context=unit_context(roots=roots, services=services, host=host), host=host
+            context=unit_context(roots=roots, services=services, host=host),
+            host=host,
+            scratch=scratch,
         ),
         host=host,
     )

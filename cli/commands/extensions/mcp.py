@@ -56,6 +56,7 @@ from pydantic import JsonValue
 
 from base.host.boundary.process import stderr_text
 from base.host.system.hostport import Host
+from base.paths.scratch import ScratchSpace
 from cli.boundary.json_text import loads
 from cli.commands.extensions._pkg_source import AcquiredSource, SourcePathNotFoundError
 from cli.commands.extensions.plans.mcp_autodetect import auto_detect_mcp, write_mcp_json
@@ -440,13 +441,17 @@ def _register_mcp(
     )
 
 
-def _acquire_or_report(source: str, ref: str | None, verb: str) -> AcquiredSource | None:
-    """`acquire_source` with the failure already printed (git failure or a
-    dead local-path source); None means the caller should return 1."""
+# meiva:note
+# `acquire_source` with the failure already printed (git failure or a dead local-path source);
+# `None` means the caller should return 1. `parent` is the directory the caller minted for this
+# acquisition and keeps until it is done with the clone.
+def _acquire_or_report(
+    source: str, ref: str | None, verb: str, *, parent: Path
+) -> AcquiredSource | None:
     from ._pkg_source import acquire_source
 
     try:
-        return acquire_source(source, ref)
+        return acquire_source(source, ref, parent=parent)
     except (subprocess.CalledProcessError, SourcePathNotFoundError) as e:
         detail = stderr_text(e).strip() if isinstance(e, subprocess.CalledProcessError) else str(e)
         print(f"[meiva mcp {verb}] {detail}", file=sys.stderr)
@@ -494,6 +499,7 @@ def cmd_mcp_install(
     uv: UvBuild,
     home: Path,
     now: datetime,
+    scratch: ScratchSpace,
 ) -> int:
     """`meiva mcp install <source> [--path SUBDIR] [--ref REF] [--env K=V]...` —
     install a standalone MCP package from a git URL or a local directory.
@@ -508,7 +514,7 @@ def cmd_mcp_install(
     from base import paths
     from base.packages.extensions import install_registry
 
-    from ._pkg_source import cleanup_temp
+    from ._pkg_source import TEMP_PREFIX
 
     try:
         overrides = parse_env_pairs(env_pairs or [])
@@ -516,11 +522,11 @@ def cmd_mcp_install(
         print(f"[meiva mcp install] {e}", file=sys.stderr)
         return 1
 
-    acq = _acquire_or_report(source, ref, "install")
-    if acq is None:
-        return 1
+    with scratch.make(prefix=TEMP_PREFIX) as staging:
+        acq = _acquire_or_report(source, ref, "install", parent=staging)
+        if acq is None:
+            return 1
 
-    try:
         pkg_dir = acq.root / path if path else acq.root
         if not pkg_dir.is_dir():
             print(f"[meiva mcp install] path '{path}' not found in source.", file=sys.stderr)
@@ -564,8 +570,6 @@ def cmd_mcp_install(
             print(f"  env set on the installed copy: {', '.join(sorted(overrides))}")
         print("  connects on next use; no restart needed.")
         return 0
-    finally:
-        cleanup_temp(acq.cloned)
 
 
 def cmd_mcp_uninstall(name: str, *, home: Path) -> int:
@@ -589,7 +593,9 @@ def cmd_mcp_uninstall(name: str, *, home: Path) -> int:
     return 0
 
 
-def cmd_mcp_upgrade(name: str, *, uv: UvBuild, home: Path, now: datetime, user_home: Path) -> int:
+def cmd_mcp_upgrade(
+    name: str, *, uv: UvBuild, home: Path, now: datetime, user_home: Path, scratch: ScratchSpace
+) -> int:
     """`meiva mcp upgrade <name>` — re-fetch an installed MCP package
     from its source.
 
@@ -599,7 +605,7 @@ def cmd_mcp_upgrade(name: str, *, uv: UvBuild, home: Path, now: datetime, user_h
     from base import paths
     from base.packages.extensions import install_registry
 
-    from ._pkg_source import cleanup_temp
+    from ._pkg_source import TEMP_PREFIX
 
     pkg = install_registry.get(name, home=home)
     if pkg is None or pkg.type != "mcp":
@@ -620,13 +626,16 @@ def cmd_mcp_upgrade(name: str, *, uv: UvBuild, home: Path, now: datetime, user_h
     # meiva:note
     # `acquire_source` takes a value already placed; `pkg` keeps the recorded text, so the
     # re-registration below does not migrate a legacy `~/...` row to an absolute path.
-    acq = _acquire_or_report(
-        install_registry.placed_source(recorded, user_home=user_home), pkg.ref, "upgrade"
-    )
-    if acq is None:
-        return 1
+    with scratch.make(prefix=TEMP_PREFIX) as staging:
+        acq = _acquire_or_report(
+            install_registry.placed_source(recorded, user_home=user_home),
+            pkg.ref,
+            "upgrade",
+            parent=staging,
+        )
+        if acq is None:
+            return 1
 
-    try:
         pkg_dir = acq.root / pkg.path if pkg.path else acq.root
         mcp_json = pkg_dir / ".mcp.json"
         if not mcp_json.is_file():
@@ -684,5 +693,3 @@ def cmd_mcp_upgrade(name: str, *, uv: UvBuild, home: Path, now: datetime, user_h
         print(f"[meiva mcp upgrade] re-fetched '{name}' from {pkg.source}.")
         print("  connects on next use; no restart needed.")
         return 0
-    finally:
-        cleanup_temp(acq.cloned)

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import tempfile
 from pathlib import Path
 
 from base.agents.messages.external_caller import launch_caller_assignment
@@ -141,10 +140,10 @@ def launch(
     stamp = site.now.strftime("%Y%m%d-%H%M%S")
     if preset_first_run:
         preset_claude_first_run(site.home, stamp)
-    with tempfile.TemporaryDirectory(prefix="meiva-claude-launch-") as marker_dir:
+    with site.scratch.make(prefix="meiva-claude-launch-") as marker_dir:
         facts = ClaudeLaunchFacts(
             claude_session=resume or str(new_uuid(process_context.current_context().require_rng())),
-            failure_marker=Path(marker_dir) / "missing-claude",
+            failure_marker=marker_dir / "missing-claude",
             stamp=stamp,
             caller_assignment=caller_assignment,
         )

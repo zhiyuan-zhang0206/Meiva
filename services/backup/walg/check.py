@@ -15,7 +15,6 @@ takes that full name. Nothing printed here contains a credential or key value.
 
 from __future__ import annotations
 
-import tempfile
 from collections.abc import Callable, Mapping
 from contextlib import AbstractContextManager
 from dataclasses import dataclass, field
@@ -24,6 +23,7 @@ from pathlib import Path
 import psycopg
 
 from base.cluster.dataplane import walg_binary
+from base.paths.scratch import ScratchSpace
 from services.backup.walg import config as walg_config
 from services.backup.walg import probe
 from services.backup.walg.archive import expected_archive
@@ -41,7 +41,12 @@ class Step:
 
 
 def _storage_round_trip(
-    *, path: Path | None, token: str, home: Path, environ: Mapping[str, str]
+    *,
+    path: Path | None,
+    token: str,
+    home: Path,
+    environ: Mapping[str, str],
+    scratch: ScratchSpace,
 ) -> str:
     remote = f"{_CHECK_DIR}/{token}.txt"
     stored = f"{remote}.lz4"
@@ -58,8 +63,8 @@ def _storage_round_trip(
             )
         )
 
-    with tempfile.TemporaryDirectory(prefix="meiva-walg-check-") as scratch:
-        source, fetched = Path(scratch, "put"), Path(scratch, "get")
+    with scratch.make(prefix="meiva-walg-check-") as box:
+        source, fetched = box / "put", box / "get"
         source.write_bytes(payload)
         try:
             call("st", "put", str(source), remote)
@@ -116,6 +121,7 @@ def run_check(
     system: str,
     machine: str,
     installed: Callable[..., str | None] = walg_binary.installed_problem,
+    scratch: ScratchSpace,
 ) -> list[Step]:
     return run_check_on(
         path=path,
@@ -124,6 +130,7 @@ def run_check(
         admin=probe.admin_connection(home=home),
         home=home,
         environ=environ,
+        scratch=scratch,
     )
 
 
@@ -138,6 +145,7 @@ def run_check_on(
     admin: AbstractContextManager[psycopg.Connection],
     home: Path,
     environ: Mapping[str, str],
+    scratch: ScratchSpace,
 ) -> list[Step]:
     if not token:
         raise ValueError("the check names its probe object by a non-empty token")
@@ -173,7 +181,9 @@ def run_check_on(
         steps.append(
             Step(
                 "storage",
-                _storage_round_trip(path=path, token=token, home=home, environ=environ),
+                _storage_round_trip(
+                    path=path, token=token, home=home, environ=environ, scratch=scratch
+                ),
             )
         )
     except WalgCommandError as exc:

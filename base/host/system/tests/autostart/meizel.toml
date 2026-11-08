@@ -1,4 +1,5 @@
 exports = []
 
 [uses]
+"child_definition.py" = []
 "test_registration.py" = ["child_definition.py"]

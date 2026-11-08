@@ -46,6 +46,7 @@ def ctx(tmp_path: Path, command_runtime: CommandRuntime) -> ConvergeCtx:
         clock=command_runtime.clock,
         services=frozenset(),
         terminal=command_runtime.terminal,
+        scratch=command_runtime.scratch,
     )
 
 

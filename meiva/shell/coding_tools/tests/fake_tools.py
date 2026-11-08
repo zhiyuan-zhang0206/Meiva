@@ -18,6 +18,8 @@ from base.agents.context.clients import ClientSet
 from base.agents.context.gateway_client.transport import GatewayTransportInputs
 from base.clock import SYSTEM_TIMERS, Timers
 from base.paths import workspace_dir
+from base.paths.scratch import ScratchSpace
+from base.paths.tests.fake_scratch import FakeScratch
 from meiva.shell.coding_tools._common import LaunchSite
 from meiva.shell.session_env import SessionHost
 from meiva.shell.sessions import ShellSessions
@@ -41,6 +43,7 @@ def site_for(
     *,
     timers: Timers = SYSTEM_TIMERS,
     now: datetime | None = None,
+    scratch: ScratchSpace | None = None,
 ) -> LaunchSite:
     return LaunchSite(
         shell=shell,
@@ -50,6 +53,7 @@ def site_for(
         host=host,
         timers=timers,
         now=datetime.now(UTC) if now is None else now,
+        scratch=FakeScratch(home / "scratch") if scratch is None else scratch,
     )
 
 

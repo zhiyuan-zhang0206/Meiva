@@ -36,6 +36,7 @@ def _h_backup_walg_check(args: argparse.Namespace) -> int:
         system=system,
         machine=machine,
         installed=options(args, _CheckOptions).installed,
+        scratch=runtime.scratch,
     )
 
 

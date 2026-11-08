@@ -75,7 +75,10 @@ attempt line and in the final `RuntimeError`.
 
 The numbers are the `lgtm_native_download_*` settings (observability domain,
 `MEIVA_LGTM_NATIVE_DOWNLOAD_*`) read by `inputs.lgtm_settings_from_boot` into
-`plans/lgtm/download_retry.DownloadLimits`; the download functions take them as data. The 900 s default
+`plans/lgtm/download_retry.DownloadLimits`; the download functions take them as data, and the
+`ScratchSpace` the archive and an extraction are staged in comes from the converge step
+(`ConvergeCtx.scratch`) — the archive in that space's root, the extraction inside the install
+target it will be renamed into. The 900 s default
 is measured: on a 5.8-8.7 MB/s link the three archives took 8 s / 14 s / 53 s
 (2026-10-17), so 900 s covers the 461 MB Grafana tarball at >=512 KB/s.
 

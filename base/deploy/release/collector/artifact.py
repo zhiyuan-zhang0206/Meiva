@@ -11,7 +11,6 @@ import hashlib
 import shutil
 import sys
 import tarfile
-import tempfile
 from pathlib import Path
 
 from base.clock import Timers
@@ -28,6 +27,7 @@ from base.deploy.release.collector.plan import (
 )
 from base.host.net.ports import StreamingUrlOpener
 from base.host.net.resilience import Policy, retry
+from base.paths.scratch import ScratchSpace
 
 
 class DownloadProgress:
@@ -149,6 +149,10 @@ def download_with_retry(
 
 # meiva:note
 # Download + SHA256-verify + install the pinned tarball's binary into dest_dir.
+#
+# `scratch` is where the tarball is staged for one install: `dest_dir` is the target the binary
+# lands in, not a workspace for a download that can run to hundreds of megabytes, so the caller
+# hands the space it minted for the call rather than this module naming the host's.
 def download_and_verify(
     tag: str,
     dest_dir: Path,
@@ -156,10 +160,11 @@ def download_and_verify(
     open_url: StreamingUrlOpener,
     timers: Timers,
     limits: DownloadLimits,
+    scratch: ScratchSpace,
 ) -> None:
     asset = release_asset(tag)
-    with tempfile.TemporaryDirectory() as tmp:
-        tarball = Path(tmp) / "otelcol-contrib.tar.gz"
+    with scratch.make(prefix="meiva-collector-") as tmp:
+        tarball = tmp / "otelcol-contrib.tar.gz"
         _report(asset.download_line())
         digest = download_with_retry(
             asset.url, tarball, timers=timers, open_url=open_url, limits=limits
@@ -167,7 +172,7 @@ def download_and_verify(
         mismatch = asset.mismatch_message(digest)
         if mismatch is not None:
             raise RuntimeError(mismatch)
-        install_binary(tarball, dest_dir)
+        install_binary(tarball, dest_dir, scratch=scratch)
     (dest_dir / VERSION_MARKER).write_text(OTELCOL_CONTRIB_VERSION + "\n", encoding="utf-8")
 
 
@@ -178,14 +183,17 @@ def download_and_verify(
 # the directory entry and never writes into the old file, which may be a running collector
 # (Linux refuses to write to an executable in use, macOS would truncate it), and a failure
 # part-way leaves the previous binary untouched.
-def install_binary(tarball: Path, dest_dir: Path) -> None:
+#
+# The staging directory is minted in `dest_dir`, never in the space's own root: a rename needs
+# one filesystem, and `dest_dir` is the one this call already has.
+def install_binary(tarball: Path, dest_dir: Path, *, scratch: ScratchSpace) -> None:
     with tarfile.open(tarball) as tf:
         members = tf.getmembers()
         name = binary_member_name([m.name for m in members])
         member = next(m for m in members if m.name == name)
-        with tempfile.TemporaryDirectory(dir=dest_dir) as staging:
+        with scratch.make(prefix="meiva-collector-stage-", parent=dest_dir) as staging:
             tf.extract(member, path=staging, filter="data")
-            staged = Path(staging) / member.name
+            staged = staging / member.name
             staged.chmod(0o755)
             shutil.move(staged, dest_dir / BINARY_NAME)
 

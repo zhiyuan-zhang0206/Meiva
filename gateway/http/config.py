@@ -36,6 +36,7 @@ from base.host.db_authority.api import AcceptanceCache
 from base.host.system.hostport import Host
 from base.native_process.loaded_commit import LoadedCommit
 from base.packages.composer_commands import CommandCatalog
+from base.paths.scratch import ScratchSpace
 from base.sessions.protocol import SessionBackend
 from base.telemetry.alerts import frontend_base_url
 from base.telemetry.observability import cluster_label
@@ -514,6 +515,11 @@ class GatewayAppState(State):
     host: Host
     process_image: LoadedCommit
     config_authority: ConfigAuthority
+    # meiva:note
+    # The temporary space of this gateway process: a handler that mints a directory for one request
+    # (an extension upload's unpacked tree, the memory pool's bundle) takes it here, beside the
+    # clock the same root builds, so no handler names where the host keeps temporary space.
+    scratch: ScratchSpace
     rpc: RpcClient
     started_at: float
     db: Database

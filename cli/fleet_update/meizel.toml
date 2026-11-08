@@ -20,7 +20,3 @@ exports = ["__init__.py", "choices.py", "fleet_alert_silence.py", "fleet_gate.py
 
 [roots]
 "fleet_alert_silence.py" = { kinds = ["clock", "settings", "argv"], why = "Standalone SSH entrypoint shipped to the gateway over stdin reads its own clock and settings; it also reads its command line (argv) once, as the process entry" }
-
-[debt.ambient-read]
-"choices.py#environ tempfile.TemporaryDirectory()" = { count = 1, owner = "#5816", until = "permanently: `_service_problems` runs `services.supervision.roster` under a throwaway `MEIVA_HOME` so the check reads this checkout's roster and never the operator's home; its caller hands it the parsed arguments and the environment, and a home passed in would be the same throwaway value that caller has to mint, so the process's own temp space is where that home belongs" }
-"choices.py#random tempfile.TemporaryDirectory()" = { count = 1, owner = "#5816", until = "permanently: the throwaway home's name is minted by the OS so two validations in one process cannot share a home, and no caller reads it — the child receives `MEIVA_HOME` and prints the roster to stdout" }

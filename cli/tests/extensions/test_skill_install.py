@@ -113,6 +113,7 @@ def test_bare_standard_skill_from_local_path(
             home=unit_home,
             now=command_runtime.clock.now(),
             environ=ENVIRON,
+            scratch=command_runtime.scratch,
         )
         == 0
     )
@@ -148,6 +149,7 @@ def test_optional_standard_fields_do_not_block_the_mount(
             home=unit_home,
             now=command_runtime.clock.now(),
             environ=ENVIRON,
+            scratch=command_runtime.scratch,
         )
         == 0
     )
@@ -183,6 +185,7 @@ def test_claude_code_skills_tree(
             home=unit_home,
             now=command_runtime.clock.now(),
             environ=ENVIRON,
+            scratch=command_runtime.scratch,
         )
         == 0
     )
@@ -219,6 +222,7 @@ def test_skills_collection_keeps_nested_subskills(
             home=unit_home,
             now=command_runtime.clock.now(),
             environ=ENVIRON,
+            scratch=command_runtime.scratch,
         )
         == 0
     )
@@ -251,6 +255,7 @@ def test_bare_collection_of_skill_folders(
             home=unit_home,
             now=command_runtime.clock.now(),
             environ=ENVIRON,
+            scratch=command_runtime.scratch,
         )
         == 0
     )
@@ -278,6 +283,7 @@ def test_path_selects_a_subdirectory(
             home=unit_home,
             now=command_runtime.clock.now(),
             environ=ENVIRON,
+            scratch=command_runtime.scratch,
         )
         == 0
     )
@@ -309,6 +315,7 @@ def test_crlf_and_bom_skill_installs(
             home=unit_home,
             now=command_runtime.clock.now(),
             environ=ENVIRON,
+            scratch=command_runtime.scratch,
         )
         == 0
     )
@@ -338,6 +345,7 @@ def test_collision_leaves_the_load_dir_untouched(
             home=unit_home,
             now=command_runtime.clock.now(),
             environ=ENVIRON,
+            scratch=command_runtime.scratch,
         )
         == 0
     )
@@ -352,6 +360,7 @@ def test_collision_leaves_the_load_dir_untouched(
             home=unit_home,
             now=command_runtime.clock.now(),
             environ=ENVIRON,
+            scratch=command_runtime.scratch,
         )
         == 1
     )
@@ -381,6 +390,7 @@ def test_no_skill_in_source_fails_fast(
             home=unit_home,
             now=command_runtime.clock.now(),
             environ=ENVIRON,
+            scratch=command_runtime.scratch,
         )
         == 1
     )
@@ -411,6 +421,7 @@ def test_malformed_skill_md_fails_fast(
             home=unit_home,
             now=command_runtime.clock.now(),
             environ=ENVIRON,
+            scratch=command_runtime.scratch,
         )
         == 1
     )
@@ -436,6 +447,7 @@ def test_missing_path_in_source_errors(
             home=unit_home,
             now=command_runtime.clock.now(),
             environ=ENVIRON,
+            scratch=command_runtime.scratch,
         )
         == 1
     )
@@ -467,6 +479,7 @@ def test_install_skips_junk_names(
             home=unit_home,
             now=command_runtime.clock.now(),
             environ=ENVIRON,
+            scratch=command_runtime.scratch,
         )
         == 0
     )
@@ -500,6 +513,7 @@ def test_install_records_explicit_update_policy(
             home=unit_home,
             now=command_runtime.clock.now(),
             environ=ENVIRON,
+            scratch=command_runtime.scratch,
         )
         == 0
     )
@@ -531,6 +545,7 @@ def test_install_rejects_a_bad_check_every(
             home=unit_home,
             now=command_runtime.clock.now(),
             environ=ENVIRON,
+            scratch=command_runtime.scratch,
         )
         == 1
     )

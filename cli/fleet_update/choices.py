@@ -11,11 +11,12 @@ from __future__ import annotations
 import argparse
 import shlex
 import subprocess
-import tempfile
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TypeGuard
+
+from base.paths.scratch import ScratchSpace
 
 from .plan.release_target import DEFAULT_CHANNEL, Channel, TargetRequest
 from .untyped import object_of
@@ -30,15 +31,19 @@ CODE_ROOT = Path(__file__).resolve().parents[2]
 # Before any host: names must be in this checkout's roster; shells and browser have own choices.
 # The roster is this checkout's own module, run by the interpreter the entry point named.
 def _service_problems(
-    args: argparse.Namespace, env: Mapping[str, str], *, python: str
+    args: argparse.Namespace,
+    env: Mapping[str, str],
+    *,
+    python: str,
+    scratch: ScratchSpace,
 ) -> list[str]:
     named = {n for flag in _NAMED for n in _strings(args, flag[2:].replace("-", "_"))}
     own = sorted(set(_strings(args, "keep_service")) & {"pty-sessions", "browser"})
     problems = [f"--keep-service {name}: it has its own keep/stop choice" for name in own]
     if not named:
         return problems
-    with tempfile.TemporaryDirectory() as home:
-        roster_env = {**env, "MEIVA_HOME": home, "MEIVA_CONFIG_FETCH": "skip"}
+    with scratch.make(prefix="meiva-update-roster-") as home:
+        roster_env = {**env, "MEIVA_HOME": str(home), "MEIVA_CONFIG_FETCH": "skip"}
         run = [python, "-m", "services.supervision.roster"]
         done = subprocess.run(
             run, cwd=CODE_ROOT, env=roster_env, capture_output=True, text=True, check=False
@@ -279,7 +284,13 @@ def _resolve_target_choice(args: argparse.Namespace) -> list[str]:
     return problems
 
 
-def _missing_choices(args: argparse.Namespace, env: Mapping[str, str], *, python: str) -> list[str]:
+def _missing_choices(
+    args: argparse.Namespace,
+    env: Mapping[str, str],
+    *,
+    python: str,
+    scratch: ScratchSpace,
+) -> list[str]:
     half = _text(args, "half")
     has_runners = bool(_strings(args, "runner"))
     problems = (
@@ -298,7 +309,7 @@ def _missing_choices(args: argparse.Namespace, env: Mapping[str, str], *, python
         problems += _value_problems(args, scope)
     if half != "up" and _attr(args, "mode") not in (None, "smooth", "force"):
         problems.append("--mode smooth|force")
-    return problems + _service_problems(args, env, python=python)
+    return problems + _service_problems(args, env, python=python, scratch=scratch)
 
 
 # meiva:note
@@ -423,9 +434,13 @@ def _fleet_args(args: argparse.Namespace) -> FleetArgs:
 # Validate a parsed `meiva update` namespace: return its `FleetArgs`, or the refusal text naming
 # every missing or conflicting choice at once before any host is touched.
 def validate_parsed(
-    args: argparse.Namespace, env: Mapping[str, str], *, python: str
+    args: argparse.Namespace,
+    env: Mapping[str, str],
+    *,
+    python: str,
+    scratch: ScratchSpace,
 ) -> FleetArgs | str:
-    if problems := _missing_choices(args, env, python=python):
+    if problems := _missing_choices(args, env, python=python, scratch=scratch):
         listed = "".join(f"\n  {problem}" for problem in problems)
         return f"refused: every choice is explicit; missing or conflicting:{listed}\n"
     if _attr(args, "rebuild_extras") is True and _attr(args, "extras") == "--keep-extras":
@@ -438,10 +453,12 @@ def validate_parsed(
 # meiva:note
 # Parse and validate the whole argv. A refusal exits 2 with every missing or conflicting choice
 # listed at once, before any host is touched.
-def parse(argv: list[str], env: Mapping[str, str], *, python: str) -> FleetArgs:
+def parse(
+    argv: list[str], env: Mapping[str, str], *, python: str, scratch: ScratchSpace
+) -> FleetArgs:
     parser = _parser()
     args = parser.parse_args(argv)
-    outcome = validate_parsed(args, env, python=python)
+    outcome = validate_parsed(args, env, python=python, scratch=scratch)
     if isinstance(outcome, str):
         parser.exit(2, outcome)
     return outcome

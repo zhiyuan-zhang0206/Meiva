@@ -7,6 +7,7 @@ from typing import Any
 import psycopg
 import pytest
 
+from base.paths.tests.fake_scratch import FakeScratch
 from services.backup.walg import check, probe
 from services.backup.walg import config as walg_config
 from services.backup.walg.pg_target import PgTarget
@@ -40,6 +41,7 @@ def _run_check(
         admin=probe.admin_connection_to(_REFUSED) if admin is None else admin,
         home=sandbox.home,
         environ=sandbox.environ,
+        scratch=FakeScratch(sandbox.home.parent / "scratch"),
     )
 
 
