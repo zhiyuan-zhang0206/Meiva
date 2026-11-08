@@ -15,6 +15,8 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+from base.clock.tests.fakes import system_clock
+
 
 def zero_record_exit() -> list[str]:
     import agent.execution.child as exec_child  # the module under test
@@ -50,8 +52,10 @@ def identity_child_record() -> dict[str, Any]:
 
     with tempfile.TemporaryDirectory(prefix="lazy-child-") as home:
         pipeline = telemetry_otlp_exporting.ExportingEventPipeline(
+            now=system_clock().now,
             writer=writer,
             exporter=default_exporter(
+                now=system_clock().now,
                 export_allowed=lambda: True,
                 mirror_dir=Path(home),
                 home=Path(home),

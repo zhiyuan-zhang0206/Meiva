@@ -50,6 +50,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlsplit
 
+from base.clock import SYSTEM_TIMERS, Clock
+from base.clock.configuration import clock_config_from_boot
 from base.cluster.dataplane.direct_url import ClusterDirectUrl
 from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.configured import ConfiguredMachineIdentity
@@ -551,6 +553,7 @@ def main(argv: Sequence[str], *, process_config: ConfigBoot) -> None:
     machine = ConfiguredMachineIdentity(process_config)
     home = meiva_home()
     pipeline = build_pipeline(
+        now=Clock(clock_config_from_boot(process_config), timers=SYSTEM_TIMERS).now,
         otlp_enabled=lambda: process_config.view.observability.telemetry_otlp_enabled,
         otlp_endpoint=lambda: process_config.view.observability.telemetry_otlp_endpoint,
         database=gate_database(

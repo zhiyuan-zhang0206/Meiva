@@ -13,6 +13,7 @@ from opentelemetry.sdk._logs import LoggerProvider
 from opentelemetry.sdk._logs.export import BatchLogRecordProcessor
 from opentelemetry.sdk.metrics.export import PeriodicExportingMetricReader
 
+from base.clock.tests.fakes import system_clock
 from base.log.tests.log_records import LogRecords
 from base.log.tests.log_records import loguru_records as loguru_records
 from base.telemetry.delivery.receipts import DrainPhase, DrainResult, DrainStatus, Event
@@ -43,6 +44,7 @@ def _backend(
     resolved_logs = FakeProvider() if logs is None else logs
     resolved_metrics = FakeProvider() if metrics is None else metrics
     backend = telemetry_otlp.OtlpBackend(
+        now=system_clock().now,
         export_allowed=lambda: True,
         enabled=enabled,
         providers=(resolved_logs, resolved_metrics),
@@ -188,6 +190,7 @@ def test_failed_sdk_build_keeps_partial_resources_until_owned_cleanup(tmp_path: 
 
     logs, metrics = FakeProvider(on_shutdown=close), FakeProvider(on_get_meter=fail_meter)
     backend = telemetry_otlp.OtlpBackend(
+        now=system_clock().now,
         export_allowed=lambda: True,
         enabled=lambda: True,
         providers=(logs, metrics),
@@ -408,6 +411,7 @@ def test_real_sdk_partial_build_threads_are_owned_and_closed(tmp_path: Path) -> 
     try:
         port = server.server_address[1]
         backend = telemetry_otlp.OtlpBackend(
+            now=system_clock().now,
             export_allowed=lambda: True,
             enabled=lambda: True,
             endpoint=lambda: f"http://127.0.0.1:{port}",
@@ -446,6 +450,7 @@ def test_failed_teardown_owner_is_not_overwritten_at_retry_deadline(tmp_path: Pa
     logs = FakeProvider(on_shutdown=close)
     metrics = FakeProvider(on_get_meter=fail_meter)
     backend = telemetry_otlp.OtlpBackend(
+        now=system_clock().now,
         export_allowed=lambda: True,
         enabled=lambda: True,
         retry_interval_s=0.05,
@@ -496,8 +501,10 @@ def test_empty_exporting_pipeline_stops_without_reading_identity(tmp_path: Path)
         raise AssertionError("empty close must not read identity")
 
     pipeline = telemetry_otlp_exporting.ExportingEventPipeline(
+        now=system_clock().now,
         writer=lambda _events, _exporter: None,
         exporter=default_exporter(
+            now=system_clock().now,
             export_allowed=reject,
             mirror_dir=tmp_path,
             home=tmp_path,
@@ -516,8 +523,10 @@ def test_stop_refuses_non_finite_and_negative_timeout(tmp_path: Path) -> None:
         raise AssertionError("a refused budget must not read identity")
 
     pipeline = telemetry_otlp_exporting.ExportingEventPipeline(
+        now=system_clock().now,
         writer=lambda _events, _exporter: None,
         exporter=default_exporter(
+            now=system_clock().now,
             export_allowed=reject,
             mirror_dir=tmp_path,
             home=tmp_path,
@@ -541,7 +550,9 @@ def test_unfinished_ordinary_writer_keeps_its_exporter_alive(tmp_path: Path) -> 
         entered.set()
         assert release.wait(5)
 
-    pipeline = telemetry_otlp_exporting.ExportingEventPipeline(writer=write, exporter=backend)
+    pipeline = telemetry_otlp_exporting.ExportingEventPipeline(
+        now=system_clock().now, writer=write, exporter=backend
+    )
     assert backend._ensure()
     pipeline.enqueue(otlp_test_event())
     assert entered.wait(2)
@@ -567,7 +578,7 @@ def test_unfinished_exporter_keeps_pipeline_for_later_observation(tmp_path: Path
 
     backend, logs, metrics = _backend(tmp_path, logs=FakeProvider(on_shutdown=close))
     pipeline = telemetry_otlp_exporting.ExportingEventPipeline(
-        writer=lambda _events, _exporter: None, exporter=backend
+        now=system_clock().now, writer=lambda _events, _exporter: None, exporter=backend
     )
     assert backend._ensure()
     try:
@@ -597,7 +608,9 @@ def test_two_stage_stop_hands_stage_two_the_real_remaining_time(tmp_path: Path) 
         writer_done.append(time.monotonic())
 
     backend, _, _ = _backend(tmp_path, logs=logs, metrics=metrics)
-    pipeline = telemetry_otlp_exporting.ExportingEventPipeline(writer=write, exporter=backend)
+    pipeline = telemetry_otlp_exporting.ExportingEventPipeline(
+        now=system_clock().now, writer=write, exporter=backend
+    )
     assert backend._ensure()
     pipeline.enqueue(otlp_test_event())
     assert writer_started.wait(5)
@@ -625,8 +638,10 @@ def test_zero_timeout_stage_one_leaves_the_exporter_untouched(tmp_path: Path) ->
         assert release_writer.wait(5)
 
     pipeline = telemetry_otlp_exporting.ExportingEventPipeline(
+        now=system_clock().now,
         writer=write,
         exporter=default_exporter(
+            now=system_clock().now,
             export_allowed=lambda: True,
             mirror_dir=tmp_path,
             home=tmp_path,
@@ -657,7 +672,9 @@ def test_blocked_writer_and_blocked_exporter_release_in_stages(tmp_path: Path) -
         assert release_writer.wait(5)
 
     backend, _, _ = _backend(tmp_path, logs=logs, metrics=metrics)
-    pipeline = telemetry_otlp_exporting.ExportingEventPipeline(writer=write, exporter=backend)
+    pipeline = telemetry_otlp_exporting.ExportingEventPipeline(
+        now=system_clock().now, writer=write, exporter=backend
+    )
     assert backend._ensure()
     pipeline.enqueue(otlp_test_event())
     assert writer_started.wait(5)
@@ -682,8 +699,10 @@ def test_stop_from_the_writer_thread_is_refused(tmp_path: Path) -> None:
         assert "event drain cannot join itself" in str(raised.value)
 
     pipeline = telemetry_otlp_exporting.ExportingEventPipeline(
+        now=system_clock().now,
         writer=write,
         exporter=default_exporter(
+            now=system_clock().now,
             export_allowed=lambda: True,
             mirror_dir=tmp_path,
             home=tmp_path,
@@ -700,7 +719,7 @@ def test_concurrent_stop_calls_share_the_blocked_observation(tmp_path: Path) -> 
     logs, metrics = BlockingProvider(), FakeProvider()
     backend, _, _ = _backend(tmp_path, logs=logs, metrics=metrics)
     pipeline = telemetry_otlp_exporting.ExportingEventPipeline(
-        writer=lambda _events, _exporter: None, exporter=backend
+        now=system_clock().now, writer=lambda _events, _exporter: None, exporter=backend
     )
     assert backend._ensure()
     results: list[DrainResult] = []

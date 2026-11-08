@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import socket
 from collections.abc import Callable
+from datetime import datetime
 from functools import partial
 from pathlib import Path
 from typing import Protocol, TypedDict
@@ -117,7 +118,9 @@ class BoundPipeline(Protocol):
 
 # meiva:note
 # The slots of the per-process binding. Each slot names one fact a process establishes at boot;
-# `jsonl_day` is the day stamp of the last mirror prune.
+# `jsonl_day` is the day stamp of the last mirror prune, and `now` is the process clock an event
+# with no `ts` of its own is stamped with — `None` until a boot seam hands one in, which is an
+# error at the first such emit rather than a quiet second time source.
 class ProcessState(TypedDict):
     pipeline: BoundPipeline | None
     process: str
@@ -127,6 +130,7 @@ class ProcessState(TypedDict):
     machine_hostname: str
     home: Path | None
     cluster: str | None
+    now: Callable[[], datetime] | None
     jsonl_day: str | None
     emission_skipped_said: set[str]
 
@@ -148,6 +152,7 @@ process_state: ProcessState = {
     "machine_hostname": machine_hostname(),
     "home": None,
     "cluster": None,
+    "now": None,
     "jsonl_day": None,
     "emission_skipped_said": set(),
 }

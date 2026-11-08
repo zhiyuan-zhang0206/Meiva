@@ -14,6 +14,7 @@ from typing import Any, overload
 
 import pytest
 
+from base.clock.tests.fakes import system_clock
 from base.telemetry.delivery.pipeline import EventPipeline
 from base.telemetry.delivery.receipts import DrainStatus, Event
 from base.telemetry.delivery.state import process_state
@@ -109,13 +110,18 @@ def capturing_events() -> Generator[EmittedEvents]:
     it does not use this. If an application's startup binds its pipeline, enter this context
     after startup and leave it before shutdown so that lifecycle retains its own binding."""
     captured: list[Event] = []
-    pipeline = EventPipeline(writer=captured.extend, flush_interval_s=0.01)
+    pipeline = EventPipeline(now=system_clock().now, writer=captured.extend, flush_interval_s=0.01)
     previous = process_state["pipeline"]
+    previous_now = process_state["now"]
     process_state["pipeline"] = pipeline
+    # The clock travels with the binding it was bound for: an event emitted without `ts` in this
+    # block is stamped by the captured pipeline's clock, exactly as `init_telemetry` binds it.
+    process_state["now"] = pipeline.now
     try:
         yield EmittedEvents(captured, pipeline)
     finally:
         process_state["pipeline"] = previous
+        process_state["now"] = previous_now
         pipeline.stop()
 
 

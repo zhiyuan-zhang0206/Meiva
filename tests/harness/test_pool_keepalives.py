@@ -48,6 +48,7 @@ from psycopg_pool import ConnectionPool
 import base.log
 import base.telemetry.process_logging
 from base import db, telemetry
+from base.clock.tests.fakes import system_clock
 from base.cluster.machine import MachineIdentityReader
 from base.config.service_read import ConfigAuthority
 from base.config.tests.config_authority import config_authority as config_authority
@@ -177,6 +178,7 @@ def test_log_sink_pipeline_drain_thread_stays_alive(
     remains live until this entry removes the adapter and performs bounded close.
     """
     pipeline = telemetry.build_pipeline(
+        now=system_clock().now,
         database=lambda: database,
         machine=machine_identity,
         home=unit_home,

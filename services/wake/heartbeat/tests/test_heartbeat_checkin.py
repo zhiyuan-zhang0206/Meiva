@@ -14,6 +14,7 @@ from psycopg_pool import ConnectionPool
 from base import telemetry
 from base.agents.tests.units import spawn_agent
 from base.clock import SYSTEM_TIMERS
+from base.clock.tests.fakes import system_clock
 from base.cluster import inbound_channel
 from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
@@ -71,6 +72,7 @@ def event_pipeline(
 ) -> Iterator[telemetry.EventPipeline]:
     """Own the process writer used by the service operation and mirror barrier."""
     pipeline = telemetry.build_pipeline(
+        now=system_clock().now,
         database=lambda: database,
         machine=machine_identity,
         home=unit_home,

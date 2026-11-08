@@ -74,6 +74,7 @@ def _producer(
         ),
         machine=machine,
         home=home,
+        now=command.clock.now,
         otlp_enabled=command.otlp_enabled,
         otlp_endpoint=command.otlp_endpoint,
         flush_interval_s=FLUSH_INTERVAL_S,

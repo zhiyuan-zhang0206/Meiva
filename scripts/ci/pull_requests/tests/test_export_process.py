@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 
+from base.clock.tests.fakes import system_clock
 from base.clock.tests.manual_timers import ManualTimers
 from base.cluster.dataplane.direct_url import ClusterDirectUrl
 from base.cluster.machine.configured import ConfiguredMachineIdentity
@@ -56,7 +57,7 @@ def test_writer_uses_one_captured_gate_and_is_joined(known: bool, tmp_path: Path
     db = Database(db_config_from_settings(), gate=gate, direct_url=direct_url)
     assert db is not None
     with export_process.drain_event_pipeline(
-        "exporter", EventPipeline(writer=lambda _events: None)
+        "exporter", EventPipeline(now=system_clock().now, writer=lambda _events: None)
     ) as pipeline:
         assert not pipeline.stopped
         if not known:
@@ -77,7 +78,7 @@ def test_body_error_preserves_the_original_writer_error_during_close() -> None:
     def write(_events: list[Event]) -> None:
         raise worker_error
 
-    pipeline = EventPipeline(writer=write, batch_size=1)
+    pipeline = EventPipeline(now=system_clock().now, writer=write, batch_size=1)
     event = Event(
         ts=datetime.now(UTC),
         trace_id=None,
@@ -115,7 +116,7 @@ def test_export_entry_captures_before_fetch_or_borrows_the_supplied_writer(
         calls.append("emit")
         emitted.extend(events)
 
-    pipeline = EventPipeline(writer=write)
+    pipeline = EventPipeline(now=system_clock().now, writer=write)
     commands: list[list[str]] = []
 
     def run_process(

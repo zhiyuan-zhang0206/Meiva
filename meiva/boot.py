@@ -192,6 +192,7 @@ def process_clients(
             database=database,
             machine=machine,
             home=resolve_meiva_home(),
+            now=Clock(clock_config_from_boot(config), timers=SYSTEM_TIMERS).now,
             otlp_enabled=lambda: config.view.observability.telemetry_otlp_enabled,
             otlp_endpoint=lambda: config.view.observability.telemetry_otlp_endpoint,
         )
@@ -358,7 +359,14 @@ SDK_PROCESS = "sdk"
 def bind_sdk_identity(home: Path) -> bool:
     from base import telemetry
 
-    return telemetry.bind_identity_if_unbound(process=SDK_PROCESS, home=home)
+    # meiva:note
+    # The process clock this binding establishes, built here because this root already owns the
+    # settings it comes from: a process the SDK named is about to write rows and emit events, and
+    # an event whose producer passed no `ts` is stamped with this clock rather than with a second
+    # time source read behind the caller's back.
+    return telemetry.bind_identity_if_unbound(
+        process=SDK_PROCESS, home=home, now=Clock.from_settings().now
+    )
 
 
 def ensure_plugins_loaded(

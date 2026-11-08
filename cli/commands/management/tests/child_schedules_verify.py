@@ -1,6 +1,7 @@
 import sys
 from datetime import UTC, datetime
 
+from base.clock.tests.fakes import system_clock
 from base.paths import meiva_home
 from cli.commands.management.schedules_verify import RowsFromFile, cmd_schedules_verify
 from cli.database import (
@@ -22,6 +23,7 @@ def _check_rows(rows_file: str) -> None:
         database,
         machine=command.machine,
         home=meiva_home(),
+        now=system_clock().now,
         otlp_enabled=command.otlp_enabled,
         otlp_endpoint=command.otlp_endpoint,
     )

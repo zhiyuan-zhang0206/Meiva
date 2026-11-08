@@ -129,15 +129,27 @@ def capture_trace_ids() -> tuple[str | None, str | None]:
 # identity it bound here. The machine comes from the home's own record; a home that cannot name
 # it still yields `unknown`, announced once. A caller holding a better identity (the health probe
 # carries the configured machine) resolves that itself with `resolve_machine`.
+#
+# `now` is the process clock the same binding establishes: the instant an event gets when its
+# producer passed no `ts` of its own. It is not a convenience default — a process that binds no
+# clock and emits such an event fails loudly (`_process_now`) rather than reading the host clock
+# a second time behind the caller's back.
 def bind_identity(
     *,
     process: str,
     home: Path,
+    now: Callable[[], datetime],
     agent_id: int | None = None,
 ) -> None:
     process_state["process"] = process
     process_state["agent_id"] = agent_id
     process_state["home"] = home
+    # meiva:note
+    # The process clock, beside every other fact this binding establishes. `emit()` stamps an
+    # event whose producer passed no `ts` with it, so a process that binds an identity binds the
+    # time source that identity speaks in — the caller that builds the process resources reads the
+    # clock once and hands it in, and no module below here reaches for the host clock.
+    process_state["now"] = now
     if process_state["machine"] is None:
         process_state["machine"] = resolve_machine(home=home)
     # meiva:note
@@ -155,10 +167,10 @@ def bind_identity(
 # Returns True when this call is what named the process, False when it already had a name; one of
 # the bounded values is `sdk`, bound where the plugin surface loads (`meiva/boot.py`) and never at
 # `import meiva`.
-def bind_identity_if_unbound(*, process: str, home: Path) -> bool:
+def bind_identity_if_unbound(*, process: str, home: Path, now: Callable[[], datetime]) -> bool:
     if process_state["process"] != UNKNOWN_PROCESS:
         return False
-    bind_identity(process=process, home=home)
+    bind_identity(process=process, home=home, now=now)
     return True
 
 
@@ -186,7 +198,7 @@ def init_telemetry(
         # original failure before admitting the next concrete entry resource.
         bound.stop(timeout=0)
         process_state["pipeline"] = pipeline
-    bind_identity(process=process, home=home, agent_id=agent_id)
+    bind_identity(process=process, home=home, now=pipeline.now, agent_id=agent_id)
     if machine_reader is not None:
         process_state["machine"] = resolve_machine(machine_reader, home=home)
     if process_state["pipeline"] is None:
@@ -203,10 +215,28 @@ def pipeline_bound() -> bool:
     return process_state["pipeline"] is not None
 
 
+# meiva:note
+# The process clock this stream stamps with, or the error that says none was bound.
+#
+# A process establishes its clock at the seam that establishes its identity (`bind_identity`,
+# reached from `init_telemetry` with the pipeline's own clock), so a value is there for every
+# process that can emit. When it is not, the event has no honest instant: reading the host clock
+# here would be a second time source beside the one the process bound, and silently dropping the
+# row would hide a boot seam that forgot to hand its clock in.
+def _process_now() -> Callable[[], datetime]:
+    now = process_state["now"]
+    if now is None:
+        raise RuntimeError(
+            "this process bound no event clock: an event emitted without `ts` is stamped with the "
+            "process clock `init_telemetry`/`bind_identity` hands in, and neither has run here"
+        )
+    return now
+
+
 def _as_utc(ts: datetime | None) -> datetime:
     """Normalize one event timestamp onto the stream's single clock: UTC.
 
-    `emit()`'s default is `datetime.now(UTC)`; an explicit `ts` — the loguru
+    `emit()`'s default is the process clock `_process_now()` returns; an explicit `ts` — the loguru
     adapter passes loguru's local-zone record time, replay/migration passes
     stored rows — is converted to UTC here so the Event and every
     serialization of it (the JSONL mirror `ts` field, the OTLP body) carries
@@ -216,7 +246,7 @@ def _as_utc(ts: datetime | None) -> datetime:
     made any local-wall-clock filter of the mirror misread gateway telemetry
     as missing since the UTC-day rollover (task #1638)."""
     if ts is None:
-        return datetime.now(UTC)
+        return _process_now()()
     if ts.tzinfo is None:
         return ts.replace(tzinfo=UTC)
     return ts.astimezone(UTC)
@@ -239,7 +269,9 @@ def emit(
     """Enqueue one event into the unified stream. Never raises — except for a
     contract violation (R2-C): an `event_name` with no `EventSpec` in
     `base/events/declarations`, or a category that contradicts the
-    declaration, raises `ValueError` (AGENTS.md "explode on unknown enums").
+    declaration, raises `ValueError` (AGENTS.md "explode on unknown enums"), and an
+    event with no `ts` in a process that bound no clock raises `RuntimeError`
+    (`_process_now`) instead of stamping a second time source.
     An explicitly supplied producer capture callback also propagates its errors
     before observation delivery; no current participant is inferred.
     The loguru adapter wraps its call with `catch=True`, so a logging line
@@ -253,14 +285,22 @@ def emit(
     `trace_id`/`span_id` are captured from the active OTel span at this point
     (enqueue time — the drain thread runs outside the span context). `agent_id`
     falls back to the process-bound value (init_telemetry); explicit wins.
-    `ts` defaults to the PROCESS clock at enqueue time (`datetime.now(UTC)`) —
-    the one time source for the entire stream, and an explicit `ts` is
-    normalized to UTC before enqueue (`_as_utc`), so every serialization of
-    the Event (the JSONL mirror `ts` field, the OTLP body) carries one offset.
+    `ts` defaults to the PROCESS clock at enqueue time — the one `bind_identity`
+    was handed — the single time source for the entire stream, and an explicit
+    `ts` is normalized to UTC before enqueue (`_as_utc`), so every serialization
+    of the Event (the JSONL mirror `ts` field, the OTLP body) carries one offset.
     Callers pass an explicit `ts` only for loguru-adapter records (loguru
     stamps local zone — normalized here) and replayed/migrated rows; a
     DB-derived timestamp would silently mix two clocks (W7 rewired the last
     DB-clock writers, heartbeat + delivery watchdog, onto this path)."""
+    # meiva:note
+    # A process that bound no event stream drops what it emits, as it always has, and says so once
+    # (`emit_prepared` reports the same absence below). Taking that decision here keeps a process
+    # with no stream from also demanding the instant such an event would have been stamped with —
+    # it bound no clock either, and an event nobody can read owes nobody a timestamp.
+    if producer is None and process_state["pipeline"] is None:
+        _report_unbound_emission(_NO_PRODUCER, event_name)
+        return
     event = prepare_event(
         category,
         event_name,

@@ -6,6 +6,7 @@ import argparse
 import sys
 from collections.abc import Callable
 from dataclasses import dataclass, replace
+from datetime import datetime
 from pathlib import Path
 from threading import Lock
 from typing import TYPE_CHECKING, NoReturn
@@ -141,12 +142,14 @@ class OperatorEventPipeline:
         *,
         machine: MachineIdentityReader,
         home: Path,
+        now: Callable[[], datetime],
         otlp_enabled: Callable[[], bool],
         otlp_endpoint: Callable[[], str],
         flush_interval_s: float = 0.5,
     ) -> None:
         self._machine = machine
         self._home = home
+        self._now = now
         self._otlp_enabled = otlp_enabled
         self._otlp_endpoint = otlp_endpoint
         self._flush_interval_s = flush_interval_s
@@ -165,6 +168,7 @@ class OperatorEventPipeline:
         database_factory: OperatorDatabaseFactory,
         machine: MachineIdentityReader,
         home: Path,
+        now: Callable[[], datetime],
         otlp_enabled: Callable[[], bool],
         otlp_endpoint: Callable[[], str],
     ) -> OperatorEventPipeline:
@@ -172,6 +176,7 @@ class OperatorEventPipeline:
             database_factory,
             machine=machine,
             home=home,
+            now=now,
             otlp_enabled=otlp_enabled,
             otlp_endpoint=otlp_endpoint,
         )
@@ -188,6 +193,7 @@ class OperatorEventPipeline:
         *,
         machine: MachineIdentityReader,
         home: Path,
+        now: Callable[[], datetime],
         log_sinks: list[str],
         otlp_enabled: Callable[[], bool],
         otlp_endpoint: Callable[[], str],
@@ -196,6 +202,7 @@ class OperatorEventPipeline:
             database_factory,
             machine=machine,
             home=home,
+            now=now,
             otlp_enabled=otlp_enabled,
             otlp_endpoint=otlp_endpoint,
         )
@@ -211,6 +218,7 @@ class OperatorEventPipeline:
                 database=self._database_factory,
                 machine=self._machine,
                 home=self._home,
+                now=self._now,
                 otlp_enabled=self._otlp_enabled,
                 otlp_endpoint=self._otlp_endpoint,
                 flush_interval_s=self._flush_interval_s,
@@ -256,6 +264,7 @@ def operator_event_pipeline(
     database_factory: OperatorDatabaseFactory,
     machine: MachineIdentityReader,
     home: Path,
+    now: Callable[[], datetime],
     *,
     otlp_enabled: Callable[[], bool],
     otlp_endpoint: Callable[[], str],
@@ -265,6 +274,7 @@ def operator_event_pipeline(
         database_factory,
         machine=machine,
         home=home,
+        now=now,
         otlp_enabled=otlp_enabled,
         otlp_endpoint=otlp_endpoint,
     )

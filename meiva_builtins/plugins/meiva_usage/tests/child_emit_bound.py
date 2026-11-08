@@ -12,6 +12,7 @@ import tempfile
 from pathlib import Path
 from typing import Any, cast
 
+from base.clock.tests.fakes import system_clock
 from base.daemon.schedules.inputs import ScheduleInputs
 from base.native_process.loaded_commit import LoadedCommit
 from base.telemetry.delivery.pipeline import EventPipeline
@@ -59,7 +60,7 @@ def _no_sleep(_seconds: float) -> None:
 
 
 written: list[Any] = []
-pipeline = EventPipeline(writer=written.extend)
+pipeline = EventPipeline(now=system_clock().now, writer=written.extend)
 
 
 def _pipeline() -> EventPipeline:

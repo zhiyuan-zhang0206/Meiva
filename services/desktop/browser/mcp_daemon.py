@@ -752,6 +752,7 @@ def main() -> None:
     config.boot()
     wiring = build_entry_wiring(config=config, image=image, home=meiva_home())
     pipeline = build_pipeline(
+        now=Clock(clock_config_from_boot(wiring.config), timers=SYSTEM_TIMERS).now,
         otlp_enabled=lambda: wiring.config.view.observability.telemetry_otlp_enabled,
         otlp_endpoint=lambda: wiring.config.view.observability.telemetry_otlp_endpoint,
         database=wiring.database,

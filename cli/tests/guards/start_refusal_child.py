@@ -7,6 +7,8 @@ from pathlib import Path
 
 SINK_SENTINEL = "start-gate-no-sink-sentinel"
 
+from base.clock.tests.fakes import system_clock  # noqa: E402 — after the sys.path bootstrap
+
 
 def main(home: Path, checkout: Path) -> None:
     from base.log import prepare_process_logging
@@ -32,6 +34,7 @@ def main(home: Path, checkout: Path) -> None:
         database,
         machine=command.machine,
         home=home,
+        now=system_clock().now,
         otlp_enabled=command.otlp_enabled,
         otlp_endpoint=command.otlp_endpoint,
     )

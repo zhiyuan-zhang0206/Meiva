@@ -15,6 +15,7 @@ import psycopg
 import pytest
 
 from base.agents.context.clients import DatabaseFactory
+from base.clock.tests.fakes import system_clock
 from base.events.contract import EVENTS
 from base.native_process.root_control.ipc import CallerPayload
 from cli.database import OperatorDatabaseFactory
@@ -198,6 +199,7 @@ def test_a_sink_that_cannot_be_dialled_never_fails_an_attributable_command(
 ) -> None:
     try:
         with operator_lifecycle_audit(
+            now=system_clock().now,
             database_factory=refuse_database,
             host=command_runtime.host_after_config(),
             home=command_runtime.home,
@@ -217,6 +219,7 @@ def test_a_sink_that_cannot_be_dialled_never_fails_an_attributable_command(
 def test_a_boot_start_is_not_attributed_to_an_operator(command_runtime: CommandRuntime) -> None:
     try:
         with operator_lifecycle_audit(
+            now=system_clock().now,
             database_factory=refuse_database,
             host=command_runtime.host_after_config(),
             home=command_runtime.home,
@@ -239,6 +242,7 @@ def test_an_operator_command_audits_itself_as_the_process_that_runs_it(
     command_runtime: CommandRuntime,
 ) -> None:
     with operator_lifecycle_audit(
+        now=system_clock().now,
         database_factory=operator_database,
         host=command_runtime.host_after_config(),
         home=command_runtime.home,
@@ -418,6 +422,7 @@ def test_the_scope_binds_the_identity_its_rows_carry(
     monkeypatch.setitem(delivery_state.process_state, "agent_id", 7)
 
     with operator_lifecycle_audit(
+        now=system_clock().now,
         database_factory=refuse_database,
         host=command_runtime.host_after_config(),
         home=home,

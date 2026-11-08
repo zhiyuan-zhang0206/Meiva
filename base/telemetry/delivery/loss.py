@@ -27,16 +27,16 @@ def _stderr(message: str) -> None:
         return
 
 
-def _utc_now() -> datetime:
-    return datetime.now(UTC)
-
-
 # meiva:note
 # Preserve the affected process identity and mark actual data loss as error.
+#
+# `now` is the instant the loss is reported, handed in by the reporter that observed it: the
+# pipeline's own clock for a shed record, the SDK's log record for the exporter's own overflow.
+# The module reads no clock of its own: a loss report is a fact about somebody else's batch, and
+# the reporter is the one holding both the batch and the time.
 def loss_event(
-    event: Event, count: int, queue_name: str, *, dropped_at: datetime | None = None
+    event: Event, count: int, queue_name: str, *, now: datetime, dropped_at: datetime | None = None
 ) -> Event:
-    now = _utc_now()
     return replace(
         event,
         ts=now,
@@ -59,10 +59,11 @@ def report_loss(
     count: int,
     queue_name: str,
     *,
+    now: datetime,
     record_metric: Callable[[Event], None] | None = None,
 ) -> Event:
     """File/stderr diagnostic plus an independent metric; neither uses a log queue."""
-    report = loss_event(event, count, queue_name)
+    report = loss_event(event, count, queue_name, now=now)
     # Always available, even before logging/provider initialization in bare scripts.
     # This exceptional data-loss diagnostic must not depend on any configured sink.
     _stderr(f"ERROR: Telemetry queue {queue_name} full: lost {count} event(s)")
@@ -98,7 +99,13 @@ class _ExporterDropFilter(logging.Filter):
         if record.msg != "Queue full, dropping %s.":
             return True
         try:
-            now = _utc_now()
+            # meiva:note
+            # The instant of the loss is the log record's own creation time: the SDK stamped it
+            # when it found its queue full, and this filter runs on that same call. Converting a
+            # value in hand (with an explicit zone, so nothing at all is read from the host) is
+            # what keeps this observer off the clock; a filter that read `now` would be a second
+            # time source for a fact the producer already stated.
+            now = datetime.fromtimestamp(record.created, UTC)
             state = process_state
             event = Event(
                 ts=now,
@@ -119,9 +126,10 @@ class _ExporterDropFilter(logging.Filter):
                 event,
                 1,
                 "otel-sdk",
+                now=now,
                 record_metric=pipeline.record_export_loss if pipeline is not None else None,
             )
-            append_jsonl([report], target_dir=self._mirror_dir)
+            append_jsonl([report], target_dir=self._mirror_dir, now=now)
         except Exception as exc:
             _stderr(f"ERROR: OTel SDK queue-overflow loss could not be recorded: {exc!r}")
         # The replacement error already reached local sinks. Re-exporting the

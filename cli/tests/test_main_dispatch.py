@@ -26,6 +26,7 @@ from typing import cast
 import pytest
 
 from base import cluster
+from base.clock.tests.fakes import system_clock
 from base.host.db_authority.unit import CAPABILITY_KEY_ENV
 from base.host.env.dotenv_boot import LAUNCHER_PROFILE_ENV_KEY
 from base.paths.tests.homes import point_home
@@ -189,6 +190,7 @@ def test_dispatch_invokes_per_subcommand_handler(
             db,
             machine=machine,
             home=home,
+            now=system_clock().now,
             log_sinks=[],
             otlp_enabled=command.otlp_enabled,
             otlp_endpoint=command.otlp_endpoint,

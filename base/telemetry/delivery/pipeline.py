@@ -14,6 +14,7 @@ import threading
 import time
 import traceback
 from collections.abc import Callable
+from datetime import datetime
 
 from base.telemetry.delivery.defer_plan import ChildDeferPlan
 from base.telemetry.delivery.receipts import (
@@ -38,11 +39,13 @@ class EventPipeline:
         self,
         *,
         writer: Callable[[list[Event]], None],
+        now: Callable[[], datetime],
         batch_size: int = 100,
         flush_interval_s: float = 0.5,
         queue_maxsize: int = 10_000,
     ) -> None:
         self._writer = writer
+        self._now = now
         self._batch_size = batch_size
         self._flush_interval_s = flush_interval_s
         self._queue: queue.Queue[Event | SyncReceipt] = queue.Queue(maxsize=queue_maxsize)
@@ -59,6 +62,16 @@ class EventPipeline:
         self._error: BaseException | None = None
         self._thread = threading.Thread(target=self._drain, daemon=True, name="event-emitter")
         self._thread.start()
+
+    # meiva:note
+    # The instant this stream stamps with: the clock its composition root handed it
+    # (`pipeline_build.build_pipeline`), read for the shed-record alarm, the loss summary and the
+    # default timestamp of an event whose producer passed none. The stream owns it because every
+    # one of those is a fact about this batch of events, and a caller that reached for the host
+    # clock instead would be the second time source in one process.
+    @property
+    def now(self) -> Callable[[], datetime]:
+        return self._now
 
     @property
     def stopped(self) -> bool:
@@ -94,7 +107,7 @@ class EventPipeline:
         if due:
             from base.telemetry.delivery.loss import report_loss
 
-            report_loss(event, 1, "emitter", record_metric=self.record_export_loss)
+            report_loss(event, 1, "emitter", now=self._now(), record_metric=self.record_export_loss)
 
     def flush(self) -> DrainResult:
         """Acknowledge queued and held records through the sole drain writer."""
@@ -194,7 +207,10 @@ class EventPipeline:
         if n and example is not None:
             from base.telemetry.delivery.loss import loss_event
 
-            batch = [*batch, loss_event(example, n, "emitter", dropped_at=example.ts)]
+            batch = [
+                *batch,
+                loss_event(example, n, "emitter", now=self._now(), dropped_at=example.ts),
+            ]
         if not batch:
             return
         self._writer(batch)

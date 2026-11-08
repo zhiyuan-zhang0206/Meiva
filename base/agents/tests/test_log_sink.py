@@ -25,6 +25,7 @@ import pytest
 from loguru import logger as _global_logger
 
 from base import telemetry
+from base.clock.tests.fakes import system_clock
 from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.db import Database
@@ -46,6 +47,7 @@ def sink_logger(database: Database, machine_identity: MachineIdentityReader) -> 
     process perspective is needed, logger.bind() overrides it.
     """
     pipeline = telemetry.build_pipeline(
+        now=system_clock().now,
         database=lambda: database,
         machine=machine_identity,
         home=meiva_home(),

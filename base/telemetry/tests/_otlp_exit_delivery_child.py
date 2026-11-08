@@ -7,6 +7,7 @@ import sys
 from functools import partial
 
 from base import telemetry
+from base.clock.tests.fakes import system_clock
 from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.config import ConfigBoot
 from base.db import Database
@@ -25,6 +26,7 @@ def main() -> None:
     config = ConfigBoot()
     config.read_process_environment()
     pipeline = telemetry.build_pipeline(
+        now=system_clock().now,
         database=partial(Database.from_settings, gate=gate),
         machine=ConfiguredMachineIdentity(config),
         home=meiva_home(),

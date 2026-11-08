@@ -478,6 +478,9 @@ def operator_producer(
         database_factory,
         machine=machine,
         home=home,
+        # The invocation's own clock, the one `CommandRuntime` built for it: the command's events
+        # are stamped on the same time source as everything else the command stamps.
+        now=command.clock.now,
         otlp_enabled=command.otlp_enabled,
         otlp_endpoint=command.otlp_endpoint,
     )

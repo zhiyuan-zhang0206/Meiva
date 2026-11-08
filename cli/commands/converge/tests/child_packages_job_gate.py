@@ -8,6 +8,7 @@ import random
 from pathlib import Path
 
 from base.clock import Clock, ClockConfig
+from base.clock.tests.fakes import system_clock
 from base.clock.tests.manual_timers import ManualTimers
 from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.config import ConfigBoot
@@ -40,6 +41,7 @@ def main() -> None:
         database,
         machine=machine,
         home=home,
+        now=system_clock().now,
         otlp_enabled=lambda: config.view.observability.telemetry_otlp_enabled,
         otlp_endpoint=lambda: config.view.observability.telemetry_otlp_endpoint,
     )

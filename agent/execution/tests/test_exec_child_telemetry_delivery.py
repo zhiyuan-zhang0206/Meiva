@@ -22,6 +22,7 @@ from agent.execution.protocol import (
     write_request,
 )
 from base.agents.context.clients import ClientSet
+from base.clock.tests.fakes import system_clock
 from base.native_process.tests.host_pipe import live_host_control
 from meiva.tests.fixtures.pin_agent import exec_context
 
@@ -236,7 +237,7 @@ def _owned_writer_that_fails(original: ValueError) -> Generator[ClientSet]:
     def writer(batch: list[Event]) -> None:
         raise original
 
-    pipe = EventPipeline(writer=writer, batch_size=1)
+    pipe = EventPipeline(now=system_clock().now, writer=writer, batch_size=1)
     clients = ClientSet(pipeline_factory=lambda: pipe)
     try:
         clients.event_pipeline().enqueue(

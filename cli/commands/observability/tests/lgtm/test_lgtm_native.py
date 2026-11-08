@@ -18,6 +18,7 @@ import pytest
 import yaml
 
 from base.agents.context.clients import DatabaseFactory
+from base.clock.tests.fakes import system_clock
 from base.host.system.tests.fake_commands import DARWIN_ARM64, LINUX_X86
 from base.native_process.os_platform import Platform
 from base.telemetry import DrainStatus, Event, EventPipeline
@@ -492,7 +493,7 @@ def test_a_failed_render_keeps_the_previous_dashboard_and_reports_it(
     capsys.readouterr()
 
     written: list[Event] = []
-    pipeline = EventPipeline(writer=written.extend)
+    pipeline = EventPipeline(now=system_clock().now, writer=written.extend)
     try:
         _lgtm_provisioning.render_provisioning(
             repo,

@@ -17,6 +17,7 @@ from base.agents.context.clients import ClientSet
 from base.agents.context.identity import AgentIdentity
 from base.agents.sdk import call_policy
 from base.agents.sdk.tests.sampling_owners import fixed_sampling_owner, sampling_owner_serving
+from base.clock.tests.fakes import system_clock
 from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.config import ConfigBoot
@@ -59,7 +60,7 @@ def test_bare_python_recorder_uses_its_captured_cold_producer(
 
     def producer() -> EventPipeline:
         order.append("producer")
-        pipe = EventPipeline(writer=written.extend, batch_size=1)
+        pipe = EventPipeline(now=system_clock().now, writer=written.extend, batch_size=1)
         built.append(pipe)
         return pipe
 
@@ -125,7 +126,7 @@ def test_context_switch_in_body_does_not_change_the_captured_producer_or_identit
     built: list[EventPipeline] = []
 
     def producer() -> EventPipeline:
-        pipe = EventPipeline(writer=written.extend, batch_size=1)
+        pipe = EventPipeline(now=system_clock().now, writer=written.extend, batch_size=1)
         built.append(pipe)
         return pipe
 

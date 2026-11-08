@@ -40,6 +40,7 @@ from agent.execution.protocol import (
     write_request,
     write_result,
 )
+from base.clock.tests.fakes import system_clock
 from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.db import Database
@@ -175,6 +176,7 @@ def test_request_envelope_transfers_emit_size_and_serialize_time(
 
     events_before = len(_exec_envelope_events())
     pipeline = telemetry.build_pipeline(
+        now=system_clock().now,
         database=lambda: database,
         machine=machine_identity,
         home=meiva_home(),

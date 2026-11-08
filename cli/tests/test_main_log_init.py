@@ -29,6 +29,7 @@ import yaml
 import cli.main as _main
 from base import telemetry
 from base.clock import Clock, ClockConfig
+from base.clock.tests.fakes import system_clock
 from base.clock.tests.manual_timers import ManualTimers
 from base.cluster import postgres
 from base.cluster.dataplane.direct_url import ClusterDirectUrl
@@ -129,6 +130,7 @@ def test_only_the_verbs_that_bring_a_unit_up_open_sinks_before_dispatch(
                 db,
                 machine=machine,
                 home=home,
+                now=system_clock().now,
                 log_sinks=cli_log_sinks,
                 otlp_enabled=command.otlp_enabled,
                 otlp_endpoint=command.otlp_endpoint,
@@ -163,6 +165,7 @@ def test_a_settings_failure_while_opening_sinks_keeps_its_actionable_message(
                 db,
                 machine=machine,
                 home=home,
+                now=system_clock().now,
                 log_sinks=cli_log_sinks,
                 otlp_enabled=command.otlp_enabled,
                 otlp_endpoint=command.otlp_endpoint,
@@ -264,13 +267,14 @@ def test_logging_and_dispatch_borrow_the_same_operator_factory(
         factories.append(database_factory)
         machines.append(machine)
         homes.append(home)
-        pipeline = telemetry.EventPipeline(writer=lambda _batch: None)
+        pipeline = telemetry.EventPipeline(now=system_clock().now, writer=lambda _batch: None)
         pipelines.append(pipeline)
         owner = OperatorEventPipeline.wrapping(
             pipeline,
             database_factory=database_factory,
             machine=machine,
             home=home,
+            now=system_clock().now,
             otlp_enabled=command.otlp_enabled,
             otlp_endpoint=command.otlp_endpoint,
         )
@@ -406,13 +410,14 @@ def test_cold_reporter_delivers_through_main_owned_pipeline(
             database_factory()
             events.extend(batch)
 
-        pipeline = telemetry.EventPipeline(writer=write)
+        pipeline = telemetry.EventPipeline(now=system_clock().now, writer=write)
         pipelines.append(pipeline)
         return OperatorEventPipeline.wrapping(
             pipeline,
             database_factory=database_factory,
             machine=machine,
             home=home,
+            now=system_clock().now,
             otlp_enabled=command.otlp_enabled,
             otlp_endpoint=command.otlp_endpoint,
         )
@@ -459,6 +464,7 @@ def test_quiet_command_does_not_construct_pipeline(
         ),
         machine=command_runtime.machine,
         home=tmp_path,
+        now=system_clock().now,
         otlp_enabled=command_runtime.otlp_enabled,
         otlp_endpoint=command_runtime.otlp_endpoint,
     )
@@ -498,7 +504,7 @@ def test_unfinished_command_writer_remains_owned_until_join(
         entered.set()
         assert release.wait(5)
 
-    pipeline = telemetry.EventPipeline(writer=write, batch_size=1)
+    pipeline = telemetry.EventPipeline(now=system_clock().now, writer=write, batch_size=1)
     owner = OperatorEventPipeline.wrapping(
         pipeline,
         database_factory=operator_database_factory(
@@ -508,6 +514,7 @@ def test_unfinished_command_writer_remains_owned_until_join(
         ),
         machine=command_runtime.machine,
         home=tmp_path,
+        now=system_clock().now,
         otlp_enabled=command_runtime.otlp_enabled,
         otlp_endpoint=command_runtime.otlp_endpoint,
     )
@@ -536,7 +543,7 @@ def test_command_close_preserves_original_writer_error_and_primary(
     def write(_batch: list[telemetry.Event]) -> None:
         raise cleanup
 
-    pipeline = telemetry.EventPipeline(writer=write)
+    pipeline = telemetry.EventPipeline(now=system_clock().now, writer=write)
 
     def producer_factory(
         database_factory: OperatorDatabaseFactory,
@@ -549,6 +556,7 @@ def test_command_close_preserves_original_writer_error_and_primary(
             database_factory=database_factory,
             machine=machine,
             home=home,
+            now=system_clock().now,
             otlp_enabled=command.otlp_enabled,
             otlp_endpoint=command.otlp_endpoint,
         )

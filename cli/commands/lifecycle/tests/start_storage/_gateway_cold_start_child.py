@@ -14,6 +14,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+from base.clock.tests.fakes import system_clock
 from base.deploy import start_trace
 from base.host.db_authority import delivery
 from base.paths.home import resolve_meiva_home
@@ -39,6 +40,7 @@ def main() -> None:
         database_factory,
         machine=command.machine,
         home=command.home,
+        now=system_clock().now,
         otlp_enabled=command.otlp_enabled,
         otlp_endpoint=command.otlp_endpoint,
     )

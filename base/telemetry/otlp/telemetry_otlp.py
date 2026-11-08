@@ -57,6 +57,7 @@ import threading
 import time
 from collections.abc import Callable, Generator
 from contextlib import contextmanager
+from datetime import datetime
 from pathlib import Path
 
 from base.cluster.derive import production_identity
@@ -260,6 +261,7 @@ class OtlpBackend:
         retry_interval_s: float = COLLECTOR_RETRY_INTERVAL_S,
         mirror_dir: Path,
         home: Path,
+        now: Callable[[], datetime],
     ) -> None:
         self._export_allowed = export_allowed
         self._enabled_flag = enabled
@@ -267,6 +269,7 @@ class OtlpBackend:
         self._retry_interval_s = retry_interval_s
         self._mirror_dir = mirror_dir
         self._home = home
+        self._now = now
         self._export_decision: bool | None = None
         self._eligibility_lock = threading.Lock()
         self._queue: queue.Queue[QueueItem] = queue.Queue(maxsize=queue_maxsize)
@@ -367,10 +370,15 @@ class OtlpBackend:
         if lost and example is not None:
             with self._dropped_lock:
                 self._dropped += lost
-            report = report_loss(example, lost, "otlp", record_metric=self.record_loss)
+            # meiva:note
+            # The instant of this loss is the stream's own clock, handed in by the root that built
+            # this exporter: a full exporter queue is observed here, and the alarm says when that
+            # was rather than borrowing the timestamp of the row it could not admit.
+            now = self._now()
+            report = report_loss(example, lost, "otlp", now=now, record_metric=self.record_loss)
             # The alarm itself bypasses both queues. Metrics can still export
             # while the log lane is full; the local mirror retains the evidence.
-            append_jsonl([report], target_dir=self._mirror_dir)
+            append_jsonl([report], target_dir=self._mirror_dir, now=now)
         for event in events:
             with failure_isolated("otlp metric mapping"):
                 self._record_metrics(event)
@@ -787,6 +795,7 @@ def default_exporter(
     endpoint: Callable[[], str],
     mirror_dir: Path,
     home: Path,
+    now: Callable[[], datetime],
 ) -> OtlpBackend:
     bound = OtlpBackend._bound_default
     if bound is not None:
@@ -797,4 +806,5 @@ def default_exporter(
         endpoint=endpoint,
         mirror_dir=mirror_dir,
         home=home,
+        now=now,
     )

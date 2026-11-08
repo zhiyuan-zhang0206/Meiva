@@ -2,6 +2,7 @@ from pathlib import Path
 
 import pytest
 
+from base.clock.tests.fakes import system_clock
 from base.cluster import derive
 from base.cluster.machine import MachineNameMissing, MachineRoleInvalid
 from base.cluster.machine.configured import ConfiguredMachineIdentity
@@ -109,6 +110,7 @@ def test_each_backend_freezes_only_its_own_eligibility(tmp_path: Path) -> None:
         return decision
 
     first = telemetry_otlp.OtlpBackend(
+        now=system_clock().now,
         export_allowed=read,
         enabled=lambda: True,
         mirror_dir=tmp_path,
@@ -119,6 +121,7 @@ def test_each_backend_freezes_only_its_own_eligibility(tmp_path: Path) -> None:
     decision = True
     assert first._enabled() is False
     second = telemetry_otlp.OtlpBackend(
+        now=system_clock().now,
         export_allowed=read,
         enabled=lambda: True,
         mirror_dir=tmp_path,
@@ -138,6 +141,7 @@ def test_backend_does_not_cache_identity_defects_as_disabled(
         raise error("bad identity")
 
     backend = telemetry_otlp.OtlpBackend(
+        now=system_clock().now,
         export_allowed=invalid,
         enabled=lambda: True,
         mirror_dir=tmp_path,
@@ -156,6 +160,7 @@ def test_disabled_backend_does_not_read_identity(tmp_path: Path) -> None:
 
     assert (
         telemetry_otlp.OtlpBackend(
+            now=system_clock().now,
             export_allowed=reject,
             enabled=lambda: False,
             mirror_dir=tmp_path,
@@ -181,8 +186,10 @@ def test_stop_marks_the_exporter_closing_before_the_drain(tmp_path: Path) -> Non
 
     seen: list[bool] = []
     pipeline = ExportingEventPipeline(
+        now=system_clock().now,
         writer=lambda _events, exporter: seen.append(exporter._closing),
         exporter=default_exporter(
+            now=system_clock().now,
             export_allowed=lambda: True,
             mirror_dir=tmp_path,
             home=tmp_path,
@@ -241,6 +248,7 @@ def test_atexit_executor_shutdown_without_bound_pipeline_emits_no_error_or_statu
     prior_pipeline = process_state["pipeline"]
 
     shutdown_backend = telemetry_otlp.OtlpBackend(
+        now=system_clock().now,
         export_allowed=lambda: True,
         providers=(_NoopLoggerProvider(), _ShutdownMeterProvider()),
         enabled=lambda: True,
@@ -249,6 +257,7 @@ def test_atexit_executor_shutdown_without_bound_pipeline_emits_no_error_or_statu
         home=tmp_path,
     )
     unreachable_backend = telemetry_otlp.OtlpBackend(
+        now=system_clock().now,
         export_allowed=lambda: True,
         providers=None,
         enabled=lambda: True,

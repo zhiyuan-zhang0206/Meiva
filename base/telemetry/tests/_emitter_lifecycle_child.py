@@ -7,6 +7,7 @@ from datetime import UTC, datetime
 
 from base import telemetry
 from base.api_contracts.agent_contract import EventSink
+from base.clock.tests.fakes import system_clock
 from base.log import logger
 from base.paths import meiva_home
 from base.telemetry.delivery.pipeline import EventPipeline
@@ -33,7 +34,7 @@ def _event() -> Event:
 def owned_writer() -> None:
     written: list[Event] = []
     prior = set(threading.enumerate())
-    pipeline = telemetry.EventPipeline(writer=written.extend)
+    pipeline = telemetry.EventPipeline(now=system_clock().now, writer=written.extend)
     try:
         telemetry.init_telemetry(
             home=meiva_home(),
@@ -76,6 +77,8 @@ def cold_emit() -> None:
 def emit_without_a_factory() -> None:
     logger.remove()
     logger.add(sys.stderr, enqueue=False)
+    # The process this scenario is about: identity and its clock bound, no event stream.
+    telemetry.bind_identity(process="no-stream", home=meiva_home(), now=system_clock().now)
 
     def no_factory() -> EventSink:
         raise telemetry.NoPipelineFactoryError("this context has no event pipeline factory")
@@ -94,6 +97,7 @@ def emit_without_a_factory() -> None:
 def failing_producer() -> None:
     logger.remove()
     logger.add(sys.stderr, enqueue=False)
+    telemetry.bind_identity(process="no-stream", home=meiva_home(), now=system_clock().now)
 
     def defective() -> EventSink:
         raise RuntimeError("sink defect")
@@ -102,8 +106,8 @@ def failing_producer() -> None:
 
 
 def replace_live_owner() -> None:
-    first = telemetry.EventPipeline(writer=lambda _batch: None)
-    second = telemetry.EventPipeline(writer=lambda _batch: None)
+    first = telemetry.EventPipeline(now=system_clock().now, writer=lambda _batch: None)
+    second = telemetry.EventPipeline(now=system_clock().now, writer=lambda _batch: None)
     try:
         telemetry.init_telemetry(home=meiva_home(), process="original-owner", pipeline=first)
         try:
@@ -126,7 +130,7 @@ def unreleasable_writer() -> None:
         entered.set()
         threading.Event().wait()
 
-    pipe = EventPipeline(writer=blocked, batch_size=1, queue_maxsize=1)
+    pipe = EventPipeline(now=system_clock().now, writer=blocked, batch_size=1, queue_maxsize=1)
     event = _event()
     pipe.enqueue(event)
     assert entered.wait(1)
@@ -142,7 +146,7 @@ def zero_sink_failure() -> None:
     def broken(batch: list[Event]) -> None:
         raise RuntimeError("zero-sink worker defect")
 
-    pipe = EventPipeline(writer=broken, batch_size=1)
+    pipe = EventPipeline(now=system_clock().now, writer=broken, batch_size=1)
     pipe.enqueue(_event())
     assert pipe._finished.wait(1)
     try:
@@ -154,8 +158,8 @@ def zero_sink_failure() -> None:
 
 
 def reuse_joined_owner() -> None:
-    first = telemetry.EventPipeline(writer=lambda _batch: None)
-    second = telemetry.EventPipeline(writer=lambda _batch: None)
+    first = telemetry.EventPipeline(now=system_clock().now, writer=lambda _batch: None)
+    second = telemetry.EventPipeline(now=system_clock().now, writer=lambda _batch: None)
     try:
         telemetry.init_telemetry(home=meiva_home(), process="first", pipeline=first)
         assert not first.stopped
@@ -175,8 +179,8 @@ def collect_failed_owner() -> None:
     def fail(batch: list[Event]) -> None:
         raise error
 
-    first = telemetry.EventPipeline(writer=fail, batch_size=1)
-    second = telemetry.EventPipeline(writer=lambda _batch: None)
+    first = telemetry.EventPipeline(now=system_clock().now, writer=fail, batch_size=1)
+    second = telemetry.EventPipeline(now=system_clock().now, writer=lambda _batch: None)
     telemetry.init_telemetry(home=meiva_home(), process="first", pipeline=first)
     telemetry.emit("log", "log")
     try:

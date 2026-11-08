@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Generator
 from contextlib import contextmanager
+from datetime import datetime
 from pathlib import Path
 
 from base.agents.context.clients import ClientSet
@@ -32,6 +33,7 @@ class GatewayProcess:
         image: LoadedCommit,
         machine: MachineIdentityReader,
         host: Host,
+        now: Callable[[], datetime],
         observe: Callable[[Path], start_serving.RootBirth] = start_serving.observe_root,
     ) -> None:
         self.home = home
@@ -56,6 +58,7 @@ class GatewayProcess:
                 database=self.database,
                 machine=self.machine,
                 home=self.home.resolve(),
+                now=now,
             ),
         )
 

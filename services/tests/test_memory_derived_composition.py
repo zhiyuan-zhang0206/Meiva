@@ -15,6 +15,7 @@ import pytest
 from psycopg.conninfo import conninfo_to_dict
 from pydantic import SecretStr
 
+from base.clock.tests.fakes import system_clock
 from base.cluster.dataplane.direct_url import ClusterDirectUrl
 from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
@@ -100,6 +101,7 @@ def test_memory_entries_share_gate_with_pipeline_and_read_config_owner_when_buil
         )
 
     pipeline = build_pipeline(
+        now=system_clock().now,
         database=database,
         machine=machine_identity,
         home=tmp_path,

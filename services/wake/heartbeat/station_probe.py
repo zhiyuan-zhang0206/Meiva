@@ -36,6 +36,8 @@ import urllib.request
 from collections.abc import Callable
 from pathlib import Path
 
+from base.clock import SYSTEM_TIMERS, Clock
+from base.clock.configuration import clock_config_from_boot
 from base.cluster.dataplane.direct_url import ClusterDirectUrl
 from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.config import ConfigBoot
@@ -174,6 +176,7 @@ def main(*, process_config: ConfigBoot, open_url: UrlOpener) -> None:
         database=database,
         machine=machine,
         home=process_home,
+        now=Clock(clock_config_from_boot(process_config), timers=SYSTEM_TIMERS).now,
         otlp_enabled=lambda: process_config.view.observability.telemetry_otlp_enabled,
         otlp_endpoint=lambda: process_config.view.observability.telemetry_otlp_endpoint,
     )

@@ -13,6 +13,7 @@ from opentelemetry.sdk.metrics import MeterProvider
 from opentelemetry.sdk.metrics.export import InMemoryMetricReader
 
 from base import telemetry
+from base.clock.tests.fakes import system_clock
 from base.telemetry import Event
 from base.telemetry.otlp import telemetry_otlp
 from base.telemetry.otlp.event_resource_exporter import EventDimensionResourceExporter
@@ -28,6 +29,7 @@ def otlp_backend(
     resource_exporter = EventDimensionResourceExporter(exporter)
     logs.add_log_record_processor(SimpleLogRecordProcessor(resource_exporter))
     backend = telemetry_otlp.OtlpBackend(
+        now=system_clock().now,
         export_allowed=lambda: True,
         enabled=lambda: True,
         providers=(logs, MeterProvider(metric_readers=[InMemoryMetricReader()])),

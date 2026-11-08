@@ -590,6 +590,7 @@ def cmd_start(
         host=command.host_after_config(),
         home=command.home,
         pid=command.pid,
+        now=command.clock.now,
         enabled=not boot_attempt,
     ) as audit:
         code = cmd_start_body(

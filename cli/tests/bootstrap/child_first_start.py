@@ -9,6 +9,7 @@ import os
 from pathlib import Path
 
 from base import telemetry
+from base.clock.tests.fakes import system_clock
 from base.cluster import ensure_pgvector_extension
 from base.log import prepare_process_logging
 from cli import init_intent
@@ -49,6 +50,7 @@ producer = operator_event_pipeline(
     database_factory,
     machine=command.machine,
     home=home,
+    now=system_clock().now,
     otlp_enabled=command.otlp_enabled,
     otlp_endpoint=command.otlp_endpoint,
 )

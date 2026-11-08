@@ -19,6 +19,8 @@ import uvicorn
 from fastapi import FastAPI
 from uvicorn.config import STARTUP_FAILURE
 
+from base.clock import SYSTEM_TIMERS, Clock
+from base.clock.configuration import clock_config_from_boot
 from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.cluster.port_preflight import serves_off_box
 from base.cluster.transport_encryption import verify_transport_encryption_declaration
@@ -135,6 +137,7 @@ def main(*, home: Path, config: ConfigBoot, build_app: Callable[[GatewayProcess]
         image=LOADED_IMAGE,
         machine=machine,
         host=Host.system(environ=config.process_environment()),
+        now=Clock(clock_config_from_boot(config), timers=SYSTEM_TIMERS).now,
     )
     with process.lifetime():
         _serve_process(process, plan, build_app)

@@ -17,6 +17,7 @@ import pytest
 from psycopg.conninfo import conninfo_to_dict
 
 import base.db
+from base.clock.tests.fakes import system_clock
 from base.cluster.dataplane.direct_url import ClusterDirectUrl
 from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
@@ -281,6 +282,7 @@ def test_main_shares_one_captured_gate_with_the_probe_and_log_factory(
         )
 
     pipeline = build_pipeline(
+        now=system_clock().now,
         database=database,
         machine=machine_identity,
         home=unit_home,

@@ -15,6 +15,7 @@ from pathlib import Path
 import pytest
 
 from base import telemetry
+from base.clock.tests.fakes import system_clock
 from base.cluster.machine import MachineIdentityReader
 from base.host.env import port_lease
 from base.log.tests.log_records import LogRecords, loguru_records
@@ -126,7 +127,7 @@ def _pipeline_whose_writer_fails(failure: BaseException) -> EventPipeline:
         failed.set()
         raise failure
 
-    pipeline = EventPipeline(writer=writer, flush_interval_s=0.01)
+    pipeline = EventPipeline(now=system_clock().now, writer=writer, flush_interval_s=0.01)
     pipeline.enqueue(_event())
     assert failed.wait(2.0)
     return pipeline
@@ -155,7 +156,7 @@ def test_an_unfinished_stop_is_reported_once_and_not_retried(loguru_records: Log
         entered.set()
         release.wait(5.0)
 
-    pipeline = EventPipeline(writer=writer, flush_interval_s=0.01)
+    pipeline = EventPipeline(now=system_clock().now, writer=writer, flush_interval_s=0.01)
     pipeline.enqueue(_event())
     assert entered.wait(2.0)
     try:
@@ -169,7 +170,9 @@ def test_an_unfinished_stop_is_reported_once_and_not_retried(loguru_records: Log
 
 
 def test_a_clean_writer_stop_reports_nothing(loguru_records: LogRecords) -> None:
-    pipeline = EventPipeline(writer=lambda _events: None, flush_interval_s=0.01)
+    pipeline = EventPipeline(
+        now=system_clock().now, writer=lambda _events: None, flush_interval_s=0.01
+    )
     daemon.stop_pipeline(pipeline, None)
     assert pipeline.stopped
     assert not [m for m in loguru_records.messages() if "unfinished" in m]
