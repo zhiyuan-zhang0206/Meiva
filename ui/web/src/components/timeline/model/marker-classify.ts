@@ -28,12 +28,6 @@ export const MEMORY_SOURCES: ReadonlySet<NoteTag> = new Set<NoteTag>([
   "inherited_memory",
 ]);
 
-// meiva:note
-// Notes the agent reads but the conversation timeline never shows: a recency anchor
-// beside the waking inbound is guidance for the model, not an event for the reader.
-// meiva:link ui/web/src/docs/frontend-components/timeline-view/markers.meiva.okf.md
-const SILENT_NOTE_TAGS: ReadonlySet<NoteTag> = new Set<NoteTag>(["non_human_wake", "reply_visibility"]);
-
 export type MarkerClass =
   | { readonly kind: "lifecycle"; readonly tag: LifecycleTag }
   | { readonly kind: "memory" }
@@ -60,7 +54,16 @@ export function isSilentEphemeralPayload(payload: string): boolean {
   );
 }
 
+// meiva:note
+// Nothing the agent reads is filtered out of the timeline any more: every NoteTag
+// renders, including the wake and visibility notes that used to be swallowed
+// (user ruling 2026-11-09). Only the ephemeral bookkeeping payloads stay hidden -
+// a compact that already happened, a cancelled run, a compact request - because
+// those are markers of machinery, not content the agent read. A recognised
+// NoteTag is never judged by its payload, so a note whose body happens to read
+// like machinery still renders.
+// meiva:link ui/web/src/docs/frontend-components/timeline-view/markers.meiva.okf.md
 export function isSilentMarker(source: string | null, payload: string): boolean {
-  if (source !== null && isNoteTag(source)) return SILENT_NOTE_TAGS.has(source);
+  if (source !== null && isNoteTag(source)) return false;
   return isSilentEphemeralPayload(payload);
 }

@@ -1,7 +1,7 @@
 ---
 type: doc
 title: Timeline sticky scroll
-description: Sticky-bottom follow pins and scrollTop ownership (echo-attributed performed scrolls, wheel and touch zones, the pull reserve, the scroll-anchoring opt-out) plus bounded inner TurnBlock scroll isolation and non-sticky header flow.
+description: Sticky-bottom follow pins and scrollTop ownership (echo-attributed performed scrolls, wheel and touch zones, the pull reserve, the scroll-anchoring opt-out) plus the one scrollport, natural-height TurnBlock bodies, the expanded live block's fixed top edge, and non-sticky header flow.
 tags:
 - frontend
 ---
@@ -85,20 +85,20 @@ the window. A reader who is not following has the bookmark's anchor re-applied
 after the reflow, so they stay on the row they were reading; a reader in the
 bottom zone pins as before (user report 2026-10-20).
 
-## Non-sticky headers and bounded TurnBlock scroll
+## Non-sticky headers and natural-height TurnBlock bodies
 Human-message, agent-reply, `TurnBlock`, and nested detail-card headers all stay
 in normal document flow without `position: sticky` (user ruling 2026-11-01,
-replacing frosted sticky work and detail headers). Instead of pinning headers
-below `HeaderBar`, every expanded `TurnBlock` (both historical and active
-`Working`) wraps its indented body in a shared auto-hiding `ScrollArea` whose
-viewport (`data-testid="turn-scroll-viewport"`) is capped at 50% of the visible
-timeline message area via `--timeline-turn-max-h` (synced on mount and
-`ResizeObserver` from `(viewport.clientHeight - BAR_HEIGHT_PX) * 0.5` in
-`useTimelineViewport`, fallback `50dvh`). Short turns shrink-wrap naturally
-without an inner scrollbar (`scrollHeight <= clientHeight`); tall turns scroll
-internally while wheel and touch gestures inside an overflowing `TurnBlock`
-(`scrollHeight > clientHeight + 1`) stay isolated from outer sticky-bottom
-detachment and history-pull triggers.
+replacing frosted sticky work and detail headers). An expanded `TurnBlock` — the
+historical one and the active `Working` one alike — has no scrollport and no
+height cap of its own: its indented body flows at its natural height inside the
+timeline, so a finished block is as tall as the work really was and the reader
+scrolls the timeline itself (user ruling 2026-11-09, revoking the 50%/80%
+view caps and the nested wheel chaining that served them). The one
+scrollport is the message list; nothing inside it can swallow a gesture, so a
+scroll over an expanded block is a scroll of the timeline.
+
+The expanded live block's edge rule has its own node:
+[[ui/web/src/docs/frontend-components/timeline-view/live-block.meiva.okf.md|The expanded live block]].
 
 Event timestamps remain visible in message-card headers at narrow widths;
 headers and timestamp text wrap when needed. Standing context notes continue
@@ -106,5 +106,6 @@ to omit timestamps according to their timeline item metadata.
 
 ## Relationship to Other Nodes
 
-- [[ui/web/src/docs/frontend-components/timeline-view/timeline-view.meiva.okf.md|Timeline View]] — the renderer whose scroll surface and bounded turn scroll this node owns.
+- [[ui/web/src/docs/frontend-components/timeline-view/timeline-view.meiva.okf.md|Timeline View]] — the renderer whose one scroll surface this node owns.
+- [[ui/web/src/docs/frontend-components/timeline-view/deep-collapse.meiva.okf.md|Timeline deep collapse]] — the turns whose natural-height bodies the live-block rule keeps in place.
 - [[ui/web/src/docs/frontend-components/timeline-view/send-anchor.meiva.okf.md|The send anchor]] — where a send parks the reader's own message and why the follow flag must ignore the bottom there.

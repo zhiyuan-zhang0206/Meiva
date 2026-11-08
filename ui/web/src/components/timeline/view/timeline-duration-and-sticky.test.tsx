@@ -29,7 +29,7 @@ describe("detail-block duration display", () => {
     expect(runToggle().getAttribute("aria-expanded")).toBe("true");
     expect(screen.getByText(/Writing code for/)).toBeTruthy();
   });
-  it("active last turn header shows the unified 'Working for' header and bounded scrollport", () => {
+  it("active last turn header shows the unified 'Working for' header and no inner scrollport", () => {
     setUserSettings({ "display.expand_working_block": true });
     const { container } = render(
       <TimelineView
@@ -40,7 +40,7 @@ describe("detail-block duration display", () => {
       />,
     );
     expect(container.querySelector('[data-live-activity-window="true"]')).not.toBeNull();
-    expect(screen.getByTestId("activity-scroll-viewport")).toBeTruthy();
+    expect(screen.queryByTestId("activity-scroll-viewport")).toBeNull();
     expect(runToggle().textContent).toContain("Working for");
     expect(runToggle().textContent).toContain("1 turn");
   });
@@ -200,36 +200,6 @@ describe("detail-block duration display", () => {
     const pending = screen.getByTestId("pending-live-activity-window");
     expect(pending.textContent).toContain("Working…");
   });
-  it("scrolling up inside the Live Activity Window reveals ScrollToBottomButton and clicking re-attaches", () => {
-    setUserSettings({ "display.expand_working_block": true });
-    render(
-      <TimelineView
-        turnActive
-        items={[
-          makeItem({ item_id: "1.0", kind: "inbound_chat", source: "user", payload: "do it" }),
-          makeItem({ item_id: "2.0", kind: "agent_reasoning", payload: "step 1" }),
-          makeItem({ item_id: "2.1", kind: "agent_code", payload: "print(1)" }),
-        ]}
-      />,
-    );
-    const inner = screen.getByTestId("activity-scroll-viewport");
-    Object.defineProperty(inner, "scrollHeight", { value: 600, configurable: true });
-    Object.defineProperty(inner, "clientHeight", { value: 224, configurable: true });
-    inner.scrollTop = 376;
-    fireEvent.scroll(inner);
-    expect(screen.queryByTestId("scroll-to-bottom")).toBeNull();
-
-    inner.scrollTop = 100;
-    fireEvent.scroll(inner);
-    const btn = screen.getByTestId("scroll-to-bottom");
-    expect(btn).toBeTruthy();
-
-    const scrollToSpy = vi.fn();
-    inner.scrollTo = scrollToSpy;
-    fireEvent.click(btn);
-    expect(scrollToSpy).toHaveBeenCalledWith({ top: 600, behavior: "smooth" });
-    expect(screen.queryByTestId("scroll-to-bottom")).toBeNull();
-  });
   it("active last turn stays expanded across streaming commits; collapses when a reply lands below", () => {
     setUserSettings({ "display.expand_working_block": true });
     const base = [
@@ -309,8 +279,14 @@ describe("streamingParseIntervalMs (adaptive stream-parse window, user report 20
   });
 });
 
-describe("TimelineView bounded expanded work block", () => {
-  it("keeps historical turns collapsed until opened, then uses the full outer timeline height", () => {
+describe("TimelineView expanded work block height", () => {
+  // meiva:note
+  // An expanded work block flows at its natural height in the timeline: no
+  // inner scrollport, no viewport-relative cap, whatever its position. A
+  // finished block is as tall as the work really was and the reader scrolls the
+  // timeline itself (user ruling 2026-11-09).
+  // meiva:link ui/web/src/docs/frontend-components/timeline-view/deep-collapse.meiva.okf.md
+  it("keeps historical turns collapsed until opened, then renders them at their natural height", () => {
     const { container } = render(<TimelineView items={[
       makeItem({ item_id: "1.0", kind: "agent_reasoning", payload: "Earlier thought" }),
       makeItem({ item_id: "1.1", kind: "agent_chat", user_facing: false, payload: "Earlier progress" }),
@@ -321,43 +297,64 @@ describe("TimelineView bounded expanded work block", () => {
     expect(historical.getAttribute("aria-expanded")).toBe("false");
     expect(trailing.getAttribute("aria-expanded")).toBe("false");
     fireEvent.click(historical);
-    const earlier = container.querySelector('[data-turn-id="1.0"]')!;
+    const earlier = container.querySelector<HTMLElement>('[data-turn-id="1.0"]')!;
+    expect(earlier.getAttribute("data-turn-expanded")).toBe("true");
     expect(earlier.querySelector('[data-turn-scroll="true"]')).toBeNull();
+    expect(earlier.querySelector('[class*="max-h-"]')).toBeNull();
     expect(screen.getByText("Earlier progress")).toBeTruthy();
     expect(historical.className).toContain("sticky");
     fireEvent.click(trailing);
-    expect(screen.getByTestId("turn-scroll-viewport").className).toContain("max-h-");
+    expect(trailing.getAttribute("aria-expanded")).toBe("true");
+    expect(screen.queryByTestId("turn-scroll-viewport")).toBeNull();
+    expect(container.querySelector('[data-turn-id="3.0"]')).not.toBeNull();
     fireEvent.click(historical);
     expect(historical.getAttribute("aria-expanded")).toBe("false");
     expect(screen.queryByText("Earlier progress")).toBeNull();
   });
 
-  it("releases the inner scrollport when an opened trailing turn becomes historical", () => {
+  it("keeps an opened trailing turn expanded at natural height once it becomes historical", () => {
     const work = [makeItem({ item_id: "1.0", kind: "agent_reasoning", payload: "Thought" })];
-    const { rerender } = render(<TimelineView items={work} />);
+    const { container, rerender } = render(<TimelineView items={work} />);
     const header = screen.getByTestId("turn-toggle");
     fireEvent.click(header);
-    expect(screen.getByTestId("turn-scroll-viewport")).toBeTruthy();
+    expect(container.querySelectorAll("[data-virtual-row]")).toHaveLength(1);
     rerender(<TimelineView items={[...work, makeItem({ item_id: "2.0", kind: "agent_chat", payload: "Done" })]} />);
     expect(screen.getByTestId("turn-toggle")).toBe(header);
     expect(header.getAttribute("aria-expanded")).toBe("true");
     expect(screen.queryByTestId("turn-scroll-viewport")).toBeNull();
+    expect(container.querySelectorAll("[data-virtual-row]")).toHaveLength(1);
   });
 
-  it("renders the expanded trailing work block with a sticky header and bounded body", () => {
+  it("renders the expanded trailing work block with a sticky header and no height cap", () => {
     const items = [
       makeItem({ item_id: "1.0", kind: "agent_reasoning", payload: "thinking" }),
       makeItem({ item_id: "1.1", kind: "agent_code", payload: "code" }),
       makeItem({ item_id: "1.2", kind: "code_output", payload: "output" }),
     ];
-    render(<TimelineView items={items} />);
+    const { container } = render(<TimelineView items={items} />);
     const toggle = screen.getByTestId("turn-toggle");
     fireEvent.click(toggle);
     expect(toggle.getAttribute("data-expanded")).toBe("true");
     expect(toggle.className).toContain("sticky");
-    const turnViewport = screen.getByTestId("turn-scroll-viewport");
-    expect(turnViewport.className).toContain("max-h-[var(--timeline-turn-max-h,50dvh)]");
+    const turn = container.querySelector<HTMLElement>('[data-turn-id="1.0"]')!;
+    expect(turn.querySelector('[class*="max-h-"]')).toBeNull();
+    expect(container.querySelectorAll("[data-virtual-row]")).toHaveLength(3);
   });
+
+  it("renders a work block under a human message at its natural height too", () => {
+    const items = [
+      makeItem({ item_id: "0.0", kind: "inbound_chat", payload: "envelope:go", source: "user" }),
+      makeItem({ item_id: "1.0", kind: "agent_reasoning", payload: "thinking" }),
+      makeItem({ item_id: "1.1", kind: "agent_code", payload: "code" }),
+    ];
+    const { container } = render(<TimelineView items={items} />);
+    fireEvent.click(screen.getByTestId("turn-toggle"));
+    const turn = container.querySelector<HTMLElement>('[data-turn-id="1.0"]')!;
+    expect(turn.getAttribute("data-turn-expanded")).toBe("true");
+    expect(turn.querySelector('[class*="max-h-"]')).toBeNull();
+    expect(screen.queryByTestId("turn-scroll-viewport")).toBeNull();
+  });
+
   it("collapsing an expanded work block preserves outer viewport scroll position", () => {
     const items = [
       makeItem({ item_id: "1.0", kind: "agent_reasoning", payload: "thinking" }),
@@ -373,44 +370,6 @@ describe("TimelineView bounded expanded work block", () => {
     fireEvent.click(toggle);
     expect(toggle.getAttribute("data-expanded")).toBe("false");
     expect(viewport.scrollTop).toBe(450);
-  });
-  it("chains upward and downward wheel events to the outer message list once the expanded TurnBlock hits its scroll boundary", () => {
-    setUserSettings({ "display.expand_working_block": true });
-    const items = [
-      makeItem({ item_id: "0.5", kind: "inbound_chat", source: "user", payload: "Prompt" }),
-      makeItem({ item_id: "1.0", kind: "agent_reasoning", payload: "thinking" }),
-      makeItem({ item_id: "1.1", kind: "agent_code", payload: "code" }),
-      makeItem({ item_id: "1.2", kind: "code_output", payload: "output" }),
-    ];
-    render(<TimelineView items={items} turnActive />);
-    const outerViewport = screen.getByTestId("scroll-viewport");
-    const innerViewport = screen.getByTestId("activity-scroll-viewport");
-    expect(innerViewport.className).not.toContain("overscroll-y-contain");
-
-    Object.defineProperty(outerViewport, "scrollHeight", { value: 1200, configurable: true });
-    Object.defineProperty(outerViewport, "clientHeight", { value: 600, configurable: true });
-    outerViewport.scrollTop = 300;
-
-    Object.defineProperty(innerViewport, "scrollHeight", { value: 500, configurable: true });
-    Object.defineProperty(innerViewport, "clientHeight", { value: 250, configurable: true });
-    innerViewport.scrollTop = 120;
-
-    // meiva:note
-    // While inner viewport still has upward travel, wheel stays inside inner viewport.
-    fireEvent.wheel(innerViewport, { deltaY: -40 });
-    expect(outerViewport.scrollTop).toBe(300);
-
-    // meiva:note
-    // Once inner viewport reaches top (scrollTop = 0), upward wheel chains to outer message list.
-    innerViewport.scrollTop = 0;
-    fireEvent.wheel(innerViewport, { deltaY: -45 });
-    expect(outerViewport.scrollTop).toBe(255);
-
-    // meiva:note
-    // Once inner viewport reaches bottom (scrollTop = 250), downward wheel chains to outer message list.
-    innerViewport.scrollTop = 250;
-    fireEvent.wheel(innerViewport, { deltaY: 35 });
-    expect(outerViewport.scrollTop).toBe(290);
   });
 });
 

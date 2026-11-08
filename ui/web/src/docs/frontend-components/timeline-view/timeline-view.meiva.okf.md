@@ -35,9 +35,9 @@ refresh jumps to the current bottom and resumes following incoming messages.
 Finishing removes only the ring, without moving messages. The position is saved before the pull hook's cleanup removes its native reserve. Older paging retains its separate top pull circle. Cold views
 without retained rows keep the existing initial-load UI.
 
-## Scroll ownership and bounded turn scroll
+## Scroll ownership and one scrollport
 
-While following the tail, content growth pins the viewport down in the same pre-paint tick, and the follow flag has a single owner (`lib/layout/sticky.ts:createStickyController`) fed by DOM events, with every performed scroll reported back so a pin's echo is a no-op. Work and detail headers stay in normal document flow without `position: sticky` (user ruling 2026-11-01); instead, every expanded `TurnBlock` wraps its body in an inner auto-hiding `ScrollArea` capped at 50% of the visible timeline message area (`--timeline-turn-max-h`, synced from `(viewport.clientHeight - BAR_HEIGHT_PX) * 0.5` in `useTimelineViewport`, fallback `50dvh`), chaining upward/downward wheel and touch scrolling cleanly to the outer message list once the inner scrollport hits its top or bottom boundary. The pull reserve, the wheel and touch zones, and the scroll-anchoring opt-out live in [[ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.meiva.okf.md|Timeline sticky scroll]].
+While following the tail, content growth pins the viewport down in the same pre-paint tick, and the follow flag has a single owner (`lib/layout/sticky.ts:createStickyController`) fed by DOM events, with every performed scroll reported back so a pin's echo is a no-op. Work and detail headers stay in normal document flow without `position: sticky` (user ruling 2026-11-01), and the timeline has exactly one scrollport: an expanded `TurnBlock` renders its body at its natural height instead of wrapping it in a capped `ScrollArea`, so a finished block is as tall as the work really was and the reader scrolls the timeline itself. The ongoing block keeps its top edge instead — growth extends it downward and never pins — which the controller owns through `notifyLiveBlock` (user ruling 2026-11-09). The pull reserve, the wheel and touch zones, and the scroll-anchoring opt-out live in [[ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.meiva.okf.md|Timeline sticky scroll]].
 
 ## Continuous segments
 
@@ -61,7 +61,7 @@ After a compact, `useCompactHistoryRetention` automatically walks all available 
 
 ## Deep collapse & Unified TurnBlock
 
-Secondary items group into unboxed inline `TurnBlock`s whose classifier, expansion defaults, turn timer, and bounded `ScrollArea` (`--timeline-turn-max-h`) live in [[ui/web/src/docs/frontend-components/timeline-view/deep-collapse.meiva.okf.md|Timeline deep collapse]].
+Secondary items group into unboxed inline `TurnBlock`s whose classifier, expansion defaults, turn timer, and natural-height body live in [[ui/web/src/docs/frontend-components/timeline-view/deep-collapse.meiva.okf.md|Timeline deep collapse]].
 
 ## Column geometry
 
@@ -83,3 +83,4 @@ cap with one `undefined`-means-full-width convention on narrow viewports.
 - [[ui/web/src/docs/frontend-components/timeline-view/card-chrome.meiva.okf.md|Card chrome]] — the hover band in the gap under a block (timestamp and Copy) and its pointer gating.
 - [[ui/web/src/docs/frontend-components/timeline-view/markers.meiva.okf.md|System markers]] — system-marker dispatch and the fail-loud unrecognized alarm.
 - [[ui/web/src/docs/frontend-components/timeline-view/loading-ring.meiva.okf.md|The loading ring]] — the one ring every loading state draws, the pull scale that rides `scale` instead of `transform`, and the reduced-motion state.
+- [[ui/web/src/docs/frontend-components/timeline-view/live-block.meiva.okf.md|The expanded live block]] — why an expanded ongoing block holds the top edge instead of the tail.

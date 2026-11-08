@@ -77,7 +77,7 @@ describe("TurnBlock component", () => {
     expect(container.querySelector('[data-turn-scroll="true"]')).toBeNull();
   });
 
-  it("renders the expanded trailing turn with a sticky header and bounded scrollport", () => {
+  it("renders an expanded turn with a sticky header and a natural-height body", () => {
     const { container } = render(
       <TurnBlock
         id="turn-1"
@@ -100,8 +100,12 @@ describe("TurnBlock component", () => {
     expect(toggle.className).toContain("top-11");
     expect(toggle.className).toContain("w-[calc(100%+0.5rem)]");
 
-    const viewport = screen.getByTestId("turn-scroll-viewport");
-    expect(viewport.className).toContain("max-h-[var(--timeline-turn-max-h,50dvh)]");
+    // meiva:note
+    // No inner scrollport and no height cap: the body is part of the timeline's
+    // own flow, so the block is exactly as tall as its content (user ruling
+    // 2026-11-09).
+    // meiva:link ui/web/src/docs/frontend-components/timeline-view/deep-collapse.meiva.okf.md
+    expect(screen.queryByTestId("turn-scroll-viewport")).toBeNull();
     const rail = screen.getByTestId("detail-content").parentElement;
     expect(rail?.className).toContain("ml-1.5");
     expect(rail?.className).toContain("pl-2");
@@ -126,9 +130,8 @@ describe("TurnBlock component", () => {
     const root = container.firstElementChild!;
     expect(root.getAttribute("data-live-activity-window")).toBe("true");
     expect(root.className).not.toContain("rounded-xl");
-    expect(screen.getByTestId("activity-scroll-viewport").className).toContain(
-      "max-h-[var(--timeline-turn-max-h,50dvh)]",
-    );
+    expect(screen.queryByTestId("activity-scroll-viewport")).toBeNull();
+    expect(screen.getByText("live row")).toBeTruthy();
   });
 
   it("renders PendingLiveActivityWindow as an inline unboxed header row", () => {

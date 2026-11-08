@@ -420,6 +420,51 @@ describe("layout changes with no scroll event (handleLayoutChange)", () => {
   });
 });
 
+// meiva:note
+// An expanded live work block owns the viewport's top edge: growth extends the
+// block downward instead of pinning the tail, so opening one stops following and
+// a growth pass reports the position without moving it. Closing or collapsing the
+// block hands the tail back to the ordinary rules (user ruling 2026-11-09).
+// meiva:link ui/web/src/docs/frontend-components/timeline-view/deep-collapse.meiva.okf.md
+describe("an expanded live work block owns the top edge (notifyLiveBlock)", () => {
+  it("stops following and never pins while the block grows downward", () => {
+    const ctl = createStickyController(TOUCH_STICKY_THRESHOLDS);
+    pin(ctl, 1000);
+    expect(ctl.isSticky()).toBe(true);
+    ctl.notifyLiveBlock(true);
+    expect(ctl.isSticky()).toBe(false);
+    expect(ctl.handleLayoutChange(view(400, 1400))).toBe(false);
+    expect(ctl.isSticky()).toBe(false);
+  });
+
+  it("does not re-stick on a growth pass that reads as at-bottom", () => {
+    const ctl = createStickyController(TOUCH_STICKY_THRESHOLDS);
+    ctl.notifyLiveBlock(true);
+    expect(ctl.handleLayoutChange(view(800, 1400))).toBe(false);
+    expect(ctl.isSticky()).toBe(false);
+  });
+
+  it("hands the tail back when the block closes", () => {
+    const ctl = createStickyController(TOUCH_STICKY_THRESHOLDS);
+    pin(ctl, 1000);
+    ctl.notifyLiveBlock(true);
+    expect(ctl.handleLayoutChange(view(400, 1400))).toBe(false);
+    ctl.notifyLiveBlock(false);
+    expect(ctl.handleLayoutChange(view(800, 1400))).toBe(true);
+    expect(ctl.isSticky()).toBe(true);
+  });
+
+  it("keeps a reader who chose to follow again while the block stays open", () => {
+    const ctl = createStickyController(TOUCH_STICKY_THRESHOLDS);
+    ctl.notifyLiveBlock(true);
+    ctl.requestStick();
+    expect(ctl.isSticky()).toBe(true);
+    ctl.notifyLiveBlock(true);
+    expect(ctl.isSticky()).toBe(true);
+    expect(ctl.handleLayoutChange(view(400, 1400))).toBe(false);
+  });
+});
+
 describe("iOS bounce & touch (position-based, no wheel events)", () => {
   it("overscroll bounce at the bottom (scrollTop drops tens of px) stays sticky", () => {
     const ctl = createStickyController(TOUCH_STICKY_THRESHOLDS);

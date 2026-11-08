@@ -377,9 +377,12 @@ describe("work block expansion", () => {
     );
 
     const initialTurn = container.querySelector('[data-live-activity-window="true"]');
-    const initialViewport = screen.getByTestId("activity-scroll-viewport");
+    const rowFor = (id: string) =>
+      container.querySelector<HTMLElement>(`.timeline-item[data-item-id="${id}"]`)?.parentElement ?? null;
+    const initialRow = rowFor("1.1");
     expect(initialTurn).not.toBeNull();
     expect(initialTurn?.getAttribute("data-item-id")).toBe("1.0");
+    expect(initialRow).not.toBeNull();
 
     rerender(
       <TimelineView
@@ -393,7 +396,7 @@ describe("work block expansion", () => {
       />,
     );
     expect(container.querySelector('[data-live-activity-window="true"]')).toBe(initialTurn);
-    expect(screen.getByTestId("activity-scroll-viewport")).toBe(initialViewport);
+    expect(rowFor("1.1")).toBe(initialRow);
     expect(initialTurn?.getAttribute("data-item-id")).toBe("1.1");
     expect(initialTurn?.getAttribute("data-turn-id")).toBe("1.1");
 

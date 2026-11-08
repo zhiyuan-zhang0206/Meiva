@@ -135,6 +135,11 @@ describe("messageCardConfig", () => {
   it("inbound_chat source=agent:42 → Agent 42", () => {
     const cfg = messageCardConfig(item("inbound_chat", { source: "agent:42" }));
     expect(cfg!.title).toBe("Agent 42");
+    // meiva:note
+    // Another agent's message is content this agent read, so opening the work
+    // block shows it instead of a collapsed header (user ruling 2026-11-09).
+    // meiva:link ui/web/src/docs/frontend-components/timeline-view/deep-collapse.meiva.okf.md
+    expect(cfg!.fixedDefault).toBe(true);
   });
 
   it("inbound_chat ui:page → Human", () => {
@@ -147,6 +152,7 @@ describe("messageCardConfig", () => {
   it("inbound_chat unknown source → System", () => {
     const cfg = messageCardConfig(item("inbound_chat", { source: "kernel" }));
     expect(cfg!.title).toBe("System");
+    expect(cfg!.fixedDefault).toBe(true);
   });
 
   it("inbound_compact → differentiated labels", () => {
@@ -162,6 +168,7 @@ describe("messageCardConfig", () => {
       item("system_marker", { source: "lifecycle_terminate" }),
     );
     expect(cfg!.title).toBe("Terminated");
+    expect(cfg!.fixedDefault).toBe(false);
   });
 
   it("system_marker memory → Memory with monochrome header (no purple override)", () => {
@@ -182,6 +189,7 @@ describe("messageCardConfig", () => {
     ]) {
       const cfg = messageCardConfig(item("system_marker", { source: src }));
       expect(cfg!.title).toBe("Note");
+      expect(cfg!.fixedDefault).toBe(true);
     }
   });
 });

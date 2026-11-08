@@ -203,14 +203,12 @@ export function useTimelineGroupWindow({
   }), [groups, activeTurnKeys, turnOverrides, turnActive, expandWorkingBlock]);
 
   const renderedRows = groupEntries.reduce(
-    (total, { group, runExpanded, isLastTurn }) =>
-      total + (group.kind === "turn" && runExpanded
-        ? isLastTurn ? Math.min(group.members.length, turnRows) : group.members.length
-        : 1),
+    (total, { group, runExpanded }) =>
+      total + (group.kind === "turn" && runExpanded ? group.members.length : 1),
     0,
   );
   const virtualEnabled = renderedRows > activationRows;
-  const virtualGroups = useMemo(() => groupEntries.map(({ group, virtualKey, runExpanded, isLastTurn }) => {
+  const virtualGroups = useMemo(() => groupEntries.map(({ group, virtualKey, runExpanded }) => {
     const members = group.kind === "single" ? [group.member] : group.members;
     return {
       key: virtualKey,
@@ -218,7 +216,7 @@ export function useTimelineGroupWindow({
       itemIds: members.map((m) => m.item.item_id),
       memberRankKeys: members.map((m) => `${m.rank}:${m.item.item_id}`),
       estimatedHeight: group.kind === "turn" ? (runExpanded ? 264 : 32) : 80,
-      expandedRows: group.kind === "turn" && runExpanded && !isLastTurn
+      expandedRows: group.kind === "turn" && runExpanded
         ? members.map((m) => `${virtualKey}:${m.source}:${m.rank}:${m.item.item_id}`)
         : null,
     };
@@ -271,14 +269,11 @@ export function TimelineGroupList({
   overrides,
   toggleExpanded,
   toggleTurn,
-  onActivityAtBottomChange,
-  activityScrollSeq,
   groups,
   groupEntries,
   virtualEnabled,
   virtualRange,
   rowRange,
-  turnRows,
 }: {
   items: BackendTimelineItem[];
   compactBuffer: CompactTransitionBuffer | null;
@@ -288,14 +283,11 @@ export function TimelineGroupList({
   overrides: ReadonlySet<string>;
   toggleExpanded: (id: string, kind: BackendTimelineItem["kind"]) => void;
   toggleTurn: (id: string, currentlyExpanded: boolean) => void;
-  onActivityAtBottomChange?: (atBottom: boolean) => void;
-  activityScrollSeq?: number;
   groups: RankedTimelineGroup[];
   groupEntries: GroupEntry[];
   virtualEnabled: boolean;
   virtualRange: { start: number; end: number; before: number; after: number };
   rowRange: (index: number) => { start: number; end: number; before: number; after: number };
-  turnRows: number;
 }) {
   const renderRow = (
     item: BackendTimelineItem,
@@ -373,10 +365,8 @@ export function TimelineGroupList({
 
             const first = group.members[0];
             const turnId = first.item.item_id;
-            const shouldWindowTurn = isLastTurn && runExpanded && group.members.length > turnRows;
             const forceChildExpand = isLiveTurn;
-            const rows = !isLastTurn ? rowRange(virtualRange.start + offset)
-              : { start: 0, end: group.members.length, before: 0, after: 0 };
+            const rows = rowRange(virtualRange.start + offset);
             return (
               <TurnBlock
                 id={turnId}
@@ -386,32 +376,19 @@ export function TimelineGroupList({
                 memberSources={group.members.map((m) => `${m.source}:${m.rank}:${m.item.item_id}`)}
                 summary={group.summary}
                 expanded={runExpanded}
-                bounded={isLastTurn}
                 onToggle={toggleTurn}
                 turnActive={turnActive && isLastTurn}
                 lastEventAt={lastEventAt}
                 liveWindow={isLiveTurn}
-                onActivityAtBottomChange={isLiveTurn ? onActivityAtBottomChange : undefined}
-                scrollToBottomSeq={isLiveTurn ? activityScrollSeq : undefined}
-                windowedCount={shouldWindowTurn ? group.members.length : undefined}
-                turnRows={shouldWindowTurn ? turnRows : undefined}
-                renderWindowedRow={
-                  shouldWindowTurn
-                    ? (idx: number) => {
-                        const m = group.members[idx];
-                        return renderRow(m.item, m.index, m.source, m.rank, forceChildExpand);
-                      }
-                    : undefined
-                }
                 timelineSource={first.source}
                 displayRank={first.rank}
               >
                 {runExpanded && rows.before > 0 ? <div data-timeline-spacer="turn-before" style={{ height: rows.before }} aria-hidden="true" /> : null}
-                {runExpanded && !shouldWindowTurn ? (
+                {runExpanded ? (
                   group.members.slice(rows.start, rows.end).map((m) => {
                     const rowKey = `${virtualKey}:${m.source}:${m.rank}:${m.item.item_id}`;
                     return (
-                      <div key={rowKey} data-virtual-row={!isLastTurn ? rowKey : undefined}>
+                      <div key={rowKey} data-virtual-row={rowKey}>
                         {renderRow(m.item, m.index, m.source, m.rank, forceChildExpand)}
                       </div>
                     );

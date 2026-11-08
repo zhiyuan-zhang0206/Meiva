@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { act, cleanup, fireEvent, screen } from "@testing-library/react";
+import { cleanup, screen } from "@testing-library/react";
 import { render } from "@/lib/transport/tests/wall-clock-render";
 
 import { TurnBlock } from "./run-block";
@@ -27,165 +27,50 @@ const baseSummary: TurnSummary = {
   lastLiveStartedAt: 0,
 };
 
-describe("TurnBlock inner row windowing", () => {
-  it("mounts only the bootstrap window and turn-before spacer when item count exceeds turnRows", () => {
+// meiva:note
+// An expanded block has one height: its own. Whatever the turn did, the body is
+// rendered in the timeline's own flow - no inner scrollport, no cap, no spacer
+// window - so a finished block is exactly as tall as it was and a running one
+// extends downward from its header (user ruling 2026-11-09).
+// meiva:link ui/web/src/docs/frontend-components/timeline-view/deep-collapse.meiva.okf.md
+describe("TurnBlock expanded body", () => {
+  it("renders every row in the timeline's flow, with no inner scrollport and no cap", () => {
     const memberIds = Array.from({ length: 120 }, (_, i) => `${i + 1}.0`);
     const { container } = render(
-      <TurnBlock
-        id="1.0"
-        memberIds={memberIds}
-        summary={baseSummary}
-        expanded
-        onToggle={vi.fn()}
-        windowedCount={120}
-        turnRows={20}
-        renderWindowedRow={(index) => (
-          <div key={memberIds[index]} data-testid="windowed-row" data-row-index={index}>
-            {`Row ${index}`}
-          </div>
-        )}
-      />,
+      <TurnBlock id="1.0" memberIds={memberIds} summary={baseSummary} expanded onToggle={vi.fn()}>
+        {memberIds.map((id) => (
+          <div key={id} data-testid="turn-row">{`Row ${id}`}</div>
+        ))}
+      </TurnBlock>,
     );
 
-    expect(container.querySelector('[data-timeline-spacer="turn-before"]')).not.toBeNull();
-    const mounted = screen.getAllByTestId("windowed-row");
-    expect(mounted.length).toBe(24);
-    expect(mounted[mounted.length - 1].getAttribute("data-row-index")).toBe("119");
-
-    const innerViewport = screen.getByTestId("turn-scroll-viewport");
-    Object.defineProperty(innerViewport, "clientHeight", { value: 240, configurable: true });
-    innerViewport.scrollTop = 1200;
-    fireEvent.scroll(innerViewport);
-
-    expect(container.querySelector('[data-timeline-spacer="turn-before"]')).not.toBeNull();
-    expect(container.querySelector('[data-timeline-spacer="turn-after"]')).not.toBeNull();
+    expect(screen.getAllByTestId("turn-row")).toHaveLength(120);
+    expect(screen.queryByTestId("turn-scroll-viewport")).toBeNull();
+    expect(screen.queryByTestId("activity-scroll-viewport")).toBeNull();
+    expect(container.querySelector('[data-turn-scroll="true"]')).toBeNull();
+    expect(container.querySelector('[data-timeline-spacer="turn-before"]')).toBeNull();
+    expect(container.querySelector('[data-timeline-spacer="turn-after"]')).toBeNull();
+    expect(container.querySelector('[class*="max-h-[var(--timeline-turn"]')).toBeNull();
   });
 
-  it("keeps the measured tail mounted while the live window follows its bottom", () => {
-    const observers: { callback: ResizeObserverCallback; targets: Set<Element> }[] = [];
-    vi.stubGlobal("ResizeObserver", class {
-      readonly record: { callback: ResizeObserverCallback; targets: Set<Element> };
-      constructor(callback: ResizeObserverCallback) {
-        this.record = { callback, targets: new Set() };
-        observers.push(this.record);
-      }
-      observe(target: Element) { this.record.targets.add(target); }
-      unobserve(target: Element) { this.record.targets.delete(target); }
-      disconnect() { this.record.targets.clear(); }
-    });
-    const reportRowHeights = (blockSize: number) => {
-      for (const { callback, targets } of observers) {
-        const rows = [...targets].filter((target) => target.hasAttribute("data-turn-row"));
-        if (rows.length === 0) continue;
-        callback(
-          rows.map((target) => ({ target, borderBoxSize: [{ blockSize, inlineSize: 600 }] }) as unknown as ResizeObserverEntry),
-          {} as ResizeObserver,
-        );
-      }
-    };
-    const memberIds = Array.from({ length: 120 }, (_, i) => `${i + 1}.0`);
+  it("mounts the live window's rows in the same flow while the turn runs", () => {
+    const memberIds = ["1.0", "1.1"];
     render(
-      <TurnBlock
-        id="1.0"
-        memberIds={memberIds}
-        summary={baseSummary}
-        expanded
-        onToggle={vi.fn()}
-        turnActive
-        liveWindow
-        onActivityAtBottomChange={vi.fn()}
-        windowedCount={120}
-        turnRows={20}
-        renderWindowedRow={(index) => (
-          <div data-testid="windowed-row" data-row-index={index}>
-            {`Row ${index}`}
-          </div>
-        )}
-      />,
+      <TurnBlock id="1.0" memberIds={memberIds} summary={baseSummary} expanded turnActive liveWindow onToggle={vi.fn()}>
+        <div data-testid="turn-row">thinking</div>
+        <div data-testid="turn-row">output</div>
+      </TurnBlock>,
     );
-    const mountedIndexes = () =>
-      screen.getAllByTestId("windowed-row").map((row) => Number(row.getAttribute("data-row-index")));
-
-    const innerViewport = screen.getByTestId("activity-scroll-viewport");
-    Object.defineProperty(innerViewport, "clientHeight", { value: 390, configurable: true });
-    act(() => reportRowHeights(300));
-    const pinnedTopOfMeasuredRows = 120 * 304 - 390;
-    innerViewport.scrollTop = pinnedTopOfMeasuredRows;
-    fireEvent.scroll(innerViewport);
-    expect(mountedIndexes()).toEqual([117, 118, 119]);
-
-    innerViewport.scrollTop = 20_000;
-    fireEvent.scroll(innerViewport);
-    expect(mountedIndexes()).toEqual([117, 118, 119]);
-    vi.unstubAllGlobals();
+    expect(screen.getAllByTestId("turn-row")).toHaveLength(2);
+    expect(screen.queryByTestId("activity-scroll-viewport")).toBeNull();
   });
 
-  it("keeps follow mode across transient scrollHeight growth and exits only when scrolling upward", () => {
-    const observers: { callback: ResizeObserverCallback; targets: Set<Element> }[] = [];
-    vi.stubGlobal("ResizeObserver", class {
-      readonly record: { callback: ResizeObserverCallback; targets: Set<Element> };
-      constructor(callback: ResizeObserverCallback) {
-        this.record = { callback, targets: new Set() };
-        observers.push(this.record);
-      }
-      observe(target: Element) { this.record.targets.add(target); }
-      unobserve(target: Element) { this.record.targets.delete(target); }
-      disconnect() { this.record.targets.clear(); }
-    });
-    const reportRowHeights = (blockSize: number) => {
-      for (const { callback, targets } of observers) {
-        const rows = [...targets].filter((target) => target.hasAttribute("data-turn-row"));
-        if (rows.length === 0) continue;
-        callback(
-          rows.map((target) => ({ target, borderBoxSize: [{ blockSize, inlineSize: 600 }] }) as unknown as ResizeObserverEntry),
-          {} as ResizeObserver,
-        );
-      }
-    };
-
-    const memberIds = Array.from({ length: 120 }, (_, i) => `${i + 1}.0`);
-    const onAtBottom = vi.fn();
+  it("renders no body while collapsed", () => {
     render(
-      <TurnBlock
-        id="1.0"
-        memberIds={memberIds}
-        summary={baseSummary}
-        expanded
-        onToggle={vi.fn()}
-        turnActive
-        liveWindow
-        onActivityAtBottomChange={onAtBottom}
-        windowedCount={120}
-        turnRows={20}
-        renderWindowedRow={(index) => (
-          <div data-testid="windowed-row" data-row-index={index}>
-            {`Row ${index}`}
-          </div>
-        )}
-      />,
+      <TurnBlock id="1.0" memberIds={["1.0"]} summary={baseSummary} expanded={false} onToggle={vi.fn()}>
+        <div data-testid="turn-row">hidden</div>
+      </TurnBlock>,
     );
-    const mountedIndexes = () =>
-      screen.getAllByTestId("windowed-row").map((row) => Number(row.getAttribute("data-row-index")));
-
-    const innerViewport = screen.getByTestId("activity-scroll-viewport");
-    let scrollHeight = 120 * 304;
-    Object.defineProperty(innerViewport, "clientHeight", { value: 390, configurable: true });
-    Object.defineProperty(innerViewport, "scrollHeight", { get: () => scrollHeight, configurable: true });
-    act(() => reportRowHeights(300));
-
-    const pinnedTop = scrollHeight - 390;
-    innerViewport.scrollTop = pinnedTop;
-    fireEvent.scroll(innerViewport);
-    expect(mountedIndexes()).toEqual([117, 118, 119]);
-
-    scrollHeight += 120;
-    fireEvent.scroll(innerViewport);
-    expect(mountedIndexes()).toEqual([117, 118, 119]);
-
-    innerViewport.scrollTop = 1200;
-    fireEvent.scroll(innerViewport);
-    expect(onAtBottom).toHaveBeenLastCalledWith(false);
-    expect(mountedIndexes()[mountedIndexes().length - 1]).toBeLessThan(100);
-    vi.unstubAllGlobals();
+    expect(screen.queryByTestId("turn-row")).toBeNull();
   });
 });

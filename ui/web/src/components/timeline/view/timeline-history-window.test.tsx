@@ -537,7 +537,12 @@ describe("deep history DOM window", () => {
     });
   });
 
-  it("windows the children of one long expanded work block", async () => {
+  // meiva:note
+  // An expanded work block has no scrollport of its own: its rows are windowed
+  // by the timeline's one window, so scrolling the timeline is what moves the
+  // mounted rows inside a long run (user ruling 2026-11-09).
+  // meiva:link ui/web/src/docs/frontend-components/timeline-view/deep-collapse.meiva.okf.md
+  it("windows the children of one long expanded work block through the timeline's own window", async () => {
     const items = Array.from({ length: 600 }, (_, index) => makeItem({
       item_id: `${index + 1}.0`,
       kind: "agent_reasoning",
@@ -546,14 +551,14 @@ describe("deep history DOM window", () => {
     render(<TimelineView items={items} threadKey="deep-run" />);
     fireEvent.click(screen.getByTestId("turn-toggle"));
     const viewport = screen.getByTestId("scroll-viewport");
-    const turnViewport = screen.getByTestId("turn-scroll-viewport");
+    expect(screen.queryByTestId("turn-scroll-viewport")).toBeNull();
     expect(viewport.querySelectorAll('[data-turn-expanded="true"]').length).toBe(1);
     expect(viewport.querySelectorAll(".timeline-item").length).toBeLessThan(60);
     expect(viewport.querySelector('[data-timeline-spacer="turn-before"]')).not.toBeNull();
-    Object.defineProperty(turnViewport, "clientHeight", { value: 360, configurable: true });
+    Object.defineProperty(viewport, "clientHeight", { value: 360, configurable: true });
     act(() => {
-      turnViewport.scrollTop = 10_000;
-      fireEvent.scroll(turnViewport);
+      viewport.scrollTop = 10_000;
+      fireEvent.scroll(viewport);
     });
     await waitFor(() => {
       expect(viewport.querySelectorAll(".timeline-item").length).toBeLessThan(60);

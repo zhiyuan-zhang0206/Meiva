@@ -239,6 +239,15 @@ export interface StickyController {
   // reader's way back into following.
   // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.meiva.okf.md
   isAnchored(): boolean;
+  // meiva:note
+  // Reports whether an expanded live work block owns the viewport. While it does,
+  // content growth must not pin: the block's own top edge is the thing that stays
+  // put as the block streams downward, and a pin would carry that edge off the
+  // screen (user ruling 2026-11-09). Opening one stops following; the reader's
+  // own return to the bottom still re-follows, and the next layout pass after the
+  // block closes (or collapses) pins as usual.
+  // meiva:link ui/web/src/docs/frontend-components/timeline-view/deep-collapse.meiva.okf.md
+  notifyLiveBlock(open: boolean): void;
   // There is deliberately no notify() for non-pin programmatic scrolls
   // (prepend compensation). They need none: the only reader of the
   // baseline is handleScroll, which re-syncs it on every event, so the
@@ -305,6 +314,11 @@ export function createStickyController(
   // back deliberately.
   // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.meiva.okf.md
   let anchored = false;
+  // meiva:note
+  // An expanded live work block owns the viewport's top edge: growth extends it
+  // downward instead of pinning the tail. See `notifyLiveBlock`.
+  // meiva:link ui/web/src/docs/frontend-components/timeline-view/deep-collapse.meiva.okf.md
+  let liveBlockOpen = false;
 
   // Following: remember where the bottom was, so a later growth can be
   // told apart from a user scrolling away.
@@ -465,6 +479,10 @@ export function createStickyController(
       // could never accumulate past the bottom zone — the timeline was
       // glued to the bottom and the scroll-to-bottom button never showed.
       if (touchActive) return false;
+      if (liveBlockOpen) {
+        prevNearBottom = isAtBottom(view, thresholds);
+        return false;
+      }
       // A height change moved the bottom with no scroll event. If it left
       // the viewport at the bottom, that IS following — reconcile the flag
       // (the old design needed a separate at-bottom net in the observer
@@ -564,6 +582,15 @@ export function createStickyController(
       prevScrollTop = view.scrollTop;
       prevScrollHeight = view.scrollHeight;
       prevNearBottom = atBottom;
+    },
+
+    notifyLiveBlock(open) {
+      if (liveBlockOpen === open) return;
+      liveBlockOpen = open;
+      if (open) {
+        unstick();
+        upwardRun = 0;
+      }
     },
 
     notifyAnchored(view) {
