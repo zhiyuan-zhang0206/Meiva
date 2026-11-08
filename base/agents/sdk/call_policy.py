@@ -33,9 +33,14 @@ from base.log import logger
 
 
 # meiva:note
-# One fetch of the cluster's SDK sampling policy from `source`: the `.env` file when this
-# process's config source is local, the gateway otherwise. The file is read again on each call
-# so an edit reaches a running process within one refresh.
+# One read of the cluster's SDK sampling policy from `source`: the `.env` file when this
+# process's config source is local, the gateway otherwise. A process the meiva root delivered no
+# machine API token to (`delivered_token` is None — a launchd job, a one-off script, a smoke
+# harness) reads the file instead of dialing: a bearer-less request can only ever be answered
+# 401, and that rejection says nothing about this process's configuration. A token that IS
+# present buys no such fallback — a rejected one is a real credential failure and stays fatal,
+# so a revoked token cannot hide behind the file. The file is read again on each call so an edit
+# reaches a running process within one refresh.
 def read_policy(source: SamplingSource) -> SamplingPolicy:
     from base.host.env.bootstrap import (
         config_source_is_local,
@@ -47,13 +52,16 @@ def read_policy(source: SamplingSource) -> SamplingPolicy:
 
     env = source.env
     env_file = read_env_aliases(source.env_path)
-    if config_source_is_local(env, env_file=env_file) or not should_fetch_from_gateway(
-        env, env_file=env_file
+    token = delivered_token(env)
+    if (
+        token is None
+        or config_source_is_local(env, env_file=env_file)
+        or not should_fetch_from_gateway(env, env_file=env_file)
     ):
         aliases = env_file
     else:
         aliases = fetch_bootstrap_config(
-            env["MEIVA_GATEWAY_URL"], bearer=delivered_token(env), tuning=source.tuning
+            env["MEIVA_GATEWAY_URL"], bearer=token, tuning=source.tuning
         )
     return policy_from_aliases(aliases)
 

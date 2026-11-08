@@ -124,6 +124,37 @@ def test_enrolled_process_reads_gateway_policy(tmp_path: Path) -> None:
     assert [r.path for r in gateway.requests] == ["/api/bootstrap"]
 
 
+@pytest.mark.parametrize("token", [None, ""])
+def test_process_without_a_machine_token_reads_the_file_without_dialing(
+    tmp_path: Path, token: str | None
+) -> None:
+    env_file = tmp_path / ".env"
+    env_file.write_text("MEIVA_SDK_CALL_SAMPLING_ENABLED=true\nMEIVA_SDK_CALL_SAMPLE_EVERY=4\n")
+    env = {"MEIVA_MACHINE_SERVE_AGENT_RUNNER": "true"}
+    if token is not None:
+        env["MEIVA_API_TOKEN"] = token
+    with serve_json(_ENABLED_EVERY_3) as gateway:
+        env["MEIVA_GATEWAY_URL"] = gateway.url
+        policy = call_policy.read_policy(SamplingSource(env=env, env_path=env_file))
+    # meiva:note
+    # Both halves matter: the empty request list proves the owner never dialed, and the policy
+    # carries the file's 4 rather than the gateway's 3 — a dial that succeeded would show here.
+    assert gateway.requests == []
+    assert policy == SamplingPolicy(sampling_enabled=True, sample_every=4)
+
+
+def test_a_rejected_machine_token_still_fails_loud(tmp_path: Path) -> None:
+    with serve_json({}, status=401) as gateway:
+        env = {
+            "MEIVA_MACHINE_SERVE_AGENT_RUNNER": "true",
+            "MEIVA_GATEWAY_URL": gateway.url,
+            "MEIVA_API_TOKEN": "revoked-token",
+        }
+        with pytest.raises(httpx.HTTPStatusError):
+            call_policy.read_policy(SamplingSource(env=env, env_path=tmp_path / ".env"))
+    assert [r.headers["authorization"] for r in gateway.requests] == ["Bearer revoked-token"]
+
+
 @pytest.mark.parametrize("outage", ["refused", "timeout", "hangup", "rate_limited"])
 def test_expected_fetch_failure_retains_the_valid_snapshot(tmp_path: Path, outage: str) -> None:
     from base.telemetry import emitter
