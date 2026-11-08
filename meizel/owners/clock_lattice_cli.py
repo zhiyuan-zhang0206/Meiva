@@ -12,7 +12,7 @@ from collections.abc import Iterable
 from pathlib import Path
 
 from meizel import allowances, lint_common
-from meizel.checkout import roles_at
+from meizel.checkout import GitRepo, roles_at
 from meizel.owners import clock_lattice
 from meizel.roles import select_packages
 
@@ -34,7 +34,7 @@ _TEST_PATTERNS = (
 # The lattice a checkout declares: the policy's two tables, and the `CLOCKS` tables of the family
 # modules it names, read here because the rule may not read.
 def lattice_of(root: Path) -> clock_lattice.Lattice:
-    policy = allowances.load(root)
+    policy = allowances.load(GitRepo(root))
     family = tuple(policy.names("clock-lattice", "family-modules"))
     return clock_lattice.Lattice.of(policy, _texts(root, family))
 

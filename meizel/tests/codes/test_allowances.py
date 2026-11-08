@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from meizel import allowances
+from meizel.entry import open_repository
 from meizel.graph.model import OS_KINDS
 from meizel.tests.synthetic import RepoFactory
 
@@ -18,7 +19,7 @@ POLICY = (
 
 
 def test_a_rule_reads_its_sections_from_the_policy(make_repo: RepoFactory) -> None:
-    policy = allowances.load(make_repo({"meizel.policy.toml": POLICY}))
+    policy = allowances.load(open_repository(make_repo({"meizel.policy.toml": POLICY})))
     assert policy.names("ambient-state", "pure-callees") == ("re.compile", "typing.TypeVar")
     assert policy.reasons("ambient-state", "sites") == {"a.py::hidden-cache:f": "a pure derivation"}
     assert policy.reasons("single-owner", "postgres-dial") == {
@@ -27,7 +28,7 @@ def test_a_rule_reads_its_sections_from_the_policy(make_repo: RepoFactory) -> No
 
 
 def test_a_section_the_file_does_not_have_lists_nothing(make_repo: RepoFactory) -> None:
-    policy = allowances.load(make_repo({"meizel.policy.toml": POLICY}))
+    policy = allowances.load(open_repository(make_repo({"meizel.policy.toml": POLICY})))
     assert policy.names("ambient-state", "wiring-callees") == ()
     assert policy.reasons("type-checking", "files") == {}
 
@@ -35,7 +36,7 @@ def test_a_section_the_file_does_not_have_lists_nothing(make_repo: RepoFactory) 
 def test_an_absent_policy_lists_nothing(make_repo: RepoFactory) -> None:
     root = make_repo({"a.py": ""})
     (root / allowances.POLICY).unlink(missing_ok=True)
-    assert allowances.load(root).reasons("type-checking", "files") == {}
+    assert allowances.load(open_repository(root)).reasons("type-checking", "files") == {}
 
 
 @pytest.mark.parametrize(
@@ -51,7 +52,7 @@ def test_an_absent_policy_lists_nothing(make_repo: RepoFactory) -> None:
 def test_a_rule_cannot_ask_for_a_section_that_does_not_exist(
     make_repo: RepoFactory, rule: str, section: str, shape: str
 ) -> None:
-    policy = allowances.load(make_repo({"meizel.policy.toml": POLICY}))
+    policy = allowances.load(open_repository(make_repo({"meizel.policy.toml": POLICY})))
     with pytest.raises(KeyError):
         (policy.reasons if shape == "reasons" else policy.names)(rule, section)
 
@@ -61,7 +62,7 @@ def test_a_malformed_policy_is_an_error_for_the_rule_that_reads_it(make_repo: Re
     with pytest.raises(
         ValueError, match=r"\[type-checking.files\] 'a.py' needs a non-empty reason"
     ):
-        allowances.load(root)
+        allowances.load(open_repository(root))
 
 
 def test_the_repository_policy_is_well_formed() -> None:
@@ -123,14 +124,14 @@ def test_the_public_surface_names_come_from_the_policy() -> None:
 # declares is `settings`, and the clock it returns runs on the system timers, so it is not a second
 # declaration of `clock`. Taking it out of `settings` would put the declarations of its callers back.
 def test_the_process_clock_constructor_is_a_settings_read() -> None:
-    policy = allowances.load(ROOT)
+    policy = allowances.load(open_repository(ROOT))
     reader = "base.clock.Clock.from_settings()"
     assert reader in policy.reasons("ambient-readers", "settings")
     assert reader not in policy.reasons("ambient-readers", "clock")
 
 
 def test_no_rule_code_holds_an_exemption_of_its_own() -> None:
-    policy = allowances.load(ROOT)
+    policy = allowances.load(open_repository(ROOT))
     exempt = {name for entries in policy.listed.values() for name in entries if "/" in name}
     assert len(exempt) > 50
     literals = {
@@ -167,7 +168,7 @@ def test_snapshot_decoder_rejects_every_other_unknown_or_malformed_input(text: s
 # the rule otherwise forbids. Pinning the counts makes adding one a deliberate edit here too, so a
 # new allowance cannot arrive inside a change that looks local. Bump a number only with its entry.
 def test_repo_policy_allowance_counts_are_pinned() -> None:
-    policy = allowances.load(ROOT)
+    policy = allowances.load(open_repository(ROOT))
     assert len(policy.external) == 43
     assert len(policy.dynamic_attrs) == 34
     assert len(policy.loads) == 24

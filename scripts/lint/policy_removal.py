@@ -503,7 +503,7 @@ def _policies(repo: GitRepo, against: str) -> tuple[Policy, Policy]:
     before, why = _policy_at(repo, against)
     if before is None:
         raise MeizelError(f"the comparison base {against} cannot be read: {why}")
-    return before, load(repo.root)
+    return before, load(repo)
 
 
 # meiva:note

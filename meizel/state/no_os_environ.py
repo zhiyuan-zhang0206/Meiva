@@ -14,11 +14,12 @@
 from __future__ import annotations
 
 import sys
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass
 from pathlib import Path
 
 from meizel import allowances, lint_common
-from meizel.checkout import roles_at
+from meizel.checkout import GitRepo, roles_at
 from meizel.roles import select_packages
 from meizel.state import lint_paths
 from meizel.state import no_os_environ_plan as plan
@@ -27,32 +28,41 @@ __all__ = ["main"]
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 
-ROLES = roles_at(_REPO_ROOT)
-
-# Everything below is listed in meizel.policy.toml under [no-os-environ], each entry with its reason.
-_POLICY = allowances.load(_REPO_ROOT)
 
 # meiva:note
-# Framework dirs whose production code the default scan skips; their own test files are read.
-_TEST_ONLY_DIRS = _POLICY.names("no-os-environ", "test-only-dirs")
+# Everything this rule takes from the repository, read once by the entry and handed down: the scan
+# directories (frameworks whose production code the default scan skips, with their own test files
+# read), the provider keys, the variables read from the live environment by design, the test files
+# that are the settings-free boundary and the registry-owned names Rule 2 takes as input. Every one
+# of them is a policy entry listed in `meizel.policy.toml` under `[no-os-environ]` with its reason.
+#
+# Nothing here is read at import: importing the rule opens no file, and a run judged against another
+# checkout is judged by that checkout's policy and roles.
+@dataclass(frozen=True, slots=True)
+class _Rule:
+    scan_targets: tuple[str, ...]
+    test_only_dirs: tuple[str, ...]
+    provider_keys: frozenset[str]
+    live_reads: frozenset[str]
+    allowed_files: frozenset[str]
+    rule_inputs: tuple[str, ...]
 
-# Scan directories — only OUR code, do not scan .venv / vendor / node_modules.
-_SCAN_TARGETS = plan.scan_targets(
-    select_packages(ROLES, "application", "standalone"),
-    select_packages(ROLES, "tooling"),
-    _TEST_ONLY_DIRS,
-)
-
-_PROVIDER_KEY_ENV_VARS = frozenset(_POLICY.reasons("no-os-environ", "provider-key-vars"))
-
-# Vars read from the live environment BY DESIGN (not via the Settings singleton, which holds the
-# environment as it stood when it was built): in tests, monkeypatch.setenv on them is a REAL seam,
-# the same class as the provider keys above. Every entry must have its reader file in _ALLOWED_FILES.
-_LIVE_READ_ENV_VARS = frozenset(_POLICY.reasons("no-os-environ", "live-read-vars"))
-
-# meiva:note
-# Test files that exercise the settings-free boundary, where the environment is the actual input.
-_ALLOWED_FILES = frozenset(_POLICY.reasons("no-os-environ", "files"))
+    @classmethod
+    def of(cls, policy: allowances.Policy, roles: Mapping[str, tuple[str, ...]]) -> _Rule:
+        section = "no-os-environ"
+        test_only_dirs = policy.names(section, "test-only-dirs")
+        return cls(
+            plan.scan_targets(
+                select_packages(roles, "application", "standalone"),
+                select_packages(roles, "tooling"),
+                test_only_dirs,
+            ),
+            test_only_dirs,
+            frozenset(policy.reasons(section, "provider-key-vars")),
+            frozenset(policy.reasons(section, "live-read-vars")),
+            frozenset(policy.reasons(section, "files")),
+            policy.names(section, "rule-inputs"),
+        )
 
 
 # meiva:note
@@ -60,34 +70,30 @@ _ALLOWED_FILES = frozenset(_POLICY.reasons("no-os-environ", "files"))
 # production code dropped, and the `--only` changed files narrowing the result when `scope` names
 # them. Explicit paths are read as given.
 def _files_to_scan(
-    resolved: list[str], scope: frozenset[str] | None, root: Path, *, explicit: bool
+    resolved: list[str], scope: frozenset[str] | None, root: Path, *, explicit: bool, rule: _Rule
 ) -> list[Path]:
     if explicit:
         return lint_paths.python_paths(root, resolved)
     default = [
         path
-        for path in lint_common.python_files([root / name for name in _SCAN_TARGETS], root)
-        if plan.in_default_scope(path, root, test_only_dirs=_TEST_ONLY_DIRS)
+        for path in lint_common.python_files([root / name for name in rule.scan_targets], root)
+        if plan.in_default_scope(path, root, test_only_dirs=rule.test_only_dirs)
     ]
     return lint_common.restrict(default, scope, root)
-
-
-# The config registry decides which env names Rule 2 treats as Settings-managed, for every test.
-_RULE_INPUTS = _POLICY.names("no-os-environ", "rule-inputs")
 
 
 # meiva:note
 # One file's findings as (line number, stripped line, kind): a judged file is read, and an unreadable
 # entry (a dangling symlink, binary content) keeps the shared lint contract of skipping.
-def _scan_file(path: Path, managed_envs: frozenset[str]) -> list[tuple[int, str, str]]:
+def _scan_file(path: Path, managed_envs: frozenset[str], rule: _Rule) -> list[tuple[int, str, str]]:
     text = lint_common.read_utf8_text(path)
     if text is None:
         return []
     return plan.setenv_violations(
         text,
         managed_envs=managed_envs,
-        provider_keys=_PROVIDER_KEY_ENV_VARS,
-        live_reads=_LIVE_READ_ENV_VARS,
+        provider_keys=rule.provider_keys,
+        live_reads=rule.live_reads,
     )
 
 
@@ -98,8 +104,15 @@ def main(
     *,
     managed_aliases: Callable[[], frozenset[str]],
     repo_root: Path | None = None,
+    policy_root: Path | None = None,
 ) -> int:
     root = repo_root if repo_root is not None else _REPO_ROOT
+    # meiva:note
+    # Two checkouts, named apart: `repo_root` is the tree this run judges, `policy_root` is the one
+    # whose policy and roles say which directories the rule scans. They are the same checkout unless
+    # a caller says otherwise, so a test judging a synthetic tree can hand it a synthetic policy.
+    configured = policy_root if policy_root is not None else _REPO_ROOT
+    rule = _Rule.of(allowances.load(GitRepo(configured)), roles_at(configured))
     argv, only = lint_common.split_only(argv)
     # meiva:note
     # argv non-empty = explicit paths; empty = the test files of all _SCAN_TARGETS, or the `--only`
@@ -110,10 +123,10 @@ def main(
         if missing:
             print(f"error: target path(s) not found: {', '.join(missing)}", file=sys.stderr)
             return 1
-    scope = lint_common.changed_scope(only, root, inputs=_RULE_INPUTS)
-    py_files = _files_to_scan(resolved, scope, root, explicit=bool(argv))
+    scope = lint_common.changed_scope(only, root, inputs=rule.rule_inputs)
+    py_files = _files_to_scan(resolved, scope, root, explicit=bool(argv), rule=rule)
     judged = [
-        path for path in py_files if plan.judges_file(path, root, allowed_files=_ALLOWED_FILES)
+        path for path in py_files if plan.judges_file(path, root, allowed_files=rule.allowed_files)
     ]
     # meiva:note
     # Importing the config registry is the slow part of a run, so it is read once and only when the
@@ -122,7 +135,7 @@ def main(
 
     total_violations = 0
     for path in sorted(judged):
-        for lineno, content, kind in _scan_file(path, managed_envs):
+        for lineno, content, kind in _scan_file(path, managed_envs, rule):
             total_violations += 1
             print(plan.finding(path, root, lineno, kind))
             print(f"    {content}")

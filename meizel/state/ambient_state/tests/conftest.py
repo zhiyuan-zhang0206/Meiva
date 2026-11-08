@@ -4,7 +4,7 @@ from dataclasses import replace
 from pathlib import Path
 
 from meizel import allowances
-from meizel.checkout import roles_at
+from meizel.checkout import GitRepo, roles_at
 from meizel.roles import select_packages
 from meizel.state.ambient_state import Config
 from meizel.state.ambient_state.allowlist import from_policy
@@ -26,6 +26,6 @@ SCOPE = select_packages(roles_at(_REPO), "application", "templates")
 # The lists are a value now: a test that wants an entry builds the value it judges instead of
 # editing a global — `replace(CONFIG, allow=replace(ALLOWLISTS, allowed={...}))` — and passes it.
 # Nothing a test writes can reach another test.
-REAL_ALLOWLISTS = from_policy(allowances.load(_REPO))
+REAL_ALLOWLISTS = from_policy(allowances.load(GitRepo(_REPO)))
 ALLOWLISTS = replace(REAL_ALLOWLISTS, sink_facades={}, allowed={}, pure_repo_callees={})
 CONFIG = Config(scope=SCOPE, allow=ALLOWLISTS)

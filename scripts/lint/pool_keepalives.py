@@ -62,13 +62,13 @@ sys.path.insert(0, str(_REPO_ROOT))
 
 # meiva:link scripts/docs/scripts.meiva.okf.md
 from meizel import allowances, lint_common  # noqa: E402
-from meizel.checkout import roles_at  # noqa: E402
+from meizel.checkout import GitRepo, roles_at  # noqa: E402
 from meizel.owners import decisions  # noqa: E402
 from meizel.roles import select_packages  # noqa: E402
 
 ROLES = roles_at(_REPO_ROOT)
 
-_DIAL = decisions.decision_table(allowances.load(_REPO_ROOT))["postgres-dial"]
+_DIAL = decisions.decision_table(allowances.load(GitRepo(_REPO_ROOT)))["postgres-dial"]
 
 # The default scope: what Rule 5 does not see. `scripts/` is not a governed
 # package, and a module the decision allows is exempt from Rule 5 as a whole.

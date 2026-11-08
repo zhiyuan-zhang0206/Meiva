@@ -14,11 +14,10 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from enum import StrEnum
 from functools import cache
-from pathlib import Path
 from typing import TypeGuard, assert_never
 
-from meizel.checkout import GitRepo
 from meizel.graph.model import OS_KINDS
+from meizel.graph.universe import Checkout
 from meizel.source_text import object_mapping
 
 __all__ = [
@@ -463,8 +462,11 @@ def parse_snapshot(text: str) -> tuple[Policy, list[str]]:
     return _parse(text, _PolicySource.SNAPSHOT)
 
 
-def _load(root: Path, source: _PolicySource) -> Policy:
-    repo = GitRepo(root)
+# meiva:note
+# The policy of the checkout the caller already holds, read through the checkout's own port: this
+# module decides the file's format and never opens it, so the read belongs to whatever entry built
+# the checkout (a process entry, a lint script, the comparison snapshot a command runs in).
+def _load(repo: Checkout, source: _PolicySource) -> Policy:
     if not repo.has_file(POLICY):
         return Policy()
     policy, problems = _parse(repo.load_text(POLICY), source)
@@ -477,15 +479,15 @@ def _load(root: Path, source: _PolicySource) -> Policy:
 # The live policy never accepts the retired snapshot vocabulary. An absent file lists nothing;
 # malformed input fails through the shared policy reader.
 @cache
-def load(root: Path) -> Policy:
-    return _load(root, _PolicySource.CURRENT)
+def load(repo: Checkout) -> Policy:
+    return _load(repo, _PolicySource.CURRENT)
 
 
 # meiva:note
 # Historical consumers share the policy owner's absent-file and input validation boundary.
 # The explicit entry never relaxes live parsing or caches a mutable temporary snapshot.
-def load_snapshot(root: Path) -> Policy:
-    return _load(root, _PolicySource.SNAPSHOT)
+def load_snapshot(repo: Checkout) -> Policy:
+    return _load(repo, _PolicySource.SNAPSHOT)
 
 
 # meiva:note
