@@ -51,8 +51,11 @@ bar, not here (user corrections 2026-08-28). A row whose agent or shell id is
 not a valid finite integer renders as plain text, so the panel never navigates
 to `/shell/NaN/NaN`.
 
-**Configuration overlay.** Rows render every overlay entry's value — strings
-pass through, everything else is JSON-stringified. `llm_model` is skipped: the
+**Configuration.** Rows render every stored configuration entry's value — strings
+pass through, everything else is JSON-stringified. The section is titled
+`Configuration` (renamed from `Configuration overlay`, user 2026-11-08): what it
+lists is the agent's configuration, and the word "overlay" named the storage
+mechanism rather than the fact. `llm_model` is skipped: the
 model is the agent's state, and it reads in Liveness instead (user 2026-10-21). Skill-list keys
 (`skills_to_inject_into_system_prompt`, `skills_to_expand_at_start`) are stored
 in the runtime's underscore Python projection and render in the canonical dash

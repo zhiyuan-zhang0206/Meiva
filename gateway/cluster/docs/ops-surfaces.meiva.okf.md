@@ -61,23 +61,27 @@ are mounted. `hours` is the aggregation window, whitelisted to
 | Card data | Source |
 |---|---|
 | `live_count` | Postgres `agents_meta` (not windowed) |
-| windowed `tokens`, `cost_usd`, `openai_cost_usd`, `anthropic_cost_usd`, warning/error counts | `telemetry_events` (Postgres) |
+| windowed `tokens`, `cost_usd`, `subscription_cost_usd`, `openai_cost_usd`, `anthropic_cost_usd`, warning/error counts | `telemetry_events` (Postgres) |
 | warning/error event totals and `alert_classes_active` / `alert_classes_dismissed` | the window's classes (below) and the active `event_dismissals` rows (Postgres) that cancel them |
 | `plugin_stats` (plugin-declared cards) | `plugin_stats` rows (`base/packages/plugins/surface/stats.py`), joined by the console against the `contributions.ui.stats` declarations; NOT windowed — a plugin value is a point in time |
 
 Every request computes its window in one pooled connection with an 8-second
 statement timeout (a timeout is a retriable 503): one grouped scan of the window's
 `llm_usage` rows (`gateway/cluster/monitor/stats_events.py`) gives the
-token sums, total metered API cost and per-model metered API cost slices (excluding
-`SUBSCRIPTION_SOURCES`), and one grouped count of the warning, error and
+token sums, the metered API cost, the subscription-covered cost and per-model metered
+API cost slices, and one grouped count of the warning, error and
 critical rows (served by the partial index `telemetry_events_anomaly_ts`) gives
 the alert classes. `openai_cost_usd` and `anthropic_cost_usd` resolve each model's
 vendor through the gateway `ModelCatalog` (`None` only when catalog startup failed,
 preserving `200` for the rest of the dashboard). The window is the requested one
 (up to 30 days), so `applied_window_hours` equals `window_hours`. The `llm_usage.cost_usd`
 sum is the usage-time quote snapshot, not historical tokens repriced against today's
-registry. Every read is scoped to the current home-derived cluster label (rows with no
-label included).
+registry. The two cost sums are disjoint halves of the same rows, split by the billing
+mode of each row's `source`: `cost_usd` is the fee an API call incurred, `subscription_cost_usd`
+the list value a call under `SUBSCRIPTION_HARNESSES` would have cost and the subscription
+covered. Both are served every time — the console renders `$0.00` rather than hiding a zero
+half, because "no subscription call in this window" is an answer the reader asked for.
+Every read is scoped to the current home-derived cluster label (rows with no label included).
 
 The warning/error class reads have their own node: [[alert-classes-api.meiva.okf.md]]
 — grouping, dismissal matching, and the quiet window that decides which classes still need

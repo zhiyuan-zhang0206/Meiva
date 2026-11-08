@@ -39,5 +39,7 @@
   "hoverSpawnedBy": "由 #{id} 创建",
   "hoverForkedFrom": "分叉自 #{id}",
   "hoverAwaitingReply": "{count} 条待回复通知",
+  "hoverModel": "模型",
+  "hoverEffort": "推理强度",
   "hoverHeartbeatPaused": "心跳暂停至 {time}"
 }

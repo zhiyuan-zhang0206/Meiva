@@ -206,6 +206,22 @@ def _config_map(value: object, name: str) -> Mapping[str, object] | None:
     return value
 
 
+# meiva:note
+# An agent's merged pin map (`config_overlay` over `birth_config`), read the way the agent host
+# reads it: an `llm_model` that is not a model name is corrupt stored configuration and fails the
+# read, never reading as an unpinned agent.
+def _pins_of(config_overlay: object, birth_config: object) -> dict[str, object]:
+    from base.config.agent_pins import resolve_agent_config_pins
+
+    overlay = _config_map(config_overlay, "config_overlay")
+    if overlay is not None and "llm_model" in overlay and not isinstance(overlay["llm_model"], str):
+        raise ValueError("config_overlay.llm_model must be a model name")
+    birth = _config_map(birth_config, "birth_config")
+    if birth is not None and "llm_model" in birth and not isinstance(birth["llm_model"], str):
+        raise ValueError("birth_config.llm_model must be a model name")
+    return resolve_agent_config_pins(overlay, birth)
+
+
 # meiva:link base/agents/observation/docs/observation.meiva.okf.md
 def agent_supports_vision(
     config_overlay: object,
@@ -214,20 +230,43 @@ def agent_supports_vision(
     catalog: ModelCatalog | None,
     default_model: str | None = None,
 ) -> bool | None:
-    from base.config.agent_pins import resolve_agent_config_pins
     from base.lm.factory import model_supports_vision
 
-    overlay = _config_map(config_overlay, "config_overlay")
-    if overlay is not None and "llm_model" in overlay and not isinstance(overlay["llm_model"], str):
-        raise ValueError("config_overlay.llm_model must be a model name")
-    birth = _config_map(birth_config, "birth_config")
-    if birth is not None and "llm_model" in birth and not isinstance(birth["llm_model"], str):
-        raise ValueError("birth_config.llm_model must be a model name")
-    pins = resolve_agent_config_pins(overlay, birth)
+    pins = _pins_of(config_overlay, birth_config)
     if catalog is None:
         return None
     model = _model_of_pins(pins, catalog=catalog, default_model=default_model)
     return model_supports_vision(model, catalog=catalog)
+
+
+# meiva:note
+# The model and reasoning effort an agent's own calls run with, resolved the way its host
+# resolves them: a withdrawn model id reads as its registered fallback, and an unpinned effort
+# reads as that model's own default rather than a blank — the two facts a reader checks before
+# judging a row's behaviour. A subscription harness agent stores the selection its launch probe
+# settled, so the same pins answer for it. Both are unknown (`None`) when the model catalog is
+# unavailable: the card then says nothing rather than guessing a model.
+# meiva:link base/agents/observation/docs/observation.meiva.okf.md
+def agent_model_and_effort(
+    config_overlay: object,
+    birth_config: object,
+    *,
+    catalog: ModelCatalog | None,
+    default_model: str | None = None,
+) -> tuple[str | None, str | None]:
+    from base.lm.registry import resolve_setting
+
+    if catalog is None:
+        return None, None
+    pins = _pins_of(config_overlay, birth_config)
+    model = _model_of_pins(pins, catalog=catalog, default_model=default_model)
+    effort = resolve_setting(
+        "reasoning_effort",
+        model=model,
+        models=catalog.models,
+        explicit=pins.get("reasoning_effort"),
+    )
+    return model, effort or None
 
 
 def _model_of_pins(

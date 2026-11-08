@@ -22,6 +22,8 @@ _DIRECTORY_CARD_KEYS = frozenset(
         "label",
         "machine",
         "supports_vision",
+        "llm_model",
+        "reasoning_effort",
         "liveness_state",
         "awaiting_response_count",
         "has_pending_question",

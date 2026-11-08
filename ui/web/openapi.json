@@ -6929,7 +6929,7 @@
     "/api/stats/dashboard": {
       "get": {
         "summary": "Get Stats Dashboard",
-        "description": "Pull all data for the sidebar Status popover in one shot.\n\nData sources:\n- `live_count`: agents_meta table — all non-terminated agents (running/idling)\n- `tokens` / `cost_usd` / `openai_cost_usd` / `anthropic_cost_usd`: the window's\n  `llm_usage` rows in `telemetry_events` (cost is each row's usage-time snapshot\n  excluding subscription harnesses; provider slices resolve through the model catalog)\n- warning/error event totals and class counts: the SELECTED window's warning, error and\n  critical `telemetry_events` rows grouped by class; a class is dismissed when an active\n  `event_dismissals` row cancels it (`gateway.cluster.monitor.alert_classes`)\n\n`?hours=` selects the aggregation window (0 = last 5m; 1/6/24/72/168/720 =\nhours), whitelisted by `StatsWindowHours` (anything else 422s); the served horizon is\n`applied_window_hours`, which is the requested window. Zero-data scenario: tokens all 0,\ncost_usd / openai_cost_usd / anthropic_cost_usd 0.0. The window is computed on\nevery request, in one connection, with an 8-second statement timeout.",
+        "description": "Pull all data for the sidebar Status popover in one shot.\n\nData sources:\n- `live_count`: agents_meta table — all non-terminated agents (running/idling)\n- `tokens` / `cost_usd` / `subscription_cost_usd` / `openai_cost_usd` /\n  `anthropic_cost_usd`: the window's `llm_usage` rows in `telemetry_events` (cost is\n  each row's usage-time snapshot: `cost_usd` the metered API half, excluding\n  subscription harnesses, and `subscription_cost_usd` the list value those harnesses\n  covered; provider slices resolve through the model catalog)\n- warning/error event totals and class counts: the SELECTED window's warning, error and\n  critical `telemetry_events` rows grouped by class; a class is dismissed when an active\n  `event_dismissals` row cancels it (`gateway.cluster.monitor.alert_classes`)\n\n`?hours=` selects the aggregation window (0 = last 5m; 1/6/24/72/168/720 =\nhours), whitelisted by `StatsWindowHours` (anything else 422s); the served horizon is\n`applied_window_hours`, which is the requested window. Zero-data scenario: tokens all 0,\ncost_usd / subscription_cost_usd / openai_cost_usd / anthropic_cost_usd 0.0.\nThe window is computed on every request, in one connection, with an 8-second\nstatement timeout.",
         "operationId": "get_stats_dashboard_api_stats_dashboard_get",
         "parameters": [
           {
@@ -8486,6 +8486,28 @@
             ],
             "title": "Supports Vision"
           },
+          "llm_model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Llm Model"
+          },
+          "reasoning_effort": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reasoning Effort"
+          },
           "liveness_state": {
             "$ref": "#/components/schemas/LivenessState"
           },
@@ -8578,6 +8600,8 @@
           "label",
           "machine",
           "supports_vision",
+          "llm_model",
+          "reasoning_effort",
           "liveness_state",
           "observation",
           "awaiting_response_count",
@@ -18629,6 +18653,11 @@
             "minimum": 0.0,
             "title": "Cost Usd"
           },
+          "subscription_cost_usd": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "Subscription Cost Usd"
+          },
           "openai_cost_usd": {
             "anyOf": [
               {
@@ -18711,6 +18740,7 @@
           "window_hours",
           "tokens",
           "cost_usd",
+          "subscription_cost_usd",
           "warnings",
           "errors",
           "alert_classes_active",
@@ -18718,7 +18748,7 @@
           "plugin_stats"
         ],
         "title": "StatsDashboard",
-        "description": "GET /api/stats/dashboard response — the sidebar Status popover's data pulled in one shot.\n\nAll windowed fields (`tokens` / `cost_usd` / `openai_cost_usd` /\n`anthropic_cost_usd` / `warnings` / `errors`) aggregate over the\n`applied_window_hours` horizon.\n`window_hours` echoes the selected value — `0` means five minutes; all\nother values are hours.\n`applied_window_hours` is the served window in hours: the requested one.\n\n- `live_count`: current non-terminated count (from agents_meta, not\n  events; not windowed)\n- `tokens`: windowed telemetry LLM token usage\n- `cost_usd`: windowed metered API spend in USD, summed from the usage-time\n  `cost_usd` snapshots carried by `llm_usage` events in `telemetry_events`\n  excluding subscription harnesses; events that pre-date the snapshot field\n  contribute 0\n- `openai_cost_usd` / `anthropic_cost_usd`: the OpenAI and Anthropic slices\n  of `cost_usd`, resolved via the gateway model catalog (`None` only when\n  the model catalog failed to load)\n- `warnings` / `errors`: event totals over the window of the classes that\n  still need attention (critical folds into error). A class is resolved when\n  an active dismissal cancels it or when nothing of it was recorded for\n  `alert_class_quiet_seconds` — a pulse that stopped hours ago is not an\n  operator's problem now (task #6540). Agent trial-and-error (exec_failed)\n  logs at INFO and is deliberately NOT counted — these numbers are\n  operator-facing alerts, not agent activity.\n- `warnings_resolved` / `errors_resolved`: the same totals over the resolved\n  classes of the window, so a reader can account for what disappeared from\n  the two numbers above.\n- `alert_classes_active` / `alert_classes_dismissed`: how many distinct\n  (level, event_name, source, process) warning/error classes the window\n  holds, split by whether the class is unresolved or resolved (a manual\n  dismissal — exact, or a wildcard row with an empty `process` — or the\n  quiet rule above). The sidebar card shows the two unresolved totals; the\n  classes themselves are `GET /api/stats/alert-classes`, which reads the\n  same rows.\n\n`plugin_stats` is not windowed (see `PluginStat`): the runtime values\nbehind cards that plugins declare under `contributions.ui.stats`, joined\nby the console on `(plugin, id)`.\n\n`as_of` is the UTC time the payload's reads were assembled."
+        "description": "GET /api/stats/dashboard response — the sidebar Status popover's data pulled in one shot.\n\nAll windowed fields (`tokens` / `cost_usd` / `subscription_cost_usd` /\n`openai_cost_usd` / `anthropic_cost_usd` / `warnings` / `errors`) aggregate over the\n`applied_window_hours` horizon.\n`window_hours` echoes the selected value — `0` means five minutes; all\nother values are hours.\n`applied_window_hours` is the served window in hours: the requested one.\n\n- `live_count`: current non-terminated count (from agents_meta, not\n  events; not windowed)\n- `tokens`: windowed telemetry LLM token usage\n- `cost_usd`: windowed metered API spend in USD, summed from the usage-time\n  `cost_usd` snapshots carried by `llm_usage` events in `telemetry_events`\n  excluding subscription harnesses; events that pre-date the snapshot field\n  contribute 0\n- `subscription_cost_usd`: the subscription half of the same rows in USD — their\n  usage-time price is the list value the subscription covered, not money the\n  account is billed. Disjoint from `cost_usd`; 0 when no subscription harness ran\n  in the window. The console renders both halves whether or not they are zero\n- `openai_cost_usd` / `anthropic_cost_usd`: the OpenAI and Anthropic slices\n  of `cost_usd`, resolved via the gateway model catalog (`None` only when\n  the model catalog failed to load)\n- `warnings` / `errors`: event totals over the window of the classes that\n  still need attention (critical folds into error). A class is resolved when\n  an active dismissal cancels it or when nothing of it was recorded for\n  `alert_class_quiet_seconds` — a pulse that stopped hours ago is not an\n  operator's problem now (task #6540). Agent trial-and-error (exec_failed)\n  logs at INFO and is deliberately NOT counted — these numbers are\n  operator-facing alerts, not agent activity.\n- `warnings_resolved` / `errors_resolved`: the same totals over the resolved\n  classes of the window, so a reader can account for what disappeared from\n  the two numbers above.\n- `alert_classes_active` / `alert_classes_dismissed`: how many distinct\n  (level, event_name, source, process) warning/error classes the window\n  holds, split by whether the class is unresolved or resolved (a manual\n  dismissal — exact, or a wildcard row with an empty `process` — or the\n  quiet rule above). The sidebar card shows the two unresolved totals; the\n  classes themselves are `GET /api/stats/alert-classes`, which reads the\n  same rows.\n\n`plugin_stats` is not windowed (see `PluginStat`): the runtime values\nbehind cards that plugins declare under `contributions.ui.stats`, joined\nby the console on `(plugin, id)`.\n\n`as_of` is the UTC time the payload's reads were assembled."
       },
       "StatsTokens": {
         "properties": {

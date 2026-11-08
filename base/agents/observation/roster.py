@@ -21,7 +21,11 @@ from base.agents.observation.evidence import (
     availability,
     observation,
 )
-from base.agents.observation.snapshot import agent_supports_vision, db_now
+from base.agents.observation.snapshot import (
+    agent_model_and_effort,
+    agent_supports_vision,
+    db_now,
+)
 from base.agents.tasks.priority import Priority
 from base.api_contracts.agent_contract import AgentStatus, Harness, LivenessState
 from base.db.rows import query_all, query_one
@@ -49,6 +53,12 @@ class AgentCard(AgentLineage):
     label: str | None
     machine: str
     supports_vision: bool | None
+    # meiva:note
+    # The model and reasoning effort the agent's own calls run with, resolved from its pins at
+    # read time so a withdrawn model id and an unpinned effort both read as what the agent will
+    # actually use. `None` = the model catalog was unavailable for this read.
+    llm_model: str | None
+    reasoning_effort: str | None
     liveness_state: LivenessState
     availability: AgentAvailability | None = None
     observation: AgentObservation
@@ -197,6 +207,12 @@ def _card(
     facts = _CardFacts.model_validate(data)
     card_data = {key: value for key, value in data.items() if key not in _FACT_COLUMNS}
     card_data["supports_vision"] = agent_supports_vision(
+        facts.config_overlay,
+        facts.birth_config,
+        catalog=catalog,
+        default_model=default_model,
+    )
+    card_data["llm_model"], card_data["reasoning_effort"] = agent_model_and_effort(
         facts.config_overlay,
         facts.birth_config,
         catalog=catalog,

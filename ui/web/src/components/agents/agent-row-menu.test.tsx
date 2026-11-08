@@ -70,6 +70,7 @@ function ag(agent_id: number, overrides: Partial<AgentRowType> = {}): AgentRowTy
     label: null,
     machine: "test-machine",
     supports_vision: true,
+    llm_model: null, reasoning_effort: null,
     liveness_state: "online",
     awaiting_response_count: 0, has_pending_question: false, highest_notice_priority: null,
     unread_notice_count: 0,

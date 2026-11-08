@@ -39,5 +39,7 @@
   "hoverSpawnedBy": "Spawned by #{id}",
   "hoverForkedFrom": "Forked from #{id}",
   "hoverAwaitingReply": "{count, plural, one {# awaiting reply} other {# awaiting reply}}",
-  "hoverHeartbeatPaused": "Heartbeat paused until {time}"
+  "hoverHeartbeatPaused": "Heartbeat paused until {time}",
+  "hoverModel": "Model",
+  "hoverEffort": "Effort"
 }

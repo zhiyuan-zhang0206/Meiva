@@ -277,6 +277,7 @@ export function rosterFixture(overrides: Partial<WireAgentCard> = {}): AgentRost
       label: null,
       machine: "test-host",
       supports_vision: false,
+      llm_model: "claude-opus-4-8", reasoning_effort: "high",
       liveness_state: "online",
       observation: { runtime_owner: "unknown" },
       awaiting_response_count: 0,

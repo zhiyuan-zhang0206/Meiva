@@ -113,7 +113,7 @@ describe("InspectorPanel", () => {
     await waitFor(() => expect(screen.queryByLabelText("Liveness loading")).toBeNull());
     expect(screen.getByText("agent-b-host")).toBeTruthy();
     expect(screen.queryByText("Persistent shells")).toBeNull();
-    expect(screen.queryByText("Configuration overlay")).toBeNull();
+    expect(screen.queryByText("Configuration")).toBeNull();
   });
 
   it("renders sections from their current-state and statistics responses", async () => {
@@ -144,7 +144,7 @@ describe("InspectorPanel", () => {
     expect(within(livenessSection!).getByText("Harness")).toBeTruthy();
     expect(within(livenessSection!).getByText("Model")).toBeTruthy();
     expect(within(livenessSection!).getByText("Claude Opus 4.8")).toBeTruthy();
-    const overlaySection = screen.getByText("Configuration overlay").closest("section");
+    const overlaySection = screen.getByText("Configuration").closest("section");
     expect(overlaySection).not.toBeNull();
     expect(within(overlaySection!).queryByText("llm_model")).toBeNull();
     expect(within(overlaySection!).getByText("0.7")).toBeTruthy();
@@ -224,7 +224,7 @@ describe("InspectorPanel", () => {
 
     expect(screen.queryByText("Page")).toBeNull();
     expect(screen.queryByText("Persistent shells")).toBeNull();
-    expect(screen.queryByText("Configuration overlay")).toBeNull();
+    expect(screen.queryByText("Configuration")).toBeNull();
     expect(screen.queryByText("Extensions")).toBeNull();
     expect(screen.queryByText("Context")).toBeNull();
     expect(screen.queryByText("Notice")).toBeNull();

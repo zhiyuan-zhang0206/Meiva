@@ -21,7 +21,7 @@
   "sectionTasks": "Tasks",
   "sectionShells": "Persistent shells",
   "unnamed": "(unnamed)",
-  "sectionConfigOverlay": "Configuration overlay",
+  "sectionConfigOverlay": "Configuration",
   "sectionCostActivity": "Activity",
   "metricCostSubscription": "Cost (subscription)",
   "metricCostApi": "Cost (API)",

@@ -437,6 +437,37 @@ def test_model_defaults_follow_independent_live_config_owners(model_catalog: Mod
     assert read(second) == "deepseek-v4-pro"
 
 
+# meiva:note
+# The card carries the model and effort the agent's own calls run with, because a reader judging
+# a row's behaviour needs them without opening the inspector: the pin when it has one, the model's
+# own default when it does not, and the harness-settled selection of a subscription harness agent
+# (which stores what its launch probe resolved).
+def test_roster_cards_report_the_effective_model_and_effort(
+    model_catalog: ModelCatalog, db_conn: psycopg.Connection
+) -> None:
+    seed(db_conn, [(1, "user", "idling"), (2, "user", "idling"), (3, "user", "idling")])
+    db_conn.execute(
+        "UPDATE agents_meta SET config_overlay = "
+        "jsonb_build_object('llm_model', 'claude-opus-5', 'reasoning_effort', 'low') WHERE id=2"
+    )
+    db_conn.execute(
+        "UPDATE agents_meta SET birth_config = "
+        "jsonb_build_object('llm_model', 'harness-only-id', 'reasoning_effort', 'high') WHERE id=3"
+    )
+    cards = {
+        card.agent_id: card
+        for card in select_roster(
+            db_conn, catalog=model_catalog, default_model="deepseek-flash"
+        ).agents
+    }
+    assert (cards[1].llm_model, cards[1].reasoning_effort) == (
+        "deepseek-flash",
+        model_catalog.models["deepseek-flash"].tuning.reasoning_effort,
+    )
+    assert (cards[2].llm_model, cards[2].reasoning_effort) == ("claude-opus-5", "low")
+    assert (cards[3].llm_model, cards[3].reasoning_effort) == ("harness-only-id", "high")
+
+
 @pytest.mark.parametrize("directory", [False, True])
 def test_roster_applies_the_given_default_to_each_unpinned_row(
     model_catalog: ModelCatalog, db_conn: psycopg.Connection, directory: bool

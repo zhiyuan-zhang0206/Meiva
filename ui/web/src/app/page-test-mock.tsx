@@ -123,6 +123,7 @@ export function makeAgent(overrides: Partial<AgentRow>): AgentRow {
     label: null,
     machine: "test",
     supports_vision: true,
+    llm_model: null, reasoning_effort: null,
     awaiting_response_count: 0,
     has_pending_question: false,
     highest_notice_priority: null,

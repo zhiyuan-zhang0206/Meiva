@@ -246,7 +246,7 @@ describe("InspectorPanel section layout", () => {
 
     const shells = screen.getByText("Persistent shells");
     const liveness = screen.getByText("Liveness");
-    const configOverlay = screen.getByText("Configuration overlay");
+    const configOverlay = screen.getByText("Configuration");
     const runLink = screen.getByRole("link", { name: "Open run timeline" });
     const context = screen.getByText("Context");
     const activity = screen.getByText("Activity");

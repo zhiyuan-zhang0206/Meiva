@@ -129,7 +129,7 @@ router.add_api_route("/api/health", get_health, methods=["GET"], response_model=
 
 @router.get(
     "/api/stats/dashboard",
-    description="Pull all data for the sidebar Status popover in one shot.\n\nData sources:\n- `live_count`: agents_meta table — all non-terminated agents (running/idling)\n- `tokens` / `cost_usd` / `openai_cost_usd` / `anthropic_cost_usd`: the window's\n  `llm_usage` rows in `telemetry_events` (cost is each row's usage-time snapshot\n  excluding subscription harnesses; provider slices resolve through the model catalog)\n- warning/error event totals and class counts: the SELECTED window's warning, error and\n  critical `telemetry_events` rows grouped by class; a class is dismissed when an active\n  `event_dismissals` row cancels it (`gateway.cluster.monitor.alert_classes`)\n\n`?hours=` selects the aggregation window (0 = last 5m; 1/6/24/72/168/720 =\nhours), whitelisted by `StatsWindowHours` (anything else 422s); the served horizon is\n`applied_window_hours`, which is the requested window. Zero-data scenario: tokens all 0,\ncost_usd / openai_cost_usd / anthropic_cost_usd 0.0. The window is computed on\nevery request, in one connection, with an 8-second statement timeout.",
+    description="Pull all data for the sidebar Status popover in one shot.\n\nData sources:\n- `live_count`: agents_meta table — all non-terminated agents (running/idling)\n- `tokens` / `cost_usd` / `subscription_cost_usd` / `openai_cost_usd` /\n  `anthropic_cost_usd`: the window's `llm_usage` rows in `telemetry_events` (cost is\n  each row's usage-time snapshot: `cost_usd` the metered API half, excluding\n  subscription harnesses, and `subscription_cost_usd` the list value those harnesses\n  covered; provider slices resolve through the model catalog)\n- warning/error event totals and class counts: the SELECTED window's warning, error and\n  critical `telemetry_events` rows grouped by class; a class is dismissed when an active\n  `event_dismissals` row cancels it (`gateway.cluster.monitor.alert_classes`)\n\n`?hours=` selects the aggregation window (0 = last 5m; 1/6/24/72/168/720 =\nhours), whitelisted by `StatsWindowHours` (anything else 422s); the served horizon is\n`applied_window_hours`, which is the requested window. Zero-data scenario: tokens all 0,\ncost_usd / subscription_cost_usd / openai_cost_usd / anthropic_cost_usd 0.0.\nThe window is computed on every request, in one connection, with an 8-second\nstatement timeout.",
 )
 def get_stats_dashboard(
     request: Request,
@@ -211,6 +211,7 @@ def _compute_stats_dashboard(
             cache_hit_pct=cache_hit_pct,
         ),
         cost_usd=totals.cost_usd,
+        subscription_cost_usd=totals.subscription_cost_usd,
         openai_cost_usd=openai_cost_usd,
         anthropic_cost_usd=anthropic_cost_usd,
         warnings=classes.warnings,
