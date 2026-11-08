@@ -16,7 +16,7 @@ and the reads behind them in
 that renders only when `harness === "meiva"` (external harnesses store no
 LangGraph message checkpoints or understanding nodes, matching `ContextSection`).
 When visible, it wears the same row chrome as the Page section's rows — the rounded
-`bg-sidebar-accent/40` (`dark:bg-[#2a2926]`) block, a leading external-link icon that brightens on
+`bg-sidebar-accent/40` (`dark:bg-[#33322C]`) block with subtle border definition, a leading external-link icon that brightens on
 hover, `11.5px` monospace values in anti-glare `#f0ede7` on dark surfaces, and the hover highlight — so the panel's clickable rows and `Metric` cells read as one
 family. A cold failure gets the full error message (`InlineError`) in the body
 instead. Background refresh failures stay silent while cached snapshots are retained.

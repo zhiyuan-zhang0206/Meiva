@@ -150,7 +150,7 @@ export function InspectorPanel({ agentId }: { agentId: number }) {
         <Link
           href={`/insights/run/${agentId}`}
           className={cn(
-            "items-center gap-2 rounded bg-sidebar-accent/40 dark:bg-[#2a2926] px-2.5 py-1.5 font-mono text-[11.5px] leading-[17px] text-foreground dark:text-[#f0ede7] hover:bg-sidebar-accent group",
+            "items-center gap-2 rounded border border-black/[0.06] dark:border-white/[0.08] bg-sidebar-accent/40 dark:bg-[#33322C] px-2.5 py-1.5 font-mono text-[11.5px] leading-[17px] text-foreground dark:text-[#f0ede7] hover:bg-sidebar-accent group",
             FLEX,
             MIN_W_0,
             FLEX_1,

@@ -69,7 +69,7 @@ function ShellRow({
       ? Math.max(0, Math.floor((now.getTime() - createdMs) / 1000))
       : shell.uptime_seconds;
   const rowClass =
-    "flex items-center gap-2 rounded bg-sidebar-accent/40 dark:bg-[#2a2926] px-2.5 py-1.5 font-mono text-[11px] leading-[16px]";
+    "flex items-center gap-2 rounded border border-black/[0.06] dark:border-white/[0.08] bg-sidebar-accent/40 dark:bg-[#33322C] px-2.5 py-1.5 font-mono text-[11px] leading-[16px]";
   const content = (
     <>
       <span className="tabular-nums text-muted-foreground">#{shell.id}</span>
@@ -126,7 +126,7 @@ export function ConfigOverlaySection({ inspect }: { inspect: AgentInspectLive })
         {entries.map(([k, v]) => (
           <div
             key={k}
-            className="rounded bg-sidebar-accent/40 dark:bg-[#2a2926] px-2.5 py-1.5 font-mono text-[11px] leading-[16px]"
+            className="rounded border border-black/[0.06] dark:border-white/[0.08] bg-sidebar-accent/40 dark:bg-[#33322C] px-2.5 py-1.5 font-mono text-[11px] leading-[16px]"
           >
             <dt className="break-all text-[10.5px] text-muted-foreground">{k}</dt>
             <dd className="mt-0.5 break-all text-foreground dark:text-[#f0ede7]">{formatValue(SKILL_LIST_KEYS.has(k) && Array.isArray(v) ? v.map(displaySkillName) : v)}</dd>

@@ -131,7 +131,7 @@
   --sidebar-foreground: #3B3B3B;
   --sidebar-primary: #3B3B3B;
   --sidebar-primary-foreground: #FFFFFF;
-  --sidebar-accent: #FFFFFF;
+  --sidebar-accent: #E6E6E6;
   --sidebar-accent-foreground: #3B3B3B;
   --sidebar-border: #E5E5E5;
   --sidebar-ring: #ED8755;
@@ -553,36 +553,34 @@
   padding-top: 4px;
   padding-bottom: 4px;
   border-radius: 6px;
-  color: #525252;
+  color: #6E727A;
 }
 
 .dark .agent-row-pill {
-  color: #A8ABB0;
+  color: #9498A0;
 }
 
 .agent-row-pill-active {
-  background-color: var(--sidebar-accent);
-  color: #3B3B3B;
-  font-weight: 450;
+  background-color: #FFFFFF;
+  color: #6E727A;
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05), 0 0 0 1px rgba(0, 0, 0, 0.075);
 }
 
 .dark .agent-row-pill-active {
   background-color: #35342E;
-  color: #E2E4E8;
-  font-weight: 450;
+  color: #9498A0;
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.28), 0 0 0 1px rgba(255, 255, 255, 0.09);
 }
 
 .agent-row-pill:not(.agent-row-pill-active):hover {
   background-color: rgba(255, 255, 255, 0.85);
-  color: #3B3B3B;
+  color: #6E727A;
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03), 0 0 0 1px rgba(0, 0, 0, 0.045);
 }
 
 .dark .agent-row-pill:not(.agent-row-pill-active):hover {
   background-color: rgba(255, 255, 255, 0.06);
-  color: #E2E4E8;
+  color: #9498A0;
   box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.05);
 }
 
@@ -592,9 +590,9 @@
 
 @media (prefers-reduced-motion: no-preference) and (forced-colors: none) {
   .agent-title-working {
-    --working-base: #8A8E96;
-    --working-mid: #45484F;
-    --working-peak: #0A0A0A;
+    --working-base: #6E727A;
+    --working-mid: #35383E;
+    --working-peak: #000000;
     background-image: linear-gradient(
       105deg,
       var(--working-base) 0%,
@@ -613,23 +611,9 @@
     animation: agent-title-sweep 2.7s linear infinite;
   }
 
-  .agent-row-pill-active .agent-title-working,
-  .agent-row-pill:not(.agent-row-pill-active):hover .agent-title-working {
-    --working-base: #737780;
-    --working-mid: #33363C;
-    --working-peak: #000000;
-  }
-
   .dark .agent-title-working {
     --working-base: #9498A0;
     --working-mid: #D0D5DD;
-    --working-peak: #FFFFFF;
-  }
-
-  .dark .agent-row-pill-active .agent-title-working,
-  .dark .agent-row-pill:not(.agent-row-pill-active):hover .agent-title-working {
-    --working-base: #C8CCD2;
-    --working-mid: #E8ECF2;
     --working-peak: #FFFFFF;
   }
 }

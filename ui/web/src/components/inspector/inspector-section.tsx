@@ -57,7 +57,7 @@ export function Metric({
   valueTestId?: string;
 }) {
   return (
-    <div className={cn("gap-0.5 rounded bg-sidebar-accent/40 dark:bg-[#2a2926] px-2.5 py-1.5", FLEX, FLEX_COL, className)}>
+    <div className={cn("gap-0.5 rounded border border-black/[0.06] dark:border-white/[0.08] bg-sidebar-accent/40 dark:bg-[#33322C] px-2.5 py-1.5", FLEX, FLEX_COL, className)}>
       <span className="text-[10.5px] tracking-wide text-muted-foreground">{label}</span>
       {value === undefined ? (
         <span className={cn("h-[17px] items-center", FLEX)} aria-hidden="true">
