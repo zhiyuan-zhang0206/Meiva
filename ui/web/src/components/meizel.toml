@@ -14,6 +14,6 @@ exports = ["agent-sidebar", "app", "auth", "connection", "content", "context", "
 "ops" = ["ui"]
 "plugins" = ["ui"]
 "run-timeline" = ["content", "inspector", "ui"]
-"shell" = ["connection", "notifications", "plugins", "ui"]
+"shell" = ["app", "connection", "notifications", "plugins", "ui"]
 "timeline" = ["content", "notifications", "ui"]
 "user-delivery" = ["content", "notifications"]

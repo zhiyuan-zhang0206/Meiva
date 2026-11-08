@@ -23,7 +23,6 @@ pub struct AppConfig {
     /// True only when this platform has a usable native-login secret.
     pub auto_login: bool,
     pub notifications: bool,
-    pub background_service: bool,
 }
 
 /// Where the user is sent when the in-app update path cannot run. The release
@@ -55,7 +54,6 @@ impl AppConfig {
                 }
             },
             notifications: settings.notifications,
-            background_service: cfg!(target_os = "android") && settings.background_service,
         }
     }
 }
@@ -98,7 +96,6 @@ pub struct SettingsPatch {
     /// Android only: optional first-login credential; never persisted here.
     pub cluster_secret: Option<String>,
     pub auto_login: Option<bool>,
-    pub background_service: Option<bool>,
     pub notifications: Option<bool>,
 }
 
@@ -163,9 +160,6 @@ pub async fn app_save_settings(
     if let Some(value) = patch.auto_login {
         settings.auto_login = value;
     }
-    if let Some(value) = patch.background_service {
-        settings.background_service = value;
-    }
     if let Some(value) = patch.notifications {
         settings.notifications = value;
     }
@@ -189,9 +183,6 @@ pub async fn app_save_settings(
                 state.cache_android_secret(Some(secret));
                 state.skip_next_android_autologin();
             }
-        }
-        if let Some(value) = patch.background_service {
-            crate::android::set_background_service_async(&app, value).await;
         }
         if patch.notifications == Some(true) {
             crate::android::request_notification_permission_async(app.clone()).await;

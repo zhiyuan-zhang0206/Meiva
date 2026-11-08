@@ -6,6 +6,7 @@
 // meiva:link ui/app/docs/app.meiva.okf.md
 (function () {
   if (window.top !== window) return;
+  if (location.protocol === "tauri:" || location.hostname === "tauri.localhost") return;
   if (window.__MEIVA_APP_NOTIFY__) return;
 
   var SEEN_LIMIT = 200;
@@ -24,12 +25,15 @@
     var seenSet = Object.create(null);
     var catchUpTimer = null;
 
+    function invoke(command, args) {
+      var target = cfg && typeof cfg.invoke === "function" ? cfg : window.__TAURI_INTERNALS__;
+      return target.invoke(command, args);
+    }
+
     function notify(title, body) {
-      window.__TAURI_INTERNALS__
-        .invoke("app_notify", { title: title, body: body })
-        .catch(function (error) {
-          console.error("[meiva-app] notification failed", error);
-        });
+      invoke("app_notify", { title: title, body: body }).catch(function (error) {
+        console.error("[meiva-app] notification failed", error);
+      });
     }
 
     // meiva:note
@@ -81,8 +85,7 @@
         console.error("[meiva-app] could not resolve the notification deep link", error);
         return;
       }
-      window.__TAURI_INTERNALS__
-        .invoke("app_take_pending_click")
+      invoke("app_take_pending_click")
         .then(function (pending) {
           if (!pending) return;
           window.location.href = target.href;

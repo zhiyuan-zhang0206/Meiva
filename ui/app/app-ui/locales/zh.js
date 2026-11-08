@@ -15,7 +15,6 @@ window.MEIVA_APP_I18N['zh'] =
   "advancedTitle": "高级选项",
   "gatewayLabel": "网关地址覆盖",
   "gatewayPlaceholder": "默认从服务器地址推导",
-  "backgroundLabel": "后台驻留",
   "notificationsLabel": "通知",
   "connectButton": "连接",
   "cancelButton": "取消",

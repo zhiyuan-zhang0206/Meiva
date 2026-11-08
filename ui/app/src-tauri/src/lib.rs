@@ -2,9 +2,9 @@
 //!
 //! The app renders no product UI of its own: it loads the cluster's console
 //! over the network and adds only what a browser tab cannot give it — tray
-//! residency and auto-login on desktop, Keystore-backed auto-login, background
-//! residency and local notifications on Android, and an update path on both.
-//! Everything the user actually looks at is served by `ui/web` behind the gate.
+//! residency and auto-login on desktop, Keystore-backed auto-login and local
+//! notifications on Android, and an update path on both. Everything the user
+//! actually looks at is served by `ui/web` behind the gate.
 
 #[cfg(target_os = "android")]
 mod android;
@@ -51,7 +51,6 @@ pub fn run() {
 
     #[cfg(target_os = "android")]
     let builder = builder
-        .plugin(android::background_plugin())
         .plugin(android::secret_plugin())
         .plugin(android::cookie_plugin())
         .plugin(android::click_plugin())

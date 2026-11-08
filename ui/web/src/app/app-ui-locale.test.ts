@@ -24,7 +24,6 @@ function loadPage(language: string) {
         entryUrl: "",
         platform: "android" as const,
         gatewayUrl: "",
-        backgroundService: false,
         notifications: false,
       }),
   };

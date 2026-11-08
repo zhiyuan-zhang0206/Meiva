@@ -157,14 +157,19 @@ fn build(app: &AppHandle, target: WebviewUrl) -> tauri::Result<WebviewWindow> {
     builder.build()
 }
 
-/// `window.__MEIVA_APP__` — the resolved configuration the injected scripts
-/// read. Serialized rather than templated so a URL can never break out of the
-/// string it sits in.
+/// `window.__MEIVA_APP__` — the host shell bridge object the console and the
+/// injected scripts read. Serialized rather than templated so a URL can never
+/// break out of the string it sits in; `Object.assign` preserves runtime bridge
+/// state (such as `update`) across page-load config refreshes.
 fn prelude(app: &AppHandle) -> String {
     let state = app.state::<AppState>();
     let config = AppConfig::build(app, &state);
     let json = serde_json::to_string(&config).unwrap_or_else(|_| "null".to_string());
-    format!("window.__MEIVA_APP__ = {json};")
+    format!(
+        "window.__MEIVA_APP__ = Object.assign(window.__MEIVA_APP__ || {{}}, {json}, {{\
+         invoke: function(cmd, args) {{ return window.__TAURI_INTERNALS__.invoke(cmd, args); }}\
+         }});"
+    )
 }
 
 /// Let the console's own origin — and only it — reach the app commands the

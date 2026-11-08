@@ -19,7 +19,7 @@ Root node of the Meiva project's OKF (Open Knowledge Format) knowledge graph. Ea
 | [[../meiva/docs/meiva.meiva.okf.md]] | SDK surface — `meiva.*` single namespace: files / shell / agents / task / memory / skills / mcps / web / self / ui / watcher |
 | [[../gateway/docs/gateway.meiva.okf.md]] | Gateway — HTTP API, SSE push, authentication, `/api/agents` derived endpoints, bootstrap handshake |
 | [[../cli/docs/cli.meiva.okf.md]] | CLI — cluster lifecycle: start / stop / restart / update / converge, multi-machine deployment orchestration |
-| [[ui/docs/ui.meiva.okf.md]] | User interfaces — web frontend and desktop application |
+| [[ui/docs/ui.meiva.okf.md]] | User interfaces — shared Next.js web console (`ui/web`) and cross-platform Tauri native host shell (`ui/app` for macOS and Android) |
 | [[meiva_builtins/docs/meiva_builtins.meiva.okf.md]] | Built-ins — bundled plugins, skills and MCP integrations |
 | [[../base/docs/base.meiva.okf.md]] | Base library — lm provider abstraction, agents-contract wire protocol, migrations, logging, configuration |
 | [[../services/docs/services.meiva.okf.md]] | Background services — long-running subsystems such as browser MCP wrapper |

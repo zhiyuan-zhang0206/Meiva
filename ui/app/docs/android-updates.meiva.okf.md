@@ -16,10 +16,11 @@ rolling release's `android-latest.json` manifest (`versionCode`, `versionName`,
 `apkUrl`, `sha256`) and compares its build number with the installed one
 (`BuildConfig.VERSION_CODE`). A strictly greater `versionCode` is the only
 "newer" signal — `versionName` is a human milestone and may repeat across
-builds. A newer build shows a bottom bar and, when notifications are enabled,
-one local notification; every failure there stays silent.
+builds. A newer build publishes `window.__MEIVA_APP__.update` (rendered in normal
+layout flow by `AppUpdateBanner` in `ui/web`) and, when notifications are
+enabled, raises one local notification; every failure there stays silent.
 
-The bar's **Update** and the settings page's **Check for updates** share one
+The banner's **Update** and the settings page's **Check for updates** share one
 chain (`app_install_update`): re-read the manifest, download the APK over HTTPS
 into the app cache, hash the stream, and refuse the file unless its SHA-256
 matches the manifest. `MeivaUpdatePlugin` then requires the archive's package name

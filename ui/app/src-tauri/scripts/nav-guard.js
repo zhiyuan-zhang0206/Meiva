@@ -12,6 +12,12 @@
   if (window.__MEIVA_APP_NAV_GUARD__) return;
   window.__MEIVA_APP_NAV_GUARD__ = true;
 
+  function invoke(command, args) {
+    var app = window.__MEIVA_APP__;
+    var target = app && typeof app.invoke === "function" ? app : window.__TAURI_INTERNALS__;
+    return target.invoke(command, args);
+  }
+
   function openExternal(raw) {
     var href;
     try {
@@ -19,11 +25,9 @@
     } catch (err) {
       return;
     }
-    window.__TAURI_INTERNALS__
-      .invoke("app_open_external", { url: href })
-      .catch(function (error) {
-        console.error("[meiva-app] could not hand off an external link", error);
-      });
+    invoke("app_open_external", { url: href }).catch(function (error) {
+      console.error("[meiva-app] could not hand off an external link", error);
+    });
   }
 
   // Deny every window.open and route it out: even in-cluster links (Inspector page links are

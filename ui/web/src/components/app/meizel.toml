@@ -1,4 +1,5 @@
-exports = ["app-settings.tsx", "deferred-mount.tsx"]
+exports = ["app-settings.tsx", "bridge.ts", "deferred-mount.tsx"]
 
 [uses]
-"app-settings.test.tsx" = ["app-settings.tsx"]
+"app-settings.test.tsx" = ["app-settings.tsx", "bridge.ts"]
+"app-settings.tsx" = ["bridge.ts"]

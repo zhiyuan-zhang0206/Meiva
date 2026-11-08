@@ -3,6 +3,7 @@
 import { QueryCache, QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useCallback, useState } from "react";
 
+import { AppUpdateBanner } from "@/components/app/app-settings";
 import { AppConnectionBanner } from "@/components/connection/app-connection-banner";
 import { OpenTasksNoticeHost } from "@/components/notifications/open-tasks-notice";
 import { ThemePackTokens } from "@/components/plugins/theme-pack-tokens";
@@ -194,6 +195,7 @@ export function Providers({
                     <ThemedSlots theme={theme} />
                     <NavTimingReporter />
                     <AppConnectionBanner />
+                    <AppUpdateBanner />
                     {children}
                     <ToastHost />
                     <OpenTasksNoticeHost />

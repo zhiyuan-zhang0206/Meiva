@@ -152,10 +152,6 @@
                 placeholder="Derived from the server address by default" data-i18n-placeholder="gatewayPlaceholder"
               />
               <label class="toggle">
-                <input id="background-service" type="checkbox" />
-                <span data-i18n="backgroundLabel">Run in background</span>
-              </label>
-              <label class="toggle">
                 <input id="notifications" type="checkbox" />
                 <span data-i18n="notificationsLabel">Notifications</span>
               </label>
@@ -303,8 +299,6 @@
         document.getElementById("unreachable-target").textContent = target;
         document.getElementById("server").value = target;
         document.getElementById("gateway").value = config.gatewayUrl || "";
-        document.getElementById("background-service").checked = config.backgroundService;
-        document.getElementById("background-service").closest("label").hidden = desktop;
         document.getElementById("notifications").checked = config.notifications;
         document.getElementById("secret-field").hidden = desktop;
         document.getElementById("setup-cancel").hidden = !target;
@@ -339,7 +333,6 @@
         const patch = {
           entryUrl: server,
           gatewayUrl: document.getElementById("gateway").value,
-          backgroundService: document.getElementById("background-service").checked,
           notifications: document.getElementById("notifications").checked,
         };
         if (!desktop) patch.clusterSecret = secret.value;
