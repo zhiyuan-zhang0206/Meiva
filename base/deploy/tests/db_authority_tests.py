@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import getpass
 import os
+import random
 import subprocess
 import uuid
 from collections.abc import Iterator
@@ -219,7 +220,7 @@ def birth(cluster: AuthorityCluster) -> None:
     with cluster.admin() as conn:
         ensure_groups(conn, owner=cluster.owner, database=cluster.database, groups=cluster.groups)
         create_ledger(cluster.home, owner=cluster.owner, groups=cluster.groups)
-        verified = mint_generation(conn, cluster.home)
+        verified = mint_generation(conn, cluster.home, rng=random.SystemRandom())
     activate(cluster.home, verified)
 
 

@@ -22,6 +22,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import random
 import re
 import stat
 from collections.abc import Callable, Generator
@@ -179,8 +180,8 @@ def publish_exclusive(path: Path, data: bytes) -> None:
     create_private_bytes(path, data)
 
 
-def new_secret_token() -> str:
-    return new_session_id()
+def new_secret_token(rng: random.Random) -> str:
+    return new_session_id(rng)
 
 
 def create_ledger(home: Path, *, owner: str, groups: Groups) -> Ledger:
@@ -201,12 +202,12 @@ def create_ledger(home: Path, *, owner: str, groups: Groups) -> Ledger:
         return ledger
 
 
-def _new_secret(home: Path, encrypt: Encrypt) -> GenerationSecret:
+def _new_secret(home: Path, encrypt: Encrypt, *, rng: random.Random) -> GenerationSecret:
     roles: dict[str, RoleSecret] = {}
     for cls, name in zip(CLASSES, GENERATION_NAMES, strict=True):
-        password = new_secret_token()
+        password = new_secret_token(rng)
         roles[cls] = RoleSecret(name=name, password=password, verifier=encrypt(name, password))
-    api = ApiTokens(gateway=new_secret_token(), runner=new_secret_token())
+    api = ApiTokens(gateway=new_secret_token(rng), runner=new_secret_token(rng))
     return GenerationSecret(number=0, home=str(home), roles=SecretRoles(**roles), api=api)
 
 
@@ -221,7 +222,7 @@ def _parse_secret(home: Path, body: bytes) -> GenerationSecret:
     return secret
 
 
-def begin_mint(home: Path, *, encrypt: Encrypt) -> Generation:
+def begin_mint(home: Path, *, encrypt: Encrypt, rng: random.Random) -> Generation:
     """Record the home's generation as pending, its secret published first.
 
     A retry returns the same pending generation, or records a published secret
@@ -241,7 +242,7 @@ def begin_mint(home: Path, *, encrypt: Encrypt) -> Generation:
         try:
             body = read_private(path)
         except FileNotFoundError:
-            body = _encode(_new_secret(home, encrypt))
+            body = _encode(_new_secret(home, encrypt, rng=rng))
             publish_exclusive(path, body)
         _parse_secret(home, body)
         gateway, runner = GENERATION_NAMES

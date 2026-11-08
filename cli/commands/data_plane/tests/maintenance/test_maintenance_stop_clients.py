@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+import random
 from pathlib import Path
 
 import psycopg
@@ -33,7 +34,7 @@ def _encrypt(name: str, _password: str) -> str:
 
 
 def _admin_password(home: Path) -> str:
-    return delivery.ensure_pooler_admin(home, encrypt=_encrypt).password
+    return delivery.ensure_pooler_admin(home, encrypt=_encrypt, rng=random.SystemRandom()).password
 
 
 def test_remaining_clients_are_named_in_stderr_and_returned_for_the_report(

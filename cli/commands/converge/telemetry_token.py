@@ -19,4 +19,4 @@ from cli.commands.converge.spec import ConvergeCtx
 # Publish a new random token unless the home already holds one. The draw is here, at the effect
 # shell, and the owner of the file takes it as a value.
 def ensure_telemetry_token_step(ctx: ConvergeCtx) -> None:
-    ensure_telemetry_token(ctx.meiva_home.resolve(), new_secret_token())
+    ensure_telemetry_token(ctx.meiva_home.resolve(), new_secret_token(ctx.secure_rng))

@@ -360,7 +360,9 @@ def test_the_sessions_list_shows_only_sessions_that_authenticate(
         client.cookies.clear()
         human = login_with_ticket(client, _HUMAN).cookies[cookie_name()]
         client.cookies.clear()
-        client.app.state.sessions.create(new_session_id(), 3600, "legacy-browser", "10.0.0.9")
+        client.app.state.sessions.create(
+            new_session_id(random.SystemRandom()), 3600, "legacy-browser", "10.0.0.9"
+        )
 
         def listed() -> set[str]:
             response = client.get("/api/auth/sessions", headers=bearer_header(_HUMAN))

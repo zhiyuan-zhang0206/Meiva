@@ -136,9 +136,11 @@ class CommandRuntime:
     # builds and never makes a second one.
     rng: random.Random
     # meiva:note
-    # The operating system's random generator, for the one kind of draw a secret rides on (the key
-    # that signs the permissions helper): `rng` is statistical and must never mint key material.
-    # A command hands it to the owner that draws and never makes a second one.
+    # The operating system's random generator, for the draws a secret rides on -- the key that
+    # signs the permissions helper, the write generation's role passwords and API tokens, the
+    # pooler admin password, and the session/ticket identifiers: `rng` is statistical and must
+    # never mint any of them. A command hands it to the owner that draws and never makes a second
+    # one.
     secure_rng: OsRandom
     # meiva:note
     # The wall clock of this invocation, over the same `timers`. A command asks it for the instant it

@@ -13,6 +13,7 @@ the secret file exactly or the mint holds.
 
 from __future__ import annotations
 
+import random
 from functools import partial
 from pathlib import Path
 
@@ -100,7 +101,7 @@ def create_missing(conn: Conn, ledger: Ledger, secret: GenerationSecret) -> None
             )
 
 
-def mint_generation(conn: Conn, home: Path) -> VerifiedGeneration:
+def mint_generation(conn: Conn, home: Path, *, rng: random.Random) -> VerifiedGeneration:
     """Mint, or exactly reconcile, the home's generation and verify it.
 
     A first mint requires the role names to be absent from the catalog and no
@@ -117,7 +118,7 @@ def mint_generation(conn: Conn, home: Path) -> VerifiedGeneration:
         if collision:
             raise CatalogRefusedError((f"roles {collision} already exist before their mint",))
         _require_no_foreign_members(conn, ledger, ())
-        current = begin_mint(home, encrypt=partial(scram_verifier, conn))
+        current = begin_mint(home, encrypt=partial(scram_verifier, conn), rng=rng)
     _require_no_foreign_members(conn, ledger, current.roles)
     if current != ledger.active:
         # Only a pending generation's roles are ever created; an active

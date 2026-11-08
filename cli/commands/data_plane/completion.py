@@ -18,6 +18,7 @@
 
 from __future__ import annotations
 
+import random
 from collections.abc import Generator, Mapping, MutableMapping
 from contextlib import contextmanager
 from dataclasses import dataclass, replace
@@ -70,6 +71,7 @@ from cli.commands.data_plane.instance.storage_plan import (
 )
 from cli.commands.data_plane.native import start_bounds
 from cli.database import OperatorDatabaseFactory
+from cli.database.runtime import OsRandom
 from cli.start_identity import mark_phase, needs_provision
 
 # meiva:note
@@ -164,14 +166,18 @@ def adopt_gateway_login(
 # meiva:note
 # Birth: groups, monitor, ledger, generation 0. The database and its schema owner share one
 # identifier.
-def _birth_generation(conn: psycopg.Connection[TupleRow], home: Path, database: str) -> Generation:
+def _birth_generation(
+    conn: psycopg.Connection[TupleRow], home: Path, database: str, *, rng: random.Random
+) -> Generation:
     owner = database
     groups = model.Groups(gateway=model.GATEWAY_GROUP, runner=model.RUNNER_GROUP)
     authority.ensure_groups(conn, owner=owner, database=database, groups=groups)
     authority.ensure_monitor(conn, database=database)
     ledger.create_ledger(home, owner=owner, groups=groups)
-    db_delivery_files.ensure_pooler_admin(home, encrypt=partial(authority.scram_verifier, conn))
-    authority.mint_generation(conn, home)
+    db_delivery_files.ensure_pooler_admin(
+        home, encrypt=partial(authority.scram_verifier, conn), rng=rng
+    )
+    authority.mint_generation(conn, home, rng=rng)
     generation = ledger.require_ledger(home).generation
     if generation is None:
         raise RuntimeError("birth minted no write generation")
@@ -244,6 +250,11 @@ class _Completion:
     # The clock of this completion pass, handed to the steps that wait (the pooler's ready poll
     # and the stop that precedes its restart).
     timers: Timers
+    # meiva:note
+    # The operating system's generator of the invocation that runs this completion: the birth of a
+    # write generation mints its role passwords, the pooler admin password and the generation's API
+    # tokens from it. Secret material, so it is the secure generator and not `rng`.
+    secure_rng: OsRandom
     local: _LocalPlane | None
 
     def run(self, steps: tuple[CompletionStep, ...], stage: _Stage) -> _Stage:
@@ -333,7 +344,10 @@ class _Completion:
         match step:
             case BirthGeneration():
                 return replace(
-                    stage, generation=_birth_generation(self._admin(stage), home, database)
+                    stage,
+                    generation=_birth_generation(
+                        self._admin(stage), home, database, rng=self.secure_rng
+                    ),
                 )
             case AdmitGeneration(refresh=refresh):
                 return replace(
@@ -414,6 +428,7 @@ def execute_completion(
     machine: MachineIdentityReader,
     macos: bool,
     timers: Timers,
+    secure_rng: OsRandom,
 ) -> None:
     local = (
         None
@@ -433,6 +448,7 @@ def execute_completion(
         machine=machine,
         macos=macos,
         timers=timers,
+        secure_rng=secure_rng,
         local=local,
     ).run(steps, _Stage())
 
@@ -460,6 +476,7 @@ def complete_gateway_data_plane(
     machine: MachineIdentityReader,
     macos: bool,
     timers: Timers,
+    secure_rng: OsRandom,
 ) -> None:
     local = not config.is_remote
     facts = CompletionFacts(
@@ -479,4 +496,5 @@ def complete_gateway_data_plane(
         machine=machine,
         macos=macos,
         timers=timers,
+        secure_rng=secure_rng,
     )

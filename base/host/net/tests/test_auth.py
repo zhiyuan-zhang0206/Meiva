@@ -1,3 +1,4 @@
+import random
 from base64 import urlsafe_b64decode
 
 from base.host.net.auth import (
@@ -40,8 +41,8 @@ def test_header_then_verify_roundtrip() -> None:
 
 
 def test_new_session_id_is_random_urlsafe_32_bytes() -> None:
-    first = new_session_id()
-    second = new_session_id()
+    first = new_session_id(random.SystemRandom())
+    second = new_session_id(random.SystemRandom())
 
     assert first != second
     assert "=" not in first

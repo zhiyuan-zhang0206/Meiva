@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import random
 from pathlib import Path
 from typing import Any
 
@@ -42,12 +43,12 @@ def _verified(generation: Generation) -> VerifiedGeneration:
 
 
 def _born(home: Path) -> Generation:
-    pending = store.begin_mint(home, encrypt=_Encrypt())
+    pending = store.begin_mint(home, encrypt=_Encrypt(), rng=random.SystemRandom())
     return store.activate(home, _verified(pending))
 
 
 def test_birth_records_generation_zero_pending_then_active(home: Path) -> None:
-    pending = store.begin_mint(home, encrypt=_Encrypt())
+    pending = store.begin_mint(home, encrypt=_Encrypt(), rng=random.SystemRandom())
     ledger = store.require_ledger(home)
     assert ledger.pending == pending and ledger.active is None
     active = store.activate(home, _verified(pending))
@@ -63,8 +64,8 @@ def test_birth_records_generation_zero_pending_then_active(home: Path) -> None:
 
 def test_exact_retry_returns_the_same_pending_generation(home: Path) -> None:
     encrypt = _Encrypt()
-    first = store.begin_mint(home, encrypt=encrypt)
-    assert store.begin_mint(home, encrypt=encrypt) == first
+    first = store.begin_mint(home, encrypt=encrypt, rng=random.SystemRandom())
+    assert store.begin_mint(home, encrypt=encrypt, rng=random.SystemRandom()) == first
     assert encrypt.calls == 2
 
 
@@ -78,10 +79,10 @@ def test_secret_published_before_a_crash_is_adopted_not_regenerated(
     with monkeypatch.context() as patched:
         patched.setattr(store, "write_private_bytes", crash)
         with pytest.raises(OSError, match="crash before pending"):
-            store.begin_mint(home, encrypt=encrypt)
+            store.begin_mint(home, encrypt=encrypt, rng=random.SystemRandom())
     published = (home / "db-authority" / "generations" / "0.json").read_bytes()
     assert store.require_ledger(home).generation is None
-    pending = store.begin_mint(home, encrypt=encrypt)
+    pending = store.begin_mint(home, encrypt=encrypt, rng=random.SystemRandom())
     assert encrypt.calls == 2
     assert pending.credential_digest == store.credential_digest(published)
     assert (home / "db-authority" / "generations" / "0.json").read_bytes() == published
@@ -99,7 +100,7 @@ def test_publication_never_overwrites_an_existing_secret(home: Path) -> None:
 def test_mint_refuses_once_the_generation_is_active(home: Path) -> None:
     _born(home)
     with pytest.raises(LedgerRefusedError, match="already active"):
-        store.begin_mint(home, encrypt=_Encrypt())
+        store.begin_mint(home, encrypt=_Encrypt(), rng=random.SystemRandom())
 
 
 def test_a_ledger_written_before_generations_stopped_rotating_loads(home: Path) -> None:
@@ -142,7 +143,7 @@ def test_a_ledger_that_recorded_a_rotation_is_refused(home: Path, legacy: dict[s
     ],
 )
 def test_activation_requires_the_exact_pending_pair(home: Path, change: dict[str, Any]) -> None:
-    pending = store.begin_mint(home, encrypt=_Encrypt())
+    pending = store.begin_mint(home, encrypt=_Encrypt(), rng=random.SystemRandom())
     fields = {**_verified(pending).__dict__, **change}
     with pytest.raises(LedgerRefusedError, match="exact pending generation"):
         store.activate(home, VerifiedGeneration(**fields))
@@ -150,7 +151,7 @@ def test_activation_requires_the_exact_pending_pair(home: Path, change: dict[str
 
 
 def test_activation_is_idempotent_for_the_same_generation(home: Path) -> None:
-    pending = store.begin_mint(home, encrypt=_Encrypt())
+    pending = store.begin_mint(home, encrypt=_Encrypt(), rng=random.SystemRandom())
     first = store.activate(home, _verified(pending))
     assert store.activate(home, _verified(pending)) == first
 
@@ -231,7 +232,7 @@ def _stray_secret(home: Path) -> None:
     ],
 )
 def test_a_damaged_store_refuses(home: Path, damage: Any, reason: str) -> None:
-    store.begin_mint(home, encrypt=_Encrypt())
+    store.begin_mint(home, encrypt=_Encrypt(), rng=random.SystemRandom())
     damage(home)
     with pytest.raises(LedgerRefusedError, match=reason):
         store.load_ledger(home)
@@ -240,7 +241,7 @@ def test_a_damaged_store_refuses(home: Path, damage: Any, reason: str) -> None:
 def test_an_unexplained_secret_refuses_the_mint(home: Path) -> None:
     _stray_secret(home)
     with pytest.raises(LedgerRefusedError, match="unknown file in the database authority store"):
-        store.begin_mint(home, encrypt=_Encrypt())
+        store.begin_mint(home, encrypt=_Encrypt(), rng=random.SystemRandom())
 
 
 def test_create_ledger_keeps_an_identical_ledger_and_refuses_another(home: Path) -> None:
@@ -291,5 +292,5 @@ def test_the_ledger_model_rejects_incoherent_records(fields: dict[str, Any]) -> 
 def test_a_loosened_store_is_refused_not_repaired_by_a_mutation(home: Path) -> None:
     _open_directory(home)
     with pytest.raises(LedgerRefusedError, match="not owner-only"):
-        store.begin_mint(home, encrypt=_Encrypt())
+        store.begin_mint(home, encrypt=_Encrypt(), rng=random.SystemRandom())
     assert (home / "db-authority").stat().st_mode & 0o777 == 0o755

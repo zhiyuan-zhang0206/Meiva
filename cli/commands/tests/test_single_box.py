@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import contextlib
 import getpass
+import random
 import shutil
 import subprocess
 from collections.abc import Callable, Iterator
@@ -213,6 +214,7 @@ def _complete(
         machine=command_runtime.machine,
         macos=command_runtime.host.platform.system == "darwin",
         timers=SYSTEM_TIMERS,
+        secure_rng=random.SystemRandom(),
     )
 
 
@@ -296,6 +298,7 @@ def _born_readonly_cluster(
             machine=machine,
             macos=system == "darwin",
             timers=SYSTEM_TIMERS,
+            secure_rng=random.SystemRandom(),
         )
         yield cb
     finally:
@@ -605,6 +608,7 @@ def test_interrupted_birth_retries_to_the_same_generation(
         machine=command_runtime.machine,
         macos=macos,
         timers=SYSTEM_TIMERS,
+        secure_rng=random.SystemRandom(),
     )
 
     interrupted = ledger.require_ledger(configured.home)
