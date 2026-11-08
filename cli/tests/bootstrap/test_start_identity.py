@@ -531,29 +531,44 @@ def test_the_fixed_table_is_a_valid_reservation(inputs: identity.IdentityInput) 
     assert record is not None and record["ports"] == cluster.FIXED_PORTS
 
 
-@pytest.mark.parametrize(
-    ("slot", "present", "message"),
-    [
-        ("retired_slot", False, r"unexpected \['retired_slot'\]"),
-        ("memory_search", True, r"missing \['memory_search'\]"),
-    ],
-)
-def test_reservation_must_match_the_fixed_table_exactly(
-    inputs: identity.IdentityInput, slot: str, present: bool, message: str
-) -> None:
-    """A record carrying a slot the table lacks (or lacking one it has) is refused
-    at once and names the difference, so a hand step left undone fails the start
-    loudly instead of running on a stale layout."""
+def test_reservation_refuses_missing_slots(inputs: identity.IdentityInput) -> None:
     identity.prepare_identity(inputs)
     path = inputs.home / identity.INTENT_NAME
     data = json.loads(path.read_text())
-    if present:
-        del data["record"]["ports"][slot]
-    else:
-        data["record"]["ports"][slot] = 8102
+    del data["record"]["ports"]["memory_search"]
     path.write_text(json.dumps(data))
-    with pytest.raises(RuntimeError, match=rf"invalid start port reservation.*{message}"):
+    with pytest.raises(
+        RuntimeError,
+        match=r"invalid start port reservation: slots differ from the fixed port table \(missing \['memory_search'\]\)",
+    ):
         identity.read_intent(inputs.home)
+
+
+def test_reservation_tolerates_and_prunes_retired_slots(inputs: identity.IdentityInput) -> None:
+    home = _initialized_gateway_home(inputs)
+    path = home / identity.INTENT_NAME
+    data = json.loads(path.read_text())
+    expected_ports = dict(data["record"]["ports"])
+    data["record"]["ports"]["im_bridge"] = 8111
+    data["record"]["ports"]["retired_slot"] = 8102
+    data["record"]["ports"]["another_retired"] = 999999
+    path.write_text(json.dumps(data))
+
+    read = identity.read_intent(home)
+    assert read is not None
+    record = read["record"]
+    assert record is not None
+    ports = record["ports"]
+    assert isinstance(ports, dict)
+    assert "im_bridge" not in ports
+    assert "retired_slot" not in ports
+    assert "another_retired" not in ports
+    assert ports == expected_ports
+
+    admitted = identity.require_initialized(home)
+    assert admitted.roles == frozenset({"gateway"})
+    assert admitted.intent["record"] is not None
+    assert admitted.intent["record"]["ports"] == expected_ports
 
 
 def test_corrupt_foreign_reservation_never_publishes(inputs: identity.IdentityInput) -> None:
