@@ -19,26 +19,32 @@ stdout/stderr; the crontab line redirects).
 from __future__ import annotations
 
 import sys
+from datetime import date
 from pathlib import Path
 
 from loguru import logger
 
 from base.host.system import walg_content as content
-from base.host.system.cron import mechanics
+from base.host.system.cron import heartbeat_population, mechanics
+from base.host.system.cron.heartbeat import HeartbeatRender
 from base.host.system.cron.mechanics import write_launchd_plist
 from base.host.system.hostport import Host
 from base.host.system.job_readings import read_launchd_path, read_meiva_binary
 from base.host.system.job_values import JobPaths, JobRoots, plist_path
 
 
-def register_macos(*, backup_hour: int, roots: JobRoots, host: Host) -> int:
+def register_macos(
+    *, backup_hour: int, roots: JobRoots, host: Host, heartbeat: HeartbeatRender
+) -> int:
     paths = JobPaths(roots, read_meiva_binary(roots.repo, host=host))
     path_env = read_launchd_path(paths.meiva, user_home=roots.user_home, host=host)
     destination = plist_path(content.LABEL, user_home=roots.user_home)
     content.log_path(roots).parent.mkdir(parents=True, exist_ok=True)
     write_launchd_plist(
         destination,
-        content.launchd_plist_content(backup_hour=backup_hour, paths=paths, path_env=path_env),
+        content.launchd_plist_content(
+            backup_hour=backup_hour, paths=paths, path_env=path_env, heartbeat=heartbeat
+        ),
     )
 
     if mechanics.reload_launchd_job(content.LABEL, destination, host=host) != 0:
@@ -59,7 +65,9 @@ def unregister_macos(*, host: Host, user_home: Path) -> int:
     return 0 if retired else 1
 
 
-def register_linux(*, backup_hour: int, roots: JobRoots, host: Host) -> int:
+def register_linux(
+    *, backup_hour: int, roots: JobRoots, host: Host, heartbeat: HeartbeatRender
+) -> int:
     missing_rc = mechanics.require_crontab(
         "  * WAL-G backup: crontab not installed; the daily tick cannot be registered",
         missing_returncode=1,
@@ -73,7 +81,7 @@ def register_linux(*, backup_hour: int, roots: JobRoots, host: Host) -> int:
 
     log_file = content.log_path(roots)
     log_file.parent.mkdir(parents=True, exist_ok=True)
-    entry = content.cron_entry(paths, backup_hour=backup_hour)
+    entry = content.cron_entry(paths, backup_hour=backup_hour, heartbeat=heartbeat)
 
     if mechanics.replace_crontab_entry(
         content.MARKER,
@@ -104,7 +112,13 @@ def unregister_linux(*, roots: JobRoots, host: Host) -> int:
 # default home (`owns_os_job_home`). Whether WAL-G is switched on is the converge
 # step's decision (`ensure_walg_job`), not this registrar's.
 def register_walg_job(
-    *, enabled: bool, backup_hour: int | None, roots: JobRoots, host: Host
+    *,
+    enabled: bool,
+    backup_hour: int | None,
+    roots: JobRoots,
+    host: Host,
+    machine: str,
+    today: date,
 ) -> None:
     if not enabled:
         mechanics.skip_os_job("WAL-G tick")
@@ -114,10 +128,22 @@ def register_walg_job(
     if backup_hour is None:
         raise ValueError("registering the WAL-G tick needs the backup hour")
     hour_of_dump = backup_hour
+    heartbeat = heartbeat_population.verified(
+        content.LABEL,
+        roots=roots,
+        machine=machine,
+        uid=host.uid,
+        schedule=content.schedule(backup_hour=hour_of_dump),
+        today=today,
+    )
     mechanics.register_platform_job(
         "WAL-G tick",
-        macos=lambda: register_macos(backup_hour=hour_of_dump, roots=roots, host=host),
-        linux=lambda: register_linux(backup_hour=hour_of_dump, roots=roots, host=host),
+        macos=lambda: register_macos(
+            backup_hour=hour_of_dump, roots=roots, host=host, heartbeat=heartbeat
+        ),
+        linux=lambda: register_linux(
+            backup_hour=hour_of_dump, roots=roots, host=host, heartbeat=heartbeat
+        ),
         host=host,
     )
 

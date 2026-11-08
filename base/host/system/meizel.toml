@@ -3,7 +3,7 @@ exports = ["boot_autostart", "backend.py", "boot_policy.py", "boot_unit.py", "cr
 [uses]
 "boot_autostart" = ["boot_policy.py", "boot_unit.py", "cron", "hostport.py", "job_readings.py", "job_values.py"]
 "boot_unit.py" = ["boot_policy.py", "hostport.py", "job_values.py"]
-"cron" = ["hostport.py", "job_readings.py", "job_values.py"]
+"cron" = ["hostport.py", "job_readings.py", "job_values.py", "logs_content.py", "packages_content.py", "pr_flow_content.py", "walg_content.py"]
 "job_readings.py" = ["hostport.py"]
 "logs_content.py" = ["job_values.py"]
 "logs_job.py" = ["cron", "hostport.py", "job_readings.py", "job_values.py", "logs_content.py"]

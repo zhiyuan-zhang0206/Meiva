@@ -647,7 +647,22 @@ def main(argv: list[str], *, run_process: GhProcess, home: Path) -> int:
     return 0
 
 
+# meiva:note
+# The rendered job definition carries `MEIVA_JOB_HEARTBEAT`, the file this run must write when it
+# finishes; `recording_exit` writes it with the exit code the run really reports, including when
+# it raises. A manual `--print` runs outside a job definition, carries no such variable and writes
+# nothing.
 if __name__ == "__main__":
+    import os
+
+    from base.host.system.cron.heartbeat_record import recording_exit
     from base.paths import meiva_home
 
-    sys.exit(main(sys.argv[1:], run_process=subprocess.run, home=meiva_home()))
+    sys.exit(
+        recording_exit(
+            lambda: main(sys.argv[1:], run_process=subprocess.run, home=meiva_home()),
+            environ=os.environ,
+            pid=os.getpid(),
+            clock=lambda: datetime.now(UTC),
+        )
+    )

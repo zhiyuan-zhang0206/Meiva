@@ -1,0 +1,8 @@
+exports = ["heartbeats.py", "tests"]
+
+[uses]
+"heartbeats.py" = []
+"tests" = ["heartbeats.py"]
+
+[purity]
+"__init__.py" = "strict"

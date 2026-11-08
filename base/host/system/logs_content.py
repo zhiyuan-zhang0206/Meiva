@@ -6,13 +6,19 @@ from xml.sax.saxutils import escape
 
 from base.host.system.job_values import (
     LAUNCHD_LABEL_PREFIX,
+    DailyAt,
+    HeartbeatRender,
+    JobHeartbeat,
     JobPaths,
     JobRoots,
+    JobSchedule,
+    MissingHeartbeatDeclaration,
     cron_environment,
     launchd_environment,
 )
 
 __all__ = [
+    "HEARTBEAT",
     "HOUR",
     "LABEL",
     "MARKER",
@@ -20,6 +26,7 @@ __all__ = [
     "cron_entry",
     "launchd_plist_content",
     "log_path",
+    "schedule",
     "shell_command",
 ]
 
@@ -31,6 +38,21 @@ HOUR = 4
 MINUTE = 40
 
 LABEL = f"{LAUNCHD_LABEL_PREFIX}.logs-maintenance"
+
+
+# meiva:note
+# The job's promise to the machine, declared beside the trigger it renders: it writes
+# `logs-maintenance.json` when it finishes, and six hours after a missed 04:40 someone is called.
+# The window is generous because the job is a once-a-day maintenance pass — an hour of lateness
+# is a slow disk, not a job that stopped, and a false alarm costs the owner's attention.
+HEARTBEAT = JobHeartbeat(name="logs-maintenance", owner="agent:405", late_after_seconds=6 * 60 * 60)
+
+
+# meiva:note
+# The cadence the plist trigger and the heartbeat declaration both come from: one value, so the
+# definition and what it promises cannot describe different schedules.
+def schedule() -> JobSchedule:
+    return DailyAt(hour=HOUR, minute=MINUTE)
 
 
 def log_path(roots: JobRoots) -> Path:
@@ -55,13 +77,26 @@ def shell_command(paths: JobPaths) -> str:
     return f"{meiva} logs maintenance"
 
 
-def launchd_plist_content(*, paths: JobPaths, path_env: str) -> str:
+def _heartbeat(heartbeat: HeartbeatRender | None) -> HeartbeatRender:
+    if heartbeat is None:
+        raise MissingHeartbeatDeclaration(
+            f"{LABEL} renders a plist but was handed no heartbeat: a job nobody watches is "
+            f"indistinguishable from one that was removed"
+        )
+    return heartbeat
+
+
+def launchd_plist_content(
+    *, paths: JobPaths, path_env: str, heartbeat: HeartbeatRender | None = None
+) -> str:
+    declared = _heartbeat(heartbeat)
     log_file = escape(str(log_path(paths.roots)))
     return f"""<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
   "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+    <!-- {escape(declared.artifact)} -->
     <key>Label</key>
     <string>{LABEL}</string>
     <key>ProgramArguments</key>
@@ -70,7 +105,7 @@ def launchd_plist_content(*, paths: JobPaths, path_env: str) -> str:
         <string>-c</string>
         <string>{escape(shell_command(paths))}</string>
     </array>
-{launchd_environment(home=paths.roots.home, path_env=path_env, indent="    ", extra=())}
+{launchd_environment(home=paths.roots.home, path_env=path_env, indent="    ", extra=declared.environment)}
     <key>StartCalendarInterval</key>
     <dict>
             <key>Hour</key>
@@ -89,5 +124,7 @@ def launchd_plist_content(*, paths: JobPaths, path_env: str) -> str:
 """
 
 
-def cron_entry(paths: JobPaths) -> str:
-    return f"{MINUTE} {HOUR} * * * {cron_environment(paths.roots.home)}/bin/sh -c {shlex.quote(shell_command(paths))}  {MARKER}"
+def cron_entry(paths: JobPaths, *, heartbeat: HeartbeatRender | None = None) -> str:
+    declared = _heartbeat(heartbeat)
+    environment = cron_environment(paths.roots.home, declared.environment)
+    return f"{MINUTE} {HOUR} * * * {environment}/bin/sh -c {shlex.quote(shell_command(paths))}  # meiva-heartbeat: {declared.artifact}  {MARKER}"

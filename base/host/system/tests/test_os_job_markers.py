@@ -6,10 +6,12 @@ import pytest
 
 from base.host.system import logs_job, packages_job, pr_flow_job, walg_job
 from base.host.system.cron import health_job, mechanics
+from base.host.system.cron.heartbeat import HeartbeatRender, JobSchedule
 from base.host.system.hostport import Host
 from base.host.system.job_values import JobRoots
 from base.host.system.tests.fake_commands import LINUX_X86, fake_host
 from base.host.system.tests.fake_crontab import FakeCrontab
+from base.host.system.tests.recurring.heartbeats import heartbeat_for
 
 _UNRELATED = "0 3 * * * /usr/local/bin/backup"
 
@@ -37,13 +39,53 @@ def _linux(crontab: FakeCrontab) -> Host:
     )
 
 
+def _heartbeat(job: str, roots: JobRoots, schedule: JobSchedule) -> HeartbeatRender:
+    return heartbeat_for(job, roots, schedule=schedule)
+
+
 def _register_all(crontab: FakeCrontab, roots: JobRoots) -> None:
     host = _linux(crontab)
     assert health_job.register_linux(300, host=host, roots=roots) == 0
-    assert logs_job.register_linux(roots=roots, host=host) == 0
-    assert packages_job.register_linux(roots=roots, tick_seconds=900, host=host) == 0
-    assert pr_flow_job.register_linux(roots=roots, host=host) == 0
-    assert walg_job.register_linux(roots=roots, backup_hour=3, host=host) == 0
+    assert (
+        logs_job.register_linux(
+            roots=roots,
+            host=host,
+            heartbeat=_heartbeat(logs_job.content.LABEL, roots, logs_job.content.schedule()),
+        )
+        == 0
+    )
+    assert (
+        packages_job.register_linux(
+            roots=roots,
+            tick_seconds=900,
+            host=host,
+            heartbeat=_heartbeat(
+                packages_job.content.LABEL,
+                roots,
+                packages_job.content.schedule(tick_seconds=900),
+            ),
+        )
+        == 0
+    )
+    assert (
+        pr_flow_job.register_linux(
+            roots=roots,
+            host=host,
+            heartbeat=_heartbeat(pr_flow_job.content.LABEL, roots, pr_flow_job.content.schedule()),
+        )
+        == 0
+    )
+    assert (
+        walg_job.register_linux(
+            roots=roots,
+            backup_hour=3,
+            host=host,
+            heartbeat=_heartbeat(
+                walg_job.content.LABEL, roots, walg_job.content.schedule(backup_hour=3)
+            ),
+        )
+        == 0
+    )
 
 
 def test_register_leaves_exactly_one_line_per_job(crontab: FakeCrontab, default_home: Path) -> None:

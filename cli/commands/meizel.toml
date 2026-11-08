@@ -1,4 +1,4 @@
-exports = ["agents", "auth.py", "cluster", "converge", "data_plane", "duration.py", "extensions", "harness.py", "lifecycle", "management", "observability", "permissions.py", "probe.py", "tests"]
+exports = ["agents", "auth.py", "cluster", "converge", "data_plane", "duration.py", "extensions", "harness.py", "jobs", "lifecycle", "management", "observability", "permissions.py", "probe.py", "tests"]
 
 [uses]
 "_repo.py" = ["_setup.py"]
@@ -6,6 +6,7 @@ exports = ["agents", "auth.py", "cluster", "converge", "data_plane", "duration.p
 "probe.py" = ["probe_report.py"]
 "cluster" = ["_repo.py", "converge", "data_plane", "observability", "probe.py"]
 "converge" = ["_repo.py"]
+"jobs" = []
 "data_plane" = ["converge"]
 "extensions" = ["_repo.py", "converge", "duration.py"]
 "lifecycle" = ["_repo.py", "_setup.py", "cluster", "converge", "data_plane", "extensions", "observability", "probe.py"]

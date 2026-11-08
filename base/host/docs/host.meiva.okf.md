@@ -80,6 +80,10 @@ binary and, for launchd, the PATH. PR-flow checks production, `gh` and the token
 file before capturing executable locations; token contents never enter a job value.
 `RefreshSchedule` belongs to `packages_content.py`, including its existing validation.
 
+Each generated job declares a heartbeat beside its trigger, and the renderer refuses a job that
+declares none; the declaration values, the refusals, the exit recorder and the document a reader
+elsewhere diffs against are described in [[base/host/docs/job-heartbeat.meiva.okf.md]].
+
 `job_readings.py` is the one executable/PATH capture policy, also used by the
 health composition in `cron/health_job.py` and boot registration in
 `system/boot_autostart/registration.py`. `job_values.py` owns the shared

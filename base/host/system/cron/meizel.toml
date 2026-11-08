@@ -1,8 +1,16 @@
-exports = ["health_content.py", "health_job.py", "mechanics.py"]
+exports = ["health_content.py", "health_job.py", "heartbeat.py", "heartbeat_population.py", "heartbeat_record.py", "mechanics.py"]
 
 [uses]
 "health_job.py" = ["health_content.py", "mechanics.py"]
+"heartbeat_population.py" = ["heartbeat.py"]
+"heartbeat_record.py" = ["heartbeat.py"]
 
 [purity]
 "__init__.py" = "strict"
 "health_content.py" = "strict"
+"heartbeat.py" = "strict"
+"heartbeat_population.py" = "strict"
+
+
+# meiva:note
+# Health definitions and scheduler resources have separate explicit owners.

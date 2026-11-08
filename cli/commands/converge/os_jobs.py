@@ -21,7 +21,20 @@
 
 from __future__ import annotations
 
+from datetime import date
+
 from cli.commands.converge.spec import ConvergeCtx
+
+
+# meiva:note
+# The two facts every generated job definition needs from the process that renders it: which
+# machine the expectation set belongs to, and the day an `until` exception is counted from.
+#
+# The machine name is read, not defaulted. A job whose heartbeat cannot name its machine cannot
+# be judged by anyone elsewhere, which is exactly the silence the declaration exists to end, so
+# converge fails here instead of writing a definition no one can check.
+def heartbeat_inputs(ctx: ConvergeCtx) -> tuple[str, date]:
+    return ctx.machine.name(), ctx.clock.now().astimezone(ctx.clock.explicit_zone()).date()
 
 
 def ensure_health_probe_cron(ctx: ConvergeCtx) -> None:
@@ -46,8 +59,13 @@ def ensure_logs_maintenance(ctx: ConvergeCtx) -> None:
     """Register daily rotation followed by retention."""
     from base.host.system.logs_job import register_logs_job
 
+    machine, today = heartbeat_inputs(ctx)
     register_logs_job(
-        enabled=ctx.read_config().view.general.os_jobs_enabled, roots=ctx.job_roots, host=ctx.host
+        enabled=ctx.read_config().view.general.os_jobs_enabled,
+        roots=ctx.job_roots,
+        host=ctx.host,
+        machine=machine,
+        today=today,
     )
 
 
@@ -65,6 +83,7 @@ def ensure_packages_refresh_job(ctx: ConvergeCtx) -> None:
     if jobs_enabled and not mechanics.owns_os_job_home("packages refresh", roots=ctx.job_roots):
         return
     refresh_enabled = view.packages.refresh_enabled if jobs_enabled else False
+    machine, today = heartbeat_inputs(ctx)
     register_packages_job(
         enabled=jobs_enabled,
         schedule=RefreshSchedule(
@@ -75,6 +94,8 @@ def ensure_packages_refresh_job(ctx: ConvergeCtx) -> None:
         else None,
         roots=ctx.job_roots,
         host=ctx.host,
+        machine=machine,
+        today=today,
     )
     # A registration failure propagates so converge fails fast.
 
@@ -88,11 +109,14 @@ def ensure_pr_flow_job(ctx: ConvergeCtx) -> None:
     from base.cluster.derive import production_identity
     from base.host.system.pr_flow_job import register_pr_flow_job
 
+    machine, today = heartbeat_inputs(ctx)
     register_pr_flow_job(
         enabled=ctx.read_config().view.general.os_jobs_enabled,
         production=production_identity(machine=ctx.machine, home=ctx.meiva_home),
         roots=ctx.job_roots,
         host=ctx.host,
+        machine=machine,
+        today=today,
     )
 
 
@@ -113,11 +137,14 @@ def ensure_walg_job(ctx: ConvergeCtx) -> None:
     if ctx.read_config().view.walg.walg_config_file is not None:
         view = ctx.read_config().view
         jobs_enabled = view.general.os_jobs_enabled
+        machine, today = heartbeat_inputs(ctx)
         register_walg_job(
             enabled=jobs_enabled,
             backup_hour=view.services.backup_hour if jobs_enabled else None,
             roots=ctx.job_roots,
             host=ctx.host,
+            machine=machine,
+            today=today,
         )
     else:
         unregister_walg_job(host=ctx.host, roots=ctx.job_roots)

@@ -6,13 +6,17 @@ import os
 import plistlib
 import shlex
 import sys
+from datetime import date
 from pathlib import Path
 
 import pytest
 
 from base.host.proc import run_bounded
 from base.host.system import logs_content, packages_content, pr_flow_content, walg_content
-from base.host.system.job_values import JobPaths, JobRoots
+from base.host.system.cron import heartbeat_population
+from base.host.system.job_values import HeartbeatRender, JobPaths, JobRoots, JobSchedule
+
+_TODAY = date(2026, 11, 8)
 
 # meiva:note
 # The executable records the actual shell-delivered argv/environment. It never starts
@@ -46,30 +50,48 @@ def _paths(tmp_path: Path) -> JobPaths:
     return JobPaths(JobRoots(home=home, repo=repo, user_home=tmp_path), str(meiva))
 
 
+def _heartbeat(label: str, paths: JobPaths, schedule: JobSchedule) -> HeartbeatRender:
+    return heartbeat_population.verified(
+        label, roots=paths.roots, machine="macmini", uid=501, schedule=schedule, today=_TODAY
+    )
+
+
 def _definitions(kind: str, paths: JobPaths) -> tuple[str, str]:
     path_env = "/usr/bin:/bin:/a & <path>"
     match kind:
         case "logs":
+            heartbeat = _heartbeat(logs_content.LABEL, paths, logs_content.schedule())
             return (
-                logs_content.launchd_plist_content(paths=paths, path_env=path_env),
-                logs_content.cron_entry(paths),
+                logs_content.launchd_plist_content(
+                    paths=paths, path_env=path_env, heartbeat=heartbeat
+                ),
+                logs_content.cron_entry(paths, heartbeat=heartbeat),
             )
         case "packages":
+            heartbeat = _heartbeat(
+                packages_content.LABEL, paths, packages_content.schedule(tick_seconds=900)
+            )
             return (
                 packages_content.launchd_plist_content(
-                    paths=paths, path_env=path_env, tick_seconds=900
+                    paths=paths, path_env=path_env, tick_seconds=900, heartbeat=heartbeat
                 ),
-                packages_content.cron_entry(paths, tick_seconds=900),
+                packages_content.cron_entry(paths, tick_seconds=900, heartbeat=heartbeat),
             )
         case "pr-flow":
+            heartbeat = _heartbeat(pr_flow_content.LABEL, paths, pr_flow_content.schedule())
             return (
-                pr_flow_content.launchd_plist_content(paths=paths, path_env=path_env),
-                pr_flow_content.cron_entry(paths),
+                pr_flow_content.launchd_plist_content(
+                    paths=paths, path_env=path_env, heartbeat=heartbeat
+                ),
+                pr_flow_content.cron_entry(paths, heartbeat=heartbeat),
             )
         case "walg":
+            heartbeat = _heartbeat(walg_content.LABEL, paths, walg_content.schedule(backup_hour=23))
             return (
-                walg_content.launchd_plist_content(paths=paths, path_env=path_env, backup_hour=23),
-                walg_content.cron_entry(paths, backup_hour=23),
+                walg_content.launchd_plist_content(
+                    paths=paths, path_env=path_env, backup_hour=23, heartbeat=heartbeat
+                ),
+                walg_content.cron_entry(paths, backup_hour=23, heartbeat=heartbeat),
             )
         case _:
             raise ValueError(kind)
@@ -83,9 +105,12 @@ def test_generated_job_delivers_real_argv_and_environment(
     paths = _paths(tmp_path)
     body, entry = _definitions(kind, paths)
     plist = plistlib.loads(body.encode())
+    heartbeat_path = plist["EnvironmentVariables"]["MEIVA_JOB_HEARTBEAT"]
+    assert Path(heartbeat_path).parent == paths.roots.home / "state" / "heartbeats"
     assert plist["EnvironmentVariables"] == {
         "MEIVA_HOME": str(paths.roots.home),
         "PATH": "/usr/bin:/bin:/a & <path>",
+        "MEIVA_JOB_HEARTBEAT": heartbeat_path,
     }
     assert Path(plist["StandardOutPath"]).parent == paths.roots.home / "logs"
     assert plist["StandardErrorPath"] == plist["StandardOutPath"]

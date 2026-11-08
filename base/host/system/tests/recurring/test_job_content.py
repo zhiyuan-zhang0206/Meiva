@@ -2,20 +2,37 @@
 # Scheduler definitions are values, independent of host services and process roots.
 
 import xml.etree.ElementTree as ET
+from datetime import date
 from pathlib import Path
 
 import pytest
 
 from base.host.system import logs_content, packages_content, pr_flow_content, walg_content
-from base.host.system.job_values import JobPaths, JobRoots
+from base.host.system.cron import heartbeat_population
+from base.host.system.job_values import HeartbeatRender, JobPaths, JobRoots, JobSchedule
+
+_TODAY = date(2026, 11, 8)
+
+
+# meiva:note
+# The product a registrar hands a renderer: the job's own declaration, validated against the
+# whole population on a fixed day.
+def heartbeat_for(
+    label: str, roots: JobRoots, schedule: JobSchedule, *, today: date = _TODAY
+) -> HeartbeatRender:
+    return heartbeat_population.verified(
+        label, roots=roots, machine="macmini", uid=501, schedule=schedule, today=today
+    )
 
 
 def test_launchd_plist_runs_maintenance_daily(
     job_roots: JobRoots,
 ) -> None:
+    paths = JobPaths(job_roots, "/work tree/.venv/bin/meiva")
     content = logs_content.launchd_plist_content(
-        paths=JobPaths(job_roots, "/work tree/.venv/bin/meiva"),
+        paths=paths,
         path_env="/work tree/.venv/bin:/usr/bin",
+        heartbeat=heartbeat_for(logs_content.LABEL, job_roots, logs_content.schedule()),
     )
     # meiva:note
     # Only this test's rendered XML reaches the parser; no external XML is accepted.
@@ -44,10 +61,14 @@ def test_launchd_plist_runs_maintenance_daily(
 def test_launchd_plist_runs_the_refresh_pass_on_the_tick(
     job_roots: JobRoots, tmp_path: Path
 ) -> None:
+    paths = JobPaths(job_roots, "/work tree/.venv/bin/meiva")
     content = packages_content.launchd_plist_content(
         tick_seconds=900,
-        paths=JobPaths(job_roots, "/work tree/.venv/bin/meiva"),
+        paths=paths,
         path_env="/work tree/.venv/bin:/usr/bin",
+        heartbeat=heartbeat_for(
+            packages_content.LABEL, job_roots, packages_content.schedule(tick_seconds=900)
+        ),
     )
     # meiva:note
     # Only this test's rendered XML reaches the parser; no external XML is accepted.
@@ -65,9 +86,11 @@ def test_launchd_plist_runs_the_refresh_pass_on_the_tick(
 
 
 def test_launchd_plist_schedules_the_daily_sampler(job_roots: JobRoots, tmp_path: Path) -> None:
+    paths = JobPaths(job_roots, "/work tree/.venv/bin/meiva")
     content = pr_flow_content.launchd_plist_content(
-        paths=JobPaths(job_roots, "/work tree/.venv/bin/meiva"),
+        paths=paths,
         path_env="/work tree/.venv/bin:/usr/bin",
+        heartbeat=heartbeat_for(pr_flow_content.LABEL, job_roots, pr_flow_content.schedule()),
     )
     # meiva:note
     # Only this test's rendered XML reaches the parser; no external XML is accepted.
@@ -107,10 +130,14 @@ def test_the_tick_hour_follows_the_logical_dump_hour_and_wraps(
 def test_launchd_plist_runs_the_tick_command_daily_and_logs_to_walg_log(
     job_roots: JobRoots, tmp_path: Path
 ) -> None:
+    paths = JobPaths(job_roots, "/work tree/.venv/bin/meiva")
     content = walg_content.launchd_plist_content(
         backup_hour=3,
-        paths=JobPaths(job_roots, "/work tree/.venv/bin/meiva"),
+        paths=paths,
         path_env="/work tree/.venv/bin:/usr/bin",
+        heartbeat=heartbeat_for(
+            walg_content.LABEL, job_roots, walg_content.schedule(backup_hour=3)
+        ),
     )
     # meiva:note
     # Only this test's rendered XML reaches the parser; no external XML is accepted.
