@@ -46,6 +46,9 @@ class ProviderKeys:
     def present(self, key_env: str) -> bool:
         return key_env in self.secrets
 
+    def get(self, key_env: str, default: str = "") -> str:
+        return self.secrets.get(key_env, default)
+
     # meiva:note
     # The key named `key_env`; `RuntimeError` when it is absent, so a missing key surfaces
     # at build time instead of as a provider 401 mid-turn.

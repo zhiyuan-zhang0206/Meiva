@@ -129,6 +129,20 @@ def _effort(
     return None
 
 
+def _default_headers(ctx: BuildContext) -> dict[str, str] | None:
+    workspace_id = ctx.keys.get("ANTHROPIC_WORKSPACE_ID")
+    custom_headers_raw = ctx.keys.get("ANTHROPIC_CUSTOM_HEADERS")
+    default_headers: dict[str, str] = {}
+    if custom_headers_raw:
+        for line in custom_headers_raw.splitlines():
+            colon = line.find(":")
+            if colon >= 0:
+                default_headers[line[:colon].strip()] = line[colon + 1 :].strip()
+    if workspace_id:
+        default_headers["anthropic-workspace-id"] = workspace_id
+    return default_headers or None
+
+
 def build(ctx: BuildContext) -> BaseChatModel:
     """claude-* branch: ThinkingTokensChatAnthropic, pinned max_tokens.
 
@@ -202,6 +216,7 @@ def build(ctx: BuildContext) -> BaseChatModel:
     return ThinkingTokensChatAnthropic(
         model_name=spec.fast_of or ctx.model,
         api_key=SecretStr(api_key),
+        default_headers=_default_headers(ctx),
         max_tokens_to_sample=spec.max_output_tokens,
         timeout=ctx.timeout,
         stop=None,
@@ -218,6 +233,7 @@ PROVIDER = ProviderContribution(
         prefix="claude-",
         display_name="Anthropic",
         key_env="ANTHROPIC_API_KEY",
+        extra_key_envs=("ANTHROPIC_WORKSPACE_ID", "ANTHROPIC_CUSTOM_HEADERS"),
         build=build,
         effort_levels=None,
         vision=True,

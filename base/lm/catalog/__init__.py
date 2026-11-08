@@ -104,7 +104,10 @@ class ModelCatalog:
     # The env name of every provider key, chat and decision, each once in install order.
     @cached_property
     def key_envs(self) -> tuple[str, ...]:
-        names = [binding.key_env for binding in self.bindings.values()]
+        names: list[str] = []
+        for binding in self.bindings.values():
+            names.append(binding.key_env)
+            names.extend(binding.extra_key_envs)
         names.extend(provider.key_env for provider in self.decision_providers.values())
         return tuple(dict.fromkeys(names))
 

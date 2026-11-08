@@ -116,6 +116,7 @@ class ProviderBinding:
     display_name: str  # human-facing provider name (errors, UI text)
     key_env: str  # the API key env var, e.g. "FOO_API_KEY"
     build: Callable[[BuildContext], BaseChatModel]
+    extra_key_envs: tuple[str, ...] = ()
     effort_levels: tuple[str, ...] | None = None
     vision: bool = False  # the bound endpoint accepts native image content blocks
     anthropic_protocol: bool = False  # ChatAnthropic binding — see module docstring

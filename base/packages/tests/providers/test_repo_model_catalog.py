@@ -46,7 +46,9 @@ def test_repo_anthropic_provider_is_enabled_and_registers_complete_contract(
     from base.lm.factory import provider_key_map
 
     assert provider_key_map(catalog=model_catalog)["claude-"] == ("Anthropic", "ANTHROPIC_API_KEY")
+    assert "ANTHROPIC_WORKSPACE_ID" in model_catalog.key_envs
     binding = model_catalog.bindings["claude-"]
+    assert binding.extra_key_envs == ("ANTHROPIC_WORKSPACE_ID", "ANTHROPIC_CUSTOM_HEADERS")
     assert binding.effort_levels is None
     assert binding.anthropic_protocol
     assert binding.vision
