@@ -47,11 +47,25 @@ automatically.
 Two things changed versus the original Phase-1 draft:
 
 - **There is no secret-less posture.** Authentication fails closed and a blank
-  secret admits nothing; the one opt-out is the explicit `human_auth =
-  trusted_network` mode for human callers on a trusted private network.
+  secret admits nothing; the one human-facing exception is `human_auth =
+  trusted_network` for human callers on a trusted private network, which has been
+  the default since 2026-10-21 (`785998890e`).
 - **The bypass list is fixed**, not route-prefix based: `/api/health`,
   `/api/auth/{login,check,logout}`, and `/api/alerts` (which applies its own token
   or loopback policy).
+
+What that exception means at the request level is worth writing down, because it
+reads as a defect when observed from one deployment and compared with another: a
+request that presents **no** `Authorization` header at all is served as the
+cluster administrator under `human_auth = trusted_network` — the principal is
+`AuthPrincipal("cluster", "administrator")` and `source_verified_by` is
+`trusted_network` — and is rejected `401 authentication_required` under
+`human_auth = required`. It is one middleware
+(`gateway/http/auth/cluster_middleware.py`) and the configuration alone decides
+which path a credential-less request takes, so the difference between two
+clusters is deployment posture, not a bug. An `Authorization` header that is
+present and does not verify is a 401 in both modes. See
+[the 2026-10-20 switch](../../../docs/decisions/data/security/2026-10-20-human-auth-trusted-network-switch.md).
 
 It could not merge alone — the middleware would have locked the frontend out
 immediately, since browser `fetch()` and `EventSource` carried no auth. That
