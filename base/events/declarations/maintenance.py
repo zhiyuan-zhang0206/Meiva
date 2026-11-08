@@ -219,6 +219,17 @@ class TrunkRedWatchRound(TypedDict):
     confirmed: int
     infra: int
     stale: int
+    # meiva:note
+    # Emitted since the round learned to count them, and missing from this declaration until
+    # 2026-11-08: the canonical types said four fields while the watch sent five. A declaration that
+    # already disagrees with the payload is the wrong place to add a sixth.
+    unnamed: int
+    # meiva:note
+    # The suspects the round carries, oldest first: fingerprint, first_seen_at, red_count and
+    # opportunities (task #6488). `suspects_dropped` says how many the cap left out, because a
+    # truncated list without a count reads as the whole set.
+    suspects: NotRequired[list[dict[str, object]]]
+    suspects_dropped: NotRequired[int]
 
 
 # meiva:note

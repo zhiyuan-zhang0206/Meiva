@@ -188,12 +188,31 @@ class Entry:
     # ledger that predates the field, and nothing asks about it.
     run_id: int = 0
     # meiva:note
+    # How many completed runs of this workflow have been read since the red was first seen -- the
+    # chances this watch had to say something new about it. `suspected` has no exit of its own: it
+    # waits for a second red, and if `main` stops moving, or the schedule stops, that second red
+    # never comes and nothing reports the wait. A zero here is the executable form of "no chance to
+    # re-check", which is a fact the round can state (task #6488, 405 2026-11-08).
+    #
+    # It counts runs this watch *read*, added to each round, because after #6509 the fetch returns
+    # only runs the watermark has not covered: recomputing from a listing would count the same run
+    # again every round, while adding what the round read counts each run once.
+    opportunities: int = 0
+    # meiva:note
     # Whether the run that reported this red ran the whole population. It decides what may retire
     # the card: a full-suite red is evidence about the whole tree, so any full-suite green on a
     # later commit resolves it, while a red from a lane that runs part of the tree is resolved only
     # by that lane's own green. Without this the macOS lane's red would be retired by the next
     # Linux nightly, which never collected the test — a card that closes while the red stands.
     covers_full_suite: bool = True
+
+    # meiva:note
+    # The workflow this entry belongs to, read back out of the fingerprint that encodes it. A
+    # property rather than another module-level function: `main_red` is at its public surface
+    # budget, and the separator has exactly one owner (`fingerprint`).
+    @property
+    def workflow(self) -> str:
+        return self.fingerprint.partition(_SEPARATOR)[0]
 
 
 # meiva:note

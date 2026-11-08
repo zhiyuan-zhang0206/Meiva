@@ -16,6 +16,8 @@ from base.db import Database
 from schedules.jobs.watch.main_red_liveness import liveness_once
 from schedules.jobs.watch.main_red_watch import (
     ATTEMPT_GREEN,
+    no_opportunity_notes,
+    suspect_rows,
     ATTEMPT_HOLDS,
     ATTEMPT_PENDING,
     AttemptOf,
@@ -36,6 +38,8 @@ from schedules.plans.watch.main_red import (
     FAILURE_UNNAMED,
     NIGHTLY_STALE_AFTER,
     STATE_CONFIRMED,
+    STATE_SUSPECTED,
+    Entry,
     Card,
     Failure,
     RunFacts,
@@ -124,6 +128,7 @@ def _watch(
         workflows=workflows,
         liveness=_LIVENESS,
         attempt_of=attempt_of,
+        notify=None,
     )
 
 
@@ -288,6 +293,7 @@ def test_a_stale_schedule_is_reported_in_the_round_line(tmp_path: Path) -> None:
         emit=lambda _p: None,
         workflows=("release-gate.yml",),
         liveness=_LIVENESS,
+        notify=None,
     )
 
     assert "no new run" not in line
@@ -475,6 +481,7 @@ def test_a_red_nightly_full_run_opens_a_card_and_its_silence_is_reported(tmp_pat
         last_start=lambda workflow: second - timedelta(hours=30) if workflow == "ci.yml" else None,
         workflows=(),
         liveness=(LivenessStream("nightly-full", "ci.yml", NIGHTLY_STALE_AFTER),),
+        notify=None,
     )
 
     assert "nightly-full" in silent
@@ -572,6 +579,7 @@ def test_a_stream_first_seen_now_is_not_reported_until_a_threshold_passes(tmp_pa
             emit=lambda _p: None,
             workflows=(),
             liveness=(LivenessStream("nightly-full", "ci.yml", NIGHTLY_STALE_AFTER),),
+            notify=None,
         )
 
     assert "never started" not in round_at(first)
@@ -610,12 +618,21 @@ def test_one_unreadable_stream_leaves_the_others_read_and_the_round_whole(tmp_pa
         emit=lambda payload: heartbeats.append(dict(payload)),
         workflows=("release-gate.yml", "main-push.yml"),
         liveness=(LivenessStream("nightly", "refresh-test-durations.yml", NIGHTLY_STALE_AFTER),),
+        notify=None,
     )
 
     assert asked == ["release-gate.yml", "main-push.yml"]
     assert "stream main-push.yml unreadable" in line
     assert "HTTP 502" in line
-    assert heartbeats == [{"fingerprints": 1, "confirmed": 0, "infra": 0, "stale": 1, "unnamed": 0}]
+    assert heartbeats[0] | {"suspects": None, "suspects_dropped": None} == {
+        "fingerprints": 1,
+        "confirmed": 0,
+        "infra": 0,
+        "stale": 1,
+        "unnamed": 0,
+        "suspects": None,
+        "suspects_dropped": None,
+    }
     assert len(load_state(tmp_path / STATE_FILE).entries) == 1
 
 
@@ -645,6 +662,7 @@ def test_the_round_counts_the_reds_it_could_not_name(tmp_path: Path) -> None:
         emit=lambda payload: heartbeats.append(dict(payload)),
         workflows=("release-gate.yml",),
         liveness=(),
+        notify=None,
     )
 
     assert "unnamed=2" in line
@@ -671,10 +689,13 @@ def test_an_unreadable_liveness_stream_does_not_stop_the_round(tmp_path: Path) -
         emit=lambda payload: heartbeats.append(dict(payload)),
         workflows=(),
         liveness=(LivenessStream("nightly", "refresh-test-durations.yml", NIGHTLY_STALE_AFTER),),
+        notify=None,
     )
 
     assert "stream refresh-test-durations.yml unreadable" in line
-    assert heartbeats == [{"fingerprints": 0, "confirmed": 0, "infra": 0, "stale": 1, "unnamed": 0}]
+    assert heartbeats[0]["fingerprints"] == 0
+    assert heartbeats[0]["stale"] == 1
+    assert heartbeats[0]["suspects"] == []
 
 
 # meiva:note
@@ -793,6 +814,7 @@ def test_a_confirmed_red_lists_the_commits_since_the_last_green(tmp_path: Path) 
             workflows=("release-gate.yml",),
             liveness=_LIVENESS,
             compare=compare,
+            notify=None,
         )
 
     round_once([_green("release-gate.yml", "a" * 40, datetime(2026, 11, 1, 6, tzinfo=UTC))])
@@ -829,6 +851,7 @@ def test_an_unreadable_range_still_opens_the_card_and_says_so(tmp_path: Path) ->
             workflows=("release-gate.yml",),
             liveness=_LIVENESS,
             compare=compare,
+            notify=None,
         )
 
     round_once([_green("release-gate.yml", "a" * 40, datetime(2026, 11, 1, 6, tzinfo=UTC))])
@@ -1404,7 +1427,152 @@ def test_the_round_tells_the_fetch_where_its_watermark_is(tmp_path: Path) -> Non
             emit=lambda _payload: None,
             workflows=("release-gate.yml",),
             liveness=_LIVENESS,
+            notify=None,
         )
 
     assert seen[0] == (None, None), "the first round has no watermark to offer"
     assert seen[1] == (when, 2), "the second names the newest (created_at, attempt) it read"
+
+
+# meiva:note
+# The case the task is named for: a red seen once, with no completed run of its workflow after it.
+# Nothing will ever confirm it (a second red is what confirms) and nothing will retire it (a green
+# run is what retires), so it waits forever unless the round says so (task #6488).
+def test_a_suspect_without_a_later_run_reports_no_recheck_opportunity(tmp_path: Path) -> None:
+    when = datetime(2026, 11, 2, 6, tzinfo=UTC)
+    heartbeats: list[dict[str, object]] = []
+
+    line = _watch(
+        tmp_path,
+        [_red("release-gate.yml", "sha1", when)],
+        opened=[],
+        closed=[],
+        heartbeats=heartbeats,
+    )
+
+    assert "no re-check opportunity" in line
+    assert "sha1" not in line, "the line names the fingerprint and the moment, not the commit"
+    (entry,) = load_state(tmp_path / STATE_FILE).entries.values()
+    assert entry.opportunities == 0
+    assert heartbeats[0]["suspects"] == [
+        {
+            "fingerprint": entry.fingerprint,
+            "first_seen_at": when.isoformat(),
+            "red_count": 1,
+            "opportunities": 0,
+        }
+    ]
+
+
+# meiva:note
+# A later run that reports some other red is a chance to re-check this one -- the watch read a
+# completed run of the same workflow and this case did not appear in it. Counting it is what makes
+# the number mean "chances", not "time": the line stays quiet, and the entry keeps its age.
+def test_a_later_run_that_does_not_report_the_case_counts_as_a_chance(tmp_path: Path) -> None:
+    first = datetime(2026, 11, 2, 6, tzinfo=UTC)
+    later = datetime(2026, 11, 2, 12, tzinfo=UTC)
+    other = "pkg/tests/test_b.py::test_other"
+
+    _watch(tmp_path, [_red("release-gate.yml", "sha1", first)], opened=[], closed=[], heartbeats=[])
+    line = _watch(
+        tmp_path,
+        [_red("release-gate.yml", "sha2", later, test_id=other)],
+        opened=[],
+        closed=[],
+        heartbeats=[],
+    )
+
+    entries = load_state(tmp_path / STATE_FILE).entries
+    mine = next(entry for entry in entries.values() if "test_a" in entry.fingerprint)
+    assert mine.opportunities == 1
+    assert mine.fingerprint not in line, "this one had a chance, so it is not the line's subject"
+    assert "test_b.py::test_other" in line, "the other red is the one with no chance yet"
+
+
+def test_suspect_rows_are_capped_and_say_how_many_were_dropped() -> None:
+    when = datetime(2026, 11, 2, 6, tzinfo=UTC)
+    entries = {
+        f"release-gate.yml::test_{index:02d}": Entry(
+            fingerprint=f"release-gate.yml::test_{index:02d}",
+            state=STATE_SUSPECTED,
+            first_seen_sha="sha1",
+            first_seen_at=when + timedelta(minutes=index),
+            last_red_sha="sha1",
+            last_red_at=when + timedelta(minutes=index),
+            red_count=1,
+            opportunities=index,
+        )
+        for index in range(12)
+    }
+
+    rows, dropped = suspect_rows(entries, limit=10)
+
+    assert len(rows) == 10
+    assert dropped == 2
+    assert rows[0]["fingerprint"] == "release-gate.yml::test_00", "oldest first"
+    assert rows[0]["opportunities"] == 0
+
+
+def test_only_suspects_without_a_chance_are_named_and_the_rest_are_counted() -> None:
+    rows = [
+        {
+            "fingerprint": f"w::t{index}",
+            "first_seen_at": "2026-11-02T06:00:00+00:00",
+            "red_count": 1,
+            "opportunities": 0,
+        }
+        for index in range(5)
+    ] + [
+        {
+            "fingerprint": "w::seen",
+            "first_seen_at": "2026-11-02T06:00:00+00:00",
+            "red_count": 1,
+            "opportunities": 3,
+        }
+    ]
+
+    lines = no_opportunity_notes(rows, limit=3)
+
+    assert len(lines) == 4, "three named, one line for the remainder"
+    assert "2 more suspects" in lines[-1]
+    assert not any("w::seen" in line for line in lines)
+
+
+# meiva:note
+# The transition, not the state: the round that gives the watch its first suspect says so once, and
+# every round after it is quiet because the suspect is already there. This is the mechanism 405
+# asked for instead of a promise to remember (2026-11-08).
+def test_the_first_suspect_is_announced_once(tmp_path: Path) -> None:
+    when = datetime(2026, 11, 2, 6, tzinfo=UTC)
+    said: list[str] = []
+
+    def notify(text: str) -> None:
+        said.append(text)
+
+    def round_(runs: list[RunFacts], *, now: datetime) -> None:
+        watch_once(
+            state_path=tmp_path / STATE_FILE,
+            now=now,
+            fetch=lambda _workflow, _seen_at, _seen_attempt: tuple(runs),
+            last_start=lambda _workflow: now - timedelta(hours=1),
+            open_card=lambda _card: 900,
+            close_card=lambda _task, _reason: None,
+            emit=lambda _payload: None,
+            workflows=("release-gate.yml",),
+            liveness=_LIVENESS,
+            notify=notify,
+        )
+
+    round_([], now=when)
+    assert said == [], "no entries, nothing to announce"
+
+    round_([_red("release-gate.yml", "sha1", when)], now=when + timedelta(minutes=30))
+    assert len(said) == 1
+    assert "first suspected red" in said[0]
+    assert "test_a" in said[0]
+
+    round_(
+        [_red("release-gate.yml", "sha2", when + timedelta(hours=1), test_id="pkg/t/o.py::t_o")],
+        now=when + timedelta(hours=1),
+    )
+    assert len(said) == 1, "a suspect already present announces nothing"
