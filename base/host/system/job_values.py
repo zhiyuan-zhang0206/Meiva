@@ -8,6 +8,7 @@ from xml.sax.saxutils import escape
 
 __all__ = [
     "DIRECTORY_PARTS",
+    "ERROR_LOG_NAME",
     "EXPIRING_WITHIN_DAYS",
     "HEARTBEAT_ENV",
     "HEARTBEAT_WRITE_FAILED_RC",
@@ -107,12 +108,20 @@ SCHEMA = 1
 HEARTBEAT_ENV = "MEIVA_JOB_HEARTBEAT"
 
 # meiva:note
-# The exit code a job reports when it could not write its own heartbeat. It must differ from the
-# command's own failure code: "ran and failed" and "ran, failed, and could not say so" have
-# different fixes, and a shared code would merge them in whatever reads the scheduler.
+# The exit code a job reports when it could not write its own heartbeat and its own code was 0.
+# It must differ from the command's own failure code: "ran and failed" and "ran, failed, and could
+# not say so" have different fixes, and a shared code would merge them in whatever reads the
+# scheduler. A run that did fail keeps its own code: that code is the primary fact an owner acts
+# on, and the missing record is already said on stderr and in `ERROR_LOG_NAME`.
 HEARTBEAT_WRITE_FAILED_RC = 3
 
 DIRECTORY_PARTS = ("state", "heartbeats")
+
+# meiva:note
+# The degraded channel beside `DIRECTORY_PARTS` (never inside it, so a reader that globs `*.json`
+# there cannot pick up an error line as a record): one place a run appends to when it could not
+# write its heartbeat, so the reason outlives the stderr of a job nobody was watching.
+ERROR_LOG_NAME = "heartbeat-errors.log"
 
 # meiva:note
 # The window in which an `until` exception is reported as expiring rather than live. Seven days

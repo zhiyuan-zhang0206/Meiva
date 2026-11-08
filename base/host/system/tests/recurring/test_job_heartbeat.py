@@ -23,6 +23,7 @@ from base.host.system.cron import heartbeat_population
 from base.host.system.cron.heartbeat import exit_document, render_declaration
 from base.host.system.cron.heartbeat_record import record_exit, recording_exit
 from base.host.system.job_values import (
+    ERROR_LOG_NAME,
     HEARTBEAT_WRITE_FAILED_RC,
     DailyAt,
     DuplicateHeartbeatName,
@@ -394,21 +395,117 @@ def test_a_run_without_a_heartbeat_to_write_keeps_its_own_exit_code(tmp_path: Pa
     assert list(tmp_path.iterdir()) == []
 
 
-def test_a_run_that_cannot_write_its_heartbeat_exits_three(
+# meiva:note
+# A heartbeat path whose directory cannot be made: `heartbeats` is a file, not a directory, so the
+# `mkdir` a write would do fails while the degraded channel beside it stays writable.
+def _blocked_heartbeat(tmp_path: Path) -> Path:
+    state = tmp_path / "state"
+    state.mkdir()
+    _ = (state / "heartbeats").write_text("", encoding="utf-8")
+    return state / "heartbeats" / "logs-maintenance.json"
+
+
+def _degraded_lines(tmp_path: Path) -> list[str]:
+    log = tmp_path / "state" / ERROR_LOG_NAME
+    return log.read_text(encoding="utf-8").splitlines()
+
+
+def test_a_success_that_cannot_be_recorded_exits_three(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    blocked = tmp_path / "not-a-directory"
-    blocked.write_text("", encoding="utf-8")
+    target = _blocked_heartbeat(tmp_path)
 
     code = record_exit(
-        environ={job_heartbeat.HEARTBEAT_ENV: str(blocked / "logs-maintenance.json")},
+        environ={job_heartbeat.HEARTBEAT_ENV: str(target)},
         pid=4242,
-        now=datetime.now(UTC),
+        now=datetime(2026, 11, 8, 4, 41, tzinfo=UTC),
         rc=0,
     )
 
     assert code == HEARTBEAT_WRITE_FAILED_RC == 3
-    assert "cannot write the job heartbeat" in capsys.readouterr().err
+    err = capsys.readouterr().err
+    assert "heartbeat write failed (cannot write the job heartbeat" in err
+    assert "the run's success cannot be reported, exiting 3" in err
+    lines = _degraded_lines(tmp_path)
+    assert len(lines) == 1
+    assert "\tlogs-maintenance\trc=0\t" in lines[0]
+
+
+def test_a_failing_run_keeps_its_own_code_when_the_record_is_missing(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    target = _blocked_heartbeat(tmp_path)
+
+    code = record_exit(
+        environ={job_heartbeat.HEARTBEAT_ENV: str(target)},
+        pid=4242,
+        now=datetime(2026, 11, 8, 4, 41, tzinfo=UTC),
+        rc=19,
+    )
+
+    assert code == 19
+    assert "job exit code 19 preserved" in capsys.readouterr().err
+    assert "\tlogs-maintenance\trc=19\t" in _degraded_lines(tmp_path)[0]
+
+
+def test_a_raising_run_keeps_its_own_code_when_the_record_is_missing(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    target = _blocked_heartbeat(tmp_path)
+
+    def broken() -> int:
+        raise RuntimeError("the maintenance pass failed")
+
+    with pytest.raises(RuntimeError, match="the maintenance pass failed"):
+        _ = recording_exit(
+            broken,
+            environ={job_heartbeat.HEARTBEAT_ENV: str(target)},
+            pid=4242,
+            clock=lambda: datetime(2026, 11, 8, 4, 41, tzinfo=UTC),
+        )
+
+    assert "job exit code 1 preserved" in capsys.readouterr().err
+    assert "\tlogs-maintenance\trc=1\t" in _degraded_lines(tmp_path)[0]
+
+
+def test_a_system_exit_claims_nothing_it_could_not_record(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    target = _blocked_heartbeat(tmp_path)
+
+    def succeeded() -> int:
+        raise SystemExit(0)
+
+    with pytest.raises(SystemExit) as raised:
+        _ = recording_exit(
+            succeeded,
+            environ={job_heartbeat.HEARTBEAT_ENV: str(target)},
+            pid=4242,
+            clock=lambda: datetime(2026, 11, 8, 4, 41, tzinfo=UTC),
+        )
+
+    assert raised.value.code == HEARTBEAT_WRITE_FAILED_RC
+    assert "the run's success cannot be reported" in capsys.readouterr().err
+
+
+def test_a_system_exit_keeps_the_code_the_command_chose(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    target = _blocked_heartbeat(tmp_path)
+
+    def stopped(rc: int) -> int:
+        raise SystemExit(rc)
+
+    with pytest.raises(SystemExit) as raised:
+        _ = recording_exit(
+            lambda: stopped(4),
+            environ={job_heartbeat.HEARTBEAT_ENV: str(target)},
+            pid=4242,
+            clock=lambda: datetime(2026, 11, 8, 4, 41, tzinfo=UTC),
+        )
+
+    assert raised.value.code == 4
+    assert "job exit code 4 preserved" in capsys.readouterr().err
 
 
 def test_a_raising_run_is_recorded_before_the_error_propagates(tmp_path: Path) -> None:
@@ -418,7 +515,7 @@ def test_a_raising_run_is_recorded_before_the_error_propagates(tmp_path: Path) -
         raise RuntimeError("the maintenance pass failed")
 
     with pytest.raises(RuntimeError, match="the maintenance pass failed"):
-        recording_exit(
+        _ = recording_exit(
             broken,
             environ={job_heartbeat.HEARTBEAT_ENV: str(target)},
             pid=4242,
