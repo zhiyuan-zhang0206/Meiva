@@ -1,11 +1,9 @@
-"""`services.upkeep.events_maintenance.rollup` — the day-grain rollup of `telemetry_events`.
-
-The rollup writes whole closed UTC days into the ledger tables from the rows of the telemetry
-record: token sums and the cost ledger columns per (agent, day, model), turn and exec counters with
-the whole-second duration histogram per (agent, day). A recompute is an idempotent full-day
-overwrite, and a monotone guard keeps a day that `telemetry_events` holds only in part from lowering
-a ledger row that is already larger.
-"""
+# meiva:note
+# `services.upkeep.events_maintenance.rollup` -- the day-grain rollup of `telemetry_events`: token
+# sums and the cost ledger columns per (agent, day, model), turn and exec counters with the
+# whole-second duration histogram per (agent, day). A recompute is an idempotent full-day overwrite,
+# and a monotone guard keeps a day that `telemetry_events` holds only in part from lowering a ledger
+# row that is already larger.
 
 from __future__ import annotations
 
@@ -77,7 +75,10 @@ def test_tokens_are_summed_per_agent_and_model_with_the_cost_ledger_columns(
     usage: dict[str, Any] = {"in_total": 100, "out_total": 50, "cache_read": 10, "reasoning": 5}
     _event(db, "llm_usage", agent, model="m1", cost_usd=0.25, **usage)
     _event(db, "llm_usage", agent, model="m1", cost_usd="0.5", **usage)
-    _event(db, "llm_usage", agent, model="m1", **usage)  # no price snapshot: unpriced
+    # meiva:note
+    # The fourth row carries a price but no price snapshot, so it is unpriced rather than
+    # mis-costed; the fifth has an unreadable token count beside a price, so the price still counts.
+    _event(db, "llm_usage", agent, model="m1", **usage)
     _event(db, "llm_usage", agent, model="m2", in_total="n/a", cost_usd=1.0)
 
     rollup.roll_day(db, _DAY)
@@ -102,7 +103,10 @@ def test_a_day_is_the_closed_utc_day_and_unknown_agents_are_skipped(db: psycopg.
         in_total=100,
     )
     _event(db, "llm_usage", agent, at=start + timedelta(days=1), model="m", in_total=1000)
-    _event(db, "llm_usage", agent + 9999, at=start, model="m", in_total=5)  # not in agents
+    # meiva:note
+    # The last row names an agent the registry does not hold: the rollup reads the ledger per
+    # registered agent, so that row contributes to no row at all.
+    _event(db, "llm_usage", agent + 9999, at=start, model="m", in_total=5)
 
     rollup.roll_day(db, _DAY)
 
@@ -114,12 +118,17 @@ def test_turn_and_exec_counters_use_the_registry_failure_names(db: psycopg.Conne
     agent = _agent(db)
     for ok, duration in ((True, 1.5), (True, 1.9), (False, 3.0), (True, "oops")):
         _event(db, "turn_end", agent, ok=ok, duration_seconds=duration)
-    _event(db, "turn_end", agent, ok=True)  # no duration: a turn, but not in the histogram
+    # meiva:note
+    # A turn that reports no duration still counts as a turn; it stays out of the histogram, which
+    # is why the two totals below differ.
+    _event(db, "turn_end", agent, ok=True)
     _event(db, "exec", agent)
     _event(db, "exec", agent)
     for name in ("exec_failed", "exec_timeout"):
         _event(db, name, agent)
-    # Prefix lookalikes that are not outcomes: the envelope and boot events, a bare prefix.
+    # meiva:note
+    # Prefix lookalikes that are not outcomes -- the envelope and boot events, and names that only
+    # begin with the monitored prefix -- must not be read as failures.
     for name in ("exec_envelope", "exec_child_boot", "exec(", "exec_", "execute"):
         _event(db, name, agent)
 
@@ -151,7 +160,10 @@ def test_a_recompute_overwrites_with_the_new_rows_and_never_doubles(db: psycopg.
     rollup.roll_day(db, _DAY)
     assert [row[1] for row in _tokens(db, agent)] == [1]
 
-    _event(db, "llm_usage", agent, model="m", in_total=10, cost_usd=0.1)  # a late write
+    # meiva:note
+    # A write for the same closed day that arrived after the first recompute: the second recompute
+    # must pick it up instead of leaving the row where it was.
+    _event(db, "llm_usage", agent, model="m", in_total=10, cost_usd=0.1)
     rollup.roll_day(db, _DAY)
     assert [(row[1], row[2]) for row in _tokens(db, agent)] == [(2, 20)]
 
@@ -170,7 +182,10 @@ def test_the_monotone_guard_keeps_a_larger_ledger_row_and_estimated_calls(
         "VALUES (%s, %s, 40, 30, 12)",
         (agent, _DAY),
     )
-    _event(db, "llm_usage", agent, model="m", in_total=10)  # the table holds the day only in part
+    # meiva:note
+    # The telemetry record holds this day only in part, so the recompute would produce smaller
+    # numbers than the ledger row already carries; the guard keeps the larger row.
+    _event(db, "llm_usage", agent, model="m", in_total=10)
     _event(db, "turn_end", agent, ok=True, duration_seconds=1.0)
 
     rollup.roll_day(db, _DAY)
@@ -209,7 +224,9 @@ def test_compute_rollup_recomputes_the_last_closed_days_but_not_today(
     days = db.execute(
         "SELECT day FROM agent_model_tokens_daily WHERE agent_id = %s ORDER BY day", (agent,)
     ).fetchall()
-    # today (offset 0) is left to the live readers; offset 9 is older than the window
+    # meiva:note
+    # Today (offset 0) is left to the live readers and offset 9 is older than the recompute window,
+    # so the three days below are the ones the window covers.
     assert [row[0] for row in days] == [date(2026, 6, 2), date(2026, 6, 3), date(2026, 6, 9)]
     assert result.tokens_rows == 3
 

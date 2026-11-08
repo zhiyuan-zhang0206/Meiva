@@ -39,7 +39,7 @@ def core_metrics() -> list[MetricSpec]:
                 '((level!~"warning|error|critical" and category="audit") or '
                 '(level=~"warning|error|critical" or (level!~"warning|error|critical" and '
                 'category!="audit" and '
-                'event_name=~"checkpoint_write_failed'
+                'event_name=~"audit_machine_unknown|checkpoint_write_failed'
                 "|compact_turn_aborted|dangling_tool_pairing_repaired"
                 "|db_pool_acquire_slow"
                 "|db_pool_acquire_timeout|delivery_stalled"

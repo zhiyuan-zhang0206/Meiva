@@ -91,6 +91,7 @@ from base.telemetry.process_logging import init_gateway_process
 from services.pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
 from services.upkeep.events_maintenance import (
     alert_reconciler,
+    audit_identity,
     escalation,
     health_components,
     loop_roster,
@@ -194,6 +195,17 @@ def run_maintenance(
             result.metrics_rows,
             result.tokens_rows,
         )
+    # meiva:note
+    # A row whose writer could not name its machine is the shape `#6089` made readable and nothing
+    # read. The window spans one interval plus the pass deadline, so a slow pass cannot open a gap
+    # between two counts and let a row through unreported (task #6235).
+    audit_identity.report_unknown_writers(
+        pool,
+        window_seconds=config.events_maintenance_interval_seconds
+        + config.events_maintenance_pass_deadline_s,
+        now=now,
+    )
+    progress.beat()
     # Hourly checkpoint size/row-count sample: the gauge is also emitted after
     # each blob vacuum, but the vacuum only runs inside the 05:00-08:00
     # cluster-time window — emitting here on every pass keeps the series dense

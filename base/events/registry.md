@@ -300,6 +300,7 @@ above (or when its name is unregistered); otherwise it stays in the JSONL mirror
 | `resolution_status` | absolute unresolved + dismissed warning/error class counts over the daemon's fixed six-hour window | noise | unresolved_warnings, unresolved_errors, dismissed_warnings, dismissed_errors, window | — | events | — |
 | `checkpoint_table_sizes` | checkpoint table physical sizes and live row counts (hourly + after each blob vacuum run) | observation | blobs_bytes, checkpoints_bytes, writes_bytes, blobs_live, checkpoints_live, writes_live | — | events | — |
 | `audit_write_failed` | an audit event could not be recorded in audit_events (the record is missing; the Loki projection of the same event still went out) | anomaly | event_name, error_class, error | — | events | — |
+| `audit_machine_unknown` | audit rows written by a process that could not name its machine | anomaly | user_rows, agent_rows, window_rows, day_rows, window_seconds | — | events | — |
 | `telemetry_store_failed` | a batch of telemetry/log events did not land in telemetry_events (the JSONL mirror and Loki still hold them) | anomaly | rows, consecutive_failures, error_class, error | — | events | — |
 | `env_audit_history` | the env-write audit history holds unreadable records in its tail window; the listing is incomplete | anomaly | — | — | events | — |
 | `lgtm_dashboard` | a provisioned LGTM dashboard JSON could not be read or is not a JSON object; it is not provisioned this pass | anomaly | — | — | events | — |
