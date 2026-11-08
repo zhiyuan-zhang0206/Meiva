@@ -190,7 +190,7 @@ async def generate_summary(
             response,
             model=model,
             usage_kind="agent",
-            options=UsageOptions(for_agent_id=agent_id, stamp_message=True),
+            options=UsageOptions(for_agent_id=agent_id, source="compaction", stamp_message=True),
             catalog=catalog,
         )
     summary = response.text
