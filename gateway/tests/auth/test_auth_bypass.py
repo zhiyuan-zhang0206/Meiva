@@ -136,7 +136,7 @@ def test_alert_ingest_reaches_handler_without_any_credential(
     assert "authorization" not in resp.request.headers
     assert "cookie" not in resp.request.headers
     assert resp.status_code == 200, resp.text
-    assert resp.json() == {"processed": 1, "inserted": 1, "updated": 0, "notified": 0}
+    assert resp.json() == {"processed": 1, "inserted": 1, "updated": 0}
 
     with db_conn.cursor() as cur:
         cur.execute(
