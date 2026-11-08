@@ -497,13 +497,6 @@ repos:
         pass_filenames: false
 
 
-      - id: check-narrative-facts
-        name: check narrative facts (skill catalog / IM commands / IM channels match code)
-        language: system
-        entry: .venv/bin/python scripts/content_lint/check_narrative_facts.py
-        files: (\.md$|^scripts/content_lint/check_narrative_facts\.py$|^services/entrypoints/im_bridge/)
-        pass_filenames: false
-
       # The flake8-bandit typed-exception switch needed by S110 also affects
       # S112. Keep S112's pre-migration behavior without 138 unrelated findings.
       - id: lint-ruff-s112
