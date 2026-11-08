@@ -1,10 +1,9 @@
 from pathlib import Path
 
 from base.telemetry.lgtm_local import service_environment, service_input_paths
-from services.supervision.meiva_root.inputs import InputSeal
 
 
-def test_config_change_changes_generation_but_data_writes_do_not(tmp_path: Path) -> None:
+def test_service_paths_and_environment(tmp_path: Path) -> None:
     native = tmp_path / "lgtm/native"
     config = native / "config"
     config.mkdir(parents=True)
@@ -12,11 +11,5 @@ def test_config_change_changes_generation_but_data_writes_do_not(tmp_path: Path)
     (native / "platform-loki").write_text("test")
     (config / "loki.yaml").write_text("limits: first")
     paths = service_input_paths(tmp_path, "loki")
-    first = tuple(InputSeal.capture(path) for path in paths)
+    assert len(paths) == 3
     assert service_environment("loki")["GOMEMLIMIT"] == "2GiB"
-    data = native / "data"
-    data.mkdir()
-    (data / "chunk").write_text("new log")
-    assert tuple(InputSeal.capture(path) for path in paths) == first
-    (config / "loki.yaml").write_text("limits: second")
-    assert tuple(InputSeal.capture(path) for path in paths) != first

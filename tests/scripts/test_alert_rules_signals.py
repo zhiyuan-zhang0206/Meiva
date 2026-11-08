@@ -71,9 +71,6 @@ SIGNALS: dict[str, Signal] = {
         "root_unit_failure_state", "meiva-ops", "0m", "error"
     ),
     "meiva-ops-root-unit-absent": Signal("root_unit_failure_state", "meiva-ops", "0m", "error"),
-    "meiva-ops-root-unit-inputs-changed": Signal(
-        "root_unit_inputs_changed", "meiva-ops", "0m", "warning"
-    ),
     "meiva-ops-root-unit-breaker-open": Signal(
         "root_unit_failure_state", "meiva-ops", "0m", "critical"
     ),
@@ -82,12 +79,6 @@ SIGNALS: dict[str, Signal] = {
     ),
     "meiva-ops-root-unit-stop-escalated": Signal(
         "root_unit_stop_escalated", "meiva-ops", "0m", "error"
-    ),
-    "meiva-ops-root-unit-unowned-alive": Signal(
-        "root_unit_unowned_alive", "meiva-ops", "0m", "error"
-    ),
-    "meiva-ops-root-unit-left-behind-stuck": Signal(
-        "root_unit_left_behind_stuck", "meiva-ops", "0m", "error"
     ),
     "meiva-ops-root-diagnostic-venv": Signal("root_diagnostic", "meiva-ops", "0m", "warning", 0),
     "meiva-ops-root-diagnostic-brew-pin": Signal(

@@ -261,8 +261,6 @@ def test_every_standard_daemon_renders_as_exec_python_dash_m_its_module(unit_hom
             "-c",
             f"cd {_REPO} && exec {_PYTHON_M}{_module(spec)}",
         ], spec.session
-        inputs = cast("list[dict[str, str]]", unit["inputs"])
-        assert [entry["path"] for entry in inputs] == [str(path) for path in spec.config_inputs]
         if spec.session in _DECLARED_STOP_CEILINGS:
             ceiling = _DECLARED_STOP_CEILINGS[spec.session]
             assert spec.stop_ceiling_s == ceiling, spec.session

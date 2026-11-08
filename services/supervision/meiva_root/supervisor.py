@@ -58,12 +58,10 @@ from services.supervision.meiva_root.stopping import (
     rewrite_state,
     rotate_unit_log,
 )
-from services.supervision.meiva_root.unit_ledger import GenerationRecord
 from services.supervision.meiva_root.unit_records import (
     Generation,
     HealthSource,
     MetricsSource,
-    SealedInputsMixin,
     UnitRuntime,
 )
 
@@ -78,7 +76,7 @@ type ArgvTransform = Callable[[str, Sequence[str]], Sequence[str]]
 # Owns the lifecycle of every unit in one registry. Whole-tree transitions and overlapping
 # mutations on the same attach subtree serialize while disjoint subtrees stop or start
 # concurrently; `status` is lock-free (one event-loop turn reads a consistent snapshot).
-class Supervisor(LeftBehindMixin, StoppingMixin, SealedInputsMixin):
+class Supervisor(LeftBehindMixin, StoppingMixin):
     def __init__(
         self,
         registry: UnitRegistry,
@@ -623,8 +621,7 @@ class Supervisor(LeftBehindMixin, StoppingMixin, SealedInputsMixin):
         """
         if self._is_active(runtime):
             return
-        if not await self._clear_left_behind(runtime):
-            return
+        await self._clear_left_behind(runtime)
         try:
             await self._spawn(runtime)
         except OSError as exc:
@@ -669,8 +666,6 @@ class Supervisor(LeftBehindMixin, StoppingMixin, SealedInputsMixin):
         """
         self._require_admission()
         manifest = runtime.manifest
-        for item in manifest.inputs:
-            item.require_unchanged()
         # meiva:note
         # One directory per unit (G5): the unit owns its log space, so the rotation
         # policy lives inside it. This is the moment to apply it -- nothing holds the
@@ -725,18 +720,11 @@ class Supervisor(LeftBehindMixin, StoppingMixin, SealedInputsMixin):
         runtime.state = UnitState.RUNNING
         runtime.last_error = None
         # meiva:note
-        # The record is what lets a later root name this process after this one is
+        # The pidfile is what lets a later root name this process after this one is
         # gone; it is written before the watch starts so no exit path can leave a
         # live process nobody recorded.
         # meiva:link services/supervision/meiva_root/docs/meiva_root.meiva.okf.md
-        if identity is not None:
-            record = GenerationRecord(
-                identity,
-                generation.seq,
-                manifest.digest(),
-                started_at=self._now(),
-            )
-            unit_ledger.write(self._run_dir, manifest.id, record)
+        unit_ledger.write(self._run_dir, manifest.id, proc.pid)
         watch = asyncio.create_task(self._watch(runtime, generation))
         self._retain_watch(watch, generation)
         runtime.watch_task = watch
@@ -757,7 +745,7 @@ class Supervisor(LeftBehindMixin, StoppingMixin, SealedInputsMixin):
                     runtime.generation = None
                     if not generation.closing:
                         runtime.last_error = f"unexpected exit: {runtime.last_exit}"
-                    unit_ledger.clear(self._run_dir, runtime.manifest.id, generation=generation.seq)
+                    unit_ledger.clear(self._run_dir, runtime.manifest.id, pid=generation.proc.pid)
                 generation.exited.set()
 
     # meiva:note

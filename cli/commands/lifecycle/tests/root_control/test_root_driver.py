@@ -43,7 +43,6 @@ from cli.commands.lifecycle.tests.root_control.support import (
 from cli.commands.lifecycle.tests.runtime_at import runtime_at
 from cli.commands.lifecycle.tests.scripted_root import UnitRow, scripted_root
 from services.supervision.meiva_root.manifest import UnitManifest
-from services.supervision.roster import composition
 from services.supervision.roster.service_spec import ServiceSpec
 
 # meiva:note
@@ -374,39 +373,6 @@ def test_the_launch_digest_is_published_but_the_launch_environment_is_not(
 
 # meiva:note
 # ── the unit environment ─────────────────────────────────────────────────────
-
-
-def test_collector_config_bytes_change_the_live_unit_generation(
-    unit_home: Path, tmp_path: Path
-) -> None:
-    from base.paths import otel_collector_config
-
-    config = otel_collector_config(unit_home)
-    config.parent.mkdir(parents=True, exist_ok=True)
-    config.write_text("receivers: {otlp: {}}\n")
-    collector = next(
-        s for s in composition.build_services(home=unit_home) if s.session == "otel-collector"
-    )
-
-    before = driver.unit_digests(
-        driver.tree_manifest(
-            (collector,), tmp_path, roles=ROLES, delivery=launch_delivery(tmp_path), home=unit_home
-        )
-    )
-    unchanged = driver.unit_digests(
-        driver.tree_manifest(
-            (collector,), tmp_path, roles=ROLES, delivery=launch_delivery(tmp_path), home=unit_home
-        )
-    )
-    config.write_text("receivers: {otlp: {protocols: {http: {}}}}\n")
-    after = driver.unit_digests(
-        driver.tree_manifest(
-            (collector,), tmp_path, roles=ROLES, delivery=launch_delivery(tmp_path), home=unit_home
-        )
-    )
-
-    assert before == unchanged
-    assert before["otel-collector"] != after["otel-collector"]
 
 
 def test_plugin_birth_config_is_part_of_the_existing_unit_generation(tmp_path: Path) -> None:

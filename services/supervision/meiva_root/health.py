@@ -78,11 +78,6 @@ class RevivalHost(Protocol):
         """The failure-state facts of one unit; unknown units raise UnknownUnitError."""
         ...
 
-    # meiva:note
-    # Sealed paths whose contents changed since admission; re-read every health round, because
-    # the answer is otherwise invisible until a spawn fails (task #6403). Unknown units raise.
-    def unit_input_drift(self, unit_id: str) -> tuple[str, ...]: ...
-
 
 HealthGate = Callable[[], tuple[bool, str]]
 """A blocking-policy seam: `(allowed, why)`; absent means always allowed.
@@ -187,9 +182,6 @@ class UnitHealth:
     """Value of the last probe verdict (`alive` / `down` / `port-taken` / `unavailable`)."""
     last_detail: str = ""
     """Detail string of the last probe verdict."""
-    # meiva:note
-    # Whether the last report was "answers its probe, owned by no generation here".
-    unowned_alive: bool = False
     alarmed_stop_since: float | None = None
 
 
@@ -249,7 +241,6 @@ class HealthMonitor:
             await self._check_unit(unit_id)
             self._sync_breaker(unit_id, self._unit_state(unit_id))
         self._report_failure_states()
-        self._report_input_drift()
 
     # meiva:note
     # One dependency probe per round while a breaker is open on a unit that is not
@@ -332,42 +323,11 @@ class HealthMonitor:
             )
 
     # meiva:note
-    # Report a unit this root could no longer spawn: its declared input changed since admission,
-    # so every later birth of it — a manual restart, this monitor's own replacement — is refused
-    # until a new root generation or an explicit re-admission (task #6403). Nothing else says so:
-    # until something tries to spawn the unit, the drift is invisible, and the unit looks
-    # healthy right up to the moment it cannot be revived.
-    #
-    # Only a unit whose intent says running is reported: a stopped unit that cannot be spawned
-    # is a fact about a decision nobody has made yet, not a degradation. The condition is a
-    # state, emitted every round while it holds.
-    def _report_input_drift(self) -> None:
-        for unit_id in self._registry.unit_ids():
-            try:
-                drift = self._supervisor.unit_input_drift(unit_id)
-                facts = self._supervisor.unit_failure_facts(unit_id)
-            except UnknownUnitError:
-                continue
-            if not drift or not facts.intent_running:
-                continue
-            from base.log import logger
-
-            for path in drift:
-                logger.warning(
-                    "[health] unit {unit}: declared input {path} changed since admission — this "
-                    "root refuses to spawn it again",
-                    event="root_unit_inputs_changed",
-                    unit=unit_id,
-                    path=path,
-                )
-
-    # meiva:note
     # The kind this round reports, which is not always the kind this round derived: a
     # recorded failure is a fact and is reported at once, while absence is a claim about
     # nothing being there and must survive `absent_rounds_before_report` consecutive
     # rounds first (task #6345). Absence that something else already explains is not
-    # reported a second time: a probe that answers while this root owns no generation is
-    # `root_unit_unowned_alive`, and a unit whose policy forbids revival is
+    # reported a second time: a unit whose policy forbids revival is
     # `root_unit_not_revivable` on this same round.
     def _confirmed_kind(
         self, unit_id: str, state: UnitHealth, kind: FailureKind | None
@@ -375,7 +335,7 @@ class HealthMonitor:
         if kind is not FailureKind.ABSENT:
             state.absent_rounds = 0
             return kind
-        if state.unowned_alive or self._deferral(unit_id) is not None:
+        if self._deferral(unit_id) is not None:
             state.absent_rounds = 0
             return None
         state.absent_rounds += 1
@@ -448,7 +408,6 @@ class HealthMonitor:
                 "next_restart_in_s": self._restart_due_in_s(state),
                 "last_verdict": state.last_verdict,
                 "last_detail": state.last_detail,
-                "unowned_alive": state.unowned_alive,
             }
         return units
 
@@ -496,7 +455,6 @@ class HealthMonitor:
         state.last_detail = result.detail
 
         if result.alive:
-            self._note_alive_ownership(unit_id, state)
             self._reset(state)
             state.alarmed_stop_since = None
             _log.debug("[health] unit %s: alive (%s)", unit_id, result.detail)
@@ -659,39 +617,6 @@ class HealthMonitor:
             unit=unit_id,
             detail=detail,
         )
-
-    # meiva:note
-    # An alive verdict says "this home's daemon of this unit answers" — never "this
-    # root owns it". A leftover of a root that exited without stopping its tree
-    # answers exactly the same way, which is how 11 units read "state stopped /
-    # probe alive" for a day with every monitor green (task #5474). The event is
-    # the only signal for a process no spawn record identifies; a recorded one is
-    # stopped by the supervisor before it spawns (supervisor._clear_left_behind).
-    def _note_alive_ownership(self, unit_id: str, state: UnitHealth) -> None:
-        unowned = state.generation is None
-        if unowned == state.unowned_alive:
-            return
-        state.unowned_alive = unowned
-        from base.log import logger
-
-        try:
-            if unowned:
-                logger.warning(
-                    "unit {unit}: readiness probe answers but this root owns no generation — "
-                    "the answering process is unmanaged and holds this unit's port",
-                    event="root_unit_unowned_alive",
-                    unit=unit_id,
-                    verdict=state.last_verdict,
-                    detail=state.last_detail,
-                )
-            else:
-                logger.info(
-                    "unit {unit}: the answering process is this root's generation again",
-                    event="root_unit_owned_alive",
-                    unit=unit_id,
-                )
-        except Exception:
-            _log.exception("unit %s: ownership event fan-out failed", unit_id)
 
     def _deferral(self, unit_id: str) -> str | None:
         """Probe-only units are observation targets, with no restart authority."""

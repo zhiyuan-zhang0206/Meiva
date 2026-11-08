@@ -17,7 +17,6 @@ from base.native_process.process_control import SYSTEM_PROCESS_CONTROL, ProcessC
 from base.native_process.tests.fake_process_control import FakeProcessControl
 from services.supervision.meiva_root import intent_store
 from services.supervision.meiva_root.failure_state import FailureKind, derive_kind
-from services.supervision.meiva_root.inputs import InputSeal
 from services.supervision.meiva_root.intent_store import (
     CallerFacts,
     IntentRecord,
@@ -55,14 +54,23 @@ def recorder(loguru_records: LogRecords) -> _Recorder:
 def _unit(
     *scenario: str,
     unit_id: str = "svc",
-    inputs: tuple[InputSeal, ...] = (),
 ) -> UnitManifest:
     return UnitManifest(
         unit_id,
         (sys.executable, "-u", str(_CHILD), *scenario),
         RestartPolicy.ALWAYS,
         "root",
-        inputs=inputs,
+    )
+
+
+def _script_unit(runner_path: Path, unit_id: str = "svc") -> UnitManifest:
+    runner_path.write_text("#!/bin/sh\nwhile true; do sleep 1; done\n")
+    runner_path.chmod(0o755)
+    return UnitManifest(
+        unit_id,
+        (str(runner_path),),
+        RestartPolicy.ALWAYS,
+        "root",
     )
 
 
@@ -81,13 +89,6 @@ def _supervisor(
         clock=system_clock(),
         root_pid=os.getpid(),
     )
-
-
-def _sealed_input(tmp_path: Path, unit_id: str = "svc") -> tuple[Path, InputSeal]:
-    path = tmp_path / f"{unit_id}-input"
-    path.write_text("v1")
-    path = path.resolve()
-    return path, InputSeal.capture(path)
 
 
 async def _entry(owner: Supervisor) -> dict[str, Any]:
@@ -237,18 +238,18 @@ async def test_boot_supersedes_a_stored_root_stop(tmp_path: Path) -> None:
 async def test_restart_up_half_failure_records_explicit_state(
     tmp_path: Path, recorder: _Recorder
 ) -> None:
-    input_path, seal = _sealed_input(tmp_path)
-    owner = _supervisor(tmp_path, [_unit(*_SLEEP_FOREVER, inputs=(seal,))])
+    runner = tmp_path / "runner.sh"
+    owner = _supervisor(tmp_path, [_script_unit(runner)])
     await owner.start()
     try:
-        input_path.write_text("v2")
+        runner.unlink()
         result = await owner.restart("svc")
         entry = cast("list[dict[str, Any]]", result["units"])[0]
         assert entry["action"] == "failed"
         status = await _entry(owner)
         assert status["intent"] == "running" and status["state"] == "stopped"
         assert status["restart_failed"]["stage"] == "up"
-        assert "input" in status["restart_failed"]["detail"]
+        assert "spawn failed" in status["restart_failed"]["detail"]
         assert owner.revival_deferral("svc") is None, "a failed restart is not an operator stop"
         stored = intent_store.read(tmp_path, "svc")
         assert stored is not None and stored.intent is UnitIntent.RUNNING
@@ -262,25 +263,26 @@ async def test_restart_up_half_failure_records_explicit_state(
 async def test_restart_up_half_failure_retry_replaces_and_clears(
     tmp_path: Path, recorder: _Recorder
 ) -> None:
-    input_path, seal = _sealed_input(tmp_path)
+    runner = tmp_path / "runner.sh"
     pc = FakeProcessControl(forward_to=SYSTEM_PROCESS_CONTROL)
     owner = _supervisor(
         tmp_path,
-        [_unit(*_SLEEP_FOREVER, inputs=(seal,))],
+        [_script_unit(runner)],
         process_control=pc,
     )
     await owner.start()
     original = owner._units["svc"].generation
     assert original is not None
     try:
-        input_path.write_text("v2")
+        runner.unlink()
         await owner.restart("svc")
         assert original.exited.is_set() and original.proc.returncode is not None
         failed = intent_store.read(tmp_path, "svc")
         assert failed is not None and failed.intent is UnitIntent.RUNNING
         assert failed.restart_failed is not None and failed.restart_failed.stage is RestartStage.UP
         pc.signals.clear()
-        input_path.write_text("v1")
+        runner.write_text("#!/bin/sh\nwhile true; do sleep 1; done\n")
+        runner.chmod(0o755)
         result = await owner.restart("svc")
         assert cast("list[dict[str, Any]]", result["units"])[0]["action"] == "restarted"
         status = await _entry(owner)
@@ -349,11 +351,11 @@ async def test_restart_down_abort_records_stage_down_and_retry_settles(
 async def test_boot_carries_recorded_failure_until_a_generation_proves_it_gone(
     tmp_path: Path, recorder: _Recorder
 ) -> None:
-    input_path, seal = _sealed_input(tmp_path)
-    unit = _unit(*_SLEEP_FOREVER, inputs=(seal,))
+    runner = tmp_path / "runner.sh"
+    unit = _script_unit(runner)
     first = _supervisor(tmp_path, [unit])
     await first.start()
-    input_path.write_text("v2")
+    runner.unlink()
     await first.restart("svc")
     stored = intent_store.read(tmp_path, "svc")
     assert stored is not None and stored.restart_failed is not None
@@ -368,7 +370,8 @@ async def test_boot_carries_recorded_failure_until_a_generation_proves_it_gone(
         assert "spawn failed" in (entry["last_error"] or "")
         assert len(recorder.events("root_restart_failed")) == 1, "no duplicate enter on carry"
         assert recorder.events("root_restart_cleared") == []
-        input_path.write_text("v1")
+        runner.write_text("#!/bin/sh\nwhile true; do sleep 1; done\n")
+        runner.chmod(0o755)
         await second.restart("svc")
         entry = await _entry(second)
         assert entry["restart_failed"] is None and entry["state"] == "running"
@@ -401,47 +404,6 @@ async def test_failure_facts_report_absence_until_a_generation_exists(tmp_path: 
         stopped = owner.unit_failure_facts("svc")
         assert stopped.observed_absent is True and stopped.intent_running is False
         assert derive_kind(stopped, restart_limit_reached=False) is None, "a stop is a decision"
-    finally:
-        await owner.shutdown()
-
-
-# meiva:note
-# The seal is what decides whether this root may spawn a unit again, so "did its input change
-# since admission" has to be answerable without attempting a spawn — that is the whole of
-# task #6403's visibility half. An unchanged input answers with nothing, a changed one names
-# the path, and a unit outside this tree is an error rather than an empty answer.
-async def test_a_changed_sealed_input_is_reported_as_drift(tmp_path: Path) -> None:
-    input_path, seal = _sealed_input(tmp_path)
-    owner = _supervisor(tmp_path, [_unit(*_SLEEP_FOREVER, inputs=(seal,))])
-    assert owner.unit_input_drift("svc") == (), "admission bytes are the baseline"
-    input_path.write_text("v2")
-    assert owner.unit_input_drift("svc") == (str(input_path),)
-
-
-# meiva:note
-# The recovery the seal needs (task #6403). A drifted input makes the unit unreplaceable — the
-# first restart below is the negative control and must fail while the bytes differ — and
-# re-admission is what makes it replaceable again WITHOUT a new root generation. Re-admission
-# restarts nothing: the evidence that nothing was replaced is that the unit answered "failed"
-# before it and "restarted" after.
-async def test_re_admission_makes_a_drifted_unit_replaceable_again(tmp_path: Path) -> None:
-    input_path, seal = _sealed_input(tmp_path)
-    owner = _supervisor(tmp_path, [_unit(*_SLEEP_FOREVER, inputs=(seal,))])
-    await owner.start()
-    try:
-        await _wait_state(owner, "running")
-        input_path.write_text("v2")
-        assert owner.unit_input_drift("svc") == (str(input_path),)
-        refused = cast("list[dict[str, Any]]", (await owner.restart("svc"))["units"])[0]
-        assert refused["action"] == "failed"
-        assert "service input changed since generation admission" in str(refused["error"])
-        changed = owner.admit_inputs("svc", caller="test")
-        assert [(path, len(old), len(new)) for path, old, new in changed] == [
-            (str(input_path), 64, 64)
-        ]
-        assert owner.unit_input_drift("svc") == ()
-        again = cast("list[dict[str, Any]]", (await owner.restart("svc"))["units"])[0]
-        assert again["action"] == "restarted"
     finally:
         await owner.shutdown()
 
