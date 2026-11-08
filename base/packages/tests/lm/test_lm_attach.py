@@ -265,7 +265,7 @@ def test_deepseek_attach_policy_switches_dimension_tier_at_image_15(
 def test_builtin_provider_bindings_own_attach_policy(*, model_catalog: ModelCatalog) -> None:
     assert model_catalog.bindings["claude-"].attach == AttachPolicy(
         file_size_limits={"image": 10 * 1024 * 1024, "pdf": 32 * 1024 * 1024},
-        image_dimension_tiers=((1, 8000),),
+        image_dimension_tiers=((1, 8000), (2, 3000)),
         pdf_document_block=True,
     )
     assert model_catalog.bindings["deepseek-"].attach == AttachPolicy(

@@ -98,3 +98,87 @@ def test_reasoning_already_present_no_overwrite():
 
 def test_a_none_chunk_stays_none() -> None:
     assert retain_usage_details(None, _message_delta_event(thinking_tokens=500)) is None
+
+
+def test_is_foreign_thinking_signature() -> None:
+    from base.lm.compat.anthropic_thinking import is_foreign_thinking_signature
+
+    assert is_foreign_thinking_signature("9d154c27-92a4-4903-b842-e98dc9e20cb1")
+    assert is_foreign_thinking_signature("opaque")
+    assert is_foreign_thinking_signature(None)
+    assert is_foreign_thinking_signature(123)
+    real_sig = (
+        "CAQS6QQKEAgTGAI4AUIIdGhpbmtpbmcSDEWCdz8HUZep1rKU9BoMqtEwVUMVL2tBarjsIjAWV9dPQQiZOhou"
+    )
+    assert not is_foreign_thinking_signature(real_sig)
+
+
+def test_sanitize_anthropic_messages_drops_foreign_thinking() -> None:
+    from langchain_core.messages import AIMessage, HumanMessage
+
+    from base.lm.compat.anthropic_thinking import sanitize_anthropic_messages
+
+    uuid_sig = "2668f888-1c8d-4655-94ac-50c9a3bf0011"
+    real_sig = (
+        "CAQS6QQKEAgTGAI4AUIIdGhpbmtpbmcSDEWCdz8HUZep1rKU9BoMqtEwVUMVL2tBarjsIjAWV9dPQQiZOhou"
+    )
+
+    messages = [
+        HumanMessage(content="Hello"),
+        AIMessage(
+            content=[
+                {"type": "thinking", "thinking": "deepseek thinking", "signature": uuid_sig},
+                {"type": "text", "text": "hello from deepseek"},
+            ]
+        ),
+        AIMessage(
+            content=[
+                {"type": "thinking", "thinking": "claude thinking", "signature": real_sig},
+                {"type": "text", "text": "hello from claude"},
+            ]
+        ),
+        AIMessage(
+            content=[
+                {"type": "thinking", "thinking": "only thinking", "signature": uuid_sig},
+            ]
+        ),
+    ]
+
+    sanitized = sanitize_anthropic_messages(messages)
+    assert len(sanitized) == 4
+    assert sanitized[1].content == [{"type": "text", "text": "hello from deepseek"}]
+    assert sanitized[2].content == [
+        {"type": "thinking", "thinking": "claude thinking", "signature": real_sig},
+        {"type": "text", "text": "hello from claude"},
+    ]
+    assert sanitized[3].content == [{"type": "text", "text": ""}]
+
+
+def test_sanitize_anthropic_messages_downscales_multi_images() -> None:
+    from langchain_core.messages import HumanMessage
+
+    from base.lm.compat.anthropic_thinking import sanitize_anthropic_messages
+
+    data_uri = "data:image/png;base64,large_fake_data"
+
+    def mock_downscaler(url: str, max_px: int) -> str:
+        assert max_px == 3000
+        return "data:image/png;base64,downscaled_data"
+
+    single_msgs = [HumanMessage(content=[{"type": "image_url", "image_url": {"url": data_uri}}])]
+    result_single = sanitize_anthropic_messages(single_msgs, image_downscaler=mock_downscaler)
+    c0 = result_single[0].content
+    assert isinstance(c0, list) and isinstance(c0[0], dict)
+    assert c0[0]["image_url"]["url"] == data_uri
+
+    multi_msgs = [
+        HumanMessage(content=[{"type": "image_url", "image_url": {"url": data_uri}}]),
+        HumanMessage(content=[{"type": "image_url", "image_url": {"url": data_uri}}]),
+    ]
+    result_multi = sanitize_anthropic_messages(multi_msgs, image_downscaler=mock_downscaler)
+    m0 = result_multi[0].content
+    m1 = result_multi[1].content
+    assert isinstance(m0, list) and isinstance(m0[0], dict)
+    assert isinstance(m1, list) and isinstance(m1[0], dict)
+    assert m0[0]["image_url"]["url"] == "data:image/png;base64,downscaled_data"
+    assert m1[0]["image_url"]["url"] == "data:image/png;base64,downscaled_data"

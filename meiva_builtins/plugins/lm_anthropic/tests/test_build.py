@@ -118,3 +118,36 @@ def test_anthropic_workspace_id_overrides_custom_headers() -> None:
         "anthropic-workspace-id": "wrkspc_new",
         "x-baz": "qux",
     }
+
+
+def test_build_provides_image_downscaler() -> None:
+    llm = _built(_context("claude-sonnet-5"))
+    assert llm._image_downscaler is not None
+
+
+def test_downscale_image_data_uri() -> None:
+    import base64
+    import io
+
+    from PIL import Image
+
+    from meiva_builtins.plugins.lm_anthropic.provider import downscale_image_data_uri
+
+    small_img = Image.new("RGB", (100, 100), color="red")
+    buf = io.BytesIO()
+    small_img.save(buf, format="PNG")
+    small_b64 = base64.b64encode(buf.getvalue()).decode("ascii")
+    small_url = f"data:image/png;base64,{small_b64}"
+    assert downscale_image_data_uri(small_url, max_px=3000) == small_url
+
+    large_img = Image.new("RGB", (3200, 1600), color="blue")
+    buf = io.BytesIO()
+    large_img.save(buf, format="PNG")
+    large_b64 = base64.b64encode(buf.getvalue()).decode("ascii")
+    large_url = f"data:image/png;base64,{large_b64}"
+
+    downscaled_url = downscale_image_data_uri(large_url, max_px=3000)
+    assert downscaled_url != large_url
+    out_b64 = downscaled_url.split(";base64,", 1)[1]
+    with Image.open(io.BytesIO(base64.b64decode(out_b64))) as resized:
+        assert max(resized.size) <= 3000

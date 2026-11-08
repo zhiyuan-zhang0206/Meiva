@@ -87,10 +87,7 @@ def test_anthropic_wire_model_speed_and_beta(
     )
     assert isinstance(model, ThinkingTokensChatAnthropic)
     # Exercise the SDK's actual wire conversion despite its incomplete typing.
-    payload = cast(
-        "dict[str, object]",
-        model._get_request_payload([HumanMessage(content="Hello")]),  # pyright: ignore[reportUnknownMemberType]
-    )
+    payload = model._get_request_payload([HumanMessage(content="Hello")])  # pyright: ignore[reportUnknownMemberType]
     assert payload["model"] == "claude-opus-5-5"
     assert _section(payload, "output_config")["effort"] == "medium"
     if fast:

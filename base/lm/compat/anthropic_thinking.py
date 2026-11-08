@@ -18,14 +18,130 @@ This is the Anthropic-side mirror of `base/lm/compat/openai_reasoning.py`
 
 from __future__ import annotations
 
+from collections.abc import Callable, Sequence
 from typing import Protocol
 
 from langchain_anthropic import ChatAnthropic
-from langchain_core.messages import AIMessageChunk
+from langchain_core.language_models import LanguageModelInput
+from langchain_core.messages import AIMessage, AIMessageChunk, BaseMessage
 from langchain_core.outputs import ChatResult
 
+from base.host.boundary.json_values import is_object_dict
 from base.host.boundary.untyped import object_of
 from base.lm.compat.provider_sdks.anthropic_sdk import anthropic
+
+type ImageDownscaler = Callable[[str, int], str]
+
+
+# meiva:note
+# Anthropic signatures are base64-encoded protobuf tokens without hyphens (>= 50 chars).
+# DeepSeek and synthetic fixtures produce UUID4 strings (with hyphens) or short tokens.
+def is_foreign_thinking_signature(signature: object) -> bool:
+    if not isinstance(signature, str):
+        return True
+    return "-" in signature or len(signature) < 50
+
+
+# meiva:note
+# Redacted thinking tokens from non-Anthropic providers also carry foreign placeholders.
+def _is_foreign_redacted_data(data: object) -> bool:
+    if not isinstance(data, str):
+        return True
+    return "-" in data or len(data) < 50
+
+
+# meiva:note
+# Strip foreign thinking blocks from an AIMessage, replacing with an empty text block if empty.
+def _sanitize_ai_content(content: Sequence[object]) -> list[object]:
+    new_content: list[object] = []
+    for block in content:
+        if is_object_dict(block):
+            b_type = block.get("type")
+            if b_type == "thinking" and is_foreign_thinking_signature(block.get("signature")):
+                continue
+            if b_type == "redacted_thinking" and _is_foreign_redacted_data(block.get("data")):
+                continue
+        new_content.append(block)
+    if not new_content:
+        return [{"type": "text", "text": ""}]
+    return new_content
+
+
+# meiva:note
+# Count image_url blocks across messages to determine whether multi-image limits apply.
+def _count_image_blocks(messages: Sequence[BaseMessage]) -> int:
+    count = 0
+    for msg in messages:
+        content = msg.content
+        if isinstance(content, list):
+            for block in content:
+                if is_object_dict(block) and block.get("type") == "image_url":
+                    count += 1
+    return count
+
+
+# meiva:note
+# Downscale image_url blocks exceeding max_multi_image_px via the injected downscaler.
+def _downscale_images_in_content(
+    content: Sequence[object],
+    image_downscaler: ImageDownscaler,
+    max_multi_image_px: int,
+) -> tuple[list[object], bool]:
+    changed = False
+    new_blocks: list[object] = []
+    for block in content:
+        if is_object_dict(block) and block.get("type") == "image_url":
+            img_obj = block.get("image_url")
+            if is_object_dict(img_obj):
+                url_val = img_obj.get("url")
+                if isinstance(url_val, str):
+                    new_url = image_downscaler(url_val, max_multi_image_px)
+                    if new_url != url_val:
+                        new_img_dict: dict[str, object] = dict(img_obj)
+                        new_img_dict["url"] = new_url
+                        new_block: dict[str, object] = dict(block)
+                        new_block["image_url"] = new_img_dict
+                        new_blocks.append(new_block)
+                        changed = True
+                        continue
+        new_blocks.append(block)
+    return new_blocks, changed
+
+
+# meiva:note
+# Sanitize message history for Anthropic Claude: strip foreign thinking blocks and downscale images.
+def sanitize_anthropic_messages(
+    messages: Sequence[BaseMessage],
+    *,
+    image_downscaler: ImageDownscaler | None = None,
+    max_multi_image_px: int = 3000,
+) -> list[BaseMessage]:
+    multi_image = _count_image_blocks(messages) > 1
+    sanitized: list[BaseMessage] = []
+    changed_any = False
+
+    for msg in messages:
+        content = msg.content
+        msg_changed = False
+        if isinstance(msg, AIMessage) and isinstance(content, list):
+            new_content = _sanitize_ai_content(content)
+            if new_content != content:
+                content = new_content
+                msg_changed = True
+
+        if multi_image and image_downscaler is not None and isinstance(content, list):
+            content, images_changed = _downscale_images_in_content(
+                content, image_downscaler, max_multi_image_px
+            )
+            msg_changed = msg_changed or images_changed
+
+        if msg_changed:
+            changed_any = True
+            sanitized.append(msg.model_copy(update={"content": content}))
+        else:
+            sanitized.append(msg)
+
+    return sanitized if changed_any else list(messages)
 
 
 # meiva:note
@@ -44,6 +160,34 @@ class ThinkingTokensChatAnthropic(ChatAnthropic):
     `base.agents.history.timeline`, `gateway.inspect.router`) all see a non-zero
     `reasoning` count — no other file needs to change.
     """
+
+    def __init__(
+        self,
+        *args: object,
+        image_downscaler: ImageDownscaler | None = None,
+        **kwargs: object,
+    ) -> None:
+        # meiva:note
+        # Retain the image downscaler before passing arguments to ChatAnthropic.__init__.
+        super().__init__(*args, **kwargs)  # pyright: ignore[reportAny]
+        self._image_downscaler = image_downscaler
+
+    def _get_request_payload(
+        self,
+        input_: LanguageModelInput,
+        *,
+        stop: list[str] | None = None,
+        **kwargs: object,
+    ) -> dict[str, object]:
+        # meiva:note
+        # Strip foreign thinking signatures and resize multi-image requests before Anthropic payload formatting.
+        if self.model.startswith("claude-"):
+            messages = self._convert_input(input_).to_messages()
+            input_ = sanitize_anthropic_messages(
+                messages,
+                image_downscaler=self._image_downscaler,
+            )
+        return super()._get_request_payload(input_, stop=stop, **kwargs)  # pyright: ignore[reportAny, reportUnknownMemberType, reportUnknownVariableType]
 
     def _format_output(
         self,
