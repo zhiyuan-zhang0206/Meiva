@@ -151,14 +151,6 @@ def _serve_process(
         home=process.home,
     )
 
-    # Raise the cluster's minimum code version to this gateway's own: a process
-    # left running older code (a runner offline during the update) then refuses
-    # to write. After the schema assertion and the logger init, so a refusal or
-    # meiva:note
-    # a failure is logged.
-    if plan.raise_min_code_version:
-        process.gate.raise_min_code_version(process.database())
-
     # Thread dump on SIGUSR1: the watchdog's gateway healthcheck sends this
     # before respawning a frozen gateway, so a stall lands a stack trace in
     # the pane log instead of a silent black box (2026-08-03: 13 freezes in

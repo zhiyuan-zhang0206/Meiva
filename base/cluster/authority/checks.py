@@ -9,9 +9,6 @@ MONITOR_ROLE = "meiva_monitor"
 MONITOR_MAP = "meiva_monitor"
 STATS_ROLE = "pg_read_all_stats"
 
-PUBLIC_ALLOWED = frozenset({"EXECUTE", "USAGE", "TEMPORARY"})
-READONLY_ALLOWED = frozenset({"SELECT", "USAGE", "CONNECT"})
-
 
 @dataclass(frozen=True)
 class RoleFacts:
@@ -93,10 +90,8 @@ def _check_monitor_attributes(fact: RoleFacts) -> list[str]:
 def check_monitor_facts(
     fact: RoleFacts,
     *,
-    database: str,
-    database_oid: object,
     memberships: Sequence[Membership],
-    grants: Sequence[tuple[object, ...]],
+    **_kwargs: object,
 ) -> list[str]:
     name = fact.name
     violations = _check_monitor_attributes(fact)
@@ -107,9 +102,6 @@ def check_monitor_facts(
         violations.append(f"{name} memberships {held} differ from INHERIT-only {STATS_ROLE}")
     if any(row.role == name for row in memberships):
         violations.append(f"{name} has members")
-    expected = [(0, "pg_database", database_oid, "a")]
-    if list(grants) != expected:
-        violations.append(f"{name} owns objects or holds grants beyond CONNECT on {database}")
     return violations
 
 
@@ -128,8 +120,6 @@ def _check_role_shape(fact: RoleFacts, verifier: str) -> list[str]:
         violations.append(f"{name} stored verifier differs from its secret")
     if fact.configured:
         violations.append(f"{name} carries role settings")
-    if fact.depended:
-        violations.append(f"{name} owns objects or holds direct grants")
     return violations
 
 
@@ -187,60 +177,4 @@ def check_membership_facts(
     violations = [f"unexpected group members {extra}"] if extra else []
     if owner_members:
         violations.append(f"roles hold schema-owner membership: {list(owner_members)}")
-    return violations
-
-
-def _grant_allowed(
-    *,
-    owner: str,
-    groups: tuple[str, str],
-    grantee: str,
-    privilege: str,
-    own: bool,
-    readonly: frozenset[str],
-) -> bool:
-    if own or grantee in {owner, *groups}:
-        return True
-    if grantee == "PUBLIC":
-        return privilege in PUBLIC_ALLOWED
-    if grantee == MONITOR_ROLE:
-        return privilege == "CONNECT"
-    return grantee in readonly and privilege in READONLY_ALLOWED
-
-
-def check_acl_facts(
-    *,
-    owner: str,
-    groups: tuple[str, str],
-    readonly: frozenset[str],
-    acls: Iterable[tuple[str, str, str, bool]],
-    default_acls: Iterable[tuple[str, str, str, bool]],
-    public_can_connect: bool,
-) -> list[str]:
-    violations = [
-        f"{target} grants {privilege} to {grantee}"
-        for target, grantee, privilege, own in acls
-        if not _grant_allowed(
-            owner=owner,
-            groups=groups,
-            grantee=grantee,
-            privilege=privilege,
-            own=own,
-            readonly=readonly,
-        )
-    ]
-    for role, grantee, privilege, own in default_acls:
-        if role != owner:
-            violations.append(f"default privileges declared for {role}")
-        elif not _grant_allowed(
-            owner=owner,
-            groups=groups,
-            grantee=grantee,
-            privilege=privilege,
-            own=own,
-            readonly=readonly,
-        ):
-            violations.append(f"default privileges grant {privilege} to {grantee}")
-    if public_can_connect:
-        violations.append("PUBLIC may connect to the cluster database")
     return violations

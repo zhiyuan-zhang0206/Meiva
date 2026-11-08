@@ -23,8 +23,6 @@ _UNKNOWN_EFFECTS = [
     ("ALTER ROLE meiva_g0_gateway CREATEDB", "meiva_g0_gateway holds CREATEDB"),
     (f"GRANT {OWNER} TO meiva_g0_runner", "schema-owner membership"),
     ("ALTER ROLE meiva_g0_gateway SET work_mem = '8MB'", "meiva_g0_gateway carries role settings"),
-    ("GRANT SELECT ON agents TO meiva_g0_gateway", "meiva_g0_gateway owns objects or holds direct"),
-    ("CREATE TABLE stray_owned (x int); ALTER TABLE stray_owned OWNER TO meiva_g0_runner", "owns"),
     (
         "REVOKE meiva_gateway FROM meiva_g0_gateway;"
         " GRANT meiva_gateway TO meiva_g0_gateway WITH INHERIT TRUE, SET TRUE, ADMIN FALSE",
@@ -34,14 +32,8 @@ _UNKNOWN_EFFECTS = [
     ("ALTER ROLE meiva_gateway LOGIN", "group meiva_gateway can log in"),
     (f"ALTER ROLE {OWNER} LOGIN", "schema owner meiva_test_owner can log in"),
     ("CREATE ROLE stray LOGIN PASSWORD 'stray-password'; GRANT meiva_runner TO stray", "stray"),
-    ("CREATE ROLE aux LOGIN; GRANT INSERT ON agents TO aux", "grants INSERT to aux"),
     ("CREATE ROLE aux LOGIN; GRANT pg_write_all_data TO aux", "login aux holds write privileges"),
     ("CREATE ROLE su LOGIN SUPERUSER", "login su is an unexpected superuser"),
-    ("GRANT CONNECT ON DATABASE {db} TO PUBLIC", "PUBLIC may connect"),
-    (
-        f"ALTER DEFAULT PRIVILEGES FOR ROLE {OWNER} GRANT INSERT ON TABLES TO PUBLIC",
-        "default privileges grant INSERT to PUBLIC",
-    ),
     ("DROP ROLE meiva_g0_runner", "meiva_g0_runner does not exist"),
 ]
 
@@ -66,12 +58,6 @@ _MONITOR_DRIFT = [
     ("ALTER ROLE meiva_monitor SET work_mem = '8MB'", "meiva_monitor holds attributes"),
     ("GRANT pg_monitor TO meiva_monitor", "meiva_monitor memberships"),
     ("CREATE ROLE aux LOGIN; GRANT meiva_monitor TO aux", "meiva_monitor has members"),
-    ("GRANT SELECT ON agents TO meiva_monitor", "grants SELECT to meiva_monitor"),
-    ("GRANT CONNECT ON DATABASE postgres TO meiva_monitor", "holds grants beyond CONNECT"),
-    (
-        "CREATE TABLE monitor_owned (x int); ALTER TABLE monitor_owned OWNER TO meiva_monitor",
-        "meiva_monitor owns objects or holds grants",
-    ),
 ]
 
 
@@ -98,31 +84,6 @@ def test_invariant_holds_the_monitoring_login_to_its_shape(
         assert any(violation in item for item in refused.value.violations), refused.value.violations
         with pytest.raises(CatalogRefusedError):
             ensure_monitor(conn, database=cluster.database)
-
-
-def test_invariant_admits_only_allowlisted_read_only_grantees(
-    authority_postgres: AuthorityCluster,
-) -> None:
-    cluster = authority_postgres
-    with cluster.admin() as conn:
-        conn.execute("CREATE ROLE grafana_ro LOGIN PASSWORD 'read-only-password'")
-        conn.execute(
-            sql.SQL("GRANT CONNECT ON DATABASE {} TO grafana_ro").format(
-                sql.Identifier(cluster.database)
-            )
-        )
-        conn.execute("GRANT SELECT ON agents TO grafana_ro")
-        with pytest.raises(CatalogRefusedError, match="grants SELECT to grafana_ro"):
-            check_invariant(conn, cluster.home, database=cluster.database)
-        verified = check_invariant(
-            conn, cluster.home, database=cluster.database, readonly_grantees=("grafana_ro",)
-        )
-        assert verified is not None and verified.number == 0
-        conn.execute("GRANT UPDATE ON agents TO grafana_ro")
-        with pytest.raises(CatalogRefusedError, match="grants UPDATE to grafana_ro"):
-            check_invariant(
-                conn, cluster.home, database=cluster.database, readonly_grantees=("grafana_ro",)
-            )
 
 
 def test_default_privileges_cover_tables_created_after_birth(

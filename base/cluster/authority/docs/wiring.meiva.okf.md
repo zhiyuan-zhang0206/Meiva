@@ -81,7 +81,7 @@ What a bundle carries and who shares it:
   serving the pending pair -> a pooled `SELECT 1` as each login -> `activate`.
   A retry reconciles to the same generation 0.
 - **Ordinary start**: `ensure_groups` after migrations -> `ensure_monitor` ->
-  `check_invariant` (read-only grantees such as `grafana_ro`); a home
+  `check_invariant`; a home
   with no ledger is refused before any native effect.
 - **Launch**: the root launcher delivers `MEIVA_DB_URL` + `MEIVA_DB_GENERATION` per
   service class; `base/host/env/dotenv_boot` keeps a delivery naming this home's

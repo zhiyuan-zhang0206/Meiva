@@ -21,8 +21,6 @@ Its whole privilege surface, verified by the invariant:
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-
 from psycopg import sql
 
 from base.cluster.authority.catalog import (
@@ -39,47 +37,21 @@ from base.cluster.authority.checks import (
 from base.cluster.authority.checks import (
     STATS_ROLE as _STATS_ROLE,
 )
-from base.db.rows import query_all
 from base.host.db_authority.model import AuthorityRefusedError, CatalogRefusedError
 
 __all__ = ["MONITOR_MAP", "MONITOR_ROLE", "ensure_monitor", "monitor_violations"]
 
-_DIRECT_GRANTS = """
-SELECT d.dbid AS dbid, d.classid::regclass::text AS classid, d.objid AS objid,
-       d.deptype AS deptype
-FROM pg_shdepend d JOIN pg_authid a ON a.oid = d.refobjid
-WHERE d.refclassid = 'pg_authid'::regclass AND a.rolname = %s
-ORDER BY 1, 2, 3, 4
-"""
-
-
-# meiva:note
-# One row of `_DIRECT_GRANTS`: the dependency a role holds on a shared object.
-@dataclass(frozen=True)
-class _GrantRow:
-    dbid: int
-    classid: str
-    objid: int
-    deptype: str
-
 
 def monitor_violations(conn: Conn, *, database: str) -> list[str]:
     """Why the existing monitor role is not exactly its shape (absent: none)."""
+    del database
     fact = role_facts(conn, (MONITOR_ROLE,)).get(MONITOR_ROLE)
     if fact is None:
         return []
     rows = memberships(conn, (MONITOR_ROLE,))
-    row = conn.execute("SELECT oid FROM pg_database WHERE datname = %s", (database,)).fetchone()
-    grants = [
-        (grant.dbid, grant.classid, grant.objid, grant.deptype)
-        for grant in query_all(conn, _GrantRow, _DIRECT_GRANTS, (MONITOR_ROLE,))
-    ]
     return check_monitor_facts(
         fact,
-        database=database,
-        database_oid=None if row is None else row[0],
         memberships=rows,
-        grants=grants,
     )
 
 

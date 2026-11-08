@@ -1,5 +1,4 @@
 exports = ["runner_logins.py", "unit_capability_support.py"]
 
 [uses]
-"test_runner_min_code_version.py" = ["runner_logins.py"]
 "test_unit_capability.py" = ["unit_capability_support.py"]

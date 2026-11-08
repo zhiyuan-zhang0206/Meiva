@@ -11,9 +11,7 @@ tags: [postgres, authority, lifecycle]
 schema owner and two stable `NOLOGIN` groups hold every privilege; application
 processes log in only as the home's one **write generation**: `meiva_g0_gateway`
 and `meiva_g0_runner`, minted by the home's first start. Nothing revokes or
-replaces it: a release does not change it (the
-[code version gate](../../../db/docs/code-version-gate.meiva.okf.md) keeps old code
-from writing) and no operation rotates it. The decisions are
+replaces it: a release does not change it and no operation rotates it. The decisions are
 [internal data plane always authenticated](../../../../docs/decisions/data/security/2026-09-26-internal-data-plane-always-authenticated.md)
 and [retiring write-generation rotation](../../../../docs/decisions/runtime/updates/execution/converge/2026-10-03-retire-write-generation-rotation.md).
 
@@ -77,10 +75,7 @@ already published; nothing is accepted or delivered before `activate`.
 `invariant.check_invariant` is read-only and fail closed. It reports every
 violation together: owner or group shape, members other than the generation's
 pair, schema-owner membership, an auxiliary login that is a superuser, owns objects or can write
-`public`, a monitoring login that differs from its shape, an ACL or
-default-privilege grantee outside owner/groups/PUBLIC (`EXECUTE`, `USAGE`,
-`TEMPORARY`), the monitor (`CONNECT` only) or an allowlisted read-only role, and
-PUBLIC `CONNECT`. A missing monitor is not a violation; start creates it.
+`public`, and a monitoring login that differs from its shape. A missing monitor is not a violation; start creates it.
 
 A group member outside the generation is a refusal, never a repair: start does
 not demote or drop it.
