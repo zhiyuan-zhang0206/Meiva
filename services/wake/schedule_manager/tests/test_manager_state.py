@@ -13,6 +13,7 @@ import psycopg
 import pytest
 from psycopg_pool import ConnectionPool
 
+from base.clock.tests.seeded_rng import seeded_rng
 from base.cluster import session_name
 from base.config import settings
 from base.daemon.schedules.claim import write_claim
@@ -82,7 +83,7 @@ def fake_session(
     serving_root: start_serving.RootBirth, unit_home: Path
 ) -> tuple[_FakeBackend, list[int]]:
     backend = _FakeBackend()
-    generation = start_serving.begin_start(unit_home)
+    generation = start_serving.begin_start(unit_home, seeded_rng())
     assert (
         start_serving.mark_serving(
             unit_home, generation, runtime=serving_root.runtime, observe=observe
@@ -448,7 +449,7 @@ def test_a_refused_launch_does_not_consume_the_auto_restart_budget(
     sid = _insert_running(db_conn, "host-gated", generation="host-a")
     backend.epoch = "host-b"
     manager = schedule_manager(pool, backend)
-    start_serving.begin_start(unit_home)
+    start_serving.begin_start(unit_home, seeded_rng())
 
     for _ in range(POLICY.auto_restart_max_per_window + 2):
         manager.reconcile(now=NOW)

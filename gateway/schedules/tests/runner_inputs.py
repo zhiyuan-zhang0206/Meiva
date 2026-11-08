@@ -5,6 +5,7 @@ from functools import partial
 from base.agents.context import MeivaContext
 from base.agents.context.identity import AgentIdentity
 from base.clock import Clock
+from base.clock.tests.seeded_rng import seeded_rng
 from base.cluster.dataplane.direct_url import ClusterDirectUrl
 from base.cluster.machine import MachineIdentityReader
 from base.config.tests.configuration import snapshot_process_config
@@ -54,6 +55,7 @@ def run_schedule(
                 clock_factory=Clock.from_settings,
                 meiva_home=meiva_home(),
                 environ=config.process_environment(),
+                rng=seeded_rng(),
             )
         )
         return engine.run(
@@ -68,5 +70,6 @@ def run_schedule(
                 policy=policy,
                 home=meiva_home(),
                 main_thread_id=threading.get_ident(),
+                rng=seeded_rng(),
             ),
         )

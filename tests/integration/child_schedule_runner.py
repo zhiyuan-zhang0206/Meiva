@@ -18,6 +18,7 @@ import threading
 import time
 from pathlib import Path
 
+from base.clock.tests.seeded_rng import seeded_rng
 from base.host.exit_codes import hard_exit
 
 # meiva:note
@@ -123,6 +124,7 @@ def completion_during_stall(schedule_id: int) -> None:
         policy=StallPolicy(timeout_s=_BUDGET_S, record_deadline_s=_RECORD_DEADLINE_S),
         home=meiva_home(),
         main_thread_id=threading.get_ident(),
+        rng=seeded_rng(),
     )
     raise SystemExit(engine.run(schedule_id, None, root))
 

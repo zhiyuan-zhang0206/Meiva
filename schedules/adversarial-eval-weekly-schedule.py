@@ -1,6 +1,7 @@
 # meiva:link schedules/docs/adversarial-eval.meiva.okf.md
 
 import os
+import random
 from datetime import UTC, datetime
 from functools import partial
 
@@ -22,12 +23,17 @@ _TIMING = LoopTiming(max_sleep=60.0, rest=0.0)
 
 if __name__ == "__main__":
     home = resolve_meiva_home()
+    # meiva:note
+    # The process entry builds the one generator this run draws from — the batch mints each case's
+    # canary through it (`new_uuid(rng)`), the same `random.SystemRandom` the schedule entry binds
+    # into the SDK context.
+    rng = random.SystemRandom()
     with open_schedule_entry(globals().get("MEIVA_SCHEDULE_INPUTS"), home=home) as inputs:
         config = BatchConfig(root=home / "adversarial_eval")
         run_loop(
             inputs.database(),
             CronSchedule((Trigger(CRON),), timezone=cluster_timezone(), timing=_TIMING),
-            partial(fire_weekly_batch, config=config, clock=lambda: datetime.now(UTC)),
+            partial(fire_weekly_batch, config=config, clock=lambda: datetime.now(UTC), rng=rng),
             schedule_id=parse_schedule_id(os.environ.get("MEIVA_SCHEDULE_ID")),
             home=inputs.home,
             started_at=datetime.now(UTC),

@@ -7,6 +7,7 @@ import psycopg
 from psycopg_pool import ConnectionPool
 
 from base.clock import Clock
+from base.clock.tests.seeded_rng import seeded_rng
 from base.deploy.lifecycle import start_serving
 from base.deploy.lifecycle.tests.serving_root import observe
 from base.deploy.lifecycle.tests.serving_root import serving_root as serving_root
@@ -89,11 +90,12 @@ def test_independent_managers_partition_schedules_and_requests_by_machine(
         home_a.mkdir()
         home_b.mkdir()
 
-        gen_a = start_serving.begin_start(home_a)
+        rng = seeded_rng()
+        gen_a = start_serving.begin_start(home_a, rng)
         assert start_serving.mark_serving(
             home_a, gen_a, runtime=serving_root.runtime, observe=observe
         )
-        gen_b = start_serving.begin_start(home_b)
+        gen_b = start_serving.begin_start(home_b, rng)
         assert start_serving.mark_serving(
             home_b, gen_b, runtime=serving_root.runtime, observe=observe
         )
@@ -169,11 +171,12 @@ def test_colocated_split_unit_tie_breaker(
         home_1.mkdir()
         home_2.mkdir()
 
-        gen_1 = start_serving.begin_start(home_1)
+        rng = seeded_rng()
+        gen_1 = start_serving.begin_start(home_1, rng)
         assert start_serving.mark_serving(
             home_1, gen_1, runtime=serving_root.runtime, observe=observe
         )
-        gen_2 = start_serving.begin_start(home_2)
+        gen_2 = start_serving.begin_start(home_2, rng)
         assert start_serving.mark_serving(
             home_2, gen_2, runtime=serving_root.runtime, observe=observe
         )

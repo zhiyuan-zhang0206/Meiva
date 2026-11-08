@@ -5,6 +5,7 @@ from threading import Event, Thread
 
 import pytest
 
+from base.clock.tests.seeded_rng import seeded_rng
 from base.deploy.lifecycle.start_serving import RootBirth
 from base.deploy.lifecycle.tests.serving_root import observe, override_observed_root
 from base.host.tests.short_tmp import short_tmp as short_tmp
@@ -28,14 +29,15 @@ def test_new_start_attempt_invalidates_a_previous_serving_generation(
 ) -> None:
     from base.deploy.lifecycle import start_serving
 
-    previous = start_serving.begin_start(home)
+    rng = seeded_rng()
+    previous = start_serving.begin_start(home, rng)
     assert (
         start_serving.mark_serving(home, previous, runtime=serving_root.runtime, observe=observe)
         is True
     )
     assert start_serving.is_serving(home, observe=observe) is True
 
-    current = start_serving.begin_start(home)
+    current = start_serving.begin_start(home, rng)
 
     assert start_serving.is_serving(home, observe=observe) is False
     assert (
@@ -54,7 +56,7 @@ def test_clear_serving_keeps_revival_blocked(
 ) -> None:
     from base.deploy.lifecycle import start_serving
 
-    generation = start_serving.begin_start(home)
+    generation = start_serving.begin_start(home, seeded_rng())
     assert (
         start_serving.mark_serving(home, generation, runtime=serving_root.runtime, observe=observe)
         is True
@@ -75,7 +77,8 @@ def test_start_waits_for_an_authorized_recovery_action(
 ) -> None:
     from base.deploy.lifecycle import start_serving
 
-    generation = start_serving.begin_start(home)
+    rng = seeded_rng()
+    generation = start_serving.begin_start(home, rng)
     assert (
         start_serving.mark_serving(home, generation, runtime=serving_root.runtime, observe=observe)
         is True
@@ -91,7 +94,7 @@ def test_start_waits_for_an_authorized_recovery_action(
             assert release_recovery.wait(timeout=2)
 
     def start_again() -> None:
-        start_serving.begin_start(home)
+        start_serving.begin_start(home, rng)
         start_completed.set()
 
     recovery_thread = Thread(target=recover)
@@ -118,7 +121,7 @@ def test_old_birth_cannot_grant_after_observed_generation_changes(
     from base.deploy.lifecycle import start_serving
     from base.native_process.root_control.client import RootClientError
 
-    generation = start_serving.begin_start(home)
+    generation = start_serving.begin_start(home, seeded_rng())
     assert start_serving.mark_serving(
         home, generation, runtime=serving_root.runtime, observe=observe
     )
@@ -153,7 +156,7 @@ def test_marker_rejects_a_different_loaded_runtime(
 ) -> None:
     from base.deploy.lifecycle import start_serving
 
-    generation = start_serving.begin_start(home)
+    generation = start_serving.begin_start(home, seeded_rng())
     other = serving_root.runtime.model_copy(update={"interpreter": "/foreign/python"})
     with pytest.raises(RuntimeError, match="admitted loaded runtime"):
         start_serving.mark_serving(home, generation, runtime=other, observe=observe)
@@ -186,13 +189,14 @@ def test_birth_read_refuses_marker_replaced_during_native_observation(
 ) -> None:
     from base.deploy.lifecycle import start_serving
 
-    generation = start_serving.begin_start(home)
+    rng = seeded_rng()
+    generation = start_serving.begin_start(home, rng)
     assert start_serving.mark_serving(
         home, generation, runtime=serving_root.runtime, observe=observe
     )
 
     def raced(_home: Path) -> RootBirth:
-        start_serving.begin_start(home)
+        start_serving.begin_start(home, rng)
         return serving_root
 
     override_observed_root(raced)

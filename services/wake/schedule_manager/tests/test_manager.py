@@ -10,6 +10,7 @@ import pytest
 from psycopg_pool import ConnectionPool
 
 import services.wake.schedule_manager.manager as sm
+from base.clock.tests.seeded_rng import seeded_rng
 from base.cluster import session_name
 from base.config import settings
 from base.db import create_agent
@@ -104,7 +105,7 @@ def fake_session(
     serving_root: start_serving.RootBirth, unit_home: Path
 ) -> tuple[_FakeBackend, list[int]]:
     backend = _FakeBackend()
-    generation = start_serving.begin_start(unit_home)
+    generation = start_serving.begin_start(unit_home, seeded_rng())
     assert (
         start_serving.mark_serving(
             unit_home, generation, runtime=serving_root.runtime, observe=observe
@@ -254,7 +255,7 @@ def test_reconcile_defers_enabled_launch_until_the_host_is_serving(
     assert launched == []
     assert _status(db_conn, sid) == "stopped"
 
-    generation = start_serving.begin_start(unit_home)
+    generation = start_serving.begin_start(unit_home, seeded_rng())
     assert (
         start_serving.mark_serving(
             unit_home, generation, runtime=serving_root.runtime, observe=observe

@@ -13,6 +13,8 @@ from base.agents.context import MeivaContext
 from base.agents.context.gateway_client import transport
 from base.agents.context.identity import AgentIdentity
 from base.api_contracts.agent_contract import GatewayUnavailable
+from base.clock.ids import new_uuid
+from base.clock.tests.seeded_rng import seeded_rng
 from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config import ConfigBoot
@@ -40,10 +42,14 @@ def retry_gateway(
     config.set_field("gateway_url", gateway_stub.url)
     config.set_field("gateway_client_max_retries", 3)
     config.set_field("gateway_client_retry_delay_seconds", 0.0)
+    # meiva:note
+    # The context carries a seeded generator, so a keyed request mints the key this seed decides
+    # and the test can name it (seed 0, the first two draws).
     context = MeivaContext(
         identity=AgentIdentity(7, True),
         clients=derived_clients(config, machine_identity),
         machine=machine_identity,
+        rng=seeded_rng(),
     )
     previous = process_context.bound_context()
     process_context.bind_context(context)
@@ -165,8 +171,15 @@ def test_keyed_post_and_patch_mint_a_key_when_none_is_pinned(retry_gateway: Gate
     transport.patch("/api/tasks/1", {"priority": "P1"}, context=process_context.current_context())
     transport.post("/api/agents/1/system-note", {}, context=process_context.current_context())
     assert len(retry_gateway.received) == 2
+    # meiva:note
+    # The keys are the fixture's own draws: one per call, in call order, from the context's seeded
+    # generator -- the identifier comes from the carrier, not from the transport.
+    seeded = seeded_rng()
+    assert [request.headers["Idempotency-Key"] for request in retry_gateway.received] == [
+        new_uuid(seeded).hex,
+        new_uuid(seeded).hex,
+    ]
     for request in retry_gateway.received:
-        assert request.headers["Idempotency-Key"]
         assert request.headers["Idempotency-Scope"] == "principal-v1"
 
 

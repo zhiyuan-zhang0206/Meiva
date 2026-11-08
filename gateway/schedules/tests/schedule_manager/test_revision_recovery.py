@@ -5,7 +5,6 @@
 # (the command a session was started with) comes from a pty-sessions service answering on the
 # home's real socket (`FakePtyService`), so the manager reads provenance the way it does in
 # production. A test that needs provenance to be unreadable simply leaves that service down.
-
 from collections.abc import Generator
 from pathlib import Path
 
@@ -13,6 +12,7 @@ import psycopg
 import pytest
 
 import base.db
+from base.clock.tests.seeded_rng import seeded_rng
 from base.cluster import session_name
 from base.db.code_version_gate import ProcessDbGate
 from base.db.rows import query_one
@@ -49,7 +49,7 @@ def provenance(unit_home: Path) -> Generator[list[dict[str, object]]]:
 def backend(
     provenance: list[dict[str, object]], serving_root: start_serving.RootBirth, unit_home: Path
 ) -> Backend:
-    generation = start_serving.begin_start(unit_home)
+    generation = start_serving.begin_start(unit_home, seeded_rng())
     assert start_serving.mark_serving(
         unit_home, generation, runtime=serving_root.runtime, observe=observe
     )

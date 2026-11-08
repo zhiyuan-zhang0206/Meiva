@@ -10,6 +10,7 @@ marker left by an earlier boot cannot admit recovery during the next boot.
 from __future__ import annotations
 
 import logging
+import random
 import uuid
 from collections.abc import Callable, Generator
 from contextlib import contextmanager
@@ -19,6 +20,7 @@ from typing import Literal, Self, TypeGuard
 import psutil
 from pydantic import model_validator
 
+from base.clock.ids import new_uuid
 from base.host.atomic_io import SYSTEM_FS, AtomicWriter
 from base.host.runtime_interpreter import LoadedRuntimeIdentity
 from base.host.verified_file.reader import regular_bytes
@@ -163,9 +165,13 @@ def write_state(home: Path, state: ServingState, *, writer: AtomicWriter) -> Non
     _sync_parent_or_log(path, writer=writer)
 
 
-def begin_start(home: Path) -> str:
+# meiva:note
+# The generation this attempt publishes comes from the caller's generator (`new_uuid(rng)`): the
+# entry that owns the start builds one and hands it here, so a test seeds it and the id is never
+# drawn where the state is written.
+def begin_start(home: Path, rng: random.Random) -> str:
     """Invalidate any previous success and return this start's generation."""
-    generation = str(uuid.uuid4())
+    generation = str(new_uuid(rng))
     with file_lock(_lock_path(home)):
         write_state(home, ServingState(state="starting", generation=generation), writer=_WRITER)
     return generation

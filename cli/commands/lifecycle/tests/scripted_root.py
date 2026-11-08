@@ -23,6 +23,7 @@ from pathlib import Path
 
 import psutil
 
+from base.clock.tests.seeded_rng import seeded_rng
 from base.deploy.lifecycle import start_serving
 from base.host.runtime_interpreter import LoadedRuntimeIdentity
 from base.native_process.ownership import OwnedProcess
@@ -163,7 +164,11 @@ class ScriptedRoot:
             self.events.append((f"{verb} {row.unit_id}", time.monotonic()))
         if verb == "up":
             if row.begins_rival_start:
-                start_serving.begin_start(self.home)
+                # meiva:note
+                # A rival start draws from a stream of its own: the invocation under test mints
+                # its generation from `CommandRuntime.rng` (seeded at 0 by the harness), and the
+                # rival only takes the unit away from it if the two generations differ.
+                start_serving.begin_start(self.home, seeded_rng(1))
             if row.writes_on_up is not None:
                 row.writes_on_up.parent.mkdir(parents=True, exist_ok=True)
                 row.writes_on_up.write_text("written while the unit launched\n")

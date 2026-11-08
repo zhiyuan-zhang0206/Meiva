@@ -9,7 +9,6 @@
 # The schedule commands are deliberately trivial (`sleep 30` for the live paths, `false` for the
 # crash paths) — the runner's real script execution and status semantics are covered by
 # test_schedule_runner.py.
-
 import json
 import shlex
 import subprocess
@@ -21,6 +20,7 @@ import psycopg
 import pytest
 from psycopg_pool import ConnectionPool
 
+from base.clock.tests.seeded_rng import seeded_rng
 from base.cluster import session_name
 from base.daemon.schedules.claim import claim_path
 from base.db.rows import query_one
@@ -105,7 +105,7 @@ def _host_is_serving(serving_root: RootBirth, _pty_home: str) -> Iterator[None]:
     from base.paths import meiva_home
 
     home = meiva_home()
-    generation = start_serving.begin_start(home)
+    generation = start_serving.begin_start(home, seeded_rng())
     assert (
         start_serving.mark_serving(home, generation, runtime=serving_root.runtime, observe=observe)
         is True

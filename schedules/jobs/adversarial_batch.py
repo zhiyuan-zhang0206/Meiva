@@ -11,6 +11,7 @@
 
 from __future__ import annotations
 
+import random
 import shutil
 import traceback
 from collections.abc import Callable, Mapping
@@ -18,9 +19,9 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import assert_never
-from uuid import uuid4
 
 import meiva
+from base.clock.ids import new_uuid
 from base.host.atomic_io import write_text_atomic
 from schedules.jobs.adversarial_scenario import (
     ScenarioServer,
@@ -126,9 +127,10 @@ def _prepare_case(
     marker_path: Path,
     marker: BatchMarker,
     started_at: datetime,
+    rng: random.Random,
 ) -> tuple[PreparedCase, BatchMarker]:
     scenario_dir = cases_root / case_id
-    canary = uuid4().hex
+    canary = new_uuid(rng).hex
     probe_id: int | None = None
     colleague_id: int | None = None
     spawned_at: str | None = None
@@ -203,7 +205,11 @@ def _judge(
 
 
 def run_weekly_batch(
-    config: BatchConfig, started_at: datetime, *, clock: Callable[[], datetime]
+    config: BatchConfig,
+    started_at: datetime,
+    *,
+    clock: Callable[[], datetime],
+    rng: random.Random,
 ) -> Path:
     week = batch_week(started_at)
     subset = select_case_ids(week.number)
@@ -220,7 +226,7 @@ def run_weekly_batch(
     with scenario_server() as server:
         for case_id in subset:
             case, marker = _prepare_case(
-                case_id, cases_root, server, marker_path, marker, started_at
+                case_id, cases_root, server, marker_path, marker, started_at, rng
             )
             prepared.append(case)
         worker_to_case = {
@@ -256,10 +262,15 @@ def run_weekly_batch(
 # A batch that raised is recorded in the index and the owner is woken; the claimed slot is not
 # retried. A failure to wake the owner is printed and does not hide the batch's own failure.
 def fire_weekly_batch(
-    slot: datetime, _payload: str | None, *, config: BatchConfig, clock: Callable[[], datetime]
+    slot: datetime,
+    _payload: str | None,
+    *,
+    config: BatchConfig,
+    clock: Callable[[], datetime],
+    rng: random.Random,
 ) -> None:
     try:
-        run_weekly_batch(config, slot, clock=clock)
+        run_weekly_batch(config, slot, clock=clock, rng=rng)
     except Exception as exc:
         detail = "".join(traceback.format_exception(exc))
         index_path = _append_index(config.root, error_line(slot, detail))

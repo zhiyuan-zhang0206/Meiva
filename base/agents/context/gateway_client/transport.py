@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json as _json
-import uuid as _uuid
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Protocol
@@ -400,10 +399,16 @@ def _post_semantics(path: str, *, idempotent: bool | None) -> Idempotency:
     return Idempotency.IDEMPOTENT if idempotent else Idempotency.NON_IDEMPOTENT
 
 
-def _idempotency_headers(*, keyed: bool, idempotency_key: str | None) -> dict[str, str] | None:
+# meiva:note
+# The keyed pair, with `new_id` minting the key when the caller pinned none: the identifier comes
+# from the context's generator (`MeivaContext.require_new_id`), never from a draw of this module, so
+# a seeded context fixes the key a test reads and retries of one call still share it.
+def _idempotency_headers(
+    *, keyed: bool, idempotency_key: str | None, new_id: Callable[[], str]
+) -> dict[str, str] | None:
     if not keyed:
         return None
-    return keyed_headers(_uuid.uuid4().hex if idempotency_key is None else idempotency_key)
+    return keyed_headers(idempotency_key if idempotency_key is not None else new_id())
 
 
 def post(
@@ -463,7 +468,9 @@ def post(
     retryable = semantics is Idempotency.IDEMPOTENT or keyed
     # One key per logical call — every retry of this call shares it, so the
     # server can dedup the retries against the original.
-    headers = _idempotency_headers(keyed=keyed, idempotency_key=idempotency_key)
+    headers = _idempotency_headers(
+        keyed=keyed, idempotency_key=idempotency_key, new_id=context.require_new_id
+    )
 
     retries = request_max_retries(context) if max_retries is None else max_retries
 
@@ -531,7 +538,9 @@ def patch(
     """
     semantics = contracts.idempotency_for("PATCH", path)
     keyed = semantics is Idempotency.AT_LEAST_ONCE_WITH_KEY
-    headers = _idempotency_headers(keyed=keyed, idempotency_key=idempotency_key)
+    headers = _idempotency_headers(
+        keyed=keyed, idempotency_key=idempotency_key, new_id=context.require_new_id
+    )
     return _request_with_retry(
         lambda: gateway_http(context).patch(path, json=json or {}, headers=headers),
         request_max_retries(context),

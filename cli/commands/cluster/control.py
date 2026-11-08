@@ -297,6 +297,7 @@ def cmd_db_authority_issue_unit(
             ).served_db_endpoint(),
             ttl_s=ttl_hours * 3600,
             now=command.clock.now().timestamp(),
+            rng=command.secure_rng,
         )
         write_bundle(target, issued.envelope)
     except (AuthorityRefusedError, ValueError, RuntimeError, OSError) as exc:

@@ -19,6 +19,3 @@ exports = ["adversarial_batch.py", "adversarial_scenario.py", "adversarial_worke
 [roots]
 "dry_import_child.py" = { kinds = ["pid"], why = "Dry-import child entry: main() reads the schedule source from standard input (sys.stdin), the one channel its parent writes to" }
 "entry.py" = { kinds = ["clock", "home", "random", "settings"], why = "Schedule process entry boots configuration before assembling its runtime; it resolves the account home and builds the random generator once, for the SDK context it binds; builds the process clock from SYSTEM_TIMERS; reads the cluster timezone every schedule fires in" }
-
-[debt.ambient-read]
-"adversarial_batch.py#random uuid.uuid4" = { count = 1, owner = "#5816", until = "permanently: the batch mints a fresh, unguessable canary for each case" }

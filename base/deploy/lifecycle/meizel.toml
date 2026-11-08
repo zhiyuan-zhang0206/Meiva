@@ -6,6 +6,3 @@ exports = ["home_lifecycle_locks.py", "host_exit_message.py", "launch_failures.p
 [purity]
 "__init__.py" = "strict"
 "service_selection.py" = "strict"
-
-[debt.ambient-read]
-"start_serving.py#random uuid.uuid4" = { count = 1, owner = "#5816", until = "permanently: begin_start() mints a generation id that must be unique per start, and a shared source would let two starts claim one generation" }
