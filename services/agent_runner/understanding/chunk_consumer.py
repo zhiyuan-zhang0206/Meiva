@@ -35,6 +35,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import random
 import threading
 import time
 from collections.abc import Awaitable, Callable, Sequence
@@ -172,6 +173,7 @@ def describe(
     *,
     config: ConfigBoot,
     clock: Clock,
+    rng: random.Random,
 ) -> ChunkResult:
     # meiva:note
     # Blocking: the agent's own model's groups and summaries of a located chunk.
@@ -187,6 +189,7 @@ def describe(
         tools=tools,
         corrections=config.view.agent.understanding_group_corrections,
         on_call=calls.append,
+        rng=rng,
         timeline_inputs=TimestampPolicy.from_clock(
             clock,
             timestamps_enabled=config.view.general.message_timestamps,
@@ -270,6 +273,7 @@ async def run_job(
     *,
     config: ConfigBoot,
     clock: Clock,
+    rng: random.Random,
     locate_job_chunk: Callable[[Database, ChunkJob], LocatedChunk] = locate_job_chunk,
     describe: Callable[..., ChunkResult] = describe,
 ) -> Outcome:
@@ -328,6 +332,7 @@ async def run_job(
             job.agent_id,
             config=config,
             clock=clock,
+            rng=rng,
         )
     except GenerateError as exc:
         return Outcome("failed", str(exc))
@@ -407,6 +412,7 @@ class Consumer:
         llm_override: str,
         config: ConfigBoot,
         clock: Clock,
+        rng: random.Random,
         poll_seconds: float = POLL_SECONDS,
         max_in_flight: int | None = None,
         locate_job_chunk: Callable[[Database, ChunkJob], LocatedChunk] = locate_job_chunk,
@@ -424,6 +430,7 @@ class Consumer:
         self.models = ModelCache(catalog, keys, llm_override)
         self.config = config
         self.clock = clock
+        self.rng = rng
         self.poll_seconds = poll_seconds
         self.max_in_flight = max_in_flight
         self.in_flight = 0
@@ -502,6 +509,7 @@ class Consumer:
                     executor,
                     config=self.config,
                     clock=self.clock,
+                    rng=self.rng,
                     locate_job_chunk=self._locate_job_chunk,
                     describe=self._describe,
                 )
@@ -535,6 +543,7 @@ class Consumer:
                     executor=executor,
                     config=self.config,
                     clock=self.clock,
+                    rng=self.rng,
                 )
         except Exception:
             # meiva:note
@@ -563,6 +572,7 @@ class Consumer:
                     executor=executor,
                     config=self.config,
                     clock=self.clock,
+                    rng=self.rng,
                 )
             except asyncio.CancelledError:
                 try:
@@ -680,6 +690,7 @@ async def replay_jobs(
     llm_override: str,
     config: ConfigBoot,
     clock: Clock,
+    rng: random.Random,
     locate_job_chunk: Callable[[Database, ChunkJob], LocatedChunk] = locate_job_chunk,
     describe: Callable[..., ChunkResult] = describe,
     settle_chunk_job: Callable[
@@ -699,6 +710,7 @@ async def replay_jobs(
         llm_override=llm_override,
         config=config,
         clock=clock,
+        rng=rng,
         locate_job_chunk=locate_job_chunk,
         describe=describe,
         settle_chunk_job=settle_chunk_job,
@@ -716,6 +728,7 @@ async def understanding_loop_forever(
     llm_override: str,
     config: ConfigBoot,
     clock: Clock,
+    rng: random.Random,
     poll_seconds: float = POLL_SECONDS,
     max_in_flight: int | None = DEFAULT_MAX_IN_FLIGHT,
     startup_delay_seconds: float = 0.0,
@@ -745,6 +758,7 @@ async def understanding_loop_forever(
         llm_override=llm_override,
         config=config,
         clock=clock,
+        rng=rng,
         poll_seconds=poll_seconds,
         max_in_flight=max_in_flight,
         locate_job_chunk=locate_job_chunk,

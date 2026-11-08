@@ -10,7 +10,8 @@
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass
+import random
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from base.clock import Clock
@@ -95,6 +96,10 @@ class UnderstandDeps:
     retry: RetryPolicy
     base_dir: Path
     output: OutputSite | None
+    # meiva:note
+    # The process generator the model-call retry draws its jitter from, handed down by the wiring
+    # that builds these deps (a seeded one in a test); not part of what makes two deps equal.
+    rng: random.Random = field(compare=False, repr=False)
 
 
 # meiva:note
@@ -307,4 +312,5 @@ def _invoke(deps: UnderstandDeps, call: ModelCall, content: list[dict[str, objec
         model=call.model,
         usage_source=call.usage_source,
         catalog=deps.catalog,
+        rng=deps.rng,
     )

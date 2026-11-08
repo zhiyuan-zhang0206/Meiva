@@ -40,6 +40,7 @@ import numpy as np
 import pytest
 
 from base.clock.tests.manual_timers import ManualTimers
+from base.clock.tests.seeded_rng import seeded_rng
 from base.host.net.resilience import retry_asleep, retry_sleep
 from base.host.proc import run_bounded
 from base.lm.catalog import ModelCatalog
@@ -80,6 +81,7 @@ def build_provider(
         transport=transport,
         sleep=sleep,
         asleep=asleep,
+        rng=seeded_rng(),
     )
 
 
@@ -458,7 +460,12 @@ def test_factory_passes_same_catalog_to_all_embedding_paths() -> None:
     catalog = replace(base_catalog, bindings=bindings)
     fake = AsyncClient(vectors=[[1.0] * DIM], prompt_token_count=123)
     provider = factory.get_provider(
-        "gemini", catalog=catalog, timeout_s=TIMEOUT_S, api_key=API_KEY, transport=fake
+        "gemini",
+        catalog=catalog,
+        timeout_s=TIMEOUT_S,
+        api_key=API_KEY,
+        transport=fake,
+        rng=seeded_rng(),
     )
     provider.embed_batch(["hello"])
     provider.embed_query("hello")
@@ -621,6 +628,7 @@ def test_sync_embed_rejects_running_loop() -> None:
                 timeout_s=TIMEOUT_S,
                 api_key=API_KEY,
                 transport=fake,
+                rng=seeded_rng(),
             )
         assert type(error.value) is RuntimeError
         assert error.value.__cause__ is None

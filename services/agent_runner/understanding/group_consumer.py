@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import random
 from collections.abc import Callable
 from concurrent.futures import Executor
 from typing import Protocol
@@ -134,6 +135,7 @@ def generate(
     *,
     config: ConfigBoot,
     clock: Clock,
+    rng: random.Random,
     min_check_open: int = MIN_CHECK_OPEN,
 ) -> list[Group]:
     # meiva:note
@@ -146,6 +148,7 @@ def generate(
         agent_id=agent_id,
         corrections=config.view.agent.understanding_group_corrections,
         clock=clock,
+        rng=rng,
         # meiva:note
         # The brake on an open set that keeps growing: past three checks' worth of this level, close one.
         must_close=len(nodes)
@@ -165,6 +168,7 @@ async def _check_level(
     *,
     config: ConfigBoot,
     clock: Clock,
+    rng: random.Random,
     min_check_open: int = MIN_CHECK_OPEN,
 ) -> bool:
     # meiva:note
@@ -203,6 +207,7 @@ async def _check_level(
                 agent_id,
                 config=config,
                 clock=clock,
+                rng=rng,
                 min_check_open=min_check_open,
             )
         except GenerateError as exc:
@@ -241,6 +246,7 @@ async def run_group_checks(
     *,
     config: ConfigBoot,
     clock: Clock,
+    rng: random.Random,
     executor: Executor | None = None,
     upto: int | None = None,
     min_check_open: int = MIN_CHECK_OPEN,
@@ -264,6 +270,7 @@ async def run_group_checks(
             upto,
             config=config,
             clock=clock,
+            rng=rng,
             min_check_open=min_check_open,
         ):
             level += 1

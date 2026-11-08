@@ -10,6 +10,7 @@ import numpy as np
 import pytest
 
 from base.clock.tests.manual_timers import ManualTimers
+from base.clock.tests.seeded_rng import seeded_rng
 from base.config import ConfigBoot
 from base.host.net.resilience import ExponentialBackoff, Policy
 from base.lm.catalog import ModelCatalog
@@ -41,14 +42,18 @@ def test_factory_default_is_gemini(model_catalog: ModelCatalog) -> None:
     name = ConfigBoot().view.services.embedding_backend
     assert name == "gemini"
     assert isinstance(
-        factory.get_provider(name, catalog=model_catalog, timeout_s=TIMEOUT_S, api_key=API_KEY),
+        factory.get_provider(
+            name, catalog=model_catalog, timeout_s=TIMEOUT_S, api_key=API_KEY, rng=seeded_rng()
+        ),
         GeminiEmbeddingProvider,
     )
 
 
 def test_factory_unknown_backend_fails_fast(model_catalog: ModelCatalog) -> None:
     with pytest.raises(ValueError, match="unknown embedding provider"):
-        factory.get_provider("openai", catalog=model_catalog, timeout_s=TIMEOUT_S, api_key=API_KEY)
+        factory.get_provider(
+            "openai", catalog=model_catalog, timeout_s=TIMEOUT_S, api_key=API_KEY, rng=seeded_rng()
+        )
 
 
 @pytest.mark.parametrize("mode", ["sync", "async"])
@@ -77,6 +82,7 @@ def test_embed_trickle_total_deadline(
                 policy=policy,
                 timeout_s=timeout,
                 api_key=API_KEY,
+                rng=seeded_rng(),
             )
         else:
             asyncio.run(
@@ -88,6 +94,7 @@ def test_embed_trickle_total_deadline(
                     policy=policy,
                     timeout_s=timeout,
                     api_key=API_KEY,
+                    rng=seeded_rng(),
                 )
             )
     elapsed = time.monotonic() - started
@@ -122,6 +129,7 @@ def test_embed_compressed_trickle_deadline(
                     policy=policy,
                     timeout_s=timeout,
                     api_key=API_KEY,
+                    rng=seeded_rng(),
                 )
             else:
                 asyncio.run(
@@ -133,6 +141,7 @@ def test_embed_compressed_trickle_deadline(
                         policy=policy,
                         timeout_s=timeout,
                         api_key=API_KEY,
+                        rng=seeded_rng(),
                     )
                 )
         elapsed = time.monotonic() - started
@@ -182,6 +191,7 @@ def test_embed_framing_drip_deadline(
                     policy=policy,
                     timeout_s=timeout,
                     api_key=API_KEY,
+                    rng=seeded_rng(),
                 )
             else:
                 asyncio.run(
@@ -193,6 +203,7 @@ def test_embed_framing_drip_deadline(
                         policy=policy,
                         timeout_s=timeout,
                         api_key=API_KEY,
+                        rng=seeded_rng(),
                     )
                 )
         elapsed = time.monotonic() - started
@@ -251,6 +262,7 @@ def test_embed_slow_error_body_preserves_status(
                     timeout_s=timeout,
                     api_key=API_KEY,
                     sleep=timers.sleep,
+                    rng=seeded_rng(),
                 )
             return asyncio.run(
                 gemini.embed_async(
@@ -262,6 +274,7 @@ def test_embed_slow_error_body_preserves_status(
                     timeout_s=timeout,
                     api_key=API_KEY,
                     asleep=timers.asleep,
+                    rng=seeded_rng(),
                 )
             )
 
@@ -317,6 +330,7 @@ def test_sync_embed_slow_resolver_deadline(model_catalog: ModelCatalog) -> None:
                     timeout_s=0.1,
                     api_key=API_KEY,
                     transport=_SlowResolverTransport(),
+                    rng=seeded_rng(),
                 )
             elapsed = time.monotonic() - started
             assert isinstance(error.value.__cause__, httpx.ReadTimeout)

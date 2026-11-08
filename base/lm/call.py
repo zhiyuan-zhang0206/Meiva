@@ -13,6 +13,7 @@ effort, then invoke) for the prompt-vs-material shape both entry points use.
 
 from __future__ import annotations
 
+import random
 import time
 from collections.abc import Callable, Sequence
 from typing import Protocol
@@ -109,6 +110,7 @@ def invoke_response(
     catalog: ModelCatalog,
     usage_agent_id: int | None = None,
     sleep: Callable[[float], None] = resilience.retry_sleep,
+    rng: random.Random,
 ) -> BaseMessage:
     """Invoke `runnable` on an already-built message list; return the response.
 
@@ -181,7 +183,7 @@ def invoke_response(
                     delay = max(delay, retry_after)
                 # Per-process deterministic phase + random ±1s (R2-D
                 # jittered) — de-phases retry waves across the fleet.
-                sleep(jittered(delay, mode=retry_jitter))
+                sleep(jittered(delay, mode=retry_jitter, rng=rng))
                 continue
             raise error_type(
                 f"Model call ({desc}) failed after {attempt + 1} attempt(s): {type(e).__name__}: {e}"
@@ -224,6 +226,7 @@ def invoke_text(
     usage_source: str | None = None,
     catalog: ModelCatalog,
     sleep: Callable[[float], None] = resilience.retry_sleep,
+    rng: random.Random,
 ) -> str:
     """Invoke `llm` on a single HumanMessage of `content`, return flattened text.
 
@@ -249,6 +252,7 @@ def invoke_text(
         usage_source=usage_source,
         catalog=catalog,
         sleep=sleep,
+        rng=rng,
     )
     text = extract_text(response)
     if not text:
@@ -279,6 +283,7 @@ def answer_text(
     overrides: ModelOverrides,
     build_chat_model: ChatModelBuilder,
     sleep: Callable[[float], None] = resilience.retry_sleep,
+    rng: random.Random,
 ) -> str:
     """Build `model` at `effort` and answer `prompt` against `material`.
 
@@ -322,4 +327,5 @@ def answer_text(
         usage_source=usage_source,
         catalog=catalog,
         sleep=sleep,
+        rng=rng,
     )

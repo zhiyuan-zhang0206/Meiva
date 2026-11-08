@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import random
 import subprocess
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
@@ -67,7 +68,9 @@ def build_search_gate(max_concurrency: int) -> asyncio.Semaphore:
 # The root builds it once when the catalog loaded, so an unknown `embedding_backend` fails the
 # start instead of every search.
 # meiva:link gateway/routers/docs/memory.meiva.okf.md
-def build_embedder(settings: MemorySearchSettings, catalog: ModelCatalog) -> EmbeddingProvider:
+def build_embedder(
+    settings: MemorySearchSettings, catalog: ModelCatalog, *, rng: random.Random
+) -> EmbeddingProvider:
     from services.derived.memory_indexer.embeddings import factory
 
     return factory.get_provider(
@@ -76,6 +79,7 @@ def build_embedder(settings: MemorySearchSettings, catalog: ModelCatalog) -> Emb
         timeout_s=settings.embedding_timeout,
         api_key=settings.api_key,
         embeddinggemma_config=settings.embeddinggemma_config,
+        rng=rng,
     )
 
 

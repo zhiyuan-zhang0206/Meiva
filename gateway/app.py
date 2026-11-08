@@ -461,7 +461,9 @@ def create_app(
     state.clock = Clock(config.clock, timers=SYSTEM_TIMERS)
     state.catalog = catalog
     if isinstance(catalog, ModelCatalog):
-        state.memory_embedder = memory_router.build_embedder(config.memory_search, catalog)
+        state.memory_embedder = memory_router.build_embedder(
+            config.memory_search, catalog, rng=config.rng
+        )
     state.command_catalog = CommandCatalog.system(
         skills=partial(
             load_skill_names,

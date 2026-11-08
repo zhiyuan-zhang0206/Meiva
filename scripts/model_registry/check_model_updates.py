@@ -9,6 +9,7 @@ import argparse
 import ipaddress
 import json
 import os
+import random
 import re
 import socket
 import sys
@@ -30,7 +31,13 @@ from base.host.boundary.fields import optional_str_field
 from base.host.boundary.json_values import is_object_dict, is_object_list
 from base.host.boundary.options import options
 from base.host.env.dotenv_file import process_env_file, read_env_aliases
-from base.host.net.resilience import ExponentialBackoff, Policy, http_classifier, retry, retry_sleep
+from base.host.net.resilience import (
+    ExponentialBackoff,
+    Policy,
+    http_classifier,
+    retry_jittered,
+    retry_sleep,
+)
 from base.lm.registry import ModelSpec
 from base.packages.plugin_providers import build_model_catalog
 from base.paths import meiva_home
@@ -323,6 +330,7 @@ def fetch_json(
     session_for_host: SessionForHost,
     http_get: HttpGet,
     sleep: Callable[[float], None] = retry_sleep,
+    rng: random.Random,
 ) -> dict[str, object]:
     def _attempt() -> dict[str, object]:
         host = urlparse(url).hostname or ""
@@ -337,7 +345,7 @@ def fetch_json(
         response.raise_for_status()
         return _response_object(response.json(), url)
 
-    return retry(_FETCH_POLICY, sleep=sleep)(_attempt)
+    return retry_jittered(_FETCH_POLICY, rng=rng, sleep=sleep)(_attempt)
 
 
 def _headers(source: SourceDescriptor, api_key: str) -> dict[str, str]:
@@ -702,6 +710,7 @@ class Options:
 def main(
     argv: list[str],
     *,
+    rng: random.Random,
     env_lookup: Callable[[str], str | None] | None = None,
     model_fetcher: Callable[[SourceDescriptor, str], list[str]] | None = None,
     models: Mapping[str, ModelSpec] | None = None,
@@ -717,7 +726,12 @@ def main(
             url: str, *, headers: Mapping[str, str], params: Mapping[str, str | int]
         ) -> dict[str, object]:
             return fetch_json(
-                url, headers=headers, params=params, session_for_host=session, http_get=requests.get
+                url,
+                headers=headers,
+                params=params,
+                session_for_host=session,
+                http_get=requests.get,
+                rng=rng,
             )
 
         model_fetcher = partial(fetch_provider_models, fetcher=fetcher)
@@ -761,4 +775,7 @@ def main(
 
 
 if __name__ == "__main__":
-    raise SystemExit(main(sys.argv[1:]))
+    # meiva:note
+    # The process entry builds the one generator this run draws from: the fetch policy spreads its
+    # retries with it.
+    raise SystemExit(main(sys.argv[1:], rng=random.SystemRandom()))

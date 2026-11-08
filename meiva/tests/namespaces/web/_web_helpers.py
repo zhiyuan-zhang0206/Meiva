@@ -18,6 +18,7 @@ import pytest
 from pydantic import SecretStr
 
 from base.clock import SYSTEM_TIMERS, Timers
+from base.clock.tests.seeded_rng import seeded_rng
 from base.config.service_read import ConfigAuthority
 from base.lm.catalog import ModelCatalog
 from base.lm.effort import ReasoningEffort
@@ -262,7 +263,7 @@ def web_harness(
 ) -> Iterator[WebHarness]:
     from base.config.tests.configuration import model_overrides
 
-    search = wiring.search_deps_for(config_authority)
+    search = wiring.search_deps_for(config_authority, rng=seeded_rng())
     fetch = wiring.fetch_deps_for(
         config_authority,
         catalog=model_catalog,
@@ -270,6 +271,7 @@ def web_harness(
         overrides=model_overrides(),
         delivery_active=False,
         agent_id=None,
+        rng=seeded_rng(),
     )
     search = dataclasses.replace(
         search,

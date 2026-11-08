@@ -14,6 +14,7 @@ from psycopg_pool import AsyncConnectionPool
 
 from base.agents.history.hierarchy.chunks import Chunk, enqueue_chunk
 from base.clock.tests.fakes import clock_with_unknown_timezone, system_clock
+from base.clock.tests.seeded_rng import seeded_rng
 from base.db import Database
 from base.lm.catalog import ModelCatalog
 from base.lm.provider_api import ProviderBinding
@@ -152,6 +153,7 @@ async def test_real_chunk_provider_receipt_survives_success_and_failure(
             keys=inert_keys(catalog),
             llm_override="",
             config=config,
+            rng=seeded_rng(),
         )
         assert len(wire.requests) == 1
         _assert_provider_request(wire.requests[0], wire.build_efforts)
@@ -220,6 +222,7 @@ async def test_generation_renders_with_the_clock_the_caller_built(
             keys=inert_keys(catalog),
             llm_override="",
             config=config,
+            rng=seeded_rng(),
         )
         assert wire.build_efforts == ["high"] and len(wire.requests) == 1
         async with aops_pool.connection() as conn:
@@ -276,6 +279,7 @@ async def test_an_unusable_zone_in_the_callers_clock_fails_the_chunk(
             keys=inert_keys(catalog),
             llm_override="",
             config=config,
+            rng=seeded_rng(),
         )
         assert wire.requests == []
         async with aops_pool.connection() as conn:

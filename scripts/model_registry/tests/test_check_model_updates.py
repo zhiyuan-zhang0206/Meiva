@@ -9,6 +9,7 @@ from typing import Any
 import pytest
 
 from base.clock.tests.manual_timers import ManualTimers
+from base.clock.tests.seeded_rng import seeded_rng
 from base.paths import meiva_home
 from scripts.model_registry import check_model_updates
 
@@ -219,6 +220,7 @@ def test_fetch_json_uses_pinned_session_when_fake_ip(tracker: Any) -> None:
             params=params,
             session_for_host=session_for_host,
             http_get=no_plain_get,
+            rng=seeded_rng(),
         )
         == payload
     )
@@ -247,6 +249,7 @@ def test_fetch_json_uses_pinned_session_when_fake_ip(tracker: Any) -> None:
             params=params,
             session_for_host=no_session_for_host,
             http_get=plain_get,
+            rng=seeded_rng(),
         )
         == payload
     )
@@ -269,6 +272,7 @@ def test_candidate_is_reported_once_then_recorded_in_state(
             env_lookup=missing_environment_value,
             model_fetcher=fetcher,
             models={},
+            rng=seeded_rng(),
         )
         == 2
     )
@@ -280,6 +284,7 @@ def test_candidate_is_reported_once_then_recorded_in_state(
             env_lookup=missing_environment_value,
             model_fetcher=fetcher,
             models={},
+            rng=seeded_rng(),
         )
         == 0
     )
@@ -468,6 +473,7 @@ def test_missing_key_is_a_provider_error(tmp_path: Path, tracker: Any) -> None:
             env_lookup=missing_environment_value,
             model_fetcher=stub_fetcher(tracker, models={}),
             models={},
+            rng=seeded_rng(),
         )
         == 0
     )
@@ -501,6 +507,7 @@ def test_fetch_json_retries_a_transient_connection_error(
             session_for_host=no_session_for_host,
             http_get=get,
             sleep=timers.sleep,
+            rng=seeded_rng(),
         )
         == payload
     )
@@ -529,6 +536,7 @@ def test_fetch_json_raises_after_the_retry_budget_is_exhausted(
             session_for_host=no_session_for_host,
             http_get=get,
             sleep=timers.sleep,
+            rng=seeded_rng(),
         )
     assert len(calls) == 3
     assert len(timers.sleeps) == 2
@@ -556,6 +564,7 @@ def test_permanent_http_error_is_not_retried(tracker: Any) -> None:
             session_for_host=no_session_for_host,
             http_get=get,
             sleep=timers.sleep,
+            rng=seeded_rng(),
         )
     assert calls == [url]
     assert timers.sleeps == []
@@ -588,6 +597,7 @@ def test_transient_ssl_eof_is_retried_without_marking_the_provider_error(
             session_for_host=no_session_for_host,
             http_get=get,
             sleep=timers.sleep,
+            rng=seeded_rng(),
         )
 
     def fetch(source: Any, api_key: str) -> list[str]:
@@ -606,6 +616,7 @@ def test_transient_ssl_eof_is_retried_without_marking_the_provider_error(
             env_lookup=missing_environment_value,
             model_fetcher=fetch,
             models={},
+            rng=seeded_rng(),
         )
         == 0
     )
@@ -646,6 +657,7 @@ def test_repeated_provider_failure_announces_once_and_never_repeats(
             session_for_host=no_session_for_host,
             http_get=current_get,
             sleep=timers.sleep,
+            rng=seeded_rng(),
         )
 
     def fetch(source: Any, api_key: str) -> list[str]:
@@ -665,6 +677,7 @@ def test_repeated_provider_failure_announces_once_and_never_repeats(
             env_lookup=missing_environment_value,
             model_fetcher=fetch,
             models={},
+            rng=seeded_rng(),
         )
 
     # meiva:note
@@ -704,6 +717,7 @@ def test_the_state_file_is_under_the_home_when_no_directory_is_named(
         env_lookup=missing_environment_value,
         model_fetcher=fetcher,
         models={},
+        rng=seeded_rng(),
     )
     assert code == 2
     assert (meiva_home() / "model-tracker" / "state.json").is_file()

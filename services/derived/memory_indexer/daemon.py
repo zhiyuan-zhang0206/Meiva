@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import random
 import signal
 import sys
 import time
@@ -504,6 +505,7 @@ async def run(
     image: LoadedCommit,
     root: Path,
     tuning: MemoryIndexerConfig,
+    rng: random.Random,
 ) -> None:
     inputs = MemoryIndexerInputs.from_boot(config)
     if _is_running(config, runtime=runtime):
@@ -526,6 +528,7 @@ async def run(
             timeout_s=inputs.embed_timeout_s,
             api_key=inputs.api_key,
             embeddinggemma_config=inputs.embeddinggemma_config,
+            rng=rng,
         )
     except ValueError as exc:
         _log.critical("[indexer] embedding provider config invalid: %s", exc)
@@ -622,6 +625,11 @@ def main() -> None:
             direct_url=ClusterDirectUrl(machine.host, home=process_home),
         )
 
+    # meiva:note
+    # The generator this process draws from: the embedding retry spreads its waits with it, so two
+    # indexers of one fleet do not retry in lockstep. Jitter keeps no secret, so a plain
+    # `random.Random` (the same choice `meiva.boot` makes for general entropy).
+    rng = random.Random()  # noqa: S311
     pipeline = build_pipeline(
         database=database,
         machine=machine,
@@ -652,6 +660,7 @@ def main() -> None:
                     image=image,
                     root=memory_root(roles=machine.role(), home=process_home),
                     tuning=MemoryIndexerConfig(),
+                    rng=rng,
                 )
             )
         except KeyboardInterrupt:

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import numpy as np
 
+from base.clock.tests.seeded_rng import seeded_rng
 from base.lm.catalog import ModelCatalog
 from services.derived.memory_indexer.embeddings.gemini import DIM, GeminiEmbeddingProvider
 from services.derived.memory_indexer.embeddings.tests.test_embeddings import AsyncClient
@@ -10,10 +11,10 @@ from services.derived.memory_indexer.embeddings.tests.test_embeddings import Asy
 async def test_two_providers_use_their_own_key_and_timeout(model_catalog: ModelCatalog) -> None:
     fake = AsyncClient(vectors=[[1.0] * DIM])
     one = GeminiEmbeddingProvider(
-        model_catalog, timeout_s=1.25, api_key="first-key", transport=fake
+        model_catalog, timeout_s=1.25, api_key="first-key", transport=fake, rng=seeded_rng()
     )
     two = GeminiEmbeddingProvider(
-        model_catalog, timeout_s=2.5, api_key="second-key", transport=fake
+        model_catalog, timeout_s=2.5, api_key="second-key", transport=fake, rng=seeded_rng()
     )
     np.testing.assert_equal(one.embed_batch([]).shape, (0, DIM))
     assert fake.calls == []

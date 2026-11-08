@@ -16,6 +16,7 @@ from base.host.net.resilience import (
     aretry,
     jittered,
     retry,
+    retry_jittered,
 )
 
 
@@ -54,10 +55,11 @@ def cli_help() -> dict[str, object]:
 
 
 # meiva:note
-# A fixed child-only seed verifies non-secret retry spreading without mutating the test runner.
+# A fixed child-only seed verifies non-secret retry spreading: the drawing mode goes through the door
+# that takes the generator, the phase mode through the one that promises not to draw, and the noise
+# the test expects is the same seed's first sample.
 def retry_jitter(mode: str) -> dict[str, object]:
     seed = 1742
-    random.seed(seed)
     expected_noise = random.Random(seed).uniform(-0.5, 0.5)  # noqa: S311
     attempts = 0
 
@@ -69,8 +71,12 @@ def retry_jitter(mode: str) -> dict[str, object]:
         return "ok"
 
     span = 5.0 if mode == "phase" else 0.5
+    policy = Policy(max_attempts=2, jitter=mode, jitter_span=span)
     waits: list[float] = []
-    result = retry(Policy(max_attempts=2, jitter=mode, jitter_span=span), sleep=waits.append)(flaky)
+    if mode == "phase":
+        result = retry(policy, sleep=waits.append)(flaky)
+    else:
+        result = retry_jittered(policy, rng=random.Random(seed), sleep=waits.append)(flaky)  # noqa: S311
     return {
         "result": result,
         "waits": waits,
@@ -120,7 +126,10 @@ def main(case: str) -> dict[str, object]:
     if case == "async-waits":
         return async_waits()
     if case == "identity":
-        return {"pid": os.getpid(), "phase": jittered(0, span=10, mode="phase")}
+        return {
+            "pid": os.getpid(),
+            "phase": jittered(0, span=10, mode="phase", rng=random.SystemRandom()),
+        }
     raise ValueError(f"unknown resilience test case: {case!r}")
 
 

@@ -10,6 +10,7 @@ the caller's `on_call`.
 
 from __future__ import annotations
 
+import random
 import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
@@ -130,6 +131,7 @@ def invoke_agent_shaped(
     retry_attempts: int,
     params: GenParams,
     agent_id: int,
+    rng: random.Random,
     on_call: Callable[[ModelCall], None] | None = None,
 ) -> str:
     """Send a finished agent-shaped request through the tool-bound model; return its text.
@@ -163,6 +165,7 @@ def invoke_agent_shaped(
                 model=model,
                 usage_source="hierarchy.generate",
                 usage_agent_id=agent_id,
+                rng=rng,
             )
         except Exception as exc:
             if on_call is not None:

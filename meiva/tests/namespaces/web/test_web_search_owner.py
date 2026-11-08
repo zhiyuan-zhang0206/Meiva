@@ -16,6 +16,7 @@ import meiva
 from base.agents.context import MeivaContext
 from base.agents.context.clients import ClientSet
 from base.agents.sdk.tests.sampling_owners import fixed_sampling_owner
+from base.clock.tests.seeded_rng import seeded_rng
 from base.config import ConfigBoot
 from base.config.service_read import ConfigAuthority
 from base.packages.plugin_config_images import DiskPluginConfigImages
@@ -142,7 +143,7 @@ def test_fetch_reports_a_missing_model_configuration(
 
 
 def test_search_reads_no_model_configuration(non_model_installation: ConfigAuthority) -> None:
-    deps = wiring.search_deps()
+    deps = wiring.search_deps(rng=seeded_rng())
 
     assert deps.brave.api_key is not None
     assert meiva.web.search(["owner query"])[0][0].title == "owner title"

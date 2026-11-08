@@ -15,6 +15,7 @@ import pytest
 from pydantic import SecretStr
 
 import meiva
+from base.clock.tests.seeded_rng import seeded_rng
 from base.config import Settings, settings
 from base.config.service_read import ConfigAuthority
 from meiva.sdk_surface.pure.plans.batch_plan import DEFAULT_BATCH_MAX_CONCURRENT
@@ -192,7 +193,7 @@ def test_search_result_str_format() -> None:
 def test_endpoint_defaults_pin_before_literals(
     web_harness: WebHarness, config_authority: ConfigAuthority
 ) -> None:
-    deps = wiring.search_deps_for(config_authority)
+    deps = wiring.search_deps_for(config_authority, rng=seeded_rng())
     fetch = wiring.fetch_deps_for(
         config_authority,
         catalog=web_harness.catalog,
@@ -200,6 +201,7 @@ def test_endpoint_defaults_pin_before_literals(
         overrides=web_harness.fetch_deps.fetch_model.overrides,
         delivery_active=False,
         agent_id=None,
+        rng=seeded_rng(),
     )
 
     assert deps.brave.endpoint == "https://api.search.brave.com/res/v1/web/search"
@@ -219,7 +221,7 @@ def test_the_deps_follow_the_configuration_owner_they_are_built_from(tmp_path: P
             },
         )
         authority = ConfigAuthority(complete, complete, tmp_path / f"config-{index}.env")
-        brave = wiring.search_deps_for(authority).brave
+        brave = wiring.search_deps_for(authority, rng=seeded_rng()).brave
         assert brave.api_key is not None
         searched.append(
             (brave.api_key.get_secret_value(), brave.endpoint, brave.timeout_s, brave.max_count)
@@ -273,8 +275,12 @@ def test_search_deps_reads_only_search_fields(tmp_path: Path) -> None:
         },
     )
 
-    deps_first = wiring.search_deps_for(ConfigAuthority(first, first, tmp_path / "first.env"))
-    deps_second = wiring.search_deps_for(ConfigAuthority(second, second, tmp_path / "second.env"))
+    deps_first = wiring.search_deps_for(
+        ConfigAuthority(first, first, tmp_path / "first.env"), rng=seeded_rng()
+    )
+    deps_second = wiring.search_deps_for(
+        ConfigAuthority(second, second, tmp_path / "second.env"), rng=seeded_rng()
+    )
 
     assert deps_first == deps_second
     assert deps_first.provider == "deepseek"
@@ -330,6 +336,7 @@ def test_fetch_deps_read_no_brave_fields(tmp_path: Path, web_harness: WebHarness
         overrides=model.overrides,
         delivery_active=False,
         agent_id=None,
+        rng=seeded_rng(),
     )
     deps_second = wiring.fetch_deps_for(
         ConfigAuthority(second, second, tmp_path / "second.env"),
@@ -338,6 +345,7 @@ def test_fetch_deps_read_no_brave_fields(tmp_path: Path, web_harness: WebHarness
         overrides=model.overrides,
         delivery_active=False,
         agent_id=None,
+        rng=seeded_rng(),
     )
 
     assert deps_first == deps_second
@@ -348,9 +356,9 @@ def test_fetch_deps_read_no_brave_fields(tmp_path: Path, web_harness: WebHarness
 
 @pytest.mark.usefixtures("sdk_model_owner")
 def test_search_deps_follow_the_sdk_installation(config_authority: ConfigAuthority) -> None:
-    deps = wiring.search_deps()
+    deps = wiring.search_deps(rng=seeded_rng())
 
-    assert deps.brave == wiring.search_deps_for(config_authority).brave
+    assert deps.brave == wiring.search_deps_for(config_authority, rng=seeded_rng()).brave
 
 
 def test_search_requires_list(web_harness: WebHarness) -> None:

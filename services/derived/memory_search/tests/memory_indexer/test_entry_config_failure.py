@@ -3,6 +3,7 @@ from pathlib import Path
 
 import pytest
 
+from base.clock.tests.seeded_rng import seeded_rng
 from base.config import ConfigBoot
 from base.config.tests.configuration import data_plane_environment
 from base.db import Database
@@ -38,6 +39,7 @@ async def test_run_unknown_provider_fails_before_health_server(
             root=tmp_path / "memory",
             tuning=MemoryIndexerConfig(),
             home=meiva_home(),
+            rng=seeded_rng(),
         )
 
     assert exc.value.code == 1

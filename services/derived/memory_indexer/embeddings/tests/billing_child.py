@@ -15,6 +15,7 @@ from typing import Any, cast
 import loguru
 from opentelemetry.sdk.trace import ReadableSpan
 
+from base.clock.tests.seeded_rng import seeded_rng
 from base.lm.pricing import PriceBook, quote
 from base.log import logger
 from base.packages.plugin_providers import build_model_catalog
@@ -139,6 +140,7 @@ def scenario(name: str, directory: Path) -> None:
                 timeout_s=5,
                 api_key="fixture-gemini-key",
                 endpoint=f"http://127.0.0.1:{server.server_port}/embed",
+                rng=seeded_rng(),
             )
             exercise_provider(provider, name)
         finally:

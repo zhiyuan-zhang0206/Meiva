@@ -19,6 +19,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import random
 import sys
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -223,12 +224,16 @@ def main(argv: Sequence[str], *, out: TextIO, err: TextIO) -> int:
 
     boot.boot()
     inputs = MemoryIndexerInputs.from_boot(boot)
+    # meiva:note
+    # The generator this operator run draws from: the same retry spread the indexer uses, and the
+    # comparison must make the calls the daemon makes.
     provider = get_provider(
         inputs.embedding_name,
         catalog=build_model_catalog(home=meiva_home()),
         timeout_s=inputs.embed_timeout_s,
         api_key=inputs.api_key,
         embeddinggemma_config=inputs.embeddinggemma_config,
+        rng=random.Random(),  # noqa: S311
     )
     database = _reconcile_database(boot, machine=machine, home=meiva_home())
     backend_a, backend_b = build_backends(

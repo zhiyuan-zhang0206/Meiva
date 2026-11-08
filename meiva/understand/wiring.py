@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import random
 from pathlib import Path
 
 from base.agents.context import MeivaContext
@@ -53,6 +54,7 @@ def understand_deps() -> UnderstandDeps:
         overrides=sdk_settings.model_overrides(),
         base_dir=base_dir,
         output=_output_site(context),
+        rng=context.require_rng(),
     )
 
 
@@ -64,6 +66,7 @@ def understand_deps_for(
     overrides: ModelOverrides,
     base_dir: Path,
     output: OutputSite | None,
+    rng: random.Random,
 ) -> UnderstandDeps:
     return UnderstandDeps(
         catalog=catalog,
@@ -88,4 +91,5 @@ def understand_deps_for(
         ),
         base_dir=base_dir,
         output=output,
+        rng=rng,
     )

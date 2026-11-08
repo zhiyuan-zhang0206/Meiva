@@ -24,6 +24,7 @@ fails with `GenerateError`.
 
 from __future__ import annotations
 
+import random
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, replace
 
@@ -121,6 +122,7 @@ def generate_chunk(
     params: GenParams | None = None,
     retry_attempts: int = UNDERSTANDING_RETRY_ATTEMPTS,
     on_call: Callable[[ChunkCall], None] | None = None,
+    rng: random.Random,
 ) -> ChunkResult:
     """Group and describe `prefix[start_offset:]`; blocking (run it in a worker thread).
 
@@ -178,6 +180,7 @@ def generate_chunk(
             retry_attempts=retry_attempts,
             params=params or GenParams(),
             agent_id=agent_id,
+            rng=rng,
             on_call=record,
         )
         row = final_rows[-1] if final_rows else -1

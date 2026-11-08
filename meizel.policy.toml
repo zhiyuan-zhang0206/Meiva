@@ -183,7 +183,6 @@ bus = [
 
 [ambient-readers.random]
 "base.host.net.auth.random_bytes()" = "draws secrets.token_bytes"
-"base.host.net.resilience.jittered()" = "draws random jitter"
 
 [ambient-readers.settings]
 "base.clock.Clock.from_settings()" = "reads the clock configuration from the process settings; the clock it builds runs on the system timers"

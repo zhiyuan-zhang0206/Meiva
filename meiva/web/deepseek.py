@@ -32,6 +32,7 @@ def search_one(
         error_type=SearchError,
         provider_json=True,
         pacer=pacer,
+        rng=deps.rng,
         policy=policy,
     )
     hits = deepseek_wire.deepseek_search_hits(data)
@@ -54,6 +55,7 @@ def read_page(
         error_type=FetchError,
         provider_json=True,
         pacer=pacer,
+        rng=deps.rng,
         policy=policy,
     )
     return deepseek_wire.deepseek_page(data, url, max_chars)

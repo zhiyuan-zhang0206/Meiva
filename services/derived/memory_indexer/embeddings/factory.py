@@ -17,6 +17,7 @@
 
 from __future__ import annotations
 
+import random
 from collections.abc import Callable
 from dataclasses import dataclass
 
@@ -44,6 +45,7 @@ _ProviderEntry = tuple[
             str | None,
             httpx.AsyncBaseTransport | None,
             embeddinggemma.EmbeddingGemmaConfig | None,
+            random.Random,
         ],
         EmbeddingProvider,
     ],
@@ -62,8 +64,8 @@ def _require_gemma(
 
 PROVIDERS: dict[str, _ProviderEntry] = {
     gemini.GeminiEmbeddingProvider.name: (
-        lambda catalog, timeout_s, api_key, transport, _config: gemini.GeminiEmbeddingProvider(
-            catalog, timeout_s=timeout_s, api_key=api_key, transport=transport
+        lambda catalog, timeout_s, api_key, transport, _config, rng: gemini.GeminiEmbeddingProvider(
+            catalog, timeout_s=timeout_s, api_key=api_key, transport=transport, rng=rng
         ),
         gemini.worst_case_batch_seconds,
         lambda _revision: EmbeddingDescriptor(
@@ -73,7 +75,7 @@ PROVIDERS: dict[str, _ProviderEntry] = {
         ),
     ),
     embeddinggemma.NAME: (
-        lambda _catalog, timeout_s, _api_key, transport, config: (
+        lambda _catalog, timeout_s, _api_key, transport, config, _rng: (
             embeddinggemma.EmbeddingGemmaProvider(
                 _require_gemma(config), timeout_s=timeout_s, transport=transport
             )
@@ -105,11 +107,12 @@ def get_provider(
     catalog: ModelCatalog,
     timeout_s: float,
     api_key: str | None,
+    rng: random.Random,
     transport: httpx.AsyncBaseTransport | None = None,
     embeddinggemma_config: embeddinggemma.EmbeddingGemmaConfig | None = None,
 ) -> EmbeddingProvider:
     ctor, _, _ = _provider_entry(name)
-    return ctor(catalog, timeout_s, api_key, transport, embeddinggemma_config)
+    return ctor(catalog, timeout_s, api_key, transport, embeddinggemma_config, rng)
 
 
 def worst_case_batch_seconds(name: str, *, timeout_seconds: float) -> float:

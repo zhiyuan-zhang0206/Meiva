@@ -39,6 +39,7 @@ from base.agents.history.hierarchy.chunks import (
     locate_chunk,
 )
 from base.clock.tests.fakes import system_clock
+from base.clock.tests.seeded_rng import seeded_rng
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.db.protocols import DbConfig
@@ -426,6 +427,7 @@ async def test_consumer_end_to_end_uses_default_single_segment_locator(
         **lm_wiring(model_catalog),
         config=consumer_config(),
         describe=chunk_seams.describe,
+        rng=seeded_rng(),
     ).run_until_idle()
 
     assert await written_nodes(aops_pool) == [

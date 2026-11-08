@@ -14,6 +14,7 @@ from typing import Any
 import pytest
 from pydantic import SecretStr
 
+from base.clock.tests.seeded_rng import seeded_rng
 from base.config import settings
 from base.config.service_read import ConfigAuthority
 from meiva.tests.namespaces.web._web_helpers import WAITED_ATTEMPTS, Received, Reply, WebHarness
@@ -247,7 +248,7 @@ def test_a_provider_that_is_not_text_is_refused() -> None:
 
 
 def test_search_deps_reads_provider_settings(config_authority: ConfigAuthority) -> None:
-    deps = wiring.search_deps_for(config_authority)
+    deps = wiring.search_deps_for(config_authority, rng=seeded_rng())
 
     assert deps.provider is SearchProvider(settings.web.web_search_provider)
     assert deps.deepseek.max_count == settings.web.web_deepseek_max_results
@@ -262,6 +263,7 @@ def test_fetch_deps_reads_the_reader_setting(web_harness: WebHarness) -> None:
         overrides=web_harness.fetch_deps.fetch_model.overrides,
         delivery_active=False,
         agent_id=None,
+        rng=seeded_rng(),
     )
 
     assert deps.reader is ReaderProvider(settings.web.web_fetch_reader)
