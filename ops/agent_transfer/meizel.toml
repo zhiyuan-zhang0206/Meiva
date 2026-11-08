@@ -1,13 +1,14 @@
-exports = ["__init__.py", "archive_io.py", "budget.py", "limits.py", "operations.py"]
+exports = ["__init__.py", "archive_io.py", "budget.py", "harness_transfer.py", "limits.py", "operations.py"]
 
 [uses]
 "__init__.py" = ["budget.py", "bundle_plan.py", "errors.py"]
 "archive_io.py" = ["budget.py", "bundle_plan.py", "errors.py"]
 "budget.py" = ["errors.py"]
 "bundle_plan.py" = ["budget.py", "errors.py"]
+"harness_transfer.py" = []
 "limits.py" = ["budget.py"]
-"operations.py" = ["archive_io.py", "budget.py", "errors.py"]
-"tests" = ["archive_io.py", "budget.py", "bundle_plan.py", "errors.py"]
+"operations.py" = ["archive_io.py", "budget.py", "errors.py", "harness_transfer.py"]
+"tests" = ["archive_io.py", "budget.py", "bundle_plan.py", "errors.py", "harness_transfer.py", "operations.py"]
 
 [purity]
 "__init__.py" = "strict"

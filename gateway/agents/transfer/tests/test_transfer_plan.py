@@ -51,26 +51,28 @@ def _machine(
     )
 
 
-def test_precheck_accepts_idling_and_terminated_native_agents() -> None:
+def test_precheck_accepts_idling_and_terminated_native_and_external_agents() -> None:
     src = _machine("macmini", roles=("gateway", "agent-runner"))
     dst = _machine("company-mini")
 
     for status in ("idling", "terminated"):
-        decision = evaluate_precheck(
-            TransferPrecheckFacts(
-                agent=_agent(status=status),
-                agent_id=2697,
-                to_machine="company-mini",
-                source_machine=src,
-                target_machine=dst,
+        for harness in ("meiva", "codex", "claude_code", "antigravity"):
+            decision = evaluate_precheck(
+                TransferPrecheckFacts(
+                    agent=_agent(status=status, harness=harness),
+                    agent_id=2697,
+                    to_machine="company-mini",
+                    source_machine=src,
+                    target_machine=dst,
+                )
             )
-        )
-        assert isinstance(decision, TransferPlan)
-        assert decision.snapshot.status == status
-        assert decision.to_machine == "company-mini"
+            assert isinstance(decision, TransferPlan)
+            assert decision.snapshot.status == status
+            assert decision.snapshot.harness == harness
+            assert decision.to_machine == "company-mini"
 
 
-def test_precheck_refuses_running_external_impersonated_and_invalid_targets() -> None:
+def test_precheck_refuses_running_and_invalid_targets() -> None:
     src = _machine("macmini")
     dst = _machine("company-mini")
 
@@ -95,18 +97,6 @@ def test_precheck_refuses_running_external_impersonated_and_invalid_targets() ->
     )
     assert isinstance(running, TransferRefusal) and running.status_code == 409
     assert "currently running" in running.detail
-
-    external = evaluate_precheck(
-        TransferPrecheckFacts(
-            agent=_agent(harness="codex"),
-            agent_id=2697,
-            to_machine="company-mini",
-            source_machine=src,
-            target_machine=dst,
-        )
-    )
-    assert isinstance(external, TransferRefusal) and external.status_code == 409
-    assert "external harness" in external.detail
 
     pending_lc = evaluate_precheck(
         TransferPrecheckFacts(
@@ -174,6 +164,20 @@ def test_verify_cutover_cas_detects_concurrent_mutations() -> None:
     assert verify_cutover_cas(snap, _agent(status="idling")) is not None
     assert verify_cutover_cas(snap, _agent(status="terminated", machine="other")) is not None
     assert verify_cutover_cas(snap, _agent(status="terminated", harness="codex")) is not None
+
+    codex_plan = evaluate_precheck(
+        TransferPrecheckFacts(
+            agent=_agent(harness="codex"),
+            agent_id=2697,
+            to_machine="company-mini",
+            source_machine=_machine("macmini"),
+            target_machine=_machine("company-mini"),
+        )
+    )
+    assert isinstance(codex_plan, TransferPlan)
+    codex_snap = codex_plan.snapshot
+    assert verify_cutover_cas(codex_snap, _agent(status="terminated", harness="codex")) is None
+    assert verify_cutover_cas(codex_snap, _agent(status="terminated", harness="meiva")) is not None
 
 
 def test_compose_transfer_wake_message_and_bundle_store_cleanup() -> None:

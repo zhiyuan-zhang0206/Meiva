@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import json
 import uuid
 from collections.abc import Generator
 from dataclasses import dataclass, replace
@@ -267,7 +268,7 @@ def test_transfer_terminated_agent_without_workspace_resurrects_on_target(
     assert "Cross-machine transfer from 'runner-a' to 'runner-b'" in chat_inbound[2]
 
 
-def test_transfer_refuses_running_external_and_impersonated_agents(
+def test_transfer_refuses_running_agents(
     two_runners: TwoRunnerCluster,
     db_conn: psycopg.Connection,
 ) -> None:
@@ -285,12 +286,50 @@ def test_transfer_refuses_running_external_and_impersonated_agents(
     assert (ws_running / "keep.txt").read_text(encoding="utf-8") == "still running"
     assert not paths.workspace_path(two_runners.home_b, running_id).exists()
 
+
+def test_transfer_external_harness_agent_moves_workspace_and_session(
+    two_runners: TwoRunnerCluster,
+    db_conn: psycopg.Connection,
+) -> None:
     codex_id = _seed_native_agent(db_conn, machine="runner-a", status="idling", harness="codex")
-    r_ext = two_runners.client.post(
+    ws_a = paths.workspace_path(two_runners.home_a, codex_id)
+    ws_a.mkdir(parents=True)
+    (ws_a / "solution.py").write_text("print('codex transferred')", encoding="utf-8")
+
+    sess_dir_a = two_runners.home_a / "harness" / "sessions"
+    sess_dir_a.mkdir(parents=True, exist_ok=True)
+    sess_file_a = sess_dir_a / f"{codex_id}.json"
+    sess_file_a.write_text(
+        json.dumps(
+            {
+                "agent_id": codex_id,
+                "session_id": "codex-test-sess-1",
+                "cwd": str(ws_a),
+                "harness": "codex",
+                "model": "gpt-5",
+                "created_at": "2026-11-01T00:00:00Z",
+                "updated_at": "2026-11-01T00:00:00Z",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    resp = two_runners.client.post(
         f"/api/agents/{codex_id}/transfer",
         json={"to_machine": "runner-b"},
     )
-    assert r_ext.status_code == 409 and "external harness" in r_ext.json()["detail"]
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["status"] == "transferred"
+
+    ws_b = paths.workspace_path(two_runners.home_b, codex_id)
+    assert (ws_b / "solution.py").read_text(encoding="utf-8") == "print('codex transferred')"
+    assert not ws_a.exists()
+
+    sess_file_b = two_runners.home_b / "harness" / "sessions" / f"{codex_id}.json"
+    assert sess_file_b.exists()
+    sess_b_data = json.loads(sess_file_b.read_text(encoding="utf-8"))
+    assert sess_b_data["cwd"] == str(ws_b)
+    assert not sess_file_a.exists()
 
 
 def test_transfer_refuses_invalid_or_paused_targets(

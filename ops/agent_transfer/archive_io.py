@@ -32,7 +32,11 @@ from ops.agent_transfer.errors import (
     WorkspaceTransferCorruptError,
     WorkspaceTransferTooLargeError,
 )
-from ops.rpc_schemas.transfer import WorkspaceBundleManifest, WorkspaceManifestEntry
+from ops.rpc_schemas.transfer import (
+    HarnessTransferPayload,
+    WorkspaceBundleManifest,
+    WorkspaceManifestEntry,
+)
 
 _READ_CHUNK_BYTES = 1024 * 1024
 
@@ -210,6 +214,7 @@ def _empty_workspace_bundle(
     source_machine: str,
     killed_shell_sessions: list[int],
     limits: WorkspaceTransferLimits,
+    harness_transfer: HarnessTransferPayload | None = None,
 ) -> tuple[WorkspaceBundleManifest, bytes]:
     tar_buf = io.BytesIO()
     with tarfile.open(fileobj=tar_buf, mode="w:gz", format=tarfile.PAX_FORMAT):
@@ -225,6 +230,7 @@ def _empty_workspace_bundle(
         tar_bytes=len(tar_bytes),
         tar_sha256=hashlib.sha256(tar_bytes).hexdigest(),
         killed_shell_sessions=killed_shell_sessions,
+        harness_transfer=harness_transfer,
     )
     return manifest, encode_bundle(manifest, tar_bytes, limits=limits)
 
@@ -308,6 +314,7 @@ def pack_workspace(
     source_machine: str,
     killed_shell_sessions: list[int],
     limits: WorkspaceTransferLimits,
+    harness_transfer: HarnessTransferPayload | None = None,
 ) -> tuple[WorkspaceBundleManifest, bytes]:
     ws_dir = paths.workspace_path(home, agent_id)
     if _workspace_root(ws_dir) is None:
@@ -317,6 +324,7 @@ def pack_workspace(
             source_machine=source_machine,
             killed_shell_sessions=killed_shell_sessions,
             limits=limits,
+            harness_transfer=harness_transfer,
         )
 
     relpaths: list[str] = []
@@ -362,6 +370,7 @@ def pack_workspace(
         tar_bytes=len(tar_bytes),
         tar_sha256=hashlib.sha256(tar_bytes).hexdigest(),
         killed_shell_sessions=killed_shell_sessions,
+        harness_transfer=harness_transfer,
     )
     return manifest, encode_bundle(manifest, tar_bytes, limits=limits)
 

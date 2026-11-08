@@ -1070,7 +1070,7 @@
     "/api/agents/{agent_id}/transfer": {
       "post": {
         "summary": "Post Agent Transfer",
-        "description": "Transfer a settled (`idling` or `terminated`) native Meiva agent — including its workspace directory and central placement — to another live `agent-runner` machine. Running agents, external-harness agents, and agents with in-flight commands or uploads are refused with HTTP 409.",
+        "description": "Transfer a settled (`idling` or `terminated`) native Meiva or external-harness agent — including its workspace directory, harness session state, and central placement — to another live `agent-runner` machine. Running agents and agents with in-flight commands or uploads are refused with HTTP 409.",
         "operationId": "post_agent_transfer_api_agents__agent_id__transfer_post",
         "parameters": [
           {

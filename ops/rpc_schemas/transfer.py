@@ -100,6 +100,27 @@ class WorkspaceManifestEntry(BaseModel):
 
 
 # meiva:note
+# Serialized external-harness transcript file preserved across machine transfer.
+class HarnessTransferFile(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    relpath: str = Field(min_length=1)
+    content_b64: str
+
+
+# meiva:note
+# Serialized external-harness session record and underlying transcript files packed inside
+# the workspace transfer manifest.
+class HarnessTransferPayload(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    harness: str = Field(min_length=1)
+    session_record: dict[str, object]
+    files: list[HarnessTransferFile] = Field(default_factory=list[HarnessTransferFile])
+    extra: dict[str, object] = Field(default_factory=dict[str, object])
+
+
+# meiva:note
 # Header manifest embedded inside a framed `MEIVA_WS_V1` workspace export stream.
 class WorkspaceBundleManifest(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
@@ -114,6 +135,7 @@ class WorkspaceBundleManifest(BaseModel):
     tar_bytes: int = Field(ge=0)
     tar_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     killed_shell_sessions: list[int] = Field(default_factory=list[int])
+    harness_transfer: HarnessTransferPayload | None = None
 
 
 class WorkspaceTransferPreparePayload(BaseModel):

@@ -45,6 +45,7 @@ class AgentTransferSnapshot:
     agent_id: int
     from_machine: str
     status: Literal["idling", "terminated"]
+    harness: str = "meiva"
 
 
 @dataclass(frozen=True)
@@ -80,12 +81,6 @@ def _parse_settled_status(status: str) -> Literal["idling", "terminated"]:
 
 
 def check_agent_state(agent: AgentRowFacts) -> Literal["idling", "terminated"] | TransferRefusal:
-    if agent.harness != "meiva":
-        return TransferRefusal(
-            409,
-            f"agent {agent.agent_id} runs external harness {agent.harness!r}; "
-            "only native 'meiva' agents can be transferred across machines",
-        )
     if agent.status == "running":
         return TransferRefusal(
             409,
@@ -181,6 +176,7 @@ def evaluate_precheck(facts: TransferPrecheckFacts) -> TransferPlan | TransferRe
             agent_id=agent.agent_id,
             from_machine=agent.machine,
             status=settled,
+            harness=agent.harness,
         ),
         source_ops_url=source_ops_url,
         to_machine=facts.to_machine,
@@ -196,8 +192,11 @@ def verify_cutover_cas(
 ) -> str | None:
     if current is None:
         return f"agent {snapshot.agent_id} disappeared before cutover"
-    if current.harness != "meiva":
-        return f"agent {snapshot.agent_id} harness is {current.harness!r}, expected 'meiva'"
+    if current.harness != snapshot.harness:
+        return (
+            f"agent {snapshot.agent_id} harness changed from {snapshot.harness!r} "
+            f"to {current.harness!r} during transfer"
+        )
     if current.machine != snapshot.from_machine:
         return (
             f"agent {snapshot.agent_id} moved from {snapshot.from_machine!r} "
