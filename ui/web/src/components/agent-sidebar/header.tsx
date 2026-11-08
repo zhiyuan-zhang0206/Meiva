@@ -1,6 +1,6 @@
 "use client";
 
-import { BAR_DIVIDER_CLASS, BAR_HEIGHT_CLASS, FLEX, MIN_W_0 } from "@/lib/layout/layout";
+import { BAR_DIVIDER_CLASS, BAR_HEIGHT_CLASS, FLEX, MIN_W_0, OVERFLOW_HIDDEN } from "@/lib/layout/layout";
 import { cn } from "@/lib/format/utils";
 
 
@@ -27,7 +27,7 @@ export function SidebarHeader({
         FLEX
       )}
     >
-      <h1 className={cn("items-center", FLEX, MIN_W_0)}>
+      <h1 className={cn("items-center", FLEX, MIN_W_0, OVERFLOW_HIDDEN)}>
         <span className="sr-only">Meiva</span>
         <svg
           xmlns="http://www.w3.org/2000/svg"
