@@ -196,13 +196,11 @@ export function useTimelineWindow({
   const previousIdentityRef = useRef(identity);
   const [view, setView] = useState({ top: restoreTop ?? 0, height: 0, origin: 52 });
   const viewRef = useRef(view);
-  const readingRef = useRef<{ node: HTMLElement; docTop: number; id: string; rank: number; identity: string | null } | null>(null);
+  const readingRef = useRef<{ node: HTMLElement; top: number; id: string; rank: number; identity: string | null } | null>(null);
   const preserveRef = useRef<typeof readingRef.current>(null);
   const tracking = enabled || groups.reduce((count, group) =>
     count + (group.expandedRows?.length ?? 1), 0) >= measureRows;
   const rememberVisible = useCallback(() => {
-    // Bottom commands hand position ownership back to the sticky controller.
-    // A parked row must neither cancel its smooth scroll nor pin the old window.
     if (isFollowing()) {
       readingRef.current = null;
       preserveRef.current = null;
@@ -213,10 +211,16 @@ export function useTimelineWindow({
     const vpRect = viewport?.getBoundingClientRect();
     const node = content && viewport && vpRect ? visibleRow(content, vpRect) : null;
     const id = node?.dataset.itemId;
-    if (!node || !id || !viewport || !vpRect) return;
+    if (!node || !id) {
+      if (vpRect && vpRect.height > 0) {
+        readingRef.current = null;
+        preserveRef.current = null;
+        setVisiblePin(null);
+      }
+      return;
+    }
     const rank = Number(node.dataset.displayRank ?? 0);
-    const docTop = node.getBoundingClientRect().top - vpRect.top + viewport.scrollTop;
-    readingRef.current = { node, docTop, id, rank, identity };
+    readingRef.current = { node, top: node.getBoundingClientRect().top, id, rank, identity };
     setVisiblePin((previous) => previous?.id === id && previous.rank === rank && previous.identity === identity
       ? previous : { id, rank, identity });
   }, [contentRef, identity, isFollowing, viewportRef]);
@@ -273,7 +277,7 @@ export function useTimelineWindow({
       Math.abs(previous.origin - next.origin) >= 1;
     if (changed) {
       rememberVisible();
-      preserveRef.current ??= readingRef.current;
+      preserveRef.current = readingRef.current;
       viewRef.current = next;
       setView(next);
     }
@@ -364,6 +368,28 @@ export function useTimelineWindow({
     return windowForSizes(childSizes, top, view.height, childOrigin, TIMELINE_TURN_ROW_GAP_PX);
   };
 
+  const syncMountedHeights = useCallback(() => {
+    const content = contentRef.current;
+    if (!content) return;
+    let heightChanged = false;
+    const nextHeights = new Map(heightsRef.current);
+    for (const item of content.querySelectorAll<HTMLElement>("[data-virtual-group], [data-virtual-row]")) {
+      const groupKey = item.dataset.virtualGroup;
+      const key = groupKey
+        ? (item.querySelector('[data-turn-expanded="true"]') ? `${groupKey}:open` : groupKey)
+        : item.dataset.virtualRow;
+      if (!key) continue;
+      const height = item.getBoundingClientRect().height;
+      if (height <= 0 || Math.abs((nextHeights.get(key) ?? 0) - height) < 1) continue;
+      nextHeights.set(key, height);
+      heightChanged = true;
+    }
+    if (heightChanged) {
+      heightsRef.current = nextHeights;
+      setHeights(nextHeights);
+    }
+  }, [contentRef]);
+
   useLayoutEffect(() => {
     const preserved = preserveRef.current;
     preserveRef.current = null;
@@ -374,21 +400,10 @@ export function useTimelineWindow({
           `.timeline-item[data-item-id="${CSS.escape(preserved.id)}"][data-display-rank="${preserved.rank}"], [data-turn-expanded="false"][data-item-id="${CSS.escape(preserved.id)}"][data-display-rank="${preserved.rank}"]`,
         );
       if (node) {
-        const vpTop = viewport.getBoundingClientRect().top;
-        const docTop = node.getBoundingClientRect().top - vpTop + viewport.scrollTop;
-        const delta = docTop - preserved.docTop;
+        const delta = node.getBoundingClientRect().top - preserved.top;
         if (Math.abs(delta) >= 1) {
           viewport.scrollTop += delta;
-          // meiva:note
-          // One layout shift, one correction. `docTop` does not move with scrollTop, so a
-          // capture this correction already answered must not answer it again: every commit
-          // re-arms the pre-commit capture, and re-applying the same shift there writes
-          // scrollTop on every commit, renders again from the new `top`, and repeats until
-          // React gives up with "Maximum update depth exceeded".
-          // The vitest case "does not roll back user scroll" cannot see this branch: its mocked
-          // geometry leaves docTop equal to the captured value, so delta is always 0. What covers
-          // delta != 0 is tests/e2e/_timeline.py::assert_timeline_surface (#8663).
-          preserveRef.current = { ...preserved, docTop };
+          syncMountedHeights();
         }
       }
     }
@@ -422,8 +437,6 @@ export function useTimelineWindow({
       if (!changed) return;
       const rect = viewportRef.current?.getBoundingClientRect();
       if (rect && enabledRef.current) keepFocusInTimeline(content, rect);
-      // ResizeObserver runs after layout. Keep the reader observed before the
-      // height change; recapturing here would select the newly grown row.
       preserveRef.current = readingRef.current;
       const groups = groupsRef.current;
       if (nextHeights.size > Math.max(HEIGHT_CACHE_SWEEP_FLOOR, groups.length * 2)) {
@@ -432,8 +445,6 @@ export function useTimelineWindow({
           if (!live.has(key)) nextHeights.delete(key);
         }
       }
-      // Two notifications can land before React commits; the second must
-      // build on the first rather than on the last committed map.
       heightsRef.current = nextHeights;
       setHeights(nextHeights);
     });

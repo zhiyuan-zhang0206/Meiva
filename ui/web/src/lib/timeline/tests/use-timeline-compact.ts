@@ -159,6 +159,41 @@ describe("useTimeline compact history retention", () => {
     expect(result.current.items.some((item) => item.payload === "evicted page loop")).toBe(false);
   });
 
+  it("caps background compact-history retention at retainedItemsMax even when parked (!isSticky)", async () => {
+    ctx.getQueryClient().setQueryData(["config", null], {
+      fields: [{ env_var: "MEIVA_TIMELINE_RETAINED_ITEMS_MAX", current_value: 5 }],
+    });
+    wireReplies.set("/api/agents/42/timeline?before=2.0", [
+      resolves(tlResp([
+        snapshotItem({ item_id: "s1.a.1.0", kind: "agent_chat", payload: "page 1a" }),
+        snapshotItem({ item_id: "s1.a.2.0", kind: "agent_chat", payload: "page 1b" }),
+      ], true)),
+    ]);
+    wireReplies.set("/api/agents/42/timeline?before=s1.a.1.0", [
+      resolves(tlResp([
+        snapshotItem({ item_id: "s2.b.1.0", kind: "agent_chat", payload: "beyond retainedItemsMax cap" }),
+      ], true)),
+    ]);
+    timeline.always(resolves(tlResp(postWindow(), true)));
+
+    const { result } = renderHook(() => useTimeline(42, vi.fn()), { wrapper });
+    await waitFor(() => expect(result.current.items).toHaveLength(3));
+    expect(result.current.retainedItemsMax).toBe(5);
+
+    pushEvent({ role: "compact_done", agent_id: 42 });
+    pushEvent({ role: "timeline_snapshot", agent_id: 42, msg_count: 3, items: postWindow() });
+
+    await waitFor(() => {
+      expect(result.current.items).toHaveLength(5);
+    });
+    expect(result.current.compactBuffer).toBeNull();
+    expect(useTimelineStore.getState().retentionCappedSeq).toBeNull();
+
+    await ctx.delay(30);
+    expect(timelineReads.filter((read) => read.before !== undefined).map((read) => read.before)).toEqual(["2.0"]);
+    expect(result.current.items.some((item) => item.payload === "beyond retainedItemsMax cap")).toBe(false);
+  });
+
   it("waits for the post-compact tail read before deciding whether older history exists", async () => {
     let postTailResolve: ((value: TimelineResponse) => void) | null = null;
     timeline.always(resolves(tlResp([

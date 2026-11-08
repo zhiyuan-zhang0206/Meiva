@@ -437,6 +437,7 @@ export function useTimeline(
     itemCount: items.length,
     compactEpoch,
     compactTailReady: compactBuffer?.tailReady ?? false,
+    retainedItemsMax,
   });
 
   const prevAgentRef = useRef<{ id: number | null; status: string | undefined }>({
