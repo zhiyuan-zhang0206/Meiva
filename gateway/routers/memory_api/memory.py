@@ -96,7 +96,7 @@ async def _backend_topk(
     database: Database,
     query_vector: np.ndarray,
     k: int,
-    deadline: float,
+    backend_deadline: float,
     dim: int,
     fingerprint: str,
     inputs: MemorySearchSettings,
@@ -110,7 +110,7 @@ async def _backend_topk(
         dim=dim,
         fingerprint=fingerprint,
         uri=inputs.uri,
-    ).search_topk_async(query_vector, k, timeout=deadline)
+    ).search_topk_async(query_vector, k, timeout=backend_deadline)
 
 
 @router.post(
@@ -146,7 +146,9 @@ async def _backend_topk(
         "\n"
         "Raises:\n"
         "    IndexerUnavailable: embedder API / search backend unreachable, the\n"
-        "        decision model failed, or the search exceeded its deadline (wire 503)"
+        "        decision model failed, or the search exceeded its deadline (wire 503).\n"
+        "        The deadline is the timer that fires first: the vector backend's own\n"
+        "        timeout is that deadline plus a configured grace."
     ),
 )
 async def post_memory_search(request: Request, body: MemorySearchRequest) -> MemorySearchResponse:
@@ -156,21 +158,24 @@ async def post_memory_search(request: Request, body: MemorySearchRequest) -> Mem
     provider = state_as(request, MemoryAppState).memory_embedder
     plan = memory_plan.search_plan(
         purpose=body.purpose,
-        configured_deadline_s=inputs.deadline,
-        requested_deadline_s=body.deadline_seconds,
+        deadlines=memory_plan.Deadlines(
+            configured_s=inputs.deadline,
+            requested_s=body.deadline_seconds,
+            backend_grace_s=inputs.backend_deadline_grace,
+        ),
         rerank_candidates=inputs.rerank_candidates,
         dedup_candidates=inputs.dedup_candidates,
         exclude=body.exclude,
     )
     try:
-        async with asyncio.timeout(plan.deadline_s):
+        async with asyncio.timeout(plan.deadlines.request_s):
             ranked = await run_until_disconnect(
                 _search_and_rank(request, body, provider, inputs, plan, catalog),
                 request.is_disconnected,
             )
     except TimeoutError as exc:
         raise IndexerUnavailable(
-            f"memory search exceeded its {plan.deadline_s:g}s deadline"
+            f"memory search exceeded its {plan.deadlines.request_s:g}s deadline"
         ) from exc
     if ranked is None:
         return MemorySearchResponse(results=[])
@@ -241,7 +246,7 @@ async def _vector_candidates(
                 gateway_state(request).db,
                 query_vector,
                 plan.vector_count,
-                plan.deadline_s,
+                plan.deadlines.backend_s,
                 provider.dim,
                 provider.fingerprint,
                 inputs,

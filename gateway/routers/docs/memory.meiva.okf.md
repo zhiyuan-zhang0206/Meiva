@@ -32,6 +32,14 @@ their existing independent requirements.
 
 The startup-sized semaphore limits embedding and backend phases, not reranking. Acquires have their own short congestion budget, and the total search deadline also covers waiting for permits. Timeout or cancellation releases acquired permits. Candidate budgets depend on purpose, not on requested k or exclusions.
 
+The vector backend's own timeout is the search deadline plus a configured grace
+(`MEIVA_MEMORY_SEARCH_BACKEND_DEADLINE_GRACE_SECONDS`, 0.5s by default), so the deadline is the
+timer that expires first. With the two equal, a loaded gateway had both due in one scheduling
+turn: the backend's timeout is the inner cancel scope, it absorbed the request's cancellation
+and reported its own message-less timeout, and the wire error read `memory search backend
+failed: ` instead of naming the deadline. The backend is the backstop of the deadline, not a
+peer of it, so only the grace makes that message deterministic under load.
+
 The embedding provider's dimension and fingerprint identify the backend vector
 space even on reads. Keeping each await bounded prevents a stalled provider
 from consuming every permit indefinitely; a shorter acquire budget lets a

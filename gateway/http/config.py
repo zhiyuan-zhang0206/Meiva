@@ -151,8 +151,9 @@ class MemoryPoolPolicy:
 
 # meiva:note
 # The memory-search tunables: the embedding provider and its key, the vector backend, the
-# waits for the concurrency gate and for a whole search, and the candidate counts of the
-# reranking and deduplication purposes.
+# waits for the concurrency gate and for a whole search (plus the grace that makes the
+# backend's own timeout the backstop of that search deadline), and the candidate counts of
+# the reranking and deduplication purposes.
 @dataclass(frozen=True)
 class MemorySearchSettings:
     embedding_backend: str
@@ -162,6 +163,7 @@ class MemorySearchSettings:
     api_key: str | None = field(repr=False)
     acquire_timeout: float
     deadline: float
+    backend_deadline_grace: float
     rerank_model: str
     rerank_candidates: int
     dedup_candidates: int
@@ -397,6 +399,7 @@ def gateway_config_from_boot(
             api_key=None if gemini_key is None else gemini_key.get_secret_value(),
             acquire_timeout=services.memory_search_acquire_timeout_seconds,
             deadline=services.memory_search_deadline_seconds,
+            backend_deadline_grace=services.memory_search_backend_deadline_grace_seconds,
             rerank_model=services.memory_rerank_model,
             rerank_candidates=services.memory_rerank_candidates,
             dedup_candidates=services.memory_dedup_candidates,

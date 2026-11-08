@@ -1,4 +1,5 @@
 [uses]
+"test_backend_deadline_backstop.py" = ["search_support.py"]
 "test_event_loop_isolation.py" = ["search_support.py"]
 "test_memory_pool.py" = ["search_support.py"]
 "test_memory_search.py" = ["search_support.py"]

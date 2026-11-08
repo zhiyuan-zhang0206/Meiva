@@ -248,6 +248,35 @@ class ServiceRuntimeSettings(EnvSettings):
         },
     )
 
+    memory_search_backend_deadline_grace_seconds: float = Field(
+        title="Memory search backend timeout grace (seconds)",
+        default=0.5,
+        ge=0,
+        alias="MEIVA_MEMORY_SEARCH_BACKEND_DEADLINE_GRACE_SECONDS",
+        description=(
+            "How much later than the request deadline the vector backend's own timeout "
+            "expires. When the two are equal, a busy gateway has both timers due in the "
+            "same scheduling turn: the backend's HTTP client is the inner cancel scope, "
+            "it absorbs the request's cancellation and reports its own timeout, which "
+            "carries no message — the wire error then reads 'memory search backend "
+            "failed: ' instead of naming the deadline. The backend is the backstop, not a "
+            "peer of the request deadline, so it expires strictly later. 0.5s is more "
+            "than ten times the scheduler jitter that put the equal timers in one turn, "
+            "and far below any wait a caller perceives; it stays inside the SDK client's "
+            "per-attempt margin (deadline + 3s), so the gateway's own answer still "
+            "reaches the caller first. 0 ties the two again — the condition this setting "
+            "exists to remove — and is allowed only so the regression test can show the "
+            "tied case failing. Takes effect on gateway restart."
+        ),
+        json_schema_extra={
+            "restart_required": "gateway",
+            "writable": False,
+            "sensitive": False,
+            "scope": "host",
+            "remote_writable": False,
+        },
+    )
+
     memory_search_acquire_timeout_seconds: float = Field(
         title="Memory search queue timeout (seconds)",
         default=1.0,
