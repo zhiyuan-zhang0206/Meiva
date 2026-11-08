@@ -197,6 +197,21 @@ describe("itemLiveStartedAt & harness items", () => {
       exec_ms: 1_500,
     };
     expect(isLiveExecution(exec)).toBe(false);
+
+    const settledPendingFalse: BackendTimelineItem = {
+      item_id: "3.0",
+      kind: "code_output",
+      source: null,
+      payload: "Tool result unavailable",
+      created_at: harnessTime,
+      inbound_id: null,
+      show_timestamp: true,
+      activity_revision: 1,
+      activity_pending: false,
+      exec_ms: null,
+    };
+    expect(itemLiveStartedAt(settledPendingFalse)).toBeUndefined();
+    expect(isLiveExecution(settledPendingFalse)).toBe(false);
   });
 
   it("returns undefined for non-work items", () => {

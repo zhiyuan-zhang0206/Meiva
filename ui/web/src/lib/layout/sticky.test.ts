@@ -465,6 +465,35 @@ describe("an expanded live work block owns the top edge (notifyLiveBlock)", () =
   });
 });
 
+describe("manually expanding a settled work block stops following (notifyBlockExpanded)", () => {
+  it("stops following and does not pin when expansion grows content, even inside the bottom zone", () => {
+    const ctl = createStickyController(TOUCH_STICKY_THRESHOLDS);
+    pin(ctl, 1000);
+    expect(ctl.isSticky()).toBe(true);
+    ctl.notifyBlockExpanded();
+    expect(ctl.isSticky()).toBe(false);
+    expect(ctl.handleLayoutChange(view(400, 1050))).toBe(false);
+    expect(ctl.isSticky()).toBe(false);
+    expect(ctl.handleLayoutChange(view(400, 1600))).toBe(false);
+    expect(ctl.isSticky()).toBe(false);
+  });
+
+  it("resumes following when the reader scrolls back to the bottom or clicks scroll-to-bottom", () => {
+    const ctl = createStickyController(TOUCH_STICKY_THRESHOLDS);
+    pin(ctl, 1000);
+    ctl.notifyBlockExpanded();
+    expect(ctl.handleLayoutChange(view(400, 1600))).toBe(false);
+    ctl.handleScroll(view(950, 1600));
+    expect(ctl.isSticky()).toBe(true);
+
+    ctl.notifyBlockExpanded();
+    expect(ctl.handleLayoutChange(view(950, 1650))).toBe(false);
+    ctl.requestStick();
+    expect(ctl.isSticky()).toBe(true);
+    expect(ctl.handleLayoutChange(view(950, 1650))).toBe(true);
+  });
+});
+
 describe("iOS bounce & touch (position-based, no wheel events)", () => {
   it("overscroll bounce at the bottom (scrollTop drops tens of px) stays sticky", () => {
     const ctl = createStickyController(TOUCH_STICKY_THRESHOLDS);

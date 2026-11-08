@@ -209,6 +209,61 @@ describe("deep history DOM window", () => {
     vi.restoreAllMocks();
   });
 
+  it("does not pin scrollTop to bottom when expanding a settled work block while following at the bottom (#6581)", () => {
+    const observers: ResizeObserverCallback[] = [];
+    vi.stubGlobal("ResizeObserver", class {
+      constructor(cb: ResizeObserverCallback) { observers.push(cb); }
+      observe = vi.fn();
+      unobserve = vi.fn();
+      disconnect = vi.fn();
+    });
+    const items = [
+      ...Array.from({ length: 12 }, (_, index) => makeItem({
+        item_id: `1.${index}`, kind: "agent_reasoning", payload: `Step ${index + 1}`,
+      })),
+      makeItem({ item_id: "2.0", kind: "agent_chat", payload: "Final reply" }),
+    ];
+    render(<TimelineView items={items} threadKey="expand-at-bottom-no-pin" />);
+    const viewport = screen.getByTestId("scroll-viewport");
+    let scrollHeight = 1200;
+    Object.defineProperty(viewport, "clientHeight", { value: 600, configurable: true });
+    Object.defineProperty(viewport, "scrollHeight", { get: () => scrollHeight, configurable: true });
+    act(() => {
+      viewport.scrollTop = 600;
+      fireEvent.scroll(viewport);
+    });
+    expect(viewport.scrollTop).toBe(600);
+
+    fireEvent.click(screen.getByTestId("turn-toggle"));
+    expect(screen.getByTestId("turn-toggle").getAttribute("aria-expanded")).toBe("true");
+    scrollHeight = 2000;
+    act(() => {
+      for (const cb of observers) cb([], {} as ResizeObserver);
+    });
+    expect(viewport.scrollTop).toBe(600);
+    vi.unstubAllGlobals();
+  });
+
+  it("pre-tracks group heights when collapsed turns hold enough items to cross activation on expand (#6581)", () => {
+    displayLimits.set("MEIVA_TIMELINE_WINDOW_ACTIVATION_ROWS", 30);
+    displayLimits.set("MEIVA_TIMELINE_WINDOW_MEASURE_ROWS", 20);
+    const observed: Element[] = [];
+    vi.stubGlobal("ResizeObserver", class {
+      observe(target: Element) { observed.push(target); }
+      unobserve = vi.fn();
+      disconnect = vi.fn();
+    });
+    const items = [
+      makeItem({ item_id: "1.0", kind: "agent_chat", payload: "Opening reply" }),
+      ...Array.from({ length: 35 }, (_, index) => makeItem({
+        item_id: `2.${index}`, kind: "agent_reasoning", payload: `Step ${index + 1}`,
+      })),
+    ];
+    render(<TimelineView items={items} threadKey="pretrack-collapsed-turn" />);
+    expect(observed.some((node) => node.hasAttribute("data-virtual-group"))).toBe(true);
+    vi.unstubAllGlobals();
+  });
+
   it("does not roll back user scroll or jump to bottom when older history prepends after scrolling up", () => {
     displayLimits.set("MEIVA_TIMELINE_WINDOW_ACTIVATION_ROWS", 20);
     displayLimits.set("MEIVA_TIMELINE_WINDOW_MEASURE_ROWS", 5);

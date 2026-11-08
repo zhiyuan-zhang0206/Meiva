@@ -29,7 +29,7 @@ export function itemLiveStartedAt(item: BackendTimelineItem): number | undefined
   } else {
     return undefined;
   }
-  if (item.activity_revision != null || item.activity_pending != null) {
+  if (item.activity_pending !== false && (item.activity_revision != null || item.activity_pending != null)) {
     if (item.created_at != null) {
       const parsed = Date.parse(item.created_at);
       if (!Number.isNaN(parsed)) return parsed;

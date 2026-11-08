@@ -193,7 +193,7 @@ export const TurnBlock = memo(function TurnBlock({
       </button>
       <div
         className={cn(
-          "grid transition-[grid-template-rows] duration-200 ease-out motion-reduce:transition-none",
+          "grid",
           expanded ? "grid-rows-[1fr]" : "grid-rows-[0fr]",
         )}
       >
