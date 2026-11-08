@@ -143,6 +143,32 @@ def _default_headers(ctx: BuildContext) -> dict[str, str] | None:
     return default_headers or None
 
 
+def downscale_image_data_uri(url: str, max_px: int) -> str:
+    if not url.startswith("data:image/") or ";base64," not in url:
+        return url
+    header, b64_data = url.split(";base64,", 1)
+    mime = header.removeprefix("data:")
+    try:
+        import base64
+        import io
+
+        from PIL import Image
+
+        raw_bytes = base64.b64decode(b64_data)
+        with Image.open(io.BytesIO(raw_bytes)) as img:
+            w, h = img.size
+            if max(w, h) <= max_px:
+                return url
+            img.thumbnail((max_px, max_px), Image.Resampling.LANCZOS)
+            out_buf = io.BytesIO()
+            fmt = img.format or "PNG"
+            img.save(out_buf, format=fmt)
+            new_b64 = base64.b64encode(out_buf.getvalue()).decode("ascii")
+            return f"data:{mime};base64,{new_b64}"
+    except (OSError, ValueError):
+        return url
+
+
 def build(ctx: BuildContext) -> BaseChatModel:
     """claude-* branch: ThinkingTokensChatAnthropic, pinned max_tokens.
 
@@ -225,6 +251,7 @@ def build(ctx: BuildContext) -> BaseChatModel:
         thinking=wire_thinking,
         effort=wire_effort,
         disable_streaming=ctx.disable_streaming,
+        image_downscaler=downscale_image_data_uri,
     )
 
 
@@ -241,7 +268,7 @@ PROVIDER = ProviderContribution(
         served_speed=served_speed,
         attach=AttachPolicy(
             file_size_limits={"image": 10 * 1024 * 1024, "pdf": 32 * 1024 * 1024},
-            image_dimension_tiers=((1, 8000),),
+            image_dimension_tiers=((1, 8000), (2, 3000)),
             pdf_document_block=True,
         ),
         stop_spec=StopSpec(
