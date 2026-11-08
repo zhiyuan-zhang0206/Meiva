@@ -25,7 +25,7 @@ def _add(
     ts_offset_hours: float = 0,
     ts: datetime | None = None,
 ) -> None:
-    when = ts if ts is not None else datetime.now(UTC) - timedelta(hours=ts_offset_hours)
+    when = ts if ts is not None else _now_ts() - timedelta(hours=ts_offset_hours)
     db.execute(
         "INSERT INTO telemetry_events (event_uid, ts, agent_id, machine, cluster, process, "
         "category, event_name, level, source, attributes) VALUES (%s, %s, %s, 'test', 'c', 'test', "
@@ -42,7 +42,16 @@ def _grid_index(ts: datetime, anchor: datetime, window_s: int, bucket_s: int) ->
 
 
 def _now_ts() -> datetime:
-    return datetime.now(UTC)
+    return datetime(2026, 3, 4, 5, 6, 7, tzinfo=UTC)
+
+
+def _get_monitor(params: dict[str, str] | None = None) -> dict[str, Any]:
+    with gateway_test_client() as client:
+        assert isinstance(client.app, FastAPI)
+        client.app.state.clock = Clock(
+            ClockConfig("UTC", "UTC", False), timers=ManualTimers(), now=_now_ts
+        )
+        return client.get("/api/ops/monitor", params=params).json()
 
 
 def _assert_zero_filled_series(body: dict[str, Any]) -> None:
@@ -105,8 +114,7 @@ def test_ops_monitor_sse_wires_kind_and_event_log_drop(db_conn: psycopg.Connecti
     _add(db_conn, event="sse_drop", payload={"n": 1}, ts_offset_hours=3)
     _add(db_conn, event="event_log_drop", payload={"n": 3}, ts_offset_hours=1)
     db_conn.commit()
-    with gateway_test_client() as client:
-        body = client.get("/api/ops/monitor").json()
+    body = _get_monitor()
     sse = body["sse"]
     assert sse["totals"] == {"queue_full": 1, "publish_error": 2, "event_log_drop": 1}
     i_qf = _grid_index(now - timedelta(hours=2), now, 86400, 1800)
@@ -138,8 +146,7 @@ def _seed_llm_bucket(db: psycopg.Connection) -> int:
 
 def _llm_report(db: psycopg.Connection) -> tuple[dict[str, Any], int]:
     i = _seed_llm_bucket(db)
-    with gateway_test_client() as client:
-        return client.get("/api/ops/monitor").json()["llm"], i
+    return _get_monitor()["llm"], i
 
 
 def test_ops_monitor_llm_counts_tokens_and_errors_from_the_rows(
@@ -178,8 +185,7 @@ def test_ops_monitor_restarts_wires_service_breakdown(db_conn: psycopg.Connectio
     _add(db_conn, event="service_started", payload={"name": "gateway"}, ts_offset_hours=1)
     _add(db_conn, event="service_started", payload={"name": "restarter"}, ts_offset_hours=2)
     db_conn.commit()
-    with gateway_test_client() as client:
-        body = client.get("/api/ops/monitor").json()
+    body = _get_monitor()
     restarts = body["restarts"]
     assert restarts["totals"] == {"service_starts": 3}
     assert restarts["services"] == [
@@ -195,8 +201,7 @@ def test_ops_monitor_grid_alignment(db_conn: psycopg.Connection) -> None:
     now = _now_ts()
     _add(db_conn, event="sse_drop", payload={"kind": "queue_full"}, ts_offset_hours=0.5)
     db_conn.commit()
-    with gateway_test_client() as client:
-        body = client.get("/api/ops/monitor").json()
+    body = _get_monitor()
     meta = body["meta"]
     i = _grid_index(now - timedelta(hours=0.5), now, 86400, 1800)
     assert body["sse"]["series"][i]["queue_full"] == 1

@@ -713,7 +713,7 @@ def test_shell_icon_size_is_uniform(
                 continue
             boxes = cast(
                 "list[IconBox]",
-                row.locator("svg").evaluate_all(
+                row.locator("svg:not(h1 svg)").evaluate_all(
                     "els => els.map(el => { const b = el.getBoundingClientRect();"
                     " return {w: +b.width.toFixed(2), h: +b.height.toFixed(2),"
                     " label: (el.closest('button')?.getAttribute('aria-label')"

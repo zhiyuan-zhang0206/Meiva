@@ -102,8 +102,9 @@ Two cases; only the second can fail:
 Neither case discriminates a stream-only change in the band's own height: the
 stream makes none (the stop control sits in the same 73px band).
 
-Icon size: every SVG inside the four control rows (the header bar, the sidebar's
-title row, the sidebar footer, the composer's band) is `ICON_SIZE_CLASS` (16px).
-A control the breakpoint hides has no box and is skipped; glyphs inside content
-(the pending strip's clock, the send button's filled stop square) keep their own
-optical size and are out of scope.
+Icon size: every control SVG inside the four control rows (the header bar, the
+sidebar's title row excluding the `h1 svg` 24px brand wordmark, the sidebar
+footer, the composer's band) is `ICON_SIZE_CLASS` (16px). A control the
+breakpoint hides has no box and is skipped; glyphs inside content (the pending
+strip's clock, the send button's filled stop square) keep their own optical
+size and are out of scope.
