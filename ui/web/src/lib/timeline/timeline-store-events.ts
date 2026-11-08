@@ -35,6 +35,14 @@ export interface TimelineState {
 
   streamingCode: boolean;
   turnActive: boolean;
+  // meiva:note
+  // When this thread last received a timeline event (the page's own wall clock), 0 = none yet.
+  // The live "Working for" clock anchors on it while no block is in flight: between two blocks
+  // nothing else advances, and the header used to freeze at its last number (user report
+  // 2026-11-08). It never carries an agent-host timestamp, so a clock skew between the agent's
+  // machine and the browser cannot move the number.
+  // meiva:link ui/web/src/docs/frontend-components/timeline-view/deep-collapse.meiva.okf.md
+  liveAnchorAt: number;
   connectionState: ConnectionState;
   tokenUsage: number;
 
@@ -250,6 +258,7 @@ export function applySseEvent(state: TimelineState, ev: SystemEvent, nowMs = 1):
         const epoch = state.compactEpoch + 1;
         return {
           items: snapItems,
+          liveAnchorAt: nowMs,
           compactEpoch: epoch,
           compactBuffer: captureCompactTransition(state.items, state.compactBuffer, ev.agent_id, epoch, false),
           streamingIds: new Set(),
@@ -282,6 +291,7 @@ export function applySseEvent(state: TimelineState, ev: SystemEvent, nowMs = 1):
       streamingIds: next.streamingIds,
       streamingCode: next.streamingCode,
       turnActive: next.turnActive,
+      liveAnchorAt: nowMs,
       hasMoreOlder: next.hasMoreOlder,
       liveCompact: retireLiveCompact(state.liveCompact, next.items),
     };

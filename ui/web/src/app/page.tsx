@@ -49,6 +49,7 @@ function HomePageWiring() {
   const composerFocusToken = useStore((state) => state.composerFocusToken);
   const setMobileSidebarOpen = useStore((state) => state.setMobileSidebarOpen);
   const requestScrollToBottom = useTimelineStore((state) => state.requestScrollToBottom);
+  const liveAnchorAt = useTimelineStore((state) => state.liveAnchorAt);
   const { bfcacheId } = useRouter();
   const showError = useCallback((msg: string) => showToast(msg), [showToast]);
   const breakpoint = useBreakpoint();
@@ -67,7 +68,10 @@ function HomePageWiring() {
     () => ({ focusComposer, composerFocusToken, setMobileSidebarOpen }),
     [focusComposer, composerFocusToken, setMobileSidebarOpen],
   );
-  const timelineStore = useMemo(() => ({ requestScrollToBottom }), [requestScrollToBottom]);
+  const timelineStore = useMemo(
+    () => ({ requestScrollToBottom, liveAnchorAt }),
+    [requestScrollToBottom, liveAnchorAt],
+  );
   const contextPanel = useMemo(
     () => ({ open: contextPanelOpen, setOpen: setContextPanelOpen }),
     [contextPanelOpen, setContextPanelOpen],

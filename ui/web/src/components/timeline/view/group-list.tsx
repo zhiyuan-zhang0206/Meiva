@@ -267,6 +267,7 @@ export function TimelineGroupList({
   compactBuffer,
   streamingCode,
   turnActive,
+  lastEventAt = 0,
   overrides,
   toggleExpanded,
   toggleTurn,
@@ -283,6 +284,7 @@ export function TimelineGroupList({
   compactBuffer: CompactTransitionBuffer | null;
   streamingCode: boolean;
   turnActive: boolean;
+  lastEventAt?: number;
   overrides: ReadonlySet<string>;
   toggleExpanded: (id: string, kind: BackendTimelineItem["kind"]) => void;
   toggleTurn: (id: string, currentlyExpanded: boolean) => void;
@@ -387,6 +389,7 @@ export function TimelineGroupList({
                 bounded={isLastTurn}
                 onToggle={toggleTurn}
                 turnActive={turnActive && isLastTurn}
+                lastEventAt={lastEventAt}
                 liveWindow={isLiveTurn}
                 onActivityAtBottomChange={isLiveTurn ? onActivityAtBottomChange : undefined}
                 scrollToBottomSeq={isLiveTurn ? activityScrollSeq : undefined}

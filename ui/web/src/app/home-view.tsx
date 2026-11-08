@@ -77,6 +77,12 @@ type InspectorView = ReturnType<typeof useInspectorOpen>;
 type SettingsView = Pick<ReturnType<typeof useUserSettings>, "settings" | "isLoading">;
 interface TimelineStoreView {
   requestScrollToBottom: () => void;
+  // meiva:note
+  // Page-clock time of the last event the selected thread received (0 = none). The running turn's
+  // live clock anchors on it between blocks, so "Working for" keeps counting through the gap
+  // between a committed block and the next one instead of freezing (user report 2026-11-08).
+  // meiva:link ui/web/src/docs/frontend-components/timeline-view/deep-collapse.meiva.okf.md
+  liveAnchorAt: number;
 }
 type TimelineViewState = Pick<
   UseTimelineResult,
@@ -470,6 +476,7 @@ function HomeContent({
             scrollMemoryKey={`${bfcacheId}:agent:${activeId ?? "unselected"}`}
             streamingCode={streamingCode}
             turnActive={agentBusy}
+            lastEventAt={timelineStore.liveAnchorAt}
             hasMoreOlder={hasMoreOlder}
             loadingOlder={loadingOlder}
             onLoadOlder={loadOlder}

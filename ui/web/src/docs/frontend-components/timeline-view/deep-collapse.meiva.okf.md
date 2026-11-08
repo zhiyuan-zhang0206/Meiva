@@ -29,7 +29,24 @@ right-aligned below the expanded body on copyable secondary messages — see
 
 The collapsed turn strip shows a single status line. Expanded turns show the counts of turns, messages and other items on a separate line beneath the status, followed by SDK-call chips and the detail rows where present. While `turnActive` is true, the trailing `TurnBlock` is the live window (`data-live-activity-window="true"`, feeding its inner detached state into the single outer `ScrollToBottomButton`), preceded by an unboxed inline `PendingLiveActivityWindow` immediately after a human prompt before the first work item arrives.
 
-The turn header's timer reads ONE basis in both states — `summarizeTurn.workedMs`, the sum of the turn's block durations — with the active `TurnBlock` header ("Working for Xs" / "Working…") displaying `totalWorkedMs` (`workedMs` plus the in-flight block's elapsed) and transitioning cleanly to "Worked for Xs" when the turn completes. Wall-clock across a turn is never displayed: a turn is a maximal run of secondary items and can span an idle gap (a restart, a wake-up the agent had not picked up yet).
+The turn header's timer reads one basis — `summarizeTurn.workedMs`, the sum of
+the turn's block durations, which a turn that spans an idle gap (a restart, a
+wake-up the agent had not picked up yet) must not inflate — plus one live
+stretch. The active `TurnBlock` header ("Working for Xs" / "Working…") displays
+`totalWorkedMs` and settles into "Worked for Xs" when the turn completes.
+
+What the live stretch counts changed (user report 2026-11-08, an Antigravity turn
+stuck at "Working for 1m 2s" with nothing left to advance it). It used to be the
+in-flight block's elapsed time only, so between two blocks — a tool result
+committed, the model thinking before its next token, a harness step transition —
+nothing was live and the number froze for as long as the gap lasted. The anchor
+is now the in-flight block's start while one runs, and otherwise
+`liveAnchorAt` — the page's own clock of the last event the thread received
+(`useTimelineStore.liveAnchorAt`), which is precisely the moment the current
+unaccounted stretch began. It comes from the browser's clock, never an
+agent-host timestamp, so a skew between the two cannot move the number; it resets
+on a thread switch. While a turn is open the number therefore only moves forward,
+and it lands on the measured sum when the next block commits.
 
 ## Relationship to Other Nodes
 
