@@ -60,8 +60,6 @@ from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
 
-from base.cluster.derive import production_identity
-from base.cluster.machine import MachineIdentityReader
 from base.telemetry.delivery.defer_plan import ChildDeferPlan
 from base.telemetry.delivery.loss import report_loss
 from base.telemetry.delivery.mirror import append_jsonl
@@ -73,7 +71,6 @@ from base.telemetry.delivery.reporting import (
 )
 from base.telemetry.emitter import emit, pipeline_bound
 from base.telemetry.metrics import ci_runs_metrics
-from base.telemetry.observability import gateway_observability_home
 from base.telemetry.otlp.plans import (
     BASE_METRIC_DISPOSITION,
     select_metric_attributes,
@@ -114,7 +111,6 @@ __all__ = [
     "bind_exporter",
     "default_exporter",
     "endpoint_reachable",
-    "observability_export_allowed",
     "remaining_time",
 ]
 
@@ -137,39 +133,11 @@ _QUEUE_MAXSIZE = 2048
 # every five minutes, not on every batch, so a missing sidecar cannot turn event
 # volume into connection-probe volume.
 COLLECTOR_RETRY_INTERVAL_S = 300
-NO_EMITTER = "_no_emitter"
 
 METRIC_DISPOSITION: dict[tuple[str, str], str | None] = {
     **BASE_METRIC_DISPOSITION,
     **ci_runs_metrics.CI_RUN_GAUGE_DISPOSITIONS,
 }
-
-
-# meiva:note
-# Decide export eligibility from the caller's machine, unit home and environment.
-def observability_export_allowed(
-    machine: MachineIdentityReader, *, home: Path, endpoint_explicit: bool
-) -> bool:
-    if endpoint_explicit:
-        return True
-    if not production_identity(machine, home=home):
-        return False
-    gateway_home = gateway_observability_home(machine, home=home)
-    if gateway_home is None:
-        return True
-    from base.telemetry.observability import home_is_observability_station
-
-    allowed = home_is_observability_station(gateway_home, machine=machine, unit_home=home)
-    if not allowed:
-        from base.log import logger
-
-        logger.bind(**{NO_EMITTER: True}).warning(
-            "[otlp-exporter] OTLP export disabled: gateway home is not the "
-            "observability station (no {} marker and no observability-station "
-            "capability); set MEIVA_TELEMETRY_OTLP_ENDPOINT to use an explicit collector",
-            gateway_home / "lgtm-host",
-        )
-    return allowed
 
 
 def endpoint_reachable(endpoint: str) -> bool:

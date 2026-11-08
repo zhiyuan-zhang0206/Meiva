@@ -4,7 +4,9 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Literal
 
+from base.cluster.derive import production_identity
 from base.cluster.machine import MachineIdentityReader
+from base.telemetry.delivery.reporting import NO_EMITTER
 
 ObservabilityEndpointVariable = Literal[
     "MEIVA_TELEMETRY_OTLP_ENDPOINT",
@@ -111,6 +113,35 @@ def home_is_observability_station(
     except MachineRoleMissing:
         return False
     return home.resolve() == unit_home.resolve()
+
+
+# meiva:note
+# Decide export eligibility from the caller's machine, unit home and environment.
+#
+# The producer half of one decision: `collector_allowed_for_home` below gates the local collector
+# on the same station question and the same explicit-endpoint escape hatch, so the two sides cannot
+# drift apart.
+def observability_export_allowed(
+    machine: MachineIdentityReader, *, home: Path, endpoint_explicit: bool
+) -> bool:
+    if endpoint_explicit:
+        return True
+    if not production_identity(machine, home=home):
+        return False
+    gateway_home = gateway_observability_home(machine, home=home)
+    if gateway_home is None:
+        return True
+    allowed = home_is_observability_station(gateway_home, machine=machine, unit_home=home)
+    if not allowed:
+        from base.log import logger
+
+        logger.bind(**{NO_EMITTER: True}).warning(
+            "[otlp-exporter] OTLP export disabled: gateway home is not the "
+            "observability station (no {} marker and no observability-station "
+            "capability); set MEIVA_TELEMETRY_OTLP_ENDPOINT to use an explicit collector",
+            gateway_home / "lgtm-host",
+        )
+    return allowed
 
 
 def collector_allowed_for_home(

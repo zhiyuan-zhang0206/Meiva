@@ -24,14 +24,11 @@ from base.host.boundary.json_values import is_object_dict, is_object_list
 from base.log import logger
 from base.paths import traces_dir
 from base.telemetry.delivery.reporting import report_no_pipeline
-from base.telemetry.observability import cluster_label
+from base.telemetry.observability import cluster_label, observability_export_allowed
 from base.telemetry.otlp.telemetry_otlp import (
     COLLECTOR_RETRY_INTERVAL_S as COLLECTOR_RETRY_INTERVAL_S,
 )
-from base.telemetry.otlp.telemetry_otlp import (
-    endpoint_reachable,
-    observability_export_allowed,
-)
+from base.telemetry.otlp.telemetry_otlp import endpoint_reachable
 from base.telemetry.otlp.trace_config import TraceConfig
 from base.telemetry.otlp.trace_readiness import PROCESS_RECORDING, TRACE_INIT_WAIT_S, TraceReadiness
 from base.telemetry.otlp.trace_workers import CollectorRetry, TraceArm

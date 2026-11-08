@@ -96,8 +96,11 @@ def build_pipeline(
     if not home.is_absolute():
         raise ValueError(f"the event pipeline needs an absolute home, got {str(home)!r}")
     from base.host.env.registry import process_environment
-    from base.telemetry.observability import endpoint_override_is_explicit
-    from base.telemetry.otlp.telemetry_otlp import default_exporter, observability_export_allowed
+    from base.telemetry.observability import (
+        endpoint_override_is_explicit,
+        observability_export_allowed,
+    )
+    from base.telemetry.otlp.telemetry_otlp import default_exporter
     from base.telemetry.otlp.telemetry_otlp_exporting import ExportingEventPipeline
 
     # meiva:note

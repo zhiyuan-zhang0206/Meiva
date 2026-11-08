@@ -51,7 +51,7 @@ def test_export_gate_roles_marker_and_override(
     if marker:
         (home / "lgtm-host").touch()
     assert (
-        telemetry_otlp.observability_export_allowed(
+        observability.observability_export_allowed(
             machine_identity(roles=roles), home=home, endpoint_explicit=override
         )
         is expected
@@ -71,7 +71,7 @@ def test_explicit_endpoint_does_not_read_machine(
         ConfiguredMachineIdentity(ConfigBoot()).name()
     machine = ConfiguredMachineIdentity(ConfigBoot())
     machine.set(role=facts.role(), host=facts.host(), description=facts.description())
-    assert telemetry_otlp.observability_export_allowed(
+    assert observability.observability_export_allowed(
         machine, home=tmp_path, endpoint_explicit=True
     )
     with pytest.raises(UnicodeDecodeError):
@@ -82,7 +82,7 @@ def test_missing_role_preserves_runner_bootstrap_gate(tmp_path: Path) -> None:
     home = tmp_path / ".meiva"
     home.mkdir()
     machine = machine_identity(roles=None)
-    assert telemetry_otlp.observability_export_allowed(machine, home=home, endpoint_explicit=False)
+    assert observability.observability_export_allowed(machine, home=home, endpoint_explicit=False)
 
 
 @pytest.mark.parametrize("operation", ["gateway", "station", "export"])
@@ -98,7 +98,7 @@ def test_invalid_roles_propagate_outside_transport_isolation(
         elif operation == "station":
             observability.home_is_observability_station(home, machine=machine, unit_home=home)
         else:
-            telemetry_otlp.observability_export_allowed(machine, home=home, endpoint_explicit=False)
+            observability.observability_export_allowed(machine, home=home, endpoint_explicit=False)
 
 
 def test_each_backend_freezes_only_its_own_eligibility(tmp_path: Path) -> None:
