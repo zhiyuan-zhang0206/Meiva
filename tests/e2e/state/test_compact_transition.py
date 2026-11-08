@@ -8,6 +8,7 @@ from urllib.parse import parse_qs, urlparse
 
 import pytest
 from playwright.sync_api import Request
+from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
 from base.api_contracts.agent_contract import AgentStatus
 from base.db import Database
@@ -141,14 +142,46 @@ def _place_nonsticky_reply(env: E2EEnv, reply: str) -> dict[str, Any]:
     return position
 
 
+# meiva:note
+# A settle that never lands and a timeline that is no longer there look identical from a bare
+# timeout. 2026-11-08 the deep-history case's anchor loop (#8652) had replaced the timeline with
+# the section ErrorBoundary, and this wait reported only "Timeout 30000ms exceeded". Reading the
+# layer costs one evaluate and says whether the boundary took over, whether the ranks are empty,
+# or whether the buffer marker is simply still up.
+_SETTLE_SNAPSHOT_JS = """(expected) => {
+  const ranks = [...new Set([...document.querySelectorAll('[data-display-rank]')]
+    .map((node) => node.dataset.displayRank))];
+  const viewport = document.querySelector('[role=log]')?.closest('[data-slot=scroll-area-viewport]');
+  return {
+    expected,
+    ranks,
+    rankJoin: ranks.join(','),
+    bufferPresent: Boolean(document.querySelector('[data-timeline-source=buffer]')),
+    boundaryTakenOver: (document.body.innerText || '').includes('Something went wrong'),
+    timelinePresent: Boolean(document.querySelector('[role=log]')),
+    rows: document.querySelectorAll('[data-item-id]').length,
+    scrollTop: viewport ? Math.round(viewport.scrollTop) : null,
+    scrollHeight: viewport ? Math.round(viewport.scrollHeight) : null,
+  };
+}"""
+
+
 def _assert_settled_anchor(env: E2EEnv, ranks: str, reply: str, position: dict[str, Any]) -> None:
-    env.page.wait_for_function(
-        "expected => [...new Set([...document.querySelectorAll('[data-display-rank]')]"
-        ".map(node => node.dataset.displayRank))].join(',') === expected && "
-        "!document.querySelector('[data-timeline-source=buffer]')",
-        arg=ranks,
-        timeout=30_000,
-    )
+    try:
+        env.page.wait_for_function(
+            "expected => [...new Set([...document.querySelectorAll('[data-display-rank]')]"
+            ".map(node => node.dataset.displayRank))].join(',') === expected && "
+            "!document.querySelector('[data-timeline-source=buffer]')",
+            arg=ranks,
+            timeout=30_000,
+        )
+    except PlaywrightTimeoutError:
+        raise AssertionError(
+            (
+                "the compacted history never settled to the expected ranks",
+                env.page.evaluate(_SETTLE_SNAPSHOT_JS, ranks),
+            )
+        ) from None
     top = env.page.evaluate("reply => window.__compactTransitionFrames.replyTop(reply)", reply)
     assert top is not None
     assert abs(top - position["top"]) < 4, (position, top)
