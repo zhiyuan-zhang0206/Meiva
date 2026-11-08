@@ -1,8 +1,10 @@
 # meiva:note
-# Source identity and successful-start bookmarks for a development root generation.
+# Launch-input digest and successful-start bookmarks for a root generation.
 #
-# The snapshot includes dirty and untracked source, not just HEAD. Ignored build
-# outputs and the editable environment are not sealed by this check.
+# Working-tree source is not sealed into the root generation: each supervised
+# unit is an OS subprocess that loads the checkout's current code when spawned,
+# so a stop that preserves shell sessions (`--keep-shell-sessions`) followed by
+# a checkout update and `meiva start` reuses the live root without refusing.
 
 from __future__ import annotations
 
@@ -14,7 +16,6 @@ from pathlib import Path
 
 from base.deploy.release import start_inputs
 from base.host.env.registry import launch_input_keys
-from base.host.runtime_interpreter import source_digest
 
 
 # meiva:note
@@ -34,17 +35,17 @@ def write_generation(home: Path) -> dict[str, object] | None:
 
 
 # meiva:note
-# Bind source, the declared launch inputs of the transport environment,
-# authoritative on-disk configuration and the delivered write generation (its
-# number and credential digest only).
+# Bind the declared launch inputs of the transport environment, authoritative
+# on-disk configuration and the delivered write generation (its number and
+# credential digest only).
 #
 # Ambient keys a service manager or shell adds to the environment are not
 # launch inputs (`launch_input_keys`), so the boot unit's start action and a
 # fixed-environment observer derive the same digest for one launch.
 def launch_digest(repo: Path, environment: Mapping[str, str], *, home: Path) -> str:
+    del repo
     inputs = launch_input_keys()
     payload = {
-        "source": source_digest(repo),
         "environment": {key: value for key, value in environment.items() if key in inputs},
         "configuration": start_inputs.configuration_digest(home),
         "write_generation": write_generation(home),

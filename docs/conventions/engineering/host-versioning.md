@@ -62,10 +62,11 @@ it". The two never mix, and neither replaces the other; see the
   duration measurements and hotfix or other non-main targets follow their own verification paths.
 - **Enforced deployment gate (`cli.fleet_update`).** `cli.fleet_update` (`down` and `run`)
   resolves its target through `cli/fleet_update/plan/release_target.py:resolve_update_target`
-  before opening any SSH session: `--channel stable|latest`, a certified `--release <tag>` or
-  `--new <sha>`, or explicit preview opt-in `--track-branch <branch> [--new <sha>]` (which prints
+  before opening any SSH session: `--channel stable|latest` (defaulting to `latest` when omitted)
+  or explicit preview opt-in `--track-branch <branch>` (which tracks the latest commit on
+  `origin/<branch>` and prints
   `target: UNRELEASED branch <branch> @ <sha> (preview / rapid-iteration mode)`). Any uncertified
-  or tampered tag, channel pointer, or commit SHA exits 2 before touching any host.
+  or tampered tag or channel pointer exits 2 before touching any host.
 - **Ancestry & train regression isolation.** `scripts/host_ops/release/base.py` verifies whether a
   target commit descends from a certified release tag (`git merge-base --is-ancestor`). When a
   scheduled Release Train batch uncovers a cross-PR regression between `channel/latest` and `main`

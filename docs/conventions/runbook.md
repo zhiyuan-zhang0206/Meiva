@@ -468,43 +468,35 @@ gateway's stop only. Choose what survives the window yourself — the fleet does
 not compare your choices with the diff. A complete command:
 
 ```bash
-.venv/bin/meiva update run --channel stable \
+.venv/bin/meiva update run --channel latest \
   --gateway GATEWAY --runner RUNNER --runner RUNNER2 --log-dir DIR --execute \
-  --close-shell-sessions --keep-browser --keep-extras --keep-infra --keep-no-services \
-  --mode smooth --stop-timeout 600 --message "Operator rolling out stable release: reason" \
+  --keep-shell-sessions --keep-browser --keep-extras --keep-infra --keep-no-services \
+  --mode smooth --stop-timeout 600 --message "Operator rolling out latest release: reason" \
   --refuse-python-change --refuse-red-schedules --silence-hours 4 \
   --all-services --start-timeout 1800 --roster-timeout 90
 ```
 
-Alternatives per choice: `--channel latest`, `--release vYYYY.MM.DD.HHMMSS` (or `-hf<N>`),
-certified `--new NEW_SHA`, or preview-only `--track-branch BRANCH` (optionally paired with
-`--new SHA` on `origin/BRANCH`) instead of `--channel stable`; `--no-runners` instead of
+Alternatives per choice: `--channel stable` or preview-only `--track-branch BRANCH` (tracking
+the latest commit on `origin/BRANCH`) instead of the default `--channel latest`; `--no-runners` instead of
 `--runner`; `--dry-run` instead
-of `--execute`; `--stop-browser`, `--stop-extras`,
+of `--execute`; `--close-shell-sessions`, `--stop-browser`, `--stop-extras`,
 `--stop-infra`; `--keep-service NAME` (repeatable) instead of `--keep-no-services`;
 `--mode force`; `--no-message` instead of `--message TEXT`; `--allow-python-change`,
 `--allow-red-schedules`;
 `--only-service NAME` or `--disable-service NAME` (repeatable) instead of
-`--all-services`. Uncertified or tampered tags, channel pointers, or commits refuse with exit 2
+`--all-services`. Uncertified or tampered tags or channel pointers refuse with exit 2
 before opening any SSH session; see [host versioning](engineering/host-versioning.md).
 
-**An update closes the shell sessions and keeps no service.** Every roster service,
-`pty-sessions` included, is a unit of the host's `meiva-root`, and a stop that leaves any
-unit running leaves the root running with it. `meiva start` reuses a running root only
-when its launch digest is unchanged, and the digest binds the checkout's HEAD, so the
-switch to NEW always changes it. A kept root unit therefore makes every `up` start exit 1
-with `requested services change the immutable root generation: root launch inputs; run
-meiva stop before starting …` (2026-10-31: `--keep-shell-sessions` failed all five
-hosts after the switch). `--keep-shell-sessions` and `--keep-service` belong to
-`meiva restart` on one checkout, not to an update. To recover, on each host run `meiva
-stop --yes --close-shell-sessions` with the window's other stop choices (`--keep-infra`
-on the gateway), confirm `run/lifecycle-op.json` records a completed stop, then rerun
-`up` alone.
+**Root generation and preserved shell sessions.** Working-tree source is not sealed into
+`meiva-root`'s launch digest: each child service is spawned as a fresh OS subprocess that loads
+the checkout's current code when started, so `--keep-shell-sessions` keeps `pty-sessions`
+and `meiva-root` running across the checkout switch while `up` brings all stopped services back
+on the new code.
 
-The same refusal is not specific to updates: on a home whose root is already running,
-`meiva start --only-service NAME` answers with the same sentence and lists the entire
-roster, because the launch digest binds the whole selection. A running host therefore has
-no supported way to restart one service — `--only-service` is a *start* selection, not a
+On a home whose root is already running,
+`meiva start --only-service NAME` refuses when `reconcile=True` and units outside the selection
+are running, because the tree reconciles the full requested selection. A running host therefore has
+no supported way to restart one service via `meiva start --only-service` — `--only-service` is a *start* selection, not a
 restart scope, and reaching it means stopping the tree. Plan a single-service restart as
 the window it really is; do not discover it while a service is already down (2026-11-02:
 Grafana was stopped to reload its environment and could not be started back alone).

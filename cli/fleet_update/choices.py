@@ -17,7 +17,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TypeGuard
 
-from .plan.release_target import Channel, TargetRequest, parse_release_tag
+from .plan.release_target import DEFAULT_CHANNEL, Channel, TargetRequest
 from .untyped import object_of
 
 # meiva:note
@@ -116,28 +116,16 @@ def populate_update_parser(
                 action="append",
                 default=None,
                 metavar="CHANNEL",
-                help="certified release channel to roll out (`stable` or `latest`)",
-            )
-            p.add_argument(
-                "--release",
-                action="append",
-                default=None,
-                metavar="TAG",
-                help="certified CalVer release tag (`vYYYY.MM.DD.HHMMSS[-hfN]`) to roll out",
+                help="certified release channel to roll out (`stable` or `latest`; "
+                "defaults to `latest` when `--track-branch` is not set)",
             )
             p.add_argument(
                 "--track-branch",
                 action="append",
                 default=None,
                 metavar="BRANCH",
-                help="explicitly track unreleased `origin/<BRANCH>` (preview / rapid iteration)",
-            )
-            p.add_argument(
-                "--new",
-                action="append",
-                default=None,
-                metavar="REV",
-                help="certified commit to switch to (or ancestor pin with --track-branch)",
+                help="explicitly track the latest commit on unreleased `origin/<BRANCH>` "
+                "(preview / rapid iteration)",
             )
             p.add_argument(
                 "--rebuild-extras",
@@ -239,7 +227,7 @@ def _resolve_pair_choice(args: argparse.Namespace, dest: str) -> str | None:
     return None
 
 
-_TARGET_SUMMARY = "--channel stable|latest | --release TAG | --track-branch BRANCH | --new SHA"
+_TARGET_SUMMARY = "--channel stable|latest | --track-branch BRANCH"
 
 
 def _clean_token(raw: str) -> str | None:
@@ -249,25 +237,15 @@ def _clean_token(raw: str) -> str | None:
     return stripped
 
 
-def _resolve_branch_choice(
-    raw_branch: str, commits: list[str]
-) -> tuple[TargetRequest | None, list[str]]:
-    problems: list[str] = []
+def _resolve_branch_choice(raw_branch: str) -> tuple[TargetRequest | None, list[str]]:
     branch = _clean_token(raw_branch)
     if branch is None:
-        problems.append(f"--track-branch {raw_branch!r}: expected a branch name")
-    elif branch.startswith(("origin/", "refs/")):
-        problems.append(
+        return None, [f"--track-branch {raw_branch!r}: expected a branch name"]
+    if branch.startswith(("origin/", "refs/")):
+        return None, [
             f"--track-branch {branch!r}: pass the branch name without 'origin/' or 'refs/' prefix"
-        )
-    pin: str | None = None
-    if commits:
-        pin = _clean_token(commits[0])
-        if pin is None:
-            problems.append(f"--new {commits[0]!r}: expected a commit SHA or revision")
-    if problems or branch is None:
-        return None, problems
-    return TargetRequest(target_mode="track-branch", branch=branch, commit_rev=pin), []
+        ]
+    return TargetRequest(target_mode="track-branch", branch=branch), []
 
 
 def _parse_channel_name(raw: str) -> Channel | None:
@@ -279,71 +257,24 @@ def _parse_channel_name(raw: str) -> Channel | None:
     return None
 
 
-def _resolve_single_mode(
-    mode: str, values: list[str], commits: list[str]
-) -> tuple[TargetRequest | None, list[str]]:
-    if mode == "channel":
-        channel = _parse_channel_name(values[0])
-        if channel is None:
-            return None, ["--channel stable|latest"]
-        return TargetRequest(target_mode="channel", channel=channel), []
-    if mode == "release":
-        raw_release = values[0].strip()
-        if parse_release_tag(raw_release) is None:
-            return None, [
-                f"--release {values[0]!r}: expected CalVer tag vYYYY.MM.DD.HHMMSS "
-                "or vYYYY.MM.DD.HHMMSS-hfN"
-            ]
-        return TargetRequest(target_mode="release", release_tag=raw_release), []
-    if mode == "branch":
-        return _resolve_branch_choice(values[0], commits)
-    rev = _clean_token(values[0])
-    if rev is None:
-        return None, [f"--new {values[0]!r}: expected a commit SHA or revision"]
-    return TargetRequest(target_mode="commit", commit_rev=rev), []
-
-
 # meiva:note
-# One target per invocation: the flags name at most one of `--channel`, `--release`,
-# `--track-branch` and `--new`. `--track-branch BRANCH --new SHA` is that one mode, the commit
-# supplying where the branch starts; every other pair names two targets and is refused.
-def _select_target_mode(
-    channels: list[str], releases: list[str], branches: list[str], commits: list[str]
-) -> tuple[str, list[str]] | None:
-    named = [
-        (mode, values)
-        for mode, values in (
-            ("channel", channels),
-            ("release", releases),
-            ("branch", branches),
-            ("commit", commits),
-        )
-        if values
-    ]
-    if len(named) == 1:
-        return named[0]
-    if {mode for mode, _ in named} == {"branch", "commit"}:
-        return "branch", branches
-    return None
-
-
+# One target per invocation: either a certified channel (`--channel stable|latest`, defaulting to
+# `latest` when neither flag is given) or an unreleased branch (`--track-branch BRANCH`).
 def _resolve_target_choice(args: argparse.Namespace) -> list[str]:
     channels = _strings(args, "channel")
-    releases = _strings(args, "release")
     branches = _strings(args, "track_branch")
-    commits = _strings(args, "new")
-    if not (channels or releases or branches or commits):
-        return [_TARGET_SUMMARY]
-    if any(len(items) > 1 for items in (channels, releases, branches, commits)):
-        return [f"conflicting target flags: choose one of {_TARGET_SUMMARY}"]
-    selected = _select_target_mode(channels, releases, branches, commits)
-    if selected is None:
-        return [
-            "conflicting target flags: choose --channel stable|latest, --release TAG, "
-            "--new SHA, or --track-branch BRANCH [--new SHA]"
-        ]
-    mode, values = selected
-    req, problems = _resolve_single_mode(mode, values, commits)
+    if not channels and not branches:
+        args.target_request = TargetRequest(target_mode="channel", channel=DEFAULT_CHANNEL)
+        return []
+    if len(channels) > 1 or len(branches) > 1 or (channels and branches):
+        return [f"conflicting target flags: choose {_TARGET_SUMMARY}"]
+    if channels:
+        channel = _parse_channel_name(channels[0])
+        if channel is None:
+            return ["--channel stable|latest"]
+        args.target_request = TargetRequest(target_mode="channel", channel=channel)
+        return []
+    req, problems = _resolve_branch_choice(branches[0])
     args.target_request = req
     return problems
 

@@ -1,8 +1,8 @@
 # meiva:note
 # What makes a commit releasable to a fleet window: the UTC CalVer tag grammar
 # (`vYYYY.MM.DD.HHMMSS` and `-hf<N>`), the Git-native `meiva-release/v1` tag annotation
-# certificate, the `channel/stable` and `channel/latest` moving pointers, and the three
-# target-resolution modes (`--channel`, `--release` / certified `--new`, and `--track-branch`).
+# certificate, the `channel/stable` and `channel/latest` moving pointers, and the two
+# target-resolution modes (`--channel stable|latest` and `--track-branch <branch>`).
 # Values in, decisions out: stdlib only, no repository or network reads.
 # meiva:link docs/conventions/engineering/host-versioning.md
 
@@ -26,7 +26,8 @@ END_CHANNEL = "-----END MEIVA CHANNEL POINTER-----"
 
 Channel = Literal["stable", "latest"]
 CHANNELS: tuple[Channel, ...] = ("stable", "latest")
-TargetMode = Literal["channel", "release", "track-branch", "commit"]
+DEFAULT_CHANNEL: Channel = "latest"
+TargetMode = Literal["channel", "track-branch"]
 
 _CALVER_TAG = re.compile(r"^v(\d{4})\.(\d{2})\.(\d{2})\.(\d{2})(\d{2})(\d{2})(?:-hf([1-9]\d*))?$")
 _FULL_SHA = re.compile(r"^[0-9a-f]{40}$")
@@ -85,9 +86,7 @@ class ChannelPointer:
 class TargetRequest:
     target_mode: TargetMode
     channel: Channel | None = None
-    release_tag: str | None = None
     branch: str | None = None
-    commit_rev: str | None = None
 
 
 @dataclass(frozen=True)
@@ -97,8 +96,6 @@ class TargetSnapshot:
     tag_body: str | None = None
     candidate_tags: Mapping[str, str | None] = field(default_factory=dict[str, str | None])
     branch_tip_sha: str | None = None
-    pinned_sha: str | None = None
-    pinned_on_branch: bool = False
 
 
 @dataclass(frozen=True)
@@ -379,28 +376,6 @@ def parse_channel_pointer(
     return _decode_channel_fields(channel, tag_ref, peeled_commit_sha, payload)
 
 
-def _highest_certified_on_commit(
-    commit_sha: str, candidate_tags: Mapping[str, str | None]
-) -> tuple[ReleaseCertificate | None, str]:
-    verified: list[tuple[ReleaseVersion, ReleaseCertificate]] = []
-    calver_errors: list[str] = []
-    for tag_name in sorted(candidate_tags):
-        parsed = parse_release_tag(tag_name)
-        if parsed is None:
-            continue
-        cert, reason = parse_tag_certificate(tag_name, commit_sha, candidate_tags[tag_name])
-        if cert is not None:
-            verified.append((parsed, cert))
-        else:
-            calver_errors.append(reason)
-    if verified:
-        _ver, best = max(verified, key=lambda pair: pair[0])
-        return best, "verified"
-    if calver_errors:
-        return None, "; ".join(calver_errors)
-    return None, f"commit {commit_sha[:12]} carries no {CERTIFICATE_SCHEMA} release tag"
-
-
 def _resolve_channel_mode(
     channel: Channel | None, snapshot: TargetSnapshot
 ) -> tuple[ResolvedTarget | None, str]:
@@ -434,65 +409,8 @@ def _resolve_channel_mode(
     return ResolvedTarget(sha=snapshot.peeled_sha, notice=notice, certificate=cert), "verified"
 
 
-def _resolve_release_mode(
-    release_tag: str | None, snapshot: TargetSnapshot
-) -> tuple[ResolvedTarget | None, str]:
-    if release_tag is None:
-        return None, "--release value is missing"
-    if parse_release_tag(release_tag) is None:
-        return (
-            None,
-            f"refused: {release_tag!r} is not a CalVer release tag (vYYYY.MM.DD.HHMMSS[-hfN])",
-        )
-    if snapshot.peeled_sha is None:
-        return (
-            None,
-            f"refused: release tag {release_tag} is not present in {snapshot.repo_display}; "
-            "run `git fetch --tags --force origin`",
-        )
-    cert, reason = parse_tag_certificate(release_tag, snapshot.peeled_sha, snapshot.tag_body)
-    if cert is None:
-        return None, f"refused: {reason}"
-    notice = (
-        f"target: release {cert.version} @ {snapshot.peeled_sha[:12]} "
-        f"(certified: {cert.gate_run_url})"
-    )
-    return ResolvedTarget(sha=snapshot.peeled_sha, notice=notice, certificate=cert), "verified"
-
-
-def _resolve_commit_mode(
-    commit_rev: str | None, snapshot: TargetSnapshot
-) -> tuple[ResolvedTarget | None, str]:
-    if commit_rev is None:
-        return None, "--new value is missing"
-    if snapshot.peeled_sha is None:
-        return (
-            None,
-            f"refused: {commit_rev} is not a commit in {snapshot.repo_display}; git fetch origin",
-        )
-    if parse_release_tag(commit_rev) is not None and commit_rev in snapshot.candidate_tags:
-        cert, reason = parse_tag_certificate(
-            commit_rev, snapshot.peeled_sha, snapshot.candidate_tags[commit_rev]
-        )
-        if cert is None:
-            return None, f"refused: {reason}"
-    else:
-        cert, reason = _highest_certified_on_commit(snapshot.peeled_sha, snapshot.candidate_tags)
-        if cert is None:
-            return (
-                None,
-                f"refused: {reason}; pass --channel stable|latest, --release <tag>, "
-                "or --track-branch <branch> for unreleased branch commits",
-            )
-    notice = (
-        f"target: release {cert.version} @ {snapshot.peeled_sha[:12]} "
-        f"(certified: {cert.gate_run_url})"
-    )
-    return ResolvedTarget(sha=snapshot.peeled_sha, notice=notice, certificate=cert), "verified"
-
-
 def _resolve_branch_mode(
-    branch: str | None, pinned_rev: str | None, snapshot: TargetSnapshot
+    branch: str | None, snapshot: TargetSnapshot
 ) -> tuple[ResolvedTarget | None, str]:
     if branch is None:
         return None, "--track-branch value is missing"
@@ -502,21 +420,7 @@ def _resolve_branch_mode(
             f"refused: origin/{branch} is not present in {snapshot.repo_display}; "
             f"push the branch and run `git fetch origin {branch}`",
         )
-    if pinned_rev is None:
-        target_sha = snapshot.branch_tip_sha
-    else:
-        if snapshot.pinned_sha is None:
-            return (
-                None,
-                f"refused: {pinned_rev} is not a commit in {snapshot.repo_display}; git fetch origin",
-            )
-        if not snapshot.pinned_on_branch:
-            return (
-                None,
-                f"refused: commit {snapshot.pinned_sha[:12]} ({pinned_rev}) is not an ancestor of "
-                f"origin/{branch} ({snapshot.branch_tip_sha[:12]})",
-            )
-        target_sha = snapshot.pinned_sha
+    target_sha = snapshot.branch_tip_sha
     notice = f"target: UNRELEASED branch {branch} @ {target_sha} (preview / rapid-iteration mode)"
     return (
         ResolvedTarget(sha=target_sha, notice=notice, unreleased_branch=branch),
@@ -530,9 +434,5 @@ def resolve_update_target(
     match request.target_mode:
         case "channel":
             return _resolve_channel_mode(request.channel, snapshot)
-        case "release":
-            return _resolve_release_mode(request.release_tag, snapshot)
-        case "commit":
-            return _resolve_commit_mode(request.commit_rev, snapshot)
         case "track-branch":
-            return _resolve_branch_mode(request.branch, request.commit_rev, snapshot)
+            return _resolve_branch_mode(request.branch, snapshot)

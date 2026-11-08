@@ -76,36 +76,19 @@ def _snapshot_tag(repo: Path, tag_name: str, *, include_candidates: bool) -> Tar
     )
 
 
-def _snapshot_branch(repo: Path, branch: str, commit_rev: str | None) -> TargetSnapshot:
+def _snapshot_branch(repo: Path, branch: str) -> TargetSnapshot:
     tip = _peeled_commit(repo, f"refs/remotes/origin/{branch}")
-    pinned = _peeled_commit(repo, commit_rev) if commit_rev is not None else None
-    on_branch = (
-        pinned is not None
-        and tip is not None
-        and git_in_repo("merge-base", "--is-ancestor", pinned, tip, repo=repo).returncode == 0
-    )
     return TargetSnapshot(
         repo_display=str(repo),
         branch_tip_sha=tip,
-        pinned_sha=pinned,
-        pinned_on_branch=on_branch,
     )
 
 
 def _build_snapshot(repo: Path, request: TargetRequest) -> TargetSnapshot:
     if request.target_mode == "channel" and request.channel is not None:
         return _snapshot_tag(repo, f"channel/{request.channel}", include_candidates=True)
-    if request.target_mode == "release" and request.release_tag is not None:
-        return _snapshot_tag(repo, request.release_tag, include_candidates=False)
-    if request.target_mode == "commit" and request.commit_rev is not None:
-        peeled = _peeled_commit(repo, request.commit_rev)
-        return TargetSnapshot(
-            repo_display=str(repo),
-            peeled_sha=peeled,
-            candidate_tags=_tags_pointing_at(repo, peeled),
-        )
     if request.target_mode == "track-branch" and request.branch is not None:
-        return _snapshot_branch(repo, request.branch, request.commit_rev)
+        return _snapshot_branch(repo, request.branch)
     return TargetSnapshot(repo_display=str(repo))
 
 

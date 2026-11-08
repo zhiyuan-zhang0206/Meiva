@@ -56,6 +56,9 @@ def test_development_generation_includes_dirty_and_untracked_source(tmp_path: Pa
     home.mkdir()
     (home / ".env").write_text("MEIVA_SSE_THROTTLE_RATE=10\n")
     configured = launch_digest(tmp_path, {}, home=home)
+    source.write_text("value = 99\n")
+    assert launch_digest(tmp_path, {}, home=home) == configured
+    source.write_text("value = 1\n")
     (home / ".env").write_text("MEIVA_SSE_THROTTLE_RATE=20\n")
     assert source_digest(tmp_path) == initial
     assert launch_digest(tmp_path, {}, home=home) != configured

@@ -89,22 +89,13 @@ def test_disabled_services_and_keeping_infra_are_forwarded_too(
         (["--message", "   \n "], "--message: cannot be empty; pass --no-message instead"),
         (["--channel", "canary"], "--channel stable|latest"),
         (
-            ["--release", "v1.0.0"],
-            "--release 'v1.0.0': expected CalVer tag vYYYY.MM.DD.HHMMSS",
-        ),
-        (
             ["--track-branch", "origin/main"],
             "pass the branch name without 'origin/' or 'refs/' prefix",
         ),
         (["--track-branch", ""], "--track-branch '': expected a branch name"),
-        (["--new", ""], "--new '': expected a commit SHA or revision"),
-        (
-            ["--channel", "stable", "--release", "v2026.10.24.120000"],
-            "conflicting target flags",
-        ),
-        (["--channel", "stable", "--new", "HEAD"], "conflicting target flags"),
         (["--channel", "stable", "--channel", "latest"], "conflicting target flags"),
-        (["--release", "v2026.10.24.120000", "--track-branch", "main"], "conflicting target flags"),
+        (["--channel", "stable", "--track-branch", "main"], "conflicting target flags"),
+        (["--track-branch", "main", "--track-branch", "feat/x"], "conflicting target flags"),
     ],
 )
 def test_a_value_a_host_would_refuse_is_refused_before_any_host(
@@ -144,10 +135,6 @@ def test_a_service_listing_that_cannot_run_is_named_not_mistaken_for_unknown_ser
 # test drops exactly one and expects only that one to be named.
 _ONE_EACH = [
     (["--runner", "mac", "--runner", "lin"], "--runner ALIAS... | --no-runners"),
-    (
-        ["--channel", "stable"],
-        "--channel stable|latest | --release TAG | --track-branch BRANCH | --new SHA",
-    ),
     (["--execute"], "--dry-run | --execute"),
     (["--all-services"], "--all-services | --only-service | --disable-service"),
     (["--start-timeout", "1800"], "--start-timeout"),
@@ -155,7 +142,7 @@ _ONE_EACH = [
     (["--keep-browser"], "--keep-browser | --stop-browser"),
     (["--keep-extras"], "--keep-extras | --stop-extras"),
     (["--keep-infra"], "--keep-infra | --stop-infra"),
-    (["--keep-no-services"], "--keep-service | --keep-no-services"),
+    (["--keep-service", "frontend"], "--keep-service | --keep-no-services"),
     (["--mode", "smooth"], "--mode"),
     (["--stop-timeout", "600"], "--stop-timeout"),
     (["--refuse-python-change"], "--allow-python-change | --refuse-python-change"),
@@ -206,7 +193,6 @@ def test_missing_choices_are_all_listed_at_once_and_no_host_is_touched(
     ]
     if half != "up":
         expected += [
-            "--channel stable|latest | --release TAG | --track-branch BRANCH | --new SHA",
             "--keep-shell-sessions | --close-shell-sessions",
             "--keep-browser | --stop-browser",
             "--keep-extras | --stop-extras",

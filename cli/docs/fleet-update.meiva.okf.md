@@ -16,7 +16,7 @@ the runbook
 this node owns the code-side order, and the window's guards are
 [[cli/docs/fleet-update-window/fleet-update-window.meiva.okf.md]].
 The halves are idempotent: after a failure, fix the cause and rerun the failed
-half. `run` accepts both halves' options, requires one explicit target selection, uses one log and
+half. `run` accepts both halves' options, resolves the target channel (`latest` by default, or `stable` / `--track-branch`), uses one log and
 stops at the first failure; a failed `down` never enters `up`. A failed `up`
 does not require repeating `down`. Its
 shape is [[cli/fleet_update/docs/structure.meiva.okf.md]].
@@ -84,10 +84,9 @@ lifecycle audit row (`base/native_process/root_control/client.py`, written by
   inside an agent's shell; the name of the machine that started it survives in the row's
   `spawn.ssh_connection` even when this is empty.
 - `MEIVA_OPERATION_GATE` / `MEIVA_OPERATION_GATE_REASON` — `satisfied` when the target was
-  resolved through the certified channel, an explicit release, or a commit a certificate
-  covers; `overridden` when the operator asked for `--track-branch`, and the reason names the
-  branch. This is the field that makes a bypass of the release gate a queryable fact instead of
-  an assumption.
+  resolved through the certified channel (`stable` or `latest`); `overridden` when the operator
+  asked for `--track-branch`, and the reason names the branch. This is the field that makes a
+  bypass of the release gate a queryable fact instead of an assumption.
 
 Only effect commands carry it: a read is a question, not an operation.
 

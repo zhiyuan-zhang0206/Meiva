@@ -13,14 +13,14 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from cli.fleet_update.plan.release_target import (
+    CERTIFICATE_SCHEMA,
     Channel,
     ChannelPointer,
     ReleaseCertificate,
-    TargetRequest,
-    TargetSnapshot,
+    ReleaseVersion,
     parse_channel_pointer,
+    parse_release_tag,
     parse_tag_certificate,
-    resolve_update_target,
 )
 
 _TAGGER_ARGS = (
@@ -135,17 +135,24 @@ def read_verified_channel(
 def read_certified_commit(
     repository: Path, commit_sha: str
 ) -> tuple[ReleaseCertificate | None, str]:
-    resolved, reason = resolve_update_target(
-        TargetRequest(target_mode="commit", commit_rev=commit_sha),
-        TargetSnapshot(
-            repo_display=str(repository),
-            peeled_sha=commit_sha,
-            candidate_tags=tags_pointing_at(repository, commit_sha),
-        ),
-    )
-    if resolved is None or resolved.certificate is None:
-        return None, reason
-    return resolved.certificate, reason
+    verified: list[tuple[ReleaseVersion, ReleaseCertificate]] = []
+    calver_errors: list[str] = []
+    candidates = tags_pointing_at(repository, commit_sha)
+    for tag_name in sorted(candidates):
+        parsed = parse_release_tag(tag_name)
+        if parsed is None:
+            continue
+        cert, reason = parse_tag_certificate(tag_name, commit_sha, candidates[tag_name])
+        if cert is not None:
+            verified.append((parsed, cert))
+        else:
+            calver_errors.append(reason)
+    if verified:
+        _ver, best = max(verified, key=lambda pair: pair[0])
+        return best, "verified"
+    if calver_errors:
+        return None, "; ".join(calver_errors)
+    return None, f"commit {commit_sha[:12]} carries no {CERTIFICATE_SCHEMA} release tag"
 
 
 def write_annotated_tag(

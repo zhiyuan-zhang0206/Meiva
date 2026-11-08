@@ -19,8 +19,6 @@ from cli.fleet_update.plan.operation import (
 
 def test_a_certified_target_satisfies_the_gate_and_track_branch_overrides_it() -> None:
     assert gate_for("channel") == ("satisfied", "channel")
-    assert gate_for("release") == ("satisfied", "release")
-    assert gate_for("commit") == ("satisfied", "commit")
     assert gate_for("track-branch", branch="preview") == ("overridden", "track-branch:preview")
 
 
