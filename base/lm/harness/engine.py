@@ -34,8 +34,10 @@ class HarnessTurn:
     # meiva:note
     # What the provider said went wrong, when it said more than a subtype. `api_error_status` is the
     # HTTP status of a failed API call the result reports as `is_error` with `subtype="success"`
-    # (the SDK documents that shape), and `errors` is the CLI's own list. Both are read only to build
-    # a fault message; a turn that succeeded carries neither.
+    # (the SDK documents that shape), and `errors` is what the CLI declares about the failure: its
+    # own list, or the provider's sentence a failed API call carries in `result`. Both are read only
+    # to build a fault message, and `errors` is that message's only source of detail; a turn that
+    # succeeded carries neither.
     api_error_status: int | None = None
     errors: tuple[str, ...] = ()
     prelude: tuple[HarnessTurn, ...] = ()

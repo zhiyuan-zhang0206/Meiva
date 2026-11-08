@@ -63,6 +63,9 @@ def map_message(message: object, *, turn_id: str | None) -> list[BridgeEvent]:
 
 
 def parse_result(message: object) -> ResultFields:
+    result_text = _text(getattr(message, "result", None))
+    api_error_status = _int_or_none(getattr(message, "api_error_status", None))
+    errors = _messages(getattr(message, "errors", None))
     return ResultFields(
         session_id=_text(getattr(message, "session_id", None)),
         subtype=_text(getattr(message, "subtype", None)) or "unknown",
@@ -72,14 +75,26 @@ def parse_result(message: object) -> ResultFields:
         duration_ms=int(getattr(message, "duration_ms", 0) or 0),
         usage=_usage(getattr(message, "usage", None)),
         cost_usd=_float_or_none(getattr(message, "total_cost_usd", None)),
-        result_text=_text(getattr(message, "result", None)),
+        result_text=result_text,
         permission_denials=_denials(getattr(message, "permission_denials", None)),
-        api_error_status=_int_or_none(getattr(message, "api_error_status", None)),
-        errors=_messages(getattr(message, "errors", None)),
+        api_error_status=api_error_status,
+        errors=errors or _api_error_sentence(api_error_status, result_text),
         origin_kind=_origin_kind(getattr(message, "origin", None)),
         interrupted=getattr(message, "terminal_reason", None)
         in ("aborted_streaming", "aborted_tools"),
     )
+
+
+# meiva:note
+# On the failed-API-call shape the provider's sentence is the whole statement about what went
+# wrong, and the CLI may send it in `result` with no error list beside it. Declared as an error
+# here, it reaches the fault message; left only in `result`, the turn's reply text was what got
+# quoted instead (#6498). The status is what marks the shape: without one, `result` may just as
+# well be the assistant's own reply.
+def _api_error_sentence(api_error_status: int | None, result_text: str | None) -> tuple[str, ...]:
+    if api_error_status is None or not result_text:
+        return ()
+    return (result_text,)
 
 
 def _system(message: object, turn_id: str | None) -> list[BridgeEvent]:
