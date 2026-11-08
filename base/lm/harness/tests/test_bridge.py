@@ -743,12 +743,11 @@ async def test_session_model_and_error_detail_surface_through_bridge() -> None:
             elif self._n == 3:
                 self._queue.append(
                     replace(
-                        completion(
-                            turn_id, "API Error: 400 This API key is not scoped to a workspace"
-                        ),
+                        completion(turn_id, ""),
                         is_error=True,
                         stop_reason="stop_sequence",
                         api_error_status=400,
+                        errors=("API Error: 400 This API key is not scoped to a workspace",),
                     )
                 )
             else:
@@ -759,7 +758,11 @@ async def test_session_model_and_error_detail_surface_through_bridge() -> None:
     bridge = make_bridge(session)
     await bridge.run_turn("one", key="k1")
     assert bridge.model == "gpt-6.1-sol"
-    with pytest.raises(HarnessTurnFaultedError, match="failed \\(failed\\): usage limit reached"):
+    with pytest.raises(
+        HarnessTurnFaultedError,
+        match="failed \\(failed\\): harness reported a failure but gave no error detail"
+        " \\(status/stop_reason: usage limit reached\\)",
+    ):
         await bridge.run_turn("two", key="k2")
     with pytest.raises(HarnessTurnFaultedError, match="failed \\(API 400\\): API Error: 400"):
         await bridge.run_turn("three", key="k3")

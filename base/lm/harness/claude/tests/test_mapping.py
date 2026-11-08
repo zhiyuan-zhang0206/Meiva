@@ -169,6 +169,36 @@ def test_result_fields_carry_the_api_error_status_and_the_error_list() -> None:
     assert fields.result_text == "API Error: 400 This API key is not scoped to a workspace"
 
 
+# meiva:note
+# On that shape the CLI may send no error list at all and put the provider's sentence in `result`
+# instead -- the only words anyone has about the failure. Declared as an error here, it reaches
+# the fault message; left in `result`, only the turn's reply text was left to quote (#6498).
+def test_a_failed_api_call_without_an_error_list_declares_the_result_text() -> None:
+    fields = parse_result(
+        fake.ResultMessage(
+            subtype="success",
+            is_error=True,
+            stop_reason="stop_sequence",
+            result="API Error: 400 This API key is not scoped to a workspace",
+            api_error_status=400,
+        )
+    )
+
+    assert fields.errors == ("API Error: 400 This API key is not scoped to a workspace",)
+
+
+# meiva:note
+# Without an API status there is nothing that says `result` is about the failure rather than the
+# reply, so a failed turn declares no error text and the fault message says it has no detail.
+def test_a_failed_result_without_an_api_status_declares_no_error_text() -> None:
+    fields = parse_result(
+        fake.ResultMessage(subtype="error_max_turns", is_error=True, result="assistant prose")
+    )
+
+    assert fields.errors == ()
+    assert fields.result_text == "assistant prose"
+
+
 def test_a_successful_result_carries_no_status_and_no_errors() -> None:
     fields = parse_result(fake.ResultMessage(subtype="success"))
 
