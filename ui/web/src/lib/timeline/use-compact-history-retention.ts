@@ -39,10 +39,11 @@ export function useCompactHistoryRetention(options: {
   itemCount: number;
   compactEpoch: number;
   compactTailReady: boolean;
+  retainedItemsMax?: number;
 }): void {
   const {
     agentId, isVisible, loadOlderSegment, hasMoreOlder, loadingOlder, itemCount,
-    compactEpoch, compactTailReady,
+    compactEpoch, compactTailReady, retainedItemsMax = 250,
   } = options;
   const compactReplaceSeq = useTimelineStore((s) => s.compactReplaceSeq);
   const compactReplaceAgent = useTimelineStore((s) => s.compactReplaceAgent);
@@ -73,8 +74,12 @@ export function useCompactHistoryRetention(options: {
     }
     const st = useTimelineStore.getState();
     if (st.activeThreadId !== agentId || st.compactEpoch !== pending.epoch) return;
-    if (st.retentionCappedSeq === pending.seq) {
+    if (
+      st.retentionCappedSeq === pending.seq ||
+      (retainedItemsMax > 0 && st.items.length >= retainedItemsMax)
+    ) {
       retentionRef.current = null;
+      useTimelineStore.getState().finishCompactTransition(agentId, pending.epoch);
       return;
     }
     if (!st.hasMoreOlder) {
@@ -94,8 +99,12 @@ export function useCompactHistoryRetention(options: {
         while (ownerRef.current === owner && retentionRef.current === pending) {
           const live = useTimelineStore.getState();
           if (live.activeThreadId !== agentId) return;
-          if (live.retentionCappedSeq === pending.seq) {
+          if (
+            live.retentionCappedSeq === pending.seq ||
+            (retainedItemsMax > 0 && live.items.length >= retainedItemsMax)
+          ) {
             retentionRef.current = null;
+            useTimelineStore.getState().finishCompactTransition(agentId, pending.epoch);
             return;
           }
           const result = await loadOlderSegment("background");
@@ -107,7 +116,12 @@ export function useCompactHistoryRetention(options: {
             if (current.attempts >= RETENTION_MAX_ATTEMPTS) retentionRef.current = null;
             return;
           }
-          if (result === "exhausted") {
+          const afterLoad = useTimelineStore.getState();
+          if (
+            result === "exhausted" ||
+            afterLoad.retentionCappedSeq === pending.seq ||
+            (retainedItemsMax > 0 && afterLoad.items.length >= retainedItemsMax)
+          ) {
             retentionRef.current = null;
             useTimelineStore.getState().finishCompactTransition(agentId, pending.epoch);
             return;
@@ -122,7 +136,7 @@ export function useCompactHistoryRetention(options: {
         if (retentionInFlightRef.current === run) retentionInFlightRef.current = null;
       }
     })();
-  }, [agentId, isVisible, loadOlderSegment, compactTailReady]);
+  }, [agentId, isVisible, loadOlderSegment, compactTailReady, retainedItemsMax]);
   useEffect(() => {
     if (compactReplaceSeq === lastRetentionSeqRef.current) return;
     lastRetentionSeqRef.current = compactReplaceSeq;

@@ -209,12 +209,16 @@ describe("deep history DOM window", () => {
     vi.restoreAllMocks();
   });
 
-  it("does not roll back user scroll when a commit lands after scrollTop advances", () => {
+  it("does not roll back user scroll or jump to bottom when older history prepends after scrolling up", () => {
+    displayLimits.set("MEIVA_TIMELINE_WINDOW_ACTIVATION_ROWS", 20);
     displayLimits.set("MEIVA_TIMELINE_WINDOW_MEASURE_ROWS", 5);
-    const items = Array.from({ length: 12 }, (_, index) => makeItem({
+    const allItems = Array.from({ length: 60 }, (_, index) => makeItem({
       item_id: `${index + 1}.0`, kind: "agent_chat", payload: `Reply ${index + 1}`,
     }));
-    const { rerender } = render(<TimelineView items={items} threadKey="scroll-no-rollback" />);
+    const tailItems = allItems.slice(30);
+    const { rerender } = render(
+      <TimelineView items={tailItems} threadKey="scroll-up-prepend" hasMoreOlder loadingOlder={false} />,
+    );
     const viewport = screen.getByTestId("scroll-viewport");
     const content = viewport.querySelector<HTMLElement>('[role="log"]')!;
     const box = (top: number, height = 0) => ({
@@ -222,7 +226,7 @@ describe("deep history DOM window", () => {
       x: 0, y: top, toJSON: () => ({}),
     });
     Object.defineProperty(viewport, "clientHeight", { value: 600, configurable: true });
-    Object.defineProperty(viewport, "scrollHeight", { value: 2400, configurable: true });
+    Object.defineProperty(viewport, "scrollHeight", { value: 12_000, configurable: true });
     vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
       if (this === viewport) return box(0, 600);
       const group = this.matches("[data-virtual-group]") ? this : this.closest<HTMLElement>("[data-virtual-group]");
@@ -230,21 +234,34 @@ describe("deep history DOM window", () => {
       let top = 52;
       for (const sibling of content.children) {
         if (sibling === group) break;
-        if (sibling.hasAttribute("data-virtual-group")) top += 92;
+        if (sibling.hasAttribute("data-virtual-group")) top += 172;
+        if (sibling.hasAttribute("data-timeline-spacer")) top += Number.parseFloat((sibling as HTMLElement).style.height) + 12;
       }
-      return box(top - viewport.scrollTop, 80);
+      return box(top - viewport.scrollTop, 160);
     });
     act(() => {
-      viewport.scrollTop = 1800;
+      viewport.scrollTop = 4500;
       fireEvent.scroll(viewport);
     });
-    act(() => {
-      viewport.scrollTop = 300;
-      fireEvent.scroll(viewport);
-    });
-    viewport.scrollTop = 360;
-    rerender(<TimelineView items={[...items]} threadKey="scroll-no-rollback" />);
-    expect(viewport.scrollTop).toBe(360);
+    for (const nextTop of [3600, 2400, 1200, 200]) {
+      act(() => {
+        viewport.scrollTop = nextTop;
+        fireEvent.scroll(viewport);
+      });
+    }
+    const anchorBefore = viewport.querySelector<HTMLElement>('.timeline-item[data-item-id="32.0"]')!;
+    expect(anchorBefore).not.toBeNull();
+    const screenTopBefore = anchorBefore.getBoundingClientRect().top;
+    rerender(
+      <TimelineView items={tailItems} threadKey="scroll-up-prepend" hasMoreOlder loadingOlder />,
+    );
+    rerender(
+      <TimelineView items={allItems} threadKey="scroll-up-prepend" hasMoreOlder={false} loadingOlder={false} />,
+    );
+    const anchorAfter = viewport.querySelector<HTMLElement>('.timeline-item[data-item-id="32.0"]');
+    expect(anchorAfter).not.toBeNull();
+    expect(Math.abs(anchorAfter!.getBoundingClientRect().top - screenTopBefore)).toBeLessThan(3);
+    expect(viewport.scrollTop).toBeLessThan(4000);
     vi.restoreAllMocks();
   });
 

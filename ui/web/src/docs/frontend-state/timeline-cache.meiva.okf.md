@@ -35,10 +35,10 @@ and `compactReplaceAgent` trigger reattachment through the same cancellable
 history-page read, walking every available older page serially (`unlimited`
 retention, user ruling 2026-11-01). A completed page with `has_more=false` ends
 the walk; an unready window before the post-compact tail read settles does not.
-Once `compactBuffer` has released and a following reader trims the canonical
-window to `display.timeline_retained_items_max`, `retentionCappedSeq` retires
-that compact's background walk so evicted pages are not re-fetched in a loop,
-while parked readers continue walking until `has_more=false`.
+Once the canonical window reaches `display.timeline_retained_items_max` (or a
+following reader trims it and sets `retentionCappedSeq`), that compact's
+background walk settles and retires so neither following nor parked readers
+fetch unbounded historical segments in a loop.
 Both the SSE reset-window snapshot and a reconnect GET that crosses an unseen
 compact capture the previously displayed rows in `compactBuffer` while canonical
 `items` takes the new current window. The buffer owns a thread/epoch, each row's
