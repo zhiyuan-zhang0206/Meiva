@@ -41,8 +41,16 @@ def scan_batch(
     # checker runs against repositories that have no frontend at all, and a tree beside the inspected
     # code would be one more thing that code could change under the analysis.
     # meiva:link meizel/docs/frontend-deps.meiva.okf.md
+    # meiva:note
+    # The tree is the reader, not the directory read: its predicates take the path they are asked
+    # about, so the preflight still observes this installation's frontend and never the checked
+    # repository's. A strict module holds the checkout as data (`universe.repo`), and the tree is
+    # how it holds one without importing the shell that runs git.
     output = run_node_analyzer(
-        producer, json.dumps(request), frontend=TOOL_ROOT.joinpath(*FRONTEND_DIR)
+        universe.repo.tree,
+        producer,
+        json.dumps(request),
+        frontend=TOOL_ROOT.joinpath(*FRONTEND_DIR),
     )
     try:
         return decode_batch(output, frozenset(contents), policy.reader_kinds)

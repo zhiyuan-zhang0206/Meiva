@@ -73,7 +73,7 @@ sys.path.insert(0, str(_REPO_ROOT))
 
 # meiva:link scripts/docs/scripts.meiva.okf.md
 from meizel import lint_common  # noqa: E402
-from meizel.checkout import roles_at  # noqa: E402
+from meizel.checkout import roles_at, source_tree  # noqa: E402
 from meizel.roles import select_packages  # noqa: E402
 
 ROLES = roles_at(_REPO_ROOT)
@@ -242,10 +242,11 @@ def violations_in_source(src: str, filename: str = "<source>") -> list[tuple[int
 
 
 def _default_files() -> list[str]:
-    roots = lint_common.scan_roots(_REPO_ROOT, _SCAN_DIRS)
+    tree = source_tree(_REPO_ROOT)
+    roots = lint_common.scan_roots(tree, _SCAN_DIRS)
     return sorted(
         rel
-        for path in lint_common.python_files(roots, _REPO_ROOT)
+        for path in lint_common.python_files(tree, roots)
         if not is_test_file(rel := path.relative_to(_REPO_ROOT).as_posix())
     )
 
@@ -256,20 +257,21 @@ def is_test_file(rel: str) -> bool:
 
 
 def main(argv: list[str]) -> int:
+    tree = source_tree(_REPO_ROOT)
     argv, only = lint_common.split_only(argv)
     if argv:
-        targets, missing = lint_common.resolve_targets(argv, _REPO_ROOT)
+        targets, missing = lint_common.resolve_targets(tree, argv)
         if missing:
             print(f"error: target path(s) not found: {', '.join(missing)}", file=sys.stderr)
             return 1
         files = [f for f in targets if not is_test_file(f)]
     else:
-        scope = lint_common.changed_scope(only, _REPO_ROOT)
+        scope = lint_common.changed_scope(tree, only)
         files = _default_files() if scope is None else [f for f in _default_files() if f in scope]
 
     total = 0
     for rel in files:
-        text = lint_common.read_utf8_text(_REPO_ROOT / rel) if rel.endswith(".py") else None
+        text = lint_common.read_utf8_text(tree, _REPO_ROOT / rel) if rel.endswith(".py") else None
         for lineno, message in violations_in_source(text, rel) if text is not None else ():
             total += 1
             print(f"{rel}:{lineno}: {message}")

@@ -5,8 +5,12 @@ from pathlib import Path
 
 import pytest
 
-from meizel import lint_common
+from meizel.checkout import roles_at
+from meizel.roles import framework_dirs
 from meizel.state import no_os_environ as gate
+
+_REPO_ROOT = Path(__file__).resolve().parents[3]
+_FRAMEWORK_DIRS = framework_dirs(roles_at(_REPO_ROOT))
 
 
 def _none() -> frozenset[str]:
@@ -38,7 +42,7 @@ def test_no_os_environ_default_scan_reaches_tests_in_dirs_it_never_scanned(
         def test_x(monkeypatch) -> None:
             monkeypatch.setenv("MEIVA_DB_URL", "x")
     """
-    for name in (*lint_common.FRAMEWORK_DIRS, "tests"):
+    for name in (*_FRAMEWORK_DIRS, "tests"):
         (tmp_path / name).mkdir(exist_ok=True)
     _write(tmp_path, f"{host}/tests/test_x.py", body)
     assert (
@@ -47,7 +51,7 @@ def test_no_os_environ_default_scan_reaches_tests_in_dirs_it_never_scanned(
 
 
 def test_no_os_environ_default_scan_still_reads_only_tests_in_those_dirs(tmp_path: Path) -> None:
-    for name in (*lint_common.FRAMEWORK_DIRS, "tests"):
+    for name in (*_FRAMEWORK_DIRS, "tests"):
         (tmp_path / name).mkdir(exist_ok=True)
     _write(tmp_path, "cli/pkg/mod.py", 'import os\n\nHOME = os.environ["HOME"]\n')
     assert (

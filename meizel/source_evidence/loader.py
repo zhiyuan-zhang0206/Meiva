@@ -13,7 +13,8 @@ from pathlib import Path, PurePosixPath
 from typing import TypeGuard
 
 from meizel.graph.model import MeizelError
-from meizel.lint_common import read_utf8_text, tracked_files
+from meizel.graph.universe import SourceTree
+from meizel.lint_common import read_utf8_text
 from meizel.source_evidence.decode import decode_index
 from meizel.source_evidence.model import Index, TsReport
 from meizel.source_text import object_of
@@ -29,13 +30,14 @@ def _find_package_dir(index: Index) -> str:
 
 
 # meiva:note
-# Where the evidence is read from, as one value the entry resolves: `root` is the judged checkout
-# (the index names it), and `tool` is the installation whose adapter and locked compiler the index
-# is checked against. Neither is derived here.
+# Where the evidence is read from, as one value the entry resolves: `tree` is the judged checkout
+# (the index names its root), and `tool_tree` is the installation whose adapter and locked compiler
+# the index is checked against. Neither is derived here, and the index's own path is read through
+# the tree that holds it.
 @dataclass(frozen=True, slots=True)
 class Evidence:
-    root: Path
-    tool: Path
+    tree: SourceTree
+    tool_tree: SourceTree
 
 
 def ts_paths(files: set[str], node: str) -> tuple[str, ...]:
@@ -50,11 +52,11 @@ def ts_paths(files: set[str], node: str) -> tuple[str, ...]:
     )
 
 
-def _text(root: Path, relative: str) -> str:
+def _text(tree: SourceTree, relative: str) -> str:
     path = PurePosixPath(relative)
     if path.is_absolute() or str(path) != relative or ".." in path.parts or "\\" in relative:
         raise MeizelError(f"invalid TS index path: {relative!r}")
-    text = read_utf8_text(root / relative)
+    text = read_utf8_text(tree, tree.root / relative)
     if text is None:
         raise MeizelError(f"unreadable TS index input: {relative}")
     return text
@@ -75,14 +77,14 @@ def _dependencies(index: Index, evidence: Evidence) -> tuple[dict[str, str], str
         package,
         "meizel/language/typescript_compiler/compiler.mjs",
         f"{compiler}typescript.js",
-        *(p for p in tracked_files(evidence.tool) if p.startswith(_ADAPTER) and p.endswith(".mjs")),
+        *(p for p in evidence.tool_tree.tracked() if p.startswith(_ADAPTER) and p.endswith(".mjs")),
     }
     contents: dict[str, str] = {}
     for item in index.dependencies:
         library = item.path.startswith(compiler) and item.path.endswith(".d.ts")
         if item.path in contents or (item.path not in expected and not library):
             raise MeizelError(f"unexpected or duplicate TS dependency: {item.path}")
-        content = _text(evidence.tool, item.path)
+        content = _text(evidence.tool_tree, item.path)
         if _digest(content) != item.sha256:
             raise MeizelError(f"stale TS dependency: {item.path}")
         contents[item.path] = content
@@ -172,7 +174,7 @@ def _locked_typescript_version(text: str) -> str:
 
 def _sources(
     index: Index,
-    root: Path,
+    tree: SourceTree,
     selected: tuple[str, ...],
     dependencies: Mapping[str, str],
     compiler: str,
@@ -181,7 +183,7 @@ def _sources(
     for source in index.sources:
         if source.path not in selected or source.path in seen:
             raise MeizelError(f"unexpected or duplicate TS source: {source.path}")
-        text = _text(root, source.path)
+        text = _text(tree, source.path)
         if _digest(text) != source.sha256:
             raise MeizelError(f"stale TS source: {source.path}")
         lines = len(text.split("\n"))
@@ -207,17 +209,17 @@ def load_report(evidence: Evidence, files: set[str], node: str, supplied: Path |
     if supplied is None:
         status = "not-requested" if selected else "not-applicable"
         return TsReport(status=status, sources=())
-    text = read_utf8_text(supplied)
+    text = read_utf8_text(evidence.tree, supplied)
     if text is None:
         raise MeizelError(f"unreadable TS source index: {supplied}")
     try:
         index = decode_index(text)
     except (TypeError, ValueError) as error:
         raise MeizelError(f"invalid TS source index: {error}") from error
-    if index.root != str(evidence.root):
+    if index.root != str(evidence.tree.root):
         raise MeizelError("TS index repository root does not match")
     dependencies, compiler = _dependencies(index, evidence)
-    _sources(index, evidence.root, selected, dependencies, compiler)
+    _sources(index, evidence.tree, selected, dependencies, compiler)
     status = (
         "not-applicable"
         if not selected

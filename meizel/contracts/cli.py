@@ -23,7 +23,7 @@ from meizel.contracts.policy import changes as policy_changes
 from meizel.contracts.sync import Sync, sync_manifests
 from meizel.graph import ReachabilityScope, python_reverse_closure, reachability_analysis
 from meizel.graph.model import Diagnostic, MeizelError
-from meizel.graph.universe import Checkout
+from meizel.graph.universe import Checkout, SourceTree
 from meizel.source_evidence import Evidence, load_report
 from meizel.test_graph.model import TestLanes, TestSelection
 
@@ -57,17 +57,18 @@ class Repository(Checkout, Protocol):
 
 
 # meiva:note
-# What only the process entry can build, handed down: where this installation sits, the three
-# readers the command layer is not allowed to own — the roles manifest, a file the argv names, and a
-# typed target resolved against the directory the entry resolved — and the day, because `debt
-# record` stamps the placeholder it writes into an entry nobody has reviewed and a strict module may
-# not read the clock.
+# What only the process entry can build, handed down: where this installation sits, the four
+# readers the command layer is not allowed to own — the roles manifest, a file the argv names, a
+# typed target resolved against the directory the entry resolved, and the filesystem of a tree
+# named by a path — and the day, because `debt record` stamps the placeholder it writes into an
+# entry nobody has reviewed and a strict module may not read the clock.
 @dataclass(frozen=True, slots=True)
 class CommandDeps:
     tool_root: Path
     read_roles: Callable[[Checkout], Mapping[str, tuple[str, ...]]]
     read_text: Callable[[Path, str], str]
     relative_target: Callable[[str], str]
+    source_tree: Callable[[Path], SourceTree]
     today: str
 
 
@@ -597,7 +598,10 @@ def _run_explain(repo: Repository, root: Path, opts: Explain, deps: CommandDeps)
     analysis = analyze(repo.universe(), jobs=opts.jobs)
     node = deps.relative_target(opts.path)
     report = load_report(
-        Evidence(root=root, tool=deps.tool_root),
+        Evidence(
+            tree=deps.source_tree(root),
+            tool_tree=deps.source_tree(deps.tool_root),
+        ),
         set(analysis.universe.files),
         node,
         opts.typescript_index,

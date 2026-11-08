@@ -19,7 +19,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from meizel import allowances, lint_common
-from meizel.checkout import GitRepo, roles_at
+from meizel.checkout import GitRepo, roles_at, source_tree
+from meizel.graph.universe import SourceTree
 from meizel.roles import select_packages
 from meizel.state import lint_paths
 from meizel.state import no_os_environ_plan as plan
@@ -70,13 +71,19 @@ class _Rule:
 # production code dropped, and the `--only` changed files narrowing the result when `scope` names
 # them. Explicit paths are read as given.
 def _files_to_scan(
-    resolved: list[str], scope: frozenset[str] | None, root: Path, *, explicit: bool, rule: _Rule
+    tree: SourceTree,
+    resolved: list[str],
+    scope: frozenset[str] | None,
+    root: Path,
+    *,
+    explicit: bool,
+    rule: _Rule,
 ) -> list[Path]:
     if explicit:
         return lint_paths.python_paths(root, resolved)
     default = [
         path
-        for path in lint_common.python_files([root / name for name in rule.scan_targets], root)
+        for path in lint_common.python_files(tree, [root / name for name in rule.scan_targets])
         if plan.in_default_scope(path, root, test_only_dirs=rule.test_only_dirs)
     ]
     return lint_common.restrict(default, scope, root)
@@ -85,8 +92,10 @@ def _files_to_scan(
 # meiva:note
 # One file's findings as (line number, stripped line, kind): a judged file is read, and an unreadable
 # entry (a dangling symlink, binary content) keeps the shared lint contract of skipping.
-def _scan_file(path: Path, managed_envs: frozenset[str], rule: _Rule) -> list[tuple[int, str, str]]:
-    text = lint_common.read_utf8_text(path)
+def _scan_file(
+    tree: SourceTree, path: Path, managed_envs: frozenset[str], rule: _Rule
+) -> list[tuple[int, str, str]]:
+    text = lint_common.read_utf8_text(tree, path)
     if text is None:
         return []
     return plan.setenv_violations(
@@ -107,6 +116,7 @@ def main(
     policy_root: Path | None = None,
 ) -> int:
     root = repo_root if repo_root is not None else _REPO_ROOT
+    tree = source_tree(root)
     # meiva:note
     # Two checkouts, named apart: `repo_root` is the tree this run judges, `policy_root` is the one
     # whose policy and roles say which directories the rule scans. They are the same checkout unless
@@ -119,12 +129,12 @@ def main(
     # changed files (the commit hook) under that same scope.
     resolved: list[str] = []
     if argv:
-        resolved, missing = lint_common.resolve_targets(argv, root)
+        resolved, missing = lint_common.resolve_targets(tree, argv)
         if missing:
             print(f"error: target path(s) not found: {', '.join(missing)}", file=sys.stderr)
             return 1
-    scope = lint_common.changed_scope(only, root, inputs=rule.rule_inputs)
-    py_files = _files_to_scan(resolved, scope, root, explicit=bool(argv), rule=rule)
+    scope = lint_common.changed_scope(tree, only, inputs=rule.rule_inputs)
+    py_files = _files_to_scan(tree, resolved, scope, root, explicit=bool(argv), rule=rule)
     judged = [
         path for path in py_files if plan.judges_file(path, root, allowed_files=rule.allowed_files)
     ]
@@ -135,7 +145,7 @@ def main(
 
     total_violations = 0
     for path in sorted(judged):
-        for lineno, content, kind in _scan_file(path, managed_envs, rule):
+        for lineno, content, kind in _scan_file(tree, path, managed_envs, rule):
             total_violations += 1
             print(plan.finding(path, root, lineno, kind))
             print(f"    {content}")

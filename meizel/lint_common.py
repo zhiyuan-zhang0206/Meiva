@@ -1,21 +1,19 @@
 from __future__ import annotations
 
 import functools
-import os
 import subprocess
 import sys
 from collections.abc import Callable, Iterable
 from pathlib import Path
 
 from meizel import is_repo_test_file, is_test_path, restrict, split_only
-from meizel.checkout import frontend_observation, roles_at, tracked_files
-from meizel.frontend_deps import FrontendDeps, FrontendDepsError, classify, refusal
+from meizel.frontend_deps import FrontendDeps, FrontendDepsError, classify, observe, refusal
 from meizel.graph.model import MeizelError
-from meizel.roles import pytest_test_hosts, select_packages
+from meizel.graph.universe import SourceTree
+from meizel.roles import pytest_test_hosts
 from meizel.source_text import decode_source
 
 __all__ = [
-    "FRAMEWORK_DIRS",
     "admission",
     "changed_scope",
     "decode_source",
@@ -29,46 +27,38 @@ __all__ = [
     "run_node_analyzer",
     "scan_roots",
     "split_only",
-    "tracked_files",
 ]
 
-# meiva:note
-# The governed production code, including independently packaged projects. Lints whose scope is
-# "the framework" import this instead of keeping their own copy, so a new or renamed package cannot
-# drift out of one lint's scope unnoticed. `meizel.roles` decides nothing about where a repository
-# is, so this file reads the roles once, where it already owns the checkout dependency.
-FRAMEWORK_DIRS = select_packages(roles_at(Path(__file__).parents[1]), "application", "standalone")
-
 
 # meiva:note
-# Check whether a candidate path on disk is a regular file.
-def _is_file(path: Path) -> bool:
-    return path.is_file()
+# Check whether the tree holds a regular file at `path`.
+def _is_file(tree: SourceTree, path: Path) -> bool:
+    return tree.is_file(path)
 
 
 # meiva:note
-# Check whether a candidate path on disk is a directory.
-def _is_dir(path: Path) -> bool:
-    return path.is_dir()
+# Check whether the tree holds a directory at `path`.
+def _is_dir(tree: SourceTree, path: Path) -> bool:
+    return tree.is_dir(path)
 
 
 # meiva:note
 # Check whether a lint target path resolves to an existing file or directory.
-def _exists(path: Path) -> bool:
-    return _is_file(path) or _is_dir(path)
+def _exists(tree: SourceTree, path: Path) -> bool:
+    return _is_file(tree, path) or _is_dir(tree, path)
 
 
-def scan_roots(repo_root: Path, dirs: Iterable[str]) -> list[Path]:
+def scan_roots(tree: SourceTree, dirs: Iterable[str]) -> list[Path]:
     """Resolve a lint's configured scan dirs; a missing one is a configuration error.
 
     A lint whose scope names a directory that does not exist checks nothing
     there and still exits 0, so the gap stays invisible. Raise instead.
     """
-    roots = [repo_root / d for d in dirs]
-    missing = [root.relative_to(repo_root).as_posix() for root in roots if not _is_dir(root)]
+    roots = [tree.root / d for d in dirs]
+    missing = [root.relative_to(tree.root).as_posix() for root in roots if not _is_dir(tree, root)]
     if missing:
         raise FileNotFoundError(
-            f"lint scan dir(s) not found under {repo_root}: {', '.join(missing)}"
+            f"lint scan dir(s) not found under {tree.root}: {', '.join(missing)}"
         )
     return roots
 
@@ -84,7 +74,7 @@ _LINT_TOOLING = (
 
 
 def changed_scope(
-    only: list[str] | None, repo_root: Path, *, inputs: Iterable[str] = ()
+    tree: SourceTree, only: list[str] | None, *, inputs: Iterable[str] = ()
 ) -> frozenset[str] | None:
     """Repo-relative paths a `--only` run judges; None means judge everything.
 
@@ -95,30 +85,30 @@ def changed_scope(
     if only is None:
         return None
     # lexists: a tracked symlink whose target is gone is still a path pre-commit hands us.
-    missing = [a for a in only if not os.path.lexists(repo_root / a)]
+    missing = [a for a in only if not tree.lexists(tree.root / a)]
     if missing:
         raise SystemExit(f"error: target path(s) not found: {', '.join(missing)}")
-    changed = frozenset(_rel_or_abs((repo_root / a).absolute(), repo_root) for a in only)
+    changed = frozenset(_rel_or_abs((tree.root / a).absolute(), tree.root) for a in only)
     widening = (*_LINT_TOOLING, *inputs)
     if any(path.startswith(widening) and not is_test_path(path) for path in changed):
         return None  # a lint's own tests are not its tooling
     return changed
 
 
-def _rel_or_abs(path: Path, repo_root: Path) -> str:
+def _rel_or_abs(path: Path, root: Path) -> str:
     try:
-        return path.relative_to(repo_root).as_posix()
+        return path.relative_to(root).as_posix()
     except ValueError:
         return path.as_posix()
 
 
-def _resolved_target(argument: str, repo_root: Path) -> Path:
+def _resolved_target(tree: SourceTree, argument: str) -> Path:
     path = Path(argument)
     if not path.is_absolute():
-        candidate = repo_root / path
-        if _exists(candidate):
+        candidate = tree.root / path
+        if _exists(tree, candidate):
             path = candidate
-    return path.resolve()
+    return tree.resolve(path)
 
 
 # meiva:note
@@ -177,17 +167,17 @@ admission = _Admission()
 # Git owns source admission in a checkout: tracked regular files plus new nonignored
 # regular files. Standalone environments are ignored dependencies, not governed source.
 # A non-Git fixture keeps the explicit filesystem behavior of the lint API.
-def _source_files(repo_root: Path) -> list[str] | None:
-    if not _exists(repo_root / ".git"):
+def _source_files(tree: SourceTree) -> list[str] | None:
+    if not _exists(tree, tree.root / ".git"):
         return None
     if not admission.active:
-        return sorted(tracked_files(repo_root, include_untracked=True, regular=True))
-    admitted = admission.files.get(repo_root)
+        return sorted(tree.tracked(include_untracked=True, regular=True))
+    admitted = admission.files.get(tree.root)
     if admitted is not None:
         admission.reuses += 1
         return admitted
-    admitted = sorted(tracked_files(repo_root, include_untracked=True, regular=True))
-    admission.files[repo_root] = admitted
+    admitted = sorted(tree.tracked(include_untracked=True, regular=True))
+    admission.files[tree.root] = admitted
     admission.reads += 1
     admission.files_count += len(admitted)
     return admitted
@@ -199,49 +189,51 @@ def _source_files(repo_root: Path) -> list[str] | None:
 # resolving every name to a Path and asking `is_relative_to` — it measured 234k Path
 # constructions (18 s of a 20 s profiled run) because one lint asked for its targets
 # 21 times.
-def _files_in_target(target: Path, repo_root: Path, admitted: list[str] | None) -> list[str]:
-    if _is_file(target):
-        return [_rel_or_abs(target, repo_root)]
-    if _is_dir(target):
-        if admitted is not None and target.is_relative_to(repo_root):
-            prefix = target.relative_to(repo_root).as_posix().rstrip("/")
+def _files_in_target(tree: SourceTree, target: Path, admitted: list[str] | None) -> list[str]:
+    if _is_file(tree, target):
+        return [_rel_or_abs(target, tree.root)]
+    if _is_dir(tree, target):
+        if admitted is not None and target.is_relative_to(tree.root):
+            prefix = target.relative_to(tree.root).as_posix().rstrip("/")
             below = prefix + "/" if prefix else ""
             return [name for name in admitted if name.startswith(below)]
-        return [_rel_or_abs(path, repo_root) for path in target.rglob("*") if _is_file(path)]
+        return [
+            _rel_or_abs(path, tree.root) for path in tree.rglob(target, "*") if _is_file(tree, path)
+        ]
     return []
 
 
-def resolve_targets(argv: list[str], repo_root: Path) -> tuple[list[str], list[str]]:
+def resolve_targets(tree: SourceTree, argv: list[str]) -> tuple[list[str], list[str]]:
     """Return sorted explicit files and any original arguments that are missing."""
-    targets = [_resolved_target(argument, repo_root) for argument in argv]
-    missing = [a for a, target in zip(argv, targets, strict=True) if not _exists(target)]
+    targets = [_resolved_target(tree, argument) for argument in argv]
+    missing = [a for a, target in zip(argv, targets, strict=True) if not _exists(tree, target)]
     if missing:
         return [], missing
-    admitted = _source_files(repo_root)
-    files = [file for target in targets for file in _files_in_target(target, repo_root, admitted)]
+    admitted = _source_files(tree)
+    files = [file for target in targets for file in _files_in_target(tree, target, admitted)]
     return sorted(set(files)), []
 
 
 # meiva:note
 # Python source below the chosen roots, using the same admission as explicit directory
 # targets. Read Git once for the whole scan; explicit leaf files retain their audit meaning.
-def python_files(roots: Iterable[Path], repo_root: Path) -> list[Path]:
-    admitted = _source_files(repo_root)
+def python_files(tree: SourceTree, roots: Iterable[Path]) -> list[Path]:
+    admitted = _source_files(tree)
     files = {
         file
         for target in roots
-        for file in _files_in_target(target, repo_root, admitted)
+        for file in _files_in_target(tree, target, admitted)
         if file.endswith(".py")
     }
-    return [repo_root / file for file in sorted(files)]
+    return [tree.root / file for file in sorted(files)]
 
 
 # meiva:note
 # The reader around `decode_source`: the one place that pays for the bytes. A lint whose rule
 # already holds the content calls the decision, not this.
-def read_utf8_text(path: Path) -> str | None:
+def read_utf8_text(tree: SourceTree, path: Path) -> str | None:
     try:
-        data = path.read_bytes()
+        data = tree.read_bytes(path)
     except OSError:
         return None
     return decode_source(data)
@@ -265,13 +257,15 @@ def _missing_frontend_dependencies(stderr: str) -> str | None:
 # This I/O boundary starts one tool-owned analyzer with JSON stdin and bounded heap/time.
 # Successful fact production is not a semantic purity proof of the scanned code.
 # meiva:link meizel/docs/frontend-deps.meiva.okf.md
-def run_node_analyzer(producer: Path, payload: str, *, frontend: Path | None = None) -> str:
+def run_node_analyzer(
+    tree: SourceTree, producer: Path, payload: str, *, frontend: Path | None = None
+) -> str:
     # meiva:note
     # A frontend tree this checkout did not install from its own lockfile answers for a graph the
     # lockfile does not describe, so the refusal happens before node starts and names the fix.
     # meiva:link meizel/docs/frontend-deps.meiva.okf.md
     if frontend is not None:
-        state = classify(frontend_observation(frontend))
+        state = classify(observe(tree, frontend))
         if state is not FrontendDeps.READY:
             raise FrontendDepsError(refusal(state))
     try:

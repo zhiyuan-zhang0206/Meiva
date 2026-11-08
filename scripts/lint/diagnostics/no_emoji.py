@@ -55,12 +55,16 @@ sys.path.insert(0, str(_REPO_ROOT))
 
 # meiva:link scripts/docs/scripts.meiva.okf.md
 from meizel import lint_common  # noqa: E402
-from meizel.checkout import roles_at  # noqa: E402
+from meizel.checkout import roles_at, source_tree  # noqa: E402
 from meizel.roles import select_packages  # noqa: E402
 
 ROLES = roles_at(_REPO_ROOT)
 
-# In-scope dirs scanned by default (no argv); `_EXEMPT_PREFIXES` still applies.
+# meiva:note
+# The dirs this rule scans by default: the framework's own directories, `scripts/` and `tests/`. The
+# framework half is the application and standalone roles — `meizel.roles.framework_dirs` names them
+# for every lint that scopes itself the same way — plus `tooling/`, which the rule text in the module
+# docstring adds to it. `_EXEMPT_PREFIXES` still applies.
 SCAN_DIRS = select_packages(ROLES, "application", "standalone", "tooling", "tests")
 
 # Path prefixes (repo-relative, posix) that are never scanned — deliberate-UX
@@ -177,11 +181,12 @@ def _scan_file(path: Path, rel_path: str) -> list[tuple[int, str, str]]:
 
 
 def _iter_py_files(roots: list[Path], repo_root: Path) -> list[Path]:
-    return lint_common.python_files(roots, repo_root)
+    return lint_common.python_files(source_tree(repo_root), roots)
 
 
 def main(argv: list[str], *, repo_root: Path | None = None) -> int:
     root = _REPO_ROOT if repo_root is None else repo_root
+    tree = source_tree(root)
     argv, only = lint_common.split_only(argv)
     if argv:
         missing = [arg for arg in argv if not Path(arg).exists()]
@@ -190,8 +195,8 @@ def main(argv: list[str], *, repo_root: Path | None = None) -> int:
             return 1
     # argv = explicit file list (manual run); empty = scan every in-scope dir, or only the
     # changed files of `--only` (the commit hook) under that same scope.
-    targets = [Path(a).resolve() for a in argv] if argv else lint_common.scan_roots(root, SCAN_DIRS)
-    scope = lint_common.changed_scope(only, root)
+    targets = [Path(a).resolve() for a in argv] if argv else lint_common.scan_roots(tree, SCAN_DIRS)
+    scope = lint_common.changed_scope(tree, only)
 
     total = 0
     for path in sorted(lint_common.restrict(_iter_py_files(targets, root), scope, root)):

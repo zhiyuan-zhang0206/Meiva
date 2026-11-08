@@ -77,6 +77,7 @@ if str(_REPO) not in sys.path:
 
 from base.host.boundary.options import options  # noqa: E402
 from meizel import lint_common  # noqa: E402
+from meizel.checkout import source_tree, tracked_files  # noqa: E402
 from scripts.audit.analysis import (  # noqa: E402
     GENERATED_FILES,
     Repo,
@@ -102,12 +103,13 @@ _DESCRIPTION = (
 def load_repo(root: Path) -> Repo:
     # meiva:note
     # Read every tracked (and unignored untracked) text file once.
+    tree = source_tree(root)
     texts: dict[str, str] = {}
-    for name in lint_common.tracked_files(root, include_untracked=True):
+    for name in tracked_files(root, include_untracked=True):
         path = root / name
         if name in GENERATED_FILES or path.is_symlink():
             continue
-        text = lint_common.read_utf8_text(path)
+        text = lint_common.read_utf8_text(tree, path)
         if text is not None:
             texts[name] = text
     return index_repo(texts)

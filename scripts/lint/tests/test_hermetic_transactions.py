@@ -8,13 +8,17 @@ from pathlib import Path
 
 import pytest
 
-from meizel import lint_common
+from meizel.checkout import roles_at
+from meizel.roles import framework_dirs
 from scripts.lint.diagnostics import hermetic_transactions as _lint
+
+_REPO_ROOT = Path(__file__).resolve().parents[3]
+_FRAMEWORK_DIRS = framework_dirs(roles_at(_REPO_ROOT))
 
 
 @pytest.fixture
 def fake_repo(tmp_path: Path) -> Path:
-    for rel in (*lint_common.FRAMEWORK_DIRS, "scripts", "meizel"):
+    for rel in (*_FRAMEWORK_DIRS, "scripts", "meizel"):
         (tmp_path / rel).mkdir(parents=True, exist_ok=True)
     return tmp_path
 

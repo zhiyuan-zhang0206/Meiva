@@ -24,10 +24,10 @@ import pytest
 
 from base.host.proc import run_bounded
 from meizel import lint_common
-from meizel.checkout import roles_at
+from meizel.checkout import roles_at, source_tree
 from meizel.language import no_script_sibling_imports
 from meizel.owners import clock_lattice, clock_lattice_cli
-from meizel.roles import select_packages
+from meizel.roles import framework_dirs, select_packages
 from meizel.state import no_os_environ, turn_scoped_config
 from scripts.content_lint import lint_no_cjk, lint_no_tailnet
 from scripts.lint import (
@@ -48,6 +48,7 @@ from scripts.lint.diagnostics import (
 from scripts.lint.plugins import no_plugin_wrap
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
+_FRAMEWORK_DIRS = framework_dirs(roles_at(_REPO_ROOT))
 
 # A path every lint's tooling-edit check treats as "the lint itself changed".
 _TOOLING = "scripts/lint/some_lint.py"
@@ -71,31 +72,30 @@ def test_changed_scope(tmp_path: Path) -> None:
     ):
         (tmp_path / rel).parent.mkdir(parents=True, exist_ok=True)
         (tmp_path / rel).write_text("x = 1\n")
-    assert lint_common.changed_scope(None, tmp_path) is None
-    assert lint_common.changed_scope(["base/a.py"], tmp_path) == {"base/a.py"}
-    assert lint_common.changed_scope([], tmp_path) == frozenset()
+    tree = source_tree(tmp_path)
+    assert lint_common.changed_scope(tree, None) is None
+    assert lint_common.changed_scope(tree, ["base/a.py"]) == {"base/a.py"}
+    assert lint_common.changed_scope(tree, []) == frozenset()
     # Tooling widens; the tooling's own tests do not.
-    assert lint_common.changed_scope(["base/a.py", "scripts/lint/x.py"], tmp_path) is None
-    assert lint_common.changed_scope(["scripts/lint/tests/test_x.py"], tmp_path) == {
+    assert lint_common.changed_scope(tree, ["base/a.py", "scripts/lint/x.py"]) is None
+    assert lint_common.changed_scope(tree, ["scripts/lint/tests/test_x.py"]) == {
         "scripts/lint/tests/test_x.py"
     }
     # A lint's own inputs widen too.
-    assert (
-        lint_common.changed_scope(["base/config/c.py"], tmp_path, inputs=("base/config/",)) is None
-    )
-    assert lint_common.changed_scope(["base/config/c.py"], tmp_path) == {"base/config/c.py"}
+    assert lint_common.changed_scope(tree, ["base/config/c.py"], inputs=("base/config/",)) is None
+    assert lint_common.changed_scope(tree, ["base/config/c.py"]) == {"base/config/c.py"}
 
 
 def test_changed_scope_rejects_a_path_that_does_not_exist(tmp_path: Path) -> None:
     with pytest.raises(SystemExit, match=r"not found: typo\.py"):
-        lint_common.changed_scope(["typo.py"], tmp_path)
+        lint_common.changed_scope(source_tree(tmp_path), ["typo.py"])
 
 
 def test_changed_scope_accepts_a_tracked_symlink_whose_target_is_gone(tmp_path: Path) -> None:
     """pre-commit hands a hook every tracked path that still exists as an entry, a dangling
     symlink included; `--all-files` must not die on one."""
     (tmp_path / "dangling.py").symlink_to(tmp_path / "missing.py")
-    assert lint_common.changed_scope(["dangling.py"], tmp_path) == {"dangling.py"}
+    assert lint_common.changed_scope(source_tree(tmp_path), ["dangling.py"]) == {"dangling.py"}
 
 
 def test_restrict_keeps_only_the_changed_files(tmp_path: Path) -> None:
@@ -122,6 +122,10 @@ class Case:
     judges_whole_tree: bool = False
     # How to call `module.main` when the rule takes its application inputs injected.
     call: Callable[..., int] | None = None
+    # meiva:note
+    # A strict rule takes the checkout's reads from its entry, so the driver hands it a tree over
+    # the scratch repository exactly as `*_cli.py` hands it one over this checkout.
+    needs_tree: bool = False
 
     def clean(self) -> str:
         return self.clean_path or str(
@@ -179,6 +183,7 @@ CASES = [
         no_plugin_wrap,
         "meiva_builtins/plugins/demo/plugin.py",
         "meiva.files.read = my_read\n",
+        needs_tree=True,
     ),
     Case(
         pool_keepalives,
@@ -239,7 +244,7 @@ def fake_repo(tmp_path: Path) -> Path:
     one and silently scanned nothing on the other."""
     root = tmp_path / "tmp" / "build" / "repo"
     for rel in (
-        *lint_common.FRAMEWORK_DIRS,
+        *_FRAMEWORK_DIRS,
         "scripts",
         "meizel",
         "tests",
@@ -268,7 +273,9 @@ def test_only_judges_exactly_the_changed_files(case: Case, fake_repo: Path) -> N
     if case.needs_git:
         subprocess.run(["git", "add", "--", "."], cwd=fake_repo, check=True)
 
-    main: Callable[[list[str]], int] = partial(case.call or lint.main, repo_root=fake_repo)
+    call = case.call or lint.main
+    reads = {"reads": source_tree(fake_repo)} if case.needs_tree else {}
+    main: Callable[[list[str]], int] = partial(call, repo_root=fake_repo, **reads)
     assert main([]) == 1, "the sample must be a violation the full scan reports"
     assert main(["--only", case.bad_path]) == 1, "a changed file gets the full scan's verdict"
     # meiva:note

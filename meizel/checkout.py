@@ -19,19 +19,19 @@ import sys
 from collections.abc import Callable, Collection, Generator, Mapping, Sequence
 from contextlib import closing, contextmanager, suppress
 from dataclasses import dataclass, field
-from functools import cache
+from functools import cache, partial
 from pathlib import Path
 
-from meizel.frontend_deps import (
-    NODE_MODULES,
-    PNPM_METADATA,
-    SOURCE_LOCK,
-    TREE_LOCK,
-    FrontendObservation,
-)
 from meizel.graph import project_metadata_paths, python_reverse_closure, standalone_projects
 from meizel.graph.model import MeizelError
-from meizel.graph.universe import MANIFEST, SOURCE_EXTENSIONS, Checkout, EditPlan, Universe
+from meizel.graph.universe import (
+    MANIFEST,
+    SOURCE_EXTENSIONS,
+    Checkout,
+    EditPlan,
+    SourceTree,
+    Universe,
+)
 from meizel.roles import parse_roles
 from meizel.source_text import object_of, object_pairs
 from meizel.test_graph import (
@@ -66,6 +66,7 @@ __all__ = [
     "read_text",
     "roles_at",
     "select_tests_at",
+    "source_tree",
     "toplevel",
     "tracked_files",
 ]
@@ -105,27 +106,22 @@ def read_text(root: Path, rel: str) -> str:
 
 
 # meiva:note
-# The four facts that decide whether this checkout may be asked a TypeScript question, read once
-# here because the tree is the shell's: whether node_modules exists, whether pnpm installed it, and
-# the digests of the lockfile it installed against and of the lockfile the checkout carries.
-# meiva:link meizel/docs/frontend-deps.meiva.okf.md
-def frontend_observation(frontend: Path) -> FrontendObservation:
-    return FrontendObservation(
-        node_modules=(frontend / NODE_MODULES).is_dir(),
-        pnpm_metadata=frontend.joinpath(*PNPM_METADATA).is_file(),
-        installed_lock=_digest(frontend.joinpath(*TREE_LOCK)),
-        source_lock=_digest(frontend / SOURCE_LOCK),
+# This checkout's filesystem as a value: `pathlib` bound to the fields `meizel.graph.universe`
+# declares, so a module that decides over a checkout reads it without importing this shell. Binding
+# reads nothing, so a tree may name a root that does not exist yet and a test pins one to its fixture.
+def source_tree(root: Path) -> SourceTree:
+    return SourceTree(
+        root=root,
+        is_file=Path.is_file,
+        is_dir=Path.is_dir,
+        exists=Path.exists,
+        resolve=Path.resolve,
+        lexists=os.path.lexists,
+        rglob=Path.rglob,
+        read_bytes=Path.read_bytes,
+        tracked=partial(tracked_files, root),
+        roles=partial(roles_at, root),
     )
-
-
-# meiva:note
-# The digest of one file, or None when it is not there: an absent lockfile and an unreadable one are
-# the same answer to "was this tree installed for the lockfile the checkout carries".
-def _digest(path: Path) -> str | None:
-    try:
-        return hashlib.sha256(path.read_bytes()).hexdigest()
-    except OSError:
-        return None
 
 
 # meiva:note
@@ -206,6 +202,13 @@ class GitRepo:
 
     def load_bytes(self, rel: str) -> bytes:
         return read_bytes(self.root, rel)
+
+    # meiva:note
+    # This seat as a value: a module that only decides reads the checkout through it, and building
+    # one reads nothing.
+    @property
+    def tree(self) -> SourceTree:
+        return source_tree(self.root)
 
     def run_text(self, *args: str) -> str:
         # meiva:note

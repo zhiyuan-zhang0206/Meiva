@@ -29,7 +29,8 @@ if __name__ == "__main__":
 
 from base.host.boundary.untyped import object_of  # noqa: E402
 from meizel import lint_common  # noqa: E402
-from meizel.checkout import roles_at  # noqa: E402
+from meizel.checkout import roles_at, source_tree  # noqa: E402
+from meizel.graph.universe import SourceTree  # noqa: E402
 from meizel.roles import select_packages  # noqa: E402
 
 ROLES = roles_at(_REPO_ROOT)
@@ -451,8 +452,8 @@ def judge_source(
     return findings, exemptions
 
 
-def _test_files(targets: list[Path], root: Path) -> Iterator[Path]:
-    yield from lint_common.python_files(targets, root)
+def _test_files(tree: SourceTree, targets: list[Path]) -> Iterator[Path]:
+    yield from lint_common.python_files(tree, targets)
 
 
 def _default_targets(root: Path) -> list[Path]:
@@ -498,12 +499,12 @@ def _write_baseline(root: Path, judged: dict[str, list[tuple[int, str, str]]]) -
 
 
 def _judge(
-    root: Path, targets: list[Path]
+    tree: SourceTree, root: Path, targets: list[Path]
 ) -> tuple[dict[str, list[tuple[int, str, str]]], dict[str, list[str]]]:
     judged: dict[str, list[tuple[int, str, str]]] = {}
     exemptions: dict[str, list[str]] = {}
     scanned: set[str] = set()
-    for path in sorted(lint_common.restrict(_test_files(targets, root), None, root)):
+    for path in sorted(lint_common.restrict(_test_files(tree, targets), None, root)):
         try:
             rel = path.relative_to(root).as_posix()
         except ValueError:
@@ -511,7 +512,7 @@ def _judge(
         if not lint_common.is_test_path(rel):
             continue
         scanned.add(rel)
-        findings, found_exemptions = judge_source(lint_common.read_utf8_text(path) or "")
+        findings, found_exemptions = judge_source(lint_common.read_utf8_text(tree, path) or "")
         if findings:
             judged[rel] = findings
         for owner, reason in found_exemptions:
@@ -711,12 +712,13 @@ def _targets(paths: list[str], root: Path) -> list[Path]:
 # not what is compared — the pre-commit path has to see the whole tree's counts or a new read
 # in the file under review would pass here and fail in CI.
 def _verdict(
+    tree: SourceTree,
     root: Path,
     judged: dict[str, list[tuple[int, str, str]]],
     exemptions: dict[str, list[str]],
     only: list[str] | None,
 ) -> int:
-    scope = lint_common.changed_scope(only, root, inputs=("pyproject.toml",))
+    scope = lint_common.changed_scope(tree, only, inputs=("pyproject.toml",))
     if scope is not None and not scope:
         return 0
     baseline = _read_baseline(root)
@@ -736,17 +738,18 @@ def _verdict(
 
 def main(argv: list[str], *, repo_root: Path | None = None) -> int:
     root = _REPO_ROOT if repo_root is None else repo_root
+    tree = source_tree(root)
     paths, only, write_baseline = _split_args(list(argv))
     problem = _arguments_problem(paths, only, write_baseline=write_baseline)
     if problem is not None:
         print(problem, file=sys.stderr)
         return 1
-    judged, exemptions = _judge(root, _targets(paths, root))
+    judged, exemptions = _judge(tree, root, _targets(paths, root))
     if write_baseline:
         _write_baseline(root, judged)
         _write_exemptions(root, exemptions, job_names(root))
         return 0
-    return _verdict(root, judged, exemptions, only)
+    return _verdict(tree, root, judged, exemptions, only)
 
 
 if __name__ == "__main__":

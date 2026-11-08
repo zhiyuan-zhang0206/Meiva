@@ -8,7 +8,7 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Collection, Mapping
+from collections.abc import Callable, Collection, Iterator, Mapping
 from contextlib import AbstractContextManager
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -22,6 +22,7 @@ __all__ = [
     "Checkout",
     "EditPlan",
     "Module",
+    "SourceTree",
     "Universe",
     "is_private_module",
     "parent_of",
@@ -65,6 +66,31 @@ def parent_of(path: str) -> str:
 
 
 # meiva:note
+# The filesystem a lint reads, as one value: the checkout's root, the predicates and readers that
+# answer it, and the two readings only a checkout can take (Git's admitted names and the roles this
+# repository declares). Every reading is a field holding a function, so this value decides nothing
+# and reads nothing; `meizel.checkout.source_tree` binds `pathlib` to it where the checkout is owned
+# and a test binds its own, which is what lets a deciding module ask which files to judge without
+# holding the calls that answer. `root` binds the two listings and the relative arithmetic a caller
+# does over them; every other field takes the path it is asked about, so a tree also answers for a
+# directory outside its root. `tracked` is `meizel.checkout.tracked_files` bound to `root`: its
+# keyword arguments (`include_untracked`, `regular`) stay the shell's.
+# meiva:link meizel/docs/lint/lint-common-admission.meiva.okf.md
+@dataclass(frozen=True, slots=True)
+class SourceTree:
+    root: Path
+    is_file: Callable[[Path], bool]
+    is_dir: Callable[[Path], bool]
+    exists: Callable[[Path], bool]
+    resolve: Callable[[Path], Path]
+    lexists: Callable[[Path], bool]
+    rglob: Callable[[Path, str], Iterator[Path]]
+    read_bytes: Callable[[Path], bytes]
+    tracked: Callable[..., list[str]]
+    roles: Callable[[], Mapping[str, tuple[str, ...]]]
+
+
+# meiva:note
 # The checkout a decision layer works on: the root it reads and the files under it. The decision
 # modules of `meizel/contracts` take this handle and never build one, so what they decide stays
 # separable from the git and file reads that answer it; `meizel.checkout.GitRepo` is the one
@@ -72,6 +98,12 @@ def parent_of(path: str) -> str:
 class Checkout(Protocol):
     @property
     def root(self) -> Path: ...
+
+    # meiva:note
+    # The same checkout as a value: the filesystem reads a deciding module may take, bound where the
+    # checkout is owned, so a caller that only judges does not import the shell that runs git.
+    @property
+    def tree(self) -> SourceTree: ...
 
     def has_file(self, rel: str) -> bool: ...
 

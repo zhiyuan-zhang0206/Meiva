@@ -55,15 +55,19 @@ keep production governance separate from the root distribution environment.
 - `graph/`, `language/` and `contracts/` are the checker, documented in
   [[meizel/docs/checker/checker.meiva.okf.md|the checker node]]: `graph/` holds the model,
   the universe of tracked files, graph algorithms, name scopes and import
-  access; `language/` the restricted Python forms, pytest fixture requests, mechanical
-  purity and container-budget checks (`purity.py`, `purity_structure.py`) and
-  the file scanner that composes them with import access; `contracts/` the
+  access, and `universe.py` the two handles a decision layer reads a checkout
+  with — the `Checkout` protocol and the `SourceTree` its `tree` property
+  returns, a frozen dataclass whose reads are function fields, so a module that
+  only decides takes one and reads nothing itself; `language/` the restricted
+  Python forms, pytest fixture requests, mechanical purity and container-budget
+  checks (`purity.py`, `purity_structure.py`) and the file scanner that composes
+  them with import access; `contracts/` the
   `meizel.toml` manifests, the rule, analysis, recorded debt, the policy file and the commands
   (`python -m meizel`). The layers form a DAG: `contracts` -> `language` -> `graph`.
 
-- `lint_common.py` — the shared scan vocabulary of the standalone lints: the
-  framework directory list, test-path detection, scan-root resolution and the
-  `--only` changed-files mode. Changed-files runs widen to a full scan when
+- `lint_common.py` — the shared scan vocabulary of the standalone lints: test-path
+  detection, scan-root resolution and the `--only` changed-files mode, over the
+  `SourceTree` its caller built. Changed-files runs widen to a full scan when
   `meizel/` itself changes, because that changes the verdict of untouched files.
 - `budgets/` — the 800-line file ceiling and the 20-entry directory cap: every
   judgment is in `budget_plans.py` (both ceilings, which directory entries are

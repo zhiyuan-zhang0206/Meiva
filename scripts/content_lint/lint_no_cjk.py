@@ -61,7 +61,13 @@ __all__ = ["main"]
 _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(_REPO_ROOT))
 
+# meiva:note
+# What this script reads, once at its own process entry: the checkout's filesystem as a tree, the
+# tracked names it scans, and the shared scan vocabulary that decides which of them to read.
+# meiva:link scripts/docs/scripts.meiva.okf.md
 from meizel import lint_common  # noqa: E402 - standalone script
+from meizel.checkout import source_tree, tracked_files  # noqa: E402
+from meizel.graph.universe import SourceTree  # noqa: E402
 
 # East Asian text: CJK ideographs U+3400-U+9FFF (incl. ext A) +
 # compatibility ideographs U+F900-U+FAFF, hiragana U+3040-U+309F,
@@ -98,11 +104,11 @@ def _is_locale_path(rel_path: str) -> bool:
 _LOCALE_PY_FILES = frozenset({"base/telemetry/alerts/copy.py", "base/packages/docs/pages_copy.py"})
 
 
-def _scan_file(rel_path: str, repo_root: Path) -> list[tuple[int, str, str]]:
+def _scan_file(tree: SourceTree, rel_path: str) -> list[tuple[int, str, str]]:
     """Return violations [(lineno, char, line_stripped), ...]."""
     if _is_locale_path(rel_path) or rel_path in _LOCALE_PY_FILES:
         return []
-    text = lint_common.read_utf8_text(repo_root / rel_path)
+    text = lint_common.read_utf8_text(tree, tree.root / rel_path)
     if text is None:
         return []
     violations: list[tuple[int, str, str]] = []
@@ -115,10 +121,11 @@ def _scan_file(rel_path: str, repo_root: Path) -> list[tuple[int, str, str]]:
 
 def main(argv: list[str], *, repo_root: Path = _REPO_ROOT) -> int:
     """Scan content under repo_root; standalone invocation uses this checkout."""
+    tree = source_tree(repo_root)
     argv, only = lint_common.split_only(argv)
-    scope = lint_common.changed_scope(only, repo_root)
+    scope = lint_common.changed_scope(tree, only)
     if argv:
-        scan, missing = lint_common.resolve_targets(argv, repo_root)
+        scan, missing = lint_common.resolve_targets(tree, argv)
         if missing:
             print(f"error: target path(s) not found: {', '.join(missing)}", file=sys.stderr)
             return 1
@@ -127,13 +134,13 @@ def main(argv: list[str], *, repo_root: Path = _REPO_ROOT) -> int:
             scope
         )  # the commit hook's changed files; the lint's scope is every tracked file
     else:
-        scan = lint_common.tracked_files(repo_root)
+        scan = tracked_files(repo_root)
 
     total = 0
     for rel in scan:
         if rel.startswith(".git/"):
             continue
-        for lineno, ch, content in _scan_file(rel, repo_root):
+        for lineno, ch, content in _scan_file(tree, rel):
             total += 1
             print(f"{rel}:{lineno}: U+{ord(ch):04X} {ch!r} | {content}")
 

@@ -27,8 +27,12 @@ from pathlib import Path
 
 import pytest
 
-from meizel import lint_common
+from meizel.checkout import roles_at
+from meizel.roles import framework_dirs
 from scripts.lint.diagnostics import time_bomb
+
+_REPO_ROOT = Path(__file__).resolve().parents[5]
+_FRAMEWORK_DIRS = framework_dirs(roles_at(_REPO_ROOT))
 
 _Scratch = tuple[Path, Callable[[list[Path]], list[str]]]
 
@@ -36,7 +40,7 @@ _Scratch = tuple[Path, Callable[[list[Path]], list[str]]]
 @pytest.fixture()
 def scratch(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> _Scratch:
     """Run the public lint against a synthetic repo and collect its diagnostics."""
-    for directory in (*lint_common.FRAMEWORK_DIRS, "scripts", "meizel", "tests"):
+    for directory in (*_FRAMEWORK_DIRS, "scripts", "meizel", "tests"):
         (tmp_path / directory).mkdir()
 
     def scan(paths: list[Path]) -> list[str]:

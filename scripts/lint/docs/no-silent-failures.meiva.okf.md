@@ -22,7 +22,7 @@ Fix order: narrow to the expected exception type, delete the handler, or keep it
 and report with the traceback (`logger.opt(exception=True).warning(...)`).
 Opt-out `# silent-ok: <reason>` on the handler line, reserved for a reporting
 channel's own failure path; there is no allowlist file. Scope
-`lint_common.FRAMEWORK_DIRS` + `scripts/`, `schedules/`, `.agents/`; tests are not
+`meizel.roles.framework_dirs` + `scripts/`, `schedules/`, `.agents/`; tests are not
 scanned. The authoritative rule text is the script's module docstring.
 
 Parent: [[scripts/lint/docs/lint.meiva.okf.md|lint]].

@@ -3,16 +3,17 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-from meizel.checkout import frontend_observation
-from meizel.frontend_deps import FRONTEND_DIR, FrontendDeps, classify, refusal
+from meizel.checkout import source_tree
+from meizel.frontend_deps import FRONTEND_DIR, FrontendDeps, classify, observe, refusal
 
 
 # meiva:note
 # The question a caller asks in a process of its own: may an answer come from this tree, and if not,
-# what does it say. The probe is the checkout shell's; the verdict is the pure module's.
+# what does it say. The shell binds the tree this process has; the four probes and the verdict are
+# `meizel.frontend_deps`'.
 # meiva:link meizel/docs/frontend-deps.meiva.okf.md
 def verdict(frontend: Path) -> tuple[FrontendDeps, str]:
-    state = classify(frontend_observation(frontend))
+    state = classify(observe(source_tree(frontend), frontend))
     return state, "" if state is FrontendDeps.READY else refusal(state)
 
 

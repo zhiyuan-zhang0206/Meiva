@@ -119,6 +119,14 @@ def all_packages(declared: Roles) -> tuple[str, ...]:
 
 
 # meiva:note
+# The governed production code, including independently packaged projects. A lint whose scope is
+# "the framework" asks this instead of keeping its own copy, so a new or renamed package cannot
+# drift out of one lint's scope unnoticed.
+def framework_dirs(declared: Roles) -> tuple[str, ...]:
+    return select_packages(declared, "application", "standalone")
+
+
+# meiva:note
 # Test hosts owned by pytest's required `testpaths`, without a second registry.
 # Supported roots are `tests` and `<host>/**/tests`; reject other patterns instead
 # of silently giving pytest, the CI selector, and generated type checking different scopes.

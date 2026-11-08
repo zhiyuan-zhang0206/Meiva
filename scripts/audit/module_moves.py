@@ -39,6 +39,7 @@ from pathlib import Path
 
 from base.host.boundary.options import options
 from meizel import lint_common
+from meizel.checkout import source_tree, tracked_files
 from scripts.audit.analysis import (
     is_text,
     module_pair,
@@ -60,7 +61,8 @@ def _is_excluded(name: str) -> bool:
 
 
 def _tracked_text(repo_root: Path) -> list[tuple[str, str]]:
-    paths = lint_common.tracked_files(repo_root)
+    tree = source_tree(repo_root)
+    paths = tracked_files(repo_root)
     texts: list[tuple[str, str]] = []
     for name in paths:
         if _is_excluded(name):
@@ -69,7 +71,11 @@ def _tracked_text(repo_root: Path) -> list[tuple[str, str]]:
         if path.resolve() == Path(__file__).resolve():
             continue
         # Git tracks a symlink's target path, not the target file's content.
-        text = path.readlink().as_posix() if path.is_symlink() else lint_common.read_utf8_text(path)
+        text = (
+            path.readlink().as_posix()
+            if path.is_symlink()
+            else lint_common.read_utf8_text(tree, path)
+        )
         if not is_text(text):
             continue
         texts.append((name, text))

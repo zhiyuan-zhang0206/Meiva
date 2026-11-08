@@ -30,7 +30,7 @@ if __name__ == "__main__":
 
 from meizel import allowances, lint_common  # noqa: E402
 from meizel.budgets import limits  # noqa: E402
-from meizel.checkout import GitRepo, load_universe, roles_at  # noqa: E402
+from meizel.checkout import GitRepo, load_universe, roles_at, source_tree  # noqa: E402
 from meizel.contracts.analysis import (  # noqa: E402
     load_manifests,
     load_policy,
@@ -42,7 +42,7 @@ from meizel.graph.universe import Universe  # noqa: E402
 from meizel.language import path_imports  # noqa: E402
 from meizel.language.scan import scan_tree  # noqa: E402
 from meizel.owners import decisions  # noqa: E402
-from meizel.roles import select_packages  # noqa: E402
+from meizel.roles import framework_dirs, select_packages  # noqa: E402
 from meizel.state import ambient_state, machine_role  # noqa: E402
 from meizel.state.ambient_state import allowlist as ambient_allowlist  # noqa: E402
 from scripts.lint.diagnostics import no_ambient_fallback  # noqa: E402
@@ -87,7 +87,7 @@ _SITE_SECTIONS = (*locality.EXTERNAL_SECTIONS, ambient_state.SECTION)
 _MEASURED_SECTIONS = (*locality.SECTIONS, path_imports.SECTION, ambient_state.SECTION)
 
 # AST rules track the application packages; budgets also cover tooling/tests.
-_SCAN_DIRS = lint_common.FRAMEWORK_DIRS
+_SCAN_DIRS = framework_dirs(ROLES)
 _AST_DIRS = select_packages(
     ROLES, "application", "standalone", "templates"
 )  # _SCAN_DIRS plus schedules/, which only Rule 9 governs
@@ -132,7 +132,7 @@ def _in_scan_scope(rel_path: str) -> bool:
 
 
 def _iter_py_files(roots: list[Path], repo_root: Path) -> list[Path]:
-    return lint_common.python_files(roots, repo_root)
+    return lint_common.python_files(source_tree(repo_root), roots)
 
 
 def _parse_baseline(
@@ -510,7 +510,7 @@ def _check_ast_and_quality(
 
 def _changed_targets(only: list[str] | None, repo_root: Path) -> list[str]:
     """The `--only` changed files as explicit targets; none (the full scan) when the tooling changed."""
-    scope = lint_common.changed_scope(only, repo_root)
+    scope = lint_common.changed_scope(source_tree(repo_root), only)
     return [] if scope is None else [str(repo_root / rel) for rel in sorted(scope)]
 
 

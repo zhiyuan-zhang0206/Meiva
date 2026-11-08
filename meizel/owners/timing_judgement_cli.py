@@ -10,7 +10,9 @@ from collections.abc import Mapping
 from pathlib import Path
 
 from meizel import lint_common
+from meizel.checkout import source_tree
 from meizel.graph.model import MeizelError
+from meizel.graph.universe import SourceTree
 from meizel.owners import timing_judgement
 from meizel.source_text import is_mapping, is_object_list, object_of
 
@@ -35,7 +37,7 @@ def _python_files(roots: list[Path]) -> list[Path]:
     return [f for f in files if "__pycache__" not in f.parts]
 
 
-def _test_files(paths: list[Path], root: Path) -> list[tuple[str, str]]:
+def _test_files(tree: SourceTree, paths: list[Path], root: Path) -> list[tuple[str, str]]:
     # meiva:note
     # (relative path, text) for the readable test files among `paths`.
     pairs: list[tuple[str, str]] = []
@@ -44,7 +46,7 @@ def _test_files(paths: list[Path], root: Path) -> list[tuple[str, str]]:
             rel = path.relative_to(root).as_posix()
         except ValueError:
             continue
-        text = lint_common.read_utf8_text(path)
+        text = lint_common.read_utf8_text(tree, path)
         if text is not None and lint_common.is_test_path(rel):
             pairs.append((rel, text))
     return pairs
@@ -114,8 +116,15 @@ def _arguments(argv: list[str]) -> tuple[list[str], bool, bool]:
     return [a for a in arguments if a not in ("--write-baseline", "--hints")], write_baseline, hints
 
 
-def _judge(files: list[tuple[str, str]], root: Path, only: list[str] | None, *, hints: bool) -> int:
-    scope = lint_common.changed_scope(only, root, inputs=(BASELINE.as_posix(),))
+def _judge(
+    tree: SourceTree,
+    files: list[tuple[str, str]],
+    root: Path,
+    only: list[str] | None,
+    *,
+    hints: bool,
+) -> int:
+    scope = lint_common.changed_scope(tree, only, inputs=(BASELINE.as_posix(),))
     found = timing_judgement.findings(
         files, baseline=_baseline_entries(root / BASELINE), scope=scope
     )
@@ -139,16 +148,17 @@ def _judge(files: list[tuple[str, str]], root: Path, only: list[str] | None, *, 
 
 def main(argv: list[str], *, repo_root: Path | None = None) -> int:
     root = _REPO_ROOT if repo_root is None else repo_root
+    tree = source_tree(root)
     arguments, write_baseline, hints = _arguments(argv)
     arguments, only = lint_common.split_only(arguments)
     missing = [argument for argument in arguments if not Path(argument).exists()]
     if missing:
         print(f"error: target path(s) not found: {', '.join(missing)}", file=sys.stderr)
         return 1
-    files = _test_files(_python_files(_targets(arguments, root=root)), root)
+    files = _test_files(tree, _python_files(_targets(arguments, root=root)), root)
     if write_baseline:
         return _write(root / BASELINE, files)
-    return _judge(files, root, only, hints=hints)
+    return _judge(tree, files, root, only, hints=hints)
 
 
 if __name__ == "__main__":

@@ -51,7 +51,7 @@ sys.path.insert(0, str(_ROOT))
 
 # meiva:link scripts/docs/scripts.meiva.okf.md
 from meizel import lint_common  # noqa: E402
-from meizel.checkout import roles_at  # noqa: E402
+from meizel.checkout import roles_at, source_tree  # noqa: E402
 from meizel.roles import select_packages  # noqa: E402
 
 ROLES = roles_at(_ROOT)
@@ -195,9 +195,10 @@ def stale_repo_helpers(
     dirs = DEFINITION_DIRS if definition_dirs is None else definition_dirs
     helpers = REPO_BLOCKING_HELPERS if repo_blocking_helpers is None else repo_blocking_helpers
     remaining = set(helpers)
+    tree = source_tree(root)
     pattern = re.compile(r"^\s*(?:async\s+)?def\s+(\w+)\s*[\[(]", re.MULTILINE)
     for directory in dirs:
-        for path in lint_common.python_files([root / directory], root):
+        for path in lint_common.python_files(tree, [root / directory]):
             if "__pycache__" in path.parts or lint_common.is_repo_test_file(path, root):
                 continue
             try:
@@ -219,11 +220,12 @@ def _scanned_files(
     """The source files of the scanned dirs (all of them, or the `--only` changed ones)."""
     root = _ROOT if repo_root is None else repo_root
     dirs = SCAN_DIRS if scan_dirs is None else scan_dirs
+    tree = source_tree(root)
     return sorted(
         lint_common.restrict(
             (
                 p
-                for p in lint_common.python_files([root / d for d in dirs], root)
+                for p in lint_common.python_files(tree, [root / d for d in dirs])
                 if "__pycache__" not in p.parts and not lint_common.is_repo_test_file(p, root)
             ),
             scope,
@@ -259,7 +261,7 @@ def main(
 ) -> int:
     root = _ROOT if repo_root is None else repo_root
     _, only = lint_common.split_only(argv)
-    scope = lint_common.changed_scope(only, root)
+    scope = lint_common.changed_scope(source_tree(root), only)
     stale = stale_repo_helpers(
         repo_root=root,
         definition_dirs=definition_dirs,

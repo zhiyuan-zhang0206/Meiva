@@ -16,6 +16,7 @@ sys.path.insert(0, str(_REPO_ROOT))
 
 # meiva:link scripts/docs/scripts.meiva.okf.md
 from meizel import lint_common  # noqa: E402
+from meizel.graph.universe import SourceTree  # noqa: E402
 
 _HOOKS_DIR = "agent/hooks/"
 _FACE_NAME = "agent_runtime.py"
@@ -49,9 +50,9 @@ def _defines_hook(tree: ast.AST) -> bool:
     return False
 
 
-def _scan_file(path: Path, rel: str) -> list[tuple[int, str]]:
+def _scan_file(reads: SourceTree, path: Path, rel: str) -> list[tuple[int, str]]:
     """[(lineno, message), ...] for `meiva` imports in a hook module; empty for any other file."""
-    source = lint_common.read_utf8_text(path)
+    source = lint_common.read_utf8_text(reads, path)
     if source is None:
         return []
     try:
@@ -72,19 +73,25 @@ def _scan_file(path: Path, rel: str) -> list[tuple[int, str]]:
     ]
 
 
-def main(argv: list[str], *, scan_dirs: tuple[str, ...], repo_root: Path = _REPO_ROOT) -> int:
+def main(
+    argv: list[str],
+    *,
+    reads: SourceTree,
+    scan_dirs: tuple[str, ...],
+    repo_root: Path = _REPO_ROOT,
+) -> int:
     argv, only = lint_common.split_only(argv)
     if argv:
-        resolved, missing = lint_common.resolve_targets(argv, repo_root)
+        resolved, missing = lint_common.resolve_targets(reads, argv)
         if missing:
             print(f"error: target path(s) not found: {', '.join(missing)}", file=sys.stderr)
             return 1
         files = [repo_root / entry for entry in resolved if entry.endswith(".py")]
     else:
-        roots = lint_common.scan_roots(repo_root, scan_dirs)
-        files = lint_common.python_files(roots, repo_root)
+        roots = lint_common.scan_roots(reads, scan_dirs)
+        files = lint_common.python_files(reads, roots)
 
-    scope = lint_common.changed_scope(only, repo_root)
+    scope = lint_common.changed_scope(reads, only)
 
     total = 0
     for path in sorted(lint_common.restrict(files, scope, repo_root)):
@@ -94,7 +101,7 @@ def main(argv: list[str], *, scan_dirs: tuple[str, ...], repo_root: Path = _REPO
             rel = path.relative_to(repo_root).as_posix()
         except ValueError:
             rel = path.as_posix()
-        for lineno, message in _scan_file(path, rel):
+        for lineno, message in _scan_file(reads, path, rel):
             total += 1
             print(f"{rel}:{lineno}: {message}")
 
@@ -112,5 +119,5 @@ def main(argv: list[str], *, scan_dirs: tuple[str, ...], repo_root: Path = _REPO
 if __name__ == "__main__":
     raise SystemExit(
         "the entry of this rule is `python scripts/lint/plugins/no_meiva_in_hooks_cli.py`: the rule "
-        "takes its scan directories from the shell that reads the roles"
+        "takes its scan directories and the checkout's reads from the shell that owns them"
     )

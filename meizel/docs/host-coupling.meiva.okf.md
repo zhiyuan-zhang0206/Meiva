@@ -35,7 +35,7 @@ tooling. Paths are non-test code and lines are those of the commit that wrote th
   `ambient_state/allowlist.py:56` and `:78` (`settings_names`), `ambient_state/__init__.py:117`
   and `ambient_state/scan.py:23` and `:168-194` (the `settings` vocabulary in the text and the
   detection).
-- Paths of the host's tooling: `lint_common.py:74-82` (`scripts/lint/`, `scripts/structure/`, ...);
+- Paths of the host's tooling: `lint_common.py:67-74` (`scripts/lint/`, `scripts/structure/`, ...);
   `language/purity.py:72` (`scripts/<top>.py`); `language/python_commands.py:8` and
   `language/path_imports.py:37`; `graph/python_layout.py:176-183` (the standalone-project CI
   contract: `uv.lock`, a `cpu` extra).

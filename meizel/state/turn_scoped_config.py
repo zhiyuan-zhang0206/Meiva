@@ -12,7 +12,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from meizel import allowances, lint_common
-from meizel.checkout import GitRepo
+from meizel.checkout import GitRepo, source_tree
+from meizel.graph.universe import SourceTree
 from meizel.state import lint_paths
 from meizel.state import turn_scoped_config_plan as plan
 
@@ -73,6 +74,7 @@ def _report(heading: str, entries: list[str]) -> None:
 # path, so a link into the scan scope is judged as what it points at, and the skip decisions are
 # asked of the plan with both that label and the name the scan reached.
 def _scan(
+    tree: SourceTree,
     path: Path,
     per_agent: set[str],
     errors: list[str],
@@ -85,7 +87,7 @@ def _scan(
     rel = lint_paths.label(path.resolve(), root.resolve())
     if plan.skips(rel, path.name, allowed_files=rule.allowed_files):
         return
-    text = lint_common.read_utf8_text(path)
+    text = lint_common.read_utf8_text(tree, path)
     if text is None:
         return
     layered_errors.extend(plan.layered_reads(text, rel, per_agent))
@@ -103,6 +105,7 @@ def main(
     policy_root: Path | None = None,
 ) -> int:
     root = _REPO_ROOT if repo_root is None else repo_root
+    tree = source_tree(root)
     # meiva:note
     # Two checkouts, named apart: `repo_root` is the tree this run judges, `policy_root` is the one
     # whose policy says what the rule scans. They are the same checkout unless a caller says
@@ -112,18 +115,18 @@ def main(
     argv, only = lint_common.split_only(argv)
     resolved: list[str] = []
     if argv:
-        resolved, missing = lint_common.resolve_targets(argv, root)
+        resolved, missing = lint_common.resolve_targets(tree, argv)
         if missing:
             print(f"error: target path(s) not found: {', '.join(missing)}", file=sys.stderr)
             return 1
-    scope = lint_common.changed_scope(only, root, inputs=rule.rule_inputs)
+    scope = lint_common.changed_scope(tree, only, inputs=rule.rule_inputs)
     per_agent = set(per_agent_field_names())
     errors: list[str] = []
     layered_errors: list[str] = []
     plugin_errors: list[str] = []
     files = _iter_files(resolved, root, explicit=bool(argv), rule=rule)
     for path in lint_common.restrict(files, scope, root):
-        _scan(path, per_agent, errors, layered_errors, plugin_errors, root=root, rule=rule)
+        _scan(tree, path, per_agent, errors, layered_errors, plugin_errors, root=root, rule=rule)
     _report(plan.PLUGIN_HEADING, plugin_errors)
     _report(plan.LAYERED_HEADING, layered_errors)
     _report(plan.SINGLETON_HEADING, errors)

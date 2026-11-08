@@ -14,7 +14,7 @@ _REPO_ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(_REPO_ROOT))
 
 from meizel import lint_common  # noqa: E402
-from meizel.checkout import roles_at  # noqa: E402
+from meizel.checkout import roles_at, source_tree  # noqa: E402
 from meizel.roles import select_packages  # noqa: E402
 
 ROLES = roles_at(_REPO_ROOT)
@@ -287,11 +287,12 @@ def check_file(path: Path, repo_root: Path) -> list[tuple[int, str]]:
 
 
 def _resolve_targets(argv: list[str], root: Path) -> list[Path] | None:
+    tree = source_tree(root)
     argv, only = lint_common.split_only(argv)
     if only == []:
         return []
     if only is not None:
-        scope = lint_common.changed_scope(only, root)
+        scope = lint_common.changed_scope(tree, only)
         if scope is None:
             return [root / d for d in _SCAN_DIRS]
         return [root / rel for rel in scope if (root / rel).is_file() and rel.endswith(".py")]
@@ -305,7 +306,7 @@ def main(argv: list[str], *, repo_root: Path | None = None) -> int:
     targets = _resolve_targets(argv, root)
     if targets == []:
         return 0
-    files = lint_common.python_files(targets or [], root)
+    files = lint_common.python_files(source_tree(root), targets or [])
     all_violations: list[tuple[str, int, str]] = [
         (
             path.relative_to(root).as_posix() if path.is_relative_to(root) else path.as_posix(),

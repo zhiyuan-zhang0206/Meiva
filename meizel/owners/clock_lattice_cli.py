@@ -12,7 +12,8 @@ from collections.abc import Iterable
 from pathlib import Path
 
 from meizel import allowances, lint_common
-from meizel.checkout import GitRepo, roles_at
+from meizel.checkout import GitRepo, roles_at, source_tree
+from meizel.graph.universe import SourceTree
 from meizel.owners import clock_lattice
 from meizel.roles import select_packages
 
@@ -36,14 +37,14 @@ _TEST_PATTERNS = (
 def lattice_of(root: Path) -> clock_lattice.Lattice:
     policy = allowances.load(GitRepo(root))
     family = tuple(policy.names("clock-lattice", "family-modules"))
-    return clock_lattice.Lattice.of(policy, _texts(root, family))
+    return clock_lattice.Lattice.of(policy, _texts(source_tree(root), family))
 
 
-def _texts(root: Path, relatives: Iterable[str]) -> dict[str, str]:
+def _texts(tree: SourceTree, relatives: Iterable[str]) -> dict[str, str]:
     return {
         rel: text
         for rel in relatives
-        if (text := lint_common.read_utf8_text(root / rel)) is not None
+        if (text := lint_common.read_utf8_text(tree, tree.root / rel)) is not None
     }
 
 
@@ -57,7 +58,7 @@ def _rel_path(path: Path, root: Path) -> str:
 # meiva:note
 # One file judged from what is on disk: the name the rule reports, its text, and the lattice.
 def scan_file(path: Path, *, repo_root: Path, lattice: clock_lattice.Lattice) -> list[str]:
-    source = lint_common.read_utf8_text(path)
+    source = lint_common.read_utf8_text(source_tree(repo_root), path)
     if source is None:
         return []
     return clock_lattice.scan_source(_rel_path(path, repo_root), source, lattice=lattice)
@@ -66,9 +67,10 @@ def scan_file(path: Path, *, repo_root: Path, lattice: clock_lattice.Lattice) ->
 def _scan(
     paths: list[Path], scope: frozenset[str] | None, *, root: Path, lattice: clock_lattice.Lattice
 ) -> list[str]:
+    tree = source_tree(root)
     errors: list[str] = []
     for path in paths:
-        for p in lint_common.python_files([path], root):
+        for p in lint_common.python_files(tree, [path]):
             rel = _rel_path(p, root)
             if any(pattern.search(rel) for pattern in _TEST_PATTERNS):
                 continue
@@ -84,8 +86,9 @@ def _scan(
 # about, so a scan of a tree that is not a checkout still answers.
 def stale_entries(root: Path, lattice: clock_lattice.Lattice) -> list[str]:
     wanted = {*lattice.family_modules, *(rel for rel, _ in lattice.independent)}
-    existing = {rel for rel in wanted if (root / rel).is_file()}
-    return clock_lattice.stale_allowlist_entries(existing, _texts(root, existing), lattice=lattice)
+    tree = source_tree(root)
+    existing = {rel for rel in wanted if tree.is_file(root / rel)}
+    return clock_lattice.stale_allowlist_entries(existing, _texts(tree, existing), lattice=lattice)
 
 
 @lint_common.admission.scoped
@@ -97,20 +100,21 @@ def main(
     lattice: clock_lattice.Lattice | None = None,
 ) -> int:
     root = _REPO_ROOT if repo_root is None else repo_root
+    tree = source_tree(root)
     lattice = lattice_of(root) if lattice is None else lattice
     argv, only = lint_common.split_only(argv)
     if argv:
-        resolved, missing = lint_common.resolve_targets(argv, root)
+        resolved, missing = lint_common.resolve_targets(tree, argv)
         if missing:
             print(f"error: target path(s) not found: {', '.join(missing)}", file=sys.stderr)
             return 1
         paths = [root / entry for entry in resolved if entry.endswith(".py")]
     else:
-        paths = lint_common.scan_roots(root, scan_dirs)
+        paths = lint_common.scan_roots(tree, scan_dirs)
     # meiva:note
     # `--only` (the commit hook) judges the changed files under the default scope; the lattice's own
     # family modules are inputs: editing one re-judges every file.
-    scope = lint_common.changed_scope(only, root, inputs=lattice.family_modules)
+    scope = lint_common.changed_scope(tree, only, inputs=lattice.family_modules)
     errors = _scan(paths, scope, root=root, lattice=lattice)
     if not argv:
         errors.extend(stale_entries(root, lattice))
