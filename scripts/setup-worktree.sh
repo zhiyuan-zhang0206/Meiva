@@ -142,6 +142,19 @@ bootstrap() {
       python "$REPO_ROOT/cli/python_install.py" --locked --inexact --no-compile-bytecode
   fi
 
+  # meiva:note
+  # `schedules/` is force-included in the wheel, so the install leaves a real directory copy under
+  # site-packages -- and site-packages precedes the editable root on `sys.path`, so that copy wins
+  # every import. It is only current at the moment of the install: after that, editing a schedule
+  # changes nothing for anything that imports it, and the result is a test run that judges the tree
+  # as it was when the worktree was created. On 2026-11-08 that read as a broken change twice (a
+  # module the source had exported was "missing"), and only the push showed the truth (task #6506).
+  # Of the force-included entries only `schedules` is a package; the rest are data files.
+  #
+  # The removal proves itself below: a worktree must import its own source, not the copy the
+  # install happened to make.
+  rm -rf .venv/lib/python3*/site-packages/schedules
+
   # `pnpm install --frozen-lockfile`, as CI does: it installs the exact graph
   # `ui/web/pnpm-lock.yaml` pins into a hoisted `node_modules` cloned from the
   # shared content-addressed store (`clonefile(2)` on macOS APFS, hardlinks on
@@ -158,6 +171,21 @@ bootstrap() {
   # regression in the change being checked (#8085 moved ui/web to pnpm).
   [ -d ui/web/node_modules ] \
     || die "ui/web/node_modules is missing after the frontend install — run: (cd ui/web && pnpm install --frozen-lockfile)"
+  # meiva:note
+  # The check, not the intention: `schedules` must come from this worktree's own source file. Three
+  # details are what make the assertion able to fail.
+  # * It is an equality, not a prefix: the worktree's `.venv` sits *inside* the worktree, so "the
+  #   path starts with the root" is true of the site-packages copy as well.
+  # * It names the module file, not the package directory: naming only `schedules/` would accept a
+  #   namespace package split across both places.
+  # * It runs under `-I`: with the working directory or `PYTHONPATH` on `sys.path`, `import
+  #   schedules` finds this tree's source for the wrong reason and passes while the copy the install
+  #   left still shadows it for every other entry point.
+  # The program is one line because anything that logs the command it ran (`$*`, an shim, a trace)
+  # would otherwise record a fragment per line and read as several commands.
+  prove='import os, sys, schedules.jobs.watch.main_red_watch as m; want = os.path.realpath(os.path.join(sys.argv[1], "schedules/jobs/watch/main_red_watch.py")); got = os.path.realpath(m.__file__); sys.exit(0 if got == want else "schedules imports " + got + " instead of " + want)'
+  .venv/bin/python -I -c "$prove" "$REPO_ROOT" \
+    || die "schedules still imports from outside this worktree — this checkout would run code it no longer holds"
   python3 "$SCRIPT_DIR/host_ops/guard_editable_venv.py" "$REPO_ROOT"
   if [ "$(git status --porcelain)" != "$before" ]; then
     git status --short >&2

@@ -31,7 +31,7 @@ echo "uv $* @ $PWD" >> "$SETUP_CALLS"
 [ -z "${FAIL_UV:-}" ] || { echo "uv: simulated failure" >&2; exit 1; }
 if [ "$1" = run ]; then
   mkdir -p .venv/bin
-  printf '#!/bin/sh\\necho "python $* @ $PWD" >> "$SETUP_CALLS"\\n' > .venv/bin/python
+  printf '#!/bin/sh\\necho "python $* @ $PWD" >> "$SETUP_CALLS"\\nif [ "$1" = -I ] && [ -n "${FAIL_IMPORT_PROOF:-}" ]; then echo "schedules imports /elsewhere/site-packages/schedules instead of this worktree" >&2; exit 1; fi\\n' > .venv/bin/python
   chmod +x .venv/bin/python
   [ -z "${REWRITE_LOCK:-}" ] || echo rewritten >> uv.lock
 fi
@@ -158,7 +158,7 @@ class _World:
         if not self.calls_file.exists():
             return []
         pairs = [line.rpartition(" @ ") for line in self.calls_file.read_text().splitlines()]
-        return [(command, Path(cwd).resolve()) for command, _, cwd in pairs]
+        return [(_named(command), Path(cwd).resolve()) for command, _, cwd in pairs]
 
     def worktree(self, task: str) -> Path:
         return (self.main / ".worktrees" / task).resolve()
@@ -180,6 +180,16 @@ def world(tmp_path: Path) -> _World:
 
 def _ready_line(path: Path, branch: str) -> str:
     return f"worktree ready: {path} (branch {branch})"
+
+
+# meiva:note
+# The import proof carries its whole `-c` program, which is the script's text and not this test's
+# contract. Name the call instead of quoting the program, so the expectation states that a proof ran
+# without restating how it is written.
+def _named(command: str) -> str:
+    return (
+        "python -I -c <schedules import proof>" if command.startswith("python -I -c ") else command
+    )
 
 
 def test_creates_the_worktree_off_fresh_origin_main_and_bootstraps_in_order(
@@ -213,6 +223,7 @@ def test_creates_the_worktree_off_fresh_origin_main_and_bootstraps_in_order(
             path,
         ),
         ("pnpm install --frozen-lockfile", path / "ui/web"),
+        ("python -I -c <schedules import proof>", path),
     ]
     assert (path / ".venv").is_dir() and not (path / ".venv").is_symlink()
     assert world.git(path, "status", "--porcelain") == ""
@@ -242,12 +253,25 @@ def test_rerunning_only_rebootstraps_the_existing_worktree(world: _World) -> Non
     assert again.stdout.splitlines()[-1] == _ready_line(path, "meiva-t1")
     assert world.git(path, "rev-parse", "HEAD") == head
     assert world.git(world.main, "worktree", "list").count("\n") == 1  # main + t1 only
-    commands = [command.split()[0] for command, _ in world.calls()]
-    assert commands == ["uv", "pnpm", "python", "pnpm"]
-    assert world.calls()[2] == (
-        f"python {path}/cli/python_install.py --locked --inexact --no-compile-bytecode",
-        path,
-    )
+    pin = (_REPO / ".python-version").read_text().strip()
+    first_calls, rerun_calls = world.calls()[:3], world.calls()[3:]
+    assert first_calls == [
+        (
+            f"uv run --no-project --python {pin} python {path}/cli/python_install.py"
+            " --locked --inexact --no-compile-bytecode",
+            path,
+        ),
+        ("pnpm install --frozen-lockfile", path / "ui/web"),
+        ("python -I -c <schedules import proof>", path),
+    ]
+    assert rerun_calls == [
+        (
+            f"python {path}/cli/python_install.py --locked --inexact --no-compile-bytecode",
+            path,
+        ),
+        ("pnpm install --frozen-lockfile", path / "ui/web"),
+        ("python -I -c <schedules import proof>", path),
+    ]
 
 
 def test_an_existing_worktree_on_another_branch_is_refused_when_one_is_named(
@@ -323,7 +347,7 @@ def test_without_a_task_a_foreign_worktree_is_completed_in_place(world: _World) 
     path = native.resolve()
     assert done.returncode == 0, done.stderr
     assert done.stdout.splitlines()[-1] == _ready_line(path, "native")
-    assert [cwd for _, cwd in world.calls()] == [path, path / "ui/web"]
+    assert [cwd for _, cwd in world.calls()] == [path, path / "ui/web", path]
 
 
 def test_a_failed_bootstrap_keeps_the_worktree_and_resumes_on_rerun(world: _World) -> None:
@@ -350,6 +374,20 @@ def test_unhealthy_shared_hooks_stop_the_bootstrap_before_any_install(tmp_path: 
     assert "missing or non-executable" in done.stdout  # the hook check's own report
     assert world.worktree("t1").is_dir()
     assert world.calls() == []
+
+
+# meiva:note
+# The stub cannot reproduce the real shadowing (there is no `schedules` in the seeded repository),
+# so this checks the wiring only: a proof that fails stops the bootstrap before it reports ready.
+# The proof's strength -- a real site-packages copy making it fail -- is a property of the script's
+# text and was verified against a real worktree venv.
+def test_a_schedules_import_from_site_packages_stops_the_bootstrap(world: _World) -> None:
+    done = world.setup("t1", FAIL_IMPORT_PROOF="1")
+
+    assert done.returncode != 0
+    assert "schedules imports /elsewhere/site-packages/schedules" in done.stderr
+    assert "schedules still imports from outside this worktree" in done.stderr
+    assert "worktree ready" not in done.stdout
 
 
 def test_a_rewritten_lock_file_fails_the_final_check(world: _World) -> None:
