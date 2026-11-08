@@ -164,9 +164,16 @@ class _NoopDatabase:
 
 def _run_child_probe() -> None:
     import meiva.skills
+    from base import telemetry
+    from base.clock.tests.fakes import system_clock
 
     noop_db: Any = _NoopDatabase
     pin_agent(1, clients=snapshot_clients_over(noop_db))
+    # meiva:note
+    # This probe is a process with clients but no boot seam: the SDK call it makes emits an event
+    # whose instant comes from the process clock, so the probe states the clock a booted process
+    # would have bound (`init_telemetry` binds the pipeline's clock at the same seam).
+    telemetry.bind_process_clock(system_clock().now)
     process_context.set_state(object())
     process_context.set_state_update({})
     before = set(sys.modules)

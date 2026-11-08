@@ -301,10 +301,14 @@ def emit(
 ) -> None:
     # meiva:note
     # A process that bound no event stream drops what it emits, as it always has, and says so once
-    # (`emit_prepared` reports the same absence below). Taking that decision here keeps a process
-    # with no stream from also demanding the instant such an event would have been stamped with —
-    # it bound no clock either, and an event nobody can read owes nobody a timestamp.
+    # (`emit_prepared` reports the same absence below). The decision is taken before the event is
+    # built — an event nobody can read owes nobody a timestamp — but the call's own contract is
+    # still answered: an unregistered name, a category contradicting the registry, or a broken
+    # `machine_reader` is this caller's bug whether or not a sink exists.
     if producer is None and process_state["pipeline"] is None:
+        _declared(category, event_name)
+        if machine_reader is not None:
+            resolve_machine(machine_reader, home=process_state["home"])
         _report_unbound_emission(_NO_PRODUCER, event_name)
         return
     event = prepare_event(
@@ -319,6 +323,25 @@ def emit(
         machine_reader=machine_reader,
     )
     emit_prepared(event, capture=capture, producer=producer)
+
+
+# meiva:note
+# Reject an event name or category the registry does not declare (R2-C): an unregistered name and a
+# category contradicting the declaration are programming errors of the caller, so they raise here
+# rather than becoming a row someone has to reverse-engineer from its payload.
+def _declared(category: Category, event_name: str) -> None:
+    spec = EVENTS.get(event_name)
+    if spec is None:
+        raise ValueError(
+            f"emit() got unregistered event_name={event_name!r} — declare an "
+            "EventSpec in a base/events/declarations module first (base/events/"
+            "registry.md is generated from it)"
+        )
+    if category != spec.category and category not in spec.extra_categories:
+        raise ValueError(
+            f"emit() category={category!r} contradicts the registry for "
+            f"event_name={event_name!r} (declared {spec.category!r})"
+        )
 
 
 def prepare_event(
@@ -342,18 +365,7 @@ def prepare_event(
     preserves one canonical byte representation across their manifest receipt
     and the eventually exported telemetry line.
     """
-    spec = EVENTS.get(event_name)
-    if spec is None:
-        raise ValueError(
-            f"emit() got unregistered event_name={event_name!r} — declare an "
-            "EventSpec in a base/events/declarations module first (base/events/"
-            "registry.md is generated from it)"
-        )
-    if category != spec.category and category not in spec.extra_categories:
-        raise ValueError(
-            f"emit() category={category!r} contradicts the registry for "
-            f"event_name={event_name!r} (declared {spec.category!r})"
-        )
+    _declared(category, event_name)
     trace_id, span_id = capture_trace_ids()
     return Event(
         ts=_as_utc(ts),

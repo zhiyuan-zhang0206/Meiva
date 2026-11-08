@@ -98,6 +98,34 @@ def test_process_binding_rejects_replacing_a_live_owner() -> None:
     assert child.returncode == 0, child.stderr
 
 
+# meiva:note
+# The other half of "an unbound process drops what it emits": the decision is taken before the event
+# is built, but it never becomes a place to hide a caller's defect. A machine reader that fails for
+# any reason other than a missing name propagates out of `emit()` even though nothing would read the
+# event, and a reader that reports only a missing name still degrades to the home's own name — the
+# exact pair `resolve_machine` draws. Reintroducing an early return that skips the reader turns the
+# first half red; nothing else in the suite would.
+def test_a_dropped_event_still_surfaces_a_broken_machine_reader(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from base.cluster.machine import MachineNameMissing
+
+    monkeypatch.setitem(telemetry.process_state, "pipeline", None)
+    failure = RuntimeError("machine reader exploded")
+
+    def broken() -> str:
+        raise failure
+
+    with pytest.raises(RuntimeError) as raised:
+        telemetry.emit("telemetry", "sdk_call", machine_reader=broken)
+    assert raised.value is failure
+
+    def missing() -> str:
+        raise MachineNameMissing("this unit names no machine")
+
+    telemetry.emit("telemetry", "sdk_call", machine_reader=missing)
+
+
 def test_full_queue_stop_is_finite_and_closes_admission() -> None:
     entered, release = threading.Event(), threading.Event()
     written: list[telemetry.Event] = []
