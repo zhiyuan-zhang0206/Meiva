@@ -1,4 +1,4 @@
-exports = ["event_resource_exporter.py", "telemetry_otlp.py", "telemetry_otlp_defer.py", "telemetry_otlp_exporting.py", "telemetry_otlp_metrics.py", "telemetry_otlp_sdk.py", "telemetry_otlp_worker.py", "tests", "trace_config.py", "trace_readiness.py", "trace_workers.py"]
+exports = ["event_resource_exporter.py", "telemetry_otlp.py", "telemetry_otlp_defer.py", "telemetry_otlp_exporting.py", "telemetry_otlp_metrics.py", "telemetry_otlp_sdk.py", "telemetry_otlp_worker.py", "tests", "trace_config.py", "trace_readiness.py", "trace_strip.py", "trace_workers.py"]
 
 [uses]
 "telemetry_otlp.py" = ["plans.py", "telemetry_otlp_barrier.py", "telemetry_otlp_defer.py", "telemetry_otlp_gauges.py", "telemetry_otlp_logs.py", "telemetry_otlp_metrics.py", "telemetry_otlp_sdk.py", "telemetry_otlp_worker.py"]
@@ -16,6 +16,7 @@ exports = ["event_resource_exporter.py", "telemetry_otlp.py", "telemetry_otlp_de
 "telemetry_otlp_barrier.py" = "strict"
 "trace_config.py" = "strict"
 "trace_readiness.py" = "strict"
+"trace_strip.py" = "strict"
 
 [debt.ambient-read]
 "telemetry_otlp_metrics.py#random uuid.uuid4" = { count = 1, owner = "#5816", until = "permanently: the service.instance.id must be unique per process - it is the identity Prometheus uses to tell two units of one service apart, and a caller-supplied id would let a restarted process inherit the previous run's series" }

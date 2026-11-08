@@ -9,6 +9,7 @@ from typing import Any
 
 import pytest
 
+from base.clock.tests.fakes import system_clock
 from base.log.tests.log_records import LogRecords
 from base.log.tests.log_records import loguru_records as loguru_records
 from base.paths import traces_dir
@@ -34,7 +35,7 @@ def test_strip_content_removes_llm_content_keeps_metadata():
     """strip_content_attributes removes gen_ai.task.input/output,
     traceloop.entity.input/output and messages-like keys; chain metadata and
     status survive."""
-    from base.telemetry.tracing import strip_content_attributes
+    from base.telemetry.otlp.trace_strip import strip_content_attributes
 
     otlp = otlp_with_attrs(
         {
@@ -70,7 +71,7 @@ def test_strip_content_size_guard_drops_huge_strings():
     """The size guard drops any single attribute whose string payload exceeds
     MAX_ATTR_STRING_CHARS even when the key is not a known content key — a
     future instrumentor-invented content key cannot leak megabytes back."""
-    from base.telemetry.tracing import MAX_ATTR_STRING_CHARS, strip_content_attributes
+    from base.telemetry.otlp.trace_strip import MAX_ATTR_STRING_CHARS, strip_content_attributes
 
     big = "x" * (MAX_ATTR_STRING_CHARS + 1)
     otlp = otlp_with_attrs(
@@ -87,7 +88,7 @@ def test_strip_content_size_guard_drops_huge_strings():
 def test_strip_content_removes_event_attributes_too():
     """Content attributes nested under span events (the use_attributes=False
     path) are stripped as well."""
-    from base.telemetry.tracing import strip_content_attributes
+    from base.telemetry.otlp.trace_strip import strip_content_attributes
 
     otlp: dict[str, Any] = {
         "resourceSpans": [
@@ -268,6 +269,7 @@ def test_initialize_relief_pass_runs_when_disk_over_watermark(
     stub_traceloop_init(monkeypatch, record_init)
 
     initialize_tracing(
+        now=system_clock().now,
         machine=machine_identity(),
         home=home,
         config=trace_config(
@@ -326,6 +328,7 @@ def test_initialize_leaves_the_environment_to_its_process_root(
     before = dict(os.environ)
 
     initialize_tracing(
+        now=system_clock().now,
         machine=machine_identity(),
         home=home,
         config=trace_config(enabled=True, strip_content=True),
@@ -361,6 +364,7 @@ def test_initialize_skips_when_collector_unreachable(
 
     stub_traceloop_init(monkeypatch, record_init)
     initialize_tracing(
+        now=system_clock().now,
         machine=machine_identity(),
         home=home,
         config=trace_config(enabled=True, endpoint=endpoint),
@@ -393,6 +397,7 @@ def test_initialize_skips_when_disk_over_watermark(
 
     stub_traceloop_init(monkeypatch, record_init)
     initialize_tracing(
+        now=system_clock().now,
         machine=machine_identity(),
         home=home,
         config=trace_config(enabled=True, disk_watermark=0.9),

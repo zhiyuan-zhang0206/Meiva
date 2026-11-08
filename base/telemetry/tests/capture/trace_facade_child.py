@@ -6,6 +6,7 @@ from opentelemetry import trace
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.trace import INVALID_SPAN_CONTEXT, NonRecordingSpan
 
+from base.clock.tests.fakes import system_clock
 from base.cluster.machine import MachineFacts
 from base.paths import meiva_home
 from base.telemetry import tracing
@@ -17,6 +18,7 @@ from base.telemetry.tests.capture.armed_tracing import BillingRuntime, armed_bil
 def inactive(scenario: str) -> None:
     if scenario.endswith("disabled"):
         tracing.initialize_tracing(
+            now=system_clock().now,
             machine=MachineFacts.of(name="", role=()),
             home=meiva_home(),
             config=TraceConfig(False, False, "http://127.0.0.1:1", 1, 1, 0.9, False),

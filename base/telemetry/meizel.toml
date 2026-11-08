@@ -21,7 +21,6 @@ exports = ["alerts", "audit_events.py", "converge_report.py", "delivery", "emitt
 
 [debt.ambient-read]
 "process_logging.py#pid os.getpid" = { count = 1, owner = "#5816", until = "permanently: the announce record names the process that is announcing itself" }
-"trace_mirror.py#clock datetime.datetime.now" = { count = 1, owner = "#5816", until = "permanently: the retention cutoff is the wall clock at prune time, and a clock handed in would let a prune keep files by another process's calendar" }
 
 # meiva:note
 # The read is `build_pipeline`, and it is the composition root of the telemetry pipeline:

@@ -49,6 +49,7 @@ def loaded() -> None:
         sys.stdout.write("loaded trace exit observed\n")
 
     atexit.register(observe)
+    from base.clock.tests.fakes import system_clock
     from base.telemetry import tracing
 
     # meiva:note
@@ -58,6 +59,7 @@ def loaded() -> None:
         unavailable.bind(("127.0.0.1", 0))
         port = unavailable.getsockname()[1]
         tracing.initialize_tracing(
+            now=system_clock().now,
             machine=MachineFacts.of(name="exit-test", role={"agent-runner"}),
             home=meiva_home(),
             config=TraceConfig(True, False, f"http://127.0.0.1:{port}", 3, 2048, 1.0, True),

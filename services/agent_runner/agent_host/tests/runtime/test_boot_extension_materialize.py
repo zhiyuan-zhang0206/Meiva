@@ -8,6 +8,7 @@ import pytest
 
 from agent.process_boot import init_process_scope, land_cluster_extensions, process_trace_config
 from base import db, paths
+from base.clock.tests.fakes import system_clock
 from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.config import ConfigBoot
 from base.config.tests.configuration import snapshot_process_config
@@ -129,7 +130,12 @@ def test_process_scope_passes_its_machine_and_home_without_reading_identity(
     reset_tracing_state()
     environ: dict[str, str] = {}
     init_process_scope(
-        machine=machine, home=unit_home, trace=trace, environ=environ, readiness=TraceReadiness()
+        now=system_clock().now,
+        machine=machine,
+        home=unit_home,
+        trace=trace,
+        environ=environ,
+        readiness=TraceReadiness(),
     )
     assert environ == {"TRACELOOP_TRACE_CONTENT": "false"}
     assert not config.prepared
