@@ -29,7 +29,7 @@ from meizel.graph.model import (
     TypeCastSite,
     Unless,
 )
-from meizel.graph.universe import Checkout, EditPlan, Universe
+from meizel.graph.universe import Checkout, EditPlan, SourceTree, Universe
 from meizel.language.fixtures import FixtureFunction, FixtureRequest, FixtureState
 from meizel.language.input_mutations import InputListAppend
 from meizel.language.scan import FileScan
@@ -51,6 +51,10 @@ class _RecordingCheckout:
     @property
     def root(self) -> Path:
         return self.inner.root
+
+    @property
+    def tree(self) -> SourceTree:
+        return self.inner.tree
 
     def has_file(self, rel: str) -> bool:
         return self.inner.has_file(rel)

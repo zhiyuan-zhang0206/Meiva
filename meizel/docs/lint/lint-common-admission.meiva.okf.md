@@ -8,7 +8,7 @@ tags: [tool, evaluation]
 # Read the checkout once per run
 
 Every lint that judges a directory asks `meizel.lint_common` for the checked-out
-files. Git owns that admission: tracked regular files plus new non-ignored files,
+files, through the tree its entry handed it. Git owns that admission: tracked regular files plus new non-ignored files,
 with any path reached through a symlinked parent rejected (`meizel/checkout.py`).
 Applying that rule is cheap: one `lstat` per name decides the file half, and each
 directory's answer is remembered for the listing — 0.05 s for this repository's
@@ -26,6 +26,29 @@ three changed files:
 `time_bomb` asked 21 times in one run: 75 s of a 92 s profiled run went into
 `checkout.tracked_files`, and the remaining cost was the per-target filter walking
 every admitted name as a `Path` (234k constructions, `is_relative_to` per name).
+
+## Where the reads come from
+
+`lint_common` decides *which* files a lint judges; it no longer holds the calls
+that answer. Every public function that reads takes a `meizel.graph.universe.SourceTree`
+— a frozen value whose fields are the reads (`is_file`, `is_dir`, `exists`,
+`resolve`, `lexists`, `rglob`, `read_bytes`) plus the two listings only a checkout
+can take (`tracked`, the shell's `checkout.tracked_files` bound to its root, and
+`roles`). `meizel/checkout.source_tree(root)` binds `pathlib` to it where the
+checkout is owned — the standalone lints' entries, the rule shells, and the
+process entry — and a test binds its own. A module that already holds a checkout
+asks it: `Checkout.tree` is the same value over the root the seat names.
+
+Building a tree reads nothing (every field is a function the caller applies), so a
+tree may name a root that does not exist yet and a scratch repository costs no
+`lstat`.
+
+The rule matches a path method by its attribute name, so `tree.read_bytes(...)`
+in a strict module reads exactly like `Path.read_bytes(...)`. Those sites are
+declared under `[injected-calls.sites]` in `meizel.policy.toml` — the receiver is
+a parameter holding a callable an entry handed in, not a path — and `meizel check`
+counts them apart from a read. See
+[[meizel/docs/checker/policy/injected-calls.meiva.okf.md|declared injected calls]].
 
 ## The scope, and why it cannot outlive the run
 

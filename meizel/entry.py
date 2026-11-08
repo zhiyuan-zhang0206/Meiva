@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
-from meizel.checkout import GitRepo, read_roles, read_text, toplevel
+from meizel.checkout import GitRepo, read_roles, read_text, source_tree, toplevel
 from meizel.contracts import cli
 from meizel.frontend_deps import FrontendDepsError
 from meizel.graph.model import MeizelError
@@ -81,6 +81,7 @@ def main(argv: list[str]) -> int:
             read_roles=read_roles,
             read_text=read_text,
             relative_target=relative_targets(root, base),
+            source_tree=source_tree,
             today=datetime.now(UTC).date().isoformat(),
         )
         return cli.dispatch(repo, root, base, args, deps)

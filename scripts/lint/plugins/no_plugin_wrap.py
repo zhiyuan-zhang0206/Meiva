@@ -62,6 +62,7 @@ REPO_ROOT = Path(__file__).parent.parent.parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 
 from meizel import lint_common  # noqa: E402 - standalone script
+from meizel.graph.universe import SourceTree  # noqa: E402
 
 SCAN_DIR = "meiva_builtins/plugins"
 
@@ -131,9 +132,9 @@ def _is_meiva_setattr(node: ast.AST) -> TypeGuard[ast.Call]:
     )
 
 
-def _scan_file(path: Path) -> list[tuple[int, str]]:
+def _scan_file(reads: SourceTree, path: Path) -> list[tuple[int, str]]:
     """Return [(lineno, message), ...] for bare meiva monkey-patches."""
-    source = lint_common.read_utf8_text(path)
+    source = lint_common.read_utf8_text(reads, path)
     if source is None:
         return []  # unreadable entry (e.g. a dangling symlink) or binary content
     lines = source.splitlines()
@@ -170,14 +171,14 @@ def _under_plugins(path: Path, repo_root: Path = REPO_ROOT) -> bool:
     return rel == SCAN_DIR or rel.startswith(f"{SCAN_DIR}/")
 
 
-def main(argv: list[str], *, repo_root: Path = REPO_ROOT) -> int:
+def main(argv: list[str], *, reads: SourceTree, repo_root: Path = REPO_ROOT) -> int:
     argv, only = lint_common.split_only(argv)
     # argv non-empty = explicit paths (any dir); keep only plugin paths (the
     # plugins dir itself included, so it enumerates its members).
     # Empty = default full scan of the plugins dir, or the `--only` changed files
     # (the commit hook) under that same scope.
     if argv:
-        resolved, missing = lint_common.resolve_targets(argv, repo_root)
+        resolved, missing = lint_common.resolve_targets(reads, argv)
         if missing:
             print(f"error: target path(s) not found: {', '.join(missing)}", file=sys.stderr)
             return 1
@@ -187,10 +188,10 @@ def main(argv: list[str], *, repo_root: Path = REPO_ROOT) -> int:
             if entry.endswith(".py") and _under_plugins(path := repo_root / entry, repo_root)
         ]
     else:
-        roots = lint_common.scan_roots(repo_root, (SCAN_DIR,))
-        files = lint_common.python_files(roots, repo_root)
+        roots = lint_common.scan_roots(reads, (SCAN_DIR,))
+        files = lint_common.python_files(reads, roots)
 
-    scope = lint_common.changed_scope(only, repo_root)
+    scope = lint_common.changed_scope(reads, only)
 
     total = 0
     for path in sorted(lint_common.restrict(files, scope, repo_root)):
@@ -200,7 +201,7 @@ def main(argv: list[str], *, repo_root: Path = REPO_ROOT) -> int:
             rel = path.as_posix()
         if lint_common.is_repo_test_file(path, repo_root):
             continue
-        for lineno, message in _scan_file(path):
+        for lineno, message in _scan_file(reads, path):
             total += 1
             print(f"{rel}:{lineno}: {message}")
 

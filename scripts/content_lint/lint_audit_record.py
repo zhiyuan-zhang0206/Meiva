@@ -52,9 +52,18 @@ from base.host.env.boot_actions import enter_scratch_home  # noqa: E402
 if __name__ == "__main__":
     enter_scratch_home()
 
+# meiva:note
+# What this script reads, once at its own process entry: the checkout's filesystem as a tree, the
+# roles the root manifest declares (the scan scope below is a selection from them), and the shared
+# scan vocabulary that decides which of those files to read.
+# meiva:link scripts/docs/scripts.meiva.okf.md
 from meizel import lint_common  # noqa: E402 - standalone script
+from meizel.checkout import source_tree  # noqa: E402
+from meizel.graph.universe import SourceTree  # noqa: E402
+from meizel.roles import framework_dirs  # noqa: E402
 
-_SCAN_DIRS = lint_common.FRAMEWORK_DIRS
+_TREE = source_tree(_REPO_ROOT)
+_SCAN_DIRS = framework_dirs(_TREE.roles())
 
 # Sites whose audit record is deliberately not `audit_events`: key `path::function`, value the
 # reason. The `.env` write audit's record is the per-home JSONL because its writers run where
@@ -172,7 +181,7 @@ def census(paths: list[Path]) -> list[str]:
             rel = path.as_posix()
         if rel in _EXEMPT_FILES or lint_common.is_test_path(rel):
             continue
-        text = lint_common.read_utf8_text(path)
+        text = lint_common.read_utf8_text(_TREE, path)
         if text is None:
             continue
         for scope, lineno, reason in violations_in_source(text):
@@ -181,8 +190,8 @@ def census(paths: list[Path]) -> list[str]:
     return found
 
 
-def _py_files(roots: list[Path], repo_root: Path) -> list[Path]:
-    return lint_common.python_files(roots, repo_root)
+def _py_files(tree: SourceTree, roots: list[Path]) -> list[Path]:
+    return lint_common.python_files(tree, roots)
 
 
 def _explicit_targets(argv: list[str]) -> list[Path] | None:
@@ -199,9 +208,9 @@ def main(argv: list[str]) -> int:
     explicit = _explicit_targets(argv)
     if explicit is None:
         return 1
-    targets = explicit or lint_common.scan_roots(_REPO_ROOT, _SCAN_DIRS)
-    scope = lint_common.changed_scope(only, _REPO_ROOT)
-    found = census(lint_common.restrict(_py_files(targets, _REPO_ROOT), scope, _REPO_ROOT))
+    targets = explicit or lint_common.scan_roots(_TREE, _SCAN_DIRS)
+    scope = lint_common.changed_scope(_TREE, only)
+    found = census(lint_common.restrict(_py_files(_TREE, targets), scope, _REPO_ROOT))
     for line in found:
         print(line)
     if found:

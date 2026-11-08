@@ -14,7 +14,7 @@ _REPO_ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(_REPO_ROOT))
 
 # meiva:link scripts/docs/scripts.meiva.okf.md
-from meizel.checkout import roles_at  # noqa: E402
+from meizel.checkout import roles_at, source_tree  # noqa: E402
 from meizel.roles import select_packages  # noqa: E402
 from scripts.lint.plugins import no_meiva_in_hooks  # noqa: E402
 
@@ -25,4 +25,6 @@ SCAN_DIRS = select_packages(
 __all__ = ["SCAN_DIRS"]
 
 if __name__ == "__main__":
-    raise SystemExit(no_meiva_in_hooks.main(sys.argv[1:], scan_dirs=SCAN_DIRS))
+    raise SystemExit(
+        no_meiva_in_hooks.main(sys.argv[1:], reads=source_tree(_REPO_ROOT), scan_dirs=SCAN_DIRS)
+    )

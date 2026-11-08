@@ -50,6 +50,7 @@ if __name__ == "__main__":
     enter_scratch_home()
 
 from meizel import lint_common  # noqa: E402
+from meizel.checkout import source_tree  # noqa: E402
 from scripts.structure import tests_location_allowed  # noqa: E402
 
 _CATEGORIES = ("contract", "integration")
@@ -156,7 +157,7 @@ def _tracked_tests(repo_root: Path) -> list[str]:
 
 def _named_tests(argv: list[str], repo_root: Path) -> list[str] | None:
     """The top-level tests the explicit paths name; None when a path does not exist."""
-    files, missing = lint_common.resolve_targets(argv, repo_root)
+    files, missing = lint_common.resolve_targets(source_tree(repo_root), argv)
     if missing:
         print(f"error: target path(s) not found: {', '.join(missing)}", file=sys.stderr)
         return None
@@ -166,7 +167,7 @@ def _named_tests(argv: list[str], repo_root: Path) -> list[str] | None:
 def _files_to_check(argv: list[str], only: list[str] | None, repo_root: Path) -> list[str] | None:
     """The tests to judge: the explicit paths or every tracked test, narrowed to `--only`'s
     changed files unless a changed path is lint tooling (then the whole default set)."""
-    scope = lint_common.changed_scope(only, repo_root)
+    scope = lint_common.changed_scope(source_tree(repo_root), only)
     if argv:
         named = _named_tests(argv, repo_root)
         return None if named is None else [rel for rel in named if scope is None or rel in scope]
@@ -179,7 +180,7 @@ def _suggest(argv: list[str], repo_root: Path) -> int:
     # Heavy (placement, the import graph): imported only when a suggestion is asked for.
     from scripts.structure import tests_location_suggest
 
-    files, missing = lint_common.resolve_targets(argv, repo_root)
+    files, missing = lint_common.resolve_targets(source_tree(repo_root), argv)
     if missing:
         print(f"error: target path(s) not found: {', '.join(missing)}", file=sys.stderr)
         return 1

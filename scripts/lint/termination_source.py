@@ -72,7 +72,7 @@ if __name__ == "__main__":
     enter_scratch_home()
 
 from meizel import lint_common  # noqa: E402
-from meizel.checkout import roles_at  # noqa: E402
+from meizel.checkout import roles_at, source_tree  # noqa: E402
 from meizel.roles import select_packages  # noqa: E402
 
 ROLES = roles_at(_REPO_ROOT)
@@ -286,7 +286,7 @@ def _is_test_file(rel_path: str) -> bool:
 
 
 def _iter_py_files(roots: list[Path], repo_root: Path) -> list[Path]:
-    return lint_common.python_files(roots, repo_root)
+    return lint_common.python_files(source_tree(repo_root), roots)
 
 
 def main(
@@ -304,10 +304,9 @@ def main(
     # argv non-empty = explicit paths; empty = full scan, or the `--only` changed files
     # (the commit hook) under the same scope. The enum that defines the legal values is
     # an input: changing it re-judges every file.
-    targets = (
-        [Path(a).resolve() for a in argv] if argv else lint_common.scan_roots(repo_root, SCAN_DIRS)
-    )
-    scope = lint_common.changed_scope(only, repo_root, inputs=_RULE_INPUTS)
+    tree = source_tree(repo_root)
+    targets = [Path(a).resolve() for a in argv] if argv else lint_common.scan_roots(tree, SCAN_DIRS)
+    scope = lint_common.changed_scope(tree, only, inputs=_RULE_INPUTS)
     sources = _termination_source_values() if legal_sources is None else legal_sources
 
     total = 0

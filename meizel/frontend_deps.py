@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import hashlib
 from dataclasses import dataclass
 from enum import StrEnum
+from pathlib import Path
 
 from meizel.graph.model import MeizelError
+from meizel.graph.universe import SourceTree
 
 FRONTEND_DIR = ("ui", "web")
 SOURCE_LOCK = "pnpm-lock.yaml"
@@ -29,6 +32,31 @@ class FrontendObservation:
     pnpm_metadata: bool
     installed_lock: str | None
     source_lock: str | None
+
+
+# meiva:note
+# The four facts that decide whether a tree may be asked a TypeScript question, read through the
+# caller's tree: whether node_modules exists, whether pnpm installed it, and the digests of the
+# lockfile it installed against and of the lockfile the tree carries. The tree decides where the
+# reads come from, so this module stays a decision.
+# meiva:link meizel/docs/frontend-deps.meiva.okf.md
+def observe(tree: SourceTree, frontend: Path) -> FrontendObservation:
+    return FrontendObservation(
+        node_modules=tree.is_dir(frontend / NODE_MODULES),
+        pnpm_metadata=tree.is_file(frontend.joinpath(*PNPM_METADATA)),
+        installed_lock=_digest(tree, frontend.joinpath(*TREE_LOCK)),
+        source_lock=_digest(tree, frontend / SOURCE_LOCK),
+    )
+
+
+# meiva:note
+# The digest of one file, or None when it is not there: an absent lockfile and an unreadable one are
+# the same answer to "was this tree installed for the lockfile the checkout carries".
+def _digest(tree: SourceTree, path: Path) -> str | None:
+    try:
+        return hashlib.sha256(tree.read_bytes(path)).hexdigest()
+    except OSError:
+        return None
 
 
 # meiva:note

@@ -117,7 +117,7 @@ sys.path.insert(0, str(_REPO_ROOT))
 # This entry puts the repository root on `sys.path` itself, so every import below that line is out of
 # order for ruff; the reason is the bootstrap, not a circular dependency.
 from meizel import lint_common  # noqa: E402
-from meizel.checkout import roles_at  # noqa: E402
+from meizel.checkout import roles_at, source_tree  # noqa: E402
 from meizel.roles import select_packages  # noqa: E402
 
 ROLES = roles_at(_REPO_ROOT)
@@ -430,27 +430,29 @@ def violations_in_source(src: str, filename: str = "<source>") -> list[tuple[int
 
 
 def _default_files(root: Path = _REPO_ROOT) -> list[str]:
-    roots = lint_common.scan_roots(root, SCAN_DIRS)
-    return sorted(p.relative_to(root).as_posix() for p in lint_common.python_files(roots, root))
+    tree = source_tree(root)
+    roots = lint_common.scan_roots(tree, SCAN_DIRS)
+    return sorted(p.relative_to(root).as_posix() for p in lint_common.python_files(tree, roots))
 
 
 def main(argv: list[str], *, repo_root: Path | None = None) -> int:
     root = _REPO_ROOT if repo_root is None else repo_root
+    tree = source_tree(root)
     argv, only = lint_common.split_only(argv)
     if argv:
-        files, missing = lint_common.resolve_targets(argv, root)
+        files, missing = lint_common.resolve_targets(tree, argv)
         if missing:
             print(f"error: target path(s) not found: {', '.join(missing)}", file=sys.stderr)
             return 1
     else:
         # The default scope, or only the `--only` changed files (the commit hook) inside it.
-        scope = lint_common.changed_scope(only, root)
+        scope = lint_common.changed_scope(tree, only)
         default = _default_files(root)
         files = default if scope is None else [f for f in default if f in scope]
 
     total = 0
     for rel in files:
-        text = lint_common.read_utf8_text(root / rel) if rel.endswith(".py") else None
+        text = lint_common.read_utf8_text(tree, root / rel) if rel.endswith(".py") else None
         for lineno, message in violations_in_source(text, rel) if text is not None else ():
             total += 1
             print(f"{rel}:{lineno}: {message}")

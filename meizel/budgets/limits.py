@@ -11,7 +11,7 @@ from collections.abc import Collection
 from pathlib import Path
 
 from meizel.budgets import budget_plans, directory_budget
-from meizel.checkout import GitRepo
+from meizel.checkout import GitRepo, source_tree
 from meizel.lint_common import python_files, read_utf8_text
 
 __all__ = ["budget_files", "check"]
@@ -24,6 +24,7 @@ __all__ = ["budget_files", "check"]
 def budget_files(
     targets: list[Path], repo_root: Path, structure_dirs: tuple[str, ...]
 ) -> set[Path]:
+    tree = source_tree(repo_root)
     selected = [
         chosen
         for target in targets
@@ -32,7 +33,7 @@ def budget_files(
     ]
     return {
         path
-        for path in python_files(selected, repo_root)
+        for path in python_files(tree, selected)
         if budget_plans.judged_path(path, repo_root, repo_root) is not None
         and not path.is_symlink()
     }
@@ -52,9 +53,10 @@ def check(
     *,
     changed: Collection[str] = frozenset(),
 ) -> tuple[list[str], list[str]]:
+    tree = source_tree(repo_root)
     texts: dict[Path, str] = {}
     for path in sorted(budget_files(targets, repo_root, structure_dirs)):
-        text = read_utf8_text(path)
+        text = read_utf8_text(tree, path)
         if text is None:
             continue
         texts[path] = text

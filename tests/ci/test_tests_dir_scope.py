@@ -8,8 +8,11 @@ import pytest
 import yaml
 
 from meizel import lint_common
+from meizel.checkout import roles_at, source_tree
+from meizel.roles import framework_dirs
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
+_FRAMEWORK_DIRS = framework_dirs(roles_at(_REPO_ROOT))
 _PRE_COMMIT = yaml.safe_load((_REPO_ROOT / ".pre-commit-config.yaml").read_text(encoding="utf-8"))
 _HOOKS = {hook["id"]: hook for repo in _PRE_COMMIT["repos"] for hook in repo["hooks"]}
 
@@ -101,11 +104,12 @@ def test_plugin_wrap_lint_exempts_a_plugins_own_tests(tmp_path: Path) -> None:
 
     body = "import meiva\n\nmeiva.files.read = lambda: None\n"
     stub = _write(tmp_path, "meiva_builtins/plugins/p/tests/test_plugin.py", body)
-    assert lint.main([], repo_root=tmp_path) == 0
-    assert lint.main([str(stub)], repo_root=tmp_path) == 0
+    reads = source_tree(tmp_path)
+    assert lint.main([], reads=reads, repo_root=tmp_path) == 0
+    assert lint.main([str(stub)], reads=reads, repo_root=tmp_path) == 0
 
     _write(tmp_path, "meiva_builtins/plugins/p/plugin.py", body)
-    assert lint.main([], repo_root=tmp_path) == 1
+    assert lint.main([], reads=reads, repo_root=tmp_path) == 1
 
 
 def test_meiva_root_scope_lint_exempts_the_supervisors_own_tests(
@@ -208,7 +212,7 @@ def test_fixture_scope_lint_ignores_a_module_that_is_not_a_test(
 
 
 def _time_bomb_root(root: Path) -> None:
-    for name in (*lint_common.FRAMEWORK_DIRS, "scripts", "meizel", "tests"):
+    for name in (*_FRAMEWORK_DIRS, "scripts", "meizel", "tests"):
         (root / name).mkdir(exist_ok=True)
 
 
@@ -246,7 +250,7 @@ def test_no_os_environ_default_scan_reaches_tests_in_dirs_it_never_scanned(
         def test_x(monkeypatch) -> None:
             monkeypatch.setenv("MEIVA_DB_URL", "x")
     """
-    for name in (*lint_common.FRAMEWORK_DIRS, "tests"):
+    for name in (*_FRAMEWORK_DIRS, "tests"):
         (tmp_path / name).mkdir(exist_ok=True)
     _write(tmp_path, f"{host}/tests/test_x.py", body)
     assert (
@@ -264,7 +268,7 @@ def test_no_os_environ_default_scan_still_reads_only_tests_in_those_dirs(
 ) -> None:
     from scripts.lint import no_os_environ as lint
 
-    for name in (*lint_common.FRAMEWORK_DIRS, "tests"):
+    for name in (*_FRAMEWORK_DIRS, "tests"):
         (tmp_path / name).mkdir(exist_ok=True)
     _write(tmp_path, "cli/pkg/mod.py", 'import os\n\nHOME = os.environ["HOME"]\n')
     assert (

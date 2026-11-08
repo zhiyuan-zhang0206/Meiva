@@ -62,7 +62,7 @@ sys.path.insert(0, str(_REPO_ROOT))
 
 # meiva:link scripts/docs/scripts.meiva.okf.md
 from meizel import allowances, lint_common  # noqa: E402
-from meizel.checkout import GitRepo, roles_at  # noqa: E402
+from meizel.checkout import GitRepo, roles_at, source_tree  # noqa: E402
 from meizel.owners import decisions  # noqa: E402
 from meizel.roles import select_packages  # noqa: E402
 
@@ -212,7 +212,7 @@ def main(argv: list[str], *, repo_root: Path | None = None) -> int:
     # argv non-empty = explicit paths, scanned whole; empty = the default scope, or the
     # `--only` changed files (the commit hook) under that same scope.
     targets = [Path(a).resolve() for a in argv] if argv else default_targets(repo_root=root)
-    scope = lint_common.changed_scope(only, root)
+    scope = lint_common.changed_scope(source_tree(root), only)
 
     total = 0
     for path in sorted(lint_common.restrict(_iter_py_files(targets), scope, root)):

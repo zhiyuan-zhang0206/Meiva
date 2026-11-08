@@ -63,7 +63,7 @@ sys.path.insert(0, str(_REPO_ROOT))
 
 # meiva:link scripts/docs/scripts.meiva.okf.md
 from meizel import lint_common  # noqa: E402
-from meizel.checkout import roles_at  # noqa: E402
+from meizel.checkout import roles_at, source_tree  # noqa: E402
 from meizel.roles import select_packages  # noqa: E402
 
 ROLES = roles_at(_REPO_ROOT)
@@ -186,11 +186,12 @@ def _scan_file(path: Path, rel_path: str) -> list[tuple[int, str]]:
 
 
 def _iter_py_files(roots: list[Path], repo_root: Path) -> list[Path]:
-    return lint_common.python_files(roots, repo_root)
+    return lint_common.python_files(source_tree(repo_root), roots)
 
 
 def main(argv: list[str], *, repo_root: Path | None = None) -> int:
     root = _REPO_ROOT if repo_root is None else repo_root
+    tree = source_tree(root)
     argv, only = lint_common.split_only(argv)
     if argv:
         missing = [arg for arg in argv if not Path(arg).exists()]
@@ -199,8 +200,8 @@ def main(argv: list[str], *, repo_root: Path | None = None) -> int:
             return 1
     # argv non-empty = explicit paths; empty = full scan, or the `--only` changed files
     # (the commit hook) under the same scope.
-    targets = [Path(a).resolve() for a in argv] if argv else lint_common.scan_roots(root, SCAN_DIRS)
-    scope = lint_common.changed_scope(only, root)
+    targets = [Path(a).resolve() for a in argv] if argv else lint_common.scan_roots(tree, SCAN_DIRS)
+    scope = lint_common.changed_scope(tree, only)
 
     total = 0
     for path in sorted(lint_common.restrict(_iter_py_files(targets, root), scope, root)):

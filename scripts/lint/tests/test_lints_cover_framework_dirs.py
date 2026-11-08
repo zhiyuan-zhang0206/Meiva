@@ -9,7 +9,9 @@ from pathlib import Path
 import pytest
 
 from meizel import lint_common
+from meizel.checkout import roles_at, source_tree
 from meizel.owners import clock_lattice_cli
+from meizel.roles import framework_dirs
 from meizel.tests.synthetic import STANDALONE_PROJECT
 from scripts.lint import async_no_sync_blocking, termination_source
 from scripts.lint.diagnostics import (
@@ -22,6 +24,7 @@ from scripts.lint.diagnostics import (
 from scripts.lint.plugins import no_meiva_in_hooks_cli
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
+_FRAMEWORK_DIRS = framework_dirs(roles_at(_REPO_ROOT))
 
 
 @pytest.mark.parametrize(
@@ -37,15 +40,15 @@ _REPO_ROOT = Path(__file__).resolve().parents[3]
     ],
 )
 def test_framework_scoped_lints_cover_every_framework_dir(scan_dirs: tuple[str, ...]) -> None:
-    assert set(lint_common.FRAMEWORK_DIRS) <= set(scan_dirs)
-    lint_common.scan_roots(_REPO_ROOT, scan_dirs)
+    assert set(_FRAMEWORK_DIRS) <= set(scan_dirs)
+    lint_common.scan_roots(source_tree(_REPO_ROOT), scan_dirs)
 
 
-@pytest.mark.parametrize("directory", (*lint_common.FRAMEWORK_DIRS, "scripts", "meizel"))
+@pytest.mark.parametrize("directory", (*_FRAMEWORK_DIRS, "scripts", "meizel"))
 def test_time_bomb_default_scan_covers_every_framework_directory(
     tmp_path: Path, capsys: pytest.CaptureFixture[str], directory: str
 ) -> None:
-    for name in (*lint_common.FRAMEWORK_DIRS, "scripts", "meizel", "tests"):
+    for name in (*_FRAMEWORK_DIRS, "scripts", "meizel", "tests"):
         (tmp_path / name).mkdir()
     target = tmp_path / directory / "tests" / "test_window.py"
     target.parent.mkdir()

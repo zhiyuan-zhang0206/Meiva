@@ -12,7 +12,8 @@ from functools import cache
 from pathlib import Path
 
 from meizel import allowances, lint_common
-from meizel.checkout import GitRepo
+from meizel.checkout import GitRepo, source_tree
+from meizel.graph.universe import SourceTree
 from meizel.language import script_siblings
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -48,14 +49,15 @@ def _directory(path: Path) -> script_siblings.Directory:
 
 def scan_file(path: Path, *, root: Path | None = None) -> list[str]:
     """Return one error string per unguarded sibling import in a script-mode file."""
-    return _violations(path, _REPO_ROOT if root is None else root, _import_scope(_REPO_ROOT))
+    resolved = _REPO_ROOT if root is None else root
+    return _violations(source_tree(resolved), path, resolved, _import_scope(_REPO_ROOT))
 
 
 # meiva:note
 # One file's violations of the guard, under the scope the caller resolved: the read and the label are
 # this shell's, the decision is `meizel.language.script_siblings`'.
-def _violations(path: Path, repo_root: Path, scope: tuple[str, ...]) -> list[str]:
-    src = lint_common.read_utf8_text(path)
+def _violations(tree: SourceTree, path: Path, repo_root: Path, scope: tuple[str, ...]) -> list[str]:
+    src = lint_common.read_utf8_text(tree, path)
     if src is None:
         return []
     try:
@@ -102,20 +104,19 @@ def _files_to_scan(
 
 
 def main(argv: list[str], *, repo_root: Path = _REPO_ROOT, policy_root: Path | None = None) -> int:
+    tree = source_tree(repo_root)
     scope = _import_scope(policy_root if policy_root is not None else _REPO_ROOT)
     argv, only = lint_common.split_only(argv)
     resolved: list[str] = []
     if argv:
-        resolved, missing = lint_common.resolve_targets(argv, repo_root)
+        resolved, missing = lint_common.resolve_targets(tree, argv)
         if missing:
             print(f"error: target path(s) not found: {', '.join(missing)}", file=sys.stderr)
             return 1
     targets = [Path(a).resolve() for a in argv]
     total = 0
     for path in sorted(
-        _files_to_scan(
-            resolved, targets, lint_common.changed_scope(only, repo_root), root=repo_root
-        )
+        _files_to_scan(resolved, targets, lint_common.changed_scope(tree, only), root=repo_root)
     ):
         rel = (
             path.relative_to(repo_root).as_posix()
@@ -124,7 +125,7 @@ def main(argv: list[str], *, repo_root: Path = _REPO_ROOT, policy_root: Path | N
         )
         if not script_siblings.judged(rel):
             continue
-        for violation in _violations(path, repo_root, scope):
+        for violation in _violations(tree, path, repo_root, scope):
             total += 1
             print(violation)
     if total:

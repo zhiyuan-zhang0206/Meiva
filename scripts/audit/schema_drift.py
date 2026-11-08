@@ -13,7 +13,7 @@ import psycopg
 
 from base.host.boundary.options import options
 from meizel import lint_common
-from meizel.checkout import apply_plan
+from meizel.checkout import apply_plan, source_tree
 from meizel.graph.universe import EditPlan
 from scripts.audit.analysis import allowlist_entries, compare, live_columns, schema_columns
 
@@ -56,7 +56,7 @@ def _allow_text(allow: Path | None) -> str:
     # The allowlist as read from disk; an absent or unreadable file allows nothing.
     if allow is None:
         return ""
-    allow_text = lint_common.read_utf8_text(allow)
+    allow_text = lint_common.read_utf8_text(source_tree(allow.parent), allow)
     return allow_text or ""
 
 
@@ -68,7 +68,7 @@ def main(argv: list[str]) -> int:
         from base.config import settings
 
         dsn = settings.data_plane.db_url
-    schema_text = lint_common.read_utf8_text(args.schema)
+    schema_text = lint_common.read_utf8_text(source_tree(args.schema.parent), args.schema)
     if schema_text is None:
         raise FileNotFoundError(args.schema)
     schema = schema_columns(schema_text)

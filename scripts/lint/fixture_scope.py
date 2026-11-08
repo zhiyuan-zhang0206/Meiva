@@ -104,6 +104,7 @@ _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(_REPO_ROOT))
 
 from meizel import lint_common  # noqa: E402 - standalone script
+from meizel.checkout import source_tree  # noqa: E402
 
 # The one location where session scope and the fixture's own blast radius coincide.
 _SESSION_PROVISIONING = "tests/fixtures/provisioning.py"
@@ -447,8 +448,9 @@ def main(argv: list[str], *, repo_root: Path | None = None) -> int:
         if missing:
             print(f"error: target path(s) not found: {', '.join(missing)}", file=sys.stderr)
             return 1
+    tree = source_tree(root)
     targets = [Path(a).resolve() for a in argv] if argv else _default_targets(repo_root=root)
-    scope = lint_common.changed_scope(only, root, inputs=("pyproject.toml",))
+    scope = lint_common.changed_scope(tree, only, inputs=("pyproject.toml",))
 
     total = 0
     for path in sorted(lint_common.restrict(_iter_py_files(targets), scope, root)):

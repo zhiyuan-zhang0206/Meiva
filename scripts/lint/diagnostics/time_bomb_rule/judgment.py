@@ -12,6 +12,7 @@ from collections.abc import Callable, Iterable, Iterator
 from pathlib import Path
 
 from meizel import lint_common
+from meizel.graph.universe import SourceTree
 from scripts.lint.diagnostics.time_bomb_rule.index import Index
 from scripts.lint.diagnostics.time_bomb_rule.sources import (
     CLOCK_PARAMS,
@@ -38,11 +39,13 @@ def _rel_or_abs(root: Path, path: Path) -> str:
     return path.as_posix().removeprefix(root.as_posix() + "/")
 
 
-def lint_source(index: Index, paths: list[Path], scope: frozenset[str] | None = None) -> list[str]:
+def lint_source(
+    index: Index, tree: SourceTree, paths: list[Path], scope: frozenset[str] | None = None
+) -> list[str]:
     errors: list[str] = []
     for path in paths:
         if path.is_dir():
-            for p in lint_common.python_files([path], index.root):
+            for p in lint_common.python_files(tree, [path]):
                 rel = _rel_or_abs(index.root, p)
                 if _is_test_path(rel) or (scope is not None and rel not in scope):
                     continue
@@ -99,11 +102,13 @@ def lint_source_file(index: Index, path: Path, rel: str) -> list[str]:
     return errors
 
 
-def lint_tests(index: Index, paths: list[Path], scope: frozenset[str] | None = None) -> list[str]:
+def lint_tests(
+    index: Index, tree: SourceTree, paths: list[Path], scope: frozenset[str] | None = None
+) -> list[str]:
     errors: list[str] = []
     for path in paths:
         if path.is_dir():
-            for p in lint_common.python_files([path], index.root):
+            for p in lint_common.python_files(tree, [path]):
                 rel = _rel_or_abs(index.root, p)
                 if _is_test_path(rel) and (scope is None or rel in scope):
                     errors.extend(lint_test_file(index, p, rel))

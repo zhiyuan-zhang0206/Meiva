@@ -3,8 +3,7 @@ from __future__ import annotations
 import tomllib
 from pathlib import Path
 
-from meizel import lint_common
-from meizel.roles import parse_roles, select_packages
+from meizel.roles import framework_dirs, parse_roles, select_packages
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -18,7 +17,7 @@ def test_framework_dirs_are_the_declared_packages() -> None:
     pyproject = tomllib.loads((_REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
     wheel = pyproject["tool"]["hatch"]["build"]["targets"]["wheel"]["packages"]
     assert set(wheel) == set(select_packages(ROLES, "application"))
-    assert select_packages(ROLES, "application", "standalone") == lint_common.FRAMEWORK_DIRS
+    assert set(wheel) <= set(framework_dirs(ROLES))
 
 
 def test_root_environment_regions_do_not_admit_independent_projects() -> None:
@@ -41,4 +40,3 @@ def test_root_environment_regions_do_not_admit_independent_projects() -> None:
         "frontend": ("web",),
     }
     assert all("engines" not in line for region in regions for line in region.render(declared))
-    assert select_packages(ROLES, "application", "standalone") == lint_common.FRAMEWORK_DIRS

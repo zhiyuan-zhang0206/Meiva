@@ -27,7 +27,7 @@ the lockfile the checkout has" is a byte comparison rather than a heuristic.
 id = "frontend-deps-verdict"
 kind = "invariant"
 statement = "A TypeScript answer comes only from the installation's own frontend tree, installed from the lockfile that installation carries: before it starts node the analyzer classifies ui/web/node_modules as ready, missing, npm-era (present without node_modules/.modules.yaml) or lock-changed (node_modules/.pnpm/lock.yaml absent or different from pnpm-lock.yaml), and a state other than ready raises a refusal naming the state and the command that fixes it instead of running the analyzer; a refusal reaches the process as exit code 3, never 1, so a caller can tell an unready environment from a failed check."
-code = ["meizel/language/typescript_compiler/runtime.py:scan_batch", "meizel/frontend_deps.py:classify", "meizel/frontend_deps.py:refusal", "meizel/checkout.py:frontend_observation", "meizel/lint_common.py:run_node_analyzer", "meizel/entry.py:main"]
+code = ["meizel/language/typescript_compiler/runtime.py:scan_batch", "meizel/frontend_deps.py:classify", "meizel/frontend_deps.py:refusal", "meizel/frontend_deps.py:observe", "meizel/lint_common.py:run_node_analyzer", "meizel/entry.py:main"]
 tests = ["meizel/tests/test_lint_common.py::test_each_observation_shape_has_one_verdict", "meizel/tests/test_lint_common.py::test_a_refusal_names_the_command_that_fixes_it", "meizel/tests/test_lint_common.py::test_the_analyzer_refuses_before_it_starts_node", "meizel/tests/test_lint_common.py::test_the_cli_exits_three_when_the_checkout_cannot_be_asked"]
 ```
 

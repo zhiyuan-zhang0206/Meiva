@@ -33,7 +33,7 @@ sys.path.insert(0, str(_REPO_ROOT))
 
 # meiva:link scripts/docs/scripts.meiva.okf.md
 from meizel import lint_common  # noqa: E402
-from meizel.checkout import roles_at  # noqa: E402
+from meizel.checkout import roles_at, source_tree  # noqa: E402
 from meizel.roles import select_packages  # noqa: E402
 
 ROLES = roles_at(_REPO_ROOT)
@@ -307,7 +307,7 @@ def scan_file(path: Path) -> list[tuple[int, str]]:
 
 
 def _iter_py_files(roots: Sequence[Path], repo_root: Path) -> list[Path]:
-    return lint_common.python_files(list(roots), repo_root)
+    return lint_common.python_files(source_tree(repo_root), list(roots))
 
 
 def _resolve_targets(
@@ -316,6 +316,7 @@ def _resolve_targets(
     repo_root: Path,
     dirs: Sequence[str],
 ) -> tuple[list[Path], frozenset[str] | None] | int:
+    tree = source_tree(repo_root)
     if argv:
         missing = [arg for arg in argv if not Path(arg).exists()]
         if missing:
@@ -323,8 +324,8 @@ def _resolve_targets(
             return 1
         targets = [Path(a).resolve() for a in argv]
     else:
-        targets = lint_common.scan_roots(repo_root, dirs)
-    scope = lint_common.changed_scope(only, repo_root, inputs=_RULE_INPUTS)
+        targets = lint_common.scan_roots(tree, dirs)
+    scope = lint_common.changed_scope(tree, only, inputs=_RULE_INPUTS)
     return targets, scope
 
 

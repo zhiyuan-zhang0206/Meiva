@@ -46,6 +46,7 @@ if __name__ == "__main__":
 from base.host.boundary.options import options  # noqa: E402
 from base.host.boundary.untyped import object_of  # noqa: E402
 from meizel import lint_common  # noqa: E402
+from meizel.checkout import source_tree  # noqa: E402
 
 _PYPROJECT_PATH = _REPO_ROOT / "pyproject.toml"
 _PYRIGHT_PATH = _REPO_ROOT / ".venv/bin/basedpyright"
@@ -686,7 +687,7 @@ def changed_python(only: list[str] | None, *, repo_root: Path | None = None) -> 
     re-checks everything.
     """
     root = _REPO_ROOT if repo_root is None else repo_root
-    scope = lint_common.changed_scope(only, root, inputs=("pyproject.toml",))
+    scope = lint_common.changed_scope(source_tree(root), only, inputs=("pyproject.toml",))
     return None if scope is None else sorted(rel for rel in scope if rel.endswith(".py"))
 
 

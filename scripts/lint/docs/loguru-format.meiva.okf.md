@@ -22,7 +22,7 @@ traceback belongs on the call as `logger.opt(exception=True)` (or
 `logger.opt(exception=exc)` for an exception object; stdlib loggers keep
 `exc_info`; task #4979).
 
-Opt-out `# log-format-ok: <reason>`; scope `lint_common.FRAMEWORK_DIRS` +
+Opt-out `# log-format-ok: <reason>`; scope `meizel.roles.framework_dirs` +
 `scripts/`. The authoritative rule text is the script's module docstring.
 
 Each source has one breadth-first AST node sequence, shared by the import,
