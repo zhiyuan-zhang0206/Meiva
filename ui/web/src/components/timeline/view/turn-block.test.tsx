@@ -186,6 +186,62 @@ describe("TurnBlock component", () => {
     }
   });
 
+  // meiva:note
+  // The regression this pins (user report 2026-11-08): between two blocks of a turn — a tool
+  // result committed, the model thinking before its next token, a harness step transition — no
+  // block is in flight, so the old live delta keyed only on `lastLiveStartedAt` was zero and the
+  // header froze at its last number while the turn kept running. The clock now falls back to the
+  // turn's last observed activity, so it advances through the gap.
+  // meiva:link ui/web/src/docs/frontend-components/timeline-view/deep-collapse.meiva.okf.md
+  it("keeps ticking between blocks, when no block is in flight", () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(100_000);
+      const betweenBlocks: TurnSummary = {
+        ...sampleSummary,
+        workedMs: 62_000,
+        lastLiveKind: null,
+        lastLiveStartedAt: 0,
+
+      };
+      render(
+        <TurnBlock id="turn-gap" memberIds={["1.0"]} summary={betweenBlocks} expanded={false} turnActive lastEventAt={98_000} onToggle={vi.fn()} />,
+      );
+      expect(screen.getByTestId("turn-toggle").textContent).toContain("Working for 1m 4s");
+      act(() => { vi.advanceTimersByTime(3_000); });
+      expect(screen.getByTestId("turn-toggle").textContent).toContain("Working for 1m 7s");
+      act(() => { vi.advanceTimersByTime(10_000); });
+      expect(screen.getByTestId("turn-toggle").textContent).toContain("Working for 1m 17s");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("stops the gap clock on settle and reports the measured work", () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(100_000);
+      const betweenBlocks: TurnSummary = {
+        ...sampleSummary,
+        workedMs: 62_000,
+        lastLiveKind: null,
+        lastLiveStartedAt: 0,
+
+      };
+      const { rerender } = render(
+        <TurnBlock id="turn-settle" memberIds={["1.0"]} summary={betweenBlocks} expanded={false} turnActive lastEventAt={98_000} onToggle={vi.fn()} />,
+      );
+      expect(screen.getByTestId("turn-toggle").textContent).toContain("Working for 1m 4s");
+      rerender(
+        <TurnBlock id="turn-settle" memberIds={["1.0"]} summary={betweenBlocks} expanded={false} onToggle={vi.fn()} />,
+      );
+      expect(screen.getByTestId("turn-toggle").textContent).toContain("Worked for 1m 2s");
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("ticks smoothly for an external harness active turn with an in-progress activity item", () => {
     vi.useFakeTimers();
     try {

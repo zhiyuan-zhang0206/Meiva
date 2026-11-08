@@ -244,7 +244,7 @@ export function homePageProps(): HomePageProps {
       loadingNewer: false,
       retryTimeline: state.retryTimeline,
     },
-    timelineStore: { requestScrollToBottom: state.requestScrollToBottom },
+    timelineStore: { requestScrollToBottom: state.requestScrollToBottom, liveAnchorAt: 0 },
     bfcacheId: state.bfcacheId,
     unresolvedAlerts: state.unresolvedAlerts,
     contextPanel: { open: state.contextPanelOpen, setOpen: state.contextPanelSetOpen },

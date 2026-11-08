@@ -63,6 +63,11 @@ interface TurnBlockProps {
   children?: ReactNode;
   timelineSource?: "buffer" | "canonical";
   displayRank?: number;
+  // meiva:note
+  // Page-clock time of the thread's last received event; anchors the live clock while no block is
+  // in flight. 0 = unknown, and the clock falls back to the in-flight block alone.
+  // meiva:link ui/web/src/docs/frontend-components/timeline-view/deep-collapse.meiva.okf.md
+  lastEventAt?: number;
 }
 
 function sameIds(a: readonly string[], b: readonly string[]): boolean {
@@ -83,6 +88,7 @@ function turnBlockPropsEqual(prev: TurnBlockProps, next: TurnBlockProps): boolea
     prev.bounded === next.bounded &&
     prev.onToggle === next.onToggle &&
     prev.turnActive === next.turnActive &&
+    prev.lastEventAt === next.lastEventAt &&
     prev.liveWindow === next.liveWindow &&
     prev.onActivityAtBottomChange === next.onActivityAtBottomChange &&
     prev.scrollToBottomSeq === next.scrollToBottomSeq &&
@@ -119,13 +125,25 @@ export const TurnBlock = memo(function TurnBlock({
   children,
   timelineSource = "canonical",
   displayRank,
+  lastEventAt = 0,
 }: TurnBlockProps) {
   const t = useTranslations("timeline");
   const liveBlockStartedAt =
     turnActive && summary.lastLiveKind != null && summary.lastLiveStartedAt > 0
       ? summary.lastLiveStartedAt
       : 0;
-  const liveNow = useNow(liveBlockStartedAt > 0);
+  // meiva:note
+  // The live "Working for" anchor is the in-flight block's start while one runs, and the page's own
+  // time of the thread's last received event when none does — the tick then keeps counting the
+  // current stretch instead of standing on the measured total, which is what used to freeze the
+  // header between blocks (a tool result committed, the model thinking before its next token, a
+  // harness step transition: user report 2026-11-08, stuck at "Working for 1m 2s" with no event
+  // left to advance it). Anchoring on the last received event, not the turn's start, keeps a turn
+  // that spans an idle gap (a restart, a wake-up) from counting that gap as work.
+  // meiva:link ui/web/src/docs/frontend-components/timeline-view/deep-collapse.meiva.okf.md
+  const liveAnchor =
+    liveBlockStartedAt > 0 ? liveBlockStartedAt : turnActive ? lastEventAt : 0;
+  const liveNow = useNow(Boolean(turnActive) && liveAnchor > 0);
 
   // meiva:note
   // Inner scrollport management: tracks detached scroll state on the active
@@ -305,7 +323,7 @@ export const TurnBlock = memo(function TurnBlock({
     return () => ro.disconnect();
   }, [liveWindow, expanded, syncInnerToBottom]);
 
-  const liveDelta = liveBlockStartedAt > 0 ? Math.max(liveNow - liveBlockStartedAt, 0) : 0;
+  const liveDelta = turnActive && liveAnchor > 0 ? Math.max(liveNow - liveAnchor, 0) : 0;
   const totalWorkedMs = summary.workedMs + liveDelta;
 
   const hasWork = summary.thinking > 0 || summary.code > 0 || summary.output > 0;

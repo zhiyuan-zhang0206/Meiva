@@ -40,6 +40,7 @@ function resetStore(): void {
     streamingIds: new Set(),
     streamingCode: false,
     turnActive: false,
+    liveAnchorAt: 0,
     connectionState: "open",
     tokenUsage: 0,
     reasoningTokens: 0,
@@ -281,6 +282,43 @@ function runFlagCase(
   });
   expect(useTimelineStore.getState()[flag]).toBe(expected);
 }
+
+// meiva:note
+// `liveAnchorAt` is the page's own clock of the thread's last received event, and it is what the
+// running turn's "Working for" header counts from while no block is in flight. It must follow
+// every thread event (that is the whole point — the number keeps moving with no block live) and it
+// must never survive a thread switch (another conversation's events are not this turn's activity).
+// meiva:link ui/web/src/docs/frontend-components/timeline-view/deep-collapse.meiva.okf.md
+describe("liveAnchorAt (the running turn's live clock anchor)", () => {
+  it("records the page clock of each event the active thread receives", () => {
+    act(() => {
+      useTimelineStore.getState().processSseEvent(
+        { role: "reasoning_start", agent_id: 42, item_id: "5.0" },
+        1_700_000_000_000,
+      );
+    });
+    expect(useTimelineStore.getState().liveAnchorAt).toBe(1_700_000_000_000);
+
+    act(() => {
+      useTimelineStore.getState().processSseEvent(
+        { role: "timeline_snapshot", agent_id: 42, msg_count: 1, items: [item({})] },
+        1_700_000_060_000,
+      );
+    });
+    expect(useTimelineStore.getState().liveAnchorAt).toBe(1_700_000_060_000);
+  });
+
+  it("resets on a thread switch", () => {
+    act(() => {
+      useTimelineStore.getState().processSseEvent(
+        { role: "reasoning_start", agent_id: 42, item_id: "5.0" },
+        1_700_000_000_000,
+      );
+      useTimelineStore.getState().switchThread(43, [], false);
+    });
+    expect(useTimelineStore.getState().liveAnchorAt).toBe(0);
+  });
+});
 
 describe("processSseEvent role dispatch (table-driven)", () => {
   // Each case runs two independent sub-tests (one for turnActive, one for streamingCode);

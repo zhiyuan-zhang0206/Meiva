@@ -43,6 +43,12 @@ interface Props {
 
   turnActive?: boolean;
 
+  // meiva:note
+  // Page-clock time of the thread's last received event; anchors the running turn's live clock
+  // through the gaps where no block is in flight (0 = unknown).
+  // meiva:link ui/web/src/docs/frontend-components/timeline-view/deep-collapse.meiva.okf.md
+  lastEventAt?: number;
+
   hasMoreOlder?: boolean;
   // meiva:note
   // An older page in flight is not a display state. `loadingOlder` is the
@@ -68,6 +74,7 @@ export const TimelineView = memo(function TimelineView({
   scrollMemoryKey,
   streamingCode = false,
   turnActive = false,
+  lastEventAt = 0,
   hasMoreOlder = false,
   loadingOlder = false,
   readerLoadingOlder = false,
@@ -512,6 +519,7 @@ export const TimelineView = memo(function TimelineView({
             compactBuffer={compactBuffer}
             streamingCode={streamingCode}
             turnActive={turnActive}
+            lastEventAt={lastEventAt}
             overrides={overrides}
             toggleExpanded={toggleExpanded}
             toggleTurn={toggleTurn}
