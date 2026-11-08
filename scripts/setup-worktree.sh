@@ -172,16 +172,20 @@ bootstrap() {
   [ -d ui/web/node_modules ] \
     || die "ui/web/node_modules is missing after the frontend install — run: (cd ui/web && pnpm install --frozen-lockfile)"
   # meiva:note
-  # The check, not the intention: `schedules` must come from this worktree's own source file. It is
-  # an equality, not a prefix -- the worktree's `.venv` sits *inside* the worktree, so "the path
-  # starts with the root" is true of the site-packages copy as well and would pass while proving
-  # nothing. Naming the file is what makes the assertion able to fail.
-  .venv/bin/python -I -c 'import os, sys, schedules.jobs.watch.main_red_watch as module
-wanted = os.path.realpath(os.path.join(sys.argv[1], "schedules", "jobs", "watch", "main_red_watch.py"))
-path = os.path.realpath(module.__file__)
-print("schedules ->", path)
-sys.exit(0 if path == wanted else "schedules imports " + path + " instead of " + wanted)' "$REPO_ROOT" \
-    || die "schedules still imports from outside this worktree — the checkout would run code it no longer holds"
+  # The check, not the intention: `schedules` must come from this worktree's own source file. Three
+  # details are what make the assertion able to fail.
+  # * It is an equality, not a prefix: the worktree's `.venv` sits *inside* the worktree, so "the
+  #   path starts with the root" is true of the site-packages copy as well.
+  # * It names the module file, not the package directory: naming only `schedules/` would accept a
+  #   namespace package split across both places.
+  # * It runs under `-I`: with the working directory or `PYTHONPATH` on `sys.path`, `import
+  #   schedules` finds this tree's source for the wrong reason and passes while the copy the install
+  #   left still shadows it for every other entry point.
+  # The program is one line because anything that logs the command it ran (`$*`, an shim, a trace)
+  # would otherwise record a fragment per line and read as several commands.
+  prove='import os, sys, schedules.jobs.watch.main_red_watch as m; want = os.path.realpath(os.path.join(sys.argv[1], "schedules/jobs/watch/main_red_watch.py")); got = os.path.realpath(m.__file__); sys.exit(0 if got == want else "schedules imports " + got + " instead of " + want)'
+  .venv/bin/python -I -c "$prove" "$REPO_ROOT" \
+    || die "schedules still imports from outside this worktree — this checkout would run code it no longer holds"
   python3 "$SCRIPT_DIR/host_ops/guard_editable_venv.py" "$REPO_ROOT"
   if [ "$(git status --porcelain)" != "$before" ]; then
     git status --short >&2
