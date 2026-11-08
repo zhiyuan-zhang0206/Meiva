@@ -1,22 +1,16 @@
 ---
 type: doc
-title: Code version gate
-description: The client-side gate that stops a process running older code than the cluster minimum from writing - the code version, the minimum on deployment_state, the check inside the pooled-session restore, the exit, and what is exempt.
+title: Process database gate
+description: The process-level gate on pooled Postgres sessions - application naming, session restore schedule, and CLI exemption.
 tags: [postgres, lifecycle, deploy]
 ---
 
-# Code version gate
+# Process database gate
 
-A unit that misses an update (a runner offline while the script stops, checks out
-and starts every unit) later wakes with its old processes still running. The gate
-makes such a process stop itself: every pooled session compares the process's
-**code version** with `deployment_state.min_code_version` and refuses to work under
-a lower one. Why it is client-side, what it costs, and what it does not cover:
-[decision](../../../docs/decisions/runtime/updates/execution/converge/2026-09-30-client-side-code-version-gate.md).
-Operator procedures (reading state, rollback, credential rotation):
-[runbook](../../../docs/conventions/runbook.md#code-version-gate).
+`base/db/code_version_gate.py` defines `ProcessDbGate`, which owns the process database
+identity and session restore configuration across pooled Postgres sessions.
 
-## Code version
+## Code version & Application name
 
 `base/native_process/code_version.py` (standard library only): the number of
 first-parent commits reachable from the commit the process loaded
@@ -25,51 +19,33 @@ and never from the checkout as it later became, cached for the process lifetime.
 A sealed release tree carries the count in its `.meiva-release.json`, computed by
 the stager from a full clone, and the capture keeps it, so a release needs no
 history. A tree that is neither raises `CodeVersionError`; nothing substitutes
-`0`. A shallow clone under-counts, which only makes its processes look older.
+`0`.
 
-## The minimum
-
-`deployment_state.min_code_version` (`BIGINT NOT NULL DEFAULT 0`). Every gateway
-start raises it once, in `gateway/cluster/server.py` after the schema assertion and the
-logger init: `raise_min_code_version` runs `UPDATE ... SET min_code_version =
-GREATEST(min_code_version, <version>) WHERE id = 1` and refuses when the singleton
-row is missing. A runner's local gateway does not (`is_gateway()`), its login
-cannot write the row. Nothing lowers the minimum but an operator.
-
-## The check
-
-`base/db/connections.py` runs the baseline-session restore on every pooled dial,
-pool-backend creation and borrow (`_restore_pooled_session` and its async twin).
-Its second statement re-applies the statement ceiling and the connection's
-`application_name` that `RESET ALL` cleared; on a borrow where
-the retained `ProcessDbGate.min_read_due()` (the process's first, then at most every
-`MIN_REFRESH_INTERVAL_S`) that same statement also selects the minimum, so the
-read adds no round trip. `observe_minimum` then compares: a process below the
-minimum logs `critical` and exits through `hard_exit` with
-`CODE_BEHIND_MINIMUM_EXIT_CODE` (78). It never raises, because `psycopg_pool`
-swallows an exception from a `check` or `configure` callback and retries to
-`PoolTimeout`, and `configure` runs on a thread nothing reads. A cluster without a
-`deployment_state` row reads as `0`.
-
-`pool()`, `async_pool()` and pooled `connect()` also start every connection with
+`pool()`, `async_pool()` and pooled `connect()` start every connection with
 `application_name = meiva:<process>:v<version>` (`ProcessDbGate.application_name`),
 resolving the version at construction so a tree without git fails there, on the
 caller's thread. PgBouncer's `SHOW CLIENTS` lists these names.
 
-## Not gated
+## The session restore schedule
+
+`base/db/connections.py` runs the baseline-session restore on every pooled dial,
+pool-backend creation and borrow (`_restore_pooled_session` and its async twin).
+Its statements re-apply the statement ceiling and the connection's
+`application_name` that `RESET ALL` cleared; on a borrow where
+the retained `ProcessDbGate.min_read_due()` (the process's first, then at most every
+`MIN_REFRESH_INTERVAL_S`), `observe_minimum` updates the last read timestamp.
+
+## Exemptions
 
 - Direct connections (`direct=True`: administrator, migration applier, `pg_dump`) and
-  `connect_url` targets. They carry no name and read no minimum.
+  `connect_url` targets. They carry no name.
 - The `meiva` CLI: one `cli.database.OperatorDatabaseFactory` retains an explicitly
   exempt gate for its command, because `meiva stop` must still drain agents on a
   stale host. Its ordinary and scratch-URL builders share that owner and dial as
   `meiva:cli` without resolving Git. Service entries retain their own nonexempt gates.
-- A process that predates the gate, and one that holds a single raw connection
-  forever.
 
 Tests: `base/native_process/tests/test_loaded_commit.py` (the count, on real repositories),
-`base/db/tests/test_connect_helpers.py` (the read schedule, the verdict and exit,
-the restore against a fake and a real Postgres, the raise, the migration pair),
+`base/db/tests/test_connect_helpers.py` (the read schedule, the restore against a fake and a real Postgres),
 `tests/components/cli/test_pgbouncer_wire.py` (the name in a real PgBouncer's client list).
 
 Parent: [[base/docs/infrastructure-utilities.meiva.okf.md|infrastructure utilities]].
@@ -80,16 +56,9 @@ Parent: [[base/docs/infrastructure-utilities.meiva.okf.md|infrastructure utiliti
 entry retains one instance across its independent `Database` handles, lazy
 handle factories and sync/async pools. A handle binds that owner; creating or
 refreshing a handle does not restart its 30-second budget. Pool configure and
-check callbacks retain the same owner and keep the two-statement restore.
+check callbacks retain the same owner and keep the restore statement schedule.
 
 The entry supplies the version reader of its captured loaded image, the existing
 process label and the CLI exemption posture. Version resolution remains lazy;
 a service's reader must resolve the captured SHA, never the checkout's later
 HEAD. An exempt CLI does not resolve a Git version to name or restore a session.
-
-The real PgBouncer wire tests establish read-only defaults with `SHOW` first.
-Their poisoned-state fixture verifies the dirty search path and timeout through
-an unscrubbed raw connection. The borrow-check tests create the backend before poisoning so a passing borrow
-proves repair on checkout, rather than initial configuration.
-If pooler parameter tracking changes and prevents that state, the fixture must
-fail instead of silently testing a clean backend.

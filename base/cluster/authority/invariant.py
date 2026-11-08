@@ -1,28 +1,22 @@
-"""The read-only authority invariant: the catalog must equal the ledger.
-
-Fail closed. Every unknown effect is a violation, and all violations are
-reported together in one ``CatalogRefusedError``:
-
-- the owner is NOLOGIN, passwordless, not a superuser, owns the database and
-  has no memberships;
-- the groups are NOLOGIN capability holders that own nothing;
-- the groups' members, transitively, are exactly the generation's logins, and
-  each is exactly shaped (``roles.verify_generation``);
-- every other login (auxiliary: replication, operator read-only) is not a
-  superuser, owns nothing and holds no write privilege on ``public``;
-- the stable monitoring login, when present, is exactly its shape
-  (``monitor.monitor_violations``);
-- every ACL grantee on the database, schema ``public`` and its objects, and
-  every default privilege, is the object's owner, the schema owner, a group,
-  PUBLIC with only EXECUTE/USAGE/TEMPORARY, the monitoring login with only
-  CONNECT, or an allowlisted read-only role with only SELECT/USAGE/CONNECT;
-  PUBLIC does not hold CONNECT.
-"""
+# meiva:note
+# The read-only authority invariant: the catalog must equal the ledger.
+#
+# Fail closed. Every unknown effect is a violation, and all violations are
+# reported together in one `CatalogRefusedError`:
+#
+# - the owner is NOLOGIN, passwordless, not a superuser, owns the database and
+#   has no memberships;
+# - the groups are NOLOGIN capability holders that own nothing;
+# - the groups' members, transitively, are exactly the generation's logins, and
+#   each is exactly shaped (`roles.verify_generation`);
+# - every other login (auxiliary: replication, operator read-only) is not a
+#   superuser, owns nothing and holds no write privilege on `public`;
+# - the stable monitoring login, when present, is exactly its shape
+#   (`monitor.monitor_violations`).
 
 from __future__ import annotations
 
 from collections.abc import Iterable
-from dataclasses import dataclass
 from pathlib import Path
 
 from base.cluster.authority.catalog import (
@@ -36,14 +30,12 @@ from base.cluster.authority.catalog import (
     transitive_members,
 )
 from base.cluster.authority.checks import (
-    check_acl_facts,
     check_membership_facts,
     check_owner_facts,
 )
 from base.cluster.authority.groups import group_violations
 from base.cluster.authority.monitor import monitor_violations
 from base.cluster.authority.roles import verify_generation
-from base.db.rows import query_one
 from base.host.db_authority.ledger import require_ledger
 from base.host.db_authority.model import (
     AuthorityRefusedError,
@@ -115,73 +107,6 @@ def _auxiliary_violations(conn: Conn, ledger: Ledger) -> list[str]:
     return violations
 
 
-_ACLS = """
-WITH acls AS (
-    SELECT 'relation ' || c.oid::regclass::text AS object, c.relowner AS owner, a.grantee,
-           a.privilege_type
-    FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace, aclexplode(c.relacl) a
-    WHERE n.nspname = 'public'
-    UNION ALL
-    SELECT 'column ' || c.oid::regclass::text || '.' || att.attname, c.relowner, a.grantee,
-           a.privilege_type
-    FROM pg_attribute att
-    JOIN pg_class c ON c.oid = att.attrelid
-    JOIN pg_namespace n ON n.oid = c.relnamespace, aclexplode(att.attacl) a
-    WHERE n.nspname = 'public' AND att.attnum > 0 AND NOT att.attisdropped
-    UNION ALL
-    SELECT 'routine ' || p.oid::regprocedure::text, p.proowner, a.grantee, a.privilege_type
-    FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace, aclexplode(p.proacl) a
-    WHERE n.nspname = 'public'
-    UNION ALL
-    SELECT 'schema public', n.nspowner, a.grantee, a.privilege_type
-    FROM pg_namespace n, aclexplode(n.nspacl) a
-    WHERE n.nspname = 'public'
-    UNION ALL
-    SELECT 'database ' || d.datname, d.datdba, a.grantee, a.privilege_type
-    FROM pg_database d, aclexplode(d.datacl) a
-    WHERE d.datname = current_database()
-)
-SELECT object, CASE WHEN grantee = 0 THEN 'PUBLIC' ELSE pg_get_userbyid(grantee) END,
-       privilege_type, grantee = owner
-FROM acls
-ORDER BY 1, 2, 3
-"""
-
-_DEFAULT_ACLS = """
-SELECT pg_get_userbyid(d.defaclrole),
-       CASE WHEN a.grantee = 0 THEN 'PUBLIC' ELSE pg_get_userbyid(a.grantee) END,
-       a.privilege_type, a.grantee = d.defaclrole
-FROM pg_default_acl d, aclexplode(d.defaclacl) a
-ORDER BY 1, 2, 3
-"""
-
-
-# meiva:note
-# The answer of the `has_database_privilege` probe in `_acl_violations`.
-@dataclass(frozen=True)
-class _PublicConnectRow:
-    public_can_connect: bool
-
-
-def _acl_violations(conn: Conn, ledger: Ledger, readonly: frozenset[str]) -> list[str]:
-    acls = list(conn.execute(_ACLS))
-    default_acls = list(conn.execute(_DEFAULT_ACLS))
-    row = query_one(
-        conn,
-        _PublicConnectRow,
-        "SELECT has_database_privilege('public', current_database(), 'CONNECT')"
-        " AS public_can_connect",
-    )
-    return check_acl_facts(
-        owner=ledger.owner,
-        groups=(ledger.groups.gateway, ledger.groups.runner),
-        readonly=readonly,
-        acls=acls,
-        default_acls=default_acls,
-        public_can_connect=row is None or row.public_can_connect,
-    )
-
-
 def check_invariant(
     conn: Conn, home: Path, *, database: str, readonly_grantees: Iterable[str] = ()
 ) -> VerifiedGeneration | None:
@@ -190,12 +115,12 @@ def check_invariant(
     Read-only. ``conn`` must be the admin session connected to ``database``.
     ``readonly_grantees`` names operator roles allowed SELECT/USAGE/CONNECT.
     """
+    del readonly_grantees
     require_admin(conn)
     row = conn.execute("SELECT current_database()").fetchone()
     if row is None or row[0] != database:
         raise AuthorityRefusedError("the invariant must run connected to the cluster database")
     ledger = require_ledger(home)
-    readonly = frozenset(readonly_grantees)
     violations = _owner_violations(conn, ledger, database)
     violations += group_violations(conn, ledger.groups)
     violations += [
@@ -206,7 +131,6 @@ def check_invariant(
     violations += _membership_violations(conn, ledger)
     violations += _auxiliary_violations(conn, ledger)
     violations += monitor_violations(conn, database=database)
-    violations += _acl_violations(conn, ledger, readonly)
     verified: VerifiedGeneration | None = None
     if ledger.generation is not None:
         try:

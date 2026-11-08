@@ -1,18 +1,18 @@
 ---
 type: doc
 title: Database access
-description: Shared database connections, transaction access and code-version admission.
+description: Shared database connections, transaction access and database process identity.
 tags: [base]
 ---
 
 # Database access
 
-`base/db/` owns shared database connections, transaction access and code-version admission.
+`base/db/` owns shared database connections, transaction access and database process identity.
 Its component nodes describe the current contracts and implementation.
 
 ## Documented components
 
-- [[base/db/docs/code-version-gate.meiva.okf.md]] — Code version gate.
+- [[base/db/docs/code-version-gate.meiva.okf.md]] — Process database gate.
 
 ## Direct (admin-plane) dials
 

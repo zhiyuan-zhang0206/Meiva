@@ -32,13 +32,13 @@ def test_the_bind_address_follows_the_role_and_the_declared_address(
 
 
 @pytest.mark.parametrize("off_box", [False, True])
-def test_only_a_gateway_serving_unit_needs_the_secret_and_raises_the_minimum(
+def test_only_a_gateway_serving_unit_needs_the_secret(
     off_box: bool,
 ) -> None:
     serving = serve_plan(serves_gateway=True, off_box=off_box, reload=False)
     runner = serve_plan(serves_gateway=False, off_box=off_box, reload=False)
-    assert (serving.require_cluster_secret, serving.raise_min_code_version) == (True, True)
-    assert (runner.require_cluster_secret, runner.raise_min_code_version) == (False, False)
+    assert serving.require_cluster_secret is True
+    assert runner.require_cluster_secret is False
 
 
 def test_reload_leaves_the_app_to_the_worker_and_otherwise_the_parent_builds_it() -> None:

@@ -34,12 +34,10 @@ import psycopg
 import pytest
 
 from base.config.tests.configuration import snapshot_process_config
-from base.native_process.code_version import CodeVersion
 from gateway.cluster.process_boot import LOADED_IMAGE
 from gateway.cluster.server import serve_kwargs
 from gateway.tests.bootstrap.child_gateway_scenarios import BUILT_ENV, PORT_ENV
 from gateway.tests.support.db_faults.missing_table import missing_table
-from gateway.tests.support.db_faults.update_fault import failing_update
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 _CHILD_ENTRY = Path(__file__).with_name("child_gateway_scenarios.py")
@@ -228,23 +226,6 @@ def start_root(
         log_file.close()
 
 
-@pytest.fixture
-def minimum_code_version(db_conn: psycopg.Connection) -> Generator[Callable[[], int]]:
-    """Read the cluster's minimum code version; restore what the test found."""
-
-    def read() -> int:
-        row = db_conn.execute("SELECT min_code_version FROM deployment_state WHERE id = 1")
-        value = row.fetchone()
-        assert value is not None
-        db_conn.commit()
-        return int(value[0])
-
-    before = read()
-    yield read
-    db_conn.execute("UPDATE deployment_state SET min_code_version = %s WHERE id = 1", (before,))
-    db_conn.commit()
-
-
 # meiva:note
 # The database URL with its port replaced by one nothing listens on.
 def _unreachable(db_url: str, distinct_free_ports: Callable[[int], list[int]]) -> str:
@@ -253,17 +234,13 @@ def _unreachable(db_url: str, distinct_free_ports: Callable[[int], list[int]]) -
     return parts._replace(netloc=f"{authority}:{distinct_free_ports(1)[0]}").geturl()
 
 
-def test_a_gateway_unit_serves_and_raises_the_minimum_code_version(
-    start_root: Callable[..., _Root], minimum_code_version: Callable[[], int]
-) -> None:
-    assert minimum_code_version() < CodeVersion(LOADED_IMAGE).get()
+def test_a_gateway_unit_serves(start_root: Callable[..., _Root]) -> None:
     root = start_root(serves_gateway=True, secret=_SECRET)
 
     served = root.wait_served()
 
     assert served["pid"] == root.proc.pid
     assert root.pidfile.read_text() == str(root.proc.pid)
-    assert minimum_code_version() == CodeVersion(LOADED_IMAGE).get()
     assert "rate limiters are process-local" in root.log()
     assert root.built_marker.read_text() == "built"
     assert root.listening_addresses() == {"127.0.0.1"}
@@ -271,30 +248,24 @@ def test_a_gateway_unit_serves_and_raises_the_minimum_code_version(
     assert root.wait_exit() in (0, -signal.SIGTERM)
 
 
-def test_a_runners_local_gateway_serves_without_touching_the_minimum(
-    start_root: Callable[..., _Root], minimum_code_version: Callable[[], int]
-) -> None:
-    before = minimum_code_version()
+def test_a_runners_local_gateway_serves(start_root: Callable[..., _Root]) -> None:
     root = start_root(serves_gateway=False, secret="")
 
     root.wait_served()
 
-    assert minimum_code_version() == before
     root.proc.send_signal(signal.SIGTERM)
     assert root.wait_exit() in (0, -signal.SIGTERM)
 
 
 def test_a_gateway_without_a_cluster_secret_refuses_to_start(
-    start_root: Callable[..., _Root], minimum_code_version: Callable[[], int]
+    start_root: Callable[..., _Root],
 ) -> None:
-    before = minimum_code_version()
     root = start_root(serves_gateway=True, secret="")
 
     assert root.wait_exit() != 0
     assert "MEIVA_CLUSTER_SECRET" in root.log()
     assert not root.pidfile.exists()
     assert root.probe() is None
-    assert minimum_code_version() == before
 
 
 # meiva:note
@@ -317,14 +288,12 @@ def test_a_missing_cluster_secret_is_refused_before_the_database_is_dialed(
 
 
 # meiva:note
-# A database whose schema is not current stops the root before the logger starts, the pidfile
-# is written or the minimum code version is raised.
+# A database whose schema is not current stops the root before the logger starts or the pidfile
+# is written.
 def test_the_schema_is_asserted_before_logging_starts(
     start_root: Callable[..., _Root],
     db_conn: psycopg.Connection,
-    minimum_code_version: Callable[[], int],
 ) -> None:
-    before = minimum_code_version()
     with missing_table(db_conn, "schema_migrations"):
         root = start_root(serves_gateway=True, secret=_SECRET)
         assert root.wait_exit() != 0
@@ -334,38 +303,14 @@ def test_the_schema_is_asserted_before_logging_starts(
     assert "service started" not in log
     assert not root.pidfile.exists()
     assert root.probe() is None
-    assert minimum_code_version() == before
-
-
-# meiva:note
-# The minimum code version is raised after the logger started, so a refusal of the raise is
-# logged: the database refuses the update, and the child's log holds the start-up line of the
-# gateway process before the refusal.
-def test_the_minimum_code_version_is_raised_after_logging_started(
-    start_root: Callable[..., _Root],
-    db_conn: psycopg.Connection,
-    minimum_code_version: Callable[[], int],
-) -> None:
-    before = minimum_code_version()
-    refusal = "minimum code version refused by the test"
-    with failing_update(db_conn, "deployment_state", message=refusal):
-        root = start_root(serves_gateway=True, secret=_SECRET)
-        assert root.wait_exit() != 0
-
-    log = root.log()
-    assert "service started: gateway" in log
-    assert log.index("service started: gateway") < log.index(refusal)
-    assert root.probe() is None
-    assert minimum_code_version() == before
 
 
 # meiva:note
 # A gateway that serves off the box binds every interface, and only under a declared
 # transport-encryption posture: without the declaration the root refuses before it serves.
 def test_an_off_box_gateway_without_a_transport_declaration_refuses_to_start(
-    start_root: Callable[..., _Root], minimum_code_version: Callable[[], int]
+    start_root: Callable[..., _Root],
 ) -> None:
-    del minimum_code_version
     root = start_root(
         serves_gateway=True,
         secret=_SECRET,
@@ -378,9 +323,8 @@ def test_an_off_box_gateway_without_a_transport_declaration_refuses_to_start(
 
 
 def test_an_off_box_gateway_with_a_transport_declaration_binds_every_interface(
-    start_root: Callable[..., _Root], minimum_code_version: Callable[[], int]
+    start_root: Callable[..., _Root],
 ) -> None:
-    del minimum_code_version
     root = start_root(
         serves_gateway=True,
         secret=_SECRET,
@@ -400,9 +344,8 @@ def test_an_off_box_gateway_with_a_transport_declaration_binds_every_interface(
 # gateway app from the unit's environment; the parent never builds the app it would serve (its
 # builder, which leaves the marker, is not called).
 def test_with_hot_reload_the_parent_never_builds_the_app_a_worker_serves(
-    start_root: Callable[..., _Root], minimum_code_version: Callable[[], int]
+    start_root: Callable[..., _Root],
 ) -> None:
-    del minimum_code_version
     root = start_root(serves_gateway=True, secret=_SECRET, settings={"MEIVA_GATEWAY_RELOAD": "1"})
 
     health = json.loads(root.wait_ok("/api/health", timeout_s=120))

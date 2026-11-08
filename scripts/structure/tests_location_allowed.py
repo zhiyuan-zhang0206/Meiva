@@ -77,10 +77,6 @@ ALLOWED: dict[str, tuple[Category, str]] = {
         "contract",
         "drift locks of the generated config index, base/host/env/config_lite_table.json, against its generator and the live registry",
     ),
-    "tests/components/base/test_connect_helpers_contract.py": (
-        "contract",
-        "the migration restores the column the baseline schema, db/schema.sql, gives a fresh database",
-    ),
     "tests/components/base/test_crash_row_writers.py": (
         "contract",
         "scans every production module for writers of the crash-row predicate fields",

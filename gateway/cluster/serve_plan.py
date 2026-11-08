@@ -39,10 +39,6 @@ class ServePlan:
     # Off the loopback the listener must run under a declared transport-encryption posture.
     transport_declaration_required: bool
     # meiva:note
-    # A runner's local gateway holds no write on the row; only a gateway-serving unit raises
-    # the cluster's minimum to its own code version, so an older process refuses to write.
-    raise_min_code_version: bool
-    # meiva:note
     # The factory path a reload worker builds its own app from, or None when this process
     # builds the app it serves.
     app_factory_path: str | None
@@ -62,6 +58,5 @@ def serve_plan(*, serves_gateway: bool, off_box: bool, reload: bool) -> ServePla
         require_cluster_secret=serves_gateway,
         bind_host=bind_host,
         transport_declaration_required=bind_host != _LOOPBACK,
-        raise_min_code_version=serves_gateway,
         app_factory_path=GATEWAY_FACTORY if reload else None,
     )

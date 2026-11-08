@@ -612,10 +612,6 @@ half, use the separate commands:
   is such a command: it runs `meiva stop` again on a host already on NEW, and NEW refuses
   the state file that is not yet converted. Rerun `down` only after the step is done on
   the hosts it has switched.
-- A unit `down` could not reach (a laptop offline) keeps running its old
-  processes. The gateway's start in `up` raises the cluster's minimum code
-  version, and those processes exit when they next touch the database
-  ([code version gate](#code-version-gate)).
 
 #### After the wave: the health checklist
 
@@ -799,59 +795,6 @@ whether a restart is required — see
 
 Not automated: each is a manual console visit, and several have no
 programmatic rotation API at all.
-
-## Code version gate
-
-The [database code-version gate](../../base/db/docs/code-version-gate.meiva.okf.md)
-owns the process version, pooled-session admission, minimum update and exit
-contract. Its [decision](../decisions/runtime/updates/execution/converge/2026-09-30-client-side-code-version-gate.md)
-records the boundary. The coordinated recovery order below remains an operator
-procedure; it does not redefine the gate.
-
-**A routine update needs nothing.** The update script starts the gateway first,
-which raises the minimum, and then the runners. Every unit needs a **full** clone:
-a shallow one counts fewer commits than exist, so its processes look stale and
-exit `78` (`git rev-parse --is-shallow-repository` must print `false`).
-
-**A unit exits `78`.** Its log holds one `critical` line: `code version gate:
-process <name> runs code version <v>, below the cluster minimum <m>`. The checkout
-is behind the cluster: check out the commit the gateway runs, `uv sync --frozen`,
-`meiva start --all-services`. `meiva stop` and every other `meiva` command keep working meanwhile, so
-a behind host can always be stopped and recovered; only service processes are
-gated. A supervisor that revives the stale service gets the same exit again until
-the checkout is updated.
-
-**Read the state.**
-
-```bash
-git rev-list --count --first-parent HEAD          # this checkout's code version
-psql "host=/tmp/meiva-pg-<home-slug> port=<pg port> dbname=<db>" \
-  -c "SELECT min_code_version FROM deployment_state"   # administrator, as above
-```
-
-Running processes name themselves `meiva:<process>:v<version>` in the pooler's
-client list: `PGPASSWORD=$(jq -r .password "$MEIVA_HOME/db-authority/pooler-admin.json")
-psql "host=127.0.0.1 port=<pooler port> user=meiva_pooler_admin dbname=pgbouncer"
--c 'SHOW CLIENTS'` (the pooler port is `MEIVA_DB_URL`'s port in the gateway `.env`;
-read the `application_name` column). The password stays in the environment, never
-argv.
-
-**Rolling back to an older commit** must lower the minimum by hand: it never falls
-by itself, and an older process would exit `78` at its first dial (the gateway
-included).
-
-1. Stop the whole cluster (`meiva stop --yes …` with every choice explicit on every unit;
-   the gateway with `--keep-infra`).
-2. Compute the target's version: `git rev-list --count --first-parent <sha>`.
-3. As the administrator, `psql "host=/tmp/meiva-pg-<home-slug> port=<pg port>
-   dbname=<db>" -c "UPDATE deployment_state SET min_code_version = <target>
-   WHERE id = 1"`. `0` switches the gate off until the next gateway start.
-4. Check out `<sha>` on every unit, `uv sync --frozen`, start the gateway, then the
-   runners. The gateway's start sets the minimum to exactly the target's version.
-
-**Shipping the gate itself is unprotected.** Processes that run code from before
-the gate have no check, so the update that first carries it stops every unit by
-hand, as updates did before; the gate protects from the following update on.
 
 ## Code flow & Events
 
