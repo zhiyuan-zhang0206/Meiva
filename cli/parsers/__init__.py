@@ -18,6 +18,8 @@
 # - ``auth`` — the web login password
 # - ``cli.commands.agents.parsers`` — agents + notices, beside their implementations
 # - ``cli.commands.agents.impersonation_parsers`` — external sessions and relays
+# - ``logs`` — local log rotation and retention
+# - ``jobs`` — the heartbeat expectation set of the generated OS jobs
 # - ``backup`` — WAL-G physical backups
 # - ``cli.commands.extensions.parsers`` — plugins, skill, MCP, memory and packages
 # - ``management`` — config + presets + schedules
@@ -46,6 +48,7 @@ from cli.parsers.host import (
     add_status_parser,
     add_stop_parser,
 )
+from cli.parsers.jobs import add_jobs_parser
 from cli.parsers.logs import add_logs_parser
 from cli.parsers.management import (
     add_config_parser,
@@ -88,6 +91,7 @@ def build_parser(
     add_cluster_parser(sub)
     add_computer_parser(sub)
     add_trace_parser(sub)
+    add_jobs_parser(sub)
     add_logs_parser(sub)
     add_backup_parser(sub)
     add_agents_parser(sub)

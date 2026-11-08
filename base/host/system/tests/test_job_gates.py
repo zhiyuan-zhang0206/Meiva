@@ -17,6 +17,7 @@ from base.host.system.tests.fake_commands import (
     fake_host,
 )
 from base.host.system.tests.fake_crontab import FakeCrontab
+from base.host.system.tests.recurring.heartbeats import MACHINE, TODAY
 
 
 @pytest.mark.parametrize("enabled", [False, True])
@@ -26,6 +27,8 @@ def test_packages_gates_stop_at_the_switch_then_the_home(tmp_path: Path, enabled
         enabled=enabled,
         schedule=None,
         host=fake_host(),
+        machine=MACHINE,
+        today=TODAY,
     )
     # meiva:note
     # A scratch home must stop before the deliberately absent schedule or platform.
@@ -42,6 +45,8 @@ def test_packages_refresh_gate_follows_home_and_precedes_platform(
         enabled=True,
         schedule=RefreshSchedule(refresh_enabled=False, tick_seconds=900),
         host=fake_host(commands, platform=DARWIN_ARM64),
+        machine=MACHINE,
+        today=TODAY,
     )
     assert commands.argvs == []
 
@@ -54,12 +59,16 @@ def test_a_non_default_home_does_not_need_either_jobs_policy(
         enabled=True,
         schedule=None,
         host=fake_host(),
+        machine=MACHINE,
+        today=TODAY,
     )
     walg_job.register_walg_job(
         roots=JobRoots(home=unit_home, repo=Path("/isolated"), user_home=tmp_path),
         enabled=True,
         backup_hour=None,
         host=fake_host(),
+        machine=MACHINE,
+        today=TODAY,
     )
 
 
@@ -74,6 +83,8 @@ def test_a_registration_with_jobs_on_needs_the_policy_the_root_read(
             enabled=True,
             schedule=None,
             host=fake_host(),
+            machine=MACHINE,
+            today=TODAY,
         )
     with pytest.raises(ValueError, match="needs the backup hour"):
         walg_job.register_walg_job(
@@ -83,6 +94,8 @@ def test_a_registration_with_jobs_on_needs_the_policy_the_root_read(
             enabled=True,
             backup_hour=None,
             host=fake_host(),
+            machine=MACHINE,
+            today=TODAY,
         )
 
 
@@ -133,6 +146,8 @@ def test_real_platform_job_definition_follows_the_value_given(
                 enabled=True,
                 schedule=RefreshSchedule(refresh_enabled=True, tick_seconds=values[owner]),
                 host=host,
+                machine=MACHINE,
+                today=TODAY,
             )
         else:
             walg_job.register_walg_job(
@@ -144,6 +159,8 @@ def test_real_platform_job_definition_follows_the_value_given(
                 enabled=True,
                 backup_hour=values[owner],
                 host=host,
+                machine=MACHINE,
+                today=TODAY,
             )
         if platform == "linux":
             return crontab.writes[-1]
@@ -193,18 +210,35 @@ def test_maintenance_switch_precedes_real_home_resolution(tmp_path: Path, kind: 
     def register(enabled: bool) -> None:
         match kind:
             case "logs":
-                logs_job.register_logs_job(enabled=enabled, roots=roots, host=fake_host())
+                logs_job.register_logs_job(
+                    enabled=enabled, roots=roots, host=fake_host(), machine=MACHINE, today=TODAY
+                )
             case "packages":
                 packages_job.register_packages_job(
-                    enabled=enabled, schedule=None, roots=roots, host=fake_host()
+                    enabled=enabled,
+                    schedule=None,
+                    roots=roots,
+                    host=fake_host(),
+                    machine=MACHINE,
+                    today=TODAY,
                 )
             case "pr-flow":
                 pr_flow_job.register_pr_flow_job(
-                    enabled=enabled, production=True, roots=roots, host=fake_host()
+                    enabled=enabled,
+                    production=True,
+                    roots=roots,
+                    host=fake_host(),
+                    machine=MACHINE,
+                    today=TODAY,
                 )
             case "walg":
                 walg_job.register_walg_job(
-                    enabled=enabled, backup_hour=None, roots=roots, host=fake_host()
+                    enabled=enabled,
+                    backup_hour=None,
+                    roots=roots,
+                    host=fake_host(),
+                    machine=MACHINE,
+                    today=TODAY,
                 )
             case _:
                 raise ValueError(kind)

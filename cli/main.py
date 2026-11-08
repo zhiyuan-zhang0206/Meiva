@@ -63,6 +63,7 @@ __all__ = [
     "bind_init_inputs",
     "bind_update_inputs",
     "deliver_lite_api_token",
+    "dispatch_command",
     "dispatch_parsed",
     "entry",
     "main",
@@ -483,8 +484,11 @@ def operator_producer(
 
 
 # meiva:note
-# Run one command; `producer_factory(database_factory, machine, home)` builds its producer and
-# `open_database(config, gate, direct_url)` every database handle of the command.
+# Run one command, recording this process's job heartbeat as it exits.
+#
+# A definition the scheduler runs carries `MEIVA_JOB_HEARTBEAT` (the file the run must write) and
+# nothing else does, so this is the one place a job command proves it ran: the exit code it
+# really reported, from the pid that did the work, written whether it succeeded or failed.
 def run_command(
     argv: list[str],
     *,
@@ -492,9 +496,35 @@ def run_command(
     producer_factory: ProducerFactory,
     open_database: OpenDatabase,
 ) -> int:
-    # Line-buffer stdout so a long command piped into `tee` (every detached rollout /
-    # updater session) streams its own progress in real time instead of block-buffering
-    # it to the end of the log, out of order against its children's unbuffered output.
+    from base.host.system.cron.heartbeat_record import recording_exit
+
+    return recording_exit(
+        lambda: dispatch_command(
+            argv,
+            retained_children=retained_children,
+            producer_factory=producer_factory,
+            open_database=open_database,
+        ),
+        environ=os.environ,
+        pid=os.getpid(),
+        clock=lambda: datetime.now(UTC),
+    )
+
+
+# meiva:note
+# Run one command; `producer_factory(database_factory, machine, home)` builds its producer and
+# `open_database(config, gate, direct_url)` every database handle of the command.
+def dispatch_command(
+    argv: list[str],
+    *,
+    retained_children: list[subprocess.Popen[bytes]] | None,
+    producer_factory: ProducerFactory,
+    open_database: OpenDatabase,
+) -> int:
+    # meiva:note
+    # Line-buffer stdout so a long command piped into `tee` (every detached rollout / updater
+    # session) streams its own progress in real time instead of block-buffering it to the end of
+    # the log, out of order against its children's unbuffered output.
     ensure_line_buffered_stdio()
     normalize_process_profile()
     # meiva:note

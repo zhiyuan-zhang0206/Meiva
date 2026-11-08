@@ -13,19 +13,23 @@ POSIX surfaces the run's output in `$MEIVA_HOME/logs/packages-refresh.log`
 from __future__ import annotations
 
 import sys
+from datetime import date
 from pathlib import Path
 
 from loguru import logger
 
 from base.host.system import packages_content as content
-from base.host.system.cron import mechanics
+from base.host.system.cron import heartbeat_population, mechanics
+from base.host.system.cron.heartbeat import HeartbeatRender
 from base.host.system.cron.mechanics import write_launchd_plist
 from base.host.system.hostport import Host
 from base.host.system.job_readings import read_launchd_path, read_meiva_binary
 from base.host.system.job_values import JobPaths, JobRoots, plist_path
 
 
-def register_macos(*, tick_seconds: int, roots: JobRoots, host: Host) -> int:
+def register_macos(
+    *, tick_seconds: int, roots: JobRoots, host: Host, heartbeat: HeartbeatRender
+) -> int:
     paths = JobPaths(roots, read_meiva_binary(roots.repo, host=host))
     path_env = read_launchd_path(paths.meiva, user_home=roots.user_home, host=host)
     label = content.LABEL
@@ -34,7 +38,9 @@ def register_macos(*, tick_seconds: int, roots: JobRoots, host: Host) -> int:
     log_file.parent.mkdir(parents=True, exist_ok=True)
     write_launchd_plist(
         destination,
-        content.launchd_plist_content(tick_seconds=tick_seconds, paths=paths, path_env=path_env),
+        content.launchd_plist_content(
+            tick_seconds=tick_seconds, paths=paths, path_env=path_env, heartbeat=heartbeat
+        ),
     )
 
     if mechanics.reload_launchd_job(label, destination, host=host) != 0:
@@ -50,7 +56,9 @@ def unregister_macos(*, host: Host, user_home: Path) -> int:
     return 0 if retired else 1
 
 
-def register_linux(*, tick_seconds: int, roots: JobRoots, host: Host) -> int:
+def register_linux(
+    *, tick_seconds: int, roots: JobRoots, host: Host, heartbeat: HeartbeatRender
+) -> int:
     missing_rc = mechanics.require_crontab(
         "  * packages refresh: crontab not installed; the recurring refresh "
         "pass cannot be registered",
@@ -66,7 +74,7 @@ def register_linux(*, tick_seconds: int, roots: JobRoots, host: Host) -> int:
     marker = content.MARKER
     log_file = content.log_path(roots)
     log_file.parent.mkdir(parents=True, exist_ok=True)
-    entry = content.cron_entry(paths, tick_seconds=tick_seconds)
+    entry = content.cron_entry(paths, tick_seconds=tick_seconds, heartbeat=heartbeat)
 
     if mechanics.replace_crontab_entry(
         marker,
@@ -95,7 +103,13 @@ def unregister_linux(*, roots: JobRoots, host: Host) -> int:
 # the default home (`owns_os_job_home`) or the refresh channel itself is off — the converge step is the only caller, so a disabled switch
 # simply leaves no job behind on machines that never registered one.
 def register_packages_job(
-    *, enabled: bool, schedule: content.RefreshSchedule | None, roots: JobRoots, host: Host
+    *,
+    enabled: bool,
+    schedule: content.RefreshSchedule | None,
+    roots: JobRoots,
+    host: Host,
+    machine: str,
+    today: date,
 ) -> None:
     if not enabled:
         mechanics.skip_os_job("packages refresh")
@@ -112,10 +126,22 @@ def register_packages_job(
     tick_seconds = schedule.tick_seconds
     if tick_seconds is None:
         raise ValueError("registering the packages refresh job needs its tick")
+    heartbeat = heartbeat_population.verified(
+        content.LABEL,
+        roots=roots,
+        machine=machine,
+        uid=host.uid,
+        schedule=content.schedule(tick_seconds=tick_seconds),
+        today=today,
+    )
     mechanics.register_platform_job(
         "packages-refresh",
-        macos=lambda: register_macos(tick_seconds=tick_seconds, roots=roots, host=host),
-        linux=lambda: register_linux(tick_seconds=tick_seconds, roots=roots, host=host),
+        macos=lambda: register_macos(
+            tick_seconds=tick_seconds, roots=roots, host=host, heartbeat=heartbeat
+        ),
+        linux=lambda: register_linux(
+            tick_seconds=tick_seconds, roots=roots, host=host, heartbeat=heartbeat
+        ),
         host=host,
     )
 

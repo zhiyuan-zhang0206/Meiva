@@ -1,6 +1,7 @@
-exports = ["cluster.py", "harness.py", "host.py", "logs.py", "permissions.py", "pty.py", "update.py"]
+exports = ["cluster.py", "harness.py", "host.py", "jobs.py", "logs.py", "permissions.py", "pty.py", "update.py"]
 
 [uses]
-"__init__.py" = ["auth.py", "backup.py", "cluster.py", "computer.py", "harness.py", "host.py", "logs.py", "management.py", "observability.py", "permissions.py", "pty.py", "update.py"]
+"__init__.py" = ["auth.py", "backup.py", "cluster.py", "computer.py", "harness.py", "host.py", "jobs.py", "logs.py", "management.py", "observability.py", "permissions.py", "pty.py", "update.py"]
+"jobs.py" = []
 "observability.py" = ["host.py"]
 "tests" = ["__init__.py"]

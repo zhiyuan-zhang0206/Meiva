@@ -24,26 +24,31 @@
 from __future__ import annotations
 
 import sys
+from datetime import date
 from pathlib import Path
 
 from loguru import logger
 
 from base.host.system import pr_flow_content as content
-from base.host.system.cron import mechanics
+from base.host.system.cron import heartbeat_population, mechanics
+from base.host.system.cron.heartbeat import HeartbeatRender
 from base.host.system.cron.mechanics import write_launchd_plist
 from base.host.system.hostport import Host
 from base.host.system.job_readings import read_launchd_path, read_meiva_binary
 from base.host.system.job_values import JobPaths, JobRoots, plist_path
 
 
-def register_macos(*, roots: JobRoots, host: Host) -> int:
+def register_macos(*, roots: JobRoots, host: Host, heartbeat: HeartbeatRender) -> int:
     paths = JobPaths(roots, read_meiva_binary(roots.repo, host=host))
     path_env = read_launchd_path(paths.meiva, user_home=roots.user_home, host=host)
     label = content.LABEL
     destination = plist_path(content.LABEL, user_home=roots.user_home)
     log_file = content.log_path(roots)
     log_file.parent.mkdir(parents=True, exist_ok=True)
-    write_launchd_plist(destination, content.launchd_plist_content(paths=paths, path_env=path_env))
+    write_launchd_plist(
+        destination,
+        content.launchd_plist_content(paths=paths, path_env=path_env, heartbeat=heartbeat),
+    )
 
     if mechanics.reload_launchd_job(label, destination, host=host) != 0:
         return 1
@@ -60,7 +65,7 @@ def unregister_macos(*, host: Host, user_home: Path) -> int:
     return 0 if retired else 1
 
 
-def register_linux(*, roots: JobRoots, host: Host) -> int:
+def register_linux(*, roots: JobRoots, host: Host, heartbeat: HeartbeatRender) -> int:
     missing_rc = mechanics.require_crontab(
         "  * PR flow: crontab not installed; the daily sampler job cannot be registered",
         missing_returncode=1,
@@ -77,7 +82,7 @@ def register_linux(*, roots: JobRoots, host: Host) -> int:
     log_file.parent.mkdir(parents=True, exist_ok=True)
     if mechanics.replace_crontab_entry(
         marker,
-        content.cron_entry(paths),
+        content.cron_entry(paths, heartbeat=heartbeat),
         skip_phrase="PR-flow registration",
         update_failure=lambda err: print(f"  * crontab update failed: {err}", file=sys.stderr),  # noqa: T201
         user_home=roots.user_home,
@@ -102,7 +107,9 @@ def credential_blocker(*, production: bool, host: Host) -> str | None:
     return None
 
 
-def register_pr_flow_job(*, enabled: bool, production: bool, roots: JobRoots, host: Host) -> None:
+def register_pr_flow_job(
+    *, enabled: bool, production: bool, roots: JobRoots, host: Host, machine: str, today: date
+) -> None:
     if not enabled:
         mechanics.skip_os_job("pr flow")
         return
@@ -112,10 +119,18 @@ def register_pr_flow_job(*, enabled: bool, production: bool, roots: JobRoots, ho
     if blocker is not None:
         logger.info("PR-flow sampler job not registered: {}", blocker)
         return
+    heartbeat = heartbeat_population.verified(
+        content.LABEL,
+        roots=roots,
+        machine=machine,
+        uid=host.uid,
+        schedule=content.schedule(),
+        today=today,
+    )
     mechanics.register_platform_job(
         "PR-flow",
-        macos=lambda: register_macos(roots=roots, host=host),
-        linux=lambda: register_linux(roots=roots, host=host),
+        macos=lambda: register_macos(roots=roots, host=host, heartbeat=heartbeat),
+        linux=lambda: register_linux(roots=roots, host=host, heartbeat=heartbeat),
         host=host,
     )
 

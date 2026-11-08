@@ -1,0 +1,4 @@
+exports = ["child_heartbeats.py"]
+
+[uses]
+"test_heartbeats_command.py" = ["child_heartbeats.py"]

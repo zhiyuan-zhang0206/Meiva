@@ -838,6 +838,9 @@ root = "cli/commands/extensions/plans/tests"
 root = "cli/commands/extensions/tests"
 
 [[tool.pyright.executionEnvironments]]
+root = "cli/commands/jobs/tests"
+
+[[tool.pyright.executionEnvironments]]
 root = "cli/commands/lifecycle/tests"
 
 [[tool.pyright.executionEnvironments]]

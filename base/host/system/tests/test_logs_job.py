@@ -8,6 +8,7 @@ import pytest
 
 from base.host.system import logs_content
 from base.host.system import logs_job as job
+from base.host.system.cron.heartbeat import HeartbeatRender
 from base.host.system.hostport import Host
 from base.host.system.job_values import JobRoots, plist_path
 from base.host.system.tests.fake_commands import (
@@ -18,9 +19,16 @@ from base.host.system.tests.fake_commands import (
     fake_host,
 )
 from base.host.system.tests.fake_crontab import FakeCrontab
+from base.host.system.tests.recurring.heartbeats import heartbeat_for
 from base.log.tests.log_records import LogRecords
 
 _UID = 501
+
+
+# meiva:note
+# The heartbeat product a registrar hands the renderer for this job.
+def _heartbeat(roots: JobRoots) -> HeartbeatRender:
+    return heartbeat_for(logs_content.LABEL, roots, schedule=logs_content.schedule())
 
 
 _NOT_LOADED = Reply(returncode=113, stderr="Could not find service")
@@ -51,10 +59,10 @@ def test_macos_reregistration_rewrites_and_reloads_idempotently(
 ) -> None:
     commands, host = _launchctl()
 
-    assert job.register_macos(roots=job_roots, host=host) == 0
+    assert job.register_macos(roots=job_roots, host=host, heartbeat=_heartbeat(job_roots)) == 0
     plist = plist_path(logs_content.LABEL, user_home=job_roots.user_home)
     first = plist.read_text(encoding="utf-8")
-    assert job.register_macos(roots=job_roots, host=host) == 0
+    assert job.register_macos(roots=job_roots, host=host, heartbeat=_heartbeat(job_roots)) == 0
 
     assert plist.read_text(encoding="utf-8") == first
     assert [argv[1] for argv in commands.argvs if argv[1] != "print"] == [
@@ -90,7 +98,10 @@ def test_linux_registration_replaces_only_its_own_lines(
     old = "35 4 * * * /old/meiva logs retention  # meiva-logs-maintenance"
     crontab = FakeCrontab(f"{other}\n\n{old}\n{old}\n")
 
-    assert job.register_linux(roots=job_roots, host=_linux(crontab)) == 0
+    assert (
+        job.register_linux(roots=job_roots, host=_linux(crontab), heartbeat=_heartbeat(job_roots))
+        == 0
+    )
     body = crontab.writes[-1]
     assert other in body
     assert f"{other}\n\n" in body
@@ -103,7 +114,12 @@ def test_linux_registration_replaces_only_its_own_lines(
 def test_linux_crontab_failures_and_empty_table(
     job_roots: JobRoots, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    assert job.register_linux(roots=job_roots, host=fake_host(platform=LINUX_X86)) == 1
+    assert (
+        job.register_linux(
+            roots=job_roots, host=fake_host(platform=LINUX_X86), heartbeat=_heartbeat(job_roots)
+        )
+        == 1
+    )
     assert capsys.readouterr().err == (
         "  * logs maintenance: crontab not installed; daily rotation and "
         "retention cannot be registered\n"
@@ -113,7 +129,7 @@ def test_linux_crontab_failures_and_empty_table(
     crontab.read_returncode = 1
     crontab.read_stderr = "permission denied"
     host = _linux(crontab)
-    assert job.register_linux(roots=job_roots, host=host) == 1
+    assert job.register_linux(roots=job_roots, host=host, heartbeat=_heartbeat(job_roots)) == 1
     assert crontab.writes == []
     assert capsys.readouterr().err == (
         "  * crontab -l failed (permission denied); "
@@ -121,7 +137,7 @@ def test_linux_crontab_failures_and_empty_table(
     )
 
     crontab.read_stderr = "no crontab for user"
-    assert job.register_linux(roots=job_roots, host=host) == 0
+    assert job.register_linux(roots=job_roots, host=host, heartbeat=_heartbeat(job_roots)) == 0
     assert (
         len(crontab.writes),
         crontab.writes[0].startswith("40 4 * * * "),
@@ -139,7 +155,7 @@ def test_linux_crontab_failures_and_empty_table(
 
     crontab.table = crontab.writes[0]
     crontab.write_failure = "write denied"
-    assert job.register_linux(roots=job_roots, host=host) == 1
+    assert job.register_linux(roots=job_roots, host=host, heartbeat=_heartbeat(job_roots)) == 1
     assert capsys.readouterr().err == "  * crontab update failed: write denied\n"
     assert job.unregister_linux(host=host, roots=job_roots) == 1
     assert len(crontab.writes) == 2
@@ -150,7 +166,7 @@ def test_macos_bootstrap_failure_and_repeated_unregister(
     loguru_records: LogRecords,
 ) -> None:
     commands, host = _launchctl(bootstrap=Reply(stderr="denied", returncode=1))
-    assert job.register_macos(roots=job_roots, host=host) == 1
+    assert job.register_macos(roots=job_roots, host=host, heartbeat=_heartbeat(job_roots)) == 1
     assert [argv[1] for argv in commands.argvs if argv[1] != "print"] == ["bootout", "bootstrap"]
     assert any(
         r["level"].name == "ERROR"

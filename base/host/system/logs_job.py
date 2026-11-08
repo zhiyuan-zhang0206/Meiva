@@ -7,24 +7,29 @@ in one shell so retention starts only after rotation succeeds.
 from __future__ import annotations
 
 import sys
+from datetime import date
 from pathlib import Path
 
 from loguru import logger
 
 from base.host.system import logs_content as content
-from base.host.system.cron import mechanics
+from base.host.system.cron import heartbeat_population, mechanics
+from base.host.system.cron.heartbeat import HeartbeatRender
 from base.host.system.cron.mechanics import write_launchd_plist
 from base.host.system.hostport import Host
 from base.host.system.job_readings import read_launchd_path, read_meiva_binary
 from base.host.system.job_values import JobPaths, JobRoots, plist_path
 
 
-def register_macos(*, roots: JobRoots, host: Host) -> int:
+def register_macos(*, roots: JobRoots, host: Host, heartbeat: HeartbeatRender) -> int:
     paths = JobPaths(roots, read_meiva_binary(roots.repo, host=host))
     path_env = read_launchd_path(paths.meiva, user_home=roots.user_home, host=host)
     label = content.LABEL
     destination = plist_path(content.LABEL, user_home=roots.user_home)
-    write_launchd_plist(destination, content.launchd_plist_content(paths=paths, path_env=path_env))
+    write_launchd_plist(
+        destination,
+        content.launchd_plist_content(paths=paths, path_env=path_env, heartbeat=heartbeat),
+    )
 
     if mechanics.reload_launchd_job(label, destination, host=host) != 0:
         return 1
@@ -41,7 +46,7 @@ def unregister_macos(*, host: Host, user_home: Path) -> int:
     return 0 if retired else 1
 
 
-def register_linux(*, roots: JobRoots, host: Host) -> int:
+def register_linux(*, roots: JobRoots, host: Host, heartbeat: HeartbeatRender) -> int:
     missing_rc = mechanics.require_crontab(
         "  * logs maintenance: crontab not installed; daily rotation and "
         "retention cannot be registered",
@@ -55,7 +60,7 @@ def register_linux(*, roots: JobRoots, host: Host) -> int:
     paths = JobPaths(roots, read_meiva_binary(roots.repo, host=host))
 
     marker = content.MARKER
-    entry = content.cron_entry(paths)
+    entry = content.cron_entry(paths, heartbeat=heartbeat)
 
     if mechanics.replace_crontab_entry(
         marker,
@@ -76,16 +81,26 @@ def unregister_linux(*, roots: JobRoots, host: Host) -> int:
     )
 
 
-def register_logs_job(*, enabled: bool, roots: JobRoots, host: Host) -> None:
+def register_logs_job(
+    *, enabled: bool, roots: JobRoots, host: Host, machine: str, today: date
+) -> None:
     if not enabled:
         mechanics.skip_os_job("logs-maintenance")
         return
     if not mechanics.owns_os_job_home("logs-maintenance", roots=roots):
         return
+    heartbeat = heartbeat_population.verified(
+        content.LABEL,
+        roots=roots,
+        machine=machine,
+        uid=host.uid,
+        schedule=content.schedule(),
+        today=today,
+    )
     mechanics.register_platform_job(
         "logs-maintenance",
-        macos=lambda: register_macos(roots=roots, host=host),
-        linux=lambda: register_linux(roots=roots, host=host),
+        macos=lambda: register_macos(roots=roots, host=host, heartbeat=heartbeat),
+        linux=lambda: register_linux(roots=roots, host=host, heartbeat=heartbeat),
         host=host,
     )
 

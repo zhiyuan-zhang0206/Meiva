@@ -10,6 +10,7 @@ import pytest
 
 from base.host.system import walg_content
 from base.host.system import walg_job as job
+from base.host.system.cron.heartbeat import HeartbeatRender
 from base.host.system.hostport import Host
 from base.host.system.job_values import JobRoots, plist_path
 from base.host.system.tests.fake_commands import (
@@ -20,9 +21,16 @@ from base.host.system.tests.fake_commands import (
     fake_host,
 )
 from base.host.system.tests.fake_crontab import FakeCrontab
+from base.host.system.tests.recurring.heartbeats import MACHINE, TODAY, heartbeat_for
 from base.log.tests.log_records import LogRecords
 
 _UID = 501
+
+
+# meiva:note
+# The heartbeat product a registrar hands the renderer for this job.
+def _heartbeat(roots: JobRoots) -> HeartbeatRender:
+    return heartbeat_for(walg_content.LABEL, roots, schedule=walg_content.schedule(backup_hour=3))
 
 
 _NOT_LOADED = Reply(returncode=113, stderr="Could not find service")
@@ -51,10 +59,26 @@ def test_macos_reregistration_rewrites_and_reloads_idempotently(
 ) -> None:
     commands, host = _launchctl()
 
-    assert job.register_macos(roots=job_roots, backup_hour=3, host=host) == 0
+    assert (
+        job.register_macos(
+            roots=job_roots,
+            backup_hour=3,
+            host=host,
+            heartbeat=_heartbeat(job_roots),
+        )
+        == 0
+    )
     plist = plist_path(walg_content.LABEL, user_home=job_roots.user_home)
     first = plist.read_text(encoding="utf-8")
-    assert job.register_macos(roots=job_roots, backup_hour=3, host=host) == 0
+    assert (
+        job.register_macos(
+            roots=job_roots,
+            backup_hour=3,
+            host=host,
+            heartbeat=_heartbeat(job_roots),
+        )
+        == 0
+    )
 
     assert plist.read_text(encoding="utf-8") == first
     assert [argv[1] for argv in commands.argvs if argv[1] != "print"] == [
@@ -69,7 +93,15 @@ def test_macos_unregister_removes_the_plist_and_is_repeatable(
     job_roots: JobRoots,
 ) -> None:
     commands, host = _launchctl()
-    assert job.register_macos(roots=job_roots, backup_hour=3, host=host) == 0
+    assert (
+        job.register_macos(
+            roots=job_roots,
+            backup_hour=3,
+            host=host,
+            heartbeat=_heartbeat(job_roots),
+        )
+        == 0
+    )
     plist = plist_path(walg_content.LABEL, user_home=job_roots.user_home)
     assert plist.exists()
 
@@ -87,7 +119,15 @@ def test_linux_registration_replaces_only_its_own_line(job_roots: JobRoots, tmp_
     old = "25 1 * * * /old/meiva backup walg run  # meiva-walg"
     crontab = FakeCrontab(f"{other}\n\n{old}\n{old}\n")
 
-    assert job.register_linux(roots=job_roots, backup_hour=3, host=_linux(crontab)) == 0
+    assert (
+        job.register_linux(
+            roots=job_roots,
+            backup_hour=3,
+            host=_linux(crontab),
+            heartbeat=_heartbeat(job_roots),
+        )
+        == 0
+    )
 
     body = crontab.writes[-1]
     assert f"{other}\n\n" in body
@@ -111,6 +151,7 @@ def test_linux_without_crontab_reports_and_registers_nothing(
             roots=job_roots,
             backup_hour=3,
             host=fake_host(platform=LINUX_X86),
+            heartbeat=_heartbeat(job_roots),
         )
         == 1
     )
@@ -137,6 +178,8 @@ def test_register_skips_when_os_jobs_are_disabled(
         enabled=False,
         backup_hour=None,
         host=fake_host(commands, platform=DARWIN_ARM64),
+        machine=MACHINE,
+        today=TODAY,
     )
     assert commands.argvs == []
     assert any(
@@ -156,6 +199,8 @@ def test_register_and_unregister_delegate_in_the_default_home(
         enabled=True,
         backup_hour=3,
         host=host,
+        machine=MACHINE,
+        today=TODAY,
     )
     plist = plist_path(walg_content.LABEL, user_home=default_home)
     assert plist.exists()

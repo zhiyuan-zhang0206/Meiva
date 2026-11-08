@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass, replace
+from datetime import date
 from functools import partial
 from pathlib import Path
 
@@ -20,7 +21,7 @@ from base.config import settings
 from base.host.system import logs_content, logs_job, packages_job, pr_flow_job, walg_job
 from base.host.system.boot_autostart import registration as autostart
 from base.host.system.boot_autostart.content import launchd_plist_content
-from base.host.system.cron import health_content, health_job, mechanics
+from base.host.system.cron import health_content, health_job, heartbeat_population, mechanics
 from base.host.system.hostport import Host
 from base.host.system.job_values import JobRoots, cron_environment, plist_path
 from base.host.system.packages_content import RefreshSchedule
@@ -69,6 +70,14 @@ def test_suite_default_is_off() -> None:
     assert settings.general.os_jobs_enabled is False
 
 
+# meiva:note
+# The two facts a rendered job definition needs from the caller: the machine the expectation
+# belongs to, and the day an exception's window is counted from. The gates asserted below are
+# independent of both, so the values only have to be explicit.
+_MACHINE = "macmini"
+_TODAY = date(2026, 11, 8)
+
+
 def _register_calls(enabled: bool) -> list[object]:
     return [
         pytest.param(
@@ -84,7 +93,7 @@ def _register_calls(enabled: bool) -> list[object]:
             id="autostart",
         ),
         pytest.param(
-            partial(logs_job.register_logs_job, enabled=enabled),
+            partial(logs_job.register_logs_job, enabled=enabled, machine=_MACHINE, today=_TODAY),
             id="logs-maintenance",
         ),
         pytest.param(
@@ -95,6 +104,8 @@ def _register_calls(enabled: bool) -> list[object]:
                     refresh_enabled=settings.packages.refresh_enabled,
                     tick_seconds=settings.packages.refresh_tick_seconds,
                 ),
+                machine=_MACHINE,
+                today=_TODAY,
             ),
             id="packages-refresh",
         ),
@@ -102,6 +113,8 @@ def _register_calls(enabled: bool) -> list[object]:
             partial(
                 pr_flow_job.register_pr_flow_job,
                 enabled=enabled,
+                machine=_MACHINE,
+                today=_TODAY,
             ),
             id="pr-flow",
         ),
@@ -110,6 +123,8 @@ def _register_calls(enabled: bool) -> list[object]:
                 walg_job.register_walg_job,
                 enabled=enabled,
                 backup_hour=settings.services.backup_hour,
+                machine=_MACHINE,
+                today=_TODAY,
             ),
             id="walg",
         ),
@@ -156,7 +171,9 @@ def test_registration_dispatches_when_enabled(
             host=host,
             roots=roots,
         ),
-        lambda: logs_job.register_logs_job(roots=roots, enabled=True, host=host),
+        lambda: logs_job.register_logs_job(
+            roots=roots, enabled=True, host=host, machine=_MACHINE, today=_TODAY
+        ),
         lambda: packages_job.register_packages_job(
             roots=roots,
             enabled=True,
@@ -165,18 +182,24 @@ def test_registration_dispatches_when_enabled(
                 tick_seconds=settings.packages.refresh_tick_seconds,
             ),
             host=host,
+            machine=_MACHINE,
+            today=_TODAY,
         ),
         lambda: pr_flow_job.register_pr_flow_job(
             roots=roots,
             enabled=True,
             production=True,
             host=host,
+            machine=_MACHINE,
+            today=_TODAY,
         ),
         lambda: walg_job.register_walg_job(
             roots=roots,
             enabled=True,
             backup_hour=settings.services.backup_hour,
             host=host,
+            machine=_MACHINE,
+            today=_TODAY,
         ),
     ]
     for call in calls:
@@ -255,7 +278,15 @@ def test_the_meiva_binary_falls_back_to_path_without_a_venv(
         programs={"meiva": "/usr/local/bin/meiva"},
     )
     roots = JobRoots(home=tmp_path / "home", repo=tmp_path / "repo", user_home=tmp_path / "user")
-    assert logs_job.register_macos(roots=roots, host=host) == 0
+    heartbeat = heartbeat_population.verified(
+        logs_content.LABEL,
+        roots=roots,
+        uid=host.uid,
+        schedule=logs_content.schedule(),
+        machine=_MACHINE,
+        today=_TODAY,
+    )
+    assert logs_job.register_macos(roots=roots, host=host, heartbeat=heartbeat) == 0
     written = plist_path(logs_content.LABEL, user_home=roots.user_home).read_text(encoding="utf-8")
     assert "/usr/local/bin/meiva" in written
 
