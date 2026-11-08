@@ -171,7 +171,7 @@ def test_repo_policy_allowance_counts_are_pinned() -> None:
     policy = allowances.load(open_repository(ROOT))
     assert len(policy.external) == 43
     assert len(policy.dynamic_attrs) == 34
-    assert len(policy.loads) == 24
+    assert len(policy.loads) == 25
 
 
 # meiva:note

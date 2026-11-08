@@ -1,4 +1,4 @@
-exports = ["accounting.py", "classify_paths.py", "commands.py", "export_process.py", "gh_process.py", "merge_gate.py", "pr_flow_export.py", "runs_api.py", "runs_export.py", "status.py"]
+exports = ["accounting.py", "classify_paths.py", "commands.py", "export_process.py", "gh_process.py", "pr_flow_export.py", "runs_api.py", "runs_export.py", "status.py"]
 
 [uses]
 "commands.py" = ["accounting.py", "diagnose.py", "monitor.py", "owner_operations.py", "status.py"]
@@ -9,7 +9,7 @@ exports = ["accounting.py", "classify_paths.py", "commands.py", "export_process.
 "runs_api.py" = ["gh_process.py"]
 "runs_contracts.py" = ["runs_api.py"]
 "runs_export.py" = ["export_process.py", "gh_process.py", "runs_api.py", "runs_contracts.py"]
-"tests" = ["accounting.py", "commands.py", "diagnose.py", "export_process.py", "gh_process.py", "job_rerun.py", "merge_gate.py", "monitor.py", "pr_flow_export.py", "pyright_scope.py", "runs_api.py", "runs_contracts.py", "runs_export.py", "status.py"]
+"tests" = ["accounting.py", "commands.py", "diagnose.py", "export_process.py", "gate/merge_gate.py", "gate/merge_ready.py", "gh_process.py", "job_rerun.py", "monitor.py", "pr_flow_export.py", "pyright_scope.py", "runs_api.py", "runs_contracts.py", "runs_export.py", "status.py"]
 "watch_pr.py" = ["status.py"]
 
 [roots]
@@ -17,7 +17,6 @@ exports = ["accounting.py", "classify_paths.py", "commands.py", "export_process.
 "classify_paths.py" = { kinds = ["cwd", "argv"], why = "CI classify entrypoint resolves the checked-out repository root from cwd; it also reads its command line (argv) in its `__main__` guard, as the process entry" }
 "commands.py" = { kinds = ["environ"], why = "CLI entrypoint hands the process environment to the owner-operations dispatch; it is not deployment configuration" }
 "export_process.py" = { kinds = ["db", "settings"], why = "Tool entry composes its process resources from the launch configuration" }
-"merge_gate.py" = { kinds = ["environ", "argv"], why = "merge gate entry: its __main__ block reads argv[1:] and the environment once, resolves the real gh from MEIVA_REAL_GH or the caller PATH, and hands the pull-request number, the environment mapping and the executable to main(), which reads none of them itself; every condition below main takes its inputs as parameters, so the decisions are testable without patching the world" }
 "plan_file_shards.py" = { kinds = ["argv"], why = "CI script entry: its __main__ block raises SystemExit with main(sys.argv[1:])" }
 "pr_flow_export.py" = { kinds = ["clock", "environ", "home", "pid", "settings", "argv"], why = "CLI entrypoint resolves the current UTC timestamp, builds the process clock from the settings, resolves the home it operates once in its __main__ block; the __main__ guard reads argv[1:] once and hands it to main" }
 "pyright_scope.py" = { kinds = ["argv"], why = "the __main__ guard reads argv[1:] once and hands it to main" }

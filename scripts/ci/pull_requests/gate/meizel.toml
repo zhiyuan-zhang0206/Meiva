@@ -1,0 +1,8 @@
+exports = ["merge_gate.py", "merge_ready.py"]
+
+[loads]
+"merge_ready.py" = ["scripts/ci/pull_requests/gate"]
+
+[roots]
+"merge_gate.py" = { kinds = ["environ", "argv"], why = "merge gate entry: its __main__ block reads argv[1:] and the environment once, resolves the real gh from MEIVA_REAL_GH or the caller PATH, and hands the pull-request number, the environment mapping and the executable to main(), which reads none of them itself; every condition below main takes its inputs as parameters, so the decisions are testable without patching the world" }
+"merge_ready.py" = { kinds = ["home", "environ", "argv", "pid"], why = "the merge gate's shell resolves the deployed and development checkouts from the home directory, takes the module and grant overrides from the environment once, and its __main__ block hands argv[1:] to main; every decision below main is a parameter" }

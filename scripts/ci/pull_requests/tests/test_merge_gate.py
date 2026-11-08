@@ -1,5 +1,5 @@
 # meiva:note
-# `scripts/ci/pull_requests/merge_gate.py`: the five conditions, driven over a fake `gh`.
+# `scripts/ci/pull_requests/gate/merge_gate.py`: the five conditions, driven over a fake `gh`.
 #
 # The gate decides whether this lane may merge a pull request, so its verdicts are checked
 # end-to-end rather than through its helpers: the module runs as a process with `MEIVA_REAL_GH`
@@ -22,7 +22,7 @@ from typing import Any
 
 import pytest
 
-GATE = Path(__file__).resolve().parents[1] / "merge_gate.py"
+GATE = Path(__file__).resolve().parents[1] / "gate/merge_gate.py"
 HEAD = "1" * 40
 BASE = "2" * 40
 MAIN = "3" * 40
@@ -72,7 +72,7 @@ def green_runs() -> dict[str, Any]:
 def passing_body(trailer: str = "Co-authored-by: Meiva #7381") -> str:
     return (
         f"Preflight on head {HEAD}: PREFLIGHT PASS: /trunk merge is allowed\n"
-        "\nwhere_used: scripts/ci/pull_requests/merge_gate.py\n"
+        "\nwhere_used: scripts/ci/pull_requests/gate/merge_gate.py\n"
         "\n## Behaviour\n\nthe gate refuses what it cannot read\n"
         f"\n{trailer}\n"
     )
@@ -82,7 +82,7 @@ def world(
     *,
     pull: Mapping[str, Any],
     runs: Mapping[str, Any] | None = None,
-    pr_files: tuple[str, ...] = ("scripts/ci/pull_requests/merge_gate.py",),
+    pr_files: tuple[str, ...] = ("scripts/ci/pull_requests/gate/merge_gate.py",),
     main_files: tuple[str, ...] = (),
     commit_message: str = "squash me",
 ) -> list[tuple[str, object]]:

@@ -2,3 +2,4 @@
 "ci_monitor" = ["ci_evidence.py", "test_ci_monitor.py"]
 "test_ci_monitor.py" = ["ci_evidence.py"]
 "test_ci_owner_operations.py" = ["ci_evidence.py"]
+"test_merge_ready_shell.py" = ["merge_gate_stub.py"]

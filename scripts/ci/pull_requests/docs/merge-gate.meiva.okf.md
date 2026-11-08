@@ -1,7 +1,7 @@
 ---
 type: doc
 title: Merge gate
-description: "`scripts/ci/pull_requests/merge_gate.py` — the five conditions a pull request must meet before this lane merges it, the grant it reads, and why every unreadable input is a refusal."
+description: "`scripts/ci/pull_requests/gate/merge_gate.py` — the five conditions a pull request must meet before this lane merges it, the grant it reads, and why every unreadable input is a refusal."
 tags:
 - scripts
 - ci
@@ -94,3 +94,28 @@ should change directory to its checkout before handing over.
 The gate decides; it does not merge. The `gh` wrapper that calls it runs the real
 `gh pr merge` on GO, so a GO verdict and the merge stay separate steps and a
 failure in the gate cannot look like a successful merge.
+
+## Install the shell and the shim (2026-11-08)
+
+Two files make the gate reachable from a lane: `merge_ready.py`, which resolves the checkout and
+the grant and hands over to this module, and `bin/gh`, the PATH-level shim that calls it for
+`gh pr merge` and passes everything else through. Both live here since task #6411 and are tested
+by `tests/test_merge_ready_shell.py`; the gate itself never depends on either.
+
+A host installs them once:
+
+1. Put a grant list at `~/.meiva/gates/lane-agents.txt` (one agent per line, `#` comments
+   allowed). It names who may merge, so it stays outside every checkout. `MEIVA_LANE_FILE`
+   overrides the location; a missing list is a refusal, not an empty grant.
+2. Copy or symlink `scripts/ci/pull_requests/gate/bin/gh` onto a directory ahead of the real `gh` on
+   `PATH`. The shim finds the real binary by skipping its own directory, so `MEIVA_REAL_GH` is only
+   needed when `PATH` carries none -- the same variable the gate reads, since the shim passes its own
+   value on.
+3. Keep a checkout of this repository at `~/.meiva/source` (deployed) or `~/Meiva`
+   (development): the shell resolves `merge_gate.py` from there, deployed first, and prints the
+   chosen module with its short HEAD sha on stderr. `MEIVA_GATE_MODULE` overrides both.
+
+`preflight.sh` (the operator script that runs the lane's checks) is deliberately not in this
+repository yet: it is a hand-maintained list of gates that changes faster than this module, and
+moving it here would give it a stability the list does not have. Its own replacement is a
+separate decision.

@@ -1,7 +1,7 @@
 # meiva:note
 # The merge gate for the pyright/debt lanes: five conditions, one fail-closed verdict.
 #
-# `python3 scripts/ci/pull_requests/merge_gate.py <PR number|url>`, from a checkout of the
+# `python3 scripts/ci/pull_requests/gate/merge_gate.py <PR number|url>`, from a checkout of the
 # repository whose pull requests it judges -- the `repos/{owner}/{repo}` call resolves from the
 # current directory, so a wrapper has to start inside a checkout. It prints the evidence per
 # condition and one verdict line; exit 0 = GO, 1 = NO-GO, and an unreadable check is NO-GO.

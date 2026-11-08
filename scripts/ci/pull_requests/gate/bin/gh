@@ -1,0 +1,55 @@
+#!/bin/sh
+# The PATH-level `gh` shim for hosts that run the merge gate (2026-11-08, task #6411).
+#
+# It is installed as `gh` ahead of the real binary on PATH, so it must stay POSIX sh and must never
+# re-implement a merge condition: it blocks one flag, decides whether this directory's repository is
+# the Meiva code repo at all, and hands everything else to the real gh untouched. Every merge rule
+# lives in merge_ready.py -> merge_gate.py, and the gate fails closed.
+#
+# Recursion: the gate itself calls the real gh, found by skipping this shim's own directory on PATH,
+# so `gh` inside the gate cannot come back here. MEIVA_REAL_GH pins that binary when PATH is odd --
+# one name for it at both layers, because the shim hands its own value to the gate.
+SELF_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd) || exit 127
+
+REAL_GH=""
+if [ -n "${MEIVA_REAL_GH:-}" ] && [ -x "$MEIVA_REAL_GH" ]; then
+  REAL_GH="$MEIVA_REAL_GH"
+else
+  OLDIFS=$IFS
+  IFS=':'
+  for d in $PATH; do
+    [ "$d" = "$SELF_DIR" ] && continue
+    if [ -x "$d/gh" ]; then REAL_GH="$d/gh"; break; fi
+  done
+  IFS=$OLDIFS
+fi
+if [ -z "$REAL_GH" ]; then
+  echo "gh: real gh not found on PATH (set MEIVA_REAL_GH to its absolute path)." >&2
+  exit 127
+fi
+
+for arg in "$@"; do
+  if [ "$arg" = "--auto" ]; then
+    echo "gh: auto-merge is blocked by the merge gate." >&2
+    exit 1
+  fi
+done
+
+# The gate exists for the Meiva code repo's lanes; other repositories (the memory pool, Monsora)
+# pass straight through. Decide by this directory's origin, never by guessing from the arguments.
+ORIGIN=$(git config --get remote.origin.url 2>/dev/null)
+case "$ORIGIN" in
+  *MeivaMemory*) IS_MEIVA=0 ;;
+  *Meiva|*Meiva.git) IS_MEIVA=1 ;;
+  *) IS_MEIVA=0 ;;
+esac
+
+if [ "$1" = "pr" ] && [ "$2" = "merge" ] && [ "$IS_MEIVA" = "1" ]; then
+  shift 2
+  # Gate first; it must NOT replace this shell -- on GO the real merge still has to run.
+  # (2026-11-04: exec'ing the gate made "merge" exit 0 without merging.)
+  MEIVA_REAL_GH="$REAL_GH" python3 "$SELF_DIR/../merge_ready.py" "$@" || exit $?
+  exec "$REAL_GH" pr merge "$@"
+fi
+
+exec "$REAL_GH" "$@"

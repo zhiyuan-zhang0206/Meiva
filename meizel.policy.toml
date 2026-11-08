@@ -80,6 +80,7 @@
 "services/supervision/meiva_root/wiring.py" = "resolves the factory attribute named by the operator's wiring reference ('module:attribute')"
 
 [loads]
+"scripts/ci/pull_requests/gate/merge_ready.py" = ["scripts/ci/pull_requests/gate"]
 "schedules/jobs/dry_import_child.py" = ["schedules"]
 "meiva/boot.py" = ["agent/extensions"]
 "meiva_builtins/skills/coordination/meiva-being-a-long-running-agent/tests/test_agent_usage.py" = ["meiva_builtins/skills"]
