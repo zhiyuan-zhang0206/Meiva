@@ -83,6 +83,14 @@ export const POINTER_STICKY_THRESHOLDS: StickyThresholds = {
 // not pass thresholds.
 const DEFAULT_STICKY_THRESHOLDS = TOUCH_STICKY_THRESHOLDS;
 
+// meiva:note
+// Share of the viewport a send leaves above the reader's own message. The send
+// anchor puts that message here and holds it, so the reply streams into the
+// space below it instead of dragging the reader's place down chunk by chunk
+// (user request 2026-11-09).
+// meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.meiva.okf.md
+export const SEND_ANCHOR_TOP_SHARE = 0.2;
+
 export interface ScrollSnapshot {
   scrollTop: number;
   scrollHeight: number;
@@ -214,6 +222,23 @@ export interface StickyController {
    *  mid-timeline position would be yanked to the bottom by the next layout
    *  growth, and a restored at-bottom position would not keep following. */
   notifyRestored(view: ScrollSnapshot): void;
+  // meiva:note
+  // Reports a performed send anchor: the reader's own message now sits a fixed
+  // share down the viewport, propped from below by a reserve that the stream
+  // consumes. Following stops here, and while that reserve holds the bottom up
+  // the position decides nothing - the viewport sits at the bottom of a padded
+  // document, not at the tail of the conversation - so the at-bottom
+  // reconciliation must not resurrect following until the reply has eaten the
+  // reserve and left the reader genuinely away from the bottom.
+  // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.meiva.okf.md
+  notifyAnchored(view: ScrollSnapshot): void;
+  // meiva:note
+  // Whether a send anchor still holds the bottom up. The scroll-to-bottom
+  // control reads this: while the reserve is there the viewport is already at
+  // the bottom by position, but the button is not a dead click - it is the
+  // reader's way back into following.
+  // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.meiva.okf.md
+  isAnchored(): boolean;
   // There is deliberately no notify() for non-pin programmatic scrolls
   // (prepend compensation). They need none: the only reader of the
   // baseline is handleScroll, which re-syncs it on every event, so the
@@ -270,6 +295,16 @@ export function createStickyController(
   // "never left" (keep the run through the echoes and pins that land at
   // the bottom meanwhile).
   let prevNearBottom = true;
+  // meiva:note
+  // A send anchor owns the bottom while its reserve is between the reader and
+  // the true end of the content: the viewport reads "at bottom" because the
+  // reserve IS the rest of the document, not because the reader follows the
+  // tail. Cleared by the first observation that leaves the bottom zone - the
+  // point where the reply has filled the reserve and position means what it
+  // says again - and by any performed pin or restore, which take the viewport
+  // back deliberately.
+  // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.meiva.okf.md
+  let anchored = false;
 
   // Following: remember where the bottom was, so a later growth can be
   // told apart from a user scrolling away.
@@ -300,6 +335,10 @@ export function createStickyController(
   // Without the gate, any echo at the bottom would resurrect "following"
   // mid-pull and re-arm the very pin the reader is escaping.
   const reconcileAtBottom = (view: ScrollSnapshot) => {
+    if (anchored) {
+      prevNearBottom = true;
+      return;
+    }
     const arrived = !prevNearBottom;
     if (upwardRun <= bottomZone(view.clientHeight, thresholds) || arrived) {
       stick(view);
@@ -307,13 +346,24 @@ export function createStickyController(
     }
   };
 
+  // meiva:note
+  // The anchor lets go the moment the viewport is away from the bottom for
+  // real: from there the ordinary rules decide again, so a reader who scrolls
+  // back down re-follows and one who stays keeps their place.
+  // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.meiva.okf.md
+  const releaseAnchor = (view: ScrollSnapshot) => {
+    if (anchored && !isAtBottom(view, thresholds)) anchored = false;
+  };
+
   return {
     isSticky: () => sticky,
+    isAnchored: () => anchored,
 
     isAtTail: (view) =>
       isAtBottom(view, thresholds) || (sticky && nearLastKnownBottom(view)),
 
     handleScroll(view) {
+      releaseAnchor(view);
       const zone = bottomZone(view.clientHeight, thresholds);
       const atBottom = isAtBottom(view, thresholds);
       const movedUp = prevScrollTop - view.scrollTop;
@@ -422,6 +472,7 @@ export function createStickyController(
       // released mid-pull is NOT reconciled: they are inside the zone by
       // position but left it by intent, and re-sticking here re-arms the
       // pin they are escaping.
+      releaseAnchor(view);
       const atBottom = isAtBottom(view, thresholds);
       if (atBottom) {
         reconcileAtBottom(view);
@@ -461,9 +512,11 @@ export function createStickyController(
       // abortable: an upward wheel mid-ride finds no phantom old bottom to
       // hide behind and unsticks.
       sticky = true;
+      anchored = false;
     },
 
     notifyPinnedToBottom(view, freshRun = false) {
+      anchored = false;
       stick(view);
       if (freshRun) upwardRun = 0;
       prevScrollTop = view.scrollTop;
@@ -503,6 +556,7 @@ export function createStickyController(
     },
 
     notifyRestored(view) {
+      anchored = false;
       const atBottom = isAtBottom(view, thresholds);
       if (atBottom) stick(view);
       else unstick();
@@ -510,6 +564,16 @@ export function createStickyController(
       prevScrollTop = view.scrollTop;
       prevScrollHeight = view.scrollHeight;
       prevNearBottom = atBottom;
+    },
+
+    notifyAnchored(view) {
+      anchored = true;
+      unstick();
+      upwardRun = 0;
+      prevScrollTop = view.scrollTop;
+      prevScrollHeight = view.scrollHeight;
+      prevNearBottom = isAtBottom(view, thresholds);
+      contentHeight = null;
     },
   };
 }

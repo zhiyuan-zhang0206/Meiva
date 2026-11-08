@@ -34,7 +34,7 @@ function resetStore(): void {
     hasMoreOlder: false,
     loadingOlder: false,
     olderFetchCount: 0,
-    scrollToBottomRequest: 0,
+    sendAnchor: { seq: 0, inboundId: null },
     liveCompact: null,
     compactReplaceSeq: 0,
     compactReplaceAgent: null,

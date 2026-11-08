@@ -76,7 +76,13 @@ type SidebarView = ReturnType<typeof useSidebarCollapsed>;
 type InspectorView = ReturnType<typeof useInspectorOpen>;
 type SettingsView = Pick<ReturnType<typeof useUserSettings>, "settings" | "isLoading">;
 interface TimelineStoreView {
-  requestScrollToBottom: () => void;
+  // meiva:note
+  // Asks the timeline to park the message the reader just sent a fixed share
+  // down the viewport and stop following the stream, instead of re-pinning to
+  // the bottom. The inbound id names that message; null when the receipt
+  // carried none.
+  // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.meiva.okf.md
+  requestSendAnchor: (inboundId: number | null) => void;
   // meiva:note
   // Page-clock time of the last event the selected thread received (0 = none). The running turn's
   // live clock anchors on it between blocks, so "Working for" keeps counting through the gap
@@ -394,8 +400,8 @@ function HomeContent({
     ): Promise<boolean> => {
       if (activeId == null) return false;
       try {
-        await client.sendMessage(activeId, content, clientMessageId);
-        timelineStore.requestScrollToBottom();
+        const receipt = await client.sendMessage(activeId, content, clientMessageId);
+        timelineStore.requestSendAnchor(receipt.inbound_id ?? null);
         return true;
       } catch (e: unknown) {
         if (e instanceof MessageDeliveryUnknownError) {
@@ -524,7 +530,7 @@ function HomeContent({
                 onStop={handleStop}
                 stageQueue={stageQueue}
                 onDeliveringBatchChange={setDeliveringBatch}
-                onUploadSent={() => timelineStore.requestScrollToBottom()}
+                onUploadSent={() => timelineStore.requestSendAnchor(null)}
                 onUploadError={handleUploadError}
                 focusToken={store.composerFocusToken}
                 agentId={activeId}
