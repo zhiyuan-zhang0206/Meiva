@@ -24,11 +24,13 @@ from pathlib import Path
 
 import meiva
 from meiva_builtins.plugins.meiva_fleet import task_registry
+from base.clock import SYSTEM_TIMERS
 from base.daemon.schedules.inputs import ScheduleInputs
 from base.host.boundary.json_values import is_object_dict, is_object_list
 from base.paths.home import resolve_meiva_home
 from schedules.jobs.entry import cluster_timezone, open_schedule_entry
 from schedules.jobs.loop import CronSchedule, Trigger, run_loop
+from schedules.jobs.watch.api_read import read_api
 from schedules.jobs.watch.main_red_watch import (
     LivenessStream,
     already_read,
@@ -118,13 +120,13 @@ def report_agent_from_environ(environ: Mapping[str, str]) -> int:
     return agent_id
 
 
+# meiva:note
+# The watch reads GitHub through one function, so the retry policy has one owner: `read_api`
+# delegates to the CI scripts' transport, which retries a transient answer within a fixed budget and
+# then fails naming the endpoint and the number of attempts it took. A bare `subprocess.run` here
+# would put a second answer to "how many times is a 502 worth retrying" in the repository.
 def _api(path: str, run_process: RunProcess) -> str:
-    result = run_process(
-        ["gh", "api", "--method", "GET", path], capture_output=True, text=True, timeout=120
-    )
-    if result.returncode != 0:
-        raise RuntimeError(f"gh api {path} failed: {(result.stderr or '').strip()[-300:]}")
-    return result.stdout
+    return read_api(path, run_process=run_process, timers=SYSTEM_TIMERS)
 
 
 # meiva:note
