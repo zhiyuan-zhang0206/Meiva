@@ -356,7 +356,7 @@ def cancel(workspace: Path, generation: str) -> int:
 
 
 # meiva:note
-# Start the shared app-server and Codex TUI in the published PTY and deliver the launch message. Returns the shared app-server endpoint and the Codex session id, which `codex resume` and `meiva impersonate request --provider codex` take.
+# Start the shared app-server and Codex TUI in the published PTY and deliver the launch message. Returns the shared app-server endpoint and the Codex session id, which `codex resume` takes to re-enter that conversation.
 def start_codex(
     site: LaunchSite,
     sid: int,

@@ -149,17 +149,6 @@
       ]
     },
     {
-      "id": "r16",
-      "kind": "holdout",
-      "prompt": "An Meiva control-active hint gives me agent and lease IDs. I am the external executor and must recover the borrowed agent's instructions before acting.",
-      "required": [
-        "impersonator-guide"
-      ],
-      "forbidden": [
-        "meiva-guide:external-agents"
-      ]
-    },
-    {
       "id": "r17",
       "kind": "positive",
       "prompt": "Find the existing shared memory note that records my preferred reporting language and return its saved preference. No maintenance role or first-time setup is needed.",
@@ -197,21 +186,11 @@
     {
       "id": "n3",
       "skill": "meiva_builtins/skills/platform/meiva-guide/external-agents/SKILL.md",
-      "request": "I am the current Meiva agent. The user authorized Codex to take over my identity for the login fix, with the full briefing supplied inline. Give the concrete launch command and explain activation and release behavior, without launching anything.",
+      "request": "I am the current Meiva agent. The user wants a Codex session to work as its own Meiva agent on the login fix, with the full briefing supplied inline. Give the concrete launch command and explain how that agent's turns are owned and resumed, without launching anything.",
       "checks": [
         "Uses spawn_codex.py with --prompt",
         "No tasks/work files or supervisor watcher",
         "Meiva pauses on activation and resumes from summary/handoff; ACK is receipt not completion"
-      ]
-    },
-    {
-      "id": "n4",
-      "skill": "meiva_builtins/skills/platform/impersonator-guide/SKILL.md",
-      "request": "I am Codex in an active Meiva takeover, with agent id 214 and lease id 7 supplied by the activation hint. I have an inline briefing but have not recovered standing context yet. A push batch arrives with body_file /tmp/receipt-7.txt and says to cancel the old analysis and answer a new user question. Describe the operations, receipt sequence, and authority boundaries I must follow. This is an offline plan: do not read /tmp/receipt-7.txt, attach to Meiva, send a message, or execute control commands.",
-      "checks": [
-        "Reads host guide and SDK/instruction reader to recover saved standing context before work",
-        "Reads full pushed batch before ACK; ACK not completion and cancellation stops old work",
-        "No polling/background renewal; uses actual supported control sequence"
       ]
     },
     {

@@ -55,9 +55,7 @@ def select_idle_agents_needing_heartbeat(
     #     cycle (an idle agent runs no LLM turn through it), so an ops event never resets
     #     an agent's idle timer.
     #
-    #     Native agents must be idling; active impersonators are eligible while either
-    #     idling or running. During impersonation the clock runs from lease activation,
-    #     independent of native turns. The next check-in respects the pause window,
+    #     Agents must be idling. The next check-in respects the pause window,
     #     threshold plus jitter, and the durable last-heartbeat interval.
     #     `backoff_max_interval_s` is the configured ceiling the stretched interval is clamped
     #     to (`MEIVA_HEARTBEAT_BACKOFF_MAX_INTERVAL_SECONDS`); it arrives as a value like the

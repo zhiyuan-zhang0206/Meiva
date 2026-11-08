@@ -42,7 +42,7 @@ claiming a live behavioral pass.
     less than `exec_node_timeout_seconds`). On exit (case 4), the saved value is
     restored via `meiva.self.restart(config_overlay=...)` after updating the
     ledger, with no duplicate close after the post-restart resume.
-  - *Attached external CLI / impersonation harness* (case 5): `meiva.self.restart`
+  - *Attached provider harness* (case 5): `meiva.self.restart`
     is skipped cleanly without error, and hot/cold split is enforced by
     discipline.
 - **Hot-path inline vs. cold-path delegation** (cases 1, 3, 5, 7, 8, 9): Fast,

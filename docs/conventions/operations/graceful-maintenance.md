@@ -58,10 +58,10 @@ processes and shell variables cannot be restored by `start`. `--keep-shell-sessi
 or `restart` keeps them instead.
 Externally launched tools are not owned by one local home.
 
-Impersonation is a separate agent identity protocol. These commands do not
-request, acquire, renew or release external-agent control leases. Also,
-`meiva cluster pause NAME` is machine membership administration, not this
-local stop; it stops nothing on this home.
+An external harness agent (Claude Code, Codex, Antigravity) is an ordinary Meiva
+agent here: it owns its agent id and its turn, and these commands drain, resume and
+stop it exactly like a native loop's. `meiva cluster pause NAME` is machine
+membership administration, not this local stop; it stops nothing on this home.
 
 ## What a smooth stop does
 

@@ -12,8 +12,7 @@ tags:
 `meiva_builtins/skills/platform/meiva-guide/` is the canonical guide package.
 Meiva loads it at `$MEIVA_HOME/skills/meiva-guide/`; the open-standard mirror is
 `.agents/skills/meiva-guide`. Host-global convergence projects the complete
-package, with `impersonator-guide`, into the skill homes of the supported external
-clients present on the host.
+package into the skill homes of the supported external clients present on the host.
 
 ## Audience and execution surface
 
@@ -43,10 +42,9 @@ sub-skills carry executable procedures and their bundled resources.
 
 `meiva-workflow` owns work organization and general work evaluation.
 `skill-creator` owns skill authoring and the evaluation contract.
-`meiva-self-development` remains a project-local contributor manual.
-`impersonator-guide` is a separate built-in executor manual under
-`meiva_builtins/skills/platform/impersonator-guide/`. Guide membership changes
-neither kernel contribution requirements nor operator authorization.
+`meiva-self-development` remains a project-local contributor manual. Guide
+membership changes neither kernel contribution requirements nor operator
+authorization.
 
 The shared skill evaluation contract lives once at
 `references/evaluation.md`, within the complete externally published Guide
@@ -55,8 +53,7 @@ Its optional self-evolution replay path loads the separately available Meiva
 capability by name; external Guide copies do not assume it is bundled.
 
 Sub-skills load substantial conditional procedures on demand. External-agent
-Mode A reads `references/delegated-workers.md`; takeover keeps its own mode
-boundary. Onboarding separates preference questions, intent branches, and
+Mode A reads `references/delegated-workers.md`. Onboarding separates preference questions, intent branches, and
 shared-memory note formats. `ops` separates resources and sessions; `operations`
 separates diagnosis and authorized-rollout verification. Each entrypoint states
 when to read the relevant reference.
@@ -64,10 +61,10 @@ when to read the relevant reference.
 ## Consumers and distribution
 
 Package and schedule draft endpoints load `meiva.skills.meiva_guide.packages.install`
-and `meiva.skills.meiva_guide.schedules`. External copies use independent
-`<client>-<skill>` ledgers — `<client>-meiva-guide` for this guide and
-`<client>-impersonator-guide` for the executor manual; legacy deployment/operator
-copies and their ledgers are preserved and are no longer refreshed by this bridge.
+and `meiva.skills.meiva_guide.schedules`. External copies use an independent
+`<client>-<skill>` ledger — `<client>-meiva-guide` for this guide; legacy
+deployment/operator copies and their ledgers are preserved and are no longer
+refreshed by this bridge.
 
 - [[docs/skills/external-agent-operator-bridge.meiva.okf.md]] — external publication and ownership
 - [[meiva_builtins/skills/docs/skills.meiva.okf.md]] — built-in catalog

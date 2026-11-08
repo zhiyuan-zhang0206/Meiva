@@ -154,8 +154,7 @@ the import closure. Run on `#7910`'s real change surface (22 files) it selected 
 
 ```
 cli/commands/agents/tests/test_relay_command.py
-cli/commands/agents/tests/test_relay_connection_retry.py
-tests/integration/test_impersonation_notifications.py      (decision=SELECTED, 645 tests)
+cli/commands/agents/tests/test_relay_connection_retry.py   (decision=SELECTED, 645 tests)
 ```
 
 So: do not write a detector for signature changes. Selecting by "who imports this module" is more
@@ -188,7 +187,7 @@ Visual belongs to the ten-PR checkpoint's full run.
 **L2 is the contract call surface**: the layer where a signature changed in one package meets a caller
 in another. Two specimens from 2026-10-31, both red on `main` with nothing running them —
 `cli/commands/observability/lgtm.py` (`backend_urls()` called with no argument after `4f3cac513` gave
-it one; fixed by `#7932`) and `tests/integration/test_impersonation_notifications.py` (the only test
+it one; fixed by `#7932`) and `cli/commands/agents/tests/test_relay_command.py` (the only test
 that constructs the relay command with the argument `#7910` added). Both are ordinary L1–L3
 selections. That is the point: the selector already includes them, so the answer is *run it*, never
 *detect the shape*.

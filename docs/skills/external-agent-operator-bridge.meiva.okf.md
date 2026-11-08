@@ -1,7 +1,7 @@
 ---
 type: doc
 title: External-agent operator skill bridge
-description: Prod host convergence copies the complete Meiva Guide and impersonator guide into the global skill roots of every supported external agent surface present on the host (Codex, Claude Code, Gemini CLI, Grok, Qwen Code, Cursor Agent, Antigravity App/IDE and CLI, DeepSeek Harness), with externally bound ownership and serialized recovery that preserve conflicts.
+description: Prod host convergence copies the complete Meiva Guide into the global skill roots of every supported external agent surface present on the host (Codex, Claude Code, Gemini CLI, Grok, Qwen Code, Cursor Agent, Antigravity App/IDE and CLI, DeepSeek Harness), with externally bound ownership and serialized recovery that preserve conflicts.
 tags:
 - extensions
 - agent-instruction
@@ -11,9 +11,8 @@ tags:
 # External-agent operator skill bridge
 
 `cli/commands/extensions/external_skills.py` is a dedicated host-global
-converge step. It publishes two complete skills —
-`<repo>/meiva_builtins/skills/platform/meiva-guide/` and
-`<repo>/meiva_builtins/skills/platform/impersonator-guide/` — into the
+converge step. It publishes the complete skill
+`<repo>/meiva_builtins/skills/platform/meiva-guide/` into the
 user-level skill directory of every external agent surface the user has.
 `_CLIENTS` is the one owner of that set: one row per surface (Codex, Claude Code,
 Gemini CLI, Grok, Qwen Code, Cursor Agent, Antigravity App/IDE, Antigravity CLI,
@@ -51,10 +50,10 @@ against the transaction marker, digest, and manifest; a merely colliding or
 otherwise ambiguous generation-shaped path never becomes Meiva-owned.
 
 Each client and skill owns `<client>-<skill>.json` and `.lock`, so the guide is
-`<client>-meiva-guide.json` and the executor manual is
-`<client>-impersonator-guide.json`. Legacy
+`<client>-meiva-guide.json`. Legacy
 operator (`<client>.json`) and deployment (`<client>-deploy-meiva-cluster.json`)
-ledgers and their targets are preserved and no longer refreshed. The bridge
+ledgers and their targets — including any retired skill such as the former
+`impersonator-guide` — are preserved and no longer refreshed. The bridge
 never adopts them as the guide or removes their user content. A conflict at the
 new guide target remains a preserved conflict under the existing ownership rules.
 

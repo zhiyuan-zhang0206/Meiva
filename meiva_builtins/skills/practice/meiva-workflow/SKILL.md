@@ -111,7 +111,7 @@ than blocking the responsive loop or flooding the coordinating context with
 verbose tool output. Otherwise, keep short or tightly coupled steps with the
 current agent. Choose tools by demonstrated capability for the task, not fixed
 file-count thresholds.
-For Meiva's external-worker launch, supervision, resume, or takeover mechanics,
+For Meiva's external-worker launch, supervision, resume, or harness-attach mechanics,
 load the external-agents guide in Meiva Guide.
 
 ## Capability Matching

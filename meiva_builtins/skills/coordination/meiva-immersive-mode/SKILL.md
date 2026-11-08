@@ -67,8 +67,8 @@ Two distinct clocks govern the loop:
    loop. Because `restart` replaces the process and resumes the turn, writing the
    ledger *before* `restart` ensures the resumed turn sees entry is complete and
    proceeds directly without repeating the announcement.
-   - **External CLI / attached harnesses**: In attached provider CLI or
-     impersonation sessions where `meiva.self.restart` is unavailable or refused,
+   - **Attached harnesses**: In an attached provider harness (Claude Code,
+     Codex, Antigravity) where `meiva.self.restart` is unavailable or refused,
      skip `restart` on both entry and exit, record the harness boundary in the
      ledger, and enforce the same hot/cold split by discipline alone.
 4. **Establish the live feedback rig first**: When the primary surface is
