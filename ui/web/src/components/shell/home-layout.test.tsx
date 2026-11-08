@@ -86,7 +86,7 @@ const fakeParts = {
   ),
 } as unknown as LayoutParts;
 
-import { HomeLayout, type LayoutParts } from "./home-layout";
+import { HomeLayout, SIDEBAR_MIN_WIDTH, type LayoutParts } from "./home-layout";
 
 function installLocalStoragePolyfill(): void {
   const store = new Map<string, string>();
@@ -209,6 +209,7 @@ describe("HomeLayout frame contract", () => {
       "horizontal",
     ]);
     expect(directPanelIds(groups[0])).toEqual(["panel-sidebar", "panel-main"]);
+    expect(directPanels(groups[0])[0].getAttribute("data-min-size")).toBe(SIDEBAR_MIN_WIDTH);
     expect(directPanelIds(groups[1])).toEqual(["panel-timeline", "panel-inspector"]);
     expect(directPanelDefaults(groups[0])).toEqual([16, 84]);
     expect(directPanelDefaults(groups[0]).reduce((sum, size) => sum + size, 0)).toBe(100);

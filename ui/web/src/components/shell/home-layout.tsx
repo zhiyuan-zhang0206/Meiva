@@ -37,16 +37,18 @@ interface ColumnFrame {
   expandedMinimums: readonly [sidebar: string, main: string];
 }
 
+export const SIDEBAR_MIN_WIDTH = "256px";
+
 const DESKTOP_COLUMNS: ColumnFrame = {
   layoutId: "meiva.home.columns.context",
   expanded: ["16%", "84%"],
-  expandedMinimums: ["12%", "60%"],
+  expandedMinimums: [SIDEBAR_MIN_WIDTH, "60%"],
 };
 
 const MOBILE_COLUMNS: ColumnFrame = {
   layoutId: "meiva.home.columns.mobile",
   expanded: ["40%", "60%"],
-  expandedMinimums: ["30%", "40%"],
+  expandedMinimums: [SIDEBAR_MIN_WIDTH, "40%"],
 };
 
 const INSPECTOR_LAYOUT_ID = "meiva.home.context.desktop";
