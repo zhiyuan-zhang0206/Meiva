@@ -20,12 +20,12 @@ from __future__ import annotations
 
 from typing import Protocol
 
-from anthropic.types import RawMessageStreamEvent
 from langchain_anthropic import ChatAnthropic
 from langchain_core.messages import AIMessageChunk
 from langchain_core.outputs import ChatResult
 
 from base.host.boundary.untyped import object_of
+from base.lm.compat.provider_sdks.anthropic_sdk import anthropic
 
 
 # meiva:note
@@ -61,12 +61,12 @@ class ThinkingTokensChatAnthropic(ChatAnthropic):
 
     def _make_message_chunk_from_anthropic_event(
         self,
-        event: RawMessageStreamEvent,
+        event: anthropic.types.RawMessageStreamEvent,
         *,
         stream_usage: bool = True,
         coerce_content_to_string: bool = False,
-        block_start_event: RawMessageStreamEvent | None = None,
-    ) -> tuple[AIMessageChunk | None, RawMessageStreamEvent | None]:
+        block_start_event: anthropic.types.RawMessageStreamEvent | None = None,
+    ) -> tuple[AIMessageChunk | None, anthropic.types.RawMessageStreamEvent | None]:
         msg, next_block_start = super()._make_message_chunk_from_anthropic_event(
             event,
             stream_usage=stream_usage,

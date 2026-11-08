@@ -185,11 +185,15 @@ def normalize_provider_transport_error(exc: Exception) -> Exception:
 
 
 def _is_transport_error(exc: BaseException) -> bool:
-    # SDK imports stay on the failure path rather than loading every provider at boot.
-    from anthropic import APIConnectionError as AnthropicConnectionError
-    from openai import APIConnectionError as OpenAIConnectionError
+    # meiva:note
+    # SDK imports stay on the failure path rather than loading every provider at boot, and they
+    # enter through `base.lm.compat.provider_sdks`: a burst of failing turns is exactly when several
+    # threads reach one SDK for the first time, and a submodule import they each issue separately
+    # loses that race (#6538).
+    from base.lm.compat.provider_sdks.anthropic_sdk import anthropic
+    from base.lm.compat.provider_sdks.openai_sdk import openai
 
-    return isinstance(exc, (AnthropicConnectionError, OpenAIConnectionError))
+    return isinstance(exc, (anthropic.APIConnectionError, openai.APIConnectionError))
 
 
 class ErrorClassification(NamedTuple):
@@ -297,11 +301,11 @@ def _model_error_class(exc: ModelError) -> ErrorClass:
 
 def _sdk_fields(exc: BaseException) -> tuple[int | None, object]:
     """Read SDK metadata, including one typed cause of an official ModelError."""
-    from anthropic import APIError as AnthropicError
-    from google.genai.errors import APIError as GoogleError
-    from openai import APIError as OpenAIError
+    from base.lm.compat.provider_sdks.anthropic_sdk import anthropic
+    from base.lm.compat.provider_sdks.genai_sdk import APIError as GoogleError
+    from base.lm.compat.provider_sdks.openai_sdk import openai
 
-    sdk_types = (AnthropicError, OpenAIError, GoogleError)
+    sdk_types = (anthropic.APIError, openai.APIError, GoogleError)
     candidate: BaseException | None = exc
     if not isinstance(candidate, sdk_types):
         if not isinstance(exc, ModelError) or _model_error_class(exc) is ErrorClass.UNKNOWN:
@@ -309,7 +313,7 @@ def _sdk_fields(exc: BaseException) -> tuple[int | None, object]:
         candidate = exc.__cause__
     if isinstance(candidate, GoogleError):
         return candidate.code, getattr(candidate, "details", None)
-    if isinstance(candidate, (AnthropicError, OpenAIError)):
+    if isinstance(candidate, (anthropic.APIError, openai.APIError)):
         status = getattr(candidate, "status_code", None)
         return status if isinstance(status, int) else None, candidate.body
     return None, None
@@ -329,10 +333,11 @@ def _error_field(body: object, key: str) -> str | None:
 # meiva:note
 # The SDK raises plain APIError for error frames after HTTP stream admission.
 def _transient_openai_stream_error(exc: BaseException, body: object) -> bool:
-    from openai import APIError
+    from base.lm.compat.provider_sdks.openai_sdk import openai
 
     return (
-        isinstance(exc, APIError) and _error_field(body, "type") in _TRANSIENT_OPENAI_STREAM_TYPES
+        isinstance(exc, openai.APIError)
+        and _error_field(body, "type") in _TRANSIENT_OPENAI_STREAM_TYPES
     )
 
 

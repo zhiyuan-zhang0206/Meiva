@@ -1,0 +1,6 @@
+exports = ["anthropic_sdk.py", "genai_sdk.py", "openai_sdk.py"]
+
+[purity]
+"anthropic_sdk.py" = "strict"
+"genai_sdk.py" = { mode = "none", why = "importing `google.genai` loads a client library; this module exists to be the one place that does it" }
+"openai_sdk.py" = { mode = "none", why = "importing `openai` loads a client library; this module exists to be the one place that does it" }
