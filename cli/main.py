@@ -353,6 +353,22 @@ def _invoke(args: argparse.Namespace) -> int:
 
 
 # meiva:note
+# Build the invocation's runtime and bind the clock it just built for this command.
+#
+# A verb that writes its audit row on a host that runs no daemon — `meiva config set` — binds no
+# event pipeline and no process label, but the row it writes states the instant it was written at:
+# the event it stages for that row is stamped with this clock, then dropped with the one line that
+# says this process has nowhere to send it.
+def _invocation_runtime(home: Path, *, suppress_local_otlp: bool) -> CommandRuntime:
+    from base import telemetry
+    from cli.database.runtime import CommandRuntime
+
+    command = CommandRuntime.create(home, suppress_local_otlp=suppress_local_otlp)
+    telemetry.bind_process_clock(command.clock.now)
+    return command
+
+
+# meiva:note
 # Execute an already-parsed CLI namespace against an explicit `declared` home and `checkout`.
 def dispatch_parsed(
     args: argparse.Namespace,
@@ -394,22 +410,12 @@ def dispatch_parsed(
     from base.paths.private_dir import ensure_private_dir
     from cli.database import operator_database_factory
     from cli.database.lifecycle_audit import AuditUnavailableError
-    from cli.database.runtime import CommandRuntime
 
     # meiva:note
     # The one place the operator's home is created (owner-only, a symlinked home refused); the
     # runtime built next only holds the path.
     ensure_private_dir(declared)
-    command = CommandRuntime.create(home, suppress_local_otlp=stops_local_collector(args_in))
-    # meiva:note
-    # The invocation's clock, bound for this process before any command runs. A verb that writes
-    # its own audit row — `meiva config set` on a host that runs no daemon — binds no pipeline and
-    # no process label, but the row it writes states the instant it was written at; the event it
-    # stages for that row is stamped with this clock and then dropped with the one line that says
-    # this process has nowhere to send it.
-    from base import telemetry
-
-    telemetry.bind_process_clock(command.clock.now)
+    command = _invocation_runtime(home, suppress_local_otlp=stops_local_collector(args_in))
     args.runtime = command
     database_factory = operator_database_factory(
         local_host=command.machine.host,

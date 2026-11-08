@@ -647,7 +647,12 @@ def openapi_schema_of(config: ConfigBoot, *, home: Path) -> dict[str, object]:
         image=LOADED_IMAGE,
         machine=ConfiguredMachineIdentity(config),
         host=Host.system(environ=config.process_environment()),
-        now=Clock(ClockConfig("UTC", "UTC", False), timers=SYSTEM_TIMERS).now,
+        now=Clock(
+            ClockConfig(
+                timezone="UTC", authoritative_timezone="UTC", message_timestamp_weekday=False
+            ),
+            timers=SYSTEM_TIMERS,
+        ).now,
     )
     with process.lifetime():
         app = create_app(
