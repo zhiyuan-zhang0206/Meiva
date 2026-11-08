@@ -220,7 +220,7 @@ async def test_a_turn_submits_the_pending_messages_and_commits_the_reply() -> No
     assert command.goto == "claim"
     assert command.update is not None
     [(prompt, key)] = engine.submitted
-    assert prompt.endswith("\n\ndo it")
+    assert prompt == "do it"
     assert key == "inbound-7"
     assert command.update["harness_pending_input"] is None
     assert command.update["halted"] is True
@@ -721,7 +721,7 @@ async def test_terminate_interrupt_preserves_projected_tool_call_messages() -> N
 
     command = await harness_turn_node(state, runtime(engine), config(6986))
     [(prompt, key)] = engine.submitted
-    assert prompt.endswith("\n\n[Heartbeat]: check in")
+    assert prompt == "[Heartbeat]: check in"
     assert key == "window-4"
     assert command.update is not None
     assert command.update == {"halted": True, "harness_pending_input": None}

@@ -65,3 +65,26 @@ async def test_sdk_harness_corrects_only_at_natural_end_and_keeps_raw_final_in_d
     with pytest.raises(FatalLLMStreamError, match="SDK delivery contract violated"):
         await harness_turn_node(corrected, sdk, config(aid))
     assert engine.interrupts == 0
+
+
+async def test_harness_turn_does_not_inject_visibility_rule_and_triggers_correction_on_violation() -> (
+    None
+):
+    engine_valid = FakeEngine(reply="MEIVA_DISPLAY_TO_USER\nhello")
+    state = AgentState(harness_pending_input={"prompt": "hello from user", "key": "inbound-10"})
+    cmd_valid = await harness_turn_node(state, runtime(engine_valid), config())
+    assert cmd_valid.goto == "claim"
+    assert cmd_valid.update is not None
+    assert cmd_valid.update["harness_pending_input"] is None
+    [(prompt, _)] = engine_valid.submitted
+    assert prompt == "hello from user"
+
+    engine_invalid = FakeEngine(reply="unprefixed reply")
+    cmd_invalid = await harness_turn_node(state, runtime(engine_invalid), config())
+    assert cmd_invalid.goto == "harness_turn"
+    assert cmd_invalid.update is not None
+    update = AgentState.model_validate(cmd_invalid.update)
+    assert update.harness_pending_input is not None
+    assert update.harness_pending_input["visibility_correction"] is True
+    assert update.harness_pending_input["key"] == "inbound-10:visibility-correction"
+    assert "visibility prefix" in str(update.harness_pending_input["prompt"])

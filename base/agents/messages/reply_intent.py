@@ -23,7 +23,7 @@ REPLY_VISIBILITY_RULE = (
     f"the user needs to see in the main conversation. Use {HIDE_FROM_USER} for working notes. "
     "Those notes are folded into Details and the user can expand and read them."
 )
-NON_HUMAN_WAKE_REMINDER = f"Non-human wake. {REPLY_VISIBILITY_RULE}"
+NON_HUMAN_WAKE_REMINDER = "Non-human wake."
 REPLY_VISIBILITY_CORRECTION = (
     "Your previous output contained text with a missing or invalid visibility prefix. "
     "That text was folded into Details. "

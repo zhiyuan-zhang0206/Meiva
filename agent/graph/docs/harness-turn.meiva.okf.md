@@ -82,8 +82,10 @@ in `FileSessionRegistry`.
   handoff document.
 - `run_turn` starts the session, submits turn text under the newest inbound row id
   (or `window-{cursor + len(pending)}` when the batch carries only notes such as a
-  heartbeat check-in), and streams `BridgeEvent`s via `on_event`. Completed keys within
-  the same session replay the ticket outcome without emitting a second completion event.
+  heartbeat check-in), and streams `BridgeEvent`s via `on_event`. Inbound text
+  omits per-turn visibility injection; invalid replies trigger a correction turn.
+  Completed keys within the same session replay the ticket outcome without emitting a second
+  completion event.
 - A session that faults or closes mid-turn retires itself and raises a fatal stream
   abort; the next inbound opens a fresh resumed session from the registry. Only a
   failure that names this turn ends it, and a session failure ends it as a closed
