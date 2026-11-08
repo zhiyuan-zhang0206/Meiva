@@ -1,0 +1,24 @@
+# The e2e reds `main` is already known to have, so a pull request that only repeats them is not
+# blocked by them. `e2e gate` reads this file, compares the pull request's failing test identities
+# with the latest completed nightly run, and passes only when every failure it saw is listed here.
+#
+# Rules this file carries, not the workflow:
+#   - the set is never written by a run; adding or extending an entry is a pull request, so the
+#     person who excuses a red signs for it;
+#   - every entry names the card that owns the fix and the date the excuse dies (`expires`, a TOML
+#     local date). An expired entry excuses nothing, and the red comes back on its own;
+#   - `nodeid` uses the watch's own fingerprint, `<file>::<test name>`, as
+#     `scripts/ci/gates/junit_reports.py` builds it from the JUnit `file`/`classname` attribute. The
+#     same test keeps one identity whichever job ran it, which is the point: `e2e shard (3/4)` on
+#     one workflow and `e2e full matrix (3/4)` on another are the same red.
+#   - an entry excuses a failure only while the pull request's base is an ancestor of that nightly
+#     run's head. Otherwise the nightly set describes another base and the gate fails instead.
+#
+# Entry shape (uncomment to excuse a red):
+#
+# [[inherited_red]]
+# nodeid = "tests/e2e/state/test_timeline_virtualization.py::test_parked_deep_history_mounts_a_bounded_window[agent_chat]"
+# card = "#6475"
+# expires = 2026-11-15
+
+inherited_red = []
