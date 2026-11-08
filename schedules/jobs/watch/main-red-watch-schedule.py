@@ -15,6 +15,7 @@
 import os
 import subprocess
 import sys
+import zipfile
 from collections.abc import Callable, Mapping
 from dataclasses import replace
 from datetime import UTC, datetime
@@ -40,6 +41,8 @@ from schedules.jobs.telemetry_event import emit_system_event
 from schedules.plans.schedule_identity import parse_schedule_id
 from schedules.jobs.watch.main_red_liveness import liveness_once
 from schedules.plans.watch.main_red import (
+    FAILURE_UNNAMED,
+    parse_failures,
     STALE_WATCH_TITLE,
     Card,
     Failure,
@@ -47,6 +50,7 @@ from schedules.plans.watch.main_red import (
     NIGHTLY_STALE_AFTER,
     RunFacts,
 )
+from schedules.plans.watch.junit import failing_case_ids, matching_artifact
 from schedules.plans.watch.workflow_graph import downstream_failing_jobs
 from schedules.plans.watch.release_gate_slot import RELEASE_GATE_SLOT_CADENCE, SlotFacts
 
@@ -174,10 +178,115 @@ def _workflow_text(workflow: str, sha: str, run_process: RunProcess) -> str:
         return ""
 
 
-def fetch_runs(workflow: str, run_process: RunProcess) -> tuple[RunFacts, ...]:
+# meiva:note
+# One job's red, from the log first and from the run's JUnit artifact only when the log named
+# nothing (task #6487). The artifact leg is the second read because it costs a download and an
+# unzip: a log that already said `FAILED path::case` has told the whole story. Both routes spell a
+# case the same way, so the fingerprint a red gets does not depend on which one answered.
+def _job_failures(
+    job: Mapping[object, object],
+    *,
+    run_id: int,
+    check_steps: frozenset[str],
+    scratch: Path,
+    run_process: RunProcess,
+) -> tuple[Failure, ...]:
+    job_id = job.get("id")
+    if not isinstance(job_id, int):
+        return ()
+    raw_name = job.get("name")
+    job_name = raw_name if isinstance(raw_name, str) else ""
+    log = _job_log(job_id, run_process)
+    failed_steps = _failed_step_names(job)
+    from_log = parse_failures(
+        log[-400_000:],
+        job_name=job_name,
+        suite_step_failed=True,
+        failed_steps=failed_steps,
+        check_steps=check_steps,
+    )
+    if from_log and all(failure.kind != FAILURE_UNNAMED for failure in from_log):
+        return from_log
+    return parse_failures(
+        log[-400_000:],
+        job_name=job_name,
+        suite_step_failed=True,
+        failed_steps=failed_steps,
+        check_steps=check_steps,
+        junit_ids=junit_case_ids(run_id, job_name, scratch, run_process),
+    )
+
+
+# meiva:note
+# The artifacts one run published, as GitHub lists them. A run that published none answers an empty
+# tuple, which reads as "no artifact named this job" -- the same evidence as an artifact that is
+# missing, and the caller already knows how to say that.
+def _run_artifacts(run_id: int, run_process: RunProcess) -> tuple[dict[str, object], ...]:
     import json
 
-    from schedules.plans.watch.main_red import parse_failures
+    payload = json.loads(
+        _api(f"repos/{_REPO}/actions/runs/{run_id}/artifacts?per_page=100", run_process)
+    )
+    items = payload.get("artifacts") if is_object_dict(payload) else None
+    if not is_object_list(items):
+        return ()
+    return tuple(item for item in items if is_object_dict(item))
+
+
+# meiva:note
+# The failing cases a job's JUnit artifact names. The artifact is matched by prefix against the name
+# derived from the job, and the longest match wins: a job whose name does not reproduce an artifact
+# name gets nothing rather than somebody else's shard, because naming a case from the wrong shard is
+# worse than admitting the watch cannot name it.
+def junit_case_ids(
+    run_id: int, job_name: str, scratch: Path, run_process: RunProcess
+) -> tuple[str, ...]:
+    by_name: dict[str, int] = {}
+    for artifact in _run_artifacts(run_id, run_process):
+        name = artifact.get("name")
+        identifier = artifact.get("id")
+        if isinstance(name, str) and isinstance(identifier, int):
+            by_name[name] = identifier
+    chosen = matching_artifact(job_name, tuple(by_name))
+    if chosen is None:
+        return ()
+    return _artifact_case_ids(by_name[chosen], scratch, run_process)
+
+
+# meiva:note
+# The zip lands under the schedule's own run directory and is removed as soon as it is read: the
+# path is chosen by the caller (`watch_round` knows the home), not invented here, because a module
+# that makes up a temporary name reads the world instead of taking it as an argument.
+def _artifact_case_ids(artifact_id: int, scratch: Path, run_process: RunProcess) -> tuple[str, ...]:
+    scratch.mkdir(parents=True, exist_ok=True)
+    bundle_path = scratch / f"artifact-{artifact_id}.zip"
+    try:
+        with bundle_path.open("wb") as sink:
+            done = run_process(
+                ["gh", "api", f"repos/{_REPO}/actions/artifacts/{artifact_id}/zip"],
+                stdout=sink,
+                stderr=subprocess.PIPE,
+                timeout=180,
+            )
+        if done.returncode != 0:
+            return ()
+        try:
+            with zipfile.ZipFile(bundle_path) as bundle:
+                documents = [
+                    bundle.read(entry) for entry in bundle.namelist() if entry.endswith(".xml")
+                ]
+        except (zipfile.BadZipFile, OSError):
+            return ()
+    finally:
+        bundle_path.unlink(missing_ok=True)
+    found: list[str] = []
+    for raw in documents:
+        found.extend(failing_case_ids(raw.decode("utf-8", "replace")))
+    return tuple(dict.fromkeys(found))
+
+
+def fetch_runs(workflow: str, run_process: RunProcess, scratch: Path) -> tuple[RunFacts, ...]:
+    import json
 
     listing = json.loads(_api(_runs_path(workflow, 10), run_process))
     definitions: dict[str, str] = {}
@@ -200,7 +309,6 @@ def fetch_runs(workflow: str, run_process: RunProcess) -> tuple[RunFacts, ...]:
                 GATE_CHECK_STEPS if workflow == _MAIN_PUSH else frozenset()
             )
             for job in failed:
-                log = _job_log(job["id"], run_process)
                 name = job.get("name", "")
                 parsed.extend(
                     # meiva:note
@@ -208,12 +316,12 @@ def fetch_runs(workflow: str, run_process: RunProcess) -> tuple[RunFacts, ...]:
                     # runs part of the tree reports reds no other job in the workflow can retire by
                     # passing (`_PARTIAL_JOBS`).
                     replace(failure, covers_full_suite=name not in _PARTIAL_JOBS)
-                    for failure in parse_failures(
-                        log[-400_000:],
-                        job_name=name,
-                        suite_step_failed=True,
-                        failed_steps=_failed_step_names(job),
+                    for failure in _job_failures(
+                        job,
+                        run_id=int(item.get("id") or 0),
                         check_steps=check_steps,
+                        scratch=scratch,
+                        run_process=run_process,
                     )
                 )
             failures = tuple(parsed)
@@ -464,7 +572,9 @@ def watch_round(
     line = watch_once(
         state_path=state_path,
         now=datetime.now(UTC),
-        fetch=partial(fetch_runs, run_process=run_process),
+        fetch=partial(
+            fetch_runs, run_process=run_process, scratch=home / "run" / "main-red-artifacts"
+        ),
         last_start=partial(_last_run_start, run_process=run_process),
         open_card=partial(_open_card, report_agent=report_agent),
         close_card=_close_card,
