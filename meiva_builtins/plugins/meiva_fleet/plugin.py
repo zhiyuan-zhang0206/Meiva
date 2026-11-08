@@ -7,6 +7,7 @@ They are not registered in the agent SDK.
 __description__: str = "Fleet role labels, task tracking and collaboration guidance."
 
 import uuid
+from collections.abc import Mapping
 from datetime import datetime, timedelta
 from typing import TypedDict
 
@@ -20,6 +21,16 @@ from base.packages.plugins.extensions import PluginContributions, SdkMember, Sdk
 from meiva.sdk_surface.validation import coerce_str, coerce_typed
 
 from . import task_registry
+
+
+# meiva:note
+# The schedule whose runner started this process, as the runner named it in the launch environment
+# the context carries. A notice posted from a schedule's own process can say which schedule that
+# was; an agent's own notice has no such entry and reports nothing, which is why the attribute is
+# optional — a missing id is "not known", never a wrong one.
+def _schedule_id(environ: Mapping[str, str] | None) -> int | None:
+    raw = (environ or {}).get("MEIVA_SCHEDULE_ID", "").strip()
+    return int(raw) if raw.isdigit() else None
 
 
 def set_label(text: str) -> None:
@@ -201,6 +212,7 @@ def notify(
             "require_response": require_response,
             "blocking": blocking,
             "task_id": task,
+            "schedule_id": _schedule_id(context.environ),
             "expire_at": expire_at_iso,
             **(
                 {"question": parsed_question.model_dump(mode="json")}

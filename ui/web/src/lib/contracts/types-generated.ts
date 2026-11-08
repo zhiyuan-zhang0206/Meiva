@@ -3338,6 +3338,7 @@ export interface components {
             require_response: boolean;
             blocking: boolean;
             task_id?: number | null;
+            schedule_id?: number | null;
             expire_at?: string | null;
             question?: (components["schemas"]["ChoiceQuestion"] | components["schemas"]["TextQuestion"]) | null;
         };

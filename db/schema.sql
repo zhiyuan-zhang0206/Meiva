@@ -297,6 +297,13 @@ CREATE TABLE agent_notices (
     -- NULL = written before the column existed.
     source_verified_by TEXT,
     expire_at       TIMESTAMPTZ,
+    -- The schedule whose run posted this notice, as its writer reported it
+    -- (`MEIVA_SCHEDULE_ID`); the server refuses one that names no schedule.
+    -- Provenance, not identity. NULL = an agent's own notice, a manual run, or
+    -- a row written before the column existed. Declared last because the
+    -- migration that introduced it appends the column, and the convergence
+    -- check compares column order. Its CHECK lives in that migration too.
+    schedule_id     BIGINT,
     CONSTRAINT agent_notices_question_requires_response
         CHECK (question IS NULL OR (jsonb_typeof(question) = 'object' AND require_response)),
     CONSTRAINT agent_notices_answer_requires_question
@@ -312,7 +319,11 @@ CREATE TABLE agent_notices (
                OR (require_response AND resolution IN ('answered', 'dismissed', 'withdrawn', 'superseded', 'expired'))
                OR (NOT require_response AND resolution IN ('answered', 'read', 'withdrawn', 'superseded', 'expired'))),
     CONSTRAINT agent_notices_answered_has_reply
-        CHECK (resolution IS DISTINCT FROM 'answered' OR reply IS NOT NULL)
+        CHECK (resolution IS DISTINCT FROM 'answered' OR reply IS NOT NULL),
+    -- Named here as well as in the migration that introduced the column: the baseline is
+    -- the squashed net effect, and the migration's DO block skips when this name exists.
+    CONSTRAINT agent_notices_schedule_id_positive
+        CHECK (schedule_id IS NULL OR schedule_id > 0)
 );
 
 -- Open notices that need a response: serves the snapshot's
