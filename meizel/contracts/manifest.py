@@ -20,7 +20,7 @@ from meizel.contracts.debt import (
     parse_debt,
     total,
 )
-from meizel.graph import judged
+from meizel.graph import licensed
 from meizel.graph.graphs import cycle_through, strongly_connected, unneeded_back_edges
 from meizel.graph.model import OS_KINDS, Code, Diagnostic, KindName, PurityItem, covered_kinds
 from meizel.graph.universe import MANIFEST, SOURCE_EXTENSIONS, Universe, is_private_module
@@ -224,11 +224,11 @@ class Manifest:
 
 # meiva:note
 # The purity items a directory's `[roots]` declarations do not license: one call seen by two rules,
-# `ambient-read` leaving the acquisition alone and `impure-call` charging for it again. A call is
-# licensed on the line its acquisition is recorded on (any language, so a TypeScript call with no
-# name the ambient table knows is covered), or on its name when that table judges it an
-# unconditional reader of a licensed kind; a call of another kind keeps its record (`time.sleep`
-# under a `clock` root is an effect of the clock's own door, not a read of the clock).
+# `ambient-read` leaving the acquisition alone and `impure-call` charging for it again. The join is
+# `meizel/graph/licensing.py` (`licensed`), which knows the three ways a declaration reaches a call
+# -- the line the acquisition is recorded on, the name the ambient table judges, and the name of a
+# filesystem read -- and a call it does not reach keeps its record (`time.sleep` under a `clock`
+# root is an effect of the clock's own door, not a read of the clock).
 def unlicensed(manifests: Mapping[str, Manifest], scan: FileScan) -> list[PurityItem]:
     owner, _, name = scan.path.rpartition("/")
     manifest = manifests.get(owner)
@@ -236,31 +236,8 @@ def unlicensed(manifests: Mapping[str, Manifest], scan: FileScan) -> list[Purity
     return [
         item
         for item in scan.purity
-        if not (item.code is Code.IMPURE_CALL and allowed and _licensed(allowed, scan, item))
+        if not (item.code is Code.IMPURE_CALL and allowed and licensed(allowed, scan.ambient, item))
     ]
-
-
-# meiva:note
-# The kinds one purity item's call is licensed by, empty when the declaration does not reach it. The
-# purity rule keeps the short spelling a call canonicalises to (`datetime.now` for the table's
-# `datetime.datetime.now`), so the table's own spelling is the second candidate -- the same name, not
-# a second rule -- and a call reached only when given no value reads nothing once handed the value,
-# so an `unless` clause names no kind here.
-def _licensed(kinds: frozenset[KindName], scan: FileScan, item: PurityItem) -> frozenset[KindName]:
-    on_line = frozenset(
-        acquisition.kind
-        for acquisition in scan.ambient
-        if acquisition.line == item.line and acquisition.kind in kinds
-    )
-    if on_line or "#" in item.key:
-        return on_line
-    reading = judged(item.key)
-    if reading is None and "." in item.key:
-        head, _, _ = item.key.partition(".")
-        reading = judged(f"{head}.{item.key}")
-    if reading is None or reading.judgment.unless is not None:
-        return frozenset()
-    return frozenset(reading.judgment.kinds) & kinds
 
 
 class _Reader:

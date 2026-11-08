@@ -137,9 +137,19 @@ class AmbientKind(StrEnum):
     PID = "pid"
     RANDOM = "random"
     ARGV = "argv"
+    FILESYSTEM = "filesystem"
 
 
 # meiva:note
+# `filesystem` is the one kind whose reads the scan derives no acquisition for: a read of a file is
+# an effect, and the purity layer already charges it `impure-call`, so restating it as a read of the
+# world would double the record of every filesystem call in a governed file and hide what the call
+# is. A root's declaration of the kind licenses the read by name instead
+# (`meizel/graph/licensing.py`), and only the read: a write, a rename, a descriptor read or an
+# `open` whose mode decides stay effects under any root, the same boundary `time.sleep` keeps inside
+# a `clock` root. A repository that wants the acquisition records it where the read belongs: a
+# function listed under `[ambient-readers.filesystem]` in the policy.
+#
 # The names of `AmbientKind`: the kinds no repository declares, which a state kind may not reuse.
 OS_KINDS: tuple[KindName, ...] = tuple(kind.value for kind in AmbientKind)
 

@@ -1,7 +1,7 @@
 ---
 type: doc
 title: "meizel/ — Ambient Kinds"
-description: "The closed vocabulary of the standard library's ambient kinds — `argv`, `environ`, `clock`, `monotonic`, `home`/`cwd`, `platform`, `pid`, `random` — the state kinds a repository's policy adds, the operating-system channels the standard-library kinds cover, the table that judges every name of those channels, and the guard that keeps the table closed."
+description: "The closed vocabulary of the standard library's ambient kinds — `argv`, `environ`, `clock`, `monotonic`, `home`/`cwd`, `platform`, `pid`, `random`, `filesystem` — the state kinds a repository's policy adds, the operating-system channels the standard-library kinds cover, the table that judges every name of those channels, and the guard that keeps the table closed."
 tags:
   - locality
   - tool
@@ -30,6 +30,12 @@ other root kind.
 | `platform` | which machine and which platform this is | `sys.platform`, `os.name`, `os.uname`, `os.cpu_count`, `os.getloadavg`, `os.sysconf`, `socket.gethostname`, `uuid.getnode`, `uuid.uuid1`, `email.utils.make_msgid`, `multiprocessing.cpu_count`, `time.get_clock_info`, `platform.*` except the `python_*` functions, which describe the pinned build |
 | `pid` | what the process says about itself: its ids, its interpreter, its terminal | `os.getpid` and the other id readers, `sys.executable`, `sys.prefix`, `sys.stdin`, `input()`, `isatty`, `shutil.get_terminal_size`, `getpass.getuser`, `email.utils.make_msgid`, `netrc.netrc()` without a file, `site.check_enableusersite`, `fileinput.input()` without files (standard input), `os.getlogin`, `pwd`/`grp` lookups, `threading.get_ident`, `psutil.Process()` without a pid |
 | `random` | entropy | `random.*` (literal non-None seeded generators and class references excluded), `secrets.*` (not `secrets.compare_digest`), `uuid.*` except the name-derived ones, `email.utils.make_msgid`, `tempfile.mkdtemp` and the other temporary-file constructors without a `dir` (the name is random), `ssl.RAND_bytes`, `os.urandom`, `os.getrandom` |
+| `filesystem` | the contents and metadata of files: the one kind whose reads derive no
+acquisition of their own, because a read of a file is an effect the purity layer already charges | a
+`[roots]` declaration licenses the read by its name (`Path.read_bytes`, `os.stat`, the
+`os.path` metadata readers); `open` (its mode decides), a call on a descriptor, a listing given
+no path and every write stay effects ([[meizel/docs/ambient-kinds-calls.meiva.okf.md|what a call
+depends on]]) |
 | a state kind of the policy's `[ambient]` | the state the repository keeps itself | the names that table lists for it, resolved against the modules whose `[state]` declares the kind ([[meizel/docs/checker/ambient.meiva.okf.md|the ambient reads node]]) |
 
 ## The channels
@@ -48,7 +54,7 @@ met. Each channel is either an ambient kind or the concern of another layer:
 | how long a wait has run, measured against a deadline the process wrote itself | `monotonic` |
 | entropy | `random` |
 | the anchors a relative path hangs from: the home directory, the working directory | `home`, `cwd` |
-| the contents and metadata of files | not a kind: an effect, `impure-call` in the purity layer |
+| the contents and metadata of files | `filesystem` for a read, an effect (`impure-call`) otherwise |
 | the network, including name resolution | not a kind: an effect, `impure-call` |
 | the repository's own state | a state kind the repository's policy declares |
 
@@ -57,12 +63,8 @@ A name that only converts, compares or formats the values it is given reads none
 ## What a call that reads the world depends on
 
 Whether a call is an acquisition can depend on what it is given, on whether its function waits, and on
-a seed: [[meizel/docs/ambient-kinds-calls.meiva.okf.md|what a call depends on]]. One call can also read
-several channels and then acquires each of them: `getpass.getuser()` is `environ` and `pid`,
-`tempfile.mkdtemp()` is `environ` and `random`. Each kind is a debt of its own, and a root declares all
-of them.
-
-The names that acquire each kind are judged one by one, and the table is kept closed:
+a seed: [[meizel/docs/ambient-kinds-calls.meiva.okf.md|what a call depends on]]. The names that
+acquire each kind are judged one by one, and the table is kept closed:
 [[meizel/docs/ambient-surface.meiva.okf.md|the ambient surface node]].
 
 Parent: [[meizel/docs/checker/ambient.meiva.okf.md|the ambient reads rules]].

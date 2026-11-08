@@ -8,6 +8,7 @@ exports = ["graphs.py", "imports.py", "model.py", "universe.py"]
 "graphs.py" = "strict"
 "impacted.py" = "strict"
 "imports.py" = "strict"
+"licensing.py" = "strict"
 "model.py" = "strict"
 "reachability.py" = "strict"
 "scopes.py" = "strict"
@@ -18,8 +19,15 @@ exports = ["graphs.py", "imports.py", "model.py", "universe.py"]
 "ambient_process_table.py" = ["ambient_judgments.py"]
 "ambient_surface.py" = ["ambient_judgments.py", "ambient_process_table.py", "model.py"]
 "impacted.py" = ["scopes.py", "universe.py"]
+"licensing.py" = ["ambient_surface.py", "model.py"]
 "imports.py" = ["model.py", "scopes.py", "universe.py"]
-"__init__.py" = ["ambient_surface.py", "impacted.py", "python_layout.py", "reachability.py"]
+"__init__.py" = [
+    "ambient_surface.py",
+    "impacted.py",
+    "licensing.py",
+    "python_layout.py",
+    "reachability.py",
+]
 "tests" = ["ambient_judgments.py", "ambient_surface.py", "model.py"]
 "reachability.py" = ["model.py", "universe.py"]
 "universe.py" = ["python_layout.py"]
