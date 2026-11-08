@@ -1,20 +1,13 @@
-"""Alert-push IM copy — the user-visible alert templates (single source).
-
-The alert push templates were moved here from ``services/entrypoints/im_bridge/copy.py``
-(2026-08-25, tech-audit P1): ``base.telemetry.alerts`` — the alert-ingest core — must
-not import up into ``services``, and the templates are its own IM copy, so
-they live in a ``base`` leaf module and ``services/entrypoints/im_bridge/copy.py``
-re-exports them for its own consumers. The "one voice for IM copy" governance
-(ruling 2026-08-08) is preserved: one definition, re-exported, never
-duplicated.
-
-Language follows the UI language — user_settings ``display.language``
-("zh" | "en"; missing/unknown falls back to ALERT_LANGUAGE_DEFAULT, user
-ruling 2026-08-13). Only template/framework copy is translated: alert
-labels/annotations data (severity, alertname, summary, generator_url) passes
-through untranslated. The English set keeps the pre-ruling production
-strings; {severity}/{alertname}/{time}/{url} are filled in at the call site.
-"""
+# meiva:note
+# The user-visible alert templates, one definition and no copies ("one voice for alert
+# copy", ruling 2026-08-08; they live in this `base` leaf module because the alert-ingest
+# core must not import up into `services`). Language follows the UI language --
+# user_settings ``display.language`` ("zh" | "en"; missing/unknown falls back to
+# ALERT_LANGUAGE_DEFAULT, user ruling 2026-08-13). Only template/framework copy is
+# translated: alert labels/annotations data (severity, alertname, summary, generator_url)
+# passes through untranslated. The English set keeps the pre-ruling production strings;
+# {severity}/{alertname}/{time}/{url} are filled in at the call site.
+# meiva:link gateway/alerts/docs/alerts.meiva.okf.md
 
 from __future__ import annotations
 

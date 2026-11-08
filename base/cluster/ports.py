@@ -37,7 +37,6 @@ class ClusterPorts(TypedDict):
     pgbouncer: int
     events_maintenance: int
     delivery_watchdog: int
-    im_bridge: int
     page_server: int
     agent_host: int
     pg_backup: int

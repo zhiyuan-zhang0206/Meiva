@@ -20,7 +20,7 @@ provider, Mixture-of-Agents presets, and fallback chains.
 | Skills — autonomous creation, self-improvement, Skills Hub (`hermes skills` / `curator`) | Skills are files installed via `meiva skill install`; changing a skill is a PR, not a runtime loop | Honest gap: no autonomous skill creation or in-use self-improvement. The closest relative is the weekly self-evolution pass that mines agent traces and proposes skill edits — reviewed, not autonomous. |
 | `hermes bundles` (skill groups) | N/A | |
 | SOUL.md persona | System prompt + role-card skills (`be-a-<role>`) | |
-| Channels (CLI, Telegram, Discord, Slack, WhatsApp, Signal, Email, SMS, …) | Platform dialog + `meiva.ui.ask`; Telegram via the IM Bridge where it runs | |
+| Channels (CLI, Telegram, Discord, Slack, WhatsApp, Signal, Email, SMS, …) | Platform dialog + `meiva.ui.ask` | Meiva has no messaging channels. |
 | Command approval (`hermes approvals`) | Memory gates + `meiva.ui.ask(...)` | No approval-history ledger. |
 | Terminal backends (local, Docker, SSH, Daytona, Modal) | Multi-machine agents (`meiva.agents.spawn(machine=...)`), `meiva.shell.sessions`, containers via shell | Daytona/Modal serverless hibernation has no Meiva equivalent. |
 | `hermes cron` | `meiva schedules` + `meiva.watcher` | |
@@ -43,8 +43,7 @@ provider, Mixture-of-Agents presets, and fallback chains.
 5. **Choose models per role.** `hermes model` / MoA presets → one model per
    agent via `config_overlay`; no multi-model aggregation.
 6. **Move channel habits.** Pick the platform dialog as the primary surface;
-   there is no WhatsApp/Discord/Slack bot (Telegram via the IM Bridge only,
-   where configured).
+   there is no WhatsApp/Discord/Slack/Telegram bot.
 
 ## Differences and pitfalls
 
@@ -59,7 +58,7 @@ provider, Mixture-of-Agents presets, and fallback chains.
   approved; Meiva's gates are memory rules and `require_response` notices, with
   no such ledger.
 - **Channels shrink to one surface.** 20+ platforms become the platform
-  dialog + notices (+ Telegram IM Bridge). Set that expectation early.
+  dialog + notices. Set that expectation early.
 - **Sessions are agent-scoped.** `hermes sessions` browse/export/prune has no
   equivalent UI; conversation state lives with each agent, and handoffs go
   through files and tasks.

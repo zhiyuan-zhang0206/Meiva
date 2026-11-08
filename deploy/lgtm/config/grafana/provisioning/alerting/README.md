@@ -204,15 +204,15 @@ R19 gives slow-by-design routes separate 5s/10s thresholds calibrated against
 baseline ×2) rather than single long turns. The emitter's single
 route-classification source is `gateway/http/middleware/latency.py`. All five carry
 `notify_im: "false"` — the PM slow-request convention is warning-first and no
-IM fan-out (alert-fatigue ruling 2026-08-22); the gateway honors the label once
-the IM gating PR (#3219) lands, until then they reach IM like the rest.
+fan-out to the user (alert-fatigue ruling 2026-08-22). The label is history: the
+IM channels retired on 2026-11-08 and the ingest no longer reads it.
 
 Severity follows the alert-system vocabulary (Task #1224):
-critical/warning/error — all three push to IM, no gate. Thresholds are
+critical/warning/error — none of the three is gated. Thresholds are
 calibrated against live data (2026-08-04, see header comment in
 `rules.yml`). R7 (trace-disk-watermark) is a chronic-condition alert: any
 degradation event in the trailing 24h keeps it firing, so one episode = one
-onset + one recovery IM instead of one per event.
+onset and one recovery record instead of one per event.
 
 R13 (llm-billing-quota) is the one rule with no threshold and no `for`
 window: an out-of-credit API key fails every turn in the fleet and only a
@@ -296,8 +296,6 @@ and trailing window carry the debounce. A condition that stops resolves itself w
 | `meiva-ops-inspect-metrics-gap` | `inspect_metrics_coverage_gap` | 0s | warning | the inspector's cooldown and direct row |
 | `meiva-ops-impersonation-seal-stuck` / `-capture-failed` | `impersonation_event_log_incomplete` | 0s | warning | the impersonation event-log rows |
 | `meiva-ops-impersonation-notice-failed` | `impersonation_terminal_notice_failed` per lease | 0s | warning | the ended-lease notice's durable retry ledger (a failed single submission is now reported, not retried) |
-| `meiva-ops-im-push-failed` | `im_push_failed` (weixin, 2+ failures) | 0s | warning | the push watchdog's cross-channel alert and cooldown |
-| `meiva-ops-im-push-stall` | `im_push_health` per leg (`attributes_channel`; pending > 0, last delivery age > 900s) | 2m | warning | nothing: an outbound IM leg could stall with no alert (10-08: Telegram leg silent 54 min, 2 pushes stranded) |
 | `meiva-ops-delivery-stalled` | `delivery_stalled` per agent | 1m | warning | the deploy-window hold and settle grace |
 | `meiva-ops-delivery-stranded-wake` | `delivery_stranded_wake` per agent (inbound id in the summary) | 0s | warning | nothing: an automatic wake that revives an owner a user had just killed had no notification path (2026-10-25 review of #7066) |
 | `meiva-ops-db-pool-acquire-slow` | `db_pool_acquire_slow` per machine | 2m | warning | the per-host cooldown marker |
@@ -316,7 +314,7 @@ and trailing window carry the debounce. A condition that stops resolves itself w
 | `meiva-ops-llm-usage-metering-failed` | `llm_usage_metering_failed` per model (1h) | 0m | warning | nothing: the call ran and its `llm_usage` row was dropped, so the spend happened and the ledger never saw it (#6400) |
 | `meiva-ops-exec-node-timeout` | `exec_node_timeout` (30m) | 0m | warning | nothing: the node timeout killed the call and no rule read the event (#6400) |
 | `meiva-ops-exec-subprocess-killed` | `exec_subprocess_killed` (1h) | 0m | warning | nothing: a child that outlived the signal grace may have left partial output behind (#6400) |
-| `meiva-ops-alert-pipeline-watchdog` | Prometheus `vector(1)` — always firing, carries `notify_im: "false"` | 0s | warning | synthetic heartbeat: it exists only so R28 has something whose absence means something. Its route repeats every 5m and does not fall through, so it costs one webhook POST per period and no IM |
+| `meiva-ops-alert-pipeline-watchdog` | Prometheus `vector(1)` — always firing | 0s | warning | synthetic heartbeat: it exists only so R28 has something whose absence means something. Its route repeats every 5m and does not fall through, so it costs one webhook POST per period |
 | `meiva-ops-alert-pipeline-silent` | `time() - meiva_alerts_last_ingest_timestamp_seconds` > 900 (three watchdog periods) | 5m | error | nothing: a rotated webhook token or a misrouted contact point silences **every** rule at once, and no rule rode a path that could report it (2026-11-04). Routes to the gateway webhook |
 
 Unhealthy-for-3-minutes and unhealthy-for-10-minutes are two coexisting rules per condition
@@ -329,15 +327,14 @@ out-of-band probe's.
 
 ## The alert pipeline's own dead-man pair
 
-Every rule above rides one path: Grafana → `POST /api/alerts` → the `alerts` row → the im_bridge
-fan-out. When that path breaks — a webhook token the gateway no longer accepts after a rotation, a
+Every rule above rides one path: Grafana → `POST /api/alerts` → the `alerts` row. When that path breaks — a webhook token the gateway no longer accepts after a rotation, a
 stopped gateway, a contact point pointing at the wrong port — **all 70 rules go quiet together**, and
 the silence looks exactly like a quiet night. Two rules close that hole and nothing else:
 
 - `meiva-ops-alert-pipeline-watchdog` fires unconditionally (`vector(1)`) every evaluation. It asserts
   nothing about the system; its only job is to walk the whole path and refresh one row. Its route
   repeats every 5 minutes and carries `continue: false`, so the heartbeat costs one POST per period
-  and never reaches the catch-all or the user's IM (`notify_im: "false"`).
+  and never reaches the catch-all.
 - `meiva-ops-alert-pipeline-silent` reads the gauge the ingest refreshes
   (`alerts_last_ingest_timestamp_seconds`, emitted by `gateway/alerts/router.py:ingest_alerts` on every
   accepted POST) and fires when it is older than 900 s — three missed periods — for 5 minutes. It routes
@@ -366,11 +363,9 @@ The host sentinel retains a separate observation loop and agent-queue submission
 but no external Bot API delivery path remains.
 
 The ingest stores each alert instance in `alerts` (deduped by fingerprint x starts_at, Alertmanager
-webhook shape) and fans firing notifications out through the im_bridge daemon (the only sanctioned
-IM surface) — one alert instance = one row, one POST's instances of a rule = one IM (`xN`, the first three summaries), every severity (critical/warning/error, no
-gate beyond the rule's own `notify_im="false"`). It is the only writer of that table; no process
-writes alert rows, posts to the endpoint or pushes an alert to IM on its own
-(`tests/scripts/test_alert_single_path.py`).
+webhook shape) — one alert instance = one row. It is the only writer of that table
+(`tests/scripts/test_alert_single_path.py`), and it delivers nothing: the IM fan-out retired with
+the IM channels on 2026-11-08, so the `notify_im` labels left in the rules are inert.
 
 A planned outage is a silence, not a gate in the services: `meiva update down` creates
 one silence in this Grafana (matcher `alertname=~".+"`, disk alerts excepted: `metric="host_disk"`,

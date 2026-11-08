@@ -13,7 +13,6 @@ os.environ["MEIVA_CONFIG_FETCH"] = "skip"
 
 _GATEWAY_SOURCE_ROOTS = (
     "gateway/",
-    "services/entrypoints/im_bridge/",
     "services/wake/heartbeat/",
     "services/derived/labeler/",
     "services/upkeep/events_maintenance/",
@@ -293,7 +292,6 @@ def test_gateway_closure_reads_do_not_hit_popped_keys() -> None:
 _KIND_ROOTS: dict[str, tuple[str, ...]] = {
     "gateway": (
         "gateway/",
-        "services/entrypoints/im_bridge/",
         "services/wake/heartbeat/",
         "services/derived/labeler/",
         "services/upkeep/events_maintenance/",

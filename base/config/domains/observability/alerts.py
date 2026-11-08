@@ -45,23 +45,6 @@ class AlertsSettings(EnvSettings):
         },
     )
 
-    im_notify_enabled: bool = Field(
-        title="Send alerts to messaging channels",
-        default=True,
-        alias="MEIVA_ALERTS_IM_NOTIFY_ENABLED",
-        description=(
-            "Send firing/resolved alert notifications to the user's connected "
-            "IM channels (Weixin via the im_bridge daemon). "
-            "Disable to keep the alerts store + UI only."
-        ),
-        json_schema_extra={
-            "restart_required": "gateway",
-            "writable": True,
-            "sensitive": False,
-            "scope": "cluster-pinned",
-        },
-    )
-
     provider_guard_balance_enabled: bool = Field(
         title="Check provider account balance",
         default=True,

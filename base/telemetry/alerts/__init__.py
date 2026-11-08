@@ -1,28 +1,9 @@
-"""Alert ingest core — the alerts-store + IM-notification logic.
-
-Alert is fully separate from Notice (Task #1224, user design 2026-08-12: own
-table, own UI, own IM channel), and there is one way in: the gateway router
-(gateway/alerts/router.py) ingests the Grafana embedded-Alertmanager webhook
-on ``POST /api/alerts``. Every rule, grouping, repetition and window silence
-is Grafana's (docs/decisions/observability/alerts/2026-10-04-alerting-on-grafana-alerting.md); no other
-process writes the ``alerts`` table or pushes an alert to IM.
-
-The functions take the Alertmanager webhook *alert shape as a plain dict*
-(status/labels/annotations/starts_at/ends_at/fingerprint/generator_url) so
-this module stays below the gateway layer (the events-maintenance
-reconciliation shares its key parsing); the router owns the transport.
-
-Dedup key (fingerprint, starts_at): Alertmanager may re-send the same instance
-while it is firing and sends it once more on resolution — the
-upsert updates the row instead of duplicating it; a resolved row that fires
-again (new starts_at) starts a fresh instance. ``fingerprint`` is the
-Alertmanager-standard fnv-1a hash over sorted labels; the ingest computes it
-when a payload omits it, using the exact Alertmanager algorithm so a
-computed hash and a Grafana-sent hash agree for the same label set. The IM
-fan-out is gated by the transition logic in ``upsert_alert`` — every severity
-pushes, and an open instance pushes again when its severity increases, unless
-the rule explicitly labels the alert ``notify_im="false"``.
-"""
+# meiva:note
+# The alert ingest core: the store, its transition record and the rendered group text,
+# with nothing delivered behind any of it. It stays below the gateway layer -- the
+# functions take the Alertmanager webhook alert shape as a plain dict and the router owns
+# the transport -- because the events-maintenance reconciliation shares the key parsing.
+# meiva:link gateway/alerts/docs/alerts.meiva.okf.md
 
 from __future__ import annotations
 
@@ -100,9 +81,6 @@ _STATUS_MAP = {"firing": "unresolved", "resolved": "resolved"}
 # Instances a grouped message names before it says how many more there are.
 _GROUP_LISTED = 3
 
-_IM_GATE_LABEL = "notify_im"
-_IM_GATE_VALUE = "false"
-
 # FNV-1a 64-bit constants (the hash Alertmanager fingerprints labels with).
 _FNV_OFFSET = 0xCBF29CE484222325
 _FNV_PRIME = 0x100000001B3
@@ -163,17 +141,6 @@ def normalize_status(status: str) -> str:
     return _STATUS_MAP.get(status, "unresolved")
 
 
-def im_fanout_allowed(labels: dict[str, str]) -> bool:
-    """Return whether this alert may fan out to IM.
-
-    Only the exact string ``labels["notify_im"] == "false"`` disables IM.
-    This conservative gate keeps noisy slow-request rules visible in the UI
-    and Insights while keeping the user's IM quiet (Task #1404).
-    """
-
-    return labels.get(_IM_GATE_LABEL) != _IM_GATE_VALUE
-
-
 # meiva:note
 # The latest known start of one fingerprint.
 @dataclass(frozen=True)
@@ -213,19 +180,19 @@ class _StoredAlertRow:
 
 
 # meiva:note
-# The IM template language row: ``value`` is jsonb and only a string is a language.
+# The alert-copy language row: ``value`` is jsonb and only a string is a language.
 @dataclass(frozen=True)
 class _DisplayLanguageRow:
     value: object
 
 
 def _existing_starts_at(conn: psycopg.Connection, fp: str, alertname: str) -> datetime | None:
-    """The latest known starts_at of `fp` for a payload that carries none; None rejects it."""
-    # No starts_at (payload drift): re-sends of an EXISTING instance
-    # reuse its starts_at so the (fingerprint, starts_at) dedup key stays
-    # stable. A genuinely new alert with no starts_at has no stable
-    # identity — fabricating now() would make every re-send a fresh
-    # instance (duplicate rows + duplicate IMs), so it is rejected.
+    # meiva:note
+    # The latest known starts_at of `fp` for a payload that carries none; None rejects it. No
+    # starts_at is payload drift: re-sends of an EXISTING instance reuse its starts_at so the
+    # (fingerprint, starts_at) dedup key stays stable, and a genuinely new alert without one
+    # has no stable identity -- fabricating now() would make every re-send a fresh instance
+    # (duplicate rows and duplicate messages), so it is rejected.
     row = query_one(
         conn,
         _StartsAtRow,
@@ -390,28 +357,19 @@ def upsert_alert(
     *,
     instance_key: AlertKey | None = None,
 ) -> tuple[AlertKey, bool, bool, dict[str, object]]:
-    """Upsert one alert instance; return (key, did_insert, should_notify, row).
-
-    ``alert`` is the Alertmanager-webhook alert shape as a dict (the model
-    dump). ``source`` tags the row's provenance (``grafana``, the webhook's
-    default); it is set on insert and never overwritten by a conflict
-    re-send — a repeated webhook for the same instance must not rewrite
-    history.
-
-    ``should_notify`` — the notification gate (every severity pushes unless
-    ``notify_im`` is exactly ``"false"``; transition rules still prevent a
-    repeated re-send of a still-firing instance from re-spamming):
-    - firing, and the firing has not been IM-notified yet (fresh insert, a
-      failed earlier attempt, or a resolved row re-firing): True — a single
-      im_bridge outage must not silence the alert forever, the next re-send
-      retries while ``notified_at`` stays NULL
-    - firing, re-fired after a resolution (a new event for the user): True
-    - firing, severity increased on an unresolved already-notified instance:
-      True — escalation is a new firing transition and therefore new information
-    - instance resolved, and the firing had been IM-notified before: True
-    - every other re-send (already firing + already notified, already
-      resolved): False
-    """
+    # meiva:note
+    # Upsert one alert instance; return (key, did_insert, should_notify, row). ``alert`` is the
+    # Alertmanager-webhook alert shape as a dict (the model dump). ``source`` tags the row's
+    # provenance (``grafana``, the webhook's default); it is set on insert and never
+    # overwritten by a conflict re-send -- a repeated webhook for the same instance must not
+    # rewrite history.
+    #
+    # ``should_notify`` is the transition predicate the record is built from (see
+    # ``_transition_notifies``): a firing with no confirmed delivery yet, a re-fire after a
+    # resolution, an escalation on an open instance, and the resolution of an instance that
+    # was delivered before. Every other re-send is False, so a repeated webhook for a
+    # still-firing instance mints no second record. ``notified_at`` has no writer left, so
+    # ``was_notified`` is False for every row written from now on and true only for history.
 
     labels = _string_map(alert, "labels")
     status = normalize_status(str(alert.get("status") or "firing"))
@@ -448,21 +406,17 @@ def upsert_alert(
         source=source,
     )
 
-    should_notify = (
-        not schedule_inactive
-        and im_fanout_allowed(labels)
-        and _transition_notifies(
-            status, severity, old_status, old_severity, was_notified=was_notified
-        )
+    should_notify = not schedule_inactive and _transition_notifies(
+        status, severity, old_status, old_severity, was_notified=was_notified
     )
     return (fp, starts_at), did_insert, should_notify, row
 
 
 # meiva:note
-# What one IM message renders against, read once where the cluster's configuration is: the zone
-# the trigger time is shown in (``None`` when this process holds no authoritative cluster
-# timezone, which renders in the host zone) and the fleet-UI base URL the jump link points at
-# ('' when no reachable UI is configured).
+# What one rendered alert message is built from, read once where the cluster's configuration
+# is: the zone the trigger time is shown in (``None`` when this process holds no authoritative
+# cluster timezone, which renders in the host zone) and the fleet-UI base URL the jump link
+# points at ('' when no reachable UI is configured).
 @dataclass(frozen=True)
 class AlertMessageStyle:
     zone: ZoneInfo | None
@@ -474,19 +428,14 @@ class AlertMessageStyle:
 # it down. A ``None`` zone — this process holding no authoritative cluster timezone
 # (settings-lite, gateway down) — renders in the host zone, which is what `Clock.zone()` returns
 # there, so the documented lite degradation survives the move.
+#
+# The rendered wall clock carries year + zone abbreviation (tz audit, 2026-08, PR-6): the prior
+# ``%m-%d %H:%M`` gave no way to tell which year an alert near New Year's fired in, and no way
+# to tell which machine's local zone the reader was looking at on a multi-machine cluster. It
+# renders in the cluster's `MEIVA_TIMEZONE` (user ruling 2026-08-27: one cluster clock — a
+# runner whose OS zone differs from the cluster's must not show a different wall clock from
+# every other surface).
 def format_local(ts: datetime | None, zone: ZoneInfo | None) -> str:
-    """Cluster-wall-clock string for the IM message ('' when None).
-
-    Carries year + zone abbreviation (tz audit, 2026-08, PR-6): the prior
-    `%m-%d %H:%M` gave no way to tell which year an alert near New Year's
-    fired in, and no way to tell which machine's local zone the reader was
-    looking at on a multi-machine cluster. Renders in the cluster's
-    `MEIVA_TIMEZONE` (user ruling 2026-08-27: one cluster clock — a runner
-    whose OS zone differs from the cluster's must not show a different wall
-    clock from every other surface); when this process holds no authoritative
-    cluster timezone (settings-lite, gateway down) it falls back to the host
-    zone, the documented lite degradation.
-    """
 
     if ts is None:
         return ""
@@ -497,15 +446,13 @@ def format_local(ts: datetime | None, zone: ZoneInfo | None) -> str:
 # Both inputs arrive as values the gateway root read once for its own use: the gateway root
 # already resolves these two URLs for `allowed_origins`, so the derivation happens there rather
 # than re-reading the process settings on every render.
+#
+# The base URL an alert's jump link points at is the user-facing fleet UI entry: the HOST of
+# ``MEIVA_GATEWAY_URL`` (reachable over the private network, never localhost in prod) and the
+# PORT of ``MEIVA_FRONTEND_HEALTHCHECK_URL`` (the Next.js app binds another port and is
+# proxied), '' when neither is configured so the link is omitted rather than pointing at
+# loopback.
 def frontend_base_url(gateway_url: str, frontend_healthcheck_url: str) -> str:
-    """The user-facing fleet UI base URL for IM jump links.
-
-    The user reaches the fleet UI at Gate's entry port on the
-    gateway host (the Next.js app itself binds another port and is proxied).
-    Derived from the two existing settings: the HOST of ``MEIVA_GATEWAY_URL``
-    (reachable over the private network, never localhost in prod) and the PORT of
-    ``MEIVA_FRONTEND_HEALTHCHECK_URL`` (the fleet UI entry the user reaches).
-    """
 
     gw = urlsplit(gateway_url)
     fe = urlsplit(frontend_healthcheck_url)
@@ -524,13 +471,12 @@ def _summary(alert: AlertPayload) -> str:
 
 
 def display_language(conn: psycopg.Connection) -> str:
-    """The IM template language — ``user_settings`` key ``display.language``.
-
-    IM copy language follows the UI language (user ruling 2026-08-13: one
-    language source, no separate IM field). Returns "zh" | "en"; a missing
-    row or an unknown value falls back to ``ALERT_LANGUAGE_DEFAULT`` ("zh").
-    Only template/framework copy is translated — alert data never is.
-    """
+    # meiva:note
+    # The alert-copy language, from ``user_settings`` key ``display.language``: the copy follows
+    # the UI language (user ruling 2026-08-13: one language source, no separate field for the
+    # alert text). Returns "zh" | "en"; a missing row or an unknown value falls back to
+    # ``ALERT_LANGUAGE_DEFAULT`` ("zh"). Only template/framework copy is translated -- alert
+    # data never is.
 
     row = query_one(
         conn, _DisplayLanguageRow, "SELECT value FROM user_settings WHERE key = 'display.language'"
@@ -540,23 +486,19 @@ def display_language(conn: psycopg.Connection) -> str:
 
 
 def notify_text(alert: AlertPayload, lang: str | None = None, *, style: AlertMessageStyle) -> str:
-    """The alert IM message — the alert-specific format (user design 2026-08-12):
-    a warning-sign-prefixed ``ALERT [<severity>] <alertname>`` head line, the
-    summary body, the generatorURL when present, the trigger time, and the
-    fleet-UI jump link (omitted when no fleet-UI base URL is configured).
-    Resolved instances swap the head for the check-marked ``RESOLVED``
-    variant. Every severity pushes
-    (critical/warning/error — no severity gate).
-
-    Templates live in ``base/telemetry/alerts/copy.py`` — the single source of
-    user-visible IM copy (governance ruling 2026-08-08; moved down from
-    services/entrypoints/im_bridge/copy.py by the 2026-08-25 tech-audit P1 so shared does
-    not import up into services). ``lang`` picks the template language
-    ("zh" | "en"); ``None`` (or an unknown value) falls back to
-    ``ALERT_LANGUAGE_DEFAULT`` ("zh", user ruling 2026-08-13). Alert
-    labels/annotations data (severity, alertname, summary, generator_url)
-    passes through untranslated.
-    """
+    # meiva:note
+    # The rendered alert message, in the alert-specific format (user design 2026-08-12): a
+    # warning-sign-prefixed ``ALERT [<severity>] <alertname>`` head line, the summary body, the
+    # generatorURL when present, the trigger time, and the fleet-UI jump link (omitted when no
+    # fleet-UI base URL is configured). Resolved instances swap the head for the check-marked
+    # ``RESOLVED`` variant. Once the text of the delivery, it is now the body of the transition
+    # record that ``alert_notification_groups`` freezes.
+    #
+    # Templates live in ``base/telemetry/alerts/copy.py`` -- the single source of user-visible
+    # copy (governance ruling 2026-08-08). ``lang`` picks the template language ("zh" | "en");
+    # ``None`` (or an unknown value) falls back to ``ALERT_LANGUAGE_DEFAULT`` ("zh", user
+    # ruling 2026-08-13). Alert labels/annotations data (severity, alertname, summary,
+    # generator_url) passes through untranslated.
 
     labels = _string_map(alert, "labels")
     severity = parse_severity(labels).upper()
@@ -584,13 +526,13 @@ def notify_text(alert: AlertPayload, lang: str | None = None, *, style: AlertMes
 def notify_group_text(
     alerts: list[AlertPayload], lang: str | None = None, *, style: AlertMessageStyle
 ) -> str:
-    """One IM message for the instances of one rule that a single webhook POST carries.
-
-    Grafana groups a rule's instances into one notification (`group_by alertname`), so the
-    user hears one message per group, not one per instance: a lone instance keeps the
-    ``notify_text`` format; several share one head (the highest severity, the alertname and
-    ``xN``), list the first few summaries and count the rest. The store still holds one row
-    per instance. Instances are expected to share their alertname and status."""
+    # meiva:note
+    # One rendered message for the instances of one rule that a single webhook POST carries.
+    # Grafana groups a rule's instances into one notification (`group_by alertname`), so the
+    # record holds one group per notification rather than one per instance: a lone instance
+    # keeps the ``notify_text`` format; several share one head (the highest severity, the
+    # alertname and ``xN``), list the first few summaries and count the rest. The store still
+    # holds one row per instance. Instances are expected to share their alertname and status.
 
     if len(alerts) == 1:
         return notify_text(alerts[0], lang, style=style)

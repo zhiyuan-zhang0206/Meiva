@@ -62,8 +62,6 @@ SIGNALS: dict[str, Signal] = {
     "meiva-ops-inspect-metrics-gap": Signal(
         "inspect_metrics_coverage_gap", "meiva-ops", "0s", "warning"
     ),
-    "meiva-ops-im-push-failed": Signal("im_push_failed", "meiva-ops", "0s", "warning"),
-    "meiva-ops-im-push-stall": Signal("im_push_health", "meiva-ops", "2m", "warning"),
     "meiva-ops-delivery-stalled": Signal("delivery_stalled", "meiva-ops", "1m", "warning"),
     "meiva-ops-delivery-stranded-wake": Signal(
         "delivery_stranded_wake", "meiva-ops", "0m", "warning"
@@ -198,7 +196,7 @@ def test_the_health_rules_label_their_check_for_routing_and_the_window_silence()
         assert "sum by (attributes_check)" in _query(_rules()[uid][1])
 
 
-def test_the_probe_dead_man_fires_on_an_absent_heartbeat_and_routes_to_telegram() -> None:
+def test_the_probe_dead_man_fires_on_an_absent_heartbeat() -> None:
     rule = _rules()["meiva-ops-health-probe-silent"][1]
     assert "absent_over_time(" in _query(rule)
     assert rule["labels"]["metric"] == "health_probe_silent"

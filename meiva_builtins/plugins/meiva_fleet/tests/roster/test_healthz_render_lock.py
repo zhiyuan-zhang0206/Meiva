@@ -87,7 +87,7 @@ class _Legacy:
 # those deliberate changes are updated in place while every other launch fact stays locked.
 # meiva:link services/agent_runner/agent_host/lifecycle/docs/graceful-exit.meiva.okf.md
 _LEGACY = (
-    _Legacy("im-bridge", "services.entrypoints.im_bridge.daemon", _GATEWAY, True),
+    _Legacy("ttl-reaper", "services.upkeep.ttl_reaper.daemon", _GATEWAY, True),
     _Legacy(
         "labeler",
         "services.derived.labeler.daemon",

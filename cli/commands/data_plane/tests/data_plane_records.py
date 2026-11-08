@@ -37,7 +37,6 @@ def remote_cluster_record() -> cluster.ClusterRecord:
             "redis": 18012,
             "events_maintenance": 18014,
             "delivery_watchdog": 18016,
-            "im_bridge": 18017,
             "agent_host": 18019,
             "pg_backup": 18021,
             "ttl_reaper": 18025,

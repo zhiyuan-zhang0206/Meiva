@@ -1081,12 +1081,6 @@ root = "services/desktop/tests"
 root = "services/entrypoints/gate/tests"
 
 [[tool.pyright.executionEnvironments]]
-root = "services/entrypoints/im_bridge/ingress/tests"
-
-[[tool.pyright.executionEnvironments]]
-root = "services/entrypoints/im_bridge/tests"
-
-[[tool.pyright.executionEnvironments]]
 root = "services/supervision/healthchecks/plans/tests"
 
 [[tool.pyright.executionEnvironments]]

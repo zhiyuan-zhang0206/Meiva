@@ -98,7 +98,7 @@ shared home.
 
 **Signature.** A result depends on process environment left by an earlier test,
 a marker under worker-shared `$MEIVA_HOME`, a real host service such as launchd,
-cron, or Telegram, or the operator's live cluster.
+cron, or a messaging provider, or the operator's live cluster.
 
 **Evidence.** `tests/e2e/conftest.py:e2e_process_env` was session-scoped, so
 its environment keys leaked to later tests in the same process. That made

@@ -91,15 +91,6 @@ peripheral or needs external credentials or hardware.
 | SC3 | A schedule script drives agents under the `schedule:<id>` actor: spawn, resurrect or wake an agent, `catch_up` after downtime | `base/daemon/schedules/`, `schedules/jobs/catchup.py`, `services/wake/schedule_manager/engine.py` | none | P0 | `gateway/tests/extensions/test_schedule_runner.py` covers the engine with a real test DB, not a live gateway/agent spawn-resurrect-wake chain; this e2e gap remains. Unit: `schedules/tests/test_catchup.py` |
 | SC4 | Built-in schedules provisioned at manager start and by `meiva schedules provision` (idempotent, resync script/command, preserve `enabled`) | `base/daemon/schedules/builtin_schedules.py`, `schedules/manifest.json` | none | P1 | Unit: `gateway/schedules/tests/test_builtin_schedules_schedules.py` |
 
-## 5. IM channels (IM bridge)
-
-| ID | Feature | Source | Existing e2e | Pri | Notes |
-|---|---|---|---|---|---|
-| IM1 | Chat commands `/list /switch /status /spawn /commands /help /notice`, per-chat switch state persisted across daemon restart, spawn menu | `services/entrypoints/im_bridge/core.py`, `.../state.py`, `.../spawn_menu.py` | none | P1 | Daemon not in e2e stack. Unit with fake adapter: `services/entrypoints/im_bridge/tests/test_im_bridge_core.py` |
-| IM2 | Inbound chat becomes an agent message; the agent reply is pushed back to that chat (SSE dialog push, watermark catch-up after reconnect, long-message split) | `services/entrypoints/im_bridge/core.py`, `.../gateway_client.py`, `.../cursor_store.py` | none | P1 | Unit: `test_im_bridge_watermark.py`, `test_im_bridge_durable_cursors.py`, `test_im_bridge_daemon.py` (same dir) |
-| IM3 | Weixin adapter is dormant in prod | `services/entrypoints/im_bridge/adapters/weixin.py` | none | P2 | Needs external IM APIs or a fake server. Unit: `services/entrypoints/im_bridge/tests/adapters/` |
-| IM4 | Notice bridge and ops-alert fan-out: agent notices appear in IM and can be resolved there; P0/P1 alerts go to the owner chat | `services/entrypoints/im_bridge/notice_bridge.py`, `gateway/alerts/router.py` | none | P1 | Unit: `services/entrypoints/im_bridge/tests/test_notice_bridge.py`, `test_im_bridge_notify.py` |
-
 ## 6. Plugins and hook injection
 
 | ID | Feature | Source | Existing e2e | Pri | Notes |

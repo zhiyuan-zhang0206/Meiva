@@ -10,7 +10,7 @@ tags: []
 The load-bearing wire contracts of `base/agents/messages/` (`kwargs.py` and
 `reply_intent.py`) — the places the `meiva_*` metadata vocabulary and reply
 routing prefix leave that package and other components (agent, gateway,
-im_bridge, insights, frontend) depend on them.
+insights, frontend) depend on them.
 
 Parent: [[base/agents/messages/docs/kwargs.meiva.okf.md|Message Metadata Contract]].
 

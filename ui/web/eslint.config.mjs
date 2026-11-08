@@ -26,7 +26,6 @@ const SENTENCE_CASE_ALLOW = [
   "Haiku",
   "MiMo",
   "DeepSeek",
-  "Telegram",
   "Gmail",
   "Slack",
   "Chrome",

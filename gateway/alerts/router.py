@@ -1,33 +1,9 @@
-"""Alerts — the system→human alert store + UI API (Task #1224, user design 2026-08-12).
-
-Alert is fully separate from Notice: own table, own UI section, own IM
-channel — nothing here touches agent_notices.
-
-- ``POST /api/alerts`` — the alert webhook. Grafana's embedded Alertmanager
-  contact point delivers the Alertmanager standard webhook payload here — the
-  one way into the store. Each alert instance is stored in ``alerts``
-  (deduped by fingerprint x starts_at), published on the ``meiva:alerts`` Redis
-  channel for the SSE stream, and fanned out to the user's connected IM
-  channels via the local im_bridge daemon — every severity pushes
-  (critical/warning/error).
-- ``GET /api/alerts`` — unresolved-first history list + unresolved count for
-  the top-bar badge.
-- ``GET /api/alerts/stream`` — SSE tail of every ingest (reuses the
-  agent_events SSE machinery; broadcast mode, no agent filter).
-
-Auth split by consumer:
-- ``POST /api/alerts`` — the Grafana webhook. It bypasses the session/bearer
-  middleware (Grafana does not hold the cluster secret) and authenticates
-  itself: ``X-Alerts-Token`` matching
-  the configured webhook token (constant-time), or the webhook token as a
-  ``Bearer`` credential (Grafana 13 webhook contact points only support the
-  notifier-native Authorization fields — custom headers are stored in
-  plaintext), else the cluster-secret Bearer, else — when no webhook token is
-  configured — loopback trust (Grafana is co-located with the gateway on the
-  single-box posture). A remote caller without the token is always rejected.
-- ``GET`` / ``/stream`` — the UI and the SDK: normal
-  session/Bearer auth via the app middleware, untouched here.
-"""
+# meiva:note
+# The alert store and its three HTTP surfaces (webhook ingest, unresolved-first list,
+# SSE tail); this router is the only writer of `alerts` and delivers an alert nowhere
+# else. The auth split between the Grafana webhook and the UI/SDK callers is stated in
+# the document this site links.
+# meiva:link gateway/alerts/docs/alerts.meiva.okf.md
 
 from __future__ import annotations
 
@@ -50,9 +26,7 @@ from base.telemetry.alerts import (
     display_language,
     upsert_alert,
 )
-from base.telemetry.alerts.native import native_sent_count
 from base.telemetry.alerts.shadow import AlertShadowBatch
-from gateway.alerts.im_notify import notify_alert_group
 from gateway.alerts.schemas import (
     AlertIngestResult,
     AlertsListMeta,
@@ -116,7 +90,7 @@ def ingest_alerts(body: AlertWebhookPayload, request: Request) -> AlertIngestRes
     if not ingest_authorized(request):
         raise HTTPException(status_code=401, detail="unauthorized webhook caller")
 
-    inserted = updated = notified = 0
+    inserted = updated = 0
     rows: list[dict[str, object]] = []
     alert_settings = gateway_config(request).alerts
     style = AlertMessageStyle(
@@ -125,9 +99,7 @@ def ingest_alerts(body: AlertWebhookPayload, request: Request) -> AlertIngestRes
     with write_transaction(gateway_state(request).db_pool) as conn:
         lang = display_language(conn)
         alerts = body.flattened()
-        shadow = AlertShadowBatch(
-            conn, alerts, lang, style=style, native=alert_settings.im_notify_enabled
-        )
+        shadow = AlertShadowBatch(conn, alerts, lang, style=style)
         for alert in shadow.items:
             instance_key, previous = shadow.observe(alert)
             if instance_key is None:
@@ -170,19 +142,7 @@ def ingest_alerts(body: AlertWebhookPayload, request: Request) -> AlertIngestRes
             },
         )
 
-    if alert_settings.im_notify_enabled:
-        for group_id in sorted(shadow.native_ids):
-            notify_alert_group(
-                group_id,
-                bridge_url=alert_settings.im_bridge_url,
-                access=gateway_state(request).gateway_access,
-            )
-    with gateway_state(request).db_pool.connection() as conn:
-        notified = native_sent_count(conn, shadow.native_ids)
-
-    return AlertIngestResult(
-        processed=len(body.alerts), inserted=inserted, updated=updated, notified=notified
-    )
+    return AlertIngestResult(processed=len(body.alerts), inserted=inserted, updated=updated)
 
 
 # -- SSE stream ---------------------------------------------------------------

@@ -23,7 +23,6 @@ _REPO = Path(__file__).resolve().parents[3]
 _EXPECTED_SESSIONS = {
     "gate",
     "gateway",
-    "im-bridge",
     "labeler",
     "heartbeat",
     "delivery-watchdog",

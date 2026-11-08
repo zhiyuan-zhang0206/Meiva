@@ -1,12 +1,10 @@
-"""base.telemetry.alerts IM-copy contract tests (Task #1261, user ruling 2026-08-13).
-
-Locks the alert-push governance contract: the user-visible alert templates
-live in base/telemetry/alerts/copy.py (no head/trigger/jump-link literals in
-base/telemetry/alerts/__init__.py; services/entrypoints/im_bridge/copy.py re-exports them), the template
-language follows user_settings ``display.language`` ("zh" | "en", default
-"zh"), and only template/framework copy is translated — alert
-labels/annotations data passes through verbatim.
-"""
+# meiva:note
+# The alert-copy contract (Task #1261, user ruling 2026-08-13): the user-visible
+# alert templates live in base/telemetry/alerts/copy.py -- no head/trigger/jump-link
+# literals in base/telemetry/alerts/__init__.py -- the template language follows
+# user_settings ``display.language`` ("zh" | "en", default "zh"), and only
+# template/framework copy is translated: alert labels/annotations data passes
+# through verbatim.
 
 from __future__ import annotations
 

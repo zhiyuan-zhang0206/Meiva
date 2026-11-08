@@ -1,7 +1,7 @@
 ---
 type: doc
 title: Alerts Router
-description: "POST /api/alerts + GET /api/alerts + GET /api/alerts/stream — the system→human alert store (alerts), Grafana-truth resolution reconciliation, the alert-section history list, the SSE live tail, and the IM notification fan-out (Task #1224)."
+description: "POST /api/alerts + GET /api/alerts + GET /api/alerts/stream — the system→human alert store (alerts), Grafana-truth resolution reconciliation, the alert-section history list and the SSE live tail (Task #1224)."
 tags:
 - gateway
 - alerts
@@ -10,24 +10,20 @@ tags:
 # Alerts Router
 
 The Alert system (user design 2026-08-12): Alert is fully separate from
-Notice — own table, own UI section, own IM channel; nothing here touches
-`agent_notices`. Grafana's embedded Alertmanager evaluates the alert rules
+Notice — own table, own UI section; nothing here touches `agent_notices`. Grafana's embedded Alertmanager evaluates the alert rules
 (`deploy/lgtm/config/grafana/provisioning/alerting/rules.yml` as code) and delivers the Alertmanager
 standard webhook payload to the gateway; this router is the other half of
 the loop. This router is the only way alerts enter the store: no other process writes
-`alerts` or pushes an alert to IM (`tests/scripts/test_alert_single_path.py`);
-every other condition is an event plus a Grafana rule
+`alerts` (`tests/scripts/test_alert_single_path.py`); every other condition is an
+event plus a Grafana rule
 ([decision](../../../docs/decisions/observability/alerts/2026-10-04-alerting-on-grafana-alerting.md)).
-One row per episode, with another IM when severity increases. The store/IM core
-lives in `base/telemetry/alerts/__init__.py`. Three HTTP surfaces plus one background
+One row per episode. The store core lives in `base/telemetry/alerts/__init__.py`. Three HTTP surfaces plus one background
 reconciler:
 
 - `POST /api/alerts` — the webhook (Grafana embedded-Alertmanager contact
   point, `deploy/lgtm/config/grafana/provisioning/alerting/contact.yml`). Upserts each alert instance
-  into `alerts`, publishes it on the SSE channel, and fans firing/recovery
-  IM notifications out via the im_bridge daemon, one message per rule and status in the POST
-  (a count plus the first instances' summaries; a lone instance keeps the single-alert format) — every severity pushes
-  (critical/warning/error, no gate).
+  into `alerts` and publishes it on the SSE channel. It delivers nothing: the IM
+  fan-out retired with the IM channels on 2026-11-08.
 - `GET /api/alerts` — the alert section's unresolved-first history list +
   unresolved count for the top-bar badge.
 - `GET /api/alerts/stream` — SSE tail (channel `meiva:alerts`, broadcast) of
@@ -89,36 +85,33 @@ broadcast mode through the same `event_stream` machinery as agent events
 the ingest — the publish is best-effort and the initial fetch covers the
 gap.
 
-### IM notification
+### No delivery
 
-Eligible new firing/resolved groups request durable acceptance through authenticated
-`POST /send/alert-outbound`; the existing IM Outbox sends the frozen available
-owner subset and retains unavailable channel decisions. Acceptance is separate
-from actual provider delivery; legacy `/send` remains for other immediate callers.
-See [[native-alert-outbox]] for recovery, completion and rollout requirements.
-Format: a severity-headed template + summary + generatorURL +
-`→ <fleet UI>/insights/alerts` (recovery swaps the head for the resolved
-variant). Templates live in `services/entrypoints/im_bridge/copy.py` — the single source
-of user-visible IM copy (governance ruling 2026-08-08) — with zh/en variants
-(the zh head carries the Chinese firing/resolved words, the en head `⚠️ ALERT [...]`); the language follows `user_settings`
-`display.language` (default zh, user ruling 2026-08-13), resolved by
-`base.telemetry.alerts.display_language` at ingest time. Alert labels/annotations
-data is never translated. All three severities push. Recovery sends only when
-the firing had been IM-notified (`notified_at` set); firing retries while
-`notified_at` stays NULL. An unresolved already-notified instance re-notifies
-only when severity increases (WARNING → ERROR/CRITICAL or ERROR → CRITICAL);
-equal severity and downgrades stay silent. IM failures are logged, never fail the ingest.
-Reconciliation repairs the durable store and SSE view but does not synthesize
-an IM recovery without Grafana's resolved notification payload.
+The gateway delivers alerts nowhere. The IM channels, the native acceptance
+route and the outbound worker were removed on 2026-11-08 (user ruling: the whole
+IM surface goes), so `notified_at` stays NULL, the ingest answers
+`processed`/`inserted`/`updated` only, and the store, the list and the SSE tail
+are the whole of the alert path.
+
+The rendered notification text survives as the transition record: the template
+(severity head + summary + generatorURL + `→ <fleet UI>/insights/alerts`,
+recovery swapping the head for the resolved variant) is frozen into
+`alert_notification_groups` by `base.telemetry.alerts.notify_group_text`, with
+zh/en variants chosen from `user_settings` `display.language` (default zh) by
+`base.telemetry.alerts.display_language` at ingest time. Alert
+labels/annotations are never translated. Reconciliation repairs the durable
+store and the SSE view.
 
 ### Shadow transition facts
 
 The ingest transaction freezes immutable revision/group/member snapshots through
 `base.telemetry.alerts.shadow.AlertShadowBatch`; fingerprint gates preserve
 input-order instance resolution. Repeated observations retain the original group.
-Only real native SENT advances `notified_revision`; `notified_at` keeps its
-first-ever timestamp. Shadow history is never proof of non-delivery and cannot
-be automatically dispatched. See
+`notification_revision` advances on each frozen transition; `notified_at` has no
+writer left and stays NULL. The Grafana label `notify_im: "false"` is inert: it gated a
+delivery, the ingest does not read it any more, and a rule that carries it records its
+transitions like every other rule. Shadow history is never proof of non-delivery and
+cannot be automatically dispatched. See
 [[alert-shadow-facts]] for transaction ownership and the retained history boundary.
 
 ### List

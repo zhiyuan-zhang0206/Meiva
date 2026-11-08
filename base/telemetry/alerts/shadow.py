@@ -1,4 +1,7 @@
-"""Immutable alert transition/group facts; native origin never promotes shadow history."""
+# meiva:note
+# Immutable alert transition/group facts: every group this module mints is shadow
+# origin, and the retired native delivery origin survives only on rows already written.
+# meiva:link gateway/alerts/docs/alert-shadow-facts.meiva.okf.md
 
 import json
 from collections import defaultdict
@@ -21,7 +24,14 @@ from base.telemetry.alerts import (
     parse_alertname,
     resolve_alert_key,
 )
-from base.telemetry.alerts.native import AlertGroupOrigin
+
+
+# meiva:note
+# Where a notification group came from. `NATIVE` is the retired IM delivery origin: rows with it
+# stay readable as history, and nothing mints one any more.
+class AlertGroupOrigin(StrEnum):
+    SHADOW = "shadow"
+    NATIVE = "native-v1"
 
 
 class ShadowTransitionReason(StrEnum):
@@ -97,13 +107,10 @@ class AlertShadowBatch:
         language: str,
         *,
         style: AlertMessageStyle,
-        native: bool = False,
     ) -> None:
         self.conn = conn
         self.language = language
         self.style = style
-        self.native = native
-        self.native_ids: set[int] = set()
         self.members: dict[tuple[str, str, AlertGroupOrigin], list[ShadowMember]] = defaultdict(
             list
         )
@@ -139,16 +146,6 @@ class AlertShadowBatch:
             return
         reason = self._reason(row, previous)
         if reason is None:
-            previous_group = query_one(
-                self.conn,
-                IdRow,
-                "SELECT g.id AS id FROM alert_notification_members m "
-                "JOIN alert_notification_groups g ON g.id=m.group_id "
-                "WHERE m.alert_id=%s AND m.notification_revision=%s AND g.origin='native-v1'",
-                (_int_field(row, "id"), previous.notification_revision if previous else 0),
-            )
-            if previous_group is not None:
-                self.native_ids.add(previous_group.id)
             return
         revision = query_one(
             self.conn,
@@ -168,9 +165,7 @@ class AlertShadowBatch:
         group = (
             normalize_status(str(alert.get("status") or "")),
             parse_alertname(alert_labels(alert)),
-            AlertGroupOrigin.NATIVE
-            if self.native and reason != ShadowTransitionReason.LEGACY_UNCONFIRMED
-            else AlertGroupOrigin.SHADOW,
+            AlertGroupOrigin.SHADOW,
         )
         self.members[group].append(member)
 
@@ -205,8 +200,6 @@ class AlertShadowBatch:
                 (status, alertname, self.language, text, origin.value),
             )
             assert group is not None  # noqa: S101 — INSERT RETURNING always yields one row
-            if origin == AlertGroupOrigin.NATIVE:
-                self.native_ids.add(group.id)
             for ordinal, member in enumerate(members):
                 self.conn.execute(
                     "INSERT INTO alert_notification_members "

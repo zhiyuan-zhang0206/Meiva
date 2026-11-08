@@ -33,7 +33,6 @@ from base.daemon.endpoints import ServiceEndpoints
 from base.db import Database
 from base.events.live.bus import EventBus
 from base.host.db_authority.api import AcceptanceCache
-from base.host.env.health_ports import health_port
 from base.host.system.hostport import Host
 from base.native_process.loaded_commit import LoadedCommit
 from base.packages.composer_commands import CommandCatalog
@@ -103,13 +102,10 @@ class SseTuning:
 
 
 # meiva:note
-# Alert intake: whether an alert also notifies the IM bridge, where the bridge answers
-# (`im_bridge_url`, the base of its `/send/...` routes) and the scoped webhook token an alert
+# Alert intake: the base URL an alert's links open on, and the scoped webhook token an alert
 # sender presents (empty when no scoped token is configured).
 @dataclass(frozen=True)
 class AlertSettings:
-    im_notify_enabled: bool
-    im_bridge_url: str
     frontend_base_url: str
     webhook_token: str = field(repr=False)
 
@@ -378,10 +374,7 @@ def gateway_config_from_boot(
             channel_pending_limit=gateway.sse_channel_pending_limit,
         ),
         alerts=AlertSettings(
-            im_notify_enabled=view.alerts.im_notify_enabled,
             frontend_base_url=frontend_base_url(gateway_url, services.frontend_healthcheck_url),
-            im_bridge_url=(services.im_bridge_health_url or "").rstrip("/")
-            or f"http://127.0.0.1:{health_port('im_bridge', read_field=config.get_field)}",
             webhook_token="" if alerts_token is None else alerts_token.get_secret_value(),
         ),
         to_user=ToUserLimits(

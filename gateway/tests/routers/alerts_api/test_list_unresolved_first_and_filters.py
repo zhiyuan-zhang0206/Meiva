@@ -15,17 +15,11 @@ from gateway.events.sse_frames import SseCadence
 from gateway.tests.auth.gateway_config import GatewayTestClient, gateway_test_client
 from gateway.tests.events.sse_support import FakeRequest, refused_redis_url
 from gateway.tests.routers.alerts_api.alerts_support import (
-    ImBridge,
     alert,
     alerts_client,
-    capture_im,
     ingest,
-    install_im,
     seed_alert_rows,
     webhook,
-)
-from gateway.tests.routers.alerts_api.alerts_support import (
-    alerts_im as alerts_im,
 )
 from gateway.tests.routers.alerts_api.alerts_support import (
     client as client,
@@ -194,10 +188,10 @@ def test_ingest_rows_are_grafana_sourced(db_conn: psycopg.Connection) -> None:
         assert cur.fetchall() == [("grafana",)]
 
 
-def test_ingest_resolved_notifies_recovery(db_conn: psycopg.Connection) -> None:
+def test_ingest_resolved_updates_the_same_row(db_conn: psycopg.Connection) -> None:
     with alerts_client() as client:
-        r1 = ingest(client, webhook(alerts=[alert(fingerprint="hp2")]))
-        r2 = ingest(
+        ingest(client, webhook(alerts=[alert(fingerprint="hp2")]))
+        ingest(
             client,
             webhook(
                 status="resolved",
@@ -206,8 +200,6 @@ def test_ingest_resolved_notifies_recovery(db_conn: psycopg.Connection) -> None:
                 ],
             ),
         )
-        assert r1.json()["notified"] == 1
-        assert r2.json()["notified"] == 1
     with db_conn.cursor() as cur:
         cur.execute("SELECT count(*) FROM alerts")
         row = cur.fetchone()
@@ -279,73 +271,6 @@ def test_an_ingested_alert_reaches_a_subscriber_of_the_alerts_channel(
     with alerts_client() as client:
         frame = asyncio.run(scenario(client))[-1]
     assert b'"alertname":"test-rule"' in frame and b'"fingerprint":"live"' in frame
-
-
-def test_a_group_of_instances_is_one_im_and_one_row_each(
-    db_conn: psycopg.Connection, alerts_im: ImBridge
-) -> None:
-    alerts = [
-        alert(alertname="machine offline", fingerprint=f"g{n}", summary=f"machine m{n} down")
-        for n in range(4)
-    ]
-    with alerts_client() as client:
-        sent = capture_im(alerts_im)
-        resp = ingest(client, webhook(alerts=alerts))
-    assert resp.json() == {"processed": 4, "inserted": 4, "updated": 0, "notified": 4}
-    assert len(sent) == 1
-    assert "×4" in sent[0] and "machine m0 down" in sent[0] and "machine m2 down" in sent[0]
-    assert "machine m3 down" not in sent[0]
-    with db_conn.cursor() as cur:
-        cur.execute("SELECT count(*), count(notified_at) FROM alerts")
-        assert cur.fetchone() == (4, 4)
-
-
-def test_instances_of_different_rules_in_one_post_are_separate_messages(
-    alerts_im: ImBridge,
-) -> None:
-    alerts = [
-        alert(alertname="rule-a", fingerprint="a1"),
-        alert(alertname="rule-a", fingerprint="a2"),
-        alert(alertname="rule-b", fingerprint="b1"),
-    ]
-    with alerts_client() as client:
-        sent = capture_im(alerts_im)
-        resp = ingest(client, webhook(alerts=alerts))
-    assert resp.json()["notified"] == 3
-    assert len(sent) == 2
-    assert sum("×2" in text for text in sent) == 1
-
-
-def test_a_failed_group_send_leaves_every_instance_unnotified_for_the_next_resend(
-    db_conn: psycopg.Connection, alerts_im: ImBridge
-) -> None:
-    alerts = [alert(fingerprint=f"r{n}") for n in range(2)]
-    with alerts_client() as client:
-        sent = capture_im(alerts_im, ok=False)
-        assert ingest(client, webhook(alerts=alerts)).json()["notified"] == 0
-        sent.clear()
-
-        def _ok(text: str) -> bool:
-            sent.append(text)
-            return True
-
-        install_im(alerts_im, _ok)
-        assert ingest(client, webhook(alerts=alerts)).json()["notified"] == 2
-    assert len(sent) == 1
-
-
-def test_a_resolved_group_is_one_recovery_message(alerts_im: ImBridge) -> None:
-    firing = [alert(fingerprint=f"x{n}") for n in range(3)]
-    resolved = [
-        alert(status="resolved", fingerprint=f"x{n}", ends_at="2026-08-04T11:00:00Z")
-        for n in range(3)
-    ]
-    with alerts_client() as client:
-        sent = capture_im(alerts_im)
-        ingest(client, webhook(alerts=firing))
-        sent.clear()
-        assert ingest(client, webhook(status="resolved", alerts=resolved)).json()["notified"] == 3
-    assert len(sent) == 1 and "×3" in sent[0]
 
 
 def test_watchdog_synthetic_heartbeat_excluded_from_list_and_counts(

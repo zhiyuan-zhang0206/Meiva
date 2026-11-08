@@ -248,9 +248,7 @@ def test_gateway_consumed_fields_declare_gateway_restart() -> None:
         ServiceSettings: (
             "embedding_backend",
             "memory_embed_timeout_seconds",
-            "im_disabled_adapters",
-            "im_send_retry_delays",
-            "im_sse_read_timeout_seconds",
+            "labeler_max_chars",
         ),
         LmSettings: (
             "labeler_model",
@@ -308,7 +306,7 @@ def test_build_registry_rejects_restart_required_for_unconsuming_kind() -> None:
         )
 
     with pytest.raises(RuntimeError, match=r"restart_required='agent'.*process profile"):
-        config_registry.validate_domain_models((("telegram", "Telegram", WrongKind, "gateway"),))
+        config_registry.validate_domain_models((("synthetic", "Synthetic", WrongKind, "gateway"),))
 
 
 def test_every_field_restart_required_names_a_kind_that_consumes_it() -> None:

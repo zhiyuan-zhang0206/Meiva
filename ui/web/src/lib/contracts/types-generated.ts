@@ -2557,7 +2557,6 @@ export interface components {
             processed: number;
             inserted: number;
             updated: number;
-            notified: number;
         };
         AlertRow: {
             id: number;

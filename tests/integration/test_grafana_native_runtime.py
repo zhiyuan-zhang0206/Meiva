@@ -50,10 +50,11 @@ def _grafana_distribution() -> tuple[Path, Path]:
     return Path(binary), Path(home)
 
 
-# The settings `native/config/grafana.ini` and `run.sh` give a real native Grafana, spelled as
-# the GF_* environment the disposable test instance reads, plus the placeholders the converge
-# renders into `runtime.env` (loopback defaults, as on a single-box home). The Telegram contact
-# point needs a non-empty token, so it gets run.sh's inert placeholders.
+# meiva:note
+# The settings `native/config/grafana.ini` and `run.sh` give a real native Grafana,
+# spelled as the GF_* environment the disposable test instance reads, plus the
+# placeholders the converge renders into `runtime.env` (loopback defaults, as on a
+# single-box home).
 _NATIVE_ENVIRONMENT = {
     "GF_AUTH_ANONYMOUS_ENABLED": "true",
     "GF_AUTH_ANONYMOUS_ORG_ROLE": "Viewer",
@@ -63,8 +64,6 @@ _NATIVE_ENVIRONMENT = {
     "GF_ANALYTICS_REPORTING_ENABLED": "false",
     "GF_ANALYTICS_CHECK_FOR_UPDATES": "false",
     "MEIVA_ALERTS_WEBHOOK_TOKEN": "",
-    "MEIVA_ALERTS_TELEGRAM_BOT_TOKEN": "unconfigured",
-    "MEIVA_ALERTS_TELEGRAM_CHAT_ID": "0",
     "GRAFANA_PG_PASSWORD": "",
 }
 # meiva:note

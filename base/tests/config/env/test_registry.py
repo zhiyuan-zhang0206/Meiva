@@ -232,7 +232,6 @@ class TestConsumptionMatrixDeclarations:
             "memory_indexer",
             "ops",
             "delivery_watchdog",
-            "im_bridge",
             "page_server",
             "agent_host",
         }

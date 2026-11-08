@@ -1,9 +1,0 @@
-exports = ["test_weixin_adapter.py", "test_weixin_chat_identity.py", "weixin_native.py"]
-
-[uses]
-"conftest.py" = ["weixin_native.py"]
-"test_weixin_adapter.py" = ["weixin_native.py"]
-"test_weixin_chat_identity.py" = ["test_weixin_adapter.py"]
-"test_weixin_ingress_account_fencing.py" = ["test_weixin_ingress_recovery.py", "weixin_native.py"]
-"test_weixin_ingress_recovery.py" = ["weixin_native.py"]
-"test_weixin_ingress_runtime.py" = ["weixin_native.py"]

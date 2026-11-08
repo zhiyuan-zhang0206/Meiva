@@ -98,7 +98,6 @@ REPO_BLOCKING_HELPERS = {
     # sync ops (subprocess / .env)
     "config_read_op",
     "config_write_op",
-    "spawn_agent",
     "resurrect_agent",
     "cluster_stopping_op",
     # process / session backends

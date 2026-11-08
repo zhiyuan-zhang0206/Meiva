@@ -9844,18 +9844,13 @@
           "updated": {
             "type": "integer",
             "title": "Updated"
-          },
-          "notified": {
-            "type": "integer",
-            "title": "Notified"
           }
         },
         "type": "object",
         "required": [
           "processed",
           "inserted",
-          "updated",
-          "notified"
+          "updated"
         ],
         "title": "AlertIngestResult",
         "description": "What one ingest POST did — counts the UI/ops can log."

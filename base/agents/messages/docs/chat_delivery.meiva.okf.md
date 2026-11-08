@@ -58,7 +58,7 @@ replays recover the original id, changed immutable identity raises
 `ClientMessageConflictError`, and distinct or absent keys retain their existing
 meaning. This refactor adds no receipt table or permanent tombstone; deleting
 that row still removes this identity's evidence. The primitive is not a provider
-source admission or execution guarantee. It changes no Weixin seen-set, routing,
+source admission or execution guarantee. It changes no ingress seen-set, routing,
 command uncertainty or cursor behavior.
 
 Owner: [[base/agents/messages/docs/inbound-provenance.meiva.okf.md]].

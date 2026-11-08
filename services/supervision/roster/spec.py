@@ -125,8 +125,6 @@ def _flag_enabled(session: str, *, settings: GateSettings) -> bool:
             return settings.heartbeat_enabled
         case "delivery-watchdog":
             return settings.delivery_watchdog_enabled
-        case "im-bridge":
-            return settings.im_bridge_enabled
         case _:
             raise ValueError(f"session {session!r} has no settings-flag gate")
 

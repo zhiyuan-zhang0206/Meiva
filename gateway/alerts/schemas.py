@@ -93,7 +93,6 @@ class AlertIngestResult(BaseModel):
     processed: int
     inserted: int
     updated: int
-    notified: int
 
 
 class AlertsListMeta(BaseModel):

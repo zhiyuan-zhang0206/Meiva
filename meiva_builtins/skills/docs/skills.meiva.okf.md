@@ -15,7 +15,7 @@ material the agent reads and adapts, `assets/` for templates and static
 files). The source-tree groups are `practice/` (engineering, research, review),
 `coordination/` (running and supervising agents, schedules), `platform/`
 (operating, extending and documenting Meiva itself) and `integrations/`
-(mail, SMS, Telegram, audio, web); a group is a folder without a `SKILL.md`,
+(mail, audio, web); a group is a folder without a `SKILL.md`,
 and converge lands each skill flat at `skills/<name>/`, so the group never
 reaches a skill's identity. This index lists the skills that carry their own
 OKF node, grouped by what each does — those headings cut across the source-tree

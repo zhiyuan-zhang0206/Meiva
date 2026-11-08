@@ -13,7 +13,7 @@ the machine's `pty-sessions` service for agents' interactive shells. Key facts:
 
 ### Session naming
 
-- `meiva-<service>` — a service daemon session (gateway, ops, im-bridge, ...)
+- `meiva-<service>` — a service daemon session (gateway, ops, labeler, ...)
 - `meiva-agent-<id>` — an agent main process session
 - `meiva-agent-<id>-shell-<n>[-<name>]` — an agent's shell sub-sessions (and
   `...-watcher` for background watchers)

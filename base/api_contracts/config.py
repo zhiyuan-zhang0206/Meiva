@@ -54,11 +54,12 @@ class ConfigFieldView(BaseModel):
     # host identity).
     # meiva:link base/docs/configuration/configuration.meiva.okf.md
     capability: Capability
-    # "agent" | "ops" | "gateway" | "all" | "schedule" | "" — which process
-    # must restart after a change. "gateway" covers the gateway process plus
-    # the gateway-profile daemons that consume the field (im_bridge /
-    # memory_indexer / memory_search / ...) — an `meiva restart`
-    # bounces all of them; "schedule" = the gateway-hosted schedule runner.
+    # meiva:note
+    # "agent" | "ops" | "gateway" | "all" | "schedule" | "" — which process must
+    # restart after a change. "gateway" covers the gateway process plus the
+    # gateway-profile daemons that consume the field (memory_indexer /
+    # memory_search / ...) — an `meiva restart` bounces all of them; "schedule" =
+    # the gateway-hosted schedule runner.
     restart_required: str
     writable: bool
     sensitive: bool

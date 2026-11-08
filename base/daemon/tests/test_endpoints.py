@@ -27,7 +27,7 @@ def test_a_port_override_reaches_the_row_and_only_that_row(tmp_path: Path) -> No
     config.view.services.labeler_health_port = 18765
     after = ServiceEndpoints.from_boot(config, runtime=tmp_path)
     assert after.of("labeler").health_port == 18765
-    assert after.of("im_bridge") == before.of("im_bridge")
+    assert after.of("page_server") == before.of("page_server")
 
 
 def test_the_table_does_not_follow_later_changes(tmp_path: Path) -> None:

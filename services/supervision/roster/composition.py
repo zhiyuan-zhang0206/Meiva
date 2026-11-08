@@ -182,14 +182,6 @@ def build_services(
             stop_ceiling_s=(gateway_shutdown_timeout_s + _GATEWAY_LIFESPAN_ALLOWANCE_S),
         ),
         healthz_daemon(
-            "im-bridge",
-            home=home,
-            endpoints=endpoints,
-            module="services.entrypoints.im_bridge.daemon",
-            capabilities=GATEWAY,
-            requires_db=True,
-        ),
-        healthz_daemon(
             "labeler",
             home=home,
             endpoints=endpoints,

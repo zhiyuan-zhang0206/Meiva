@@ -102,6 +102,10 @@ deleteRules:
   - orgId: 1
     uid: ava-ops-im-push-stall
   - orgId: 1
+    uid: meiva-ops-im-push-failed
+  - orgId: 1
+    uid: meiva-ops-im-push-stall
+  - orgId: 1
     uid: ava-ops-impersonation-capture-failed
   - orgId: 1
     uid: ava-ops-impersonation-notice-failed

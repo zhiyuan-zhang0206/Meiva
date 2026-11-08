@@ -129,9 +129,9 @@ def test_the_url_follows_the_endpoint_table_resolved_when_the_roster_is_built(
         return 18111
 
     pin_endpoints(monkeypatch, port=_fake_health_port)
-    assert healthz_url("im_bridge", _table()) == "http://localhost:18111/healthz"
+    assert healthz_url("labeler", _table()) == "http://localhost:18111/healthz"
     spec = healthz_daemon(
-        "im-bridge",
+        "labeler",
         home=meiva_home(),
         endpoints=_table(),
         module="a.b",

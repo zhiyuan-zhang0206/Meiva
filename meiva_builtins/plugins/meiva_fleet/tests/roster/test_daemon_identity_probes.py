@@ -21,7 +21,6 @@ from services.agent_runner.page_server import resources as page_resources
 from services.backup.scheduler import daemon as backup_scheduler
 from services.derived.labeler import daemon as labeler
 from services.derived.memory_indexer import daemon as memory_indexer
-from services.entrypoints.im_bridge import daemon as im_bridge
 from services.supervision.roster import composition
 from services.supervision.roster.service_spec import ServiceSpec
 from services.upkeep.events_maintenance import daemon as events_maintenance
@@ -33,7 +32,6 @@ from services.wake.schedule_manager import daemon as schedule_manager
 _DAEMON_MODULES: dict[str, ModuleType] = {
     module.__name__: module
     for module in (
-        im_bridge,
         labeler,
         heartbeat,
         delivery_watchdog,

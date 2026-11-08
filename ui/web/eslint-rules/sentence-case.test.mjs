@@ -17,7 +17,7 @@ const tester = new RuleTester({
 });
 
 // A small self-contained allow list — the real config seeds a bigger one.
-const opts = [{ allow: ["GitHub", "API", "SDK", "Telegram"] }];
+const opts = [{ allow: ["GitHub", "API", "SDK", "Grafana"] }];
 
 tester.run("sentence-case", rule, {
   valid: [
@@ -29,7 +29,7 @@ tester.run("sentence-case", rule, {
     // First-word-of-string exemption: capitalized first word + acronym is fine.
     { code: '<Foo label="Agent SDK" />', options: opts },
     { code: '<Foo label="Enable API" />', options: opts },
-    { code: '<Foo title="Web & Telegram" />', options: opts },
+    { code: '<Foo title="Web & Grafana" />', options: opts },
     // Object property with a whitelisted run.
     { code: 'const x = { label: "GitHub API" };', options: opts },
     // Non-copy positions are never inspected.

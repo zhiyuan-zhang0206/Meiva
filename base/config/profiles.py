@@ -269,8 +269,8 @@ def _validate_restart_required(name: str, attr: str, extra: SchemaExtra) -> None
                 f"({sorted(profile)}) — the named process kind "
                 f"does not consume this field, so the operator would restart the wrong "
                 f"process and the change would silently not take effect. Point it at "
-                f"the kind that actually reads it (the im_bridge-consumed "
-                f"im_* fields are 'gateway'), or use 'all' or 'schedule'."
+                f"the kind that actually reads it (a gateway-profile daemon's "
+                f"fields are 'gateway'), or use 'all' or 'schedule'."
             )
 
 
