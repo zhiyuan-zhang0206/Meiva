@@ -143,8 +143,7 @@ reproduced, not summarised.
 checker and merge-receipt audit retired once CI returned, while `scripts/hooks/diff_checks.py`
 continues as the local `--mode incremental|full` check runner. This section preserves the
 specification they were built against; where the build moved a decision (the location, the
-refusal-loss red rule, the type-check attribution), the text says so in place. The manual gate
-under "The refusal-loss trigger" is superseded by the `debt-reduced` trigger and retires with it.
+type-check attribution), the text says so in place.
 
 #### 0. The finding: the mapper exists, what is missing is somebody running it
 
@@ -203,7 +202,7 @@ operate on a home on every `meiva` invocation. One name for two jobs invites the
   orchestrator (derive layers → call pyright/ruff/pytest/meizel). Putting it inside meizel mixes two
   jobs, and meizel is itself called by the runner (L4) — a cycle.
 - **Why `scripts/hooks/` and not `scripts/ci/`** (moved while building, 2026-10-31): two gates decide
-  this. `scripts/ci` may not reach `scripts/audit/refusal_loss.py` — `scripts/audit` already reaches
+  this. `scripts/ci` may not reach `scripts/audit` — `scripts/audit` already reaches
   `scripts/ci` through `impact_census.py`, so that edge closes a cycle `meizel` refuses; and
   `scripts/ci` already holds its twenty direct entries, the cap `lint-code-structure` enforces.
   `scripts/hooks` is the pre-push family the runner unifies (`prepush-pyright-files.sh`,
@@ -219,7 +218,7 @@ One line, in the PR body. The example below is a real run at `3cd7ef34` — a do
 change, the shape that says why each layer does not apply instead of printing nothing about it:
 
 ```
-diff-checks/v1 @3cd7ef3439056b6558e13b253734467b5c3902ae base=23bdc7ece90bcc13046cb4d301212718709e9a4b scope=docs pyright=n/a(no-python-touched) err_in_this_diff=n/a(no-python-touched) closure=n/a(no-python-touched) ruff=n/a(no-python-touched) selector=SELECTED:74files tests=skipped(--skip-tests) passed=n/a(no-test-ran) failed=n/a(no-test-ran) errors=n/a(no-test-ran) blind=n/a(no-changed-file-was-invisible) fallback=n/a(the-selection-was-not-blind) vitest-app=n/a(no-web-tree-file) next-build=n/a(not-the-app-router) meizel=ok(exit=0,772manifests,76771edges)(16s) debt=n/a(no-manifest-changed) refusal-loss=n/a(no-net-debt-reduction) docs-refs=ok(1593docs,0dangling)(3s) docs-okf=ok(757files,0errors,4warnings)(2s) generated=scripts/hooks/diff_checks.py
+diff-checks/v1 @3cd7ef3439056b6558e13b253734467b5c3902ae base=23bdc7ece90bcc13046cb4d301212718709e9a4b scope=docs pyright=n/a(no-python-touched) err_in_this_diff=n/a(no-python-touched) closure=n/a(no-python-touched) ruff=n/a(no-python-touched) selector=SELECTED:74files tests=skipped(--skip-tests) passed=n/a(no-test-ran) failed=n/a(no-test-ran) errors=n/a(no-test-ran) blind=n/a(no-changed-file-was-invisible) fallback=n/a(the-selection-was-not-blind) vitest-app=n/a(no-web-tree-file) next-build=n/a(not-the-app-router) meizel=ok(exit=0,772manifests,76771edges)(16s) debt=n/a(no-manifest-changed) docs-refs=ok(1593docs,0dangling)(3s) docs-okf=ok(757files,0errors,4warnings)(2s) generated=scripts/hooks/diff_checks.py
 ```
 
 **The vocabulary is the whole contract** (405, 2026-10-31: a receipt of nothing but `none` proved
@@ -266,7 +265,7 @@ offence as a hand-written test result.**
 | a parameter added without a default / deleted / renamed / a return type changed | the same — **no extra detection needed**: the selector picks by import closure and covers cross-layer construction sites by construction |
 | migration / schema | all of the above + the integration layer against a real Postgres (migration smoke) |
 | gateway routes, request handling, configuration value objects | all of the above (the selector pulls `gateway/tests`) + that domain's e2e |
-| configuration fields / `meizel.toml` | + `meizel debt diff --against <base>` (and the refusal-loss scan when the deleted lines outnumber the added ones) + the touched domain's L1 |
+| configuration fields / `meizel.toml` | + `meizel debt diff --against <base>` + the touched domain's L1 |
 | `ui/web/**` | additionally `vitest-app` (the whole `src/app` test tree), and the production build when the change can cross the RSC boundary |
 | documentation or comments only | the document checks (L4'): dangling references and OKF lint, each reporting how many documents it read |
 
@@ -352,48 +351,8 @@ merge.** `scripts/ci/test_selector.py` has been there all along, and run on `#79
 surface it selects 645 tests including the three files that were missed — this is exactly where the
 principle is easiest to get wrong: seeing a miss and going looking for a new mechanism.
 
-### The refusal-loss trigger (a net-debt-reducing change)
-
-This is `#3230`'s gate of 2026-10-31 16:49, rendered in English for the no-CJK rule; the ruling is the
-authority, this is its text.
-
-A pull request **reduces recorded debt** when a `*meizel.toml` diff deletes more lines than it adds.
-Such a pull request puts one line in its body, produced by a **single** scan of the tool:
-
-```
-refusal-loss: hits=N blocking=M unreplaced=K
-```
-
-**A hand-written approximation is not accepted** — including one "derived from the tool's output". The
-line has to be the stdout of `refusal_loss.py --receipt`, verbatim: the three counts come from one
-scan, and a reader who recomposes them by hand is back to typing a number that looks right. When
-`blocking > 0`, every hit carries its review conclusion after that line.
-
-The reviewer runs it themselves rather than trusting the pasted line — and the command is written out
-because a missing `PYTHONPATH` does not fail: it answers, plausibly, from the wrong tree:
-
-```bash
-git -C ~/.meiva/source worktree add --detach /tmp/mv-main origin/main
-cd /tmp/mv-main && PYTHONPATH=/tmp/mv-main ~/.meiva/source/.venv/bin/python \
-    -m scripts.audit.refusal_loss --receipt --range <base>..<head>
-git -C ~/.meiva/source worktree remove --force /tmp/mv-main
-```
-
-**One state now, and the one it is going to leave (2026-10-31 16:58):**
-
-1. `--receipt` is live: `#7933` (`ab0faea1c`) prints exactly that line and exits non-zero when
-   `blocking > 0`. The line is therefore the command's own stdout today, not a target it will meet.
-2. The gate's **location** is temporary on purpose: it belongs in the diff-checks receipt above (field
-   `refusal-loss=hits/blocking/unreplaced`) and moves there when the runner lands — one place, never
-   two. 405 withdraws this manual criterion when it does.
-
-The trigger exists at all because the tool blocks only one of the shapes a real deletion takes; the
-other two ("a refusal deleted and something else added") are **listed, not blocked**, and a list
-nobody reads is not a list — today proved it once already: `scripts/ci/test_selector.py` has been in
-the repository all along, and `#7910` still slipped through, because nobody ran it.
-
 ## What this does not replace
 
-The refusal-loss audit (`scripts/audit/refusal_loss.py`, `#7926`) asks *whether something was deleted*.
+An audit asks *whether something was deleted*.
 This convention asks *whether the deletion was frozen into a test* (behaviour) or *into a mandatory
 run* (process). A pull request can pass the gate and still owe both.

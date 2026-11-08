@@ -98,7 +98,6 @@ FIELD_ORDER = (
     "next-build",
     "meizel",
     "debt",
-    "refusal-loss",
     "docs-refs",
     "docs-okf",
 )
@@ -199,13 +198,6 @@ def _docs_okf_field(code: int, output: str, seconds: float) -> str:
     )
 
 
-def _refusal_field(output: str) -> str:
-    found = re.search(r"refusal-loss: hits=(\d+) blocking=(\d+) unreplaced=(\d+)", output)
-    if found is None:
-        return "unreadable"
-    return f"hits={found.group(1)},blocking={found.group(2)},unreplaced={found.group(3)}"
-
-
 # meiva:note
 # A clean tree says so in one field and stops: no closure scan, no attribution. A red tree is
 # attributed to this change only when the errors sit in files that can see it; anything the scan
@@ -286,8 +278,6 @@ def fields_for(
         return {"docs-refs": _docs_refs_field(code, output, seconds)}
     if run.label == "docs-okf":
         return {"docs-okf": _docs_okf_field(code, output, seconds)}
-    if run.label == "refusal-loss":
-        return {"refusal-loss": _refusal_field(output)}
     verdict = "ok" if code == 0 else f"failed({code})"
     return {run.label: f"{verdict}({spell_seconds(seconds)})"}
 
@@ -304,7 +294,6 @@ def not_run_fields(change: ChangeSet, *, pyright_ran: bool) -> dict[str, str]:
         "vitest-app": "n/a(no-web-tree-file)",
         "next-build": "n/a(not-the-app-router)",
         "debt": "n/a(no-manifest-changed)",
-        "refusal-loss": "n/a(no-net-debt-reduction)",
         "docs-refs": "n/a(no-doc-touched)",
         "docs-okf": "n/a(no-doc-touched)",
     }
