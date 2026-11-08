@@ -401,6 +401,15 @@ def dispatch_parsed(
     # runtime built next only holds the path.
     ensure_private_dir(declared)
     command = CommandRuntime.create(home, suppress_local_otlp=stops_local_collector(args_in))
+    # meiva:note
+    # The invocation's clock, bound for this process before any command runs. A verb that writes
+    # its own audit row — `meiva config set` on a host that runs no daemon — binds no pipeline and
+    # no process label, but the row it writes states the instant it was written at; the event it
+    # stages for that row is stamped with this clock and then dropped with the one line that says
+    # this process has nowhere to send it.
+    from base import telemetry
+
+    telemetry.bind_process_clock(command.clock.now)
     args.runtime = command
     database_factory = operator_database_factory(
         local_host=command.machine.host,

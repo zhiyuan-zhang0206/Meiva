@@ -134,6 +134,18 @@ def capture_trace_ids() -> tuple[str | None, str | None]:
 # producer passed no `ts` of its own. It is not a convenience default — a process that binds no
 # clock and emits such an event fails loudly (`_process_now`) rather than reading the host clock
 # a second time behind the caller's back.
+# meiva:note
+# Bind the clock this process stamps an event with, without binding who it is.
+#
+# `bind_identity` establishes it beside the identity, and a boot seam that only needs the clock
+# calls this directly: the operator CLI's composition root builds an invocation clock for every
+# command, and a verb like `meiva config set` writes its audit row (and stages the event for it)
+# on a host that runs no daemon, so it binds no stream and no process label but still states the
+# instant its row was written at. The caller hands in a clock it built; nothing here reads one.
+def bind_process_clock(now: Callable[[], datetime]) -> None:
+    process_state["now"] = now
+
+
 def bind_identity(
     *,
     process: str,
@@ -149,7 +161,7 @@ def bind_identity(
     # event whose producer passed no `ts` with it, so a process that binds an identity binds the
     # time source that identity speaks in — the caller that builds the process resources reads the
     # clock once and hands it in, and no module below here reaches for the host clock.
-    process_state["now"] = now
+    bind_process_clock(now)
     if process_state["machine"] is None:
         process_state["machine"] = resolve_machine(home=home)
     # meiva:note

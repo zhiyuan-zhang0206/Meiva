@@ -2,11 +2,16 @@ import os
 import sys
 from pathlib import Path
 
+from base import telemetry
+from base.clock.tests.fakes import system_clock
 from cli.commands.management import config
 
 PROCESS = config.ConfigProcess(environ=os.environ, home=Path(os.environ["MEIVA_HOME"]))
 
 if __name__ == "__main__":
+    # The CLI's own entry binds this before dispatch (`cli.main.dispatch_parsed`); this child
+    # calls the verb directly, so it states the same clock the invocation would have.
+    telemetry.bind_process_clock(system_clock().now)
     verb = sys.argv[1]
     try:
         if verb == "get":
