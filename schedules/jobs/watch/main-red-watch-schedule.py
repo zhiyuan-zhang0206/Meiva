@@ -46,6 +46,7 @@ from schedules.plans.schedule_identity import parse_schedule_id
 from schedules.jobs.watch.main_red_liveness import liveness_once
 from schedules.plans.watch.main_red import (
     FAILURE_UNNAMED,
+    JunitEvidence,
     parse_failures,
     STALE_WATCH_TITLE,
     Card,
@@ -54,7 +55,7 @@ from schedules.plans.watch.main_red import (
     NIGHTLY_STALE_AFTER,
     RunFacts,
 )
-from schedules.plans.watch.junit import failing_case_ids, matching_artifact
+from schedules.plans.watch.junit import ArtifactMatch, failing_case_ids, match_artifact
 from schedules.plans.watch.workflow_graph import downstream_failing_jobs
 from schedules.plans.watch.release_gate_slot import RELEASE_GATE_SLOT_CADENCE, SlotFacts
 
@@ -211,13 +212,14 @@ def _job_failures(
     )
     if from_log and all(failure.kind != FAILURE_UNNAMED for failure in from_log):
         return from_log
+    case_ids, match = junit_case_ids(run_id, job_name, scratch, run_process)
     return parse_failures(
         log[-400_000:],
         job_name=job_name,
         suite_step_failed=True,
         failed_steps=failed_steps,
         check_steps=check_steps,
-        junit_ids=junit_case_ids(run_id, job_name, scratch, run_process),
+        junit=JunitEvidence(case_ids, match.candidates, match.note),
     )
 
 
@@ -244,17 +246,17 @@ def _run_artifacts(run_id: int, run_process: RunProcess) -> tuple[dict[str, obje
 # worse than admitting the watch cannot name it.
 def junit_case_ids(
     run_id: int, job_name: str, scratch: Path, run_process: RunProcess
-) -> tuple[str, ...]:
+) -> tuple[tuple[str, ...], ArtifactMatch]:
     by_name: dict[str, int] = {}
     for artifact in _run_artifacts(run_id, run_process):
         name = artifact.get("name")
         identifier = artifact.get("id")
         if isinstance(name, str) and isinstance(identifier, int):
             by_name[name] = identifier
-    chosen = matching_artifact(job_name, tuple(by_name))
-    if chosen is None:
-        return ()
-    return _artifact_case_ids(by_name[chosen], scratch, run_process)
+    chosen = match_artifact(job_name, tuple(by_name))
+    if chosen.name is None:
+        return (), chosen
+    return _artifact_case_ids(by_name[chosen.name], scratch, run_process), chosen
 
 
 # meiva:note

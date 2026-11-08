@@ -6,9 +6,12 @@
 from __future__ import annotations
 
 from schedules.plans.watch.junit import (
+    artifact_candidates,
     artifact_name_for_job,
     failing_case_ids,
+    match_artifact,
     matching_artifact,
+    shard_number,
 )
 
 
@@ -63,3 +66,71 @@ def test_junit_names_the_cases_that_failed_or_errored() -> None:
 def test_an_unreadable_junit_document_names_nothing() -> None:
     assert failing_case_ids("<testsuites><testsuite>") == ()
     assert failing_case_ids("") == ()
+
+
+# meiva:note
+# The tier that was missing on 2026-11-08: a matrix job is named after its lane and population
+# (`e2e full matrix (3/4)`) while it uploads after its shard (`test-results-e2e-shard-3`), so the
+# derived name reaches nothing. The shard number in the job name closes that gap without a table,
+# and the log bundle carrying the same number must not win the suffix match.
+def test_a_matrix_job_finds_its_artifact_by_the_shard_it_declares() -> None:
+    names = (
+        "e2e-logs-matrix-3",
+        "test-results-e2e-shard-1",
+        "test-results-e2e-shard-2",
+        "test-results-e2e-shard-3",
+        "test-results-e2e-shard-4",
+    )
+
+    match = match_artifact("e2e full matrix (3/4)", names)
+
+    assert match.name == "test-results-e2e-shard-3"
+    assert match.how == "shard"
+    assert match.candidates == ()
+    assert match.note == (
+        "test-results-e2e-shard-3 (matched by shard: the job name gives no upload name)"
+    )
+
+
+def test_the_shard_number_is_read_from_the_job_name() -> None:
+    assert shard_number("e2e full matrix (3/4)") == "3"
+    assert shard_number("Backend full suite (8/8)") == "8"
+    assert shard_number("backend shard 6/8") == "6"
+    assert shard_number("data plane (macOS)") is None
+
+
+# meiva:note
+# Two artifacts ending in the same shard number answer nothing: picking one would put a real test id
+# on another job's red. The near misses go on the card instead, filtered to the names that share a
+# word with the job so a backend card does not advertise e2e bundles.
+def test_an_ambiguous_shard_names_no_artifact_and_offers_the_candidates() -> None:
+    names = ("test-results-e2e-shard-3", "test-results-e2e-matrix-3", "test-results-frontend")
+
+    match = match_artifact("e2e full matrix (3/4)", names)
+
+    assert match.name is None
+    assert match.how == "none"
+    assert match.candidates == ("test-results-e2e-matrix-3", "test-results-e2e-shard-3")
+
+
+# meiva:note
+# The bug the first cut of the shard tier had, caught by replaying the real run: `Backend full suite
+# (4/8)` matched `test-results-e2e-shard-4`, because the run published no backend artifact and the
+# only thing the two names shared was the shard number. A backend card naming an e2e case is the
+# misattribution the whole three-tier rule exists to prevent, so the shard tier also demands a word
+# in common with the job.
+def test_a_lane_never_takes_another_lanes_shard() -> None:
+    names = ("test-results-e2e-shard-4", "test-results-e2e-shard-3")
+
+    match = match_artifact("Backend full suite (4/8)", names)
+
+    assert match.name is None
+    assert match.how == "none"
+    assert match.candidates == ()
+
+
+def test_a_job_with_no_artifact_gets_no_candidates_from_another_lane() -> None:
+    names = ("test-results-e2e-shard-1", "test-results-e2e-shard-2")
+
+    assert artifact_candidates("Backend full suite (8/8)", names) == ()
+    assert match_artifact("Backend full suite (8/8)", names).name is None

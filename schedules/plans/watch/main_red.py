@@ -71,6 +71,14 @@ _SEPARATOR = "::"
 # `[gw1] [ 24%] ` in front. Reading only the bare form made every delivered failure unreadable:
 # on 2026-11-06 a 214 KB job log held 37 `FAILED` lines and the watch matched none of them, so
 # every red job was filed as one unnamed infrastructure fault and no card could ever open.
+# meiva:note
+# pytest colours `FAILED` when its output is not a pipe, and the job log keeps the escapes: the line
+# reads `\x1b[31mFAILED path::node\x1b[0m`, so every one of the anchored patterns below misses it.
+# On 2026-11-08 three cards opened as `unnamed failure` from logs that each carried the case -- the
+# backend logs printed `FAILED gateway/tests/...::test_...` and the watch read none of them. The
+# escapes are stripped at the boundary, once, rather than taught to every pattern.
+_ANSI_ESCAPE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
+
 _FAILED_LINE = re.compile(
     r"^(?:[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:.]+Z\s+)?"
     r"(?:\[gw\d+\]\s+\[\s*\d+%\]\s+)?"
@@ -110,6 +118,21 @@ _CANDIDATE_LIMIT = 20
 
 
 # meiva:note
+# What the run's JUnit artifact offered for one job, as one value: the cases it named, and -- when
+# no artifact could be tied to the job -- the near misses a reader should open instead. One
+# parameter rather than two because they travel together and `parse_failures` is at its parameter
+# budget; a caller that passes candidates without cases is a mistake this type cannot express.
+@dataclass(frozen=True)
+class JunitEvidence:
+    case_ids: tuple[str, ...] = ()
+    candidates: tuple[str, ...] = ()
+    matched: str = ""
+
+
+_NO_JUNIT = JunitEvidence()
+
+
+# meiva:note
 # One failing case out of one run. `kind` is the only judgement made from the log: `test` means a
 # JUnit record names it, `infra` means the run broke around the suite instead.
 @dataclass(frozen=True)
@@ -127,6 +150,15 @@ class Failure:
     # red from it belongs to that job: the next green of the workflow proves nothing about a test
     # the job alone collects.
     covers_full_suite: bool = True
+    # meiva:note
+    # The artifacts a reader should look at when this red could not be named: names from the same
+    # run that share a word with the job. Capped at the plan's own limit, because a run can publish
+    # dozens and the card is read by a person. Empty for a failure the log or the JUnit named.
+    artifact_candidates: tuple[str, ...] = ()
+    # meiva:note
+    # How the case was named when the log named nothing: the artifact and the fact that the match
+    # was heuristic. Empty when the log named the case itself, which needs no provenance line.
+    artifact_note: str = ""
 
 
 # meiva:note
@@ -205,6 +237,17 @@ class Entry:
     # by that lane's own green. Without this the macOS lane's red would be retired by the next
     # Linux nightly, which never collected the test — a card that closes while the red stands.
     covers_full_suite: bool = True
+    # meiva:note
+    # The artifacts a reader should open when this red was never named (`kind=unnamed`): names from
+    # the same run that share a word with the job. Carried on the entry rather than recomputed at
+    # card time because the run's artifact list is gone once GitHub expires it -- the card would
+    # then say "I do not know" with no way to recover what was on offer when the red was seen.
+    artifact_candidates: tuple[str, ...] = ()
+    # meiva:note
+    # The artifact a heuristic matched to this red, in the words the card shows. Persisted with the
+    # entry for the same reason the candidates are: the run's artifact list is gone once GitHub
+    # expires it, and "which bundle did this come from" must not become unanswerable.
+    artifact_note: str = ""
 
     # meiva:note
     # The workflow this entry belongs to, read back out of the fingerprint that encodes it. A
@@ -318,8 +361,9 @@ def parse_failures(
     suite_step_failed: bool,
     failed_steps: tuple[str, ...] = (),
     check_steps: frozenset[str] = frozenset(),
-    junit_ids: tuple[str, ...] = (),
+    junit: JunitEvidence = _NO_JUNIT,
 ) -> tuple[Failure, ...]:
+    log_text = _ANSI_ESCAPE.sub("", log_text)
     marker = _infrastructure_marker(log_text)
     if marker is not None:
         return (Failure(f"{job_name} runner: {marker}", FAILURE_INFRA, job_name),)
@@ -341,8 +385,11 @@ def parse_failures(
     # turns a suspect into a card would never arrive. An artifact that carried no failing case is
     # not the same as one that was never read, so it falls through to the unnamed failure below and
     # says which artifact was consulted.
-    if junit_ids:
-        return tuple(Failure(case, FAILURE_TEST, job_name) for case in junit_ids)
+    if junit.case_ids:
+        return tuple(
+            Failure(case, FAILURE_TEST, job_name, artifact_note=junit.matched)
+            for case in junit.case_ids
+        )
     # meiva:note
     # Everything below is a red this watch cannot name, and the steps are the whole of what it
     # knows: an empty tuple here is how a failed run once left no trace at all, so the answer is a
@@ -355,10 +402,18 @@ def parse_failures(
                 f"{job_name}: pytest summary without a parsable case ({steps})",
                 FAILURE_UNNAMED,
                 job_name,
+                artifact_candidates=junit.candidates,
             ),
         )
     if suite_step_failed or failed_steps:
-        return (Failure(f"{job_name}: unnamed failure ({steps})", FAILURE_UNNAMED, job_name),)
+        return (
+            Failure(
+                f"{job_name}: unnamed failure ({steps})",
+                FAILURE_UNNAMED,
+                job_name,
+                artifact_candidates=junit.candidates,
+            ),
+        )
     return ()
 
 
@@ -446,6 +501,8 @@ def apply_run(entries: dict[str, Entry], run: RunFacts) -> Plan:
                 job=failure.job,
                 run_id=run.run_id,
                 covers_full_suite=run.covers_full_suite and failure.covers_full_suite,
+                artifact_candidates=failure.artifact_candidates,
+                artifact_note=failure.artifact_note,
             )
             plan_entries[name] = created
             if state == STATE_CONFIRMED:
@@ -489,6 +546,25 @@ def card_title(entry: Entry) -> str:
     return f"main-red: {test_id} failed {entry.red_count} post-merge runs on main ({workflow})"
 
 
+# meiva:note
+# What the card says about the artifact it could not use. Two answers, and the second is the one that
+# matters: with candidates the reader is told where to look; with none the card states that this run
+# published nothing that names the job, which is a fact about the workflow rather than about the
+# watch. Both are only written for a red the watch could not name -- a named red needs neither.
+_ARTIFACT_CANDIDATE_LIMIT = 6
+
+
+def _artifact_line(entry: Entry) -> str:
+    if entry.artifact_note:
+        return f"Artifacts: {entry.artifact_note}\n\n"
+    if entry.kind != FAILURE_UNNAMED:
+        return ""
+    if not entry.artifact_candidates:
+        return "Artifacts: this run published none that belongs to this job.\n\n"
+    named = ", ".join(f"`{name}`" for name in entry.artifact_candidates[:_ARTIFACT_CANDIDATE_LIMIT])
+    return f"Candidate artifacts (none matched this job): {named}\n\n"
+
+
 def card_body(
     entry: Entry,
     *,
@@ -526,6 +602,7 @@ def card_body(
     return (
         f"Fingerprint: `{entry.fingerprint}`\n\n"
         f"Evidence: {latest_url or '-'} (jobs: {jobs})\n\n"
+        f"{_artifact_line(entry)}"
         f"First seen: `{entry.first_seen_sha}` at {entry.first_seen_at.isoformat()}\n\n"
         f"Latest red: `{entry.last_red_sha}` at {entry.last_red_at.isoformat()}\n\n"
         f"Red runs: {entry.red_count}\n\n"
