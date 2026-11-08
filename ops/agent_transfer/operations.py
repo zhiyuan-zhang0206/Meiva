@@ -23,6 +23,7 @@ from base.agents.lifecycle import release_browser_pages
 from base.cluster.machine import GatewayAccess, gateway_api_base, gateway_auth_headers
 from base.db.rows import query_one
 from base.host.net.http_dial import get as http_get
+from base.lm.harness.registry import FileSessionRegistry
 from ops.agent_transfer.archive_io import (
     abort_target_workspace,
     finalize_workspace,
@@ -35,6 +36,10 @@ from ops.agent_transfer.budget import WorkspaceTransferLimits, check_bundle_stre
 from ops.agent_transfer.errors import (
     WorkspaceTransferConflictError,
     WorkspaceTransferCorruptError,
+)
+from ops.agent_transfer.harness_transfer import (
+    apply_harness_transfer,
+    collect_harness_transfer,
 )
 from ops.cluster_status import agent_shell_sessions, kill_agent_shells, kill_shell
 from ops.rpc_schemas.transfer import (
@@ -121,6 +126,7 @@ def export_workspace_bundle(
         before_session_index=session_index,
         home=home,
     )
+    harness_transfer = collect_harness_transfer(home=home, agent_id=request.agent_id)
     _manifest, stream = pack_workspace(
         home=home,
         agent_id=request.agent_id,
@@ -128,6 +134,7 @@ def export_workspace_bundle(
         source_machine=local_machine,
         killed_shell_sessions=killed,
         limits=limits,
+        harness_transfer=harness_transfer,
     )
     _verify_export_fence(pool, request, local_machine=local_machine)
     return stream
@@ -186,6 +193,15 @@ def import_workspace_op(
         bundle_bytes=bundle_bytes,
         limits=limits,
     )
+    if manifest.harness_transfer is not None:
+        apply_harness_transfer(
+            home=home,
+            payload=manifest.harness_transfer,
+            to_machine=local_machine,
+            agent_id=payload.agent_id,
+        )
+    else:
+        FileSessionRegistry(paths.harness_sessions_dir(home=home)).delete(payload.agent_id)
     return WorkspaceTransferImportResult(
         machine=local_machine,
         workspace_dir=str(paths.workspace_path(home, payload.agent_id)),
@@ -207,6 +223,12 @@ def _cleanup_source_sessions_best_effort(agent_id: int, *, home: Path) -> None:
     except Exception:
         _log.warning(
             "post-transfer browser page release failed for agent %d", agent_id, exc_info=True
+        )
+    try:
+        FileSessionRegistry(paths.harness_sessions_dir(home=home)).delete(agent_id)
+    except Exception:
+        _log.warning(
+            "post-transfer harness session cleanup failed for agent %d", agent_id, exc_info=True
         )
 
 
@@ -238,4 +260,12 @@ def abort_transfer_op(
         agent_id=payload.agent_id,
         transfer_id=payload.transfer_id,
     )
+    try:
+        FileSessionRegistry(paths.harness_sessions_dir(home=home)).delete(payload.agent_id)
+    except Exception:
+        _log.warning(
+            "abort-transfer harness session cleanup failed for agent %d",
+            payload.agent_id,
+            exc_info=True,
+        )
     return WorkspaceTransferAbortResult(machine=local_machine, restored_previous=restored)

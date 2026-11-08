@@ -1,7 +1,7 @@
 ---
 type: doc
 title: Agent Cross-Machine Transfer
-description: CLI-driven cross-machine workspace and ownership transfer for quiescent native agents.
+description: CLI-driven cross-machine workspace, harness transcript, and ownership transfer for quiescent native and external-harness agents.
 tags:
 - gateway
 - agents
@@ -10,7 +10,7 @@ tags:
 
 # Agent Cross-Machine Transfer
 
-`POST /api/agents/{id}/transfer` (`gateway/agents/transfer/router.py`), exposed exclusively through `meiva agents transfer <id> --to <machine>` (`cli/commands/agents/control.py`), relocates a quiescent native agent (`harness = 'meiva'`) and its runner-local workspace directory from its current `from_machine` to another live `agent-runner` machine in the same cluster.
+`POST /api/agents/{id}/transfer` (`gateway/agents/transfer/router.py`), exposed exclusively through `meiva agents transfer <id> --to <machine>` (`cli/commands/agents/control.py`), relocates a quiescent agent (native `harness = 'meiva'` or external harness like `claude_code`, `codex`, `antigravity`) and its runner-local workspace directory from its current `from_machine` to another live `agent-runner` machine in the same cluster.
 
 No SDK surface (`meiva.self` or `meiva.agents`), web UI action, or new `agents_meta.status` / `inbound_messages.kind` enum value is introduced. An agent that wants to relocate itself asks a peer or operator to run `meiva agents transfer` after terminating itself with `meiva.self.terminate()`.
 
@@ -18,8 +18,7 @@ No SDK surface (`meiva.self` or `meiva.agents`), web UI action, or new `agents_m
 
 `gateway/agents/transfer/transfer_plan.py:evaluate_precheck` refuses the request with HTTP 409 before touching either runner when:
 
-- `agents_meta.status == 'running'` (running turns are never preempted or drained by transfer; only `idling` and `terminated` native agents are eligible).
-- `agents_meta.harness != 'meiva'` (external-harness sessions own host-local state outside Meiva's runner workspace).
+- `agents_meta.status == 'running'` (running turns are never preempted or drained by transfer; only `idling` and `terminated` agents are eligible).
 - `from_machine == to_machine`, `to_machine` is not registered as an active `agent-runner`, or `to_machine` is paused or stopped.
 - Any in-flight lifecycle command (`pending_lifecycle`) or upload delivery batch (`pending_upload`) exists.
 - Any open impersonation lease (`status IN ('requested', 'accepted', 'active')`) or unsettled impersonation handoff (`delta_version > applied_version` or `handoff_applied_at IS NULL`) exists for the agent, since pending handoff files are written on the previous home runner.
@@ -35,7 +34,7 @@ Runners do not dial each other directly; the gateway orchestrates a clean three-
 2. **Step 2 — Hub-and-spoke workspace transfer & atomic Postgres cutover while `terminated`**:
    - **Target prepare** (`workspace_transfer_prepare` on `to_machine`): verifies free disk capacity under `<to_home>/workspaces`.
    - **Fenced source export** (`POST /workspace/export` on `from_machine`, `ops/agent_transfer/operations.py:export_workspace_bundle`): verifies `status == 'terminated'` in Postgres, measures the workspace against the transfer ceilings before killing any remaining shells or reading a byte of it (`ops/agent_transfer/archive_io.py:preflight_workspace_budget`), then packs `<from_home>/workspaces/<id>` deterministically (`ops/agent_transfer/archive_io.py:pack_workspace`). Regular files, directories, and relative symlinks are preserved with SHA-256 digests. Both ceilings are cluster config (`settings.transfer`, [limits](../../../base/config/docs/workspace-transfer-limits.meiva.okf.md)): entries and original file bytes, HTTP 413 on overflow, with the refusal naming what the workspace holds, the effective ceiling and the setting that moves it. The gateway holds the framed `MEIVA_WS_V1` bundle in a lifespan-scoped `TransferBundleStore` (`gateway/agents/transfer/bundle_store.py`) under an unguessable token, and refuses a stream above the byte ceiling plus the framing slack.
-   - **Target import and verify** (`workspace_transfer_import` on `to_machine`): pulls `GET /api/internal/agent-transfers/{transfer_id}/bundle`, extracts safely without `extractall`, rescans disk against the manifest (`ops/agent_transfer/bundle_plan.py:verify_disk_snapshot`), backs up pre-existing target directories to `.pre-transfer-<transfer_id>`, and atomically renames the verified tree into `<to_home>/workspaces/<id>`.
+   - **Target import and verify** (`workspace_transfer_import` on `to_machine`): pulls `GET /api/internal/agent-transfers/{transfer_id}/bundle`, extracts safely without `extractall`, rescans disk against the manifest (`ops/agent_transfer/bundle_plan.py:verify_disk_snapshot`), backs up pre-existing target directories to `.pre-transfer-<transfer_id>`, and atomically renames the verified tree into `<to_home>/workspaces/<id>`. For external harnesses (`claude_code`, `codex`, `antigravity`), any transferred session records and transcripts are unpacked, project slugs and workspace `cwd` paths are rewritten to `to_machine`, and local indices are updated.
    - **Atomic Postgres cutover** (`gateway/agents/transfer/router.py:commit_cutover_blocking`): locks `agents_meta FOR UPDATE`, verifies CAS placement and `status == 'terminated'`, updates `machine = to_machine` while clearing runtime ownership, closes remaining `agent_pages`, deletes stale `agent_shell_ttls`, and records the `"transfer"` audit event (`base/events/declarations/audit.py`). If the CAS check or any pre-cutover step fails, `workspace_transfer_abort` rolls back target staging and `<from_home>/workspaces/<id>` remains intact.
 3. **Step 3 — Insert message & wake (`resurrect-explicit`) on `to_machine`**:
-   Once cutover commits and `<to_home>/workspaces/<id>` is active, the gateway composes a transfer completion wake message (`gateway/agents/transfer/transfer_plan.py:compose_transfer_wake_message`) describing the completed transfer, active workspace, closed shells/pages, and caller message. The gateway dispatches `POST /api/agents/{id}/resurrect-explicit` to `to_machine` with `ResurrectAgentRequest(resurrected_by=source, prompt=wake_message)`, resurrecting the agent into `'idling'` with both the `'resurrect'` lifecycle marker and the `'chat'` completion prompt queued on `to_machine`. Source and target workspace cleanups finalize best-effort (`workspace_transfer_finalize`).
+   Once cutover commits and `<to_home>/workspaces/<id>` is active, the gateway composes a transfer completion wake message (`gateway/agents/transfer/transfer_plan.py:compose_transfer_wake_message`) describing the completed transfer, active workspace, closed shells/pages, and caller message. The gateway dispatches `POST /api/agents/{id}/resurrect-explicit` to `to_machine` with `ResurrectAgentRequest(resurrected_by=source, prompt=wake_message)`, resurrecting the agent into `'idling'` with both the `'resurrect'` lifecycle marker and the `'chat'` completion prompt queued on `to_machine`. Source and target workspace cleanups finalize best-effort (`workspace_transfer_finalize`), which also cleans up residual source harness session records on `from_machine`.

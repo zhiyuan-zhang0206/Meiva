@@ -729,10 +729,10 @@ async def get_staged_transfer_bundle(
     "/api/agents/{agent_id}/transfer",
     response_model=TransferAgentResponse,
     description=(
-        "Transfer a settled (`idling` or `terminated`) native Meiva agent — including its "
-        "workspace directory and central placement — to another live `agent-runner` machine. "
-        "Running agents, external-harness agents, and agents with in-flight commands or uploads "
-        "are refused with HTTP 409."
+        "Transfer a settled (`idling` or `terminated`) native Meiva or external-harness agent — "
+        "including its workspace directory, harness session state, and central placement — "
+        "to another live `agent-runner` machine. "
+        "Running agents and agents with in-flight commands or uploads are refused with HTTP 409."
     ),
 )
 async def post_agent_transfer(
