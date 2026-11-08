@@ -27,7 +27,3 @@ exports = ["boot_autostart", "backend.py", "boot_policy.py", "boot_unit.py", "cr
 
 [roots]
 "hostport.py" = { kinds = ["pid", "platform"], why = "Host.system() is the door that builds the one Host this process has, and a Host must describe the process that built it: the user id it carries is the id a lock, a private directory and a socket path are later judged against, so one handed in from outside would let a component claim another process's identity — the single thing this value must not be able to say; `Platform.current()` is the other fact the same constructor reads — the machine this Host describes — and the comment on `Host.system` already counts two acquisitions here" }
-
-[debt.ambient-read]
-"boot_unit.py#pid grp.getgrgid" = { count = 1, owner = "#5816", until = "permanently: `unit_context` writes the unit's Group= from the primary gid of the account running this host process, and a group name is only ever the account database's answer for that gid — a caller would have to perform the same lookup to hand it in, and would be answering about the same account" }
-"boot_unit.py#pid pwd.getpwuid" = { count = 1, owner = "#5816", until = "permanently: `unit_context` turns the uid the `Host` port already holds into the account the unit runs as — its name, home and gid — and no caller of that port knows the account database better than the process reading it here" }

@@ -20,16 +20,62 @@
 
 from __future__ import annotations
 
+import grp
+import pwd
 import shutil
+import socket
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
+from pathlib import Path
 from types import MappingProxyType
 
 from base.host.proc import CommandRunner, run_bounded
 from base.native_process.os_platform import Platform
 from base.native_process.root_control.client import current_uid
 
-__all__ = ["Host"]
+__all__ = [
+    "Host",
+    "account_home_and_group",
+    "chown_account_names",
+    "local_hostname",
+    "process_account",
+]
+
+
+# meiva:note
+# The kernel hostname of this machine.
+def local_hostname() -> str:
+    return socket.gethostname()
+
+
+# meiva:note
+# The user name, primary group name and home directory of `uid` from the OS account database.
+def account_home_and_group(uid: int) -> tuple[str, str, Path]:
+    entry = pwd.getpwuid(uid)
+    group = grp.getgrgid(entry.pw_gid).gr_name
+    return entry.pw_name, group, Path(entry.pw_dir)
+
+
+# meiva:note
+# The user and group names `chown` takes for `uid`, or numeric ids when no entry exists.
+def chown_account_names(uid: int) -> tuple[str, str]:
+    try:
+        pw = pwd.getpwuid(uid)
+    except KeyError:
+        return str(uid), str(uid)
+    gid = pw.pw_gid
+    try:
+        return pw.pw_name, grp.getgrgid(gid).gr_name
+    except KeyError:
+        return pw.pw_name, str(gid)
+
+
+# meiva:note
+# The running process's real uid, account name and home directory from the OS account database.
+def process_account() -> tuple[int, str, Path]:
+    uid = current_uid()
+    entry = pwd.getpwuid(uid)
+    return uid, entry.pw_name, Path(entry.pw_dir)
 
 
 @dataclass(frozen=True)

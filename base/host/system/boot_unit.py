@@ -26,7 +26,7 @@ from base.host.system.boot_policy import (
     BOOT_RETRY_INTERVAL_S,
     boot_start_arguments,
 )
-from base.host.system.hostport import Host
+from base.host.system.hostport import Host, account_home_and_group
 from base.host.system.job_values import JobRoots
 from base.native_process.ownership import OwnedProcess
 from base.paths.scratch import ScratchSpace
@@ -76,17 +76,13 @@ def root_pid_path(home: Path) -> Path:
 def unit_context(*, roots: JobRoots, services: frozenset[str], host: Host) -> BootUnitContext:
     # meiva:note
     # The unit of the cluster `roots` names, run by the account that owns this host process.
-    import grp
-    import pwd
-
-    entry = pwd.getpwuid(host.uid)
-    group = grp.getgrgid(entry.pw_gid).gr_name
+    user, group, home_dir = account_home_and_group(host.uid)
     return BootUnitContext(
         home=roots.home,
         repo=roots.repo,
-        user=entry.pw_name,
+        user=user,
         group=group,
-        home_dir=Path(entry.pw_dir),
+        home_dir=home_dir,
         services=services,
     )
 

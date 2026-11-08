@@ -16,6 +16,7 @@ exports = ["agent_env.py", "agent_slices.py", "boot_actions.py", "boot_policy.py
 [roots]
 "dotenv_file.py" = { kinds = ["clock"], why = "the .env backup name carries the HOST clock by decision (docs/decisions/data/backup/2026-09-28-env-backup-names-use-the-host-clock.md): the writer runs before first-start identity, so asking a cluster Clock would mean loading runtime Settings to name a file, and the name must stay this machine's local time" }
 "boot_actions.py" = { kinds = ["environ", "random"], why = "The program-level operations that write this process's own TZ, MEIVA_HOME and config-fetch marker before the first application import, and that name the scratch home they create at random under the temporary directory; nothing else in base.host.env writes the process environment" }
+"port_lease.py" = { kinds = ["pid"], why = "the holder of a lease is the process holding the flock (`os.getpid()`) and each user owns one lease namespace (`os.getuid()`); caller-supplied ids would let one process answer for another's lease or write into somebody else's namespace" }
 "registry.py" = { kinds = ["environ"], why = "child_env builds the parent->child forwarding dict from the LIVE env (the registry's allowlist keys + passthrough rows); Settings cannot enumerate non-modeled keys and the dict must reflect the parent env, not its own snapshot — same child-env handoff as base.sessions.env_forwarding" }
 
 [purity]
@@ -31,8 +32,7 @@ exports = ["agent_env.py", "agent_slices.py", "boot_actions.py", "boot_policy.py
 [debt.ambient-read]
 "dotenv_file.py#home base.paths.home.resolve_meiva_home" = { count = 1, owner = "#5816", until = "waits for a caller that holds the home: every caller of process_env_file() is a module with no home to pass (base.config, base.lm, the plugin config view), so handing one in would move the same resolve_meiva_home() into each of them instead of removing it" }
 "harness_binaries.py#home base.paths.home.user_home" = { count = 1, owner = "#5816", until = "waits for every call site to hold the user home: the antigravity transcript mapper has none in hand, so the fallback stays until it passes one" }
-"port_lease.py#pid os.getpid" = { count = 1, owner = "#5816", until = "permanently: the holder of a lease is the process holding the flock, and a caller-supplied pid would let one process answer for another's lease (the 2026-10-31 ruling)" }
-"port_lease.py#pid os.getuid" = { count = 1, owner = "#5816", until = "permanently: each user owns one lease namespace and the uid is the owner of the shared directory, so a caller-supplied uid would write into somebody else's namespace (the 2026-10-31 ruling)" }
+
 
 [debt.impure-call]
 "config_lite_table.py#pkgutil.get_data" = { count = 1, owner = "#7240", until = "waits for a boot-order change that makes the single import-time derivation lazy: the table stays JSON, and one line — base/packages/plugins/flags.py:40 `frozenset(FIELD_DOMAINS.values())` — is the door; the other 17 import sites read the tables inside functions" }

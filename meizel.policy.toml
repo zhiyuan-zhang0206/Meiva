@@ -162,6 +162,8 @@ bus = [
 "meiva.boot.process_disable_entries()" = "reads the SDK disable entries from the live os.environ"
 
 [ambient-readers.home]
+"base.config.base.is_default_unit_home()" = "compares against user_home() (and unit_home() when no home is passed)"
+"base.config.base.unit_home()" = "resolve_meiva_home() for config sub-model path defaults"
 "base.paths.home.resolve_meiva_home()" = "reads MEIVA_HOME from os.environ and falls back to Path.home()"
 "base.paths.home.user_home()" = "returns Path.home()"
 "base.paths.meiva_home()" = "resolve_meiva_home() plus creating the directory"

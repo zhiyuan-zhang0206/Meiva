@@ -237,7 +237,7 @@ async def run(
     database: Callable[[], Database],
     image: LoadedCommit,
 ) -> None:
-    refusal = prod_service_checkout_error(REPO_ROOT)
+    refusal = prod_service_checkout_error(REPO_ROOT, home=runtime.parent)
     if refusal is not None:
         raise RuntimeError(f"schedule supervision refused: {refusal}")
     if _is_running(process_config, runtime=runtime) or not acquire_pidfile(

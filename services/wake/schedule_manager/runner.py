@@ -161,7 +161,7 @@ def main(argv: Sequence[str]) -> None:
         )
         raise SystemExit(2)
 
-    refusal = prod_service_checkout_error(Path(__file__).resolve().parents[3])
+    refusal = prod_service_checkout_error(Path(__file__).resolve().parents[3], home=meiva_home())
     if refusal is not None:
         logger.error("schedule runner refused: {}", refusal)
         raise SystemExit(3)

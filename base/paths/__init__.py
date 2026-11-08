@@ -61,18 +61,18 @@ def repo_root() -> Path:
     return Path(__file__).resolve().parents[2]
 
 
-def prod_service_checkout_error(repo: Path) -> str | None:
-    """Why `repo` must not launch services for this unit, or None when it may.
-
-    The 01:13 worktree accident (Task #966): `repo_root()` is "whoever imported
-    base/paths/__init__.py", and a prod daemon bound to a dev clone's or worktree's
-    code loses its floor when that checkout is deleted — routine worktree
-    cleanup. A home that carries its own `<home>/source` checkout (the prod home
-    `~/.meiva`) may only launch services from that checkout; a home with none (a
-    test home) accepts any. The rule is `base.paths.home.home_checkout_error`, shared
-    with the CLI's pre-Settings gate.
-    """
-    return home_checkout_error(repo, home=resolve_meiva_home())
+# meiva:note
+# Why `repo` must not launch services for `home`, or None when it may.
+#
+# The 01:13 worktree accident (Task #966): `repo_root()` is "whoever imported
+# base/paths/__init__.py", and a prod daemon bound to a dev clone's or worktree's
+# code loses its floor when that checkout is deleted — routine worktree
+# cleanup. A home that carries its own `<home>/source` checkout (the prod home
+# `~/.meiva`) may only launch services from that checkout; a home with none (a
+# test home) accepts any. The rule is `base.paths.home.home_checkout_error`, shared
+# with the CLI's pre-Settings gate.
+def prod_service_checkout_error(repo: Path, *, home: Path) -> str | None:
+    return home_checkout_error(repo, home=home)
 
 
 def repo_plugins_dir() -> Path:

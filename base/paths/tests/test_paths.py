@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from base import paths
-from base.paths.home import default_home, is_default_home, is_default_home_of, is_prod_install
+from base.paths.home import is_default_home_of, is_prod_install, user_home
 
 
 def test_meiva_home_reads_settings(unit_home: Path):
@@ -48,13 +48,8 @@ def test_workspace_paths_derive_from_the_workspaces_root(unit_home: Path):
     assert paths.workspace_dir(7, home=unit_home) == root / "7"
 
 
-def test_default_home_is_bare_meiva():
-    assert default_home() == Path("~/.meiva").expanduser()
-
-
-def test_is_default_home_expands_and_compares():
-    assert is_default_home(Path("~/.meiva"))
-    assert not is_default_home(Path("~/.meiva-foo"))
+def test_user_home_is_bare_home():
+    assert user_home() == Path("~").expanduser()
 
 
 def test_is_default_home_of_compares_against_the_given_account_not_the_process(tmp_path: Path):
@@ -62,7 +57,7 @@ def test_is_default_home_of_compares_against_the_given_account_not_the_process(t
     assert is_default_home_of(account / ".meiva", user_home=account)
     assert is_default_home_of(account / "elsewhere" / ".." / ".meiva", user_home=account)
     assert not is_default_home_of(account / ".meiva-foo", user_home=account)
-    assert not is_default_home_of(default_home(), user_home=account)
+    assert not is_default_home_of(user_home() / ".meiva", user_home=account)
 
 
 def test_is_default_home_of_follows_a_symlinked_spelling_of_the_same_directory(tmp_path: Path):
@@ -75,7 +70,7 @@ def test_is_default_home_of_follows_a_symlinked_spelling_of_the_same_directory(t
 
 
 def test_is_prod_install_needs_the_default_home_and_a_non_worktree_checkout(tmp_path: Path):
-    home = default_home()
+    home = user_home() / ".meiva"
     assert is_prod_install(repo=tmp_path / "Meiva", home=home)
     assert not is_prod_install(repo=tmp_path / "Meiva" / ".worktrees" / "x", home=home)
     assert not is_prod_install(repo=tmp_path / ".claude" / "worktrees" / "x", home=home)

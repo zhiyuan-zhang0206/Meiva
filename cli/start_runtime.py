@@ -10,7 +10,6 @@
 from __future__ import annotations
 
 import argparse
-import sys
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -61,10 +60,8 @@ class StartRuntime:
     # its identity. Raises `LoadedRuntimeError` (a `ValueError`) when it is not.
     @classmethod
     def admit(cls, checkout: Path) -> StartRuntime:
-        loaded = runtime_interpreter.verify_loaded_source(
-            checkout, loaded=runtime_interpreter.loaded_runtime()
-        )
-        return cls(checkout, checkout, Path(sys.executable).absolute(), loaded)
+        interpreter, loaded = runtime_interpreter.admit_loaded_source(checkout)
+        return cls(checkout, checkout, interpreter, loaded)
 
     # meiva:note
     # The loaded identity with the source digest of `code_root` read again now.

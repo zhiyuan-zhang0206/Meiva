@@ -2,12 +2,11 @@
 
 from __future__ import annotations
 
-import grp
-import pwd
 import sys
 from datetime import datetime
 from pathlib import Path
 
+from base.host.system.hostport import chown_account_names
 from cli.commands.converge.plans.ownership_plan import (
     Account,
     OwnedPath,
@@ -55,15 +54,8 @@ def _key_paths(meiva_home: Path) -> tuple[Path, ...]:
 # meiva:note
 # The names `chown` takes for `uid`, or the numeric ids when the system has no entry.
 def _account(uid: int) -> Account:
-    try:
-        pw = pwd.getpwuid(uid)
-    except KeyError:
-        return Account(uid, str(uid), str(uid))
-    gid = pw.pw_gid
-    try:
-        return Account(uid, pw.pw_name, grp.getgrgid(gid).gr_name)
-    except KeyError:
-        return Account(uid, pw.pw_name, str(gid))
+    user, group = chown_account_names(uid)
+    return Account(uid, user, group)
 
 
 def _append_warnings(path: Path, warnings: tuple[str, ...], *, now: datetime) -> None:

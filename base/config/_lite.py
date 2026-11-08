@@ -53,7 +53,7 @@ from base.host.env.process_profile import (
     ProcessProfile,
     parse_process_profile,
 )
-from base.paths.home import default_home, home_from_env, resolve_meiva_home
+from base.paths.home import home_from_env, resolve_meiva_home, user_home
 
 # `MEIVA_CONFIG_BOOT=eager` — the operator's instant rollback to the eager boot.
 BOOT_MODE_ENV = "MEIVA_CONFIG_BOOT"
@@ -335,7 +335,7 @@ class ConfigBoot:
         from base.host.env.dotenv_file import env_file_path, read_env_aliases
 
         env = self.process_environment()
-        home = home_from_env(env, user_home=default_home().parent)
+        home = home_from_env(env, user_home=user_home())
         return launch_facts(env, env_file=read_env_aliases(env_file_path(home)))
 
     def _apply_cluster_timezone(self) -> None:
@@ -373,7 +373,7 @@ class ConfigBoot:
             self.profile = parsed_profile
             self.env_boot = captured_env_boot(
                 environment,
-                home=home_from_env(environment, user_home=default_home().parent),
+                home=home_from_env(environment, user_home=user_home()),
                 process=_state if live_environment else None,
                 dotenv_result=dotenv_result,
             )

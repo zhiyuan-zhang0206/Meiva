@@ -61,7 +61,7 @@ def _home_with_source(unit_home: Path) -> Path:
 def test_prod_checkout_guard_allows_the_homes_own_source(unit_home: Path) -> None:
     """A home's own source checkout is the one allowed launch site."""
     home = _home_with_source(unit_home)
-    assert paths.prod_service_checkout_error(home / "source") is None
+    assert paths.prod_service_checkout_error(home / "source", home=home) is None
 
 
 def test_prod_checkout_guard_refuses_dev_worktree(tmp_path: Path, unit_home: Path) -> None:
@@ -69,7 +69,7 @@ def test_prod_checkout_guard_refuses_dev_worktree(tmp_path: Path, unit_home: Pat
     services: deleting the worktree removes the floor under the running fleet."""
     home = _home_with_source(unit_home)
     for repo in (home / "worktrees" / "meiva-2750-dev-wt", home / "source-wt", tmp_path / "Meiva"):
-        err = paths.prod_service_checkout_error(repo)
+        err = paths.prod_service_checkout_error(repo, home=home)
         assert err is not None, repo
         assert str(home / "source") in err
 
@@ -80,7 +80,9 @@ def test_prod_checkout_guard_allows_a_home_without_source_any_checkout(
     """A home with no `source` of its own (a test or scratch home) runs whichever
     checkout's code launches it — the guard is about homes that have an owner."""
     assert not (unit_home / "source").exists()
-    assert paths.prod_service_checkout_error(tmp_path / "worktrees" / "dev-wt") is None
+    assert (
+        paths.prod_service_checkout_error(tmp_path / "worktrees" / "dev-wt", home=unit_home) is None
+    )
 
 
 def test_file_anchored_roots_resolve_to_the_checkout_root() -> None:

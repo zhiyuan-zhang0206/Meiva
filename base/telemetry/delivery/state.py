@@ -2,19 +2,19 @@
 
 from __future__ import annotations
 
-import socket
 from collections.abc import Callable
 from datetime import datetime
 from functools import partial
 from pathlib import Path
 from typing import Protocol, TypedDict
 
+from base.host.system.hostport import local_hostname
 from base.telemetry.delivery.receipts import DrainResult, Event
 from base.telemetry.delivery.reporting import report_sink_failure
 
 
 def _hostname() -> str:
-    return socket.gethostname()
+    return local_hostname()
 
 
 # meiva:note

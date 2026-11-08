@@ -28,6 +28,10 @@ from base.telemetry.delivery.receipts import (
 __all__ = ["EventPipeline"]
 
 
+class _WorkerLocal(threading.local):
+    in_worker: bool = False
+
+
 class EventPipeline:
     """Bounded queue + drain thread owning all event persistence for the process.
 
@@ -60,6 +64,7 @@ class EventPipeline:
         self._stop_requested = threading.Event()
         self._finished = threading.Event()
         self._error: BaseException | None = None
+        self._worker_local = _WorkerLocal()
         self._thread = threading.Thread(target=self._drain, daemon=True, name="event-emitter")
         self._thread.start()
 
@@ -140,7 +145,7 @@ class EventPipeline:
         """
         if not math.isfinite(timeout) or timeout < 0:
             raise ValueError("event drain timeout must be finite and non-negative")
-        if threading.current_thread() is self._thread:
+        if self._worker_local.in_worker:
             raise RuntimeError("event drain cannot wait on its own barrier")
         deadline = time.monotonic() + timeout
         receipt = SyncReceipt()
@@ -175,7 +180,7 @@ class EventPipeline:
         deadline = time.monotonic() + timeout
         with self._admission_lock:
             self._stop_requested.set()
-        if threading.current_thread() is self._thread:
+        if self._worker_local.in_worker:
             raise RuntimeError("event drain cannot join itself")
         self._thread.join(timeout=max(0.0, deadline - time.monotonic()))
         return self._result(completed=not self._thread.is_alive(), phase=DrainPhase.STOP)
@@ -218,6 +223,7 @@ class EventPipeline:
     def _drain(self) -> None:
         """Own all writes and retain terminal failures for barrier/stop callers."""
         try:
+            self._worker_local.in_worker = True
             self._run_drain()
         except BaseException as exc:
             from base.telemetry.delivery.reporting import report_no_pipeline

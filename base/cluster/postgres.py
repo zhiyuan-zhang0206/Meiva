@@ -27,7 +27,7 @@ from base.host.atomic_io import write_text_atomic
 from base.log import logger
 from base.native_process.evidence import EvidenceModel, ExpectedProcess
 from base.native_process.kernel_identity import native_boot_id
-from base.native_process.os_platform import Platform, file_lock
+from base.native_process.os_platform import file_lock, is_linux, is_macos
 from base.native_process.ownership import OwnedProcess, capture_tree, retain_processes
 from base.paths.private_dir import ensure_private_dir
 
@@ -128,7 +128,8 @@ def read_receipt(data: Path) -> Receipt | None:
     except FileNotFoundError:
         return None
     receipt = Receipt.model_validate_json(raw)
-    if receipt.data != str(data) or receipt.platform != Platform.current().system:
+    current_system = "darwin" if is_macos() else ("linux" if is_linux() else "")
+    if receipt.data != str(data) or receipt.platform != current_system:
         raise RuntimeError("PostgreSQL custody names another data directory or platform")
     return receipt
 

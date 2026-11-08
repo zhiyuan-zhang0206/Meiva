@@ -3,3 +3,7 @@ exports = ["settings.py"]
 
 [uses]
 "settings.py" = ["health_ports_fields.py", "runtime.py"]
+
+[roots]
+"runtime.py" = { kinds = ["home"], why = "unit_home() is a pydantic default_factory that runs while ServicesRuntimeSettings is constructed, before any Settings object exists to carry the home" }
+"settings.py" = { kinds = ["home"], why = "unit_home() is a pydantic default_factory that runs while ServicesSettings is constructed, before any Settings object exists to carry the home" }
