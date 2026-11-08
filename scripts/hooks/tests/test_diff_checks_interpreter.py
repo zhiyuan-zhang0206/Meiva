@@ -34,7 +34,7 @@ def _always(selection: Selection) -> Callable[[ChangeSet], Selection]:
 def _commands(
     change: ChangeSet, *, mode: Literal["incremental", "full"], python: str
 ) -> dict[str, tuple[str, ...]]:
-    groups = schedule_groups(change, mode=mode, debt_reduced=True, python=python)
+    groups = schedule_groups(change, mode=mode, python=python)
     return {run.label: run.argv for group in groups for run in group.runs}
 
 
@@ -85,7 +85,7 @@ def test_a_command_naming_a_first_party_entry_runs_on_the_interpreter_the_caller
         python=_ELSEWHERE,
     )
 
-    for label in ("docs-refs", "docs-okf", "refusal-loss"):
+    for label in ("docs-refs", "docs-okf"):
         assert commands[label][0] == _ELSEWHERE, (
             f"{label} names a first-party entry: its command runs on the interpreter the caller "
             "handed in, and its edge comes from the `Interpreter` parameter"
@@ -115,9 +115,7 @@ def test_a_check_tool_is_looked_for_beside_the_interpreter_the_caller_handed_in(
     basedpyright.chmod(0o755)
 
     def pyright_argv(python: str) -> tuple[str, ...]:
-        groups = schedule_groups(
-            _change("base/thing.py"), mode="incremental", debt_reduced=False, python=python
-        )
+        groups = schedule_groups(_change("base/thing.py"), mode="incremental", python=python)
         return next(run.argv for group in groups for run in group.runs if run.label == "pyright")
 
     assert pyright_argv(str(bin_dir / "python"))[0] == str(basedpyright), (

@@ -114,7 +114,7 @@ def input_digest_for_run(
         if len(argv) > 2:
             return files_digest(root, (*_RUFF_CONFIG_FILES, *argv[2:]))
         return f"{context.python_digest}:{files_digest(root, _RUFF_CONFIG_FILES)}"
-    if label in {"debt", "refusal-loss", "selector"}:
+    if label in {"debt", "selector"}:
         return f"{context.head_tree}:{context.base_sha}"
     return context.head_tree
 

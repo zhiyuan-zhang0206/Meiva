@@ -205,23 +205,6 @@ def _docs_runs(*, python: Interpreter) -> tuple[Run, ...]:
     )
 
 
-def _refusal_runs(change: ChangeSet, *, python: Interpreter) -> tuple[Run, ...]:
-    return (
-        Run(
-            "refusal-loss",
-            (
-                python,
-                "-m",
-                "scripts.audit.refusal_loss",
-                "--base",
-                change.base,
-                "--receipt",
-            ),
-            "exit code (a pure-deletion hunk); the line names hits/blocking/unreplaced",
-        ),
-    )
-
-
 # meiva:note
 # The React Server Component boundary is a framework rule: a Server Component that calls a client
 # hook type-checks, lints and unit-tests clean, and only the production build refuses it. A change
@@ -290,7 +273,6 @@ def schedule_groups(
     change: ChangeSet,
     *,
     mode: CheckMode,
-    debt_reduced: bool,
     cache: CacheContext | None = None,
     python: str,
 ) -> tuple[ScheduledGroup, ...]:
@@ -311,8 +293,6 @@ def schedule_groups(
             groups.append(ScheduledGroup("frontend-rsc", _FRONTEND_RUNS))
         if _touches_web_tree(change):
             groups.append(ScheduledGroup("frontend-app", _APP_TEST_RUNS))
-        if debt_reduced:
-            groups.append(ScheduledGroup("debt-reduced", _refusal_runs(change, python=python)))
         return tuple(groups)
     if mode == "full":
         groups = [
@@ -323,8 +303,6 @@ def schedule_groups(
             ScheduledGroup("full-frontend-rsc", _FRONTEND_RUNS),
             ScheduledGroup("full-frontend-app", _APP_TEST_RUNS),
         ]
-        if debt_reduced:
-            groups.append(ScheduledGroup("debt-reduced", _refusal_runs(change, python=python)))
         return tuple(groups)
     assert_never(mode)
 

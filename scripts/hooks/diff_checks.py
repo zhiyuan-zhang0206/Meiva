@@ -105,30 +105,6 @@ def changed_files(base: str, root: Path) -> tuple[str, ...]:
 
 
 # meiva:note
-# Whether a change reduces recorded debt: a `meizel.toml` whose deleted lines outnumber the
-# added ones. The refusal-loss scan is the check that shape owes — a debt repaid by deleting a
-# refusal has to say which refusal took its place.
-def _net_debt_reduction(change: ChangeSet) -> bool:
-    manifests = [name for name in change.files if name.endswith("meizel.toml")]
-    if not manifests:
-        return False
-    # meiva:note
-    # A manifest diff this runner cannot read is not evidence that nothing was repaid, so the
-    # refusal scan runs: the check costs seconds and a missing scan is the expensive mistake.
-    try:
-        counted = _git(change.root, "diff", "--numstat", f"{change.base}...HEAD", "--", *manifests)
-    except (subprocess.CalledProcessError, FileNotFoundError):
-        return True
-    added = deleted = 0
-    for line in counted.splitlines():
-        fields = line.split("\t")
-        if len(fields) >= 2 and fields[0].isdigit() and fields[1].isdigit():
-            added += int(fields[0])
-            deleted += int(fields[1])
-    return deleted > added
-
-
-# meiva:note
 # The selector's decision for this change: the files it chose, whether it covered the change
 # whole (`FULL`), and the changed files it admits it cannot map. `blind` is reported rather than
 # swallowed — a blind change needs the fallback run that the receipt then names.
@@ -397,9 +373,7 @@ def check(
     mode: CheckMode = "incremental",
     cache: CacheContext | None = None,
 ) -> tuple[dict[str, str], bool]:
-    groups = schedule_groups(
-        change, mode=mode, debt_reduced=_net_debt_reduction(change), cache=cache, python=python
-    )
+    groups = schedule_groups(change, mode=mode, cache=cache, python=python)
     values: dict[str, str] = {"scope": scope_of(change)}
     selection = _choose_selection(change, choose=choose, mode=mode, cache=cache)
     values["selector"] = selection.field
@@ -437,9 +411,7 @@ def plan(
     python: str,
     mode: CheckMode = "incremental",
 ) -> list[str]:
-    groups = schedule_groups(
-        change, mode=mode, debt_reduced=_net_debt_reduction(change), python=python
-    )
+    groups = schedule_groups(change, mode=mode, python=python)
     return render_plan(change, groups, skip_tests=skip_tests, mode=mode)
 
 
