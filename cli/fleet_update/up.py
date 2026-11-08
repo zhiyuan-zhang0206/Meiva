@@ -101,8 +101,9 @@ def up(s: Session, args: FleetArgs) -> list[HostFailure]:
     )
     failures += verified
     # meiva:note
-    # The planned-outage silence ends here even on a partial up: hosts that came back healthy
-    # must not spend the rest of the silence with their alerts suppressed.
+    # The planned-outage silence is shortened to its post-`up` settle grace here even on a
+    # partial up: hosts that came back healthy must not spend the rest of a multi-hour silence
+    # with their alerts suppressed.
     run_silence(s, args.gateway, "close")
     for alias in hosts:
         s.say(f"matrix: {alias} {outcome(alias, tuple(failures), skipped)}")

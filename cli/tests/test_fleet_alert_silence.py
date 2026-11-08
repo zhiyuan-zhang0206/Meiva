@@ -131,14 +131,21 @@ def test_a_rerun_extends_the_silence_it_owns_instead_of_stacking_another(
     assert fake.rows[0]["startsAt"] == "2026-10-04T04:00:00+00:00"
 
 
-def test_close_expires_only_the_silences_it_owns(grafana: tuple[FakeGrafana, str]) -> None:
+def test_close_shortens_only_the_silences_it_owns_to_the_settle_grace(
+    grafana: tuple[FakeGrafana, str],
+) -> None:
     fake, base = grafana
     fake.add_foreign()
     owned = silence.open_window(base, "pw", hours=4, comment="a", now=_NOW)
-    assert silence.close_window(base, "pw") == [owned]
-    states = {row["id"]: row["status"]["state"] for row in fake.rows}
-    assert states == {"other": "active", owned: "expired"}
-    assert silence.close_window(base, "pw") == []
+    closed_at = _NOW + timedelta(minutes=30)
+    assert silence.close_window(base, "pw", now=closed_at) == [owned]
+    by_id = {row["id"]: row for row in fake.rows}
+    assert "endsAt" not in by_id["other"]
+    assert by_id[owned]["status"]["state"] == "active"
+    assert by_id[owned]["startsAt"] == "2026-10-04T04:00:00+00:00"
+    assert by_id[owned]["endsAt"] == (closed_at + silence.SETTLE_WINDOW).isoformat(
+        timespec="seconds"
+    )
 
 
 # meiva:note
@@ -173,9 +180,12 @@ def test_main_opens_then_closes_through_the_hosts_settings(
     assert _run(tmp_path, base, "pw", "open", "--hours", "2", "--comment", "window").startswith(
         "SILENCE opened id=s1 until="
     )
+    opened_ends_at = datetime.fromisoformat(fake.rows[0]["endsAt"])
     assert fake.rows[0]["status"]["state"] == "active"
     assert _run(tmp_path, base, "pw", "close") == "SILENCE closed 1\n"
-    assert fake.rows[0]["status"]["state"] == "expired"
+    closed_ends_at = datetime.fromisoformat(fake.rows[0]["endsAt"])
+    assert fake.rows[0]["status"]["state"] == "active"
+    assert closed_ends_at < opened_ends_at
 
 
 def test_an_unreachable_grafana_is_reported_not_raised(tmp_path: Path) -> None:

@@ -593,19 +593,22 @@ half, use the separate commands:
   agent boot loads it; the loader skips a broken plugin, so this is what turns that into
   a failure — 2026-10-03: out-of-repo plugins calling deleted hook APIs). They come
   last so a red never skips the refresh. Only after they pass does `up`
-  expire the window's alert silence.
+  shorten the window's alert silence to its 10-minute post-`up` settle grace.
 - The window is quiet through one Grafana silence, not through any gate in the services:
   `down` has the gateway host create a silence in the co-located Grafana's Alertmanager
   (`createdBy` `meiva-fleet-update`, matcher `alertname=~".+"` except the disk alerts (`metric="host_disk"`, `attributes_check="disk_usage"`: a filling disk still pages) — comment naming NEW, expiry
-  `--silence-hours`, default 4) before anything stops, and `up` expires it after the drift
-  checks. A silenced rule keeps evaluating, so a condition that outlives the window notifies
+  `--silence-hours`, default 4) before anything stops, and `up` shortens its `endsAt` to a
+  10-minute post-`up` settle window (`SETTLE_WINDOW`) after the drift checks so rules that
+  entered `Firing` during `down` can complete their `keepFiringFor: 5m` / 6-evaluation
+  recovery window and 5-minute health-probe cron tick before Alertmanager unsilences them. A
+  silenced rule keeps evaluating, so a condition that outlives the settle window notifies
   when the silence ends. A rerun of `down` extends the silence it owns; a failed `up`
   leaves it to its expiry (the cluster stays quiet while you fix the cause); `down --dry-run`
   only prints the command. The program (`cli/fleet_update/fleet_alert_silence.py`) ships on stdin, so the
   first update carrying it already has it; a host without `GRAFANA_ADMIN_PASSWORD`, or a
   Grafana that does not answer, prints a `WARNING: alert silence not open/close` line and
   the half goes on (a window without a silence is noisy, not unsafe). Expire a stuck silence
-  by hand in Grafana (Alerting > Silences) or with `python - close` from that file.
+  by hand in Grafana (Alerting > Silences) or shorten it with `python - close` from that file.
 - The first failure stops a half and nothing rolls back: fix the cause and
   rerun the whole half, which is idempotent. `--dry-run` runs only the
   read-only checks and prints the effects. Output is redacted and tee'd to

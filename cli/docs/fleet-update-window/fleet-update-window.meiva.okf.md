@@ -46,9 +46,12 @@ unevaluable and refuses.
 ## The silence
 
 `down` opens one Grafana silence on the gateway host before the first stop
-(comment naming NEW, expiry the required `--silence-hours`) and `up` expires it
-after the drift checks. A silence that cannot open only warns; a failed `up`
-leaves the silence to its expiry. `--dry-run` prints the command without
+(comment naming NEW, expiry the required `--silence-hours`) and `up` shortens it
+to a 10-minute post-`up` settle window (`SETTLE_WINDOW`) after the drift checks so
+rules that fired during the `down` window can complete their `keepFiringFor: 5m`
+/ 6-evaluation recovery window and 5-minute health-probe cron tick before
+Alertmanager unsilences them. A silence that cannot open only warns; a failed `up`
+leaves the silence to its original expiry. `--dry-run` prints the command without
 opening.
 
 ## The log and the macOS start
@@ -68,9 +71,9 @@ Before anything stops — under --dry-run too — down runs NEW's offline verify
 
 After a failed stop, down recovers the hosts that stop took down: [[cli/docs/fleet-update-window/failed-stop-recovery.meiva.okf.md]].
 
-down opens one Grafana silence on the gateway host before the first stop, its comment naming NEW and its expiry the required --silence-hours; up expires it after the drift checks; a silence that cannot open only warns and the half goes on; a failed up leaves the silence to its expiry; --dry-run prints the command without opening.
+down opens one Grafana silence on the gateway host before the first stop, its comment naming NEW and its expiry the required --silence-hours; up shortens it to a 10-minute post-up settle grace after the drift checks; a silence that cannot open only warns and the half goes on; a failed up leaves the silence to its expiry; --dry-run prints the command without opening.
 
-up starts every listed host even when one fails — except that runners are not tried when the gateway did not start, since they join through it: each is reported as a failed start saying so — a host whose start or converge aborts is reported with the step and reason recorded by that host's incomplete-converge marker ([[cli/commands/converge/docs/converge-incomplete.meiva.okf.md]]), the remaining hosts still start, and the run exits 3 (partial) after listing each failure — distinct from 2 (refused before any effect) and 1 (a failure before any host started). Verification is per host and does not stop at the first red: a red drift check and a failed package refresh are each that host's failure, the other hosts are still verified, and a host the window could not verify at all — a roster that never agrees, or a host that never started — is a failure naming why, never a silent skip. Every listed host ends with one matrix line: `serving`, `failed at <step>`, or `skipped: <why>`. A roster that cannot agree on the window's hosts is itself the failure, reported once per host. The silence is expired at the end of up even on a partial one: hosts that came back healthy must not spend the rest of the window with their alerts suppressed, while each failed host is already named in the report.
+up starts every listed host even when one fails — except that runners are not tried when the gateway did not start, since they join through it: each is reported as a failed start saying so — a host whose start or converge aborts is reported with the step and reason recorded by that host's incomplete-converge marker ([[cli/commands/converge/docs/converge-incomplete.meiva.okf.md]]), the remaining hosts still start, and the run exits 3 (partial) after listing each failure — distinct from 2 (refused before any effect) and 1 (a failure before any host started). Verification is per host and does not stop at the first red: a red drift check and a failed package refresh are each that host's failure, the other hosts are still verified, and a host the window could not verify at all — a roster that never agrees, or a host that never started — is a failure naming why, never a silent skip. Every listed host ends with one matrix line: `serving`, `failed at <step>`, or `skipped: <why>`. A roster that cannot agree on the window's hosts is itself the failure, reported once per host. The silence is shortened to its post-up settle grace at the end of up even on a partial one: hosts that came back healthy must not spend the rest of the multi-hour window with their alerts suppressed, while each failed host is already named in the report.
 
 ## The helper gate
 
