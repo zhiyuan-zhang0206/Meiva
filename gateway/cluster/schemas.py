@@ -252,16 +252,23 @@ class StatsDashboard(BaseModel):
                 "- `openai_cost_usd` / `anthropic_cost_usd`: the OpenAI and Anthropic slices\n"
                 "  of `cost_usd`, resolved via the gateway model catalog (`None` only when\n"
                 "  the model catalog failed to load)\n"
-                "- `warnings` / `errors`: raw event totals over the window (critical\n"
-                "  folds into error). Agent trial-and-error (exec_failed) logs at INFO\n"
-                "  and is deliberately NOT counted — these numbers are operator-facing\n"
-                "  alerts, not agent activity.\n"
+                "- `warnings` / `errors`: event totals over the window of the classes that\n"
+                "  still need attention (critical folds into error). A class is resolved when\n"
+                "  an active dismissal cancels it or when nothing of it was recorded for\n"
+                "  `alert_class_quiet_seconds` — a pulse that stopped hours ago is not an\n"
+                "  operator's problem now (task #6540). Agent trial-and-error (exec_failed)\n"
+                "  logs at INFO and is deliberately NOT counted — these numbers are\n"
+                "  operator-facing alerts, not agent activity.\n"
+                "- `warnings_resolved` / `errors_resolved`: the same totals over the resolved\n"
+                "  classes of the window, so a reader can account for what disappeared from\n"
+                "  the two numbers above.\n"
                 "- `alert_classes_active` / `alert_classes_dismissed`: how many distinct\n"
                 "  (level, event_name, source, process) warning/error classes the window\n"
-                "  holds, split by whether an active dismissal in `event_dismissals`\n"
-                "  cancels the class — exact, or a wildcard row with an empty `process`.\n"
-                "  The sidebar card shows `alert_classes_active`; the classes themselves\n"
-                "  are `GET /api/stats/alert-classes`, which reads the same rows.\n\n"
+                "  holds, split by whether the class is unresolved or resolved (a manual\n"
+                "  dismissal — exact, or a wildcard row with an empty `process` — or the\n"
+                "  quiet rule above). The sidebar card shows the two unresolved totals; the\n"
+                "  classes themselves are `GET /api/stats/alert-classes`, which reads the\n"
+                "  same rows.\n\n"
                 "`plugin_stats` is not windowed (see `PluginStat`): the runtime values\n"
                 "behind cards that plugins declare under `contributions.ui.stats`, joined\n"
                 "by the console on `(plugin, id)`.\n\n"
@@ -279,6 +286,8 @@ class StatsDashboard(BaseModel):
     anthropic_cost_usd: float | None = Field(default=None, ge=0)
     warnings: NonNegativeInt
     errors: NonNegativeInt
+    warnings_resolved: NonNegativeInt = 0
+    errors_resolved: NonNegativeInt = 0
     alert_classes_active: NonNegativeInt
     alert_classes_dismissed: NonNegativeInt
     plugin_stats: list[PluginStat]
@@ -288,16 +297,18 @@ class StatsDashboard(BaseModel):
 AlertLevel = Literal["warning", "error", "critical"]
 
 
+# meiva:note
+# One warning/error class over the window, tallied across its events. The identity is
+# (level, event_name, source, process), the same one an `event_dismissals` row cancels;
+# `category` is the emission transport to put on a dismissal made from this class (matching
+# ignores it), and `dismissal_id` is the active dismissal (None when there is none).
+#
+# `resolved_by` is why the class does not need attention right now: "dismissed" for that manual
+# row, "quiet" when the class recorded nothing for the gateway's `alert_class_quiet_seconds`,
+# None while unresolved. It is a display verdict, not stored state — the quiet half is
+# recomputed from `last_seen` on every read.
+# meiva:link docs/decisions/observability/events/2026-11-08-quiet-auto-resolution.md
 class AlertClassRow(BaseModel):
-    """One warning/error class over the window, tallied across its events.
-
-    The identity is `(level, event_name, source, process)`, the same one an
-    `event_dismissals` row cancels. `category` is the emission transport to put on a
-    dismissal made from this class (matching ignores it). `dismissal_id` is the active
-    dismissal cancelling the class (reopen it through
-    `POST /api/event-resolutions/{id}/reopen`), None when the class is active.
-    """
-
     model_config = ConfigDict(frozen=True)
 
     level: AlertLevel
@@ -309,6 +320,7 @@ class AlertClassRow(BaseModel):
     first_seen: datetime
     last_seen: datetime
     dismissal_id: int | None
+    resolved_by: Literal["dismissed", "quiet"] | None = None
 
 
 class AlertClassesResponse(BaseModel):

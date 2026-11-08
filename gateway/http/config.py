@@ -264,6 +264,14 @@ class GatewayConfig:
     alert_classes_limit: int = 200
     alert_samples_limit: int = 5
     # meiva:note
+    # How long a warning/error class must record nothing before it stops counting as
+    # unresolved (task #6540, user ruling 2026-11-08). A pulse that ended is not an
+    # operator's problem now: the numbers the Status popover shows answer "what is
+    # happening", not "what happened in the last N hours". One hour keeps a class that
+    # fires once an hour visible while dropping a rollout burst that ended with the
+    # restart.
+    alert_class_quiet_seconds: float = 3600.0
+    # meiva:note
     # First-contact per-host budget for a remote inventory_read in the aggregate fan-out, so
     # one offline host doesn't stall the whole matrix on the default deadline.
     inventory_host_wait_seconds: float = 15.0

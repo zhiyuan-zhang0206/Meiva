@@ -2527,6 +2527,7 @@ export interface components {
             first_seen: string;
             last_seen: string;
             dismissal_id: number | null;
+            resolved_by?: ("dismissed" | "quiet") | null;
         };
         AlertClassSample: {
             ts: string;
@@ -3953,6 +3954,8 @@ export interface components {
             anthropic_cost_usd?: number | null;
             warnings: number;
             errors: number;
+            warnings_resolved: number;
+            errors_resolved: number;
             alert_classes_active: number;
             alert_classes_dismissed: number;
             plugin_stats: components["schemas"]["PluginStat"][];
@@ -8225,6 +8228,7 @@ export interface operations {
         parameters: {
             query?: {
                 hours?: components["schemas"]["StatsWindowHours"];
+                include_resolved?: boolean;
             };
             header?: never;
             path?: never;

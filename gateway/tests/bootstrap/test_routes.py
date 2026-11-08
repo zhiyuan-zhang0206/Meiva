@@ -152,11 +152,13 @@ def _insert_dismissal(
     db.commit()
 
 
+# meiva:note
+# Unresolved totals and the active count move together; the events of a resolved class keep their
+# own pair, and critical folds into the error side.
+# meiva:link docs/decisions/observability/events/2026-11-08-quiet-auto-resolution.md
 def test_dashboard_counts_alert_classes_not_events(
     db_conn: psycopg.Connection, event_rows: _EventRows
 ) -> None:
-    """The card's number is the active class count: three events of one class are one class,
-    a dismissed class leaves the active count, and critical folds into the error event total."""
     _insert_dismissal(db_conn, level="warning", event_name="dismissed_warning")
     _insert_dismissal(db_conn, level="error", event_name="dismissed_error")
     event_rows.add(event="dismissed_warning", level="warning")
@@ -168,8 +170,10 @@ def test_dashboard_counts_alert_classes_not_events(
     db_conn.commit()
     with gateway_test_client() as client:
         body = client.get("/api/stats/dashboard").json()
-    assert body["warnings"] == 4
-    assert body["errors"] == 2
+    assert body["warnings"] == 2
+    assert body["errors"] == 1
+    assert body["warnings_resolved"] == 2
+    assert body["errors_resolved"] == 1
     assert body["alert_classes_active"] == 2
     assert body["alert_classes_dismissed"] == 2
 
@@ -183,7 +187,8 @@ def test_dashboard_all_classes_dismissed_reports_zero_active(
     db_conn.commit()
     with gateway_test_client() as client:
         body = client.get("/api/stats/dashboard").json()
-    assert body["warnings"] == 2
+    assert body["warnings"] == 0
+    assert body["warnings_resolved"] == 2
     assert body["alert_classes_active"] == 0
     assert body["alert_classes_dismissed"] == 1
 
@@ -450,6 +455,10 @@ def test_dashboard_audit_warning_not_counted(
     assert body["errors"] == 0
 
 
+# meiva:note
+# The 3-hour-old warning below sits inside the 6-hour window and still reads resolved: the window
+# says where to look, the quiet rule says what still needs attention.
+# meiva:link docs/decisions/observability/events/2026-11-08-quiet-auto-resolution.md
 def test_dashboard_hours_param_selects_window(
     db_conn: psycopg.Connection, event_rows: _EventRows
 ) -> None:
@@ -492,7 +501,8 @@ def test_dashboard_hours_param_selects_window(
     assert wide["window_hours"] == 6
     assert wide["tokens"]["input"] == 110
     assert wide["tokens"]["output"] == 55
-    assert wide["warnings"] == 1
+    assert wide["warnings"] == 0
+    assert wide["warnings_resolved"] == 1
     assert math.isclose(wide["openai_cost_usd"], 1.0)
     assert math.isclose(wide["anthropic_cost_usd"], 0.1)
 

@@ -32,6 +32,8 @@ describe("StatusCards tri-state (loading / data / error)", () => {
       anthropic_cost_usd: 5.67,
       warnings: 19_588,
       errors: 41,
+      warnings_resolved: 0,
+      errors_resolved: 0,
       alert_classes_active: 7,
       alert_classes_dismissed: 2,
       plugin_stats: [],
@@ -60,6 +62,8 @@ describe("StatusCards tri-state (loading / data / error)", () => {
       anthropic_cost_usd: 0.5,
       warnings: 0,
       errors: 0,
+      warnings_resolved: 0,
+      errors_resolved: 0,
       alert_classes_active: 0,
       alert_classes_dismissed: 0,
       plugin_stats: [],
@@ -71,7 +75,12 @@ describe("StatusCards tri-state (loading / data / error)", () => {
     expect(await screen.findByText("$3.00")).toBeTruthy();
     expect(screen.queryByText("0.00%")).toBeNull();
   });
-  it("dismissed classes do not replace the Warning / Error event totals", async () => {
+  // meiva:note
+  // The pair states what is happening now. A class the server resolved (dismissed, or quiet for
+  // its window) is not in these two numbers, and the tooltip names the resolved events so a
+  // number that fell is accountable rather than mysterious (user ruling 2026-11-08).
+  // meiva:link ui/web/src/docs/frontend-components/agent-sidebar.meiva.okf.md
+  it("shows unresolved events only and accounts for the resolved ones in the tooltip", async () => {
     state.agents = [makeAgent({ agent_id: 1 })];
     state.stats = {
       live_count: 5,
@@ -82,15 +91,42 @@ describe("StatusCards tri-state (loading / data / error)", () => {
       anthropic_cost_usd: 0.25,
       warnings: 3,
       errors: 2,
-      alert_classes_active: 0,
+      warnings_resolved: 2_500,
+      errors_resolved: 40,
+      alert_classes_active: 2,
       alert_classes_dismissed: 5,
       plugin_stats: [],
     };
     wrap(<AgentSidebar {...handlers} />);
     openStatus();
     expect(await screen.findByText("3 / 2")).toBeTruthy();
+    const card = screen.getByText("3 / 2").closest("div");
+    expect(card?.getAttribute("title")).toContain("2,540 events resolved");
     expect(screen.queryByText("5 events")).toBeNull();
-    expect(screen.queryByText("All clear")).toBeNull();
+  });
+  it("an all-clear pair is muted and says nothing is still happening", async () => {
+    state.agents = [makeAgent({ agent_id: 1 })];
+    state.stats = {
+      live_count: 5,
+      window_hours: 24,
+      tokens: { input: 12_345, output: 6_789, cache_read: 0, cache_hit_pct: 80 },
+      cost_usd: 1.2345,
+      openai_cost_usd: 0.5,
+      anthropic_cost_usd: 0.25,
+      warnings: 0,
+      errors: 0,
+      warnings_resolved: 2_996,
+      errors_resolved: 64,
+      alert_classes_active: 0,
+      alert_classes_dismissed: 33,
+      plugin_stats: [],
+    };
+    wrap(<AgentSidebar {...handlers} />);
+    openStatus();
+    const value = await screen.findByText("0 / 0");
+    expect(value.className).toContain("text-muted-foreground");
+    const card = value.closest("div");
+    expect(card?.getAttribute("title")).toBe("No warning or error is still happening");
   });
   it("keeps Warning / Error counts compact without opening an inline class list", async () => {
     state.agents = [makeAgent({ agent_id: 1 })];
@@ -103,6 +139,8 @@ describe("StatusCards tri-state (loading / data / error)", () => {
       anthropic_cost_usd: 0,
       warnings: 10_000,
       errors: 0,
+      warnings_resolved: 0,
+      errors_resolved: 0,
       alert_classes_active: 1,
       alert_classes_dismissed: 0,
       plugin_stats: [],
@@ -137,6 +175,8 @@ describe("StatusCards tri-state (loading / data / error)", () => {
       anthropic_cost_usd: 0.25,
       warnings: 2,
       errors: 1,
+      warnings_resolved: 0,
+      errors_resolved: 0,
       alert_classes_active: 1,
       alert_classes_dismissed: 2,
       plugin_stats: [],
@@ -175,6 +215,8 @@ describe("StatusCards tri-state (loading / data / error)", () => {
       anthropic_cost_usd: 0,
       warnings: 0,
       errors: 0,
+      warnings_resolved: 0,
+      errors_resolved: 0,
       alert_classes_active: 0,
       alert_classes_dismissed: 0,
       plugin_stats: [],
@@ -194,6 +236,8 @@ describe("StatusCards tri-state (loading / data / error)", () => {
       anthropic_cost_usd: null,
       warnings: 0,
       errors: 0,
+      warnings_resolved: 0,
+      errors_resolved: 0,
       alert_classes_active: 0,
       alert_classes_dismissed: 0,
       plugin_stats: [],
@@ -217,6 +261,8 @@ describe("plugin status cards", () => {
       anthropic_cost_usd: 0,
       warnings: 0,
       errors: 0,
+      warnings_resolved: 0,
+      errors_resolved: 0,
       alert_classes_active: 0,
       alert_classes_dismissed: 0,
       plugin_stats: pluginStats,
@@ -359,6 +405,8 @@ describe("StatusCards window selector", () => {
       anthropic_cost_usd: 3.1,
       warnings: 2,
       errors: 1,
+      warnings_resolved: 0,
+      errors_resolved: 0,
       alert_classes_active: 1,
       alert_classes_dismissed: 2,
       plugin_stats: [
@@ -408,6 +456,8 @@ describe("StatusCards window selector", () => {
       anthropic_cost_usd: 0.2,
       warnings: 0,
       errors: 0,
+      warnings_resolved: 0,
+      errors_resolved: 0,
       alert_classes_active: 0,
       alert_classes_dismissed: 0,
       plugin_stats: [],

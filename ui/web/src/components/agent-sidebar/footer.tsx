@@ -265,6 +265,7 @@ export function StatusCards({
                 valueClass={valueClass}
                 firstLoad={firstLoad}
                 title={card.title}
+                windowLabel={win}
               />
             ) : (
               <div
@@ -460,6 +461,12 @@ function SidebarNavButton({
 // Windowed Warning / Error event totals, presented like the other status cards.
 // Formal Grafana alerts have their own header badge and history.
 // meiva:link ui/web/src/docs/frontend-components/alert-classes.meiva.okf.md
+// meiva:note
+// The pair counts only classes that still need attention: the server resolves a class that
+// stopped happening, so a pulse that ended hours ago cannot keep this badge red (user ruling
+// 2026-11-08). What it does count stays visible, and the tooltip names the resolved events, so a
+// pair that fell from "3000 / 64" to "0 / 0" is accountable rather than mysterious.
+// meiva:link ui/web/src/docs/frontend-components/agent-sidebar.meiva.okf.md
 function WarningErrorCard({
   stats,
   placeholder,
@@ -467,6 +474,7 @@ function WarningErrorCard({
   valueClass,
   firstLoad,
   title,
+  windowLabel,
 }: {
   stats: StatsDashboard | undefined;
   placeholder: string;
@@ -474,17 +482,36 @@ function WarningErrorCard({
   valueClass: string;
   firstLoad: boolean;
   title: string | undefined;
+  windowLabel: string;
 }) {
   const t = useTranslations("sidebar");
+  const warnings = stats?.warnings;
+  const errors = stats?.errors;
+  const unresolved = warnings === 0 && errors === 0;
+  const resolved = (stats?.warnings_resolved ?? 0) + (stats?.errors_resolved ?? 0);
+  const shownTitle =
+    stats === undefined
+      ? title
+      : resolved > 0
+        ? t("warningsTitleUnresolved", {
+            win: windowLabel,
+            resolved: resolved.toLocaleString("en-US"),
+          })
+        : t("warningsTitle", { win: windowLabel });
   return (
-    <div title={title} className={cn("gap-0.5 rounded bg-sidebar-accent/40 px-2 py-1.5", FLEX, FLEX_COL)}>
+    <div
+      title={unresolved ? t("warningsAllClear") : shownTitle}
+      className={cn("gap-0.5 rounded bg-sidebar-accent/40 px-2 py-1.5", FLEX, FLEX_COL)}
+    >
       <span className="text-[10px] tracking-wide text-muted-foreground">{t("warningsErrors")}</span>
       {firstLoad ? (
         <span className="h-4 w-10 animate-pulse rounded bg-muted-foreground/20" aria-hidden />
       ) : stats === undefined ? (
         <span className={placeholderClass}>{placeholder}</span>
       ) : (
-        <span className={valueClass}>{`${stats.warnings} / ${stats.errors}`}</span>
+        <span className={cn(valueClass, unresolved && "text-muted-foreground")}>
+          {`${stats.warnings} / ${stats.errors}`}
+        </span>
       )}
     </div>
   );

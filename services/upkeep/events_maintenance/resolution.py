@@ -29,6 +29,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
+from typing import Final, Literal
 
 import psycopg
 from psycopg_pool import ConnectionPool
@@ -386,6 +387,46 @@ def _emit_auto_resolved(event_class: EventClass, days: int) -> None:
             event_class, dismissed_by=-1, note=f"auto:stable-{days}-days"
         ),
     )
+
+
+# meiva:note
+# The automatic half of resolution: a class nothing recorded for a whole quiet window is not
+# happening now, so it stops counting as unresolved without anyone dismissing it. The window is
+# the caller's — the gateway's read paths pass their configured one — because the horizons
+# differ; what is shared is the rule, not the number.
+# meiva:link services/docs/gateway_side/events_maintenance/events_maintenance.meiva.okf.md
+ResolutionKind = Literal["dismissed", "quiet"]
+
+QUIET: Final[ResolutionKind] = "quiet"
+DISMISSED: Final[ResolutionKind] = "dismissed"
+
+
+# meiva:note
+# Whether a class recorded nothing over the whole quiet window ending at `at`. The boundary is
+# inclusive: a class silent for exactly the window is quiet, which keeps two readers that agree
+# on the window from disagreeing about the edge.
+# meiva:link docs/decisions/observability/events/2026-11-08-quiet-auto-resolution.md
+def is_quiet(*, last_seen: datetime, at: datetime, quiet_window: timedelta) -> bool:
+    return at - last_seen >= quiet_window
+
+
+# meiva:note
+# Why this class is resolved right now, or None while it is unresolved. A manual dismissal
+# outranks the quiet rule: an operator's word is the narrower fact, so the class stays hidden
+# until the burst valve or a human reopens it.
+# meiva:link docs/decisions/observability/events/2026-11-08-quiet-auto-resolution.md
+def resolution_state(
+    dismissal: Dismissal | None,
+    *,
+    last_seen: datetime,
+    at: datetime,
+    quiet_window: timedelta,
+) -> ResolutionKind | None:
+    if dismissal is not None:
+        return DISMISSED
+    if is_quiet(last_seen=last_seen, at=at, quiet_window=quiet_window):
+        return QUIET
+    return None
 
 
 def _same_base(left: EventClass, right: EventClass) -> bool:

@@ -53,7 +53,7 @@ OKF viewer. Fleet graph keeps its route-local query.
 [[gateway/routers/docs/frontend-ui-data.meiva.okf.md]]
 
 ### Ops & system
-- **status** + **alert_classes** (`/api/health`, `/api/status`, `/api/stats/dashboard`, `/api/stats/alert-classes[/samples]`) — liveness + status panel + dashboard event totals + warning/error class diagnostics; public health exposes process `started_at` and boot-frozen `sha` for rollout observers ([[gateway/cluster/docs/ops-surfaces.meiva.okf.md|dashboard contract]])
+- **status** + **alert_classes** (`/api/health`, `/api/status`, `/api/stats/dashboard`, `/api/stats/alert-classes[/samples]`) — liveness + status panel + dashboard event totals + warning/error class diagnostics; public health exposes process `started_at` and boot-frozen `sha` for rollout observers ([[gateway/cluster/docs/ops-surfaces.meiva.okf.md|dashboard contract]], [[gateway/cluster/docs/alert-classes-api.meiva.okf.md|alert classes]])
 - **metrics** (`/api/metrics`, `/api/metrics/agents`) — aggregated metrics over `telemetry_events`
 - **schedules** (`/api/schedules/*`) — scheduled task CRUD + start/stop/restart
 - **shell** (`/api/agents/{id}/shell/{sid}`) — shell session monitor (session backend proxy)
