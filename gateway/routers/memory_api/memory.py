@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import random
 import subprocess
 from collections.abc import AsyncGenerator, Callable
 from contextlib import asynccontextmanager
@@ -73,6 +74,7 @@ def build_embedder(
     catalog: ModelCatalog,
     *,
     now: Callable[[], datetime],
+    rng: random.Random,
 ) -> EmbeddingProvider:
     from services.derived.memory_indexer.embeddings import factory
 
@@ -83,6 +85,7 @@ def build_embedder(
         api_key=settings.api_key,
         embeddinggemma_config=settings.embeddinggemma_config,
         now=now,
+        rng=rng,
     )
 
 

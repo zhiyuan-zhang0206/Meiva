@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+import random
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from enum import StrEnum
 
@@ -74,6 +75,12 @@ class SearchDeps:
     provider: SearchProvider
     brave: BraveConfig
     deepseek: DeepSeekSearchConfig
+    # meiva:note
+    # The process generator the read policy spreads its retries with, built by the root that owns
+    # this process (a seeded one in a test) and passed here rather than read where a request is sent.
+    # Two bundles are equal when they read the same configuration: the generator is not a fact of
+    # the configuration and compares by identity, so it stays out of equality and out of the repr.
+    rng: random.Random = field(compare=False, repr=False)
 
 
 @dataclass(frozen=True)
@@ -83,3 +90,6 @@ class FetchDeps:
     deepseek: DeepSeekFetchConfig
     fetch_model: FetchModel
     injection: InjectionCheckInputs
+    # meiva:note
+    # The process generator, as in `SearchDeps`: both deps bundles hand it to `send_json`.
+    rng: random.Random = field(compare=False, repr=False)

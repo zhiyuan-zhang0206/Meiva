@@ -19,6 +19,7 @@ import pytest
 from fastapi import Request
 from pydantic import SecretStr
 
+from base.clock.tests.seeded_rng import seeded_rng
 from base.config import settings
 from base.host.net.tests.local_http import serve_asgi
 from base.lm.pricing import Rates
@@ -389,6 +390,7 @@ async def test_query_usage_failure_propagates_without_network_replay(
             api_key="test-key",
             endpoint=url,
             now=app.state.clock.now,
+            rng=seeded_rng(),
         )
         request = Request({"type": "http", "app": app}, stays_connected)
         with pytest.raises(error_type) as caught:

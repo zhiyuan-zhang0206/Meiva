@@ -27,6 +27,7 @@ import numpy as np
 import pytest
 from fastapi import FastAPI
 
+from base.clock.tests.seeded_rng import seeded_rng
 from base.cluster.machine import MachineIdentityReader
 from base.host.db_authority.api import AcceptanceCache
 from base.lm.catalog import ModelCatalog
@@ -279,7 +280,10 @@ class SearchRig:
     def embedder_for(self, config: GatewayConfig) -> EmbeddingProvider:
         if self.embedder.real:
             return memory_router.build_embedder(
-                config.memory_search, self.catalog, now=lambda: datetime(2026, 8, 17, tzinfo=UTC)
+                config.memory_search,
+                self.catalog,
+                now=lambda: datetime(2026, 8, 17, tzinfo=UTC),
+                rng=seeded_rng(),
             )
         return cast(EmbeddingProvider, self.embedder)
 

@@ -243,6 +243,7 @@ def background_loops(
     installation: Installation,
     config: ConfigBoot,
     clock: Clock,
+    rng: random.Random,
     plugins_root: Path,
     stdout_log: Path,
     home: Path | None = None,
@@ -270,6 +271,7 @@ def background_loops(
             llm_override=config.view.lm.llm_override,
             config=config,
             clock=clock,
+            rng=rng,
             startup_delay_seconds=DEFAULT_STARTUP_DELAY_SECONDS,
         ),
     }
@@ -657,6 +659,7 @@ async def run(
                     installation=installation,
                     config=config,
                     clock=stamping.clock,
+                    rng=rng,
                     plugins_root=external_plugin_read_root(home=home),
                     stdout_log=stdout_log_path(logs_dir=logs_dir(home=home)),
                     home=home,

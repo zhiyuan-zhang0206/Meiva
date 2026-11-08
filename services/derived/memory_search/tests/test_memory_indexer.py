@@ -24,6 +24,7 @@ from typing import cast
 import numpy as np
 import pytest
 
+from base.clock.tests.seeded_rng import seeded_rng
 from base.daemon.health import Liveness
 from base.packages.plugin_providers import build_model_catalog
 from base.paths import meiva_home
@@ -514,6 +515,7 @@ def test_factory_worst_case_registry_complete() -> None:
             timeout_s=EMBED_TIMEOUT_S,
             api_key=None,
             now=lambda: datetime(2026, 8, 17, tzinfo=UTC),
+            rng=seeded_rng(),
         )
     with pytest.raises(ValueError) as budget_error:
         factory.worst_case_batch_seconds(unknown, timeout_seconds=EMBED_TIMEOUT_S)

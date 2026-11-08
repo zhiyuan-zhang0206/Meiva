@@ -26,6 +26,7 @@ from base.agents.history.hierarchy.generate import GenerateError
 from base.agents.history.hierarchy.leaf_groups import UnitGroup
 from base.agents.messages.timestamp_policy import TimestampPolicy
 from base.clock.tests.fakes import system_clock
+from base.clock.tests.seeded_rng import seeded_rng
 from base.config import ConfigBoot
 from base.host.env.agent_slices import ModelOverrides
 from base.lm.catalog import ModelCatalog
@@ -207,6 +208,7 @@ async def test_loop_is_idle_when_the_feature_is_off(
         clock=CLOCK,
         **lm_wiring(model_catalog),
         config=config,
+        rng=seeded_rng(),
     )
 
 
@@ -347,7 +349,7 @@ async def test_each_group_is_a_node_covering_the_chunk_to_its_end(
         (5, 1, 3, 3, "third"),
     ]
     assert await job_spans(aops_pool) == [("done", 1, 5)]
-    assert set(chunk_seams.state["kw"]) == {"clock", "config"}
+    assert set(chunk_seams.state["kw"]) == {"clock", "config", "rng"}
     assert isinstance(chunk_seams.state["kw"]["config"], ConfigBoot)
 
 
@@ -426,6 +428,7 @@ async def test_a_done_job_is_followed_by_the_upper_level_checks(
         config=config,
         describe=chunk_seams.describe,
         locate_job_chunk=chunk_seams.locate_job_chunk,
+        rng=seeded_rng(),
     ).run_until_idle()
     async with aops_pool.connection() as conn:
         rows = await (
@@ -481,6 +484,7 @@ async def test_different_agents_run_together_and_one_agents_jobs_in_order(
         config=consumer_config(),
         describe=chunk_seams.describe,
         locate_job_chunk=chunk_seams.locate_job_chunk,
+        rng=seeded_rng(),
     ).run_until_idle()
     assert [s for s, *_ in await job_statuses(aops_pool)] == ["done"] * 3
     # meiva:note
@@ -517,6 +521,7 @@ async def test_every_due_job_runs_at_once_each_on_its_own_thread(
         config=consumer_config(),
         describe=chunk_seams.describe,
         locate_job_chunk=chunk_seams.locate_job_chunk,
+        rng=seeded_rng(),
     )
     await consumer.run_until_idle()
     jobs = await job_statuses(aops_pool)
@@ -549,6 +554,7 @@ async def test_one_jobs_failure_touches_no_other_job(
         config=consumer_config(),
         describe=chunk_seams.describe,
         locate_job_chunk=chunk_seams.locate_job_chunk,
+        rng=seeded_rng(),
     ).run_until_idle()
     status = [(s, e) for s, _, e in await job_statuses(aops_pool)]
     assert [s for s, _ in status] == ["done", "failed", "done"]
@@ -579,6 +585,7 @@ async def test_a_job_that_cannot_be_settled_is_left_to_its_lease_and_others_fini
         describe=chunk_seams.describe,
         locate_job_chunk=chunk_seams.locate_job_chunk,
         settle_chunk_job=settle,
+        rng=seeded_rng(),
     )
     # meiva:note
     # does not raise
@@ -603,6 +610,7 @@ async def test_the_backlog_event_carries_in_flight(
         config=consumer_config(),
         describe=chunk_seams.describe,
         locate_job_chunk=chunk_seams.locate_job_chunk,
+        rng=seeded_rng(),
     )
     consumer.in_flight = 1
     await consumer.emit_backlog()
@@ -629,6 +637,7 @@ async def test_the_forever_loop_works_the_queue_and_stops_cleanly_on_cancel(
             poll_seconds=0.05,
             describe=chunk_seams.describe,
             locate_job_chunk=chunk_seams.locate_job_chunk,
+            rng=seeded_rng(),
         )
     )
     for _ in range(100):
@@ -675,6 +684,7 @@ async def test_max_in_flight_caps_concurrent_claims_and_drains_remaining_jobs(
         max_in_flight=2,
         describe=chunk_seams.describe,
         locate_job_chunk=chunk_seams.locate_job_chunk,
+        rng=seeded_rng(),
     ).run_until_idle()
     assert peak == 2
     assert [s for s, *_ in await job_statuses(aops_pool)] == ["done"] * 4
@@ -721,6 +731,7 @@ async def test_a_replay_describes_one_agents_segments_together_and_skips_the_upp
         config=config,
         describe=chunk_seams.describe,
         locate_job_chunk=chunk_seams.locate_job_chunk,
+        rng=seeded_rng(),
     )
     assert [s for s, *_ in await job_statuses(aops_pool)] == ["done", "done", "pending"]
     async with aops_pool.connection() as conn:

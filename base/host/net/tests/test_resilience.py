@@ -12,6 +12,7 @@ import asyncio
 import email.message
 import inspect
 import io
+import random
 import time
 import urllib.error
 from dataclasses import FrozenInstanceError
@@ -24,15 +25,25 @@ from base.host.net.resilience import (
     ExponentialBackoff,
     Policy,
     aretry,
+    aretry_jittered,
     extract_retry_after,
     http_classifier,
     jitter_delay,
     jittered,
     retry,
     retry_asleep,
+    retry_jittered,
     retry_sleep,
 )
 from base.host.net.tests.resilience_process import report
+
+
+# meiva:note
+# The seeded generator these cases hand the drawing door. It is local because this package may not
+# reach `base.clock.tests.seeded_rng`: the clock already reaches host, so that import closes a
+# host -> clock cycle. Seeded, so a case that asserts a wait reads the same draw on every run.
+def _seeded_rng(seed: int = 0) -> random.Random:
+    return random.Random(seed)  # noqa: S311
 
 
 class _Flaky:
@@ -89,42 +100,53 @@ def timers() -> _RecordingTimers:
 class TestRetry:
     def test_success_first_attempt(self, timers: _RecordingTimers) -> None:
         f = _Flaky(ValueError("x"), 0)
-        assert retry(Policy(), sleep=timers.sleep)(f) == "ok"
+        assert (
+            retry(
+                Policy(
+                    jitter="none",
+                ),
+                sleep=timers.sleep,
+            )(f)
+            == "ok"
+        )
         assert f.calls == 1
 
     def test_transient_then_success(self, timers: _RecordingTimers) -> None:
         f = _Flaky(urllib.error.URLError("boom"), 2)
-        assert retry(Policy(max_attempts=4), sleep=timers.sleep)(f) == "ok"
+        assert retry(Policy(jitter="none", max_attempts=4), sleep=timers.sleep)(f) == "ok"
         assert f.calls == 3
 
     def test_exhausts_raises_last_error(self, timers: _RecordingTimers) -> None:
         f = _Flaky(urllib.error.URLError("boom"), 100)
         with pytest.raises(urllib.error.URLError):
-            retry(Policy(max_attempts=3), sleep=timers.sleep)(f)
+            retry(Policy(jitter="none", max_attempts=3), sleep=timers.sleep)(f)
         assert f.calls == 3
 
     def test_permanent_status_not_retried(self, timers: _RecordingTimers) -> None:
         f = _Flaky(_http_error(400), 100)
         with pytest.raises(urllib.error.HTTPError):
-            retry(Policy(max_attempts=3), sleep=timers.sleep)(f)
+            retry(Policy(jitter="none", max_attempts=3), sleep=timers.sleep)(f)
         assert f.calls == 1
 
     def test_transient_status_retried(self, timers: _RecordingTimers) -> None:
         f = _Flaky(_http_error(429), 2)
-        assert retry(Policy(max_attempts=4), sleep=timers.sleep)(f) == "ok"
+        assert retry(Policy(jitter="none", max_attempts=4), sleep=timers.sleep)(f) == "ok"
         assert f.calls == 3
 
     def test_non_http_exception_is_permanent(self, timers: _RecordingTimers) -> None:
         f = _Flaky(ValueError("bug"), 100)
         with pytest.raises(ValueError):
-            retry(Policy(max_attempts=3), sleep=timers.sleep)(f)
+            retry(Policy(jitter="none", max_attempts=3), sleep=timers.sleep)(f)
         assert f.calls == 1
 
     def test_idempotent_false_single_attempt(self, timers: _RecordingTimers) -> None:
         """Non-idempotent: exactly one execution even for retryable errors."""
         f = _Flaky(_http_error(503), 100)
         with pytest.raises(urllib.error.HTTPError):
-            retry(Policy(idempotent=False, on_final_failure=lambda _e: None), sleep=timers.sleep)(f)
+            retry(
+                Policy(jitter="none", idempotent=False, on_final_failure=lambda _e: None),
+                sleep=timers.sleep,
+            )(f)
         assert f.calls == 1
 
     def test_on_final_failure_hook_sees_last_error(self, timers: _RecordingTimers) -> None:
@@ -135,7 +157,9 @@ class TestRetry:
             seen.append(exc)
 
         with pytest.raises(urllib.error.HTTPError):
-            retry(Policy(max_attempts=2, on_final_failure=_hook), sleep=timers.sleep)(f)
+            retry(
+                Policy(jitter="none", max_attempts=2, on_final_failure=_hook), sleep=timers.sleep
+            )(f)
         assert len(seen) == 1
         assert isinstance(seen[0], urllib.error.HTTPError)
 
@@ -145,7 +169,7 @@ class TestRetry:
 
         f = _Flaky(_http_error(502), 100)
         with pytest.raises(RuntimeError, match="converted"):
-            retry(Policy(on_final_failure=_hook), sleep=timers.sleep)(f)
+            retry(Policy(jitter="none", on_final_failure=_hook), sleep=timers.sleep)(f)
 
     def test_backoff_sequence(self, timers: _RecordingTimers) -> None:
         """Exponential shape: base * factor**attempt, capped."""
@@ -209,7 +233,9 @@ class TestAretry:
         async def _call() -> object:
             return f()
 
-        assert await aretry(Policy(max_attempts=4), asleep=timers.asleep)(_call) == "ok"
+        assert (
+            await aretry(Policy(jitter="none", max_attempts=4), asleep=timers.asleep)(_call) == "ok"
+        )
         assert f.calls == 3
 
     async def test_aretry_permanent_not_retried(self, timers: _RecordingTimers) -> None:
@@ -219,7 +245,7 @@ class TestAretry:
             return f()
 
         with pytest.raises(ValueError):
-            await aretry(Policy(max_attempts=3), asleep=timers.asleep)(_call)
+            await aretry(Policy(jitter="none", max_attempts=3), asleep=timers.asleep)(_call)
         assert f.calls == 1
 
     async def test_aretry_idempotent_false_single_attempt(self, timers: _RecordingTimers) -> None:
@@ -230,9 +256,89 @@ class TestAretry:
 
         with pytest.raises(urllib.error.HTTPError):
             await aretry(
-                Policy(idempotent=False, on_final_failure=lambda _e: None), asleep=timers.asleep
+                Policy(jitter="none", idempotent=False, on_final_failure=lambda _e: None),
+                asleep=timers.asleep,
             )(_call)
         assert f.calls == 1
+
+
+# meiva:note
+# A policy declares the wait and the door builds the loop, so the two must agree: the door that
+# promises not to draw refuses a policy that asks for noise when the loop is built -- not on the
+# first transient failure, which may never come -- and the drawing door takes the generator the
+# caller hands it, so one seed decides every wait a test reads.
+class TestTheDrawingDoor:
+    @pytest.mark.parametrize("mode", ["agent", "relative", "random"])
+    def test_retry_refuses_a_policy_that_draws(self, mode: str) -> None:
+        with pytest.raises(ValueError, match="retry_jittered"):
+            retry(Policy(jitter=mode))
+
+    @pytest.mark.parametrize("mode", ["agent", "relative", "random"])
+    async def test_aretry_refuses_a_policy_that_draws(self, mode: str) -> None:
+        with pytest.raises(ValueError, match="aretry_jittered"):
+            aretry(Policy(jitter=mode))
+
+    @pytest.mark.parametrize("mode", ["none", "phase"])
+    def test_retry_accepts_a_wait_that_draws_nothing(self, mode: str) -> None:
+        assert callable(retry(Policy(jitter=mode)))
+
+    @pytest.mark.parametrize("mode", ["none", "phase"])
+    def test_aretry_accepts_a_wait_that_draws_nothing(self, mode: str) -> None:
+        assert callable(aretry(Policy(jitter=mode)))
+
+    def test_the_refusal_happens_when_the_loop_is_built(self) -> None:
+        # meiva:note
+        # The refusal is the build-time one: a policy that draws never reaches a first attempt, so
+        # a later refactor cannot turn it into a silent no-jitter retry that only a timing test
+        # would notice.
+        waits: list[float] = []
+        with pytest.raises(ValueError, match="retry_jittered"):
+            retry(Policy(jitter="agent"), sleep=waits.append)
+        assert waits == []
+
+    @pytest.mark.parametrize("mode", ["agent", "relative", "random"])
+    def test_the_drawing_door_serves_every_drawing_mode(self, mode: str) -> None:
+        assert callable(retry_jittered(Policy(jitter=mode), rng=_seeded_rng()))
+
+    @pytest.mark.parametrize("mode", ["agent", "relative", "random"])
+    def test_the_async_drawing_door_serves_every_drawing_mode(self, mode: str) -> None:
+        assert callable(aretry_jittered(Policy(jitter=mode), rng=_seeded_rng()))
+
+    def test_retry_jittered_draws_the_wait_from_its_generator(
+        self, timers: _RecordingTimers
+    ) -> None:
+        policy = Policy(max_attempts=2, jitter="agent", jitter_span=1.0)
+        run = retry_jittered(policy, rng=_seeded_rng(), sleep=timers.sleep)
+        assert run(_Flaky(urllib.error.URLError("boom"), 1)) == "ok"
+        expected = jittered(policy.backoff(0), policy.jitter_span, "agent", rng=_seeded_rng())
+        assert timers.sleeps == [expected]
+
+    async def test_aretry_jittered_draws_the_wait_from_its_generator(
+        self, timers: _RecordingTimers
+    ) -> None:
+        policy = Policy(max_attempts=2, jitter="relative", jitter_span=0.5)
+        flaky = _Flaky(httpx.ConnectError("boom"), 1)
+
+        async def call() -> object:
+            return flaky()
+
+        assert await aretry_jittered(policy, rng=_seeded_rng(), asleep=timers.asleep)(call) == "ok"
+        expected = jittered(policy.backoff(0), policy.jitter_span, "relative", rng=_seeded_rng())
+        assert timers.sleeps == [expected]
+
+    def test_the_seed_decides_the_wait(self, timers: _RecordingTimers) -> None:
+        policy = Policy(max_attempts=2, jitter="agent", jitter_span=1.0)
+        again = _RecordingTimers()
+        retry_jittered(policy, rng=_seeded_rng(), sleep=timers.sleep)(
+            _Flaky(urllib.error.URLError("boom"), 1)
+        )
+        retry_jittered(policy, rng=_seeded_rng(), sleep=again.sleep)(
+            _Flaky(urllib.error.URLError("boom"), 1)
+        )
+        assert again.sleeps == timers.sleeps
+
+    def test_the_doors_are_exported(self) -> None:
+        assert {"retry_jittered", "aretry_jittered"} <= set(resilience.__all__)
 
 
 # meiva:note
@@ -375,7 +481,7 @@ class TestHttpClassifier:
 
 class TestJitter:
     def test_none_mode_returns_delay(self) -> None:
-        assert jittered(2.0, mode="none") == 2.0
+        assert jittered(2.0, mode="none", rng=_seeded_rng()) == 2.0
 
     @pytest.mark.parametrize("random_value", [-100.0, 100.0])
     def test_phase_mode_adds_deterministic_phase_only(self, random_value: float) -> None:
@@ -383,7 +489,7 @@ class TestJitter:
 
     def test_phase_mode_bounds(self) -> None:
         for _ in range(100):
-            j = jittered(2.0, span=5.0, mode="phase")
+            j = jittered(2.0, span=5.0, mode="phase", rng=_seeded_rng())
             assert 2.0 <= j < 7.0
 
     @pytest.mark.parametrize("random_value, expected", [(-0.5, 2.0), (0.0, 4.0), (0.5, 6.0)])
@@ -392,14 +498,14 @@ class TestJitter:
 
     def test_relative_mode_bounds(self) -> None:
         for _ in range(100):
-            j = jittered(4.0, span=0.5, mode="relative")
+            j = jittered(4.0, span=0.5, mode="relative", rng=_seeded_rng())
             assert 2.0 <= j <= 6.0
 
     def test_relative_mode_never_negative(self) -> None:
         assert jitter_delay(0.5, "relative", phase=100.0, noise=-2.0) == 0.0
 
     def test_relative_zero_span_returns_delay(self) -> None:
-        assert jittered(4.0, span=0.0, mode="relative") == 4.0
+        assert jittered(4.0, span=0.0, mode="relative", rng=_seeded_rng()) == 4.0
 
     def test_retry_passes_phase_jitter_to_sleep(self) -> None:
         observed = report("phase")
@@ -418,12 +524,12 @@ class TestJitter:
     def test_agent_mode_bounds(self) -> None:
         # delay + phase in [0, span) + uniform(-span, span)
         for _ in range(100):
-            j = jittered(2.0, span=1.0, mode="agent")
+            j = jittered(2.0, span=1.0, mode="agent", rng=_seeded_rng())
             assert 1.0 <= j < 4.0
 
     def test_random_mode_bounds(self) -> None:
         for _ in range(100):
-            j = jittered(2.0, span=1.0, mode="random")
+            j = jittered(2.0, span=1.0, mode="random", rng=_seeded_rng())
             assert 1.0 <= j <= 3.0
 
     def test_never_negative_when_delay_below_span(self) -> None:
@@ -432,9 +538,9 @@ class TestJitter:
         (audit 2026-08-08 P2; invoke_text's delay comes from a writable
         cluster setting, so this is production-reachable)."""
         for _ in range(200):
-            assert jittered(0.5, span=1.0, mode="agent") >= 0.0
-            assert jittered(0.5, span=1.0, mode="random") >= 0.0
-        assert jittered(0.0, span=5.0, mode="random") >= 0.0
+            assert jittered(0.5, span=1.0, mode="agent", rng=_seeded_rng()) >= 0.0
+            assert jittered(0.5, span=1.0, mode="random", rng=_seeded_rng()) >= 0.0
+        assert jittered(0.0, span=5.0, mode="random", rng=_seeded_rng()) >= 0.0
 
 
 class TestExtractRetryAfter:

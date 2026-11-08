@@ -49,6 +49,7 @@ def read_page(
                 error_type=FetchError,
                 provider_json=False,
                 pacer=None,
+                rng=deps.rng,
                 policy=policy,
             )
             return wire.jina_page(data, url, max_chars)
@@ -87,6 +88,7 @@ def _answer(
         overrides=fm.overrides,
         build_chat_model=factory.build_chat_model,
         now=fm.now,
+        rng=deps.rng,
     )
 
 

@@ -8,6 +8,7 @@ used to each inline.
 
 from __future__ import annotations
 
+import random
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -27,6 +28,14 @@ from base.lm.effort import ReasoningEffort
 from base.log.tests.log_records import LogRecords
 from base.packages.tests.lm.providers.lm_process import run_billing
 from base.packages.tests.model_catalog import inert_keys
+
+
+# meiva:note
+# The seeded generator these cases hand `base.lm.call`: seeded, so a case that asserts a wait reads
+# the same draw every run. It is local because `base/packages` may not reach `base.clock`, whose
+# `tests/seeded_rng.py` is the shared helper for the limbs that declare the clock.
+def _seeded_rng(seed: int = 0) -> random.Random:
+    return random.Random(seed)  # noqa: S311
 
 
 # meiva:note
@@ -96,6 +105,7 @@ def test_invoke_text_returns_flattened_text(*, model_catalog: ModelCatalog) -> N
         error_type=ValueError,
         catalog=model_catalog,
         now=_now,
+        rng=_seeded_rng(),
     )
     assert out == "answer"
     assert llm.messages[0].content == [{"type": "text", "text": "q"}]
@@ -137,6 +147,7 @@ def test_invoke_text_logs_priced_chat_usage_with_source(
             usage_source="web.fetch",
             catalog=model_catalog,
             now=_now,
+            rng=_seeded_rng(),
         )
         == "answer"
     )
@@ -169,6 +180,7 @@ def test_invoke_text_skips_usage_log_without_usage_metadata(
             error_type=ValueError,
             catalog=model_catalog,
             now=_now,
+            rng=_seeded_rng(),
         )
         == "answer"
     )
@@ -188,6 +200,7 @@ def test_invoke_text_empty_response_raises_error_type(*, model_catalog: ModelCat
             error_type=ValueError,
             catalog=model_catalog,
             now=_now,
+            rng=_seeded_rng(),
         )
 
 
@@ -208,6 +221,7 @@ def test_invoke_text_upstream_error_wrapped_in_error_type(
             model="deepseek-v4-pro",
             catalog=model_catalog,
             now=_now,
+            rng=_seeded_rng(),
         )
     events = loguru_records.events("llm_provider_error")
     assert events[-1]["extra"]["status"] == 429
@@ -251,6 +265,7 @@ def test_answer_text_happy_path(
         overrides=model_overrides(),
         build_chat_model=_fake_build,
         now=_now,
+        rng=_seeded_rng(),
     )
     assert out == "answer"
     assert captured == {"model": "m1", "effort": ReasoningEffort.HIGH}
@@ -288,6 +303,7 @@ def test_answer_text_build_failure_raises_error_type(
             overrides=model_overrides(),
             build_chat_model=_fail,
             now=_now,
+            rng=_seeded_rng(),
         )
 
 
@@ -328,6 +344,7 @@ def test_answer_text_build_failure_uses_build_error_when_given(
             overrides=model_overrides(),
             build_chat_model=_fail,
             now=_now,
+            rng=_seeded_rng(),
         )
     assert seen["model"] == "m1"
 
@@ -360,6 +377,7 @@ def test_invoke_text_retries_transient_then_succeeds(*, model_catalog: ModelCata
         catalog=model_catalog,
         sleep=timers.sleep,
         now=_now,
+        rng=_seeded_rng(),
     )
     assert out == "answer"
     assert calls["n"] == 2
@@ -387,6 +405,7 @@ def test_invoke_text_retry_exhausted_raises_error_type(*, model_catalog: ModelCa
             catalog=model_catalog,
             sleep=timers.sleep,
             now=_now,
+            rng=_seeded_rng(),
         )
     assert timers.sleeps == [0.0]
 
@@ -413,6 +432,7 @@ def test_invoke_text_retry_uses_exponential_backoff(*, model_catalog: ModelCatal
             catalog=model_catalog,
             sleep=timers.sleep,
             now=_now,
+            rng=_seeded_rng(),
         )
     assert timers.sleeps == [2.0, 4.0, 8.0]
 
@@ -438,6 +458,7 @@ def test_invoke_text_retry_backoff_capped(*, model_catalog: ModelCatalog) -> Non
             catalog=model_catalog,
             sleep=timers.sleep,
             now=_now,
+            rng=_seeded_rng(),
         )
     assert timers.sleeps == [2.0, 4.0, 5.0, 5.0]
 
@@ -475,6 +496,7 @@ def test_invoke_text_retry_respects_retry_after(*, model_catalog: ModelCatalog) 
             catalog=model_catalog,
             sleep=timers.sleep,
             now=_now,
+            rng=_seeded_rng(),
         )
     # attempt 1 backoff would be 2s, but Retry-After 45 wins; attempt 2 too.
     assert timers.sleeps == [45.0, 45.0]
@@ -497,6 +519,7 @@ def test_invoke_text_retry_after_capped_at_120(*, model_catalog: ModelCatalog) -
             catalog=model_catalog,
             sleep=timers.sleep,
             now=_now,
+            rng=_seeded_rng(),
         )
     assert timers.sleeps == [2.0, 4.0]  # Retry-After 300 ignored
 
@@ -517,6 +540,7 @@ def test_invoke_text_retry_after_ms_header(*, model_catalog: ModelCatalog) -> No
             catalog=model_catalog,
             sleep=timers.sleep,
             now=_now,
+            rng=_seeded_rng(),
         )
     assert timers.sleeps == [7.0]  # 7000ms → 7s, longer than the 2s backoff
 
@@ -542,6 +566,7 @@ def test_invoke_text_does_not_retry_permanent(*, model_catalog: ModelCatalog) ->
             retry_delay_seconds=0.0,
             catalog=model_catalog,
             now=_now,
+            rng=_seeded_rng(),
         )
     assert calls["n"] == 1  # no retry on PERMANENT
 
@@ -564,6 +589,7 @@ def test_invoke_response_attributes_usage_to_the_given_agent(
         usage_agent_id=42,
         catalog=model_catalog,
         now=_now,
+        rng=_seeded_rng(),
     )
 
     [record] = [r for r in loguru_records if r["extra"].get("event") == "llm_usage"]

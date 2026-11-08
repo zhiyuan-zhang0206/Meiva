@@ -18,6 +18,7 @@ from base.agents.history.hierarchy.chunks import (
 )
 from base.agents.messages.timestamp_policy import TimestampPolicy
 from base.clock.tests.fakes import system_clock
+from base.clock.tests.seeded_rng import seeded_rng
 from base.lm.catalog import ModelCatalog
 from base.telemetry.tests.capture.event_capture import EmittedEvents
 from services.agent_runner.understanding import chunk_consumer as loop
@@ -141,6 +142,7 @@ async def test_a_cancelled_job_is_failed_and_reported_not_put_back(
         config=consumer_config(),
         describe=chunk_seams.describe,
         locate_job_chunk=chunk_seams.locate_job_chunk,
+        rng=seeded_rng(),
     )
     task = asyncio.create_task(consumer.run_until_idle())
     try:

@@ -8,6 +8,7 @@ URL source: `base.config.settings` is the single source of truth. An empty SQL U
 process resource; the default database factory refuses it before a connection can reach libpq.
 """
 
+import random
 from collections.abc import Mapping
 from typing import Literal, Protocol, overload
 
@@ -29,6 +30,18 @@ from .installation import (
 from .installation import (
     provider_keys as provider_keys,
 )
+
+
+# meiva:note
+# This process's random generator, for an operation that spreads its retries: the one the bound
+# context carries, built once by the root that launched this process (`MeivaContext.require_rng`).
+# The installation is not a second place to look -- it holds no generator -- so a process without a
+# bound context refuses instead of making one of its own.
+def rng() -> random.Random:
+    context = process_context.ambient_context()
+    if context is None:
+        raise RuntimeError("this process binds no MeivaContext, so it carries no random generator")
+    return context.require_rng()
 
 
 # meiva:note

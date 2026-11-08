@@ -10,6 +10,7 @@ import httpx
 import numpy as np
 import pytest
 
+from base.clock.tests.seeded_rng import seeded_rng
 from base.lm.catalog import ModelCatalog
 from services.derived.memory_indexer.embeddings import embeddinggemma, factory
 from services.derived.memory_indexer.embeddings.base import EmbeddingAPIError
@@ -131,6 +132,7 @@ def test_factory_preserves_metadata_and_uses_local_auth_only(model_catalog: Mode
         now=lambda: datetime(2026, 8, 17, tzinfo=UTC),
         embeddinggemma_config=_config(),
         transport=httpx.MockTransport(respond),
+        rng=seeded_rng(),
     )
     provider.embed_query("find")
     assert "Authorization" not in calls[0].headers

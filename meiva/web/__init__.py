@@ -52,7 +52,10 @@ def search(
     return [
         [SearchResult(title=h.title, url=h.url, snippet=h.snippet, kind=h.kind) for h in hits]
         for hits in runner.run_search(
-            plan, wiring.search_deps(), security.current_delivery(), timers=sdk_settings.clock()
+            plan,
+            wiring.search_deps(rng=sdk_settings.rng()),
+            security.current_delivery(),
+            timers=sdk_settings.clock(),
         )
     ]
 
@@ -86,5 +89,8 @@ def fetch(
 
     delivery = security.current_delivery()
     return runner.run_fetch(
-        plan, wiring.fetch_deps(delivery), delivery, timers=sdk_settings.clock()
+        plan,
+        wiring.fetch_deps(delivery, rng=sdk_settings.rng()),
+        delivery,
+        timers=sdk_settings.clock(),
     )

@@ -16,12 +16,14 @@ __all__ = [
     "ExponentialBackoff",
     "Policy",
     "aretry",
+    "aretry_jittered",
     "extract_retry_after",
     "http_classifier",
     "jitter_delay",
     "jittered",
     "retry",
     "retry_asleep",
+    "retry_jittered",
     "retry_sleep",
 ]
 
@@ -82,8 +84,10 @@ def agent_phase(span: float) -> float:
 
 
 # meiva:note
-# Jitter exists to spread retries, not to keep a secret, so the non-cryptographic generator is the intended one.
-def jittered(delay: float, span: float = 1.0, mode: str = "agent") -> float:
+# Jitter exists to spread retries, not to keep a secret, so the non-cryptographic generator is the
+# intended one -- and it arrives from the caller: `rng` is the process generator the composition root
+# built, so this module draws nothing of its own and a seeded generator fixes the wait a test reads.
+def jittered(delay: float, span: float = 1.0, mode: str = "agent", *, rng: random.Random) -> float:
     """``delay`` plus jitter, never negative.
 
     ``mode``:
@@ -103,7 +107,7 @@ def jittered(delay: float, span: float = 1.0, mode: str = "agent") -> float:
     Policy).
     """
     phase = agent_phase(span) if mode not in {"none", "relative", "random"} else 0.0
-    noise = random.uniform(-span, span) if mode not in {"none", "phase"} else 0.0  # noqa: S311
+    noise = rng.uniform(-span, span) if mode not in {"none", "phase"} else 0.0
     return jitter_delay(delay, mode, phase=phase, noise=noise)
 
 
@@ -273,12 +277,51 @@ class Policy:
     on_final_failure: Callable[[Exception], None] | None = None
 
 
-# meiva:link base/host/docs/resilience.meiva.okf.md
-def retry(
-    policy: Policy, *, sleep: Callable[[float], None] = retry_sleep
-) -> Callable[[Callable[[], T]], T]:
-    """Wrap a sync ``fn`` in the one retry loop."""
+# meiva:note
+# The modes whose wait is decided without a draw: `none` hands the backoff back unchanged and
+# `phase` adds the per-process phase. Every other mode asks for noise, and noise needs a generator.
+_DETERMINISTIC_JITTER = frozenset({"none", "phase"})
 
+
+# meiva:note
+# The one wait decision both loops share: the policy's backoff, the upstream's Retry-After when the
+# policy honours it, then the policy's jitter. `rng` is the process generator, or None from the door
+# that promises a wait this policy does not draw -- a mode that would draw then refuses instead of
+# reading entropy here.
+def _wait_seconds(
+    policy: Policy, attempt: int, exc: Exception, *, rng: random.Random | None
+) -> float:
+    delay = policy.backoff(attempt)
+    if policy.respect_retry_after:
+        retry_after = extract_retry_after(exc)
+        if retry_after is not None:
+            delay = max(delay, retry_after)
+    if rng is not None:
+        return jittered(delay, policy.jitter_span, policy.jitter, rng=rng)
+    if policy.jitter not in _DETERMINISTIC_JITTER:
+        raise ValueError(
+            f"this retry policy draws jitter (`jitter={policy.jitter!r}`): build its loop with "
+            "`retry_jittered(policy, rng=...)` / `aretry_jittered(...)` and hand it the process "
+            "generator, or declare a wait that draws nothing"
+        )
+    phase = agent_phase(policy.jitter_span) if policy.jitter == "phase" else 0.0
+    return jitter_delay(delay, policy.jitter, phase=phase, noise=0.0)
+
+
+# meiva:note
+# A drawing policy must not reach the door that promises no draw: refuse where the loop is built,
+# not on the first transient failure, which may be never.
+def _require_no_draw(policy: Policy, door: str) -> None:
+    if policy.jitter not in _DETERMINISTIC_JITTER:
+        raise ValueError(
+            f"{door} waits without drawing, but this policy's `jitter={policy.jitter!r}` asks for "
+            "noise: use retry_jittered/aretry_jittered with the process generator instead"
+        )
+
+
+def _sync_loop(
+    policy: Policy, *, rng: random.Random | None, sleep: Callable[[float], None]
+) -> Callable[[Callable[[], T]], T]:
     def _run(fn: Callable[[], T]) -> T:
         attempts = 1 if not policy.idempotent else max(1, policy.max_attempts)
         for attempt in range(attempts):
@@ -286,26 +329,19 @@ def retry(
                 return fn()
             except Exception as exc:
                 if attempt < attempts - 1 and policy.classify(exc):
-                    delay = policy.backoff(attempt)
-                    if policy.respect_retry_after:
-                        retry_after = extract_retry_after(exc)
-                        if retry_after is not None:
-                            delay = max(delay, retry_after)
-                    sleep(jittered(delay, policy.jitter_span, policy.jitter))
+                    sleep(_wait_seconds(policy, attempt, exc, rng=rng))
                     continue
                 if policy.on_final_failure is not None:
                     policy.on_final_failure(exc)
                 raise
-        raise AssertionError("unreachable")  # every attempt either returns or raises
+        raise AssertionError("unreachable")
 
     return _run
 
 
-def aretry(
-    policy: Policy, *, asleep: Callable[[float], Awaitable[None]] = retry_asleep
+def _async_loop(
+    policy: Policy, *, rng: random.Random | None, asleep: Callable[[float], Awaitable[None]]
 ) -> Callable[[Callable[[], Awaitable[T]]], Awaitable[T]]:
-    """Wrap an async ``fn`` in the one retry loop (async twin of ``retry``)."""
-
     def _run(fn: Callable[[], Awaitable[T]]) -> Awaitable[T]:
         async def _runner() -> T:
             attempts = 1 if not policy.idempotent else max(1, policy.max_attempts)
@@ -314,12 +350,7 @@ def aretry(
                     return await fn()
                 except Exception as exc:
                     if attempt < attempts - 1 and policy.classify(exc):
-                        delay = policy.backoff(attempt)
-                        if policy.respect_retry_after:
-                            retry_after = extract_retry_after(exc)
-                            if retry_after is not None:
-                                delay = max(delay, retry_after)
-                        await asleep(jittered(delay, policy.jitter_span, policy.jitter))
+                        await asleep(_wait_seconds(policy, attempt, exc, rng=rng))
                         continue
                     if policy.on_final_failure is not None:
                         policy.on_final_failure(exc)
@@ -329,3 +360,46 @@ def aretry(
         return _runner()
 
     return _run
+
+
+# meiva:note
+# The door that promises a wait which draws nothing: the policy's backoff plus its Retry-After, and
+# a policy whose `jitter` mode asks for noise is refused here at build time, because this loop has
+# no generator to draw from. `retry_jittered` is the drawing door.
+# meiva:link base/host/docs/resilience.meiva.okf.md
+def retry(
+    policy: Policy, *, sleep: Callable[[float], None] = retry_sleep
+) -> Callable[[Callable[[], T]], T]:
+    """Wrap a sync ``fn`` in the one retry loop."""
+    _require_no_draw(policy, "retry")
+    return _sync_loop(policy, rng=None, sleep=sleep)
+
+
+# meiva:note
+# The sync loop for a policy whose wait draws its jitter: `rng` is the process's generator, the one
+# `random.Random` the composition root built (a `random.SystemRandom` where a secret rides on the
+# draw), and a test hands in a seeded one so the waits it asserts are repeatable.
+def retry_jittered(
+    policy: Policy, *, rng: random.Random, sleep: Callable[[float], None] = retry_sleep
+) -> Callable[[Callable[[], T]], T]:
+    return _sync_loop(policy, rng=rng, sleep=sleep)
+
+
+# meiva:note
+# The async twin of `retry`, with the same refusal and the same promise: a drawing policy is built
+# with `aretry_jittered` instead.
+def aretry(
+    policy: Policy, *, asleep: Callable[[float], Awaitable[None]] = retry_asleep
+) -> Callable[[Callable[[], Awaitable[T]]], Awaitable[T]]:
+    """Wrap an async ``fn`` in the one retry loop (async twin of ``retry``)."""
+    _require_no_draw(policy, "aretry")
+    return _async_loop(policy, rng=None, asleep=asleep)
+
+
+# meiva:note
+# The async drawing door: the same generator contract as `retry_jittered`, awaited through the
+# caller's own `asleep`.
+def aretry_jittered(
+    policy: Policy, *, rng: random.Random, asleep: Callable[[float], Awaitable[None]] = retry_asleep
+) -> Callable[[Callable[[], Awaitable[T]]], Awaitable[T]]:
+    return _async_loop(policy, rng=rng, asleep=asleep)

@@ -20,6 +20,7 @@ from base.agents.history.hierarchy.group import (
     parse_groups,
 )
 from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
+from base.clock.tests.seeded_rng import seeded_rng
 from base.lm.catalog import ModelCatalog
 
 _CLOCK = Clock(
@@ -151,6 +152,7 @@ def _run(
         retry_attempts=0,
         on_call=calls.append,
         catalog=model_catalog,
+        rng=seeded_rng(),
     )
     return groups, calls
 
@@ -194,6 +196,7 @@ def test_corrections_run_out_into_a_failure_with_every_call_recorded(
             retry_attempts=0,
             on_call=calls.append,
             catalog=model_catalog,
+            rng=seeded_rng(),
         )
     assert len(calls) == 3 and all(c.problem for c in calls)
 
@@ -217,6 +220,7 @@ def test_must_close_is_passed_to_the_prompt_and_the_check(model_catalog: ModelCa
         retry_attempts=0,
         on_call=calls.append,
         catalog=model_catalog,
+        rng=seeded_rng(),
     )
     assert groups == [Group(100, 102, "s100")]
     assert "must be closed" in llm.seen[0][0].content
@@ -237,6 +241,7 @@ def test_a_provider_error_is_recorded_and_raised(model_catalog: ModelCatalog) ->
             retry_attempts=0,
             on_call=calls.append,
             catalog=model_catalog,
+            rng=seeded_rng(),
         )
     assert len(calls) == 1 and calls[0].response is None and "boom" in (calls[0].error or "")
 
@@ -258,6 +263,7 @@ def test_unknown_group_invocation_error_is_recorded_once_and_preserved(
             retry_attempts=2,
             on_call=calls.append,
             catalog=model_catalog,
+            rng=seeded_rng(),
         )
     assert raised.value is error
     assert len(llm.seen) == len(calls) == 1

@@ -2,6 +2,7 @@
 # Replay upper-level checks with fresh policy at each leaf horizon.
 
 import asyncio
+import random
 from concurrent.futures import Executor
 
 from psycopg_pool import AsyncConnectionPool
@@ -27,6 +28,7 @@ async def run_rebuild(
     *,
     config: ConfigBoot,
     clock: Clock,
+    rng: random.Random,
     executor: Executor | None = None,
     min_check_open: int = MIN_CHECK_OPEN,
 ) -> int:
@@ -50,6 +52,7 @@ async def run_rebuild(
             agent_id,
             config=config,
             clock=clock,
+            rng=rng,
             executor=executor,
             upto=end,
             min_check_open=min_check_open,

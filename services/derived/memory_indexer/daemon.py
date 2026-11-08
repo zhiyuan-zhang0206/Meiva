@@ -57,14 +57,6 @@ from services.pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfi
 _log = logging.getLogger("services.derived.memory_indexer.daemon")
 
 
-# meiva:note
-# The process's random generator, built once at its entry: the event pipeline mints its
-# `service.instance.id` from it, and an identifier is not a secret, so it is a plain
-# `random.Random`.
-def _new_rng() -> random.Random:
-    return random.Random()  # noqa: S311
-
-
 def memory_root(*, roles: MachineRoles, home: Path) -> Path:
     """The consolidated memory checkout this daemon indexes, resolved on use."""
     return gateway_memory_dir(roles=roles, home=home)
@@ -516,6 +508,7 @@ async def run(
     root: Path,
     tuning: MemoryIndexerConfig,
     now: Callable[[], datetime],
+    rng: random.Random,
 ) -> None:
     inputs = MemoryIndexerInputs.from_boot(config)
     if _is_running(config, runtime=runtime):
@@ -539,6 +532,7 @@ async def run(
             api_key=inputs.api_key,
             embeddinggemma_config=inputs.embeddinggemma_config,
             now=now,
+            rng=rng,
         )
     except ValueError as exc:
         _log.critical("[indexer] embedding provider config invalid: %s", exc)
@@ -636,6 +630,11 @@ def main() -> None:
         )
 
     now = Clock(clock_config_from_boot(config), timers=SYSTEM_TIMERS).now
+    # meiva:note
+    # The generator this process draws from: the event pipeline mints its `service.instance.id`
+    # from it and the embedding retry spreads its waits with it. Neither is a secret, so a plain
+    # `random.Random` (the same choice `meiva.boot` makes for general entropy).
+    rng = random.Random()  # noqa: S311
     pipeline = build_pipeline(
         database=database,
         machine=machine,
@@ -643,7 +642,7 @@ def main() -> None:
         now=now,
         otlp_enabled=lambda: config.view.observability.telemetry_otlp_enabled,
         otlp_endpoint=lambda: config.view.observability.telemetry_otlp_endpoint,
-        rng=_new_rng(),
+        rng=rng,
     )
     code = 0
     try:
@@ -669,6 +668,7 @@ def main() -> None:
                     root=memory_root(roles=machine.role(), home=process_home),
                     tuning=MemoryIndexerConfig(),
                     now=now,
+                    rng=rng,
                 )
             )
         except KeyboardInterrupt:

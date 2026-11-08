@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import random
 from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
@@ -56,6 +57,7 @@ def understand_deps() -> UnderstandDeps:
         base_dir=base_dir,
         output=_output_site(context),
         now=sdk_settings.clock().now,
+        rng=context.require_rng(),
     )
 
 
@@ -68,6 +70,7 @@ def understand_deps_for(
     base_dir: Path,
     output: OutputSite | None,
     now: Callable[[], datetime],
+    rng: random.Random,
 ) -> UnderstandDeps:
     return UnderstandDeps(
         catalog=catalog,
@@ -93,4 +96,5 @@ def understand_deps_for(
         base_dir=base_dir,
         output=output,
         now=now,
+        rng=rng,
     )
