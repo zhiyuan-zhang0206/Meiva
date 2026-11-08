@@ -7,26 +7,17 @@ import asyncio
 import os
 import subprocess
 import sys
-import time
 from pathlib import Path
 from typing import cast
 
 import psutil
 import pytest
 
-from base.daemon.health import DaemonProbe
-from base.log.tests.log_records import LogRecords
-from base.log.tests.log_records import loguru_records as loguru_records
-from base.native_process.ownership import OwnedProcess
 from services.supervision.meiva_root import unit_ledger
-from services.supervision.meiva_root.failure_state import UnitFailureFacts
-from services.supervision.meiva_root.health import HealthConfig, HealthMonitor
 from services.supervision.meiva_root.manifest import RestartPolicy, UnitManifest, UnitRegistry
-from services.supervision.meiva_root.probes import ProbeRegistry
 from services.supervision.meiva_root.stopping import SupervisorConfig
 from services.supervision.meiva_root.supervisor import Supervisor
 from services.supervision.meiva_root.tests.slices import system_clock
-from services.supervision.meiva_root.unit_records import OperatorStopFacts
 
 _CHILD = Path(__file__).with_name("child_unit.py")
 
@@ -56,17 +47,8 @@ def _leftover(*scenario: str) -> subprocess.Popen[bytes]:
     )
 
 
-def _record(run_dir: Path, process: subprocess.Popen[bytes], *, generation: int = 7) -> None:
-    unit_ledger.write(
-        run_dir,
-        "worker",
-        unit_ledger.GenerationRecord(
-            identity=OwnedProcess.capture(psutil.Process(process.pid)),
-            generation=generation,
-            manifest_digest="recorded",
-            started_at=time.time(),
-        ),
-    )
+def _record(run_dir: Path, process: subprocess.Popen[bytes]) -> None:
+    unit_ledger.write(run_dir, "worker", process.pid)
 
 
 def _row(status: dict[str, object]) -> dict[str, object]:
@@ -96,7 +78,7 @@ async def test_recorded_leftover_is_stopped_before_the_replacement_spawns(tmp_pa
             assert row["pid"] != leftover.pid
             record = unit_ledger.read(tmp_path, "worker")
             assert record is not None
-            assert record.identity.pid == row["pid"]
+            assert record == row["pid"]
         finally:
             await owner.shutdown()
     finally:
@@ -152,7 +134,7 @@ async def test_a_record_whose_process_is_gone_is_dropped(tmp_path: Path) -> None
         assert row["state"] == "running"
         record = unit_ledger.read(tmp_path, "worker")
         assert record is not None
-        assert record.identity.pid == row["pid"]
+        assert record == row["pid"]
     finally:
         await owner.shutdown()
 
@@ -174,11 +156,11 @@ async def test_the_record_is_cleared_when_its_generation_exits(tmp_path: Path) -
 def test_a_late_clear_from_an_older_generation_keeps_the_newer_record(tmp_path: Path) -> None:
     head = _leftover("sleep")
     try:
-        _record(tmp_path, head, generation=8)
-        unit_ledger.clear(tmp_path, "worker", generation=7)
+        unit_ledger.write(tmp_path, "worker", head.pid)
+        unit_ledger.clear(tmp_path, "worker", pid=999999)
         kept = unit_ledger.read(tmp_path, "worker")
-        assert kept is not None and kept.generation == 8
-        unit_ledger.clear(tmp_path, "worker", generation=8)
+        assert kept is not None and kept == head.pid
+        unit_ledger.clear(tmp_path, "worker", pid=head.pid)
         assert unit_ledger.read(tmp_path, "worker") is None
     finally:
         if head.poll() is None:
@@ -189,82 +171,13 @@ def test_a_late_clear_from_an_older_generation_keeps_the_newer_record(tmp_path: 
 @pytest.mark.parametrize(
     "body",
     [
-        "not json",
-        '{"pid": 1}',
-        '{"pid": 1, "birth": 1.0, "starttime": null, "generation": 1, '
-        '"manifest_digest": "x", "started_at": 1.0, "extra": true}',
+        "not a pid",
+        "abc\n",
     ],
 )
 def test_an_unreadable_record_is_dropped_rather_than_trusted(tmp_path: Path, body: str) -> None:
-    path = unit_ledger.record_path(tmp_path, "worker")
+    path = unit_ledger.pidfile_path(tmp_path, "worker")
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(body)
     assert unit_ledger.read(tmp_path, "worker") is None
     assert not path.exists()
-
-
-class _Probe:
-    def __init__(self, verdict: DaemonProbe) -> None:
-        self.verdict = verdict
-
-    def __call__(self) -> DaemonProbe:
-        return self.verdict
-
-
-# meiva:note
-# The health runner's supervisor slice, owning no generation at all.
-class _OwnerlessSupervisor:
-    def __init__(self) -> None:
-        self.generation: tuple[OwnedProcess, float] | None = None
-        self.restart_calls: list[str] = []
-
-    async def restart(self, unit_id: str) -> dict[str, object]:
-        self.restart_calls.append(unit_id)
-        return {"verb": "restart", "units": []}
-
-    def health_generation(self, unit_id: str) -> tuple[OwnedProcess, float] | None:
-        return self.generation
-
-    def revival_deferral(self, unit_id: str) -> str | None:
-        return None
-
-    def unit_failure_facts(self, unit_id: str) -> UnitFailureFacts:
-        return UnitFailureFacts(intent_running=True, restart_failed=None)
-
-    def unit_input_drift(self, unit_id: str) -> tuple[str, ...]:
-        return ()
-
-    def operator_stop_facts(self, unit_id: str) -> OperatorStopFacts | None:
-        return None
-
-
-def _events(records: LogRecords, name: str) -> list[dict[str, object]]:
-    return [r["extra"] for r in records if r["extra"].get("event") == name]
-
-
-# meiva:note
-# An alive verdict names the unit's daemon, never its owner: a leftover of a dead
-# root answers identically. Reporting it once per episode is the only signal a
-# process no spawn record describes can produce (task #5474).
-async def test_an_alive_answer_from_no_generation_is_reported_once(
-    loguru_records: LogRecords,
-) -> None:
-    probe = _Probe(DaemonProbe.up("leftover answers"))
-    registry = ProbeRegistry()
-    registry.register("svc", probe)
-    stub = _OwnerlessSupervisor()
-    monitor = HealthMonitor(
-        stub,
-        registry,
-        config=HealthConfig(interval_s=0.01, startup_grace_s=0.0, restart_backoff_s=(0.0,)),
-        clock=system_clock(),
-    )
-    await monitor.run_round()
-    await monitor.run_round()
-    assert len(_events(loguru_records, "root_unit_unowned_alive")) == 1
-    assert monitor.snapshot()["svc"].unowned_alive is True
-    assert stub.restart_calls == []
-    stub.generation = (OwnedProcess(43, 200.0, None), 0.0)
-    await monitor.run_round()
-    assert len(_events(loguru_records, "root_unit_owned_alive")) == 1
-    assert monitor.snapshot()["svc"].unowned_alive is False

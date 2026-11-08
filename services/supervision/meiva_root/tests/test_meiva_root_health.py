@@ -21,7 +21,6 @@ from services.supervision.meiva_root import health as health_mod
 from services.supervision.meiva_root import manifest as manifest_mod
 from services.supervision.meiva_root.failure_state import UnitFailureFacts
 from services.supervision.meiva_root.health import HealthConfig, HealthMonitor
-from services.supervision.meiva_root.inputs import InputSeal
 from services.supervision.meiva_root.probes import ProbeRegistry
 from services.supervision.meiva_root.stopping import UnitStopTimeoutError
 from services.supervision.meiva_root.supervisor import Supervisor
@@ -458,14 +457,14 @@ async def test_code_gate_exit_is_not_automatically_restarted(
 async def test_failed_replacement_remains_visible_and_budgeted(
     started: StartFactory, short_tmp: Path, recorder: Recorder
 ) -> None:
-    sealed = short_tmp / "sealed-input"
-    sealed.write_text("v1")
+    runner = short_tmp / "runner.sh"
+    runner.write_text("#!/bin/sh\nwhile true; do sleep 1; done\n")
+    runner.chmod(0o755)
     unit = manifest_mod.UnitManifest(
         "svc",
-        tuple(_SLEEP_FOREVER),
+        (str(runner),),
         manifest_mod.RestartPolicy.ALWAYS,
         "root",
-        inputs=(InputSeal.capture(sealed.resolve()),),
     )
     supervisor = await started([unit])
     probe = CellProbe(DaemonProbe.up("serving"))
@@ -473,7 +472,7 @@ async def test_failed_replacement_remains_visible_and_budgeted(
         supervisor, _registry("svc", probe), config=_config(), clock=system_clock()
     )
     await monitor.run_round()
-    sealed.write_text("v2")
+    runner.unlink()
     probe.verdict = DaemonProbe.down("not serving")
     for _ in range(7):
         await monitor.run_round()

@@ -16,7 +16,6 @@ import pytest
 
 from base.clock.tests.manual_timers import ManualTimers
 from base.native_process.ownership import OwnedProcess
-from services.supervision.meiva_root.inputs import InputSeal
 from services.supervision.meiva_root.manifest import RestartPolicy, UnitManifest, UnitRegistry
 from services.supervision.meiva_root.stopping import rotate_unit_log
 from services.supervision.meiva_root.supervisor import Supervisor, SupervisorConfig
@@ -87,63 +86,6 @@ async def test_up_is_idempotent_and_restart_stops_previous_generation(tmp_path: 
         await owner.restart("worker")
         assert (await row(owner))["pid"] != original
         assert not psutil.pid_exists(original)
-    finally:
-        await owner.shutdown()
-
-
-@pytest.mark.parametrize("change", ["bytes", "added-file", "removed-file"])
-async def test_restart_refuses_changed_inputs_before_native_birth(
-    tmp_path: Path, change: str
-) -> None:
-    config = tmp_path / "config"
-    config.mkdir()
-    value = config / "value"
-    value.write_text("admitted")
-    output = tmp_path / "read-config"
-    unit = UnitManifest(
-        "worker",
-        (
-            sys.executable,
-            str(_CHILD),
-            "read_config",
-            str(output),
-            str(value),
-        ),
-        RestartPolicy.ALWAYS,
-        "root",
-        inputs=(InputSeal.capture(config),),
-    )
-    owner = Supervisor(
-        UnitRegistry([unit]),
-        environ=dict(os.environ),
-        run_dir=tmp_path / "root",
-        clock=system_clock(),
-        root_pid=os.getpid(),
-    )
-    await owner.start()
-    try:
-        await wait_file(output)
-        assert output.read_text() == "admitted"
-        original = (await row(owner))["pid"]
-        if change == "bytes":
-            value.write_text("unapproved")
-        elif change == "added-file":
-            (config / "new-rule").write_text("unapproved")
-        else:
-            value.unlink()
-        output.unlink()
-        await owner.restart("worker")
-        current = await row(owner)
-        assert current["state"] == "stopped"
-        assert "service input changed" in current["last_error"]
-        assert not psutil.pid_exists(original)
-        assert not output.exists()
-        assert not list((tmp_path / "root/custody").glob("*.json"))
-        value.write_text("admitted")
-        (config / "new-rule").unlink(missing_ok=True)
-        await owner.up("worker")
-        await wait_file(output)
-        assert output.read_text() == "admitted"
     finally:
         await owner.shutdown()
 

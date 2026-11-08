@@ -50,7 +50,6 @@ from typing import get_args
 from base.cluster.machine import MachineRole
 from base.host.boundary.json_values import is_object_dict, is_object_list
 from base.native_process.stop_timing import STOP_MARGIN_S
-from services.supervision.meiva_root.inputs import InputSeal
 from services.supervision.meiva_root.manifest import (
     ManifestError,
     UnitManifest,
@@ -150,7 +149,6 @@ def build_units(
             "restart": "always",
             "attach": "root",
             "env": {} if environments is None else environments[spec.session],
-            "inputs": [InputSeal.capture(path).as_mapping() for path in spec.config_inputs],
             "stop_tier": _STOP_ORDER_TIER.get(spec.session, 1),
         }
         if spec.stop_ceiling_s is not None:

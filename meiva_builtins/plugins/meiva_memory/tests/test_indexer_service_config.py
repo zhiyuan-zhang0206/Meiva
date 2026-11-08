@@ -1,5 +1,4 @@
 from pathlib import Path
-from typing import cast
 
 import pytest
 
@@ -13,7 +12,6 @@ from base.packages.plugins.plugin_errors import InvalidConfigData, SchemaDriftEr
 from base.paths import meiva_home, run_dir
 from meiva_builtins.plugins.meiva_memory import services
 from meiva_builtins.plugins.meiva_memory.default_config import MemoryConfig
-from services.supervision.meiva_root.inputs import InputChangedError, InputSeal
 from services.supervision.meiva_root_glue.manifests import build_units
 from services.supervision.roster import plugin_services as roster_plugins
 from services.supervision.roster.service_spec import ServiceSpec
@@ -74,7 +72,7 @@ def test_invalid_image_fails_composition_before_a_gate_can_fail_open(
     assert image.read_text() == content
 
 
-def test_first_converge_materializes_and_seals_the_declared_input(unit_home: Path) -> None:
+def test_first_converge_materializes_the_declared_input(unit_home: Path) -> None:
     before = _indexer()
     assert before.gate is not None and before.gate() is None
     assert not disk_image_path("meiva_memory", home=unit_home).exists()
@@ -90,12 +88,8 @@ def test_first_converge_materializes_and_seals_the_declared_input(unit_home: Pat
     units = build_units(
         [spec], capabilities={"gateway"}, repo_root=Path(__file__).parents[4], home=unit_home
     )
-    inputs = cast("list[object]", units[0]["inputs"])
-    assert len(inputs) == 1
-    seal = InputSeal.from_mapping(inputs[0])
+    assert len(units) == 1
     image.write_text('{"indexer_enabled": false}\n')
-    with pytest.raises(InputChangedError):
-        seal.require_unchanged()
     disabled = services.services(home=unit_home, endpoints=_table())[0]
     assert disabled.gate is not None
     assert disabled.gate() == "disabled (meiva_memory.indexer_enabled off)"

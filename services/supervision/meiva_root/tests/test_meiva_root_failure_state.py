@@ -110,7 +110,6 @@ class _Supervisor:
         self.facts = UnitFailureFacts(intent_running=True, restart_failed=None)
         self.deferrals: dict[str, str] = {}
         self.restart_calls: list[str] = []
-        self.input_drift: tuple[str, ...] = ()
 
     async def restart(self, unit_id: str) -> dict[str, object]:
         self.restart_calls.append(unit_id)
@@ -124,9 +123,6 @@ class _Supervisor:
 
     def unit_failure_facts(self, unit_id: str) -> UnitFailureFacts:
         return self.facts
-
-    def unit_input_drift(self, unit_id: str) -> tuple[str, ...]:
-        return self.input_drift
 
 
 class _Cell:
@@ -478,25 +474,6 @@ async def test_absence_is_reported_only_after_consecutive_rounds(
 
 
 # meiva:note
-# An absence whose gap is filled by a process this root does not own is already its own
-# finding (`root_unit_unowned_alive`, task #5474), and reporting it a second time as a
-# failure state would name the wrong cause (task #6345).
-async def test_absence_is_not_reported_when_a_leftover_answers_the_probe(
-    clock: _Clock, recorder: _Recorder
-) -> None:
-    supervisor = _Supervisor()
-    supervisor.generation = None
-    supervisor.facts = UnitFailureFacts(
-        intent_running=True, restart_failed=None, observed_absent=True
-    )
-    monitor = _monitor(supervisor, _Cell(DaemonProbe.up("someone answers")), timers=clock)
-    for _ in range(4):
-        await monitor.run_round()
-    assert recorder.events("root_unit_failure_state") == []
-    assert len(recorder.events("root_unit_unowned_alive")) == 1
-
-
-# meiva:note
 # A unit whose policy forbids revival is reported every round as `root_unit_not_revivable`;
 # its absence is the same fact, so it is not reported twice (task #6345).
 async def test_absence_is_not_reported_when_the_policy_forbids_revival(
@@ -513,28 +490,6 @@ async def test_absence_is_not_reported_when_the_policy_forbids_revival(
     assert recorder.events("root_unit_failure_state") == []
     assert len(recorder.events("root_unit_not_revivable")) == 4
     assert supervisor.restart_calls == []
-
-
-# meiva:note
-# The seal drift is reported while the unit still looks healthy: the point of the signal is to
-# arrive before something tries to spawn it and cannot (task #6403). A stopped unit is not
-# reported — a unit nobody asked to run cannot be revived, which is not yet a degradation.
-async def test_a_changed_sealed_input_is_reported_while_the_unit_is_healthy(
-    clock: _Clock, recorder: _Recorder
-) -> None:
-    supervisor = _Supervisor()
-    supervisor.input_drift = ("/home/u/.meiva/lgtm/native/config",)
-    monitor = _monitor(supervisor, _Cell(DaemonProbe.up("ok")), timers=clock)
-    await monitor.run_round()
-    await monitor.run_round()
-    reports = recorder.events("root_unit_inputs_changed")
-    assert [(r["unit"], r["path"], r["level"]) for r in reports] == [
-        ("svc", "/home/u/.meiva/lgtm/native/config", "warning"),
-        ("svc", "/home/u/.meiva/lgtm/native/config", "warning"),
-    ]
-    supervisor.facts = UnitFailureFacts(intent_running=False, restart_failed=None)
-    await monitor.run_round()
-    assert len(recorder.events("root_unit_inputs_changed")) == 2, "a stop is a decision"
 
 
 def _real_root(tmp_path: Path, clock: Clock, *scenario: str) -> Supervisor:

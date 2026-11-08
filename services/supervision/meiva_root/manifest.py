@@ -23,7 +23,6 @@ from pathlib import Path
 from base.deploy.progress_timeout import ROOT_HEALTH_INTERVAL_S
 from base.host.boundary.json_values import is_object_dict, is_object_list
 from base.host.boundary.untyped import object_of
-from services.supervision.meiva_root.inputs import InputSeal, parse_inputs
 
 # The implicit tree root. Units attach here by default; it is never a unit
 # itself and cannot be declared as one.
@@ -37,7 +36,7 @@ _UNIT_ID_RE = re.compile(r"^[a-z0-9][a-z0-9._-]*\Z")
 # validators reject anything else, so field drift fails loudly instead of
 # being carried around silently.
 _REQUIRED_FIELDS = frozenset({"id", "exec", "restart"})
-_MANIFEST_FIELDS = _REQUIRED_FIELDS | {"attach", "env", "inputs", "stop_timeout_s", "stop_tier"}
+_MANIFEST_FIELDS = _REQUIRED_FIELDS | {"attach", "env", "stop_timeout_s", "stop_tier"}
 _FILE_FIELDS = frozenset({"units", "launch_digest"})
 
 
@@ -66,7 +65,6 @@ class UnitManifest:
     restart: RestartPolicy
     attach: str
     env: tuple[tuple[str, str], ...] = ()
-    inputs: tuple[InputSeal, ...] = ()
     stop_timeout_s: float | None = None
     """Seconds root waits for this unit to exit after TERM; None = root's default.
 
@@ -85,7 +83,6 @@ class UnitManifest:
                 "restart": self.restart.value,
                 "attach": self.attach,
                 "env": self.env,
-                "inputs": [item.as_mapping() for item in self.inputs],
                 "stop_timeout_s": self.stop_timeout_s,
                 "stop_tier": self.stop_tier,
             },
@@ -131,17 +128,12 @@ class UnitManifest:
         if attach != ROOT_ID and not _UNIT_ID_RE.match(attach):
             raise ManifestError(f"{origin}: attach {attach!r} is not a valid unit id")
 
-        try:
-            inputs = parse_inputs(raw.get("inputs", []))
-        except (ValueError, TypeError) as exc:
-            raise ManifestError(f"{origin}: {exc}") from exc
         return cls(
             id=unit_id,
             exec=_parse_exec(raw["exec"], origin),
             restart=restart,
             attach=attach,
             env=_parse_environment(raw.get("env", {}), origin),
-            inputs=inputs,
             stop_timeout_s=_parse_stop_timeout(raw.get("stop_timeout_s"), origin),
             stop_tier=_parse_stop_tier(raw.get("stop_tier"), origin),
         )

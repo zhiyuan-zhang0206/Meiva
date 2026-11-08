@@ -1,4 +1,4 @@
-exports = ["__main__.py", "failure_state.py", "health.py", "inputs.py", "manifest.py", "probes.py", "selfcheck.py", "server.py", "supervisor.py", "wiring.py"]
+exports = ["__main__.py", "failure_state.py", "health.py", "manifest.py", "probes.py", "selfcheck.py", "server.py", "supervisor.py", "wiring.py"]
 
 [uses]
 "__init__.py" = ["health.py", "manifest.py", "probes.py", "selfcheck.py", "server.py", "supervisor.py", "wiring.py"]
@@ -7,11 +7,11 @@ exports = ["__main__.py", "failure_state.py", "health.py", "inputs.py", "manifes
 "failure_state.py" = ["intent_store.py"]
 "health.py" = ["failure_state.py", "manifest.py", "probes.py", "stopping.py"]
 "left_behind.py" = ["stopping.py", "unit_ledger.py", "unit_records.py"]
-"manifest.py" = ["inputs.py"]
+"manifest.py" = []
 "stopping.py" = ["unit_records.py"]
 "supervisor.py" = ["failure_state.py", "intent_store.py", "left_behind.py", "manifest.py", "stopping.py", "unit_ledger.py", "unit_records.py"]
-"tests" = ["__init__.py", "__main__.py", "daemon.py", "failure_state.py", "health.py", "helper_chain_plan.py", "inputs.py", "intent_store.py", "manifest.py", "probes.py", "selfcheck.py", "server.py", "stopping.py", "supervisor.py", "unit_ledger.py", "unit_records.py", "wiring.py"]
-"unit_records.py" = ["inputs.py", "intent_store.py", "manifest.py"]
+"tests" = ["__init__.py", "__main__.py", "daemon.py", "failure_state.py", "health.py", "helper_chain_plan.py", "intent_store.py", "manifest.py", "probes.py", "selfcheck.py", "server.py", "stopping.py", "supervisor.py", "unit_ledger.py", "unit_records.py", "wiring.py"]
+"unit_records.py" = ["intent_store.py", "manifest.py"]
 "wiring.py" = ["manifest.py", "supervisor.py"]
 
 [loads]
