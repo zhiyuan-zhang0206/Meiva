@@ -294,12 +294,20 @@ def _artifact_case_ids(artifact_id: int, scratch: Path, run_process: RunProcess)
 # that paid for runs it had already read would spend the difference every thirty minutes (task
 # #6509). It is also what keeps one broken run from blinding the stream -- a run whose jobs endpoint
 # answers 502 fails only the round that first had to read it, and the rounds after that skip it.
+# meiva:note
+# The signature is the port's, not the callee's: `watch_once` calls `fetch(workflow, seen_at,
+# seen_attempt)` positionally, and the composition binds the two effect parameters by keyword
+# through `partial`. Putting `run_process`/`scratch` in front made every call a TypeError --
+# "multiple values for argument 'run_process'" -- which the round reported as four unreadable
+# streams for six hours on 2026-11-08 (the first wave that carried the watermark, #8677). The
+# two halves were each tested; the binding between them was not.
 def fetch_runs(
     workflow: str,
-    run_process: RunProcess,
-    scratch: Path,
     seen_at: datetime | None = None,
     seen_attempt: int | None = None,
+    *,
+    run_process: RunProcess,
+    scratch: Path,
 ) -> tuple[RunFacts, ...]:
     import json
 
