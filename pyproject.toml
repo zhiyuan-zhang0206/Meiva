@@ -284,7 +284,7 @@ check-typed-exception = true
 # variable is an API path the gate builds itself from a pull-request number, a commit sha
 # or the `{owner}/{repo}` placeholder gh resolves, so S603 (untrusted subprocess input)
 # has nothing to flag.
-"scripts/ci/pull_requests/merge_gate.py" = ["S603"]
+"scripts/ci/pull_requests/gate/merge_gate.py" = ["S603"]
 # This operator tool inserts the repository root on sys.path before importing
 # first-party modules, so it can run from any working directory with the
 # checkout venv. The bootstrap is a code statement ahead of those imports by
