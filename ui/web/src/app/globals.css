@@ -593,31 +593,30 @@
 @media (prefers-reduced-motion: no-preference) and (forced-colors: none) {
   .agent-title-working {
     --working-base: #525252;
-    --working-mid: #9CA3AF;
-    --working-peak: #E2E7F0;
+    --working-mid: #787E87;
+    --working-peak: #969EA9;
     background-image: linear-gradient(
       105deg,
       var(--working-base) 0%,
-      var(--working-base) 40%,
+      var(--working-base) 41%,
       var(--working-mid) 46%,
-      var(--working-peak) 49%,
-      var(--working-peak) 51%,
+      var(--working-peak) 50%,
       var(--working-mid) 54%,
-      var(--working-base) 60%,
+      var(--working-base) 59%,
       var(--working-base) 100%
     );
     background-size: 220% 100%;
     background-clip: text;
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
-    animation: agent-title-sweep 1.8s linear infinite;
+    animation: agent-title-sweep 3.8s linear infinite;
   }
 
   .agent-row-pill-active .agent-title-working,
   .agent-row-pill:not(.agent-row-pill-active):hover .agent-title-working {
     --working-base: #3B3B3B;
-    --working-mid: #8A919E;
-    --working-peak: #DCE2EC;
+    --working-mid: #666C75;
+    --working-peak: #88909C;
   }
 
   .dark .agent-title-working {
@@ -635,6 +634,7 @@
 }
 
 @keyframes agent-title-sweep {
-  0% { background-position: 120% 0; }
-  100% { background-position: -20% 0; }
+  0% { background-position: 125% 0; }
+  65% { background-position: -25% 0; }
+  100% { background-position: -25% 0; }
 }
