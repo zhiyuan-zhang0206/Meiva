@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -45,12 +45,18 @@ from schedules.plans.watch.release_gate_slot import (
 Compare = Callable[[str, str], tuple[str, ...]]
 
 __all__ = [
+    "ATTEMPT_GREEN",
+    "ATTEMPT_HOLDS",
+    "ATTEMPT_PENDING",
     "STATE_FILE",
+    "AttemptOf",
     "Compare",
     "LivenessStream",
     "SlotLedger",
     "WatchState",
     "card_operation_key",
+    "job_attempt_verdict",
+    "listing_attempt",
     "load_state",
     "round_line",
     "save_state",
@@ -178,6 +184,44 @@ def _already_read(run: RunFacts, seen_at: datetime | None, seen_attempt: int | N
     return seen_attempt is None or run.attempt <= seen_attempt
 
 
+# meiva:note
+# Which attempt a listing row says it is. `run_attempt` is the only field that moves when a run is
+# re-run -- the id and `created_at` do not -- so reading it wrongly is the same as not reading it at
+# all, and it is read once here instead of at each call site. A row that carries no attempt (or a
+# value that is not a positive integer) means the first attempt, which is what every run is.
+def listing_attempt(item: Mapping[str, object]) -> int:
+    raw = item.get("run_attempt")
+    if isinstance(raw, int) and not isinstance(raw, bool) and raw > 0:
+        return raw
+    return 1
+
+
+# meiva:note
+# What a re-run may say about a claim. Only `success` withdraws it: `failure`, `cancelled` and a job
+# that is missing from the newest attempt all leave the claim standing, because "there is a newer
+# attempt" is not "the newer attempt is green" (405, 2026-11-08). An attempt that has not concluded
+# settles nothing this round -- opening a card on it would report a red the re-run may still clear,
+# and withdrawing the claim on it would answer "safe" from a fact nobody has yet.
+ATTEMPT_GREEN = "green"
+ATTEMPT_HOLDS = "holds"
+ATTEMPT_PENDING = "pending"
+
+
+# meiva:note
+# `job_attempt_verdict` answers about one job among one attempt's jobs, and returns the verdict
+# together with what it actually read -- the conclusion, or that the job was not listed. The second
+# half is what lets a round line say which conclusion suppressed a card instead of only that it did.
+def job_attempt_verdict(jobs: Sequence[Mapping[str, object]], job_name: str) -> tuple[str, str]:
+    for job in jobs:
+        if not is_object_dict(job) or job.get("name") != job_name:
+            continue
+        conclusion = job.get("conclusion")
+        if not isinstance(conclusion, str) or not conclusion:
+            return ATTEMPT_PENDING, "no conclusion yet"
+        return (ATTEMPT_GREEN if conclusion == "success" else ATTEMPT_HOLDS), conclusion
+    return ATTEMPT_HOLDS, "missing from that attempt"
+
+
 def load_state(path: Path) -> WatchState:
     if not path.exists():
         return WatchState({}, {}, {})
@@ -202,6 +246,10 @@ def load_state(path: Path) -> WatchState:
             # A ledger written before the class existed carries no `kind`; those entries were all
             # named cases, which is the default, so an upgrade never re-reads an old red as new.
             kind=value.get("kind") or FAILURE_TEST,
+            # meiva:note
+            # Absent in a ledger written before the field: that entry keeps no job, and the attempt
+            # gate skips it rather than guess which job its red belonged to.
+            job=value.get("job") or "",
             # meiva:note
             # A ledger written before the field existed holds full-suite reds (the push gate's were
             # the only partial ones), so the default keeps an upgrade from re-reading an old red as
@@ -234,6 +282,7 @@ def save_state(path: Path, state: WatchState) -> None:
                 "last_green_at": entry.last_green_at.isoformat() if entry.last_green_at else None,
                 "task_id": entry.task_id,
                 "kind": entry.kind,
+                "job": entry.job,
                 "covers_full_suite": entry.covers_full_suite,
             }
             for name, entry in state.entries.items()
@@ -325,6 +374,48 @@ def round_line(
 
 
 # meiva:note
+# One run's newest attempt, read as `(attempt number, that attempt's jobs)`. The read lives with the
+# other `gh` calls; the judgement on what it returns lives here, where a test can hand it values.
+AttemptOf = Callable[[int], tuple[int, tuple[Mapping[str, object], ...]]]
+
+
+# meiva:note
+# The gate a re-run earned (task #6488, 405 2026-11-08): a card is opened only while the job that
+# reported the red is still red in the newest attempt of its own run. This is the case that made it
+# necessary -- `e2e full matrix (1/4)` failed in attempt 1, attempt 2 cleared it thirty minutes
+# later, and the card had been opened in between; the aggregate `e2e gate` job was green in that
+# same attempt 2 while shard 3 stayed red, which is why the question is asked per job and never of
+# the run's own conclusion.
+#
+# It answers `ATTEMPT_HOLDS` whenever it cannot know better -- no port, no job on the entry, no run
+# id, or an attempt that could not be read -- so the one thing able to suppress a card is a green
+# somebody actually read. The round line carries the decision either way, so a gate that never runs
+# (an entry from a ledger that predates the field) is visible rather than silently absent.
+def _attempt_decision(
+    entry: Entry, run: RunFacts, attempt_of: AttemptOf | None, notes: list[str]
+) -> str:
+    if attempt_of is None or not entry.job or not run.run_id:
+        return ATTEMPT_HOLDS
+    try:
+        attempt, jobs = attempt_of(run.run_id)
+    except Exception as exc:
+        notes.append(f"attempt of run {run.run_id} unreadable: {type(exc).__name__}: {exc}")
+        return ATTEMPT_HOLDS
+    verdict, seen = job_attempt_verdict(jobs, entry.job)
+    if verdict == ATTEMPT_HOLDS:
+        if attempt > 1:
+            notes.append(f"{entry.fingerprint}: {entry.job} attempt {attempt} {seen}")
+        return ATTEMPT_HOLDS
+    if verdict == ATTEMPT_GREEN:
+        notes.append(
+            f"{entry.fingerprint}: {entry.job} attempt {attempt} green, claim withdrawn, no card"
+        )
+    else:
+        notes.append(f"{entry.fingerprint}: {entry.job} attempt {attempt} {seen}, card waits")
+    return verdict
+
+
+# meiva:note
 # One run's effects, kept out of the round so the round stays a loop over streams: what a run does
 # to the ledger is apply the verdict, keep the newest green, and act on the cards it confirms or
 # closes. `unnamed` is the count of reds the round could not put a name on -- a repeat of a shape
@@ -338,6 +429,7 @@ def _apply_one_run(
     open_card: Callable[[Card], int],
     close_card: Callable[[int, str], None],
     notes: list[str],
+    attempt_of: AttemptOf | None = None,
 ) -> tuple[dict[str, Entry], int, int, int]:
     plan = apply_run(entries, run)
     entries = dict(plan.entries)
@@ -347,6 +439,16 @@ def _apply_one_run(
     unnamed = sum(1 for failure in run.failures if failure.kind == FAILURE_UNNAMED)
     opened = 0
     for entry in plan.confirmed:
+        decision = _attempt_decision(entry, run, attempt_of, notes)
+        if decision == ATTEMPT_PENDING:
+            continue
+        if decision == ATTEMPT_GREEN:
+            # meiva:note
+            # The claim is withdrawn, so the entry goes with it: nothing is left to card, and a
+            # later red of the same case is a new sighting rather than a second strike earned by a
+            # run whose own re-run said it passed.
+            entries.pop(entry.fingerprint, None)
+            continue
         card, candidate_note = _confirmed_card(entry, run, compare, greens.get(run.workflow))
         if candidate_note is not None:
             notes.append(candidate_note)
@@ -372,6 +474,7 @@ def watch_once(
     workflows: tuple[str, ...],
     liveness: tuple[LivenessStream, ...],
     compare: Compare | None = None,
+    attempt_of: AttemptOf | None = None,
 ) -> str:
     state = load_state(state_path)
     entries = dict(state.entries)
@@ -409,6 +512,7 @@ def watch_once(
                 open_card=open_card,
                 close_card=close_card,
                 notes=notes,
+                attempt_of=attempt_of,
             )
             opened += run_opened
             infra += run_infra
