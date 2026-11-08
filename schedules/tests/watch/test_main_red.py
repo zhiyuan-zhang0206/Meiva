@@ -642,3 +642,67 @@ def test_a_workflow_with_a_trigger_key_is_still_read() -> None:
         "  b:\n    name: b\n    needs: [a]\n"
     )
     assert downstream_failing_jobs(workflow, ("a", "b")) == ("b",)
+
+
+# meiva:note
+# The integration the task asked for: a red whose log names nothing gets its card title from the
+# artifact. The log is checked first and wins when it names a case, so a download is never spent on
+# a red the log already explained.
+def test_an_unnamed_log_takes_its_case_from_the_artifact() -> None:
+    log = "Verify shard results\n1 failed\n"
+
+    from_artifact = parse_failures(
+        log,
+        job_name="e2e shard (2/4)",
+        suite_step_failed=True,
+        failed_steps=("Verify shard results",),
+        junit_ids=("tests/e2e/fakes/test_a.py::test_two",),
+    )
+    assert [(failure.test_id, failure.kind) for failure in from_artifact] == [
+        ("tests/e2e/fakes/test_a.py::test_two", FAILURE_TEST)
+    ]
+
+    named_log = "FAILED tests/e2e/fakes/test_a.py::test_from_the_log - assert 1 == 2\n"
+    from_log = parse_failures(
+        named_log,
+        job_name="e2e shard (2/4)",
+        suite_step_failed=True,
+        junit_ids=("tests/e2e/fakes/test_a.py::test_two",),
+    )
+    assert [failure.test_id for failure in from_log] == [
+        "tests/e2e/fakes/test_a.py::test_from_the_log"
+    ], "a log that named a case is not overridden by the artifact"
+
+
+# meiva:note
+# The check step of the push gate is a red of that check, not of a test, so it is answered before
+# the artifact is even consulted -- the gate publishes no JUnit and its step name is the whole
+# evidence.
+def test_a_gate_check_step_wins_over_the_artifact() -> None:
+    step = "Locality gate (full meizel check)"
+    parsed = parse_failures(
+        "some output\n",
+        job_name="meizel gate",
+        suite_step_failed=True,
+        failed_steps=(step,),
+        check_steps=GATE_CHECK_STEPS,
+        junit_ids=("tests/x.py::test_y",),
+    )
+
+    assert [failure.test_id for failure in parsed] == [f"meizel gate / {step}"]
+
+
+# meiva:note
+# An artifact that carries no failing case is not an artifact that was never read: the unnamed
+# failure survives, so the card still says which job and which steps, and the reader knows the
+# watch looked rather than guessing that it did not.
+def test_an_artifact_without_a_failing_case_still_reports_unnamed() -> None:
+    parsed = parse_failures(
+        "Verify shard results\n",
+        job_name="e2e shard (2/4)",
+        suite_step_failed=True,
+        failed_steps=("Verify shard results",),
+        junit_ids=(),
+    )
+
+    assert [failure.kind for failure in parsed] == [FAILURE_UNNAMED]

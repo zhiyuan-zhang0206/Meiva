@@ -299,6 +299,7 @@ def parse_failures(
     suite_step_failed: bool,
     failed_steps: tuple[str, ...] = (),
     check_steps: frozenset[str] = frozenset(),
+    junit_ids: tuple[str, ...] = (),
 ) -> tuple[Failure, ...]:
     marker = _infrastructure_marker(log_text)
     if marker is not None:
@@ -314,6 +315,15 @@ def parse_failures(
     for step in failed_steps:
         if step in check_steps:
             return (Failure(f"{job_name} / {step}", FAILURE_TEST, job_name),)
+    # meiva:note
+    # The run's own JUnit artifact, when the log named nothing (task #6487). The id is built the way
+    # the log builds it -- `file::name` -- so one test keeps one fingerprint whichever route named
+    # it: a dotted `classname` would make the same case look like two, and the second sighting that
+    # turns a suspect into a card would never arrive. An artifact that carried no failing case is
+    # not the same as one that was never read, so it falls through to the unnamed failure below and
+    # says which artifact was consulted.
+    if junit_ids:
+        return tuple(Failure(case, FAILURE_TEST, job_name) for case in junit_ids)
     # meiva:note
     # Everything below is a red this watch cannot name, and the steps are the whole of what it
     # knows: an empty tuple here is how a failed run once left no trace at all, so the answer is a
