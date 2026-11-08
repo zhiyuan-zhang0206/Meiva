@@ -34,6 +34,8 @@ def _round(
     heartbeats: list[dict[str, object]],
     runs: Mapping[str, Sequence[RunFacts]] | None = None,
     workflows: tuple[str, ...] = _STREAMS,
+    blind_min_streams: int = 2,
+    blind_stream_rounds: int = 6,
 ) -> str:
     def fetch(
         workflow: str, _seen_at: datetime | None, _seen_attempt: int | None
@@ -53,6 +55,8 @@ def _round(
         workflows=workflows,
         liveness=(),
         notify=None,
+        blind_min_streams=blind_min_streams,
+        blind_stream_rounds=blind_stream_rounds,
     )
 
 
@@ -314,3 +318,39 @@ def test_a_watch_round_keeps_the_slot_ledger(tmp_path: Path) -> None:
     )
 
     assert load_state(tmp_path / STATE_FILE).slot.task_id == 799
+
+
+# meiva:note
+# The thresholds are configuration, not code: a deployment that wants a round of three failing
+# streams to be a card, or a stream to be reported after three rounds instead of six, changes a
+# value rather than the judgement. This pins that the caller's numbers are the ones that decide --
+# a default that ignores the parameter would pass every test that uses the default.
+def test_the_thresholds_are_the_callers(tmp_path: Path) -> None:
+    opened: list[Card] = []
+    closed: list[tuple[int, str]] = []
+    heartbeats: list[dict[str, object]] = []
+
+    _round(
+        tmp_path,
+        _START,
+        failing={"ci.yml": "boom", "main-push.yml": "HTTP 502"},
+        opened=opened,
+        closed=closed,
+        heartbeats=heartbeats,
+        blind_min_streams=4,
+    )
+
+    assert opened == []
+
+    _round(
+        tmp_path,
+        _START + timedelta(minutes=30),
+        failing={"ci.yml": "boom"},
+        opened=opened,
+        closed=closed,
+        heartbeats=heartbeats,
+        blind_stream_rounds=2,
+    )
+
+    assert len(opened) == 1
+    assert "`ci.yml` unreadable for 2 rounds" in opened[0].title

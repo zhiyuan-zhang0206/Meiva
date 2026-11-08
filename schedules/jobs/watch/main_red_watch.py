@@ -38,6 +38,8 @@ from schedules.plans.watch.main_red import (
     liveness_alert,
 )
 from schedules.jobs.watch.main_red_blind import (
+    BLIND_STREAMS,
+    BLIND_STREAM_ROUNDS,
     BlindLedger,
     advance_blindness,
     load_blind,
@@ -658,6 +660,8 @@ def watch_once(
     compare: Compare | None = None,
     attempt_of: AttemptOf | None = None,
     notify: Callable[[str], None] | None,
+    blind_min_streams: int = BLIND_STREAMS,
+    blind_stream_rounds: int = BLIND_STREAM_ROUNDS,
 ) -> str:
     state = load_state(state_path)
     entries = dict(state.entries)
@@ -738,6 +742,8 @@ def watch_once(
         runs_read=runs_read,
         open_card=open_card,
         close_card=close_card,
+        min_streams=blind_min_streams,
+        stream_rounds=blind_stream_rounds,
     )
     notes.extend(blind_notes)
     # meiva:note
