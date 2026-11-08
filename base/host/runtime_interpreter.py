@@ -14,7 +14,6 @@ from typing import Literal, Self
 
 from pydantic import model_validator
 
-from base.host.verified_file.plan import stat_changed
 from base.native_process.evidence import Digest, EvidenceModel
 
 
@@ -55,8 +54,7 @@ def source_digest(repo: Path) -> str:
         path = repo / encoded.decode("utf-8")
         digest.update(encoded + b"\0")
         try:
-            before = path.lstat()
-            mode = before.st_mode
+            mode = path.lstat().st_mode
         except FileNotFoundError:
             digest.update(b"deleted\0")
             continue
@@ -66,9 +64,6 @@ def source_digest(repo: Path) -> str:
             content = path.read_bytes()
         else:
             raise RuntimeError(f"unsupported development source member: {path}")
-        after = path.lstat()
-        if stat_changed(before, after):
-            raise RuntimeError(f"development source changed while reading: {path}")
         digest.update(str(mode).encode() + b"\0" + hashlib.sha256(content).digest())
     if (
         subprocess.check_output(  # noqa: S603 — same read-only HEAD check

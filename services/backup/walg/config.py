@@ -26,7 +26,6 @@ from urllib.parse import urlsplit
 
 from base.host.boundary.untyped import object_of
 from base.host.private_storage import create_private_bytes, private_file_problem
-from base.host.verified_file.reader import RegularFileReadError, regular_bytes
 from services.backup.artifact.names import REMOTE_ROOT
 
 _CONFIG_MAX_BYTES = 64 * 1024
@@ -111,8 +110,8 @@ def read_config(path: Path) -> WalgConfig:
     """
     _owner_only_file(path, "WAL-G config")
     try:
-        raw = object_of(json.loads, regular_bytes(path, max_bytes=_CONFIG_MAX_BYTES))
-    except (OSError, RegularFileReadError, ValueError):
+        raw = object_of(json.loads, path.read_bytes())
+    except (OSError, ValueError):
         raise WalgConfigError(f"WAL-G config {path} is not readable JSON") from None
     if not _is_object_dict(raw):
         raise WalgConfigError(f"WAL-G config {path} must be a JSON object")
@@ -148,8 +147,8 @@ def read_config(path: Path) -> WalgConfig:
 def _key_fingerprint(key_path: Path) -> str:
     _owner_only_file(key_path, "WAL-G encryption key file")
     try:
-        text = regular_bytes(key_path, max_bytes=_KEY_MAX_BYTES).decode().strip()
-    except (OSError, RegularFileReadError, UnicodeDecodeError):
+        text = key_path.read_text(encoding="utf-8").strip()
+    except (OSError, UnicodeDecodeError):
         raise WalgConfigError(f"WAL-G encryption key file {key_path} is not readable") from None
     if _KEY_HEX.fullmatch(text) is None:
         raise WalgConfigError(
@@ -163,10 +162,10 @@ def pinned_key_id(home: Path) -> str | None:
     """The fingerprint pinned on first use, or None before any load pinned one."""
     path = key_id_path(home)
     try:
-        value = regular_bytes(path, max_bytes=256).decode().strip()
+        value = path.read_text(encoding="utf-8").strip()
     except FileNotFoundError:
         return None
-    except (OSError, RegularFileReadError, UnicodeDecodeError) as exc:
+    except (OSError, UnicodeDecodeError) as exc:
         raise WalgConfigError(f"pinned key id {path} is not readable: {exc}") from None
     if re.fullmatch(rf"[0-9a-f]{{{_FINGERPRINT_CHARS}}}", value) is None:
         raise WalgConfigError(f"pinned key id {path} is malformed")

@@ -1,17 +1,16 @@
-exports = ["atomic_io.py", "boundary", "brew_pin.py", "config_validators.py", "converge", "db_authority", "env", "exit_codes.py", "git", "net", "permissions_helper", "private_storage.py", "proc.py", "resource", "runtime_interpreter.py", "system", "tests", "verified_file"]
+exports = ["atomic_io.py", "boundary", "brew_pin.py", "config_validators.py", "converge", "db_authority", "env", "exit_codes.py", "git", "net", "permissions_helper", "private_storage.py", "proc.py", "resource", "runtime_interpreter.py", "system", "tests"]
 
 [uses]
 "brew_pin.py" = ["proc.py"]
 "config_validators.py" = ["system"]
 "converge" = ["boundary", "system"]
-"db_authority" = ["boundary", "net", "private_storage.py", "verified_file"]
+"db_authority" = ["boundary", "net", "private_storage.py"]
 "env" = ["atomic_io.py", "boundary", "db_authority", "net", "private_storage.py", "proc.py"]
 "git" = ["boundary", "proc.py"]
 "net" = ["__init__.py", "boundary"]
 "permissions_helper" = ["boundary", "converge", "net"]
-"runtime_interpreter.py" = ["verified_file"]
 "system" = ["atomic_io.py", "boundary", "brew_pin.py", "env", "proc.py", "runtime_interpreter.py"]
-"tests" = ["atomic_io.py", "config_validators.py", "env", "private_storage.py", "proc.py", "resource", "system", "verified_file"]
+"tests" = ["atomic_io.py", "config_validators.py", "env", "private_storage.py", "proc.py", "resource", "system"]
 
 [roots]
 "proc.py" = { kinds = ["monotonic"], why = "wait_owned() bounds a wait on real processes and times nothing it reports: `clock = time.monotonic` builds a deadline the loop then compares against (`deadline - clock()`, `time.sleep`), and the readings are never recorded, so no caller holds a better duration. The kind is the narrow one; `time.time()` or `datetime.now()` in this file still fails" }

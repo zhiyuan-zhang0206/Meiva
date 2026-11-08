@@ -19,7 +19,6 @@ from typing import Literal, assert_never
 from base.host.boundary.options import attribute, options
 from base.host.net.browser_origins import parse_browser_origins, split_browser_origins
 from base.host.proc import run_bounded
-from base.host.verified_file.plan import stat_changed
 
 _KEY_FILE = "meiva-build-key"
 BuildAction = Literal["reuse", "build"]
@@ -71,19 +70,15 @@ def _frontend_source_names(frontend_dir: Path) -> list[bytes]:
 
 def _source_entry_record(path: Path, encoded: bytes) -> bytes:
     try:
-        before = path.lstat()
+        mode = path.lstat().st_mode
     except FileNotFoundError:
         return b"D\0" + encoded + b"\0"
-    mode = before.st_mode
     if stat.S_ISLNK(mode):
         content = str(path.readlink()).encode("utf-8")
     elif stat.S_ISREG(mode):
         content = path.read_bytes()
     else:
         raise RuntimeError(f"unsupported frontend source member: {path}")
-    after = path.lstat()
-    if stat_changed(before, after):
-        raise RuntimeError(f"frontend source changed while reading: {path}")
     return (
         b"F\0" + encoded + b"\0" + f"{mode:o}\0".encode("ascii") + hashlib.sha256(content).digest()
     )

@@ -29,7 +29,6 @@ from contextlib import suppress
 from pathlib import Path
 
 from base.host.private_storage import private_file_problem, write_private_bytes
-from base.host.verified_file.reader import regular_bytes
 
 PIN_NAME = "logical-backup.passphrase"
 _PASSPHRASE = re.compile(r"^[0-9a-f]{64}$")
@@ -77,7 +76,7 @@ def pinned(home: Path) -> str | None:
         problem = "is not owner-only"
     if problem is not None:
         raise PassphrasePinError(f"{path}: {problem}")
-    value = regular_bytes(path, max_bytes=4096).decode().strip()
+    value = path.read_text(encoding="utf-8").strip()
     if _PASSPHRASE.fullmatch(value) is None:
         raise PassphrasePinError(f"{path} does not hold a logical-backup passphrase")
     return value

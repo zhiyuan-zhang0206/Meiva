@@ -169,10 +169,8 @@ def write_grant(home: Path, cls: GenerationClass) -> WriteGrant:
 
 
 def _intent_checkout(home: Path) -> Path:
-    from base.host.verified_file.reader import regular_bytes
-
     try:
-        data = object_of(json.loads, regular_bytes(home / "start-intent.json", max_bytes=1 << 20))
+        data = object_of(json.loads, (home / "start-intent.json").read_bytes())
     except (OSError, ValueError) as exc:
         raise AuthorityRefusedError(f"the home's start intent is unreadable: {exc}") from exc
     if not is_object_dict(data):

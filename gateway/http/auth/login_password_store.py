@@ -62,7 +62,6 @@ class LoginPasswords:
     #     RuntimeError: the file is a symlink, not a regular file, or not owner-only.
     def current(self, home: Path) -> StoredPassword | None:
         from base.host.private_storage import private_file_problem
-        from base.host.verified_file.reader import regular_bytes
 
         path = login_password_path(home)
         try:
@@ -79,7 +78,7 @@ class LoginPasswords:
             problem = "is not owner-only"
         if problem is not None:
             raise RuntimeError(f"{path}: {problem}")
-        raw = regular_bytes(path, max_bytes=_MAX_RECORD_BYTES)
+        raw = path.read_bytes()
         try:
             record = parse_record(raw)
         except PasswordRecordError as exc:
