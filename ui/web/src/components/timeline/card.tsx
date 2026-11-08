@@ -44,10 +44,12 @@ export interface CardConfig {
   readonly titleKey?: string;
   readonly titleValues?: Record<string, string | number>;
   // meiva:note
-  // Default expanded state for a child inside an opened settled TurnBlock: false
-  // for machinery steps (thinking, code, output, agent/system inbound, notes),
-  // true for agent_chat (normal agent text output inside a background-wake turn)
-  // and attach thumbnails.
+  // Default expanded state for a child inside an opened settled TurnBlock. True
+  // for everything the agent actually read - agent_chat, attachments, other
+  // agents' and system inbound messages, and note markers - so opening a work
+  // block shows the conversation the agent had instead of a stack of collapsed
+  // headers (user ruling 2026-11-09). False for machinery steps (thinking, code,
+  // output, compact envelopes, the system prompt, lifecycle and memory markers).
   // meiva:link ui/web/src/docs/frontend-components/timeline-view/deep-collapse.meiva.okf.md
   readonly fixedDefault: boolean;
   // meiva:note
@@ -133,7 +135,7 @@ export function messageCardConfig(item: BackendTimelineItem): CardConfig | null 
           title: `Agent ${(item.source ?? "").slice("agent:".length)}`,
           titleKey: "timeline.agent",
           titleValues: { id: (item.source ?? "").slice("agent:".length) },
-          fixedDefault: false,
+          fixedDefault: true,
           showTimestamp: true,
           copy: true,
         };
@@ -146,7 +148,7 @@ export function messageCardConfig(item: BackendTimelineItem): CardConfig | null 
           title: `External agent ${name}`,
           titleKey: "timeline.externalAgent",
           titleValues: { name },
-          fixedDefault: false,
+          fixedDefault: true,
           showTimestamp: true,
           copy: true,
         };
@@ -167,7 +169,7 @@ export function messageCardConfig(item: BackendTimelineItem): CardConfig | null 
         icon: Info,
         title: "System",
         titleKey: "timeline.system",
-        fixedDefault: false,
+        fixedDefault: true,
         showTimestamp: true,
         copy: false,
       };
@@ -201,7 +203,7 @@ export function messageCardConfig(item: BackendTimelineItem): CardConfig | null 
         icon: v.icon,
         title: v.title,
         titleKey: v.titleKey ? `markers.${v.titleKey}` : undefined,
-        fixedDefault: false,
+        fixedDefault: cls.kind === "note",
         showTimestamp: item.show_timestamp,
         copy: false,
       };

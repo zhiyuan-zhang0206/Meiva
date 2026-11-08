@@ -228,18 +228,32 @@ describe("groupIntoTurns", () => {
     expect(summary.lastLiveStartedAt).toBe(123_456);
   });
 
-  it("skips silent markers (compact_done, cancelled, compact_request:*, non_human_wake) and [files] companions without splitting turns", () => {
+  it("skips ephemeral machinery markers and [files] companions without splitting turns", () => {
     const items = [
       item("agent_reasoning"),
       item("system_marker", null, undefined, { payload: "compact_done" }),
       item("system_marker", null, undefined, { payload: "cancelled" }),
       item("system_marker", null, undefined, { payload: "compact_request:now" }),
-      item("system_marker", "non_human_wake", undefined, { payload: "Non-human wake: ..." }),
       item("inbound_chat", "user", undefined, { payload: "user [2026-11-01]:\n\n[files]" }),
       item("agent_code"),
     ];
     const groups = groupIntoTurns(items, { collapseTurns: true, liveIndex: null });
     expect(kinds(groups)).toEqual(["turn(2@0)"]);
+  });
+
+  // meiva:note
+  // A note marker is content the agent read, so it stays inside the work block
+  // instead of being filtered out (user ruling 2026-11-09).
+  // meiva:link ui/web/src/docs/frontend-components/timeline-view/markers.meiva.okf.md
+  it("keeps a note marker inside the work block", () => {
+    const items = [
+      item("agent_reasoning"),
+      item("system_marker", "non_human_wake", undefined, { payload: "Non-human wake: ..." }),
+      item("system_marker", "reply_visibility", undefined, { payload: "reply target: user" }),
+      item("agent_code"),
+    ];
+    const groups = groupIntoTurns(items, { collapseTurns: true, liveIndex: null });
+    expect(kinds(groups)).toEqual(["turn(4@0)"]);
   });
 
   it("keeps non-user-facing agent chat in the work block even when it is the latest output", () => {

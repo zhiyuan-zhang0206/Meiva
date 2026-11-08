@@ -3,24 +3,16 @@
 // meiva:note
 // Unified collapsible TurnBlock for secondary agent steps (both live "Working…"
 // turns and completed "Worked for Xs" turns): inline unboxed header with live/settled
-// duration summary and a sticky expanded header. Historical bodies flow through
-// the timeline; only the trailing turn retains a half-viewport inner ScrollArea.
+// duration summary and a sticky expanded header. An expanded body always flows at
+// its natural height in the timeline - there is no inner scrollport and no height
+// cap - so a finished block is as tall as it really was and a running one extends
+// downward from a fixed top edge while the reader scrolls the timeline itself.
 // meiva:link ui/web/src/docs/frontend-components/timeline-view/timeline-view.meiva.okf.md
 
 import { ChevronRight, Layers } from "lucide-react";
 import { useTranslations } from "next-intl";
-import {
-  memo,
-  type ReactNode,
-  type UIEvent as ReactUIEvent,
-  useCallback,
-  useEffect,
-  useLayoutEffect,
-  useRef,
-  useState,
-} from "react";
+import { memo, type ReactNode } from "react";
 
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { formatDuration, type SdkCall } from "@/lib/format/item-summary";
 import { cn } from "@/lib/format/utils";
 import {
@@ -31,17 +23,11 @@ import {
   MIN_H_0,
   MIN_W_0,
   OVERFLOW_HIDDEN,
-  TIMELINE_TURN_ROW_GAP_PX,
 } from "@/lib/layout/layout";
 
 import { CallBadge } from "./view/card-summary";
 import { useNow } from "./model/reasoning-clock";
 import { formatTurnSummary, turnSummaryEqual, type TurnSummary } from "./model/runs";
-import { span, windowForSizes } from "./model/use-timeline-window";
-
-const INNER_BOOTSTRAP_ROWS = 24;
-const INNER_ESTIMATED_ROW_PX = 40;
-const INNER_UNMEASURED_VIEW_PX = 360;
 
 interface TurnBlockProps {
   id: string;
@@ -51,15 +37,9 @@ interface TurnBlockProps {
   memberSources?: readonly string[];
   summary: TurnSummary;
   expanded: boolean;
-  bounded?: boolean;
   onToggle: (id: string, currentlyExpanded: boolean) => void;
   turnActive?: boolean;
   liveWindow?: boolean;
-  onActivityAtBottomChange?: (atBottom: boolean) => void;
-  scrollToBottomSeq?: number;
-  windowedCount?: number;
-  turnRows?: number;
-  renderWindowedRow?: (index: number) => ReactNode;
   children?: ReactNode;
   timelineSource?: "buffer" | "canonical";
   displayRank?: number;
@@ -85,16 +65,10 @@ function turnBlockPropsEqual(prev: TurnBlockProps, next: TurnBlockProps): boolea
     prev.id === next.id &&
     prev.toggleKey === next.toggleKey &&
     prev.expanded === next.expanded &&
-    prev.bounded === next.bounded &&
     prev.onToggle === next.onToggle &&
     prev.turnActive === next.turnActive &&
     prev.lastEventAt === next.lastEventAt &&
     prev.liveWindow === next.liveWindow &&
-    prev.onActivityAtBottomChange === next.onActivityAtBottomChange &&
-    prev.scrollToBottomSeq === next.scrollToBottomSeq &&
-    prev.windowedCount === next.windowedCount &&
-    prev.turnRows === next.turnRows &&
-    prev.renderWindowedRow === next.renderWindowedRow &&
     prev.children === next.children &&
     prev.timelineSource === next.timelineSource &&
     prev.displayRank === next.displayRank &&
@@ -113,15 +87,9 @@ export const TurnBlock = memo(function TurnBlock({
   memberSources,
   summary,
   expanded,
-  bounded = true,
   onToggle,
   turnActive,
   liveWindow = false,
-  onActivityAtBottomChange,
-  scrollToBottomSeq = 0,
-  windowedCount,
-  turnRows,
-  renderWindowedRow,
   children,
   timelineSource = "canonical",
   displayRank,
@@ -144,184 +112,6 @@ export const TurnBlock = memo(function TurnBlock({
   const liveAnchor =
     liveBlockStartedAt > 0 ? liveBlockStartedAt : turnActive ? lastEventAt : 0;
   const liveNow = useNow(Boolean(turnActive) && liveAnchor > 0);
-
-  // meiva:note
-  // Inner scrollport management: tracks detached scroll state on the active
-  // trailing turn for the outer ScrollToBottomButton, and bounds DOM mounts
-  // inside mega-turns exceeding MEIVA_TIMELINE_WINDOW_TURN_ROWS.
-  // meiva:link ui/web/src/docs/frontend-components/timeline-view/timeline-view.meiva.okf.md
-  const activityScrollRef = useRef<HTMLDivElement | null>(null);
-  const activityContentRef = useRef<HTMLDivElement | null>(null);
-  const innerStickyRef = useRef(true);
-  const lastInnerScrollTopRef = useRef(0);
-  const seenScrollSeqRef = useRef(scrollToBottomSeq);
-
-  const isWindowed =
-    bounded &&
-    expanded &&
-    windowedCount !== undefined &&
-    turnRows !== undefined &&
-    windowedCount > turnRows &&
-    renderWindowedRow !== undefined;
-  // meiva:note
-  // The inner window places rows by measured heights (estimates only until a row
-  // has mounted once), and while the live window follows its bottom the range is
-  // the tail of those sizes, not a mapping of the DOM scrollTop. Mapping a pinned
-  // scrollTop through estimates mounted a different row set each frame, the
-  // height change re-pinned the scrollport, and the live window flickered for as
-  // long as the agent worked. Row gaps follow the shared work-block geometry.
-  // meiva:link ui/web/src/docs/frontend-components/timeline-view/bounded-window.meiva.okf.md
-  const [innerView, setInnerView] = useState({ top: 0, height: 0, follow: true });
-  const [rowHeights, setRowHeights] = useState<ReadonlyMap<string, number>>(() => new Map());
-  const rowHeightsRef = useRef(rowHeights);
-  const rowObserverRef = useRef<{ observer: ResizeObserver; nodes: Set<HTMLElement> } | null>(null);
-
-  const handleInnerScroll = useCallback(
-    (event: ReactUIEvent<HTMLDivElement>) => {
-      const el = activityScrollRef.current;
-      if (!el) return;
-      if (event.target !== el && event.target !== event.currentTarget) return;
-
-      const dist = el.scrollHeight - el.scrollTop - el.clientHeight;
-      if (liveWindow) {
-        const prevTop = lastInnerScrollTopRef.current;
-        lastInnerScrollTopRef.current = el.scrollTop;
-
-        if (dist <= 16) {
-          if (!innerStickyRef.current) innerStickyRef.current = true;
-          onActivityAtBottomChange?.(true);
-        } else if (el.scrollTop < prevTop - 1) {
-          innerStickyRef.current = false;
-          onActivityAtBottomChange?.(false);
-        }
-      }
-
-      if (isWindowed) {
-        const follow = liveWindow && innerStickyRef.current;
-        setInnerView((prev) =>
-          prev.follow !== follow || prev.height !== el.clientHeight ||
-          (!follow && Math.abs(prev.top - el.scrollTop) >= 1)
-            ? { top: el.scrollTop, height: el.clientHeight, follow }
-            : prev,
-        );
-      }
-    },
-    [isWindowed, liveWindow, onActivityAtBottomChange],
-  );
-
-  useLayoutEffect(() => {
-    if (!isWindowed) return;
-    const el = activityScrollRef.current;
-    if (!el) return;
-    const follow = liveWindow && innerStickyRef.current;
-    setInnerView((prev) =>
-      prev.top !== el.scrollTop || prev.height !== el.clientHeight || prev.follow !== follow
-        ? { top: el.scrollTop, height: el.clientHeight, follow }
-        : prev,
-    );
-  }, [isWindowed, liveWindow]);
-
-  // meiva:note
-  // One ResizeObserver per windowed session records each mounted row's height;
-  // each commit observes only newly mounted rows and releases unmounted ones. Two
-  // notifications can land before React commits, so the second builds on the
-  // first through the ref rather than on the last committed map.
-  // meiva:link ui/web/src/docs/frontend-components/timeline-view/bounded-window.meiva.okf.md
-  useLayoutEffect(() => {
-    if (!isWindowed || typeof ResizeObserver === "undefined") return;
-    const observer = new ResizeObserver((entries) => {
-      let next: Map<string, number> | null = null;
-      for (const entry of entries) {
-        const node = entry.target as HTMLElement;
-        const key = node.dataset.turnRow;
-        if (!key) continue;
-        const height = entry.borderBoxSize[0]?.blockSize ?? node.getBoundingClientRect().height;
-        const known = (next ?? rowHeightsRef.current).get(key);
-        if (height <= 0 || (known !== undefined && Math.abs(known - height) < 1)) continue;
-        next ??= new Map(rowHeightsRef.current);
-        next.set(key, height);
-      }
-      if (!next) return;
-      rowHeightsRef.current = next;
-      setRowHeights(next);
-    });
-    rowObserverRef.current = { observer, nodes: new Set() };
-    return () => {
-      observer.disconnect();
-      rowObserverRef.current = null;
-    };
-  }, [isWindowed]);
-
-  useLayoutEffect(() => {
-    const rows = rowObserverRef.current;
-    const content = activityContentRef.current;
-    if (!rows || !content) return;
-    const mounted = new Set(
-      [...content.children].filter(
-        (node): node is HTMLElement => node instanceof HTMLElement && node.dataset.turnRow !== undefined,
-      ),
-    );
-    for (const node of rows.nodes) {
-      if (!mounted.has(node)) {
-        rows.observer.unobserve(node);
-        rows.nodes.delete(node);
-      }
-    }
-    for (const node of mounted) {
-      if (!rows.nodes.has(node)) {
-        rows.observer.observe(node);
-        rows.nodes.add(node);
-      }
-    }
-  });
-
-  useEffect(() => {
-    if (!liveWindow || !expanded) {
-      innerStickyRef.current = true;
-      onActivityAtBottomChange?.(true);
-      return;
-    }
-    return () => {
-      onActivityAtBottomChange?.(true);
-    };
-  }, [liveWindow, expanded, onActivityAtBottomChange]);
-
-  useEffect(() => {
-    if (seenScrollSeqRef.current === scrollToBottomSeq) return;
-    seenScrollSeqRef.current = scrollToBottomSeq;
-    if (!liveWindow || !expanded) return;
-    const el = activityScrollRef.current;
-    if (!el) return;
-    innerStickyRef.current = true;
-    onActivityAtBottomChange?.(true);
-    if (isWindowed) {
-      setInnerView((prev) =>
-        prev.follow ? prev : { top: el.scrollTop, height: el.clientHeight, follow: true },
-      );
-    }
-    el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
-  }, [scrollToBottomSeq, liveWindow, expanded, isWindowed, onActivityAtBottomChange]);
-
-  const syncInnerToBottom = useCallback(() => {
-    const scroller = activityScrollRef.current;
-    if (!scroller || !innerStickyRef.current) return;
-    scroller.scrollTop = scroller.scrollHeight;
-    lastInnerScrollTopRef.current = scroller.scrollTop;
-  }, []);
-
-  useLayoutEffect(() => {
-    if (!liveWindow || !expanded) return;
-    syncInnerToBottom();
-  }, [liveWindow, expanded, children, windowedCount, syncInnerToBottom]);
-
-  useLayoutEffect(() => {
-    if (!liveWindow || !expanded) return;
-    const content = activityContentRef.current;
-    if (!content || typeof ResizeObserver === "undefined") return;
-    const ro = new ResizeObserver(syncInnerToBottom);
-    ro.observe(content);
-    return () => ro.disconnect();
-  }, [liveWindow, expanded, syncInnerToBottom]);
 
   const liveDelta = turnActive && liveAnchor > 0 ? Math.max(liveNow - liveAnchor, 0) : 0;
   const totalWorkedMs = summary.workedMs + liveDelta;
@@ -354,41 +144,6 @@ export const TurnBlock = memo(function TurnBlock({
     </span>
   ) : null;
 
-  const renderedBody = (() => {
-    if (!expanded) return null;
-    if (!isWindowed) return children;
-    const keys = Array.from({ length: windowedCount }, (_, index) => memberSources?.[index] ?? memberIds[index]);
-    const sizes = keys.map((key) => rowHeights.get(key) ?? INNER_ESTIMATED_ROW_PX);
-    const viewHeight = innerView.height > 0 ? innerView.height : INNER_UNMEASURED_VIEW_PX;
-    const range = (() => {
-      if (innerView.height <= 0 && innerView.top <= 0) {
-        const start = Math.max(0, windowedCount - INNER_BOOTSTRAP_ROWS);
-        return { start, end: windowedCount, before: span(sizes, 0, start, TIMELINE_TURN_ROW_GAP_PX), after: 0 };
-      }
-      const top = liveWindow && innerView.follow
-        ? Math.max(0, span(sizes, 0, windowedCount, TIMELINE_TURN_ROW_GAP_PX) - viewHeight)
-        : innerView.top;
-      return windowForSizes(sizes, top, viewHeight, 0, TIMELINE_TURN_ROW_GAP_PX);
-    })();
-    return (
-      <>
-        {range.before > 0 ? (
-          <div data-timeline-spacer="turn-before" style={{ height: range.before }} aria-hidden="true" />
-        ) : null}
-        {Array.from({ length: range.end - range.start }, (_, offset) => {
-          const index = range.start + offset;
-          return (
-            <div key={keys[index]} data-turn-row={keys[index]}>
-              {renderWindowedRow(index)}
-            </div>
-          );
-        })}
-        {range.after > 0 ? (
-          <div data-timeline-spacer="turn-after" style={{ height: range.after }} aria-hidden="true" />
-        ) : null}
-      </>
-    );
-  })();
 
   return (
     <div
@@ -443,24 +198,10 @@ export const TurnBlock = memo(function TurnBlock({
         )}
       >
         <div className={cn(OVERFLOW_HIDDEN, MIN_H_0, MIN_W_0)}>
-          {expanded && !bounded ? (
+          {expanded ? (
             <div className="mt-1.5 ml-1.5 pl-2 pr-2 border-l border-border/60 space-y-1">
-              {renderedBody}
+              {children}
             </div>
-          ) : expanded ? (
-            <ScrollArea
-              data-turn-scroll="true"
-              data-activity-scroll={liveWindow ? "true" : undefined}
-              viewportTestId={liveWindow ? "activity-scroll-viewport" : "turn-scroll-viewport"}
-              viewportRef={activityScrollRef}
-              onScrollCapture={handleInnerScroll}
-              className="mt-1.5"
-              viewportClassName="[overflow-anchor:none] max-h-[var(--timeline-turn-max-h,50dvh)]"
-            >
-              <div ref={activityContentRef} className="ml-1.5 pl-2 pr-2 border-l border-border/60 space-y-1">
-                {renderedBody}
-              </div>
-            </ScrollArea>
           ) : null}
         </div>
       </div>

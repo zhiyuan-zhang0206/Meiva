@@ -157,8 +157,6 @@ export const TimelineView = memo(function TimelineView({
   });
 
   const [atBottom, setAtBottom] = useState(true);
-  const [activityAtBottom, setActivityAtBottom] = useState(true);
-  const [activityScrollSeq, setActivityScrollSeq] = useState(0);
 
   const {
     turnOverrides,
@@ -273,10 +271,6 @@ export const TimelineView = memo(function TimelineView({
         },
         freshRun,
       );
-      if (freshRun) {
-        setActivityAtBottom(true);
-        setActivityScrollSeq((seq) => seq + 1);
-      }
     },
     [controller],
   );
@@ -477,7 +471,7 @@ export const TimelineView = memo(function TimelineView({
     prevLoadingOlderReleaseRef.current = loadingOlder;
   }, [loadingOlder, finishHistoryPull, historyPullActive, controller, pendingAnchorRef]);
 
-  const { groups, groupEntries, virtualEnabled, virtualRange, rowRange, turnRows } = useTimelineGroupWindow({
+  const { groups, groupEntries, virtualEnabled, virtualRange, rowRange } = useTimelineGroupWindow({
     canonicalItems,
     compactBuffer,
     bufferedItems,
@@ -497,6 +491,19 @@ export const TimelineView = memo(function TimelineView({
     restoreTop: pendingRestoreRef.current?.scrollTop ?? null,
   });
 
+  // meiva:note
+  // An expanded live work block owns the viewport's top edge: the block streams
+  // downward from a fixed top instead of the tail pulling the reader along
+  // (user ruling 2026-11-09). The controller is told once per change; the flag
+  // only suppresses growth pins, so the reader's own scroll to the bottom still
+  // re-follows and a completed or collapsed block hands the tail back.
+  // meiva:link ui/web/src/docs/frontend-components/timeline-view/deep-collapse.meiva.okf.md
+  const lastGroup = groupEntries.at(-1);
+  const liveBlockExpanded = lastGroup !== undefined && lastGroup.isLiveTurn && lastGroup.runExpanded;
+  useLayoutEffect(() => {
+    controller.notifyLiveBlock(liveBlockExpanded);
+  }, [controller, liveBlockExpanded]);
+
   const handleScrollToBottom = useCallback(() => {
     const viewport =
       viewportRef.current ??
@@ -508,8 +515,6 @@ export const TimelineView = memo(function TimelineView({
     holdRestoredPositionRef.current = false;
     controller.requestStick();
     setAtBottom(true);
-    setActivityAtBottom(true);
-    setActivityScrollSeq((seq) => seq + 1);
     if (viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight > 1) {
       viewport.scrollTo({ top: viewport.scrollHeight, behavior: "smooth" });
     } else {
@@ -557,21 +562,18 @@ export const TimelineView = memo(function TimelineView({
             overrides={overrides}
             toggleExpanded={toggleExpanded}
             toggleTurn={toggleTurn}
-            onActivityAtBottomChange={setActivityAtBottom}
-            activityScrollSeq={activityScrollSeq}
             groups={groups}
             groupEntries={groupEntries}
             virtualEnabled={virtualEnabled}
             virtualRange={virtualRange}
             rowRange={rowRange}
-            turnRows={turnRows}
           />
           <CompactingBlock />
           <div ref={endRef} />
         </div>
         <div ref={sendReserveRef} data-send-reserve aria-hidden="true" />
       </ScrollArea>
-      <ScrollToBottomButton atBottom={atBottom && (!turnActive || activityAtBottom)} refreshing={loadingNew && !loadingOlder} onClick={handleScrollToBottom} />
+      <ScrollToBottomButton atBottom={atBottom} refreshing={loadingNew && !loadingOlder} onClick={handleScrollToBottom} />
     </div>
   );
 });

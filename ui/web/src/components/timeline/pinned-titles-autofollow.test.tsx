@@ -83,12 +83,14 @@ describe("TimelineView bounded work blocks during scroll", () => {
     expect(container.querySelector("[data-testid='python-code'] .token")).toBeNull();
   });
 
-  it("keeps the expanded trailing header sticky across rapid scroll gestures while bounding its body", () => {
+  it("keeps the expanded trailing header sticky across rapid scroll gestures", () => {
     const { container, viewport, toggle } = setupExpandedBlock();
     expect(toggle.className).toContain("sticky");
-    expect(screen.getByTestId("turn-scroll-viewport").className).toContain(
-      "max-h-[var(--timeline-turn-max-h,50dvh)]",
-    );
+    // meiva:note
+    // The body has no inner scrollport and no cap: it is as tall as its content
+    // and the timeline around it is what scrolls (user ruling 2026-11-09).
+    // meiva:link ui/web/src/docs/frontend-components/timeline-view/deep-collapse.meiva.okf.md
+    expect(screen.queryByTestId("turn-scroll-viewport")).toBeNull();
 
     viewport.scrollTop = 1400;
     act(() => { fireEvent.scroll(viewport); });

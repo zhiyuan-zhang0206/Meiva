@@ -60,10 +60,12 @@ export function splitEnvelope(payload: string): { header: string; body: string }
 }
 
 // meiva:note
-// Items that intentionally render no visible DOM (silent markers, see `isSilentMarker`,
-// and the companion `[files]` placeholder after `system:upload`). Skipping them during
-// turn grouping prevents invisible items from splitting adjacent TurnBlocks or
-// mounting empty vertical padding gaps.
+// Items that intentionally render no visible DOM: the ephemeral bookkeeping
+// markers (`compact_done`, `cancelled`, `compact_request:*`) and the companion
+// `[files]` placeholder after `system:upload`. Skipping them during turn
+// grouping prevents invisible items from splitting adjacent TurnBlocks or
+// mounting empty vertical padding gaps. NoteTag markers are NOT here - every
+// note the agent read now renders (user ruling 2026-11-09).
 // meiva:link ui/web/src/docs/frontend-components/timeline-view/deep-collapse.meiva.okf.md
 export function isSilentTimelineItem(item: BackendTimelineItem): boolean {
   if (item.kind === "system_marker" && isSilentMarker(item.source, item.payload)) {

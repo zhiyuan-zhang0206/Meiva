@@ -24,9 +24,12 @@ The vocabulary is generated, not mirrored: `NOTE_TAGS` in
 subsets of it, and every other member is a note, so a new backend tag renders as a
 generic note with no frontend change. A frontend test iterating `NOTE_TAGS` locks
 every member to its chip and never the red alarm. `isSilentMarker` owns which
-markers the conversation timeline hides: the `non_human_wake` recency reminder
-(guidance for the model, not an event for the reader) and the silent ephemeral
-payloads below.
+markers the conversation timeline hides, and it now hides nothing that carries a
+`NoteTag`: every note the agent read renders, including the `non_human_wake`
+recency reminder and `reply_visibility` (user ruling 2026-11-09, replacing the
+silent filter those two used to have). Only the ephemeral payloads below are
+silent, and a recognised tag is never judged by its payload — a note whose body
+reads like machinery still renders.
 
 The payload-identified ephemeral markers render bare: `compact_done` and
 `compact_request:*` are normally filtered at the SSE layer (`applySystemEvent`),
