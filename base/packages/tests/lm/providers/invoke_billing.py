@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from concurrent.futures import ThreadPoolExecutor
+from datetime import UTC, datetime
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 from langchain_openai import ChatOpenAI
@@ -67,6 +68,7 @@ def invoke(tracer: BillingRuntime, catalog: ModelCatalog) -> None:
                     desc="local provider",
                     error_type=ValueError,
                     catalog=catalog,
+                    now=lambda: datetime(2026, 8, 17, tzinfo=UTC),
                 )
                 == "answer"
             )

@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import time
 from collections.abc import Callable, Sequence
+from datetime import datetime
 from typing import Protocol
 
 from langchain_core.language_models.chat_models import BaseChatModel
@@ -108,6 +109,7 @@ def invoke_response(
     usage_source: str | None = None,
     catalog: ModelCatalog,
     usage_agent_id: int | None = None,
+    now: Callable[[], datetime],
     sleep: Callable[[float], None] = resilience.retry_sleep,
 ) -> BaseMessage:
     """Invoke `runnable` on an already-built message list; return the response.
@@ -206,6 +208,7 @@ def invoke_response(
                 for_agent_id=usage_agent_id,
             ),
             catalog=catalog,
+            now=now(),
         )
     return response
 
@@ -223,6 +226,7 @@ def invoke_text(
     model: str | None = None,
     usage_source: str | None = None,
     catalog: ModelCatalog,
+    now: Callable[[], datetime],
     sleep: Callable[[float], None] = resilience.retry_sleep,
 ) -> str:
     """Invoke `llm` on a single HumanMessage of `content`, return flattened text.
@@ -248,6 +252,7 @@ def invoke_text(
         model=model,
         usage_source=usage_source,
         catalog=catalog,
+        now=now,
         sleep=sleep,
     )
     text = extract_text(response)
@@ -278,6 +283,7 @@ def answer_text(
     llm_override: str,
     overrides: ModelOverrides,
     build_chat_model: ChatModelBuilder,
+    now: Callable[[], datetime],
     sleep: Callable[[float], None] = resilience.retry_sleep,
 ) -> str:
     """Build `model` at `effort` and answer `prompt` against `material`.
@@ -321,5 +327,6 @@ def answer_text(
         model=model,
         usage_source=usage_source,
         catalog=catalog,
+        now=now,
         sleep=sleep,
     )

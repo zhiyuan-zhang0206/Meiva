@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 import pytest
 
 from base.host.env.agent_slices import ModelOverrides
@@ -88,6 +90,7 @@ async def test_the_decision_path_rejects_a_chat_id() -> None:
             catalog=catalog,
             keys=inert_keys(catalog),
             usage_kind="test",
+            now=lambda: datetime(2026, 8, 17, tzinfo=UTC),
         )
 
 

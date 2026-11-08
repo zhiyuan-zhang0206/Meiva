@@ -388,6 +388,7 @@ async def test_query_usage_failure_propagates_without_network_replay(
             timeout_s=app.state.gateway_config.memory_search.embedding_timeout,
             api_key="test-key",
             endpoint=url,
+            now=app.state.clock.now,
         )
         request = Request({"type": "http", "app": app}, stays_connected)
         with pytest.raises(error_type) as caught:

@@ -42,7 +42,8 @@ def disabled() -> None:
             tok_out=1,
             cost_usd=0.0,
             usage_kind="chat",
-        )
+        ),
+        now=system_clock().now(),
     )
 
 
@@ -79,7 +80,8 @@ def failing(tracer: BillingRuntime) -> None:
                     tok_out=1,
                     cost_usd=0.0,
                     usage_kind="chat",
-                )
+                ),
+                now=system_clock().now(),
             )
             is None
         )

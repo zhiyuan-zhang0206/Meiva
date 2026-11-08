@@ -43,6 +43,7 @@ def priced(tracer: BillingRuntime) -> None:
             latency_ms=1_234.5,
             priced_at=priced_at,
             catalog=catalog,
+            now=datetime.now(UTC),
         )
         after_ns = time.time_ns()
     finally:
@@ -71,7 +72,11 @@ def incomplete(tracer: BillingRuntime) -> None:
         content="", usage_metadata={"input_tokens": 100, "total_tokens": 100}
     )
     log_llm_usage(
-        message, agent_id=7, model="deepseek-v4-pro", catalog=build_model_catalog(home=meiva_home())
+        message,
+        agent_id=7,
+        model="deepseek-v4-pro",
+        catalog=build_model_catalog(home=meiva_home()),
+        now=datetime.now(UTC),
     )
     assert tracer.spans == []
     assert message.usage_metadata is not None

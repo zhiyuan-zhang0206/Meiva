@@ -163,6 +163,7 @@ def test_usage_snapshot_prices_cache_writes_at_actual_served_speed(
         "claude-opus-5-5-fast",
         options=UsageOptions(priced_at=datetime(2026, 10, 8, tzinfo=UTC)),
         catalog=model_catalog,
+        now=datetime(2026, 10, 8, tzinfo=UTC),
     )
     assert result is not None
     expected = 0.00614 * multiplier

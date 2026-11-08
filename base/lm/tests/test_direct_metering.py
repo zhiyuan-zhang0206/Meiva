@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import sys
 import types
+from datetime import UTC, datetime
 from typing import Any
 
 import pytest
@@ -141,7 +142,13 @@ def test_a_caller_that_logs_the_same_response_does_not_double_count(
     llm, _ = _build(monkeypatch, model_catalog)
 
     response = llm.invoke([HumanMessage("hello")])
-    log_usage_from_message(response, _MODEL, usage_kind="chat", catalog=model_catalog)
+    log_usage_from_message(
+        response,
+        _MODEL,
+        usage_kind="chat",
+        catalog=model_catalog,
+        now=datetime(2026, 8, 17, tzinfo=UTC),
+    )
 
     assert len(_usage_rows(loguru_records)) == 1
     assert response.additional_kwargs["meiva_usage"]["model"] == _MODEL

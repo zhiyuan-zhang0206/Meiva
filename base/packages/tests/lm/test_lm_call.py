@@ -8,6 +8,7 @@ used to each inline.
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -56,6 +57,10 @@ class _FakeLLM:
         return self._response
 
 
+def _now() -> datetime:
+    return datetime(2026, 8, 17, tzinfo=UTC)
+
+
 # ─── extract_text ─────────────────────────────────────────────────────────
 
 
@@ -85,7 +90,12 @@ def test_extract_text_stringifies_other_shapes() -> None:
 def test_invoke_text_returns_flattened_text(*, model_catalog: ModelCatalog) -> None:
     llm = _FakeLLM(_FakeResponse("answer"))
     out = invoke_text(
-        llm, [{"type": "text", "text": "q"}], desc="d", error_type=ValueError, catalog=model_catalog
+        llm,
+        [{"type": "text", "text": "q"}],
+        desc="d",
+        error_type=ValueError,
+        catalog=model_catalog,
+        now=_now,
     )
     assert out == "answer"
     assert llm.messages[0].content == [{"type": "text", "text": "q"}]
@@ -126,6 +136,7 @@ def test_invoke_text_logs_priced_chat_usage_with_source(
             error_type=ValueError,
             usage_source="web.fetch",
             catalog=model_catalog,
+            now=_now,
         )
         == "answer"
     )
@@ -157,6 +168,7 @@ def test_invoke_text_skips_usage_log_without_usage_metadata(
             desc="d",
             error_type=ValueError,
             catalog=model_catalog,
+            now=_now,
         )
         == "answer"
     )
@@ -175,6 +187,7 @@ def test_invoke_text_empty_response_raises_error_type(*, model_catalog: ModelCat
             desc="d",
             error_type=ValueError,
             catalog=model_catalog,
+            now=_now,
         )
 
 
@@ -194,6 +207,7 @@ def test_invoke_text_upstream_error_wrapped_in_error_type(
             error_type=KeyError,
             model="deepseek-v4-pro",
             catalog=model_catalog,
+            now=_now,
         )
     events = loguru_records.events("llm_provider_error")
     assert events[-1]["extra"]["status"] == 429
@@ -236,6 +250,7 @@ def test_answer_text_happy_path(
         llm_override="",
         overrides=model_overrides(),
         build_chat_model=_fake_build,
+        now=_now,
     )
     assert out == "answer"
     assert captured == {"model": "m1", "effort": ReasoningEffort.HIGH}
@@ -272,6 +287,7 @@ def test_answer_text_build_failure_raises_error_type(
             llm_override="",
             overrides=model_overrides(),
             build_chat_model=_fail,
+            now=_now,
         )
 
 
@@ -311,6 +327,7 @@ def test_answer_text_build_failure_uses_build_error_when_given(
             llm_override="",
             overrides=model_overrides(),
             build_chat_model=_fail,
+            now=_now,
         )
     assert seen["model"] == "m1"
 
@@ -342,6 +359,7 @@ def test_invoke_text_retries_transient_then_succeeds(*, model_catalog: ModelCata
         retry_jitter="none",
         catalog=model_catalog,
         sleep=timers.sleep,
+        now=_now,
     )
     assert out == "answer"
     assert calls["n"] == 2
@@ -368,6 +386,7 @@ def test_invoke_text_retry_exhausted_raises_error_type(*, model_catalog: ModelCa
             retry_jitter="none",
             catalog=model_catalog,
             sleep=timers.sleep,
+            now=_now,
         )
     assert timers.sleeps == [0.0]
 
@@ -393,6 +412,7 @@ def test_invoke_text_retry_uses_exponential_backoff(*, model_catalog: ModelCatal
             retry_jitter="none",
             catalog=model_catalog,
             sleep=timers.sleep,
+            now=_now,
         )
     assert timers.sleeps == [2.0, 4.0, 8.0]
 
@@ -417,6 +437,7 @@ def test_invoke_text_retry_backoff_capped(*, model_catalog: ModelCatalog) -> Non
             retry_jitter="none",
             catalog=model_catalog,
             sleep=timers.sleep,
+            now=_now,
         )
     assert timers.sleeps == [2.0, 4.0, 5.0, 5.0]
 
@@ -453,6 +474,7 @@ def test_invoke_text_retry_respects_retry_after(*, model_catalog: ModelCatalog) 
             retry_jitter="none",
             catalog=model_catalog,
             sleep=timers.sleep,
+            now=_now,
         )
     # attempt 1 backoff would be 2s, but Retry-After 45 wins; attempt 2 too.
     assert timers.sleeps == [45.0, 45.0]
@@ -474,6 +496,7 @@ def test_invoke_text_retry_after_capped_at_120(*, model_catalog: ModelCatalog) -
             retry_jitter="none",
             catalog=model_catalog,
             sleep=timers.sleep,
+            now=_now,
         )
     assert timers.sleeps == [2.0, 4.0]  # Retry-After 300 ignored
 
@@ -493,6 +516,7 @@ def test_invoke_text_retry_after_ms_header(*, model_catalog: ModelCatalog) -> No
             retry_jitter="none",
             catalog=model_catalog,
             sleep=timers.sleep,
+            now=_now,
         )
     assert timers.sleeps == [7.0]  # 7000ms → 7s, longer than the 2s backoff
 
@@ -517,6 +541,7 @@ def test_invoke_text_does_not_retry_permanent(*, model_catalog: ModelCatalog) ->
             retry_attempts=3,
             retry_delay_seconds=0.0,
             catalog=model_catalog,
+            now=_now,
         )
     assert calls["n"] == 1  # no retry on PERMANENT
 
@@ -538,6 +563,7 @@ def test_invoke_response_attributes_usage_to_the_given_agent(
         usage_source="hierarchy.group",
         usage_agent_id=42,
         catalog=model_catalog,
+        now=_now,
     )
 
     [record] = [r for r in loguru_records if r["extra"].get("event") == "llm_usage"]

@@ -12,6 +12,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Callable, Mapping
 from dataclasses import replace
+from datetime import UTC, datetime
 from typing import Any
 
 import pytest
@@ -79,6 +80,10 @@ def _catalog(binding: ScriptedBinding, *, window: int = 100_000) -> ModelCatalog
     )
 
 
+def _now() -> datetime:
+    return datetime(2026, 8, 17, tzinfo=UTC)
+
+
 def _inputs(catalog: ModelCatalog, **changes: Any) -> InjectionCheckInputs:
     base = InjectionCheckInputs(
         enabled=True,
@@ -88,6 +93,7 @@ def _inputs(catalog: ModelCatalog, **changes: Any) -> InjectionCheckInputs:
         keys=inert_keys(catalog),
         agent_id=None,
         delivery_active=True,
+        now=_now,
     )
     return replace(base, **changes)
 
@@ -148,7 +154,13 @@ def test_a_long_page_is_split_so_every_request_is_inside_the_model_limits() -> N
 
     asyncio.run(
         page_probability(
-            _MODEL, page, catalog=catalog, keys=inert_keys(catalog), url=_URL, for_agent_id=None
+            _MODEL,
+            page,
+            catalog=catalog,
+            keys=inert_keys(catalog),
+            url=_URL,
+            for_agent_id=None,
+            now=_now,
         )
     )
 

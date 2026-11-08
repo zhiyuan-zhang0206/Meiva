@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import time
 from collections.abc import Awaitable, Callable
+from datetime import datetime
 from hashlib import sha256
 from typing import TypedDict, TypeGuard
 
@@ -172,10 +173,11 @@ class ReplySuggestionService:
         cached = self._cache.get(key)
         if cached is not None:
             return cached
+        now = rendering.require_now()
         result = (
-            await self._draft(agent_id, excerpt, policy, ready, keys)
+            await self._draft(agent_id, excerpt, policy, ready, keys, now=now)
             if context.has_prompt
-            else await self._gate_and_draft(agent_id, excerpt, policy, ready, keys)
+            else await self._gate_and_draft(agent_id, excerpt, policy, ready, keys, now=now)
         )
         if result.suggestions:
 
@@ -195,9 +197,13 @@ class ReplySuggestionService:
         policy: ReplySuggestionPolicy,
         catalog: ModelCatalog,
         keys: ProviderKeys,
+        *,
+        now: datetime,
     ) -> ReplySuggestionResponse:
         try:
-            useful = await self._useful_reply_probability(agent_id, excerpt, policy, catalog, keys)
+            useful = await self._useful_reply_probability(
+                agent_id, excerpt, policy, catalog, keys, now=lambda: now
+            )
         except DecisionError:
             logger.opt(exception=True).warning(
                 "reply suggestion gate failed for agent {agent_id}",
@@ -215,7 +221,7 @@ class ReplySuggestionService:
         refusal = gate_refusal(useful, policy.gate_threshold)
         if refusal is not None:
             return _none(refusal)
-        return await self._draft(agent_id, excerpt, policy, catalog, keys)
+        return await self._draft(agent_id, excerpt, policy, catalog, keys, now=now)
 
     async def _useful_reply_probability(
         self,
@@ -224,6 +230,8 @@ class ReplySuggestionService:
         policy: ReplySuggestionPolicy,
         catalog: ModelCatalog,
         keys: ProviderKeys,
+        *,
+        now: Callable[[], datetime],
     ) -> float:
         questions: dict[str, Question] = {USEFUL_REPLY: GATE_QUESTION}
         decisions = await decide(
@@ -236,6 +244,7 @@ class ReplySuggestionService:
             for_agent_id=agent_id,
             timeout=GATE_TIMEOUT_S,
             transport=self._transport,
+            now=now,
         )
         return decisions[USEFUL_REPLY].probability("true")
 
@@ -246,6 +255,8 @@ class ReplySuggestionService:
         policy: ReplySuggestionPolicy,
         catalog: ModelCatalog,
         keys: ProviderKeys,
+        *,
+        now: datetime,
     ) -> ReplySuggestionResponse:
         chat = build_chat_model(
             policy.model, catalog=catalog, keys=keys, **draft_model_options(self._llm_override)
@@ -277,6 +288,7 @@ class ReplySuggestionService:
                 for_agent_id=agent_id,
             ),
             catalog=catalog,
+            now=now,
         )
         stop, _ = classify_stop(response["raw"], stops=catalog.stops)
         verdict = draft_verdict(

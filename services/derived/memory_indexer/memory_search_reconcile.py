@@ -25,6 +25,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TextIO
 
+from base.clock import SYSTEM_TIMERS, Clock
+from base.clock.configuration import clock_config_from_boot
 from base.cluster.dataplane.direct_url import ClusterDirectUrl
 from base.cluster.machine import MachineIdentityReader, MachineRoles
 from base.cluster.machine.configured import ConfiguredMachineIdentity
@@ -229,6 +231,7 @@ def main(argv: Sequence[str], *, out: TextIO, err: TextIO) -> int:
         timeout_s=inputs.embed_timeout_s,
         api_key=inputs.api_key,
         embeddinggemma_config=inputs.embeddinggemma_config,
+        now=Clock(clock_config_from_boot(boot), timers=SYSTEM_TIMERS).now,
     )
     database = _reconcile_database(boot, machine=machine, home=meiva_home())
     backend_a, backend_b = build_backends(

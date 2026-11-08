@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import datetime
 from enum import StrEnum
 
 from base.host.env.agent_slices import ModelOverrides
@@ -64,6 +66,7 @@ class FetchModel:
     catalog: ModelCatalog
     keys: ProviderKeys
     overrides: ModelOverrides
+    now: Callable[[], datetime]
 
 
 @dataclass(frozen=True)

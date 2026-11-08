@@ -25,8 +25,9 @@ order, because a silent downgrade would hide a broken ranking behind plausible-l
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Collection, Sequence
+from collections.abc import Callable, Collection, Sequence
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import NamedTuple
 
@@ -149,6 +150,7 @@ async def ask_relevance(
     catalog: ModelCatalog,
     keys: ProviderKeys,
     usage_kind: str,
+    now: Callable[[], datetime],
 ) -> float:
     """Probability of "yes" to `question` about `state`, from one decision call."""
     try:
@@ -160,6 +162,7 @@ async def ask_relevance(
             keys=keys,
             usage_kind=usage_kind,
             source="memory_search",
+            now=now,
         )
     except DecisionError as exc:
         logger.warning(
@@ -281,6 +284,7 @@ async def _score_all(
     catalog: ModelCatalog,
     keys: ProviderKeys,
     usage_kind: str,
+    now: Callable[[], datetime],
 ) -> list[float]:
     """One request per state, at most `MAX_CONCURRENT_DECISIONS` at once; the first failure
     cancels the rest and is raised as itself."""
@@ -289,7 +293,13 @@ async def _score_all(
     async def score(state: str) -> float:
         async with permits:
             return await ask_relevance(
-                model, state, question, catalog=catalog, keys=keys, usage_kind=usage_kind
+                model,
+                state,
+                question,
+                catalog=catalog,
+                keys=keys,
+                usage_kind=usage_kind,
+                now=now,
             )
 
     try:
@@ -313,6 +323,7 @@ async def rerank(
     exclude: Collection[str],
     memory_root: Path,
     reports: UnreadableReports,
+    now: Callable[[], datetime],
 ) -> list[RankedChunk]:
     """Up to `k` of the `limit` candidates most worth reading for `query`, best first.
 
@@ -329,7 +340,7 @@ async def rerank(
         return []
     states = [pair_state(query, candidate, purpose) for candidate in candidates]
     scores = await _score_all(
-        model, states, _QUESTIONS[purpose], catalog, keys, USAGE_KINDS[purpose]
+        model, states, _QUESTIONS[purpose], catalog, keys, USAGE_KINDS[purpose], now
     )
     ranked = top_indices(scores, k)
     return [

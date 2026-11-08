@@ -13,6 +13,7 @@ from __future__ import annotations
 import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Protocol
 
 from langchain_core.language_models.chat_models import BaseChatModel
@@ -130,6 +131,7 @@ def invoke_agent_shaped(
     retry_attempts: int,
     params: GenParams,
     agent_id: int,
+    now: Callable[[], datetime],
     on_call: Callable[[ModelCall], None] | None = None,
 ) -> str:
     """Send a finished agent-shaped request through the tool-bound model; return its text.
@@ -163,6 +165,7 @@ def invoke_agent_shaped(
                 model=model,
                 usage_source="hierarchy.generate",
                 usage_agent_id=agent_id,
+                now=now,
             )
         except Exception as exc:
             if on_call is not None:

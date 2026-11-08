@@ -4,6 +4,9 @@ Extracted from gateway/labels.py to eliminate the services -> gateway
 reverse dependency.
 """
 
+from collections.abc import Callable
+from datetime import datetime
+
 from langchain_core.messages import HumanMessage, SystemMessage
 from loguru import logger
 
@@ -44,6 +47,7 @@ async def generate_label_async(
     keys: ProviderKeys,
     llm_override: str,
     overrides: ModelOverrides,
+    now: Callable[[], datetime],
 ) -> bool | None:
 
     # thinking is both slow and expensive on the label path, and it
@@ -89,6 +93,7 @@ async def generate_label_async(
         model=config.labeler_model,
         usage_kind="batch",
         options=UsageOptions(for_agent_id=agent_id),
+        now=now(),
     )
     judgment = label_rules.judge(message_content(response), config.labeler_max_chars)
     if isinstance(judgment, label_rules.Empty):

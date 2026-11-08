@@ -10,6 +10,7 @@ from __future__ import annotations
 import base64
 import dataclasses
 from collections.abc import Iterator
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -185,6 +186,7 @@ def understand_harness(
         overrides=model_overrides(),
         base_dir=tmp_path,
         output=None,
+        now=lambda: datetime(2026, 8, 17, tzinfo=UTC),
     )
     yield UnderstandHarness(dataclasses.replace(deps, llm_override=OVERRIDE), scripted_models)
     process_context.unbind_exec_turn()

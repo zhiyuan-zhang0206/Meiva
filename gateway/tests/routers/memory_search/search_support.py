@@ -17,6 +17,7 @@ import time
 from collections.abc import Generator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass, field, replace
+from datetime import UTC, datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, Literal, cast
@@ -277,7 +278,9 @@ class SearchRig:
     # built from the app's own config and catalog.
     def embedder_for(self, config: GatewayConfig) -> EmbeddingProvider:
         if self.embedder.real:
-            return memory_router.build_embedder(config.memory_search, self.catalog)
+            return memory_router.build_embedder(
+                config.memory_search, self.catalog, now=lambda: datetime(2026, 8, 17, tzinfo=UTC)
+            )
         return cast(EmbeddingProvider, self.embedder)
 
     # meiva:note

@@ -40,6 +40,7 @@ from __future__ import annotations
 import asyncio
 import json
 from collections.abc import Awaitable, Callable
+from datetime import datetime
 
 import httpx
 import numpy as np
@@ -174,7 +175,7 @@ def _vectors_from_body(body: object, texts: list[str]) -> np.ndarray:
     return vectors
 
 
-def _emit_billing(body: object, *, catalog: ModelCatalog) -> None:
+def _emit_billing(body: object, *, catalog: ModelCatalog, now: datetime) -> None:
     """Account for a completed request before validating its vectors.
 
     Gemini bills malformed-but-successful responses too. Accounting failures
@@ -193,6 +194,7 @@ def _emit_billing(body: object, *, catalog: ModelCatalog) -> None:
         fields=UsageFields(tok_in=tok_in, tok_out=0),
         usage_kind="embedding",
         catalog=catalog,
+        now=now,
     )
 
 
@@ -232,6 +234,7 @@ def embed(
     policy: Policy = EMBED_POLICY,
     transport: httpx.AsyncBaseTransport | None = None,
     sleep: Callable[[float], None] = retry_sleep,
+    now: Callable[[], datetime],
 ) -> np.ndarray:
     """Single batched `batchEmbedContents` call with retry; returns
     (N, DIM) float32. Raises after retries.
@@ -268,7 +271,7 @@ def embed(
         raise EmbeddingAPIError(
             f"Gemini embed failed after {policy.max_attempts} attempts: {exc!r}"
         ) from exc
-    _emit_billing(body, catalog=catalog)
+    _emit_billing(body, catalog=catalog, now=now())
     return _vectors_from_body(body, texts)
 
 
@@ -283,6 +286,7 @@ async def embed_async(
     policy: Policy = EMBED_POLICY,
     transport: httpx.AsyncBaseTransport | None = None,
     asleep: Callable[[float], Awaitable[None]] = retry_asleep,
+    now: Callable[[], datetime],
 ) -> np.ndarray:
     """Async twin of ``embed`` — native non-blocking I/O over
     ``httpx.AsyncClient`` with ``asyncio.sleep`` backoff. Same timeout /
@@ -314,7 +318,7 @@ async def embed_async(
         raise EmbeddingAPIError(
             f"Gemini embed failed after {policy.max_attempts} attempts: {exc!r}"
         ) from exc
-    _emit_billing(body, catalog=catalog)
+    _emit_billing(body, catalog=catalog, now=now())
     return _vectors_from_body(body, texts)
 
 
@@ -345,6 +349,7 @@ class GeminiEmbeddingProvider:
         transport: httpx.AsyncBaseTransport | None = None,
         sleep: Callable[[float], None] = retry_sleep,
         asleep: Callable[[float], Awaitable[None]] = retry_asleep,
+        now: Callable[[], datetime],
     ) -> None:
         self._catalog = catalog
         self._timeout_s = timeout_s
@@ -353,6 +358,7 @@ class GeminiEmbeddingProvider:
         self._transport = transport
         self._sleep = sleep
         self._asleep = asleep
+        self._now = now
 
     def embed_batch(self, texts: list[str]) -> np.ndarray:
         """Batch embed markdown file contents for indexing. (N, DIM) float32."""
@@ -365,6 +371,7 @@ class GeminiEmbeddingProvider:
             endpoint=self._endpoint,
             transport=self._transport,
             sleep=self._sleep,
+            now=self._now,
         )
 
     def embed_query(self, text: str) -> np.ndarray:
@@ -379,6 +386,7 @@ class GeminiEmbeddingProvider:
             policy=QUERY_EMBED_POLICY,
             transport=self._transport,
             sleep=self._sleep,
+            now=self._now,
         )
         return row_vectors(embedded)[0]
 
@@ -394,5 +402,6 @@ class GeminiEmbeddingProvider:
             policy=QUERY_EMBED_POLICY,
             transport=self._transport,
             asleep=self._asleep,
+            now=self._now,
         )
         return row_vectors(embedded)[0]

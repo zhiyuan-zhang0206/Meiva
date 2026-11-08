@@ -110,7 +110,12 @@ def test_openai_actual_service_controls_usage_and_price(
         usage_metadata={"input_tokens": 100, "output_tokens": 10, "total_tokens": 110},
     )
     assert usage_model(message, "gpt-6.1-sol-fast", catalog=model_catalog) == expected
-    result = log_usage_from_message(message, "gpt-6.1-sol-fast", catalog=model_catalog)
+    result = log_usage_from_message(
+        message,
+        "gpt-6.1-sol-fast",
+        catalog=model_catalog,
+        now=datetime(2026, 10, 7, 12, tzinfo=UTC),
+    )
     assert result is not None
     assert result[1] == pytest.approx(0.0003 if tier == "default" else 0.0006)
 

@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 from collections.abc import Callable
+from datetime import UTC, datetime
 from typing import Any
 
 import httpx
@@ -101,6 +102,7 @@ async def call(
         catalog=selected or catalog(),
         keys=keys or ProviderKeys({}),
         usage_kind="local_decision_test",
+        now=lambda: datetime(2026, 8, 17, tzinfo=UTC),
         transport=transport,
         timeout=timeout,
     )
@@ -275,6 +277,7 @@ async def test_invalid_requests_fail_before_http(mode: str) -> None:
             catalog=selected,
             keys=ProviderKeys({}),
             usage_kind="test",
+            now=lambda: datetime(2026, 8, 17, tzinfo=UTC),
             transport=httpx.MockTransport(respond),
         )
     assert requests == []

@@ -30,6 +30,7 @@ from collections.abc import (
 )
 from contextlib import asynccontextmanager, contextmanager
 from dataclasses import replace
+from datetime import UTC, datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from io import BytesIO
 from pathlib import Path
@@ -61,6 +62,10 @@ TIMEOUT_S = 60.0
 API_KEY = "test-gemini-key"
 
 
+def _now() -> datetime:
+    return datetime(2026, 8, 17, tzinfo=UTC)
+
+
 def build_provider(
     *,
     catalog: ModelCatalog | None = None,
@@ -70,6 +75,7 @@ def build_provider(
     transport: httpx.AsyncBaseTransport | None = None,
     sleep: Callable[[float], None] = retry_sleep,
     asleep: Callable[[float], Awaitable[None]] = retry_asleep,
+    now: Callable[[], datetime] = _now,
 ) -> GeminiEmbeddingProvider:
     active_catalog = build_model_catalog(home=meiva_home()) if catalog is None else catalog
     return GeminiEmbeddingProvider(
@@ -80,6 +86,7 @@ def build_provider(
         transport=transport,
         sleep=sleep,
         asleep=asleep,
+        now=now,
     )
 
 
@@ -458,7 +465,7 @@ def test_factory_passes_same_catalog_to_all_embedding_paths() -> None:
     catalog = replace(base_catalog, bindings=bindings)
     fake = AsyncClient(vectors=[[1.0] * DIM], prompt_token_count=123)
     provider = factory.get_provider(
-        "gemini", catalog=catalog, timeout_s=TIMEOUT_S, api_key=API_KEY, transport=fake
+        "gemini", catalog=catalog, timeout_s=TIMEOUT_S, api_key=API_KEY, now=_now, transport=fake
     )
     provider.embed_batch(["hello"])
     provider.embed_query("hello")
@@ -621,6 +628,7 @@ def test_sync_embed_rejects_running_loop() -> None:
                 timeout_s=TIMEOUT_S,
                 api_key=API_KEY,
                 transport=fake,
+                now=_now,
             )
         assert type(error.value) is RuntimeError
         assert error.value.__cause__ is None

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Callable
+from datetime import UTC, datetime
 from typing import Any
 
 import httpx
@@ -84,6 +85,7 @@ async def _decide(catalog: ModelCatalog, server: _Server, keys: ProviderKeys = _
         catalog=catalog,
         keys=keys,
         usage_kind="test",
+        now=lambda: datetime(2026, 8, 17, tzinfo=UTC),
         transport=server.transport,
     )
 

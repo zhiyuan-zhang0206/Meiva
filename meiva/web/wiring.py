@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
+from datetime import datetime
+
 from base.config.service_read import ConfigAuthority
 from base.host.env.agent_slices import ModelOverrides
 from base.lm.catalog import ModelCatalog
@@ -59,6 +62,7 @@ def fetch_deps(delivery: FindingDelivery) -> FetchDeps:
         overrides=overrides,
         delivery_active=delivery.active,
         agent_id=agent_identity.agent_id(),
+        now=sdk_settings.clock().now,
     )
 
 
@@ -70,6 +74,7 @@ def fetch_deps_for(
     overrides: ModelOverrides,
     delivery_active: bool,
     agent_id: int | None,
+    now: Callable[[], datetime],
 ) -> FetchDeps:
     fetch_timeout_s = authority.service_field_value("web_fetch_timeout_seconds")
     return FetchDeps(
@@ -98,9 +103,15 @@ def fetch_deps_for(
             catalog=catalog,
             keys=keys,
             overrides=overrides,
+            now=now,
         ),
         injection=injection_inputs(
-            authority, catalog, keys=keys, agent_id=agent_id, delivery_active=delivery_active
+            authority,
+            catalog,
+            keys=keys,
+            agent_id=agent_id,
+            delivery_active=delivery_active,
+            now=now,
         ),
     )
 
@@ -115,6 +126,7 @@ def injection_inputs(
     keys: ProviderKeys,
     agent_id: int | None,
     delivery_active: bool,
+    now: Callable[[], datetime],
 ) -> InjectionCheckInputs:
     return InjectionCheckInputs(
         enabled=bool(authority.service_field_value("web_fetch_injection_check_enabled")),
@@ -124,4 +136,5 @@ def injection_inputs(
         keys=keys,
         agent_id=agent_id,
         delivery_active=delivery_active,
+        now=now,
     )

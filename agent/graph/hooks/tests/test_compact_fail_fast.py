@@ -1,3 +1,4 @@
+from datetime import UTC, datetime
 from typing import cast
 
 import httpx2
@@ -41,6 +42,7 @@ async def test_compaction_programming_error_stops_once_without_history_change(
             slices=AgentSlices.resolve(default_reader=defaults()),
             agent_id=228,
             catalog=model_catalog,
+            now=lambda: datetime(2026, 8, 17, tzinfo=UTC),
         )
 
     assert raised.value is error
@@ -60,7 +62,13 @@ async def test_compaction_keeps_explicit_empty_and_short_summary_recovery(
     slices = AgentSlices.resolve(default_reader=defaults())
 
     result = await compact.auto_compact_summary(
-        messages, llm, 1, slices, agent_id=228, catalog=build_model_catalog(home=meiva_home())
+        messages,
+        llm,
+        1,
+        slices,
+        agent_id=228,
+        catalog=build_model_catalog(home=meiva_home()),
+        now=lambda: datetime(2026, 8, 17, tzinfo=UTC),
     )
 
     assert result == expected

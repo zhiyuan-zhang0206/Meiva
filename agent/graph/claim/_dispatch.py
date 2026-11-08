@@ -307,6 +307,7 @@ async def _handle_compact_request(
                 ctx.require_agent(),
                 agent_id=agent_id,
                 catalog=ctx.require_catalog(),
+                now=ctx.require_clock().now,
             )
             break
         except Exception as e:

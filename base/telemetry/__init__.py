@@ -28,6 +28,7 @@ from base.telemetry.emitter import (
     flush,
     init_telemetry,
     prepare_event,
+    process_now,
     stop,
     sync,
 )
@@ -65,6 +66,7 @@ __all__ = [
     "machine_hostname",
     "prepare_event",
     "process_name",
+    "process_now",
     "process_state",
     "prune_jsonl_mirror",
     "report_no_pipeline",

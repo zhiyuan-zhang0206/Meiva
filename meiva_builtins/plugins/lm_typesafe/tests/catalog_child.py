@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import sys
+from datetime import UTC, datetime
 from pathlib import Path
 
 import httpx
@@ -59,6 +60,7 @@ async def verify_snapshots(home: Path) -> None:
             catalog=selected,
             keys=ProviderKeys({}),
             usage_kind="test",
+            now=lambda: datetime(2026, 8, 17, tzinfo=UTC),
             transport=httpx.MockTransport(respond),
         )
     assert sent == ["model-one", "model-two", "model-three"]
@@ -80,6 +82,7 @@ async def verify_snapshots(home: Path) -> None:
         catalog=recovered,
         keys=ProviderKeys({}),
         usage_kind="test",
+        now=lambda: datetime(2026, 8, 17, tzinfo=UTC),
         transport=httpx.MockTransport(respond),
     )
     assert sent[-1] == "recovered"

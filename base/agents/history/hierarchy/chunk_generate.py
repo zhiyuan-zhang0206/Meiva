@@ -26,6 +26,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, replace
+from datetime import datetime
 
 from langchain_core.messages import BaseMessage, HumanMessage
 
@@ -120,6 +121,7 @@ def generate_chunk(
     corrections: int = 0,
     params: GenParams | None = None,
     retry_attempts: int = UNDERSTANDING_RETRY_ATTEMPTS,
+    now: Callable[[], datetime],
     on_call: Callable[[ChunkCall], None] | None = None,
 ) -> ChunkResult:
     """Group and describe `prefix[start_offset:]`; blocking (run it in a worker thread).
@@ -178,6 +180,7 @@ def generate_chunk(
             retry_attempts=retry_attempts,
             params=params or GenParams(),
             agent_id=agent_id,
+            now=now,
             on_call=record,
         )
         row = final_rows[-1] if final_rows else -1

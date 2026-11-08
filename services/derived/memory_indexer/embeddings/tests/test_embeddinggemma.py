@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 from dataclasses import replace
+from datetime import UTC, datetime
 from typing import Any
 
 import httpx
@@ -127,6 +128,7 @@ def test_factory_preserves_metadata_and_uses_local_auth_only(model_catalog: Mode
         catalog=model_catalog,
         timeout_s=1,
         api_key="gemini-key-must-not-leak",
+        now=lambda: datetime(2026, 8, 17, tzinfo=UTC),
         embeddinggemma_config=_config(),
         transport=httpx.MockTransport(respond),
     )

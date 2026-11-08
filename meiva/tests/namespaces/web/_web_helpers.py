@@ -11,6 +11,7 @@ import socket
 import threading
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass, replace
+from datetime import UTC, datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, cast
 
@@ -195,7 +196,12 @@ class WebHarness:
         self.fetch_deps = dataclasses.replace(
             self.fetch_deps,
             injection=wiring.injection_inputs(
-                authority, catalog, keys=inert_keys(catalog), agent_id=None, delivery_active=True
+                authority,
+                catalog,
+                keys=inert_keys(catalog),
+                agent_id=None,
+                delivery_active=True,
+                now=self.fetch_deps.fetch_model.now,
             ),
         )
 
@@ -270,6 +276,7 @@ def web_harness(
         overrides=model_overrides(),
         delivery_active=False,
         agent_id=None,
+        now=lambda: datetime(2026, 8, 17, tzinfo=UTC),
     )
     search = dataclasses.replace(
         search,

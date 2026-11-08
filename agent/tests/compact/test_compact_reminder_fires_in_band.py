@@ -234,6 +234,7 @@ async def test_compact_contract_reaches_request_without_resident_self(
         ),
         agent_id=228,
         catalog=build_model_catalog(home=meiva_home()),
+        now=Clock.from_settings().now,
     )
     [request] = llm.requests
     assert request[0] is head

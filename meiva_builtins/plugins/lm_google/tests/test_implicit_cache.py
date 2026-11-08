@@ -1,3 +1,5 @@
+from datetime import UTC, datetime
+
 import pytest
 from google.genai import types
 from google.genai.errors import ClientError
@@ -84,7 +86,12 @@ async def test_google_tool_call_uses_complete_prefix_and_accounts_cache_reads(
     assert response.usage_metadata is not None
     assert response.usage_metadata.get("input_token_details", {}).get("cache_read") == 200
 
-    log_usage_from_message(response, "gemini-3.8-flash", catalog=model_catalog)
+    log_usage_from_message(
+        response,
+        "gemini-3.8-flash",
+        catalog=model_catalog,
+        now=datetime(2026, 8, 17, tzinfo=UTC),
+    )
     [usage] = loguru_records.extras(event="llm_usage")
     assert usage["cache_read"] == 200
 

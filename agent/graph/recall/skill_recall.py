@@ -23,7 +23,7 @@ and the turn goes on without the note.
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from datetime import datetime
 from typing import NamedTuple
 
@@ -159,6 +159,7 @@ async def recall_skills(
             usage_kind="skill_recall",
             for_agent_id=agent_id,
             timeout=settings.skill_recall_deadline_seconds,
+            now=lambda: created_at,
         )
     except DecisionInputTooLargeError as exc:
         # Not a transient failure: this agent's catalog does not fit one request, so recall
@@ -242,6 +243,7 @@ async def peer_gate_passes(
     catalog: ModelCatalog,
     keys: ProviderKeys,
     agent_id: int,
+    now: Callable[[], datetime],
 ) -> bool:
     settings = agent.skill_recall
     stripped = text.strip()
@@ -257,6 +259,7 @@ async def peer_gate_passes(
             usage_kind="skill_recall_peer_gate",
             for_agent_id=agent_id,
             timeout=settings.skill_recall_peer_gate_deadline_seconds,
+            now=now,
         )
     except DecisionError as exc:
         logger.warning(

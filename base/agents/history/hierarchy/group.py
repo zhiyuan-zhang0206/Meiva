@@ -254,6 +254,7 @@ def generate_groups(
                 model=model,
                 usage_source="hierarchy.group",
                 usage_agent_id=agent_id,
+                now=clock.now,
             )
         except Exception as exc:
             _record(

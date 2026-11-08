@@ -22,6 +22,7 @@ import random
 import signal
 import sys
 from collections.abc import Callable
+from datetime import datetime
 from pathlib import Path
 
 import psycopg
@@ -200,6 +201,7 @@ async def dispatch_loop(
     keys: ProviderKeys,
     llm_override: str,
     overrides: ModelOverrides,
+    now: Callable[[], datetime],
 ) -> None:
     """Main loop: every second, poll the newest unlabeled agents
     (`select_unlabeled`, excluding previous attempts) -> grab first prompt ->
@@ -235,6 +237,7 @@ async def dispatch_loop(
                 keys=keys,
                 llm_override=llm_override,
                 overrides=overrides,
+                now=now,
             )
             if result is False:
                 _log.warning(
@@ -287,6 +290,7 @@ async def run(
             overrides=labeler_model_overrides(
                 profile=process_config.view.profile, lm=process_config.view.lm
             ),
+            now=Clock(clock_config_from_boot(process_config), timers=timers).now,
         )
     finally:
         pool.close()
