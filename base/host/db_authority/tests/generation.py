@@ -1,5 +1,6 @@
 """Opt-in private generation ledgers: an active write generation without a database."""
 
+import random
 from collections.abc import Callable
 from pathlib import Path
 
@@ -22,7 +23,11 @@ def seed_active_generation(home: Path) -> GenerationSecret:
     home = home.resolve()
     groups = Groups(gateway=GATEWAY_GROUP, runner=RUNNER_GROUP)
     create_ledger(home, owner="meiva", groups=groups)
-    pending = begin_mint(home, encrypt=lambda name, _pw: f"SCRAM-SHA-256$4096:c2VlZA==${name}")
+    pending = begin_mint(
+        home,
+        encrypt=lambda name, _pw: f"SCRAM-SHA-256$4096:c2VlZA==${name}",
+        rng=random.SystemRandom(),
+    )
     activate(home, VerifiedGeneration(pending.number, pending.credential_digest, pending.roles))
     return read_secret(home, pending)
 

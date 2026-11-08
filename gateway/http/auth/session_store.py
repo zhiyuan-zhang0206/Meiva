@@ -8,6 +8,7 @@ outlives the credential that minted it.
 
 from __future__ import annotations
 
+import random
 from collections import OrderedDict
 from collections.abc import Collection
 from contextlib import suppress
@@ -46,9 +47,9 @@ class _SessionValidity:
 _SESSION_CACHE_MAX_ENTRIES = 4096
 
 
-def minted_session_id(mint: str) -> str:
+def minted_session_id(mint: str, *, rng: random.Random) -> str:
     """A new opaque session id bound to `mint` (256 random bits after it)."""
-    return f"{mint}.{new_session_id()}"
+    return f"{mint}.{new_session_id(rng)}"
 
 
 def session_mint(session_id: str) -> str | None:
@@ -67,9 +68,9 @@ LOGIN_TICKET_TTL_SECONDS = 120
 _TICKET_PREFIX = "ticket"
 
 
-def minted_ticket_id(mint: str) -> str:
+def minted_ticket_id(mint: str, *, rng: random.Random) -> str:
     """A new opaque login ticket bound to `mint` (256 random bits after it)."""
-    return f"{_TICKET_PREFIX}.{mint}.{new_session_id()}"
+    return f"{_TICKET_PREFIX}.{mint}.{new_session_id(rng)}"
 
 
 def ticket_mint(ticket: str) -> str | None:

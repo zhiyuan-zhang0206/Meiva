@@ -15,6 +15,7 @@
 
 from __future__ import annotations
 
+import random
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -73,7 +74,7 @@ def read_pooler_admin(home: Path) -> PoolerAdmin:
         raise LedgerRefusedError("no pooler admin credential: birth creates it") from None
 
 
-def ensure_pooler_admin(home: Path, *, encrypt: Encrypt) -> PoolerAdmin:
+def ensure_pooler_admin(home: Path, *, encrypt: Encrypt, rng: random.Random) -> PoolerAdmin:
     """Create the admin-console credential once, published exclusively.
 
     Birth calls this; an existing credential is kept, never rotated, so a
@@ -83,7 +84,7 @@ def ensure_pooler_admin(home: Path, *, encrypt: Encrypt) -> PoolerAdmin:
         path = pooler_admin_path(home)
         if path.exists():
             return _parse_pooler_admin(read_private(path))
-        password = new_secret_token()
+        password = new_secret_token(rng)
         admin = PoolerAdmin(password=password, verifier=encrypt(POOLER_ADMIN, password))
         publish_exclusive(path, (admin.model_dump_json() + "\n").encode())
         return _parse_pooler_admin(read_private(path))

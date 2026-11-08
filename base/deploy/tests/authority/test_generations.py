@@ -3,6 +3,7 @@ equality with the group, denials, and crash-safe exact-retry minting."""
 
 from __future__ import annotations
 
+import random
 from dataclasses import replace
 from functools import partial
 from pathlib import Path
@@ -195,7 +196,9 @@ _BOUNDARIES = ["secret-published", "pending-recorded", "roles-created", "verifie
 def _advance_to_boundary(conn: psycopg.Connection[Any], home: Path, boundary: str) -> None:
     ledger_path = home / "db-authority" / "ledger.json"
     initial_ledger = ledger_path.read_bytes()
-    pending = begin_mint(home, encrypt=partial(roles_module.scram_verifier, conn))
+    pending = begin_mint(
+        home, encrypt=partial(roles_module.scram_verifier, conn), rng=random.SystemRandom()
+    )
     if boundary == "secret-published":
         ledger_path.write_bytes(initial_ledger)
         return
@@ -225,11 +228,11 @@ def test_mint_retry_after_crash_reconciles_the_same_generation(
     ledger = require_ledger(cluster.home)
     assert (ledger.pending is None) == (boundary == "secret-published")
     with cluster.admin() as conn:
-        verified = mint_generation(conn, cluster.home)
-        again = mint_generation(conn, cluster.home)
+        verified = mint_generation(conn, cluster.home, rng=random.SystemRandom())
+        again = mint_generation(conn, cluster.home, rng=random.SystemRandom())
         assert again == verified and verified.number == 0
         activate(cluster.home, verified)
-        assert mint_generation(conn, cluster.home) == verified
+        assert mint_generation(conn, cluster.home, rng=random.SystemRandom()) == verified
         assert _generation_roles(conn) == ["meiva_g0_gateway", "meiva_g0_runner"]
         check_invariant(conn, cluster.home, database=cluster.database)
     ledger = require_ledger(cluster.home)
@@ -251,7 +254,7 @@ def test_retry_holds_when_the_stored_verifier_differs(
     with cluster.admin() as conn:
         conn.execute("ALTER ROLE meiva_g0_gateway PASSWORD 'foreign-credential-value'")
         with pytest.raises(CatalogRefusedError, match="stored verifier differs"):
-            mint_generation(conn, cluster.home)
+            mint_generation(conn, cluster.home, rng=random.SystemRandom())
         assert _generation_roles(conn) == ["meiva_g0_gateway", "meiva_g0_runner"]
     ledger = require_ledger(cluster.home)
     assert ledger.pending is not None and ledger.active is None
@@ -263,7 +266,7 @@ def test_mint_holds_when_the_names_already_exist(authority_unborn: AuthorityClus
     with cluster.admin() as conn:
         conn.execute("CREATE ROLE meiva_g0_runner NOLOGIN")
         with pytest.raises(CatalogRefusedError, match="already exist before their mint"):
-            mint_generation(conn, cluster.home)
+            mint_generation(conn, cluster.home, rng=random.SystemRandom())
     assert require_ledger(cluster.home).pending is None
     assert not (cluster.home / "db-authority" / "generations" / "0.json").exists()
 
@@ -277,7 +280,7 @@ def test_mint_holds_while_another_login_holds_group_membership(
         conn.execute("CREATE ROLE stray_writer LOGIN PASSWORD 'stray-writer-password'")
         conn.execute("GRANT meiva_runner TO stray_writer")
         with pytest.raises(CatalogRefusedError, match="stray_writer"):
-            mint_generation(conn, cluster.home)
+            mint_generation(conn, cluster.home, rng=random.SystemRandom())
     assert require_ledger(cluster.home).pending is None
 
 
@@ -288,7 +291,7 @@ def test_activation_names_the_exact_pending_generation(
     _begin_birth(cluster)
     with cluster.admin() as conn:
         _advance_to_boundary(conn, cluster.home, "verified")
-        verified = mint_generation(conn, cluster.home)
+        verified = mint_generation(conn, cluster.home, rng=random.SystemRandom())
     with pytest.raises(LedgerRefusedError, match="exact pending generation"):
         activate(cluster.home, replace(verified, number=1))
     assert require_ledger(cluster.home).active is None
@@ -300,12 +303,12 @@ def test_mint_refuses_a_non_admin_session(authority_postgres: AuthorityCluster) 
         cluster.connect_class("gateway", autocommit=True) as conn,
         pytest.raises(Exception, match="superuser session"),
     ):
-        mint_generation(conn, cluster.home)
+        mint_generation(conn, cluster.home, rng=random.SystemRandom())
     with cluster.admin() as conn:
         conn.execute(sql.SQL("SET ROLE {}").format(sql.Identifier(OWNER)))
         with pytest.raises(Exception, match="superuser session"):
-            mint_generation(conn, cluster.home)
+            mint_generation(conn, cluster.home, rng=random.SystemRandom())
     with cluster.instance.admin(cluster.database) as conn:
         conn.autocommit = False
         with pytest.raises(Exception, match="autocommit"):
-            mint_generation(conn, cluster.home)
+            mint_generation(conn, cluster.home, rng=random.SystemRandom())

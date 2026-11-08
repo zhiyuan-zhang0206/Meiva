@@ -174,8 +174,8 @@ async def login(body: LoginRequest, request: Request) -> JSONResponse:
 
 async def _open_session(request: Request, mint: str, ip: str) -> JSONResponse:
     """Create a session bound to `mint` and answer with its cookie."""
-    session_id = minted_session_id(mint)
     config: GatewayConfig = gateway_state(request).gateway_config
+    session_id = minted_session_id(mint, rng=config.rng)
     ttl_seconds = config.session_ttl_seconds
     await asyncio.to_thread(
         state_as(request, AuthAppState).sessions.create,
@@ -247,7 +247,7 @@ async def issue_login_ticket(request: Request) -> JSONResponse:
         config.cluster_secret,
         home=gateway_state(request).gateway_process.home,
     )
-    ticket = minted_ticket_id(mint)
+    ticket = minted_ticket_id(mint, rng=config.rng)
     ip = request.client.host if request.client else "unknown"
     await asyncio.to_thread(
         state_as(request, AuthAppState).sessions.create,

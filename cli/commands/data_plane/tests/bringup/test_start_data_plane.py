@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import dataclasses
 import os
+import random
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -173,6 +174,7 @@ def test_a_release_readiness_refuses_a_home_without_a_ledger_before_any_dial(
             machine=command_machine,
             macos=NATIVE_TEST_MACOS,
             timers=SYSTEM_TIMERS,
+            secure_rng=random.SystemRandom(),
         )
 
 

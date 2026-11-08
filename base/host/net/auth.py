@@ -19,9 +19,9 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import random
 from base64 import urlsafe_b64encode
 from collections.abc import Collection, Mapping
-from secrets import token_bytes
 
 from base.host.net import (
     ClusterSecretMissingError as ClusterSecretMissingError,
@@ -77,13 +77,15 @@ def verify_bearer_digest(authorization: str | None, digests: Collection[str]) ->
     return matched
 
 
-def random_bytes(size: int = 32) -> bytes:
-    return token_bytes(size)
-
-
-def new_session_id() -> str:
+# meiva:note
+# The one session identifier: 256 bits drawn from the caller's generator and encoded URL-safe. The
+# identifier is a bearer secret, so the generator is a required argument and a caller hands in the
+# process's system generator (`secrets.SystemRandom`; `OsRandom` in the CLI). The parameter is typed
+# `random.Random` because the gateway's configuration carries that type while its value is a system
+# generator -- nothing here mints a second source of its own.
+def new_session_id(rng: random.Random) -> str:
     """Return an opaque URL-safe identifier with 256 bits of entropy."""
-    return urlsafe_b64encode(random_bytes(32)).rstrip(b"=").decode("ascii")
+    return urlsafe_b64encode(rng.randbytes(32)).rstrip(b"=").decode("ascii")
 
 
 def cookie_name() -> str:

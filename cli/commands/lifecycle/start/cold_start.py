@@ -152,6 +152,7 @@ def _run_step(
                 machine=command.machine,
                 macos=command.host.platform.system == "darwin",
                 timers=command.timers,
+                secure_rng=command.secure_rng,
             )
             return 0
         case ColdStep.SCHEMA_CHECK:

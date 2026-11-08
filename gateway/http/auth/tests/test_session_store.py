@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import random
 from collections import OrderedDict
 from collections.abc import Iterator
 from dataclasses import dataclass
@@ -172,7 +173,10 @@ def test_a_session_whose_mint_is_no_longer_admitted_is_refused_before_any_lookup
 
 
 def test_minted_ids_carry_their_mint_and_fresh_randomness(store: SessionStore) -> None:
-    first, second = minted_session_id(_MINT), minted_session_id(_MINT)
+    first, second = (
+        minted_session_id(_MINT, rng=random.SystemRandom()),
+        minted_session_id(_MINT, rng=random.SystemRandom()),
+    )
     assert first != second
     assert session_store.session_mint(first) == _MINT == session_store.session_mint(second)
     assert len(first.partition(".")[2]) >= 43  # 256 random bits, base64url

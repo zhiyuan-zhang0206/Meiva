@@ -10,6 +10,7 @@ refusal that turns a dial of the credential-free endpoint into a named error.
 from __future__ import annotations
 
 import json
+import random
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any, NamedTuple
@@ -39,7 +40,7 @@ def home(tmp_path: Path) -> Path:
 @pytest.fixture
 def seeded(home: Path, seed_write_generation: Callable[[Path], Any]) -> Any:
     secret = seed_write_generation(home)
-    delivery.ensure_pooler_admin(home, encrypt=_encrypt)
+    delivery.ensure_pooler_admin(home, encrypt=_encrypt, rng=random.SystemRandom())
     return secret
 
 
@@ -69,7 +70,7 @@ def test_userlist_holds_exactly_the_generation_and_the_admin_console(
 def test_pooler_admin_is_created_once_and_never_rotated(home: Path, seeded: Any) -> None:
     del seeded
     first = delivery.read_pooler_admin(home)
-    again = delivery.ensure_pooler_admin(home, encrypt=_encrypt)
+    again = delivery.ensure_pooler_admin(home, encrypt=_encrypt, rng=random.SystemRandom())
     assert again == first
     info = delivery.pooler_admin_path(home).stat()
     assert info.st_mode & 0o077 == 0
