@@ -42,7 +42,10 @@ the bottom zone, or only short of it because a chunk outran its pin) rather
 than a distance, so a switch away inside a streaming frame still counts as
 the tail. The scroll-to-bottom button exists only away from the bottom: presence follows
 the measured distance, not the follow flag, so a height change with no scroll
-event still decides it. At the bottom it is not rendered at all, refresh in
+event still decides it. A send anchor is the one exception — it holds the bottom
+up, so the viewport reads "at bottom" while the control still has a job (resume
+following); it stays shown there, because hiding it would leave the reader no way
+back. At the bottom it is not rendered at all, refresh in
 flight or not — a faded button left a hover target whose click did nothing (user
 report 2026-10-30). While the tail read after a switch or a reconnect
 (`loadingNewer`, the composed reconcile) is in flight it rests on the same ring
@@ -58,10 +61,7 @@ asynchronous ride survives; growth mid-ride pins instantly because the
 controller already follows. An agent switch hides the button in the same
 commit, supersedes an unreachable restore target, and pins with a fresh run so a
 post-command twitch cannot release following while the awaited reply streams in
-(user report 2026-09-19). A send re-pins only a follower: the thread is
-unchanged, so it pins when the controller is already following — or, while a
-bookmark is still settling, when the reader is at a real tail by measurement —
-and a reader parked mid-history keeps their place (user report 2026-10-19). The
+(user report 2026-09-19). The
 bookmark owns the viewport only until it settles or the reader moves: a settled
 restore and any movement the controller classifies both release the hold, so a
 reader who scrolls after returning is no longer read as "none" (that silence
@@ -72,6 +72,11 @@ viewport back instead of holding the reader at the top forever. The composer's p
 area, so the echo arrives as ordinary growth and a following reader stays on the
 tail either way. Only a following reader releases the oldest rows (the 250-row
 retention rule in the paging doc).
+
+A send is its own arrival, not a pin: it parks the reader's own message a fixed
+share down the viewport over a reserve the reply consumes, and stops following
+there. [[ui/web/src/docs/frontend-components/timeline-view/send-anchor.meiva.okf.md|The send anchor]]
+owns that park, the reserve, and the controller state the reserve needs.
 
 A viewport width change is the same problem in the other direction: every row
 re-wraps, so the pixel offset that was the reader's place now points at a
@@ -102,3 +107,4 @@ to omit timestamps according to their timeline item metadata.
 ## Relationship to Other Nodes
 
 - [[ui/web/src/docs/frontend-components/timeline-view/timeline-view.meiva.okf.md|Timeline View]] — the renderer whose scroll surface and bounded turn scroll this node owns.
+- [[ui/web/src/docs/frontend-components/timeline-view/send-anchor.meiva.okf.md|The send anchor]] — where a send parks the reader's own message and why the follow flag must ignore the bottom there.

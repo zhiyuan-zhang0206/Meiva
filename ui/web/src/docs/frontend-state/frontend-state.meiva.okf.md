@@ -69,7 +69,8 @@ The selected conversation store and its abortable reads have their own node:
 
 ## Sticky Bottom Controller (`lib/sticky.ts`)
 
-`createStickyController` is the **sole owner** of the sticky flag — replacing 6 paths that each wrote `stickyRef`. Two core ideas: when pinning, move the baseline together (`notifyPinnedToBottom` makes the pin's own echo read as zero movement, eliminating direction heuristics/grace timers); `lastBottomScrollHeight` witnesses "content growing taller under my feet". At-bottom zone width splits into two thresholds by pointer type (touch/mouse). Callers only issue `requestStick()`/`handleScroll()`/`handleLayoutChange()`, never modify the flag. A thread change is the only unconditional pin: the view pins the newest content on mount and whenever its `threadKey` changes. A send (`scrollToBottomRequest`) re-pins only a reader already following the tail, so sending never pulls a reader parked mid-history away from what they were reading. Those pins hand the controller a fresh upward run (`notifyPinnedToBottom(view, freshRun)`; a stale run would otherwise release following again on the first post-pin twitch, before the reply could be followed). Automatic (streaming-growth) pins keep the run.
+The follow flag, its pin/echo baselines and the send anchor have their own
+node: [[ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.meiva.okf.md|Timeline sticky scroll]].
 
 ## History-Entry Scroll Memory
 

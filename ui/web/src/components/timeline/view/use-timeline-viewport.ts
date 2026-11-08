@@ -55,6 +55,7 @@ export function useTimelineViewport({
   cancelPullTouch,
   applyPendingRestore,
   settleRestoredPosition,
+  maintainSendAnchor,
 }: {
   wrapperRef: RefObject<HTMLDivElement | null>;
   viewportRef: RefObject<HTMLElement | null>;
@@ -83,6 +84,13 @@ export function useTimelineViewport({
   cancelPullTouch: () => void;
   applyPendingRestore: (viewport: HTMLElement | null) => void;
   settleRestoredPosition: (viewport: HTMLElement | null, layoutChanged: boolean) => void;
+  // meiva:note
+  // Rewrites the send anchor's bottom reserve before the follow rule reads the
+  // layout: the reserve is a height the stream consumes, so it belongs to this
+  // pass and not to a later one, where the reader would see the reserve and the
+  // growth fight for one frame.
+  // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.meiva.okf.md
+  maintainSendAnchor: () => void;
 }) {
   useEffect(() => {
     const viewport = wrapperRef.current?.querySelector<HTMLElement>('[data-slot="scroll-area-viewport"]') ?? null;
@@ -223,6 +231,7 @@ export function useTimelineViewport({
 
     const ro = new ResizeObserver(() => {
       syncTurnMaxHeight();
+      maintainSendAnchor();
       const probe = restoreProbeRef.current;
       if (probe.height === viewport.scrollHeight) probe.passes += 1;
       else { probe.height = viewport.scrollHeight; probe.passes = 1; }
@@ -285,5 +294,6 @@ export function useTimelineViewport({
     cancelPullTouch,
     applyPendingRestore,
     settleRestoredPosition,
+    maintainSendAnchor,
   ]);
 }

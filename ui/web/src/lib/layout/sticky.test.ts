@@ -957,3 +957,46 @@ describe("isAtTail (a saved position's tail measure)", () => {
     expect(ctl.isAtTail(view(0, 5000))).toBe(false);
   });
 });
+
+// meiva:note
+// The send anchor owns a bottom it did not earn by position: the reserve under
+// the reader's message is the rest of the document, so "at the bottom" is true
+// while following is off. These cases pin the rule that keeps that reading from
+// resurrecting following, and the point where it stops applying.
+// meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.meiva.okf.md
+describe("send anchor over a bottom reserve", () => {
+  it("stops following and ignores the at-bottom reading the reserve creates", () => {
+    const ctl = createStickyController(POINTER_STICKY_THRESHOLDS);
+    pin(ctl, 3000);
+    ctl.notifyAnchored(view(780, 1380));
+    expect(ctl.isSticky()).toBe(false);
+    expect(ctl.handleLayoutChange(view(780, 1380))).toBe(false);
+    expect(ctl.handleScroll(view(780, 1380))).toBe("none");
+    expect(ctl.isSticky()).toBe(false);
+  });
+
+  it("stays released while growth keeps the viewport inside the bottom zone", () => {
+    const ctl = createStickyController(POINTER_STICKY_THRESHOLDS);
+    ctl.notifyAnchored(view(780, 1380));
+    expect(ctl.handleLayoutChange(view(780, 1400))).toBe(false);
+    expect(ctl.isSticky()).toBe(false);
+  });
+
+  it("hands the reader back to the ordinary rules once the reply fills the reserve", () => {
+    const ctl = createStickyController(POINTER_STICKY_THRESHOLDS);
+    ctl.notifyAnchored(view(780, 1380));
+    expect(ctl.handleLayoutChange(view(780, 1440))).toBe(false);
+    expect(ctl.handleScroll(view(840, 1440))).toBe("down");
+    expect(ctl.isSticky()).toBe(true);
+    expect(ctl.handleLayoutChange(view(840, 2000))).toBe(true);
+  });
+
+  it("a performed pin takes the bottom back before the reserve is gone", () => {
+    const ctl = createStickyController(POINTER_STICKY_THRESHOLDS);
+    ctl.notifyAnchored(view(780, 1380));
+    ctl.requestStick();
+    ctl.notifyPinnedToBottom(view(780, 1380), true);
+    expect(ctl.isSticky()).toBe(true);
+    expect(ctl.handleLayoutChange(view(780, 1500))).toBe(true);
+  });
+});

@@ -51,7 +51,7 @@ export const hooksState = {
   setMobileSidebarOpen: vi.fn(),
   setMobileInspectorOpen: vi.fn(),
   setInspectorHours: vi.fn(),
-  requestScrollToBottom: vi.fn(),
+  requestSendAnchor: vi.fn(),
   setSetting: vi.fn(),
   settings: { "display.timeline_width_px": 768 } as Record<string, unknown>,
   settingsLoading: false,
@@ -244,7 +244,7 @@ export function homePageProps(): HomePageProps {
       loadingNewer: false,
       retryTimeline: state.retryTimeline,
     },
-    timelineStore: { requestScrollToBottom: state.requestScrollToBottom, liveAnchorAt: 0 },
+    timelineStore: { requestSendAnchor: state.requestSendAnchor, liveAnchorAt: 0 },
     bfcacheId: state.bfcacheId,
     unresolvedAlerts: state.unresolvedAlerts,
     contextPanel: { open: state.contextPanelOpen, setOpen: state.contextPanelSetOpen },
@@ -327,7 +327,7 @@ export async function resetHomePageTestState() {
   transport.getUserMessages.mockResolvedValue({ mode: "prefix", items: [] });
   transport.getReplySuggestion.mockImplementation(() => Promise.resolve(replySuggestions));
   resetStreamHandlers();
-  transport.sendMessage.mockResolvedValue(undefined);
+  transport.sendMessage.mockResolvedValue({ status: "running", inbound_id: 11, duplicate: false });
   transport.cancel.mockResolvedValue(undefined);
   transport.stageUploadFile.mockResolvedValue(undefined);
   transport.deleteStagedUploadFile.mockResolvedValue(undefined);

@@ -144,12 +144,12 @@ describe("history entry scroll ownership", () => {
     act(() => { height = 5000; resizeCallbacks.forEach((deliver) => deliver()); });
     expect(viewport().scrollTop).toBe(4400);
   });
-  it.each([600, 900])("a send leaves a parked reader at their saved position at content height %i", (initialHeight) => {
+  it.each([600, 900])("a send whose message has not committed leaves a parked reader at their saved position at content height %i", (initialHeight) => {
     height = initialHeight;
     saveScrollMemory(`history-send-${initialHeight}`, { contentKey: "42", scrollTop: 700, followBottom: false });
     renderWithBrowser(conversation(42, `history-send-${initialHeight}`));
     resize();
-    act(() => { useTimelineStore.getState().requestScrollToBottom(); });
+    act(() => { useTimelineStore.getState().requestSendAnchor(null); });
     act(() => { height = 5000; resizeCallbacks.forEach((deliver) => deliver()); });
     expect(viewport().scrollTop).toBe(700);
   });
@@ -160,11 +160,11 @@ describe("history entry scroll ownership", () => {
     resize();
     expect(viewport().scrollTop).toBe(700);
     act(() => { viewport().scrollTop = 4400; fireEvent.scroll(viewport()); });
-    act(() => { useTimelineStore.getState().requestScrollToBottom(); });
+    act(() => { useTimelineStore.getState().requestSendAnchor(null); });
     act(() => { height = 6000; resizeCallbacks.forEach((deliver) => deliver()); });
     expect(viewport().scrollTop).toBe(5400);
   });
-  it("pins a send from a real tail while a settled bookmark still holds the viewport", () => {
+  it("a send releases a settled bookmark at the tail, so the stream pins again", () => {
     useTimelineStore.getState().switchThread(42, items, false);
     saveScrollMemory("history-tail-send", {
       contentKey: "42", scrollTop: 4400, followBottom: false,
@@ -172,7 +172,7 @@ describe("history entry scroll ownership", () => {
     });
     renderWithBrowser(conversation(42, "history-tail-send"));
     expect(viewport().scrollTop).toBe(4400);
-    act(() => { useTimelineStore.getState().requestScrollToBottom(); });
+    act(() => { useTimelineStore.getState().requestSendAnchor(null); });
     act(() => { height = 6000; resizeCallbacks.forEach((deliver) => deliver()); });
     expect(viewport().scrollTop).toBe(5400);
   });

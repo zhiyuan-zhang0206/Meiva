@@ -25,7 +25,7 @@ import { applyBookmarkRestore, settleRestoredPosition as settleRestoredPositionI
 import { rememberTimelinePosition } from "./model/reading-position";
 import { useCompactTransitionAnchor } from "./model/use-compact-transition-anchor";
 import { useOlderHistoryPull } from "./model/use-older-history-pull";
-import { usePinRequests } from "./model/use-pin-requests";
+import { useSendAnchor, useThreadPin } from "./model/use-viewport-arrivals";
 import { usePrependAnchor } from "./view/use-prepend-anchor";
 import { useTimelineExpansion } from "./view/use-timeline-expansion";
 import { useTimelineViewport } from "./view/use-timeline-viewport";
@@ -113,6 +113,13 @@ export const TimelineView = memo(function TimelineView({
   const viewportRef = useRef<HTMLElement | null>(null);
   const wrapperRef = useRef<HTMLDivElement>(null);
   const historySpaceRef = useRef<HTMLDivElement>(null);
+  // meiva:note
+  // The send anchor's bottom reserve: empty height the reply consumes as it
+  // streams in, which is what keeps the reader's own message parked a fixed
+  // share down the viewport. It sits outside the content column so it carries
+  // no row spacing, and useSendAnchor writes its height directly.
+  // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.meiva.okf.md
+  const sendReserveRef = useRef<HTMLDivElement>(null);
 
   const pendingRestoreRef = useRef<SavedScroll | null>(scrollMemoryKey ? readScrollMemory(scrollMemoryKey) : null);
 
@@ -236,7 +243,14 @@ export const TimelineView = memo(function TimelineView({
       setAtBottom(viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight <= 1);
       return;
     }
+    // meiva:note
+    // The control's presence follows the measured distance, with one exception:
+    // a send anchor holds the bottom up, so the viewport is "at the bottom" by
+    // position while the button still has a job (resume following). Hiding it
+    // there would leave the reader no way back.
+    // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.meiva.okf.md
     setAtBottom(
+      !controller.isAnchored() &&
       isAtBottom(
         {
           scrollTop: viewport.scrollTop,
@@ -246,7 +260,7 @@ export const TimelineView = memo(function TimelineView({
         stickyThresholds,
       ),
     );
-  }, [stickyThresholds]);
+  }, [controller, stickyThresholds]);
 
   const pinToBottom = useCallback(
     (viewport: HTMLElement, freshRun = false) => {
@@ -282,6 +296,27 @@ export const TimelineView = memo(function TimelineView({
     items,
     loadingOlder,
     scrollByDelta,
+  });
+
+  // meiva:note
+  // A send takes the viewport from any bookmark it was settling: the reader
+  // asked for the message they just wrote, so the saved row no longer owns it.
+  // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.meiva.okf.md
+  const cancelBookmark = useCallback(() => {
+    pendingAnchorRef.current = null;
+    pendingRestoreRef.current = null;
+    settledRestoreRef.current = null;
+    holdRestoredPositionRef.current = false;
+  }, [pendingAnchorRef]);
+
+  const { maintain: maintainSendAnchor } = useSendAnchor({
+    items,
+    viewportRef,
+    wrapperRef,
+    reserveRef: sendReserveRef,
+    controller,
+    measureAtBottom,
+    cancelBookmark,
   });
 
   const compactPin = useCompactTransitionAnchor({
@@ -404,19 +439,18 @@ export const TimelineView = memo(function TimelineView({
     cancelPullTouch,
     applyPendingRestore,
     settleRestoredPosition,
+    maintainSendAnchor,
   });
 
-  usePinRequests({
+  useThreadPin({
     threadKey,
     controller,
-    thresholds: stickyThresholds,
     viewportRef,
     wrapperRef,
     anchorRef: pendingAnchorRef,
     pendingRef: pendingRestoreRef,
     settledRef: settledRestoreRef,
     holdRef: holdRestoredPositionRef,
-    restoreInFlight,
     pinToBottom,
     setAtBottom,
   });
@@ -535,6 +569,7 @@ export const TimelineView = memo(function TimelineView({
           <CompactingBlock />
           <div ref={endRef} />
         </div>
+        <div ref={sendReserveRef} data-send-reserve aria-hidden="true" />
       </ScrollArea>
       <ScrollToBottomButton atBottom={atBottom && (!turnActive || activityAtBottom)} refreshing={loadingNew && !loadingOlder} onClick={handleScrollToBottom} />
     </div>
