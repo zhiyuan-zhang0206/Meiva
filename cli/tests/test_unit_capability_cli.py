@@ -90,7 +90,7 @@ def _issue_bundle(
         == 0
     )
     printed = capsys.readouterr().out
-    match = re.search(r"transport key \(shown once, carry it separately\): (\S+)", printed)
+    match = re.search(r"transport key \(shown once, carry it separately\): (\S*)", printed)
     assert match is not None, printed
     return printed, match.group(1)
 

@@ -139,22 +139,21 @@ def test_it_refuses_a_home_init_has_not_initialized(
     assert sealed.path.exists() and gateway.requests == []
 
 
-def test_it_needs_the_transport_key_and_keeps_the_bundle(
+def test_it_refuses_a_corrupt_bundle_and_keeps_it(
     tmp_path: Path, gateway_home: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    with serving({BOOTSTRAP: bootstrap_reply(refused_endpoint())}) as gateway:
-        home = initialized_runner(tmp_path, gateway_url=gateway.url)
-        sealed = seal_bundle(
-            gateway_home, tmp_path / "unit.bundle", endpoint=refused_endpoint(), unit_home=home
-        )
+    del gateway_home
+    home = initialized_runner(tmp_path, gateway_url="http://127.0.0.1:8000")
+    corrupt = tmp_path / "unit.bundle"
+    corrupt.write_text("{}")
 
-        rc = cmd_db_authority_install_unit(
-            bundle=str(sealed.path), transport_key="", home=home, now=time.time()
-        )
+    rc = cmd_db_authority_install_unit(
+        bundle=str(corrupt), transport_key="", home=home, now=time.time()
+    )
 
     assert rc == 1
-    assert "MEIVA_DB_CAPABILITY_KEY" in capsys.readouterr().err
-    assert sealed.path.exists() and gateway.requests == []
+    assert "corrupt" in capsys.readouterr().err
+    assert corrupt.exists()
     assert load_unit_capability(home) is None
 
 

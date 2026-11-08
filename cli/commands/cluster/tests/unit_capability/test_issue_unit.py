@@ -12,7 +12,6 @@
 
 from __future__ import annotations
 
-import re
 import stat
 from collections.abc import Callable
 from dataclasses import replace
@@ -59,14 +58,8 @@ def _issue(command: CommandRuntime, out: Path, *, unit_home: str = "/home/u/.mei
     )
 
 
-def _printed_key(printed: str) -> str:
-    match = re.search(r"transport key \(shown once, carry it separately\): (\S+)", printed)
-    assert match is not None, printed
-    return match.group(1)
-
-
 @pytest.mark.parametrize("zone", [None, "America/New_York"])
-def test_it_seals_the_active_generation_for_one_unit_under_the_key_it_prints(
+def test_it_seals_the_active_generation_for_one_unit(
     tmp_path: Path,
     gateway_home: Path,
     command_runtime: CommandRuntime,
@@ -84,9 +77,7 @@ def test_it_seals_the_active_generation_for_one_unit_under_the_key_it_prints(
     assert stat.S_IMODE(out.stat().st_mode) == 0o600
     assert f"written to {out} (0600)" in printed
     assert "`meiva cluster db-authority install-unit <bundle>`" in printed
-    bundle = open_bundle(
-        out.read_bytes(), _printed_key(printed), now=command.clock.now().timestamp()
-    )
+    bundle = open_bundle(out.read_bytes(), now=command.clock.now().timestamp())
     expected_zone = ZoneInfo("America/Los_Angeles" if zone is None else zone)
     expires = datetime.fromtimestamp(bundle.expires_at, tz=expected_zone).isoformat(
         timespec="seconds"

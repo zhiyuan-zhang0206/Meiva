@@ -20,6 +20,7 @@ from dotenv import dotenv_values
 from base import cluster
 from base.clock.tests.seeded_rng import seeded_rng
 from base.deploy.lifecycle import start_serving
+from base.host.db_authority import unit
 from base.host.db_authority.api import ensure_telemetry_token
 from base.host.net.tests.local_http import closed_port_url
 from base.host.system.tests.fake_commands import LINUX_X86, fake_host
@@ -461,7 +462,7 @@ def test_runner_without_a_capability_refuses_before_persisting(
     assert cluster.get_record(home) is None
 
 
-def test_capability_bundle_needs_its_transport_key(
+def test_corrupt_capability_bundle_is_refused(
     inputs: identity.IdentityInput,
     site: HomeSite,
     caller: CallerHost,
@@ -470,7 +471,7 @@ def test_capability_bundle_needs_its_transport_key(
     bundle = tmp_path / "unit.bundle"
     bundle.write_text("{}")
     args = _runner_start(closed_port_url(), "--db-capability", str(bundle))
-    with pytest.raises(ValueError, match="MEIVA_DB_CAPABILITY_KEY"):
+    with pytest.raises(unit.UnitCapabilityError, match="corrupt"):
         prepare_init_identity(args, site, caller)
     assert bundle.exists()
     assert not (inputs.home / ".env").exists()

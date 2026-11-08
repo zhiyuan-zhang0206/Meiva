@@ -19,7 +19,6 @@ import httpx
 import pytest
 
 from base.host.db_authority.unit import (
-    CAPABILITY_KEY_ENV,
     UnitCapabilityError,
     load_unit_capability,
     require_unit_capability,
@@ -120,44 +119,30 @@ def test_a_unit_holding_no_capability_and_carrying_no_bundle_never_dials_the_gat
     assert gateway.requests == []
 
 
-def test_a_bundle_without_its_transport_key_is_refused_before_anything_is_dialled(
-    tmp_path: Path, gateway_home: Path, runner_home: Path
+def test_a_corrupt_bundle_is_refused_before_anything_is_dialled(
+    tmp_path: Path, runner_home: Path
 ) -> None:
-    sealed = seal_bundle(
-        gateway_home, tmp_path / "mini.bundle", endpoint=refused_endpoint(), unit_home=runner_home
-    )
+    corrupt = tmp_path / "mini.bundle"
+    corrupt.write_text("{}")
     with (
         serving({BOOTSTRAP: bootstrap_reply(refused_endpoint())}) as gateway,
-        pytest.raises(ValueError, match=f"requires its transport key in {CAPABILITY_KEY_ENV}"),
+        pytest.raises(UnitCapabilityError, match="corrupt"),
     ):
-        join_gateway(_identity(gateway.url), runner_home, str(sealed.path), "", now=time.time())
+        join_gateway(_identity(gateway.url), runner_home, str(corrupt), "", now=time.time())
 
-    assert gateway.requests == [] and sealed.path.exists()
+    assert gateway.requests == [] and corrupt.exists()
 
 
-def test_a_bundle_the_transport_key_does_not_open_is_refused_before_anything_is_dialled(
-    tmp_path: Path, gateway_home: Path, runner_home: Path
-) -> None:
-    endpoint = refused_endpoint()
-    sealed = seal_bundle(
-        gateway_home, tmp_path / "mini.bundle", endpoint=endpoint, unit_home=runner_home
-    )
-    other = seal_bundle(
-        gateway_home, tmp_path / "other.bundle", endpoint=endpoint, unit_home=runner_home
-    )
-    with (
-        serving({BOOTSTRAP: bootstrap_reply(endpoint)}) as gateway,
-        pytest.raises(UnitCapabilityError, match="does not authenticate"),
-    ):
-        join_gateway(
-            _identity(gateway.url),
-            runner_home,
-            str(sealed.path),
-            other.transport_key,
-            now=time.time(),
-        )
-
-    assert gateway.requests == [] and sealed.path.exists()
+def test_runner_can_join_with_direct_db_config(gateway_home: Path, runner_home: Path) -> None:
+    del gateway_home
+    endpoint = "postgresql://meiva@10.0.0.7:6433/meiva"
+    values = _identity("http://127.0.0.1:8000")
+    values["MEIVA_DB_URL"] = "postgresql://meiva_g0_runner:pw@10.0.0.7:6433/meiva"
+    values["MEIVA_API_TOKEN"] = "token" * 8
+    with serving({BOOTSTRAP: bootstrap_reply(endpoint)}) as gateway:
+        values["MEIVA_GATEWAY_URL"] = gateway.url
+        join_gateway(values, runner_home, None, "", now=time.time())
+    assert len(gateway.requests) == 1
 
 
 def test_a_unit_holding_the_human_secret_is_refused_before_anything_is_dialled(

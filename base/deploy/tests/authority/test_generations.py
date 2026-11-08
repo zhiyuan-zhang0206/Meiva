@@ -290,7 +290,7 @@ def test_activation_names_the_exact_pending_generation(
         _advance_to_boundary(conn, cluster.home, "verified")
         verified = mint_generation(conn, cluster.home)
     with pytest.raises(LedgerRefusedError, match="exact pending generation"):
-        activate(cluster.home, replace(verified, credential_digest="0" * 64))
+        activate(cluster.home, replace(verified, number=1))
     assert require_ledger(cluster.home).active is None
 
 

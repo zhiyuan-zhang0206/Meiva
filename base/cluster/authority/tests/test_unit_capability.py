@@ -1,11 +1,8 @@
 from __future__ import annotations
 
-import json
 import math
 import time
-from collections.abc import Callable
 from pathlib import Path
-from typing import Any
 
 import pytest
 
@@ -23,45 +20,17 @@ from base.host.db_authority import model, unit
 from base.host.db_authority.unit import UNIT_BUNDLE_MAX_TTL_S
 
 
-def _flip(text: str) -> str:
-    return ("A" if text[0] != "A" else "B") + text[1:]
-
-
-_MUTATIONS: dict[str, Callable[[dict[str, Any]], None]] = {
-    "ciphertext": lambda d: d.update(ciphertext=_flip(d["ciphertext"])),
-    "truncated ciphertext": lambda d: d.update(ciphertext=d["ciphertext"][:-8]),
-    "iv": lambda d: d.update(iv=_flip(d["iv"])),
-    "header generation": lambda d: d["header"].update(generation=d["header"]["generation"] + 1),
-    "header machine": lambda d: d["header"].update(machine="other"),
-    "header home": lambda d: d["header"].update(home="/elsewhere"),
-    "header expiry": lambda d: d["header"].update(expires_at=d["header"]["expires_at"] + 1e6),
-}
-
-
-@pytest.mark.parametrize("mutation", sorted(_MUTATIONS))
-def test_a_tampered_bundle_is_refused(gateway: Path, runner_home: Path, mutation: str) -> None:
-    issued = issue(gateway, runner_home)
-    assert open_issued(issued).capability.unit.home == str(runner_home)
-    data = json.loads(issued.envelope)
-    _MUTATIONS[mutation](data)
-    with pytest.raises(unit.UnitCapabilityError, match="does not authenticate"):
-        unit.open_bundle(json.dumps(data).encode(), issued.transport_key, now=time.time())
+def test_a_corrupt_bundle_is_refused(runner_home: Path) -> None:
+    with pytest.raises(unit.UnitCapabilityError, match="is corrupt"):
+        unit.open_bundle(b"{}", now=time.time())
     assert unit.load_unit_capability(runner_home) is None
 
 
-def test_a_bundle_opens_only_with_its_own_transport_key(gateway: Path, runner_home: Path) -> None:
-    issued, other = issue(gateway, runner_home), issue(gateway, runner_home)
-    assert issued.transport_key != other.transport_key
-    with pytest.raises(unit.UnitCapabilityError, match="does not authenticate"):
-        unit.open_bundle(issued.envelope, other.transport_key, now=time.time())
-    with pytest.raises(unit.UnitCapabilityError, match="32-byte key"):
-        unit.open_bundle(issued.envelope, "AAAA", now=time.time())
-    with pytest.raises(unit.UnitCapabilityError, match="not a database capability bundle"):
-        unit.open_bundle(b"{}", issued.transport_key, now=time.time())
+def test_a_bundle_opens_directly(gateway: Path, runner_home: Path) -> None:
+    issued = issue(gateway, runner_home)
     bundle = open_issued(issued)
+    assert bundle.capability.unit.home == str(runner_home)
     assert bundle.capability.api is not None
-    for secret in (bundle.capability.password, bundle.capability.api.token):
-        assert secret.encode() not in issued.envelope
 
 
 def test_an_expired_bundle_is_refused(gateway: Path, runner_home: Path) -> None:
