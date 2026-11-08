@@ -22,7 +22,9 @@ if sys.path[:1] != [str(_REPO_ROOT)]:
     sys.path.insert(0, str(_REPO_ROOT))
 
 # meiva:link scripts/docs/scripts.meiva.okf.md
+from base.host.boundary.json_values import is_object_dict  # noqa: E402
 from base.host.boundary.options import attribute, options  # noqa: E402
+from base.host.boundary.untyped import object_of  # noqa: E402
 from cli.fleet_update.plan.release_target import (  # noqa: E402
     ChannelPointer,
     ReleaseCertificate,
@@ -39,8 +41,11 @@ from scripts.host_ops.release.git_tags import (  # noqa: E402
     read_verified_certificate,
     read_verified_channel,
     resolved_commit,
+    tree_paths_changed,
     write_annotated_tag,
 )
+
+_CLIENT_APP_PATHS = ("ui/app",)
 
 
 @dataclass(frozen=True)
@@ -64,6 +69,8 @@ class MintOptions:
     version: str
     hotfix_of: str
     reason: str
+    app_manifest: Path | None
+    android_manifest: Path | None
     github_output: Path | None
 
 
@@ -205,6 +212,41 @@ def _apply_release_tag(repository: Path, cert: ReleaseCertificate) -> str:
     return tag_plan
 
 
+def _previous_release_sha(repository: Path, hotfix_of: str) -> str | None:
+    if hotfix_of:
+        base_cert, _reason = read_verified_certificate(repository, hotfix_of)
+        return base_cert.sha if base_cert is not None else None
+    _pointer, latest_cert, _reason = read_verified_channel(repository, "latest")
+    return latest_cert.sha if latest_cert is not None else None
+
+
+def _manifest_commit(manifest_path: Path) -> str | None:
+    try:
+        decoded = object_of(json.loads, manifest_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if not is_object_dict(decoded):
+        return None
+    commit = decoded.get("commit")
+    return commit if isinstance(commit, str) and len(commit) == 40 else None
+
+
+def _client_needs_packaging(
+    repository: Path,
+    previous_sha: str | None,
+    target_sha: str,
+    manifest_path: Path | None,
+) -> bool:
+    if manifest_path is None:
+        return tree_paths_changed(repository, previous_sha, target_sha, _CLIENT_APP_PATHS)
+    if not manifest_path.is_file():
+        return tree_paths_changed(repository, None, target_sha, _CLIENT_APP_PATHS)
+    manifest_sha = _manifest_commit(manifest_path)
+    if manifest_sha is None:
+        return tree_paths_changed(repository, None, target_sha, _CLIENT_APP_PATHS)
+    return tree_paths_changed(repository, manifest_sha, target_sha, _CLIENT_APP_PATHS)
+
+
 def _run_mint(args: MintOptions) -> int:
     sha = resolved_commit(args.repo, args.sha.strip())
     if sha is None or sha != args.sha.strip():
@@ -218,6 +260,10 @@ def _run_mint(args: MintOptions) -> int:
     hotfix_of = args.hotfix_of.strip()
     if hotfix_of:
         _validate_hotfix_base(args.repo, hotfix_of, sha)
+    previous_sha = _previous_release_sha(args.repo, hotfix_of)
+    app_changed = tree_paths_changed(args.repo, previous_sha, sha, _CLIENT_APP_PATHS)
+    package_app = _client_needs_packaging(args.repo, previous_sha, sha, args.app_manifest)
+    package_android = _client_needs_packaging(args.repo, previous_sha, sha, args.android_manifest)
     version = _select_version(args.repo, args.version.strip(), hotfix_of, sha, certified_dt)
     cert = ReleaseCertificate(
         version=version,
@@ -251,6 +297,9 @@ def _run_mint(args: MintOptions) -> int:
         "sha": sha,
         "tag_action": tag_plan,
         "advance_latest": "true" if advance_latest else "false",
+        "app_changed": "true" if app_changed else "false",
+        "package_app": "true" if package_app else "false",
+        "package_android": "true" if package_android else "false",
     }
     append_github_output(args.github_output, outputs)
     print(json.dumps({"ok": True, **outputs}))
@@ -281,6 +330,8 @@ def _parser() -> argparse.ArgumentParser:
     mint.add_argument("--version", default="")
     mint.add_argument("--hotfix-of", default="")
     mint.add_argument("--reason", default="")
+    mint.add_argument("--app-manifest", default=None, type=Path)
+    mint.add_argument("--android-manifest", default=None, type=Path)
     mint.add_argument("--github-output", default=None, type=Path)
     return parser
 

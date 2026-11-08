@@ -615,6 +615,12 @@ jobs:
     name: Certify and publish channel/latest
     runs-on: ubuntu-24.04
     timeout-minutes: 15
+    outputs:
+      version: ${{ steps.mint.outputs.version }}
+      sha: ${{ steps.mint.outputs.sha }}
+      app_changed: ${{ steps.mint.outputs.app_changed }}
+      package_app: ${{ steps.mint.outputs.package_app }}
+      package_android: ${{ steps.mint.outputs.package_android }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -634,6 +640,24 @@ jobs:
             printf 'Verification for commit `%s` using [full verification](%s) of the same Git tree.\n' "$SHA" "$url" >> "$GITHUB_STEP_SUMMARY"
           else
             printf 'Verification for commit `%s` using the full verification jobs in this run.\n' "$SHA" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Fetch current client release manifests
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/client-manifests"
+          gh api "repos/$GITHUB_REPOSITORY/releases/tags/app-latest" \
+            --jq '.assets[] | select(.name == "latest.json") | .url' > "$RUNNER_TEMP/app_asset_url.txt" 2>/dev/null || true
+          if [ -s "$RUNNER_TEMP/app_asset_url.txt" ]; then
+            gh api "$(cat "$RUNNER_TEMP/app_asset_url.txt")" \
+              -H "Accept: application/octet-stream" > "$RUNNER_TEMP/client-manifests/app-latest.json" 2>/dev/null || rm -f "$RUNNER_TEMP/client-manifests/app-latest.json"
+          fi
+          gh api "repos/$GITHUB_REPOSITORY/releases/tags/android-latest" \
+            --jq '.assets[] | select(.name == "android-latest.json") | .url' > "$RUNNER_TEMP/android_asset_url.txt" 2>/dev/null || true
+          if [ -s "$RUNNER_TEMP/android_asset_url.txt" ]; then
+            gh api "$(cat "$RUNNER_TEMP/android_asset_url.txt")" \
+              -H "Accept: application/octet-stream" > "$RUNNER_TEMP/client-manifests/android-latest.json" 2>/dev/null || rm -f "$RUNNER_TEMP/client-manifests/android-latest.json"
           fi
 
       - name: Mint annotated release certificate
@@ -657,6 +681,8 @@ jobs:
           --version "$EXPLICIT_VERSION"
           --hotfix-of "$HOTFIX_OF"
           --reason "$REASON"
+          --app-manifest "$RUNNER_TEMP/client-manifests/app-latest.json"
+          --android-manifest "$RUNNER_TEMP/client-manifests/android-latest.json"
           --github-output "$GITHUB_OUTPUT"
 
       - name: Publish release tag and channel/latest
@@ -673,3 +699,29 @@ jobs:
             git push --force origin refs/tags/channel/latest:refs/tags/channel/latest
           fi
           echo "Certified commit \`$SHA\` as \`$VERSION\`." >> "$GITHUB_STEP_SUMMARY"
+
+  release-app:
+    name: Package macOS app
+    needs: [precheck, certify]
+    if: needs.certify.result == 'success' && needs.certify.outputs.package_app == 'true'
+    permissions:
+      contents: write
+    uses: ./.github/workflows/release-app.yml
+    with:
+      release_tag: ${{ needs.certify.outputs.version }}
+      target_sha: ${{ needs.certify.outputs.sha }}
+      publish: true
+    secrets: inherit
+
+  release-android:
+    name: Package Android APK
+    needs: [precheck, certify]
+    if: needs.certify.result == 'success' && needs.certify.outputs.package_android == 'true'
+    permissions:
+      contents: write
+    uses: ./.github/workflows/release-android.yml
+    with:
+      release_tag: ${{ needs.certify.outputs.version }}
+      target_sha: ${{ needs.certify.outputs.sha }}
+      publish: true
+    secrets: inherit

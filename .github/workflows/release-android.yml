@@ -25,19 +25,23 @@ on:
   push:
     tags:
       - 'android-v[0-9]+.[0-9]+.[0-9]+'
-    branches:
-      - main
-    paths:
-      # Only app code rebuilds the mutable android-latest channel: docs and
-      # unrelated trees (backend/, ui/web/) must not trigger a signed APK
-      # build. The filter also applies to tag pushes, which is safe: the
-      # version-alignment check in prepare (#900) means a release tag's
-      # commit always bumps Cargo.toml under src-tauri/**, so every
-      # legitimate android-v* tag still matches.
-      - 'ui/app/src-tauri/**'
-      - 'ui/app/app-ui/**'
-      - 'ui/app/android/**'
-      - '.github/workflows/release-android.yml'
+  workflow_call:
+    inputs:
+      release_tag:
+        description: 'Certified cluster release tag (vYYYY.MM.DD.HHMMSS[-hfN])'
+        required: false
+        type: string
+        default: ''
+      target_sha:
+        description: 'Commit SHA to build and publish'
+        required: false
+        type: string
+        default: ''
+      publish:
+        description: 'Publish to the mutable android-latest updater channel'
+        required: false
+        type: boolean
+        default: true
   workflow_dispatch:
     inputs:
       dry_run:
@@ -46,6 +50,14 @@ on:
         description: 'Build only; set to false to publish to the android-latest channel'
         type: boolean
         default: true
+      release_tag:
+        description: 'Optional certified release tag (vYYYY.MM.DD.HHMMSS[-hfN])'
+        required: false
+        default: ''
+      target_sha:
+        description: 'Optional commit SHA to build (defaults to workflow ref HEAD)'
+        required: false
+        default: ''
 
 permissions:
   contents: read
@@ -70,17 +82,24 @@ jobs:
     outputs:
       version: ${{ steps.version.outputs.version }}
       build_number: ${{ steps.build.outputs.build_number }}
+      target_sha: ${{ steps.version.outputs.target_sha }}
+      release_tag: ${{ steps.version.outputs.release_tag }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.target_sha || github.sha }}
 
       - name: Resolve and validate version
         id: version
         env:
           REF_NAME: ${{ github.ref_name }}
           REF_TYPE: ${{ github.ref_type }}
+          RUN_NUMBER: ${{ github.run_number }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
         run: |
+          target_sha="$(git rev-parse HEAD)"
           python3 - <<'PY'
-          import os, pathlib, re, tomllib
+          import os, pathlib, re, subprocess, sys, tomllib
 
           cargo = tomllib.loads(pathlib.Path("ui/app/src-tauri/Cargo.toml").read_text())
           cargo_version = cargo["package"]["version"]
@@ -98,11 +117,23 @@ jobs:
                       "bump ui/app/src-tauri/Cargo.toml to match the tag before releasing"
                   )
           else:
-              # main-branch build or manual dispatch: version comes from Cargo.
-              version = cargo_version
+              version = subprocess.check_output(
+                  [
+                      sys.executable,
+                      "scripts/codegen/build_app_update_manifest.py",
+                      "version-name",
+                      "--cargo-version",
+                      cargo_version,
+                      "--run-number",
+                      os.environ["RUN_NUMBER"],
+                  ],
+                  text=True,
+              ).strip()
           with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
               output.write(f"version={version}\n")
+              output.write(f"release_tag={os.environ.get('RELEASE_TAG', '')}\n")
           PY
+          echo "target_sha=$target_sha" >> "$GITHUB_OUTPUT"
 
       - name: Compute the build number
         id: build
@@ -130,6 +161,8 @@ jobs:
       BUILD_NUMBER: ${{ needs.prepare.outputs.build_number }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.prepare.outputs.target_sha }}
 
       - name: Install Java
         uses: actions/setup-java@77dd5b2ce225ea11469928ac317850245a74ae78 # v6.2.0
@@ -191,7 +224,7 @@ jobs:
             echo "Android signing secrets are only partially configured" >&2
             exit 1
           fi
-          if [ "$EVENT_NAME" = "push" ] && [ "$missing" -gt 0 ]; then
+          if { [ "$EVENT_NAME" = "push" ] || [ "$EVENT_NAME" = "workflow_call" ]; } && [ "$missing" -gt 0 ]; then
             echo "Release tags require Android signing" >&2
             exit 1
           fi
@@ -255,10 +288,14 @@ jobs:
     permissions:
       contents: write # create the release and upload its assets
     # A manual dispatch may build and inspect the APK without touching the
-    # channel phones update from; push and tag runs always publish.
-    if: github.event_name != 'workflow_dispatch' || inputs.dry_run != true
+    # channel phones update from; release-gate workflow_call and tag runs publish.
+    if: >-
+      (github.event_name != 'workflow_dispatch' || inputs.dry_run != true) &&
+      (github.event_name != 'workflow_call' || inputs.publish != false)
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.prepare.outputs.target_sha }}
 
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
@@ -286,12 +323,13 @@ jobs:
         env:
           APP_VERSION: ${{ needs.prepare.outputs.version }}
           BUILD_NUMBER: ${{ needs.prepare.outputs.build_number }}
+          TARGET_SHA: ${{ needs.prepare.outputs.target_sha }}
         run: |
           python3 scripts/codegen/build_android_release.py manifest \
             --version-code "$BUILD_NUMBER" \
             --version-name "$APP_VERSION" \
             --apk "release-assets/meiva-app-$APP_VERSION.apk" \
-            --commit "$GITHUB_SHA" \
+            --commit "$TARGET_SHA" \
             --repo "$GITHUB_REPOSITORY" \
             --out release-assets/android-latest.json
 

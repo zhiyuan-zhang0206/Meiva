@@ -246,3 +246,118 @@ def test_certify_rejects_hotfix_from_non_ancestor(
     )
     err = capsys.readouterr()
     assert "does not descend from --hotfix-of" in err.err
+
+
+def test_mint_reports_client_packaging_when_ui_app_changes_or_manifest_lags(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    repo, sha1 = _repository(tmp_path)
+    (repo / "ui" / "app").mkdir(parents=True)
+    (repo / "ui" / "app" / "main.rs").write_text("fn main() {}\n", encoding="utf-8")
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-q", "-m", "initial app")
+    sha_app1 = _git(repo, "rev-parse", "HEAD")
+
+    assert (
+        certify.main(
+            [
+                "mint",
+                "--repo",
+                str(repo),
+                "--sha",
+                sha_app1,
+                "--source-ref",
+                "refs/heads/main",
+                "--certified-at",
+                "2026-11-01T10:00:00Z",
+                "--gate-run-id",
+                "1",
+                "--gate-run-url",
+                "https://github.com/o/r/actions/runs/1",
+            ]
+        )
+        == 0
+    )
+    first = json.loads(capsys.readouterr().out)
+    assert first["app_changed"] == "true"
+    assert first["package_app"] == "true"
+    assert first["package_android"] == "true"
+
+    (repo / "app.py").write_text("V = 2\n", encoding="utf-8")
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-q", "-m", "backend only")
+    sha_backend = _git(repo, "rev-parse", "HEAD")
+
+    app_manifest = tmp_path / "app-latest.json"
+    app_manifest.write_text(json.dumps({"version": "1.0.1", "commit": sha_app1}), encoding="utf-8")
+    missing_android_manifest = tmp_path / "missing-android-latest.json"
+
+    assert (
+        certify.main(
+            [
+                "mint",
+                "--repo",
+                str(repo),
+                "--sha",
+                sha_backend,
+                "--source-ref",
+                "refs/heads/main",
+                "--certified-at",
+                "2026-11-01T16:00:00Z",
+                "--gate-run-id",
+                "2",
+                "--gate-run-url",
+                "https://github.com/o/r/actions/runs/2",
+                "--app-manifest",
+                str(app_manifest),
+                "--android-manifest",
+                str(missing_android_manifest),
+            ]
+        )
+        == 0
+    )
+    second = json.loads(capsys.readouterr().out)
+    assert second["app_changed"] == "false"
+    assert second["package_app"] == "false"
+    assert second["package_android"] == "true"
+
+    (repo / "ui" / "app" / "main.rs").write_text(
+        'fn main() { println!("v2"); }\n', encoding="utf-8"
+    )
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-q", "-m", "update ui/app")
+    sha_app2 = _git(repo, "rev-parse", "HEAD")
+    android_manifest = tmp_path / "android-latest.json"
+    android_manifest.write_text(
+        json.dumps({"versionCode": 1000002, "commit": sha_app1}), encoding="utf-8"
+    )
+
+    assert (
+        certify.main(
+            [
+                "mint",
+                "--repo",
+                str(repo),
+                "--sha",
+                sha_app2,
+                "--source-ref",
+                "refs/heads/main",
+                "--certified-at",
+                "2026-11-01T22:00:00Z",
+                "--gate-run-id",
+                "3",
+                "--gate-run-url",
+                "https://github.com/o/r/actions/runs/3",
+                "--app-manifest",
+                str(app_manifest),
+                "--android-manifest",
+                str(android_manifest),
+            ]
+        )
+        == 0
+    )
+    third = json.loads(capsys.readouterr().out)
+    assert third["app_changed"] == "true"
+    assert third["package_app"] == "true"
+    assert third["package_android"] == "true"
+    assert sha1 != sha_app2
