@@ -4,6 +4,7 @@
 import pytest
 
 from gateway.agents.history.paging import (
+    STANDING_HEAD_NOTE_TAGS,
     Row,
     Selection,
     boundary_read_limit,
@@ -94,6 +95,31 @@ def test_untagged_markers_are_not_standing_notes() -> None:
     page = window_or_cross(rows, "2.0", 5, older_available=True)
     assert page.crossed is False
     assert picked(rows, page) == ["0.0", "1.0"]
+
+
+@pytest.mark.parametrize(
+    ("source", "expected"),
+    [
+        ("exec_timeout", True),
+        ("timezone", True),
+        ("memory", True),
+        ("agent_id", True),
+        ("agent_memory", True),
+        ("inherited_memory", True),
+        ("preloaded_skills", True),
+        ("lifecycle_resurrect", False),
+        ("lifecycle_restart", False),
+        ("lifecycle_terminate", False),
+        ("lifecycle_fork", False),
+        ("impersonation", False),
+        ("error", False),
+        (None, False),
+    ],
+)
+def test_only_standing_context_note_tags_qualify_as_standing_head_notes(
+    source: str | None, expected: bool
+) -> None:
+    assert (source in STANDING_HEAD_NOTE_TAGS) is expected
 
 
 def test_the_initial_window_keeps_prompt_notes_and_summaries_ahead_of_the_tail() -> None:

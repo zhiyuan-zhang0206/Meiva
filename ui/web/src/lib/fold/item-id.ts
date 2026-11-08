@@ -92,12 +92,31 @@ export function isReattachedTimelineContext(item: BackendTimelineItem): boolean 
   );
 }
 
+function isStandingHeadNoteTag(source: string | null | undefined): boolean {
+  switch (source) {
+    case "exec_timeout":
+    case "timezone":
+    case "memory":
+    case "agent_id":
+    case "agent_memory":
+    case "inherited_memory":
+    case "preloaded_skills":
+      return true;
+    default:
+      return false;
+  }
+}
+
 export function standingHeadNoteIds(items: readonly BackendTimelineItem[]): Set<string> {
   const ids = new Set<string>();
   const promptIdx = items.findIndex(isStandingPromptItem);
   if (promptIdx < 0) return ids;
   let i = promptIdx + 1;
-  while (i < items.length && items[i].kind === "system_marker" && items[i].source != null) {
+  while (
+    i < items.length &&
+    items[i].kind === "system_marker" &&
+    isStandingHeadNoteTag(items[i].source)
+  ) {
     ids.add(items[i].item_id);
     i += 1;
   }

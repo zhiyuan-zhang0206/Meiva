@@ -145,14 +145,17 @@ def test_cross_harness_under_limit_merges_checkpoints(
     assert data["items"][4]["payload"] == "Codex response"
 
 
-def test_cross_harness_over_limit_avoids_checkpoint_deserialization(
+def test_cross_harness_over_limit_merges_checkpoint_and_reattaches_prompt(
     db_conn: psycopg.Connection,
     test_client: TestClient,
 ) -> None:
     tid = create_agent(db_conn)
     messages = [
         SystemMessage(content="System prompt"),
-        HumanMessage(content="Old message"),
+        HumanMessage(
+            content="Old message",
+            additional_kwargs={"meiva_created_at": "2026-05-01T09:00:00+00:00"},
+        ),
     ]
     _put_checkpoint(tid, messages)
 
@@ -172,9 +175,122 @@ def test_cross_harness_over_limit_avoids_checkpoint_deserialization(
     resp = test_client.get(f"/api/agents/{tid}/timeline?limit=5")
     assert resp.status_code == 200
     data = resp.json()
-    assert len(data["items"]) == 5
+    assert len(data["items"]) == 6
     assert data["has_more"] is True
-    assert [it["item_id"] for it in data["items"]] == ["h5.0", "h6.0", "h7.0", "h8.0", "h9.0"]
+    assert [it["item_id"] for it in data["items"]] == [
+        "0.0",
+        "h5.0",
+        "h6.0",
+        "h7.0",
+        "h8.0",
+        "h9.0",
+    ]
+
+
+def test_external_harness_over_limit_excludes_pre_compact_and_lifecycle_head_markers(
+    db_conn: psycopg.Connection,
+    test_client: TestClient,
+) -> None:
+    tid = create_agent(db_conn)
+    pre_compact_harness = [
+        TimelineItem(
+            item_id="h0.0",
+            kind="inbound_chat",
+            payload="Ancient pre-compact message",
+            created_at="2026-05-01T08:00:00+00:00",
+        ),
+        TimelineItem(
+            item_id="h1.0",
+            kind="system_marker",
+            source="impersonation",
+            payload="Retired impersonation marker",
+            created_at="2026-05-01T08:01:00+00:00",
+        ),
+        TimelineItem(
+            item_id="h2.0",
+            kind="system_marker",
+            source="lifecycle_resurrect",
+            payload="Agent 1 resurrected",
+            created_at="2026-05-01T08:02:00+00:00",
+        ),
+        TimelineItem(
+            item_id="h3.0",
+            kind="system_marker",
+            source="lifecycle_restart",
+            payload="Agent 1 restarted",
+            created_at="2026-05-01T08:03:00+00:00",
+        ),
+    ]
+    post_compact_harness = [
+        TimelineItem(
+            item_id="h4.0",
+            kind="system_marker",
+            source="lifecycle_restart",
+            payload="Post-compact restart",
+            created_at="2026-05-01T12:01:00+00:00",
+        ),
+        *[
+            TimelineItem(
+                item_id=f"h{5 + i}.0",
+                kind="agent_chat",
+                payload=f"Post-compact turn {i}",
+                created_at=f"2026-05-01T12:{2 + i:02d}:00+00:00",
+            )
+            for i in range(6)
+        ],
+    ]
+    append_harness_timeline_items(
+        db_conn, tid, "antigravity", [*pre_compact_harness, *post_compact_harness]
+    )
+    db_conn.commit()
+
+    messages = [
+        SystemMessage(content="System prompt"),
+        HumanMessage(
+            content="<system_note>\nmemory note\n</system_note>",
+            additional_kwargs={
+                "meiva_msg_type": "system_note",
+                "meiva_note_tag": "memory",
+                "meiva_created_at": "2026-05-01T11:59:00+00:00",
+            },
+        ),
+        HumanMessage(
+            content="Compact summary [2026-05-01]: context compacted",
+            additional_kwargs={
+                "meiva_msg_type": "compact_summary",
+                "meiva_created_at": "2026-05-01T12:00:00+00:00",
+            },
+        ),
+    ]
+    _put_checkpoint(tid, messages)
+    _set_harness(db_conn, tid, "antigravity")
+
+    resp = test_client.get(f"/api/agents/{tid}/timeline?limit=5")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert [it["item_id"] for it in data["items"]] == [
+        "0.0",
+        "1.0",
+        "2.0",
+        "h6.0",
+        "h7.0",
+        "h8.0",
+        "h9.0",
+        "h10.0",
+    ]
+    assert data["has_more"] is True
+
+    older = test_client.get(f"/api/agents/{tid}/timeline?before=h6.0&limit=5")
+    assert older.status_code == 200
+    older_data = older.json()
+    assert [it["item_id"] for it in older_data["items"]] == [
+        "0.0",
+        "1.0",
+        "2.0",
+        "h4.0",
+        "h5.0",
+    ]
+    assert older_data["has_more"] is False
 
 
 def test_cross_harness_paging_backward(
