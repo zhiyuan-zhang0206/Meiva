@@ -16,7 +16,6 @@ from typing import TypeGuard
 
 from base.host.atomic_io import SYSTEM_FS, AtomicWriter
 from base.host.boundary.untyped import object_of
-from base.host.verified_file.reader import regular_bytes
 from base.native_process.os_platform import file_lock
 from base.paths import run_dir
 
@@ -73,7 +72,7 @@ def consume_host_exit_message(home: Path) -> str | None:
         return None
     with file_lock(_lock_path(home)):
         try:
-            raw = regular_bytes(target)
+            raw = target.read_bytes()
         except FileNotFoundError:
             return None
         except (OSError, ValueError) as exc:

@@ -24,7 +24,6 @@ from pydantic import Field, model_validator
 from base.clock import Timers
 from base.cluster.port_preflight import require_listener
 from base.host.atomic_io import write_text_atomic
-from base.host.verified_file.reader import regular_bytes
 from base.log import logger
 from base.native_process.evidence import EvidenceModel, ExpectedProcess
 from base.native_process.kernel_identity import native_boot_id
@@ -125,7 +124,7 @@ def write(data: Path, receipt: Receipt) -> None:
 def read_receipt(data: Path) -> Receipt | None:
     path = receipt_path(data)
     try:
-        raw = regular_bytes(path, max_bytes=16 * 1024)
+        raw = path.read_bytes()
     except FileNotFoundError:
         return None
     receipt = Receipt.model_validate_json(raw)
@@ -252,7 +251,7 @@ def require_closed(
 def read_pidfile(data: Path, receipt: Receipt) -> tuple[tuple[int, int], tuple[str, ...]]:
     path = data / "postmaster.pid"
     before = _inode(path)
-    lines = regular_bytes(path, max_bytes=8192).decode().splitlines()
+    lines = path.read_text(encoding="utf-8").splitlines()
     owner = receipt.process()
     if (
         len(lines) < 4

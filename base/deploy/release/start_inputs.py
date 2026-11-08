@@ -10,7 +10,6 @@ from base.deploy.release.start_digest import (
     combined_digest,
     relative_key,
 )
-from base.host.verified_file.reader import regular_bytes
 
 
 def configuration_digest(home: Path) -> str:
@@ -26,4 +25,4 @@ def _file_digest(path: Path) -> str | None:
         return None
     # A dangling symlink is an invalid declaration, never an omitted/default
     # value. Disappearance or replacement after lstat also refuses this read.
-    return bytes_digest(regular_bytes(path))
+    return bytes_digest(path.read_bytes())

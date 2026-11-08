@@ -30,7 +30,6 @@ from typing import Literal
 from base.host.boundary.json_values import is_object_dict
 from base.host.boundary.untyped import object_of
 from base.host.private_storage import write_private_bytes
-from base.host.verified_file.reader import RegularFileReadError, regular_bytes
 
 _VERSION = 1
 _MAX_BYTES = 256 * 1024
@@ -310,10 +309,10 @@ def read_state(home: Path) -> State:
     """
     path = state_path(home)
     try:
-        data = regular_bytes(path, max_bytes=_MAX_BYTES)
+        data = path.read_bytes()
     except FileNotFoundError:
         return State()
-    except (OSError, RegularFileReadError):
+    except OSError:
         raise StateError(f"the WAL-G state file {path} is not readable") from None
     return from_json(data)
 

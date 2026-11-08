@@ -46,7 +46,6 @@ from base.host.db_authority.model import (
 )
 from base.host.net.auth import new_session_id
 from base.host.private_storage import create_private_bytes, write_private_bytes
-from base.host.verified_file.reader import RegularFileReadError, regular_bytes
 from base.native_process.os_platform import file_lock
 from base.paths.private_dir import ensure_private_dir, is_foreign_owned
 
@@ -91,8 +90,10 @@ def read_private(path: Path) -> bytes:
     """Bounded read of an owner-only regular file; FileNotFoundError passes through."""
     _require_private(path, path.lstat(), directory=False)
     try:
-        return regular_bytes(path, max_bytes=_MAX_FILE_BYTES)
-    except RegularFileReadError as exc:
+        return path.read_bytes()
+    except FileNotFoundError:
+        raise
+    except OSError as exc:
         raise LedgerRefusedError(f"database authority file {path} is not stable: {exc}") from exc
 
 

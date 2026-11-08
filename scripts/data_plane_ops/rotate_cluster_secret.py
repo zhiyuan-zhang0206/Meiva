@@ -46,7 +46,6 @@ from base.host.boundary.options import options
 from base.host.boundary.untyped import object_of
 from base.host.env.dotenv_file import upsert_env
 from base.host.private_storage import write_private_bytes
-from base.host.verified_file.reader import regular_bytes
 from ops.env_audit import EnvWriteAudit
 from services.backup.artifact import passphrase
 
@@ -106,7 +105,7 @@ def _current_secret(home: Path) -> str:
 
 def _staged(home: Path) -> str | None:
     path = pending_path(home)
-    return regular_bytes(path).decode().strip() if path.exists() else None
+    return path.read_text(encoding="utf-8").strip() if path.exists() else None
 
 
 def _begin(home: Path) -> tuple[Rotation, str]:
@@ -195,7 +194,7 @@ def read_journal(home: Path) -> Rotation | None:
     path = journal_path(home)
     if not path.exists():
         return None
-    return Rotation.parse(object_of(json.loads, regular_bytes(path)))
+    return Rotation.parse(object_of(json.loads, path.read_bytes()))
 
 
 def _save(home: Path) -> Callable[[Rotation], None]:

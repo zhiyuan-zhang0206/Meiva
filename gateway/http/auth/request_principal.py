@@ -117,7 +117,6 @@ class SessionKeys:
         Losing the file ends every session; the next login mints a new key.
         """
         from base.host.private_storage import create_private_bytes, private_file_problem
-        from base.host.verified_file.reader import regular_bytes
 
         path = session_key_path(home)
         if create and not path.exists():
@@ -136,7 +135,7 @@ class SessionKeys:
             problem = "is not owner-only"
         if problem is not None:
             raise RuntimeError(f"{path}: {problem}")
-        value = regular_bytes(path, max_bytes=4096).decode().strip()
+        value = path.read_text(encoding="utf-8").strip()
         if _SESSION_KEY.fullmatch(value) is None:
             raise RuntimeError(f"{path} does not hold a session key")
         key = bytes.fromhex(value)

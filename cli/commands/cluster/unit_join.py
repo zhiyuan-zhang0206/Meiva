@@ -26,7 +26,6 @@ from base.host.db_authority.unit import (
 from base.host.env.boot_policy import BootstrapFetch
 from base.host.env.bootstrap import fetch_bootstrap_config
 from base.host.net.url_secret import url_host
-from base.host.verified_file.reader import regular_bytes
 from cli.commands.cluster.plans.unit_join_checks import (
     JoinTarget,
     data_plane_urls,
@@ -55,7 +54,7 @@ class _Carry:
 # Open the carried bundle file under the transport key: authenticated and unexpired, or a
 # refusal.
 def _open(step: CarriedBundle, transport_key: str, *, now: float) -> _Carry:
-    sealed = regular_bytes(Path(step.path), max_bytes=_MAX_BUNDLE_BYTES)
+    sealed = Path(step.path).read_bytes()
     return _Carry(step, open_bundle(sealed, transport_key, now=now))
 
 
