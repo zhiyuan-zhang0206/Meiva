@@ -44,6 +44,7 @@ from base.host.system.hostport import Host
 from base.native_process.os_platform import LockTimeoutError, file_lock
 from base.packages.extensions import install_registry
 from base.packages.skills.names import match_key
+from base.paths.scratch import ScratchSpace
 from cli.commands.extensions.packages.refresh_git_plan import (
     core_fetch,
     core_listing,
@@ -144,6 +145,7 @@ class Pass:
         repo: Path,
         home: Path,
         user_home: Path,
+        scratch: ScratchSpace,
     ) -> None:
         self.config = config
         # meiva:note
@@ -157,6 +159,9 @@ class Pass:
         self.repo = repo
         self.home = home
         self.user_home = user_home
+        # meiva:note
+        # The space a git-sourced package is cloned into for one pass, minted by the entry.
+        self.scratch = scratch
         self.skills_dir = paths.skills_dir(home)
         self.registry: install_registry.Registry | None = None
         self.deltas: dict[str, _Delta] = {}
@@ -681,9 +686,9 @@ class Pass:
 
     def _process_git(self, pkg: install_registry.InstalledPackage) -> None:
         from cli.commands.extensions._pkg_source import (
+            TEMP_PREFIX,
             SourcePathNotFoundError,
             acquire_source,
-            cleanup_temp,
         )
 
         sha = self._git_candidate(pkg)
@@ -691,10 +696,9 @@ class Pass:
             return
         source = pkg.source
         assert source is not None  # noqa: S101
-        acquired = None
-        try:
+        with self.scratch.make(prefix=TEMP_PREFIX) as staging:
             try:
-                acquired = acquire_source(source, pkg.ref)
+                acquired = acquire_source(source, pkg.ref, parent=staging)
             except (subprocess.CalledProcessError, SourcePathNotFoundError) as exc:
                 detail = (
                     stderr_text(exc).strip()
@@ -711,15 +715,11 @@ class Pass:
             if staged.exists():
                 shutil.rmtree(staged)
             self.skills_dir.mkdir(parents=True, exist_ok=True)
-            shutil.copytree(
-                root, staged, ignore=shutil.ignore_patterns(*install_registry.IGNORED_NAMES)
-            )
+            ignore = shutil.ignore_patterns(*install_registry.IGNORED_NAMES)
+            shutil.copytree(root, staged, ignore=ignore)
             result, new_hash = self._apply_staged(pkg, staged, sha)
             self._note_applied(pkg, result, new_hash, sha)
             self._record(pkg, result)
-        finally:
-            if acquired is not None:
-                cleanup_temp(acquired.cloned)
 
     # -- write-back ----------------------------------------------------------
 
@@ -763,6 +763,7 @@ def run_refresh(
     check_only: bool = False,
     only: str | None = None,
     from_job: bool = False,
+    scratch: ScratchSpace,
 ) -> RefreshReport:
     """Run one refresh pass with the caller's prepared configuration owner.
 
@@ -792,6 +793,7 @@ def run_refresh(
                 repo=repo,
                 home=home,
                 user_home=user_home,
+                scratch=scratch,
             )
             return pass_.run()
     except LockTimeoutError:

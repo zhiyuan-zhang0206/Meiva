@@ -17,6 +17,7 @@ import sys
 from pathlib import Path
 
 from base.paths.home import resolve_meiva_home
+from base.paths.scratch import SYSTEM_SCRATCH
 
 # meiva:note
 # `yt_run` and the pure modules are siblings in this skill's own scripts/ dir, not an importable
@@ -49,6 +50,7 @@ def _process_config() -> yt_run.YoutubeConfig:
         transcribe=(sys.executable, str(script)),
         root=resolve_meiva_home() / "state" / "mirrors" / "youtube",
         now=_now_iso,
+        scratch=SYSTEM_SCRATCH,
     )
 
 

@@ -168,5 +168,6 @@ def ensure_cluster_autostart(ctx: ConvergeCtx) -> None:
         enabled=ctx.read_config().view.general.os_jobs_enabled,
         host=ctx.host,
         roots=ctx.job_roots,
+        scratch=ctx.scratch,
     )
     # On failure the exception propagates so converge fails fast.

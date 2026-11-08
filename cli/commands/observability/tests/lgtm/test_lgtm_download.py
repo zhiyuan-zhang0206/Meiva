@@ -18,6 +18,7 @@ from pathlib import Path
 
 import pytest
 
+from base.paths.tests.fake_scratch import FakeScratch
 from cli.commands.observability import lgtm_native
 from cli.commands.observability.plans.lgtm.download_retry import DownloadLimits
 from cli.commands.observability.tests.lgtm.lgtm_harness import tar_bytes, zip_bytes
@@ -25,6 +26,13 @@ from cli.commands.observability.tests.observability_inputs import FAST_DOWNLOADS
 from cli.commands.observability.tests.scripted_http import Drip, Reply, serve
 
 LIMITS = replace(FAST_DOWNLOADS, retry_backoff_s=0.01)
+
+
+# meiva:note
+# The space a download stages in: the test's own directory, so a staging tree a failure leaks is
+# visible beside the archive instead of in the host's temporary root.
+def _scratch(tmp_path: Path) -> FakeScratch:
+    return FakeScratch(tmp_path / "scratch")
 
 
 def limits(**changes: float) -> DownloadLimits:
@@ -199,7 +207,13 @@ def test_an_archive_with_the_wrong_sha256_is_refused_and_leaves_no_marker(tmp_pa
         asset = {"url": f"{mirror.url}/loki.zip", "sha256": "0" * 64, "member": "loki-bin"}
         with pytest.raises(RuntimeError, match="SHA256 mismatch"):
             lgtm_native.download_and_verify(
-                "loki", "3.7.6", asset, tmp_path / "native", tag="linux_amd64", limits=LIMITS
+                "loki",
+                "3.7.6",
+                asset,
+                tmp_path / "native",
+                tag="linux_amd64",
+                limits=LIMITS,
+                scratch=_scratch(tmp_path),
             )
 
     assert not (tmp_path / "native" / "version-loki").exists()
@@ -219,6 +233,7 @@ def test_a_verified_executable_is_installed_with_its_version_and_platform_marker
             native,
             tag="linux_amd64",
             limits=LIMITS,
+            scratch=_scratch(tmp_path),
         )
 
     assert (native / "bin/loki").read_bytes() == b"binary"
@@ -246,6 +261,7 @@ def test_a_tarball_member_is_installed_at_the_backends_binary_path(tmp_path: Pat
             native,
             tag="linux_amd64",
             limits=LIMITS,
+            scratch=_scratch(tmp_path),
         )
 
     assert (native / "bin/prometheus").read_bytes() == b"prometheus"
@@ -267,6 +283,7 @@ def test_an_archive_without_the_expected_member_is_refused(tmp_path: Path) -> No
             tmp_path / "native",
             tag="linux_amd64",
             limits=LIMITS,
+            scratch=_scratch(tmp_path),
         )
 
     assert not (tmp_path / "native" / "version-prometheus").exists()
@@ -285,6 +302,7 @@ def test_a_release_tree_is_installed_without_its_top_level_directory(tmp_path: P
             native,
             tag="linux_amd64",
             limits=LIMITS,
+            scratch=_scratch(tmp_path),
         )
 
     assert (native / "grafana-home/bin/grafana").read_bytes() == b"grafana"
@@ -307,6 +325,7 @@ def test_a_release_tree_with_two_top_level_directories_is_refused(tmp_path: Path
             tmp_path / "native",
             tag="linux_amd64",
             limits=LIMITS,
+            scratch=_scratch(tmp_path),
         )
 
     assert not (tmp_path / "native" / "version-grafana").exists()

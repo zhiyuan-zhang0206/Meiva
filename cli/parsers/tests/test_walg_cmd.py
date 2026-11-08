@@ -16,6 +16,7 @@ from base.clock import Clock, ClockConfig
 from base.clock.tests.manual_timers import ManualTimers
 from base.host.boundary.options import options
 from base.host.boundary.untyped import object_of
+from base.paths.tests.fake_scratch import FakeScratch
 from cli.commands.data_plane import walg as walg_cmd
 from cli.commands.data_plane.config import DataPlaneConfig
 from cli.commands.data_plane.tests.data_plane_records import data_plane_config as data_plane_config
@@ -238,6 +239,7 @@ def test_check_prints_a_mark_per_step_and_exits_zero_when_all_pass(
             installed=always_pinned,
             system=_SYSTEM,
             machine=_MACHINE,
+            scratch=FakeScratch(sandbox.home / "scratch"),
         )
         == 0
     )
@@ -267,6 +269,7 @@ def test_check_exits_non_zero_and_names_the_failing_step(
             installed=always_pinned,
             system=_SYSTEM,
             machine=_MACHINE,
+            scratch=FakeScratch(sandbox.home / "scratch"),
         )
         == 1
     )

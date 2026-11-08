@@ -22,6 +22,7 @@ from base.config import ConfigBoot
 from base.host.system.hostport import Host
 from base.packages.extensions import install_registry
 from base.packages.extensions.install_registry import InstalledPackage, UpdateMode
+from base.paths.scratch import ScratchSpace
 
 # Column width for the text table's LAST RESULT cell (JSON is untruncated).
 _RESULT_W = 40
@@ -298,6 +299,7 @@ def cmd_packages_refresh(
     home: Path,
     user_home: Path,
     now: datetime,
+    scratch: ScratchSpace,
     check_only: bool = False,
     only: str | None = None,
     json_output: bool = False,
@@ -323,6 +325,7 @@ def cmd_packages_refresh(
         check_only=check_only,
         only=only,
         from_job=from_job,
+        scratch=scratch,
     )
     if json_output:
         payload = {

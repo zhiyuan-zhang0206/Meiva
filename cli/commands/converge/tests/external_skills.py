@@ -11,6 +11,7 @@ from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
 from base.cluster.machine import MachineIdentityReader
 from base.config import ConfigBoot
 from base.host.system.tests.fake_commands import fake_host
+from base.paths.scratch import SYSTEM_SCRATCH
 from base.sessions.tests.refuse_helper import refuse_helper
 from base.telemetry import EventPipeline
 from cli.commands.converge.spec import ConvergeCtx
@@ -57,6 +58,7 @@ def skill_ctx(
             ClockConfig("UTC", None, message_timestamp_weekday=False), timers=SYSTEM_TIMERS
         ),
         terminal=inert_terminal(),
+        scratch=SYSTEM_SCRATCH,
     )
 
 

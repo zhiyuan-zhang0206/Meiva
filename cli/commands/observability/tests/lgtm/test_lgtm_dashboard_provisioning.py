@@ -16,6 +16,7 @@ import pytest
 from base.agents.context.clients import DatabaseHandle
 from base.clock.tests.fakes import system_clock
 from base.host.net.tests.local_http import closed_port_url
+from base.paths.tests.fake_scratch import FakeScratch
 from base.telemetry import DrainStatus, EventPipeline
 from cli.commands.observability import _lgtm_provisioning as provisioning
 from cli.commands.observability.plans.lgtm.dashboard_plan import (
@@ -123,8 +124,13 @@ def _unreachable_database() -> DatabaseHandle:
     raise RuntimeError("database is down")
 
 
-def test_a_render_that_raises_is_an_outcome_not_an_error() -> None:
-    assert provisioning.render_dashboard(_unreachable_database) == _BROKEN
+def test_a_render_that_raises_is_an_outcome_not_an_error(tmp_path: Path) -> None:
+    assert (
+        provisioning.render_dashboard(
+            _unreachable_database, scratch=FakeScratch(tmp_path / "scratch")
+        )
+        == _BROKEN
+    )
 
 
 def test_a_render_is_installed_recorded_and_not_rewritten_when_unchanged(

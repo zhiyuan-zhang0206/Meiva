@@ -22,6 +22,7 @@ from base.config import ConfigBoot
 from base.packages.extensions import install_registry as reg
 from base.paths import meiva_home
 from base.paths.home import resolve_meiva_home
+from base.paths.tests.fake_scratch import FakeScratch
 from cli.commands.duration import parse_duration
 from cli.commands.extensions.packages.refresh import Pass, RefreshReport, run_refresh
 from cli.commands.extensions.packages.refresh_git_plan import (
@@ -92,6 +93,7 @@ def _refresh(
         from_job=from_job,
         home=_home(),
         user_home=_home(),
+        scratch=FakeScratch(_home().parent / "scratch"),
     )
 
 
@@ -302,6 +304,7 @@ def test_git_channel_copy_edit_converges_to_incoming(
             repo=core_repo,
             home=_home(),
             user_home=_home(),
+            scratch=FakeScratch(tmp_path / "scratch"),
         )
         result, new_hash = gate._apply_staged(pkg, staged, "0" * 40)
     finally:
@@ -584,6 +587,7 @@ def test_refresh_cmd_json_shape(
             json_output=True,
             home=_home(),
             user_home=_home(),
+            scratch=FakeScratch(_home().parent / "scratch"),
         )
         == 0
     )

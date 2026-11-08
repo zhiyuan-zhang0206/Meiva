@@ -14,6 +14,7 @@ from base.cluster.machine import MachineIdentityReader
 from base.db.code_version_gate import ProcessDbGate
 from base.packages.extensions import materialize as mat
 from base.packages.extensions import registry as reg
+from base.paths.tests.fake_scratch import FakeScratch
 from cli.commands.extensions.skill import cmd_skill_install
 from cli.database.runtime import CommandRuntime
 from cli.database.tests.cli_tests import operator_database as operator_database
@@ -78,6 +79,7 @@ def test_install_on_home_a_materializes_on_home_b(
                 home=home_a,
                 now=command_runtime.clock.now(),
                 environ=ENVIRON,
+                scratch=FakeScratch(home_a / "scratch"),
             )
             == 0
         )
@@ -125,6 +127,7 @@ def test_home_b_is_idempotent_on_a_second_pass(
                 home=home_a,
                 now=command_runtime.clock.now(),
                 environ=ENVIRON,
+                scratch=FakeScratch(home_a / "scratch"),
             )
             == 0
         )
@@ -168,6 +171,7 @@ def test_the_row_records_the_installing_machine(
                 home=home_a,
                 now=command_runtime.clock.now(),
                 environ=ENVIRON,
+                scratch=FakeScratch(home_a / "scratch"),
             )
             == 0
         )
@@ -202,6 +206,7 @@ def test_disabling_on_the_cluster_stops_new_machines_getting_it(
                 home=home_a,
                 now=command_runtime.clock.now(),
                 environ=ENVIRON,
+                scratch=FakeScratch(home_a / "scratch"),
             )
             == 0
         )
@@ -243,6 +248,7 @@ def test_home_b_keeps_its_own_edit_when_the_cluster_moves(
                 home=home_a,
                 now=command_runtime.clock.now(),
                 environ=ENVIRON,
+                scratch=FakeScratch(home_a / "scratch"),
             )
             == 0
         )

@@ -150,6 +150,7 @@ def test_external_guide_preserves_legacy_copies_and_publishes_nested_resources(
             ClockConfig("UTC", None, message_timestamp_weekday=False), timers=SYSTEM_TIMERS
         ),
         terminal=command_runtime.terminal,
+        scratch=command_runtime.scratch,
     )
     external_skills.converge_external_agent_skill(context, host_home=host_home)
     target = client_home / "skills" / "meiva-guide"

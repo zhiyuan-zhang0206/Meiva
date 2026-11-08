@@ -12,6 +12,7 @@ from pathlib import Path
 import pytest
 
 from base.agents.context.clients import DatabaseFactory
+from base.paths.tests.fake_scratch import FakeScratch
 from cli.commands.observability import grafana_render
 from cli.database.tests.cli_tests import operator_database as operator_database
 from cli.database.tests.command_inputs import command_runtime as command_runtime
@@ -28,7 +29,11 @@ def target(tmp_path: Path) -> Path:
 
 def _render(home: Path, database: DatabaseFactory, *, force: bool) -> int:
     return grafana_render.cmd_grafana_render(
-        home=home, force=force, repo_only=True, database_factory=database
+        home=home,
+        force=force,
+        repo_only=True,
+        database_factory=database,
+        scratch=FakeScratch(home / "scratch"),
     )
 
 

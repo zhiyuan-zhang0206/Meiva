@@ -38,6 +38,7 @@ from base.cluster.machine import MachineIdentityReader
 from base.config import ConfigBoot
 from base.host.boundary.process import stderr_text
 from base.packages.extensions import install_registry as reg
+from base.paths.scratch import ScratchSpace
 from cli.commands.extensions.plans.source_binding import SourceBinding
 from cli.commands.extensions.skill_package import ExtensionGateway
 from cli.commands.extensions.skills_sync import Source
@@ -63,6 +64,7 @@ def cmd_skill_install(
     home: Path,
     now: datetime,
     environ: Mapping[str, str],
+    scratch: ScratchSpace,
 ) -> int:
     """`meiva skill install <git-url-or-local-path> [--ref REF] [--path SUBDIR]
     [--accept-risk] [--update-mode auto|notify|off] [--check-every DUR]` —
@@ -79,7 +81,7 @@ def cmd_skill_install(
     """
     from cli.commands.duration import parse_duration
 
-    from ._pkg_source import SourcePathNotFoundError, acquire_source, cleanup_temp
+    from ._pkg_source import TEMP_PREFIX, SourcePathNotFoundError, acquire_source
     from .skill_package import SkillPackageError, SkillScanRefused, discover, install
 
     try:
@@ -87,13 +89,15 @@ def cmd_skill_install(
     except ValueError as exc:
         print(f"[meiva skill install] {exc}", file=sys.stderr)
         return 1
-    try:
-        acquired = acquire_source(source, ref)
-    except (subprocess.CalledProcessError, SourcePathNotFoundError) as e:
-        detail = stderr_text(e).strip() if isinstance(e, subprocess.CalledProcessError) else str(e)
-        print(f"[meiva skill install] {detail}", file=sys.stderr)
-        return 1
-    try:
+    with scratch.make(prefix=TEMP_PREFIX) as staging:
+        try:
+            acquired = acquire_source(source, ref, parent=staging)
+        except (subprocess.CalledProcessError, SourcePathNotFoundError) as e:
+            detail = (
+                stderr_text(e).strip() if isinstance(e, subprocess.CalledProcessError) else str(e)
+            )
+            print(f"[meiva skill install] {detail}", file=sys.stderr)
+            return 1
         root = acquired.root / path if path else acquired.root
         if not root.is_dir():
             print(f"[meiva skill install] path '{path}' not found in source.", file=sys.stderr)
@@ -132,8 +136,6 @@ def cmd_skill_install(
         print("  trust=unreviewed — `meiva skill trust <name>` once a person has read it.")
         print("  active on the next skill scan; no restart needed.")
         return 0
-    finally:
-        cleanup_temp(acquired.cloned)
 
 
 def cmd_skill_scan(target: str, *, home: Path) -> int:
@@ -641,7 +643,9 @@ def cmd_skill_update(
     )
 
 
-def cmd_skill_upgrade(name: str, *, home: Path, now: datetime, user_home: Path) -> int:
+def cmd_skill_upgrade(
+    name: str, *, home: Path, now: datetime, user_home: Path, scratch: ScratchSpace
+) -> int:
     """`meiva skill upgrade <name>` — re-fetch an installed skill package
     from its recorded git source (a private skills repo and other user
     installs).
@@ -655,7 +659,7 @@ def cmd_skill_upgrade(name: str, *, home: Path, now: datetime, user_home: Path) 
     from base import paths
     from base.packages.extensions import install_registry
 
-    from ._pkg_source import SourcePathNotFoundError, acquire_source, cleanup_temp
+    from ._pkg_source import TEMP_PREFIX, SourcePathNotFoundError, acquire_source
 
     pkg = install_registry.get(name, home=home)
     if pkg is None or pkg.type != "skill":
@@ -684,15 +688,19 @@ def cmd_skill_upgrade(name: str, *, home: Path, now: datetime, user_home: Path) 
     # meiva:note
     # `acquire_source` takes a value already placed; `pkg` keeps the recorded text, so the
     # re-registration below does not migrate a legacy `~/...` row to an absolute path.
-    try:
-        acquired = acquire_source(
-            install_registry.placed_source(recorded, user_home=user_home), pkg.ref
-        )
-    except (subprocess.CalledProcessError, SourcePathNotFoundError) as e:
-        detail = stderr_text(e).strip() if isinstance(e, subprocess.CalledProcessError) else str(e)
-        print(f"[meiva skill upgrade] {detail}", file=sys.stderr)
-        return 1
-    try:
+    with scratch.make(prefix=TEMP_PREFIX) as staging:
+        try:
+            acquired = acquire_source(
+                install_registry.placed_source(recorded, user_home=user_home),
+                pkg.ref,
+                parent=staging,
+            )
+        except (subprocess.CalledProcessError, SourcePathNotFoundError) as e:
+            detail = (
+                stderr_text(e).strip() if isinstance(e, subprocess.CalledProcessError) else str(e)
+            )
+            print(f"[meiva skill upgrade] {detail}", file=sys.stderr)
+            return 1
         pkg_dir = acquired.root / pkg.path if pkg.path else acquired.root
         if not (pkg_dir / "SKILL.md").is_file():
             print(
@@ -719,5 +727,3 @@ def cmd_skill_upgrade(name: str, *, home: Path, now: datetime, user_home: Path) 
         print(f"[meiva skill upgrade] re-fetched '{name}' from {pkg.source}.")
         print("  active on the next skill scan; no restart needed.")
         return 0
-    finally:
-        cleanup_temp(acquired.cloned)

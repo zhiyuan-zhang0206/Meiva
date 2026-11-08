@@ -104,6 +104,7 @@ def _h_plugins_install(args: argparse.Namespace) -> int:
         home=runtime.home,
         now=runtime.clock.now(),
         environ=runtime.config.process_environment(),
+        scratch=runtime.scratch,
     )
 
 
@@ -161,6 +162,7 @@ def _h_plugins_upgrade(args: argparse.Namespace) -> int:
         binding=source_binding(runtime.session.user_home, runtime.config.process_environment()),
         home=runtime.home,
         now=runtime.clock.now(),
+        scratch=runtime.scratch,
     )
 
 
@@ -190,6 +192,7 @@ def _h_skill_upgrade(args: argparse.Namespace) -> int:
         home=runtime.home,
         now=runtime.clock.now(),
         user_home=runtime.session.user_home,
+        scratch=runtime.scratch,
     )
 
 
@@ -237,6 +240,7 @@ def _h_skill_install(args: argparse.Namespace) -> int:
         home=runtime.home,
         now=runtime.clock.now(),
         environ=runtime.config.process_environment(),
+        scratch=runtime.scratch,
     )
 
 

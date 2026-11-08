@@ -15,6 +15,7 @@ from base.config import ConfigBoot
 from base.config.tests.configuration import snapshot_process_config
 from base.host.system.tests.fake_commands import fake_host
 from base.paths import meiva_home, repo_root
+from base.paths.tests.fake_scratch import FakeScratch
 from base.sessions.tests.refuse_helper import refuse_helper
 from cli.database.runtime import CommandRuntime, Terminal, UserSession
 
@@ -62,6 +63,7 @@ def command_runtime(tmp_path: Path) -> CommandRuntime:
         ),
         checkout=repo_root(),
         terminal=inert_terminal(),
+        scratch=FakeScratch(tmp_path / "scratch"),
     )
 
 

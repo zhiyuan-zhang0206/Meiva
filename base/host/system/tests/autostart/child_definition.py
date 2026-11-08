@@ -26,6 +26,12 @@ def _cold() -> None:
         assert name not in sys.modules, name
 
 
+def _scratch():
+    from base.paths.scratch import SYSTEM_SCRATCH
+
+    return SYSTEM_SCRATCH
+
+
 def _assert_written(plist: Path) -> None:
     from base.host.system.boot_policy import BOOT_RETRY_INTERVAL_S
 
@@ -93,7 +99,11 @@ def _registration(scenario: str) -> None:
         plist.write_text("registered")
         try:
             registration.register_autostart(
-                services=frozenset(), enabled=True, host=host, roots=_roots()
+                services=frozenset(),
+                enabled=True,
+                host=host,
+                roots=_roots(),
+                scratch=_scratch(),
             )
         except ValueError as exc:
             assert "starts no service" in str(exc)

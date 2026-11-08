@@ -13,9 +13,7 @@ an abrupt root death. It must never erase that retained custody.
 
 from __future__ import annotations
 
-import os
 import subprocess
-import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -31,6 +29,7 @@ from base.host.system.boot_policy import (
 from base.host.system.hostport import Host
 from base.host.system.job_values import JobRoots
 from base.native_process.ownership import OwnedProcess
+from base.paths.scratch import ScratchSpace
 
 SYSTEM_UNIT_DIR = Path("/etc/systemd/system")
 SYSTEMD_RUNTIME_DIR = Path("/run/systemd/system")
@@ -332,14 +331,21 @@ def _read_text(path: Path) -> str | None:
 # --- native registration / retirement -------------------------------------------
 
 
+# meiva:note
+# Register and enable the sole Linux boot route without recursive startup.
+#
+# The rendered unit travels to the privileged `install` as a file the caller's `scratch` minted
+# for this call: `unit_dir` is root-owned and unreadable to this process, and `context.home` is
+# durable deployment state, so the one place that is both writable here and disposable is the
+# space the entry handed down.
 def install(
     *,
     context: BootUnitContext,
     host: Host,
+    scratch: ScratchSpace,
     unit_dir: Path = SYSTEM_UNIT_DIR,
     runtime_dir: Path = SYSTEMD_RUNTIME_DIR,
 ) -> list[str]:
-    """Register and enable the sole Linux boot route without recursive startup."""
     if not systemd_running(host=host, runtime_dir=runtime_dir):
         raise RuntimeError(
             "the boot unit needs a Linux host running systemd as its service manager"
@@ -349,18 +355,14 @@ def install(
     destination = unit_path(unit_dir)
     unit_content = render_unit(context)
     if _read_text(destination) != unit_content:
-        fd, name = tempfile.mkstemp(prefix="meiva-boot-unit-", suffix=".service")
-        os.close(fd)
-        holder = Path(name)
-        try:
+        with scratch.make(prefix="meiva-boot-unit-") as staging:
+            holder = staging / f"{UNIT_NAME}.service"
             holder.write_text(unit_content)
             _privileged_or_raise(
                 ["install", "-m", "0644", str(holder), str(destination)],
                 f"write {destination}",
                 host=host,
             )
-        finally:
-            holder.unlink(missing_ok=True)
         _privileged_or_raise(["systemctl", "daemon-reload"], "systemctl daemon-reload", host=host)
         steps.append(f"installed system unit {destination}")
 

@@ -17,6 +17,7 @@ from base.cluster.dataplane import walg_binary
 from base.cluster.dataplane.pg_throwaway_base import ThrowawayConfig, configured_base
 from base.config import ConfigBoot
 from base.db import Database
+from base.paths.scratch import ScratchSpace
 from cli.commands.data_plane.config import DataPlaneConfig, data_plane_config_from_boot
 from services.backup.walg import check, probe, state, tick
 from services.backup.walg import config as walg_config
@@ -62,6 +63,7 @@ def cmd_walg_check(
     system: str,
     machine: str,
     installed: Callable[..., str | None] = walg_binary.installed_problem,
+    scratch: ScratchSpace,
 ) -> int:
     steps = check.run_check(
         path=plane.walg_config_file,
@@ -71,6 +73,7 @@ def cmd_walg_check(
         system=system,
         machine=machine,
         installed=installed,
+        scratch=scratch,
     )
     for step in steps:
         print(f"  {'✓' if step.ok else '✗'} {step.name}: {step.detail}")

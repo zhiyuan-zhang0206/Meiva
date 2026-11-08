@@ -18,6 +18,7 @@ from base.host.system.tests.fake_commands import (
 )
 from base.host.system.tests.fake_crontab import FakeCrontab
 from base.host.system.tests.recurring.heartbeats import MACHINE, TODAY
+from base.paths.tests.fake_scratch import FakeScratch
 
 
 @pytest.mark.parametrize("enabled", [False, True])
@@ -192,9 +193,21 @@ def test_every_registrar_stops_at_the_switch_before_the_home(
     loop.symlink_to(loop)
     roots = JobRoots(home=loop, repo=tmp_path, user_home=tmp_path)
     if register is autostart.register_autostart:
-        register(services=frozenset({"gateway"}), enabled=False, host=fake_host(), roots=roots)
+        register(
+            services=frozenset({"gateway"}),
+            enabled=False,
+            host=fake_host(),
+            roots=roots,
+            scratch=FakeScratch(tmp_path),
+        )
         with pytest.raises(RuntimeError, match="Symlink loop"):
-            register(services=frozenset({"gateway"}), enabled=True, host=fake_host(), roots=roots)
+            register(
+                services=frozenset({"gateway"}),
+                enabled=True,
+                host=fake_host(),
+                roots=roots,
+                scratch=FakeScratch(tmp_path),
+            )
     else:
         register(enabled=False, host=fake_host(), roots=roots)
         with pytest.raises(RuntimeError, match="Symlink loop"):

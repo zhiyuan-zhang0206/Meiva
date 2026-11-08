@@ -26,6 +26,7 @@ from base.host.system.hostport import Host
 from base.host.system.job_values import JobRoots, cron_environment, plist_path
 from base.host.system.packages_content import RefreshSchedule
 from base.host.system.tests.fake_commands import DARWIN_ARM64, FakeCommands, Reply, fake_host
+from base.paths.scratch import SYSTEM_SCRATCH, ScratchSpace
 from base.sessions.tests.refuse_helper import refuse_helper
 from services.desktop.permissions_helper.tests.support import (
     helper_build_env,
@@ -42,6 +43,13 @@ class _ProbePlatform:
 
 
 _PROBE_PLATFORM = _ProbePlatform()
+
+
+# meiva:note
+# The temporary space a registrar is handed: the system one, because every gate asserted below
+# refuses before anything is minted — the point is the refusal, not the directory.
+def _scratch() -> ScratchSpace:
+    return SYSTEM_SCRATCH
 
 
 # meiva:note
@@ -89,6 +97,7 @@ def _register_calls(enabled: bool) -> list[object]:
                 autostart.register_autostart,
                 services=frozenset({"gateway"}),
                 enabled=enabled,
+                scratch=_scratch(),
             ),
             id="autostart",
         ),
@@ -170,6 +179,7 @@ def test_registration_dispatches_when_enabled(
             enabled=True,
             host=host,
             roots=roots,
+            scratch=_scratch(),
         ),
         lambda: logs_job.register_logs_job(
             roots=roots, enabled=True, host=host, machine=_MACHINE, today=_TODAY

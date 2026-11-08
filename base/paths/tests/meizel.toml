@@ -1,7 +1,9 @@
-exports = ["homes.py"]
+exports = ["fake_scratch.py", "homes.py"]
 
 [uses]
 "conftest.py" = ["homes.py"]
+"fake_scratch.py" = []
+"test_scratch.py" = ["fake_scratch.py"]
 
 [debt.env-patch]
 "homes.py#monkeypatch.setenv os.environ.HOME" = { count = 1, owner = "#6018", until = "waits for debt lane A to convert the entry points these tests drive (CLI commands, ops handlers) to take their home as a value instead of resolving it from the process environment: point_home, unit_home and default_home are the shared front of 76 test modules, so converting this fixture before its consumers would move the read rather than remove it. HOME goes with MEIVA_HOME because the OS-job registrars resolve the default home from it." }

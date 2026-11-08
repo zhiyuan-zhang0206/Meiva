@@ -66,6 +66,7 @@ def ctx(tmp_path: Path, command_runtime: CommandRuntime) -> ConvergeCtx:
         clock=command_runtime.clock,
         services=frozenset(),
         terminal=command_runtime.terminal,
+        scratch=command_runtime.scratch,
     )
 
 
@@ -132,6 +133,7 @@ def test_ensure_external_harness_clis_raises_on_failure(
         clock=command_runtime.clock,
         services=frozenset(),
         terminal=command_runtime.terminal,
+        scratch=command_runtime.scratch,
     )
 
     with pytest.raises(RuntimeError, match="external harness CLI convergence failed"):

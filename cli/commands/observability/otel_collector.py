@@ -34,6 +34,7 @@ from base.deploy.release.collector import artifact as collector_artifact
 from base.deploy.release.collector import plan as collector_plan
 from base.host.net.ports import SYSTEM_URL_OPENER, StreamingUrlOpener
 from base.paths import otel_collector_config, otel_collector_dir
+from base.paths.scratch import ScratchSpace
 from base.telemetry.observability import collector_allowed_for_home, endpoint_override_is_explicit
 from base.telemetry.station_endpoint import resolve_station_target, validated_observability_base
 from cli.commands.converge.rendered_file import warn_sealed_inputs, write_rendered_guarded
@@ -324,6 +325,7 @@ def ensure_otel_collector(
     open_url: StreamingUrlOpener,
     tag: str | None,
     platform_label: str,
+    scratch: ScratchSpace,
 ) -> None:
     dest_dir = otel_collector_dir(meiva_home)
     marker = dest_dir / collector_plan.VERSION_MARKER
@@ -347,6 +349,7 @@ def ensure_otel_collector(
                 open_url=open_url,
                 timers=timers,
                 limits=settings.download,
+                scratch=scratch,
             )
             print(f"  · otel-collector: installed otelcol-contrib {version} ({install_tag})")
         case KeepCollector():
@@ -407,6 +410,7 @@ def ensure_otel_collector_step(ctx: ConvergeCtx) -> None:
         open_url=SYSTEM_URL_OPENER,
         tag=collector_plan.platform_tag_for(platform.system, platform.machine),
         platform_label=f"{platform.system} {platform.machine}",
+        scratch=ctx.scratch,
     )
 
 

@@ -1,14 +1,16 @@
-exports = ["expand.py", "home.py", "private_dir.py", "tests"]
+exports = ["expand.py", "home.py", "private_dir.py", "scratch.py", "tests"]
 
 [uses]
 "__init__.py" = ["home.py", "private_dir.py"]
-"tests" = ["__init__.py", "expand.py", "home.py", "private_dir.py"]
+"scratch.py" = []
+"tests" = ["__init__.py", "expand.py", "home.py", "private_dir.py", "scratch.py"]
 
 [purity]
 "expand.py" = "strict"
 
 [roots]
 "home.py" = { kinds = ["environ", "home"], why = "resolve_meiva_home and default_home read MEIVA_HOME and Path.home(): the home is the input that locates the .env Settings is built from, so it is read before (and below) Settings; moved here from dotenv_boot unchanged" }
+"scratch.py" = { kinds = ["environ", "random"], why = "the host boundary that owns the process's temporary space: it is the one place a scratch directory is minted, and every module above it takes the space it was handed; the directory's home is the environment's answer (`TMPDIR` and its siblings, read by `tempfile.gettempdir`) and its name is the OS's random draw, and both are read here so no caller repeats them — a call that names its own parent passes that directory down and reads neither" }
 
 [debt.ambient-read]
 "__init__.py#home base.paths.home.resolve_meiva_home" = { count = 2, owner = "#5816", until = "permanently: this module IS the home resolution (MEIVA_HOME else ~/.meiva); meiva_home() and the checkout check read it here so no caller restates the rule" }

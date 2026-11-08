@@ -12,6 +12,7 @@ from base.clock import Timers
 from base.host.atomic_io import SYSTEM_FS, AtomicWriter
 from base.log import logger
 from base.paths.expand import expand_home
+from base.paths.scratch import SYSTEM_SCRATCH, ScratchSpace
 from base.sessions import coding_session_owner, tool_capabilities
 from base.sessions import provenance as provenance_block
 from base.sessions.backend import get_shell_backend
@@ -63,6 +64,11 @@ class LaunchSite:
     host: SessionHost
     timers: Timers
     now: datetime
+    # meiva:note
+    # The temporary space this launch mints its failure marker in: a launch is the process that
+    # knows how long the marker must live, and the SDK entry hands it the system space because no
+    # agent's code cell can name one.
+    scratch: ScratchSpace
 
     def open_session(self, name: str, ttl: float) -> int:
         session_id, _full = self.shell.create(name, cwd=self.session_cwd, ttl=ttl, host=self.host)
@@ -83,6 +89,7 @@ def launch_site() -> LaunchSite:
         host=sessions.session_host(sessions.process_environ()),
         timers=clock.timers,
         now=clock.now(),
+        scratch=SYSTEM_SCRATCH,
     )
 
 

@@ -118,6 +118,7 @@ def _h_mcp_install(args: argparse.Namespace) -> int:
         uv=UvBuild(host=runtime.host, caller_environ=runtime.config.process_environment()),
         home=runtime.home,
         now=runtime.clock.now(),
+        scratch=runtime.scratch,
     )
 
 
@@ -139,6 +140,7 @@ def _h_mcp_upgrade(args: argparse.Namespace) -> int:
         home=runtime.home,
         now=runtime.clock.now(),
         user_home=runtime.session.user_home,
+        scratch=runtime.scratch,
     )
 
 

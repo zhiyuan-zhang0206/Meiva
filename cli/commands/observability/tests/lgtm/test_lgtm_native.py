@@ -88,6 +88,7 @@ def ensure(
         producer=unit.producer,
         machine=unit.machine,
         host=host_on(host_platform),
+        scratch=unit.scratch,
     )
 
 

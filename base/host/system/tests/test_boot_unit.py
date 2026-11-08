@@ -35,6 +35,7 @@ from base.host.system.tests.fake_commands import (
     fake_host,
 )
 from base.native_process.ownership import OwnedProcess
+from base.paths.tests.fake_scratch import FakeScratch
 
 _SYSTEMCTL = {"systemctl": "/usr/bin/systemctl"}
 
@@ -215,6 +216,7 @@ def test_install_refuses_without_systemd(ctx: BootUnitContext, tmp_path: Path) -
             context=ctx,
             host=_linux(programs={}),
             runtime_dir=tmp_path / "absent",
+            scratch=FakeScratch(tmp_path / "scratch"),
         )
 
 
@@ -444,6 +446,7 @@ def test_install_enables_native_unit_without_recursively_starting(
         host=_linux(commands),
         unit_dir=unit_dir,
         runtime_dir=runtime_dir,
+        scratch=FakeScratch(tmp_path / "scratch"),
     )
     recorded = [list(argv) for argv in commands.argvs]
     assert recorded[0][:3] == ["install", "-m", "0644"]
@@ -467,6 +470,7 @@ def test_unchanged_enabled_unit_never_restarts_or_rewrites(
             host=_linux(commands),
             unit_dir=unit_dir,
             runtime_dir=runtime_dir,
+            scratch=FakeScratch(tmp_path / "scratch"),
         )
         == []
     )

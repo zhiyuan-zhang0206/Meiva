@@ -72,11 +72,13 @@ def _h_lgtm(
         from cli.commands.observability.grafana_render import cmd_grafana_render
 
         render = options(args, _LgtmRenderOptions)
+        renderer = runtime_of(args)
         return cmd_grafana_render(
-            home=runtime_of(args).home,
+            home=renderer.home,
             force=render.force,
             repo_only=render.repo_only,
             database_factory=database_factory_of(args),
+            scratch=renderer.scratch,
         )
     runtime = runtime_of(args)
     return cmd_lgtm_status(

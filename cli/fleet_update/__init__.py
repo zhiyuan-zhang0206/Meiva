@@ -11,6 +11,8 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
+from base.paths.scratch import ScratchSpace
+
 from . import choices
 from .down import down
 from .fleet_gate import resolve_target
@@ -30,6 +32,11 @@ class UpdateWindowInputs:
     operation_id: str
     initiator: str
     python: str
+    # meiva:note
+    # The temporary space a validation mints its throwaway `MEIVA_HOME` in: the roster check reads
+    # this checkout's services through a home no process can reach, so the entry hands in the space
+    # rather than the module naming the host's.
+    scratch: ScratchSpace
 
 
 # meiva:note
@@ -132,7 +139,9 @@ def run_window(
 
 
 def run_parsed(args: argparse.Namespace, inputs: UpdateWindowInputs) -> int:
-    outcome = choices.validate_parsed(args, inputs.env, python=inputs.python)
+    outcome = choices.validate_parsed(
+        args, inputs.env, python=inputs.python, scratch=inputs.scratch
+    )
     if isinstance(outcome, str):
         sys.stderr.write(outcome)
         return 2
@@ -159,8 +168,9 @@ def main(
     operation_id: str,
     initiator: str,
     python: str,
+    scratch: ScratchSpace,
 ) -> int:
-    args = choices.parse(argv, env, python=python)
+    args = choices.parse(argv, env, python=python, scratch=scratch)
     return run_window(
         args,
         repo=repo,

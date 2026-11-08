@@ -72,6 +72,7 @@ def _preflight_ctx(
         timers=command_runtime.timers,
         clock=command_runtime.clock,
         terminal=command_runtime.terminal,
+        scratch=command_runtime.scratch,
     )
 
 
@@ -411,6 +412,7 @@ def _git_repo(
         timers=command_runtime.timers,
         clock=command_runtime.clock,
         terminal=command_runtime.terminal,
+        scratch=command_runtime.scratch,
     )
     return ctx, head, first
 
@@ -489,6 +491,7 @@ def test_checkout_worktree_skipped(
         timers=command_runtime.timers,
         clock=command_runtime.clock,
         terminal=command_runtime.terminal,
+        scratch=command_runtime.scratch,
     )
     (wt / "stray.txt").write_text("dirty\n")
 

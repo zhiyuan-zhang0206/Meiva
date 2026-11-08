@@ -20,8 +20,8 @@
 #   - **series task** (`backfill=True`, typically a playlist like a conference): a bounded
 #     one-shot — take every video (up to `max_scan`), no watermark stop.
 #
-# Login-free, so this runs anywhere (not Mac-mini-bound). Pure stdlib + `yt-dlp` on PATH; no
-# `chrome` MCP, no `meiva` SDK.
+# Login-free, so this runs anywhere (not Mac-mini-bound). Stdlib + `yt-dlp` on PATH; no `chrome`
+# MCP, no `meiva` SDK — the one `base` import is the temporary-space port the config carries.
 #
 # This file is the shell: it runs yt-dlp and the transcription CLI, reads and writes the mirror
 # and reads the clock. What is asked of yt-dlp and how its answers are read are values in
@@ -35,7 +35,6 @@ from __future__ import annotations
 import json
 import subprocess
 import sys
-import tempfile
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -73,6 +72,8 @@ from yt_wire import (
     ytdlp_argv,
 )
 
+from base.paths.scratch import ScratchSpace
+
 
 # meiva:note
 # Where the adapter's effects land: the yt-dlp program, the argv prefix that runs the
@@ -88,6 +89,11 @@ class YoutubeConfig:
     transcribe: tuple[str, ...]
     root: Path
     now: Callable[[], str]
+    # meiva:note
+    # Where a one-track scratch directory is minted: the caller hands in the space (the skill's
+    # entry passes the process's own), so this module never asks the host where temporary space
+    # lives. Nothing outlives one fetch, and the name under it is that space's own.
+    scratch: ScratchSpace
 
 
 # meiva:note
@@ -180,13 +186,13 @@ def save(post: Post, root: Path) -> Path:
 # scratch dir; it is cleaned to prose.
 def fetch_transcript(config: YoutubeConfig, video_id: str, prefer_lang: str) -> Transcript | None:
     for kind in SUB_KINDS:
-        with tempfile.TemporaryDirectory() as tmp:
+        with config.scratch.make() as tmp:
             template = str(Path(tmp) / "%(id)s.%(ext)s")
             request = SubsRequest(video_url(video_id), kind, prefer_lang, template)
             subprocess.run(
                 ytdlp_argv(config.ytdlp, request), capture_output=True, text=True, check=False
             )
-            vtts = sorted(Path(tmp).glob(f"{video_id}*.vtt"))
+            vtts = sorted(tmp.glob(f"{video_id}*.vtt"))
             if vtts:
                 text = clean_vtt(vtts[0].read_text(encoding="utf-8", errors="replace"))
                 if text:

@@ -29,6 +29,8 @@ from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.host.proc import run_bounded
 from base.host.system.hostport import Host
 from base.native_process.os_platform import Platform
+from base.paths.scratch import ScratchSpace
+from base.paths.tests.fake_scratch import FakeScratch
 from base.telemetry import EventPipeline
 from base.telemetry.lgtm_local import BACKENDS
 from cli.commands.observability import lgtm_native
@@ -73,6 +75,11 @@ class LgtmUnit:
     home: Path
     machine: ConfiguredMachineIdentity
     producer: Callable[[], EventPipeline]
+    # meiva:note
+    # The temporary space a converge pass mints its download and extraction directories in: the
+    # test's own, so a staging directory that a failure leaks shows up beside the home rather than
+    # in the host's root.
+    scratch: ScratchSpace
 
     @property
     def native(self) -> Path:
@@ -124,7 +131,12 @@ def lgtm_unit(
     tmp_path: Path, command_runtime: CommandRuntime, operator_pipeline: Callable[[], EventPipeline]
 ) -> LgtmUnit:
     """A home under `tmp_path` with this invocation's machine identity and event producer."""
-    return LgtmUnit(tmp_path / "home", command_runtime.machine, operator_pipeline)
+    return LgtmUnit(
+        tmp_path / "home",
+        command_runtime.machine,
+        operator_pipeline,
+        FakeScratch(tmp_path / "scratch"),
+    )
 
 
 # meiva:note

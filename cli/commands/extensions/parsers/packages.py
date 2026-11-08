@@ -69,6 +69,7 @@ def _h_packages_refresh(args: argparse.Namespace) -> int:
         home=runtime.home,
         user_home=runtime.session.user_home,
         now=runtime.clock.now(),
+        scratch=runtime.scratch,
         check_only=opts.check,
         only=opts.package,
         json_output=opts.json_output,

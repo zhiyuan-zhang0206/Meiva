@@ -18,6 +18,7 @@ import pytest
 
 from base.cluster.machine import MachineIdentityReader
 from base.packages.extensions import install_registry as reg
+from base.paths.tests.fake_scratch import FakeScratch
 from cli.commands.extensions.mcp import UvBuild, cmd_mcp_install, cmd_mcp_upgrade
 from cli.commands.extensions.plugins import cmd_plugins_install
 from cli.commands.extensions.skill import cmd_skill_install
@@ -89,7 +90,18 @@ def test_mcp_install_refuses_manifest_beyond_host_engines(
     # (2026.x), so the beyond-host example must outrun a full year, not two digits.
     bad = dict(GOOD_MANIFEST, engines={"meiva": ">=2099"})
     _write_manifest(pkg, bad)
-    assert cmd_mcp_install(str(pkg), None, None, uv=uv, home=unit_home, now=datetime.now(UTC)) == 1
+    assert (
+        cmd_mcp_install(
+            str(pkg),
+            None,
+            None,
+            uv=uv,
+            home=unit_home,
+            now=datetime.now(UTC),
+            scratch=FakeScratch(unit_home / "scratch"),
+        )
+        == 1
+    )
     assert "requires Meiva >=2099" in capsys.readouterr().err
     assert reg.get("acme", home=unit_home) is None
     assert not (unit_home / "mcps" / "acme").exists()
@@ -106,7 +118,18 @@ def test_mcp_install_refuses_unbounded_pyproject(
         'requires-python = ">=3.12"\ndependencies = ["mcp>=1.27"]\n\n[tool.uv]\npackage = false\n',
         encoding="utf-8",
     )
-    assert cmd_mcp_install(str(pkg), None, None, uv=uv, home=unit_home, now=datetime.now(UTC)) == 1
+    assert (
+        cmd_mcp_install(
+            str(pkg),
+            None,
+            None,
+            uv=uv,
+            home=unit_home,
+            now=datetime.now(UTC),
+            scratch=FakeScratch(unit_home / "scratch"),
+        )
+        == 1
+    )
     assert "#1198" in capsys.readouterr().err
     assert reg.get("acme", home=unit_home) is None
 
@@ -121,7 +144,18 @@ def test_mcp_install_refuses_pyproject_out_of_declared_range(
         'requires-python = ">=3.12"\ndependencies = ["mcp>=1.27,<3"]\n\n[tool.uv]\npackage = false\n',
         encoding="utf-8",
     )
-    assert cmd_mcp_install(str(pkg), None, None, uv=uv, home=unit_home, now=datetime.now(UTC)) == 1
+    assert (
+        cmd_mcp_install(
+            str(pkg),
+            None,
+            None,
+            uv=uv,
+            home=unit_home,
+            now=datetime.now(UTC),
+            scratch=FakeScratch(unit_home / "scratch"),
+        )
+        == 1
+    )
     assert "reaches above" in capsys.readouterr().err
     assert reg.get("acme", home=unit_home) is None
 
@@ -131,7 +165,18 @@ def test_mcp_install_refuses_invalid_manifest(
 ) -> None:
     pkg = _make_mcp_package(tmp_path)
     (pkg / "meiva-plugin.json").write_text("not json", encoding="utf-8")
-    assert cmd_mcp_install(str(pkg), None, None, uv=uv, home=unit_home, now=datetime.now(UTC)) == 1
+    assert (
+        cmd_mcp_install(
+            str(pkg),
+            None,
+            None,
+            uv=uv,
+            home=unit_home,
+            now=datetime.now(UTC),
+            scratch=FakeScratch(unit_home / "scratch"),
+        )
+        == 1
+    )
     assert "not valid JSON" in capsys.readouterr().err
     assert reg.get("acme", home=unit_home) is None
 
@@ -139,7 +184,18 @@ def test_mcp_install_refuses_invalid_manifest(
 def test_mcp_install_accepts_valid_manifest(unit_home: Path, tmp_path: Path, uv: UvBuild) -> None:
     pkg = _make_mcp_package(tmp_path)
     _write_manifest(pkg, GOOD_MANIFEST)
-    assert cmd_mcp_install(str(pkg), None, None, uv=uv, home=unit_home, now=datetime.now(UTC)) == 0
+    assert (
+        cmd_mcp_install(
+            str(pkg),
+            None,
+            None,
+            uv=uv,
+            home=unit_home,
+            now=datetime.now(UTC),
+            scratch=FakeScratch(unit_home / "scratch"),
+        )
+        == 0
+    )
     row = reg.get("acme", home=unit_home)
     assert row is not None
     assert (unit_home / "mcps" / "acme" / "meiva-plugin.json").is_file()
@@ -168,7 +224,18 @@ def test_mcp_install_accepts_pyproject_dependencies_not_mirrored_in_manifest(
         'requires-python = ">=3.12"\ndependencies = ["mcp>=1.27,<2", "requests>=2.0,<3"]\n\n[tool.uv]\npackage = false\n',
         encoding="utf-8",
     )
-    assert cmd_mcp_install(str(pkg), None, None, uv=uv, home=unit_home, now=datetime.now(UTC)) == 0
+    assert (
+        cmd_mcp_install(
+            str(pkg),
+            None,
+            None,
+            uv=uv,
+            home=unit_home,
+            now=datetime.now(UTC),
+            scratch=FakeScratch(unit_home / "scratch"),
+        )
+        == 0
+    )
     row = reg.get("acme", home=unit_home)
     assert row is not None
 
@@ -179,7 +246,18 @@ def test_mcp_install_manifest_without_pyproject_fails_when_declaring_packages(
     pkg = _make_mcp_package(tmp_path)
     _write_manifest(pkg, GOOD_MANIFEST)
     (pkg / "pyproject.toml").unlink()
-    assert cmd_mcp_install(str(pkg), None, None, uv=uv, home=unit_home, now=datetime.now(UTC)) == 1
+    assert (
+        cmd_mcp_install(
+            str(pkg),
+            None,
+            None,
+            uv=uv,
+            home=unit_home,
+            now=datetime.now(UTC),
+            scratch=FakeScratch(unit_home / "scratch"),
+        )
+        == 1
+    )
     assert "no pyproject.toml" in capsys.readouterr().err
 
 
@@ -197,7 +275,18 @@ def test_mcp_upgrade_refuses_source_that_breaks_the_contract(
     _git(pkg, "add", ".")
     _git(pkg, "commit", "-q", "-m", "init")
     url = f"file://{pkg}"
-    assert cmd_mcp_install(url, None, None, uv=uv, home=unit_home, now=datetime.now(UTC)) == 0
+    assert (
+        cmd_mcp_install(
+            url,
+            None,
+            None,
+            uv=uv,
+            home=unit_home,
+            now=datetime.now(UTC),
+            scratch=FakeScratch(unit_home / "scratch"),
+        )
+        == 0
+    )
 
     _write_manifest(pkg, dict(GOOD_MANIFEST, engines={"meiva": ">=2099"}))
     _git(pkg, "add", ".")
@@ -209,6 +298,7 @@ def test_mcp_upgrade_refuses_source_that_breaks_the_contract(
             home=unit_home,
             now=datetime.now(UTC),
             user_home=unit_home,
+            scratch=FakeScratch(unit_home / "scratch"),
         )
         == 1
     )
@@ -251,6 +341,7 @@ def test_plugins_install_refuses_invalid_manifest_before_detection(
             home=unit_home,
             now=datetime.now(UTC),
             environ=ENVIRON,
+            scratch=FakeScratch(unit_home / "scratch"),
         )
         == 1
     )
@@ -283,6 +374,7 @@ def test_plugins_install_accepts_manifest_with_valid_engines(
             home=unit_home,
             now=datetime.now(UTC),
             environ=ENVIRON,
+            scratch=FakeScratch(unit_home / "scratch"),
         )
         == 1
     )
@@ -309,6 +401,7 @@ def test_skill_install_refuses_invalid_manifest_before_discovery(
             home=unit_home,
             now=datetime.now(UTC),
             environ=ENVIRON,
+            scratch=FakeScratch(unit_home / "scratch"),
         )
         == 1
     )
@@ -340,6 +433,7 @@ def test_skill_install_valid_manifest_proceeds(
             home=unit_home,
             now=datetime.now(UTC),
             environ=ENVIRON,
+            scratch=FakeScratch(unit_home / "scratch"),
         )
         == 0
     )

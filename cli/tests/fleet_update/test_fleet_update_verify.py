@@ -4,10 +4,12 @@ import json
 import sys
 import time
 from collections.abc import Callable
+from pathlib import Path
 from typing import cast
 
 import pytest
 
+from base.paths.tests.fake_scratch import FakeScratch
 from cli.fleet_update.choices import parse
 from cli.fleet_update.fleet_verify import roster
 from cli.fleet_update.plan.host_failures import PARTIAL_FAILURE_EXIT
@@ -119,7 +121,7 @@ class _Gateway:
 # meiva:note
 # The roster wait is spent on the clock the session carries. A wait that read `time` for itself
 # would record no sleep here and burn the same two seconds of wall time instead.
-def test_the_roster_wait_is_spent_on_the_sessions_clock() -> None:
+def test_the_roster_wait_is_spent_on_the_sessions_clock(tmp_path: Path) -> None:
     timers = _Timers()
     session = cast(
         Session,
@@ -142,6 +144,7 @@ def test_the_roster_wait_is_spent_on_the_sessions_clock() -> None:
         ],
         {},
         python=sys.executable,
+        scratch=FakeScratch(tmp_path / "scratch"),
     )
     started = time.monotonic()
 

@@ -22,7 +22,6 @@ from __future__ import annotations
 import importlib
 import importlib.util
 import sys
-import tempfile
 from collections.abc import Generator, Iterable
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -35,6 +34,7 @@ from base.db import Database
 from base.log import logger
 from base.packages.extensions import registry
 from base.packages.plugins import data_registry, load_report
+from base.paths.scratch import ScratchSpace
 from base.telemetry.metrics.plugin_metrics import MetricSpec
 
 # ── plugin spec suppliers ─────────────────────────────────────────────────────
@@ -133,7 +133,7 @@ def _import_plugin_metrics(module_name: str, metrics_py: Path) -> ModuleType:
 
 
 def _installed_faces(
-    conn: psycopg.Connection, skip_names: Iterable[str]
+    conn: psycopg.Connection, skip_names: Iterable[str], *, scratch: ScratchSpace
 ) -> tuple[list[data_registry.DeclaredFace | None], list[str], list[str]]:
     """(declarations, plugin names, plugins that could not even be read) of the enabled installed
     plugins. The declaration is taken while the unpacked tree exists, so the manifest gate and the
@@ -159,7 +159,7 @@ def _installed_faces(
             unreadable.append(extension.name)
             continue
         try:
-            with _unpacked_plugin(extension.name, archive) as tree:
+            with _unpacked_plugin(extension.name, archive, scratch=scratch) as tree:
                 metrics_py = tree / "metrics.py"
                 if not metrics_py.is_file():
                     logger.error(
@@ -186,7 +186,7 @@ def _installed_faces(
 
 
 def load_installed_plugin_specs(
-    conn: psycopg.Connection, *, skip_names: Iterable[str] = ()
+    conn: psycopg.Connection, *, skip_names: Iterable[str] = (), scratch: ScratchSpace
 ) -> PluginSpecs:
     """Load the enabled installed plugins from the registry (kind='plugin').
 
@@ -198,23 +198,26 @@ def load_installed_plugin_specs(
     whose ``metrics.py`` fails to import or declare, is reported and skipped;
     the rest still load.
     """
-    faces, names, unreadable = _installed_faces(conn, skip_names)
+    faces, names, unreadable = _installed_faces(conn, skip_names, scratch=scratch)
     specs = _specs_of(faces, names)
     return PluginSpecs(specs=specs.specs, loaded=specs.loaded, failed=[*unreadable, *specs.failed])
 
 
+# meiva:note
+# Unpack a plugin blob into a tree the caller's space mints; yields the tree root and removes
+# the tree when the context exits.
 @contextmanager
-def _unpacked_plugin(name: str, archive: bytes) -> Generator[Path]:
-    """Unpack a plugin blob into a scratch tree; yields the tree root. Owns
-    (and removes) the scratch tree it creates."""
-    with tempfile.TemporaryDirectory(prefix=f"meiva-plugin-{name}-") as scratch:
-        tree = Path(scratch)
+def _unpacked_plugin(name: str, archive: bytes, *, scratch: ScratchSpace) -> Generator[Path]:
+    with scratch.make(prefix=f"meiva-plugin-{name}-") as tree:
         registry.unpack_tree(archive, tree)
         yield tree
 
 
 def collect_plugin_specs(
-    conn: psycopg.Connection | None = None, plugins_dir: Path = REPO_PLUGINS_DIR
+    conn: psycopg.Connection | None = None,
+    plugins_dir: Path = REPO_PLUGINS_DIR,
+    *,
+    scratch: ScratchSpace,
 ) -> PluginSpecs:
     """The dual supplier: repo plugins (checkout) plus enabled installed
     plugins (registry rows + blobs), deduplicated by plugin name — a name
@@ -224,7 +227,9 @@ def collect_plugin_specs(
     faces, names = _repo_faces(plugins_dir)
     unreadable: list[str] = []
     if conn is not None:
-        installed_faces, installed_names, unreadable = _installed_faces(conn, names)
+        installed_faces, installed_names, unreadable = _installed_faces(
+            conn, names, scratch=scratch
+        )
         faces.extend(installed_faces)
         names.extend(installed_names)
     merged = _specs_of(faces, names)
@@ -233,7 +238,9 @@ def collect_plugin_specs(
     )
 
 
-def render_dashboard_json(db: Database, *, repo_only: bool = False) -> tuple[str, tuple[str, ...]]:
+def render_dashboard_json(
+    db: Database, *, repo_only: bool = False, scratch: ScratchSpace
+) -> tuple[str, tuple[str, ...]]:
     """Render the complete meiva-ops dashboard JSON from the live spec suppliers.
 
     The one render path shared by the operator command (``meiva lgtm render``)
@@ -251,9 +258,9 @@ def render_dashboard_json(db: Database, *, repo_only: bool = False) -> tuple[str
 
     core_specs = catalog.collect_core_metrics()
     if repo_only:
-        plugins = collect_plugin_specs()
+        plugins = collect_plugin_specs(scratch=scratch)
     else:
         with db.connect() as conn:
-            plugins = collect_plugin_specs(conn)
+            plugins = collect_plugin_specs(conn, scratch=scratch)
     rendered = render_to_json(render_dashboard(core_specs, plugins.specs))
     return rendered, tuple(sorted(plugins.failed))

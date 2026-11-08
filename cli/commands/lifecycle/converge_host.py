@@ -636,6 +636,7 @@ def converge_host(
         host=command.host,
         session=command.session,
         terminal=command.terminal,
+        scratch=command.scratch,
     )
     # meiva:note
     # Host-global steps belong to the host's prod install (the default home

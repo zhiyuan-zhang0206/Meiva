@@ -20,6 +20,7 @@ from base.host.boundary.options import attribute
 from base.host.permissions_helper.client import HelperFactory
 from base.host.system.hostport import Host
 from base.paths import repo_root
+from base.paths.scratch import SYSTEM_SCRATCH, ScratchSpace
 from base.sessions.helperproc import helper_for
 
 __all__ = [
@@ -153,6 +154,12 @@ class CommandRuntime:
     # other process facts. The entry's checkout gate has already accepted it for `home`.
     checkout: Path
     terminal: Terminal
+    # meiva:note
+    # The temporary space of this invocation: every command that mints a directory for one call
+    # (`meiva backup walg check`'s probe files, a fleet update's throwaway home, an extension
+    # clone's parent) takes it here and passes it down, so no command reads where the host keeps
+    # temporary space and a test can hand in a `FakeScratch` over its own directory.
+    scratch: ScratchSpace
     suppress_local_otlp: bool = False
 
     # meiva:note
@@ -243,6 +250,7 @@ class CommandRuntime:
             ),
             checkout=repo_root(),
             terminal=Terminal.current(),
+            scratch=SYSTEM_SCRATCH,
             suppress_local_otlp=suppress_local_otlp,
         )
 

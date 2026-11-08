@@ -306,6 +306,7 @@ def _context(
         clock=command_runtime.clock,
         services=services,
         terminal=command_runtime.terminal,
+        scratch=command_runtime.scratch,
     )
 
 

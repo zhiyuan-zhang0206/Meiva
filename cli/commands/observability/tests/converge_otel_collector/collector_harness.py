@@ -239,6 +239,7 @@ class CollectorUnit:
             open_url=self.open_url,
             tag=tag,
             platform_label=platform_label,
+            scratch=self.runtime.scratch,
         )
 
     # meiva:note
@@ -274,6 +275,7 @@ class CollectorUnit:
             clock=self.runtime.clock,
             services=frozenset(),
             terminal=self.runtime.terminal,
+            scratch=self.runtime.scratch,
         )
 
 

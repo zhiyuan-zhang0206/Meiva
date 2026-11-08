@@ -14,6 +14,7 @@ from base.host.system.backend import (
 from base.host.system.boot_autostart import registration as autostart
 from base.host.system.boot_unit import BootUnitContext
 from base.host.system.tests.fake_commands import LINUX_X86, FakeCommands, Reply, fake_host
+from base.paths.tests.fake_scratch import FakeScratch
 
 
 def test_get_backend_returns_correct_type() -> None:
@@ -74,6 +75,7 @@ def test_linux_autostart_has_one_native_manager(tmp_path: Path) -> None:
         autostart.register_linux(
             host=host,
             context=ctx,
+            scratch=FakeScratch(tmp_path),
             unit_dir=unit_dir,
             runtime_dir=runtime_dir,
         )
@@ -103,4 +105,6 @@ def test_linux_autostart_propagates_unavailable_systemd(tmp_path: Path) -> None:
         services=frozenset({"gateway"}),
     )
     with pytest.raises(RuntimeError, match="systemd"):
-        autostart.register_linux(host=fake_host(platform=LINUX_X86), context=ctx)
+        autostart.register_linux(
+            host=fake_host(platform=LINUX_X86), context=ctx, scratch=FakeScratch(tmp_path)
+        )

@@ -18,6 +18,7 @@ from typing import TypeGuard
 
 from base.agents.context.clients import DatabaseFactory
 from base.host.atomic_io import write_text_atomic
+from base.paths.scratch import ScratchSpace
 from cli.boundary.json_text import loads
 from cli.commands.observability._lgtm_provisioning import record_rendered_hash
 from cli.commands.observability.plans.lgtm.dashboard_plan import RENDERED_DASHBOARD_REL
@@ -109,7 +110,12 @@ def _report_diff(target: Path, current: str, rendered: str) -> None:
 # already matches (or was written), 1 when it differs (diff preview) or the render cannot run on
 # this host.
 def cmd_grafana_render(
-    *, home: Path, force: bool, repo_only: bool, database_factory: DatabaseFactory
+    *,
+    home: Path,
+    force: bool,
+    repo_only: bool,
+    database_factory: DatabaseFactory,
+    scratch: ScratchSpace,
 ) -> int:
     target = provisioning_dashboard(home)
     if not target.parent.is_dir():
@@ -122,7 +128,9 @@ def cmd_grafana_render(
 
     from base.packages.dashboard_supply import render_dashboard_json
 
-    rendered, failed = render_dashboard_json(database_factory(), repo_only=repo_only)
+    rendered, failed = render_dashboard_json(
+        database_factory(), repo_only=repo_only, scratch=scratch
+    )
     if failed:
         print(
             f"plugin load failures (skipped, panels missing from this render): {', '.join(failed)}",

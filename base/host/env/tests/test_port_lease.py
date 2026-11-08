@@ -32,6 +32,7 @@ from base.host.env.port_table import FIXED_PORTS
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 _LEASE_CHILD = Path(__file__).with_name("_lease_child.py")
+_LEASE_ROOT_CHILD = Path(__file__).with_name("_lease_root_child.py")
 
 
 # meiva:note
@@ -96,6 +97,28 @@ def _lease_reports(children: list[subprocess.Popen[bytes]]) -> list[list[int]]:
                     reports[child.pid] = json.loads(line)
                     ready.unregister(key.fileobj)
     return [reports[child.pid] for child in children]
+
+
+# meiva:note
+# The registry root is the host's meeting point, not this process's temporary directory: a second
+# process carrying a different `TMPDIR` must compute the same directory, or the two keep two
+# registries and each believes it owns the band this module hands out once.
+def test_the_registry_root_does_not_follow_the_processes_temporary_directory(
+    tmp_path: Path,
+) -> None:
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    child = subprocess.run(  # noqa: S603
+        [sys.executable, str(_LEASE_ROOT_CHILD)],
+        env={**os.environ, "TMPDIR": str(elsewhere)},
+        capture_output=True,
+        text=True,
+        cwd=_REPO_ROOT,
+        check=True,
+    )
+
+    assert Path(child.stdout.strip()) == port_lease.registry_dir()
+    assert not port_lease.registry_dir().is_relative_to(elsewhere)
 
 
 def _assert_live_lease_holders(

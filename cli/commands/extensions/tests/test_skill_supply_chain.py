@@ -24,6 +24,7 @@ import pytest
 from base.cluster.machine import GatewayAccess
 from base.packages.extensions import install_registry as reg
 from base.packages.extensions import registry
+from base.paths.tests.fake_scratch import FakeScratch
 from cli.commands.extensions.packages.cluster_registry import HttpExtensionGateway
 from cli.commands.extensions.skill import (
     cmd_skill_install,
@@ -114,6 +115,7 @@ def test_a_malicious_skill_refuses_and_leaves_nothing_behind(
             home=unit_home,
             now=datetime.now(UTC),
             environ=ENVIRON,
+            scratch=FakeScratch(unit_home / "scratch"),
         )
         == 1
     )
@@ -147,6 +149,7 @@ def test_one_bad_skill_aborts_a_whole_collection_before_the_first_copy(
             home=unit_home,
             now=datetime.now(UTC),
             environ=ENVIRON,
+            scratch=FakeScratch(unit_home / "scratch"),
         )
         == 1
     )
@@ -175,6 +178,7 @@ def test_accept_risk_installs_and_records_what_it_waived(
             home=unit_home,
             now=datetime.now(UTC),
             environ=ENVIRON,
+            scratch=FakeScratch(unit_home / "scratch"),
         )
         == 0
     )
@@ -207,6 +211,7 @@ def test_a_clean_third_party_install_is_still_unreviewed(
             home=unit_home,
             now=datetime.now(UTC),
             environ=ENVIRON,
+            scratch=FakeScratch(unit_home / "scratch"),
         )
         == 0
     )
@@ -280,6 +285,7 @@ def test_trust_is_a_separate_human_verb(
             home=unit_home,
             now=datetime.now(UTC),
             environ=ENVIRON,
+            scratch=FakeScratch(unit_home / "scratch"),
         )
         == 0
     )
@@ -319,6 +325,7 @@ def test_scan_reports_an_installed_package_and_exits_on_criticals(
             home=unit_home,
             now=datetime.now(UTC),
             environ=ENVIRON,
+            scratch=FakeScratch(unit_home / "scratch"),
         )
         == 0
     )
@@ -352,6 +359,7 @@ def test_scan_surfaces_previously_accepted_findings(
             home=unit_home,
             now=datetime.now(UTC),
             environ=ENVIRON,
+            scratch=FakeScratch(unit_home / "scratch"),
         )
         == 0
     )
@@ -384,6 +392,7 @@ def test_converge_stamps_repo_skills_builtin_and_leaves_a_review_alone(
             home=unit_home,
             now=datetime.now(UTC),
             environ=ENVIRON,
+            scratch=FakeScratch(unit_home / "scratch"),
         )
         == 0
     )
@@ -426,6 +435,7 @@ def test_install_registers_through_the_gateway_before_the_local_copy(
             home=unit_home,
             now=datetime.now(UTC),
             environ=ENVIRON,
+            scratch=FakeScratch(unit_home / "scratch"),
         )
         == 0
     )
@@ -462,6 +472,7 @@ def test_a_refused_registration_fails_the_install_and_copies_nothing(
             home=unit_home,
             now=datetime.now(UTC),
             environ=ENVIRON,
+            scratch=FakeScratch(unit_home / "scratch"),
         )
         == 1
     )

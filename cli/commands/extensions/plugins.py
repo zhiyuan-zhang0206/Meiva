@@ -36,12 +36,13 @@ from pathlib import Path
 
 from base.cluster.machine import MachineIdentityReader
 from base.host.boundary.process import stderr_text
+from base.paths.scratch import ScratchSpace
 from cli.commands.extensions._claude_code_plugin import Materialized
 from cli.commands.extensions._manifest_gate import gate_refuses
 from cli.commands.extensions.plans.source_binding import SourceBinding
 from cli.commands.extensions.skill_package import ExtensionGateway
 
-from ._pkg_source import cleanup_temp, clone_git
+from ._pkg_source import TEMP_PREFIX, clone_git
 
 
 def cmd_plugins_update(*, home: Path) -> int:
@@ -333,6 +334,7 @@ def cmd_plugins_install(
     home: Path,
     now: datetime,
     environ: Mapping[str, str],
+    scratch: ScratchSpace,
 ) -> int:
     """`meiva plugins install <url> [--path SUBDIR] [--ref REF] [--accept-risk]` —
     install an external package.
@@ -344,13 +346,13 @@ def cmd_plugins_install(
 
     from . import _claude_code_plugin
 
-    try:
-        cloned = clone_git(url, ref)
-    except subprocess.CalledProcessError as e:
-        print(f"[meiva plugins install] git failed: {stderr_text(e).strip()}", file=sys.stderr)
-        return 1
+    with scratch.make(prefix=TEMP_PREFIX) as staging:
+        try:
+            cloned = clone_git(url, ref, parent=staging)
+        except subprocess.CalledProcessError as e:
+            print(f"[meiva plugins install] git failed: {stderr_text(e).strip()}", file=sys.stderr)
+            return 1
 
-    try:
         pkg_dir = cloned / path if path else cloned
         if not pkg_dir.is_dir():
             print(f"[meiva plugins install] path '{path}' not found in source.", file=sys.stderr)
@@ -409,8 +411,6 @@ def cmd_plugins_install(
             file=sys.stderr,
         )
         return 1
-    finally:
-        cleanup_temp(cloned)
 
 
 def _install_dest(pkg_type: str, name: str, *, home: Path) -> Path:
@@ -465,7 +465,9 @@ def cmd_plugins_installed(*, home: Path) -> int:
     return 0
 
 
-def cmd_plugins_upgrade(name: str, *, binding: SourceBinding, home: Path, now: datetime) -> int:
+def cmd_plugins_upgrade(
+    name: str, *, binding: SourceBinding, home: Path, now: datetime, scratch: ScratchSpace
+) -> int:
     """`meiva plugins upgrade <name>` — re-fetch an installed package
     from its source.
 
@@ -495,13 +497,13 @@ def cmd_plugins_upgrade(name: str, *, binding: SourceBinding, home: Path, now: d
             "replacing it with the fetched source."
         )
 
-    try:
-        cloned = clone_git(pkg.source, pkg.ref)
-    except subprocess.CalledProcessError as e:
-        print(f"[meiva plugins upgrade] git failed: {stderr_text(e).strip()}", file=sys.stderr)
-        return 1
+    with scratch.make(prefix=TEMP_PREFIX) as staging:
+        try:
+            cloned = clone_git(pkg.source, pkg.ref, parent=staging)
+        except subprocess.CalledProcessError as e:
+            print(f"[meiva plugins upgrade] git failed: {stderr_text(e).strip()}", file=sys.stderr)
+            return 1
 
-    try:
         pkg_dir = cloned / pkg.path if pkg.path else cloned
         if not pkg_dir.is_dir():
             print(
@@ -538,5 +540,3 @@ def cmd_plugins_upgrade(name: str, *, binding: SourceBinding, home: Path, now: d
         print(f"[meiva plugins upgrade] re-fetched '{name}' from {pkg.source}.")
         print("  active on the next skill scan; no restart needed.")
         return 0
-    finally:
-        cleanup_temp(cloned)

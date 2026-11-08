@@ -9,6 +9,7 @@ from pathlib import Path
 
 import pytest
 
+from base.paths.tests.fake_scratch import FakeScratch
 from cli.fleet_update.choices import parse
 from cli.tests.fleet_update.fleet_update_cluster import Cluster, write_executable
 
@@ -319,6 +320,7 @@ def test_the_service_roster_runs_on_the_interpreter_the_entry_named(
             ["run", *_STOP_CHOICES, "--stop-infra", "--gateway", "gw", "--log-dir", "logs"],
             {},
             python=str(stand_in),
+            scratch=FakeScratch(tmp_path / "scratch"),
         )
     assert refusal.value.code == 2
     assert (
