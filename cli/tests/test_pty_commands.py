@@ -1,18 +1,15 @@
 from __future__ import annotations
 
-from pathlib import Path
-
 import pytest
 
 from base.paths import meiva_home
-from base.paths.tests.homes import point_home
+from base.paths.tests.homes import unit_home as unit_home
 from base.sessions.pty import allocation_freeze
+from base.sessions.pty.tests.pty_service import PtyServiceProcess
+from base.sessions.pty.tests.pty_service import pty_service as pty_service
 from cli import main as cli_main
 
-
-@pytest.fixture(autouse=True)
-def _isolated_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    point_home(monkeypatch, tmp_path / "home")
+pytestmark = pytest.mark.usefixtures("pty_service")
 
 
 def test_operator_round_trip_needs_no_gateway_or_data_plane(
@@ -47,6 +44,8 @@ def test_cli_refuses_stale_generation_and_preserves_current_owner(
     assert cli_main.main(["pty", "resume", "stale-generation"]) == 1
     assert allocation_freeze.read(home=meiva_home()) == current
     assert "does not own the freeze" in capsys.readouterr().err
+    if current.generation is not None:
+        assert cli_main.main(["pty", "resume", current.generation]) == 0
 
 
 def test_cli_status_surfaces_corrupt_marker_as_fail_closed(
@@ -61,11 +60,11 @@ def test_cli_status_surfaces_corrupt_marker_as_fail_closed(
     assert f"marker={path}" in output
 
 
-def test_cli_resume_reports_allocation_lock_timeout(
+def test_cli_resume_reports_service_down(
     capsys: pytest.CaptureFixture[str],
+    pty_service: PtyServiceProcess,
 ) -> None:
-    lock = allocation_freeze.lock_path(meiva_home())
-    lock.mkdir(parents=True)
+    pty_service.stop()
 
     assert cli_main.main(["pty", "resume", "owned-generation"]) == 1
-    assert str(lock) in capsys.readouterr().err
+    assert "no pty-sessions service is listening" in capsys.readouterr().err

@@ -243,8 +243,5 @@ def resume(generation: str, *, home: Path, writer: AtomicWriter | None = None) -
     from base.sessions.pty.paths import service_socket_path
 
     socket_path = service_socket_path(run_dir(home))
-    try:
-        res = client.request("resume", socket_path=socket_path, generation=generation)
-        return bool(res.get("resumed", False))
-    except (client.ServiceDownError, FileNotFoundError):
-        return False
+    res = client.request("resume", socket_path=socket_path, generation=generation)
+    return bool(res.get("resumed", False))
