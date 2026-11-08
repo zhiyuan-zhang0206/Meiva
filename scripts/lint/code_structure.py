@@ -30,7 +30,7 @@ if __name__ == "__main__":
 
 from meizel import allowances, lint_common  # noqa: E402
 from meizel.budgets import limits  # noqa: E402
-from meizel.checkout import load_universe, roles_at  # noqa: E402
+from meizel.checkout import GitRepo, load_universe, roles_at  # noqa: E402
 from meizel.contracts.analysis import (  # noqa: E402
     load_manifests,
     load_policy,
@@ -566,7 +566,7 @@ def main(
     # lists are a value the rule takes, so `meizel/state/ambient_state` opens nothing and a
     # synthetic root is judged by its own policy.
     try:
-        policy = allowances.load(repo_root)
+        policy = allowances.load(GitRepo(repo_root))
         table = decisions.decision_table(policy)
         ambient_config = ambient_state.Config(
             scope=_AST_DIRS, allow=ambient_allowlist.from_policy(policy)

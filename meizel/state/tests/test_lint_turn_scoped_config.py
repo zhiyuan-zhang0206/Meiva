@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 
+from meizel import allowances
 from meizel.state import turn_scoped_config as gate
 
 
@@ -71,3 +72,36 @@ def test_the_agents_overrides_and_non_per_agent_settings_pass(tmp_path: Path) ->
         encoding="utf-8",
     )
     assert gate.main([str(fine)], per_agent_field_names=_per_agent) == 0
+
+
+# meiva:note
+# Which policy a run is judged by is the caller's to say: `policy_root` names the checkout whose
+# policy applies and `repo_root` the tree judged. Before they were two names the module read this
+# repository's policy at import, so a caller could not judge a synthetic tree by a synthetic policy
+# -- and could not tell from the signature which policy was in force.
+def test_the_policy_a_run_uses_is_the_one_its_caller_names(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    policy_root = tmp_path / "policy"
+    policy_root.mkdir()
+    (policy_root / allowances.POLICY).write_text(
+        '[turn-scoped-config]\nscan-dirs = ["lib"]\nextra-files = []\nrule-inputs = []\n'
+        "\n[turn-scoped-config.files]\n\n[turn-scoped-config.plugin-mechanism-files]\n",
+        encoding="utf-8",
+    )
+    tree = tmp_path / "tree"
+    (tree / "lib").mkdir(parents=True)
+    # meiva:note
+    # A name the walk does not skip: the rule judges the files beside a test and reports each by the
+    # name the scan reached.
+    (tree / "lib" / "helper.py").write_text(
+        "value = settings.agent.reasoning_effort\n", encoding="utf-8"
+    )
+    assert (
+        gate.main([], per_agent_field_names=_per_agent, repo_root=tree, policy_root=policy_root)
+        == 1
+    )
+    assert "lib/helper.py:1" in capsys.readouterr().err
+    # meiva:note
+    # The same tree under this repository's policy lies outside every directory it scans.
+    assert gate.main([], per_agent_field_names=_per_agent, repo_root=tree) == 0

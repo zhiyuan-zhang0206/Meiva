@@ -38,5 +38,5 @@ def typescript_scopes(policy: Policy) -> tuple[str, ...]:
 def scan_typescript(
     path: str, source: str, universe: Universe, policy: Policy | None = None
 ) -> TsScan:
-    loaded = allowances.load(universe.root) if policy is None else policy
+    loaded = allowances.load(universe.repo) if policy is None else policy
     return scan_batch(universe, {path: source}, loaded, Sources())[path]

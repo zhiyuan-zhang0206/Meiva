@@ -8,13 +8,25 @@
 from __future__ import annotations
 
 import sys
+from functools import cache
 from pathlib import Path
 
 from meizel import allowances, lint_common
+from meizel.checkout import GitRepo
 from meizel.language import script_siblings
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
-_PATH_IMPORT_SCOPE = allowances.load(_REPO_ROOT).names("path-imports", "scope")
+
+
+# meiva:note
+# The import paths this rule guards: the checkout that runs the rule declares them, because the scope
+# is this tool's configuration and not the judged tree's -- a synthetic root is judged by the same
+# scope. Read on first use rather than at import: importing this module opens no file, and a run that
+# judges nothing reads no policy.
+@cache
+def _import_scope(policy_root: Path) -> tuple[str, ...]:
+    return allowances.load(GitRepo(policy_root)).names("path-imports", "scope")
+
 
 __all__ = ["main", "scan_file"]
 
@@ -36,7 +48,13 @@ def _directory(path: Path) -> script_siblings.Directory:
 
 def scan_file(path: Path, *, root: Path | None = None) -> list[str]:
     """Return one error string per unguarded sibling import in a script-mode file."""
-    repo_root = _REPO_ROOT if root is None else root
+    return _violations(path, _REPO_ROOT if root is None else root, _import_scope(_REPO_ROOT))
+
+
+# meiva:note
+# One file's violations of the guard, under the scope the caller resolved: the read and the label are
+# this shell's, the decision is `meizel.language.script_siblings`'.
+def _violations(path: Path, repo_root: Path, scope: tuple[str, ...]) -> list[str]:
     src = lint_common.read_utf8_text(path)
     if src is None:
         return []
@@ -47,7 +65,7 @@ def scan_file(path: Path, *, root: Path | None = None) -> list[str]:
         # Not under the repository: pre-commit passes absolute paths, and an out-of-tree target is
         # judged by the same rule rather than crashing the run.
         rel = path.as_posix()
-    return script_siblings.violations(rel, src, _directory(path.parent), scope=_PATH_IMPORT_SCOPE)
+    return script_siblings.violations(rel, src, _directory(path.parent), scope=scope)
 
 
 # meiva:note
@@ -83,7 +101,8 @@ def _files_to_scan(
     ]
 
 
-def main(argv: list[str], *, repo_root: Path = _REPO_ROOT) -> int:
+def main(argv: list[str], *, repo_root: Path = _REPO_ROOT, policy_root: Path | None = None) -> int:
+    scope = _import_scope(policy_root if policy_root is not None else _REPO_ROOT)
     argv, only = lint_common.split_only(argv)
     resolved: list[str] = []
     if argv:
@@ -105,7 +124,7 @@ def main(argv: list[str], *, repo_root: Path = _REPO_ROOT) -> int:
         )
         if not script_siblings.judged(rel):
             continue
-        for violation in scan_file(path, root=repo_root):
+        for violation in _violations(path, repo_root, scope):
             total += 1
             print(violation)
     if total:

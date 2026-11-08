@@ -236,7 +236,7 @@ def sync_manifests(
 # every surviving policy entry and its reason keeps its original text for the current scanner.
 def prepare_policy_snapshot(repo: Checkout) -> Policy:
     try:
-        policy = load_snapshot(repo.root)
+        policy = load_snapshot(repo)
     except ValueError as error:
         raise MeizelError(f"cannot read the manifests of snapshot: {error}") from error
     text = "\n".join(policy.lines) + ("\n" if policy.lines else "")
