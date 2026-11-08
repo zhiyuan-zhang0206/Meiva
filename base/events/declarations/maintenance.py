@@ -112,6 +112,11 @@ class TaskEscalation(TypedDict):
     leg: Literal["delegator", "user"]
 
 
+class TaskReminderUndelivered(TypedDict):
+    owner_id: int
+    count: int
+
+
 class TaskReminderRerouted(TypedDict):
     owner_id: int
     leg: Literal["manager", "user"]
@@ -325,6 +330,22 @@ EVENTS: dict[str, EventSpec] = {
         tier="noise",
         site="task_maintenance/daemon.py:run_reminders",
         persist=True,
+    ),
+    # meiva:note
+    # A task that has stayed overdue past its interval plus one sweep plus the longest digest
+    # hold, with `reminder_count` still zero, has never had a reminder delivered. Counting sits
+    # at delivery, so a broken delivery path leaves both sides quiet: no message, and no counter
+    # to notice (the blind spot #8596 opened, task #6399). One event per owner per sweep, with
+    # the count -- this is an anomaly, not a breadcrumb. Not persisted: `persist` marks an event
+    # a Postgres reader queries by name, and no reader names this one yet. It is read where an
+    # anomaly is read instead -- `core_events_what_happened` lists the name, so the row reaches
+    # the "what happened" board through the log stream.
+    "task_reminder_undelivered": telemetry_event(
+        "task_reminder_undelivered",
+        "overdue task whose owner never received a reminder: zero deliveries past the grace",
+        payload=TaskReminderUndelivered,
+        tier="anomaly",
+        site="task_maintenance/undelivered.py:report_undelivered",
     ),
     "task_reminder_rerouted": telemetry_event(
         "task_reminder_rerouted",

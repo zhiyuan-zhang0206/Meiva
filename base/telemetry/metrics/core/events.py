@@ -49,7 +49,7 @@ def core_metrics() -> list[MetricSpec]:
                 "|host_turn_crashed|host_turn_uncancellable|label_generate_failed"
                 "|llm_cancelled|llm_provider_error|llm_turn_aborted"
                 "|page_restore_failed|page_restore_query_failed|page_serve_dir_missing"
-                '|screen_capture_notify_failed|sse_drop|warning_resolved")))'
+                '|screen_capture_notify_failed|sse_drop|task_reminder_undelivered|warning_resolved")))'
             ),
             target_names=["events"],
             width=24,

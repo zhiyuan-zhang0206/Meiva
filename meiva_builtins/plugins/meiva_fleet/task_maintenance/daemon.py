@@ -45,7 +45,7 @@ from base.packages.plugins.flags import read_declared_flag
 from base.paths import meiva_home, run_dir
 from base.telemetry.process_logging import init_gateway_process
 from meiva_builtins.plugins.meiva_fleet.default_config import FleetConfig, contribute
-from meiva_builtins.plugins.meiva_fleet.task_maintenance import routing
+from meiva_builtins.plugins.meiva_fleet.task_maintenance import routing, undelivered
 from services.pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
 
 # meiva:note
@@ -485,6 +485,7 @@ def run_reminders(
     digest_window_p0_seconds: float = 0.0,
     digest_window_p1_seconds: float = 0.0,
     digest_window_p2_seconds: float = 0.0,
+    undelivered_grace_seconds: float = 0.0,
 ) -> int:
     with write_transaction(pool) as conn, conn.cursor() as cur:
         live: dict[int, list[_DueTask]] = defaultdict(list)
@@ -513,6 +514,7 @@ def run_reminders(
             orphaned,
             notice_ttl_limit_seconds=notice_ttl_limit_seconds(),
         )
+    undelivered.report_undelivered(pool, undelivered_grace_seconds)
     _announce_owner_digests(digests, db, bus)
     _announce_reroutes(reroutes, db, bus)
     _announce_human_notices(notices, pool, bus)
@@ -627,6 +629,10 @@ async def dispatch_loop(
     )
     while True:
         try:
+            # meiva:note
+            # The undelivered grace is one sweep to select a task plus the longest hold the digest
+            # window can impose on its owner: past that a working delivery path has already counted
+            # the task, so one still uncounted there is the anomaly the same sweep reports.
             run_reminders(
                 pool,
                 db,
@@ -635,6 +641,12 @@ async def dispatch_loop(
                 digest_window_p0_seconds=config.task_reminder_digest_window_p0_seconds,
                 digest_window_p1_seconds=config.task_reminder_digest_window_p1_seconds,
                 digest_window_p2_seconds=config.task_reminder_digest_window_p2_seconds,
+                undelivered_grace_seconds=interval
+                + max(
+                    config.task_reminder_digest_window_p0_seconds,
+                    config.task_reminder_digest_window_p1_seconds,
+                    config.task_reminder_digest_window_p2_seconds,
+                ),
             )
             run_escalate(pool, db, bus, escalate_n, backoff_seconds)
         except asyncio.CancelledError:
