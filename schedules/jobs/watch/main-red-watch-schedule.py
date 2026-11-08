@@ -574,6 +574,15 @@ def _close_liveness_card(report_agent: int) -> None:
             )
 
 
+# meiva:note
+# The one-shot notice the watch owes whoever acts on its cards: when it takes its first suspect, the
+# question of whether that suspect can ever be re-checked becomes real, and the person who would act
+# on the answer hears it once (405, 2026-11-08). Every later round already has a suspect and stays
+# quiet -- this is a transition, not a status.
+def _notify_lead(text: str, report_agent: int) -> None:
+    meiva.agents.send_message(report_agent, text)
+
+
 def _close_card(task_id: int, reason: str) -> None:
     task_registry.update_in_context(
         meiva.context,
@@ -598,6 +607,7 @@ def watch_round(
         last_start=partial(_last_run_start, run_process=run_process),
         open_card=partial(_open_card, report_agent=report_agent),
         close_card=_close_card,
+        notify=partial(_notify_lead, report_agent=report_agent),
         emit=lambda payload: emit_system_event(
             _EVENT_NAME,
             payload,
