@@ -61,7 +61,7 @@ def test_preflight_checks_its_dispatch_commit_and_cannot_publish() -> None:
 
 def test_every_leg_runs_on_the_commit_the_precheck_resolved_and_skips_idle_train() -> None:
     jobs = _yaml(_RELEASE_GATE)["jobs"]
-    assert set(jobs) == {"precheck", "certify", *_CHECKS}
+    assert set(jobs) == {"precheck", "certify", "release-app", "release-android", *_CHECKS}
     for name in _CHECKS:
         job = jobs[name]
         assert job["needs"] == "precheck"
@@ -121,8 +121,45 @@ def test_certify_mints_git_native_certificate_without_reverse_pr() -> None:
     mint = _step(certify["steps"], "Mint annotated release certificate")
     publish = _step(certify["steps"], "Publish release tag and channel/latest")
     assert "scripts/host_ops/release/certify.py mint" in mint["run"]
+    assert "--app-manifest" in mint["run"]
+    assert "--android-manifest" in mint["run"]
     assert "refs/tags/channel/latest" in publish["run"]
     assert "gh pr create" not in _RELEASE_GATE.read_text(encoding="utf-8")
+
+
+def test_certify_triggers_client_packaging_when_ui_app_needs_release() -> None:
+    jobs = _yaml(_RELEASE_GATE)["jobs"]
+    certify = jobs["certify"]
+    assert certify["outputs"]["package_app"] == "${{ steps.mint.outputs.package_app }}"
+    assert certify["outputs"]["package_android"] == "${{ steps.mint.outputs.package_android }}"
+
+    app_job = jobs["release-app"]
+    assert app_job["needs"] == ["precheck", "certify"]
+    assert (
+        app_job["if"]
+        == "needs.certify.result == 'success' && needs.certify.outputs.package_app == 'true'"
+    )
+    assert app_job["uses"] == "./.github/workflows/release-app.yml"
+    assert app_job["with"] == {
+        "release_tag": "${{ needs.certify.outputs.version }}",
+        "target_sha": "${{ needs.certify.outputs.sha }}",
+        "publish": True,
+    }
+    assert app_job["secrets"] == "inherit"
+
+    android_job = jobs["release-android"]
+    assert android_job["needs"] == ["precheck", "certify"]
+    assert (
+        android_job["if"]
+        == "needs.certify.result == 'success' && needs.certify.outputs.package_android == 'true'"
+    )
+    assert android_job["uses"] == "./.github/workflows/release-android.yml"
+    assert android_job["with"] == {
+        "release_tag": "${{ needs.certify.outputs.version }}",
+        "target_sha": "${{ needs.certify.outputs.sha }}",
+        "publish": True,
+    }
+    assert android_job["secrets"] == "inherit"
 
 
 def test_cluster_release_workflows_publish_no_github_release() -> None:

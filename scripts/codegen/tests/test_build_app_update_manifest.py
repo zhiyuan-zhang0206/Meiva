@@ -63,3 +63,49 @@ def test_rejects_ambiguous_archives(tmp_path: Path) -> None:
             artifacts=tmp_path,
             repo="owner/Meiva",
         )
+
+
+def test_version_name_increments_patch_by_run_number() -> None:
+    assert manifest_builder.build_version_name("1.0.0", 1) == "1.0.1"
+    assert manifest_builder.build_version_name("1.0.0", 42) == "1.0.42"
+    with pytest.raises(ValueError, match="run number must be positive"):
+        manifest_builder.build_version_name("1.0.0", 0)
+
+
+def test_builds_mutable_app_latest_manifest_with_commit(tmp_path: Path) -> None:
+    _artifact(tmp_path, "Meiva.app.tar.gz", "mac-signature\n")
+    commit = "a" * 40
+
+    manifest = manifest_builder.build_manifest(
+        tag="app-latest",
+        version="1.0.15",
+        commit=commit,
+        artifacts=tmp_path,
+        repo="owner/Meiva",
+    )
+
+    assert manifest == {
+        "version": "1.0.15",
+        "commit": commit,
+        "platforms": {
+            "darwin-aarch64": {
+                "url": "https://github.com/owner/Meiva/releases/download/app-latest/Meiva.app.tar.gz",
+                "signature": "mac-signature",
+            },
+            "darwin-x86_64": {
+                "url": "https://github.com/owner/Meiva/releases/download/app-latest/Meiva.app.tar.gz",
+                "signature": "mac-signature",
+            },
+        },
+    }
+
+
+def test_assert_version_advances_guards_app_latest(tmp_path: Path) -> None:
+    current = tmp_path / "latest.json"
+    current.write_text('{"version": "1.0.10", "platforms": {}}\n', encoding="utf-8")
+
+    manifest_builder.assert_version_advances(current=current, version="1.0.11")
+    with pytest.raises(ValueError, match=r"already advertises 1\.0\.10"):
+        manifest_builder.assert_version_advances(current=current, version="1.0.10")
+    with pytest.raises(ValueError, match=r"already advertises 1\.0\.10"):
+        manifest_builder.assert_version_advances(current=current, version="1.0.9")

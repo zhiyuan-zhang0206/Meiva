@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import subprocess
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -48,6 +48,25 @@ def resolved_commit(repository: Path, revision: str) -> str | None:
 
 def is_ancestor(repository: Path, ancestor: str, descendant: str) -> bool:
     return git_run(repository, "merge-base", "--is-ancestor", ancestor, descendant).returncode == 0
+
+
+def tree_paths_changed(
+    repository: Path,
+    base_sha: str | None,
+    target_sha: str,
+    paths: Sequence[str],
+) -> bool:
+    if not paths:
+        return False
+    if base_sha is None:
+        done = git_run(repository, "ls-tree", "-r", "--name-only", target_sha, "--", *paths)
+        return done.returncode == 0 and bool(done.stdout.strip())
+    if base_sha == target_sha:
+        return False
+    if resolved_commit(repository, base_sha) is None:
+        return True
+    done = git_run(repository, "diff", "--name-only", base_sha, target_sha, "--", *paths)
+    return done.returncode != 0 or bool(done.stdout.strip())
 
 
 def list_tag_names(repository: Path) -> list[str]:

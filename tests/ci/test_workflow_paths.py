@@ -29,6 +29,7 @@ EXEMPTIONS = {
         "ci.yml",
         "pull_request",
     ): "Change-class classification inside ci.yml gates backend, frontend, and e2e lanes per diff.",
+    ("release-android.yml", "push"): "Version-tag releases; GitHub ignores paths for tags.",
     ("release-app.yml", "push"): "Version-tag releases; GitHub ignores paths for tags.",
     (
         "attribution-gate.yml",

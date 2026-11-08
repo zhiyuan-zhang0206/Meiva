@@ -66,3 +66,18 @@ def test_manual_dispatch_keeps_the_explicit_unsigned_build_path() -> None:
     text = _workflow()
     assert "workflow_dispatch:" in text
     assert "EXTRA+=(--no-sign)" in text
+
+
+def test_merging_to_main_does_not_trigger_client_release_builds() -> None:
+    for text in (_workflow(), _android_workflow()):
+        assert "branches:" not in text
+        assert "workflow_call:" in text
+        assert "build_app_update_manifest.py" in text
+        assert "version-name" in text
+
+
+def test_desktop_publish_guards_app_latest_and_stamps_commit() -> None:
+    text = _workflow()
+    assert "gh release download app-latest --pattern latest.json" in text
+    assert "build_app_update_manifest.py assert-advances" in text
+    assert '--commit "$TARGET_SHA"' in text
