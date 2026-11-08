@@ -43,8 +43,7 @@ with a distinct idempotency key and at most one retry.
 
 `meiva_explicit_visibility` marks new checkpoint output. Native chat SSE carries the corresponding `explicit_visibility` field.
 External harness activity snapshots carry the projected body and `user_facing`. Historical output without the marker retains
-its wake-based projection. A fresh background wake includes a silent reminder
-with the current protocol; wake source no longer decides new text visibility.
+its wake-based projection. A fresh background wake includes a concise silent `Non-human wake.` reminder; the visibility rule remains resident in the system prompt rather than repeating on each inbound message, and wake source no longer decides new text visibility.
 The frontend generates the marker constants from
 `base/agents/messages/reply_intent.py`.
 

@@ -49,7 +49,6 @@ from base.agents.history.timeline import build_timeline_items
 from base.agents.history.timeline_item import TimelineItem
 from base.agents.messages.inbound import InterruptScope
 from base.agents.messages.kwargs import read_meiva_kwargs
-from base.agents.messages.reply_intent import REPLY_VISIBILITY_RULE
 from base.db.transaction import async_write_transaction
 from base.events.live.projection import Cancelled, InboundCommitted, LLMDone, TimelineSnapshot
 from base.events.live.publisher import AgentEventPublisher
@@ -64,7 +63,6 @@ from base.lm.harness import (
     HarnessTurnFaultedError,
 )
 from base.lm.harness.engine import ForegroundSteering, HarnessTurn, TurnEngine
-from base.lm.system_note import wrap_system_note
 from base.lm.usage import UsageFields, log_usage_fields
 from base.log import logger
 
@@ -188,15 +186,12 @@ def _resolve_turn_prompt_and_key(
     state: _state.AgentState,
     pre_messages: Sequence[BaseMessage],
     agent_id: int,
-    delivery_mode: str,
 ) -> tuple[str, str]:
     pending_input = state.harness_pending_input or {}
     text = str(pending_input.get("prompt") or "")
     if pre_messages:
         pre_text = render_messages(pre_messages)
         text = f"{pre_text}\n\n{text}".strip() if text else pre_text
-    if delivery_mode == "prefix" and text and REPLY_VISIBILITY_RULE not in text:
-        text = f"{wrap_system_note(REPLY_VISIBILITY_RULE)}\n\n{text}"
     key = str(pending_input.get("key") or "") or f"inbound-turn-{agent_id}"
     return text, key
 
@@ -214,9 +209,7 @@ async def _run_harness_turn(
     ctx.turn_progress.mark(agent_id)
     extra_updates = dict(hook_updates) if hook_updates else {}
     pre_messages = await with_pending_deliveries(ctx, agent_id, list(pre_messages))
-    text, key = _resolve_turn_prompt_and_key(
-        state, pre_messages, agent_id, ctx.require_agent().prompt.user_delivery_mode
-    )
+    text, key = _resolve_turn_prompt_and_key(state, pre_messages, agent_id)
     if not text:
         return Command[HarnessGoto](
             update={**extra_updates, "halted": True, "harness_pending_input": None}, goto=CLAIM

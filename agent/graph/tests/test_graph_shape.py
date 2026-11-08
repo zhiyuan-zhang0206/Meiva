@@ -151,7 +151,7 @@ async def test_unmarked_harness_reply_gets_one_correction_turn() -> None:
     seen = await executed_nodes(Harness.CLAUDE_CODE, engine)
 
     [original, correction] = engine.submitted
-    assert original.endswith("\n\ndo it")
+    assert original == "do it"
     assert "That text was folded into Details" in correction
     assert seen.count("harness_turn") == 2
 
@@ -164,7 +164,7 @@ async def test_an_external_harness_never_enters_the_native_turn_nodes() -> None:
     assert "harness_turn" in seen, "the harness node is the turn"
     assert not NATIVE_NODES.intersection(seen), f"native turn nodes ran: {seen}"
     [prompt] = engine.submitted
-    assert prompt.endswith("\n\ndo it")
+    assert prompt == "do it"
 
 
 # meiva:note
