@@ -403,7 +403,7 @@ def test_labeler_boot_without_profile_marker_reads_provider_key_from_env(tmp_pat
 def test_gateway_marker_still_drops_provider_keys_for_other_daemons(tmp_path: Path) -> None:
     # meiva:note
     # The mirror image: a daemon that DOES carry MEIVA_PROCESS_PROFILE=gateway
-    # (heartbeat, events-maintenance, im-bridge, ...) still loses the provider
+    # (heartbeat, events-maintenance, labeler, ...) still loses the provider
     # keys at boot — the labeler's opt-out must not spread the keys into every
     # gateway-profile daemon (anti-spread, task #1230).
     env = {"MEIVA_PROCESS_PROFILE": "gateway"}

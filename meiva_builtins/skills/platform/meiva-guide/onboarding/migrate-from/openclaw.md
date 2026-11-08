@@ -15,7 +15,7 @@ control plane for sessions, tools, events and channel connections.
 | OpenClaw | Meiva | Notes |
 |---|---|---|
 | Gateway (single source of truth for sessions / routing / channels) | Meiva cluster — gateway + agent runners; `meiva cluster` / `meiva status` | |
-| Channels (WhatsApp, Telegram, Slack, Discord, Signal, iMessage, …) with pairing (`openclaw pairing approve`) | Platform dialog + `meiva.ui.ask`; clusters running the IM Bridge add Telegram | Meiva is not a chat bot for your messenger. The interaction surface is the platform UI/dialog plus the notice queue; no per-channel pairing exists because there are no channels. |
+| Channels (WhatsApp, Telegram, Slack, Discord, Signal, iMessage, …) with pairing (`openclaw pairing approve`) | Platform dialog + `meiva.ui.ask` | Meiva is not a chat bot for your messenger. The interaction surface is the platform UI/dialog plus the notice queue; no per-channel pairing exists because there are no channels. |
 | Sessions (per sender / workspace; DMs share the main session) | Agent dialogs + the task registry (`meiva.tasks`) | |
 | Agents (multi-agent routing) | Peer agent fleet (`meiva.agents.spawn`), delegation via messages and tasks | |
 | Skills / tools / plugins (ClawHub) | `meiva skill install` (Agent Skills standard), `meiva plugins`, MCP via `meiva mcp` | Skills already in SKILL.md form install directly; anything else needs porting to SKILL.md or an MCP server covering the same tool. |

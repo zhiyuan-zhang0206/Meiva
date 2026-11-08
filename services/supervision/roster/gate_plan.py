@@ -40,7 +40,6 @@ class GateSettings:
     permissions_helper_enabled: bool
     heartbeat_enabled: bool
     delivery_watchdog_enabled: bool
-    im_bridge_enabled: bool
     db_url: str
     redis_url: str
 
@@ -55,7 +54,6 @@ class GateSettings:
             permissions_helper_enabled=bool(read_field("permissions_helper_enabled")),
             heartbeat_enabled=bool(read_field("heartbeat_enabled")),
             delivery_watchdog_enabled=bool(read_field("delivery_watchdog_enabled")),
-            im_bridge_enabled=bool(read_field("im_bridge_enabled")),
             db_url=str(read_field("db_url")),
             redis_url=str(read_field("redis_url")),
         )
@@ -113,7 +111,6 @@ GateFact = FlagFact | BrowserFact | ComputerFact | StationFact | CollectorFact |
 _FLAG_REASONS = {
     "heartbeat": "disabled (MEIVA_HEARTBEAT_ENABLED off)",
     "delivery-watchdog": "disabled (MEIVA_DELIVERY_WATCHDOG_ENABLED off)",
-    "im-bridge": "disabled (MEIVA_IM_BRIDGE_ENABLED off)",
 }
 
 

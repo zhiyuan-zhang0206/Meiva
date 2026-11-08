@@ -99,57 +99,33 @@ def test_current_field_values_decodes_nodecode_comma_list_without_warning(
     # meiva:note
     # P1 regression: a NoDecode comma-list value is a SUPPORTED .env spelling,
     #     not a decode failure. Decoding through the owning model must not emit the
-    #     "cannot be decoded" warning — it fired on every panel read / agent spawn
-    #     for MEIVA_IM_DISABLED_ADAPTERS='weixin,retired-channel' — and a list[float] field must
-    #     come back floats, not a wrong-typed string split.
+    #     "cannot be decoded" warning, which fired on every panel read and agent spawn
+    #     while a comma-separated list reached the panel path.
 
     rec = _Logged(loguru_records)
-    _write(
-        authority,
-        {
-            "im_disabled_adapters": ["weixin", "retired-channel"],
-            "im_send_retry_delays": [0.5, 1.0],
-        },
-        set(),
-    )
+    _write(authority, {"skills_to_inject_into_system_prompt": ["alpha", "beta"]}, set())
+    (authority.env_path).write_text("MEIVA_SKILLS_TO_INJECT_INTO_SYSTEM_PROMPT=alpha,beta\n")
 
     values = authority.current_field_values()
 
-    assert values["im_disabled_adapters"] == ["weixin", "retired-channel"]
-    assert values["im_send_retry_delays"] == [0.5, 1.0]
-    delays = values["im_send_retry_delays"]
-    assert is_object_list(delays)
-    assert all(isinstance(delay, float) for delay in delays)
-    assert rec.warnings == []
-
-
-def test_current_field_values_decodes_json_array_spelling(
-    authority: ConfigAuthority, loguru_records: LogRecords
-):
-    """The JSON-array spelling the model validators also accept must decode
-    through the panel path too — both spellings, not just the comma list."""
-
-    rec = _Logged(loguru_records)
-    _write(authority, {"im_disabled_adapters": '["weixin", "retired-channel"]'}, set())
-
-    values = authority.current_field_values()
-
-    assert values["im_disabled_adapters"] == ["weixin", "retired-channel"]
+    injected = values["skills_to_inject_into_system_prompt"]
+    assert injected == ["alpha", "beta"]
+    assert is_object_list(injected)
     assert rec.warnings == []
 
 
 def test_current_field_values_decodes_empty_nodecode_list(
     authority: ConfigAuthority, loguru_records: LogRecords
 ):
-    """An empty NoDecode list value decodes to [] (nothing disabled), matching
-    Settings construction."""
+    # meiva:note
+    # An empty NoDecode list value decodes to [], matching Settings construction.
 
     rec = _Logged(loguru_records)
-    _write(authority, {"im_disabled_adapters": []}, set())
+    _write(authority, {"skills_to_inject_into_system_prompt": []}, set())
 
     values = authority.current_field_values()
 
-    assert values["im_disabled_adapters"] == []
+    assert values["skills_to_inject_into_system_prompt"] == []
     assert rec.warnings == []
 
 
@@ -236,13 +212,14 @@ def test_current_field_values_rejects_undecodable_env_value(
     assert rec.warnings == []
 
 
-def test_current_field_values_rejects_bad_nodecode_list_value(
+def test_current_field_values_rejects_a_bad_value(
     authority: ConfigAuthority, loguru_records: LogRecords
 ):
-    """Invalid file values fail at the explicit reader without serving boot defaults."""
+    # meiva:note
+    # Invalid file values fail at the explicit reader without serving boot defaults.
 
     rec = _Logged(loguru_records)
-    _write(authority, {"im_send_retry_delays": "banana,apple"}, set())
+    _write(authority, {"ops_concurrency": "banana"}, set())
 
     with pytest.raises(ValidationError):
         authority.current_field_values()
@@ -306,11 +283,11 @@ def test_current_field_values_isolates_bad_env_from_good_file_value(
     the boot value instead."""
 
     rec = _Logged(loguru_records)
-    _write(authority, {"im_disabled_adapters": ["weixin", "retired-channel"]}, set())
+    _write(authority, {"skills_to_inject_into_system_prompt": ["alpha", "beta"]}, set())
 
     values = authority.current_field_values()
 
-    assert values["im_disabled_adapters"] == ["weixin", "retired-channel"]
+    assert values["skills_to_inject_into_system_prompt"] == ["alpha", "beta"]
     assert rec.warnings == []
 
 

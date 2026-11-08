@@ -30,7 +30,6 @@ _GATEWAY_SESSIONS = {
     "prometheus",
     "grafana",
     "gateway",
-    "im-bridge",
     "labeler",
     "heartbeat",
     "delivery-watchdog",
@@ -232,12 +231,6 @@ def _gates_in_child(
     ("flag", "sessions", "wording", "scope"),
     [
         ("MEIVA_BROWSER_ENABLED", ("browser", "browser-mcp"), "MEIVA_BROWSER_ENABLED", "host"),
-        (
-            "MEIVA_IM_BRIDGE_ENABLED",
-            ("im-bridge",),
-            "disabled (MEIVA_IM_BRIDGE_ENABLED off)",
-            "cluster",
-        ),
     ],
 )
 def test_a_session_whose_flag_is_off_is_gated_out_with_the_flag_named(
@@ -346,7 +339,7 @@ def test_labeler_is_the_only_service_that_opts_out_of_the_profile_marker() -> No
 
 def test_gateway_daemons_keep_the_gateway_marker() -> None:
     by_session = {s.session: s for s in composition.build_services(home=meiva_home())}
-    for sess in ("heartbeat", "events-maintenance", "im-bridge", "memory-indexer", "gateway"):
+    for sess in ("heartbeat", "events-maintenance", "memory-indexer", "gateway"):
         assert service_spec.profile_marker(by_session[sess]) == "gateway", sess
 
 

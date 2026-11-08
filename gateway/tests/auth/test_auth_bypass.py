@@ -128,7 +128,7 @@ def test_alert_ingest_reaches_handler_without_any_credential(
     db_conn: psycopg.Connection,
 ) -> None:
     with anonymous_gateway_client(
-        fields={"webhook_token": None, "im_notify_enabled": False},
+        fields={"webhook_token": None},
         client=("127.0.0.1", 5000),
     ) as client:
         resp = client.post("/api/alerts", json=_ALERT_WEBHOOK)
@@ -153,7 +153,7 @@ def test_alert_ingest_reaches_handler_without_any_credential(
 # bug that admitted everything would read as the forward test passing.
 def test_protected_routes_still_refuse_the_same_anonymous_client() -> None:
     with anonymous_gateway_client(
-        fields={"webhook_token": None, "im_notify_enabled": False},
+        fields={"webhook_token": None},
         client=("127.0.0.1", 5000),
     ) as client:
         same_path_other_method = client.get("/api/alerts")

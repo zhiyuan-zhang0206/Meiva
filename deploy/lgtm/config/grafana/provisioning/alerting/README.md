@@ -296,8 +296,6 @@ and trailing window carry the debounce. A condition that stops resolves itself w
 | `meiva-ops-inspect-metrics-gap` | `inspect_metrics_coverage_gap` | 0s | warning | the inspector's cooldown and direct row |
 | `meiva-ops-impersonation-seal-stuck` / `-capture-failed` | `impersonation_event_log_incomplete` | 0s | warning | the impersonation event-log rows |
 | `meiva-ops-impersonation-notice-failed` | `impersonation_terminal_notice_failed` per lease | 0s | warning | the ended-lease notice's durable retry ledger (a failed single submission is now reported, not retried) |
-| `meiva-ops-im-push-failed` | `im_push_failed` (weixin, 2+ failures) | 0s | warning | the push watchdog's cross-channel alert and cooldown |
-| `meiva-ops-im-push-stall` | `im_push_health` per leg (`attributes_channel`; pending > 0, last delivery age > 900s) | 2m | warning | nothing: an outbound IM leg could stall with no alert (10-08: Telegram leg silent 54 min, 2 pushes stranded) |
 | `meiva-ops-delivery-stalled` | `delivery_stalled` per agent | 1m | warning | the deploy-window hold and settle grace |
 | `meiva-ops-delivery-stranded-wake` | `delivery_stranded_wake` per agent (inbound id in the summary) | 0s | warning | nothing: an automatic wake that revives an owner a user had just killed had no notification path (2026-10-25 review of #7066) |
 | `meiva-ops-db-pool-acquire-slow` | `db_pool_acquire_slow` per machine | 2m | warning | the per-host cooldown marker |
@@ -329,8 +327,7 @@ out-of-band probe's.
 
 ## The alert pipeline's own dead-man pair
 
-Every rule above rides one path: Grafana → `POST /api/alerts` → the `alerts` row → the im_bridge
-fan-out. When that path breaks — a webhook token the gateway no longer accepts after a rotation, a
+Every rule above rides one path: Grafana → `POST /api/alerts` → the `alerts` row. When that path breaks — a webhook token the gateway no longer accepts after a rotation, a
 stopped gateway, a contact point pointing at the wrong port — **all 70 rules go quiet together**, and
 the silence looks exactly like a quiet night. Two rules close that hole and nothing else:
 
@@ -366,11 +363,9 @@ The host sentinel retains a separate observation loop and agent-queue submission
 but no external Bot API delivery path remains.
 
 The ingest stores each alert instance in `alerts` (deduped by fingerprint x starts_at, Alertmanager
-webhook shape) and fans firing notifications out through the im_bridge daemon (the only sanctioned
-IM surface) — one alert instance = one row, one POST's instances of a rule = one IM (`xN`, the first three summaries), every severity (critical/warning/error, no
-gate beyond the rule's own `notify_im="false"`). It is the only writer of that table; no process
-writes alert rows, posts to the endpoint or pushes an alert to IM on its own
-(`tests/scripts/test_alert_single_path.py`).
+webhook shape) — one alert instance = one row. It is the only writer of that table
+(`tests/scripts/test_alert_single_path.py`), and it delivers nothing: the IM fan-out retired with
+the IM channels on 2026-11-08, so the `notify_im` labels left in the rules are inert.
 
 A planned outage is a silence, not a gate in the services: `meiva update down` creates
 one silence in this Grafana (matcher `alertname=~".+"`, disk alerts excepted: `metric="host_disk"`,

@@ -44,7 +44,6 @@ FIXED_PORTS: dict[str, int] = {
     "pgbouncer": 6433,
     "events_maintenance": 8109,
     "delivery_watchdog": 8110,
-    "im_bridge": 8111,
     "page_server": 8112,
     "agent_host": 8114,
     "pg_backup": 8116,

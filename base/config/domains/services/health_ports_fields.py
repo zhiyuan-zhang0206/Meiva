@@ -61,9 +61,6 @@ class ServiceHealthPortFields:
     labeler_health_port: int | None = health_port_field(
         "labeler", title="Conversation labeler health port"
     )
-    im_bridge_health_port: int | None = health_port_field(
-        "im_bridge", title="Messaging bridge health port"
-    )
     heartbeat_health_port: int | None = health_port_field(
         "heartbeat", title="Heartbeat service health port"
     )

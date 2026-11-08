@@ -36,8 +36,7 @@ schema upgrade are marked `legacy_unconfirmed`, not backfilled as fresh history.
 
 Groups whose creation origin is `shadow` remain **unknown historical observations**,
 not accepted outbound work or provider-delivery evidence. Legacy may already have
-sent them, so native producers never promote or automatically enqueue this history.
-New eligible groups may carry `native-v1` creation origin; the sender's retained
-receipt and actual SENT completion remain separate facts. See [[native-alert-outbox]]
-for atomic fanout, recovery, completion and the mandatory old-generation stop/drain
-boundary. There is no expiry or automatic historical replay.
+sent them, and nothing promotes or automatically enqueues this history. Rows the
+retired native producer created keep their `native-v1` origin as history; nothing
+mints one any more, and no delivery reads these facts. There is no expiry or
+automatic historical replay.

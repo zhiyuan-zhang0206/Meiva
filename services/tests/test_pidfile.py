@@ -17,7 +17,6 @@ from services.agent_runner.page_server import daemon as page_server_daemon
 from services.backup.scheduler import daemon as backup_scheduler_daemon
 from services.derived.labeler import daemon as labeler_daemon
 from services.derived.memory_indexer import daemon as memory_indexer_daemon
-from services.entrypoints.im_bridge import daemon as im_bridge_daemon
 from services.pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
 from services.upkeep.events_maintenance import daemon as events_maintenance_daemon
 from services.wake.delivery_watchdog import daemon as delivery_watchdog_daemon
@@ -62,7 +61,6 @@ def _guard(daemon: ModuleType, config: ConfigBoot, runtime: Path) -> tuple[Path,
         heartbeat_daemon,
         backup_scheduler_daemon,
         page_server_daemon,
-        im_bridge_daemon,
         memory_indexer_daemon,
         delivery_watchdog_daemon,
         events_maintenance_daemon,

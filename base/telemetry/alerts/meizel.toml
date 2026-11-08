@@ -1,8 +1,8 @@
-exports = ["copy.py", "native.py", "shadow.py"]
+exports = ["copy.py", "shadow.py"]
 
 [uses]
 "__init__.py" = ["copy.py"]
-"shadow.py" = ["__init__.py", "native.py"]
+"shadow.py" = ["__init__.py"]
 
 [purity]
 "copy.py" = "strict"

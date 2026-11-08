@@ -4,20 +4,14 @@
 #
 # check_doc_references.py validates that docs point at things that exist
 # (links, CLI flags). It cannot see that a doc's *prose* describes the code
-# that is actually there. This script adds three narrative-fact checks, each
-# extracted from the code and asserted against the doc that owns the fact:
+# that is actually there. This script adds one narrative-fact check, extracted
+# from the code and asserted against the doc that owns the fact:
 #
 #   A. skill catalog  — every slug-like skill name in docs/skills/skills.meiva.okf.md
 #      functional-group rows must resolve under meiva_builtins/skills/ or
-#      meiva_builtins/plugins/ (catches a removed skill still listed — the
-#      2026-08-03 telegram residual class).
-#   B. IM command set — every `/command` route in services/entrypoints/im_bridge/core.py
-#      must appear in the "Command set" line of
-#      services/docs/gateway_side/im_bridge/im_bridge.meiva.okf.md (catches the 8/2-8/6 drift
-#      class: /spawn /commands /notice shipped, doc listed four commands).
-#   C. IM channels    — every adapter in services/entrypoints/im_bridge/adapters/ must be
-#      mentioned in im_bridge.meiva.okf.md (channel aliases: weixin/wechat).
-#      Catches stale channel-count narrative after convergence.
+#      meiva_builtins/plugins/ (catches a removed skill still listed).
+#
+# The IM-narrative checks retired with the IM channels themselves (2026-11-08).
 #
 # Facts are declared once in code; the docs are views and this script is the
 # freshness check. Run from the repo root; wired into pre-commit.
@@ -30,9 +24,6 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent.parent
 SLUG = re.compile(r"^[a-z0-9][a-z0-9_-]*$")
-CHANNEL_ALIASES = {
-    "weixin": ("weixin", "wechat"),
-}
 
 
 def _skill_group_names(doc: str) -> list[str]:
@@ -70,54 +61,9 @@ def check_skill_catalog() -> list[str]:
     return problems
 
 
-def check_im_command_set() -> list[str]:
-    core = (ROOT / "services/entrypoints/im_bridge/core.py").read_text(errors="replace")
-    cmds = sorted(
-        {
-            str(match[1])
-            for pattern in (r'cmd == "/([a-z]+)"', r'startswith\("/([a-z]+)"')
-            for match in re.finditer(pattern, core)
-        }
-    )
-    doc_path = ROOT / "services/docs/gateway_side/im_bridge/im_bridge.meiva.okf.md"
-    doc = doc_path.read_text(errors="replace")
-    cmd_line = next((ln for ln in doc.splitlines() if "Command set" in ln), "")
-    missing = [c for c in cmds if f"/{c}" not in cmd_line]
-    return [
-        f"{doc_path} Command set line lacks shipped command /{c} "
-        f"(present in services/entrypoints/im_bridge/core.py) — narrative drift"
-        for c in missing
-    ]
-
-
-def check_im_channels() -> list[str]:
-    adapters_dir = ROOT / "services/entrypoints/im_bridge/adapters"
-    doc = (ROOT / "services/docs/gateway_side/im_bridge/im_bridge.meiva.okf.md").read_text(
-        errors="replace"
-    )
-    lower = doc.lower()
-    problems: list[str] = []
-    if not adapters_dir.is_dir():
-        return problems
-    for f in sorted(adapters_dir.iterdir()):
-        if not f.name.endswith(".py") or f.name == "__init__.py":
-            continue
-        stem = f.name[:-3]
-        aliases = CHANNEL_ALIASES.get(stem, (stem,))
-        if not any(a in lower for a in aliases):
-            problems.append(
-                f"{adapters_dir}/{f.name} exists but the channel is not mentioned in "
-                f"services/docs/gateway_side/im_bridge/im_bridge.meiva.okf.md — "
-                f"channel-convergence narrative drift"
-            )
-    return problems
-
-
 def main() -> int:
     problems: list[str] = []
     problems += check_skill_catalog()
-    problems += check_im_command_set()
-    problems += check_im_channels()
     if problems:
         print(f"check_narrative_facts: {len(problems)} narrative-fact violation(s)")
         for p in problems:

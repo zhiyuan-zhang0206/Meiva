@@ -102,7 +102,7 @@ HOST_PACKAGE_INSTALL_TIMEOUT_S = 1800.0
 
 # The public serving path shares one critical readiness/startup tier across
 # CLI readiness and root monitoring. All other services use the shorter tier.
-CRITICAL_SERVICE_SESSIONS = frozenset({"gate", "gateway", "frontend", "agent-host", "im-bridge"})
+CRITICAL_SERVICE_SESSIONS = frozenset({"gate", "gateway", "frontend", "agent-host"})
 
 # Initial startup grace for optional services in the root health monitor.
 # CLI startup does not wait for optional capabilities: it reports their

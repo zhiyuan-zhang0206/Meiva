@@ -27,16 +27,11 @@ from base.telemetry.tests.capture.event_capture import capturing_events
 from gateway.tests.agents.gateway_auth import without_credentials
 from gateway.tests.auth.gateway_config import gateway_test_client
 from gateway.tests.routers.alerts_api.alerts_support import (
-    ImBridge,
     alert,
     alert_frames,
     alerts_client,
-    capture_im,
     ingest,
     webhook,
-)
-from gateway.tests.routers.alerts_api.alerts_support import (
-    alerts_im as alerts_im,
 )
 from gateway.tests.routers.alerts_api.alerts_support import (
     client as client,
@@ -47,13 +42,13 @@ from gateway.tests.routers.alerts_api.alerts_support import (
 
 
 # meiva:note
-# A firing webhook inserts one row (unresolved), notifies IM once, stamps
-# notified_at.
-def test_ingest_firing_inserts_row_and_notifies(db_conn: psycopg.Connection) -> None:
+# A firing webhook inserts one row (unresolved). Nothing delivers it, so `notified_at` stays
+# NULL: the store and the UI are the whole of the alert path.
+def test_ingest_firing_inserts_row(db_conn: psycopg.Connection) -> None:
     with alerts_client() as client:
         resp = ingest(client, webhook())
         assert resp.status_code == 200
-        assert resp.json() == {"processed": 1, "inserted": 1, "updated": 0, "notified": 1}
+        assert resp.json() == {"processed": 1, "inserted": 1, "updated": 0}
 
     with db_conn.cursor() as cur:
         cur.execute("SELECT status, severity, alertname, fingerprint, notified_at FROM alerts")
@@ -64,7 +59,7 @@ def test_ingest_firing_inserts_row_and_notifies(db_conn: psycopg.Connection) -> 
     assert severity == "error"
     assert alertname == "test-rule"
     assert fp == "abc123"
-    assert notified_at is not None
+    assert notified_at is None
 
 
 # meiva:note
@@ -94,7 +89,6 @@ def test_ingest_dedups_same_instance(db_conn: psycopg.Connection) -> None:
         resp = ingest(client, webhook(summary="updated summary"))
         assert resp.json()["inserted"] == 0
         assert resp.json()["updated"] == 1
-        assert resp.json()["notified"] == 0
 
     with db_conn.cursor() as cur:
         cur.execute("SELECT count(*), max(annotations->>'summary') FROM alerts")
@@ -107,15 +101,11 @@ def test_ingest_dedups_same_instance(db_conn: psycopg.Connection) -> None:
 
 # meiva:note
 # Escalation is a new firing transition on the existing instance.
-def test_ingest_severity_escalation_updates_instance_and_renotifies(
-    db_conn: psycopg.Connection,
-) -> None:
+def test_ingest_severity_escalation_updates_instance(db_conn: psycopg.Connection) -> None:
     with alerts_client() as client:
-        warning = ingest(client, webhook(severity="warning"))
-        error = ingest(client, webhook(severity="error"))
+        ingest(client, webhook(severity="warning"))
+        ingest(client, webhook(severity="error"))
 
-    assert warning.json()["notified"] == 1
-    assert error.json()["notified"] == 1
     with db_conn.cursor() as cur:
         cur.execute("SELECT count(*), max(severity) FROM alerts")
         row = cur.fetchone()
@@ -124,15 +114,11 @@ def test_ingest_severity_escalation_updates_instance_and_renotifies(
 
 # meiva:note
 # A lower class carries no new urgent information for the owner.
-def test_ingest_severity_downgrade_does_not_renotify(
-    db_conn: psycopg.Connection,
-) -> None:
+def test_ingest_severity_downgrade_updates_instance(db_conn: psycopg.Connection) -> None:
     with alerts_client() as client:
-        error = ingest(client, webhook(severity="error"))
-        warning = ingest(client, webhook(severity="warning"))
+        ingest(client, webhook(severity="error"))
+        ingest(client, webhook(severity="warning"))
 
-    assert error.json()["notified"] == 1
-    assert warning.json()["notified"] == 0
     with db_conn.cursor() as cur:
         cur.execute("SELECT count(*), max(severity) FROM alerts")
         row = cur.fetchone()
@@ -140,16 +126,14 @@ def test_ingest_severity_downgrade_does_not_renotify(
 
 
 # meiva:note
-# A resolved webhook for a notified firing flips status + sets ends_at
-# and notifies the recovery line.
-def test_ingest_resolved_flips_row_and_notifies_recovery(db_conn: psycopg.Connection) -> None:
+# A resolved webhook for a firing flips status and sets ends_at.
+def test_ingest_resolved_flips_row(db_conn: psycopg.Connection) -> None:
     with alerts_client() as client:
         ingest(client, webhook())
-        resp = ingest(
+        ingest(
             client,
             webhook(status="resolved", ends_at="2026-08-04T11:00:00Z"),
         )
-        assert resp.json()["notified"] == 1
 
     with db_conn.cursor() as cur:
         cur.execute("SELECT status, ends_at FROM alerts")
@@ -157,25 +141,6 @@ def test_ingest_resolved_flips_row_and_notifies_recovery(db_conn: psycopg.Connec
         assert row is not None
     assert row[0] == "resolved"
     assert row[1] == datetime(2026, 8, 4, 11, 0, tzinfo=UTC)
-
-
-# meiva:note
-# An instance whose firing IM never landed resolves silently (the user
-# never heard the firing; a bare recovery line would be noise).
-def test_ingest_resolved_without_prior_notify_is_silent(db_conn: psycopg.Connection) -> None:
-    with alerts_client() as client:
-        with db_conn.cursor() as cur:
-            cur.execute(
-                "INSERT INTO alerts (status, severity, alertname, labels, annotations,"
-                " starts_at, fingerprint) VALUES ('unresolved', 'error', 'test-rule',"
-                " '{}', '{}', '2026-08-04T10:00:00+00:00', 'abc123')"
-            )
-        db_conn.commit()
-        resp = ingest(
-            client,
-            webhook(status="resolved", ends_at="2026-08-04T11:00:00Z"),
-        )
-        assert resp.json()["notified"] == 0
 
 
 # meiva:note
@@ -202,148 +167,9 @@ def test_ingest_severity_parsing(db_conn: psycopg.Connection) -> None:
 
 
 # meiva:note
-# User design 2026-08-12: ALL three severities push to IM — there is no
-# severity gate anymore.
-def test_ingest_every_severity_notifies(alerts_im: ImBridge) -> None:
-    notified = capture_im(alerts_im)
-    with alerts_client() as client:
-        ingest(client, webhook(alerts=[alert(severity="critical", fingerprint="c1")]))
-        ingest(client, webhook(alerts=[alert(severity="warning", fingerprint="w1")]))
-        ingest(client, webhook(alerts=[alert(severity="error", fingerprint="e1")]))
-    assert len(notified) == 3
-    # meiva:note
-    # default template language is zh (user ruling 2026-08-13: IM copy follows
-    # user_settings display.language, default zh) — the en path is covered by
-    # test_ingest_uses_display_language_setting
-    assert (
-        # meiva:note
-        # emoji-ok: IM alert head format
-        "\u26a0\ufe0f \u544a\u8b66 [CRITICAL]" in notified[0]
-    )
-    assert (
-        # meiva:note
-        # emoji-ok: IM alert head format
-        "\u26a0\ufe0f \u544a\u8b66 [WARNING]" in notified[1]
-    )
-    assert (
-        # meiva:note
-        # emoji-ok: IM alert head format
-        "\u26a0\ufe0f \u544a\u8b66 [ERROR]" in notified[2]
-    )
-
-
-# meiva:note
-# notify_im="false" keeps the alert in the store and SSE stream while
-# suppressing only its IM fan-out.
-def test_ingest_notify_im_false_stores_and_publishes_without_im(
-    db_conn: psycopg.Connection, alerts_im: ImBridge, event_bus: EventBus
-) -> None:
-    notified = capture_im(alerts_im)
-
-    with alert_frames(event_bus) as published, alerts_client() as client:
-        resp = ingest(client, webhook(notify_im="false"))
-    assert resp.json() == {"processed": 1, "inserted": 1, "updated": 0, "notified": 0}
-    assert notified == []
-
-    with db_conn.cursor() as cur:
-        cur.execute("SELECT status, notified_at FROM alerts")
-        row = cur.fetchone()
-        assert row is not None
-    assert row == ("unresolved", None)
-
-    assert [frame["status"] for frame in published] == ["unresolved"]
-
-
-# meiva:note
-# A gated firing and its resolution both update the row without IM.
-def test_ingest_notify_im_false_firing_and_resolution_stay_silent(
-    db_conn: psycopg.Connection, alerts_im: ImBridge
-) -> None:
-    notified = capture_im(alerts_im)
-
-    with alerts_client() as client:
-        firing = ingest(client, webhook(notify_im="false"))
-        resolved = ingest(
-            client,
-            webhook(
-                status="resolved",
-                ends_at="2026-08-04T11:00:00Z",
-                notify_im="false",
-            ),
-        )
-    assert firing.json()["notified"] == 0
-    assert resolved.json()["notified"] == 0
-    assert notified == []
-
-    with db_conn.cursor() as cur:
-        cur.execute("SELECT status, ends_at, notified_at FROM alerts")
-        row = cur.fetchone()
-        assert row is not None
-    assert row == ("resolved", datetime(2026, 8, 4, 11, 0, tzinfo=UTC), None)
-
-
-# meiva:note
-# Only the exact string "false" gates IM; "true" keeps the default.
-def test_ingest_notify_im_non_gating_value_still_notifies(
-    alerts_im: ImBridge,
-) -> None:
-    notified = capture_im(alerts_im)
-
-    with alerts_client() as client:
-        resp = ingest(client, webhook(notify_im="true"))
-    assert resp.json()["notified"] == 1
-    assert len(notified) == 1
-
-
-# meiva:note
-# Gated still-firing re-sends and a new firing episode never retry IM.
-def test_ingest_notify_im_false_resends_and_refire_stay_silent(
-    db_conn: psycopg.Connection, alerts_im: ImBridge
-) -> None:
-    notified = capture_im(alerts_im)
-
-    with alerts_client() as client:
-        firing = ingest(client, webhook(notify_im="false"))
-        resend = ingest(client, webhook(notify_im="false"))
-        resolved = ingest(
-            client,
-            webhook(
-                status="resolved",
-                ends_at="2026-08-04T11:00:00Z",
-                notify_im="false",
-            ),
-        )
-        refire = ingest(
-            client,
-            webhook(
-                starts_at="2026-08-04T12:00:00Z",
-                notify_im="false",
-            ),
-        )
-
-    assert [response.json()["notified"] for response in (firing, resend, resolved, refire)] == [
-        0,
-        0,
-        0,
-        0,
-    ]
-    assert resend.json()["updated"] == 1
-    assert refire.json()["inserted"] == 1
-    assert notified == []
-
-    with db_conn.cursor() as cur:
-        cur.execute("SELECT status, notified_at FROM alerts ORDER BY starts_at")
-        rows = cur.fetchall()
-    assert rows == [("resolved", None), ("unresolved", None)]
-
-
-# meiva:note
-# IM template language follows user_settings display.language — an "en"
-# row selects the English template set through the full ingest path (the
-# default zh path is covered by test_ingest_every_severity_notifies).
-def test_ingest_uses_display_language_setting(
-    db_conn: psycopg.Connection, alerts_im: ImBridge
-) -> None:
+# The rendered notification text follows the display language. Nothing delivers it any more, so
+# the frozen group row is what an assertion can read.
+def test_ingest_uses_display_language_setting(db_conn: psycopg.Connection) -> None:
     with db_conn.cursor() as cur:
         cur.execute(
             "INSERT INTO user_settings (key, value) VALUES ('display.language', %s)",
@@ -351,15 +177,18 @@ def test_ingest_uses_display_language_setting(
         )
     db_conn.commit()
 
-    notified = capture_im(alerts_im)
     with alerts_client() as client:
         ingest(client, webhook())
-    assert len(notified) == 1
-    assert (
-        # meiva:note
-        # emoji-ok: asserting the user-designated IM format
-        "\u26a0\ufe0f ALERT [ERROR] test-rule" in notified[0]
-    )
+    with db_conn.cursor() as cur:
+        cur.execute("SELECT text FROM alert_notification_groups")
+        rows = cur.fetchall()
+    assert len(rows) == 1
+    text = rows[0][0]
+    assert isinstance(text, str)
+    # meiva:note
+    # The stored group text keeps the emoji head the copy template renders.
+    # emoji-ok: asserting the rendered alert format
+    assert "\u26a0\ufe0f ALERT [ERROR] test-rule" in text
 
 
 # meiva:note
@@ -379,47 +208,6 @@ def test_ingest_zero_ends_at_stored_null(db_conn: psycopg.Connection) -> None:
 # meiva:note
 # im_bridge down -> the ingest still stores the row (notified_at stays
 # NULL) and answers 200.
-def test_ingest_im_failure_does_not_fail_ingest(
-    db_conn: psycopg.Connection, alerts_im: ImBridge
-) -> None:
-    capture_im(alerts_im, ok=False)
-    with alerts_client() as client:
-        resp = ingest(client, webhook())
-        assert resp.status_code == 200
-        assert resp.json()["notified"] == 0
-
-    with db_conn.cursor() as cur:
-        cur.execute("SELECT notified_at FROM alerts")
-        row = cur.fetchone()
-        assert row is not None
-        assert row[0] is None
-
-
-# meiva:note
-# notified_at NULL keeps the firing gate open — the next re-send retries
-# the IM.
-def test_ingest_firing_retries_notify_after_failed_attempt(
-    db_conn: psycopg.Connection, alerts_im: ImBridge
-) -> None:
-    capture_im(alerts_im, ok=False)
-    with alerts_client() as client:
-        ingest(client, webhook())
-    capture_im(alerts_im, ok=True)
-    with alerts_client() as client:
-        resp = ingest(client, webhook())
-        assert resp.json()["notified"] == 1
-
-    with db_conn.cursor() as cur:
-        cur.execute("SELECT count(*), max(notified_at) IS NOT NULL FROM alerts")
-        row = cur.fetchone()
-        assert row is not None
-        n, stamped = row
-    assert n == 1 and stamped
-
-
-# meiva:note
-# A resolved row that fires again (new starts_at) is a new episode — a
-# fresh row + a fresh IM.
 def test_ingest_refire_after_resolution_notifies_again(db_conn: psycopg.Connection) -> None:
     with alerts_client() as client:
         ingest(client, webhook())
@@ -429,7 +217,6 @@ def test_ingest_refire_after_resolution_notifies_again(db_conn: psycopg.Connecti
             webhook(starts_at="2026-08-04T12:00:00Z", ends_at=""),
         )
         assert resp.json()["inserted"] == 1
-        assert resp.json()["notified"] == 1
 
     with db_conn.cursor() as cur:
         cur.execute("SELECT count(*) FROM alerts")
@@ -610,51 +397,16 @@ def test_ingest_loopback_is_not_enough_when_a_token_is_set() -> None:
 
 
 # meiva:note
-# -- one IM per notification group --------------------------------------------
+# -- one notification group per transition ------------------------------------
 
 
 # meiva:note
-# Native retries recover their original group rather than re-rendering expanded POSTs.
-def test_native_groups_recover_original_group_and_new_members_without_sent_fact(
-    db_conn: psycopg.Connection, alerts_im: ImBridge
-) -> None:
-    sent = capture_im(alerts_im, ok=False)
-    a, b, c = [alert(fingerprint=fp, summary=fp) for fp in ("a", "b", "c")]
-    with alerts_client() as client:
-        first = ingest(client, webhook(alerts=[a, b]))
-        second = ingest(client, webhook(alerts=[a, b, c]))
-        assert first.json() == {"processed": 2, "inserted": 2, "updated": 0, "notified": 0}
-        assert second.json() == {"processed": 3, "inserted": 1, "updated": 2, "notified": 0}
-    assert len(sent) == 3
-    assert sent[0] == sent[1]
-    # meiva:note
-    # C is a distinct source operation.
-    assert sent[2] != sent[0]
-    rows = db_conn.execute(
-        "SELECT text,origin FROM alert_notification_groups ORDER BY id"
-    ).fetchall()
-    assert rows[0] == (sent[0], "native-v1")
-    assert rows[1] == (sent[2], "native-v1")
-    assert db_conn.execute("SELECT count(*) FROM alert_notification_members").fetchone() == (3,)
-    assert db_conn.execute(
-        "SELECT count(*) FROM alerts WHERE notified_at IS NOT NULL"
-    ).fetchone() == (0,)
-
-
-# meiva:note
-# A later entry still finds the same instance inserted earlier in this POST.
-def test_shadow_keeps_input_order_missing_start_resolution(
-    db_conn: psycopg.Connection, alerts_im: ImBridge
-) -> None:
-    sent = capture_im(alerts_im, ok=False)
+# Two observations of one instance mint one member: the second updates the row and adds no fact.
+def test_shadow_keeps_input_order_missing_start_resolution(db_conn: psycopg.Connection) -> None:
     first = alert(fingerprint="same")
     later = alert(fingerprint="same", starts_at="", summary="later")
     with alerts_client() as client:
         response = ingest(client, webhook(alerts=[first, later]))
-    assert response.json() == {"processed": 2, "inserted": 1, "updated": 1, "notified": 0}
-    assert len(sent) == 1
-    # meiva:note
-    # The original source body is immutable.
-    assert "later" not in sent[0]
+    assert response.json() == {"processed": 2, "inserted": 1, "updated": 1}
     assert db_conn.execute("SELECT count(*) FROM alert_notification_members").fetchone() == (1,)
     assert db_conn.execute("SELECT annotations->>'summary' FROM alerts").fetchone() == ("later",)

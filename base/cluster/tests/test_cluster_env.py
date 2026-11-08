@@ -25,7 +25,6 @@ def _rec(tmp_path: Path):
             "app": 18015,
             # The birth shape: every slot of the fixed table carries a key.
             "delivery_watchdog": 18016,
-            "im_bridge": 18017,
             "agent_host": 18019,
             "pg_backup": 18021,
             "ttl_reaper": 18025,

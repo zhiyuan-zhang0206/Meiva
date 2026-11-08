@@ -41,7 +41,7 @@ The permitted exception classes, with real sites:
 | Class | Why it stays | Examples |
 |---|---|---|
 | Protocol / format specs | the number is the format; changing it breaks the wire | msgpack ext-header bytes (`base/agents/history/checkpoint.py`); short-SHA display width 7 (`base/deploy/git/source_tree_guard.py`); page-registration name/host/path bounds (`gateway/schemas/pages.py`) |
-| External platform caps | the platform dictates it; any other value fails | Telegram caption length limit |
+| External platform caps | the platform dictates it; any other value fails | a provider's payload length limit |
 | Self-imposed transport / payload guards | bounds one request or read so a single call cannot park unbounded bytes | message content ceiling (`gateway/agents/state.py` — self-imposed, not an external protocol limit); attach ceilings (`base/lm/attach/constants.py`); pty capture clamp (`base/sessions/pty/paths.py`); events `le=1000` / `offset` 10 000 (`gateway/events/router.py`) |
 | Protective security / resource bounds | memory or abuse guard, not a tuning knob | login limiter's tracked-IP cap (`base/cluster/rate_limit.py`); labeler poll batch (`services/derived/labeler/daemon.py`); impersonation maintenance quantities (`base/agents/impersonation/maintenance.py`) |
 | UI micro-details | rendering density or truncation; a design decision per surface | run-timeline node labels and unit previews (`ui/web/src/components/run-timeline/run-timeline-rows.tsx`) |

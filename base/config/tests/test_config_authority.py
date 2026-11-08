@@ -88,9 +88,7 @@ def test_unexpected_domain_attribute_error_is_not_recovered(tmp_path: Path) -> N
         authority.service_field_value("exec_timeout_seconds")
 
 
-@pytest.mark.parametrize(
-    "line", ["MEIVA_TRACE_ENABLED=banana\n", "MEIVA_IM_SEND_RETRY_DELAYS=banana,apple\n"]
-)
+@pytest.mark.parametrize("line", ["MEIVA_TRACE_ENABLED=banana\n", "MEIVA_OPS_CONCURRENCY=banana\n"])
 def test_invalid_file_values_fail_without_mutating_runtime(tmp_path: Path, line: str) -> None:
     path = tmp_path / ".env"
     authority = _authority(path)
@@ -114,9 +112,9 @@ def test_domain_validation_keeps_cross_field_invariants(tmp_path: Path) -> None:
 def test_valid_file_values_do_not_read_later_ambient_values(tmp_path: Path) -> None:
     path = tmp_path / ".env"
     authority = _authority(path)
-    path.write_text("MEIVA_IM_DISABLED_ADAPTERS=weixin,retired-channel\n")
+    path.write_text("MEIVA_OPS_CONCURRENCY=4\n")
 
-    assert authority.current_field_values()["im_disabled_adapters"] == ["weixin", "retired-channel"]
+    assert authority.current_field_values()["ops_concurrency"] == 4
 
 
 def test_agent_owner_file_uses_explicit_runner_projection(tmp_path: Path) -> None:

@@ -21,7 +21,6 @@ from services.supervision.roster.gate_plan import (
     [
         ("heartbeat", "flag"),
         ("delivery-watchdog", "flag"),
-        ("im-bridge", "flag"),
         ("browser", "browser"),
         ("browser-mcp", "browser"),
         ("computer-mcp", "computer-mcp"),
@@ -52,7 +51,6 @@ def test_a_gated_session_without_its_fact_is_refused() -> None:
     [
         ("heartbeat", "disabled (MEIVA_HEARTBEAT_ENABLED off)"),
         ("delivery-watchdog", "disabled (MEIVA_DELIVERY_WATCHDOG_ENABLED off)"),
-        ("im-bridge", "disabled (MEIVA_IM_BRIDGE_ENABLED off)"),
     ],
 )
 def test_a_flag_session_names_its_flag_when_off_and_runs_when_on(

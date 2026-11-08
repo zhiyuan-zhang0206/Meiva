@@ -13,7 +13,7 @@ path. A successful CLI exit establishes queue acceptance; it does not prove the
 human read a message. Failed submission is logged, returns nonzero, and remains
 retryable. Successful submissions share the persisted repeat window.
 
-It does not use Grafana's alert engine or any Telegram credentials. Delivery
+It does not use Grafana's alert engine or any messaging credentials. Delivery
 still requires the installed CLI and the cluster services that agent messaging
 uses. The CLI posts to the gateway agents message endpoint; gateway outage therefore
 leaves the local log and nonzero status. This is not
