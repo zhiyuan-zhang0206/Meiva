@@ -38,3 +38,8 @@ async def test_compaction_preserves_fast_accounting_id(loguru_records: LogRecord
     # (task #6444).
     assert usage["extra"]["agent_id"] == 228
     assert usage["extra"]["attribution"] == "caller"
+    # meiva:note
+    # The row says what the call was, so a cost reader never has to infer a compaction from a
+    # large uncached input: cold and warm compactions differ by two orders of magnitude in cost
+    # while both are the same call (task #6444).
+    assert usage["extra"]["source"] == "compaction"
