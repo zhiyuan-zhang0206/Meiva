@@ -56,11 +56,10 @@ export function useReplySuggestion({ agentId, status, busy, items, enabled }: Pa
     last !== null &&
     last.kind === "agent_chat" &&
     last.user_facing !== false &&
-    !last.partial &&
-    (!last.askQuestion || last.askQuestion.resolved_at === null)
+    !last.partial
       ? `${agentId}:${last.item_id}`
       : null;
-  const explicitPrompt = Boolean(last?.userDelivery?.suggestions.length) || last?.askQuestion?.resolved_at === null;
+  const explicitPrompt = Boolean(last?.userDelivery?.suggestions.length);
   const eligible = enabled && visible && ((!busy && status === "idling") || explicitPrompt) && turnKey !== null;
 
   useEffect(() => {
