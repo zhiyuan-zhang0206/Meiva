@@ -5,10 +5,12 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 
 from schedules.plans.watch.workflow_graph import downstream_failing_jobs
 from schedules.plans.watch.main_red import (
+    JunitEvidence,
     FAILURE_INFRA,
     GATE_CHECK_STEPS,
     FAILURE_TEST,
@@ -656,7 +658,7 @@ def test_an_unnamed_log_takes_its_case_from_the_artifact() -> None:
         job_name="e2e shard (2/4)",
         suite_step_failed=True,
         failed_steps=("Verify shard results",),
-        junit_ids=("tests/e2e/fakes/test_a.py::test_two",),
+        junit=JunitEvidence(("tests/e2e/fakes/test_a.py::test_two",)),
     )
     assert [(failure.test_id, failure.kind) for failure in from_artifact] == [
         ("tests/e2e/fakes/test_a.py::test_two", FAILURE_TEST)
@@ -667,7 +669,7 @@ def test_an_unnamed_log_takes_its_case_from_the_artifact() -> None:
         named_log,
         job_name="e2e shard (2/4)",
         suite_step_failed=True,
-        junit_ids=("tests/e2e/fakes/test_a.py::test_two",),
+        junit=JunitEvidence(("tests/e2e/fakes/test_a.py::test_two",)),
     )
     assert [failure.test_id for failure in from_log] == [
         "tests/e2e/fakes/test_a.py::test_from_the_log"
@@ -686,7 +688,7 @@ def test_a_gate_check_step_wins_over_the_artifact() -> None:
         suite_step_failed=True,
         failed_steps=(step,),
         check_steps=GATE_CHECK_STEPS,
-        junit_ids=("tests/x.py::test_y",),
+        junit=JunitEvidence(("tests/x.py::test_y",)),
     )
 
     assert [failure.test_id for failure in parsed] == [f"meizel gate / {step}"]
@@ -702,7 +704,55 @@ def test_an_artifact_without_a_failing_case_still_reports_unnamed() -> None:
         job_name="e2e shard (2/4)",
         suite_step_failed=True,
         failed_steps=("Verify shard results",),
-        junit_ids=(),
+        junit=JunitEvidence(),
     )
 
     assert [failure.kind for failure in parsed] == [FAILURE_UNNAMED]
+
+
+# meiva:note
+# pytest colours `FAILED` when its output is not a pipe, and the job log keeps the escapes. On
+# 2026-11-08 three cards opened as `unnamed failure` from logs that each printed the case behind
+# `\x1b[31m`, which every anchored pattern in the parser missed. The line below is one of those
+# logs, byte for byte.
+def test_a_coloured_failed_line_still_names_the_case() -> None:
+    log = (
+        "2026-11-08T07:00:44.9697247Z \x1b[31mFAILED gateway/tests/observability/test_ops_monitor.py"
+        "::test_ops_monitor_llm_percentiles_are_exact_over_the_bucket_rows - assert None == 600.0"
+        "\x1b[0m\n"
+    )
+
+    failures = parse_failures(log, job_name="Backend full suite (8/8)", suite_step_failed=True)
+
+    assert [failure.test_id for failure in failures] == [
+        "gateway/tests/observability/test_ops_monitor.py"
+        "::test_ops_monitor_llm_percentiles_are_exact_over_the_bucket_rows"
+    ]
+    assert failures[0].kind == FAILURE_TEST
+
+
+# meiva:note
+# A red the watch could not name says where to look: the artifacts that came close, and when there
+# are none, that the run published nothing belonging to this job. Both are statements about where
+# the reader should go next; neither pretends the watch named the case.
+def test_an_unnamed_card_lists_the_candidate_artifacts() -> None:
+    plan = apply_run({}, _red(_GATE, "aaa111", "2026-11-02T00:00:00+00:00", _WATCH_WORK))
+    (named_entry,) = dict(plan.entries).values()
+    entry = replace(named_entry, kind=FAILURE_UNNAMED)
+    unnamed = replace(entry, artifact_candidates=("test-results-e2e-shard-3",))
+
+    body = card_body(
+        unnamed,
+        latest_url="https://example/run/1",
+        job_names=("e2e full matrix (3/4)",),
+        candidate_commits=(),
+    )
+
+    assert "Candidate artifacts (none matched this job): `test-results-e2e-shard-3`" in body
+    bare = card_body(
+        entry,
+        latest_url="https://example/run/1",
+        job_names=("e2e full matrix (3/4)",),
+        candidate_commits=(),
+    )
+    assert "published none that belongs to this job" in bare

@@ -288,6 +288,9 @@ def load_state(path: Path) -> WatchState:
             # the only partial ones), so the default keeps an upgrade from re-reading an old red as
             # something only its own lane may retire.
             covers_full_suite=bool(value.get("covers_full_suite", True)),
+            artifact_candidates=tuple(
+                name for name in value.get("artifact_candidates", ()) if isinstance(name, str)
+            ),
         )
         for name, value in raw.get("entries", {}).items()
     }
@@ -319,6 +322,7 @@ def save_state(path: Path, state: WatchState) -> None:
                 "run_id": entry.run_id,
                 "opportunities": entry.opportunities,
                 "covers_full_suite": entry.covers_full_suite,
+                "artifact_candidates": list(entry.artifact_candidates),
             }
             for name, entry in state.entries.items()
         },

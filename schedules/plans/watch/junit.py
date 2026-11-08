@@ -12,9 +12,18 @@ from __future__ import annotations
 
 import re
 from collections.abc import Sequence
+from dataclasses import dataclass
 from xml.etree import ElementTree
 
-__all__ = ["artifact_name_for_job", "failing_case_ids", "matching_artifact"]
+__all__ = [
+    "ArtifactMatch",
+    "artifact_candidates",
+    "artifact_name_for_job",
+    "failing_case_ids",
+    "match_artifact",
+    "matching_artifact",
+    "shard_number",
+]
 
 
 # meiva:note
@@ -37,16 +46,82 @@ def artifact_name_for_job(job_name: str) -> str:
 # answers nothing rather than the nearest name: naming a case from another shard would put a real
 # test id on the wrong red, which is worse than saying the watch could not name it.
 def matching_artifact(job_name: str, names: Sequence[str]) -> str | None:
+    return match_artifact(job_name, names).name
+
+
+# meiva:note
+# Every artifact this module will consider is a JUnit bundle; `e2e-logs-matrix-3` is a log bundle
+# that would otherwise win a suffix match on the same shard number.
+_ARTIFACT_PREFIX = "test-results-"
+
+
+# meiva:note
+# The shard a job name declares, when it declares one: `e2e full matrix (3/4)` answers `3` and
+# `backend shard 6/8` answers `6`. Written because a matrix job names its upload after the shard
+# (`test-results-e2e-shard-3`) while the job itself is named after the lane and the population
+# (`e2e full matrix (3/4)`), so the derived name cannot reach it (2026-11-08, three cards unnamed).
+def shard_number(job_name: str) -> str | None:
+    match = re.search(r"(\d+)\s*/\s*\d+", job_name)
+    return match.group(1) if match else None
+
+
+# meiva:note
+# The artifacts a reader should look at when none of them belongs to this job: names in this run's
+# bundle family that share a word with the job. The point is not to guess -- a name picked from here
+# never names a case -- but to answer "where do I look" on the card instead of leaving the reader to
+# open the run and diff the artifact list by eye.
+def _shares_a_word(job_name: str, artifact: str) -> bool:
+    words = {word for word in re.split(r"[^a-z0-9]+", job_name.lower()) if len(word) > 2}
+    return bool(
+        words & {word for word in re.split(r"[^a-z0-9]+", artifact.lower()) if len(word) > 2}
+    )
+
+
+def artifact_candidates(job_name: str, names: Sequence[str]) -> tuple[str, ...]:
+    return tuple(
+        sorted(
+            name
+            for name in names
+            if name.startswith(_ARTIFACT_PREFIX) and _shares_a_word(job_name, name)
+        )
+    )
+
+
+# meiva:note
+# Which artifact this job's JUnit is in, and how the answer was reached. Three tiers, and the third
+# is the important one: the derived name (a job that names its own upload); else, for a matrix job,
+# the one artifact whose name ends with the shard the job declares; else nothing, with the near
+# misses listed so the card can say where to look. A wrong shard would put a real test id on another
+# job's red, which is worse than saying the watch could not name it.
+@dataclass(frozen=True)
+class ArtifactMatch:
+    name: str | None
+    how: str
+    candidates: tuple[str, ...]
+
+
+def match_artifact(job_name: str, names: Sequence[str]) -> ArtifactMatch:
     wanted = artifact_name_for_job(job_name)
     if wanted in names:
-        return wanted
+        return ArtifactMatch(wanted, "name", ())
     longer = [name for name in names if name.startswith(wanted)]
     if longer:
-        return max(longer, key=len)
+        return ArtifactMatch(max(longer, key=len), "name", ())
     shorter = [name for name in names if wanted.startswith(name)]
     if shorter:
-        return max(shorter, key=len)
-    return None
+        return ArtifactMatch(max(shorter, key=len), "name", ())
+    shard = shard_number(job_name)
+    if shard is not None:
+        by_shard = [
+            name
+            for name in names
+            if name.startswith(_ARTIFACT_PREFIX)
+            and name.endswith(f"-{shard}")
+            and _shares_a_word(job_name, name)
+        ]
+        if len(by_shard) == 1:
+            return ArtifactMatch(by_shard[0], "shard", ())
+    return ArtifactMatch(None, "none", artifact_candidates(job_name, names))
 
 
 # meiva:note
