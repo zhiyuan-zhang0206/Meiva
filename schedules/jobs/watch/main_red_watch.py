@@ -133,6 +133,51 @@ def _load_slot(raw: object) -> SlotLedger:
     )
 
 
+# meiva:note
+# A watermark is "the newest `(created_at, attempt)` this watch has already read" for one workflow.
+# It used to be only the timestamp, which cannot see a re-run: GitHub keeps a run's id and
+# `created_at` and only advances `run_attempt`, so attempt 2 looked exactly like a run already read —
+# the red it cleared stayed on the books and the red it repeated was never counted (task #6488).
+# A ledger written before this encoding holds a bare ISO timestamp; it means "that run was read, at
+# whatever attempt it then had", which is recorded here as an unknown attempt. That choice is
+# deliberate: reading an old boundary run again would count one red twice and could confirm a card
+# from a single event, while treating it as read can at most miss one attempt of one run that was
+# already in flight when the encoding changed.
+_WATERMARK_SEPARATOR = "|"
+
+
+def _read_watermark(raw: str | None) -> tuple[datetime | None, int | None]:
+    if not raw:
+        return None, None
+    stamp, _separator, attempt = raw.partition(_WATERMARK_SEPARATOR)
+    try:
+        seen_at = datetime.fromisoformat(stamp)
+    except ValueError:
+        return None, None
+    if not attempt:
+        return seen_at, None
+    try:
+        return seen_at, int(attempt)
+    except ValueError:
+        return seen_at, None
+
+
+def _format_watermark(seen_at: datetime, attempt: int | None) -> str:
+    if attempt is None:
+        return seen_at.isoformat()
+    return f"{seen_at.isoformat()}{_WATERMARK_SEPARATOR}{attempt}"
+
+
+def _already_read(run: RunFacts, seen_at: datetime | None, seen_attempt: int | None) -> bool:
+    if seen_at is None:
+        return False
+    if run.created_at < seen_at:
+        return True
+    if run.created_at > seen_at:
+        return False
+    return seen_attempt is None or run.attempt <= seen_attempt
+
+
 def load_state(path: Path) -> WatchState:
     if not path.exists():
         return WatchState({}, {}, {})
@@ -341,19 +386,21 @@ def watch_once(
     infra = 0
     unnamed = 0
     for workflow in workflows:
-        watermark = watermarks.get(workflow)
-        seen_at = datetime.fromisoformat(watermark) if watermark else None
+        seen_at, seen_attempt = _read_watermark(watermarks.get(workflow))
         try:
             runs = fetch(workflow)
         except Exception as exc:
             notes.append(f"stream {workflow} unreadable: {type(exc).__name__}: {exc}")
             stale += 1
             continue
-        newest = seen_at
+        newest: tuple[datetime, int | None] | None = (
+            (seen_at, seen_attempt) if seen_at is not None else None
+        )
         for run in reversed(runs):
-            if seen_at is not None and run.created_at <= seen_at:
+            if _already_read(run, seen_at, seen_attempt):
                 continue
-            newest = run.created_at if newest is None else max(newest, run.created_at)
+            if newest is None or (run.created_at, run.attempt) > (newest[0], newest[1] or 0):
+                newest = (run.created_at, run.attempt)
             entries, run_opened, run_infra, run_unnamed = _apply_one_run(
                 entries,
                 run,
@@ -367,7 +414,7 @@ def watch_once(
             infra += run_infra
             unnamed += run_unnamed
         if newest is not None:
-            watermarks[workflow] = newest.isoformat()
+            watermarks[workflow] = _format_watermark(newest[0], newest[1])
     for stream in liveness:
         try:
             started = last_start(stream.workflow)

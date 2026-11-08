@@ -148,6 +148,13 @@ class RunFacts:
     downstream_jobs: tuple[str, ...] = ()
     covers_full_suite: bool = True
     head_title: str = ""
+    # meiva:note
+    # Which attempt of this run produced the facts above, and the run it belongs to. A re-run keeps
+    # the run's id and its `created_at` and only advances `run_attempt`, so a watermark on time alone
+    # can never see the second attempt — the red it left behind stands until some later run resolves
+    # it (task #6488). `attempt=1` is what every record written before this field means.
+    run_id: int = 0
+    attempt: int = 1
 
 
 # meiva:note

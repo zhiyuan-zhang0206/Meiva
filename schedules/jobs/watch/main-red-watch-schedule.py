@@ -232,6 +232,8 @@ def fetch_runs(workflow: str, run_process: RunProcess) -> tuple[RunFacts, ...]:
                 job_names=job_names,
                 downstream_jobs=downstream,
                 covers_full_suite=workflow in _FULL_SUITE_WORKFLOWS,
+                run_id=int(item.get("id") or 0),
+                attempt=int(item.get("run_attempt") or 1),
                 head_title=_commit_subject(item.get("head_sha", ""), run_process)
                 if conclusion == "failure"
                 else "",

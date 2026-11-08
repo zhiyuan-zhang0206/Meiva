@@ -910,3 +910,61 @@ def test_the_create_key_fits_the_registry_limit_for_any_test_id() -> None:
 
     assert 1 <= len(key) <= 128
     assert card_operation_key(card) == key
+
+
+# meiva:note
+# A re-run keeps the run's id and `created_at` and only advances `run_attempt`. The second attempt
+# is new evidence — it may repeat the red on the same commit, which is the second sighting that
+# confirms a named failure, so the watermark has to carry the attempt number (task #6488). Before
+# this, attempt 2 was invisible: the same red counted once, and its recovery could not close a card.
+def test_a_second_attempt_of_the_same_run_is_read_once_and_counts(tmp_path: Path) -> None:
+    when = datetime(2026, 11, 2, 10, tzinfo=UTC)
+    opened: list[Card] = []
+    closed: list[tuple[int, str]] = []
+    heartbeats: list[dict[str, object]] = []
+
+    first = replace(_red("release-gate.yml", "a" * 40, when), run_id=701, attempt=1)
+    _watch(tmp_path, [first], opened=opened, closed=closed, heartbeats=heartbeats)
+    state = load_state(tmp_path / STATE_FILE)
+    assert [entry.red_count for entry in state.entries.values()] == [1]
+    assert opened == [], "one sighting of a named failure is not yet a card"
+
+    again = replace(first, attempt=2)
+    _watch(tmp_path, [again], opened=opened, closed=closed, heartbeats=heartbeats)
+    state = load_state(tmp_path / STATE_FILE)
+    assert [entry.red_count for entry in state.entries.values()] == [2], "attempt 2 is evidence"
+    assert len(opened) == 1, "the second sighting confirms the card"
+
+    _watch(tmp_path, [again], opened=opened, closed=closed, heartbeats=heartbeats)
+    state = load_state(tmp_path / STATE_FILE)
+    assert [entry.red_count for entry in state.entries.values()] == [2], "a round is idempotent"
+    assert len(opened) == 1, "the same attempt never opens a second card"
+
+
+# meiva:note
+# A ledger written before the watermark carried an attempt holds a bare ISO timestamp, and it means
+# "that run was read, at whatever attempt it then had". Reading it again would count one red twice
+# and could confirm a card from a single event, so the old boundary run stays read (task #6488).
+def test_an_old_watermark_does_not_replay_its_boundary_run(tmp_path: Path) -> None:
+    when = datetime(2026, 11, 2, 10, tzinfo=UTC)
+    path = tmp_path / STATE_FILE
+    legacy = _red("release-gate.yml", "b" * 40, when)
+    fetch = [legacy]
+
+    opened: list[Card] = []
+    closed: list[tuple[int, str]] = []
+    heartbeats: list[dict[str, object]] = []
+    _watch(tmp_path, fetch, opened=opened, closed=closed, heartbeats=heartbeats)
+
+    raw = load_state(path)
+    legacy_watermarks = {name: stamp.split("|")[0] for name, stamp in raw.watermarks.items()}
+    save_state(path, replace(raw, watermarks=legacy_watermarks))
+
+    _watch(
+        tmp_path, [replace(legacy, attempt=2)], opened=opened, closed=closed, heartbeats=heartbeats
+    )
+    state = load_state(path)
+    assert [entry.red_count for entry in state.entries.values()] == [1], (
+        "the old run is not replayed"
+    )
+    assert opened == []
