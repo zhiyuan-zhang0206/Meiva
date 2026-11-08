@@ -305,6 +305,7 @@ async def _handle_compact_request(
                 state.messages,
                 ctx.llm,
                 ctx.require_agent(),
+                agent_id=agent_id,
                 catalog=ctx.require_catalog(),
             )
             break

@@ -141,7 +141,7 @@ async def test_generate_summary_returns_summary():
     slices = AgentSlices.resolve(None, default_reader=defaults())
     llm = _fake_llm(summary_text="a synthetic summary")
     summary = await generate_summary(
-        msgs, llm, slices, catalog=build_model_catalog(home=meiva_home())
+        msgs, llm, slices, agent_id=228, catalog=build_model_catalog(home=meiva_home())
     )
 
     assert summary == "a synthetic summary"
@@ -161,7 +161,11 @@ async def test_generate_summary_remembers_the_call_that_produced_it() -> None:
         response_metadata={"model_name": "m1"},
     )
     summary = await generate_summary(
-        msgs, _fake_llm(response=response), slices, catalog=build_model_catalog(home=meiva_home())
+        msgs,
+        _fake_llm(response=response),
+        slices,
+        agent_id=228,
+        catalog=build_model_catalog(home=meiva_home()),
     )
 
     closing = closing_of(summary)
@@ -172,7 +176,11 @@ async def test_generate_summary_remembers_the_call_that_produced_it() -> None:
     assert summary == "a synthetic summary"  # still the plain text everywhere else
 
     bare = await generate_summary(
-        msgs, _fake_llm("no usage"), slices, catalog=build_model_catalog(home=meiva_home())
+        msgs,
+        _fake_llm("no usage"),
+        slices,
+        agent_id=228,
+        catalog=build_model_catalog(home=meiva_home()),
     )
     assert closing_of(bare) is None
     assert closing_of("an agent-written summary") is None

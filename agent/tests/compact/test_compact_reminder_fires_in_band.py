@@ -232,6 +232,7 @@ async def test_compact_contract_reaches_request_without_resident_self(
                 agent__sdk_expand_in_system_prompt=["shell", "files", "agents", "tasks"]
             )
         ),
+        agent_id=228,
         catalog=build_model_catalog(home=meiva_home()),
     )
     [request] = llm.requests

@@ -154,6 +154,7 @@ async def generate_summary(
     llm: BaseChatModel,
     slices: AgentSlices,
     *,
+    agent_id: int,
     catalog: ModelCatalog,
 ) -> SummaryText:
     has_system = bool(messages) and isinstance(messages[0], SystemMessage)
@@ -179,12 +180,17 @@ async def generate_summary(
     )
     model = slices.brain.llm_model
     if isinstance(model, str) and model:
-        from base.lm.usage import log_usage_from_message
+        from base.lm.usage import UsageOptions, log_usage_from_message
 
+        # meiva:note
+        # The compaction call is an agent's own spend, and the row carries that agent: this
+        # process serves several agents, so the ambient identity is None here and a row that
+        # falls back to it is `unattributed` (task #6444).
         log_usage_from_message(
             response,
             model=model,
             usage_kind="agent",
+            options=UsageOptions(for_agent_id=agent_id, stamp_message=True),
             catalog=catalog,
         )
     summary = response.text
@@ -243,13 +249,16 @@ async def auto_compact_summary(
     content_count: int,
     slices: AgentSlices,
     *,
+    agent_id: int,
     catalog: ModelCatalog,
 ) -> str:
     summary: str = ""
     last_error: Exception | None = None
     for attempt in range(1, COMPACT_MAX_ATTEMPTS + 1):
         try:
-            summary = await generate_summary(messages, llm, slices, catalog=catalog)
+            summary = await generate_summary(
+                messages, llm, slices, agent_id=agent_id, catalog=catalog
+            )
         except Exception as e:
             if not isinstance(e, EmptyCompactionSummaryError) and not is_retryable_provider_error(
                 e
@@ -339,6 +348,7 @@ async def auto_compact_for_llm(
                     llm,
                     len(content_msgs),
                     runtime.context.require_agent(),
+                    agent_id=agent_id,
                     catalog=catalog,
                 ),
                 interrupted,
