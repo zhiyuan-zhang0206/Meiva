@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import random
 import socket
 import time
 from datetime import UTC, datetime
@@ -102,7 +103,7 @@ def test_a_scratch_handle_reads_the_owners_ssl_policy_when_it_is_built(
 # every other live holder on the host, so two workers — or two runs of one shard on
 # one machine — cannot be given it.
 def _free_port() -> int:
-    return port_lease.lease_ports(1)[0]
+    return port_lease.lease_ports(1, rng=random.SystemRandom())[0]
 
 
 async def _healthz(port: int) -> tuple[int, dict[str, object]]:

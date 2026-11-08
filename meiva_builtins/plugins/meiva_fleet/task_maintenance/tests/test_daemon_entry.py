@@ -9,6 +9,7 @@ import asyncio
 import http.client
 import json
 import os
+import random
 import socket
 import subprocess
 import sys
@@ -49,7 +50,7 @@ _REPO_ROOT = Path(__file__).resolve().parents[5]
 # every other live holder on the host, so two workers — or two runs of one shard on
 # one machine — cannot be given it.
 def _free_port() -> int:
-    return port_lease.lease_ports(1)[0]
+    return port_lease.lease_ports(1, rng=random.SystemRandom())[0]
 
 
 def _endpoint(directory: Path) -> ServiceEndpoint:

@@ -1,3 +1,4 @@
+import random
 import socket
 from datetime import UTC, datetime
 from pathlib import Path
@@ -19,7 +20,7 @@ from services.derived.memory_indexer.config import MemoryIndexerConfig
 # every other live holder on the host, so two workers — or two runs of one shard on
 # one machine — cannot be given it.
 def _free_port() -> int:
-    return port_lease.lease_ports(1)[0]
+    return port_lease.lease_ports(1, rng=random.SystemRandom())[0]
 
 
 async def test_run_unknown_provider_fails_before_health_server(

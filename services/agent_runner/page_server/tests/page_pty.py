@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import os
+import random
 import subprocess
 import sys
 from collections.abc import Generator
@@ -65,7 +66,7 @@ _REPO = Path(__file__).resolve().parents[4]
 # every other live holder on the host, so two workers — or two runs of one shard on
 # one machine — cannot be given it.
 def free_port() -> int:
-    return port_lease.lease_ports(1)[0]
+    return port_lease.lease_ports(1, rng=random.SystemRandom())[0]
 
 
 # meiva:note

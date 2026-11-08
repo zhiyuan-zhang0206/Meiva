@@ -22,6 +22,7 @@ and every other plugin load after this module and read what it established.
 
 import hashlib
 import os
+import random
 import sys
 import tempfile
 import time
@@ -584,7 +585,7 @@ os.environ["MEIVA_EXEC_TIMEOUT_SECONDS"] = "60.0"
 # to a fixture of this very process later on. A leased number is refused to every
 # other holder while this one lives, and a dead holder frees it.
 def _reserve_distinct_ports(count: int) -> list[int]:
-    return port_lease.lease_ports(count)
+    return port_lease.lease_ports(count, rng=random.SystemRandom())
 
 
 def _pin_setting(field: str, value: object) -> None:

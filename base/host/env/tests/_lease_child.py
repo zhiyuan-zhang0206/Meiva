@@ -10,13 +10,14 @@
 from __future__ import annotations
 
 import json
+import random
 import sys
 
 from base.host.env.port_lease import lease_ports
 
 
 def main(count: int) -> None:
-    sys.stdout.write(json.dumps(lease_ports(count)) + "\n")
+    sys.stdout.write(json.dumps(lease_ports(count, rng=random.SystemRandom())) + "\n")
     sys.stdout.flush()
     sys.stdin.readline()
 

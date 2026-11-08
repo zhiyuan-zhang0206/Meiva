@@ -32,7 +32,7 @@ from cli.startup.tests.birth_facts import birth_facts
 # meiva:note
 # One port held by the host-wide lease for this session; sibling workers cannot reuse it.
 def _free_port() -> int:
-    return port_lease.lease_ports(1)[0]
+    return port_lease.lease_ports(1, rng=random.SystemRandom())[0]
 
 
 # meiva:note

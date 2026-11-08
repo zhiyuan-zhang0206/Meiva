@@ -4,6 +4,7 @@ from __future__ import annotations
 # Memory search and indexer entries compose their database handle, server, and cleanup from their owners.
 import asyncio
 import json
+import random
 import socket
 import threading
 import time
@@ -46,7 +47,7 @@ def _application_name(database: Database) -> str:
 
 
 def _free_port() -> int:
-    return port_lease.lease_ports(1)[0]
+    return port_lease.lease_ports(1, rng=random.SystemRandom())[0]
 
 
 def _port_refuses(port: int) -> bool:

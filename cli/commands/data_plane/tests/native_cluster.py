@@ -14,6 +14,7 @@ import contextlib
 import dataclasses
 import getpass
 import json
+import random
 import subprocess
 from collections.abc import Callable, Iterator
 from dataclasses import asdict, dataclass
@@ -118,7 +119,7 @@ def seed_pg_template(home: Path, template_seed: Path) -> None:
 # ephemeral pool at import — could hold it when a record was written, and the record
 # validated as `duplicate start port reservation`.
 def free_port() -> int:
-    return port_lease.lease_ports(1)[0]
+    return port_lease.lease_ports(1, rng=random.SystemRandom())[0]
 
 
 # meiva:note

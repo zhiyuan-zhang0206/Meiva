@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import random
 import socket
 import time
 from collections.abc import Callable
@@ -25,7 +26,7 @@ from services.wake.heartbeat import completion_digest, daemon
 
 
 def _free_port() -> int:
-    return port_lease.lease_ports(1)[0]
+    return port_lease.lease_ports(1, rng=random.SystemRandom())[0]
 
 
 def _port_refuses(port: int) -> bool:
