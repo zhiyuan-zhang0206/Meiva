@@ -65,5 +65,8 @@
   "sidebarSettings": "侧栏设置",
   "view": "视图",
   "display": "显示",
-  "emptyAgents": "还没有 agent。"
+  "emptyAgents": "还没有 agent。",
+  "warningsErrorsUnresolved": "警告 / 错误（未解决）",
+  "warningsTitleUnresolved": "过去 {win} 仍在发生的 Warning / Error 事件；已经不再发生的那一类视为已解决、不计入（已解决 {resolved} 条）",
+  "warningsAllClear": "当前没有仍在发生的警告或错误"
 }

@@ -65,5 +65,8 @@
   "sidebarSettings": "Sidebar settings",
   "view": "View",
   "display": "Display",
-  "emptyAgents": "No agents yet."
+  "emptyAgents": "No agents yet.",
+  "warningsErrorsUnresolved": "Warnings / errors (unresolved)",
+  "warningsTitleUnresolved": "Warning / Error events still happening over the past {win}; a class that stopped happening is resolved and not counted ({resolved} events resolved)",
+  "warningsAllClear": "No warning or error is still happening"
 }

@@ -17,7 +17,7 @@ import threading
 import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 from typing import Annotated
@@ -46,7 +46,7 @@ from base.native_process.loaded_commit import LoadedCommit
 from base.packages.plugins.surface import stats
 from gateway.cluster._health import get_health
 from gateway.cluster.monitor import stats_events
-from gateway.cluster.monitor.alert_classes import read_alert_classes
+from gateway.cluster.monitor.alert_classes import alert_class_totals, read_alert_classes
 from gateway.cluster.roster import roster_probe, roster_rows
 from gateway.cluster.roster.liveness_snapshot import Snapshot
 from gateway.cluster.roster.roster_plan import (
@@ -183,7 +183,13 @@ def _compute_stats_dashboard(
     with pool.connection() as conn:
         stats_events.set_statement_timeout(conn, config.stats_statement_timeout_ms)
         totals = stats_events.window_totals(conn, cluster=cluster, start=window_start, end=now)
-        alert_classes = read_alert_classes(conn, cluster=cluster, start=window_start, end=now)
+        alert_classes = read_alert_classes(
+            conn,
+            cluster=cluster,
+            start=window_start,
+            end=now,
+            quiet_window=timedelta(seconds=config.alert_class_quiet_seconds),
+        )
         live_count = count_one(
             conn, "SELECT COUNT(*) AS n FROM agents_meta WHERE status != 'terminated'"
         )
@@ -193,6 +199,7 @@ def _compute_stats_dashboard(
         else (None if totals.in_total else 0.0)
     )
     openai_cost_usd, anthropic_cost_usd = _provider_api_costs(totals.api_cost_by_model, catalog)
+    classes = alert_class_totals(alert_classes)
     return StatsDashboard(
         live_count=live_count,
         window_hours=hours,
@@ -206,10 +213,12 @@ def _compute_stats_dashboard(
         cost_usd=totals.cost_usd,
         openai_cost_usd=openai_cost_usd,
         anthropic_cost_usd=anthropic_cost_usd,
-        warnings=sum(row.count for row in alert_classes if row.level == "warning"),
-        errors=sum(row.count for row in alert_classes if row.level != "warning"),
-        alert_classes_active=sum(row.dismissal_id is None for row in alert_classes),
-        alert_classes_dismissed=sum(row.dismissal_id is not None for row in alert_classes),
+        warnings=classes.warnings,
+        errors=classes.errors,
+        warnings_resolved=classes.warnings_resolved,
+        errors_resolved=classes.errors_resolved,
+        alert_classes_active=classes.classes_unresolved,
+        alert_classes_dismissed=classes.classes_resolved,
         plugin_stats=_plugin_stat_rows(pool),
         as_of=clock.now(),
     )

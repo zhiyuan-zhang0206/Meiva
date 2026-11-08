@@ -79,23 +79,9 @@ sum is the usage-time quote snapshot, not historical tokens repriced against tod
 registry. Every read is scoped to the current home-derived cluster label (rows with no
 label included).
 
-### Alert classes — `GET /api/stats/alert-classes?hours=` and `.../samples`
-
-The sidebar's Warnings / Errors card displays the dashboard's raw event totals,
-separately from formal Grafana alerts. The diagnostic API groups one class per
-`(level, event_name, source, process)` of the window, with its event count, first and
-last occurrence and the `dismissal_id` of the
-active `event_dismissals` row that cancels it (None = active). The dismissal match is
-`resolution.matching_dismissal` — the daemon's: the emission category is ignored, an
-exact `process` row or a wildcard row (`process = ''`, task #4329 B5) cancels the class,
-and the exact row wins when both match. A reopened or per-agent row cancels nothing. The
-dashboard's `alert_classes_active` / `alert_classes_dismissed` count the same rows
-(`warnings` / `errors` stay raw event totals, critical folded into errors). The list is
-most-frequent-first, capped at 200 rows (`total_classes` / `total_events` are uncapped).
-`/samples?level&event_name&source&process&hours` returns the newest five events of one
-class (`attributes.msg` as `message`, plus the full attributes). Dismiss and reopen use `POST /api/event-resolutions[/{id}/reopen]`
-calls, scoped per class. Both reads run under an 8-second statement timeout
-(a timeout is a retriable 503).
+The warning/error class reads have their own node: [[alert-classes-api.meiva.okf.md]]
+— grouping, dismissal matching, and the quiet window that decides which classes still need
+attention.
 
 `GET /api/agents/{id}/inspect/statistics` owns window-dependent cost, stats,
 TPS and activity. It reads one repeatable-read Postgres snapshot over persisted
