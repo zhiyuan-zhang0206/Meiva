@@ -643,6 +643,19 @@ class LmSettings(EnvSettings):
         },
     )
 
+    anthropic_workspace_id: str | None = Field(
+        title="Anthropic Workspace ID",
+        default=None,
+        alias="ANTHROPIC_WORKSPACE_ID",
+        description="Anthropic Workspace ID header (anthropic-workspace-id) required for organization user API keys.",
+        json_schema_extra={
+            "restart_required": "agent",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
     gemini_api_key: SecretStr | None = Field(
         title="Gemini API key",
         default=None,

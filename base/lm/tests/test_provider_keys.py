@@ -9,6 +9,9 @@ def test_a_key_is_required_by_its_env_name() -> None:
     keys = ProviderKeys({"FOO_API_KEY": "sk-foo"})
     assert keys.present("FOO_API_KEY")
     assert keys.require("FOO_API_KEY") == "sk-foo"
+    assert keys.get("FOO_API_KEY") == "sk-foo"
+    assert keys.get("MISSING_KEY", "fallback") == "fallback"
+    assert keys.get("MISSING_KEY") == ""
 
 
 def test_a_missing_or_empty_key_fails_at_once() -> None:

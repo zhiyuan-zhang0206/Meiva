@@ -16,6 +16,7 @@ def _context(
     budget: int = 0,
     spec: ModelSpec | None = None,
     disable_streaming: bool = False,
+    keys: ProviderKeys | None = None,
 ) -> BuildContext:
     return BuildContext(
         model=model,
@@ -25,7 +26,9 @@ def _context(
         disable_streaming=disable_streaming,
         timeout=None,
         thinking_budget_tokens=budget,
-        keys=ProviderKeys({"ANTHROPIC_API_KEY": "test-not-a-real-key"}),
+        keys=keys
+        if keys is not None
+        else ProviderKeys({"ANTHROPIC_API_KEY": "test-not-a-real-key"}),
     )
 
 
@@ -75,3 +78,43 @@ def test_a_fast_service_declares_its_beta_and_speed() -> None:
 
 def test_streaming_can_be_disabled() -> None:
     assert _built(_context("claude-sonnet-5", disable_streaming=True)).disable_streaming is True
+
+
+def test_anthropic_workspace_id_header_injected() -> None:
+    keys = ProviderKeys(
+        {
+            "ANTHROPIC_API_KEY": "test-key",
+            "ANTHROPIC_WORKSPACE_ID": "wrkspc_test123",
+        }
+    )
+    llm = _built(_context("claude-sonnet-5", keys=keys))
+    assert llm.default_headers == {"anthropic-workspace-id": "wrkspc_test123"}
+
+
+def test_anthropic_custom_headers_injected() -> None:
+    keys = ProviderKeys(
+        {
+            "ANTHROPIC_API_KEY": "test-key",
+            "ANTHROPIC_CUSTOM_HEADERS": "x-foo: bar\nanthropic-workspace-id: wrkspc_custom",
+        }
+    )
+    llm = _built(_context("claude-sonnet-5", keys=keys))
+    assert llm.default_headers == {
+        "x-foo": "bar",
+        "anthropic-workspace-id": "wrkspc_custom",
+    }
+
+
+def test_anthropic_workspace_id_overrides_custom_headers() -> None:
+    keys = ProviderKeys(
+        {
+            "ANTHROPIC_API_KEY": "test-key",
+            "ANTHROPIC_CUSTOM_HEADERS": "anthropic-workspace-id: old_wrkspc\nx-baz: qux",
+            "ANTHROPIC_WORKSPACE_ID": "wrkspc_new",
+        }
+    )
+    llm = _built(_context("claude-sonnet-5", keys=keys))
+    assert llm.default_headers == {
+        "anthropic-workspace-id": "wrkspc_new",
+        "x-baz": "qux",
+    }
