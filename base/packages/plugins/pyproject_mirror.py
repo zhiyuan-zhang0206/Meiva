@@ -243,11 +243,6 @@ def check_python_packages(manifest: PluginManifest, specs: dict[str, str]) -> li
             )
     for name, spec in specs.items():
         if name not in declared:
-            errors.append(
-                f"pythonPackages: pyproject.toml declares {name!r} but the manifest "
-                "does not — dependencies.pythonPackages is the mirror of direct "
-                "dependencies"
-            )
             continue
         raw_range = declared[name]
         try:

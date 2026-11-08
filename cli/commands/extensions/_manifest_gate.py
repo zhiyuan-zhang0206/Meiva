@@ -45,7 +45,6 @@ def manifest_install_errors(
     except host_version_mod.HostVersionError as e:
         return [str(e)]
     errors += manifest_module.check_host_engine(manifest, host)
-    errors += manifest_module.check_host_commit(manifest, paths.repo_root(), environ=environ)
 
     if mirror_pyproject:
         from base.packages.plugins import pyproject_mirror

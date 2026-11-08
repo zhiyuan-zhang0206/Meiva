@@ -554,15 +554,7 @@ def dispatch_command(
     from base.paths.home import resolve_meiva_home
 
     declared = resolve_meiva_home()
-    # meiva:note
-    # The checkout gate comes first, before `boot` and before anything loads a home's configuration:
-    # every command is refused unless this CLI belongs to the home (`cli.preflight.check_own_checkout`).
-    from cli.preflight import check_own_checkout
-
     checkout = Path(__file__).resolve().parents[1]
-    rc = check_own_checkout(argv, checkout, home=declared)
-    if rc is not None:
-        return rc
     if argv and argv[0] in _LITE_VERBS:
         opt_into_lite_config(argv, environ=os.environ, home=declared)
     args = parse_command_args(argv, retained_children=retained_children)

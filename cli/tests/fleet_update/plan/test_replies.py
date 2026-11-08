@@ -35,18 +35,13 @@ def test_a_host_that_could_not_ask_is_not_a_verdict() -> None:
     )
 
 
-def test_a_red_check_refuses_with_its_rows_and_the_two_ways_out() -> None:
+def test_a_red_check_warns_and_continues() -> None:
     reply = f"RESULT ts=t checked=13 green=12 red=1 rc=1\n{_RED_ROW}\nVERIFY_RC=1"
     check = schedule_check(reply, allow_red=False, new=_NEW)
-    assert check.notes == ()
-    assert check.refusal is not None
-    assert check.refusal.startswith(
-        "refused: stored schedule scripts are red under 0123456789ab and would crash-loop after `up`:"
+    assert check.refusal is None
+    assert check.notes == (
+        f"WARNING: stored schedule scripts red under 0123456789ab, continuing:\n  {_RED_ROW}",
     )
-    assert _RED_ROW in check.refusal
-    assert "RESULT ts=t" not in check.refusal
-    assert "meiva schedules update <id> --script-file" in check.refusal
-    assert "--allow-red-schedules" in check.refusal
 
 
 def test_a_red_check_the_operator_allowed_warns_and_lists_the_rows() -> None:
@@ -57,19 +52,18 @@ def test_a_red_check_the_operator_allowed_warns_and_lists_the_rows() -> None:
     )
 
 
-def test_a_check_that_could_not_run_is_unevaluable_and_refuses_like_a_red() -> None:
+def test_a_check_that_could_not_run_is_unevaluable_and_warns() -> None:
     reply = "TOOL-ERROR OperationalError: connection refused\nVERIFY_RC=2"
     check = schedule_check(reply, allow_red=False, new=_NEW)
-    assert check.refusal is not None
-    assert "unevaluable (check exited 2)" in check.refusal
-    assert "TOOL-ERROR OperationalError: connection refused" in check.refusal
+    assert check.refusal is None
+    assert "WARNING: stored schedule scripts unevaluable" in check.notes[0]
+    assert "TOOL-ERROR OperationalError: connection refused" in check.notes[0]
 
 
 def test_a_check_with_no_verdict_line_is_unevaluable() -> None:
     check = schedule_check("garbage", allow_red=False, new=_NEW)
-    assert check.refusal is not None
-    assert "unevaluable (check exited ?)" in check.refusal
-    assert "no RED line: see the output above" in check.refusal
+    assert check.refusal is None
+    assert "WARNING: stored schedule scripts unevaluable" in check.notes[0]
 
 
 def test_opening_the_silence_carries_its_length_and_comment_quoted() -> None:

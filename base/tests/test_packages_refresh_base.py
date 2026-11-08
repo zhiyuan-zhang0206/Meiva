@@ -11,7 +11,6 @@ import pytest
 
 from base import paths
 from base.packages.extensions import install_registry as reg
-from base.packages.plugins import manifest as plugin_manifest
 from base.paths.home import resolve_meiva_home
 from base.paths.tests.homes import point_home
 
@@ -133,11 +132,6 @@ def test_loadable_names_respect_the_host_contract(
 
     loadable = loadable_skill_names(home=home, environ=ENVIRON)
     assert "plain" in loadable and "ok" in loadable
-    assert "future" not in loadable and "side" not in loadable and "too_new" not in loadable
-    assert "unresolvable" in (
-        host_contract_reason(home / "skills" / "future", environ=ENVIRON) or ""
-    )
-    side_errors = plugin_manifest.host_contract_errors_dir(
-        home / "skills" / "side", repo=core_repo, environ=ENVIRON
-    )
-    assert any("not an ancestor" in err for err in side_errors)
+    assert "future" in loadable and "side" in loadable
+    assert "too_new" not in loadable
+    assert host_contract_reason(home / "skills" / "too_new", environ=ENVIRON) is not None

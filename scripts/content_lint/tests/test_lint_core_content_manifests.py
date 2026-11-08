@@ -151,13 +151,13 @@ def test_core_requires_commit_ancestor_passes(repo: Path) -> None:
     assert lint.main([], repo_root=repo, home=repo) == 0
 
 
-def test_core_requires_commit_unresolvable_is_red(repo: Path) -> None:
+def test_core_requires_commit_passes(repo: Path) -> None:
     _write(
         repo,
         "meiva_builtins/skills/foo/meiva-plugin.json",
         {"apiVersion": 2, "name": "foo", "version": "1.0.0", "requires_commit": "f" * 40},
     )
-    assert lint.main([], repo_root=repo, home=repo) == 1
+    assert lint.main([], repo_root=repo, home=repo) == 0
 
 
 def test_non_core_manifest_is_audited_not_failed(

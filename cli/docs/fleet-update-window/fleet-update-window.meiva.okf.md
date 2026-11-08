@@ -41,7 +41,7 @@ A `down` rerun after a failed stop finds the gateway's database already stopped,
 so the table cannot be read: for the same NEW, and only while the receipt is
 younger than `--silence-hours`, the receipt stands in for the verdict and the log
 says so (`REUSED`). Without a matching, fresh receipt the table is still
-unevaluable and refuses.
+unevaluable and warns, continuing.
 
 ## The silence
 
@@ -67,7 +67,7 @@ reporting its label and log path; its label is its own
 
 down refuses before touching anything — exit 2, no effects — when a listed host has uncommitted changes, a post-checkout hook, an active update marker, when the hosts disagree on HEAD, and when .python-version changes without --allow-python-change; the probe reads its facts through the host's own shell, among them whether the host is already stopped: its last lifecycle operation (`run/lifecycle-op.json`) is a completed stop with rc 0 and no meiva-root is running. A stop counts only when `meiva stop` exits 0 and that journal then records it complete with rc 0; a start counts when `meiva start` exits 0, which it does only after readiness.
 
-Before anything stops — under --dry-run too — down runs NEW's offline verify over the gateway's stored schedule table from a throwaway worktree: the read step runs on the home's OLD checkout by signature dispatch, the check goes through NEW's schedules CLI under a throwaway home, VERIFY_RC separates a crashed check from a red, a host that has not fetched NEW is reported as not checked, and a red or unevaluable table refuses with the rows listed unless --allow-red-schedules; when the rows cannot be read, a receipt of an earlier pass of the same NEW younger than --silence-hours is reused and reported instead.
+Before anything stops — under --dry-run too — down runs NEW's offline verify over the gateway's stored schedule table from a throwaway worktree: the read step runs on the home's OLD checkout by signature dispatch, the check goes through NEW's schedules CLI under a throwaway home, VERIFY_RC separates a crashed check from a red, a host that has not fetched NEW is reported as not checked, and a red or unevaluable table warns with the rows listed, continuing; when the rows cannot be read, a receipt of an earlier pass of the same NEW younger than --silence-hours is reused and reported instead.
 
 After a failed stop, down recovers the hosts that stop took down: [[cli/docs/fleet-update-window/failed-stop-recovery.meiva.okf.md]].
 
