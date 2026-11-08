@@ -502,9 +502,16 @@
           {
             "name": "Idempotency-Scope",
             "in": "header",
-            "required": true,
+            "required": false,
             "schema": {
-              "type": "string",
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
               "title": "Idempotency-Scope"
             }
           }
@@ -5221,9 +5228,16 @@
           {
             "name": "Idempotency-Scope",
             "in": "header",
-            "required": true,
+            "required": false,
             "schema": {
-              "type": "string",
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
               "title": "Idempotency-Scope"
             }
           }
@@ -5342,9 +5356,16 @@
           {
             "name": "Idempotency-Scope",
             "in": "header",
-            "required": true,
+            "required": false,
             "schema": {
-              "type": "string",
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
               "title": "Idempotency-Scope"
             }
           }
@@ -5688,9 +5709,16 @@
           {
             "name": "Idempotency-Scope",
             "in": "header",
-            "required": true,
+            "required": false,
             "schema": {
-              "type": "string",
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
               "title": "Idempotency-Scope"
             }
           }

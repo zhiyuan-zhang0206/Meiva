@@ -382,7 +382,7 @@ def test_converge_does_not_descend_node_modules(
 def test_converge_prunes_virtualenv_and_tool_cache_subtrees_after_sealing_root(
     request: pytest.FixtureRequest, tmp_path: Path, dirname: str
 ) -> None:
-    root = tmp_path / "workspaces"
+    root = tmp_path / "tree"
     pruned = root / "agent-1" / dirname
     inner = pruned / "nested"
     inner.mkdir(parents=True)
@@ -400,6 +400,31 @@ def test_converge_prunes_virtualenv_and_tool_cache_subtrees_after_sealing_root(
     assert _mode(root / "agent-1") == 0o700
     assert _mode(pruned) == 0o700
     assert _mode(wheel_file) == 0o644
+    assert cap.debugs == []
+    assert cap.warnings == []
+    assert private_storage.scan_non_regular_nodes(root, euid=os.geteuid()) == []
+
+
+def test_converge_workspaces_never_descends_into_workspace_internals(
+    request: pytest.FixtureRequest, tmp_path: Path
+) -> None:
+    root = tmp_path / "workspaces"
+    agent_ws = root / "agent-1"
+    sub_dir = agent_ws / "large_repo"
+    sub_dir.mkdir(parents=True)
+    agent_ws.chmod(0o755)
+    sub_dir.chmod(0o755)
+    file_in_sub = sub_dir / "code.py"
+    file_in_sub.write_text("print('hi')\n")
+    file_in_sub.chmod(0o644)
+    cap = _Captured(request.addfinalizer)
+
+    assert private_storage.converge_private_tree(root, euid=os.geteuid()) == root
+
+    assert _mode(root) == 0o700
+    assert _mode(agent_ws) == 0o700
+    assert _mode(sub_dir) == 0o755
+    assert _mode(file_in_sub) == 0o644
     assert cap.debugs == []
     assert cap.warnings == []
     assert private_storage.scan_non_regular_nodes(root, euid=os.geteuid()) == []

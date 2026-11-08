@@ -117,7 +117,6 @@ curl -XPOST http://localhost:8000/api/keyed/v1/agents \
   -H "Authorization: Bearer $SECRET" \
   -H 'content-type: application/json' \
   -H "Idempotency-Key: $(uuidgen)" \
-  -H 'Idempotency-Scope: principal-v1' \
   -d '{"prompt":"Hello, introduce yourself","prompt_source":"user"}'
 ```
 

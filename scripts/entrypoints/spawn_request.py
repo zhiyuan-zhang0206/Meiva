@@ -6,7 +6,6 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass
 
-from base.api_contracts.idempotency import PRINCIPAL_SCOPE, SCOPE_HEADER
 from base.cluster.machine import GatewayAccess, gateway_api_base, gateway_auth_headers
 
 __all__ = ["SpawnRequest", "build_spawn_request", "parse_spawn_agent_id"]
@@ -30,7 +29,6 @@ def build_spawn_request(access: GatewayAccess, *, idempotency_key: str) -> Spawn
     headers = {
         **gateway_auth_headers(access),
         "Idempotency-Key": idempotency_key,
-        SCOPE_HEADER: PRINCIPAL_SCOPE,
     }
     return SpawnRequest(
         url=f"{base}/api/keyed/v1/agents",

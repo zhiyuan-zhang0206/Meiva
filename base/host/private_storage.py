@@ -117,6 +117,14 @@ class SkipReport:
         return f"{shown}; …" if len(tagged) > _SUMMARY_EXAMPLE_LIMIT else shown
 
 
+def _default_workspaces_depth(root: Path) -> int | None:
+    if root.name == "workspaces":
+        return 1
+    if root.parent.name == "workspaces":
+        return 0
+    return None
+
+
 # meiva:note
 # Recursively converge a private directory tree to owner-only modes.
 #
@@ -129,14 +137,17 @@ class SkipReport:
 # out of the tree while doing so, and skips nodes it cannot repair (symlinks, foreign
 # owners, sockets, FIFOs, or OS-refused bundles) with per-node DEBUG lines and ONE
 # summary WARNING per tree. `_PRUNED_DIRNAMES` subtrees are converged to `0o700` at
-# their directory boundary and not descended.
-def converge_private_tree(path: Path, *, euid: int) -> Path:
+# their directory boundary and not descended. Agent workspaces are sealed at their
+# root directories (0o700) without recursive descent into internal project files.
+def converge_private_tree(path: Path, *, euid: int, max_depth: int | None = None) -> Path:
     skips = SkipReport()
     try:
         root_stat: os.stat_result | None = path.lstat()
     except FileNotFoundError:
         root_stat = None
-    _converge_tree(path, skips, current=root_stat, euid=euid)
+    if max_depth is None:
+        max_depth = _default_workspaces_depth(path)
+    _converge_tree(path, skips, current=root_stat, euid=euid, depth=0, max_depth=max_depth)
     report_skips(path, skips)
     return path
 
@@ -169,7 +180,13 @@ def _already_private_regular(current: os.stat_result, *, euid: int) -> bool:
 
 
 def _converge_tree(
-    path: Path, skips: SkipReport, *, current: os.stat_result | None, euid: int
+    path: Path,
+    skips: SkipReport,
+    *,
+    current: os.stat_result | None,
+    euid: int,
+    depth: int = 0,
+    max_depth: int | None = None,
 ) -> None:
     if current is not None and foreign_owned(current, euid=euid):
         # meiva:note
@@ -183,13 +200,17 @@ def _converge_tree(
             path.chmod(0o700)
     else:
         ensure_private_dir(path, euid=euid)
+    if max_depth is not None and depth >= max_depth:
+        return
     with os.scandir(path) as entries:
         ordered = sorted(entries, key=lambda entry: entry.name)
     for entry in ordered:
         entry_stat = entry.stat(follow_symlinks=False)
         if _already_private_regular(entry_stat, euid=euid):
             continue
-        _converge_child_stat(Path(entry.path), entry_stat, skips, euid=euid)
+        _converge_child_stat(
+            Path(entry.path), entry_stat, skips, euid=euid, depth=depth + 1, max_depth=max_depth
+        )
 
 
 def converge_child(child: Path, skips: SkipReport, *, euid: int) -> None:
@@ -197,7 +218,13 @@ def converge_child(child: Path, skips: SkipReport, *, euid: int) -> None:
 
 
 def _converge_child_stat(
-    child: Path, current: os.stat_result, skips: SkipReport, *, euid: int
+    child: Path,
+    current: os.stat_result,
+    skips: SkipReport,
+    *,
+    euid: int,
+    depth: int = 0,
+    max_depth: int | None = None,
 ) -> None:
     if stat.S_ISLNK(current.st_mode):
         # meiva:note
@@ -211,7 +238,7 @@ def _converge_child_stat(
         skips.foreign_owned.append(child)
         return
     try:
-        _repair_child(child, current, skips, euid=euid)
+        _repair_child(child, current, skips, euid=euid, depth=depth, max_depth=max_depth)
     except PermissionError:
         # meiva:note
         # The operating system refuses the repair: a macOS application bundle an agent
@@ -226,14 +253,22 @@ def _converge_child_stat(
         skips.permission_denied.append(child)
 
 
-def _repair_child(child: Path, current: os.stat_result, skips: SkipReport, *, euid: int) -> None:
+def _repair_child(
+    child: Path,
+    current: os.stat_result,
+    skips: SkipReport,
+    *,
+    euid: int,
+    depth: int = 0,
+    max_depth: int | None = None,
+) -> None:
     if stat.S_ISDIR(current.st_mode):
         if child.name in _PRUNED_DIRNAMES:
             if stat.S_IMODE(current.st_mode) != 0o700:
                 child.chmod(0o700)
             skips.pruned_dirs += 1
             return
-        _converge_tree(child, skips, euid=euid, current=current)
+        _converge_tree(child, skips, euid=euid, current=current, depth=depth, max_depth=max_depth)
         return
     if not stat.S_ISREG(current.st_mode):
         # meiva:note
@@ -265,6 +300,32 @@ def private_tree_root_problem(path: Path, *, euid: int) -> str | None:
     return dir_refusal(current, euid=euid)
 
 
+def _is_scannable_dir(current: os.stat_result, euid: int) -> bool:
+    if stat.S_ISLNK(current.st_mode) or not stat.S_ISDIR(current.st_mode):
+        return False
+    return not foreign_owned(current, euid=euid)
+
+
+def _scan_entry_node(
+    entry: os.DirEntry[str],
+    *,
+    euid: int,
+    max_depth: int | None,
+    depth: int,
+) -> list[Path]:
+    child_stat = entry.stat(follow_symlinks=False)
+    mode = child_stat.st_mode
+    if stat.S_ISREG(mode) or stat.S_ISLNK(mode) or foreign_owned(child_stat, euid=euid):
+        return []
+    if stat.S_ISDIR(mode):
+        if entry.name in _PRUNED_DIRNAMES:
+            return []
+        return scan_non_regular_nodes(
+            Path(entry.path), euid=euid, max_depth=max_depth, _depth=depth + 1
+        )
+    return [Path(entry.path)]
+
+
 # meiva:note
 # Read-only: the nodes `converge_private_tree(root)` would skip as non-regular.
 #
@@ -276,29 +337,24 @@ def private_tree_root_problem(path: Path, *, euid: int) -> str | None:
 # what will be skipped. A missing or unsuitable root yields [] (converge handles
 # the root itself; `private_tree_root_problem` is its predicate). Read-only; the
 # returned paths are in deterministic traversal order.
-def scan_non_regular_nodes(root: Path, *, euid: int) -> list[Path]:
-    out: list[Path] = []
+def scan_non_regular_nodes(
+    root: Path, *, euid: int, max_depth: int | None = None, _depth: int = 0
+) -> list[Path]:
     try:
         current = root.lstat()
     except FileNotFoundError:
-        return out
-    if stat.S_ISLNK(current.st_mode) or not stat.S_ISDIR(current.st_mode):
-        return out
-    if foreign_owned(current, euid=euid):
-        return out
+        return []
+    if not _is_scannable_dir(current, euid):
+        return []
+    if max_depth is None and _depth == 0:
+        max_depth = _default_workspaces_depth(root)
+    if max_depth is not None and _depth >= max_depth:
+        return []
     with os.scandir(root) as entries:
         ordered = sorted(entries, key=lambda entry: entry.name)
+    out: list[Path] = []
     for entry in ordered:
-        child_stat = entry.stat(follow_symlinks=False)
-        mode = child_stat.st_mode
-        if stat.S_ISREG(mode) or stat.S_ISLNK(mode) or foreign_owned(child_stat, euid=euid):
-            continue
-        if stat.S_ISDIR(mode):
-            if entry.name in _PRUNED_DIRNAMES:
-                continue
-            out += scan_non_regular_nodes(Path(entry.path), euid=euid)
-        else:
-            out.append(Path(entry.path))
+        out.extend(_scan_entry_node(entry, euid=euid, max_depth=max_depth, depth=_depth))
     return out
 
 

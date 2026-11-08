@@ -223,24 +223,34 @@ def test_ensure_meiva_home_dirs(ctx: ConvergeCtx) -> None:
 def test_ensure_meiva_home_dirs_recursively_converges_private_data_trees(
     ctx: ConvergeCtx,
 ) -> None:
-    targets = (
+    recursive_targets = (
         ctx.meiva_home / "logs" / "daemon" / "current.log",
-        ctx.meiva_home / "workspaces" / "7" / "download.txt",
         ctx.meiva_home / "memory" / ".git" / "config",
     )
-    for target in targets:
+    for target in recursive_targets:
         target.parent.mkdir(parents=True)
         target.write_text("private")
         target.chmod(0o644)
         for parent in (target.parent, target.parent.parent):
             parent.chmod(0o755)
 
+    workspace_file = ctx.meiva_home / "workspaces" / "7" / "download.txt"
+    workspace_file.parent.mkdir(parents=True)
+    workspace_file.write_text("private")
+    workspace_file.chmod(0o644)
+    workspace_file.parent.chmod(0o755)
+    workspace_file.parent.parent.chmod(0o755)
+
     _steps.ensure_meiva_home_dirs(ctx)
 
-    for target in targets:
+    for target in recursive_targets:
         assert stat.S_IMODE(target.stat().st_mode) == 0o600
         assert stat.S_IMODE(target.parent.stat().st_mode) == 0o700
         assert stat.S_IMODE(target.parent.parent.stat().st_mode) == 0o700
+
+    assert stat.S_IMODE(workspace_file.parent.parent.stat().st_mode) == 0o700
+    assert stat.S_IMODE(workspace_file.parent.stat().st_mode) == 0o700
+    assert stat.S_IMODE(workspace_file.stat().st_mode) == 0o644
 
 
 # meiva:note

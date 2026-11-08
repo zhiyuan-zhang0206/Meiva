@@ -5,10 +5,9 @@
 # source URL in the matching `*.dist-info/direct_url.json`. A polluted `VIRTUAL_ENV` can
 # therefore make a worktree install repoint a long-lived checkout's interpreter at disposable
 # source. This module only reads the install: the exec boundary refuses to spawn a child from a
-# violating interpreter and the health probe reports the violation. The few file stats are
-# negligible beside a process spawn, and deliberately remain uncached so a newly poisoned install
-# cannot evade the next execution. Nothing here rewrites an install; the fix for a violation is a
-# locked `uv sync` run by the operator.
+# violating interpreter and the health probe reports the violation. The file readings are cached
+# per source root to avoid repeated disk traversals across executions. Nothing here rewrites
+# an install; the fix for a violation is a locked `uv sync` run by the operator.
 #
 # The module is the reader: it lists and reads the records and resolves their paths. What the
 # records must say, and how a violation is worded, is `editable_policy.py`, which judges the
@@ -18,6 +17,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
+from functools import lru_cache
 from pathlib import Path
 
 from base.deploy.release.editable_layout import (
@@ -57,6 +57,7 @@ DIRECT_URL_PATTERNS = (
 __all__ = [
     "EDITABLE_DIST_INFO_GLOB",
     "EDITABLE_PTH_NAME",
+    "clear_editable_install_cache",
     "current_interpreter_source_root",
     "editable_console_script_violations",
     "editable_direct_url_paths",
@@ -115,6 +116,7 @@ def _read_pointer(path: Path) -> PointerRecord:
 # Observe every editable record of the checkout: the pointers and metadata that exist and are
 # readable or not, the pointer paths missing beside existing metadata, and the pointers that have
 # no metadata record in their site-packages directory.
+@lru_cache(maxsize=64)
 def _read_editable_install(source_root: Path) -> EditableReadings:
     pointer_paths = editable_meiva_pth_paths(source_root)
     metadata_paths = editable_direct_url_paths(source_root)
@@ -125,6 +127,12 @@ def _read_editable_install(source_root: Path) -> EditableReadings:
         pointers_missing=sorted_paths(path for path in expected if not _path_exists(path)),
         pointers_without_metadata=pointers_without_metadata(pointer_paths, metadata_paths),
     )
+
+
+# meiva:note
+# Clear cached editable install readings.
+def clear_editable_install_cache() -> None:
+    _read_editable_install.cache_clear()
 
 
 # meiva:note

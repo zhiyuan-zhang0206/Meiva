@@ -11,11 +11,11 @@ tags:
 
 `POST /api/keyed/v1/agents` accepts creation and forks through the existing birth
 transaction and launch owner. Every request requires a valid `Idempotency-Key`
-(1–128 characters), the exact `Idempotency-Scope: principal-v1` header, and a
-verified authenticated principal. Missing or invalid admission, an unverified
-principal are rejected before birth or launch effects. Existing
-authentication still applies to replay; revoked credentials cannot retrieve a
-receipt.
+(1–128 characters) and a verified authenticated principal; the
+`Idempotency-Scope: principal-v1` header is accepted but optional. Missing or
+invalid admission, an unverified principal are rejected before birth or launch
+effects. Existing authentication still applies to replay; revoked credentials
+cannot retrieve a receipt.
 
 The receipt identity includes the principal, POST method, and this versioned
 logical path. Identical keyed requests replay the committed birth; changed

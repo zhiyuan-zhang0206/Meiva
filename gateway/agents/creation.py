@@ -48,8 +48,9 @@ from gateway.agents.launch.forward import forward_spawn_to_remote
 from gateway.http.auth.request_principal import (
     PRINCIPAL_SCOPE,
     SCOPE_HEADER,
+    AuthPrincipal,
     PrincipalScopeError,
-    request_key,
+    principal_key,
 )
 from gateway.http.config import EnsureHarnesses
 from ops.cluster.rpc import RpcClient
@@ -59,8 +60,22 @@ from ops.rpc_schemas import LaunchAgentRequest, SpawnAgentRequest, SpawnedAgent
 
 def scoped_creation_key(request: Request, key: str, *, operation_path: str) -> str:
     """Bind a caller key to the verified principal and the versioned operation path."""
+    if not key or len(key) > 128:
+        raise HTTPException(
+            status_code=422, detail="idempotency key must contain 1 to 128 characters"
+        )
+    scope = request.headers.get(SCOPE_HEADER)
+    if scope is not None and scope != PRINCIPAL_SCOPE:
+        raise HTTPException(
+            status_code=422, detail=f"unsupported {SCOPE_HEADER}; expected {PRINCIPAL_SCOPE}"
+        )
+    principal = getattr(request.state, "auth_principal", None)
+    if not isinstance(principal, AuthPrincipal):
+        raise HTTPException(
+            status_code=422, detail="creation requires a verified credential principal"
+        )
     try:
-        return request_key(request, key, method="POST", path=operation_path)
+        return principal_key(principal, "POST", operation_path, key)
     except PrincipalScopeError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
@@ -452,10 +467,10 @@ async def announce_creation_prompt(
 def guarded_draft_key(
     request: Request,
     idempotency_key: str = Header(alias="Idempotency-Key", min_length=1, max_length=128),
-    idempotency_scope: str = Header(alias=SCOPE_HEADER),
+    idempotency_scope: str | None = Header(None, alias=SCOPE_HEADER),
 ) -> str:
     """Require a verified principal and the exact versioned operation namespace."""
-    if idempotency_scope != PRINCIPAL_SCOPE:
+    if idempotency_scope is not None and idempotency_scope != PRINCIPAL_SCOPE:
         raise HTTPException(status_code=422, detail="guarded draft requires principal-v1 scope")
     return scoped_creation_key(request, idempotency_key, operation_path=request.url.path)
 

@@ -22,7 +22,9 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import datetime as dt
 import os
+import random
 import re
 import signal
 import threading
@@ -34,6 +36,7 @@ from typing import TypeGuard
 import psutil
 
 from base.clock import Timers
+from base.clock.ids import new_uuid
 from base.host.env.registry import session_credential_keys
 from base.log import logger
 from base.native_process.kernel_identity import pid_starttime_ticks
@@ -42,7 +45,7 @@ from base.native_process.ownership import stable_create_time
 from base.native_process.process_control import ProcessControl
 from base.paths import logs_dir, run_dir
 from base.sessions.pty import closure, process_groups, protocol
-from base.sessions.pty.allocation_freeze import locked_freeze_state, state_path
+from base.sessions.pty.allocation_freeze import PtyAllocationFreeze, state_path
 from base.sessions.pty.paths import (
     CAPTURE_MAX_LINES,
     DEFAULT_COLS,
@@ -164,6 +167,7 @@ class PtyService:
         now: Callable[[], float],
         pid: int,
         host_generation: str = "",
+        rng: random.Random | None = None,
     ) -> None:
         self._home = home
         self._base_environ = base_environ
@@ -175,6 +179,9 @@ class PtyService:
         self._lock = threading.Lock()
         self._closing = False
         self._host_generation = host_generation
+        self._freeze: PtyAllocationFreeze = PtyAllocationFreeze(status="inactive")
+        self._freeze_lock = threading.Lock()
+        self._rng = rng
         # Set once `serve` runs: the loop and its task group, and the stop request.
         self._loop: asyncio.AbstractEventLoop | None = None
         self._tasks: asyncio.TaskGroup | None = None
@@ -190,6 +197,9 @@ class PtyService:
             "resize": self._resize,
             "kill": self._kill,
             "close_all": self._close_all,
+            "freeze": self._freeze_op,
+            "resume": self._resume_op,
+            "freeze_status": self._freeze_status,
         }
 
     # -- table ---------------------------------------------------------------
@@ -260,6 +270,55 @@ class PtyService:
         ]
         return {"sessions": rows}
 
+    def _freeze_status(self, req: dict[str, object]) -> dict[str, object]:
+        del req
+        with self._freeze_lock:
+            return self._freeze_to_dict(self._freeze)
+
+    def _freeze_to_dict(self, freeze: PtyAllocationFreeze) -> dict[str, object]:
+        return {
+            "status": freeze.status,
+            "generation": freeze.generation,
+            "holder": freeze.holder,
+            "reason": freeze.reason,
+            "created_at": freeze.created_at.isoformat() if freeze.created_at else None,
+            "error": freeze.error,
+        }
+
+    def _freeze_op(self, req: dict[str, object]) -> dict[str, object]:
+        holder = _text(req, "holder")
+        reason = _text(req, "reason")
+        with self._freeze_lock:
+            if self._freeze.status == "frozen":
+                raise RequestError(
+                    protocol.ERROR,
+                    f"generation {self._freeze.generation!r} held by {self._freeze.holder!r} is already active",
+                )
+            if self._rng is None:
+                raise RequestError(protocol.ERROR, "PtyService requires rng for freeze operations")
+            self._freeze = PtyAllocationFreeze(
+                status="frozen",
+                generation=str(new_uuid(self._rng)),
+                holder=holder,
+                reason=reason,
+                created_at=dt.datetime.fromtimestamp(self._now(), tz=dt.UTC),
+            )
+            return self._freeze_to_dict(self._freeze)
+
+    def _resume_op(self, req: dict[str, object]) -> dict[str, object]:
+        generation = _text(req, "generation")
+        with self._freeze_lock:
+            if self._freeze.status != "frozen" or self._freeze.generation != generation:
+                return {"resumed": False}
+            self._freeze = PtyAllocationFreeze(
+                status="inactive",
+                generation=self._freeze.generation,
+                holder=self._freeze.holder,
+                reason=self._freeze.reason,
+                created_at=self._freeze.created_at,
+            )
+            return {"resumed": True}
+
     def _new(self, req: dict[str, object]) -> dict[str, object]:
         name = _text(req, "name")
         if not _NAME_RE.fullmatch(name):
@@ -273,10 +332,14 @@ class PtyService:
         if cmd is not None and not isinstance(cmd, str):
             raise RequestError(protocol.BAD_REQUEST, "cmd must be a string")
         env = child_env(req.get("env", {}), base_environ=self._base_environ)
-        # The allocation lock is held until the session is registered: once a
-        # concurrent freeze returns, every earlier allocation is visible here
-        # and every later one observes the marker.
-        with locked_freeze_state(home=self._home) as freeze:
+        with self._freeze_lock:
+            freeze = self._freeze
+            if state_path(self._home).exists():
+                from base.sessions.pty import allocation_freeze
+
+                disk_freeze = allocation_freeze.read(home=self._home)
+                if disk_freeze.status == "invalid":
+                    freeze = disk_freeze
             existing = self._live(name)
             if existing is not None:
                 if (
@@ -304,7 +367,7 @@ class PtyService:
             if freeze.status == "invalid":
                 raise RequestError(
                     protocol.ERROR,
-                    f"pty allocation refused: host freeze marker {state_path(self._home)} is invalid "
+                    f"pty allocation refused: host freeze marker is invalid "
                     f"({freeze.error}); repair it before allocating new sessions",
                 )
             created = self._spawn(name, cwd, env, cmd, freeze.generation)

@@ -341,6 +341,7 @@ config-readers = [
 "meiva/files.py::ambient-instance:cwd" = "a namespace of functions built once and never rebound or filled afterwards"
 "meiva_builtins/plugins/meiva_memory/sdk.py::hidden-cache:_documented_pool" = "wraps one home's pool path in a documented constant"
 "base/config/admin/candidate.py::hidden-cache:_candidate_validation_model" = "builds a validation subclass of a given Settings class"
+"base/deploy/release/editable_install.py::hidden-cache:_read_editable_install" = "caches the parsed allowlist violation state of an editable install to avoid repeating disk file-stats on every execute_code"
 "base/config/config_registry.py::hidden-singleton:build_registry" = "the static config registry derived from the Settings classes"
 "base/config/config_registry.py::hidden-singleton:field_infos" = "a static view of the config registry"
 "base/host/env/registry.py::hidden-singleton:agent_runner_cluster_aliases" = "a static view of the env registry"
