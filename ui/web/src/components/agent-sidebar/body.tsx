@@ -167,16 +167,16 @@ export function SidebarBody(props: InnerProps) {
 // neutral static placeholder instead.
 function SpawningRow({ active, showStatus }: { active: boolean; showStatus: boolean }) {
   return (
-    <li className="relative" data-testid="spawning-row">
+    <li className="agent-row-item relative" data-testid="spawning-row">
       <div
         className={cn(
-          "w-full text-left py-2.5 pr-4 font-mono text-xs items-center gap-2 border-l-2",
+          "agent-row-pill w-full text-left pr-2.5 font-mono text-xs leading-4 items-center gap-2",
           active
-            ? "bg-sidebar-accent text-sidebar-accent-foreground border-primary"
-            : "text-muted-foreground border-transparent",
+            ? "agent-row-pill-active bg-sidebar-accent text-sidebar-accent-foreground"
+            : "text-muted-foreground",
             FLEX
         )}
-        style={{ paddingLeft: "16px" }}
+        style={{ paddingLeft: "10px" }}
       >
         {/* status dot follows the same opt-in as agent rows: hidden entirely
             when display.show_agent_status is off. */}

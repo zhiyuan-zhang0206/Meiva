@@ -82,8 +82,13 @@ silently disappear on a phone.
 
 Collapsed hides the column entirely; the title bar's PanelLeft button restores
 it. The list is stably sorted by agent ID descending and status or activity
-changes never re-sort it. A running agent's title pulses with a calm monochrome
-opacity shift (and stays at static foreground emphasis under reduced motion).
+changes never re-sort it. Each row renders as a compact inset Crisp Card pill
+(`.agent-row-item` / `.agent-row-pill`) with softened charcoal active text
+(`#3B3B3B` light / `#E2E4E8` dark at `font-weight: 450`) and readable mid-gray
+idle text (`#525252` light / `#A8ABB0` dark). A running agent's title sweeps
+with a lighter monochrome Silver Glint highlight (`agent-title-sweep`) over its
+normal row base color so running items never darken or bolden relative to idle
+rows (and stays at static row emphasis under reduced motion).
 Offline agents retain a gray marker. At the right edge, an unresolved structured
 question shows a Sunset Orange (`#ED8755`) circled question mark, and an ordinary
 response-required notice shows a Sunset Orange (`#ED8755`) dot. The question

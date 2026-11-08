@@ -15,16 +15,16 @@
 /* ---- tokens ------------------------------------------------------------ */
 
 :root {
-  --background: #F0F2F4;
-  --foreground: #292824;
-  --card: #F7F8FA;
-  --card-foreground: #292824;
-  --primary: #292824;
-  --primary-foreground: #F0F2F4;
-  --muted-foreground: #686660;
+  --background: #FFFFFF;
+  --foreground: #2E2E2E;
+  --card: #FFFFFF;
+  --card-foreground: #2E2E2E;
+  --primary: #2E2E2E;
+  --primary-foreground: #FFFFFF;
+  --muted-foreground: #666666;
   --destructive: oklch(0.577 0.245 27.325);
-  --border: #DCE0E5;
-  --input: #DCE0E5;
+  --border: #E5E5E5;
+  --input: #E5E5E5;
   --ring: #ED8755;
   --radius: 0.625rem;
   color-scheme: light;

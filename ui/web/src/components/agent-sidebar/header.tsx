@@ -33,7 +33,7 @@ export function SidebarHeader({
           xmlns="http://www.w3.org/2000/svg"
           viewBox="0 0 2460 600"
           aria-hidden="true"
-          className="h-6 w-auto shrink-0 text-foreground"
+          className="h-6 w-auto shrink-0 text-[#3B3B3B] dark:text-[#E2E4E8]"
           fill="currentColor"
         >
           <g>
