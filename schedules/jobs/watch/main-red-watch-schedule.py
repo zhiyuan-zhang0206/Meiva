@@ -31,6 +31,7 @@ from schedules.jobs.entry import cluster_timezone, open_schedule_entry
 from schedules.jobs.loop import CronSchedule, Trigger, run_loop
 from schedules.jobs.watch.main_red_watch import (
     LivenessStream,
+    already_read,
     STATE_FILE,
     card_operation_key,
     listing_attempt,
@@ -285,7 +286,19 @@ def _artifact_case_ids(artifact_id: int, scratch: Path, run_process: RunProcess)
     return tuple(dict.fromkeys(found))
 
 
-def fetch_runs(workflow: str, run_process: RunProcess, scratch: Path) -> tuple[RunFacts, ...]:
+# meiva:note
+# `seen_at`/`seen_attempt` are the round's watermark, and they are applied here rather than only on
+# the way out: reading a run costs a jobs listing and one log download per failing job, and a round
+# that paid for runs it had already read would spend the difference every thirty minutes (task
+# #6509). It is also what keeps one broken run from blinding the stream -- a run whose jobs endpoint
+# answers 502 fails only the round that first had to read it, and the rounds after that skip it.
+def fetch_runs(
+    workflow: str,
+    run_process: RunProcess,
+    scratch: Path,
+    seen_at: datetime | None = None,
+    seen_attempt: int | None = None,
+) -> tuple[RunFacts, ...]:
     import json
 
     listing = json.loads(_api(_runs_path(workflow, 10), run_process))
@@ -294,6 +307,13 @@ def fetch_runs(workflow: str, run_process: RunProcess, scratch: Path) -> tuple[R
     for item in listing.get("workflow_runs", []):
         conclusion = item.get("conclusion")
         if conclusion not in {"success", "failure"}:
+            continue
+        created = datetime.fromisoformat(item["created_at"].replace("Z", "+00:00"))
+        # meiva:note
+        # The boundary comes from the same two fields the round compares, through the same judgement
+        # (`already_read`), so a run this skips is exactly a run the round would have skipped after
+        # paying for it.
+        if already_read(created, listing_attempt(item), seen_at, seen_attempt):
             continue
         failures: tuple[Failure, ...] = ()
         job_names: tuple[str, ...] = ()
@@ -334,7 +354,7 @@ def fetch_runs(workflow: str, run_process: RunProcess, scratch: Path) -> tuple[R
             RunFacts(
                 workflow=workflow,
                 head_sha=item.get("head_sha", ""),
-                created_at=datetime.fromisoformat(item["created_at"].replace("Z", "+00:00")),
+                created_at=created,
                 conclusion=conclusion,
                 failures=failures,
                 html_url=item.get("html_url"),
