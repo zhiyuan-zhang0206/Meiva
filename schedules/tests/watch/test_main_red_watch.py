@@ -1230,3 +1230,129 @@ def test_the_state_file_carries_the_job_across_rounds(tmp_path: Path) -> None:
 
     (entry,) = load_state(path).entries.values()
     assert entry.job == _GATED_JOB
+
+
+# meiva:note
+# The other half of the attempt gate: a card opened before its run was re-run had no exit a re-run
+# could reach -- `apply_run` retires a card on a later green run, and the run that would have to be
+# green is the one already read (task #6488). The port below answers per run, so the same two rounds
+# can open a card and then watch attempt 2 of that same run turn it green.
+class _Attempts:
+    def __init__(self, verdict: str, seen: str, attempt: int = 2) -> None:
+        self.verdict = verdict
+        self.seen = seen
+        self.attempt = attempt
+        self.calls: list[int] = []
+
+    def __call__(self, run_id: int) -> tuple[int, tuple[Mapping[str, object], ...]]:
+        self.calls.append(run_id)
+        return self.attempt, ({"name": _GATED_JOB, "conclusion": self.seen},)
+
+
+def _two_rounds(
+    tmp_path: Path, port: AttemptOf, *, opened: list[Card]
+) -> tuple[list[tuple[int, str]], list[str]]:
+    closed: list[tuple[int, str]] = []
+    lines: list[str] = []
+    for sha, hour, run_id in (("sha1", 6, 701), ("sha2", 12, 702)):
+        lines.append(
+            _watch(
+                tmp_path,
+                [
+                    replace(
+                        _red(
+                            "release-gate.yml",
+                            sha,
+                            datetime(2026, 11, 2, hour, tzinfo=UTC),
+                            job=_GATED_JOB,
+                        ),
+                        run_id=run_id,
+                    )
+                ],
+                opened=opened,
+                closed=closed,
+                heartbeats=[],
+                attempt_of=port,
+            )
+        )
+    return closed, lines
+
+
+def test_a_card_closes_when_its_own_run_is_re_run_green(tmp_path: Path) -> None:
+    opened: list[Card] = []
+    port = _Attempts("holds", "failure")
+    closed, _lines = _two_rounds(tmp_path, port, opened=opened)
+    assert len(opened) == 1, "the first two reds confirm the card"
+    assert closed == []
+
+    port.verdict, port.seen = "green", "success"
+    port.calls.clear()
+    line = _watch(
+        tmp_path,
+        [],
+        opened=opened,
+        closed=closed,
+        heartbeats=[],
+        attempt_of=port,
+    )
+
+    assert closed == [(900, "e2e full matrix (1/4) passed in attempt 2 of run 702")]
+    assert "closed card 900" in line
+    assert port.calls == [702], "the card is asked about the run that last reported its red"
+    assert load_state(tmp_path / STATE_FILE).entries == {}, "the entry goes with the card"
+
+
+# meiva:note
+# The reverse control: the same third round with the job still red in attempt 2 must leave the card
+# open, or the previous test would pass for a re-check that closes on any verdict.
+def test_a_card_stays_open_while_the_attempt_is_still_red(tmp_path: Path) -> None:
+    opened: list[Card] = []
+    port = _Attempts("holds", "failure")
+    _two_rounds(tmp_path, port, opened=opened)
+    closed: list[tuple[int, str]] = []
+
+    _watch(tmp_path, [], opened=opened, closed=closed, heartbeats=[], attempt_of=port)
+
+    assert closed == []
+    assert len(load_state(tmp_path / STATE_FILE).entries) == 1
+
+
+def test_an_unreadable_attempt_leaves_the_card_open(tmp_path: Path) -> None:
+    opened: list[Card] = []
+    port = _Attempts("holds", "failure")
+    _two_rounds(tmp_path, port, opened=opened)
+    closed: list[tuple[int, str]] = []
+
+    def broken(_run_id: int) -> tuple[int, tuple[Mapping[str, object], ...]]:
+        raise RuntimeError("gh api failed")
+
+    line = _watch(tmp_path, [], opened=opened, closed=closed, heartbeats=[], attempt_of=broken)
+
+    assert closed == []
+    assert "unreadable" in line
+
+
+# meiva:note
+# A card on an entry from a ledger that predates `Entry.job`/`run_id` names no run, and nothing may
+# invent one: an older run's green would retire a card the newer red owns.
+def test_a_card_without_a_run_id_is_not_asked_about(tmp_path: Path) -> None:
+    opened: list[Card] = []
+    path = tmp_path / STATE_FILE
+    _watch(
+        path.parent,
+        [
+            _red("release-gate.yml", "sha1", datetime(2026, 11, 2, 6, tzinfo=UTC)),
+            _red("release-gate.yml", "sha2", datetime(2026, 11, 2, 12, tzinfo=UTC)),
+        ],
+        opened=opened,
+        closed=[],
+        heartbeats=[],
+    )
+    assert len(opened) == 1, "the card is open, and its entry names no job or run"
+
+    port = _Attempts("green", "success")
+    closed: list[tuple[int, str]] = []
+    _watch(tmp_path, [], opened=opened, closed=closed, heartbeats=[], attempt_of=port)
+
+    assert closed == []
+    assert port.calls == [], "no run id means no run to ask about"

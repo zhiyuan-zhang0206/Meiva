@@ -182,6 +182,12 @@ class Entry:
     # re-deciding a red on evidence nobody had when the red was recorded.
     job: str = ""
     # meiva:note
+    # The run that last reported this red. A card that is already open has to be asked about
+    # afterwards too: a re-run can turn its job green while no later run exists to retire the card,
+    # and without the id the watch would have to guess which run to ask. Zero means an entry from a
+    # ledger that predates the field, and nothing asks about it.
+    run_id: int = 0
+    # meiva:note
     # Whether the run that reported this red ran the whole population. It decides what may retire
     # the card: a full-suite red is evidence about the whole tree, so any full-suite green on a
     # later commit resolves it, while a red from a lane that runs part of the tree is resolved only
@@ -409,6 +415,7 @@ def apply_run(entries: dict[str, Entry], run: RunFacts) -> Plan:
                 red_count=1,
                 kind=failure.kind,
                 job=failure.job,
+                run_id=run.run_id,
                 covers_full_suite=run.covers_full_suite and failure.covers_full_suite,
             )
             plan_entries[name] = created
@@ -418,11 +425,16 @@ def apply_run(entries: dict[str, Entry], run: RunFacts) -> Plan:
             else:
                 notes.append(f"suspected {name} on {run.head_sha}")
             continue
+        # meiva:note
+        # The job and the run move with the red: a later sighting may come from another job of the
+        # same fingerprint, and the question asked of a re-run is what the newest evidence named.
         updated = replace(
             entry,
             last_red_sha=run.head_sha,
             last_red_at=run.created_at,
             red_count=entry.red_count + 1,
+            job=failure.job,
+            run_id=run.run_id,
         )
         # meiva:note
         # Two red runs confirm, whatever commits they ran on. The round only reads runs newer than
