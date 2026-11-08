@@ -121,7 +121,6 @@ _ENTRIES = [
     ("scripts/verify/understanding_replay.py", None),
     ("services/agent_runner/agent_ops/daemon.py", None),
     ("services/backup/restore_drill.py", None),
-    ("services/derived/labeler/daemon.py", None),
     ("services/redis_bridge/relay.py", None),
     (
         "services/supervision/meiva_root/__main__.py",
