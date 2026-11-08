@@ -1,9 +1,11 @@
 # meiva:note
 # The stats dashboard's window totals, read from `telemetry_events`.
 #
-# One scan of the window's `llm_usage` rows gives the token sums, total metered API cost, and
-# per-model metered API cost slices. Subscription harness rows (`SUBSCRIPTION_SOURCES`) still
-# contribute to token totals while being excluded from metered API cost sums. The cluster filter
+# One scan of the window's `llm_usage` rows gives the token sums, the metered API cost, the
+# subscription-covered cost and the per-model metered API slices. The two cost sums are disjoint
+# halves of the same rows, split by the billing mode of the row's `source` harness: an API row's
+# fee is money the account is billed, a subscription row's usage-time price is the list value the
+# subscription covered. Subscription rows still contribute to the token totals. The cluster filter
 # accepts the home cluster's label and rows with no label, as every dashboard read does. The
 # warning/error classes are `gateway.cluster.monitor.alert_classes`.
 # meiva:link gateway/cluster/docs/ops-surfaces.meiva.okf.md
@@ -17,15 +19,12 @@ from typing import NamedTuple
 
 import psycopg
 
-from base.api_contracts.agent_contract import HARNESS_BILLING, HarnessBilling
+from base.api_contracts.agent_contract import SUBSCRIPTION_HARNESSES
 from base.db.rows import query_all
 from base.events.contract import LLM_USAGE_KEYS
 from base.telemetry.metrics.event_sql import numeric
 
-SUBSCRIPTION_SOURCES = tuple(
-    sorted(h.value for h, b in HARNESS_BILLING.items() if b is HarnessBilling.SUBSCRIPTION)
-)
-_SUBSCRIPTION_SOURCES_SQL = ", ".join(repr(s) for s in SUBSCRIPTION_SOURCES)
+_SUBSCRIPTION_SOURCES_SQL = ", ".join(repr(s) for s in SUBSCRIPTION_HARNESSES)
 
 
 def set_statement_timeout[RowT](
@@ -45,6 +44,7 @@ class _ModelUsageRow:
     cache_read: Decimal | float
     cache_input: Decimal | float
     cost_usd: Decimal | float
+    subscription_cost_usd: Decimal | float
 
 
 class WindowTotals(NamedTuple):
@@ -53,6 +53,7 @@ class WindowTotals(NamedTuple):
     cache_read: int
     cache_input: int
     cost_usd: float
+    subscription_cost_usd: float
     api_cost_by_model: tuple[tuple[str, Decimal], ...]
 
 
@@ -65,6 +66,9 @@ def window_totals(
     conn: psycopg.Connection, *, cluster: str, start: datetime, end: datetime
 ) -> WindowTotals:
     api_source = f"COALESCE({LLM_USAGE_KEYS['source']}, '') NOT IN ({_SUBSCRIPTION_SOURCES_SQL})"
+    subscription_source = (
+        f"COALESCE({LLM_USAGE_KEYS['source']}, '') IN ({_SUBSCRIPTION_SOURCES_SQL})"
+    )
     query = f"""
         SELECT
           COALESCE({LLM_USAGE_KEYS["model"]}, '') AS model,
@@ -74,7 +78,9 @@ def window_totals(
           COALESCE(sum({numeric(LLM_USAGE_KEYS["in_total"])}) FILTER (
               WHERE {numeric(LLM_USAGE_KEYS["cache_read"])} IS NOT NULL), 0) AS cache_input,
           COALESCE(sum({numeric(LLM_USAGE_KEYS["cost_usd"])}) FILTER (WHERE {api_source}), 0)
-            AS cost_usd
+            AS cost_usd,
+          COALESCE(sum({numeric(LLM_USAGE_KEYS["cost_usd"])}) FILTER (
+              WHERE {subscription_source}), 0) AS subscription_cost_usd
         FROM telemetry_events
         WHERE event_name = 'llm_usage'
           AND category = 'telemetry'
@@ -93,11 +99,13 @@ def window_totals(
         if row.model and Decimal(row.cost_usd) != 0
     )
     total_cost = sum((Decimal(row.cost_usd) for row in rows), Decimal(0))
+    subscription_cost = sum((Decimal(row.subscription_cost_usd) for row in rows), Decimal(0))
     return WindowTotals(
         in_total=round(in_total),
         out_total=round(out_total),
         cache_read=round(cache_read),
         cache_input=round(cache_input),
         cost_usd=float(total_cost),
+        subscription_cost_usd=float(subscription_cost),
         api_cost_by_model=api_costs,
     )

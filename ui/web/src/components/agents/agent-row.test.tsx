@@ -88,6 +88,7 @@ function ag(agent_id: number, overrides: Partial<AgentRowType> = {}): AgentRowTy
     label: null,
     machine: "test-machine",
     supports_vision: true,
+    llm_model: null, reasoning_effort: null,
     liveness_state: "online",
     awaiting_response_count: 0, has_pending_question: false, highest_notice_priority: null,
     unread_notice_count: 0,
@@ -424,6 +425,44 @@ describe("AgentRow single-line truncation and hover peek card", () => {
 
     fireEvent.mouseLeave(row);
     expect(screen.queryByTestId("agent-hover-card")).toBeNull();
+  });
+
+  // meiva:note
+  // The peek card names the model and effort the agent's calls run with, each on its own row
+  // (user 2026-11-08): a reader judging a row should not have to open the Inspector for the two
+  // facts that decide how it behaves. A half the roster could not resolve renders nothing rather
+  // than a placeholder — the card does not guess.
+  it("names the resolved model and reasoning effort on their own rows", async () => {
+    vi.useFakeTimers();
+    const { container } = render(
+      <AgentRow
+        {...baseProps}
+        label="model-row"
+        agent={ag(181, { llm_model: "claude-opus-5", reasoning_effort: "xhigh" })}
+        depth={0}
+        ancestorsIsLast={[]}
+      />,
+    );
+    fireEvent.mouseEnter(container.querySelector("li > button")!);
+    await act(() => vi.advanceTimersByTimeAsync(AGENT_HOVER_OPEN_DELAY_MS));
+
+    const model = screen.getByTestId("agent-hover-model");
+    expect(model.textContent).toBe("Modelclaude-opus-5");
+    const effort = screen.getByTestId("agent-hover-effort");
+    expect(effort.textContent).toBe("Effortxhigh");
+  });
+
+  it("renders no model or effort row when the roster could not resolve them", async () => {
+    vi.useFakeTimers();
+    const { container } = render(
+      <AgentRow {...baseProps} label="unknown-model" agent={ag(182)} depth={0} ancestorsIsLast={[]} />,
+    );
+    fireEvent.mouseEnter(container.querySelector("li > button")!);
+    await act(() => vi.advanceTimersByTimeAsync(AGENT_HOVER_OPEN_DELAY_MS));
+
+    expect(screen.getByTestId("agent-hover-card")).toBeTruthy();
+    expect(screen.queryByTestId("agent-hover-model")).toBeNull();
+    expect(screen.queryByTestId("agent-hover-effort")).toBeNull();
   });
 
   it("ignores brief pointer sweeps shorter than 400ms and switches in 0ms within the 300ms warm-up window", async () => {

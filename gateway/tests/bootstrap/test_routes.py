@@ -108,6 +108,7 @@ def test_dashboard_empty_db_returns_zeros(db_conn: psycopg.Connection) -> None:
     assert body["window_hours"] == 24
     assert body["tokens"] == {"input": 0, "output": 0, "cache_read": 0, "cache_hit_pct": 0}
     assert body["cost_usd"] == 0
+    assert body["subscription_cost_usd"] == 0
     assert body["openai_cost_usd"] == 0
     assert body["anthropic_cost_usd"] == 0
     assert "avg_turn_seconds" not in body
@@ -391,8 +392,61 @@ def test_dashboard_provider_api_costs_exclude_subscription_harnesses(
     assert body["tokens"]["input"] == 8400
     assert body["tokens"]["output"] == 3000
     assert math.isclose(body["cost_usd"], 21.0)
+    # meiva:note
+    # codex 9.0 + claude_code 14.0: the same rows' subscription half, kept apart from the metered
+    # API sum and its vendor slices rather than folded into or dropped from them.
+    # meiva:link gateway/cluster/docs/ops-surfaces.meiva.okf.md
+    assert math.isclose(body["subscription_cost_usd"], 23.0)
     assert math.isclose(body["openai_cost_usd"], 12.75)
     assert math.isclose(body["anthropic_cost_usd"], 6.75)
+
+
+# meiva:note
+# Either half of the cost split can be zero: a home that only runs subscription harnesses owes
+# nothing to an API and still reports the list value it consumed, and the reverse. Both fields
+# are served unconditionally so the console can render `$0.00` instead of hiding a half.
+def test_dashboard_subscription_cost_is_a_disjoint_half(
+    db_conn: psycopg.Connection, event_rows: _EventRows
+) -> None:
+    event_rows.add(
+        event="llm_usage",
+        payload={
+            "model": "claude-sonnet-5-5",
+            "source": "claude_code",
+            "in_total": 100,
+            "out_total": 20,
+            "cost_usd": 2.5,
+        },
+    )
+    event_rows.add(
+        event="llm_usage",
+        payload={
+            "model": "gpt-6.1-sol",
+            "source": "codex",
+            "in_total": 100,
+            "out_total": 20,
+            "cost_usd": 1.25,
+        },
+    )
+    db_conn.commit()
+    with gateway_test_client() as client:
+        body = client.get("/api/stats/dashboard").json()
+    assert body["cost_usd"] == 0
+    assert math.isclose(body["subscription_cost_usd"], 3.75)
+
+
+def test_dashboard_api_only_window_reports_zero_subscription_cost(
+    db_conn: psycopg.Connection, event_rows: _EventRows
+) -> None:
+    event_rows.add(
+        event="llm_usage",
+        payload={"model": "deepseek-flash", "in_total": 100, "out_total": 20, "cost_usd": 0.5},
+    )
+    db_conn.commit()
+    with gateway_test_client() as client:
+        body = client.get("/api/stats/dashboard").json()
+    assert math.isclose(body["cost_usd"], 0.5)
+    assert body["subscription_cost_usd"] == 0
 
 
 def test_dashboard_default_24h_window_filters_old_rows(

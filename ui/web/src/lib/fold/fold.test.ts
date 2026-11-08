@@ -25,6 +25,7 @@ const baseAgent: AgentRow = {
   spawned_at: "2026-05-10T00:00:00Z",
   machine: "test",
   supports_vision: true,
+  llm_model: null, reasoning_effort: null,
   awaiting_response_count: 0, has_pending_question: false, highest_notice_priority: null,
   unread_notice_count: 0,
   unread_user_message_count: 0,

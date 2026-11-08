@@ -19,10 +19,10 @@ describe("StatusCards tri-state (loading / data / error)", () => {
     openStatus();
     expect(await screen.findByRole("status", { name: "Status is updating" })).toBeTruthy();
     // meiva:note
-    // Seven placeholder cells (live agents + six windowed cards) each show a
+    // Eight placeholder cells (live agents + seven windowed cards) each show a
     // spinner; none of them keeps a placeholder bar shaped like a value.
     expect(document.querySelectorAll(".animate-pulse")).toHaveLength(0);
-    expect(document.querySelectorAll(".animate-spin").length).toBeGreaterThanOrEqual(7);
+    expect(document.querySelectorAll(".animate-spin").length).toBeGreaterThanOrEqual(8);
     expect(screen.queryByText("—")).toBeNull();
   });
   it("stats has data → live count and 6 windowed cards show real numbers", async () => {
@@ -32,6 +32,7 @@ describe("StatusCards tri-state (loading / data / error)", () => {
       window_hours: 24,
       tokens: { input: 12_345, output: 6_789, cache_read: 0, cache_hit_pct: 80 },
       cost_usd: 25.4,
+      subscription_cost_usd: 0,
       openai_cost_usd: 12.34,
       anthropic_cost_usd: 5.67,
       warnings: 19_588,
@@ -62,6 +63,7 @@ describe("StatusCards tri-state (loading / data / error)", () => {
       window_hours: 24,
       tokens: { input: 6000, output: 0, cache_read: 0, cache_hit_pct: null },
       cost_usd: 3,
+      subscription_cost_usd: 0,
       openai_cost_usd: 1.5,
       anthropic_cost_usd: 0.5,
       warnings: 0,
@@ -91,6 +93,7 @@ describe("StatusCards tri-state (loading / data / error)", () => {
       window_hours: 24,
       tokens: { input: 12_345, output: 6_789, cache_read: 0, cache_hit_pct: 80 },
       cost_usd: 1.2345,
+      subscription_cost_usd: 0,
       openai_cost_usd: 0.5,
       anthropic_cost_usd: 0.25,
       warnings: 3,
@@ -115,6 +118,7 @@ describe("StatusCards tri-state (loading / data / error)", () => {
       window_hours: 24,
       tokens: { input: 12_345, output: 6_789, cache_read: 0, cache_hit_pct: 80 },
       cost_usd: 1.2345,
+      subscription_cost_usd: 0,
       openai_cost_usd: 0.5,
       anthropic_cost_usd: 0.25,
       warnings: 0,
@@ -139,6 +143,7 @@ describe("StatusCards tri-state (loading / data / error)", () => {
       window_hours: 24,
       tokens: { input: 1, output: 1, cache_read: 0, cache_hit_pct: 0 },
       cost_usd: 0,
+      subscription_cost_usd: 0,
       openai_cost_usd: 0,
       anthropic_cost_usd: 0,
       warnings: 10_000,
@@ -175,6 +180,7 @@ describe("StatusCards tri-state (loading / data / error)", () => {
       window_hours: 24,
       tokens: { input: 100, output: 50, cache_read: 0, cache_hit_pct: 80 },
       cost_usd: 1,
+      subscription_cost_usd: 0,
       openai_cost_usd: 0.5,
       anthropic_cost_usd: 0.25,
       warnings: 2,
@@ -215,6 +221,7 @@ describe("StatusCards tri-state (loading / data / error)", () => {
       window_hours: 24,
       tokens: { input: 1_500_000, output: 0, cache_read: 0, cache_hit_pct: 0 },
       cost_usd: 0,
+      subscription_cost_usd: 0,
       openai_cost_usd: 0,
       anthropic_cost_usd: 0,
       warnings: 0,
@@ -236,6 +243,7 @@ describe("StatusCards tri-state (loading / data / error)", () => {
       window_hours: 24,
       tokens: { input: 100, output: 50, cache_read: 0, cache_hit_pct: 0 },
       cost_usd: 1.5,
+      subscription_cost_usd: 0,
       openai_cost_usd: null,
       anthropic_cost_usd: null,
       warnings: 0,
@@ -261,6 +269,7 @@ describe("plugin status cards", () => {
       window_hours: 24,
       tokens: { input: 100, output: 50, cache_read: 0, cache_hit_pct: 0 },
       cost_usd: 0,
+      subscription_cost_usd: 0,
       openai_cost_usd: 0,
       anthropic_cost_usd: 0,
       warnings: 0,
@@ -405,6 +414,7 @@ describe("StatusCards window selector", () => {
       window_hours: 24,
       tokens: { input: 12_345, output: 6_789, cache_read: 0, cache_hit_pct: 80 },
       cost_usd: 10.5,
+      subscription_cost_usd: 0,
       openai_cost_usd: 4.2,
       anthropic_cost_usd: 3.1,
       warnings: 2,
@@ -429,13 +439,13 @@ describe("StatusCards window selector", () => {
     openStatus();
     expect(await screen.findByText("5")).toBeTruthy();
     expect(await screen.findByText("$42.80")).toBeTruthy();
-    expect(await screen.findAllByText("…")).toHaveLength(6);
+    expect(await screen.findAllByText("…")).toHaveLength(7);
     expect(screen.queryByText("19.1k")).toBeNull();
     expect(screen.queryByText("80.00%")).toBeNull();
     expect(screen.queryByText("$10.50")).toBeNull();
     expect(screen.queryByText("$4.20")).toBeNull();
     expect(screen.queryByText("$3.10")).toBeNull();
-    expect(await screen.findAllByTitle("Updating for 1h…")).toHaveLength(6);
+    expect(await screen.findAllByTitle("Updating for 1h…")).toHaveLength(7);
   });
   it("renders all seven window options including 30d with the persisted value selected", async () => {
     state.agents = [makeAgent({ agent_id: 1 })];
@@ -456,6 +466,7 @@ describe("StatusCards window selector", () => {
       applied_window_hours: 84,
       tokens: { input: 100, output: 50, cache_read: 0, cache_hit_pct: 0 },
       cost_usd: 1,
+      subscription_cost_usd: 0,
       openai_cost_usd: 0.5,
       anthropic_cost_usd: 0.2,
       warnings: 0,
@@ -482,6 +493,47 @@ describe("StatusCards window selector", () => {
       expect(transport.putSetting).toHaveBeenCalledWith("display.stats_window_hours", 720),
     );
   });
+  // meiva:note
+  // The pair of cost cards states both halves of the split whatever their value (user ruling
+  // 2026-11-08): `$0.00` is an answer, and hiding it would make the pair read as the single
+  // total it replaced. The Inspector keeps the opposite rule; these assertions pin the split,
+  // not a shared zero-hiding policy.
+  // meiva:link ui/web/src/docs/frontend-components/agent-sidebar.meiva.okf.md
+  it.each([
+    { cost: 0, subscription: 0, api: "$0.00", sub: "$0.00", case: "both halves zero" },
+    { cost: 12.5, subscription: 0, api: "$12.50", sub: "$0.00", case: "subscription half zero" },
+    { cost: 0, subscription: 3.75, api: "$0.00", sub: "$3.75", case: "API half zero" },
+    { cost: 10.5, subscription: 2.25, api: "$10.50", sub: "$2.25", case: "both halves non-zero" },
+  ])("cost cards split API from subscription when $case", async ({ cost, subscription, api, sub }) => {
+    state.agents = [makeAgent({ agent_id: 1 })];
+    state.stats = {
+      live_count: 1,
+      window_hours: 24,
+      tokens: { input: 1000, output: 100, cache_read: 0, cache_hit_pct: 0 },
+      cost_usd: cost,
+      subscription_cost_usd: subscription,
+      openai_cost_usd: null,
+      anthropic_cost_usd: null,
+      warnings: 0,
+      errors: 0,
+      warnings_resolved: 0,
+      errors_resolved: 0,
+      alert_classes_active: 0,
+      alert_classes_dismissed: 0,
+      plugin_stats: [],
+    };
+    wrap(<AgentSidebar {...handlers} />);
+    openStatus();
+
+    const apiCard = (await screen.findByText("Cost (API)")).closest("div");
+    const subCard = screen.getByText("Cost (subscription)").closest("div");
+    await waitFor(() => expect(apiCard?.textContent).toBe(`Cost (API)${api}`));
+    expect(subCard?.textContent).toBe(`Cost (subscription)${sub}`);
+    expect(apiCard?.getAttribute("title")).toContain(`: ${api}`);
+    expect(subCard?.getAttribute("title")).toContain("not money owed");
+    expect(subCard?.getAttribute("title")).toContain(`: ${sub}`);
+  });
+
   it("separates Live agents above the Usage section and renders each stat label", async () => {
     state.agents = [makeAgent({ agent_id: 1 })];
     state.statsWindowHours = 1;
@@ -493,7 +545,8 @@ describe("StatusCards window selector", () => {
     expect(await screen.findByText("Warnings / errors")).toBeTruthy();
     expect(await screen.findByText("Tokens")).toBeTruthy();
     expect(await screen.findByText("Cache hit")).toBeTruthy();
-    expect(await screen.findByText("Cost")).toBeTruthy();
+    expect(await screen.findByText("Cost (API)")).toBeTruthy();
+    expect(await screen.findByText("Cost (subscription)")).toBeTruthy();
     expect(await screen.findByText("OpenAI API")).toBeTruthy();
     expect(await screen.findByText("Anthropic API")).toBeTruthy();
     expect(screen.queryByText("Average turn time")).toBeNull();

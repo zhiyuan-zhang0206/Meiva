@@ -62,6 +62,7 @@ function rosterRow(agent_id: number, over: Partial<AgentRow> = {}): AgentRow {
     label: null,
     machine: "test",
     supports_vision: false,
+    llm_model: null, reasoning_effort: null,
     liveness_state: "online",
     awaiting_response_count: 0, has_pending_question: false, highest_notice_priority: null,
     unread_notice_count: 0,

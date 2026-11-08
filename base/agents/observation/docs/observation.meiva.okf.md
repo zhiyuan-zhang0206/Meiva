@@ -88,7 +88,18 @@ database failures and lifecycle/observation enum validation still propagate.
 Unknown capability does not change agent status, ownership evidence, pagination,
 or the live roster's ancestor closure. A missing agent is still missing.
 
-Agent cards and snapshots share overlay > birth > live model resolution. A missing catalog makes only the required supports_vision field null; it cannot hide malformed stored model pins, database errors or invalid agent enums.
+Agent cards and snapshots share overlay > birth > live model resolution. A missing
+catalog makes only the resolved model fields null — `supports_vision`, and the card's
+`llm_model` / `reasoning_effort`; it cannot hide malformed stored model pins, database
+errors or invalid agent enums.
+
+Cards also report the two facts a reader needs before opening the inspector:
+`llm_model` (the pin, else the caller's default, settled one hop past a registered
+withdrawal) and `reasoning_effort` (the pin, else that model's own tuned default, read
+through `registry.resolve_setting` — an unset effort is a value, never a blank).
+Both are required and nullable, both come from the same pins the capability
+projection uses, and a harness-provided model id the catalog does not know keeps
+its pinned effort and reports it under its own name.
 
 Database read failure in `agent_model_target` retains its separate historical
 contract: it logs the error and returns the caller's explicit fallback. That

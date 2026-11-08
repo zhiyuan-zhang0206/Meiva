@@ -141,6 +141,12 @@ export function projectAgentStatus(row: WireAgentCard | WireAgentRow): AgentRow 
   return {
     ...cardFields,
     status,
+    // meiva:note
+    // A selected-detail body carries no model projection, so the card it projects says
+    // "unknown" rather than guessing: the hover card renders nothing for these two.
+    // meiva:link ui/web/src/docs/frontend-components/agent-sidebar.meiva.okf.md
+    llm_model: null,
+    reasoning_effort: null,
     awaiting_response_count: notices_awaiting_response.length,
     has_pending_question: notices_awaiting_response.some((notice) => notice.question != null),
     highest_notice_priority: notices_awaiting_response.map((n) => n.priority).sort()[0] ?? null,

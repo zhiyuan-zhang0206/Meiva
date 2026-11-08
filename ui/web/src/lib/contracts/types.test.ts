@@ -26,6 +26,7 @@ const wireCard: Required<WireAgentCard> = {
   spawned_at: "2026-09-01T00:00:00Z",
   last_active_at: "2026-09-01T00:00:00Z", last_inbound_at: "2026-09-01T00:00:00Z",
   label: "card", machine: "test-host", supports_vision: true, liveness_state: "unknown",
+  llm_model: "claude-opus-4-8", reasoning_effort: "high",
   availability, observation: { runtime_owner: "unknown" }, awaiting_response_count: 3, has_pending_question: false,
   highest_notice_priority: "P2", unread_notice_count: 2, unread_user_message_count: 0, heartbeat_paused_until: null,
   harness_exit_code: null, harness_exit_at: null,
@@ -54,6 +55,7 @@ it("keeps optional detail extensions while dropping detail-only fields and aggre
   const { notices_awaiting_response: _notices, fork_source_checkpoint_id: _fork, last_probe_at: _probe, ...shared } = input;
   expect(projected).toEqual({
     ...shared, awaiting_response_count: 3, has_pending_question: true, highest_notice_priority: "P1",
+    llm_model: null, reasoning_effort: null,
   });
   for (const excluded of ["notices_awaiting_response", "fork_source_checkpoint_id", "last_probe_at"]) {
     expect(projected).not.toHaveProperty(excluded);

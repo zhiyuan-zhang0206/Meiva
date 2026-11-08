@@ -43,10 +43,17 @@ below:
   such as provider balances and subscription quota windows).
 - **Windowed `Usage` section** (below the rule, headed by `Usage` and its own
   `WindowSelect` offering `5m` / `1h` / `6h` / `24h` / `3d` / `7d` / `30d`): a
-  2×3 grid of `Tokens`, `Cache hit`, total metered API `Cost`, `Warnings / errors`,
-  and metered `OpenAI API` and `Anthropic API` spend slices (excluding
-  subscription harnesses so monthly API credit consumption stays distinct from
-  subscription quotas).
+  2-column grid of `Tokens`, `Cache hit`, `Cost (API)`, `Cost (subscription)`,
+  `Warnings / errors`, and metered `OpenAI API` and `Anthropic API` spend slices.
+  The two cost cards are the same disjoint split the Inspector shows, by the
+  billing mode of the harness that ran each call: `Cost (API)` is the fee the
+  account is billed (subscription harnesses excluded, so monthly API credit
+  consumption stays distinct from subscription quotas) and `Cost (subscription)`
+  the list value those harnesses covered — consumed quota, not money owed. Both
+  cards always render, `$0.00` included (user ruling 2026-11-08): the pair is a
+  statement about two billing modes, and dropping a zero half would make it read
+  as the single total it replaced. The Inspector keeps the opposite rule (a zero
+  block disappears) because there each block is a claim about one agent's spend.
 
 Keeping the panel behind the footer trigger means the closed sidebar spends no
 height on numbers a reader checks occasionally (the old inline bar occupied a
@@ -101,8 +108,11 @@ ellipsis (`truncate`) so long names and deep
 tree indents never wrap or vary row height. On fine pointers (`!useCoarsePointer()`),
 hovering a row for 400 ms opens a read-only peek card (`agent-hover-card.tsx`) to
 the right of the sidebar with the full untruncated `#ID · label`, lifecycle status,
-harness, machine, relative `Active` and `Spawned` timestamps, and any active
-lineage or anomaly signals; moving to another row within a 300 ms warm-up window
+harness, machine, the `Model` and `Effort` the agent's calls actually run with
+(each on its own row, resolved from the roster: the agent's pin, else the model's
+own default, else the selection a subscription harness settled at launch — a
+sub-catalog model id a harness brought keeps its own name), relative `Active` and
+`Spawned` timestamps, and any active lineage or anomaly signals; moving to another row within a 300 ms warm-up window
 switches the card immediately (0 ms), and leaving closes it at once (coarse
 pointers suppress synthetic hover tooltips). Rows can be renamed inline either by
 double-clicking the label or by choosing `Rename` from the context menu (long-press

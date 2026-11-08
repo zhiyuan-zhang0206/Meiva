@@ -93,7 +93,7 @@ describe("InspectorPanel", () => {
     render(<InspectorPanel agentId={1} />);
     await waitFor(() => expect(screen.queryByLabelText("Liveness loading")).toBeNull());
     expect(screen.queryByText("Persistent shells")).toBeNull();
-    expect(screen.queryByText("Configuration overlay")).toBeNull();
+    expect(screen.queryByText("Configuration")).toBeNull();
   });
 
   it("does not render observation details", async () => {
@@ -121,7 +121,7 @@ describe("InspectorPanel", () => {
       }),
     );
     render(<InspectorPanel agentId={1} />);
-    await waitFor(() => expect(screen.getByText("Configuration overlay")).toBeTruthy());
+    await waitFor(() => expect(screen.getByText("Configuration")).toBeTruthy());
     expect(screen.getByText('["example-skill","*"]')).toBeTruthy();
     expect(screen.queryByText(/example_skill/)).toBeNull();
     expect(screen.getByText("Claude Opus 4.8")).toBeTruthy();
@@ -259,7 +259,7 @@ describe("InspectorPanel plugin widgets", () => {
     const runLink = await screen.findByRole("link", { name: "Open run timeline" });
     const widgetLink = await screen.findByRole("link", { name: /Ship the inspector fix/ });
     const context = await screen.findByText("Context");
-    const configOverlay = await screen.findByText("Configuration overlay");
+    const configOverlay = await screen.findByText("Configuration");
     const activity = screen.getByText("Activity");
     expect(
       runLink.compareDocumentPosition(widgetLink) & Node.DOCUMENT_POSITION_FOLLOWING,

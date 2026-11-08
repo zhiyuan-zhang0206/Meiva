@@ -227,6 +227,14 @@ export function AgentHoverCard({
     Number.isFinite(pausedUntilMs) &&
     pausedUntilMs > now.getTime();
 
+  // meiva:note
+  // The model and reasoning effort the agent's calls run with, each on its own row: a hover
+  // answers "what is this row doing" before the reader opens the inspector. Both arrive resolved
+  // from the roster — the pin, else the model's own default, else the selection a subscription
+  // harness settled at launch — so a name here is what the provider is asked for, not what
+  // somebody typed. A missing half renders nothing rather than a placeholder: the roster could
+  // not resolve it (model catalog unavailable), and the card does not guess.
+  // meiva:link ui/web/src/docs/frontend-components/agent-sidebar.meiva.okf.md
   return (
     <Popover.Portal>
       <Popover.Content
@@ -266,6 +274,20 @@ export function AgentHoverCard({
           <p className="tabular-nums text-muted-foreground">
             {t("hoverActive", { time: activeTime })} · {t("hoverSpawned", { time: spawnedTime })}
           </p>
+
+          {agent.llm_model != null ? (
+            <p className={cn("items-center gap-1.5 text-[10.5px] text-muted-foreground", FLEX)} data-testid="agent-hover-model">
+              <span className="shrink-0">{t("hoverModel")}</span>
+              <span className="truncate font-mono text-popover-foreground">{agent.llm_model}</span>
+            </p>
+          ) : null}
+
+          {agent.reasoning_effort != null ? (
+            <p className={cn("items-center gap-1.5 text-[10.5px] text-muted-foreground", FLEX)} data-testid="agent-hover-effort">
+              <span className="shrink-0">{t("hoverEffort")}</span>
+              <span className="truncate font-mono text-popover-foreground">{agent.reasoning_effort}</span>
+            </p>
+          ) : null}
 
           {agent.fork_source_agent_id != null ? (
             <p className="font-mono text-[10.5px] text-muted-foreground">

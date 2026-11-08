@@ -43,7 +43,7 @@ values causes zero height shift or DOM remount, and the pending state never pain
 a bar shaped like the value it stands in for (user ruling 2026-11-08 — a loading
 state shows the turning ring alone, with no loading sentence and no skeleton
 anywhere in the console). Conditional and sparse sections — `Page`, `Persistent
-shells`, `Configuration overlay`, `Context` and plugin widgets — render nothing
+shells`, `Configuration`, `Context` and plugin widgets — render nothing
 while pending or empty rather than reserving speculative placeholder rows that
 collapse after fetch.
 

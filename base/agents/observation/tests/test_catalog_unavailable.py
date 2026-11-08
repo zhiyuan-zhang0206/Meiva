@@ -32,6 +32,7 @@ def test_unavailable_capabilities_preserve_ancestors_and_keyset_history(
     roster = select_roster(existing_agents, catalog=None, default_model=DEFAULT_MODEL)
     assert [card.agent_id for card in roster.agents] == [2, 3]
     assert all(card.supports_vision is None for card in roster.agents)
+    assert all(card.llm_model is None and card.reasoning_effort is None for card in roster.agents)
     assert [link.agent_id for link in roster.ancestors] == [1]
     first = list_directory(
         existing_agents, scope="all", limit=2, catalog=None, default_model=DEFAULT_MODEL
@@ -88,6 +89,10 @@ def test_nullable_capability_is_required_and_does_not_relax_agent_enums(
         del data["supports_vision"]
         with pytest.raises(ValidationError, match="supports_vision"):
             model.model_validate(data)
+        if model is AgentCard:
+            del data["llm_model"], data["reasoning_effort"]
+            with pytest.raises(ValidationError, match="llm_model"):
+                model.model_validate(data)
 
 
 def test_read_errors_are_not_replaced_by_empty_agents(existing_agents: psycopg.Connection) -> None:

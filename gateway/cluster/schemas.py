@@ -236,8 +236,8 @@ class StatsDashboard(BaseModel):
         json_schema_extra={
             "description": (
                 "GET /api/stats/dashboard response — the sidebar Status popover's data pulled in one shot.\n\n"
-                "All windowed fields (`tokens` / `cost_usd` / `openai_cost_usd` /\n"
-                "`anthropic_cost_usd` / `warnings` / `errors`) aggregate over the\n"
+                "All windowed fields (`tokens` / `cost_usd` / `subscription_cost_usd` /\n"
+                "`openai_cost_usd` / `anthropic_cost_usd` / `warnings` / `errors`) aggregate over the\n"
                 "`applied_window_hours` horizon.\n"
                 "`window_hours` echoes the selected value — `0` means five minutes; all\n"
                 "other values are hours.\n"
@@ -249,6 +249,10 @@ class StatsDashboard(BaseModel):
                 "  `cost_usd` snapshots carried by `llm_usage` events in `telemetry_events`\n"
                 "  excluding subscription harnesses; events that pre-date the snapshot field\n"
                 "  contribute 0\n"
+                "- `subscription_cost_usd`: the subscription half of the same rows in USD — their\n"
+                "  usage-time price is the list value the subscription covered, not money the\n"
+                "  account is billed. Disjoint from `cost_usd`; 0 when no subscription harness ran\n"
+                "  in the window. The console renders both halves whether or not they are zero\n"
                 "- `openai_cost_usd` / `anthropic_cost_usd`: the OpenAI and Anthropic slices\n"
                 "  of `cost_usd`, resolved via the gateway model catalog (`None` only when\n"
                 "  the model catalog failed to load)\n"
@@ -282,6 +286,7 @@ class StatsDashboard(BaseModel):
     applied_window_hours: int | None = None
     tokens: StatsTokens
     cost_usd: float = Field(ge=0)
+    subscription_cost_usd: float = Field(ge=0)
     openai_cost_usd: float | None = Field(default=None, ge=0)
     anthropic_cost_usd: float | None = Field(default=None, ge=0)
     warnings: NonNegativeInt

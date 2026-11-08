@@ -116,8 +116,14 @@ export function StatusCards({
           : placeholder,
       title: windowedTitle ?? errMsg ?? t("cacheHitTitle", { win }),
     },
+    // meiva:note
+    // Two cost cards, one per billing mode, mirroring the inspector's labels. Both are always
+    // rendered, `$0.00` included (user ruling 2026-11-08): "no API spend" and "no subscription
+    // call" are answers a reader asked for, and hiding a zero half would make the pair look like
+    // the one number it replaced. The inspector does the opposite — it hides a zero block.
+    // meiva:link ui/web/src/docs/frontend-components/agent-sidebar.meiva.okf.md
     {
-      label: t("cost"),
+      label: t("costApi"),
       value: windowMismatch
         ? windowedPlaceholder
         : stats
@@ -127,8 +133,22 @@ export function StatusCards({
         windowedTitle ??
         errMsg ??
         (stats
-          ? t("costTitleDetail", { win, amount: stats.cost_usd.toFixed(2) })
-          : t("costTitle", { win })),
+          ? t("costApiTitleDetail", { win, amount: stats.cost_usd.toFixed(2) })
+          : t("costApiTitle", { win })),
+    },
+    {
+      label: t("costSubscription"),
+      value: windowMismatch
+        ? windowedPlaceholder
+        : stats
+          ? `$${stats.subscription_cost_usd.toFixed(2)}`
+          : placeholder,
+      title:
+        windowedTitle ??
+        errMsg ??
+        (stats
+          ? t("costSubscriptionTitleDetail", { win, amount: stats.subscription_cost_usd.toFixed(2) })
+          : t("costSubscriptionTitle", { win })),
     },
     {
       kind: "warnings",

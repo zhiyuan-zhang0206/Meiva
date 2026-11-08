@@ -2354,6 +2354,8 @@ export interface components {
             label: string | null;
             machine: string;
             supports_vision: boolean | null;
+            llm_model: string | null;
+            reasoning_effort: string | null;
             liveness_state: components["schemas"]["LivenessState"];
             availability?: components["schemas"]["AgentAvailability"] | null;
             observation: components["schemas"]["AgentObservation"];
@@ -3954,6 +3956,7 @@ export interface components {
             applied_window_hours?: number | null;
             tokens: components["schemas"]["StatsTokens"];
             cost_usd: number;
+            subscription_cost_usd: number;
             openai_cost_usd?: number | null;
             anthropic_cost_usd?: number | null;
             warnings: number;
