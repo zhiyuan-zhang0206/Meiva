@@ -11,13 +11,9 @@ exports = ["base.py", "bisect_train.py", "certify.py", "evidence.py", "git_tags.
 
 [roots]
 "base.py" = { kinds = ["argv"], why = "the __main__ guard reads argv[1:] once and hands it to main" }
-"bisect_train.py" = { kinds = ["argv", "pid"], why = "the __main__ guard reads argv[1:] once and hands it to main, and names the interpreter it runs on (sys.executable) for the `git bisect run` child it starts and for the pytest-python fallback when the repository has no virtualenv" }
+"bisect_train.py" = { kinds = ["argv", "pid", "environ", "random"], why = "the __main__ guard reads argv[1:] once and hands it to main, and names the interpreter it runs on (sys.executable) for the `git bisect run` child it starts and for the pytest-python fallback when the repository has no virtualenv; each bisect probe runs in a throwaway home and a throwaway worktree it creates and removes (`tempfile.TemporaryDirectory()`), so it reads the environment's temporary directory and the OS's random name for those paths" }
 "certify.py" = { kinds = ["argv"], why = "the __main__ guard reads argv[1:] once and hands it to main" }
 "evidence.py" = { kinds = ["argv", "pid"], why = "the process entry passes the target and evidence timestamp from argv and the Actions API response from stdin" }
 "nightly.py" = { kinds = ["argv"], why = "the __main__ guard reads argv[1:] once and hands it to main" }
 "promote.py" = { kinds = ["argv"], why = "the __main__ guard reads argv[1:] once and hands it to main" }
 "tag.py" = { kinds = ["argv"], why = "the __main__ guard reads argv[1:] once and hands it to main" }
-
-[debt.ambient-read]
-"bisect_train.py#environ tempfile.TemporaryDirectory()" = { count = 2, owner = "#5816", until = "permanently: both sites need a directory outside the repository — `_run_probe` gives the test run a throwaway `MEIVA_HOME` that the commit under test must not find this checkout's state in, and `_execute_bisect` checks out the `git worktree` it bisects in there; the only path either caller holds is `repository`, which is the one location both must stay out of" }
-"bisect_train.py#random tempfile.TemporaryDirectory()" = { count = 2, owner = "#5816", until = "permanently: both names are minted by the OS because a bisect runs the probe many times in one process and every worktree has to be its own; `main` hands over the plan, the repository and the interpreter, and nothing that could stand in for a name" }
