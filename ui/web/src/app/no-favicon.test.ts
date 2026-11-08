@@ -19,10 +19,9 @@ describe("brand favicon and app icons", () => {
     expect(iconConventionFiles("src/app")).toEqual(["src/app/icon.svg"]);
     expect(existsSync("public/favicon.ico")).toBe(false);
     const svg = readFileSync("src/app/icon.svg", "utf8");
-    expect(svg).toContain('viewBox="0 0 1000 1000"');
+    expect(svg).toContain('viewBox="50 -150 900 900"');
     expect(svg).toContain("#ED8755");
-    expect(svg).toContain("#427C6E");
-    expect(svg).toContain("#2276B5");
+    expect(svg).toContain("M 112.000000 554.000000");
   });
 
   it("matches every icon convention Next accepts", () => {
