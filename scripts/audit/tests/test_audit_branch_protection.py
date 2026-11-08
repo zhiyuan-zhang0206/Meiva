@@ -25,7 +25,6 @@ _ADMISSION_CHECKS = frozenset(
         "backend structure (pre-commit lint + codegen freshness)",
         "classify change",
         "core-content manifests",
-        "diff hints",
         "doc lints (pre-commit family)",
         "e2e gate",
         "frontend gate",

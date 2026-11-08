@@ -387,24 +387,6 @@ jobs:
       - name: Check canonical pnpm lock sources (stdlib only)
         run: python3 scripts/lint/locks/package_lock.py
 
-  diff-hints:
-    name: diff hints
-    runs-on: ubuntu-24.04
-    timeout-minutes: 5
-    if: ${{ github.event_name == 'pull_request' && github.event.pull_request.draft == false }}
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 0
-
-      - name: Check that every hint on the branch is fixed or answered
-        env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-        run: |
-          python3 scripts/lint/diagnostics/diff_hints/hints.py branch \
-            --base "$BASE_SHA" --head "$HEAD_SHA" --summary "$GITHUB_STEP_SUMMARY"
-
   core-content-manifests:
     name: core-content manifests
     runs-on: ubuntu-24.04

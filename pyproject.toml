@@ -973,9 +973,6 @@ root = "scripts/host_ops/tests"
 root = "scripts/host_ops/worktree_gc/tests"
 
 [[tool.pyright.executionEnvironments]]
-root = "scripts/lint/diagnostics/diff_hints/tests"
-
-[[tool.pyright.executionEnvironments]]
 root = "scripts/lint/diagnostics/tests"
 
 [[tool.pyright.executionEnvironments]]

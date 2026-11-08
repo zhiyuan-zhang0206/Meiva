@@ -131,38 +131,6 @@ has Python, frontend and e2e commands, environment details and cleanup guidance.
 Full suites run in CI. The [migration guide](../db/docs/migrations.md) covers
 schema changes, immutable migration history and baseline verification.
 
-### Diff hints and `Hint-Ack`
-
-The commit-msg and pre-push hooks ask about the shapes that reviews keep finding on the
-lines a commit adds: an unmediated clock or environment read, a callable with a default,
-a test that subclasses production code, a deleted test and the others in the
-[catalog](../scripts/lint/docs/diff-hints/catalog.meiva.okf.md). Each hint says why the shape is a
-problem and gives the recipe in order of preference. Change the code, or answer with one line
-per site **in the pull request body**:
-
-```text
-Hint-Ack: service-locator cli/commands/x/runtime.py:42 -- composition root of the daemon
-```
-
-The body is where the answer belongs because it is the text that survives: a squash merge lands
-the pull request's title and body as the commit message and drops the branch's own messages, so an
-answer written only in a commit message is gone from `main` the moment the pull request merges, and
-the next branch whose base predates that merge is asked the same question about code it did not
-touch. A commit message is still read (a branch's own pushes work either way), but it is not the
-copy to rely on.
-
-A path without a line answers every site of that id in the file, and a directory with a
-trailing slash every site below it. Answer with the reason the site is right, not with the
-rule's name; an unanswered hint also stops the push.
-
-A push is judged against the `main` GitHub has, not against the refs this checkout happens to
-have fetched. `origin` here is a mirror that resets every few minutes, so a tracking ref can be
-behind, and a range built from a stale base carries other people's merged work — which is then
-reported as sites on a branch that never touched them. When GitHub's main cannot be read (no
-`gh`, no network, no GitHub origin, or the commit is not in this checkout) the check falls back
-to `origin/main` and says so on one line (`base=… may lag`), because a red from a stale base has
-to be visible rather than silent.
-
 ### Locality gate (meizel)
 
 `python -m meizel check` judges every first-party dependency against the

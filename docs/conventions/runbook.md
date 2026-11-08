@@ -1002,10 +1002,7 @@ Push with `scripts/hooks/push.sh` when the hook output can be large. OpenSSH set
 never blocks, and the wrapper redirects there and retries once. Bypassing with
 `--no-verify` is not a repair.
 
-The configuration also makes plain `pre-commit install` install all three stages. The
-`commit-msg` stage runs the [diff hints](../../scripts/lint/docs/diff-hints/diff-hints.meiva.okf.md)
-against the message being written; the pre-push stage runs them again over the branch, so a
-clone without the `commit-msg` hook still cannot push an unanswered hint.
+The configuration also makes plain `pre-commit install` install the configured stages.
 Never install from an ephemeral worktree: all worktrees of a clone share
 `git rev-parse --git-common-dir`'s `hooks/` directory, and pre-commit writes the
 installing interpreter's absolute path into `INSTALL_PYTHON`. Deleting that

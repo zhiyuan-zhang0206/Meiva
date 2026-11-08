@@ -87,7 +87,6 @@ _ENTRIES = [
     ("scripts/host_ops/update_schedule_script.py", None),
     ("scripts/lint/async_no_sync_blocking.py", None),
     ("scripts/lint/code_structure.py", None),
-    ("scripts/lint/diagnostics/diff_hints/hints.py", None),
     ("scripts/lint/diagnostics/hermetic_transactions.py", None),
     ("scripts/lint/diagnostics/logger_add_diagnose.py", None),
     ("scripts/lint/diagnostics/loguru_format.py", None),

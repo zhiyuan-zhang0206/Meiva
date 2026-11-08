@@ -16,9 +16,7 @@ standard-library names that acquire each kind are judged in one table,
 The state a repository keeps itself is not in the vocabulary: each repository declares its own kinds
 as the keys of the policy table `[ambient]` (`Policy.state_kinds`), and a kind of either family
 travels as a plain name (`KindName`). A manifest's `[state]` accepts the declared kinds and `[roots]`
-accepts those and the standard library's; any other kind is `manifest-syntax`. Diff hints read the
-same two sets (the standard library's and the policy's at the revision they judge) and reject any
-other root kind.
+accepts those and the standard library's; any other kind is `manifest-syntax`.
 
 | kind | what it is | acquired by |
 |---|---|---|
