@@ -270,27 +270,44 @@ fn dirs_home() -> Option<PathBuf> {
         .map(PathBuf::from)
 }
 
+/// Read the raw `$MEIVA_HOME/.env` (or `~/.meiva/.env`) text on desktop.
+#[cfg(desktop)]
+pub fn host_env_text() -> Option<String> {
+    let path = env_file()?;
+    std::fs::read_to_string(path).ok()
+}
+
 /// Read the desktop cluster secret from `$MEIVA_HOME/.env`.
 ///
-/// `None` means "no local cluster here" and is normal for a frontend-only
-/// desktop machine. The value is never logged.
+/// `None` means "no local cluster secret here" and is normal for an
+/// agent-runner or frontend-only desktop machine. The value is never logged.
 #[cfg(desktop)]
 pub fn cluster_secret() -> Option<String> {
-    let path = env_file()?;
-    let text = std::fs::read_to_string(path).ok()?;
+    let text = host_env_text()?;
     parse_secret(&text)
 }
 
-/// Extract the secret from `.env` text. Tolerates surrounding whitespace and
-/// `export ` prefixes; an empty assignment is the no-auth cluster mode.
+/// Discover the desktop host's cluster endpoints from `$MEIVA_HOME/.env`.
 #[cfg(desktop)]
-fn parse_secret(text: &str) -> Option<String> {
+pub fn discover_env_endpoints() -> Option<Endpoints> {
+    let text = host_env_text()?;
+    crate::urls::endpoints_from_env_text(&text)
+}
+
+/// Extract a key's value from `.env` text. Tolerates `#` comments, surrounding
+/// whitespace, `export ` prefixes, and matching quotes; an empty assignment
+/// yields `None`.
+pub(crate) fn parse_env_value(text: &str, key: &str) -> Option<String> {
     for line in text.lines() {
         let line = line.trim();
-        let line = line.strip_prefix("export ").unwrap_or(line);
-        let Some(value) = line.strip_prefix(SECRET_KEY) else {
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let line = line.strip_prefix("export ").unwrap_or(line).trim_start();
+        let Some(value) = line.strip_prefix(key) else {
             continue;
         };
+        let value = value.trim_start();
         let Some(value) = value.strip_prefix('=') else {
             continue;
         };
@@ -300,6 +317,13 @@ fn parse_secret(text: &str) -> Option<String> {
         }
     }
     None
+}
+
+/// Extract the secret from `.env` text. Tolerates surrounding whitespace and
+/// `export ` prefixes; an empty assignment is the no-auth cluster mode.
+#[cfg(desktop)]
+fn parse_secret(text: &str) -> Option<String> {
+    parse_env_value(text, SECRET_KEY)
 }
 
 #[cfg(test)]

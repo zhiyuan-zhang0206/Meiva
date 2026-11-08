@@ -6,13 +6,31 @@
     <title>Meiva</title>
     <style>
       :root {
-        color-scheme: dark;
-        --bg: #0e0e12;
-        --fg: #f4f4f5;
-        --muted: #a1a1aa;
-        --line: #2a2a33;
-        --accent: #4f46e5;
-        --danger: #f87171;
+        color-scheme: light dark;
+        --bg: #F0F2F4;
+        --fg: #292824;
+        --surface: #F7F8FA;
+        --surface-2: #E6E9EE;
+        --muted: #686660;
+        --line: #DCE0E5;
+        --accent: #ED8755;
+        --primary: #292824;
+        --primary-fg: #F0F2F4;
+        --danger: #DC2626;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --bg: #292824;
+          --fg: #F0F2F4;
+          --surface: #302F2A;
+          --surface-2: #3B3A34;
+          --muted: #B2B4B8;
+          --line: #403F39;
+          --accent: #ED8755;
+          --primary: #F0F2F4;
+          --primary-fg: #292824;
+          --danger: #F87171;
+        }
       }
       * { box-sizing: border-box; }
       body {
@@ -25,9 +43,20 @@
         background: var(--bg);
         color: var(--fg);
         font: 15px/1.55 system-ui, -apple-system, "Segoe UI", sans-serif;
+        -webkit-font-smoothing: antialiased;
       }
       main { width: 100%; max-width: 26rem; }
-      h1 { margin: 0 0 6px; font-size: 1.35rem; }
+      .brand-wordmark {
+        display: block;
+        height: 24px;
+        width: auto;
+        margin: 0 0 16px;
+        color: var(--fg);
+      }
+      section[style*="text-align: center"] .brand-wordmark {
+        margin-inline: auto;
+      }
+      h1 { margin: 0 0 6px; font-size: 1.35rem; letter-spacing: -0.02em; }
       p { margin: 0 0 20px; color: var(--muted); }
       label { display: block; margin-bottom: 6px; font-size: 0.85rem; color: var(--muted); }
       input[type="text"], input[type="password"] {
@@ -35,7 +64,7 @@
         padding: 11px 12px;
         border: 1px solid var(--line);
         border-radius: 8px;
-        background: #16161c;
+        background: var(--surface);
         color: var(--fg);
         font: inherit;
       }
@@ -47,13 +76,15 @@
         padding: 11px 12px;
         border: 0;
         border-radius: 8px;
-        background: var(--accent);
-        color: #fff;
+        background: var(--primary);
+        color: var(--primary-fg);
         font: inherit;
         font-weight: 600;
+        cursor: pointer;
       }
+      button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
       button.secondary { background: transparent; color: var(--muted); font-weight: 400; }
-      button:disabled { opacity: 0.55; }
+      button:disabled { opacity: 0.55; cursor: default; }
       .secret-input { display: flex; gap: 8px; }
       .secret-input input { min-width: 0; }
       .secret-toggle {
@@ -61,7 +92,8 @@
         flex: 0 0 auto;
         margin: 0;
         padding-inline: 12px;
-        background: #24242c;
+        background: var(--surface-2);
+        color: var(--fg);
         font-weight: 400;
       }
       .error { color: var(--danger); font-size: 0.85rem; min-height: 1.2em; margin: 14px 0 0; }

@@ -82,6 +82,40 @@ impl Settings {
         let text = serde_json::to_string_pretty(self).map_err(|e| e.to_string())?;
         fs::write(&path, text).map_err(|e| format!("cannot write {}: {e}", path.display()))
     }
+
+    /// Apply endpoints discovered from the desktop host's `$MEIVA_HOME/.env` when
+    /// settings have not been customized away from the default loopback gate.
+    ///
+    /// On a gateway host (`MEIVA_MACHINE_SERVE_GATEWAY=true`), this picks up
+    /// local worktree port overrides (`MEIVA_FRONTEND_HEALTHCHECK_URL`,
+    /// `MEIVA_GATEWAY_PORT`). On an agent-runner host
+    /// (`MEIVA_MACHINE_SERVE_GATEWAY=false`), this replaces the default
+    /// `localhost:3000` with the cluster's remote gate and gateway derived from
+    /// `MEIVA_GATEWAY_URL`.
+    #[cfg(any(desktop, test))]
+    pub fn apply_env_endpoints(&mut self, discovered: Option<&crate::urls::Endpoints>) {
+        let Some(endpoints) = discovered else {
+            return;
+        };
+        if self.gateway_url.is_some() || !is_default_loopback_entry(self.entry_url.as_deref()) {
+            return;
+        }
+        self.entry_url = Some(endpoints.entry.to_string());
+        if endpoints.gateway != crate::urls::derive_gateway(&endpoints.entry) {
+            self.gateway_url = Some(endpoints.gateway.to_string());
+        }
+    }
+}
+
+#[cfg(any(desktop, test))]
+fn is_default_loopback_entry(raw: Option<&str>) -> bool {
+    let Some(raw) = raw else {
+        return true;
+    };
+    matches!(
+        raw.trim().trim_end_matches('/'),
+        "" | "http://localhost:3000" | "http://127.0.0.1:3000"
+    )
 }
 
 /// Where `settings.json` lives. Resolved from the Tauri path API so each
@@ -150,5 +184,53 @@ mod tests {
         fs::write(dir.join(FILE_NAME), "{ not json").expect("write");
         assert_eq!(Settings::load(&dir), Settings::default());
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn default_loopback_settings_adopt_discovered_runner_endpoints() {
+        let mut settings = Settings::default();
+        let discovered = crate::urls::endpoints_from_env_text(
+            "MEIVA_MACHINE_SERVE_GATEWAY=false\nMEIVA_GATEWAY_URL=http://10.0.0.46:8000\n",
+        );
+        settings.apply_env_endpoints(discovered.as_ref());
+        assert_eq!(
+            settings.entry_url.as_deref(),
+            Some("http://10.0.0.46:3000/")
+        );
+        assert_eq!(settings.gateway_url, None);
+    }
+
+    #[test]
+    fn default_loopback_settings_record_custom_gateway_port_from_env() {
+        let mut settings = Settings::default();
+        let discovered = crate::urls::endpoints_from_env_text(
+            "MEIVA_MACHINE_SERVE_GATEWAY=true\nMEIVA_FRONTEND_HEALTHCHECK_URL=http://localhost:3100\nMEIVA_GATEWAY_PORT=8100\n",
+        );
+        settings.apply_env_endpoints(discovered.as_ref());
+        assert_eq!(
+            settings.entry_url.as_deref(),
+            Some("http://localhost:3100/")
+        );
+        assert_eq!(
+            settings.gateway_url.as_deref(),
+            Some("http://localhost:8100/")
+        );
+    }
+
+    #[test]
+    fn explicit_custom_entry_url_is_not_overwritten_by_env_discovery() {
+        let mut settings = Settings {
+            entry_url: Some("https://meiva.example.com".into()),
+            gateway_url: None,
+            ..Settings::default()
+        };
+        let discovered = crate::urls::endpoints_from_env_text(
+            "MEIVA_MACHINE_SERVE_GATEWAY=false\nMEIVA_GATEWAY_URL=http://10.0.0.46:8000\n",
+        );
+        settings.apply_env_endpoints(discovered.as_ref());
+        assert_eq!(
+            settings.entry_url.as_deref(),
+            Some("https://meiva.example.com")
+        );
     }
 }

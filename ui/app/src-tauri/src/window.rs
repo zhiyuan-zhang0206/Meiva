@@ -113,6 +113,19 @@ fn attach_entry(app: &AppHandle, window: WebviewWindow, endpoints: Endpoints) {
     watch_entry(window, endpoints.entry);
 }
 
+/// Brand Moonlight White (`#F0F2F4`) for light mode, Brand Coal Black (`#292824`)
+/// for dark mode — matching `ui/web/src/app/globals.css`, the Gate's `theme.css`,
+/// and `app-ui/index.html` so loading transitions never flash black in light mode.
+pub const LIGHT_BG: tauri::webview::Color = tauri::webview::Color(0xf0, 0xf2, 0xf4, 0xff);
+pub const DARK_BG: tauri::webview::Color = tauri::webview::Color(0x29, 0x28, 0x24, 0xff);
+
+pub const fn theme_background_color(theme: tauri::Theme) -> tauri::webview::Color {
+    match theme {
+        tauri::Theme::Dark => DARK_BG,
+        _ => LIGHT_BG,
+    }
+}
+
 /// Create the window with the platform's script set attached.
 fn build(app: &AppHandle, target: WebviewUrl) -> tauri::Result<WebviewWindow> {
     let navigation_handle = app.clone();
@@ -123,7 +136,7 @@ fn build(app: &AppHandle, target: WebviewUrl) -> tauri::Result<WebviewWindow> {
         .title("Meiva")
         .inner_size(1280.0, 840.0)
         .min_inner_size(960.0, 640.0)
-        .background_color(tauri::webview::Color(0x0e, 0x0e, 0x12, 0xff))
+        .background_color(LIGHT_BG)
         .initialization_script(prelude(app))
         .initialization_script(include_str!("../scripts/nav-guard.js"))
         // Same-window navigation resolves its allowlist from live settings, so
@@ -154,7 +167,11 @@ fn build(app: &AppHandle, target: WebviewUrl) -> tauri::Result<WebviewWindow> {
             .initialization_script(include_str!("../scripts/update-check.js"));
     }
 
-    builder.build()
+    let window = builder.build()?;
+    if let Ok(theme) = window.theme() {
+        let _ = window.set_background_color(Some(theme_background_color(theme)));
+    }
+    Ok(window)
 }
 
 /// `window.__MEIVA_APP__` — the host shell bridge object the console and the
