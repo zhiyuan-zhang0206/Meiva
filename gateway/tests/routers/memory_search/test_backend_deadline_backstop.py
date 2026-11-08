@@ -21,6 +21,7 @@ from __future__ import annotations
 import asyncio
 import time
 from pathlib import Path
+from typing import cast
 
 from base.config import settings
 from gateway.tests.routers.memory_search.search_support import (
@@ -78,7 +79,7 @@ async def test_a_stalled_backend_is_reported_as_the_request_deadline(
 # to remove.
 def test_the_shipped_grace_keeps_the_backend_timeout_strictly_later() -> None:
     field = type(settings.services).model_fields["memory_search_backend_deadline_grace_seconds"]
-    assert field.default == 0.5
+    assert cast(float, field.default) == 0.5
 
 
 def test_the_configured_grace_reaches_the_search_settings(tmp_path: Path) -> None:
