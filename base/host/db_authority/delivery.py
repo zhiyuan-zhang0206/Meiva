@@ -1,29 +1,25 @@
-"""Deliver the home's write generation: pooler userlist, launch grants, CLI use.
-
-Settings-free and database-free. Every consumer of a generation's credentials
-reads them through here, bound to the ledger's credential digest:
-
-- the owned PgBouncer, whose ``auth_file`` holds exactly one generation's two
-  SCRAM verifiers plus the operator admin-console entry ``meiva_pooler_admin``
-  (a userlist-only name, never a PostgreSQL role);
-- the root launcher, which projects one class login (and its API token) into
-  one service's launch environment (``write_grant``); only ``number`` and
-  ``credential_digest`` reach launch digests and journals;
-- an operator process on the gateway home that no launcher injected
-  (``consume``, as environment ``operator_environment``), admitted only while
-  it runs the home's admitted runtime: the source checkout the home was born from.
-"""
+# meiva:note
+# Deliver the home's write generation: pooler userlist, launch grants, CLI use.
+#
+# Settings-free and database-free. Every consumer of a generation's credentials
+# reads them through here, bound to the ledger's credential digest:
+#
+# - the owned PgBouncer, whose `auth_file` holds exactly one generation's two
+#   SCRAM verifiers plus the operator admin-console entry `meiva_pooler_admin`
+#   (a userlist-only name, never a PostgreSQL role);
+# - the root launcher, which projects one class login (and its API token) into
+#   one service's launch environment (`write_grant`); only `number` and
+#   `credential_digest` reach launch digests and journals;
+# - an operator process on the gateway home that no launcher injected
+#   (`consume`, as environment `operator_environment`).
 
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
-from base.host.boundary.json_values import is_object_dict
-from base.host.boundary.untyped import object_of
 from base.host.db_authority.ledger import (
     Encrypt,
     authority_dir,
@@ -147,11 +143,10 @@ class WriteGrant:
 def active_generation(home: Path) -> Generation:
     """The ledger's active generation; a home without one cannot deliver."""
     ledger = require_ledger(home)
-    if ledger.active is None:
-        raise LedgerRefusedError(
-            "the database authority has no active generation; a pending one is never delivered"
-        )
-    return ledger.active
+    current = ledger.generation
+    if current is None:
+        raise LedgerRefusedError("the database authority has no generation")
+    return current
 
 
 def write_grant(home: Path, cls: GenerationClass) -> WriteGrant:
@@ -168,56 +163,21 @@ def write_grant(home: Path, cls: GenerationClass) -> WriteGrant:
     )
 
 
-def _intent_checkout(home: Path) -> Path:
-    try:
-        data = object_of(json.loads, (home / "start-intent.json").read_bytes())
-    except (OSError, ValueError) as exc:
-        raise AuthorityRefusedError(f"the home's start intent is unreadable: {exc}") from exc
-    if not is_object_dict(data):
-        raise AuthorityRefusedError("the home's start intent is malformed")
-    checkout = data.get("checkout")
-    if data.get("home") != str(home) or not isinstance(checkout, str):
-        raise AuthorityRefusedError("the home's start intent names another home or no checkout")
-    return Path(checkout)
-
-
-def require_admitted_runtime(home: Path, *, code_root: Path) -> None:
-    """Refuse unless ``code_root`` is the home's admitted runtime.
-
-    Only the source checkout recorded by the home's start intent is admitted;
-    a job still pointing at another checkout receives nothing.
-    """
-    checkout = _intent_checkout(home)
-    if code_root.resolve() != checkout.resolve():
-        raise AuthorityRefusedError(
-            f"this process runs {code_root}, not the home's source checkout {checkout}"
-        )
-
-
+# meiva:note
+# The active `cls` login for a process the launcher did not inject.
 def consume(home: Path, cls: GenerationClass) -> WriteGrant:
-    """The active ``cls`` login for a process the launcher did not inject.
-
-    Admission is the loaded runtime (``require_admitted_runtime``); any refusal
-    raises ``AuthorityRefusedError`` and delivers nothing.
-    """
-    code_root = Path(__file__).resolve().parents[3]
-    require_admitted_runtime(home, code_root=code_root)
     return write_grant(home, cls)
 
 
+# meiva:note
+# The environment delivery of an operator process on the gateway `home`.
+#
+# Processes the root launcher starts carry their class login in the launch
+# environment. An operator process (the `meiva` CLI, a script, an OS job)
+# that no launcher started (`launcher`, the launcher profile its process
+# tree descends from, is None) receives the active gateway login dialing
+# `endpoint` (and the gateway API token).
 def operator_environment(home: Path, endpoint: str, *, launcher: str | None) -> dict[str, str]:
-    """The environment delivery of an operator process on the gateway ``home``.
-
-    Processes the root launcher starts carry their class login in the launch
-    environment. An operator process (the ``meiva`` CLI, a script, an OS job)
-    that no launcher started (``launcher``, the launcher profile its process
-    tree descends from, is None) receives the active gateway login dialing
-    ``endpoint`` (and the gateway API token) only while it runs
-    the home's admitted runtime (``consume``).
-
-    Raises:
-        AuthorityRefusedError: why this process receives nothing.
-    """
     if launcher is not None:
         raise AuthorityRefusedError(
             f"this {launcher}-profile process was launched without a delivered write "

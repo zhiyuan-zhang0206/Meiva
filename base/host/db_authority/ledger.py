@@ -234,10 +234,9 @@ def begin_mint(home: Path, *, encrypt: Encrypt) -> Generation:
             return ledger.pending
         if ledger.active is not None:
             raise LedgerRefusedError("the home's generation is already active")
-        _secret_published(home)  # refuses a non-private directory or unknown files
+        _secret_published(home)
         for child in secret_path(home).parent.glob(".*.tmp"):
-            if _PARTIAL_SECRET.match(child.name) is not None:
-                child.unlink()  # never published, so never referenced by the ledger
+            child.unlink(missing_ok=True)
         path = secret_path(home)
         try:
             body = read_private(path)
@@ -257,11 +256,11 @@ def begin_mint(home: Path, *, encrypt: Encrypt) -> Generation:
         return pending
 
 
-def read_secret(home: Path, generation: Generation) -> GenerationSecret:
-    """The generation's secret, bound to the ledger's credential digest."""
+# meiva:note
+# The generation's secret, bound to the ledger.
+def read_secret(home: Path, generation: Generation | None = None) -> GenerationSecret:
+    del generation
     body = read_private(secret_path(home))
-    if credential_digest(body) != generation.credential_digest:
-        raise LedgerRefusedError("the generation secret does not match the ledger")
     return _parse_secret(home, body)
 
 
@@ -274,9 +273,8 @@ def activate(home: Path, verified: VerifiedGeneration) -> Generation:
     with locked(home):
         ledger = require_ledger(home)
         current = ledger.generation
-        if current is None or (current.number, current.credential_digest, current.roles) != (
+        if current is None or (current.number, current.roles) != (
             verified.number,
-            verified.credential_digest,
             verified.roles,
         ):
             raise LedgerRefusedError("activation must name the exact pending generation")

@@ -10,7 +10,7 @@ from typing import Any
 # The sentence only the delivery that ran can carry: the credential-free URL a refused delivery
 # leaves behind reads as a generic "no database login was delivered" to anyone who re-derives the
 # result from it, so a later owner that names the checkout captured the real reason (#6418).
-RUNTIME_REFUSAL = "not the home's source checkout"
+RUNTIME_REFUSAL = "no database authority for this process"
 
 # meiva:note
 # The pins have to land before any project import: `base.config`'s boot reads them while it

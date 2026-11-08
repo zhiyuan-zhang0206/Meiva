@@ -737,7 +737,7 @@ def test_init_and_start_are_settings_free_until_the_home_is_admitted(tmp_path: P
     _start_entry_probe("init_and_start_settings_free", tmp_path)
 
 
-@pytest.mark.parametrize("scenario", ["warm", "cold", "foreign", "refused", "launcher"])
+@pytest.mark.parametrize("scenario", ["warm", "cold", "foreign", "foreign_checkout", "launcher"])
 def test_start_reenters_database_authority_for_its_home(scenario: str, tmp_path: Path) -> None:
     _start_entry_probe(f"start_delivery_{scenario}", tmp_path)
 

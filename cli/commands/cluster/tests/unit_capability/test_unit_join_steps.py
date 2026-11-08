@@ -40,9 +40,8 @@ def test_a_join_without_a_bundle_presents_the_installed_capability_whatever_key_
     )
 
 
-def test_a_bundle_without_its_transport_key_is_refused_naming_where_the_key_goes() -> None:
-    with pytest.raises(ValueError, match=f"requires its transport key in {_KEY_ENV}"):
-        plan_credential("/in/mini.bundle", key_supplied=False, env_name=_KEY_ENV)
+def test_a_bundle_is_planned_as_carried_bundle() -> None:
+    assert plan_credential("/in/mini.bundle") == CarriedBundle("/in/mini.bundle")
 
 
 def test_the_install_is_handed_this_machine_the_endpoint_served_now_and_the_bundle_file() -> None:

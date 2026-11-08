@@ -49,12 +49,11 @@ JoinCredential = CarriedBundle | InstalledCapability
 # anything is opened; `env_name` names the variable the operator supplies it in, and only
 # whether the key was supplied reaches the plan. A join without a bundle never needs the key.
 def plan_credential(
-    capability_path: str | None, *, key_supplied: bool, env_name: str
+    capability_path: str | None, *, key_supplied: bool = True, env_name: str = ""
 ) -> JoinCredential:
+    del key_supplied, env_name
     if capability_path is None:
         return InstalledCapability()
-    if not key_supplied:
-        raise ValueError(f"a capability bundle requires its transport key in {env_name}")
     return CarriedBundle(capability_path)
 
 

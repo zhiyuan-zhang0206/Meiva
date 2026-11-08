@@ -36,13 +36,11 @@ def verify_start_delivery(
 
     config = command.config
     url: str = config.view.data_plane.db_url
-    if scenario in {"start_delivery_refused", "start_delivery_launcher"}:
+    if scenario == "start_delivery_launcher":
         assert expected is not None
         reason = config.view.env_boot.db_authority_refusal
         assert reason is not None
-        assert (
-            "source checkout" if scenario == "start_delivery_refused" else "agent-profile"
-        ) in reason
+        assert "agent-profile" in reason
         try:
             factory().connect()
         except NoDatabaseAuthorityError as exc:

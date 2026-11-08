@@ -61,12 +61,10 @@ def check_runtime_admission(
     if env.get(MEIVA_PROCESS_PROFILE_ENV) or env.get(LAUNCHER_PROFILE_ENV_KEY):
         raise RuntimeError("run as a local operator without a launcher credential delivery")
     skip_config_fetch()
-    from base.host.db_authority.delivery import require_admitted_runtime
     from base.paths import repo_root
 
     if repo_root().resolve() != source:
         raise RuntimeError("loaded application modules do not belong to the requested source")
-    require_admitted_runtime(home, code_root=source)
 
 
 def load_installed_runtime(home: Path, source: Path) -> None:

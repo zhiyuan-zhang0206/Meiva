@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import os
 import subprocess
 import sys
@@ -26,15 +25,14 @@ def test_boot_authority_result_reaches_the_database_handle(
     (home / ".env").write_text(
         "MEIVA_MACHINE_SERVE_GATEWAY=true\n"
         "MEIVA_DB_URL=postgresql://meiva@127.0.0.1:6433/meiva\n"
-        "MEIVA_REDIS_URL=redis://127.0.0.1:1/0\n",
+        "MEIVA_REDIS_URL=redis://127.0.0.1:1/0\n"
+        "MEIVA_TIMEZONE=UTC\n",
         encoding="utf-8",
     )
-    intent = home / "start-intent.json"
-    intent.write_text(json.dumps({"home": str(home), "checkout": str(tmp_path / "foreign")}))
-    intent.chmod(0o600)
     env = {key: value for key, value in os.environ.items() if not key.startswith("MEIVA_")}
     env.pop("VIRTUAL_ENV", None)
     env["MEIVA_HOME"] = str(home)
+    env["MEIVA_PROCESS_PROFILE"] = "runner"
     if mode == "eager":
         env["MEIVA_CONFIG_BOOT"] = "eager"
     if mode == "skip":
@@ -50,4 +48,4 @@ def test_boot_authority_result_reaches_the_database_handle(
     )
     assert proc.returncode == 0, proc.stderr
     assert "REFUSED refusing to dial" in proc.stdout
-    assert "source checkout" in proc.stdout
+    assert "only the root launcher delivers" in proc.stdout

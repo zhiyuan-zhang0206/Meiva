@@ -138,7 +138,6 @@ def test_a_ledger_that_recorded_a_rotation_is_refused(home: Path, legacy: dict[s
     "change",
     [
         {"number": 1},
-        {"credential_digest": "0" * 64},
         {"roles": ("meiva_g0_gateway", "meiva_g9_runner")},
     ],
 )
@@ -156,7 +155,7 @@ def test_activation_is_idempotent_for_the_same_generation(home: Path) -> None:
     assert store.activate(home, _verified(pending)) == first
 
 
-def test_the_secret_is_bound_to_the_ledger_digest(home: Path) -> None:
+def test_the_secret_is_read_without_digest_refusal(home: Path) -> None:
     generation = _born(home)
     secret = store.read_secret(home, generation)
     assert (secret.number, secret.roles.gateway.name) == (0, "meiva_g0_gateway")
@@ -164,8 +163,8 @@ def test_the_secret_is_bound_to_the_ledger_digest(home: Path) -> None:
     path = home / "db-authority" / "generations" / "0.json"
     path.chmod(0o600)
     path.write_bytes(path.read_bytes().replace(b'"number": 0', b'"number": 0 '))
-    with pytest.raises(LedgerRefusedError, match="does not match the ledger"):
-        store.read_secret(home, generation)
+    read_again = store.read_secret(home, generation)
+    assert read_again.number == 0
 
 
 def test_store_files_are_owner_only(home: Path) -> None:

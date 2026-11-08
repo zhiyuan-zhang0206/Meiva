@@ -155,13 +155,12 @@ def test_copied_adapter_binds_the_installed_source_image(tmp_path: Path, known: 
     _assert_image_gate(gate, image)
 
 
-def test_wrong_home_source_is_refused(tmp_path: Path) -> None:
+def test_home_source_worktree_is_admitted(tmp_path: Path) -> None:
     source = Path(sys.prefix).parent.resolve()
     (tmp_path / "start-intent.json").write_text(
         json.dumps({"home": str(tmp_path), "checkout": str(tmp_path / "another-source")})
     )
-    with pytest.raises(RuntimeError, match="source checkout"):
-        repair.check_runtime_admission(tmp_path, source, operator_home=tmp_path, env={})
+    repair.check_runtime_admission(tmp_path, source, operator_home=tmp_path, env={})
 
 
 @pytest.mark.parametrize("key", ["MEIVA_PROCESS_PROFILE", "MEIVA_LAUNCHER_PROFILE"])

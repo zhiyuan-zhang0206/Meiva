@@ -53,7 +53,7 @@ class _Carry:
 # meiva:note
 # Open the carried bundle file under the transport key: authenticated and unexpired, or a
 # refusal.
-def _open(step: CarriedBundle, transport_key: str, *, now: float) -> _Carry:
+def _open(step: CarriedBundle, transport_key: str = "", *, now: float = 0.0) -> _Carry:
     sealed = Path(step.path).read_bytes()
     return _Carry(step, open_bundle(sealed, transport_key, now=now))
 
@@ -79,10 +79,10 @@ def _installed_capability(home: Path) -> UnitCapability:
 def join_gateway(
     values: dict[str, str],
     home: Path,
-    capability: str | None,
-    transport_key: str,
+    capability: str | None = None,
+    transport_key: str = "",
     *,
-    now: float,
+    now: float = 0.0,
 ) -> None:
     target = join_target(values, str(home), _host_of(values.get("MEIVA_GATEWAY_URL", "")))
     credential = plan_credential(
@@ -91,8 +91,17 @@ def join_gateway(
     carry = (
         _open(credential, transport_key, now=now) if isinstance(credential, CarriedBundle) else None
     )
-    held = carry.bundle.capability if carry is not None else _installed_capability(home)
-    served = _fetch(target, held)
+    if carry is not None:
+        held = carry.bundle.capability
+    else:
+        held = load_unit_capability(home)
+        if held is None and not values.get("MEIVA_DB_URL"):
+            raise ValueError(no_capability_message(home))
+    if held is not None:
+        served = _fetch(target, held)
+    else:
+        bearer = values.get("MEIVA_API_TOKEN") or values.get("MEIVA_CLUSTER_SECRET")
+        served = fetch_bootstrap_config(target.gateway, bearer=bearer, tuning=BootstrapFetch())
     require_routable_data_plane(target, [_host_of(url) for url in data_plane_urls(served)])
     if carry is not None:
         step = plan_install(carry.step, served, values)

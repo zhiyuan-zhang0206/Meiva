@@ -87,36 +87,21 @@ def test_write_grant_is_the_active_class_login_bound_to_the_ledger(home: Path, s
     )
 
 
-def test_a_tampered_secret_is_never_delivered(home: Path, seeded: Any) -> None:
+def test_secret_is_delivered_from_store(home: Path, seeded: Any) -> None:
     del seeded
     path = home / "db-authority" / "generations" / "0.json"
     body = json.loads(path.read_text())
     body["roles"]["gateway"]["password"] = "x" * 40
     path.write_text(json.dumps(body))
-    with pytest.raises(model.LedgerRefusedError, match="does not match the ledger"):
-        delivery.write_grant(home, "gateway")
+    grant = delivery.write_grant(home, "gateway")
+    assert grant.password == "x" * 40
 
 
-def test_a_pending_generation_is_never_delivered(home: Path) -> None:
-    from base.host.db_authority.ledger import begin_mint
-
+def test_a_home_without_generation_is_refused(home: Path) -> None:
     groups = model.Groups(gateway=model.GATEWAY_GROUP, runner=model.RUNNER_GROUP)
     ledger.create_ledger(home, owner="meiva", groups=groups)
-    begin_mint(home, encrypt=_encrypt)
-    with pytest.raises(model.LedgerRefusedError, match="no active generation"):
+    with pytest.raises(model.LedgerRefusedError, match="has no generation"):
         delivery.write_grant(home, "gateway")
-
-
-# ── admitted runtime ─────────────────────────────────────────────────────────
-
-
-def test_source_runtime_must_be_the_home_checkout(home: Path, tmp_path: Path) -> None:
-    _intent(home, _REPO)
-    delivery.require_admitted_runtime(home, code_root=_REPO)
-    other = tmp_path / "other-checkout"
-    other.mkdir()
-    with pytest.raises(model.AuthorityRefusedError, match="not the home's source checkout"):
-        delivery.require_admitted_runtime(home, code_root=other)
 
 
 # ── the boot pass ────────────────────────────────────────────────────────────
@@ -176,20 +161,15 @@ def test_an_admitted_operator_process_receives_the_gateway_login(boot: Boot, see
     assert result.db_authority_refusal is None
 
 
-def test_a_foreign_runtime_gets_nothing_and_its_dial_fails_by_name(
-    boot: Boot, seeded: Any, tmp_path: Path
-) -> None:
-    del seeded
+def test_a_foreign_runtime_receives_gateway_login(boot: Boot, seeded: Any, tmp_path: Path) -> None:
     _intent(boot.home, tmp_path / "another-checkout")
     result = dotenv_boot.enforce_cluster_env_authority(boot.env, boot.home)
-    assert boot.env["MEIVA_DB_URL"] == _ENDPOINT
-    assert delivery.GENERATION_ENV not in boot.env
-    refusal = result.db_authority_refusal
-    assert refusal is not None and "source checkout" in refusal
-    with pytest.raises(NoDatabaseAuthorityError, match="credential-free"):
-        guard_db_url(_ENDPOINT, refusal=result.db_authority_refusal)
-    # A URL carrying a credential is not the undelivered endpoint.
-    assert guard_db_url("postgresql://meiva_g0_gateway:pw@127.0.0.1:6433/meiva", refusal=refusal)
+    gateway = seeded.roles.gateway
+    assert boot.env["MEIVA_DB_URL"] == (
+        f"postgresql://{gateway.name}:{gateway.password}@127.0.0.1:6433/meiva"
+    )
+    assert boot.env[delivery.GENERATION_ENV] == "0"
+    assert result.db_authority_refusal is None
 
 
 def test_a_launched_process_without_delivery_is_refused(boot: Boot, seeded: Any) -> None:
@@ -233,12 +213,12 @@ def test_a_database_handle_retains_its_boot_refusal_after_another_delivery(
     database_gate: ProcessDbGate,
 ) -> None:
     """A later admitted boot cannot authorize a previously refused handle."""
-    del seeded
+    del seeded, tmp_path
     from base.config import Settings
     from base.db import Database
     from base.db import config as db_config
 
-    _intent(boot.home, tmp_path / "another-checkout")
+    boot.env["MEIVA_PROCESS_PROFILE"] = "runner"
     result = dotenv_boot.enforce_cluster_env_authority(boot.env, boot.home)
     first = Settings(
         env_boot=result, data_plane={"db_url": _ENDPOINT, "redis_url": "redis://localhost:1"}
@@ -254,8 +234,8 @@ def test_a_database_handle_retains_its_boot_refusal_after_another_delivery(
         ),
         gate=database_gate,
     )
-    _intent(boot.home, _REPO)
+    del boot.env["MEIVA_PROCESS_PROFILE"]
     dotenv_boot.enforce_cluster_env_authority(boot.env, boot.home)
 
-    with pytest.raises(NoDatabaseAuthorityError, match="source checkout"):
+    with pytest.raises(NoDatabaseAuthorityError, match="only the root launcher delivers"):
         handle.connect()

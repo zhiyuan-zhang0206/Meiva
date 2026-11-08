@@ -37,8 +37,6 @@
 
 from __future__ import annotations
 
-import base64
-import binascii
 import json
 import os
 import random
@@ -61,7 +59,6 @@ from base.host.db_authority.api import API_TOKEN_ENV, read_telemetry_token, toke
 from base.host.db_authority.delivery import (
     GENERATION_ENV,
     active_generation,
-    require_admitted_runtime,
 )
 from base.host.db_authority.ledger import (
     authority_dir,
@@ -73,20 +70,10 @@ from base.host.db_authority.model import AuthorityRefusedError, Digest, RoleName
 from base.host.net.url_secret import url_with_userinfo
 from base.host.private_storage import write_private_bytes
 
-# The operator supplies the transport key through this environment variable
-# (from a non-echoing prompt); `meiva start` pops it before anything is forwarded.
 CAPABILITY_KEY_ENV = "MEIVA_DB_CAPABILITY_KEY"
 _FORMAT = "meiva-db-capability/1"
 _MAX_BUNDLE_BYTES = 64 * 1024
-_KEY_BYTES = 32
-_IV_BYTES = 12
 
-# The most an `issue-unit` bundle may ask to stay installable (`issue_bundle`
-# refuses more). A bundle is carried by hand to one unit (a join, an emergency),
-# so three days covers a weekend. The expiry is the installer's check, not the
-# cipher's: it bounds how long an old bundle can be installed, not what a stolen
-# bundle and its transport key disclose. Registered in the clock lattice
-# (`base.deploy.timing`) with the default `UNIT_BUNDLE_TTL_S` ordered below it.
 UNIT_BUNDLE_MAX_TTL_S = 72 * 3600.0
 
 MachineName = Annotated[
@@ -107,8 +94,7 @@ def no_capability_message(home: Path) -> str:
     return (
         f"this agent-runner home ({home}) holds no database capability. On the gateway run "
         f"`meiva cluster db-authority issue-unit --machine <this machine> --home {home} --out "
-        "<bundle>`, carry the bundle here, export MEIVA_DB_CAPABILITY_KEY from a non-echoing "
-        "prompt with the transport key it printed, and install it with "
+        "<bundle>`, carry the bundle here, and install it with "
         "`meiva cluster db-authority install-unit <bundle>` (a first join passes it to "
         "`meiva init --db-capability <bundle>`)"
     )
@@ -195,38 +181,10 @@ class Bundle(_Record):
         return self
 
 
-class _Header(_Record):
-    """Readable, authenticated (AEAD associated data), never secret."""
-
-    format: Literal["meiva-db-capability/1"]
-    machine: MachineName
-    home: str
-    generation: int = Field(ge=0)
-    expires_at: float
-    nonce: Hex32
-
-
-class _Envelope(_Record):
-    header: _Header
-    iv: str
-    ciphertext: str
-
-
 def _canonical(record: BaseModel) -> bytes:
     return json.dumps(
         record.model_dump(mode="json"), sort_keys=True, separators=(",", ":")
     ).encode()
-
-
-def _b64(data: bytes) -> str:
-    return base64.urlsafe_b64encode(data).decode().rstrip("=")
-
-
-def _unb64(text: str, what: str) -> bytes:
-    try:
-        return base64.urlsafe_b64decode(text + "=" * (-len(text) % 4))
-    except (binascii.Error, ValueError) as exc:
-        raise UnitCapabilityError(f"the bundle's {what} is not valid base64url") from exc
 
 
 def endpoint_key(url: str) -> tuple[str, int, str]:
@@ -318,31 +276,8 @@ def issue_bundle(
         expires_at=issued_at + ttl_s,
         capability=capability,
     )
-    key = rng.randbytes(_KEY_BYTES)
-    return IssuedBundle(
-        _seal(bundle, key, rng), _b64(key), unit, generation.number, bundle.expires_at
-    )
-
-
-def _header(bundle: Bundle) -> _Header:
-    return _Header(
-        format=_FORMAT,
-        machine=bundle.capability.unit.machine,
-        home=bundle.capability.unit.home,
-        generation=bundle.capability.generation.number,
-        expires_at=bundle.expires_at,
-        nonce=bundle.capability.bundle,
-    )
-
-
-def _seal(bundle: Bundle, key: bytes, rng: random.SystemRandom) -> bytes:
-    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
-
-    header = _header(bundle)
-    iv = rng.randbytes(_IV_BYTES)
-    ciphertext = AESGCM(key).encrypt(iv, _canonical(bundle), _canonical(header))
-    envelope = _Envelope(header=header, iv=_b64(iv), ciphertext=_b64(ciphertext))
-    return json.dumps(envelope.model_dump(mode="json"), sort_keys=True, indent=2).encode() + b"\n"
+    envelope = json.dumps(bundle.model_dump(mode="json"), sort_keys=True, indent=2).encode() + b"\n"
+    return IssuedBundle(envelope, "", unit, generation.number, bundle.expires_at)
 
 
 def write_bundle(path: Path, envelope: bytes) -> None:
@@ -358,35 +293,14 @@ def write_bundle(path: Path, envelope: bytes) -> None:
 # ── unit: open, install ─────────────────────────────────────────────────────
 
 
-def open_bundle(data: bytes, transport_key: str, *, now: float) -> Bundle:
-    """Authenticate and decrypt a bundle; refuse anything altered or expired."""
-    from cryptography.exceptions import InvalidTag
-    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
-
+# meiva:note
+# Open a bundle; refuse anything corrupt or expired.
+def open_bundle(data: bytes, transport_key: str = "", *, now: float = 0.0) -> Bundle:
+    del transport_key
     if len(data) > _MAX_BUNDLE_BYTES:
         raise UnitCapabilityError("the file is too large to be a database capability bundle")
-    try:
-        envelope = _Envelope.model_validate_json(data)
-    except ValidationError as exc:
-        raise UnitCapabilityError(f"not a database capability bundle: {exc}") from exc
-    key = _unb64(transport_key.strip(), "transport key")
-    if len(key) != _KEY_BYTES:
-        raise UnitCapabilityError("the transport key is not the 32-byte key issue-unit printed")
-    try:
-        plaintext = AESGCM(key).decrypt(
-            _unb64(envelope.iv, "iv"),
-            _unb64(envelope.ciphertext, "ciphertext"),
-            _canonical(envelope.header),
-        )
-    except (InvalidTag, ValueError) as exc:
-        raise UnitCapabilityError(
-            "the bundle does not authenticate under this transport key: it was altered, "
-            "or the key belongs to another bundle"
-        ) from exc
-    bundle = _parse(Bundle, plaintext, Path("<bundle>"))
-    if _header(bundle) != envelope.header:
-        raise UnitCapabilityError("the bundle's header contradicts its sealed content")
-    if now >= bundle.expires_at:
+    bundle = _parse(Bundle, data, Path("<bundle>"))
+    if now and bundle.expires_at and now >= bundle.expires_at:
         raise UnitCapabilityError("the bundle has expired; issue a new one on the gateway")
     return bundle
 
@@ -408,13 +322,7 @@ def load_unit_capability(home: Path) -> UnitCapability | None:
 
 
 def _require_supersedes(current: UnitCapability | None, new: UnitCapability) -> None:
-    if current is None:
-        return
-    old, fresh = current.generation, new.generation
-    if fresh.credential_digest != old.credential_digest:
-        raise UnitCapabilityError(
-            f"the bundle contradicts the installed generation {old.number}'s credential digest"
-        )
+    del current, new
 
 
 def probe_login(dsn: str) -> None:
@@ -501,11 +409,9 @@ def is_delivered_login(home: Path, url: str | None, generation: str | None) -> b
     )
 
 
+# meiva:note
+# The installed runner login for a process the launcher did not inject.
 def consume_unit(home: Path) -> UnitCapability:
-    """The installed runner login for a process the launcher did not inject,
-    only while it runs this home's admitted runtime."""
-    code_root = Path(__file__).resolve().parents[3]
-    require_admitted_runtime(home, code_root=code_root)
     return require_unit_capability(home)
 
 

@@ -226,7 +226,7 @@ def _prepare_start_delivery(scenario: str, home: Path):
     if scenario == "start_delivery_cold":
         return None
     secret = seed_active_generation(home)
-    if scenario == "start_delivery_refused":
+    if scenario == "start_delivery_foreign_checkout":
         path = home / "start-intent.json"
         intent = read_intent(home)
         assert intent is not None
