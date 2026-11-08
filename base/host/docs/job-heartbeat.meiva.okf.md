@@ -25,5 +25,24 @@ deploying. `*_content.py` builds the declaration's cadence and the plist trigger
 document `meiva jobs heartbeats` prints, which is what makes "declared but not installed"
 observable to a reader outside this checkout. `cron/heartbeat_record.py` writes the file on the
 way out of the process that ran the job — the CLI entry for three of them, the PR-flow script for
-the fourth — recording the command's own exit code with `ok`, and exits 3 when it cannot write
-one: a run must not report a success it could not prove.
+the fourth — recording the command's own exit code with `ok`.
+
+## Exit codes a reader has to tell apart
+
+`3` is the only code this module ever adds, and it means "the run finished cleanly and could not
+record that". Nothing else is reserved: any other code in a job's log is the command's own, so a
+`4` there is never this instrument. A run that failed keeps its code even when its heartbeat could
+not be written — that code is what tells an owner whether to investigate the work or the
+instrument — and a `SystemExit(0)` over an unwritten record is raised as `3`, because a run cannot
+report the success it failed to prove.
+
+## When the write fails
+
+The reason is printed on stderr and appended to `<home>/state/heartbeat-errors.log`, one line per
+failure: the instant, the job name, the run's code and the reason. The channel sits beside
+`state/heartbeats/`, never inside it, so a reader that globs `*.json` there cannot take an error
+line for a record.
+
+A job whose heartbeat stops moving is therefore worth two questions, in this order: did it run,
+and could it write? This log is the first place to look, and "the instrument could not record"
+must not be reported as "the job did not run".
