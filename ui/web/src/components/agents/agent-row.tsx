@@ -18,7 +18,7 @@ import dynamic from "next/dynamic";
 import { useTranslations } from "next-intl";
 
 import { useBrowser } from "@/lib/browser/browser-provider";
-import { useRef, useState } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 
 import {
   ContextMenu,
@@ -122,6 +122,20 @@ function TreeGuides({
   return <>{bars}</>;
 }
 
+function useSyncedTitleShimmer(working: boolean, editing: boolean, indentPx: number) {
+  const titleRef = useRef<HTMLSpanElement | null>(null);
+  useLayoutEffect(() => {
+    const el = titleRef.current;
+    if (!el || editing) return;
+    el.style.setProperty("--agent-indent-px", `${indentPx}px`);
+    if (!working || typeof el.getAnimations !== "function") return;
+    for (const anim of el.getAnimations()) {
+      anim.startTime = 0;
+    }
+  }, [working, editing, indentPx]);
+  return titleRef;
+}
+
 
 export function AgentRow({
   agent,
@@ -170,6 +184,7 @@ export function AgentRow({
   // #ID and label coexist, complementing each other: `#180 · screen-permission` or `#180` (when there's no label)
   const displayLabel = label ? `#${agent.agent_id} · ${label}` : `#${agent.agent_id}`;
   const indentPx = depth * INDENT;
+  const titleRef = useSyncedTitleShimmer(working, editing, indentPx);
 
   const submit = () => {
     onRename(draft);
@@ -324,7 +339,10 @@ export function AgentRow({
                     startRename();
                   }}
                 >
-                  <span className={cn("truncate", MIN_W_0, working && "agent-title-working")}>
+                  <span
+                    ref={titleRef}
+                    className={cn("truncate", MIN_W_0, working && "agent-title-working")}
+                  >
                     {displayLabel}
                   </span>
                   {working ? <span className="sr-only">{t("statusWorking")}</span> : null}
