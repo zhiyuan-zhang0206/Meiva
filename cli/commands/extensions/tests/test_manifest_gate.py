@@ -145,6 +145,34 @@ def test_mcp_install_accepts_valid_manifest(unit_home: Path, tmp_path: Path, uv:
     assert (unit_home / "mcps" / "acme" / "meiva-plugin.json").is_file()
 
 
+def test_mcp_install_accepts_pyproject_dependencies_not_mirrored_in_manifest(
+    unit_home: Path, tmp_path: Path, uv: UvBuild
+) -> None:
+    pkg = _make_mcp_package(tmp_path)
+    manifest = {
+        "apiVersion": 2,
+        "name": "acme",
+        "version": "1.0.0",
+        "description": "test package",
+        "engines": {"meiva": ">=0.1.0"},
+        "dependencies": {},
+        "lifecycle": {
+            "entry": "plugin.py",
+            "activation": "immediate",
+            "dispose": "effect-registry",
+        },
+    }
+    _write_manifest(pkg, manifest)
+    (pkg / "pyproject.toml").write_text(
+        '[project]\nname = "acme-mcp"\nversion = "0.0.0"\n'
+        'requires-python = ">=3.12"\ndependencies = ["mcp>=1.27,<2", "requests>=2.0,<3"]\n\n[tool.uv]\npackage = false\n',
+        encoding="utf-8",
+    )
+    assert cmd_mcp_install(str(pkg), None, None, uv=uv, home=unit_home, now=datetime.now(UTC)) == 0
+    row = reg.get("acme", home=unit_home)
+    assert row is not None
+
+
 def test_mcp_install_manifest_without_pyproject_fails_when_declaring_packages(
     unit_home: Path, tmp_path: Path, uv: UvBuild, capsys: pytest.CaptureFixture[str]
 ) -> None:

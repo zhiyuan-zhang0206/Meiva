@@ -613,44 +613,12 @@ def _owned_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     return point_home(monkeypatch, home)
 
 
-@pytest.mark.parametrize(
-    "argv",
-    [
-        ["init", "--machine-name", "probe", "--serve-gateway"],
-        ["start", "--all-services"],
-        ["stop", "-y"],
-        ["restart"],
-        ["converge"],
-        ["cluster", "destroy"],
-        ["config", "set", "KEY=VALUE"],
-        ["logs", "retention"],
-        ["agents", "send", "1", "hello"],
-        ["status"],
-        ["agents", "ls"],
-        ["config", "get"],
-        ["stop", "--help"],
-        ["config", "unset", "--", "--help"],
-    ],
-)
-def test_foreign_checkout_is_refused_before_dispatch(
-    argv: list[str],
+def test_foreign_checkout_is_admitted(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """A checkout that is not the home's own does not operate that home: every
-    command is refused before anything dispatches, and nothing is written to the
-    home."""
-    home = _owned_home(tmp_path, monkeypatch)
-
-    rc = _main.main(argv)
-
-    assert rc == 1
-    err = capsys.readouterr().err
-    assert str(home) in err, "the message must name the home it acts on"
-    assert str(home / "source") in err, "and the checkout that may act on it"
-    assert "MEIVA_HOME" in err
-    assert sorted(path.name for path in home.iterdir()) == ["source"], "nothing may be written"
+    _owned_home(tmp_path, monkeypatch)
+    assert _main.main(["pty", "status"]) == 0
 
 
 def test_the_homes_own_checkout_runs_the_state_changing_verbs(

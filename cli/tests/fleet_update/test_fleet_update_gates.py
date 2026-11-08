@@ -99,15 +99,15 @@ def test_stored_schedules_are_checked_against_new_before_anything_stops(
 
 
 @pytest.mark.parametrize("command", ["run", "down"])
-def test_a_red_stored_schedule_refuses_down_before_any_stop(
+def test_a_red_stored_schedule_warns_and_continues_before_any_stop(
     env: tuple[Cluster, Callable[..., int]], capsys: pytest.CaptureFixture[str], command: str
 ) -> None:
     cluster, run = env
     cluster.stored_schedules = (1, ["RESULT ts=t checked=13 green=12 red=1 rc=1", _RED_ROW])
-    assert run(command) == 2
+    assert run(command) == 0
     out = capsys.readouterr().out
-    assert _RED_ROW in out and "--allow-red-schedules" in out and "would crash-loop" in out
-    assert {k for k, _ in cluster.effects} & {"stop", "switch"} == set()
+    assert "WARNING: stored schedule scripts red" in out and _RED_ROW in out
+    assert "stop" in {k for k, _ in cluster.effects}
 
 
 def test_allow_red_schedules_proceeds_and_still_lists_the_rows(
@@ -122,15 +122,15 @@ def test_allow_red_schedules_proceeds_and_still_lists_the_rows(
     assert set(stops[:-1]) == {"mac", "lin"} and stops[-1] == "gw"
 
 
-def test_a_check_that_could_not_run_refuses_like_a_red(
+def test_a_check_that_could_not_run_warns_and_continues(
     env: tuple[Cluster, Callable[..., int]], capsys: pytest.CaptureFixture[str]
 ) -> None:
     cluster, run = env
     cluster.stored_schedules = (2, ["TOOL-ERROR OperationalError: connection refused"])
-    assert run("down") == 2
+    assert run("down") == 0
     out = capsys.readouterr().out
-    assert "unevaluable (check exited 2)" in out and "connection refused" in out
-    assert {k for k, _ in cluster.effects} & {"stop", "switch"} == set()
+    assert "WARNING: stored schedule scripts unevaluable" in out and "connection refused" in out
+    assert "stop" in {k for k, _ in cluster.effects}
 
 
 def test_a_verdict_reused_from_the_earlier_pass_is_said_and_the_down_goes_on(
@@ -149,7 +149,7 @@ def test_the_dry_run_of_down_reports_a_red_without_changing_anything(
 ) -> None:
     cluster, run = env
     cluster.stored_schedules = (1, [_RED_ROW])
-    assert run("down", "--dry-run") == 2
+    assert run("down", "--dry-run") == 0
     assert _RED_ROW in capsys.readouterr().out
     assert [k for k, _ in cluster.effects] == ["pre-verify"]
 

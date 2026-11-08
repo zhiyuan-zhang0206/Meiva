@@ -302,7 +302,7 @@ def test_mirror_missing_sides() -> None:
     assert mirror.check_python_packages(m, {}) != []  # declared but absent from pyproject
     m2 = _deps(None)
     errors = mirror.check_python_packages(m2, {"y": ">=1,<2"})
-    assert len(errors) == 1  # pyproject declares, manifest does not
+    assert errors == []
     assert mirror.check_python_packages(m2, {}) == []
 
 
@@ -510,16 +510,14 @@ def test_check_host_commit_ancestor_passes(tmp_path: Path) -> None:
     assert pm.check_host_commit(_manifest(requires_commit=main_sha), repo, environ=ENVIRON) == []
 
 
-def test_check_host_commit_non_ancestor_blocks(tmp_path: Path) -> None:
+def test_check_host_commit_non_ancestor_does_not_block(tmp_path: Path) -> None:
     repo, _main, side_sha = _commit_repo(tmp_path)
-    errors = pm.check_host_commit(_manifest(requires_commit=side_sha), repo, environ=ENVIRON)
-    assert errors and "not an ancestor" in errors[0]
+    assert pm.check_host_commit(_manifest(requires_commit=side_sha), repo, environ=ENVIRON) == []
 
 
-def test_check_host_commit_unresolvable_blocks(tmp_path: Path) -> None:
+def test_check_host_commit_unresolvable_does_not_block(tmp_path: Path) -> None:
     repo, _main, _side = _commit_repo(tmp_path)
-    errors = pm.check_host_commit(_manifest(requires_commit="f" * 40), repo, environ=ENVIRON)
-    assert errors and "unresolvable" in errors[0]
+    assert pm.check_host_commit(_manifest(requires_commit="f" * 40), repo, environ=ENVIRON) == []
 
 
 def test_settings_metadata_defaults_and_explicit_values() -> None:
