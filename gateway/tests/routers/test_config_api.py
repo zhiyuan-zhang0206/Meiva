@@ -22,6 +22,7 @@ from typing import Any
 import psycopg
 import pytest
 
+from base.clock.tests.fakes import system_clock
 from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config import runtime_config
@@ -751,6 +752,7 @@ def test_remote_host_fleet_toggle_respects_owned_image_and_policy(
         local_machine=machine_identity.name(),
         host=fake_host(),
         home=meiva_home(),
+        now=system_clock().now,
     )
     assert rejected.applied is False
     accepted = config_write_op(
@@ -760,6 +762,7 @@ def test_remote_host_fleet_toggle_respects_owned_image_and_policy(
         local_machine=machine_identity.name(),
         host=fake_host(),
         home=meiva_home(),
+        now=system_clock().now,
     )
     assert accepted.applied is True
     assert (
@@ -774,6 +777,7 @@ def test_remote_host_fleet_toggle_respects_owned_image_and_policy(
         local_machine=machine_identity.name(),
         host=fake_host(),
         home=meiva_home(),
+        now=system_clock().now,
     )
     assert mixed.applied is False
     assert "mixes owners" in str(mixed.results["task_maintenance_enabled"].reason)

@@ -7,6 +7,7 @@ from typing import Any, cast
 import psycopg
 import pytest
 
+from base.clock.tests.fakes import system_clock
 from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config import runtime_config
@@ -191,6 +192,7 @@ def _record_two_writes() -> None:
         {"MEIVA_MODEL"},
         set(),
         site="test-one",
+        now=system_clock().now,
         changes=[{"alias": "MEIVA_MODEL", "old": "old", "new": "audit-one"}],
     )
     record_env_write(
@@ -198,6 +200,7 @@ def _record_two_writes() -> None:
         {"MEIVA_MODEL"},
         set(),
         site="test-two",
+        now=system_clock().now,
         changes=[{"alias": "MEIVA_MODEL", "old": "audit-one", "new": "audit-two"}],
     )
 
@@ -221,6 +224,7 @@ def test_get_config_audit_reads_own_records(
         {"MEIVA_MODEL"},
         set(),
         site="test-self",
+        now=system_clock().now,
         changes=[{"alias": "MEIVA_MODEL", "old": "old", "new": "audit-self"}],
     )
 

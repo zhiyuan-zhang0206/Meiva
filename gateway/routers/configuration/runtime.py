@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
+from datetime import datetime
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Query, Request
@@ -201,6 +203,7 @@ async def _dispatch_config_write(
     local_machine: MachineIdentityReader,
     host: Host,
     home: Path,
+    now: Callable[[], datetime],
 ) -> ConfigWriteOpResult:
 
     try:
@@ -248,6 +251,7 @@ async def _dispatch_config_write(
             local_machine=local_machine.name(),
             host=host,
             home=home,
+            now=now,
         )
     )
 
@@ -491,6 +495,7 @@ async def _put_local(
     local_machine: MachineIdentityReader,
     host: Host,
     home: Path,
+    now: Callable[[], datetime],
 ) -> tuple[ConfigWriteOpResult, list[str]]:
 
     host_result = await _dispatch_config_write(
@@ -505,10 +510,11 @@ async def _put_local(
         local_machine=local_machine,
         host=host,
         home=home,
+        now=now,
     )
     cluster_changed: set[str] = set()
     if host_result.applied and has_cluster_patch:
-        await _write_cluster_fields(plan, actor=actor, trace_id=trace_id)
+        await _write_cluster_fields(plan, actor=actor, trace_id=trace_id, now=now)
         cluster_changed = set(plan.cluster_writes) | plan.cluster_removals
     return host_result, write_plan.restart_required(
         metas, cluster_changed, host_result.restart_required
@@ -520,6 +526,7 @@ async def _write_cluster_fields(
     *,
     actor: str | None,
     trace_id: str | None,
+    now: Callable[[], datetime],
 ) -> None:
     candidate = validate_env_patch_for_write(
         plan.cluster_writes, plan.cluster_removals, env_bytes=capture_process_env_bytes()
@@ -531,7 +538,7 @@ async def _write_cluster_fields(
             plan.cluster_writes,
             plan.cluster_removals,
             expected_digest=candidate.expected_digest,
-            audit=EnvWriteAudit(site="gateway_config_put", actor=actor, trace_id=trace_id),
+            audit=EnvWriteAudit(site="gateway_config_put", now=now, actor=actor, trace_id=trace_id),
         )
     except RuntimeError as exc:
         conflict = write_plan.stale_env_conflict(exc)
@@ -639,6 +646,7 @@ async def put_config(
             local_machine=gateway_state(request).machine,
             host=gateway_state(request).host,
             home=gateway_state(request).gateway_process.home,
+            now=gateway_state(request).clock.now,
         )
     else:
         host_result = await _dispatch_config_write(
@@ -652,6 +660,7 @@ async def put_config(
             local_machine=gateway_state(request).machine,
             host=gateway_state(request).host,
             home=gateway_state(request).gateway_process.home,
+            now=gateway_state(request).clock.now,
         )
         restart_required = host_result.restart_required
 

@@ -14,9 +14,9 @@ from __future__ import annotations
 
 import contextlib
 import json
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import datetime
 from pathlib import Path
 
 from base.config import field_domain, runtime_config
@@ -77,10 +77,11 @@ def record_env_write(
     actor: str | None = None,
     trace_id: str | None = None,
     changes: Sequence[Mapping[str, object]] | None = None,
+    now: Callable[[], datetime],
 ) -> None:
     audit_file = env_path.parent / ".env.audit.jsonl"
     record: dict[str, object] = {
-        "ts": datetime.now(UTC).isoformat(),
+        "ts": now().isoformat(),
         "site": site,
         "actor": actor,
         "trace_id": trace_id,
@@ -105,6 +106,7 @@ def record_env_write(
 @dataclass(frozen=True)
 class EnvWriteAudit:
     site: str
+    now: Callable[[], datetime]
     actor: str | None = None
     trace_id: str | None = None
 
@@ -123,6 +125,7 @@ class EnvWriteAudit:
             actor=self.actor,
             trace_id=self.trace_id,
             changes=changes,
+            now=self.now,
         )
 
 
@@ -264,6 +267,7 @@ def _apply_patch(
     results: dict[str, FieldWriteResult],
     *,
     env_path: Path,
+    now: Callable[[], datetime],
     actor: str | None,
     trace_id: str | None,
 ) -> tuple[bool, list[str]]:
@@ -282,7 +286,9 @@ def _apply_patch(
                 writes,
                 removals,
                 expected_digest=candidate.expected_digest,
-                audit=EnvWriteAudit(site="ops_config_write", actor=actor, trace_id=trace_id),
+                audit=EnvWriteAudit(
+                    site="ops_config_write", now=now, actor=actor, trace_id=trace_id
+                ),
                 path=env_path,
             )
         except EnvChangedError:
@@ -353,6 +359,7 @@ def config_write_op(
     local_machine: str,
     host: Host,
     home: Path,
+    now: Callable[[], datetime],
 ) -> ConfigWriteOpResult:
     metas = {m.name: m for m in panel_metadata(authority=authority, home=home)}
     try:
@@ -378,7 +385,13 @@ def config_write_op(
         applied, restart_required = _apply_plugin_patch(owner, overrides, metas, results)
     elif applied:
         applied, restart_required = _apply_patch(
-            overrides, metas, results, env_path=authority.env_path, actor=actor, trace_id=trace_id
+            overrides,
+            metas,
+            results,
+            env_path=authority.env_path,
+            now=now,
+            actor=actor,
+            trace_id=trace_id,
         )
 
     return ConfigWriteOpResult(

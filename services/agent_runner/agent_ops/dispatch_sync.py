@@ -108,6 +108,7 @@ def dispatch_sync(
                     local_machine=local_machine.name(),
                     host=host,
                     home=home,
+                    now=lambda: now,
                 ).model_dump(mode="json")
         case "inventory_read":
             return OpStatus.COMPLETED, inventory.inventory_read_op(
