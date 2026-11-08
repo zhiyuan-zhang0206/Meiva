@@ -51,7 +51,7 @@ export function InspectWidgetSection({ widget }: { widget: InspectWidget }) {
             <Link
               href={fleetTaskHref(task.id)}
               className={cn(
-                "items-center gap-2 rounded bg-sidebar-accent/40 dark:bg-[#2a2926] px-2.5 py-1.5 text-[11.5px] leading-[17px] hover:bg-sidebar-accent",
+                "items-center gap-2 rounded border border-black/[0.06] dark:border-white/[0.08] bg-sidebar-accent/40 dark:bg-[#33322C] px-2.5 py-1.5 text-[11.5px] leading-[17px] hover:bg-sidebar-accent",
                 FLEX,
                 MIN_W_0,
               )}

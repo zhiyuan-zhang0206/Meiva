@@ -16,7 +16,7 @@ the two lists equal, and a skin (plugin theme pack) may repaint any of them.
 
 Achromatic neutral daylight ramp (`R = G = B`, zero yellow cast and zero blue cast) anchored with Brand Sunset Orange (`--meiva-sunset-orange: #ED8755`) focus rings:
 - Canvas (`--background` / `--theme-color`), cards (`--card`), and popovers (`--popover`) are pure `#FFFFFF`;
-- Sidebar (`--sidebar`) sits on neutral `#F7F7F7` so `#FFFFFF` Crisp Card pills (`--sidebar-accent`) lift cleanly above the rail;
+- Sidebar (`--sidebar`) sits on neutral `#F7F7F7` with `--sidebar-accent` on `#E6E6E6` while `.agent-row-pill-active` paints `#FFFFFF` Crisp Card pills above the rail;
 - Muted/secondary surfaces (`--muted` / `--secondary` / `--accent`) use `#F3F3F3` and borders (`--border` / `--input` / `--sidebar-border`) use `#E5E5E5`;
 - Primary foreground (`--foreground` / `--primary`) uses `#2E2E2E`, muted foreground (`--muted-foreground`) uses `#666666`, and sidebar active foreground (`--sidebar-foreground` / `--sidebar-accent-foreground`) uses softened charcoal `#3B3B3B`.
 
