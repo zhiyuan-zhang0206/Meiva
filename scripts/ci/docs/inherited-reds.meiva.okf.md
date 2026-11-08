@@ -67,11 +67,13 @@ new kind of false green.
    and its set describes nothing.
 2. **No base.** A failed suite with no `pull_request.base.sha` (a dispatch or the nightly itself) has
    nothing to be inherited from.
-3. **Base off the nightly.** `compare(base...nightly_head)` must answer `ahead` or `identical`: the
-   nightly tested a tree that contains this pull request's base. `behind` and `diverged` mean the set
-   describes another base, and an excuse that does not describe this base is not old, it is invalid.
-   (Consequence, and the reason this direction is the strict one: once `main` advances past the
-   nightly head, no excuse is available until the next nightly completes.)
+3. **Base off the nightly.** `compare(nightly_head...base)` must answer `ahead` or `identical`: this
+   pull request's base contains the tree the nightly tested. `behind` and `diverged` mean the base
+   lacks commits the nightly saw, and an excuse for a state this base does not contain is invalid
+   rather than merely old. The direction matters and only this one can fire: the pull request that
+   declares an inherited red is merged *after* the nightly, so by the time any later pull request
+   asks, `main` is already past the nightly head; asking the other way round would make the
+   mechanism unreachable by construction (405, 2026-11-08).
 4. **No evidence.** The run's own attempt must yield the failing identities, and the artifacts must
    come from that attempt: an artifact carries no attempt field, so it is bound by *its job's name*
    (the artifact name derived from the failing job) and *its job's time window*. Fetching by name

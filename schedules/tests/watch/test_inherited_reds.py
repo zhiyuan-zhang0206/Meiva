@@ -113,7 +113,7 @@ def _zip_path(artifact_id: int) -> str:
 
 
 _NIGHTLY_PATH = f"repos/{_REPOSITORY}/actions/workflows/ci.yml/runs?branch={_BRANCH}&event=schedule"
-_COMPARE_PATH = f"repos/{_REPOSITORY}/compare/{_BASE_SHA}...{_NIGHTLY_SHA}"
+_COMPARE_PATH = f"repos/{_REPOSITORY}/compare/{_NIGHTLY_SHA}...{_BASE_SHA}"
 
 
 def _job(name: str, conclusion: str, started: str, completed: str) -> dict[str, object]:
@@ -205,14 +205,15 @@ def test_a_red_the_nightly_already_had_passes_and_the_summary_names_its_owner() 
         nightly_failures=frozenset({_NODEID}),
         declaration=reds.Declaration(reds=(_red(),)),
         nightly=_nightly(),
-        base_is_ancestor=True,
+        nightly_is_ancestor=True,
         now=_NOW,
     )
     assert verdict.passed, verdict.reason
     summary = verdict.summary(now=_NOW)
     assert f"run {_NIGHTLY_RUN_ID} attempt 1 sha {_NIGHTLY_SHA[:12]}" in summary
     assert "completed 2026-11-08T07:00:00+00:00 (5.0h ago)" in summary
-    assert "base is an ancestor of the nightly head: yes" in summary
+    assert "completed 2026-11-08T07:00:00+00:00 (5.0h ago)" in summary
+    assert "nightly head is an ancestor of this base: yes" in summary
     assert "inherited red 1:" in summary
     assert f"  - {_NODEID} (card #6475, expires 2026-11-15)" in summary
     assert "new red" not in summary
@@ -224,7 +225,7 @@ def test_a_red_the_nightly_did_not_have_blocks_and_is_named() -> None:
         nightly_failures=frozenset({_NODEID}),
         declaration=reds.Declaration(reds=(_red(), _red(_OTHER_NODEID))),
         nightly=_nightly(),
-        base_is_ancestor=True,
+        nightly_is_ancestor=True,
         now=_NOW,
     )
     assert not verdict.passed
@@ -243,7 +244,7 @@ def test_a_nightly_red_nobody_declared_still_blocks() -> None:
         nightly_failures=frozenset({_OTHER_NODEID}),
         declaration=reds.Declaration(reds=()),
         nightly=_nightly(),
-        base_is_ancestor=True,
+        nightly_is_ancestor=True,
         now=_NOW,
     )
     assert not verdict.passed
@@ -257,7 +258,7 @@ def test_an_expired_entry_excuses_nothing() -> None:
         nightly_failures=frozenset({_NODEID}),
         declaration=reds.Declaration(reds=(expired,)),
         nightly=_nightly(),
-        base_is_ancestor=True,
+        nightly_is_ancestor=True,
         now=_NOW,
     )
     assert not verdict.passed
@@ -271,7 +272,7 @@ def test_an_entry_expires_at_the_end_of_its_day() -> None:
         nightly_failures=frozenset({_NODEID}),
         declaration=reds.Declaration(reds=(_red(expires=_NOW.date()),)),
         nightly=_nightly(),
-        base_is_ancestor=True,
+        nightly_is_ancestor=True,
         now=_NOW,
     )
     assert verdict.passed
@@ -283,11 +284,11 @@ def test_a_base_that_does_not_stand_on_the_nightly_head_blocks() -> None:
         nightly_failures=frozenset({_NODEID}),
         declaration=reds.Declaration(reds=(_red(),)),
         nightly=_nightly(),
-        base_is_ancestor=False,
+        nightly_is_ancestor=False,
         now=_NOW,
     )
     assert not verdict.passed
-    assert "not an ancestor" in verdict.reason
+    assert "is not an ancestor of the pull request base" in verdict.reason
     assert verdict.summary(now=_NOW).endswith("inherited red 0:")
 
 
@@ -298,7 +299,7 @@ def test_a_stale_nightly_blocks() -> None:
         nightly_failures=frozenset({_NODEID}),
         declaration=reds.Declaration(reds=(_red(),)),
         nightly=stale,
-        base_is_ancestor=True,
+        nightly_is_ancestor=True,
         now=_NOW,
     )
     assert not verdict.passed
@@ -311,7 +312,7 @@ def test_the_oldest_nightly_that_is_young_enough_still_answers() -> None:
         nightly_failures=frozenset({_NODEID}),
         declaration=reds.Declaration(reds=(_red(),)),
         nightly=_nightly(completed_at=_NOW - reds.MAX_NIGHTLY_AGE),
-        base_is_ancestor=True,
+        nightly_is_ancestor=True,
         now=_NOW,
     )
     assert verdict.passed
@@ -415,16 +416,19 @@ def test_an_artifact_that_is_not_a_zip_fails_closed() -> None:
 
 
 # meiva:note
-# Ancestry comes from the graph, not from the clock.
+# Ancestry comes from the graph, not from the clock, and the direction that is asked is the one that
+# can fire: `compare(nightly_head...base)` answering `ahead` means the base contains the nightly head.
+# The same answer read the other way round (`base...nightly_head` = `behind`) is the case this gate
+# must reject, because a base behind the nightly lacks the commits the nightly tested.
 @pytest.mark.parametrize(
     "status, expected",
     [("ahead", True), ("identical", True), ("behind", False), ("diverged", False)],
 )
-def test_ancestry_is_the_comparison_status(status: str, expected: bool) -> None:
+def test_the_base_inherits_the_nightly_head(status: str, expected: bool) -> None:
     api = _api({_COMPARE_PATH: {"status": status}})
     assert (
-        reds.base_is_ancestor(
-            api, repository=_REPOSITORY, base_sha=_BASE_SHA, head_sha=_NIGHTLY_SHA
+        reds.nightly_is_ancestor(
+            api, repository=_REPOSITORY, nightly_head=_NIGHTLY_SHA, base_sha=_BASE_SHA
         )
         is expected
     )

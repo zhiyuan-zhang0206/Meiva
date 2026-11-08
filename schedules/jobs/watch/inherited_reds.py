@@ -9,8 +9,8 @@
 # Four ways this could become a silent green, each closed by failing instead:
 #   - the nightly's artifacts cannot be read   -> red ("no authoritative set"), never "empty"
 #   - the last completed nightly is too old    -> red
-#   - the pull request base is not an ancestor
-#     of the nightly head                      -> red ("the set describes another base")
+#   - the nightly head is not an ancestor of
+#     the pull request base                    -> red ("the base lacks what it tested")
 #   - the run's own failing cases cannot be
 #     read from the attempt that failed        -> red, never "nothing failed"
 #
@@ -131,11 +131,11 @@ class Verdict:
     inherited: tuple[DeclaredRed, ...] = ()
     fresh: tuple[str, ...] = ()
     nightly: Nightly | None = None
-    base_is_ancestor: bool | None = None
+    nightly_is_ancestor: bool | None = None
 
     # meiva:note
     # A pass is an event, not an absence: the summary names the run it trusted, how old that run
-    # is, whether the base stood on it, and every red it waved through with its card and expiry.
+    # is, whether this base contains it, and every red it waved through with its card and expiry.
     def summary(self, *, now: datetime) -> str:
         lines = [f"e2e gate: {'PASS' if self.passed else 'FAIL'} - {self.reason}"]
         if self.nightly is not None:
@@ -145,10 +145,10 @@ class Verdict:
                 f"sha {self.nightly.head_sha[:12]} "
                 f"completed {self.nightly.completed_at.isoformat()} ({hours:.1f}h ago)"
             )
-            if self.base_is_ancestor is not None:
+            if self.nightly_is_ancestor is not None:
                 lines.append(
-                    "base is an ancestor of the nightly head: "
-                    + ("yes" if self.base_is_ancestor else "no")
+                    "nightly head is an ancestor of this base: "
+                    + ("yes" if self.nightly_is_ancestor else "no")
                 )
         lines.append(f"inherited red {len(self.inherited)}:")
         lines.extend(f"  - {red.describe()}" for red in self.inherited)
@@ -364,10 +364,14 @@ def _nightly(run: object) -> Nightly | None:
 
 
 # meiva:note
-# Ancestry is the graph's answer, not the clock's: the nightly set describes a base only when the
-# pull request's base stands on it. `ahead` is exactly that; `behind` and `diverged` are not.
-def base_is_ancestor(api: GitHub, *, repository: str, base_sha: str, head_sha: str) -> bool:
-    document = api.json(f"repos/{repository}/compare/{base_sha}...{head_sha}")
+# Ancestry is the graph's answer, not the clock's, and the direction is the one that can fire: the
+# nightly head must be an ancestor of this pull request's base, so the base contains the state the
+# nightly tested. Read the other way round it could never hold -- the pull request that declares an
+# inherited red is merged after the nightly, so `main` is already past that head by the time any
+# later pull request asks (405, 2026-11-08). `compare(nightly_head...base)` answering `ahead` or
+# `identical` is exactly that; `behind` and `diverged` mean the base lacks commits the nightly saw.
+def nightly_is_ancestor(api: GitHub, *, repository: str, nightly_head: str, base_sha: str) -> bool:
+    document = api.json(f"repos/{repository}/compare/{nightly_head}...{base_sha}")
     if not is_object_dict(document):
         raise DeclarationError("the comparison did not answer with an object")
     return document.get("status") in {"ahead", "identical"}
@@ -379,18 +383,18 @@ def judge(
     nightly_failures: frozenset[str],
     declaration: Declaration,
     nightly: Nightly,
-    base_is_ancestor: bool,
+    nightly_is_ancestor: bool,
     now: datetime,
 ) -> Verdict:
-    if not base_is_ancestor:
+    if not nightly_is_ancestor:
         return Verdict(
             passed=False,
             reason=(
-                "the pull request base is not an ancestor of the nightly head, so the nightly set "
-                "describes another base"
+                "the nightly head is not an ancestor of the pull request base, so the nightly set "
+                "describes a state this base does not contain"
             ),
             nightly=nightly,
-            base_is_ancestor=False,
+            nightly_is_ancestor=False,
         )
     age = now - nightly.completed_at
     if age > MAX_NIGHTLY_AGE:
@@ -401,7 +405,7 @@ def judge(
                 f"(limit {MAX_NIGHTLY_AGE})"
             ),
             nightly=nightly,
-            base_is_ancestor=True,
+            nightly_is_ancestor=True,
         )
     included = {
         red.nodeid
@@ -419,14 +423,14 @@ def judge(
             inherited=inherited,
             fresh=fresh,
             nightly=nightly,
-            base_is_ancestor=True,
+            nightly_is_ancestor=True,
         )
     return Verdict(
         passed=True,
         reason=f"every failure is inherited from run {nightly.run_id}",
         inherited=inherited,
         nightly=nightly,
-        base_is_ancestor=True,
+        nightly_is_ancestor=True,
     )
 
 
@@ -545,8 +549,11 @@ def _decide(
         nightly_failures=nightly_failures,
         declaration=declaration,
         nightly=nightly,
-        base_is_ancestor=base_is_ancestor(
-            api, repository=options.repository, base_sha=options.base_sha, head_sha=nightly.head_sha
+        nightly_is_ancestor=nightly_is_ancestor(
+            api,
+            repository=options.repository,
+            nightly_head=nightly.head_sha,
+            base_sha=options.base_sha,
         ),
         now=now,
     )
