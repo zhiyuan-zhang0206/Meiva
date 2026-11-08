@@ -89,6 +89,33 @@ if set(HARNESS_BILLING) != set(Harness):
         f"{sorted(item.value for item in set(Harness) - set(HARNESS_BILLING))}"
     )
 
+# meiva:note
+# The harness names that bill by subscription, in the order the billing table declares them. A
+# `llm_usage` row names the loop that ran the call in its `source`, so this tuple is what tells a
+# subscription call from a metered one — one owner for the vocabulary the cost split and the
+# ops dashboard both read.
+# meiva:link base/agents/docs/harness/harness.meiva.okf.md
+SUBSCRIPTION_HARNESSES: tuple[str, ...] = tuple(
+    harness.value
+    for harness, billing in HARNESS_BILLING.items()
+    if billing is HarnessBilling.SUBSCRIPTION
+)
+
+
+# meiva:note
+# The billing mode of one `llm_usage.source`. A subscription harness pays nothing per token; every
+# other source — the native loop, compaction, `web.fetch`, `understand`, a decision model, a batch
+# or embedding caller — is metered API work, and an absent source is the native loop's own call.
+# meiva:link base/agents/docs/harness/harness.meiva.okf.md
+def harness_billing_of_source(source: str | None) -> HarnessBilling:
+    if source is None:
+        return HarnessBilling.API
+    try:
+        harness = Harness(source)
+    except ValueError:
+        return HarnessBilling.API
+    return HARNESS_BILLING[harness]
+
 
 # meiva:note
 # Return the parent agent id if spawner is 'agent:<positive-int>', else None.

@@ -5,7 +5,7 @@
 // mutation or source-checkout update preflight.
 
 import { useQuery } from "@tanstack/react-query";
-import { Loader2, Server } from "lucide-react";
+import { Server } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { type ComponentType, type ReactNode } from "react";
 
@@ -18,6 +18,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { InlineError } from "@/components/ui/inline-error";
+import { Spinner } from "@/components/ui/spinner";
 import { useWallDate } from "@/lib/format/now/use-wall-date";
 import { formatRelative } from "@/lib/format/time";
 import type { ClusterPanel, MachineStatus, SystemStatus } from "@/lib/contracts/types";
@@ -49,7 +50,7 @@ export default function StatusPage() {
   if (isLoading)
     return (
       <div data-settling="true" className={cn("justify-center py-12", FLEX)}>
-        <Loader2 className="size-6 animate-spin text-muted-foreground" />
+        <Spinner className="size-6" />
       </div>
     );
   if (error && !data) {

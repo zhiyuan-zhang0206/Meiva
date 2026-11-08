@@ -539,6 +539,8 @@ CREATE TABLE agent_metric_observations (
     exec_ok BIGINT NOT NULL DEFAULT 0 CHECK (exec_ok >= 0),
     exec_failed BIGINT NOT NULL DEFAULT 0 CHECK (exec_failed >= 0),
     cost_usd NUMERIC NOT NULL DEFAULT 0 CHECK (cost_usd >= 0 AND cost_usd <> 'NaN'::numeric),
+    cost_usd_subscription NUMERIC NOT NULL DEFAULT 0 CHECK (cost_usd_subscription >= 0 AND cost_usd_subscription <> 'NaN'::numeric),
+    unpriced_calls_subscription BIGINT NOT NULL DEFAULT 0 CHECK (unpriced_calls_subscription >= 0),
     turn_duration_seconds DOUBLE PRECISION CHECK (turn_duration_seconds >= 0 AND turn_duration_seconds < 'Infinity'::float8),
     active_seconds DOUBLE PRECISION NOT NULL DEFAULT 0 CHECK (active_seconds >= 0 AND active_seconds < 'Infinity'::float8),
     exec_seconds DOUBLE PRECISION NOT NULL DEFAULT 0 CHECK (exec_seconds >= 0 AND exec_seconds < 'Infinity'::float8)
@@ -551,6 +553,7 @@ CREATE TABLE agent_metric_days (
     day DATE NOT NULL,
     usage_calls BIGINT NOT NULL DEFAULT 0 CHECK (usage_calls >= 0),
     unpriced_calls BIGINT NOT NULL DEFAULT 0 CHECK (unpriced_calls >= 0),
+    unpriced_calls_subscription BIGINT NOT NULL DEFAULT 0 CHECK (unpriced_calls_subscription >= 0),
     tokens_in BIGINT NOT NULL DEFAULT 0 CHECK (tokens_in >= 0),
     tokens_out BIGINT NOT NULL DEFAULT 0 CHECK (tokens_out >= 0),
     tokens_cached BIGINT NOT NULL DEFAULT 0 CHECK (tokens_cached >= 0),
@@ -561,6 +564,7 @@ CREATE TABLE agent_metric_days (
     exec_ok BIGINT NOT NULL DEFAULT 0 CHECK (exec_ok >= 0),
     exec_failed BIGINT NOT NULL DEFAULT 0 CHECK (exec_failed >= 0),
     cost_usd NUMERIC NOT NULL DEFAULT 0 CHECK (cost_usd >= 0 AND cost_usd <> 'NaN'::numeric),
+    cost_usd_subscription NUMERIC NOT NULL DEFAULT 0 CHECK (cost_usd_subscription >= 0 AND cost_usd_subscription <> 'NaN'::numeric),
     turn_duration_sum DOUBLE PRECISION NOT NULL DEFAULT 0,
     turn_duration_min DOUBLE PRECISION,
     turn_duration_max DOUBLE PRECISION,
@@ -695,8 +699,10 @@ CREATE TABLE agent_model_tokens_daily (
     tokens_cached    BIGINT NOT NULL DEFAULT 0,
     tokens_reasoning BIGINT NOT NULL DEFAULT 0,
     cost_usd         DOUBLE PRECISION NOT NULL DEFAULT 0,
+    cost_usd_subscription DOUBLE PRECISION NOT NULL DEFAULT 0,
     costed_calls     BIGINT NOT NULL DEFAULT 0,
     unpriced_calls   BIGINT NOT NULL DEFAULT 0,
+    unpriced_calls_subscription BIGINT NOT NULL DEFAULT 0,
     estimated_calls  BIGINT NOT NULL DEFAULT 0,
     PRIMARY KEY (agent_id, day, model)
 );
@@ -2054,6 +2060,9 @@ INSERT INTO schema_migrations (name) VALUES ('20261106T032125_user-delivery-mess
 INSERT INTO schema_migrations (name) VALUES ('20261107T080823_drop-agent-pages');
 INSERT INTO schema_migrations (name) VALUES ('20261107T103459_delete-inbound-reminders');
 INSERT INTO schema_migrations (name) VALUES ('20261107T103500_drop-agent-impersonations');
+-- The cost split's columns are already in this file's table definitions above, so a
+-- fresh database never replays the migration that adds them to an older one.
+INSERT INTO schema_migrations (name) VALUES ('20261108T122000_split-llm-cost-by-billing-mode');
 
 -- Domain receipts never expire into fresh notice effects.
 CREATE TABLE notice_operation_receipts (

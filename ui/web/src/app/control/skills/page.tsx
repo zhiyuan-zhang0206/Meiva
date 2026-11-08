@@ -13,12 +13,12 @@
 // verifies the skill in its own conversation.
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Loader2 } from "lucide-react";
 import { useTranslations } from "next-intl";
 
 import { PackageDraftEntry } from "@/components/plugins/package-draft-entry";
 import { Switch } from "@/components/ui/switch";
 import { InlineError } from "@/components/ui/inline-error";
+import { Spinner } from "@/components/ui/spinner";
 
 import { errMsg } from "@/lib/contracts/errors";
 import { useStore } from "@/lib/state/store";
@@ -90,7 +90,7 @@ function SkillsTable({
   if (isLoading) {
     return (
       <div className={cn("justify-center py-12", FLEX)}>
-        <Loader2 className="size-6 animate-spin text-muted-foreground" />
+        <Spinner className="size-6" />
       </div>
     );
   }

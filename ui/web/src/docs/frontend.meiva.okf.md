@@ -58,6 +58,7 @@ Meiva's web user interface — Next.js 16 (App Router) + React 19 + Tailwind CSS
 - [[ui/web/src/docs/frontend-state/frontend-state.meiva.okf.md|State management]] — three mechanisms division of labor + per-thread timeline cache + sticky controller
 - [[ui/web/src/docs/frontend-data-flow/frontend-data-flow.meiva.okf.md|Data flow]] — dual SSE Provider architecture + hook directory
 - [[frontend-components.meiva.okf.md|Components]] — chat view / Fleet view / settings page components
+- [[ui/web/src/docs/frontend-components/loading-states.meiva.okf.md|Loading states]] — the one loading indicator (a bare turning ring), no loading sentence, no skeleton
 
 ## Entry points
 

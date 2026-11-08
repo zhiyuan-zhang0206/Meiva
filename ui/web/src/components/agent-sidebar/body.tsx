@@ -1,8 +1,5 @@
 "use client";
 
-import {
-  Loader2,
-} from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useMemo } from "react";
 
@@ -10,6 +7,7 @@ import { AgentHoverGroup, AgentRow as AgentRowItem } from "@/components/agents/a
 import { SpawnPopover } from "./spawn-popover";
 import { AgentArchive } from "./archive";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Spinner } from "@/components/ui/spinner";
 import { buildAgentTree, type AgentNode } from "@/lib/agents/agent-tree";
 import { useSidebarSort, type FlatSortKey, type SidebarSort } from "@/lib/agents/sidebar";
 import { useStore } from "@/lib/state/store";
@@ -95,9 +93,8 @@ export function SidebarBody(props: InnerProps) {
       {/* ── Agent list ── */}
       <ScrollArea className={cn(FLEX_1, MIN_H_0)}>
         {rosterPending ? (
-          <div className={cn("items-center justify-center gap-2 py-4 text-xs text-muted-foreground", FLEX)}>
-            <Loader2 className="size-3.5 animate-spin" />
-            {t("loadingAgents")}
+          <div className={cn("items-center justify-center py-4", FLEX)}>
+            <Spinner label={t("loadingAgents")} />
           </div>
         ) : isEmpty ? (
           // meiva:note
@@ -185,7 +182,7 @@ function SpawningRow({ active, showStatus }: { active: boolean; showStatus: bool
         ) : null}
         <span className={cn("items-center min-h-4", FLEX_1, FLEX)}>
           {showStatus ? (
-            <Loader2 className="size-3 animate-spin opacity-60" />
+            <Spinner className="size-3 opacity-60" />
           ) : (
             <span className="text-[10px] opacity-60 leading-none">…</span>
           )}

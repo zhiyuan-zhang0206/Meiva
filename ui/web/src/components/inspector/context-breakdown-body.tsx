@@ -15,6 +15,7 @@ import { FLEX, FLEX_1, FLEX_COL } from "@/lib/layout/layout";
 
 import { SectionRows } from "./context-sections";
 import { InlineError } from "@/components/ui/inline-error";
+import { Spinner } from "@/components/ui/spinner";
 import { useApi } from "@/lib/transport/transport-context";
 
 // meiva:note
@@ -149,9 +150,9 @@ function BreakdownQuery({
 
   if (isPending) {
     return (
-      <p data-testid="context-breakdown-loading" className="text-muted-foreground text-[11.5px]">
-        {t("loading")}
-      </p>
+      <div data-testid="context-breakdown-loading" className="py-1">
+        <Spinner label={t("loading")} />
+      </div>
     );
   }
   if (isError) {

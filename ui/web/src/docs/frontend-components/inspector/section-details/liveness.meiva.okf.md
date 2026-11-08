@@ -1,7 +1,7 @@
 ---
 type: doc
 title: Inspector liveness section
-description: The Liveness cells — birth, harness and model, the next-heartbeat rule for a pause, a queued wake, a projected check-in or nothing, last pause, machine and status.
+description: The Liveness cells — birth, harness and model, the next-heartbeat cell that prints one instant (an active pause's end, else the projected check-in) and no state word, last pause, machine and status.
 tags: [frontend]
 ---
 
@@ -14,28 +14,26 @@ order, Task #3952 / #3904). Cells in display order: agent birth
 not `started_at`, which refreshes on every restart; harness (roster's display
 label, em dash until the roster loads) and the model the agent was born on
 (`config_overlay.llm_model`, user 2026-10-21); next heartbeat — the cell
-answers "when does the heartbeat look at this agent again", so an active pause
-renders labelled, `paused · <time>`, on ONE line rather than as a bare clock
-time that reads like a scheduled check-in. The relative span that used to sit
-under the value as the cell's sub line is gone — it read as a second, smaller
-line (user 2026-10-29) — and the time itself follows the reader's
-`display.date_format`: the date-context absolute form by default
+answers "when does the heartbeat look at this agent again" and prints **only that
+instant**: no `paused`, `pending` or `due` qualifier rides beside it (user ruling
+2026-11-08, superseding the labelled pause of 2026-10-28). An active pause is the
+daemon's floor whatever the agent's status is, so its end is the value while it
+runs; otherwise the projected check-in is. That holds for a running agent too —
+reading the pause only while idling hid a day-long pause behind an em dash for as
+long as the agent kept working (user report 2026-10-28). The value follows the
+reader's `display.date_format`: the date-context absolute form by default
 (`Tomorrow 15:21`), or `in 22h`, which counts down with the panel's one-second
-clock, for a relative reader. That holds for a
-running agent too: the pause is the daemon's floor whatever the status is, and
-reading it only while idling hid a day-long pause behind an em dash for as long
-as the agent kept working (user report 2026-10-28). Both projected instants (the
-end of an active pause and the check-in time) render through `formatFuture`, so
-under the default absolute form the day boundary is part of the value: clock
-time later today, `Tomorrow 15:21` across local midnight, a weekday name two to
-six days out, a date countdown from seven days, and a plain date from a month
-on. A bare clock time is never shown for a future day — `15:21` read at 16:26 looks like a time that already passed
-(user report 2026-10-17, in the 12-hour wording then in use). A queued check-in
-renders "pending" (the daemon will not send another while an inbound is pending),
-and a running agent with no active pause or any terminated agent renders an em dash.
-A projected time already in the past renders "due" (a past "*next*" time must never
-read "Xm ago"); a pause that ran out between the last live read and the current
-tick also reads "due" instead of counting down at zero; last pause (relative time
+clock, for a relative reader. It renders through `formatFuture`, so under the
+default absolute form the day boundary is part of the value: clock time later
+today, `Tomorrow 15:21` across local midnight, a weekday name two to six days
+out, a date countdown from seven days, and a plain date from a month on. A bare
+clock time is never shown for a future day — `15:21` read at 16:26 looks like a
+time that already passed (user report 2026-10-17, in the 12-hour wording then in
+use). A projected time already in the past prints that time (a past "*next*" time
+must never read "Xm ago"), and a cell with no instant to print — a paused-out
+pause with no projection, a queued check-in the daemon has not stamped, or a
+terminated agent — renders an em dash;
+last pause (relative time
 · duration, or "never paused"); then machine and lifecycle status. A terminated
 panel keeps "Terminated" even if a stale roster card is cached. The
 gateway's derived liveness state colors the heart icon when offline. The "every

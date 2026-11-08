@@ -18,12 +18,13 @@ afterEach(cleanup);
 beforeEach(setupConfigTest);
 
 describe("ConfigPage tri-state", () => {
-  it("loading shows loading text", () => {
+  it("loading shows a spinner and no loading sentence", () => {
     transport.getConfig.mockReturnValue(
       new Promise(() => undefined),
     );
     wrap(<ConfigEditor mode="advanced" />);
-    expect(screen.getByText(/Loading config/)).toBeTruthy();
+    expect(screen.getByRole("status", { name: "Loading config…" })).toBeTruthy();
+    expect(screen.queryByText(/Loading config/)).toBeNull();
   });
 
   it("error shows a quiet line, not the raw error", async () => {

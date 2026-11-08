@@ -11,6 +11,7 @@ import { TelemetryPageView } from "@/lib/telemetry/telemetry-page-view";
 import { useAuth } from "@/lib/auth/auth-context";
 import { FLEX, FLEX_1, MIN_H_0 } from "@/lib/layout/layout";
 import { cn } from "@/lib/format/utils";
+import { Spinner } from "@/components/ui/spinner";
 import { useNavigation } from "@/lib/browser/navigation/navigation-provider";
 
 export function AuthGuard({ children }: { children: ReactNode }) {
@@ -32,7 +33,7 @@ export function AuthGuard({ children }: { children: ReactNode }) {
   if (status === "loading") {
     return (
       <div className={cn("items-center justify-center", FLEX, FLEX_1, MIN_H_0)}>
-        <div className="h-6 w-6 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+        <Spinner className="size-6 text-primary" />
       </div>
     );
   }

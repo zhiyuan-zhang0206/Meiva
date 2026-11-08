@@ -1,7 +1,7 @@
 ---
 type: doc
 title: Inspector Panel
-description: The right-side panel body for the selected agent — one ordered section list, in-place metric loading without shadow skeletons, and the render-nothing-while-closed boundary.
+description: The right-side panel body for the selected agent — one ordered section list, in-place metric loading with a bare spinner and no placeholder bar, and the render-nothing-while-closed boundary.
 tags: [frontend]
 ---
 
@@ -32,17 +32,20 @@ This subscription makes no additional detail request. Its token totals and thres
 cannot represent an external CLI session. Unknown harness metadata also keeps
 this section hidden.
 
-**In-place loading, no shadow skeleton tree.** Persistent metric sections
-(`Liveness` and `Activity`) stay mounted at their ordered keys across initial
-loads, agent switches and window changes. While a section's read is pending with
-no matching snapshot, `Section` (`components/inspector/inspector-section.tsx`)
-sets `aria-busy` and `aria-label="{Title} loading"`, and each `Metric` cell
-renders a low-contrast `animate-pulse` bar inside the exact `17px` value line-box
-of its real card chrome so resolving values causes zero height shift or DOM
-remount. Conditional and sparse sections — `Page`, `Persistent shells`,
-`Configuration overlay`, `Context` and plugin widgets — render nothing while
-pending or empty rather than reserving speculative placeholder rows that collapse
-after fetch.
+**In-place loading, one spinner per cell, never a placeholder.** Persistent
+metric sections (`Liveness` and `Activity`) stay mounted at their ordered keys
+across initial loads, agent switches and window changes. While a section's read is
+pending with no matching snapshot, `Section`
+(`components/inspector/inspector-section.tsx`) sets `aria-busy` and
+`aria-label="{Title} loading"`, and each `Metric` cell renders the shared
+`Spinner` inside the exact `17px` value line-box of its real card chrome: resolving
+values causes zero height shift or DOM remount, and the pending state never paints
+a bar shaped like the value it stands in for (user ruling 2026-11-08 — a loading
+state shows the turning ring alone, with no loading sentence and no skeleton
+anywhere in the console). Conditional and sparse sections — `Page`, `Persistent
+shells`, `Configuration overlay`, `Context` and plugin widgets — render nothing
+while pending or empty rather than reserving speculative placeholder rows that
+collapse after fetch.
 
 **Single column chrome owner.** `SharedContextPanel` owns the right column's
 outer chrome at every breakpoint — the desktop `document-bar` with the

@@ -39,6 +39,8 @@ _SUM_FIELDS = (
     "tokens_cache_input",
     "tokens_reasoning",
     "cost_usd",
+    "cost_usd_subscription",
+    "unpriced_calls_subscription",
     "turn_total",
     "turn_ok",
     "turn_duration_sum",
@@ -182,10 +184,12 @@ def _legacy_days(
     costs = _rows(
         conn,
         "SELECT day, sum(llm_calls) AS usage_calls, sum(unpriced_calls) AS unpriced_calls, "
+        "sum(unpriced_calls_subscription) AS unpriced_calls_subscription, "
         "sum(tokens_in) AS tokens_in, sum(tokens_out) AS tokens_out, "
         "sum(tokens_in) AS tokens_cache_input, "
         "sum(tokens_cached) AS tokens_cached, sum(tokens_reasoning) AS tokens_reasoning, "
-        "sum(cost_usd) AS cost_usd FROM agent_model_tokens_daily "
+        "sum(cost_usd) AS cost_usd, sum(cost_usd_subscription) AS cost_usd_subscription "
+        "FROM agent_model_tokens_daily "
         "WHERE agent_id=%s AND day>=%s AND day<%s GROUP BY day",
         params,
     )
@@ -280,6 +284,8 @@ class _Totals:
     tokens_cache_input: int = 0
     tokens_reasoning: int = 0
     cost_usd: Decimal = field(default_factory=lambda: Decimal(0))
+    cost_usd_subscription: Decimal = field(default_factory=lambda: Decimal(0))
+    unpriced_calls_subscription: int = 0
     turn_total: int = 0
     turn_ok: int = 0
     turn_duration_sum: float = 0.0
@@ -310,6 +316,10 @@ def _sum_days(
         )
         totals.tokens_reasoning += _as_int(cost_row.get("tokens_reasoning", 0))
         totals.cost_usd += Decimal(str(cost_row.get("cost_usd", 0)))
+        totals.cost_usd_subscription += Decimal(str(cost_row.get("cost_usd_subscription", 0)))
+        totals.unpriced_calls_subscription += _as_int(
+            cost_row.get("unpriced_calls_subscription", 0)
+        )
         totals.turn_total += _as_int(turn_row.get("turn_total", 0))
         totals.turn_ok += _as_int(turn_row.get("turn_ok", 0))
         totals.turn_duration_sum += _as_float(turn_row.get("turn_duration_sum", 0))
@@ -391,7 +401,11 @@ def _cost_and_turns(
         if cost_evidence.availability == "unavailable"
         else AgentCost(
             cost_usd=float(round(totals.cost_usd, 4)),
+            cost_usd_api=float(round(totals.cost_usd - totals.cost_usd_subscription, 4)),
+            cost_usd_subscription=float(round(totals.cost_usd_subscription, 4)),
             unpriced_calls=totals.unpriced_calls,
+            unpriced_calls_api=totals.unpriced_calls - totals.unpriced_calls_subscription,
+            unpriced_calls_subscription=totals.unpriced_calls_subscription,
             llm_calls=totals.usage_calls,
             tokens_in=totals.tokens_in,
             tokens_out=totals.tokens_out,

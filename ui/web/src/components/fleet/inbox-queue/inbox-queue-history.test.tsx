@@ -416,10 +416,11 @@ describe("InboxQueue — error presentation (audit C3)", () => {
     expect(screen.getByText("Failed to load questions.")).not.toBeNull();
   });
 
-  it("first load in flight → Loading, not the empty state", () => {
+  it("first load in flight → a spinner, not the empty state", () => {
     setFeed({ cold: true, openPending: true, historyPending: true });
     renderQueue([agent({ agent_id: 1 })]);
-    expect(screen.getByText("Loading…")).not.toBeNull();
+    expect(screen.getByRole("status", { name: "Loading…" })).not.toBeNull();
+    expect(screen.queryByText("Loading…")).toBeNull();
     expect(screen.queryByText(/Nothing needs your attention/)).toBeNull();
   });
 });

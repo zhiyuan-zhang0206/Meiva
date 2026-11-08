@@ -32,7 +32,22 @@ class AgentCost(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     cost_usd: float = Field(ge=0)
+    cost_usd_api: float = Field(ge=0, description="Metered spend: money the account is billed for.")
+    cost_usd_subscription: float = Field(
+        ge=0,
+        description=(
+            "List value the calls a subscription covered would have cost; not money owed."
+        ),
+    )
     unpriced_calls: NonNegativeInt
+    unpriced_calls_api: NonNegativeInt = Field(
+        description="Metered calls with no usage-time price snapshot; they contribute 0."
+    )
+    unpriced_calls_subscription: NonNegativeInt = Field(
+        description=(
+            "Subscription-covered calls with no usage-time price snapshot; they contribute 0."
+        ),
+    )
     llm_calls: NonNegativeInt
     tokens_in: NonNegativeInt
     tokens_out: NonNegativeInt

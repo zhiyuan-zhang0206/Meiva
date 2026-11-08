@@ -63,7 +63,7 @@ the live failure cannot hide statistics or widgets and vice versa.
 **Retention and the switch budget** (`lib/layout/switch-budget.ts`): inactive
 entries persist for `INSPECTOR_RETENTION_MS` (30 minutes) per agent — both as
 query `gcTime` and as the widget read's `staleTime` — so a back-switch inside the
-window renders the retained snapshot immediately (no cold skeleton) and
+window renders the retained snapshot immediately (no cold pending state) and
 revalidates at most the two live reads, never a third widget read; only the
 selected agent's keys are ever rendered, so retention cannot leak across agents.
 

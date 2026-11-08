@@ -5,13 +5,14 @@
 // to that conversation to finish it. Mirrors the Schedules page's writer entry:
 
 import { useMutation } from "@tanstack/react-query";
-import { Loader2, Sparkles } from "lucide-react";
+import { Sparkles } from "lucide-react";
 import type { Route } from "next";
 import { useTranslations } from "next-intl";
 import { useRouter } from "next/navigation";
 import { useCallback, useState } from "react";
 
 import { Button } from "@/components/ui/button";
+import { Spinner } from "@/components/ui/spinner";
 import { Input } from "@/components/ui/input";
 import { errMsg } from "@/lib/contracts/errors";
 import { useStore } from "@/lib/state/store";
@@ -73,7 +74,7 @@ export function GuidePageView({ navigate }: GuidePageViewProps) {
         />
         <Button type="button" size="sm" disabled={!nl.trim() || draftMutation.isPending} onClick={submit}>
           {draftMutation.isPending ? (
-            <Loader2 className="size-3.5 animate-spin mr-1" />
+            <Spinner className="mr-1 size-3.5" />
           ) : (
             <Sparkles className="size-3.5 mr-1" />
           )}

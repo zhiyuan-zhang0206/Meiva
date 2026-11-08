@@ -22,6 +22,7 @@ import type { Route } from "next";
 import { useTranslations } from "next-intl";
 import { useCallback, useEffect, useMemo, useRef } from "react";
 
+import { Spinner } from "@/components/ui/spinner";
 import { FLEX, FLEX_1, FLEX_COL, MIN_H_0 } from "@/lib/layout/layout";
 import type { TaskGraphRow } from "@/lib/contracts/types";
 import { useTasks, type TaskWindow } from "@/lib/notifications/use-tasks";
@@ -308,8 +309,8 @@ export function TaskGraph({
 
   if (loading) {
     return (
-      <div className={cn("h-full items-center justify-center text-xs text-muted-foreground", FLEX)}>
-        {t("loading")}
+      <div className={cn("h-full items-center justify-center", FLEX)}>
+        <Spinner className="size-5" label={t("loading")} />
       </div>
     );
   }

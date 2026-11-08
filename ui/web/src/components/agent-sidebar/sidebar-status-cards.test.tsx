@@ -12,13 +12,17 @@ function openStatus() {
 }
 
 describe("StatusCards tri-state (loading / data / error)", () => {
-  it("fetching without data shows an updating spinner and seven skeleton values", async () => {
+  it("fetching without data shows a spinner in every value cell and no skeleton bar", async () => {
     state.agents = [makeAgent({ agent_id: 1 })];
     state.statsFetching = true;
     wrap(<AgentSidebar {...handlers} />);
     openStatus();
     expect(await screen.findByRole("status", { name: "Status is updating" })).toBeTruthy();
-    expect(document.querySelectorAll(".animate-pulse")).toHaveLength(7);
+    // meiva:note
+    // Seven placeholder cells (live agents + six windowed cards) each show a
+    // spinner; none of them keeps a placeholder bar shaped like a value.
+    expect(document.querySelectorAll(".animate-pulse")).toHaveLength(0);
+    expect(document.querySelectorAll(".animate-spin").length).toBeGreaterThanOrEqual(7);
     expect(screen.queryByText("—")).toBeNull();
   });
   it("stats has data → live count and 6 windowed cards show real numbers", async () => {

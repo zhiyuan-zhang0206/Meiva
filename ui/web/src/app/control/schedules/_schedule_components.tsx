@@ -4,7 +4,6 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import {
   ChevronDown,
   ChevronRight,
-  Loader2,
   Pause,
   Pencil,
   Play,
@@ -16,6 +15,7 @@ import { useState } from "react";
 
 import { PythonCode, usePythonCodeHighlighter } from "@/components/content/python-code";
 import { Button } from "@/components/ui/button";
+import { Spinner } from "@/components/ui/spinner";
 import { Input } from "@/components/ui/input";
 import { TableCell, TableRow } from "@/components/ui/table";
 import { errMsg } from "@/lib/contracts/errors";
@@ -190,7 +190,7 @@ function ScheduleDetail({
   });
 
   if (full.isLoading || !full.data) {
-    return <Loader2 className="size-4 animate-spin text-muted-foreground my-3 mx-auto" />;
+    return <Spinner className="my-3 mx-auto size-4" />;
   }
   const s = full.data;
 
@@ -238,7 +238,7 @@ function ScheduleDetail({
               disabled={updateMutation.isPending}
               onClick={() => updateMutation.mutate(editForm)}
             >
-              {updateMutation.isPending ? <Loader2 className="size-3.5 animate-spin mr-1" /> : null}
+              {updateMutation.isPending ? <Spinner className="mr-1 size-3.5" /> : null}
               Save
             </Button>
             <Button type="button" size="sm" variant="ghost" onClick={onDoneEditing}>
@@ -370,7 +370,7 @@ export function ScheduleForm({
       </div>
       <div className={cn("items-center gap-2", FLEX)}>
         <Button type="button" size="sm" disabled={!canSubmit || submitting} onClick={onSubmit}>
-          {submitting ? <Loader2 className="size-3.5 animate-spin mr-1" /> : null}
+          {submitting ? <Spinner className="mr-1 size-3.5" /> : null}
           {submitLabel}
         </Button>
         <Button type="button" size="sm" variant="ghost" onClick={onCancel}>

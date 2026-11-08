@@ -24,6 +24,7 @@ import psycopg
 from psycopg.types.json import Jsonb
 from psycopg_pool import ConnectionPool
 
+from base.api_contracts.agent_contract import HarnessBilling, harness_billing_of_source
 from base.db import Database
 from base.db.rows import CountRow, query_one
 from base.host.boundary.json_values import is_object_dict
@@ -46,12 +47,14 @@ class MetricObservation:
     model: str | None = None
     usage_calls: int = 0
     unpriced_calls: int = 0
+    unpriced_calls_subscription: int = 0
     tokens_in: int = 0
     tokens_out: int = 0
     tokens_cached: int = 0
     tokens_cache_input: int | None = None
     tokens_reasoning: int = 0
     cost_usd: Decimal = Decimal(0)
+    cost_usd_subscription: Decimal = Decimal(0)
     turn_total: int = 0
     turn_ok: int = 0
     turn_duration_seconds: float | None = None
@@ -115,6 +118,13 @@ def _activity(attributes: Mapping[str, object]) -> tuple[float, float]:
     return active, execution
 
 
+def _optional_text(attributes: Mapping[str, object], key: str) -> str | None:
+    value = attributes.get(key)
+    if value is not None and not isinstance(value, str):
+        raise ValueError(f"observed usage {key} must be text")
+    return value
+
+
 def _usage(base: _MetricIdentity, attributes: Mapping[str, object]) -> MetricObservation:
     """Preserve a usage-time price or explicitly record the call as unpriced."""
     cost = attributes.get("cost_usd")
@@ -122,9 +132,16 @@ def _usage(base: _MetricIdentity, attributes: Mapping[str, object]) -> MetricObs
     price = Decimal(0) if unpriced else Decimal(str(cost))
     if not price.is_finite() or price < 0:
         raise ValueError("observed usage cost must be finite and nonnegative")
-    model = attributes.get("model")
-    if model is not None and not isinstance(model, str):
-        raise ValueError("observed usage model must be text")
+    model = _optional_text(attributes, "model")
+    # meiva:note
+    # The row's `source` names the loop that ran the call, and that loop's billing mode splits
+    # metered API spend from subscription-covered spend: the fee an API call incurred, and the
+    # list price a subscription call would have cost. An unpriced call keeps its mode too — a
+    # subscription call with no price snapshot is unknown-priced, never free.
+    subscription = (
+        harness_billing_of_source(_optional_text(attributes, "source"))
+        is HarnessBilling.SUBSCRIPTION
+    )
     calls = max(1, _count(attributes.get("calls", 1)))
     return MetricObservation(
         **base,
@@ -132,6 +149,7 @@ def _usage(base: _MetricIdentity, attributes: Mapping[str, object]) -> MetricObs
         model=model,
         usage_calls=calls,
         unpriced_calls=calls if unpriced else 0,
+        unpriced_calls_subscription=calls if unpriced and subscription else 0,
         tokens_in=_count(attributes.get("in_total", 0)),
         tokens_out=_count(attributes.get("out_total", 0)),
         tokens_cached=_count(attributes["cache_read"])
@@ -142,6 +160,7 @@ def _usage(base: _MetricIdentity, attributes: Mapping[str, object]) -> MetricObs
         else 0,
         tokens_reasoning=_count(attributes.get("reasoning", 0)),
         cost_usd=price,
+        cost_usd_subscription=price if subscription else Decimal(0),
     )
 
 
@@ -210,6 +229,7 @@ def observe_event(event: Event) -> MetricObservation | None:
 _COUNTERS = (
     "usage_calls",
     "unpriced_calls",
+    "unpriced_calls_subscription",
     "tokens_in",
     "tokens_out",
     "tokens_cached",
@@ -220,7 +240,7 @@ _COUNTERS = (
     "exec_ok",
     "exec_failed",
 )
-_SUMS = (*_COUNTERS, "cost_usd", "active_seconds", "exec_seconds")
+_SUMS = (*_COUNTERS, "cost_usd", "cost_usd_subscription", "active_seconds", "exec_seconds")
 _RECORD_TYPES = {
     "event_id": "numeric",
     "agent_id": "bigint",
@@ -229,6 +249,7 @@ _RECORD_TYPES = {
     "model": "text",
     **dict.fromkeys(_COUNTERS, "bigint"),
     "cost_usd": "numeric",
+    "cost_usd_subscription": "numeric",
     "turn_duration_seconds": "double precision",
     "active_seconds": "double precision",
     "exec_seconds": "double precision",
@@ -316,6 +337,7 @@ def write_observations(observations: Sequence[MetricObservation], *, db: psycopg
         row = asdict(observation)
         row["occurred_at"] = observation.occurred_at.isoformat()
         row["cost_usd"] = str(observation.cost_usd)
+        row["cost_usd_subscription"] = str(observation.cost_usd_subscription)
         rows.append(row)
     result = query_one(db, CountRow, _WRITE_SQL.encode(), (Jsonb(rows),))
     if result is None:

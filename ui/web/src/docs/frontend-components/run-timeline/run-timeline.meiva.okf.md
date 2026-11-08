@@ -22,7 +22,9 @@ hydration; side panel 300-760px, keyboard-resizable separator, ratio in
 localStorage `meiva.run-timeline.split` through the guarded
 `panelLayoutStorage`); below that the panel stacks under the chart. The route
 `loading.tsx` composes the same `PageHeader` and `RunTimelineWorkspace` around
-`RunTimelineChartSkeleton` so route loading matches the resolved shell. The
+`RunTimelineChartLoading` — the panel's own frame at the chart's height holding a
+single `Spinner` — so route loading matches the resolved shell and shows no
+placeholder chart and no loading sentence (user ruling 2026-11-08). The
 `ContextBreakdownCard` follows the chart.
 
 **Source layout.** `components/run-timeline/model/` owns the axis, selection, row layout and accessible selection readout models with their tests. Axis geometry, viewport bounds, selection ancestry, block classes and context values have distinct owners. `timeline-model.ts` composes the time axis; `timeline-nav.ts` owns navigation and selection relationships, using the row definitions and row item projections. Consumers import these owners directly; the composition modules do not reexport their dependencies. `canvas/` owns rendering, painting, the axis and the shared canvas test helper. `agent-view/` owns agent headings, shared controls and navigation across agents with their tests. Page composition, rows and the details panel stay at the component root; consumers import their owning modules directly.

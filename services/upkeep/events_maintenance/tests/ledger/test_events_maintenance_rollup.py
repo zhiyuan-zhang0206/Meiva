@@ -89,6 +89,25 @@ def test_tokens_are_summed_per_agent_and_model_with_the_cost_ledger_columns(
     ]
 
 
+def test_subscription_harness_usage_is_split_from_metered_spend(db: psycopg.Connection) -> None:
+    # meiva:note
+    # `llm_usage.source` names the loop that ran the call; the rollup keeps the subscription-covered
+    # part of the day's cost apart from the metered part so the Inspector can show both.
+    agent = _agent(db)
+    _event(db, "llm_usage", agent, model="m", in_total=10, cost_usd=0.25)
+    _event(db, "llm_usage", agent, model="m", in_total=10, cost_usd=1.0, source="claude_code")
+    _event(db, "llm_usage", agent, model="m", in_total=10, source="codex")
+
+    rollup.roll_day(db, _DAY)
+
+    row = db.execute(
+        "SELECT cost_usd, cost_usd_subscription, unpriced_calls, unpriced_calls_subscription "
+        "FROM agent_model_tokens_daily WHERE agent_id = %s AND day = %s",
+        (agent, _DAY),
+    ).fetchone()
+    assert row == (pytest.approx(1.25), pytest.approx(1.0), 1, 1)
+
+
 def test_a_day_is_the_closed_utc_day_and_unknown_agents_are_skipped(db: psycopg.Connection) -> None:
     agent = _agent(db)
     start = datetime(2026, 6, 9, tzinfo=UTC)

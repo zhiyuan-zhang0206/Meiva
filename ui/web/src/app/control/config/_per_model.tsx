@@ -9,6 +9,7 @@ import { useState } from "react";
 import { groupedModels, modelLabel, providerLabel } from "@/lib/contracts/models";
 import type { ResolvedFieldView } from "@/lib/contracts/types";
 import { InlineError } from "@/components/ui/inline-error";
+import { Spinner } from "@/components/ui/spinner";
 
 import { formatConfigValue } from "../config-groups";
 import { useSectionVisible } from "../visibility";
@@ -119,7 +120,7 @@ export function PerModelPanel({
           Model settings are unavailable. Check the gateway configuration and reload.
         </InlineError>
       )}
-      {resolved.isLoading && <p className="text-xs text-muted-foreground">{t("loading")}</p>}
+      {resolved.isLoading && <Spinner className="size-3" label={t("loading")} />}
       {resolved.error && (
         <InlineError>
           {t("couldntResolve")}

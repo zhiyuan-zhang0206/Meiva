@@ -4,6 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
 import { useState } from "react";
 import { AgentRow as AgentRowItem } from "@/components/agents/agent-row";
+import { Spinner } from "@/components/ui/spinner";
 import { AGENT_DIRECTORY_QUERY_KEY } from "@/lib/fold/agents";
 import { FLEX } from "@/lib/layout/layout";
 import { cn } from "@/lib/format/utils";
@@ -48,7 +49,11 @@ function ArchivePage({ query, props }: { query: string; props: InnerProps }) {
   const nextCursor = page.data?.next_cursor;
   return <section aria-label={t("archive")} className="border-t border-border py-2">
     <div className="px-3 text-xs text-muted-foreground">{t("archive")}</div>
-    {page.isPending && <p className="px-3 text-xs">{t("loadingAgents")}</p>}
+    {page.isPending && (
+      <div className={cn("items-center gap-1.5 px-3 py-1", FLEX)}>
+        <Spinner label={t("loadingAgents")} />
+      </div>
+    )}
     {page.isError && <button onClick={() => void page.refetch()} className="px-3 text-xs text-destructive">{t("archiveRetry")}</button>}
     {page.isSuccess && page.data.agents.length === 0 && <p className="px-3 text-xs">{t("noResults")}</p>}
     <ul>{page.data?.agents.map((agent) => <AgentRowItem key={agent.agent_id} agent={agent}

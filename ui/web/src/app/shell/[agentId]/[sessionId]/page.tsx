@@ -25,6 +25,7 @@ import { useParams, useRouter } from "next/navigation";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 
 import { InlineError } from "@/components/ui/inline-error";
+import { Spinner } from "@/components/ui/spinner";
 
 import { useWallNow } from "@/lib/transport/transport-context";
 import { useDisplayLimit } from "@/lib/format/display-limits";
@@ -359,7 +360,7 @@ export function ShellMonitorView({ params, bfcacheId }: ShellMonitorViewProps) {
             {error instanceof Error ? error.message : "Failed to load shell output"}
           </InlineError>
         ) : !data ? (
-          <p className={`font-mono text-xs ${terminalMuted}`}>Loading…</p>
+          <Spinner className={`size-3 ${terminalMuted}`} />
         ) : data.lines.length === 0 ? (
           <p className={`font-mono text-xs ${terminalMuted}`}>(no output)</p>
         ) : (

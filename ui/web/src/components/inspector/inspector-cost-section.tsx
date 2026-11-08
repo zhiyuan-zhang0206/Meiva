@@ -142,18 +142,16 @@ export function CostActivitySection({
     ? Math.max(0, activity.alive_seconds - activity.active_seconds)
     : 0;
   // meiva:note
-  // The cost cell names a billing mode only when the number needs qualifying: a
-  // metered (API) agent prices every call, so the amount is the whole story and
-  // the cell stays silent; a subscription pays nothing per token, so its label
-  // rides the amount in parentheses instead of taking a line of its own. An
-  // unresolved harness gets the amount alone — the panel never guesses a mode
-  // (user ruling 2026-10-28).
+  // Two cost blocks, one per billing mode, each naming its own mode in the label:
+  // `Cost (subscription)` covers the calls a subscription already paid for (their
+  // usage-time price is list value consumed, not money owed) and `Cost (API)` the
+  // metered calls the account is billed for. A block is rendered only when its
+  // amount is above zero — a zero amount is not a cost and the block disappears
+  // whole, unpriced calls included (user ruling 2026-11-08, restated by 405 the
+  // same day; the unpriced count still rides the sub-line of a block that shows).
+  // One agent can show both: a restart can move it to another harness, and the
+  // ledger keeps every call under the agent.
   // meiva:link ui/web/src/docs/frontend-components/inspector/activity.meiva.okf.md
-  const billingLabel = isExternalHarness ? t("billingSubscription") : undefined;
-  const unpricedSub =
-    cost && cost.unpriced_calls > 0
-      ? t("unpriced", { count: String(cost.unpriced_calls) })
-      : undefined;
   return (
     <Section
       icon={<Activity className="size-3" />}
@@ -204,12 +202,31 @@ export function CostActivitySection({
         <div className="space-y-1">
           {!inspect || cost ? (
             <div className="grid grid-cols-2 gap-1">
-              <Metric
-                label={t("metricCost")}
-                value={cost ? costAmount(cost.cost_usd, billingLabel) : undefined}
-                sub={unpricedSub}
-                valueTestId={cost ? "inspector-cost-amount" : undefined}
-              />
+              {cost == null ? (
+                <>
+                  <Metric label={t("metricCostSubscription")} value={undefined} />
+                  <Metric label={t("metricCostApi")} value={undefined} />
+                </>
+              ) : (
+                <>
+                  {cost.cost_usd_subscription > 0 ? (
+                    <Metric
+                      label={t("metricCostSubscription")}
+                      value={usd(cost.cost_usd_subscription)}
+                      sub={unpricedLine(t, cost.unpriced_calls_subscription)}
+                      valueTestId="inspector-cost-subscription"
+                    />
+                  ) : null}
+                  {cost.cost_usd_api > 0 ? (
+                    <Metric
+                      label={t("metricCostApi")}
+                      value={usd(cost.cost_usd_api)}
+                      sub={unpricedLine(t, cost.unpriced_calls_api)}
+                      valueTestId="inspector-cost-api"
+                    />
+                  ) : null}
+                </>
+              )}
               <Metric label={t("metricLlmCalls")} value={cost ? String(cost.llm_calls) : undefined} />
               <Metric
                 label={t("metricTokens")}
@@ -274,12 +291,20 @@ export function CostActivitySection({
 }
 
 // meiva:note
-// One text run: the amount and, for a subscription, its qualifier in
-// parentheses — the cell must not split them across two rows.
+// A cost block exists when its mode has a cost: the amount is the whole test, and a zero amount
+// hides the block even if that mode logged unpriced calls (user ruling 2026-11-08 — the panel must
+// not answer "$0.0000" to a question about cost). Under a block that does show, `N unpriced`
+// marks how many of that mode's calls had no price snapshot and therefore contributed nothing.
 // meiva:link ui/web/src/docs/frontend-components/inspector/activity.meiva.okf.md
-function costAmount(usd: number, billing: string | undefined): string {
-  const amount = `$${usd.toFixed(4)}`;
-  return billing === undefined ? amount : `${amount} (${billing})`;
+function usd(amount: number): string {
+  return `$${amount.toFixed(4)}`;
+}
+
+function unpricedLine(
+  t: ReturnType<typeof useTranslations<"inspector">>,
+  count: number,
+): string | undefined {
+  return count > 0 ? t("unpriced", { count: String(count) }) : undefined;
 }
 
 function formatTps(n: number): string {

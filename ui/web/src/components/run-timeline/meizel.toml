@@ -1,7 +1,7 @@
-exports = ["agent-view", "canvas", "model", "run-timeline-detail.tsx", "run-timeline-link-detail.tsx", "run-timeline-link-group-detail.tsx", "run-timeline-rows.tsx", "run-timeline-skeleton.tsx", "run-timeline-workspace.tsx", "viewport"]
+exports = ["agent-view", "canvas", "model", "run-timeline-detail.tsx", "run-timeline-link-detail.tsx", "run-timeline-link-group-detail.tsx", "run-timeline-rows.tsx", "run-timeline-loading.tsx", "run-timeline-workspace.tsx", "viewport"]
 
 [uses]
-"agent-view" = ["canvas", "model", "viewport", "run-timeline-row-shell.tsx", "run-timeline-skeleton.tsx"]
+"agent-view" = ["canvas", "model", "viewport", "run-timeline-loading.tsx", "run-timeline-row-shell.tsx"]
 "canvas" = ["model", "viewport"]
 "run-timeline-detail.test.tsx" = ["model", "run-timeline-detail.tsx", "run-timeline-link-detail.tsx"]
 "run-timeline-detail.tsx" = ["model", "run-timeline-markdown.tsx", "run-timeline-messages.tsx"]
