@@ -37,10 +37,12 @@ from schedules.plans.watch.main_red import (
     card_title,
     liveness_alert,
 )
-from schedules.plans.watch.release_gate_slot import (
-    RELEASE_GATE_SLOT_STALE_AFTER,
-    SlotFacts,
-    decide_slot,
+from schedules.jobs.watch.main_red_blind import (
+    BlindLedger,
+    advance_blindness,
+    load_blind,
+    save_blind,
+    stream_errors,
 )
 
 Compare = Callable[[str, str], tuple[str, ...]]
@@ -64,7 +66,6 @@ __all__ = [
     "no_opportunity_notes",
     "round_line",
     "save_state",
-    "slot_round",
     "suspect_rows",
     "watch_once",
 ]
@@ -123,6 +124,11 @@ class WatchState:
     first_seen: Mapping[str, str]
     slot: SlotLedger = SlotLedger()
     greens: Mapping[str, str] = field(default_factory=dict[str, str])
+    # meiva:note
+    # The window of blindness this watch is inside, if any. It lives here rather than in `slot`
+    # because the two answer different questions: `slot` is about a schedule that stopped running,
+    # this is about streams that cannot be read, and one can be true while the other is not.
+    blind: BlindLedger = field(default_factory=BlindLedger)
 
 
 # meiva:note
@@ -283,13 +289,13 @@ def load_state(path: Path) -> WatchState:
         )
         for name, value in raw.get("entries", {}).items()
     }
-    slot = _load_slot(raw.get("slot"))
     return WatchState(
-        entries,
-        dict(raw.get("watermarks", {})),
-        dict(raw.get("first_seen", {})),
-        slot,
-        dict(raw.get("greens", {})),
+        entries=entries,
+        watermarks=dict(raw.get("watermarks", {})),
+        first_seen=dict(raw.get("first_seen", {})),
+        slot=_load_slot(raw.get("slot")),
+        greens=dict(raw.get("greens", {})),
+        blind=load_blind(raw.get("blind")),
     )
 
 
@@ -322,6 +328,7 @@ def save_state(path: Path, state: WatchState) -> None:
             "task_id": state.slot.task_id,
             "unreadable_rounds": state.slot.unreadable_rounds,
         },
+        "blind": save_blind(state.blind),
     }
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
@@ -471,7 +478,7 @@ def _recheck_open_cards(
             continue
         close_card(
             entry.task_id,
-            f"{entry.job} passed in attempt {attempt} of run {entry.run_id}",
+            f"red ended: {entry.job} passed in attempt {attempt} of run {entry.run_id}",
         )
         del entries[entry.fingerprint]
         closed += 1
@@ -583,7 +590,7 @@ def _apply_one_run(
         opened += 1
         notes.append(f"opened card {task_id} for {entry.fingerprint}")
     for task_id in plan.closes:
-        close_card(task_id, "resolved by a green run")
+        close_card(task_id, "red ended: resolved by a green run")
         notes.append(f"closed card {task_id}")
     return entries, opened, infra, unnamed
 
@@ -602,6 +609,39 @@ def _charge_opportunities(
         fresh = sum(1 for run in runs if run.created_at > entry.first_seen_at)
         if fresh:
             entries[name] = replace(entry, opportunities=entry.opportunities + fresh)
+
+
+# meiva:note
+# Each liveness stream's silence, priced: how many the round could not judge at all and the lines it
+# owes for those. Separate from the run reading because it answers the other half of the question --
+# a stream that reads fine but never runs is silent, not unreadable, and the round reports both.
+def _silence_notes(
+    liveness: tuple[LivenessStream, ...],
+    last_start: Callable[[str], datetime | None],
+    now: datetime,
+    first_seen: Mapping[str, str],
+) -> tuple[int, tuple[str, ...]]:
+    silent = 0
+    notes: list[str] = []
+    for stream in liveness:
+        try:
+            started = last_start(stream.workflow)
+        except Exception as exc:
+            notes.append(f"stream {stream.workflow} unreadable: {type(exc).__name__}: {exc}")
+            silent += 1
+            continue
+        alert = liveness_alert(
+            stream.label,
+            started,
+            now,
+            stale_after=stream.stale_after,
+            since=datetime.fromisoformat(first_seen[stream.workflow]),
+            make_up=stream.make_up,
+        )
+        if alert is not None:
+            notes.append(alert)
+            silent += 1
+    return silent, tuple(notes)
 
 
 def watch_once(
@@ -631,14 +671,22 @@ def watch_once(
     opened = 0
     infra = 0
     unnamed = 0
+    # meiva:note
+    # What this round could not read, and what each stream answered when it could. The first is
+    # what the blindness card is made of; the second is how the round that reads a stream again
+    # learns whether the interval it missed was actually covered.
+    failed: dict[str, str] = {}
+    runs_read: dict[str, tuple[RunFacts, ...]] = {}
     for workflow in workflows:
         seen_at, seen_attempt = _read_watermark(watermarks.get(workflow))
         try:
             runs = fetch(workflow, seen_at, seen_attempt)
         except Exception as exc:
+            failed[workflow] = f"{type(exc).__name__}: {exc}"
             notes.append(f"stream {workflow} unreadable: {type(exc).__name__}: {exc}")
             stale += 1
             continue
+        runs_read[workflow] = runs
         newest: tuple[datetime, int | None] | None = (
             (seen_at, seen_attempt) if seen_at is not None else None
         )
@@ -663,24 +711,9 @@ def watch_once(
         _charge_opportunities(entries, workflow, runs)
         if newest is not None:
             watermarks[workflow] = _format_watermark(newest[0], newest[1])
-    for stream in liveness:
-        try:
-            started = last_start(stream.workflow)
-        except Exception as exc:
-            notes.append(f"stream {stream.workflow} unreadable: {type(exc).__name__}: {exc}")
-            stale += 1
-            continue
-        alert = liveness_alert(
-            stream.label,
-            started,
-            now,
-            stale_after=stream.stale_after,
-            since=datetime.fromisoformat(first_seen[stream.workflow]),
-            make_up=stream.make_up,
-        )
-        if alert is not None:
-            notes.append(alert)
-            stale += 1
+    silent, silence = _silence_notes(liveness, last_start, now, first_seen)
+    stale += silent
+    notes.extend(silence)
     # meiva:note
     # After the runs are applied and before the state is written, so a card this round closed is not
     # persisted as open. A card opened this same round is asked about again here, and that repeat is
@@ -697,7 +730,32 @@ def watch_once(
             f"{newcomer.opportunities} re-check opportunities so far. This is the trigger for the "
             f"JUnit half of task #6488."
         )
-    save_state(state_path, WatchState(entries, watermarks, first_seen, greens=greens))
+    blind, blind_notes = advance_blindness(
+        state.blind,
+        now=now,
+        workflows=workflows,
+        unreadable=failed,
+        runs_read=runs_read,
+        open_card=open_card,
+        close_card=close_card,
+    )
+    notes.extend(blind_notes)
+    # meiva:note
+    # `replace`, never a fresh `WatchState(...)`: this line used to rebuild the state from the maps
+    # it happened to name, which silently reset the slot ledger every round -- the slot card then
+    # met a `task_id` of None on the round that should have closed it. A map that vanishes on the
+    # round that needs it is a memory that looks like it works.
+    save_state(
+        state_path,
+        replace(
+            state,
+            entries=entries,
+            watermarks=watermarks,
+            first_seen=first_seen,
+            greens=greens,
+            blind=blind,
+        ),
+    )
     emit(
         {
             "fingerprints": len(entries),
@@ -707,6 +765,8 @@ def watch_once(
             "unnamed": unnamed,
             "suspects": rows,
             "suspects_dropped": dropped,
+            "unreadable": len(failed),
+            "stream_errors": stream_errors(failed),
         }
     )
     return round_line(
@@ -716,66 +776,3 @@ def watch_once(
         notes=tuple(notes),
         unnamed=unnamed,
     )
-
-
-# meiva:note
-# The slot round: one workflow's cron can stop without anything going red, and the watch would
-# otherwise be silent through exactly the outage it exists to end. A missing slot opens one card
-# and the next scheduled run closes it. The round dispatches nothing: the make-up run certifies,
-# certifying releases, and a release is the user's decision -- so the card carries the command and
-# stays open until a human runs it or the cron recovers.
-# meiva:note
-# How often an unreadable slot leg repeats itself on the round line. One note per three rounds --
-# ninety minutes at the current cadence -- is often enough that the line never goes quiet while the
-# judgement is not running, and rare enough that it does not become the only thing on the line.
-_UNREADABLE_NOTE_EVERY = 3
-
-
-def slot_round(
-    *,
-    state_path: Path,
-    now: datetime,
-    facts: SlotFacts | None,
-    open_card: Callable[[Card], int],
-    close_card: Callable[[int, str], None],
-    since: datetime | None = None,
-    unreadable: str | None = None,
-) -> str | None:
-    state = load_state(state_path)
-    ledger = state.slot
-    if facts is None:
-        rounds = ledger.unreadable_rounds + 1
-        save_state(state_path, replace_state_slot(state, replace(ledger, unreadable_rounds=rounds)))
-        if rounds % _UNREADABLE_NOTE_EVERY != 0:
-            return None
-        return (
-            f"release-gate slot has not been judged for {rounds} consecutive rounds "
-            f"({unreadable or 'unreadable'}): nothing is watching the slot while this lasts"
-        )
-    recovered = ledger.unreadable_rounds
-    decision = decide_slot(
-        facts,
-        now=now,
-        since=since,
-        stale_after=RELEASE_GATE_SLOT_STALE_AFTER,
-    )
-    if decision.card is None:
-        if ledger.task_id is not None:
-            close_card(ledger.task_id, decision.note or "a scheduled release-gate run appeared")
-        slot = SlotLedger()
-    else:
-        task_id = ledger.task_id if ledger.task_id is not None else open_card(decision.card)
-        slot = SlotLedger(gap_id=decision.gap_id, task_id=task_id)
-    save_state(state_path, replace_state_slot(state, slot))
-    if recovered:
-        back = f"release-gate slot readable again after {recovered} unreadable round(s)"
-        return back if decision.note is None else f"{back} | {decision.note}"
-    return decision.note
-
-
-# meiva:note
-# `replace`, not a fresh `WatchState(...)`: the positional form silently dropped whichever maps were
-# added after it was written, and a map that vanishes on every slot round is a memory that looks
-# like it works until the round that needed it.
-def replace_state_slot(state: WatchState, slot: SlotLedger) -> WatchState:
-    return replace(state, slot=slot)

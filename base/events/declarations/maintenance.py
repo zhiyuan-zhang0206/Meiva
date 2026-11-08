@@ -235,6 +235,14 @@ class TrunkRedWatchRound(TypedDict):
     # truncated list without a count reads as the whole set.
     suspects: NotRequired[list[dict[str, object]]]
     suspects_dropped: NotRequired[int]
+    # meiva:note
+    # `stale` counts every stream that gave no usable judgement, and that includes a workflow that
+    # read fine but has not run -- silence is not blindness. The blindness card needs the narrower
+    # number, so the round now states it: `unreadable` counts reads that raised, and `stream_errors`
+    # names each one with its message (bounded to one entry per stream and 160 characters). Without
+    # it, "stale: 4" is a count nobody can diagnose without the schedule's log (task #6523).
+    unreadable: NotRequired[int]
+    stream_errors: NotRequired[list[dict[str, object]]]
 
 
 # meiva:note

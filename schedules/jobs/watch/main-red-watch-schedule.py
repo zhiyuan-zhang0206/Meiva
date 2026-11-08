@@ -31,13 +31,13 @@ from base.paths.home import resolve_meiva_home
 from schedules.jobs.entry import cluster_timezone, open_schedule_entry
 from schedules.jobs.loop import CronSchedule, Trigger, run_loop
 from schedules.jobs.watch.api_read import read_api
+from schedules.jobs.watch.main_red_slot import slot_round
 from schedules.jobs.watch.main_red_watch import (
     LivenessStream,
     already_read,
     STATE_FILE,
     card_operation_key,
     listing_attempt,
-    slot_round,
     watch_once,
 )
 from schedules.jobs.telemetry_event import emit_system_event
@@ -598,7 +598,7 @@ def _close_card(task_id: int, reason: str) -> None:
         meiva.context,
         task_id,
         status="done",
-        results=f"red ended: {reason}",
+        results=reason,
         operation_key=f"main-red-close-{task_id}",
     )
 
