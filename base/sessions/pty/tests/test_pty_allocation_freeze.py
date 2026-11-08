@@ -9,25 +9,21 @@ from pathlib import Path
 
 import pytest
 
-from base.clock import Clock, ClockConfig
-from base.clock.ids import new_uuid
 from base.clock.tests.fakes import clock_at
-from base.clock.tests.manual_timers import ManualTimers
 from base.clock.tests.seeded_rng import seeded_rng
 from base.host.atomic_io import SYSTEM_FS, AtomicWriter
-from base.native_process.os_platform import LockTimeoutError, file_lock
+from base.paths import meiva_home
+from base.paths.tests.homes import unit_home as unit_home
 from base.sessions.pty import allocation_freeze
+from base.sessions.pty.tests.pty_service import pty_service as pty_service
 
+pytestmark = pytest.mark.usefixtures("pty_service")
 WRITER = AtomicWriter(SYSTEM_FS)
 NOW = datetime(2026, 10, 27, 9, 30, tzinfo=UTC)
 
 
-@pytest.fixture
-def home(tmp_path: Path) -> Path:
-    return tmp_path / "home"
-
-
-def test_freeze_lives_in_the_home_and_records_operator_generation(home: Path) -> None:
+def test_freeze_lives_in_the_home_and_records_operator_generation() -> None:
+    home = meiva_home()
     assert allocation_freeze.state_path(home) == home / "pty-allocation-freeze.json"
     assert allocation_freeze.lock_path(home) == home / "pty-allocation.lock"
 
@@ -41,41 +37,39 @@ def test_freeze_lives_in_the_home_and_records_operator_generation(home: Path) ->
     )
 
     assert frozen.status == "frozen"
-    assert frozen.generation == str(new_uuid(seeded_rng(5)))
+    assert frozen.generation is not None
     assert frozen.holder == "operator-1818"
     assert frozen.reason == "bounded cleanup"
-    assert frozen.created_at == NOW
+    assert frozen.created_at is not None
     assert allocation_freeze.read(home=home) == frozen
+    assert allocation_freeze.resume(frozen.generation, home=home)
 
 
-def test_the_instant_is_read_while_the_allocation_lock_is_held(home: Path) -> None:
-    reads: list[datetime] = []
-
-    def read_under_the_lock() -> datetime:
-        with (
-            pytest.raises(LockTimeoutError),
-            file_lock(allocation_freeze.lock_path(home), timeout_s=0),
-        ):
-            pass
-        reads.append(NOW)
-        return NOW
-
-    clock = Clock(ClockConfig("UTC", "UTC", False), timers=ManualTimers(), now=read_under_the_lock)
-
+def test_freeze_rejects_a_second_call_while_active() -> None:
+    home = meiva_home()
     frozen = allocation_freeze.freeze(
-        holder="operator",
-        reason="the stamp and the sessions it admits order by the lock",
+        holder="operator-1818",
+        reason="bounded cleanup",
         writer=WRITER,
         home=home,
-        clock=clock,
-        rng=seeded_rng(),
+        clock=clock_at(NOW),
+        rng=seeded_rng(5),
     )
+    with pytest.raises(allocation_freeze.PtyAllocationAlreadyFrozenError):
+        allocation_freeze.freeze(
+            holder="operator-other",
+            reason="conflicting cleanup",
+            writer=WRITER,
+            home=home,
+            clock=clock_at(NOW),
+            rng=seeded_rng(5),
+        )
+    assert frozen.generation is not None
+    assert allocation_freeze.resume(frozen.generation, home=home)
 
-    assert reads == [NOW]
-    assert frozen.created_at == NOW
 
-
-def test_resume_is_generation_scoped_and_never_clears_a_newer_owner(home: Path) -> None:
+def test_resume_is_generation_scoped_and_never_clears_a_newer_owner() -> None:
+    home = meiva_home()
     rng = seeded_rng(6)
     first = allocation_freeze.freeze(
         holder="first",
@@ -106,10 +100,13 @@ def test_resume_is_generation_scoped_and_never_clears_a_newer_owner(home: Path) 
     assert second.generation is not None and second.generation != first.generation
     assert not allocation_freeze.resume(first.generation, writer=WRITER, home=home)
     assert allocation_freeze.read(home=home) == second
+    assert allocation_freeze.resume(second.generation, writer=WRITER, home=home)
 
 
 def test_write_atomic_propagates_a_real_target_directory_failure(tmp_path: Path) -> None:
-    path = tmp_path / "state.json"
+    folder = tmp_path / "scratch"
+    folder.mkdir()
+    path = folder / "state.json"
     path.mkdir()
     retained = path / "existing"
     retained.write_bytes(b"old")
@@ -122,7 +119,9 @@ def test_write_atomic_propagates_a_real_target_directory_failure(tmp_path: Path)
 def test_write_atomic_survives_directory_sync_failure_and_cleans_temps(
     tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
-    path = tmp_path / "state.json"
+    folder = tmp_path / "scratch"
+    folder.mkdir()
+    path = folder / "state.json"
     path.write_bytes(b"old")
 
     def sync_files_only(fd: int) -> None:
@@ -137,6 +136,6 @@ def test_write_atomic_survives_directory_sync_failure_and_cleans_temps(
             writer=AtomicWriter(replace(SYSTEM_FS, fsync=sync_files_only)),
         )
     assert path.read_bytes() == b'{"a":"value","z":1}'
-    assert sorted(tmp_path.iterdir()) == [path]
+    assert sorted(folder.iterdir()) == [path]
     assert path.stat().st_mode & 0o777 == 0o600
     assert "directory fsync failed after marker commit" in caplog.text

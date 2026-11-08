@@ -25,6 +25,6 @@ def test_start_agent_posts_with_bearer() -> None:
     assert request.url == "http://gw:8000/api/keyed/v1/agents"
     assert request.json == {"spawner": "user"}
     assert request.headers["Authorization"] == "Bearer sekret"
-    assert request.headers["Idempotency-Scope"] == "principal-v1"
+    assert "Idempotency-Scope" not in request.headers
     assert request.headers["Idempotency-Key"] == "aaaaaaaa"
     assert mod.parse_spawn_agent_id({"id": 7}) == 7

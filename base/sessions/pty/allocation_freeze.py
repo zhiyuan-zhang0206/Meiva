@@ -25,7 +25,6 @@ from pathlib import Path
 from typing import Literal, Never, TypeGuard
 
 from base.clock import Clock
-from base.clock.ids import new_uuid
 from base.host.atomic_io import AtomicWriter
 from base.host.boundary.untyped import object_of
 from base.native_process.os_platform import file_lock
@@ -125,9 +124,42 @@ def _read_unlocked(path: Path) -> PtyAllocationFreeze:
         return PtyAllocationFreeze(status="invalid", error=str(exc))
 
 
+def _from_dict(res: dict[str, object]) -> PtyAllocationFreeze:
+    raw_status = res.get("status")
+    status: Literal["inactive", "frozen", "invalid"] = (
+        raw_status if raw_status in ("inactive", "frozen", "invalid") else "inactive"
+    )
+    created = res.get("created_at")
+    created_at = None
+    if isinstance(created, str):
+        created_at = _timestamp(created)
+    return PtyAllocationFreeze(
+        status=status,
+        generation=str(res["generation"]) if res.get("generation") else None,
+        holder=str(res["holder"]) if res.get("holder") else None,
+        reason=str(res["reason"]) if res.get("reason") else None,
+        created_at=created_at,
+        error=str(res["error"]) if res.get("error") else None,
+    )
+
+
+# meiva:note
+# Read one atomic marker snapshot; in-memory in pty-sessions with file fallback for invalid markers.
 def read(*, home: Path) -> PtyAllocationFreeze:
-    """Read one atomic marker snapshot without taking the allocation lock."""
-    return _read_unlocked(state_path(home))
+    file = state_path(home)
+    if file.exists():
+        return _read_unlocked(file)
+
+    from base.paths import run_dir
+    from base.sessions.pty import client
+    from base.sessions.pty.paths import service_socket_path
+
+    socket_path = service_socket_path(run_dir(home))
+    try:
+        res = client.request("freeze_status", socket_path=socket_path)
+        return _from_dict(res)
+    except (client.ServiceDownError, FileNotFoundError):
+        return PtyAllocationFreeze(status="inactive")
 
 
 def current_generation(*, home: Path) -> str | None:
@@ -166,69 +198,50 @@ def locked_freeze_state(*, home: Path) -> Generator[PtyAllocationFreeze]:
     later absent-to-live transition observes the marker and is refused.
     """
     with file_lock(lock_path(home), timeout_s=_LOCK_TIMEOUT_S):
-        yield _read_unlocked(state_path(home))
+        yield read(home=home)
 
 
 # meiva:note
-# Create a new operator-owned allocation freeze generation.
+# Create a new operator-owned allocation freeze generation in pty-sessions memory.
 def freeze(
     *,
     home: Path,
     holder: str,
     reason: str,
-    writer: AtomicWriter,
+    writer: AtomicWriter | None = None,
     clock: Clock,
     rng: random.Random,
 ) -> PtyAllocationFreeze:
+    del writer, clock, rng
     if not holder:
         raise ValueError("holder must be non-empty")
     if not reason:
         raise ValueError("reason must be non-empty")
-    path = state_path(home)
-    with locked_freeze_state(home=home) as current:
-        if current.status == "invalid":
-            raise InvalidPtyAllocationFreezeError(
-                f"cannot replace invalid marker {path}: {current.error}"
-            )
-        if current.status == "frozen":
-            raise PtyAllocationAlreadyFrozenError(
-                f"generation {current.generation!r} held by {current.holder!r} is already active"
-            )
-        now = clock.now()
-        payload: dict[str, object] = {
-            "schema_version": SCHEMA_VERSION,
-            "state": "frozen",
-            "generation": str(new_uuid(rng)),
-            "holder": holder,
-            "reason": reason,
-            "created_at": now.astimezone(dt.UTC).isoformat(),
-        }
-        write_atomic(path, payload, writer=writer)
-        return _parse(payload)
+
+    from base.paths import run_dir
+    from base.sessions.pty import client
+    from base.sessions.pty.paths import service_socket_path
+
+    socket_path = service_socket_path(run_dir(home))
+    try:
+        res = client.request("freeze", socket_path=socket_path, holder=holder, reason=reason)
+        return _from_dict(res)
+    except client.ServiceError as exc:
+        if "already active" in str(exc):
+            raise PtyAllocationAlreadyFrozenError(str(exc)) from exc
+        raise
 
 
-def resume(generation: str, *, home: Path, writer: AtomicWriter) -> bool:
+def resume(generation: str, *, home: Path, writer: AtomicWriter | None = None) -> bool:
     """CAS-activate exactly ``generation``; never clear a replacement owner."""
+    del writer
     if not generation:
         raise ValueError("generation must be non-empty")
-    path = state_path(home)
-    with locked_freeze_state(home=home) as current:
-        if current.status == "invalid":
-            raise InvalidPtyAllocationFreezeError(
-                f"cannot resume invalid marker {path}: {current.error}"
-            )
-        if current.status != "frozen" or current.generation != generation:
-            return False
-        write_atomic(
-            path,
-            {
-                "schema_version": SCHEMA_VERSION,
-                "state": "active",
-                "generation": current.generation,
-                "holder": current.holder,
-                "reason": current.reason,
-                "created_at": current.created_at.isoformat() if current.created_at else None,
-            },
-            writer=writer,
-        )
-        return True
+
+    from base.paths import run_dir
+    from base.sessions.pty import client
+    from base.sessions.pty.paths import service_socket_path
+
+    socket_path = service_socket_path(run_dir(home))
+    res = client.request("resume", socket_path=socket_path, generation=generation)
+    return bool(res.get("resumed", False))

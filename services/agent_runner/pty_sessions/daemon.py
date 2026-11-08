@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import os
+import random
 import resource
 import sys
 import time
@@ -70,6 +71,8 @@ def main() -> int:
         return 1
 
 
+# meiva:note
+# Run the pty-sessions service over the home directory.
 def _run(run: Path, home: Path) -> int:
     service = PtyService(
         home=home,
@@ -79,6 +82,7 @@ def _run(run: Path, home: Path) -> int:
         pid=os.getpid(),
         host_generation=uuid.uuid4().hex,
         now=time.time,
+        rng=random.Random(),  # noqa: S311
     )
     ledger.sweep(
         ledger_path(run),

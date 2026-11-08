@@ -1,6 +1,7 @@
 exports = ["allocation_freeze.py", "client.py", "closure.py", "keys.py", "paths.py", "process_groups.py", "protocol.py", "screen.py", "survivor_role.py", "tests"]
 
 [uses]
+"allocation_freeze.py" = ["client.py", "paths.py"]
 "client.py" = ["closure.py", "paths.py", "protocol.py"]
 "closure.py" = ["process_groups.py", "survivor_role.py"]
 "screen.py" = ["paths.py"]

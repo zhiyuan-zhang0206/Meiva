@@ -172,10 +172,10 @@ async def post_guarded_agents(
     body: SpawnAgentRequest,
     request: Request,
     idempotency_key: str = Header(alias="Idempotency-Key", min_length=1, max_length=128),
-    idempotency_scope: str = Header(alias=SCOPE_HEADER),
+    idempotency_scope: str | None = Header(None, alias=SCOPE_HEADER),
 ) -> SpawnedAgent:
 
-    if idempotency_scope != PRINCIPAL_SCOPE:
+    if idempotency_scope is not None and idempotency_scope != PRINCIPAL_SCOPE:
         raise HTTPException(status_code=422, detail="guarded creation requires principal-v1 scope")
     key = scoped_creation_key(request, idempotency_key, operation_path="/api/keyed/v1/agents")
     target = body.machine if body.machine is not None else gateway_state(request).machine.name()

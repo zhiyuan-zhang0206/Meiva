@@ -82,16 +82,36 @@ def _count(conn: psycopg.Connection) -> int:
         {},
         {"Idempotency-Scope": "principal-v1"},
         {"Idempotency-Key": "", "Idempotency-Scope": "principal-v1"},
+        {"Idempotency-Key": ""},
         {"Idempotency-Key": "x" * 129, "Idempotency-Scope": "principal-v1"},
-        {"Idempotency-Key": "intent"},
+        {"Idempotency-Key": "x" * 129},
         {"Idempotency-Key": "intent", "Idempotency-Scope": "legacy"},
     ],
 )
 def test_invalid_admission_has_no_birth(
     client: TestClient, db_conn: psycopg.Connection, headers: dict[str, str]
 ) -> None:
-    assert client.post(PATH, json={}, headers=headers).status_code == 422
+    assert (
+        client.post(
+            PATH,
+            json={"machine": "local-test", "config": {"llm_model": "deepseek-flash"}},
+            headers=headers,
+        ).status_code
+        == 422
+    )
     assert _count(db_conn) == 0
+
+
+def test_creation_with_single_idempotency_key_succeeds(
+    client: TestClient, db_conn: psycopg.Connection
+) -> None:
+    response = client.post(
+        PATH,
+        json={"machine": "local-test", "config": {"llm_model": "deepseek-flash"}},
+        headers={"Idempotency-Key": "single-key-test"},
+    )
+    assert response.status_code == 201
+    assert _count(db_conn) == 1
 
 
 def test_fork_without_source_checkpoint_has_no_birth(
@@ -167,11 +187,24 @@ def test_scoped_creation_key_binds_the_principal_and_the_operation_path() -> Non
             "type": "http",
             "method": "POST",
             "path": "/api/keyed/v1/agents",
-            "headers": [(b"idempotency-scope", b"principal-v1")],
+            "headers": [],
         }
     )
     principal = AuthPrincipal("cluster", "administrator")
     request.state.auth_principal = principal
     assert scoped_creation_key(request, "prior", operation_path=PATH) == principal_key(
+        principal, "POST", PATH, "prior"
+    )
+
+    request_with_scope = Request(
+        {
+            "type": "http",
+            "method": "POST",
+            "path": "/api/keyed/v1/agents",
+            "headers": [(b"idempotency-scope", b"principal-v1")],
+        }
+    )
+    request_with_scope.state.auth_principal = principal
+    assert scoped_creation_key(request_with_scope, "prior", operation_path=PATH) == principal_key(
         principal, "POST", PATH, "prior"
     )

@@ -4639,7 +4639,7 @@ export interface operations {
             query?: never;
             header: {
                 "Idempotency-Key": string;
-                "Idempotency-Scope": string;
+                "Idempotency-Scope"?: string | null;
             };
             path?: never;
             cookie?: never;
@@ -7342,7 +7342,7 @@ export interface operations {
             query?: never;
             header: {
                 "Idempotency-Key": string;
-                "Idempotency-Scope": string;
+                "Idempotency-Scope"?: string | null;
             };
             path?: never;
             cookie?: never;
@@ -7409,7 +7409,7 @@ export interface operations {
             query?: never;
             header: {
                 "Idempotency-Key": string;
-                "Idempotency-Scope": string;
+                "Idempotency-Scope"?: string | null;
             };
             path?: never;
             cookie?: never;
@@ -7639,7 +7639,7 @@ export interface operations {
             query?: never;
             header: {
                 "Idempotency-Key": string;
-                "Idempotency-Scope": string;
+                "Idempotency-Scope"?: string | null;
             };
             path?: never;
             cookie?: never;

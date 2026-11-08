@@ -13,7 +13,6 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from base import paths
-from base.api_contracts.idempotency import PRINCIPAL_SCOPE, SCOPE_HEADER
 from base.clock import SYSTEM_TIMERS
 from base.clock.tests.fakes import system_clock
 from base.clock.tests.seeded_rng import seeded_rng
@@ -293,7 +292,6 @@ def spawn_headers(key: str | None = None, extra: Mapping[str, str] | None = None
     return {
         **(extra or {}),
         "Idempotency-Key": key if key is not None else uuid.uuid4().hex,
-        SCOPE_HEADER: PRINCIPAL_SCOPE,
     }
 
 

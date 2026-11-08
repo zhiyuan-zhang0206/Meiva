@@ -66,6 +66,7 @@ def cmd_pty_resume(*, generation: str, home: Path) -> int:
         LockTimeoutError,
         OSError,
         ValueError,
+        RuntimeError,
         allocation_freeze.InvalidPtyAllocationFreezeError,
     ) as exc:
         print(f"PTY allocation resume refused: {exc}", file=sys.stderr)
