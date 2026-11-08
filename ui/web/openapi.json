@@ -14618,6 +14618,17 @@
             ],
             "title": "Task Id"
           },
+          "schedule_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Schedule Id"
+          },
           "expire_at": {
             "anyOf": [
               {

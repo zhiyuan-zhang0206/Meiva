@@ -136,6 +136,11 @@ class NoticeCreateIn(BaseModel):
     require_response: Annotated[bool, Field(strict=True)] = True
     blocking: Annotated[bool, Field(strict=True)] = False
     task_id: int | None = None
+    # meiva:note
+    # The schedule this notice's writer runs under, reported by the writer itself: the gateway
+    # cannot read a client's environment, and `source_verified_by` records the credential, not
+    # the schedule. Omitted by an agent's own notice and by a manual run.
+    schedule_id: int | None = None
     expire_at: datetime | None = None
     question: NoticeQuestion | None = None
 

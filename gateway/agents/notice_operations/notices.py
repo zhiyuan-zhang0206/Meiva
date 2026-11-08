@@ -504,9 +504,9 @@ async def post_notice_create(
             cur.execute(
                 "INSERT INTO agent_notices "
                 "(agent_id, local_id, title, content, priority, require_response, blocking, "
-                "task_id, expire_at, question, source_verified_by) "
+                "task_id, expire_at, question, source_verified_by, schedule_id) "
                 "VALUES (%s, COALESCE((SELECT MAX(local_id) FROM agent_notices "
-                "WHERE agent_id = %s), -1) + 1, %s, %s, %s, %s, %s, %s, %s, %s, %s) "
+                "WHERE agent_id = %s), -1) + 1, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) "
                 "RETURNING id, local_id",
                 (
                     agent_id,
@@ -522,6 +522,7 @@ async def post_notice_create(
                     if body.question is not None
                     else None,
                     source_verified_by,
+                    body.schedule_id,
                 ),
             )
             row = cur.fetchone()
@@ -757,6 +758,18 @@ def validate_creation_state(
             cur.execute("SELECT 1 FROM agent_tasks WHERE id = %s", (body.task_id,))
             if cur.fetchone() is None:
                 raise HTTPException(status_code=422, detail=f"task {body.task_id} does not exist")
+    # meiva:note
+    # The writer reports the schedule; the server refuses one that names no schedule row, so a
+    # notice cannot claim a schedule that never existed (the column itself carries no FK).
+    if body.schedule_id is not None:
+        if body.schedule_id <= 0:
+            raise HTTPException(status_code=422, detail="schedule_id must be positive")
+        with conn.cursor() as cur:
+            cur.execute("SELECT 1 FROM schedules WHERE id = %s", (body.schedule_id,))
+            if cur.fetchone() is None:
+                raise HTTPException(
+                    status_code=422, detail=f"schedule {body.schedule_id} does not exist"
+                )
     problem = past_expiry_problem(body.expire_at, now=now)
     if problem is not None:
         raise HTTPException(status_code=422, detail=problem)
