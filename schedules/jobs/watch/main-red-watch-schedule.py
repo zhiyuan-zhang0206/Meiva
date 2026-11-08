@@ -219,7 +219,7 @@ def _job_failures(
         suite_step_failed=True,
         failed_steps=failed_steps,
         check_steps=check_steps,
-        junit=JunitEvidence(case_ids, match.candidates),
+        junit=JunitEvidence(case_ids, match.candidates, match.note),
     )
 
 

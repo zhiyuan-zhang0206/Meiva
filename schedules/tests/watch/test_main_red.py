@@ -756,3 +756,29 @@ def test_an_unnamed_card_lists_the_candidate_artifacts() -> None:
         candidate_commits=(),
     )
     assert "published none that belongs to this job" in bare
+
+
+# meiva:note
+# Exact and heuristic matches have to be distinguishable on the card: a reader deciding whether to
+# trust a case needs to know the name came from the job's own upload or from the shard it declares.
+# The unnamed branches already announce themselves; this is the symmetric line for the third route.
+def test_a_card_named_by_shard_says_the_match_was_heuristic() -> None:
+    plan = apply_run({}, _red(_GATE, "aaa111", "2026-11-02T00:00:00+00:00", _WATCH_WORK))
+    (named,) = dict(plan.entries).values()
+    entry = replace(
+        named,
+        artifact_note="test-results-e2e-shard-3 (matched by shard: the job name gives no upload name)",
+        last_green_sha=None,
+    )
+
+    body = card_body(
+        entry,
+        latest_url="https://example/run/1",
+        job_names=("e2e full matrix (3/4)",),
+        candidate_commits=(),
+    )
+
+    assert (
+        "Artifacts: test-results-e2e-shard-3 (matched by shard: the job name gives no upload name)"
+        in body
+    )

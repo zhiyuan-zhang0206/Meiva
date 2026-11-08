@@ -291,6 +291,7 @@ def load_state(path: Path) -> WatchState:
             artifact_candidates=tuple(
                 name for name in value.get("artifact_candidates", ()) if isinstance(name, str)
             ),
+            artifact_note=value.get("artifact_note") or "",
         )
         for name, value in raw.get("entries", {}).items()
     }
@@ -323,6 +324,7 @@ def save_state(path: Path, state: WatchState) -> None:
                 "opportunities": entry.opportunities,
                 "covers_full_suite": entry.covers_full_suite,
                 "artifact_candidates": list(entry.artifact_candidates),
+                "artifact_note": entry.artifact_note,
             }
             for name, entry in state.entries.items()
         },

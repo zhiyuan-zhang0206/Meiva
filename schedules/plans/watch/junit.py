@@ -98,6 +98,13 @@ class ArtifactMatch:
     name: str | None
     how: str
     candidates: tuple[str, ...]
+    # meiva:note
+    # What the card says when the name came from the shard tier rather than from the job's own
+    # upload name: exact and heuristic matches have to be distinguishable to a reader, or the next
+    # person asking "is this case really this card's" has no way to tell whether to trust it (405,
+    # 2026-11-08). Empty for an exact match and for no match -- the other two branches already say
+    # what they are.
+    note: str = ""
 
 
 def match_artifact(job_name: str, names: Sequence[str]) -> ArtifactMatch:
@@ -120,7 +127,12 @@ def match_artifact(job_name: str, names: Sequence[str]) -> ArtifactMatch:
             and _shares_a_word(job_name, name)
         ]
         if len(by_shard) == 1:
-            return ArtifactMatch(by_shard[0], "shard", ())
+            return ArtifactMatch(
+                by_shard[0],
+                "shard",
+                (),
+                f"{by_shard[0]} (matched by shard: the job name gives no upload name)",
+            )
     return ArtifactMatch(None, "none", artifact_candidates(job_name, names))
 
 

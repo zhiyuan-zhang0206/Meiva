@@ -126,6 +126,7 @@ _CANDIDATE_LIMIT = 20
 class JunitEvidence:
     case_ids: tuple[str, ...] = ()
     candidates: tuple[str, ...] = ()
+    matched: str = ""
 
 
 _NO_JUNIT = JunitEvidence()
@@ -154,6 +155,10 @@ class Failure:
     # run that share a word with the job. Capped at the plan's own limit, because a run can publish
     # dozens and the card is read by a person. Empty for a failure the log or the JUnit named.
     artifact_candidates: tuple[str, ...] = ()
+    # meiva:note
+    # How the case was named when the log named nothing: the artifact and the fact that the match
+    # was heuristic. Empty when the log named the case itself, which needs no provenance line.
+    artifact_note: str = ""
 
 
 # meiva:note
@@ -238,6 +243,11 @@ class Entry:
     # card time because the run's artifact list is gone once GitHub expires it -- the card would
     # then say "I do not know" with no way to recover what was on offer when the red was seen.
     artifact_candidates: tuple[str, ...] = ()
+    # meiva:note
+    # The artifact a heuristic matched to this red, in the words the card shows. Persisted with the
+    # entry for the same reason the candidates are: the run's artifact list is gone once GitHub
+    # expires it, and "which bundle did this come from" must not become unanswerable.
+    artifact_note: str = ""
 
     # meiva:note
     # The workflow this entry belongs to, read back out of the fingerprint that encodes it. A
@@ -376,7 +386,10 @@ def parse_failures(
     # not the same as one that was never read, so it falls through to the unnamed failure below and
     # says which artifact was consulted.
     if junit.case_ids:
-        return tuple(Failure(case, FAILURE_TEST, job_name) for case in junit.case_ids)
+        return tuple(
+            Failure(case, FAILURE_TEST, job_name, artifact_note=junit.matched)
+            for case in junit.case_ids
+        )
     # meiva:note
     # Everything below is a red this watch cannot name, and the steps are the whole of what it
     # knows: an empty tuple here is how a failed run once left no trace at all, so the answer is a
@@ -489,6 +502,7 @@ def apply_run(entries: dict[str, Entry], run: RunFacts) -> Plan:
                 run_id=run.run_id,
                 covers_full_suite=run.covers_full_suite and failure.covers_full_suite,
                 artifact_candidates=failure.artifact_candidates,
+                artifact_note=failure.artifact_note,
             )
             plan_entries[name] = created
             if state == STATE_CONFIRMED:
@@ -541,6 +555,8 @@ _ARTIFACT_CANDIDATE_LIMIT = 6
 
 
 def _artifact_line(entry: Entry) -> str:
+    if entry.artifact_note:
+        return f"Artifacts: {entry.artifact_note}\n\n"
     if entry.kind != FAILURE_UNNAMED:
         return ""
     if not entry.artifact_candidates:

@@ -87,6 +87,9 @@ def test_a_matrix_job_finds_its_artifact_by_the_shard_it_declares() -> None:
     assert match.name == "test-results-e2e-shard-3"
     assert match.how == "shard"
     assert match.candidates == ()
+    assert match.note == (
+        "test-results-e2e-shard-3 (matched by shard: the job name gives no upload name)"
+    )
 
 
 def test_the_shard_number_is_read_from_the_job_name() -> None:
