@@ -32,6 +32,7 @@ from schedules.jobs.watch.main_red_watch import (
     LivenessStream,
     STATE_FILE,
     card_operation_key,
+    listing_attempt,
     slot_round,
     watch_once,
 )
@@ -233,13 +234,38 @@ def fetch_runs(workflow: str, run_process: RunProcess) -> tuple[RunFacts, ...]:
                 downstream_jobs=downstream,
                 covers_full_suite=workflow in _FULL_SUITE_WORKFLOWS,
                 run_id=int(item.get("id") or 0),
-                attempt=int(item.get("run_attempt") or 1),
+                attempt=listing_attempt(item),
                 head_title=_commit_subject(item.get("head_sha", ""), run_process)
                 if conclusion == "failure"
                 else "",
             )
         )
     return tuple(facts)
+
+
+# meiva:note
+# One run's newest attempt, as GitHub holds it now rather than as the listing described it: an
+# attempt can start or finish between the listing and the card, and the gate must answer about the
+# attempt that exists when it is asked. Two reads, because the attempt number is a field of the run
+# and one attempt's jobs are listed under it. The attempt number is parsed by the same helper the
+# listing uses, so the two cannot drift.
+def latest_attempt_jobs(
+    run_id: int, run_process: RunProcess
+) -> tuple[int, tuple[Mapping[str, object], ...]]:
+    import json
+
+    run = json.loads(_api(f"repos/{_REPO}/actions/runs/{run_id}", run_process))
+    attempt = listing_attempt(run) if is_object_dict(run) else 1
+    payload = json.loads(
+        _api(
+            f"repos/{_REPO}/actions/runs/{run_id}/attempts/{attempt}/jobs?per_page=100",
+            run_process,
+        )
+    )
+    jobs = payload.get("jobs") if is_object_dict(payload) else None
+    if not is_object_list(jobs):
+        return attempt, ()
+    return attempt, tuple(job for job in jobs if is_object_dict(job))
 
 
 # meiva:note
@@ -453,6 +479,7 @@ def watch_round(
         ),
         workflows=(_RELEASE_GATE, _NIGHTLY, _CI_NIGHTLY, _MAIN_PUSH),
         compare=partial(compare_commits, run_process=run_process),
+        attempt_of=partial(latest_attempt_jobs, run_process=run_process),
         liveness=(
             LivenessStream("nightly", _NIGHTLY, NIGHTLY_STALE_AFTER),
             LivenessStream(

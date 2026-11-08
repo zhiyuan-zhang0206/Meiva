@@ -174,6 +174,14 @@ class Entry:
     task_id: int | None = None
     kind: str = FAILURE_TEST
     # meiva:note
+    # The job that reported this red, from the run that first named it. A re-run advances one job and
+    # leaves the run alone, so "did this claim survive the re-run" is a question about this job in
+    # that run's newest attempt -- and answering it needs the name, which the fingerprint does not
+    # carry (that stays `(workflow, test_id)`, because a shard name must not decide identity). An
+    # entry written before the field existed has none: the gate then leaves it alone rather than
+    # re-deciding a red on evidence nobody had when the red was recorded.
+    job: str = ""
+    # meiva:note
     # Whether the run that reported this red ran the whole population. It decides what may retire
     # the card: a full-suite red is evidence about the whole tree, so any full-suite green on a
     # later commit resolves it, while a red from a lane that runs part of the tree is resolved only
@@ -400,6 +408,7 @@ def apply_run(entries: dict[str, Entry], run: RunFacts) -> Plan:
                 last_red_at=run.created_at,
                 red_count=1,
                 kind=failure.kind,
+                job=failure.job,
                 covers_full_suite=run.covers_full_suite and failure.covers_full_suite,
             )
             plan_entries[name] = created

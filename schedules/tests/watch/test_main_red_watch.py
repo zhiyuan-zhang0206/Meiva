@@ -15,7 +15,13 @@ from typing import cast
 from base.db import Database
 from schedules.jobs.watch.main_red_liveness import liveness_once
 from schedules.jobs.watch.main_red_watch import (
+    ATTEMPT_GREEN,
+    ATTEMPT_HOLDS,
+    ATTEMPT_PENDING,
+    AttemptOf,
     LivenessStream,
+    job_attempt_verdict,
+    listing_attempt,
     card_operation_key,
     STATE_FILE,
     WatchState,
@@ -28,6 +34,7 @@ from schedules.plans.watch.main_red import (
     FAILURE_TEST,
     FAILURE_UNNAMED,
     NIGHTLY_STALE_AFTER,
+    STATE_CONFIRMED,
     Card,
     Failure,
     RunFacts,
@@ -52,6 +59,7 @@ def _red(
     full_suite: bool = True,
     partial_job: bool = False,
     title: str = "",
+    job: str = "",
 ) -> RunFacts:
     from schedules.plans.watch.main_red import Failure
 
@@ -60,7 +68,7 @@ def _red(
         sha,
         when,
         "failure",
-        (Failure(test_id, FAILURE_TEST, covers_full_suite=not partial_job),),
+        (Failure(test_id, FAILURE_TEST, job=job, covers_full_suite=not partial_job),),
         covers_full_suite=full_suite,
         head_title=title,
     )
@@ -80,6 +88,7 @@ def _watch(
     now: datetime | None = None,
     workflows: tuple[str, ...] = ("release-gate.yml",),
     starts: Mapping[str, datetime | None] | None = None,
+    attempt_of: AttemptOf | None = None,
 ) -> str:
     def fetch(_workflow: str) -> tuple[RunFacts, ...]:
         return tuple(runs)
@@ -111,6 +120,7 @@ def _watch(
         emit=emit,
         workflows=workflows,
         liveness=_LIVENESS,
+        attempt_of=attempt_of,
     )
 
 
@@ -968,3 +978,255 @@ def test_an_old_watermark_does_not_replay_its_boundary_run(tmp_path: Path) -> No
         "the old run is not replayed"
     )
     assert opened == []
+
+
+# meiva:note
+# The two shards of the case that produced this gate: attempt 1 of `42418111597` had
+# `e2e full matrix (1/4)` red and attempt 2 cleared it, while `(3/4)` stayed red. So the question is
+# asked of one job in one attempt -- never of the run's own conclusion, which was `failure` in both.
+_GATED_JOB = "e2e full matrix (1/4)"
+_HOLDS_JOB = "e2e full matrix (3/4)"
+
+
+def test_only_a_green_attempt_withdraws_a_claim() -> None:
+    jobs: list[Mapping[str, object]] = [
+        {"name": _GATED_JOB, "conclusion": "success"},
+        {"name": _HOLDS_JOB, "conclusion": "failure"},
+        {"name": "still running", "conclusion": None},
+        {"name": "cancelled", "conclusion": "cancelled"},
+    ]
+
+    assert job_attempt_verdict(jobs, _GATED_JOB) == (ATTEMPT_GREEN, "success")
+    assert job_attempt_verdict(jobs, _HOLDS_JOB) == (ATTEMPT_HOLDS, "failure")
+    assert job_attempt_verdict(jobs, "still running") == (ATTEMPT_PENDING, "no conclusion yet")
+    assert job_attempt_verdict(jobs, "cancelled")[0] == ATTEMPT_HOLDS
+
+
+# meiva:note
+# A job the newest attempt does not list is not a job that passed: a re-run can drop a matrix leg,
+# and answer `holds` -- "there is a newer attempt" is not "the newer attempt is green".
+def test_a_job_missing_from_the_attempt_keeps_the_claim() -> None:
+    verdict, seen = job_attempt_verdict(
+        [{"name": "another job", "conclusion": "success"}], _HOLDS_JOB
+    )
+
+    assert verdict == ATTEMPT_HOLDS
+    assert "missing" in seen
+
+
+def test_the_listing_attempt_defaults_to_the_first() -> None:
+    assert listing_attempt({"run_attempt": 2}) == 2
+    assert listing_attempt({}) == 1
+    assert listing_attempt({"run_attempt": 0}) == 1
+    assert listing_attempt({"run_attempt": "3"}) == 1
+    assert listing_attempt({"run_attempt": True}) == 1
+
+
+def _attempt_port(
+    jobs: Sequence[Mapping[str, object]], *, attempt: int = 2
+) -> tuple[AttemptOf, list[int]]:
+    calls: list[int] = []
+
+    def port(run_id: int) -> tuple[int, tuple[Mapping[str, object], ...]]:
+        calls.append(run_id)
+        return attempt, tuple(jobs)
+
+    return port, calls
+
+
+# meiva:note
+# Two red runs confirm a named failure, and the card is opened for the second one. That run was
+# re-run before the round reached it, and the job it named passed in attempt 2 -- so the card must
+# not appear, and the entry goes with the claim: a later red of the same case is a new sighting,
+# not a second strike earned by a run whose own re-run said it passed.
+def test_a_re_run_that_turned_the_job_green_opens_no_card(tmp_path: Path) -> None:
+    opened: list[Card] = []
+    port, calls = _attempt_port([{"name": _GATED_JOB, "conclusion": "success"}])
+    lines = [
+        _watch(
+            tmp_path,
+            [
+                replace(
+                    _red(
+                        "release-gate.yml",
+                        "sha1",
+                        datetime(2026, 11, 2, 6, tzinfo=UTC),
+                        job=_GATED_JOB,
+                    ),
+                    run_id=701,
+                )
+            ],
+            opened=opened,
+            closed=[],
+            heartbeats=[],
+            attempt_of=port,
+        ),
+        _watch(
+            tmp_path,
+            [
+                replace(
+                    _red(
+                        "release-gate.yml",
+                        "sha2",
+                        datetime(2026, 11, 2, 12, tzinfo=UTC),
+                        job=_GATED_JOB,
+                    ),
+                    run_id=702,
+                )
+            ],
+            opened=opened,
+            closed=[],
+            heartbeats=[],
+            attempt_of=port,
+        ),
+    ]
+
+    assert opened == [], "the newest attempt of its own run cleared the red"
+    assert calls == [702], "only the run that would have opened the card is asked about"
+    assert "attempt 2 green" in lines[-1]
+    assert load_state(tmp_path / STATE_FILE).entries == {}, "the claim is withdrawn with the entry"
+
+
+# meiva:note
+# The reverse control: the same two rounds with the job still red in attempt 2 must open the card,
+# or the previous test would pass for a gate that never fires.
+def test_a_re_run_that_is_still_red_opens_the_card(tmp_path: Path) -> None:
+    opened: list[Card] = []
+    port, _calls = _attempt_port([{"name": _GATED_JOB, "conclusion": "failure"}])
+    for sha, hour, run_id in (("sha1", 6, 701), ("sha2", 12, 702)):
+        line = _watch(
+            tmp_path,
+            [
+                replace(
+                    _red(
+                        "release-gate.yml",
+                        sha,
+                        datetime(2026, 11, 2, hour, tzinfo=UTC),
+                        job=_GATED_JOB,
+                    ),
+                    run_id=run_id,
+                )
+            ],
+            opened=opened,
+            closed=[],
+            heartbeats=[],
+            attempt_of=port,
+        )
+
+    assert len(opened) == 1
+    assert "attempt 2 failure" in line
+
+
+# meiva:note
+# An attempt that has not concluded settles nothing: it must not open a card (the re-run may still
+# clear it) and must not withdraw the claim (nobody has read a green). The entry stays confirmed and
+# the next round asks again.
+def test_an_unfinished_attempt_waits_instead_of_deciding(tmp_path: Path) -> None:
+    opened: list[Card] = []
+    port, _calls = _attempt_port([{"name": _GATED_JOB, "conclusion": None}])
+    for sha, hour, run_id in (("sha1", 6, 701), ("sha2", 12, 702)):
+        line = _watch(
+            tmp_path,
+            [
+                replace(
+                    _red(
+                        "release-gate.yml",
+                        sha,
+                        datetime(2026, 11, 2, hour, tzinfo=UTC),
+                        job=_GATED_JOB,
+                    ),
+                    run_id=run_id,
+                )
+            ],
+            opened=opened,
+            closed=[],
+            heartbeats=[],
+            attempt_of=port,
+        )
+
+    assert opened == []
+    assert "card waits" in line
+    entries = load_state(tmp_path / STATE_FILE).entries
+    (entry,) = entries.values()
+    assert entry.state == STATE_CONFIRMED
+    assert entry.task_id is None
+
+
+# meiva:note
+# A read that failed must not answer "safe": the gate suppresses a card only on a green someone
+# actually read, so an unreadable attempt opens the card and says so in the round line.
+def test_an_unreadable_attempt_still_opens_the_card(tmp_path: Path) -> None:
+    opened: list[Card] = []
+
+    def port(_run_id: int) -> tuple[int, tuple[Mapping[str, object], ...]]:
+        raise RuntimeError("gh api failed")
+
+    for sha, hour, run_id in (("sha1", 6, 701), ("sha2", 12, 702)):
+        line = _watch(
+            tmp_path,
+            [
+                replace(
+                    _red(
+                        "release-gate.yml",
+                        sha,
+                        datetime(2026, 11, 2, hour, tzinfo=UTC),
+                        job=_GATED_JOB,
+                    ),
+                    run_id=run_id,
+                )
+            ],
+            opened=opened,
+            closed=[],
+            heartbeats=[],
+            attempt_of=port,
+        )
+
+    assert len(opened) == 1
+    assert "unreadable" in line
+
+
+# meiva:note
+# An entry written before `Entry.job` existed keeps no job, and the gate stays out of its way: the
+# red it stands for was decided without the attempt evidence, and nothing here may re-decide it by
+# guessing which job it belonged to.
+def test_an_entry_without_a_job_skips_the_gate(tmp_path: Path) -> None:
+    opened: list[Card] = []
+    port, calls = _attempt_port([{"name": _GATED_JOB, "conclusion": "success"}])
+    for sha, hour, run_id in (("sha1", 6, 701), ("sha2", 12, 702)):
+        _watch(
+            tmp_path,
+            [
+                replace(
+                    _red("release-gate.yml", sha, datetime(2026, 11, 2, hour, tzinfo=UTC)),
+                    run_id=run_id,
+                )
+            ],
+            opened=opened,
+            closed=[],
+            heartbeats=[],
+            attempt_of=port,
+        )
+
+    assert len(opened) == 1
+    assert calls == [], "no job on the entry means no question to ask"
+
+
+def test_the_state_file_carries_the_job_across_rounds(tmp_path: Path) -> None:
+    path = tmp_path / STATE_FILE
+    _watch(
+        path.parent,
+        [
+            replace(
+                _red(
+                    "release-gate.yml", "sha1", datetime(2026, 11, 2, 6, tzinfo=UTC), job=_GATED_JOB
+                ),
+                run_id=701,
+            )
+        ],
+        opened=[],
+        closed=[],
+        heartbeats=[],
+    )
+
+    (entry,) = load_state(path).entries.values()
+    assert entry.job == _GATED_JOB
