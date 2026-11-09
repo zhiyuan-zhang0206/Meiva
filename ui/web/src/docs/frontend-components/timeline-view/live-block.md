@@ -1,14 +1,15 @@
 # The expanded live block
 
 An active turn's expanded block reports itself through
-`createStickyController().notifyLiveBlock(open)`. Opening one stops following —
-the block's header is the reader's place from then on, not the tail — and while it
-stays open a layout pass never pins, so the block's top edge holds and its content
-extends downward with no bound. The flag suppresses the pin only: the reader's own
-return to the bottom still re-follows, and the first layout pass after the block
-closes or collapses pins as usual. Without it, every streamed chunk pinned the
-tail and carried the header the reader was reading off the top of the screen
-(user ruling 2026-11-09).
+`createStickyController().notifyLiveBlock(open)`. Opening an active `Working`
+block jumps directly to the bottom of its expanded content and enables
+tail-following (`sticky = true`) so the reader immediately sees the latest
+in-progress step and follows subsequent streamed output (user ruling 2026-11-09,
+superseding the earlier fixed-top-edge rule). While the block remains open,
+ordinary upward scroll or wheel gestures still release following so the reader
+can inspect earlier steps inside the block. Manually expanding a settled
+historical `TurnBlock` calls `notifyBlockExpanded()` instead, keeping the
+viewport where the reader clicked.
 
 ## Relationship to Other Nodes
 

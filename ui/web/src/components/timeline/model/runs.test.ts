@@ -63,19 +63,19 @@ describe("classifyItem", () => {
     expect(summary.lastLiveStartedAt).toBe(1000);
   });
 
-  it("agent_chat, human inbound and system:upload are primary; non-user-facing agent_chat is secondary", () => {
+  it("agent_chat and human inbound are primary; non-user-facing agent_chat is secondary", () => {
     expect(classifyItem(item("agent_chat"))).toBe("primary");
     expect(classifyItem(item("agent_chat", null, undefined, { user_facing: true }))).toBe("primary");
     expect(classifyItem(item("agent_chat", null, undefined, { user_facing: false }))).toBe("secondary");
     expect(classifyItem(item("inbound_chat", "user"))).toBe("primary");
     expect(classifyItem(item("inbound_chat", "ui:page:board"))).toBe("primary");
-    expect(classifyItem(item("inbound_chat", "system:upload"))).toBe("primary");
   });
 
   it("agent + system inbound are secondary", () => {
     expect(classifyItem(item("inbound_chat", "agent:5"))).toBe("secondary");
     expect(classifyItem(item("inbound_chat", "external_agent:claude_code"))).toBe("secondary");
     expect(classifyItem(item("inbound_chat", "system"))).toBe("secondary");
+    expect(classifyItem(item("inbound_chat", "system:upload"))).toBe("secondary");
     expect(classifyItem(item("inbound_chat", "watcher:1"))).toBe("secondary");
   });
 

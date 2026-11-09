@@ -318,10 +318,34 @@ def _current_items(
     return items, msg_count
 
 
+def _is_work_item(item: TimelineItem) -> bool:
+    return item.kind in {"agent_reasoning", "agent_code", "code_output"} or (
+        item.kind == "agent_chat" and item.user_facing is False
+    )
+
+
+def _is_primary_item(item: TimelineItem) -> bool:
+    if item.kind == "agent_chat":
+        return item.user_facing is not False
+    if item.kind == "inbound_chat":
+        source = item.source or ""
+        return source == "user" or source.startswith("ui:page:")
+    return False
+
+
 # meiva:note
 # The facts the windowing rules read of each rendered item, in order.
 def _rows(items: Sequence[TimelineItem]) -> list[Row]:
-    return [Row(item.item_id, item.kind, item.source in STANDING_HEAD_NOTE_TAGS) for item in items]
+    return [
+        Row(
+            item.item_id,
+            item.kind,
+            item.source in STANDING_HEAD_NOTE_TAGS,
+            work=_is_work_item(item),
+            primary=_is_primary_item(item),
+        )
+        for item in items
+    ]
 
 
 # meiva:note

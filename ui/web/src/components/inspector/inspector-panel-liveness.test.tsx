@@ -52,7 +52,7 @@ describe("InspectorPanel liveness identity rows", () => {
     const activitySection = screen.getByText("Activity").closest("section");
     expect(within(activitySection!).getByText("Cost (API)")).toBeTruthy();
     expect(within(activitySection!).getByText("LLM calls")).toBeTruthy();
-    expect(within(activitySection!).getByText("Idle")).toBeTruthy();
+    expect(within(activitySection!).queryByText("Idle")).toBeNull();
     expect(within(activitySection!).queryByText("TPS")).toBeNull();
     expect(within(activitySection!).queryByText("LLM output")).toBeNull();
     expect(within(activitySection!).queryByText("Code execution")).toBeNull();

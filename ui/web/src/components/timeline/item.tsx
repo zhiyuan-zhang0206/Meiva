@@ -327,11 +327,9 @@ function EnvelopeContent({
 }) {
   const t = useTranslations("timeline");
   const body = stripHumanHeader ? splitEnvelope(payload).body : payload;
-  const isUploadBatchWithFiles = source === "system:upload" && Boolean(files?.length);
   const showBody =
-    !isUploadBatchWithFiles &&
     Boolean(body) &&
-    !(images?.length && body === "[image]") &&
+    !(images?.length && (body === "[image]" || body === "[files]")) &&
     !((Boolean(files?.length) || source === "user") && body === "[files]");
   // Attach items carry data URIs (self.attach media) — those render raw;
   // gateway-relative urls (user uploads) resolve through assetUrl.
@@ -373,7 +371,7 @@ function EnvelopeContent({
         </div>
       ) : null}
       {images?.length ? (
-        <div className={cn("mt-2 flex-wrap gap-2", FLEX)}>
+        <div className={cn(showBody && "mt-2", "flex-wrap gap-2", FLEX)}>
           {images.map((src) => (
             <Thumbnail key={src} src={resolveImageSrc(src)} alt={t("attachedImage")} />
           ))}

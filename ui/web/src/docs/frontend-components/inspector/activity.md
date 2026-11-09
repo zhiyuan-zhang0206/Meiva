@@ -19,8 +19,9 @@ under a block that does show when that mode has calls without a stored usage-tim
 price snapshot: those contribute 0 and are surfaced rather than hidden, never
 silently partial. Then LLM calls; tokens in / out combined; cache-hit
 percent (`N/A` when unmetered). Activity: TPS (the LLM stage's),
-then the absolute durations the header window covers — LLM output, code execution,
-and idle (`alive − active`). For external harnesses (`harness !== "meiva"`), TPS,
+then the absolute durations the header window covers — LLM output and code execution
+(the former Idle block was removed per user ruling 2026-11-09). For external
+harnesses (`harness !== "meiva"`), TPS,
 LLM output, and code execution are omitted because those belong to the native
 `execute_code` loop. Without life (`alive_seconds = 0`) the duration cells show em
 dashes while TPS stays visible. Durations use the shared tiering — `45s` / `15m` /

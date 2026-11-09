@@ -380,3 +380,57 @@ def test_upload_note_inbound_carries_meiva_upload_files() -> None:
             "url": f"/api/agents/7/uploads/{batch_id}/0",
         }
     ]
+
+
+def test_user_image_uploads_inbound_renders_multimodal_message_and_harness_prompt(
+    tmp_path: Any,
+) -> None:
+    from pathlib import Path
+
+    from agent.graph.claim.harness_turn import render_message
+    from base.agents.history.timeline import build_timeline_items
+
+    batch_id = "b" * 32
+    png_bytes = b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR"
+    img_path = Path(tmp_path) / "screen.png"
+    img_path.write_bytes(png_bytes)
+    row = ClaimedInbound(
+        id=10,
+        agent_id=7,
+        content="Look at this screenshot",
+        kind="chat",
+        source="user",
+        payload={
+            "image_uploads": [
+                {
+                    "name": "screen.png",
+                    "size": len(png_bytes),
+                    "content_type": "image/png",
+                    "path": str(img_path),
+                    "batch_id": batch_id,
+                    "ordinal": 0,
+                }
+            ]
+        },
+        created_at=datetime(2026, 6, 30, 12, 0, 0, tzinfo=UTC),
+    )
+    msg, finding = build_chat_inbound(
+        row,
+        read_security_enabled=lambda: settings.agent.security_scan_enabled,
+        envelope_inputs=_ENVELOPE_INPUTS,
+        expand_command=CommandCatalog.system(skills=list, home=meiva_home()).expand,
+        gateway=_forbidden_gateway,
+        picked_up_at=_PICKED_UP_AT,
+    )
+    assert finding is None
+    assert [b["type"] for b in _blocks(msg)] == ["text", "image_url"]
+    prompt = render_message(msg)
+    assert "Look at this screenshot" in prompt
+    assert f"Attached images:\n- screen.png (image/png, {len(png_bytes)} B): {img_path}" in prompt
+    assert "[image_url]" not in prompt
+    items, _ = build_timeline_items([msg], inputs=_ENVELOPE_INPUTS)
+    assert len(items) == 1
+    assert items[0].kind == "inbound_chat"
+    assert items[0].source == "user"
+    assert items[0].images == [f"/api/agents/7/uploads/{batch_id}/0"]
+    assert items[0].files is None

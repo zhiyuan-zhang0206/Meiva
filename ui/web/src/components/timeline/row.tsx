@@ -115,11 +115,8 @@ export const TimelineRow = memo(function TimelineRow({
   // expanded body's bottom-right corner when `config.copy` is true (inter-agent
   // messages and non-user-facing agent_chat) so inter-card spacing stays uniform.
   // meiva:link ui/web/src/docs/frontend-components/timeline-view/card-chrome.md
-  const isUploadRow =
-    item.kind === "inbound_chat" &&
-    (item.source === "system:upload" || Boolean(item.files?.length));
   const isHumanBubble =
-    item.kind === "inbound_chat" && (inboundKind(item.source) === "human" || isUploadRow);
+    item.kind === "inbound_chat" && inboundKind(item.source) === "human";
   const isAgentProse =
     item.kind === "agent_chat" && item.user_facing !== false;
   const isPrimaryMessage = isHumanBubble || isAgentProse;

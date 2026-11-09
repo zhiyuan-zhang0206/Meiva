@@ -240,13 +240,14 @@ export interface StickyController {
   // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.md
   isAnchored(): boolean;
   // meiva:note
-  // Reports whether an expanded live work block owns the viewport. While it does,
-  // content growth must not pin: the block's own top edge is the thing that stays
-  // put as the block streams downward, and a pin would carry that edge off the
-  // screen (user ruling 2026-11-09). Opening one stops following; the reader's
-  // own return to the bottom still re-follows, and the next layout pass after the
-  // block closes (or collapses) pins as usual.
-  // meiva:link ui/web/src/docs/frontend-components/timeline-view/deep-collapse.md
+  // Reports whether an expanded live work block is open. Opening an active
+  // working block jumps to its bottom and enables tail-following so the reader
+  // immediately sees the latest in-progress step and follows new steps as they
+  // stream in (user ruling 2026-11-09, replacing the earlier fixed-top-edge
+  // rule). While the block remains open, ordinary upward scroll/wheel gestures
+  // still release following so the reader can inspect earlier steps inside the
+  // block.
+  // meiva:link ui/web/src/docs/frontend-components/timeline-view/live-block.md
   notifyLiveBlock(open: boolean): void;
   // meiva:note
   // Reports that the reader manually expanded a work block to inspect its
@@ -322,9 +323,10 @@ export function createStickyController(
   // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.md
   let anchored = false;
   // meiva:note
-  // An expanded live work block owns the viewport's top edge: growth extends it
-  // downward instead of pinning the tail. See `notifyLiveBlock`.
-  // meiva:link ui/web/src/docs/frontend-components/timeline-view/deep-collapse.md
+  // Tracks whether the active working block is currently expanded so opening it
+  // transitions into bottom-following once without re-sticking on every streamed
+  // commit while it stays open. See `notifyLiveBlock`.
+  // meiva:link ui/web/src/docs/frontend-components/timeline-view/live-block.md
   let liveBlockOpen = false;
 
   // Following: remember where the bottom was, so a later growth can be
@@ -486,10 +488,6 @@ export function createStickyController(
       // could never accumulate past the bottom zone — the timeline was
       // glued to the bottom and the scroll-to-bottom button never showed.
       if (touchActive) return false;
-      if (liveBlockOpen) {
-        prevNearBottom = isAtBottom(view, thresholds);
-        return false;
-      }
       // A height change moved the bottom with no scroll event. If it left
       // the viewport at the bottom, that IS following — reconcile the flag
       // (the old design needed a separate at-bottom net in the observer
@@ -596,7 +594,8 @@ export function createStickyController(
       if (liveBlockOpen === open) return;
       liveBlockOpen = open;
       if (open) {
-        unstick();
+        sticky = true;
+        anchored = false;
         upwardRun = 0;
       }
     },

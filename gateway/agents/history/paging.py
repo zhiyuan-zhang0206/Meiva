@@ -47,6 +47,8 @@ class Row:
     item_id: str
     kind: str
     tagged_plain: bool
+    work: bool = False
+    primary: bool = False
 
 
 # meiva:note
@@ -193,12 +195,58 @@ def _missing_standing_context(items: Sequence[Row], window: Sequence[int]) -> tu
     return (*prompt, *notes, *compact)
 
 
+_MIN_INITIAL_PRIMARY_ITEMS = 6
+_MAX_INITIAL_WORK_SPAN_MULTIPLIER = 20
+_MAX_INITIAL_WORK_SPAN_FLOOR = 1000
+
+
+def _extend_for_min_primary(
+    items: Sequence[Row], tail_start: int, min_primary: int, max_span: int
+) -> int:
+    primary_count = sum(1 for item in items[tail_start:] if item.primary)
+    if primary_count >= min_primary or not any(item.primary for item in items[:tail_start]):
+        return tail_start
+    cursor = tail_start
+    while cursor > 0 and (len(items) - cursor) < max_span and primary_count < min_primary:
+        cursor -= 1
+        if items[cursor].primary:
+            primary_count += 1
+            tail_start = cursor
+    return tail_start
+
+
+def _is_turn_boundary_item(item: Row, head_note_ids: set[str]) -> bool:
+    return item.primary or item.kind in _REATTACHED_KINDS or item.item_id in head_note_ids
+
+
+def _work_aware_tail_start(items: Sequence[Row], tail_start: int, limit: int) -> int:
+    if tail_start <= 0 or limit <= 0:
+        return max(0, tail_start)
+    if not any(item.work for item in items[tail_start:]):
+        return tail_start
+    min_primary = min(limit, _MIN_INITIAL_PRIMARY_ITEMS)
+    max_span = max(limit * _MAX_INITIAL_WORK_SPAN_MULTIPLIER, _MAX_INITIAL_WORK_SPAN_FLOOR)
+    tail_start = _extend_for_min_primary(items, tail_start, min_primary, max_span)
+    head_note_ids = _standing_head_note_ids(items)
+    while (
+        tail_start > 0
+        and (len(items) - tail_start) < max_span
+        and not _is_turn_boundary_item(items[tail_start - 1], head_note_ids)
+    ):
+        tail_start -= 1
+    return tail_start
+
+
 # meiva:note
 # The head window of the current segment, preserving its standing context.
 #
 # The tail is the newest `tail_size` items and `tail_has_more` says whether older ones exist.
-# What fell off the tail as standing context is re-attached at the head without counting against
-# `limit` or creating a phantom older-page affordance.
+# When a long run of secondary work items (`agent_reasoning`, `agent_code`, `code_output`, or
+# non-user-facing `agent_chat`) fills the raw `tail_size` slice, `_work_aware_tail_start` extends
+# the tail backward across work items so recent primary messages and their contiguous turn block
+# remain visible without requiring manual scroll-up paging. What fell off the tail as standing
+# context is re-attached at the head without counting against `limit` or creating a phantom
+# older-page affordance.
 def initial_window(
     items: Sequence[Row],
     *,
@@ -207,10 +255,14 @@ def initial_window(
     limit: int,
     historical_segments_available: bool,
 ) -> Selection:
-    window = tuple(range(len(items) - tail_size, len(items)))
-    has_more = tail_has_more
+    tail_start = len(items) - tail_size
+    if tail_has_more:
+        tail_start = _work_aware_tail_start(items, tail_start, limit)
+    window = tuple(range(tail_start, len(items)))
+    has_more = tail_has_more and tail_start > 0
     reattached = _missing_standing_context(items, window)
     if reattached:
         window = (*reattached, *window)
-        has_more = has_more and len(items) - len(reattached) > limit
+        effective_limit = max(limit, len(items) - tail_start)
+        has_more = has_more and len(items) - len(reattached) > effective_limit
     return Selection(window, has_more=has_more or historical_segments_available)

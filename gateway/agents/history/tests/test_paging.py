@@ -146,3 +146,18 @@ def test_a_window_holding_the_prompt_attaches_nothing_and_keeps_history_visible(
         rows, tail_size=2, tail_has_more=False, limit=50, historical_segments_available=True
     )
     assert (picked(rows, window), window.has_more) == (["0.0", "1.0"], True)
+
+
+def test_the_initial_window_extends_past_long_work_runs_to_retain_recent_primary_messages() -> None:
+    rows = [
+        Row("h0.0", "system_prompt", tagged_plain=False),
+        Row("h1.0", "system_marker", tagged_plain=True),
+        Row("h2.0", "inbound_chat", tagged_plain=False, primary=True),
+        Row("h3.0", "agent_chat", tagged_plain=False, primary=True),
+        *(Row(f"h{n}.0", "agent_code", tagged_plain=False, work=True) for n in range(4, 64)),
+    ]
+    window = initial_window(
+        rows, tail_size=50, tail_has_more=True, limit=50, historical_segments_available=False
+    )
+    assert picked(rows, window) == [r.item_id for r in rows]
+    assert window.has_more is False

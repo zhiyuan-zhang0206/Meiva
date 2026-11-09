@@ -138,9 +138,6 @@ export function CostActivitySection({
   const activity = inspect?.activity ?? null;
   const tps = inspect?.tps;
   const hasLife = activity !== null && activity.alive_seconds > 0;
-  const idleSeconds = activity
-    ? Math.max(0, activity.alive_seconds - activity.active_seconds)
-    : 0;
   // meiva:note
   // Two cost blocks, one per billing mode, each naming its own mode in the label:
   // `Cost (subscription)` covers the calls a subscription already paid for (their
@@ -244,46 +241,34 @@ export function CostActivitySection({
               />
             </div>
           ) : null}
-          <div className="grid grid-cols-2 gap-1">
-            {!isExternalHarness ? (
-              <>
-                <Metric
-                  label={t("metricTps")}
-                  value={inspect ? (tps?.lm_stage_tps != null ? formatTps(tps.lm_stage_tps) : "—") : undefined}
-                />
-                <Metric
-                  label={t("metricLlmOutput")}
-                  value={
-                    inspect
-                      ? hasLife && activity.llm_seconds != null
-                        ? formatInterval(Math.round(activity.llm_seconds))
-                        : "—"
-                      : undefined
-                  }
-                />
-                <Metric
-                  label={t("metricCodeExecution")}
-                  value={
-                    inspect
-                      ? hasLife
-                        ? formatInterval(Math.round(activity.exec_seconds))
-                        : "—"
-                      : undefined
-                  }
-                />
-              </>
-            ) : null}
-            <Metric
-              label={t("metricIdle")}
-              value={
-                inspect
-                  ? hasLife
-                    ? formatInterval(Math.round(idleSeconds))
-                    : "—"
-                  : undefined
-              }
-            />
-          </div>
+          {!isExternalHarness ? (
+            <div className="grid grid-cols-2 gap-1">
+              <Metric
+                label={t("metricTps")}
+                value={inspect ? (tps?.lm_stage_tps != null ? formatTps(tps.lm_stage_tps) : "—") : undefined}
+              />
+              <Metric
+                label={t("metricLlmOutput")}
+                value={
+                  inspect
+                    ? hasLife && activity.llm_seconds != null
+                      ? formatInterval(Math.round(activity.llm_seconds))
+                      : "—"
+                    : undefined
+                }
+              />
+              <Metric
+                label={t("metricCodeExecution")}
+                value={
+                  inspect
+                    ? hasLife
+                      ? formatInterval(Math.round(activity.exec_seconds))
+                      : "—"
+                    : undefined
+                }
+              />
+            </div>
+          ) : null}
         </div>
       )}
     </Section>

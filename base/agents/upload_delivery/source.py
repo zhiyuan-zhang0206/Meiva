@@ -9,6 +9,7 @@ from psycopg.types.json import Jsonb
 from pydantic import BaseModel, ConfigDict, TypeAdapter
 
 from base.agents.inbox.chat_delivery import insert_chat_inbound_in_transaction
+from base.agents.messages.inbound_images import image_mime_for
 from base.agents.messages.inbound_provenance import InboundProvenance
 from base.agents.upload_delivery.models import (
     PROTOCOL,
@@ -440,6 +441,47 @@ class _CompleteRow:
     message: object
 
 
+def _verify_complete_row(row: _CompleteRow | None, request: ReceiveRequest) -> _CompleteRow:
+    if row is None:
+        raise UploadDeliveryConflictError("source acceptance is absent")
+    if (
+        UnitIdentity.model_validate(row.target_unit) != request.target
+        or Manifest.model_validate(row.manifest) != request.manifest
+        or UnitIdentity.model_validate(row.source_unit) != request.source
+    ):
+        raise UploadDeliveryConflictError("stored intent differs from receiver proof")
+    if row.inbound_id is None and row.state != "pending":
+        raise UploadDeliveryConflictError("held delivery cannot accept a late copy proof")
+    return row
+
+
+def _partition_delivered_uploads(
+    manifest: Manifest, paths: list[str]
+) -> tuple[list[dict[str, object]], list[dict[str, object]]]:
+    upload_files: list[dict[str, object]] = [
+        {
+            "name": item.name,
+            "size": item.size,
+            "content_type": item.content_type,
+            "path": path,
+            "batch_id": manifest.batch_id,
+            "ordinal": item.ordinal,
+        }
+        for item, path in zip(manifest.objects, paths, strict=True)
+    ]
+    image_uploads = [
+        entry
+        for entry in upload_files
+        if image_mime_for(str(entry["name"]), str(entry["content_type"])) is not None
+    ]
+    file_uploads = [
+        entry
+        for entry in upload_files
+        if image_mime_for(str(entry["name"]), str(entry["content_type"])) is None
+    ]
+    return image_uploads, file_uploads
+
+
 def complete(pool: ConnectionSource, request: ReceiveRequest, proof: CopyProof) -> int:
     if (
         proof.version != PROTOCOL
@@ -449,26 +491,19 @@ def complete(pool: ConnectionSource, request: ReceiveRequest, proof: CopyProof) 
         raise UploadDeliveryConflictError("receiver proof differs from the frozen target manifest")
     manifest = request.manifest
     with write_transaction(pool) as conn:
-        row = query_one(
-            conn,
-            _CompleteRow,
-            "SELECT inbound_id, target_unit, manifest, provenance, state, source_unit, message "
-            "FROM upload_delivery_batches "
-            "WHERE batch_id=%s AND protocol=%s AND ready_at IS NOT NULL FOR UPDATE",
-            (manifest.batch_id, PROTOCOL),
+        row = _verify_complete_row(
+            query_one(
+                conn,
+                _CompleteRow,
+                "SELECT inbound_id, target_unit, manifest, provenance, state, source_unit, message "
+                "FROM upload_delivery_batches "
+                "WHERE batch_id=%s AND protocol=%s AND ready_at IS NOT NULL FOR UPDATE",
+                (manifest.batch_id, PROTOCOL),
+            ),
+            request,
         )
-        if row is None:
-            raise UploadDeliveryConflictError("source acceptance is absent")
-        if (
-            UnitIdentity.model_validate(row.target_unit) != request.target
-            or Manifest.model_validate(row.manifest) != manifest
-            or UnitIdentity.model_validate(row.source_unit) != request.source
-        ):
-            raise UploadDeliveryConflictError("stored intent differs from receiver proof")
         if row.inbound_id is not None:
             return row.inbound_id
-        if row.state != "pending":
-            raise UploadDeliveryConflictError("held delivery cannot accept a late copy proof")
         if target_unit(conn, manifest.agent_id) != request.target:
             raise UploadDeliveryConflictError("agent placement changed after upload acceptance")
         paths = _proof_paths(proof, manifest, home=request.target.home)
@@ -484,23 +519,13 @@ def complete(pool: ConnectionSource, request: ReceiveRequest, proof: CopyProof) 
                 for item, path in zip(manifest.objects, paths, strict=True)
             ],
         )
-        upload_files = [
-            {
-                "name": item.name,
-                "size": item.size,
-                "content_type": item.content_type,
-                "path": path,
-                "batch_id": manifest.batch_id,
-                "ordinal": item.ordinal,
-            }
-            for item, path in zip(manifest.objects, paths, strict=True)
-        ]
+        image_uploads, file_uploads = _partition_delivered_uploads(manifest, paths)
         note_receipt, _ = insert_chat_inbound_in_transaction(
             conn,
             agent_id=manifest.agent_id,
             content=note_content,
             source="system:upload",
-            payload={"upload_files": upload_files},
+            payload={"upload_files": file_uploads} if file_uploads else None,
             client_message_id=f"upload-delivery-v2:{manifest.batch_id}:note",
             provenance=provenance,
         )
@@ -510,7 +535,7 @@ def complete(pool: ConnectionSource, request: ReceiveRequest, proof: CopyProof) 
             agent_id=manifest.agent_id,
             content=user_content,
             source=frozen.source,
-            payload=None,
+            payload={"image_uploads": image_uploads} if image_uploads else None,
             client_message_id=f"upload-delivery-v2:{manifest.batch_id}:message",
             provenance=provenance,
         )

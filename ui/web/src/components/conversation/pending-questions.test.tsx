@@ -26,18 +26,16 @@ beforeEach(() => {
 });
 afterEach(() => { cleanup(); dropTombstonesResetForTest(); });
 
-it("anchors a collapsed queue above the composer and retains independent drafts through collapse", () => {
+it("opens expanded by default above the composer and retains independent drafts through collapse", () => {
   renderQuestions(<PendingQuestions questions={questions} failed={false} maxWidthCss="768px" />);
   const region = screen.getByTestId("pending-questions");
   expect(region.className).toContain("relative");
   expect(region.style.maxWidth).toBe("768px");
   const toggle = screen.getByRole("button", { name: "2 questions waiting" });
-  expect(toggle.getAttribute("aria-expanded")).toBe("false");
+  expect(toggle.getAttribute("aria-expanded")).toBe("true");
   const answerLayer = document.getElementById(toggle.getAttribute("aria-controls")!)!;
   expect(answerLayer.className).toContain("absolute");
   expect(answerLayer.className).toContain("bottom-full");
-  expect(screen.queryByRole("textbox")).toBeNull();
-  fireEvent.click(toggle);
   const first = within(screen.getByRole("article", { name: "Question 1" })).getByRole<HTMLTextAreaElement>("textbox");
   const second = within(screen.getByRole("article", { name: "Question 2" })).getByRole<HTMLTextAreaElement>("textbox");
   expect(first.value).toBe("");
@@ -47,8 +45,10 @@ it("anchors a collapsed queue above the composer and retains independent drafts 
   const viewport = region.querySelector('[data-slot="scroll-area-viewport"]')!;
   expect(viewport.className).toContain(QUESTION_REGION_MAX_HEIGHT_CLASS);
   fireEvent.click(toggle);
+  expect(toggle.getAttribute("aria-expanded")).toBe("false");
   expect(screen.queryByRole("textbox")).toBeNull();
   fireEvent.click(toggle);
+  expect(toggle.getAttribute("aria-expanded")).toBe("true");
   expect(first.value).toBe("First answer");
   expect(second.value).toBe("Second answer");
   expect(screen.getAllByRole("textbox")).toHaveLength(2);
@@ -58,7 +58,6 @@ it("resolves only the selected question and drops it from the shared pending que
   transport.resolveNotice.mockResolvedValue({ status: "ok" });
   const { queryClient } = renderQuestions(<PendingQuestions questions={questions} failed={false} />);
   queryClient.setQueryData(NOTICES_QUERY_KEY, { awaiting: questions, open: [], resolved_page: [], next_cursor: null });
-  fireEvent.click(screen.getByRole("button", { name: "2 questions waiting" }));
   const first = within(screen.getByRole("article", { name: "Question 1" }));
   fireEvent.change(first.getByRole("textbox"), { target: { value: "First answer" } });
   fireEvent.click(first.getByRole("button", { name: "Submit answer" }));
@@ -70,7 +69,6 @@ it("resolves only the selected question and drops it from the shared pending que
 it("retains drafts on a failed answer and permits retry", async () => {
   transport.resolveNotice.mockRejectedValueOnce(new Error("offline")).mockResolvedValue({ status: "ok" });
   renderQuestions(<PendingQuestions questions={[questions[0]]} failed={false} />);
-  fireEvent.click(screen.getByRole("button", { name: "1 question waiting" }));
   const input = screen.getByRole<HTMLTextAreaElement>("textbox");
   fireEvent.change(input, { target: { value: "Keep this" } });
   fireEvent.click(screen.getByRole("button", { name: "Submit answer" }));

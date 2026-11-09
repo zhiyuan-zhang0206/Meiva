@@ -13,6 +13,7 @@ import {
 } from "../fold";
 import { foldEvent } from "../fold/timeline";
 import type { BackendTimelineItem, ConnectionState, SystemEvent } from "../contracts/types";
+import { findOldestTimelineCursor } from "./timeline-plan";
 
 
 export interface LiveCompact {
@@ -133,13 +134,60 @@ export function crossedUnseenCompact(
   });
 }
 
+const MIN_RETAINED_PRIMARY_ITEMS = 6;
+const MAX_RETAINED_WORK_SPAN_MULTIPLIER = 8;
+const MAX_RETAINED_WORK_SPAN_FLOOR = 2000;
+
+function isWorkTimelineItem(it: BackendTimelineItem): boolean {
+  return (
+    it.kind === "agent_reasoning" ||
+    it.kind === "agent_code" ||
+    it.kind === "code_output" ||
+    (it.kind === "agent_chat" && it.user_facing === false)
+  );
+}
+
+function isPrimaryTimelineItem(it: BackendTimelineItem): boolean {
+  if (it.kind === "agent_chat") return it.user_facing !== false;
+  if (it.kind === "inbound_chat") {
+    return it.source === "user" || Boolean(it.source?.startsWith("ui:page:"));
+  }
+  return false;
+}
+
+export function hasDisjointSnapshotGap(
+  local: readonly BackendTimelineItem[],
+  snapshot: readonly BackendTimelineItem[],
+  hasMoreOlder: boolean,
+): boolean {
+  if (!hasMoreOlder || local.length === 0 || snapshot.length === 0) return false;
+  const oldestSnap = findOldestTimelineCursor(snapshot);
+  if (!oldestSnap) return false;
+  const snapParts = parseItemIdParts(oldestSnap.item_id);
+  if (snapParts?.rank !== 0) return false;
+  const snapIsHarness = oldestSnap.item_id.startsWith("h");
+  const localHeadNotes = standingHeadNoteIds(local);
+  let maxLocalMsg = -1;
+  for (const it of local) {
+    if (Boolean(it.partial) || it.item_id.startsWith("_marker.")) continue;
+    if (isReattachedTimelineContext(it) || localHeadNotes.has(it.item_id)) continue;
+    const parts = parseItemIdParts(it.item_id);
+    if (parts?.rank !== 0 || it.item_id.startsWith("h") !== snapIsHarness) continue;
+    if (parts.msg > maxLocalMsg) maxLocalMsg = parts.msg;
+  }
+  return maxLocalMsg >= 0 && snapParts.msg > maxLocalMsg + 1;
+}
+
 // meiva:note
 // Mirrors gateway/agents/history/paging.py (_missing_standing_context): rank-0
 // system prompt, contiguous head system_marker notes, and rank-0 compact
 // summaries are re-attached at the head of every GET /timeline response.
 // Retaining them when follower trimming caps the 250-item window keeps
 // `crossedUnseenCompact` from misreading re-attached summaries as an unseen
-// compact reset and keeps the oldest non-standing cursor intact.
+// compact reset and keeps the oldest non-standing cursor intact. When a long
+// run of secondary work items exceeds `maxItems`, the trim bound expands across
+// work items so recent primary messages and their contiguous turn block stay
+// in view.
 // meiva:link ui/web/src/docs/frontend-state/timeline-cache.md
 export function retainStandingContextOnTrim(
   items: readonly BackendTimelineItem[],
@@ -155,10 +203,44 @@ export function retainStandingContextOnTrim(
       standingIds.add(it.item_id);
     }
   }
-  if (standingIds.size === 0 || standingIds.size >= maxItems) {
-    return items.slice(-maxItems);
+  let effectiveMax = maxItems;
+  let tailStart = Math.max(0, items.length - maxItems);
+  if (
+    items.slice(tailStart).some(isWorkTimelineItem) &&
+    items.slice(0, tailStart).some(isPrimaryTimelineItem)
+  ) {
+    const minPrimary = Math.min(maxItems, MIN_RETAINED_PRIMARY_ITEMS);
+    const hardCap = Math.max(maxItems * MAX_RETAINED_WORK_SPAN_MULTIPLIER, MAX_RETAINED_WORK_SPAN_FLOOR);
+    let primaryCount = items.slice(tailStart).filter(isPrimaryTimelineItem).length;
+    if (primaryCount < minPrimary) {
+      let cursor = tailStart;
+      while (cursor > 0 && items.length - cursor < hardCap && primaryCount < minPrimary) {
+        cursor -= 1;
+        if (isPrimaryTimelineItem(items[cursor])) {
+          primaryCount += 1;
+          tailStart = cursor;
+        }
+      }
+      while (
+        tailStart > 0 &&
+        items.length - tailStart < hardCap &&
+        !isPrimaryTimelineItem(items[tailStart - 1]) &&
+        !standingIds.has(items[tailStart - 1].item_id)
+      ) {
+        tailStart -= 1;
+      }
+      let standingBeforeTail = 0;
+      for (let i = 0; i < tailStart; i += 1) {
+        if (standingIds.has(items[i].item_id)) standingBeforeTail += 1;
+      }
+      effectiveMax = Math.min(hardCap, Math.max(maxItems, items.length - tailStart + standingBeforeTail));
+    }
   }
-  let dropRemaining = items.length - maxItems;
+  if (items.length <= effectiveMax) return [...items];
+  if (standingIds.size === 0 || standingIds.size >= effectiveMax) {
+    return items.slice(-effectiveMax);
+  }
+  let dropRemaining = items.length - effectiveMax;
   const retained: BackendTimelineItem[] = [];
   for (const it of items) {
     if (standingIds.has(it.item_id)) {

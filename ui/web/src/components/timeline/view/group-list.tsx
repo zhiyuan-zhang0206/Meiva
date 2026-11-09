@@ -2,6 +2,7 @@ import { useMemo, useState, type RefObject } from "react";
 
 import type { BackendTimelineItem } from "@/lib/contracts/types";
 import { canonicalBufferCoordinate, type CompactTransitionBuffer } from "@/lib/layout/compact-transition";
+import { TIMELINE_TURN_ROW_GAP_PX } from "@/lib/layout/layout";
 import { useUserSettings } from "@/lib/state/use-user-settings";
 import { parseItemIdParts } from "@/lib/timeline/timeline";
 
@@ -215,7 +216,9 @@ export function useTimelineGroupWindow({
       rank: members[0].rank,
       itemIds: members.map((m) => m.item.item_id),
       memberRankKeys: members.map((m) => `${m.rank}:${m.item.item_id}`),
-      estimatedHeight: group.kind === "turn" ? (runExpanded ? 264 : 32) : 80,
+      estimatedHeight: group.kind === "turn"
+        ? (runExpanded ? 60 + members.length * 80 + Math.max(0, members.length - 1) * TIMELINE_TURN_ROW_GAP_PX : 32)
+        : 80,
       expandedRows: group.kind === "turn" && runExpanded
         ? members.map((m) => `${virtualKey}:${m.source}:${m.rank}:${m.item.item_id}`)
         : null,

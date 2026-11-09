@@ -248,10 +248,12 @@ export function useTimelineWindow({
   const groupsRef = useRef(groups);
   const heightsRef = useRef(heights);
   const enabledRef = useRef(enabled);
+  const isFollowingRef = useRef(isFollowing);
   useLayoutEffect(() => {
     groupsRef.current = groups;
     heightsRef.current = heights;
     enabledRef.current = enabled;
+    isFollowingRef.current = isFollowing;
   });
 
   const measureView = useCallback(() => {
@@ -288,7 +290,9 @@ export function useTimelineWindow({
   // pre-paint render that clears its pin. The read is cheap on a streamed
   // commit: TimelineView's stuck-header sync has already flushed layout, and
   // measureView only renders again when the view actually moved.
+  const measureViewRef = useRef(measureView);
   useLayoutEffect(() => {
+    measureViewRef.current = measureView;
     if (tracking) measureView();
   });
 
@@ -386,6 +390,7 @@ export function useTimelineWindow({
     }
     if (heightChanged) {
       heightsRef.current = nextHeights;
+      if (isFollowingRef.current()) measureViewRef.current();
       setHeights(nextHeights);
     }
   }, [contentRef]);
@@ -446,6 +451,7 @@ export function useTimelineWindow({
         }
       }
       heightsRef.current = nextHeights;
+      if (isFollowingRef.current()) measureViewRef.current();
       setHeights(nextHeights);
     });
     rowObserverRef.current = { observer, nodes: new Set() };

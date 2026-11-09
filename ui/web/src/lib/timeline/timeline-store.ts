@@ -25,6 +25,7 @@ import {
 import {
   applySseEvent,
   crossedUnseenCompact,
+  hasDisjointSnapshotGap,
   retainStandingContextOnTrim,
   retireLiveCompact,
   type TimelineState,
@@ -186,8 +187,14 @@ export const useTimelineStore = create<TimelineState>()((set, get) => ({
         return { hasMoreOlder };
       }
       const snapshotIds = new Set(snapshot.map((it) => it.item_id));
+      const disjointGap = !crossedCompact && hasDisjointSnapshotGap(s.items, snapshot, hasMoreOlder);
+      const localBase = crossedCompact
+        ? []
+        : disjointGap
+          ? s.items.filter((it) => Boolean(it.partial) || it.item_id.startsWith("_marker."))
+          : s.items;
       const merged = mergeSnapshotWithStreaming(
-        crossedCompact ? [] : s.items,
+        localBase,
         snapshot,
         msg_count,
         s.streamingIds,
@@ -210,6 +217,7 @@ export const useTimelineStore = create<TimelineState>()((set, get) => ({
         compactEpoch: epoch,
         compactBuffer,
         hasMoreOlder,
+        ...(disjointGap ? { olderFetchCount: 0 } : {}),
         resetPending: crossedCompact ? false : s.resetPending,
         // Reconnect can discover the rewrite without any compact SSE event.
         // A cold snapshot seeds a view; only an existing view needs retention.
@@ -292,8 +300,10 @@ export const useTimelineStore = create<TimelineState>()((set, get) => ({
   trimOldestWhileFollowing: (maxItems) => {
     const state = get();
     if (state.compactBuffer || state.items.length <= maxItems) return;
+    const retained = retainStandingContextOnTrim(state.items, maxItems);
+    if (retained.length === state.items.length) return;
     set({
-      items: retainStandingContextOnTrim(state.items, maxItems),
+      items: retained,
       hasMoreOlder: true,
       olderFetchCount: 0,
       retentionCappedSeq: state.compactReplaceSeq,

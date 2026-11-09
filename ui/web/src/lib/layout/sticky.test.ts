@@ -421,47 +421,56 @@ describe("layout changes with no scroll event (handleLayoutChange)", () => {
 });
 
 // meiva:note
-// An expanded live work block owns the viewport's top edge: growth extends the
-// block downward instead of pinning the tail, so opening one stops following and
-// a growth pass reports the position without moving it. Closing or collapsing the
-// block hands the tail back to the ordinary rules (user ruling 2026-11-09).
-// meiva:link ui/web/src/docs/frontend-components/timeline-view/deep-collapse.md
-describe("an expanded live work block owns the top edge (notifyLiveBlock)", () => {
-  it("stops following and never pins while the block grows downward", () => {
+// Opening an active live work block jumps to its bottom and enables following
+// so new streamed steps keep the bottom visible; while the block remains open,
+// an upward scroll/wheel still releases following so the reader can inspect
+// earlier steps inside the block (user ruling 2026-11-09).
+// meiva:link ui/web/src/docs/frontend-components/timeline-view/live-block.md
+describe("expanding a live work block follows its bottom (notifyLiveBlock)", () => {
+  it("enables following on open and pins as the block grows downward", () => {
     const ctl = createStickyController(TOUCH_STICKY_THRESHOLDS);
     pin(ctl, 1000);
+    ctl.handleScroll(view(200, 1000));
+    expect(ctl.isSticky()).toBe(false);
+    ctl.notifyLiveBlock(true);
     expect(ctl.isSticky()).toBe(true);
-    ctl.notifyLiveBlock(true);
-    expect(ctl.isSticky()).toBe(false);
-    expect(ctl.handleLayoutChange(view(400, 1400))).toBe(false);
-    expect(ctl.isSticky()).toBe(false);
+    expect(ctl.handleLayoutChange(view(400, 1400))).toBe(true);
+    expect(ctl.isSticky()).toBe(true);
   });
 
-  it("does not re-stick on a growth pass that reads as at-bottom", () => {
+  it("releases a send anchor when the live work block opens", () => {
     const ctl = createStickyController(TOUCH_STICKY_THRESHOLDS);
-    ctl.notifyLiveBlock(true);
-    expect(ctl.handleLayoutChange(view(800, 1400))).toBe(false);
+    ctl.notifyAnchored(view(400, 1000));
+    expect(ctl.isAnchored()).toBe(true);
     expect(ctl.isSticky()).toBe(false);
+    ctl.notifyLiveBlock(true);
+    expect(ctl.isAnchored()).toBe(false);
+    expect(ctl.isSticky()).toBe(true);
+    expect(ctl.handleLayoutChange(view(400, 1400))).toBe(true);
   });
 
-  it("hands the tail back when the block closes", () => {
+  it("lets a reader scroll up inside the open live block without being re-stuck on subsequentnotifyLiveBlock(true) commits", () => {
     const ctl = createStickyController(TOUCH_STICKY_THRESHOLDS);
-    pin(ctl, 1000);
+    pin(ctl, 1400);
     ctl.notifyLiveBlock(true);
-    expect(ctl.handleLayoutChange(view(400, 1400))).toBe(false);
+    expect(ctl.isSticky()).toBe(true);
+    ctl.handleScroll(view(200, 1400));
+    expect(ctl.isSticky()).toBe(false);
+    ctl.notifyLiveBlock(true);
+    expect(ctl.isSticky()).toBe(false);
+    expect(ctl.handleLayoutChange(view(200, 1800))).toBe(false);
+  });
+
+  it("re-sticks when the live block is collapsed and expanded again", () => {
+    const ctl = createStickyController(TOUCH_STICKY_THRESHOLDS);
+    pin(ctl, 1400);
+    ctl.notifyLiveBlock(true);
+    ctl.handleScroll(view(200, 1400));
+    expect(ctl.isSticky()).toBe(false);
     ctl.notifyLiveBlock(false);
-    expect(ctl.handleLayoutChange(view(800, 1400))).toBe(true);
-    expect(ctl.isSticky()).toBe(true);
-  });
-
-  it("keeps a reader who chose to follow again while the block stays open", () => {
-    const ctl = createStickyController(TOUCH_STICKY_THRESHOLDS);
-    ctl.notifyLiveBlock(true);
-    ctl.requestStick();
-    expect(ctl.isSticky()).toBe(true);
     ctl.notifyLiveBlock(true);
     expect(ctl.isSticky()).toBe(true);
-    expect(ctl.handleLayoutChange(view(400, 1400))).toBe(false);
+    expect(ctl.handleLayoutChange(view(200, 1800))).toBe(true);
   });
 });
 

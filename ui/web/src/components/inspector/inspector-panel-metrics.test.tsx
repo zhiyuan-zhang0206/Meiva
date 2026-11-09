@@ -71,15 +71,15 @@ describe("InspectorPanel metrics and durations", () => {
     expect(within(activitySection!).getByText(expected)).toBeTruthy();
   });
 
-  it("formats durations past 24h as Xd Yh (task #824): idle 24d 3h", async () => {
+  it("formats durations past 24h as Xd Yh (task #824): llm output 24d 3h", async () => {
     getAgentInspectStatistics.mockResolvedValue(
       fixture({
         activity: {
-          active_seconds: 0,
-          alive_seconds: 24 * 86_400 + 3 * 3_600,
-          active_rate: 0,
-          llm_seconds: 3_600,
-          exec_seconds: 0,
+          active_seconds: 24 * 86_400 + 4 * 3_600,
+          alive_seconds: 24 * 86_400 + 4 * 3_600,
+          active_rate: 1,
+          llm_seconds: 24 * 86_400 + 3 * 3_600,
+          exec_seconds: 3_600,
         },
       }),
     );
@@ -110,7 +110,7 @@ describe("InspectorPanel metrics and durations", () => {
     await waitFor(() => expect(screen.queryByLabelText("Activity loading")).toBeNull());
     const activitySection = screen.getByText("Activity").closest("section");
     expect(activitySection).not.toBeNull();
-    expect(within(activitySection!).getAllByText("—")).toHaveLength(3);
+    expect(within(activitySection!).getAllByText("—")).toHaveLength(2);
     expect(within(activitySection!).getByText("42.5")).toBeTruthy();
   });
 });

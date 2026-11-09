@@ -45,34 +45,48 @@ def parse_upload_url(url: str) -> tuple[int, str] | None:
     return int(agent_part), name
 
 
-def image_mime_for(name: str) -> str | None:
-    """MIME type for an image upload name, or None if the suffix is not an image."""
-    return IMAGE_MIME.get(Path(name).suffix.lower())
+# meiva:note
+# MIME type for an image upload name, or None if the suffix/content_type is not an image.
+def image_mime_for(name: str, content_type: str | None = None) -> str | None:
+    mime = IMAGE_MIME.get(Path(name).suffix.lower())
+    if mime is None or content_type is None:
+        return mime
+    media = content_type.split(";", 1)[0].strip().lower()
+    return mime if media == mime else None
+
+
+def _block_image_url(agent_id: int, raw_block: object) -> str | None:
+    if not is_object_dict(raw_block) or raw_block.get("type") != "image_url":
+        return None
+    image_url = raw_block.get("image_url")
+    url = image_url.get("url") if is_object_dict(image_url) else None
+    if not isinstance(url, str):
+        return None
+    parsed = parse_upload_url(url)
+    if parsed is None or parsed[0] != agent_id or image_mime_for(parsed[1]) is None:
+        return None
+    return url
 
 
 def inbound_image_urls(agent_id: int, payload: Mapping[str, object] | None) -> list[str] | None:
+    raw_images = payload.get("image_uploads") if payload else None
+    if is_object_list(raw_images):
+        urls = [
+            f"/api/agents/{agent_id}/uploads/{item.batch_id}/{item.ordinal}"
+            for raw in raw_images
+            if (item := _validate_stored_file(raw)) is not None
+            and image_mime_for(item.name, item.content_type) is not None
+        ]
+        if urls:
+            return urls
     raw_blocks = payload.get("content_blocks") if payload else None
     if not is_object_list(raw_blocks):
         return None
-    urls: list[str] = []
-    for raw_block in raw_blocks:
-        if not is_object_dict(raw_block):
-            continue
-        if raw_block.get("type") != "image_url":
-            continue
-        image_url = raw_block.get("image_url")
-        if not is_object_dict(image_url):
-            continue
-        url = image_url.get("url")
-        if not isinstance(url, str):
-            continue
-        parsed = parse_upload_url(url)
-        if parsed is None:
-            continue
-        ref_agent, name = parsed
-        if ref_agent != agent_id or image_mime_for(name) is None:
-            continue
-        urls.append(url)
+    urls = [
+        url
+        for raw_block in raw_blocks
+        if (url := _block_image_url(agent_id, raw_block)) is not None
+    ]
     return urls or None
 
 
@@ -84,12 +98,19 @@ class _StoredUploadFile(BaseModel):
     content_type: str = Field(min_length=1)
     batch_id: str = Field(min_length=32, max_length=32)
     ordinal: int = Field(ge=0)
+    path: str | None = None
+
+
+def _validate_stored_file(raw: object) -> _StoredUploadFile | None:
+    try:
+        return _StoredUploadFile.model_validate(raw)
+    except ValidationError:
+        return None
 
 
 def _parse_upload_file(agent_id: int, raw: object) -> TimelineUploadFile | None:
-    try:
-        item = _StoredUploadFile.model_validate(raw)
-    except ValidationError:
+    item = _validate_stored_file(raw)
+    if item is None:
         return None
     return TimelineUploadFile(
         name=item.name,
