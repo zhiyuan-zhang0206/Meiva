@@ -266,6 +266,43 @@ describe("TurnBlock component", () => {
     }
   });
 
+  it("never flickers between 'Working…' and 'Working for' when lastEventAt updates on a non-work turn", () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(100_000);
+      const noteOnly: TurnSummary = {
+        ...sampleSummary,
+        total: 1,
+        thinking: 0,
+        code: 0,
+        output: 0,
+        turns: 0,
+        systemNotes: 1,
+        workedMs: 0,
+        thinkingMs: 0,
+        codeMs: 0,
+        execMs: 0,
+        sdkCalls: [],
+        lastLiveKind: null,
+        lastLiveStartedAt: 0,
+      };
+      const { rerender } = render(
+        <TurnBlock id="turn-note" memberIds={["1.0"]} summary={noteOnly} expanded={false} turnActive lastEventAt={100_000} onToggle={vi.fn()} />,
+      );
+      expect(screen.getByTestId("turn-toggle").textContent).toContain("Working for 0.1s");
+      expect(screen.getByTestId("turn-toggle").textContent).not.toContain("Working…");
+
+      act(() => { vi.setSystemTime(100_040); });
+      rerender(
+        <TurnBlock id="turn-note" memberIds={["1.0"]} summary={noteOnly} expanded={false} turnActive lastEventAt={100_040} onToggle={vi.fn()} />,
+      );
+      expect(screen.getByTestId("turn-toggle").textContent).toContain("Working for 0.1s");
+      expect(screen.getByTestId("turn-toggle").textContent).not.toContain("Working…");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("calls onToggle with its id and current state", () => {
     const onToggle = vi.fn();
     render(
