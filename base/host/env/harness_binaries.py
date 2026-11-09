@@ -71,10 +71,10 @@ def locate_harness_binary(
     program: str,
     *,
     home: Path | None = None,
-    path_env: str | None = None,
+    path_env: str | None,
     bin_dirs: Sequence[str] | None = None,
 ) -> tuple[str | None, bool]:
-    found = shutil.which(program, path=path_env)
+    found = shutil.which(program, path=path_env) if path_env is not None else None
     if found is not None:
         return found, True
     for entry in harness_bin_dirs(home, bin_dirs):
@@ -93,7 +93,7 @@ def resolve_harness_binary(
     program: str,
     *,
     home: Path | None = None,
-    path_env: str | None = None,
+    path_env: str | None,
     bin_dirs: Sequence[str] | None = None,
 ) -> str:
     if os.sep in program:

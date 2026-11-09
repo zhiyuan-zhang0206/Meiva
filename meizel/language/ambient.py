@@ -109,23 +109,30 @@ def _own_facts(
 
 # meiva:note
 # Whether the call hands the reader the value that spares its read. An explicit `None` is still a
-# read, and an argument list whose shape is hidden (`*args`) cannot prove that a value was given.
-def _spares(call: ast.Call, unless: Unless | None) -> bool:
+# read, a parameter of the enclosing function that defaults to `None` (`def main(argv=None):
+# parser.parse_args(argv)`, `def make(parent=None): TemporaryDirectory(dir=parent)`) may be `None`
+# and is still a read, and an argument list whose shape is hidden (`*args`) cannot prove that a
+# value was given.
+def _spares(call: ast.Call, unless: Unless | None, optional: frozenset[str] = frozenset()) -> bool:
     if unless is None:
         return False
     for keyword in call.keywords:
         if keyword.arg == unless.parameter:
-            return not _is_none(keyword.value)
+            return not _is_missing(keyword.value, optional)
     position = unless.position
     if position is None or len(call.args) <= position:
         return False
     if any(isinstance(argument, ast.Starred) for argument in call.args[: position + 1]):
         return False
-    return not _is_none(call.args[position])
+    return not _is_missing(call.args[position], optional)
 
 
 def _is_none(node: ast.expr) -> bool:
     return isinstance(node, ast.Constant) and node.value is None
+
+
+def _is_missing(node: ast.expr, optional: frozenset[str]) -> bool:
+    return _is_none(node) or (isinstance(node, ast.Name) and node.id in optional)
 
 
 # meiva:note
@@ -139,11 +146,13 @@ def _module_of(path: str) -> str:
 # meiva:note
 # The kind of read a call is: None when it names no reader, and None when the call hands the reader
 # the value that spares the read, so that `called` stays a list of the acquisitions it adds.
-def _reader_of(call: ast.Call, callee: str | None, sources: Sources) -> tuple[KindName, str] | None:
+def _reader_of(
+    call: ast.Call, callee: str | None, sources: Sources, optional: frozenset[str] = frozenset()
+) -> tuple[KindName, str] | None:
     if callee is None:
         return None
     kind = sources.calls.get(callee)
-    if kind is None or _spares(call, sources.unless.get(callee)):
+    if kind is None or _spares(call, sources.unless.get(callee), optional):
         return None
     return kind, callee
 
@@ -352,6 +361,9 @@ class AmbientRecorder:
                 self._add(line, kind, prefix)
                 return
 
+    def _optional(self) -> frozenset[str]:
+        return self._open[-1].optional if self._open else frozenset()
+
     # meiva:note
     # A judged call that reads the world only when it is not handed the value that spares the read
     # (`tempfile.mkdtemp()` without a `dir`, `time.strftime(fmt)` without a time): the call is the
@@ -361,25 +373,13 @@ class AmbientRecorder:
         if reading is None or reading.name != callee:
             return
         judgment = reading.judgment
-        if judgment.kinds and judgment.unless is not None and not _spares(call, judgment.unless):
+        if (
+            judgment.kinds
+            and judgment.unless is not None
+            and not _spares(call, judgment.unless, self._optional())
+        ):
             for kind in judgment.kinds:
                 self._add(call.lineno, kind, f"{callee}()")
-
-    # meiva:note
-    # Whether the value that spares an argument-vector read is the function's own parameter that
-    # defaults to `None`: `parse_args(argv)` in `def main(argv=None)` hands argparse a value that
-    # may be absent, and argparse then reads `sys.argv[1:]`, so the call is the same acquisition as
-    # `parse_args()`. Only the facts of this one function are used; whether any caller passes the
-    # list is not asked.
-    def _optional_argument(self, kind: KindName, unless: Unless | None, call: ast.Call) -> bool:
-        if kind != AmbientKind.ARGV or unless is None or not self._open:
-            return False
-        handed = next(
-            (keyword.value for keyword in call.keywords if keyword.arg == unless.parameter), None
-        )
-        if handed is None and unless.position is not None and len(call.args) > unless.position:
-            handed = call.args[unless.position]
-        return isinstance(handed, ast.Name) and handed.id in self._open[-1].optional
 
     # meiva:note
     # A method call on a receiver of no resolved type, judged by its name (`parser.parse_args()`,
@@ -392,9 +392,7 @@ class AmbientRecorder:
         method = METHOD_READS.get(func.attr)
         if method is None:
             return
-        if _spares(call, method.unless) and not self._optional_argument(
-            method.kind, method.unless, call
-        ):
+        if _spares(call, method.unless, self._optional()):
             return
         if method.caller_exempt and self._from_caller(func.value):
             return
@@ -407,7 +405,7 @@ class AmbientRecorder:
             self._interval(call.lineno, LOOP_CLOCK)
         self._conditional(callee, call)
         self._method(callee, call)
-        reader = _reader_of(call, callee, self.sources)
+        reader = _reader_of(call, callee, self.sources, self._optional())
         if reader is not None:
             self._add(call.lineno, *reader)
 

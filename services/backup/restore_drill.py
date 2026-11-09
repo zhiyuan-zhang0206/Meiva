@@ -15,7 +15,6 @@ import dataclasses
 import shutil
 import subprocess
 import sys
-import tempfile
 import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
@@ -57,6 +56,7 @@ from base.native_process.child_env import inherited_process_env
 from base.native_process.code_version import CodeVersion
 from base.native_process.loaded_commit import LoadedCommit
 from base.paths import meiva_home
+from base.paths.scratch import SYSTEM_SCRATCH, ScratchSpace
 from base.telemetry.delivery.state import process_name
 from services.backup import dump as backup
 from services.backup.dump_lines import restore_failure_message
@@ -567,6 +567,7 @@ def run_drill(
     throwaway: ThrowawayConfig,
     foreground: bool = False,
     scratch_root: Path | None = None,
+    scratch_space: ScratchSpace = SYSTEM_SCRATCH,
     env: Mapping[str, str],
 ) -> tuple[RestoreReport, float]:
     """Run the complete decrypt, restore, and verification drill.
@@ -578,8 +579,7 @@ def run_drill(
     if not artifact.is_file():
         raise RuntimeError(f"backup artifact does not exist: {artifact.name}")
     started = time.monotonic()
-    with tempfile.TemporaryDirectory(prefix="meiva-restore-drill-", dir=scratch_root) as tmp:
-        scratch = Path(tmp)
+    with scratch_space.make(prefix="meiva-restore-drill-", parent=scratch_root) as scratch:
         raw_dump = scratch / "backup.dump"
         backup.decrypt_artifact(artifact, raw_dump, tree=tree, env=env)
         required = scratch_space_requirement(raw_dump)

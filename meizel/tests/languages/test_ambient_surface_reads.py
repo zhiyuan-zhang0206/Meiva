@@ -311,6 +311,39 @@ def test_the_optional_parameter_of_another_parser_method_is_the_command_line(
 
 
 @pytest.mark.parametrize(
+    ("source", "expected"),
+    [
+        (
+            "import tempfile\n\ndef make(parent=None):\n"
+            "    return tempfile.TemporaryDirectory(prefix='x-', dir=parent)\n",
+            [
+                ("environ", "tempfile.TemporaryDirectory()"),
+                ("random", "tempfile.TemporaryDirectory()"),
+            ],
+        ),
+        (
+            "import tempfile\n\ndef make(parent=None):\n"
+            "    return tempfile.mkdtemp(None, 'x-', parent)\n",
+            [("environ", "tempfile.mkdtemp()"), ("random", "tempfile.mkdtemp()")],
+        ),
+        (
+            "import shutil\n\ndef locate(cmd, *, path_env: str | None = None):\n"
+            "    return shutil.which(cmd, path=path_env)\n",
+            [("environ", "shutil.which()")],
+        ),
+        (
+            "def local(moment=None):\n    return other.astimezone(moment)\n",
+            [("clock", "datetime.datetime.astimezone")],
+        ),
+    ],
+)
+def test_an_optional_parameter_handed_to_any_unless_clause_acquires(
+    make_repo: RepoFactory, source: str, expected: list[tuple[str, str]]
+) -> None:
+    assert acquired(make_repo, source) == expected
+
+
+@pytest.mark.parametrize(
     "source",
     [
         "def main(argv: list[str]):\n    return parser.parse_args(argv)\n",
@@ -325,10 +358,11 @@ def test_the_optional_parameter_of_another_parser_method_is_the_command_line(
         "def main(argv=None):\n    def inner(argv):\n        return parser.parse_args(argv)\n"
         "    return inner\n",
         "def main(argv=None):\n    return parser.format_help(argv)\n",
-        "def main(moment=None):\n    return other.astimezone(moment)\n",
+        "import tempfile\n\ndef make(parent):\n"
+        "    return tempfile.TemporaryDirectory(prefix='x-', dir=parent)\n",
     ],
 )
-def test_a_parameter_that_is_required_or_decided_before_the_parser_is_not_the_command_line(
+def test_a_parameter_that_is_required_or_decided_before_the_call_reads_nothing(
     make_repo: RepoFactory, source: str
 ) -> None:
     assert acquired(make_repo, source) == []
