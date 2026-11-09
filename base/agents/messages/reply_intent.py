@@ -23,7 +23,6 @@ REPLY_VISIBILITY_RULE = (
     f"the user needs to see in the main conversation. Use {HIDE_FROM_USER} for working notes. "
     "Those notes are folded into Details and the user can expand and read them."
 )
-NON_HUMAN_WAKE_REMINDER = "Non-human wake."
 REPLY_VISIBILITY_CORRECTION = (
     "Your previous output contained text with a missing or invalid visibility prefix. "
     "That text was folded into Details. "
@@ -126,11 +125,3 @@ def delivery_disabled_entries(mode: str) -> tuple[str, ...]:
         if UserDeliveryMode(mode) is UserDeliveryMode.SDK
         else ("ui.publish", "ui.publications")
     )
-
-
-def non_human_delivery_reminder(mode: str) -> str:
-    return {
-        UserDeliveryMode.PREFIX: NON_HUMAN_WAKE_REMINDER,
-        UserDeliveryMode.SDK: SDK_DELIVERY_RULE,
-        UserDeliveryMode.NAIVE: "Non-human wake. Communicate only meaningful changes.",
-    }[UserDeliveryMode(mode)]

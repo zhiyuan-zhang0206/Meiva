@@ -233,10 +233,10 @@ async def test_settle_claimed_batch_appends_recency_reminder_only_on_fresh_non_h
     peer_update = cast(dict[str, object], peer_cmd.update)
     assert peer_update.get("non_human_wake") is True
     peer_msgs = cast(list[BaseMessage], peer_update["messages"])
-    assert len(peer_msgs) == 2
-    assert read_meiva_kwargs(peer_msgs[-1]).get("meiva_note_tag") == "non_human_wake"
-    assert "Non-human wake." in str(peer_msgs[-1].content)
-    assert "MEIVA_DISPLAY_TO_USER" not in str(peer_msgs[-1].content)
+    assert len(peer_msgs) == 1
+    assert read_meiva_kwargs(peer_msgs[0]).get("meiva_note_tag") is None
+    assert "Non-human wake." not in str(peer_msgs[0].content)
+    assert "MEIVA_DISPLAY_TO_USER" not in str(peer_msgs[0].content)
 
     mid_run_cmd = await settle_claimed_batch(
         runtime.context,
@@ -307,7 +307,7 @@ async def test_external_harness_non_human_wake_includes_recency_reminder_and_kee
     assert update.get("non_human_wake") is True
     pending = cast(dict[str, str], update["harness_pending_input"])
     assert pending["key"] == "inbound-601"
-    assert "Non-human wake." in pending["prompt"]
+    assert "Non-human wake." not in pending["prompt"]
     assert "MEIVA_DISPLAY_TO_USER" not in pending["prompt"]
 
     restart = await settle_claimed_batch(
