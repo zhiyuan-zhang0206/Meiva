@@ -30,11 +30,26 @@ _BUNDLE = Path(__file__).resolve().parent
 
 
 _FM_KEY_LINE_RE = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*): (.*)$")
-_MISREAD_STRING_KEYS = ("title", "description", "name", "type", "meiva_machine", "timestamp")
+_DATE_ONLY_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+_OFFSET_DATETIME_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(Z|[+-]\d{2}:\d{2})$")
+_MISREAD_STRING_KEYS = (
+    "title",
+    "description",
+    "name",
+    "type",
+    "meiva_machine",
+    "timestamp",
+    "verified",
+    "stale_after",
+)
 
 
 def _is_str_dict(value: object) -> TypeGuard[dict[str, object]]:
     return isinstance(value, dict)
+
+
+def _is_object_list(value: object) -> TypeGuard[list[object]]:
+    return isinstance(value, list)
 
 
 _P = ParamSpec("_P")
@@ -93,6 +108,27 @@ def _frontmatter_problem(content: str) -> tuple[dict[str, object] | None, str | 
     return fm, parts[1], None
 
 
+def _optional_okf_field_errors(fm: dict[str, object]) -> list[str]:
+    errors: list[str] = []
+    if "sources" in fm and fm["sources"] is not None:
+        sources = fm["sources"]
+        if not _is_object_list(sources) or not all(
+            isinstance(s, str) and s.strip() for s in sources
+        ):
+            errors.append("Field 'sources' must be a list of non-empty strings")
+    for date_key in ("verified", "stale_after"):
+        if date_key in fm and fm[date_key] is not None:
+            val = fm[date_key]
+            if not (
+                isinstance(val, str)
+                and (_DATE_ONLY_RE.fullmatch(val) or _OFFSET_DATETIME_RE.fullmatch(val))
+            ):
+                errors.append(
+                    f"Field '{date_key}' must be a quoted YYYY-MM-DD date string: {val!r}"
+                )
+    return errors
+
+
 def validate_file(file_path: Path) -> list[str]:
     """Validate a single OKF concept file. Returns list of error messages."""
     errors: list[str] = []
@@ -113,6 +149,8 @@ def validate_file(file_path: Path) -> list[str]:
     if problem is not None:
         return [problem]
     assert fm is not None and fm_raw is not None  # noqa: S101
+
+    errors.extend(_optional_okf_field_errors(fm))
 
     for key in _misread_frontmatter_keys(fm_raw):
         errors.append(

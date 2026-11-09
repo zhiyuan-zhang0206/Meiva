@@ -25,28 +25,6 @@ while IFS= read -r f || [ -n "$f" ]; do
         fail=1
     fi
 
-    case "$(basename "$f")" in
-        index.md|log.md|AGENTS.md) continue ;;
-    esac
-
-    first_line=$(head -1 "$f")
-    if [ "$first_line" != "---" ]; then
-        echo "okf: $f missing YAML frontmatter" >&2
-        fail=1
-        continue
-    fi
-
-    type_val=$(sed -n '/^---$/,/^---$/p' "$f" | grep '^type:' | head -1 | sed 's/^type:[[:space:]]*//' || true)
-    if [ -z "$type_val" ]; then
-        echo "okf: $f missing or empty 'type' field" >&2
-        fail=1
-    fi
-
-    if ! grep -q '^meiva_agent:' "$f"; then
-        echo "okf: $f missing required 'meiva_agent' field" >&2
-        fail=1
-    fi
-
 done < <(git diff --cached --name-only --diff-filter=ACM)
 
 # Full pool validation (OKF + type tags + descriptions + directory

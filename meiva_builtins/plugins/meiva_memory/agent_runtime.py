@@ -136,9 +136,12 @@ Correcting stale memory is an obligation, not an option:
 Write notes directly as pure Markdown: start with a `# Title` heading, followed
 by a concise high-level description paragraph stating the rule or fact, then
 the body (including a "Why:" line and a "How to apply:" line for rules and
-project constraints). No YAML frontmatter is needed (though optional YAML
-frontmatter is accepted if valid), and each note must stay under 8000
-characters.
+project constraints). No YAML frontmatter is needed at write time (never write
+legacy `type: Memory`, `meiva_agent`, `meiva_machine`, `type/<x>` tags, or HTML
+attribution comments); during Meiva Dream consolidation, the Memory Arbiter
+automatically maintains canonical OKF provenance and lifecycle fields
+(`description`, `sources`, `verified`, and optional `stale_after`). Each note
+must stay under 8000 characters.
 
 A memory is a claim, not a source of truth. Your sources differ in how they can
 be checked:

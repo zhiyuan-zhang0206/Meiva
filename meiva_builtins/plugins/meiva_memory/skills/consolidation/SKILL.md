@@ -11,9 +11,10 @@ cycle (`Orientation` -> `Gather Signal` -> `Consolidation` -> `Prune & Index`) s
 the pool stays canonical, conflict-free, committed, pushed, and searchable.
 
 All index-rebuild / validation / refresh operations are wrapped in scripts under
-`../scripts/` and the pool root:
+`../scripts/`, `scripts/`, and the pool root:
+- `python scripts/dream_gather.py [--pool <path>] [--repo <alias>=<path>] [--json]` — Phase 2 (`Gather Signal`) deterministic probe: scan optional `sources` / `verified` / `stale_after` frontmatter across pool notes, intersect `repo:<alias>:<path>` anchors against repository file trees and recent `git log` changes, flag expired `stale_after` and aging `verified` notes, list pure-Markdown or legacy notes needing Dream OKF enrichment, and surface pool churn/conflict hotspots
 - `python ../scripts/rebuild_memory_index.py` — rebuild the root `MEMORY.md` pointers (resolves the pool from `MEIVA_HOME` and takes no arguments)
-- `python3 validate.py` (in the pool or worktree root) — enforce UTF-8, optional YAML frontmatter syntax (and unquoted `' #'` / `': '` truncation checks), 8000-character note cap, 20-file / 20-subdirectory Locality limits, `MEMORY.md` pointer targets and coverage, and `<!-- fact-check: ... -->` probes
+- `python3 validate.py` (in the pool or worktree root) — enforce UTF-8, optional YAML frontmatter syntax (plus optional type checks for `sources`, `verified`, and `stale_after`, and unquoted `' #'` / `': '` truncation checks), 8000-character note cap, 20-file / 20-subdirectory Locality limits, `MEMORY.md` pointer targets and coverage, and `<!-- fact-check: ... -->` probes
 - `python ../scripts/consolidate.py -m "..."` — remote-backed single-box wrapper: rebuild indexes, stage, commit, push, refresh
 - `python ../scripts/steward.py -m "..."` — per-machine branch wrapper: rebuild indexes, stage, commit, push, create PR
 - `python ../scripts/arbiter_merge.py` — inspect/merge open PRs whose `validate` check is green + refresh (`--apply` to merge; exit 1 = alert)
@@ -59,23 +60,28 @@ Every full consolidation executes four phases in order inside the target worktre
 1. **Recent Session Transcripts (`USER_INPUT`)**: Scan recent session transcripts
    for user corrections, rulings, reversals, and explicit decisions in chronological
    order so newer rulings supersede older ones.
-2. **World Truth Probes (External Ground-Truth Verification)**: Verify claims in
-   existing notes against observable ground truth across multiple domains rather
-   than assuming a single codebase:
+2. **World Truth Probes (External Ground-Truth Verification)**: Run
+   `python scripts/dream_gather.py --pool "$W"` first to automatically intersect
+   every note's bound `sources:` (`repo:<alias>:<path>`) against mapped repository
+   file trees and recent `git log` commits since the note's `verified` date, flag
+   expired `stale_after` notes, and identify recent pool churn/conflict hotspots;
+   then verify claims in existing notes against observable ground truth across
+   multiple domains rather than assuming a single codebase:
    - *Multi-repo codebases & file trees* (e.g. `~/.meiva/source`, project checkouts):
      check `git log`, file path existence, symbol/contract definitions, and deleted
      scripts/queues so notes citing removed paths or retired contracts are caught.
    - *Cluster runtime & database registries* (`agents`, `schedules`, `tasks`,
      machine topology): check active vs. terminated agents, live schedule triggers,
-     and task status so notes naming terminated role holders or obsolete cron times
-     are caught.
+     and task status (including `db:<db_name>:<table>` anchors surfaced in
+     `external_source_probes`) so notes naming terminated role holders or obsolete
+     cron times are caught.
    - *Host environment & embedded probes*: check machine configuration and execute
      `<!-- fact-check: <cmd> -->` directives.
 3. **Per-Agent Workspace Memory (`~/.meiva/workspaces/*/memory/`)**: Scan agent
    workspace memory directories (and legacy `MEMORY.md` remnants) to extract
    durable, reusable cross-agent rules and facts into the shared pool.
 
-### Phase 3 — Consolidation (Canonical One-Topic-One-File & State Overwrite)
+### Phase 3 — Consolidation (Canonical One-Topic-One-File, State Overwrite & Auto-OKF)
 - **One topic, one canonical file (dateless naming)**: Maintain a single dateless
   canonical note per rule or topic slot (e.g. `meiva/rulings/merge/meiva-merge-policy.md`,
   or root standing files like `collaboration-preferences.md`), rather than
@@ -86,6 +92,18 @@ Every full consolidation executes four phases in order inside the target worktre
   superseded, reversed, or fragmented historical notes (git history preserves the
   audit trail). Never leave conflicting old notes in the pool or stack chronological
   patch disclaimers at the bottom of stale notes.
+- **Dream-Time Auto-OKF Maintenance**: While working agents write pure Markdown
+  without YAML frontmatter, the Arbiter populates and refreshes four canonical
+  OKF provenance & lifecycle fields on consolidated canonical notes (and strips
+  retired `type`, `meiva_agent`, `meiva_machine`, and `tags` boilerplate):
+  - `description`: One-line high-density summary for `MEMORY.md` pointers and previews.
+  - `sources`: List of external World Truth anchors bound to the note (e.g.
+    `"repo:meiva:scripts/hooks/diff_checks.py"`, `"repo:memory:validate.py"`,
+    `"db:meiva_main:schedules"`), driving `dream_gather.py` drift detection on
+    subsequent Dream runs.
+  - `verified`: Quoted `"YYYY-MM-DD"` date when the note was verified against World Truth.
+  - `stale_after`: Optional quoted `"YYYY-MM-DD"` expiration date for temporary
+    freezes or transition rules.
 - **De-relativize time**: Convert relative time expressions (`"today"`,
   `"this morning"`, `"recently"`, `"next week"`) into explicit ISO dates
   (`YYYY-MM-DD`).
@@ -160,11 +178,12 @@ Vault: <vault-path>/<path>
 The pointer note carries the topic and the Vault path so semantic search can
 still find it.
 
-### Note Format & Directory Structure Rules
+### Note Format & Directory Structure Rules (Two-Stage OKF Discipline)
 
-1. **Pure Markdown Notes (YAML frontmatter optional)**:
-   - Write notes directly as pure Markdown: start with `# Title`, followed by a
-     short high-level description paragraph stating the rule or fact, then the body:
+1. **Stage 1 — Write-Time Pure Markdown (Working Agents, Zero Frontmatter Burden)**:
+   - Working agents write notes directly as pure Markdown: start with `# Title`,
+     followed by a short high-level description paragraph stating the rule or fact,
+     then the body:
      ```markdown
      # <Title>
 
@@ -172,21 +191,36 @@ still find it.
 
      <Body with details, Why, and How to apply...>
      ```
-   - YAML frontmatter (`--- ... ---`) is completely optional. Do not require
-     `type`, `meiva_agent`, `timestamp`, `tags`, `description`, or HTML attribution
-     comments. If optional YAML frontmatter is present, `validate.py` only checks
-     that it is a valid YAML mapping without unquoted `' #'` or `': '` truncation.
+   - YAML frontmatter (`--- ... ---`) is completely optional at write time. Never
+     write legacy boilerplate (`type: Memory`, `meiva_agent`, `meiva_machine`,
+     `timestamp`, `tags: [type/...]`) or inline HTML attribution comments.
+2. **Stage 2 — Dream Consolidation Auto-OKF (Memory Arbiter)**:
+   - During Dream Phase 3/4, the Memory Arbiter populates and refreshes four
+     canonical OKF provenance and lifecycle fields on canonical notes:
+     ```yaml
+     ---
+     description: "<One-line summary distilled from the opening paragraph>"
+     sources:
+       - "repo:meiva:scripts/hooks/diff_checks.py"
+     verified: "2026-11-09"
+     stale_after: "2026-12-01"   # optional: only for temporary rules
+     ---
+     ```
+   - When optional YAML frontmatter is present, `validate.py` checks that it is a
+     valid YAML mapping without unquoted `' #'` or `': '` truncation, and lightly
+     validates `sources` (list of non-empty strings) and `verified` / `stale_after`
+     (quoted `YYYY-MM-DD` date strings) if present.
    - Every note must be valid UTF-8 and stay within `8000` characters.
-2. **Optional Directory `index.md` (High-Level Description)**:
+3. **Optional Directory `index.md` (High-Level Description)**:
    - `index.md` is an optional folder-level high-level description, not a
      mandatory generated inventory of every file pointer and recursive count.
    - Adding or deleting a note does not require running `gen_indexes.py` to
      cascade-rewrite ancestor `index.md` files.
-3. **Directory Locality Limits (`MAX_FILES_PER_DIR = 20`, `MAX_SUBDIRS_PER_DIR = 20`)**:
+4. **Directory Locality Limits (`MAX_FILES_PER_DIR = 20`, `MAX_SUBDIRS_PER_DIR = 20`)**:
    - Every directory holds at most **20 `.md` notes** and at most **20 subdirectories**
      (enforced by `validate_structure` in `validate.py`). When a directory exceeds
      either cap, split it into topical subdirectories.
-4. **Root `MEMORY.md` Pointers**:
+5. **Root `MEMORY.md` Pointers**:
    - `validate_pointers` checks that every pointer target in `MEMORY.md` exists,
      has no duplicate pointer lines, and covers every root-level note and top-level
      directory with notes (link text does not need to match any frontmatter `title`).
