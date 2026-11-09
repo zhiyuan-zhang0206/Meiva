@@ -19,9 +19,6 @@ exports = ["alerts", "audit_events.py", "converge_report.py", "delivery", "emitt
 [purity]
 "loki_index_labels.py" = "strict"
 
-[debt.ambient-read]
-"process_logging.py#pid os.getpid" = { count = 1, owner = "#5816", until = "permanently: the announce record names the process that is announcing itself" }
-
 # meiva:note
 # The read is `build_pipeline`, and it is the composition root of the telemetry pipeline:
 # every daemon builds its pipeline once, after its boot loaded the `.env` it will run with, and the
@@ -30,3 +27,4 @@ exports = ["alerts", "audit_events.py", "converge_report.py", "delivery", "emitt
 # second boot, so add a parameter and hand the value down instead.
 [roots]
 "pipeline_build.py" = { kinds = ["environ"], why = "composition root of the event pipeline: build_pipeline() reads the process environment once to decide whether the OTLP endpoint was set explicitly, then hands that answer to the exporter it builds" }
+"process_logging.py" = { kinds = ["pid"], why = "the service_started announce record names the process that is announcing itself (`os.getpid()`)" }

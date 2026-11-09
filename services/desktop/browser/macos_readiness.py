@@ -20,7 +20,6 @@ must relaunch the service from the GUI domain.
 from __future__ import annotations
 
 import logging
-import pwd
 import subprocess
 from collections.abc import Iterable
 from dataclasses import dataclass
@@ -28,13 +27,10 @@ from pathlib import Path
 
 import base.host.proc
 from base.clock import Timers
-from base.host.system.hostport import Host
+from base.host.system.hostport import process_account
 from base.native_process.os_platform import is_macos
 
 _log = logging.getLogger("services.desktop.browser.macos_readiness")
-# meiva:note
-# The host is read for its uid only, so its environment is deliberately empty.
-_SYSTEM_HOST = Host.system(environ={})
 
 _PROBE_TIMEOUT_S = 5.0
 READINESS_RETRY_S = 5.0
@@ -84,8 +80,8 @@ def run_probe(argv: list[str]) -> ProbeResult:
 # inherited from shell environment variables, which may describe the SSH caller rather than the
 # launch context of the detached service.
 def current_account() -> tuple[str, Path]:
-    entry = pwd.getpwuid(_SYSTEM_HOST.uid)
-    return entry.pw_name, Path(entry.pw_dir)
+    _uid, user, home_dir = process_account()
+    return user, home_dir
 
 
 # meiva:note
@@ -199,8 +195,7 @@ def probe_startup_readiness() -> StartupReadiness:
     if not is_macos():
         return StartupReadiness(ready=True)
 
-    uid = _SYSTEM_HOST.uid
-    account, home = current_account()
+    uid, account, home = process_account()
     console_cmd, gui_cmd, domain_cmd, keychain_cmd = macos_probe_commands(uid, home)
     console = run_probe(console_cmd)
     console_user = console.stdout.strip()

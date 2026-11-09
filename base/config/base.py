@@ -14,7 +14,7 @@ from typing import Self
 from pydantic_settings import BaseSettings, PydanticBaseSettingsSource, SettingsConfigDict
 from pydantic_settings.sources import EnvSettingsSource
 
-from base.paths.home import is_default_home, resolve_meiva_home
+from base.paths.home import is_default_home_of, resolve_meiva_home, user_home
 
 
 def unit_home() -> Path:
@@ -27,7 +27,8 @@ def unit_home() -> Path:
 # meiva:note
 # Checks whether `home` (or this unit's resolved home) resolves to the default user home.
 def is_default_unit_home(home: Path | None = None) -> bool:
-    return is_default_home(unit_home() if home is None else home)
+    target = unit_home() if home is None else home
+    return is_default_home_of(Path(target).expanduser(), user_home=user_home())
 
 
 class EnvSettings(BaseSettings):

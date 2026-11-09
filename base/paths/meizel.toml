@@ -7,11 +7,10 @@ exports = ["expand.py", "home.py", "private_dir.py", "scratch.py", "tests"]
 
 [purity]
 "expand.py" = "strict"
+"home.py" = "strict"
 
 [roots]
-"home.py" = { kinds = ["environ", "home"], why = "resolve_meiva_home and default_home read MEIVA_HOME and Path.home(): the home is the input that locates the .env Settings is built from, so it is read before (and below) Settings; moved here from dotenv_boot unchanged" }
+"__init__.py" = { kinds = ["home"], why = "meiva_home() is the home resolution and creation door registered in [ambient-readers.home]; every caller is tracked at its call site" }
+"home.py" = { kinds = ["environ", "filesystem", "home"], why = "resolve_meiva_home and default_home read MEIVA_HOME and Path.home(): the home is the input that locates the .env Settings is built from, so it is read before (and below) Settings; home_checkout_error checks whether `<home>/source` is a directory and resolves checkout paths for comparison" }
+"private_dir.py" = { kinds = ["pid"], why = "is_foreign_owned() is the process euid comparison door registered in [ambient-readers.pid]; callers that omit euid are tracked at their call site" }
 "scratch.py" = { kinds = ["environ", "random"], why = "the host boundary that owns the process's temporary space: it is the one place a scratch directory is minted, and every module above it takes the space it was handed; the directory's home is the environment's answer (`TMPDIR` and its siblings, read by `tempfile.gettempdir`) and its name is the OS's random draw, and both are read here so no caller repeats them — a call that names its own parent passes that directory down and reads neither" }
-
-[debt.ambient-read]
-"__init__.py#home base.paths.home.resolve_meiva_home" = { count = 2, owner = "#5816", until = "permanently: this module IS the home resolution (MEIVA_HOME else ~/.meiva); meiva_home() and the checkout check read it here so no caller restates the rule" }
-"private_dir.py#pid os.geteuid" = { count = 1, owner = "#5816", until = "permanently: is_foreign_owned() already takes euid and defaults it to the euid of the process doing the check; no caller holds a second answer" }

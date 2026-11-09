@@ -12,5 +12,5 @@ exports = ["admission.py", "api.py", "delivery.py", "digests.py", "ledger.py", "
 "tests" = ["api.py", "ledger.py", "model.py"]
 "unit.py" = ["api.py", "delivery.py", "ledger.py", "model.py"]
 
-[debt.ambient-read]
-"ledger.py#pid base.paths.private_dir.is_foreign_owned" = { count = 1, owner = "#5816", until = "permanently: the check asks whether the ledger's directory belongs to another user, which only the process about to use it can answer" }
+[roots]
+"ledger.py" = { kinds = ["pid"], why = "_require_private asks whether the ledger's directory belongs to another user (`is_foreign_owned`), which only the process about to use it can answer" }

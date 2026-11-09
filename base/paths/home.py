@@ -15,10 +15,8 @@ from collections.abc import Mapping
 from pathlib import Path
 
 __all__ = [
-    "default_home",
     "home_checkout_error",
     "home_from_env",
-    "is_default_home",
     "is_default_home_of",
     "is_prod_install",
     "resolve_meiva_home",
@@ -100,15 +98,8 @@ def user_home() -> Path:
 
 
 # meiva:note
-# The default (prod) cluster home, `~/.meiva` — the one home whose initialization
-# uses the fixed default port block and whose checkout anchors without a
-# pointer. The ambient reader for composition roots.
-def default_home() -> Path:
-    return user_home() / ".meiva"
-
-
-def is_default_home(home: Path) -> bool:
-    """Whether `home` is the default prod home (`~/.meiva`)."""
+# Whether `home` is the default prod home (`~/.meiva`).
+def _is_default_home(home: Path) -> bool:
     return is_default_home_of(Path(home).expanduser(), user_home=user_home())
 
 
@@ -131,4 +122,4 @@ def is_prod_install(*, repo: Path, home: Path) -> bool:
     resolved = str(repo.resolve())
     if ".claude/worktrees" in resolved or "/.worktrees/" in resolved:
         return False
-    return is_default_home(home)
+    return _is_default_home(home)

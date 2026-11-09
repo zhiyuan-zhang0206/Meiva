@@ -15,8 +15,6 @@ from pathlib import Path
 
 from loguru import logger
 
-from base.clock.tests.fakes import system_clock
-
 
 def emit(text: object) -> None:
     sys.stdout.write(f"{text}\n")
@@ -78,6 +76,7 @@ def role_initialization(role: str, root: str) -> None:
         agent_ids.append(message.record["extra"]["agent_id"])  # type: ignore[attr-defined]
 
     sink = base_logger.add(observe, diagnose=False)
+    from base.clock.tests.fakes import system_clock
     from base.log.process import init_subprocess_logger
     from base.native_process.loaded_commit import LoadedCommit
     from base.telemetry.delivery.pipeline import EventPipeline

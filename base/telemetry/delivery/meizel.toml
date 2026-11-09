@@ -11,7 +11,3 @@ exports = ["defer_plan.py", "loss.py", "mirror.py", "pipeline.py", "receipts.py"
 "defer_plan.py" = "strict"
 "receipts.py" = "strict"
 "reporting.py" = "strict"
-
-[debt.ambient-read]
-"pipeline.py#pid threading.current_thread" = { count = 2, owner = "#5816", until = "permanently: `EventPipeline.sync` and `EventPipeline.stop` compare the caller against the pipeline's own worker thread to refuse a drain the worker would end up waiting on itself, and which thread is executing the call is a fact only the running thread can report — a caller passing it would be naming itself" }
-"state.py#platform socket.gethostname" = { count = 1, owner = "#5816", until = "permanently: process_state names the mirror's owner by this host's kernel name, and the configured cluster name is a different fact that would mislabel two units on one host" }

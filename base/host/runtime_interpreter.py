@@ -161,6 +161,16 @@ def verify_loaded_source(
     )
 
 
+# meiva:note
+# Verify `checkout` is the canonical checkout loaded into this process and return
+# `(interpreter, identity)`, keeping the interpreter's virtualenv symlink path intact.
+def admit_loaded_source(checkout: Path) -> tuple[Path, LoadedRuntimeIdentity]:
+    interpreter = Path(sys.executable)
+    if not interpreter.is_absolute():
+        raise LoadedRuntimeError("runtime interpreter must be an explicit absolute path")
+    return interpreter, verify_loaded_source(checkout, loaded=loaded_runtime())
+
+
 def capture_loaded_runtime() -> LoadedRuntimeIdentity:
     """Capture the checkout that is executing this code."""
     loaded = loaded_runtime()
