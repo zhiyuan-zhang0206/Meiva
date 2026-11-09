@@ -399,9 +399,10 @@ async def test_click_before_any_snapshot_falls_back_to_helper_scale(
 
 # meiva:note
 # Regression (#6643): when an older helper reports `screen_size.scale=1` on a 2x Retina display
-# (`CGDisplayPixelsWide` returning logical width), a cold-start region snapshot or fresh `find_text`
-# seeds the daemon's scale from the captured PNG so a subsequent direct click converts at 2x.
-async def test_cold_start_region_snapshot_and_find_text_seed_scale_when_helper_reports_one(
+# (`CGDisplayPixelsWide` returning logical width), a cold-start region snapshot keeps its scale on
+# `frame` without polluting global `_scale`, while a fresh whole-screen `find_text` records the
+# measured 2x capture scale so a subsequent direct click converts at 2x.
+async def test_cold_start_region_frame_stays_local_and_find_text_seeds_global_scale(
     fake_helper: FakeHelper,
     audit_log: AuditLog,
     *,
@@ -414,8 +415,8 @@ async def test_cold_start_region_snapshot_and_find_text_seed_scale_when_helper_r
         d, "snapshot", {"region": {"x": 100, "y": 150, "w": 200, "h": 100}}
     )
     assert region_snap["frame"]["scale"] == 2.0
-    await call(d, "click", {"x": 400, "y": 300})
-    assert ("click", {"x": 200.0, "y": 150.0, "double": False}) in fake_helper.calls
+    await call(d, "click", {"x": 40, "y": 20, "frame": region_snap["frame"]})
+    assert ("click", {"x": 120.0, "y": 160.0, "double": False}) in fake_helper.calls
 
     fake_helper.calls.clear()
     fake_helper.png_size = (3420, 2214)

@@ -105,21 +105,25 @@ def test_cold_start_current_scale_reconciles_display_modes(
     assert screen.current_scale(sh, 2.0, display_mode=lambda: mode) == 2.0
 
 
-def test_measured_tool_scale_covers_cold_start_and_preserves_warm_region() -> None:
-    seeded = screen.measured_tool_scale(
-        "snapshot",
-        {"region": {"x": 10, "y": 20, "w": 100, "h": 50}},
-        {"source": "region", "frame": {"scale": 2.0}},
-        None,
+def test_measured_tool_scale_updates_whole_screen_producers_and_keeps_region_local() -> None:
+    assert (
+        screen.measured_tool_scale(
+            "snapshot",
+            {"region": {"x": 10, "y": 20, "w": 100, "h": 50}},
+            {"source": "region", "frame": {"scale": 2.0}},
+            None,
+        )
+        is None
     )
-    assert seeded == 2.0
-    preserved = screen.measured_tool_scale(
-        "snapshot",
-        {"region": {"x": 10, "y": 20, "w": 100, "h": 50}},
-        {"source": "region", "frame": {"scale": 2.0}},
-        1.0,
+    assert (
+        screen.measured_tool_scale(
+            "snapshot",
+            {"region": {"x": 10, "y": 20, "w": 100, "h": 50}},
+            {"source": "region", "frame": {"scale": 2.0}},
+            1.0,
+        )
+        == 1.0
     )
-    assert preserved == 1.0
     assert (
         screen.measured_tool_scale("find_text", {"text": "ok"}, {"fresh": True}, None, 2.0, None)
         == 2.0
