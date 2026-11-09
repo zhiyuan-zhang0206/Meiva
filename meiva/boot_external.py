@@ -25,6 +25,7 @@ from base.clock.configuration import clock_config_from_boot
 from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.config import ConfigBoot
+from base.log import guard_default_logging
 from base.packages.plugins.loading import StateGate
 from meiva.boot import clients_over, database_factory, initialize_context
 
@@ -85,10 +86,12 @@ type ExternalBoot = BorrowedBoot | OwnedBoot
 
 
 def borrow_external_process(bound: MeivaContext) -> BorrowedBoot:
+    guard_default_logging()
     return BorrowedBoot(machine=bound.require_machine(), database=bound.clients.database)
 
 
 def own_external_process(config: ConfigBoot) -> OwnedBoot:
+    guard_default_logging()
     if not config.prepared:
         config.read_process_environment()
     from base.paths.home import resolve_meiva_home

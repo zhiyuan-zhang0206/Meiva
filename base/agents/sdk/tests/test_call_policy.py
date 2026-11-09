@@ -1,6 +1,7 @@
 """Live sampling uses validated snapshots and never blocks SDK calls on a fetch."""
 
 import os
+import re
 import subprocess
 import sys
 import threading
@@ -308,3 +309,63 @@ def test_invalid_refresh_dependency_classification_reaches_the_caller(
     cache.refresh()
     with pytest.raises(AttributeError, match="HTTPStatusError"):
         cache.read()
+
+
+_ANSI = re.compile(r"\x1b\[[0-9;]*m")
+
+
+# meiva:note
+# Simulate a bare tool subprocess (`_sdk_cold_child.py`, fixed argv) hitting a gateway outage
+# during `sdk-call-policy` refresh without `prepare_process_logging` or `add_sink` (task #6594).
+def test_bare_subprocess_refresh_outage_does_not_leak_bearer_token_to_stderr(
+    tmp_path: Path,
+) -> None:
+    canary = "canary-fake-bearer-token-998877"
+    home = tmp_path / "home"
+    home.mkdir()
+    _ = (home / ".env").write_text("", encoding="utf-8")
+    unreachable = closed_port_url()
+    env = {
+        **os.environ,
+        "MEIVA_HOME": str(home),
+        "MEIVA_MACHINE_SERVE_AGENT_RUNNER": "true",
+        "MEIVA_MACHINE_SERVE_GATEWAY": "false",
+        "MEIVA_GATEWAY_URL": unreachable,
+        "MEIVA_API_TOKEN": canary,
+    }
+    _ = env.pop("MEIVA_CONFIG_SOURCE", None)
+    result = subprocess.run(  # noqa: S603
+        [
+            sys.executable,
+            "-I",
+            str(Path(__file__).with_name("_sdk_cold_child.py")),
+            "bare_refresh_outage",
+        ],
+        cwd=tmp_path,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    plain_stderr = _ANSI.sub("", result.stderr)
+    motive = (
+        "a bare subprocess running sdk-call-policy refresh during a gateway outage must guard "
+        "default stderr handler 0 before logging `.opt(exception=True)`: on 2026-11-09 (task #6594) "
+        "handler 0 still carried `_diagnose=True` and dumped `headers={'Authorization': 'Bearer ...'}` "
+        "from `fetch_bootstrap_config` / `http_dial.py` into tool stderr; see "
+        f"base/agents/sdk/call_policy.py and base/log/sinks.py. stderr={plain_stderr!r}"
+    )
+
+    assert result.stdout.strip() == "diagnosing: []", motive
+    assert canary not in result.stdout and canary not in result.stderr, motive
+    assert [t for t in ("Authorization", "Bearer", "└ ") if t in plain_stderr] == [], motive
+    required = (
+        "SDK sampling config fetch unavailable; retaining the last valid policy",
+        "ConnectError",
+        "call_policy.py",
+        "bootstrap.py",
+        "http_dial.py",
+    )
+    assert [t for t in required if t not in plain_stderr] == [], motive

@@ -14,12 +14,12 @@
 # nothing can interpret -- a password held in a variable called `x` matches no rule -- so the quantity
 # has to close too: not "mostly masked", but "no handler renders frame variables at all".
 #
-# It is installed at the seam that opens a sink, like the redaction patcher beside it: `add_sink`
-# disables frame-variable rendering on every handler registered before the sink it is opening, which
-# covers the default one in a process that never runs the prelude. The coverage is therefore exactly
-# redaction's: a process that logs without opening a sink -- an ad-hoc script that imports the SDK,
-# nothing in this repository -- gets neither. A call at import would reach it and is not available:
-# meizel's `import-time-call` rule refuses a side effect that belongs to importing a module.
+# It is installed through `base.log.sinks.guard_default_logging` at both kinds of seams: `add_sink`
+# disables frame-variable rendering on every handler registered before the sink it is opening, and
+# the SDK, call-policy and bootstrap entry points run the same guard for tool subprocesses (`python
+# -c "import meiva; ..."`) that never call `prepare_process_logging()` or `add_sink()` and therefore
+# log straight to loguru's default stderr handler 0 (task #6594). Importing `base.log` stays free of
+# side effects so embedded callers keep their own logging untouched until a Meiva entry runs.
 #
 # The remaining way in is a `logger.add` called directly, which no runtime hook sees before the record
 # is already formatted. That one is refused in source instead:

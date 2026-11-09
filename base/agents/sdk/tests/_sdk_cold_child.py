@@ -16,8 +16,38 @@ def cold_import_loads_no_httpx() -> None:
     assert "httpcore" not in sys.modules
 
 
+# meiva:note
+# Run `SamplingPolicyOwner` refresh in a bare subprocess without `prepare_process_logging` or
+# `add_sink` to verify default handler 0 does not render frame variables (#6594).
+def bare_refresh_outage() -> None:
+    import os
+    import random
+    from pathlib import Path
+
+    from base.agents.sdk.call_policy import SamplingPolicy, SamplingPolicyOwner, SamplingSource
+    from base.host.env.bootstrap import BootstrapFetch
+    from base.log.diagnose import diagnosing_handler_ids
+
+    source = SamplingSource(
+        env=os.environ,
+        env_path=Path(os.environ["MEIVA_HOME"]) / ".env",
+        refresh_seconds=0.0,
+        tuning=BootstrapFetch(attempts=1, timeout_s=0.2, backoff_step_s=0.0),
+    )
+    owner = SamplingPolicyOwner(
+        initial=SamplingPolicy(),
+        source=source,
+        rng=random.Random(0),  # noqa: S311
+    )
+    _ = owner.read()
+    assert owner.worker is not None and owner.worker.completed.wait(10)
+    _ = sys.stdout.write(f"diagnosing: {diagnosing_handler_ids()}\n")
+    _ = owner.close()
+
+
 SCENARIOS = {
     "cold_import_loads_no_httpx": cold_import_loads_no_httpx,
+    "bare_refresh_outage": bare_refresh_outage,
 }
 
 if __name__ == "__main__":

@@ -343,7 +343,9 @@ def fetch_bootstrap_config(
     from base.host.net.auth import bearer_header
     from base.host.net.http_dial import get as dial_get
     from base.host.net.resilience import Policy, retry
+    from base.log import guard_default_logging
 
+    guard_default_logging()
     headers = bearer_header(bearer) if bearer else {}
     url = f"{base_url.rstrip('/')}/api/bootstrap"
     # Gateway briefly down: retry connect errors only; ReadTimeout propagates.
@@ -494,7 +496,9 @@ def resolve_bootstrap_values(
     env: Mapping[str, str], *, home: Path, now: float, tuning: BootstrapFetch
 ) -> dict[str, str]:
     from base.host.net.auth import delivered_token
+    from base.log import guard_default_logging
 
+    guard_default_logging()
     base_url = _gateway_base_url(env)
     snapshot = read_config_snapshot(base_url, home=home, now=now)
     if snapshot is not None and snapshot[1] <= tuning.snapshot_fresh_s:

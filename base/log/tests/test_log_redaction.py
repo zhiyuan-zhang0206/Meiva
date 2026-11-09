@@ -52,12 +52,28 @@ def test_a_secret_named_value_in_a_serialized_mapping_is_masked() -> None:
         ('DB_PASSWORD="fixture-quoted"', 'DB_PASSWORD="***"'),
         ("API_SECRET: fixture-colon then text", "API_SECRET: *** then text"),
         ("MEIVA_DB_PASSWORD='fixture-single'", "MEIVA_DB_PASSWORD='***'"),
+        (
+            "Authorization: Bearer canary-fake-bearer-token-998877",
+            "Authorization: Bearer ***",
+        ),
+        (
+            "headers={'Authorization': 'Bearer canary-fake-bearer-token-998877'}",
+            "headers={'Authorization': 'Bearer ***'}",
+        ),
+        (
+            '{"Authorization": "Bearer canary-fake-bearer-token-998877"}',
+            '{"Authorization": "***"}',
+        ),
     ],
 )
 def test_an_environment_assignment_keeps_its_key_and_loses_its_value(
     line: str, masked: str
 ) -> None:
-    assert redact_text(line) == masked
+    assert redact_text(line) == masked, (
+        "redact_text must mask credential assignments and Authorization Bearer tokens while "
+        "keeping the key prefix: on 2026-11-09 (task #6594) unguarded stderr logging exposed "
+        "`Authorization: Bearer <token>` in child tool output; see base/log/redaction.py."
+    )
 
 
 @pytest.mark.parametrize(
@@ -67,11 +83,17 @@ def test_an_environment_assignment_keeps_its_key_and_loses_its_value(
         "token_count=3 tokenizer=bert token_expires_at=soon",
         "PASSWORD_POLICY=strict",
         "TOKENIZER_PATH=/x",
+        "[mcp-oauth] open authorization URL: https://issuer.test/auth",
+        "authorization callback missing 'code'",
         "a line with no credential at all",
     ],
 )
 def test_a_text_without_a_credential_is_returned_unchanged(text: str) -> None:
-    assert redact_text(text) is text
+    assert redact_text(text) is text, (
+        "redact_text must return non-credential lines (including non-Bearer authorization prose) "
+        "unchanged without copying: over-broad matching destroys OAuth/callback diagnostics "
+        "(2026-11-09, task #6594); see base/log/redaction.py."
+    )
 
 
 # meiva:note

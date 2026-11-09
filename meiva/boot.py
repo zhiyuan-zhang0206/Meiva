@@ -48,6 +48,7 @@ from base.host.env.agent_env import AGENT_ID_ENV
 from base.host.exit_codes import hard_exit
 from base.lm.catalog import ModelCatalog
 from base.lm.catalog.provider_keys import ProviderKeys
+from base.log import guard_default_logging
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.packages.plugins.loading import StateGate
 from base.telemetry.delivery.pipeline import EventPipeline
@@ -274,6 +275,7 @@ def launch_agent_id(env: Mapping[str, str]) -> int | None:
 
 
 def launched_context(*, env: Mapping[str, str], config: ConfigBoot) -> MeivaContext | None:
+    guard_default_logging()
     agent_id = launch_agent_id(env)
     if agent_id is None:
         return None
@@ -393,6 +395,7 @@ def ensure_plugins_loaded(
     from base import paths
     from meiva.sdk_surface import install as _sdk_install
 
+    guard_default_logging()
     if context is not None:
         process_context.bind_context(context)
     else:
@@ -703,6 +706,7 @@ def maybe_load_plugins_for_missing(name: str) -> bool:
 
 
 def bind_launched_context() -> MeivaContext | None:
+    guard_default_logging()
     env = os.environ
     if launch_agent_id(env) is None:
         return None
@@ -757,6 +761,7 @@ def harness_failure(exc: BaseException) -> HarnessAttachError:
 def record_harness_failure(exc: BaseException) -> None:
     from meiva.sdk_surface import install as _sdk_install
 
+    guard_default_logging()
     failure = harness_failure(exc)
     try:
         _sdk_install.uninstall()

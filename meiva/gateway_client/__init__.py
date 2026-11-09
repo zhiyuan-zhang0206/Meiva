@@ -18,7 +18,7 @@ import meiva.sdk_surface.agent_identity
 from base.agents.context import MeivaContext
 from base.agents.context.gateway_client import transport as _transport
 from base.api_contracts.agent_contract import GatewayUnavailable as GatewayUnavailable
-from base.log import logger
+from base.log import guard_default_logging, logger
 from meiva.gateway_client import agent_plans, plans
 from meiva.gateway_client.plans import Request
 from meiva.sdk_surface import process_context
@@ -63,6 +63,7 @@ def _ctx(context: MeivaContext | None) -> MeivaContext:
 # contract; the plan's `None` timeout and retry count leave the context's own configuration in
 # charge. httpx is imported here so `import meiva` does not load it.
 def _run(plan: Request, context: MeivaContext) -> _transport.TransportResponse:
+    guard_default_logging()
     timeout = None
     if plan.timeout_seconds is not None:
         import httpx
@@ -111,6 +112,7 @@ def get(
     Keep the context's HTTP client, timeout and bounded retry policy. A shared
     host must supply its context; it cannot borrow an ambient agent identity.
     """
+    guard_default_logging()
     return _transport.get(
         path, params=params, timeout=timeout, max_retries=max_retries, context=_ctx(context)
     )
