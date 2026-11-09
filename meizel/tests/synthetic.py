@@ -37,7 +37,9 @@ def counts(table: Mapping[str, DebtEntry]) -> dict[str, int]:
 # entry exists only for the test that reads it, so its owner says `synthetic` rather than borrowing a
 # task id that would outlive the fixture and answer for entries that never existed.
 FIXTURE_OWNER = "synthetic"
-FIXTURE_UNTIL = "permanently: a fixture entry that exists only for the test that reads it"
+FIXTURE_UNTIL = (
+    "waits for the fixture seam: a fixture entry that exists only for the test that reads it"
+)
 
 
 # meiva:note

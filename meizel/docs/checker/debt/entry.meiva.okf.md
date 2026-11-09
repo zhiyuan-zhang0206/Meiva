@@ -1,7 +1,7 @@
 ---
 type: doc
 title: "meizel/ — What one recorded entry says"
-description: "The count, owner and until a [debt] line carries, the two shapes an until takes, the marked placeholder debt record writes, and the three numbers the summary counts apart."
+description: "The count, owner and until a [debt] line carries, the waiting shape an until takes, the marked placeholder debt record writes, and the three numbers the summary counts apart."
 tags:
   - locality
   - tool
@@ -18,8 +18,8 @@ A `[debt.<code>]` line records a count, the task that re-reads it, and the condi
 
 `count` is required and positive, and `owner` and `until` are required with it: a line that leaves
 either out is `bare-debt`, one diagnostic per entry at the entry's own line, naming the fields it
-lacks. An `until` also has to begin with `waits for ` or `permanently:` — the two shapes say different
-things, and a sentence in neither shape reads as an answer without saying which question it answers —
+lacks. An `until` also has to begin with `waits for ` — every debt entry names the condition that
+retires it, whereas a permanent host or composition boundary belongs in `[roots]` —
 or with `unreviewed:`, the marker below. The full text of what `until` and `owner` each answer is printed once per run, on the first
 entry that lacks that field, so a baseline with twenty bare entries prints twenty lines rather than
 twenty copies of the rule. An empty or unknown field is `manifest-debt` rather than dropped — a

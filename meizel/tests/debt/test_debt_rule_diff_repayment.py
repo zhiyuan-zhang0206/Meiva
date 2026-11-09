@@ -105,7 +105,14 @@ def test_a_read_the_old_rules_measure_arriving_under_a_rule_change_is_negative_r
     write(root, {"app/other.py": "import os\n\nvalue = os.environ['B']\n"})
     assert (
         run(
-            root, "debt", "record", ".", "--owner", "synthetic", "--until", "permanently: a fixture"
+            root,
+            "debt",
+            "record",
+            ".",
+            "--owner",
+            "synthetic",
+            "--until",
+            "waits for a seam: a fixture",
         )
         == 0
     )

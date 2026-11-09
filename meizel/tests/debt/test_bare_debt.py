@@ -14,7 +14,9 @@ USE = {
 }
 DECLARED = '[uses]\n"a.py" = ["b.py"]\n'
 KEY = "a.py -> b.py#_secret"
-COMPLETE = '{ count = 1, owner = "#6018", until = "permanently: the fixture reads it" }'
+COMPLETE = (
+    '{ count = 1, owner = "#6018", until = "waits for the fixture seam: the fixture reads it" }'
+)
 
 
 # meiva:note
@@ -53,7 +55,7 @@ def test_a_bare_entry_is_reported_once_at_its_own_line(make_repo: RepoFactory) -
 def test_the_full_text_reaches_the_first_entry_of_each_kind_only(make_repo: RepoFactory) -> None:
     entries = {
         "a.py -> b.py#_until": '{ count = 1, owner = "synthetic" }',
-        "a.py -> b.py#_owner": '{ count = 1, until = "permanently: a fixture entry" }',
+        "a.py -> b.py#_owner": '{ count = 1, until = "waits for the fixture seam: a fixture entry" }',
         "a.py -> b.py#_both": "1",
     }
     root = make_repo({**USE, "pkg/meizel.toml": manifest(**entries)})
@@ -97,20 +99,29 @@ def test_an_until_in_no_shape_is_an_error_that_names_both(
     root = make_repo({**USE, "pkg/meizel.toml": manifest(**entries)})
     [only] = bare(root)
     assert "states an exit condition in no shape this tool reads" in only.message
-    assert "`waits for ...:` or `permanently:`" in only.message
+    assert "`waits for ...:`." in only.message
     assert "Something will arrive" in only.render()
     assert run(root, "check") == 1
 
 
-def test_an_until_that_waits_for_nothing_asks_for_permanently(make_repo: RepoFactory) -> None:
+def test_permanently_is_rejected_as_an_invalid_until_shape(make_repo: RepoFactory) -> None:
+    entries = {KEY: '{ count = 1, owner = "synthetic", until = "permanently: a design boundary" }'}
+    root = make_repo({**USE, "pkg/meizel.toml": manifest(**entries)})
+    [only] = bare(root)
+    assert "states an exit condition in no shape this tool reads" in only.message
+    assert "A permanent boundary is not debt" in only.render()
+    assert run(root, "check") == 1
+
+
+def test_an_until_that_waits_for_nothing_is_rejected(make_repo: RepoFactory) -> None:
     entries = {
         KEY: '{ count = 1, owner = "synthetic", until = "waits for nothing that can arrive: a fixture" }'
     }
     root = make_repo({**USE, "pkg/meizel.toml": manifest(**entries)})
     [only] = bare(root)
     assert "waits for nothing" in only.message
-    assert "`permanently: <the design boundary it is tied to>`" in only.message
-    assert "answers one of the two questions" in only.render()
+    assert "`[roots]` instead of `[debt]`" in only.message
+    assert "names the condition that ends" in only.render()
     assert run(root, "check") == 1
 
 
