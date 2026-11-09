@@ -34,8 +34,8 @@ the user, while this file records the agent's own lesson — what went wrong and
 the specific change to make next time. Nothing renders it; the agent reads it on
 its next pass over its workspace.
 
-The file is seeded empty by the plugin's `after_init` hook
-(`ensure_to_do_better`) on the first boot of a process that carries an agent
+The file is seeded empty by the plugin's `before_turn` hook
+(`ensure_to_do_better`) when the process carries an agent
 identity, so the path in the reminder already exists when the agent appends to
 it. Seeding creates only a missing file: an existing record is never rewritten,
 truncated or moved, so a lesson from an earlier session survives every restart.

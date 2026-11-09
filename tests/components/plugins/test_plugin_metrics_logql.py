@@ -28,7 +28,7 @@ def _load_core() -> list[MetricSpec]:
 
 def test_shipped_plugin_metrics_are_logql() -> None:
     specs = registered_metrics()
-    assert len(specs) == 11
+    assert len(specs) == 9
     names = {spec.name for spec in specs}
     assert {
         "meiva_memory_recall_search_latency_ms",
@@ -168,7 +168,7 @@ def test_dashboard_json_matches_core_registrations() -> None:
         _assert_dashboard_panel_matches_spec(panels_by_title[render_title(spec)], spec)
 
 
-def test_dashboard_has_141_loki_targets() -> None:
+def test_dashboard_has_132_loki_targets() -> None:
     path = _REPO_ROOT / "deploy/lgtm/config/grafana/provisioning/dashboards/meiva-ops-main.json"
     panels = json.loads(path.read_text())["panels"]
     loki_targets = [
@@ -177,7 +177,7 @@ def test_dashboard_has_141_loki_targets() -> None:
         for target in panel.get("targets", [])
         if target.get("datasource", panel.get("datasource", {})).get("uid") == "loki"
     ]
-    assert len(loki_targets) == 141
+    assert len(loki_targets) == 132
 
 
 def test_unresolved_gauge_names_match_the_otlp_contract() -> None:

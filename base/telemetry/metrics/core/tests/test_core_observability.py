@@ -59,7 +59,6 @@ EXPECTED = {
         "telemetry",
         3,
     ),
-    "meiva_obs_syntax_fix_by_kind": ("timeseries", ["grafana"], "syntax_fix", "telemetry", 7),
     "meiva_obs_spawn_by_spawner": ("barchart", ["grafana"], "spawn", "audit", 1),
     "meiva_obs_lifecycle_counts": ("barchart", ["grafana"], "spawn", "audit", 1),
     "meiva_obs_sdk_call_top": ("table", ["grafana"], "sdk_call", "telemetry", 1),
@@ -249,23 +248,6 @@ def test_halt_breakdown_buckets() -> None:
     assert 'attributes_body!="no tool_call (idle)"' in exprs[3]
     assert 'attributes_body!~".*compact.*"' in exprs[3]
     assert 'attributes_body!~"lifecycle .*"' in exprs[3]
-
-
-def test_syntax_fix_kind_buckets() -> None:
-    exprs = _all_rendered()["meiva_obs_syntax_fix_by_kind"]
-    assert 'attributes_fixes=~".*ruff_format.*"' in exprs[0]
-    assert 'attributes_fixes=~".*ruff.*" | attributes_fixes!~".*ruff_format.*"' in exprs[1]
-    for needle, idx in [
-        ("invalid_escape", 2),
-        ("missing_imports", 3),
-        ("chinese_punct", 4),
-        ("bracket_matching", 5),
-    ]:
-        assert f'attributes_fixes=~".*{needle}.*"' in exprs[idx], needle
-    assert (
-        'attributes_fixes!~".*(ruff|invalid_escape|missing_imports|chinese_punct|bracket_matching).*"'
-        in exprs[6]
-    )
 
 
 def test_lifecycle_and_spawner_window_aggregates() -> None:

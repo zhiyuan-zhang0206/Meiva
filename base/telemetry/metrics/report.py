@@ -1,21 +1,11 @@
-"""Render helpers for the metrics report over the unified event stream.
-
-This module is the shared rendering layer for the SQL-aggregated metrics path
-(`base.telemetry.metrics.aggregate`): it owns the ASCII text blocks and the machine
-data shapes (`MetricSection`, `Pctiles`) that the gateway report endpoint and
-the CLI both emit. The per-row computation it used to host (the
-`EventRow` / `EventIndex` / `@metric_unit` registry and the `query_events`
-fetch) was retired with the SQL aggregation (single-day materialization
-outgrew 430K+ rows; the aggregate path reduced it to a handful of SQL GROUP
-BYs). The only production importer is `base.telemetry.metrics.aggregate`, which computes the
-data dicts in SQL and calls the render helpers here — the math (pctiles,
-third_of, fix-kind parsing) cannot drift because both sides share these
-functions.
-"""
+# meiva:note
+# Render helpers for the metrics report over the unified event stream (`base.telemetry.metrics.aggregate`).
+# Owns the ASCII text blocks and machine data shapes (`MetricSection`, `Pctiles`) that the gateway
+# report endpoint and the CLI both emit.
+# meiva:link base/telemetry/metrics/docs/metrics.md
 
 from __future__ import annotations
 
-import re
 import statistics
 from dataclasses import dataclass
 from typing import TypedDict
@@ -31,23 +21,6 @@ class Pctiles(TypedDict):
     p90: float
     max: float
     mean: float
-
-
-# meiva:note
-# One position third's `ruff_format` hit count and the number of code blocks that fell in it.
-class PositionBlocks(TypedDict):
-    hits: int
-    blocks: int
-
-
-# meiva:note
-# The `syntax_fix` section's machine fragment: the shape `render_syntax_fix` reads and the
-# JSON / API carries.
-class SyntaxFixData(TypedDict):
-    code_blocks: int
-    trigger_counts: dict[str, int]
-    ruff_format_by_position: dict[str, PositionBlocks]
-    ruff_format_rate_pct_by_position: dict[str, float]
 
 
 # meiva:note
@@ -110,16 +83,17 @@ class PluginActivationData(TypedDict):
     by_plugin_model: dict[str, int]
 
 
-type SectionData = (
-    SyntaxFixData | ExecData | LlmTurnsData | AgentActivityData | PluginActivationData
-)
+type SectionData = ExecData | LlmTurnsData | AgentActivityData | PluginActivationData
 
 
+# meiva:note
+# One section of the metrics report: unit key (`name`), human/agent-readable block (`text`), and
+# machine fragment (`data`).
 @dataclass
 class MetricSection:
-    name: str  # unit key, e.g. "syntax_fix"
-    text: str  # human/agent-readable block
-    data: SectionData  # machine fragment for the JSON / API
+    name: str
+    text: str
+    data: SectionData
 
 
 def pctiles(values: list[float]) -> Pctiles:
@@ -175,20 +149,6 @@ def render_pctiles(title: str, p: Pctiles) -> str:
     return (
         f"{title}\n  n={p['n']}  p50={p['p50']}  p90={p['p90']}  max={p['max']}  mean={p['mean']}\n"
     )
-
-
-def render_syntax_fix(data: SyntaxFixData) -> str:
-    text = render_counts(
-        "syntax_fix trigger counts (per code block):", data["trigger_counts"], data["code_blocks"]
-    )
-    text += "\nruff_format trigger rate by thread position:\n"
-    for b in ("early", "mid", "late"):
-        h, t = (
-            data["ruff_format_by_position"][b]["hits"],
-            data["ruff_format_by_position"][b]["blocks"],
-        )
-        text += f"  {b:<6} {data['ruff_format_rate_pct_by_position'][b]:>5.1f}%  ({h}/{t})  {render_bar(int(data['ruff_format_rate_pct_by_position'][b]), 100, 20)}\n"
-    return text
 
 
 def render_exec(data: ExecData) -> str:
@@ -263,18 +223,3 @@ def render_plugin_activation(data: PluginActivationData) -> str:
     else:
         text += "  (none — no plugin hook, wrap, or prompt section fired)\n"
     return text
-
-
-def fix_kinds(fixes: str) -> list[str]:
-    """Parse a syntax_fix `fixes` payload, e.g. "ruff,chinese_punct(3)".
-
-    Strips the per-block `(n)` count suffix, yielding the kind name only.
-    The "none" sentinel (logged on the llm_repair / compile_failed paths when
-    no deterministic fix ran) is not a fix kind and is dropped.
-    """
-    out: list[str] = []
-    for raw in fixes.split(","):
-        part = raw.strip()
-        if part and part != "none":
-            out.append(re.sub(r"\(\d+\)$", "", part))
-    return out

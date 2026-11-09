@@ -34,10 +34,10 @@ Together with SDK wraps (a plugin's declared `SdkWrap`, applied by `meiva/sdk_su
 
 ## Notes
 
-- Workspace cwd validation (`ValidateCwdAfterInitHook`) and standing self-evolution instructions (`ensure_to_do_better`) run directly inside `init_context_node` before the standing message head is laid down.
+- Workspace cwd validation (`ValidateCwdAfterInitHook`) runs directly inside `init_context_node` before the standing message head is laid down.
 - A hook returning `None` means "no modification"—it produces no state update
 - Built-in `before_turn` hooks (repair / compact reminder / skill recall / capability-index drift) — the unconditional built-ins and their registration order: [Built-in before_llm Hooks](../../graph/hooks/docs/builtin-before-llm.md).
-- Plugin hooks are also `Hook` subclasses (e.g., `meiva_builtins/plugins/meiva_sdk_reminder/agent_runtime.py`, `meiva_builtins/plugins/meiva_memory/agent_runtime.py`, `meiva_builtins/plugins/meiva_to_user/agent_runtime.py`), written in the same style as built-in hooks—plugin authors don't need to care about built-in vs plugin distinction.
+- Plugin hooks are also `Hook` subclasses (e.g., `meiva_builtins/plugins/meiva_self_evolution/agent_runtime.py`, `meiva_builtins/plugins/meiva_memory/agent_runtime.py`, `meiva_builtins/plugins/meiva_to_user/agent_runtime.py`), written in the same style as built-in hooks—plugin authors don't need to care about built-in vs plugin distinction.
 
 `tests/fakes.py` gives fake cursors `fetchone=None` and `fetchall=[]` to mean no
 pending interruption. A truthy default mock can falsely trigger cancellation

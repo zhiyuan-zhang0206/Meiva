@@ -1,7 +1,7 @@
 exports = ["meiva_fleet", "meiva_usage"]
 
 [uses]
-"tests" = ["meiva_code", "meiva_fleet", "meiva_memory", "meiva_sdk_reminder", "meiva_syntax_fix"]
+"tests" = ["meiva_code", "meiva_fleet", "meiva_memory"]
 
 [purity]
 "__init__.py" = "strict"

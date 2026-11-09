@@ -26,7 +26,6 @@ def _slice_values(slices: AgentSlices) -> dict[str, object]:
         "memory": slices.memory,
         "skill_recall": slices.skill_recall,
         "history_dump": slices.history_dump,
-        "sdk_reminders": slices.sdk_reminders,
         "llm_policy": slices.llm_policy,
         "overrides": slices.overrides,
         "sandbox": slices.sandbox,

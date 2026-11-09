@@ -23,9 +23,9 @@ decentralized-install **step 3**, so enable state is now fully per-machine.
 ```json
 {
   "plugins": {
-    "meiva_compact":    { "enabled": true },
-    "meiva_syntax_fix": { "enabled": true },
-    "audit":          { "enabled": false }
+    "meiva_compact":        { "enabled": true },
+    "meiva_self_evolution": { "enabled": true },
+    "audit":              { "enabled": false }
   }
 }
 ```

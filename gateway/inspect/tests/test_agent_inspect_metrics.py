@@ -462,9 +462,8 @@ def test_in_process_loader_imports_shipped_metrics() -> None:
 
     plugin_specs = [s for s in specs if s.plugin != "core"]
     core_specs = [s for s in specs if s.plugin == "core"]
-    # the shipped plugin metrics (11, including recall-filter latency panels)
-    assert {s.plugin for s in plugin_specs} == {"meiva_fleet", "meiva_memory", "meiva_syntax_fix"}
-    assert len(plugin_specs) == 11
+    assert {s.plugin for s in plugin_specs} == {"meiva_fleet", "meiva_memory"}
+    assert len(plugin_specs) == 9
     # core section follows, plugin section first (old snapshot order)
     assert [s.plugin for s in specs].index("core") == len(plugin_specs)
     assert len(core_specs) >= 16

@@ -27,7 +27,6 @@ from base.telemetry.metrics.plugin_metrics import MetricSpec
 from meiva_builtins.plugins.meiva_fleet import inspector as fleet_inspector
 from meiva_builtins.plugins.meiva_fleet import metrics as fleet_metrics
 from meiva_builtins.plugins.meiva_memory import metrics as memory_metrics
-from meiva_builtins.plugins.meiva_syntax_fix import metrics as syntax_fix_metrics
 
 Failures = Callable[[], list[tuple[str, BaseException]]]
 
@@ -338,7 +337,6 @@ def test_a_refusal_is_reported_through_load_report(
 _SHIPPED_METRICS = (
     ("meiva_fleet", fleet_metrics),
     ("meiva_memory", memory_metrics),
-    ("meiva_syntax_fix", syntax_fix_metrics),
 )
 
 

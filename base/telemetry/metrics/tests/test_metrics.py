@@ -1,20 +1,6 @@
 from __future__ import annotations
 
-from base.telemetry.metrics import fix_kinds, pctiles, third_of
-
-
-def test_fix_kinds_strips_count_suffix():
-    assert fix_kinds("ruff,ruff_format") == ["ruff", "ruff_format"]
-    assert fix_kinds("chinese_punct(3),missing_imports(2)") == [
-        "chinese_punct",
-        "missing_imports",
-    ]
-    assert fix_kinds("") == []
-
-
-def test_fix_kinds_drops_none_sentinel():
-    assert fix_kinds("none") == []
-    assert fix_kinds("ruff,none") == ["ruff"]
+from base.telemetry.metrics import pctiles, third_of
 
 
 def test_pctiles_pins_nearest_rank_values():

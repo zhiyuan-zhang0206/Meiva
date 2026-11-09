@@ -108,14 +108,14 @@ def _imported_plugins() -> set[str]:
 def test_only_enabled_plugins_are_imported(unit_home: Path):
     """enabled=true plugins are imported; enabled=false are not."""
     _make_plugin(unit_home, "compact")
-    _make_plugin(unit_home, "syntax_fix")
+    _make_plugin(unit_home, "custom_ext")
     _make_plugin(unit_home, "demo")
 
     _write_enabled(
         {
-            "meiva_syntax_fix": {"enabled": True},
+            "meiva_self_evolution": {"enabled": True},
             "compact": {"enabled": True},
-            "syntax_fix": {"enabled": True},
+            "custom_ext": {"enabled": True},
             "demo": {"enabled": False},
         }
     )
@@ -125,9 +125,9 @@ def test_only_enabled_plugins_are_imported(unit_home: Path):
     _loader.load_extensions(sampling=fixed_sampling_owner(), home=unit_home)
 
     imported = _imported_plugins()
-    assert "meiva_builtins.plugins.meiva_syntax_fix.plugin" in imported
+    assert "meiva_builtins.plugins.meiva_self_evolution.plugin" in imported
     assert "plugins.compact.plugin" in imported
-    assert "plugins.syntax_fix.plugin" in imported
+    assert "plugins.custom_ext.plugin" in imported
     assert not any("demo" in name for name in imported)
     assert not any("meiva_to_user" in name for name in imported)
 
@@ -135,11 +135,13 @@ def test_only_enabled_plugins_are_imported(unit_home: Path):
 def test_retired_silent_idle_plugin_config_does_not_restore_the_nudge(unit_home: Path) -> None:
     from meiva.sdk_surface import extensions as _loader
 
-    _write_enabled({"meiva_silent_idle": {"enabled": True}, "meiva_syntax_fix": {"enabled": True}})
+    _write_enabled(
+        {"meiva_silent_idle": {"enabled": True}, "meiva_self_evolution": {"enabled": True}}
+    )
     _loader.load_extensions(sampling=fixed_sampling_owner(), home=unit_home)
 
     imported = _imported_plugins()
-    assert "meiva_builtins.plugins.meiva_syntax_fix.plugin" in imported
+    assert "meiva_builtins.plugins.meiva_self_evolution.plugin" in imported
     assert not any("meiva_silent_idle" in name for name in imported)
 
 
@@ -182,25 +184,11 @@ def test_load_extensions_installs_metering():
     assert installation.metered, "the recorder was installed over the surface"
 
 
+# meiva:note
+# Issue #147: a second `load_extensions()` re-executes the plugin module already registered in
+# `sys.modules` — it must not bind a new one. Replacing it forks the module identity so whoever
+# imported the plugin before the load keeps the old object while `mock.patch` resolves the new one.
 def test_a_repeat_load_reuses_the_module_object_so_a_patch_still_lands(unit_home: Path):
-    """Issue #147: a second `load_extensions()` re-executes the plugin module
-    already registered in `sys.modules` — it must not bind a new one.
-
-    Replacing it forks the module identity. Whoever imported the plugin before
-    the load — a test's module-level `from ...plugin import hook`, a hook object
-    built at import time — keeps the old object, while `mock.patch` resolves the
-    dotted path through `sys.modules` and patches the new one. The patch then
-    silently never reaches the code under test: it is not a mock failure, it is
-    two live copies of one module. `meiva_builtins/plugins/meiva_syntax_fix/tests/test_syntax_fix.py` failed
-    exactly this way whenever a plugin-loading sibling ran first in the same
-    xdist worker, and passed in isolation.
-
-    Repeated in-process loads are a production path too, not only a test
-    fixture: `agent/extensions/catalog.py:build_catalog()` loads in the calling
-    process, and the runner-hosted executor sketched in
-    `future/infra/extensions/extension-ownership.md` would reload as the activated union
-    changes rather than once at process boot.
-    """
     _make_plugin(
         unit_home,
         "demo",
@@ -262,9 +250,9 @@ def test_duplicate_plugin_name_raises(unit_home: Path):
     """Same-named plugin in two locations -> discover_plugins raises DuplicatePlugin."""
     from base.packages.plugins.enable_config import DuplicatePlugin, discover_plugins
 
-    _make_external_plugin(unit_home, "meiva_syntax_fix")
+    _make_external_plugin(unit_home, "meiva_self_evolution")
 
-    with pytest.raises(DuplicatePlugin, match="meiva_syntax_fix"):
+    with pytest.raises(DuplicatePlugin, match="meiva_self_evolution"):
         discover_plugins(home=unit_home)
 
 
@@ -407,17 +395,17 @@ def test_broken_builtin_plugin_skipped_and_others_load(tmp_path: Path, unit_home
     broken_py = tmp_path / "plugin.py"
     broken_py.write_text("raise RuntimeError('boom')\n", encoding="utf-8")
     assert (
-        safe_load_plugin_module(broken_py, name="syntax_fix", pkg="meiva_builtins.plugins") is None
+        safe_load_plugin_module(broken_py, name="custom_ext", pkg="meiva_builtins.plugins") is None
     )
-    assert "meiva_builtins.plugins.syntax_fix.plugin" not in sys.modules
+    assert "meiva_builtins.plugins.custom_ext.plugin" not in sys.modules
 
-    _make_plugin(unit_home, "syntax_fix", "raise RuntimeError('boom')\n")
-    _write_enabled({"syntax_fix": {"enabled": True}, "meiva_syntax_fix": {"enabled": True}})
+    _make_plugin(unit_home, "custom_ext", "raise RuntimeError('boom')\n")
+    _write_enabled({"custom_ext": {"enabled": True}, "meiva_self_evolution": {"enabled": True}})
 
     _loader.load_extensions(sampling=fixed_sampling_owner(), home=unit_home)  # must not raise
 
-    assert "meiva_builtins.plugins.meiva_syntax_fix.plugin" in sys.modules
-    assert "plugins.syntax_fix.plugin" not in sys.modules
+    assert "meiva_builtins.plugins.meiva_self_evolution.plugin" in sys.modules
+    assert "plugins.custom_ext.plugin" not in sys.modules
 
 
 def test_external_plugin_relative_import_resolves_when_plugins_prefix_is_shadowed(

@@ -73,10 +73,10 @@ def test_plugins_config_defaults():
 
 def test_load_writes_default_when_no_local_file(tmp_path: Path, store: PluginEnableStore):
     _make_plugin_dir("compact", tmp_path)
-    _make_plugin_dir("syntax_fix", tmp_path)
+    _make_plugin_dir("audit", tmp_path)
 
-    cfg = store.load({"compact", "syntax_fix"})
-    assert set(cfg.plugins) == {"compact", "syntax_fix"}
+    cfg = store.load({"compact", "audit"})
+    assert set(cfg.plugins) == {"compact", "audit"}
     assert all(e.enabled for e in cfg.plugins.values())
 
 
@@ -99,12 +99,12 @@ def test_load_reads_existing_config(tmp_path: Path, store: PluginEnableStore):
 
 def test_load_auto_merges_new_plugins(tmp_path: Path, store: PluginEnableStore):
     _make_plugin_dir("compact", tmp_path)
-    _make_plugin_dir("syntax_fix", tmp_path)
+    _make_plugin_dir("audit", tmp_path)
     store.write({"plugins": {"compact": {"enabled": False}}})
 
-    cfg = store.load({"compact", "syntax_fix"})
+    cfg = store.load({"compact", "audit"})
     assert cfg.plugins["compact"].enabled is False
-    assert cfg.plugins["syntax_fix"].enabled is True
+    assert cfg.plugins["audit"].enabled is True
 
 
 def test_load_auto_merge_new_plugins_deterministic_order(tmp_path: Path, store: PluginEnableStore):

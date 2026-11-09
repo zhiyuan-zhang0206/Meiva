@@ -1,4 +1,4 @@
-exports = ["claim", "exec", "hooks", "interrupt", "llm", "llm_errors.py", "node_log", "prompt", "recall", "tests", "tool_calls.py"]
+exports = ["claim", "exec", "hooks", "interrupt", "llm", "llm_errors.py", "node_log", "prompt", "recall", "tests"]
 
 [purity]
 "_shared.py" = "strict"

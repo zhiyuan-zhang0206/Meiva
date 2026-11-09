@@ -1,12 +1,9 @@
-"""Aggregate fetch for metrics — the gateway + CLI path.
-
-The digest's units reduce the window's telemetry and log rows to a handful of aggregates (counts,
-sums, distributions, per-key counters, position buckets). `fetch_aggregate` reads those aggregates
-from `telemetry_events` (`base.telemetry.metrics.aggregate_sql`, a few statements in one
-connection, nothing materialized per row) and returns an `EventAggregate`;
-`build_report_from_aggregate` / `agent_rollups_from_aggregate` rebuild the report from it, reusing
-the helper functions (`pctiles`, `third_of`, `fix_kinds`) so the math cannot drift.
-"""
+# meiva:note
+# Aggregate fetch for metrics — the gateway + CLI path.
+# `fetch_aggregate` reads counts, sums, distributions, per-key counters, and position buckets from
+# `telemetry_events` (`base.telemetry.metrics.aggregate_sql`) and returns an `EventAggregate`;
+# `build_report_from_aggregate` / `agent_rollups_from_aggregate` rebuild the report from it.
+# meiva:link base/telemetry/metrics/docs/metrics.md
 
 from __future__ import annotations
 
@@ -24,16 +21,11 @@ from base.telemetry.metrics import (
     LlmTurnsData,
     MetricSection,
     PluginActivationData,
-    PositionBlocks,
-    SyntaxFixData,
-    fix_kinds,
     pctiles,
     render_agent_activity,
     render_exec,
     render_llm_turns,
     render_plugin_activation,
-    render_syntax_fix,
-    third_of,
 )
 from base.telemetry.metrics.aggregate_sql import (
     AgentCounters,
@@ -57,7 +49,6 @@ class ReportMeta(TypedDict):
 # meiva:note
 # The `metrics` map of the report: one fragment per section, keyed by the section name.
 class ReportMetrics(TypedDict):
-    syntax_fix: SyntaxFixData
     exec: ExecData
     llm_turns: LlmTurnsData
     agent_activity: AgentActivityData
@@ -131,10 +122,8 @@ class EventAggregate:
 
     total_events: int
     distinct_agents: int
-    # syntax_fix
     code_blocks: int
     code_blocks_per_agent: dict[int | None, int]
-    fix_events: list[tuple[int | None, int, str]]  # (agent_id, block_no, fixes) — time order
     # exec
     exec_ok: int
     exec_failed: int
@@ -227,7 +216,6 @@ def fetch_aggregate(
         distinct_agents=len([a for a in raw if a is not None]),
         code_blocks=sum(r.code for r in rows),
         code_blocks_per_agent={a: r.code for a, r in raw.items() if r.code},
-        fix_events=data["fix_events"],
         exec_ok=sum(r.exec_ok for r in rows),
         exec_failed=sum(r.exec_failed for r in rows),
         failure_types=data["failure_types"],
@@ -294,39 +282,6 @@ def _llm_totals_from_models(
     treason = sum(r[5] for r in rows)
     cost, unpriced = _cost_totals(row for models in costs.values() for row in models.items())
     return _LlmTotals(calls, tin, tout, tcached, treason, cost, unpriced)
-
-
-def _data_syntax_fix(agg: EventAggregate) -> SyntaxFixData:
-    """The `syntax_fix` section data."""
-    # syntax_fix: per-event kinds (Counter, stream order) + per-block
-    # ruff_format position thirds (block index i among the agent's n blocks ->
-    # third_of(i, n)).
-    kind_counts: Counter[str] = Counter()
-    hits: dict[str, int] = {"early": 0, "mid": 0, "late": 0}
-    blocks_b: dict[str, int] = {"early": 0, "mid": 0, "late": 0}
-    for _agent_id, blk, fixes in agg.fix_events:
-        if blk <= 0:
-            continue
-        kinds = set(fix_kinds(fixes))
-        kind_counts.update(kinds)
-        b = third_of(blk - 1, agg.code_blocks_per_agent.get(_agent_id, 0))
-        if "ruff_format" in kinds:
-            hits[b] += 1
-    for _agent_id, n in agg.code_blocks_per_agent.items():
-        for i in range(n):
-            blocks_b[third_of(i, n)] += 1
-    rate = {
-        b: round(hits[b] / blocks_b[b] * 100, 1) if blocks_b[b] else 0.0
-        for b in ("early", "mid", "late")
-    }
-    return {
-        "code_blocks": agg.code_blocks,
-        "trigger_counts": dict(kind_counts),
-        "ruff_format_by_position": {
-            b: PositionBlocks(hits=hits[b], blocks=blocks_b[b]) for b in ("early", "mid", "late")
-        },
-        "ruff_format_rate_pct_by_position": rate,
-    }
 
 
 def _data_exec(agg: EventAggregate) -> ExecData:
@@ -422,10 +377,9 @@ def _data_plugin_activation(agg: EventAggregate) -> PluginActivationData:
 
 
 # meiva:note
-# Rebuild the five unit data fragments from `EventAggregate`.
+# Rebuild the four unit data fragments from `EventAggregate`.
 def _metrics_from_aggregate(agg: EventAggregate) -> ReportMetrics:
     return {
-        "syntax_fix": _data_syntax_fix(agg),
         "exec": _data_exec(agg),
         "llm_turns": _data_llm_turns(agg),
         "agent_activity": _data_agent_activity(agg),
@@ -434,13 +388,10 @@ def _metrics_from_aggregate(agg: EventAggregate) -> ReportMetrics:
 
 
 # meiva:note
-# Render the five fragments with the shared render functions — the text blocks stay identical to
+# Render the four fragments with the shared render functions — the text blocks stay identical to
 # the per-row path because the renders are the same functions.
 def _sections_from_metrics(metrics: ReportMetrics) -> list[MetricSection]:
     return [
-        MetricSection(
-            "syntax_fix", render_syntax_fix(metrics["syntax_fix"]), metrics["syntax_fix"]
-        ),
         MetricSection("exec", render_exec(metrics["exec"]), metrics["exec"]),
         MetricSection("llm_turns", render_llm_turns(metrics["llm_turns"]), metrics["llm_turns"]),
         MetricSection(

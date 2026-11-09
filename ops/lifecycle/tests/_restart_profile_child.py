@@ -21,12 +21,12 @@ def main(profile: str) -> None:
     home = Path(os.environ["MEIVA_HOME"])
     valid: dict[str, object] = {
         "completion_notice_policy": "hourly",
-        "syntax_fix_ruff_format": True,
+        "eval_isolation": True,
     }
     validate_config_overlay_shape(valid, home=home)
     invalid_overlays: tuple[dict[str, object], ...] = (
         {"completion_notice_policy": "bogus"},
-        {"syntax_fix_ruff_format": "not-a-bool"},
+        {"eval_isolation": "not-a-bool"},
     )
     for invalid in invalid_overlays:
         with pytest.raises(InvalidConfigOverlay):

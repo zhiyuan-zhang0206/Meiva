@@ -297,9 +297,8 @@ and persistent PTY shells have their own resource lifetimes. Full verified break
 
 Meiva does not sandbox model-authored code. `execute_code` runs the agent's
 generated Python in a disposable subprocess on the host, with the
-permissions of whichever user started it. The `before_exec` hook
-([`demos/permission-hooks/`](../demos/permission-hooks)) can intercept dangerous
-patterns before they run, but it is a mitigation layer, not a boundary.
+permissions of whichever user started it. Pattern-matching checks can warn on dangerous
+patterns, but they are a mitigation layer, not a boundary.
 
 The isolation Meiva relies on is **where you deploy the cluster** — a dedicated
 OS user, machine, or VM per cluster — not a sandbox drawn around any single

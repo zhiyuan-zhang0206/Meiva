@@ -23,11 +23,11 @@ def _emitted_tuples(loguru_records: LogRecords) -> list[tuple[str, str, str, str
 
 def test_records_an_attributed_firing(loguru_records: LogRecords) -> None:
     activation.record(
-        "meiva_syntax_fix", "hooks", "before_turn", detail="wrote messages", model="m"
+        "meiva_self_evolution", "hooks", "before_turn", detail="wrote messages", model="m"
     )
 
     assert _emitted_tuples(loguru_records) == [
-        ("meiva_syntax_fix", "hooks", "before_turn", "wrote messages")
+        ("meiva_self_evolution", "hooks", "before_turn", "wrote messages")
     ]
 
 

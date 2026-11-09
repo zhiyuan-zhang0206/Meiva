@@ -35,7 +35,6 @@ from base.events.contract import (
     HALT_KEYS,
     LLM_USAGE_KEYS,
     PLUGIN_ACTIVATION_KEYS,
-    SYNTAX_FIX_KEYS,
     TURN_END_KEYS,
 )
 from base.telemetry.metrics.event_sql import numeric
@@ -148,15 +147,6 @@ class _PositionRow:
 
 
 # meiva:note
-# One `syntax_fix` event and the code blocks its agent had written by then.
-@dataclass(frozen=True)
-class _FixEventRow:
-    agent_id: int | None
-    blk: int
-    fixes: str
-
-
-# meiva:note
 # One (plugin, surface, identifier, model) and its activation count.
 @dataclass(frozen=True)
 class _PluginActRow:
@@ -197,7 +187,6 @@ class WindowData(TypedDict):
     llm_cache_input: dict[int | None, int]
     llm_costs: dict[int | None, dict[str, LlmCostSums]]
     llm_position: dict[str, tuple[int, int]]
-    fix_events: list[tuple[int | None, int, str]]
     spawners: dict[str, int]
     plugin_acts: dict[tuple[str, str, str, str], int]
 
@@ -447,22 +436,6 @@ def _llm_position(scope: _Scope, conn: psycopg.Connection) -> dict[str, tuple[in
     return {row.bucket: (row.cached, row.tin) for row in ranked}
 
 
-def _fix_events(scope: _Scope, conn: psycopg.Connection) -> list[tuple[int | None, int, str]]:
-    """Each `syntax_fix` event with the number of code blocks its agent had written by then."""
-    query = (
-        "SELECT agent_id, blk, fixes FROM ("  # noqa: S608 — keys come from the registered payload constants
-        "SELECT t.agent_id, t.ts, t.id, t.event_name, "
-        f"CASE WHEN t.event_name = 'syntax_fix' THEN COALESCE({SYNTAX_FIX_KEYS['fixes']}, '') END "
-        "AS fixes, "
-        "sum((t.event_name = 'code')::int) OVER (PARTITION BY t.agent_id ORDER BY t.ts, t.id) "
-        f"AS blk FROM {scope.from_sql} WHERE {scope.where_sql} "
-        "AND t.event_name IN ('code', 'syntax_fix')) s "
-        "WHERE event_name = 'syntax_fix' ORDER BY agent_id, ts, id"
-    )
-    rows = query_all(conn, _FixEventRow, query.encode(), scope.params)
-    return [(row.agent_id, row.blk, row.fixes) for row in rows]
-
-
 def _per_agent_counters(scope: _Scope, conn: psycopg.Connection) -> dict[int | None, AgentCounters]:
     """The window's counters per agent (key None = service rows), merged from both statements."""
     outcomes = _outcomes(scope, conn)
@@ -549,7 +522,6 @@ def read_window(
         "llm_cache_input": _llm_cache_input(scope, conn),
         "llm_costs": _llm_cost_sums(scope, conn),
         "llm_position": _llm_position(scope, conn),
-        "fix_events": _fix_events(scope, conn),
         "spawners": spawners,
         "plugin_acts": plugin_acts,
     }

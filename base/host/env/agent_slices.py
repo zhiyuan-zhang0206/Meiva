@@ -69,13 +69,6 @@ class HistoryDump:
 
 
 @dataclass(frozen=True)
-class SdkReminders:
-    sdk_code_reminder_cadence: Cadence
-    sdk_nameerror_hint_enabled: bool
-    agent_reply_reminder_cadence: Cadence
-
-
-@dataclass(frozen=True)
 class LlmCallPolicy:
     llm_fatal_provider_error_types: str
 
@@ -85,7 +78,6 @@ class Sandbox:
     eval_isolation: bool
     eval_network_allowlist: tuple[str, ...]
     exec_timeout_seconds: float
-    syntax_fix_ruff_format: bool
 
 
 @dataclass(frozen=True)
@@ -176,7 +168,6 @@ class AgentSlices:
     memory: MemoryRecall
     skill_recall: SkillRecall
     history_dump: HistoryDump
-    sdk_reminders: SdkReminders
     llm_policy: LlmCallPolicy
     overrides: ModelOverrides
     sandbox: Sandbox
@@ -209,7 +200,6 @@ class AgentSlices:
             memory=_slice(MemoryRecall, fields(MemoryRecall), pins, default_reader),
             skill_recall=_slice(SkillRecall, fields(SkillRecall), pins, default_reader),
             history_dump=_slice(HistoryDump, fields(HistoryDump), pins, default_reader),
-            sdk_reminders=_slice(SdkReminders, fields(SdkReminders), pins, default_reader),
             llm_policy=_slice(LlmCallPolicy, fields(LlmCallPolicy), pins, default_reader),
             overrides=_slice(ModelOverrides, fields(ModelOverrides), pins, default_reader),
             sandbox=_slice(Sandbox, fields(Sandbox), pins, default_reader),

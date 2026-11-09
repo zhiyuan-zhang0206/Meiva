@@ -31,7 +31,7 @@ from base.paths import workspace_dir
 
 from .claim import route_target
 from .claim.harness_turn import pending_messages, render_messages, turn_key
-from .hooks.cwd import ValidateCwdAfterInitHook, ensure_to_do_better
+from .hooks.cwd import ValidateCwdAfterInitHook
 from .node_log import StallConfig, node_lifecycle
 from .prompt.context_notes import (
     context_notes,
@@ -244,7 +244,6 @@ async def init_context_node(
         publish_timeline=runtime.context.harness is Harness.MEIVA,
     ):
         cwd_update = await ValidateCwdAfterInitHook()(state, runtime, config)
-        ensure_to_do_better(runtime.context)
         reset = state.context_reset
         if runtime.context.harness is Harness.MEIVA and state.messages:
             # History intact — nothing to establish. A parked tail here would

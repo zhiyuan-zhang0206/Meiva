@@ -11,7 +11,7 @@
 - `fetch_events(days, agent_id)` / `build_report(...)` — assembly entry points.
 
 ### Metric units
-Currently 5: `syntax_fix`, `exec`, `llm_turns`, `agent_activity`, `plugin_activation` — the list `_sections_from_aggregate` returns in `base/telemetry/metrics/aggregate.py`. Each is a `MetricSection` containing both a text block (human-/agent-readable ASCII digest) and a `data` fragment (machine-readable shape).
+Currently 4: `exec`, `llm_turns`, `agent_activity`, `plugin_activation` — the list `_sections_from_aggregate` returns in `base/telemetry/metrics/aggregate.py`. Each is a `MetricSection` containing both a text block (human-/agent-readable ASCII digest) and a `data` fragment (machine-readable shape).
 
 - `plugin_activation` counts **plugin injection surfaces that fired**: one `plugin_activation` event per firing (`base/packages/plugins/activation.py`), keyed by the same `<plugin>/<surface>/<identifier>` triple `meiva plugins inspect` lists as a registered contribution, plus the model in force. A contribution registered but never counted here is philosophy §6's removal evidence.
 - `pctiles()` returns a typed `Pctiles` (`TypedDict`: `n`/`p50`/`p90`/`max`/`mean`), consumed by `render_pctiles` with the same shape.

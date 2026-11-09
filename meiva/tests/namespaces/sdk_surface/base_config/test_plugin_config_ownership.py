@@ -29,16 +29,6 @@ from base.paths import meiva_home
 from base.paths.home import resolve_meiva_home
 
 
-def test_syntax_fix_ruff_format_overlay_is_accepted(model_catalog: ModelCatalog) -> None:
-
-    validate_config_overlay(
-        {"syntax_fix_ruff_format": True}, models=model_catalog.models, home=meiva_home()
-    )
-    validate_config_overlay(
-        {"syntax_fix_ruff_format": False}, models=model_catalog.models, home=meiva_home()
-    )
-
-
 def test_exec_timeout_seconds_overlay_is_accepted_and_bounded(
     model_catalog: ModelCatalog,
 ) -> None:

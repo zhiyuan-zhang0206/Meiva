@@ -18,10 +18,8 @@ valuable.
 Meiva does not sandbox model-authored code. `execute_code` runs the agent's
 generated Python in the agent process, on the host, with the permissions of
 whichever user started it — the same trust model as a human running that
-code themselves. The `before_exec` hook (see
-[`demos/permission-hooks/`](demos/permission-hooks)) can intercept and warn on
-dangerous patterns before they run, but it is a **mitigation layer, not a
-security boundary**: it lowers the rate of a bad command executing, it does
+code themselves. Pattern-matching checks are a **mitigation layer, not a
+security boundary**: they lower the rate of a bad command executing, they do
 not close off the possibility (see the module docstring in `base/agents/messages/injection_scan.py`).
 
 Third-party **skills** are the one ingestion path with a gate of its own, for the

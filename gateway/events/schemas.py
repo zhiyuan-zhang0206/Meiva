@@ -191,17 +191,11 @@ class MetricsMeta(BaseModel):
     since_compact: bool = False
 
 
+# meiva:note
+# GET /api/metrics response — aggregate report over events for the settings Metrics tab.
+# `metrics` is a free-form map (one key per registered metric unit, e.g. "exec" / "llm_turns" /
+# "agent_activity") so the schema does not couple to the metric registry.
 class MetricsReport(BaseModel):
-    """GET /api/metrics response — aggregate report over events for the
-    settings Metrics tab.
-
-    `metrics` is intentionally a free-form map (one key per registered metric
-    unit, e.g. "syntax_fix" / "exec" / "llm_turns" / "agent_activity"). Typing
-    each unit's shape here would couple the schema to the metric registry and
-    defeat the "add a metric = one function" extensibility, so the frontend
-    carries the per-unit data shapes in hand-written TypeScript instead of
-    generated types."""
-
     model_config = ConfigDict(frozen=True)
 
     meta: MetricsMeta

@@ -7,10 +7,7 @@ from base.telemetry.metrics.report import (
     MetricSection,
     Pctiles,
     PluginActivationData,
-    PositionBlocks,
     SectionData,
-    SyntaxFixData,
-    fix_kinds,
     pctiles,
     render_agent_activity,
     render_bar,
@@ -19,7 +16,6 @@ from base.telemetry.metrics.report import (
     render_llm_turns,
     render_pctiles,
     render_plugin_activation,
-    render_syntax_fix,
     third_of,
 )
 
@@ -31,11 +27,8 @@ __all__ = [
     "MetricSection",
     "Pctiles",
     "PluginActivationData",
-    "PositionBlocks",
     "SectionData",
-    "SyntaxFixData",
     "core",
-    "fix_kinds",
     "pctiles",
     "render_agent_activity",
     "render_bar",
@@ -44,6 +37,5 @@ __all__ = [
     "render_llm_turns",
     "render_pctiles",
     "render_plugin_activation",
-    "render_syntax_fix",
     "third_of",
 ]

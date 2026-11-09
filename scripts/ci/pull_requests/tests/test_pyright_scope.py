@@ -26,7 +26,7 @@ def test_paths_under_an_include_root_are_kept_and_the_rest_dropped() -> None:
             "scripts/ci/y.py",
             "tests/z.py",
             "schedules/agent-watch-schedule.py",
-            "demos/permission-hooks/sensitive_op_gate.py",
+            "demos/24-hour-ops/ops_patrol.py",
             "basement/w.py",
         ],
         _PYPROJECT,
@@ -34,7 +34,7 @@ def test_paths_under_an_include_root_are_kept_and_the_rest_dropped() -> None:
     assert kept == ["base/x.py", "scripts/ci/y.py", "tests/z.py"]
     assert skipped == [
         "schedules/agent-watch-schedule.py",
-        "demos/permission-hooks/sensitive_op_gate.py",
+        "demos/24-hour-ops/ops_patrol.py",
         "basement/w.py",
     ]
 
