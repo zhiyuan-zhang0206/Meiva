@@ -11,7 +11,7 @@
   "output": "Output",
   "working": "Working…",
   "workingFor": "Working for {duration}",
-  "workActivity": "Activity",
+  "workActivity": "Context",
   "workedFor": "Worked for {duration}",
   "ranFor": "Ran for {duration}",
   "compactSummaries": "{count} {unit}",

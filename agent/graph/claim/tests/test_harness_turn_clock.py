@@ -186,3 +186,5 @@ async def test_late_reasoning_does_not_duplicate_open_chat() -> None:
     assert chat.activity_pending is False
     assert reasoning.kind == "agent_reasoning"
     assert reasoning.payload == "Synthesizing"
+    assert reasoning.reasoning_ms == 2000
+    assert reasoning.activity_pending is False
