@@ -55,8 +55,8 @@ The `after_exec` hook then reads and clears the record and checks, under
 - every written shared note against the pool: `POST /api/memory/search` with
   `purpose="dedup"`, query = the note's description and body (4000 characters at most),
   `k = 5` (the gateway ranks `memory_dedup_candidates`, default 5, not the 30 of recall/search; the note itself is set aside, so an already indexed note leaves four). The gateway restores the text of its
-  closest candidates and a decision model answers, per candidate, whether the two notes record
-  the same rule or decision (`usage_kind=memory_write_dedup`). Candidates at or above
+  closest candidates and a decision model answers, per candidate, whether the two notes govern
+  the same specific rule, policy, or subject slot — including revisions, exceptions, or superseding decisions (`usage_kind=memory_write_dedup`). Candidates at or above
   `memory_write_dedup_threshold` (0.80; measured on 2026-10-19 on two 200-write samples, where
   about one shared write in ten got a reminder and about half of those named a real duplicate)
   are named; every probability is logged (`[memory-write-check]`). Personal notes are not

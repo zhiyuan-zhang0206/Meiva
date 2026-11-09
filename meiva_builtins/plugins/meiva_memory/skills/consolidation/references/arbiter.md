@@ -1,4 +1,4 @@
-# Multi-host memory arbiter
+# Multi-host memory arbiter (Meiva Dream)
 
 Read this reference only for the task or mode selected by the skill entrypoint.
 Run command examples from the original skill directory unless they specify
@@ -6,45 +6,94 @@ another working directory.
 
 ## Arbiter (multi-host only)
 
-You orchestrate the nightly consolidation and hold the schedule.
+You orchestrate the daily **Meiva Dream** consolidation and cross-machine PR merges.
+The built-in `memory-arbiter` schedule (`schedules/memory-steward-schedule.py`) wakes
+you daily at `04:00` for full Dream consolidation and at `07:00` for the health check.
+You are also woken immediately whenever the user or an agent asks you to consolidate.
 
-**On first run, arm the schedule (idempotent).** If `meiva.shell.sessions.list()`
-has no session named `"watcher"`, call
-`meiva.watcher.cron("0 3 * * *", "meiva-memory: consolidate the pool")` so you are
-woken once a day, then idle. You are also woken immediately whenever the user asks
-you to consolidate now.
+**Worktree + PR rule:** Never commit directly on the shared checkout's `main`
+(`~/.meiva/memory` pre-commit hook refuses direct commits on `main`, and switching
+the shared checkout onto a `machine-<name>` branch is retired). Perform all
+consolidation edits and index rebuilds inside an isolated temporary git worktree
+branched from `origin/main`, land them via a PR whose `validate` check is green,
+and remove/prune the temporary worktree immediately afterwards.
 
-**Each time you are woken to consolidate:**
+**Each time you are woken to consolidate (Meiva Dream 4-Phase Workflow):**
 
-1. `machines = meiva.agents.list_machines()`. For each machine, spawn a steward on it and
-   pass your own id so it can report back:
-   `meiva.agents.spawn(prompt=f"Read and follow meiva.skills.meiva_memory.consolidation as the STEWARD. Report to arbiter agent {meiva.self.AGENT_ID}.", machine=m.name)`.
-   Remember the returned steward ids.
-2. Wait for every steward to message you that its pull request is ready (or that it had
-   nothing to commit). Idle between messages; each steward message wakes you. If one
-   stays silent far longer than the others,
-   `meiva.agents.resurrect(steward_id, prompt="Status? Your pull request has not arrived.")`.
-3. Merge all open pull requests into `main`:
-   `meiva.shell.run("python ../scripts/arbiter_merge.py")`.
-   This squash-merges every open PR targeting `main` sequentially **and then
-   refreshes the index** (the refresh is bundled — it is what keeps the
-   gateway checkout and search index in sync with `main`; the F3 staleness
-   incident happened because it used to be a separate, skippable step). If a merge
-   conflicts, the CLI prints the failure reason — find the author from the note's
-   stamp (`<!-- agent-<id> @ <machine> ... -->`) or `git -C POOL blame`,
-   `meiva.agents.resurrect(author_id, prompt="<what you need clarified>")`, use the
-   answer to resolve it in POOL, and push `main`. A non-zero exit means a merge
-   was skipped and/or the refresh failed — do not send the stewards the
-   "rebase now" step (step 5) until it is resolved, and report the failure.
-4. When every request is merged, the new notes are made searchable
-   automatically: `../scripts/arbiter_merge.py` bundles the post-merge refresh
-   (POSTs to the gateway so the indexer re-embeds the changed files). Treat a
-   non-zero exit as an alert — a merge was skipped or the refresh failed —
-   and report it rather than moving on silently. Run `meiva memory refresh`
-   manually only when you need an immediate refresh outside the merge flow
-   (or to retry a failed one).
-5. Tell every steward to rebase: `meiva.agents.send_message(steward_id, "rebase now")`.
-6. Re-curate `MEMORY.md` and commit it to `main`: it is injected into every
-   agent's context, so keep it a tight, current index under the 16000-char cap —
-   promote what is reached for often, demote stale lines into pointed-to notes,
-   keep the `## Setup` header. (The cap hook rejects an over-long `MEMORY.md`.)
+1. **Create an isolated worktree and fake `MEIVA_HOME`:**
+   ```bash
+   W=$(mktemp -d)/pool
+   FH=$(dirname "$W")/fh
+   git -C ~/.meiva/memory fetch origin main
+   git -C ~/.meiva/memory worktree add -q -B "mem/dream-$(date +%m%d-%H%M)" "$W" origin/main
+   mkdir -p "$FH"
+   ln -sfn "$W" "$FH/memory"
+   cd "$W"
+   ```
+   (`rebuild_memory_index.py` and `gen_indexes.py` resolve the pool from
+   `MEIVA_HOME` and take no arguments; the fake home points them at `$W`.)
+
+2. **Phase 1 — Orientation:**
+   - Scan `MEMORY.md` and directory `index.md` files in `$W` to map existing
+     topic directories, canonical filenames, and size/entry counts (`MEMORY.md`
+     ≤ 16000 chars, note ≤ 8000 chars, ≤ 20 `.md` notes and ≤ 20 subdirectories
+     per directory).
+   - If other machines have pending local notes, either collect their open PRs or
+     spawn per-machine stewards to open worktree PRs against `main`.
+
+3. **Phase 2 — Gather Signal (Three Incremental Sources):**
+   - **Recent Session Transcripts (`USER_INPUT`)**: Scan recent session transcripts
+     for user corrections, rulings, reversals, and explicit decisions, ordered by
+     timestamp so newer rulings supersede older ones.
+   - **World Truth Probes (External Ground-Truth Verification)**: Verify claims in
+     existing notes against observable ground truth across multiple domains:
+     - *Multi-repo codebases & file trees* (`~/.meiva/source`, project checkouts):
+       check `git log`, path/symbol existence, and retired contracts or scripts.
+     - *Cluster runtime & database registries* (`agents`, `schedules`, `tasks`,
+       machine topology): check active vs. terminated agents, live schedule triggers,
+       and task status.
+     - *Host environment & embedded probes*: check machine configuration and
+       `<!-- fact-check: <cmd> -->` directives.
+   - **Per-Agent Workspace Memory (`~/.meiva/workspaces/*/memory/`)**: Scan agent
+     workspace memory directories (and legacy `MEMORY.md` files) to harvest
+     durable, reusable cross-agent rules and facts into the shared pool.
+
+4. **Phase 3 — Consolidation (Canonical One-Topic-One-File & State Overwrite):**
+   - **One topic, one canonical file**: Keep a single dateless canonical note per
+     rule or topic slot (e.g. `meiva/rulings/merge/meiva-merge-policy.md`, or root
+     standing files like `collaboration-preferences.md`), rather than accumulating
+     date-suffixed fragments (`*-2026xxxx.md`).
+   - **State overwrite in place & `git rm` superseded fragments**: When a ruling is
+     revised, amended, or overturned, or when World Truth Probes show drift, update
+     the canonical note in place with the current truth and `git rm` superseded,
+     reversed, or fragmented historical notes. Do not leave conflicting old notes
+     or append chronological patch disclaimers at the bottom of stale notes.
+   - **De-relativize time**: Convert relative time words (`"today"`, `"yesterday"`,
+     `"this morning"`) into explicit ISO dates (`YYYY-MM-DD`).
+
+5. **Phase 4 — Prune & Index:**
+   - Keep `MEMORY.md` conflict-free, self-consistent, and concise under the
+     16000-char cap (preserve `## Setup`, inline only current standing rules and
+     canonical pointers, remove superseded timeline entries).
+   - Rebuild indexes and validate inside the worktree:
+     ```bash
+     MEIVA_HOME="$FH" ~/.meiva/source/.venv/bin/python ~/.meiva/source/meiva_builtins/plugins/meiva_memory/skills/scripts/gen_indexes.py
+     MEIVA_HOME="$FH" ~/.meiva/source/.venv/bin/python ~/.meiva/source/meiva_builtins/plugins/meiva_memory/skills/scripts/rebuild_memory_index.py
+     python3 validate.py
+     ```
+   - Commit, push the worktree branch, open a PR targeting `main`, and squash-merge
+     it once the `validate` check is green.
+   - Clean up the temporary worktree so the registry does not grow:
+     ```bash
+     git -C ~/.meiva/memory worktree remove --force "$W"
+     git -C ~/.meiva/memory worktree prune
+     rm -rf "$(dirname "$W")"
+     ```
+   - Merge any remaining open review PRs whose `validate` check is green and whose
+     author is not the merger, writing the collector snapshot (each face's HEAD +
+     dirty count) into the PR body first (`python ../scripts/arbiter_merge.py --apply`).
+   - Refresh the gateway checkout and semantic search index:
+     ```bash
+     meiva memory refresh
+     ```
+     Treat a non-zero exit as an alert and report it rather than moving on silently.
