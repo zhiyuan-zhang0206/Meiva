@@ -21,7 +21,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { memo, type ReactNode } from "react";
+import { memo, useContext, type ReactNode } from "react";
 
 import { usePythonCodeHighlighter } from "@/components/content/python-code";
 import type { BackendTimelineItem } from "@/lib/contracts/types";
@@ -31,7 +31,7 @@ import { markerVisual } from "./markers";
 import { classifyMarker } from "./model/marker-classify";
 import { inboundKind } from "./model/runs";
 import { externalAgentName } from "@/lib/format/inbound-source";
-import { isLiveCode, isLiveExecution, isLiveReasoning, useNow } from "./model/reasoning-clock";
+import { isLiveCode, isLiveExecution, isLiveReasoning, LiveClockGate, useNow } from "./model/reasoning-clock";
 import { FLEX, MIN_W_0 } from "@/lib/layout/layout";
 import { agentChatTitle, HEADER_CLS, Summary, toolCallIcon } from "./view/card-summary";
 
@@ -261,7 +261,8 @@ export const CardHeader = memo(function CardHeader({
   onToggle: () => void;
 }) {
   const t = useTranslations();
-  const live = isLiveReasoning(item) || isLiveCode(item) || isLiveExecution(item);
+  const gate = useContext(LiveClockGate);
+  const live = gate && (isLiveReasoning(item) || isLiveCode(item) || isLiveExecution(item));
   const now = useNow(live);
   const Icon = config.icon;
   const highlighter = usePythonCodeHighlighter();

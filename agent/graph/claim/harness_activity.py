@@ -145,7 +145,13 @@ class HarnessTurnProjector:
             and self._text_item is not None
             and self._text_item.kind == "agent_chat"
         ):
-            self._new_item("agent_reasoning", event.text, now)
+            self._new_item(
+                "agent_reasoning",
+                event.text,
+                now,
+                reasoning_ms=_elapsed(self._text_started, now),
+                activity_pending=False,
+            )
             self._reasoning_ended = now
             await self._flush()
             return True

@@ -100,7 +100,7 @@ describe("detail-block duration display", () => {
     fireEvent.click(header);
     expect(screen.getByText("1 turn")).toBeTruthy();
   });
-  it("system-note-only turn has an Activity label and reveals its note count on expansion", () => {
+  it("system-note-only turn has a Context label and reveals its note count on expansion", () => {
     render(
       <TimelineView
         items={[
@@ -111,9 +111,31 @@ describe("detail-block duration display", () => {
       />,
     );
     const header = runToggle();
-    expect(header.textContent).toBe("Activity");
+    expect(header.textContent).toBe("Context");
     fireEvent.click(header);
     expect(screen.getByText("1 system note")).toBeTruthy();
+  });
+  it("completed work turn with zero measured duration still shows 'Worked for' instead of Context", () => {
+    render(
+      <TimelineView
+        items={[
+          makeItem({ item_id: "1.0", kind: "agent_chat", payload: "hi" }),
+          makeItem({
+            item_id: "2.0",
+            kind: "agent_reasoning",
+            payload: "quick thought",
+            activity_revision: 1,
+            created_at: new Date(Date.now() - 112_000).toISOString(),
+          }),
+          makeItem({ item_id: "3.0", kind: "agent_chat", payload: "done" }),
+        ]}
+      />,
+    );
+    const header = runToggle();
+    expect(header.textContent).toBe("Worked for 0.1s");
+    fireEvent.click(header);
+    expect(screen.getByTestId("card-toggle").textContent).toBe("Thinking");
+    expect(screen.getByTestId("card-toggle").textContent).not.toContain("Thinking for");
   });
   it("live timer excludes the idle gap the turn spans, so it does not drop at turn end", () => {
     const now = Date.now();
