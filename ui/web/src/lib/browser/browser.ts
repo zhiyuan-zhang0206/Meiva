@@ -84,7 +84,12 @@ export interface BrowserView {
 // no visual viewport at all.
 export interface ViewportReading {
   readonly layoutHeight: number;
-  readonly visual: { readonly height: number; readonly scale: number } | null;
+  readonly layoutWidth?: number;
+  readonly visual: {
+    readonly height: number;
+    readonly width?: number;
+    readonly scale: number;
+  } | null;
 }
 
 export interface BrowserViewport {

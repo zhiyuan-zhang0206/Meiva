@@ -359,6 +359,14 @@ export function applySseEvent(state: TimelineState, ev: SystemEvent, nowMs = 1):
         };
       }
     }
+    const waitingBefore = state.items.find((it) => it.llmWaiting)?.reasoningStartedAt;
+    const hadLiveWorkClock = state.items.some(
+      (it) =>
+        !it.llmWaiting &&
+        ((it.kind === "agent_reasoning" && it.reasoningStartedAt != null && it.reasoning_ms == null) ||
+          (it.kind === "agent_code" && it.codeStartedAt != null && it.code_elapsed_ms == null) ||
+          (it.kind === "code_output" && it.execStartedAt != null && it.exec_ms == null)),
+    );
     const next = foldEvent(
       {
         items: state.items,
@@ -373,6 +381,28 @@ export function applySseEvent(state: TimelineState, ev: SystemEvent, nowMs = 1):
       ev,
       nowMs,
     );
+    const isKeepaliveNoop =
+      (ev.role === "llm_keepalive" || (ev.role === "exec_output_chunk" && ev.keepalive === true)) &&
+      next.items === state.items &&
+      next.turnActive === state.turnActive &&
+      next.streamingCode === state.streamingCode &&
+      next.streamingIds === state.streamingIds &&
+      state.liveAnchorAt > 0;
+    if (isKeepaliveNoop) return {};
+    const preserveLiveAnchor =
+      state.liveAnchorAt > 0 &&
+      (ev.role === "llm_keepalive" ||
+        ev.role === "chat_delta" ||
+        ev.role === "reasoning_delta" ||
+        ev.role === "code_delta" ||
+        ev.role === "exec_output_chunk" ||
+        (ev.role === "chat_start" && !hadLiveWorkClock));
+    const nextLiveAnchorAt =
+      ev.role === "chat_start" && !hadLiveWorkClock && waitingBefore != null
+        ? waitingBefore
+        : preserveLiveAnchor
+          ? state.liveAnchorAt
+          : nowMs;
     // Unchanged fields keep their references (foldEvent carries them via
     // ...t / no-op reducers), so per-field Zustand selectors short-circuit.
     return {
@@ -380,7 +410,7 @@ export function applySseEvent(state: TimelineState, ev: SystemEvent, nowMs = 1):
       streamingIds: next.streamingIds,
       streamingCode: next.streamingCode,
       turnActive: next.turnActive,
-      liveAnchorAt: nowMs,
+      liveAnchorAt: nextLiveAnchorAt,
       hasMoreOlder: next.hasMoreOlder,
       liveCompact: retireLiveCompact(state.liveCompact, next.items),
     };

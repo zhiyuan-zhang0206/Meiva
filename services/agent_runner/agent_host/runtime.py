@@ -12,6 +12,7 @@ from datetime import datetime
 from pathlib import Path
 
 from langchain_core.language_models.chat_models import BaseChatModel
+from langchain_core.messages import BaseMessage
 from psycopg_pool import AsyncConnectionPool
 from pydantic import BaseModel
 
@@ -156,6 +157,7 @@ class AgentRuntime:
     harness: Harness = Harness.MEIVA
     harness_bridge: TurnEngine | None = None
     last_used: float = field(default_factory=time.monotonic)
+    last_reconstruction: tuple[str, list[BaseMessage]] | None = None
 
 
 @dataclass

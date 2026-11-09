@@ -11,6 +11,7 @@ from base.lm.harness.claude.tests import fake_sdk as fake
 from base.lm.harness.claude.tests.fake_sdk import Emit, Say
 from base.lm.harness.claude.tests.support import start
 from base.lm.harness.events import (
+    ForegroundAccepted,
     HandoffInjected,
     RateLimitObserved,
     SessionBound,
@@ -61,6 +62,7 @@ async def test_totals_accumulate_across_turns(tmp_path: Path) -> None:
         completed = harness.of(TurnCompleted)
         assert completed[0].cumulative_cost_usd == pytest.approx(0.0004)
         assert completed[1].cumulative_cost_usd == pytest.approx(0.0008)
+        assert len(harness.of(ForegroundAccepted)) == 2
         assert first.text == "one" and second.text == "two"
     finally:
         await harness.stop()

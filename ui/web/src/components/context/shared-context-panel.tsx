@@ -47,7 +47,7 @@ export function SharedContextPanel({ agentId, document, mobile, onClose, onColla
         MIN_H_0,
         FLEX_COL,
         mobile
-          ? "fixed inset-x-0 top-0 z-50 h-[var(--visual-viewport-height,100dvh)] pt-[env(safe-area-inset-top)] pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)] pb-[var(--safe-area-bottom,env(safe-area-inset-bottom,0px))]"
+          ? "fixed inset-x-0 top-0 z-50 w-[var(--visual-viewport-width,100%)] h-[var(--visual-viewport-height,100dvh)] pt-[env(safe-area-inset-top)] pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)] pb-[var(--safe-area-bottom,env(safe-area-inset-bottom,0px))]"
           : "h-full",
       )}
       aria-label={t("title")}

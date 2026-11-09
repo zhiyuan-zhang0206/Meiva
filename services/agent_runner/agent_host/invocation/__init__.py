@@ -17,6 +17,7 @@ from agent.checkpoint import AgentGraph, flush_checkpoint
 from agent.turn.runloop import PendingTurnFailure, publish_turn_failure, settle_turn_failure
 from agent.turn.trace_checkpoint import attach_trace_checkpoint_ref
 from base.agents.context import MeivaContext
+from base.agents.history.delta_read_compat import seed_latest_checkpoint_messages
 from base.api_contracts.agent_contract import ReconstructionScope
 from base.db.protocols import AsyncPool
 from base.events.live.bus import EventBus
@@ -114,6 +115,7 @@ async def finish_completed_invocation(
         if plan.flush_checkpoint:
             await flush_checkpoint(checkpoints.saver, agent_id)
             pending.checkpoint_flushed = True
+        seed_latest_checkpoint_messages(checkpoints.reconstruction, pending.result.get("messages"))
         if plan.attach_trace:
             await attach_trace_checkpoint_ref(checkpoints.graph, ctx, agent_id)
             pending.trace_attached = True

@@ -375,6 +375,7 @@ export function applySystemEvent(
       (it) => it.item_id === `${ev.msg_idx}.0` ? { ...it, llmWaiting: true, partial: true } : it,
     );
   }
+  let waitingStartedAt: number | undefined;
   if (
     ev.role === "chat_start" || ev.role === "chat_delta" ||
     ev.role === "code_start" || ev.role === "code_delta" ||
@@ -383,7 +384,11 @@ export function applySystemEvent(
     ev.role === "exec_output" || ev.role === "llm_done" ||
     ev.role === "cancelled" || ev.role === "error"
   ) {
-    if (items.some((it) => it.llmWaiting)) items = items.filter((it) => !it.llmWaiting);
+    const waitingItem = items.find((it) => it.llmWaiting);
+    if (waitingItem) {
+      waitingStartedAt = waitingItem.reasoningStartedAt;
+      items = items.filter((it) => !it.llmWaiting);
+    }
   }
   switch (ev.role) {
     case "chat_start":
@@ -417,10 +422,10 @@ export function applySystemEvent(
         freezeReasoningClocks(clearCodeClocks(items, nowMs), nowMs),
         ev.item_id,
         "agent_code",
-        nowMs,
+        waitingStartedAt ?? nowMs,
       );
     case "code_delta":
-      return appendDeltaById(items, ev.item_id, "agent_code", ev.content, nowMs);
+      return appendDeltaById(items, ev.item_id, "agent_code", ev.content, waitingStartedAt ?? nowMs);
     case "reasoning_start":
       // A new reasoning block starts → the previous reasoning block (if its
       // clock is still live, e.g. two thinking blocks with no text between)
@@ -431,10 +436,10 @@ export function applySystemEvent(
         freezeReasoningClocks(clearCodeClocks(items, nowMs), nowMs),
         ev.item_id,
         "agent_reasoning",
-        nowMs,
+        waitingStartedAt ?? nowMs,
       );
     case "reasoning_delta":
-      return appendDeltaById(items, ev.item_id, "agent_reasoning", ev.content, nowMs);
+      return appendDeltaById(items, ev.item_id, "agent_reasoning", ev.content, waitingStartedAt ?? nowMs);
     case "exec_start":
       // Code stream finished, subprocess began executing — create a
       // code_output placeholder immediately so the output block appears
@@ -688,7 +693,9 @@ export function mergeSnapshotWithStreaming(
     if (streamingIds.has(it.item_id)) return true;
     const parsed = parseItemId(it.item_id);
     if (parsed === null) return true;
-    return it.kind === "code_output" ? parsed[0] <= msg_count : parsed[0] === msg_count;
+    if (it.kind === "code_output") return parsed[0] <= msg_count;
+    if (it.llmWaiting === true) return parsed[0] >= msg_count;
+    return parsed[0] === msg_count;
   });
   // Sort by item_id's msg_idx.block_idx — ephemeral markers go through the
   // parseItemId null path and land at the end, preserving event ordering.

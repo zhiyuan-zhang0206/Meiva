@@ -13,6 +13,8 @@
 
 import { useEffect, useState } from "react";
 
+import { useBrowser } from "@/lib/browser/browser-provider";
+import { pinnedShellWidth } from "@/lib/browser/viewport";
 import { useMediaQuery } from "./use-media-query";
 
 const BREAKPOINT_XS_PX = 320;
@@ -50,16 +52,29 @@ export interface Breakpoint {
  *  its first render (useMediaQuery's useSyncExternalStore snapshot), so a
  *  route change never paints the wrong frame. */
 export function useBreakpoint(): Breakpoint {
-  const isNarrow = !useMediaQuery(`(min-width: ${BREAKPOINT_MD_PX}px)`);
-  const isLarge = useMediaQuery(`(min-width: ${BREAKPOINT_LG_PX}px)`);
-  const isWide = useMediaQuery(`(min-width: ${BREAKPOINT_WIDE_PX}px)`);
+  const browser = useBrowser();
+  const mediaNarrow = !useMediaQuery(`(min-width: ${BREAKPOINT_MD_PX}px)`);
+  const mediaLarge = useMediaQuery(`(min-width: ${BREAKPOINT_LG_PX}px)`);
+  const mediaWide = useMediaQuery(`(min-width: ${BREAKPOINT_WIDE_PX}px)`);
   const [width, setWidth] = useState(0);
+  const [pinnedWidth, setPinnedWidth] = useState<number | null>(null);
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- SSR-safe sync: read the real viewport once after mount
-    setWidth(window.innerWidth);
-    const onResize = () => setWidth(window.innerWidth);
-    window.addEventListener("resize", onResize);
-    return () => window.removeEventListener("resize", onResize);
-  }, []);
+    const sync = () => {
+      const reading = browser.viewport.read();
+      const pinned = pinnedShellWidth(reading);
+      setPinnedWidth(pinned);
+      setWidth(pinned ?? reading.layoutWidth ?? window.innerWidth);
+    };
+    sync();
+    const unsubscribe = browser.viewport.subscribe(sync);
+    window.addEventListener("resize", sync);
+    return () => {
+      unsubscribe();
+      window.removeEventListener("resize", sync);
+    };
+  }, [browser]);
+  const isNarrow = pinnedWidth !== null ? pinnedWidth < BREAKPOINT_MD_PX : mediaNarrow;
+  const isLarge = pinnedWidth !== null ? pinnedWidth >= BREAKPOINT_LG_PX : mediaLarge;
+  const isWide = pinnedWidth !== null ? pinnedWidth >= BREAKPOINT_WIDE_PX : mediaWide;
   return { tier: tierForWidth(width), isNarrow, isLarge, isWide };
 }

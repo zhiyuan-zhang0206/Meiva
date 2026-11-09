@@ -380,6 +380,7 @@ describe("viewportOver", () => {
       popstate: new Set(),
       resize: new Set(),
       scroll: new Set(),
+      orientationchange: new Set(),
     };
     const viewport = viewportOver(
       pageOf({
@@ -395,6 +396,7 @@ describe("viewportOver", () => {
     expect(visual.listening()).toBe(2);
     expect(pageEvents.resize.size).toBe(1);
     expect(pageEvents.scroll.size).toBe(1);
+    expect(pageEvents.orientationchange.size).toBe(1);
     visual.fire();
     expect(heard).toBe(2);
     for (const listener of [...pageEvents.resize, ...pageEvents.scroll]) listener();
@@ -404,6 +406,7 @@ describe("viewportOver", () => {
     expect(visual.listening()).toBe(0);
     expect(pageEvents.resize.size).toBe(0);
     expect(pageEvents.scroll.size).toBe(0);
+    expect(pageEvents.orientationchange.size).toBe(0);
     visual.fire();
     expect(heard).toBe(4);
   });

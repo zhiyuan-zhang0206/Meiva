@@ -50,11 +50,33 @@ describe("model waiting keepalives", () => {
     expect(useTimelineStore.getState().items).toEqual([]);
   });
 
-  it("survives an in-flight snapshot and disappears once the message commits", () => {
+  it("survives an in-flight or lagging snapshot and disappears once the message commits", () => {
     const items = waiting();
+    expect(mergeSnapshotWithStreaming(items, [], 4)).toEqual(items);
     expect(mergeSnapshotWithStreaming(items, [], 5)).toEqual(items);
     expect(mergeSnapshotWithStreaming(items, [], 6)).toEqual([]);
     const real: BackendTimelineItem = { ...items[0], llmWaiting: undefined, kind: "agent_code", payload: "print(3)", partial: false };
     expect(mergeSnapshotWithStreaming(items, [real], 6)).toEqual([real]);
+  });
+
+  it("preserves the waiting clock anchor across repeat keepalives, reasoning_start, and chat_start", () => {
+    useTimelineStore.getState().switchThread(1, null, false);
+    useTimelineStore.getState().processSseEvent(beat, 1000);
+    expect(useTimelineStore.getState().liveAnchorAt).toBe(1000);
+
+    useTimelineStore.getState().processSseEvent(beat, 1500);
+    expect(useTimelineStore.getState().liveAnchorAt).toBe(1000);
+
+    useTimelineStore.getState().processSseEvent(
+      { role: "chat_start", agent_id: 1, item_id: "5.0", non_human_wake: false, explicit_visibility: true, delivery_mode: "prefix" },
+      4000,
+    );
+    expect(useTimelineStore.getState().liveAnchorAt).toBe(1000);
+
+    useTimelineStore.getState().processSseEvent(
+      { role: "chat_delta", agent_id: 1, item_id: "5.0", content: "MEIVA_HIDE_FROM_USER\nnote", non_human_wake: false, explicit_visibility: true, delivery_mode: "prefix" },
+      4040,
+    );
+    expect(useTimelineStore.getState().liveAnchorAt).toBe(1000);
   });
 });

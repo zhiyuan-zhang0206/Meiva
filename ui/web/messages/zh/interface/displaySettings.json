@@ -37,6 +37,12 @@
     "coreNeedsInput": "等你回答"
   },
   "awaitingReplyDescription": "在侧栏标题显示等待回复的通知总数。",
+  "theme": "主题",
+  "appearance": "外观",
+  "appearanceDescription": "跟随系统配色方案，或固定使用亮色 / 暗色模式。",
+  "themeSystem": "跟随系统",
+  "themeLight": "亮色",
+  "themeDark": "暗色",
   "themeDescription": "选择界面配色。",
   "replySuggestionsSummary": "在 Agent 回复后提供建议回复。"
 }

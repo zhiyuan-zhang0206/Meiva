@@ -260,7 +260,7 @@ export function WorkspaceFileView({
       ) : (
       <ScrollArea className={cn(MIN_H_0, FLEX_1)}>
         {isLoading ? (
-          <div className={cn("items-center justify-center px-8 py-12", FLEX, FLEX_1)}>
+          <div className={cn("items-center justify-center px-8 py-20", FLEX, FLEX_1)}>
             <Spinner className="size-4" label={t("loading")} />
           </div>
         ) : error ? (

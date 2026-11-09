@@ -88,4 +88,30 @@ describe("useBreakpoint", () => {
     expect(result.current.isNarrow).toBe(true);
     expect(result.current.isLarge).toBe(false);
   });
+
+  it("switches out of large mode when an unzoomed visual viewport shrinks below the stuck layout width (iPad Chrome rotation)", () => {
+    resizeViewport(1180);
+    const browser = fakeBrowser({
+      viewport: {
+        layoutHeight: 820,
+        layoutWidth: 1180,
+        visual: { height: 820, width: 1180, scale: 1 },
+      },
+    });
+    const { result } = renderHook(() => useBreakpoint(), { wrapper: pageWrapper(browser) });
+    expect(result.current.isLarge).toBe(true);
+    expect(result.current.isNarrow).toBe(false);
+    expect(result.current.tier).toBe("xl");
+
+    act(() => {
+      browser.answerViewport({
+        layoutHeight: 820,
+        layoutWidth: 1180,
+        visual: { height: 1180, width: 820, scale: 1 },
+      });
+    });
+    expect(result.current.isLarge).toBe(false);
+    expect(result.current.isNarrow).toBe(false);
+    expect(result.current.tier).toBe("lg");
+  });
 });

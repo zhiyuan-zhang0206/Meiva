@@ -279,6 +279,7 @@ export function createStickyController(
   // A shrinking layout can clamp scrollTop upward without user motion, even
   // when the reader is parked mid-history and the bottom witness is absent.
   let prevScrollHeight = 0;
+  let prevClientHeight = 0;
   // A touch drag is in progress (touchstart seen, no touchend yet). While
   // true the user's finger owns the scroll position: handleLayoutChange
   // must not ask for a pin (#1016 — see the interface docs).
@@ -390,6 +391,8 @@ export function createStickyController(
       const zone = bottomZone(view.clientHeight, thresholds);
       const atBottom = isAtBottom(view, thresholds);
       const movedUp = prevScrollTop - view.scrollTop;
+      const clientHeightGrowth = prevClientHeight > 0 ? Math.max(0, view.clientHeight - prevClientHeight) : 0;
+      const effectiveMovedUp = movedUp - clientHeightGrowth;
       let direction: "up" | "down" | "none" = "none";
 
       if (view.scrollHeight < prevScrollHeight) {
@@ -403,7 +406,7 @@ export function createStickyController(
         // that was not a user gesture. Update the anchor to the new
         // (smaller) height; do not unstick.
         lastBottomScrollHeight = view.scrollHeight;
-      } else if (movedUp > WHEEL_NOISE_PX) {
+      } else if (effectiveMovedUp > WHEEL_NOISE_PX) {
         if (shrinkPending) {
           // meiva:note
           // The browser clamp from the shrink declared by the commit that
@@ -411,7 +414,7 @@ export function createStickyController(
           // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.md
           shrinkPending = false;
           if (atBottom) stick(view);
-        } else if (view.scrollHeight - view.scrollTop - view.clientHeight <= 0) {
+        } else if (view.scrollHeight - view.scrollTop - view.clientHeight <= 1) {
           // An upward move that lands at the true bottom is a clamp, not
           // a gesture: nothing to depart from. Reconcile and start a
           // fresh run.
@@ -424,7 +427,7 @@ export function createStickyController(
           // departure even when no single event passed any per-event bar
           // — a scrollbar drag yields only small deltas and fires no
           // wheel, so nothing else can ever see the gesture.
-          upwardRun += movedUp;
+          upwardRun += effectiveMovedUp;
           if (upwardRun > zone) {
             unstick();
           } else if (atBottom) {
@@ -451,9 +454,10 @@ export function createStickyController(
       // else: sub-noise motion away from the bottom — keep state.
       // Downward must not unstick: the button's smooth ride and a user
       // scrolling back toward the bottom both pass through here.
-      if (movedUp <= WHEEL_NOISE_PX) shrinkPending = false;
+      if (effectiveMovedUp <= WHEEL_NOISE_PX) shrinkPending = false;
       prevScrollTop = view.scrollTop;
       prevScrollHeight = view.scrollHeight;
+      prevClientHeight = view.clientHeight;
       prevNearBottom = atBottom;
       return direction;
     },
@@ -545,6 +549,7 @@ export function createStickyController(
       if (freshRun) upwardRun = 0;
       prevScrollTop = view.scrollTop;
       prevScrollHeight = view.scrollHeight;
+      prevClientHeight = view.clientHeight;
       prevNearBottom = true;
       // meiva:note
       // A performed pin is a measurement of the content, so the shrink baseline
@@ -587,6 +592,7 @@ export function createStickyController(
       upwardRun = 0;
       prevScrollTop = view.scrollTop;
       prevScrollHeight = view.scrollHeight;
+      prevClientHeight = view.clientHeight;
       prevNearBottom = atBottom;
     },
 
@@ -611,6 +617,7 @@ export function createStickyController(
       upwardRun = 0;
       prevScrollTop = view.scrollTop;
       prevScrollHeight = view.scrollHeight;
+      prevClientHeight = view.clientHeight;
       prevNearBottom = isAtBottom(view, thresholds);
       contentHeight = null;
     },

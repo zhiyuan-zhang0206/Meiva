@@ -89,18 +89,22 @@ def cluster_facts(ctx: MeivaContext) -> tuple[ClusterFact, ...]:
     return tuple(facts)
 
 
+def _load_context_notes(ctx: MeivaContext) -> Sequence[BaseMessage]:
+    return () if ctx.ops_pool is None else context_notes(ctx.plugin_registry(), ctx)
+
+
 async def _seed_harness_timeline(
     ctx: MeivaContext,
     *,
     agent_id: int,
-    notes: Sequence[BaseMessage],
     tail: Sequence[BaseMessage],
     warm_session: bool,
-) -> Handoff | None:
+) -> tuple[Handoff | None, Sequence[BaseMessage]]:
     if ctx.ops_pool is None:
-        return _build_grounded_handoff(ctx, agent_id=agent_id)
+        return _build_grounded_handoff(ctx, agent_id=agent_id), ()
     async with async_write_transaction(ctx.ops_pool) as pool_conn:
         count = await aload_harness_message_count(pool_conn, agent_id)
+        notes: Sequence[BaseMessage] = _load_context_notes(ctx) if (count == 0 or tail) else ()
         handoff = (
             _build_grounded_handoff(ctx, agent_id=agent_id)
             if count == 0 or tail or not warm_session
@@ -114,7 +118,7 @@ async def _seed_harness_timeline(
         if to_append:
             items, _ = build_timeline_items(to_append, inputs=ctx.timestamp_policy())
             await aappend_harness_timeline_items(pool_conn, agent_id, ctx.harness.value, items)
-        return handoff
+        return handoff, notes
 
 
 def _pending_input_payload(
@@ -142,17 +146,15 @@ def _pending_input_payload(
 async def _establish_external_harness_context(
     ctx: MeivaContext,
     *,
+    state: _state.AgentState,
     agent_id: int,
-    notes: Sequence[BaseMessage],
     reset: ContextReset,
-    indexed: set[str],
     cwd_update: dict[str, object] | None = None,
 ) -> Command[NodeName]:
     warm_session = getattr(ctx.harness_bridge, "session_id", None) is not None
-    handoff = await _seed_harness_timeline(
+    handoff, notes = await _seed_harness_timeline(
         ctx,
         agent_id=agent_id,
-        notes=notes,
         tail=reset.tail,
         warm_session=warm_session,
     )
@@ -160,6 +162,17 @@ async def _establish_external_harness_context(
         set_handoff = getattr(ctx.harness_bridge, "set_handoff", None)
         if callable(set_handoff):
             set_handoff(handoff)
+    indexed = (
+        set(state.capabilities.indexed)
+        if warm_session and not reset.tail and state.capabilities.indexed
+        else indexed_skill_identifiers(
+            skill_view(
+                ctx.require_agent().prompt,
+                home=ctx.require_meiva_home(),
+                environ=ctx.require_environ(),
+            )
+        )
+    )
     target = route_target(ctx, reset.resume)
     ext_update: dict[str, Any] = {
         **(cwd_update or {}),
@@ -266,15 +279,21 @@ async def init_context_node(
                 goto=route_target(runtime.context, reset.resume),
             )
 
+        # meiva:link agent/graph/docs/harness-turn.md
+        if runtime.context.harness is not Harness.MEIVA:
+            return await _establish_external_harness_context(
+                runtime.context,
+                state=state,
+                agent_id=agent_id_from_config(config),
+                reset=reset,
+                cwd_update=cwd_update,
+            )
+
         # Container mode (eval harness): no ops_pool, so no inbound queue, no
         # workspace, and nothing the notes describe. The head is the system
         # prompt alone, keeping an eval's context deterministic. Same signal
         # `_claim` uses for its container early-return.
-        notes = (
-            []
-            if runtime.context.ops_pool is None
-            else context_notes(runtime.context.plugin_registry(), runtime.context)
-        )
+        notes = _load_context_notes(runtime.context)
         logger.info(
             "[init-context] establishing: {} note(s) + {} tail message(s), resume={}",
             len(notes),
@@ -296,17 +315,6 @@ async def init_context_node(
                 environ=runtime.context.require_environ(),
             )
         )
-
-        # meiva:link agent/graph/docs/harness-turn.md
-        if runtime.context.harness is not Harness.MEIVA:
-            return await _establish_external_harness_context(
-                runtime.context,
-                agent_id=agent_id_from_config(config),
-                notes=notes,
-                reset=reset,
-                indexed=indexed,
-                cwd_update=cwd_update,
-            )
 
         head: list[BaseMessage] = [
             SystemMessage(

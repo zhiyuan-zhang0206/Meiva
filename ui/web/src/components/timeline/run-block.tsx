@@ -117,7 +117,8 @@ export const TurnBlock = memo(function TurnBlock({
   const totalWorkedMs = summary.workedMs + liveDelta;
 
   const hasWork = summary.thinking > 0 || summary.code > 0 || summary.output > 0;
-  const hasLiveTimer = summary.lastLiveKind !== null && summary.lastLiveStartedAt > 0;
+  const hasLiveTimer =
+    (summary.lastLiveKind !== null && summary.lastLiveStartedAt > 0) || liveAnchor > 0;
   const workedLabel = turnActive
     ? totalWorkedMs > 0 || hasWork || hasLiveTimer
       ? t("workingFor", { duration: formatDuration(totalWorkedMs) })

@@ -7,10 +7,44 @@ from __future__ import annotations
 
 from langchain_core.messages import BaseMessage
 
+from agent.graph.node_log import SNAPSHOT_CURSOR
 from agent.state import BaseAgentState
 from base.agents.context import MeivaContext
 from base.agents.history.timeline import build_timeline_items, tail_window
 from base.events.live.projection import InboundCommitted, TimelineSnapshot
+
+
+# meiva:note
+# Publish an incremental TimelineSnapshot for messages claimed in this batch before
+# InboundCommitted fires, so the frontend renders the newly committed user message
+# in the timeline before removing it from PendingStrip.
+def publish_claimed_timeline_snapshot(
+    ctx: MeivaContext,
+    state: BaseAgentState,
+    agent_id: int,
+    new_msgs: list[BaseMessage],
+) -> None:
+    if ctx.event_publisher is None:
+        raise RuntimeError("publish_claimed_timeline_snapshot requires ctx.event_publisher")
+    if not new_msgs:
+        return
+    base_len = len(state.messages)
+    combined = list(state.messages) + new_msgs
+    delta, msg_count = build_timeline_items(
+        combined,
+        start=base_len,
+        inputs=ctx.timestamp_policy(),
+    )
+    if not delta:
+        return
+    SNAPSHOT_CURSOR[agent_id] = len(combined)
+    ctx.event_publisher.emit(
+        TimelineSnapshot(
+            agent_id=agent_id,
+            items=[it.model_dump() for it in delta],
+            msg_count=msg_count,
+        ).model_dump_json()
+    )
 
 
 async def publish_inbound_committed(

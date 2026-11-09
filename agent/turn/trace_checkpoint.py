@@ -47,19 +47,26 @@ async def attach_trace_checkpoint_ref(
     span_ctx = span.get_span_context()
     if not span_ctx.is_valid:
         return
+    from base.agents.history.checkpoint import alatest_checkpoint_id, attach_trace_to_checkpoint
+
     config: RunnableConfig = {"configurable": {"thread_id": str(agent_id)}}
     try:
-        state = await graph.aget_state(config)
-        # meiva:note
-        # The configured state carries `Any` values; read the one key this linker uses as `object`
-        # and narrow it here, so an id of another type is refused at the read instead of being
-        # stamped into the span and the checkpoint row.
-        configurable = object_mapping(state.config).get("configurable")
-        if not is_object_dict(configurable):
-            return
-        checkpoint_id = configurable.get("checkpoint_id")
-        if not isinstance(checkpoint_id, str):
-            return
+        if ctx.ops_pool is not None:
+            checkpoint_id = await alatest_checkpoint_id(ctx.ops_pool, str(agent_id))
+            if not isinstance(checkpoint_id, str):
+                return
+        else:
+            state = await graph.aget_state(config)
+            # meiva:note
+            # The configured state carries `Any` values; read the one key this linker uses as `object`
+            # and narrow it here, so an id of another type is refused at the read instead of being
+            # stamped into the span and the checkpoint row.
+            configurable = object_mapping(state.config).get("configurable")
+            if not is_object_dict(configurable):
+                return
+            checkpoint_id = configurable.get("checkpoint_id")
+            if not isinstance(checkpoint_id, str):
+                return
     except Exception:
         # A fresh thread yields an empty snapshot (handled above); a raise is a checkpoint
         # read failure. The next turn's commit will carry the link.
@@ -76,7 +83,6 @@ async def attach_trace_checkpoint_ref(
     # endpoint — is DB-side and unaffected.
     if span.is_recording():
         span.set_attribute("meiva.checkpoint_id", checkpoint_id)
-    from base.agents.history.checkpoint import attach_trace_to_checkpoint
 
     await attach_trace_to_checkpoint(
         ctx.ops_pool,

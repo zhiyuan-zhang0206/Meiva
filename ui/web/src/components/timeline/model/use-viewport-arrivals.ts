@@ -1,18 +1,17 @@
 import { useCallback, useLayoutEffect, useRef, type RefObject } from "react";
 
 import type { BackendTimelineItem } from "@/lib/contracts/types";
-import { SEND_ANCHOR_TOP_SHARE, type StickyController } from "@/lib/layout/sticky";
+import type { StickyController } from "@/lib/layout/sticky";
 import type { SavedScroll } from "@/lib/layout/scroll-memory";
 import { useTimelineStore } from "@/lib/timeline/timeline-store";
 
 // meiva:note
 // Where the viewport goes when the READER asks for something, rather than when
-// the stream grows: a thread change pins to the bottom, a send parks the
-// message that was just written. Both are placements the follow flag has to
-// learn about, and both release a bookmark that was still settling - the reader
-// picked a position, so the saved one no longer owns the viewport. The pin is
-// immediate; the anchor waits for its row to mount, because until then there is
-// nothing to park.
+// the stream grows: a thread change pins to the bottom, a send pins to the
+// bottom and re-enables following so the reply keeps streaming into view. Both
+// are placements the follow flag has to learn about, and both release a
+// bookmark that was still settling - the reader picked a position, so the saved
+// one no longer owns the viewport.
 // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.md
 
 export interface ThreadPinArgs {
@@ -55,14 +54,10 @@ export function useThreadPin({
 }
 
 // meiva:note
-// The send anchor: once the reader's own message is committed and mounted, park
-// that row a fixed share down the viewport and let following go, so the reply
-// streams into the space below it instead of dragging the reader down chunk by
-// chunk (user request 2026-11-09). A bottom reserve makes the parking position
-// reachable while the reply is still shorter than the viewport: it fills exactly
-// the missing height and gives it back as the reply grows, so scrollHeight - and
-// with it the reader's viewport - stays where it is. The controller owns the
-// follow flag; this hook only writes positions and reports them.
+// The send anchor: when the reader sends a message, pin the viewport to the
+// bottom and re-enable sticky following, and re-pin once the committed row
+// mounts so the timeline stays glued to the bottom instead of releasing the
+// scroll-to-bottom state (user request 2026-11-09).
 // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.md
 export interface SendAnchorArgs {
   items: readonly BackendTimelineItem[];
@@ -119,16 +114,8 @@ export function useSendAnchor({
   cancelBookmark,
 }: SendAnchorArgs): { maintain: () => void } {
   const request = useTimelineStore((state) => state.sendAnchor);
-  // meiva:note
-  // One anchor is three pieces of state: the sequence already consumed (a
-  // request recorded before this view mounted belongs to a thread it never
-  // showed, so it is not owed here), the inbound still waiting for its row
-  // (`undefined` = nothing owed, `null` = the newest user message stands in),
-  // and the position being held (null while no reserve is outstanding).
-  // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.md
   const consumedSeq = useRef(request.seq);
   const pending = useRef<number | null | undefined>(undefined);
-  const anchoredTop = useRef<number | null>(null);
 
   const writeReserve = useCallback((height: number) => {
     const element = reserveRef.current;
@@ -139,45 +126,16 @@ export function useSendAnchor({
   }, [reserveRef]);
 
   const maintain = useCallback(() => {
-    const viewport = viewportRef.current;
-    const element = reserveRef.current;
-    const top = anchoredTop.current;
-    if (!viewport || !element || top === null) return;
-    if (controller.isSticky()) {
-      // meiva:note
-      // Following again: the reserve no longer holds the reader, and keeping it
-      // would park blank space between them and the tail.
-      // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.md
-      anchoredTop.current = null;
-      writeReserve(0);
-      return;
-    }
-    writeReserve(top + viewport.clientHeight - (viewport.scrollHeight - reserveHeight(element)));
-  }, [controller, reserveRef, viewportRef, writeReserve]);
+    writeReserve(0);
+  }, [writeReserve]);
 
-  const anchorRow = useCallback((viewport: HTMLElement, node: HTMLElement) => {
-    // meiva:note
-    // The reader asked for the message they just wrote, so a bookmark still
-    // settling no longer owns the viewport. Released here rather than when the
-    // request arrives: until the row mounts there is nothing to park, and a
-    // bookmark that lands first is still the reader's place.
-    // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.md
+  const pinSentToBottom = useCallback((viewport: HTMLElement) => {
     cancelBookmark();
-    const reserve = reserveRef.current;
-    const rowTop = node.getBoundingClientRect().top - viewport.getBoundingClientRect().top + viewport.scrollTop;
-    const top = Math.max(0, Math.round(rowTop - viewport.clientHeight * SEND_ANCHOR_TOP_SHARE));
-    const natural = viewport.scrollHeight - (reserve ? reserveHeight(reserve) : 0);
-    writeReserve(top + viewport.clientHeight - natural);
-    viewport.scrollTop = top;
-    pending.current = undefined;
-    // meiva:note
-    // The reserved height makes `top` reachable, so the browser keeps it; a
-    // clamp would become the held position instead of a fight with the layout.
-    // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.md
-    anchoredTop.current = viewport.scrollTop;
-    controller.notifyAnchored(snapshotOf(viewport));
+    writeReserve(0);
+    viewport.scrollTop = viewport.scrollHeight;
+    controller.notifyPinnedToBottom(snapshotOf(viewport), true);
     measureAtBottom();
-  }, [cancelBookmark, controller, measureAtBottom, reserveRef, writeReserve]);
+  }, [cancelBookmark, controller, measureAtBottom, writeReserve]);
 
   useLayoutEffect(() => {
     const viewport = viewportRef.current
@@ -188,14 +146,16 @@ export function useSendAnchor({
     if (request.seq !== consumedSeq.current) {
       consumedSeq.current = request.seq;
       pending.current = request.inboundId;
-      anchoredTop.current = null;
       writeReserve(0);
     }
 
-    if (pending.current !== undefined && anchoredTop.current === null) {
+    if (pending.current !== undefined) {
       const itemId = targetItemId(items, pending.current);
       const node = itemId === null ? null : findRow(viewport, itemId);
-      if (node) anchorRow(viewport, node);
+      if (node) {
+        pending.current = undefined;
+        pinSentToBottom(viewport);
+      }
     }
     maintain();
   });

@@ -5,9 +5,21 @@
 // the module, which is why this exists as a value at all.
 import type { ComponentType, ReactNode } from "react";
 
+export type ThemeMode = "system" | "light" | "dark";
+
+// meiva:note
+// Coerce an untrusted setting value to one of the three supported color modes, defaulting to "system".
+export function normalizeThemeMode(value: unknown): ThemeMode {
+  return value === "light" || value === "dark" || value === "system" ? value : "system";
+}
+
 export type ThemeProviderComponent = ComponentType<{ nonce?: string; children: ReactNode }>;
 
 export interface ThemeRuntime {
   Provider: ThemeProviderComponent;
   useResolvedTheme: () => string | undefined;
+  useThemeMode?: () => {
+    theme: string | undefined;
+    setTheme: (theme: ThemeMode) => void;
+  };
 }

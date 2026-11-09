@@ -26,6 +26,7 @@ from base.lm.harness.base_session import (
 )
 from base.lm.harness.cancel import CancelReport, unobserved_cancel
 from base.lm.harness.events import (
+    ForegroundAccepted,
     SessionFailed,
     TurnCompleted,
     UnsolicitedOutput,
@@ -223,6 +224,7 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
             self._sent_turn = ticket.turn_id
             await transport.send(ticket.text)
             ticket.interrupt_ready.set()
+            self._emit(ForegroundAccepted(turn_id=ticket.turn_id))
         except (TransportClosedError, OSError, RuntimeError) as exc:
             self._sent_turn = None
             self._fail_turn(ticket, exc)

@@ -142,5 +142,5 @@ export function useNow(active: boolean): number {
     if (!ticking) return;
     return subscribeTick(wallNow, setNow);
   }, [ticking, wallNow]);
-  return now;
+  return ticking ? Math.max(now, wallNow()) : now;
 }

@@ -99,13 +99,24 @@ describe("DisplaySettingsPage models, themes, language, and colors", () => {
     expect(screen.getByLabelText<HTMLButtonElement>("DeepSeek Flash").disabled).toBe(false);
   });
 
-  it("has no Theme section when no plugin contributes a skin", async () => {
+  it("renders the Appearance options (System, Light, Dark) defaulting to System and hides Skin when no plugin contributes a skin", async () => {
     renderPage();
 
     await waitFor(() => {
-      expect(screen.getByText("Show agent status dot")).toBeTruthy();
+      expect(screen.getByText("Appearance")).toBeTruthy();
     });
     expect(screen.queryByText("Skin")).toBeNull();
+    const systemRadio = screen.getByLabelText("System") as unknown as HTMLInputElement;
+    const lightRadio = screen.getByLabelText("Light") as unknown as HTMLInputElement;
+    const darkRadio = screen.getByLabelText("Dark") as unknown as HTMLInputElement;
+    expect(systemRadio.checked).toBe(true);
+    expect(lightRadio.checked).toBe(false);
+    expect(darkRadio.checked).toBe(false);
+
+    fireEvent.click(darkRadio);
+    await waitFor(() => {
+      expect(transport.putSetting).toHaveBeenCalledWith("display.theme", "dark");
+    });
   });
 
   it("lists contributed skins and persists the chosen pack", async () => {

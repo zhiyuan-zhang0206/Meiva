@@ -124,6 +124,7 @@ class RecoveryReconstructionScope:
     generation: int = 0
     key: tuple[str, str, str] | None = None
     messages: list[BaseMessage] | None = None
+    last_checkpoint_id: str | None = None
     active: bool = True
 
     def reader(self) -> AsyncPostgresSaver:
@@ -152,6 +153,57 @@ class RecoveryReconstructionScope:
         self.key = None
         self.messages = None
 
+    def seed(self, checkpoint_id: str, messages: object, *, checkpoint_ns: str = "") -> None:
+        if not self.active or not is_object_list(messages):
+            return
+        typed: list[BaseMessage] = []
+        for item in messages:
+            if not isinstance(item, BaseMessage):
+                return
+            typed.append(item)
+        copied = deepcopy(typed)
+        _ = normalize_stored_message_ids(copied)
+        self.key = (self.thread_id, checkpoint_id, checkpoint_ns)
+        self.messages = copied
+
+
+# meiva:note
+# Seed the active recovery scope with the in-memory messages of a known checkpoint id.
+def seed_checkpoint_messages(
+    scope: object,
+    checkpoint_id: str,
+    messages: object,
+) -> None:
+    if isinstance(scope, RecoveryReconstructionScope):
+        scope.seed(checkpoint_id, messages)
+
+
+# meiva:note
+# Read back the latest reconstructed (checkpoint_id, messages) pair held by an active recovery scope.
+def retained_reconstruction(
+    scope: object,
+) -> tuple[str, list[BaseMessage]] | None:
+    if (
+        isinstance(scope, RecoveryReconstructionScope)
+        and scope.key is not None
+        and scope.messages is not None
+    ):
+        return (scope.key[1], scope.messages)
+    return None
+
+
+# meiva:note
+# Seed the active recovery scope with the in-memory messages of the just-flushed checkpoint.
+def seed_latest_checkpoint_messages(
+    scope: object,
+    messages: object,
+) -> None:
+    if not isinstance(scope, RecoveryReconstructionScope):
+        return
+    if not isinstance(scope.last_checkpoint_id, str):
+        return
+    scope.seed(scope.last_checkpoint_id, messages)
+
 
 # meiva:note
 # The `configurable` mapping of a config, its entries read as `object` (langchain types them `Any`).
@@ -168,11 +220,15 @@ def _thread_id(config: RunnableConfig) -> str:
     return str(_configurable(config)["thread_id"])
 
 
-def _invalidate_recovery_scopes(saver: AsyncPostgresSaver, thread_id: str) -> None:
+def _invalidate_recovery_scopes(
+    saver: AsyncPostgresSaver, thread_id: str, *, checkpoint_id: object = None
+) -> None:
     scopes: dict[str, set[RecoveryReconstructionScope]] = getattr(
         saver, "_meiva_recovery_scopes", {}
     )
     for scope in scopes.get(thread_id, ()):
+        if isinstance(checkpoint_id, str):
+            scope.last_checkpoint_id = checkpoint_id
         scope.invalidate()
 
 
@@ -192,11 +248,12 @@ def _install_recovery_invalidation(saver: AsyncPostgresSaver) -> None:
         new_versions: ChannelVersions,
     ) -> RunnableConfig:
         thread_id = _thread_id(config)
-        _invalidate_recovery_scopes(saver, thread_id)
+        cid = checkpoint.get("id")
+        _invalidate_recovery_scopes(saver, thread_id, checkpoint_id=cid)
         try:
             return await orig_aput(config, checkpoint, metadata, new_versions)
         finally:
-            _invalidate_recovery_scopes(saver, thread_id)
+            _invalidate_recovery_scopes(saver, thread_id, checkpoint_id=cid)
 
     async def aput_writes(
         config: RunnableConfig,

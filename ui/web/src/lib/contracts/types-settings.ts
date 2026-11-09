@@ -65,6 +65,7 @@ export const USER_SETTING_DEFAULTS: Record<string, unknown> = {
   "display.task_window": "24h",
 
   "display.shell_terminal_theme": "system",
+  "display.theme": "system",
 
   "display.theme_pack": null,
 
