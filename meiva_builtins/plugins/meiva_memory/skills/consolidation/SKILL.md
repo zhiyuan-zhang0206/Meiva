@@ -12,7 +12,7 @@ the pool stays canonical, conflict-free, committed, pushed, and searchable.
 
 All index-rebuild / validation / refresh operations are wrapped in scripts under
 `../scripts/`, `scripts/`, and the pool root:
-- `python scripts/dream_gather.py [--pool <path>] [--repo <alias>=<path>] [--json]` — Phase 2 (`Gather Signal`) deterministic probe: scan optional `sources` / `verified` / `stale_after` frontmatter across pool notes, intersect `repo:<alias>:<path>` anchors against repository file trees and recent `git log` changes, flag expired `stale_after` and aging `verified` notes, list pure-Markdown or legacy notes needing Dream OKF enrichment, and surface pool churn/conflict hotspots
+- `python scripts/dream_gather.py [--pool <path>] [--repo <alias>=<path>] [--json]` — Phase 2 (`Gather Signal`) deterministic probe: scan optional `sources` / `verified` / `stale_after` frontmatter across pool notes, intersect `repo:<alias>:<path>` anchors against repository file trees and recent `git log` changes, render `## External Source Probes` for `db:...` anchors, flag expired `stale_after` and aging `verified` notes, list pure-Markdown or legacy notes needing Dream OKF enrichment, scan `~/.meiva/workspaces/*/memory/*.md` and `*/memory/inherit/*.md` for `## Workspace Memory Candidates`, and surface existing-file pool churn/conflict hotspots
 - `python ../scripts/rebuild_memory_index.py` — rebuild the root `MEMORY.md` pointers (resolves the pool from `MEIVA_HOME` and takes no arguments)
 - `python3 validate.py` (in the pool or worktree root) — enforce UTF-8, optional YAML frontmatter syntax (plus optional type checks for `sources`, `verified`, and `stale_after`, and unquoted `' #'` / `': '` truncation checks), 8000-character note cap, 20-file / 20-subdirectory Locality limits, `MEMORY.md` pointer targets and coverage, and `<!-- fact-check: ... -->` probes
 - `python ../scripts/consolidate.py -m "..."` — remote-backed single-box wrapper: rebuild indexes, stage, commit, push, refresh
@@ -63,23 +63,28 @@ Every full consolidation executes four phases in order inside the target worktre
 2. **World Truth Probes (External Ground-Truth Verification)**: Run
    `python scripts/dream_gather.py --pool "$W"` first to automatically intersect
    every note's bound `sources:` (`repo:<alias>:<path>`) against mapped repository
-   file trees and recent `git log` commits since the note's `verified` date, flag
-   expired `stale_after` notes, and identify recent pool churn/conflict hotspots;
-   then verify claims in existing notes against observable ground truth across
-   multiple domains rather than assuming a single codebase:
-   - *Multi-repo codebases & file trees* (e.g. `~/.meiva/source`, project checkouts):
+   file trees and recent `git log` commits since the note's `verified` date, render
+   `## External Source Probes` (`db:...` anchors), flag expired `stale_after` notes,
+   list `## Workspace Memory Candidates`, and identify recent pool churn/conflict
+   hotspots among existing pool files; then verify claims in existing notes against
+   observable ground truth across multiple domains rather than assuming a single
+   codebase:
+   - *Multi-repo codebases & file trees* (e.g. `~/.meiva/source`, `~/MonsoraV2`):
      check `git log`, file path existence, symbol/contract definitions, and deleted
      scripts/queues so notes citing removed paths or retired contracts are caught.
    - *Cluster runtime & database registries* (`agents`, `schedules`, `tasks`,
      machine topology): check active vs. terminated agents, live schedule triggers,
      and task status (including `db:<db_name>:<table>` anchors surfaced in
-     `external_source_probes`) so notes naming terminated role holders or obsolete
+     `## External Source Probes`) so notes naming terminated role holders or obsolete
      cron times are caught.
    - *Host environment & embedded probes*: check machine configuration and execute
      `<!-- fact-check: <cmd> -->` directives.
-3. **Per-Agent Workspace Memory (`~/.meiva/workspaces/*/memory/`)**: Scan agent
-   workspace memory directories (and legacy `MEMORY.md` remnants) to extract
-   durable, reusable cross-agent rules and facts into the shared pool.
+3. **Per-Agent Workspace Memory (`~/.meiva/workspaces/*/memory/`)**: Review the
+   `## Workspace Memory Candidates` section reported by `dream_gather.py`
+   (which deterministically scans `workspaces/*/memory/*.md` and
+   `workspaces/*/memory/inherit/*.md` modified within `--since-days` with
+   non-zero size) alongside any legacy `MEMORY.md` remnants to extract durable,
+   reusable cross-agent rules and facts into the shared pool.
 
 ### Phase 3 — Consolidation (Canonical One-Topic-One-File, State Overwrite & Auto-OKF)
 - **One topic, one canonical file (dateless naming)**: Maintain a single dateless
@@ -93,14 +98,26 @@ Every full consolidation executes four phases in order inside the target worktre
   audit trail). Never leave conflicting old notes in the pool or stack chronological
   patch disclaimers at the bottom of stale notes.
 - **Dream-Time Auto-OKF Maintenance**: While working agents write pure Markdown
-  without YAML frontmatter, the Arbiter populates and refreshes four canonical
-  OKF provenance & lifecycle fields on consolidated canonical notes (and strips
-  retired `type`, `meiva_agent`, `meiva_machine`, and `tags` boilerplate):
+  without YAML frontmatter or write-time validation, the Arbiter populates and
+  refreshes four canonical OKF provenance & lifecycle fields on consolidated
+  canonical notes (and strips retired `type`, `meiva_agent`, `meiva_machine`, and
+  `tags` boilerplate):
   - `description`: One-line high-density summary for `MEMORY.md` pointers and previews.
-  - `sources`: List of external World Truth anchors bound to the note (e.g.
-    `"repo:meiva:scripts/hooks/diff_checks.py"`, `"repo:memory:validate.py"`,
-    `"db:meiva_main:schedules"`), driving `dream_gather.py` drift detection on
-    subsequent Dream runs.
+  - `sources`: List of external World Truth anchors bound to the note using the
+    canonical `sources:` grammar, driving `dream_gather.py` drift detection on
+    subsequent Dream runs:
+    - `repo:meiva:<file_path>` — auto-mapped to `~/.meiva/source` (global manifest
+      files `pyproject.toml`, `meizel.toml`, `meizel.policy.toml`, and
+      `.pre-commit-config.yaml` check existence without `git_changed` noise)
+    - `repo:monsora:<file_path>` — auto-mapped to `~/MonsoraV2` when present
+      (silently skipped on machines without `~/MonsoraV2`)
+    - `repo:memory:<file_path>` — auto-mapped to the memory pool checkout
+    - `db:meiva_main:<table>` — database registry anchor (surfaced under
+      `## External Source Probes`)
+    - `user:ruling` / `user:preference` / `user:profile` — valid semantic
+      user-dimension sources (recognized without triggering external probe warnings)
+    - `env:<machine>` — valid semantic host-environment source (recognized without
+      triggering external probe warnings)
   - `verified`: Quoted `"YYYY-MM-DD"` date when the note was verified against World Truth.
   - `stale_after`: Optional quoted `"YYYY-MM-DD"` expiration date for temporary
     freezes or transition rules.

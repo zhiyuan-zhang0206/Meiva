@@ -79,24 +79,26 @@ cd "$W"
      notes and ≤ 20 subdirectories per directory).
 
 2. **Phase 2 — Gather Signal (Three Incremental Signal Sources)**:
-   - Run `dream_gather.py` first (`~/.meiva/source/.venv/bin/python ~/.meiva/source/meiva_builtins/plugins/meiva_memory/skills/consolidation/scripts/dream_gather.py --pool "$W"`) to intersect note `sources:` against repository file trees and recent `git log` changes, flag expired `stale_after` and aging `verified` notes, list pure-Markdown or legacy notes needing Dream OKF enrichment, and surface pool churn/conflict hotspots.
+   - Run `dream_gather.py` first (`~/.meiva/source/.venv/bin/python ~/.meiva/source/meiva_builtins/plugins/meiva_memory/skills/consolidation/scripts/dream_gather.py --pool "$W"`) to intersect note `sources:` against repository file trees and recent `git log` changes, render `## External Source Probes` for `db:...` anchors, flag expired `stale_after` and aging `verified` notes, list pure-Markdown or legacy notes needing Dream OKF enrichment, list `## Workspace Memory Candidates` (`workspaces/*/memory/*.md` and `workspaces/*/memory/inherit/*.md` modified within `--since-days`), and surface existing-file pool churn/conflict hotspots.
    - **Recent Session Transcripts (`USER_INPUT`)**: Scan recent session transcripts
      for user corrections, rulings, reversals, and explicit decisions, ordered by
      timestamp so newer rulings supersede older ones.
    - **World Truth Probes (External Ground-Truth Verification)**: Verify claims in
      existing notes against observable ground truth across multiple domains:
-     - *Multi-repo codebases & file trees* (`~/.meiva/source`, project checkouts):
+     - *Multi-repo codebases & file trees* (`~/.meiva/source`, `~/MonsoraV2`, project checkouts):
        check `missing_path` and `git_changed` items from `dream_gather.py`, symbol
        existence, and deleted scripts or retired contracts.
      - *Cluster runtime & database registries* (`agents`, `schedules`, `tasks`,
        machine topology): check active vs. terminated agents, live schedule cron
-       times, and task status so notes naming terminated agents or obsolete
+       times, and task status (including `db:meiva_main:<table>` items in
+       `## External Source Probes`) so notes naming terminated agents or obsolete
        schedules are caught.
      - *Host environment & embedded probes*: check machine configuration and run
        `<!-- fact-check: <cmd> -->` directives.
-   - **Per-Agent Workspace Memory (`~/.meiva/workspaces/*/memory/`)**: Scan agent
-     workspace memory directories (and legacy `MEMORY.md` files) to extract
-     durable, reusable cross-agent rules and facts into the shared pool.
+   - **Per-Agent Workspace Memory (`~/.meiva/workspaces/*/memory/`)**: Review the
+     `## Workspace Memory Candidates` section reported by `dream_gather.py`
+     (plus any legacy `MEMORY.md` files) to extract durable, reusable cross-agent
+     rules and facts into the shared pool.
 
 3. **Phase 3 — Consolidation (Canonical One-Topic-One-File, State Overwrite & Auto-OKF)**:
    - **One topic, one canonical file (dateless naming)**: Maintain a single dateless
@@ -111,10 +113,18 @@ cd "$W"
      the audit trail). Never leave conflicting old notes or stack chronological
      patch disclaimers at the bottom of stale notes.
    - **Dream-Time Auto-OKF Maintenance**: Working agents write pure Markdown without
-     frontmatter. During consolidation, populate/refresh the four canonical OKF
+     frontmatter or write-time validation (`validate.py` runs only during Dream
+     consolidation). During consolidation, populate/refresh the four canonical OKF
      fields on canonical notes (`description`, `sources`, `verified: "YYYY-MM-DD"`,
      and optional `stale_after: "YYYY-MM-DD"`) while stripping legacy `type`,
-     `meiva_agent`, `meiva_machine`, and `tags` fields.
+     `meiva_agent`, `meiva_machine`, and `tags` fields. Use the explicit `sources:`
+     grammar:
+     - `repo:meiva:<file_path>` (auto-mapped to `~/.meiva/source`; global manifests `pyproject.toml`, `meizel.toml`, `meizel.policy.toml`, `.pre-commit-config.yaml` skip `git_changed` drift noise)
+     - `repo:monsora:<file_path>` (auto-mapped to `~/MonsoraV2` when present; skipped when absent on the machine)
+     - `repo:memory:<file_path>` (auto-mapped to the memory pool checkout)
+     - `db:meiva_main:<table>` (rendered under `## External Source Probes`)
+     - `user:ruling` / `user:preference` / `user:profile` (semantic user-dimension sources; ignored in external probe warnings)
+     - `env:<machine>` (semantic host-environment source; ignored in external probe warnings)
    - **De-relativize time**: Convert relative time expressions (`"today"`,
      `"this morning"`, `"recently"`, `"next week"`) into explicit ISO dates
      (`YYYY-MM-DD`).
