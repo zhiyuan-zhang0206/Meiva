@@ -176,6 +176,71 @@ async def test_an_uncaptured_leader_identity_reports_its_own_reason(
 def test_reap_window_rejects_a_non_positive_value() -> None:
     with pytest.raises(ValueError, match="stop_kill_reap_s"):
         SupervisorConfig(stop_kill_reap_s=0.0)
+    with pytest.raises(ValueError, match="stop_group_poll_s"):
+        SupervisorConfig(stop_group_poll_s=0.0)
+
+
+async def test_group_descendant_closing_within_window_after_leader_exits_stops_without_escalation(
+    tmp_path: Path, recorder: _Recorder
+) -> None:
+    ready = tmp_path / "ready"
+    closed = tmp_path / "closed"
+    child_file = tmp_path / "child.pid"
+    owner = root(
+        tmp_path,
+        "forked_graceful_child",
+        str(child_file),
+        str(ready),
+        str(closed),
+        "0.2",
+        stop_timeout_s=2.0,
+    )
+    await owner.start()
+    await wait_file(ready)
+    await wait_file(child_file)
+    child_pid = int(child_file.read_text())
+    try:
+        result = await owner.down("worker")
+        assert cast("list[dict[str, Any]]", result["units"])[0]["action"] == "stopped"
+        assert closed.read_text() == "graceful-child-done\n"
+        assert not psutil.pid_exists(child_pid)
+        assert recorder.events("root_unit_stop_escalated") == []
+        assert recorder.events("root_unit_stop_aborted") == []
+    finally:
+        with pytest.raises(psutil.NoSuchProcess):
+            psutil.Process(child_pid).kill()
+        await owner.shutdown()
+
+
+async def test_group_descendant_ignoring_term_after_leader_exits_is_escalated_with_sigkill(
+    tmp_path: Path, recorder: _Recorder
+) -> None:
+    ready = tmp_path / "ready"
+    child_file = tmp_path / "child.pid"
+    owner = root(
+        tmp_path,
+        "forked_late_child",
+        str(child_file),
+        str(ready),
+        stop_timeout_s=0.4,
+    )
+    await owner.start()
+    await wait_file(ready)
+    leader_pid = cast("list[dict[str, Any]]", (await owner.status())["units"])[0]["pid"]
+    try:
+        result = await owner.down("worker")
+        await wait_file(child_file)
+        child_pid = int(child_file.read_text())
+        assert cast("list[dict[str, Any]]", result["units"])[0]["action"] == "stopped"
+        assert not psutil.pid_exists(leader_pid)
+        assert not psutil.pid_exists(child_pid), "orphan in-group descendant survived stop"
+        escalated = recorder.events("root_unit_stop_escalated")
+        assert len(escalated) == 1
+        assert escalated[0]["reason"] == "escaped_term_window"
+        assert escalated[0]["pid"] == leader_pid
+        assert recorder.events("root_unit_stop_aborted") == []
+    finally:
+        await owner.shutdown()
 
 
 async def test_force_kills_without_waiting_the_declared_window(tmp_path: Path) -> None:

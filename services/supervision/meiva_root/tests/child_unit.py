@@ -124,6 +124,46 @@ def _forked_late_child(child_file: str, ready: str) -> None:
     time.sleep(60)
 
 
+def _forked_graceful_child(child_file: str, ready: str, closed: str, close_s: str) -> None:
+    child_pid = os.fork()
+    if child_pid == 0:
+
+        def child_close(*_: object) -> None:
+            time.sleep(float(close_s))
+            pathlib.Path(closed).write_text("graceful-child-done\n")
+            os._exit(0)
+
+        signal.signal(signal.SIGTERM, child_close)
+        pathlib.Path(ready).touch()
+        time.sleep(60)
+        os._exit(0)
+
+    pathlib.Path(child_file).write_text(str(child_pid))
+
+    def leader_exit_immediately(*_: object) -> None:
+        os._exit(0)
+
+    signal.signal(signal.SIGTERM, leader_exit_immediately)
+    time.sleep(60)
+
+
+def _detached_late_child(child_file: str, ready: str) -> None:
+
+    def finish(*_: object) -> None:
+        pid = os.fork()
+        if pid == 0:
+            os.setsid()
+            signal.signal(signal.SIGTERM, signal.SIG_IGN)
+            time.sleep(60)
+            os._exit(0)
+        pathlib.Path(child_file).write_text(str(pid))
+        os._exit(0)
+
+    signal.signal(signal.SIGTERM, finish)
+    pathlib.Path(ready).touch()
+    time.sleep(60)
+
+
 def _exit_soon(delay_s: str, hold: str) -> None:
     # meiva:note
     # A unit that dies on its own, and keeps dying on every replacement until a hold file exists:
@@ -165,6 +205,8 @@ _SCENARIOS = {
     "closes_recording": _closes_recording,
     "restart_down": _restart_down,
     "forked_late_child": _forked_late_child,
+    "forked_graceful_child": _forked_graceful_child,
+    "detached_late_child": _detached_late_child,
     "code_gate_exit": _code_gate_exit,
     "exit_soon": _exit_soon,
     "fail_loudly": _fail_loudly,

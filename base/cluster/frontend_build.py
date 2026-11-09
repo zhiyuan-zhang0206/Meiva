@@ -9,9 +9,11 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import socket
 import stat
 import subprocess
 import sys
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal, assert_never
@@ -21,6 +23,11 @@ from base.host.net.browser_origins import parse_browser_origins, split_browser_o
 from base.host.proc import run_bounded
 
 _KEY_FILE = "meiva-build-key"
+_FRONTEND_BIND_HOST = "127.0.0.1"
+# meiva:note
+# Loopback SYN/ACK or RST resolves inside the kernel in sub-millisecond time; 200ms
+# bounds the preflight under scheduler contention without delaying normal startup.
+_LOOPBACK_PROBE_TIMEOUT_S = 0.2
 BuildAction = Literal["reuse", "build"]
 
 
@@ -187,6 +194,29 @@ def finalize_frontend_build(
 
 
 # meiva:note
+# Check `127.0.0.1:<port>` before `pnpm run build` mutates `.next` in place: if an
+# orphaned or foreign listener still holds the serve port, rebuilding first would
+# overwrite the live `.next` chunks on disk and then immediately crash on EADDRINUSE.
+# Combining a loopback TCP connect probe with an `SO_REUSEADDR` bind check catches
+# wildcard (`0.0.0.0`) and loopback listeners alike while allowing `TIME_WAIT` sockets
+# left behind by a just-stopped generation, matching Node/libuv's own `uv_tcp_bind`.
+def port_busy_reason(port: int, *, host: str = _FRONTEND_BIND_HOST) -> str | None:
+    if not (1 <= port <= 65535):
+        return f"{host}:{port} is not a valid TCP port"
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+        probe.settimeout(_LOOPBACK_PROBE_TIMEOUT_S)
+        if probe.connect_ex((host, port)) == 0:
+            return f"{host}:{port} already has an active TCP listener"
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as binder:
+        binder.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        try:
+            binder.bind((host, port))
+        except OSError as exc:
+            return f"{host}:{port} cannot be bound ({exc.strerror or exc})"
+    return None
+
+
+# meiva:note
 # The decision is printed because a unit's stdout is the only record an operator
 # can read after a start: this one-shot module has no CLI process to carry a log
 # sink, and "the UI did not change" must not look like "the build was skipped by
@@ -196,7 +226,16 @@ def ensure_build(
     *,
     gateway_port: int,
     browser_origins: tuple[str, ...],
+    port: int | None = None,
+    build_runner: Callable[[Path], int] = _pnpm_build,
 ) -> int:
+    if port is not None:
+        busy = port_busy_reason(port)
+        if busy is not None:
+            sys.stderr.write(
+                f"frontend port preflight failed: {busy}; refusing to overwrite {frontend_dir / '.next'}\n"
+            )
+            return 1
     current = build_key(frontend_dir, gateway_port=gateway_port, browser_origins=browser_origins)
     decision = plan_frontend_build(
         frontend_dir,
@@ -208,7 +247,7 @@ def ensure_build(
         case "reuse":
             return 0
         case "build":
-            code = _pnpm_build(frontend_dir)
+            code = build_runner(frontend_dir)
             return finalize_frontend_build(frontend_dir, current_key=current, exit_code=code)
         case _:
             assert_never(decision.action)
@@ -220,6 +259,7 @@ def ensure_build(
 class _EnsureOptions:
     dir: str
     gateway_port: int
+    port: int | None
     browser_origins: str
 
 
@@ -229,6 +269,7 @@ def main(argv: list[str]) -> int:
     ensure = sub.add_parser("ensure", help="build the frontend unless its inputs are unchanged")
     ensure.add_argument("--dir", required=True, help="frontend directory, relative to the unit cwd")
     ensure.add_argument("--gateway-port", type=int, required=True)
+    ensure.add_argument("--port", type=int, default=None)
     ensure.add_argument("--browser-origins", default="")
     args = parser.parse_args(argv)
     if attribute(args, "command", str) == "ensure":
@@ -237,6 +278,7 @@ def main(argv: list[str]) -> int:
             Path(chosen.dir),
             gateway_port=chosen.gateway_port,
             browser_origins=parse_browser_origins(split_browser_origins(chosen.browser_origins)),
+            port=chosen.port,
         )
     return 2
 

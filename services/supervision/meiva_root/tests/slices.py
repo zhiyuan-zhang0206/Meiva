@@ -38,7 +38,7 @@ class StubSupervisor:
         self.deferrals: dict[str, str] = dict(deferrals or {})
         self.unknown_units: set[str] = set(unknown_units or ())
         self.on_restart: Callable[[], None] | None = None
-        self.generation = (OwnedProcess(42, 100.0, None), 0.0)
+        self.generation: tuple[OwnedProcess, float] | None = (OwnedProcess(42, 100.0, None), 0.0)
         self.failure_facts = UnitFailureFacts(intent_running=True, restart_failed=None)
 
     async def restart(self, unit_id: str) -> dict[str, object]:
@@ -47,7 +47,7 @@ class StubSupervisor:
             self.on_restart()
         return {"verb": "restart", "units": []}
 
-    def health_generation(self, unit_id: str) -> tuple[OwnedProcess, float]:
+    def health_generation(self, unit_id: str) -> tuple[OwnedProcess, float] | None:
         if unit_id in self.unknown_units:
             raise manifest_mod.UnknownUnitError(f"unknown unit {unit_id!r}")
         return self.generation

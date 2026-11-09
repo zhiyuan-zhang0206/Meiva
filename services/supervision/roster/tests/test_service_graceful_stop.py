@@ -167,7 +167,9 @@ def test_frontend_service_command_is_exec_safe():
     from base.cluster import frontend_service_cmd
 
     cmd = frontend_service_cmd(3001, gateway_port=8000, browser_origins=())
-    assert "exec pnpm run start -p 3001" in cmd
+    assert "exec ./node_modules/.bin/next start -H 127.0.0.1 -p 3001" in cmd
+    assert "pnpm run start" not in cmd
+    assert "--port 3001" in cmd
     assert exec_into(cmd) == cmd
 
 

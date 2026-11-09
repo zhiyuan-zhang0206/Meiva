@@ -1,8 +1,8 @@
-"""Bounded best-effort stops of root's direct service children.
-
-A live captured leader identifies its process group at signal time. Once the
-leader exits, root does not enumerate descendants or reuse its old group number.
-"""
+# meiva:note
+# Bounded best-effort stops of root's direct service children and their process groups.
+# A live captured leader identifies its dedicated process group at signal time. If
+# the leader exits while live non-zombie members remain in that group, root waits
+# out the unit's stop window and escalates SIGKILL to the group before reaping completes.
 
 from __future__ import annotations
 
@@ -13,6 +13,7 @@ from collections.abc import AsyncGenerator, Awaitable, Callable, Iterable, Seque
 from contextlib import AsyncExitStack, asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Never
 
 from base.clock import Clock
 from base.deploy.progress_timeout import STOP_KILL_REAP_S
@@ -20,6 +21,7 @@ from base.log import logger
 from base.native_process.ownership import OwnedProcess
 from base.native_process.process_control import SYSTEM_PROCESS_CONTROL, ProcessControl
 from base.native_process.root_control.ipc import UnitState
+from base.sessions.posixproc import process_group_has_live_members
 from services.supervision.meiva_root.unit_records import Generation, UnitRuntime
 
 # meiva:note
@@ -53,6 +55,12 @@ class SupervisorConfig:
     #
     # Short by design: the kernel reaps a killed child promptly, so a longer wait
     # only delays the honest failure report.
+
+    # meiva:note
+    # Polling cadence while waiting for non-zombie survivors in a unit's process group
+    # to exit after the group leader has already exited. Kept at 20ms so a fast-closing
+    # child adds negligible stop latency without busy-spinning.
+    stop_group_poll_s: float = 0.02
 
     watch_join_timeout_s: float = 0.2
     """Independent bounded observation of retained generation watchers at shutdown."""
@@ -89,6 +97,44 @@ class SupervisorConfig:
             raise ValueError("rewrite_retire_after_failures must be at least 1")
         if not math.isfinite(self.stop_kill_reap_s) or self.stop_kill_reap_s <= 0:
             raise ValueError("stop_kill_reap_s must be finite and positive")
+        if not math.isfinite(self.stop_group_poll_s) or self.stop_group_poll_s <= 0:
+            raise ValueError("stop_group_poll_s must be finite and positive")
+
+
+# meiva:note
+# Read the leader's dedicated process group while that leader's native birth is still
+# verified live on both sides of `getpgid`. Returns None when the leader is gone or shares
+# root's own process group.
+def _owned_group(
+    identity: OwnedProcess,
+    *,
+    own_group: int,
+    process_control: ProcessControl = SYSTEM_PROCESS_CONTROL,
+) -> int | None:
+    if not identity.live():
+        return None
+    try:
+        group = process_control.getpgid(identity.pid)
+    except ProcessLookupError:
+        return None
+    if not identity.live():
+        return None
+    if group == identity.pid and group != own_group:
+        return group
+    return None
+
+
+# meiva:note
+# Whether a different process birth now occupies `identity.pid`. While any member remains
+# in PGID `identity.pid`, POSIX kernels reserve that numeric ID; this guards the narrow
+# window after the group empties against signalling a newly created group at the same PID.
+def _foreign_birth_at_pid(identity: OwnedProcess) -> bool:
+    reading = identity.read_live()
+    if reading is None:
+        return False
+    if identity.starttime is not None:
+        return reading.ticks is not None and reading.ticks != identity.starttime
+    return reading.identity is not None and not identity.same_birth(reading.identity)
 
 
 # meiva:note
@@ -120,9 +166,9 @@ def signal_owned(
     return True
 
 
+# meiva:note
+# Stop known direct children and any live survivors in their dedicated process group.
 class StoppingMixin:
-    """Stop known direct children, without durable custody or descendant discovery."""
-
     _clock: Clock
     _config: SupervisorConfig
     _process_control: ProcessControl
@@ -192,12 +238,16 @@ class StoppingMixin:
         began = self._clock.monotonic()
         generation.closing = True
         identity = generation.identity
+        pgid = self._owned_group(identity) if identity is not None else None
         if identity is not None:
             self._signal_owned(identity, force=False)
         window = 0.0 if force else self._stop_window(runtime)
+        deadline = began + window
         if await self._wait_exit(generation, window):
-            self._log_stopped(runtime, generation, began)
-            return
+            remaining = max(0.0, deadline - self._clock.monotonic())
+            if await self._wait_group_empty(pgid, identity, remaining):
+                self._log_stopped(runtime, generation, began)
+                return
         if not escalate:
             # meiva:note
             # Whole-tree shutdown stays a bounded graceful stop: root is exiting
@@ -220,20 +270,38 @@ class StoppingMixin:
                 f"unit {runtime.manifest.id} outlived its {window:g}s window and root never "
                 f"captured its leader identity, so it did not kill it (pid {generation.proc.pid})"
             )
-        if not self._signal_owned(identity, force=True):
-            if generation.exited.is_set():
+        await self._escalate_stop(
+            runtime,
+            generation,
+            identity,
+            pgid=pgid,
+            began=began,
+            window=window,
+        )
+
+    async def _escalate_stop(
+        self,
+        runtime: UnitRuntime,
+        generation: Generation,
+        identity: OwnedProcess,
+        *,
+        pgid: int | None,
+        began: float,
+        window: float,
+    ) -> None:
+        if not generation.exited.is_set() and self._signal_owned(identity, force=True):
+            pass
+        elif generation.exited.is_set():
+            if not self._group_has_survivors(pgid, identity):
+                self._log_stopped(runtime, generation, began)
                 return
-            self._emit_stop_event(
-                "root_unit_stop_aborted",
-                runtime,
-                generation,
-                graceful_waited_s=self._clock.monotonic() - began,
-                reason="identity_changed",
-            )
-            raise UnitStopTimeoutError(
-                f"unit {runtime.manifest.id} outlived its {window:g}s window and its "
-                f"leader identity changed, so root did not kill it (pid {generation.proc.pid})"
-            )
+            if pgid is None or _foreign_birth_at_pid(identity):
+                self._abort_identity_changed(runtime, generation, began=began, window=window)
+            if not self._kill_group(pgid, identity):
+                self._log_stopped(runtime, generation, began)
+                return
+        else:
+            self._abort_identity_changed(runtime, generation, began=began, window=window)
         self._emit_stop_event(
             "root_unit_stop_escalated",
             runtime,
@@ -241,13 +309,74 @@ class StoppingMixin:
             graceful_waited_s=self._clock.monotonic() - began,
             reason="escaped_term_window",
         )
-        if await self._wait_exit(generation, self._config.stop_kill_reap_s):
+        reap_deadline = self._clock.monotonic() + self._config.stop_kill_reap_s
+        if await self._wait_exit(
+            generation, max(0.0, reap_deadline - self._clock.monotonic())
+        ) and await self._wait_group_empty(
+            pgid, identity, max(0.0, reap_deadline - self._clock.monotonic())
+        ):
             self._log_stopped(runtime, generation, began)
             return
         raise UnitStopTimeoutError(
             f"unit {runtime.manifest.id} survived SIGKILL past its "
             f"{self._config.stop_kill_reap_s:g}s reap window (pid {generation.proc.pid})"
         )
+
+    def _abort_identity_changed(
+        self,
+        runtime: UnitRuntime,
+        generation: Generation,
+        *,
+        began: float,
+        window: float,
+    ) -> Never:
+        self._emit_stop_event(
+            "root_unit_stop_aborted",
+            runtime,
+            generation,
+            graceful_waited_s=self._clock.monotonic() - began,
+            reason="identity_changed",
+        )
+        raise UnitStopTimeoutError(
+            f"unit {runtime.manifest.id} outlived its {window:g}s window and its "
+            f"leader identity changed, so root did not kill it (pid {generation.proc.pid})"
+        )
+
+    def _kill_group(self, pgid: int, identity: OwnedProcess) -> bool:
+        try:
+            self._process_control.killpg(pgid, signal.SIGKILL)
+        except ProcessLookupError:
+            return False
+        except PermissionError:
+            # meiva:note
+            # A kernel that rejects `killpg` with EPERM when a group holds only unreaped
+            # zombies has already terminated every runnable member; treat a zombie-only
+            # group as gone while re-raising genuine permission errors when live members
+            # still exist.
+            if not self._group_has_survivors(pgid, identity):
+                return False
+            raise
+        return True
+
+    def _group_has_survivors(self, pgid: int | None, identity: OwnedProcess | None) -> bool:
+        if pgid is None:
+            return False
+        if identity is not None and _foreign_birth_at_pid(identity):
+            return False
+        return process_group_has_live_members(pgid, process_control=self._process_control)
+
+    async def _wait_group_empty(
+        self, pgid: int | None, identity: OwnedProcess | None, timeout_s: float
+    ) -> bool:
+        if not self._group_has_survivors(pgid, identity):
+            return True
+        deadline = self._clock.monotonic() + max(0.0, timeout_s)
+        while self._clock.monotonic() < deadline:
+            remaining = deadline - self._clock.monotonic()
+            await self._clock.asleep(min(self._config.stop_group_poll_s, remaining))
+            if not self._group_has_survivors(pgid, identity):
+                return True
+        return not self._group_has_survivors(pgid, identity)
 
     def _log_stopped(self, runtime: UnitRuntime, generation: Generation, began: float) -> None:
         logger.info(
@@ -302,6 +431,13 @@ class StoppingMixin:
     # pid, because a group signal there would take this process down with it.
     def _own_group(self) -> int:
         return self._process_control.getpgid(self._root_pid)
+
+    def _owned_group(self, identity: OwnedProcess) -> int | None:
+        return _owned_group(
+            identity,
+            own_group=self._own_group(),
+            process_control=self._process_control,
+        )
 
     def _signal_owned(
         self,

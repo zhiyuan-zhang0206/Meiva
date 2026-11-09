@@ -445,14 +445,30 @@ class HealthMonitor:
             )
             return None
 
+    # meiva:note
+    # An identity-less port or HTTP probe (such as `frontend` on :3001) can receive
+    # 200 OK from an orphaned descendant while the managed unit's own process has
+    # already exited (`observed_absent`). Never treat an absent managed unit as
+    # healthy or reset its restart/failure state from an unowned listener's reply.
+    def _reconcile_unit_observation(
+        self, unit_id: str, state: UnitHealth, result: DaemonProbe
+    ) -> DaemonProbe:
+        facts = self._failure_facts(unit_id)
+        if facts is not None and facts.observed_absent and result.alive:
+            state.generation_ready = False
+            result = DaemonProbe.down(
+                f"managed unit process is absent while probe answered ({result.detail})"
+            )
+        state.last_verdict = result.verdict.value
+        state.last_detail = result.detail
+        return result
+
     async def _check_unit(self, unit_id: str) -> None:
         state = self._unit_state(unit_id)
         probe = self._resolvable_probe(unit_id, state)
         if probe is None:
             return
-        result = await self._probe(unit_id, probe)
-        state.last_verdict = result.verdict.value
-        state.last_detail = result.detail
+        result = self._reconcile_unit_observation(unit_id, state, await self._probe(unit_id, probe))
 
         if result.alive:
             self._reset(state)
@@ -502,30 +518,14 @@ class HealthMonitor:
         state.restart_attempts += 1
         delay_s = restart_delay_s(state.restart_attempts, self._config.restart_backoff_s)
         state.next_restart_at = self._clock.monotonic() + delay_s
-        if breaker_open and recovery:
-            _log.warning(
-                "[health] unit %s: down (%s), the database answered — restarting now "
-                "(the breaker closes when a generation is alive)",
-                unit_id,
-                result.detail,
-            )
-        elif breaker_open:
-            _log.warning(
-                "[health] unit %s: down (%s), restarting on the breaker's %.0fs cadence "
-                "(%d attempts)",
-                unit_id,
-                result.detail,
-                delay_s,
-                state.restart_attempts,
-            )
-        else:
-            _log.warning(
-                "[health] unit %s: down (%s), restarting (%d/%d)",
-                unit_id,
-                result.detail,
-                state.restart_attempts,
-                self._config.max_restart_attempts,
-            )
+        self._log_restart_attempt(
+            unit_id,
+            result.detail,
+            delay_s=delay_s,
+            attempts=state.restart_attempts,
+            breaker_open=breaker_open,
+            recovery=recovery,
+        )
         try:
             await self._supervisor.restart(unit_id)
         except* UnitStopTimeoutError as exc:
@@ -533,6 +533,41 @@ class HealthMonitor:
             # This attempt remains spent; other errors still reach root's owner.
             _log.warning("[health] unit %s: replacement stop refused", unit_id, exc_info=exc)
         # Spawn acceptance is not readiness. The next ordinary round observes it.
+
+    def _log_restart_attempt(
+        self,
+        unit_id: str,
+        detail: str,
+        *,
+        delay_s: float,
+        attempts: int,
+        breaker_open: bool,
+        recovery: bool,
+    ) -> None:
+        if breaker_open and recovery:
+            _log.warning(
+                "[health] unit %s: down (%s), the database answered — restarting now "
+                "(the breaker closes when a generation is alive)",
+                unit_id,
+                detail,
+            )
+        elif breaker_open:
+            _log.warning(
+                "[health] unit %s: down (%s), restarting on the breaker's %.0fs cadence "
+                "(%d attempts)",
+                unit_id,
+                detail,
+                delay_s,
+                attempts,
+            )
+        else:
+            _log.warning(
+                "[health] unit %s: down (%s), restarting (%d/%d)",
+                unit_id,
+                detail,
+                attempts,
+                self._config.max_restart_attempts,
+            )
 
     def _note_operator_stop(self, unit_id: str, state: UnitHealth, result: DaemonProbe) -> None:
         try:
@@ -618,6 +653,14 @@ class HealthMonitor:
             detail=detail,
         )
 
+    # meiva:note
+    # Supervisor failure facts for a tree unit, or None for a static probe target.
+    def _failure_facts(self, unit_id: str) -> UnitFailureFacts | None:
+        try:
+            return self._supervisor.unit_failure_facts(unit_id)
+        except UnknownUnitError:
+            return None
+
     def _deferral(self, unit_id: str) -> str | None:
         """Probe-only units are observation targets, with no restart authority."""
         try:
@@ -639,7 +682,7 @@ class HealthMonitor:
             state.generation_ready = False
         if before != after:
             return DaemonProbe.unavailable("service generation changed during observation")
-        if result.alive:
+        if result.alive and after is not None:
             state.generation_ready = True
         return result
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import socket
 from pathlib import Path
 
 import pytest
@@ -243,3 +244,72 @@ def test_non_git_or_missing_directory_fails_closed_to_build(tmp_path: Path) -> N
     with pytest.raises(RuntimeError, match="git ls-files failed"):
         frontend_build.frontend_source_digest(plain)
     assert frontend_build.build_key(plain, gateway_port=8000, browser_origins=()) is None
+
+
+def test_occupied_port_aborts_before_overwriting_existing_next_build(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _repo, frontend = _init_monorepo(tmp_path)
+    next_dir = frontend / ".next"
+    next_dir.mkdir(parents=True)
+    sentinel = next_dir / "BUILD_ID"
+    sentinel.write_text("live-serving-build\n")
+    frontend_build.record(frontend, "stale-key-that-would-trigger-rebuild")
+
+    builds: list[Path] = []
+
+    def fake_build(directory: Path) -> int:
+        builds.append(directory)
+        sentinel.write_text("overwritten-by-build\n")
+        return 0
+
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as occupied:
+        occupied.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        occupied.bind(("127.0.0.1", 0))
+        occupied.listen(1)
+        port = occupied.getsockname()[1]
+
+        code = frontend_build.ensure_build(
+            frontend,
+            gateway_port=8000,
+            browser_origins=(),
+            port=port,
+            build_runner=fake_build,
+        )
+        captured = capsys.readouterr()
+        assert code == 1
+        assert builds == [], "build must not run when 127.0.0.1:<port> is already occupied"
+        assert sentinel.read_text() == "live-serving-build\n"
+        assert frontend_build.recorded_key(frontend) == "stale-key-that-would-trigger-rebuild"
+        assert f"127.0.0.1:{port}" in captured.err
+        assert "refusing to overwrite" in captured.err
+
+        cli_code = frontend_build.main(
+            [
+                "ensure",
+                "--dir",
+                str(frontend),
+                "--gateway-port",
+                "8000",
+                "--port",
+                str(port),
+            ]
+        )
+        assert cli_code == 1
+        assert sentinel.read_text() == "live-serving-build\n"
+        assert frontend_build.recorded_key(frontend) == "stale-key-that-would-trigger-rebuild"
+
+    # meiva:note
+    # Negative control: once the listener closes and the port is free, ensure_build proceeds
+    # with the rebuild and records the new build key.
+    code_after_free = frontend_build.ensure_build(
+        frontend,
+        gateway_port=8000,
+        browser_origins=(),
+        port=port,
+        build_runner=fake_build,
+    )
+    assert code_after_free == 0
+    assert builds == [frontend]
+    assert sentinel.read_text() == "overwritten-by-build\n"
+    assert frontend_build.recorded_key(frontend) != "stale-key-that-would-trigger-rebuild"
