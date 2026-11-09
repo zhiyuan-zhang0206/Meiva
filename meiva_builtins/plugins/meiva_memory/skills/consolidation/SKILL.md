@@ -3,21 +3,30 @@ name: consolidation
 description: "Consolidates Meiva's shared memory. Use for assigned single-box maintenance or multi-host arbiter/steward work."
 ---
 
-# Memory pool consolidation
+# Memory pool consolidation (Meiva Dream)
 
 The shared memory pool (`meiva.memory.PATH`) is a git repo. During the day, agents
-write notes into the working tree. Once a day the day's notes are consolidated so
-the pool stays committed, pushed, and searchable. This skill is that consolidation
-procedure.
+write notes into the working tree. Consolidation runs the four-phase **Meiva Dream**
+cycle (`Orientation` -> `Gather Signal` -> `Consolidation` -> `Prune & Index`) so
+the pool stays canonical, conflict-free, committed, pushed, and searchable.
 
-All git / gh / refresh operations are wrapped in self-contained scripts under
-`../scripts/` — the agent calls one script per step instead of hand-typing
-shell pipelines:
-- `python ../scripts/consolidate.py -m "..."` — remote-backed single-box: rebuild indexes, stage, commit, push, refresh
-- `python ../scripts/steward.py -m "..."` — per-machine: rebuild indexes, stage, commit, push, create PR
-- `python ../scripts/gen_indexes.py` and `python ../scripts/rebuild_memory_index.py` — rebuild every directory `index.md` and the root `MEMORY.md` pointers (the two scripts above run both first)
-- `python ../scripts/arbiter_merge.py` — merge all open PRs + refresh (exit 1 = alert)
-- `meiva memory refresh` — the one remaining memory CLI (gateway index rebuild)
+All index-rebuild / validation / refresh operations are wrapped in scripts under
+`../scripts/` and the pool root:
+- `python ../scripts/gen_indexes.py` and `python ../scripts/rebuild_memory_index.py` — rebuild every directory `index.md` and the root `MEMORY.md` pointers (resolve the pool from `MEIVA_HOME` and take no arguments)
+- `python3 validate.py` (in the pool or worktree root) — enforce frontmatter, type tag, description, character caps, directory limits, pointer integrity, and `<!-- fact-check: ... -->` probes
+- `python ../scripts/consolidate.py -m "..."` — remote-backed single-box wrapper: rebuild indexes, stage, commit, push, refresh
+- `python ../scripts/steward.py -m "..."` — per-machine branch wrapper: rebuild indexes, stage, commit, push, create PR
+- `python ../scripts/arbiter_merge.py` — inspect/merge open PRs whose `validate` check is green + refresh (`--apply` to merge; exit 1 = alert)
+- `meiva memory refresh` — fast-forward the gateway checkout to `origin/main` and trigger semantic index re-embedding
+
+**Worktree + PR discipline (remote-backed multi-host pools):** Never commit
+directly on the shared checkout's `main` (`~/.meiva/memory` pre-commit hook refuses
+direct commits on `main`, and switching the shared checkout onto a `machine-<name>`
+branch is retired). Always create an isolated temporary git worktree from
+`origin/main` (`git -C ~/.meiva/memory worktree add -q -B <branch> $W origin/main`),
+point a temporary `MEIVA_HOME` symlink (`$FH/memory -> $W`) when running index
+scripts against the worktree, open and squash-merge the PR once `validate` is
+green, and remove/prune the temporary worktree immediately afterwards.
 
 **Which procedure applies depends on the deployment.** On a single box (multihost
 off, the default — `meiva.agents.spawn` has no machine argument there) follow
@@ -25,15 +34,70 @@ off, the default — `meiva.agents.spawn` has no machine argument there) follow
 cluster, your spawn prompt tells you which role you are: **arbiter** (one, on the
 always-on machine, holds the daily schedule and orchestrates; this is the role the
 Memory Arbiter agent plays) or **per-machine steward** (one per machine,
-spawned by the arbiter on each run or resident as a local scheduler).
+spawned by the arbiter or resident as a local scheduler).
 
 **Triggers — fire early and often** (a missed trigger leaves notes unsearchable;
 an extra one only costs a cheap commit):
-1. daily 03:00 full consolidate (arbiter);
+1. daily `04:00` full Meiva Dream consolidation (`memory-arbiter` schedule) and `07:00` daily health check;
 2. per-machine watch every 1–5 minutes: >10 memory files changed since last
    sync, or pending diff >200 lines, or uncommitted changes >30 min old →
-   `../scripts/steward.py` immediately, then notify the arbiter;
-3. arbiter merge watch: merge ready machine PRs as they arrive.
+   publish a branch PR from an isolated worktree and notify the arbiter;
+3. arbiter merge watch: merge ready PRs whose `validate` check is green as they arrive.
+
+## The Four-Phase Meiva Dream Workflow
+
+Every full consolidation executes four phases in order inside the target worktree
+(or local checkout on a local-only single box):
+
+### Phase 1 — Orientation
+- Scan `MEMORY.md` and directory `index.md` files across the pool to map existing
+  topic directories, canonical filenames, and current size/entry budgets (`MEMORY.md`
+  ≤ 16000 chars, note ≤ 8000 chars, ≤ 20 `.md` notes and ≤ 20 subdirectories per
+  directory).
+
+### Phase 2 — Gather Signal (Three Incremental Signal Sources)
+1. **Recent Session Transcripts (`USER_INPUT`)**: Scan recent session transcripts
+   for user corrections, rulings, reversals, and explicit decisions in chronological
+   order so newer rulings supersede older ones.
+2. **World Truth Probes (External Ground-Truth Verification)**: Verify claims in
+   existing notes against observable ground truth across multiple domains rather
+   than assuming a single codebase:
+   - *Multi-repo codebases & file trees* (e.g. `~/.meiva/source`, project checkouts):
+     check `git log`, file path existence, symbol/contract definitions, and deleted
+     scripts/queues so notes citing removed paths or retired contracts are caught.
+   - *Cluster runtime & database registries* (`agents`, `schedules`, `tasks`,
+     machine topology): check active vs. terminated agents, live schedule triggers,
+     and task status so notes naming terminated role holders or obsolete cron times
+     are caught.
+   - *Host environment & embedded probes*: check machine configuration and execute
+     `<!-- fact-check: <cmd> -->` directives.
+3. **Per-Agent Workspace Memory (`~/.meiva/workspaces/*/memory/`)**: Scan agent
+   workspace memory directories (and legacy `MEMORY.md` remnants) to extract
+   durable, reusable cross-agent rules and facts into the shared pool.
+
+### Phase 3 — Consolidation (Canonical One-Topic-One-File & State Overwrite)
+- **One topic, one canonical file (dateless naming)**: Maintain a single dateless
+  canonical note per rule or topic slot (e.g. `meiva/rulings/merge/meiva-merge-policy.md`,
+  or root standing files like `collaboration-preferences.md`), rather than
+  accumulating date-suffixed fragments (`*-2026xxxx.md`).
+- **State overwrite in place & `git rm` superseded fragments**: When a ruling is
+  revised, amended, or overturned, or when World Truth Probes reveal drift,
+  overwrite the canonical note in place with the current truth and `git rm`
+  superseded, reversed, or fragmented historical notes (git history preserves the
+  audit trail). Never leave conflicting old notes in the pool or stack chronological
+  patch disclaimers at the bottom of stale notes.
+- **De-relativize time**: Convert relative time expressions (`"today"`,
+  `"this morning"`, `"recently"`, `"next week"`) into explicit ISO dates
+  (`YYYY-MM-DD`).
+
+### Phase 4 — Prune & Index
+- Keep `MEMORY.md` zero-conflict, self-consistent, and concise as a routing index:
+  inline only current standing rules and pointers to canonical notes, and remove
+  superseded timeline entries or broken pointers.
+- Run `gen_indexes.py` + `rebuild_memory_index.py` + `validate.py`, commit and
+  land via PR (or local commit on a keep-local single box), clean up any temporary
+  worktree, and run `meiva memory refresh` to synchronize the gateway checkout and
+  semantic search index.
 
 ## Repo layout (write and merge in the right place)
 - Topic folders at the root (`people/`, `lessons/`, `prefs/`, ...) are shared.
@@ -176,7 +240,7 @@ To prevent the pool from drifting past the consolidation window:
   changes in the pool.
 - When the threshold is exceeded, the watcher wakes the Arbiter for immediate
   consolidation (outside the daily schedule).
-- This runs alongside the daily 03:00 cron consolidation — the threshold
+- This runs alongside the daily 04:00 cron consolidation — the threshold
   trigger is a safety net, not a replacement.
 
 ## First-time setup (bootstrap, idempotent)

@@ -21,14 +21,22 @@ tags:
 
 ## Triggers — fire early and often
 
-1. **Daily 03:00** scheduled full consolidate (Arbiter).
+1. **Daily 04:00** scheduled full Meiva Dream consolidation (Arbiter, `schedules/memory-steward-schedule.py`) and **07:00** health check.
 2. **Per-machine watch, every 1–5 minutes** (resident Steward or polled):
    >10 memory files changed, or pending diff >200 lines, or uncommitted changes
-   older than ~30 min → commit + push + PR immediately, notify Arbiter.
-3. **Arbiter merge watch**: merge ready machine PRs as they arrive.
+   older than ~30 min → publish a branch PR from an isolated worktree immediately, notify Arbiter.
+3. **Arbiter merge watch**: merge ready PRs whose `validate` check is green as they arrive.
 
 A missed trigger leaves notes unsearchable; an extra trigger only costs a cheap
 commit — when in doubt, trigger.
+
+## Four-Phase Meiva Dream Workflow
+
+Each full consolidation runs four phases inside an isolated git worktree (`git -C ~/.meiva/memory worktree add -q -B <branch> $W origin/main`; direct commits on `main` are refused by the pool pre-commit hook):
+1. **Phase 1 (Orientation)**: Scan `MEMORY.md` and directory `index.md` files to map topic layout and size budgets.
+2. **Phase 2 (Gather Signal)**: Collect three incremental signals — (a) recent session transcripts (`USER_INPUT` corrections and rulings), (b) generalized World Truth Probes (multi-repo paths/symbols/contracts, cluster DB active/terminated agents and schedule states, host environment and `<!-- fact-check: ... -->`), and (c) per-agent `workspaces/*/memory/` notes.
+3. **Phase 3 (Consolidation)**: Enforce one dateless canonical file per rule/topic slot, overwrite canonical state in place when rulings or world truth change, `git rm` superseded/expired date-suffixed fragments, and convert relative time words to explicit `YYYY-MM-DD` dates.
+4. **Phase 4 (Prune & Index)**: Keep `MEMORY.md` conflict-free and concise, run `gen_indexes.py` + `rebuild_memory_index.py` + `validate.py`, land via PR, clean up the temporary worktree, and run `meiva memory refresh`.
 
 ## Three Deployment Topologies
 

@@ -84,14 +84,20 @@ _QUESTIONS: dict[MemorySearchPurpose, YesNo] = {
     ),
     "dedup": YesNo(
         question=(
-            "The existing note states the same rule or decision as the new note: an agent that "
-            "read either one would take the same action, and the two are two records of one "
-            "decision rather than two different decisions. Different wording, more or less "
-            "detail, or a later exception added to one of them does not make the decisions "
-            "different."
+            "The existing note governs the same specific rule, policy, or subject slot as the "
+            "new note — whether it restates the same decision, adds an exception or detail, or "
+            "revises, amends, or supersedes an earlier decision on that same question — such "
+            "that an agent reading one needs to know the other exists or has been superseded, "
+            "and keeping both as separate files would leave duplicate or conflicting guidance."
         ),
-        true_if="The two notes record the same rule or decision.",
-        false_if="They are two different decisions on the same subject, or share only a topic.",
+        true_if=(
+            "Both notes govern the same specific rule or subject slot (including revisions, "
+            "exceptions, or superseding decisions that should update or replace the existing note)."
+        ),
+        false_if=(
+            "They address genuinely separate rules or independent questions that happen to "
+            "share a broad domain or keywords."
+        ),
     ),
 }
 """The question per purpose. `recall` and `search` are variant A of the calibration benchmark;
