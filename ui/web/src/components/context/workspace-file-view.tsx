@@ -5,10 +5,10 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { ArrowLeft, Download, FileCode, FileText, Film, House, ImageIcon, Music, PanelRight, RefreshCw, ScanSearch } from "lucide-react";
+import { ArrowLeft, Code, Download, ExternalLink, Eye, FileCode, FileText, Film, Globe, House, ImageIcon, Music, PanelRight, RefreshCw, ScanSearch } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { Highlight, type PrismTheme } from "prism-react-renderer";
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { CopyButton } from "@/components/content/copy-button";
 import { isAudioExtension, isImageExtension, isVideoExtension, parseLineRange } from "@/components/content/file-path-utils";
@@ -110,9 +110,12 @@ export function WorkspaceFileView({
 
   const ext = data?.extension ?? target.path.slice(target.path.lastIndexOf(".")).toLowerCase();
   const isMarkdown = ext === ".md" || ext === ".markdown";
+  const isHtml = ext === ".html" || ext === ".htm";
   const isImage = isImageExtension(ext);
   const isVideo = isVideoExtension(ext);
   const isAudio = isAudioExtension(ext);
+  const [showSource, setShowSource] = useState(() => Boolean(target.lineRange));
+  const showHtmlPreview = isHtml && !showSource && !isLoading && !error && Boolean(data) && !data?.binary;
   const rawUrl = `${API_BASE}/api/agents/${agentId}/files/raw?path=${encodeURIComponent(data?.path ?? target.path)}`;
 
   const language = EXTENSION_LANGUAGE_MAP[ext] || "text";
@@ -159,6 +162,8 @@ export function WorkspaceFileView({
             <Music className="size-3.5 opacity-70" />
           ) : isMarkdown ? (
             <FileText className="size-3.5 opacity-70" />
+          ) : isHtml ? (
+            <Globe className="size-3.5 opacity-70" />
           ) : (
             <FileCode className="size-3.5 opacity-70" />
           )}
@@ -178,6 +183,31 @@ export function WorkspaceFileView({
         <div className={cn("shrink-0 items-center gap-1.5 ml-1", FLEX)}>
           {data?.size !== undefined && (
             <span className="text-[10px] text-muted-foreground">({formatFileSize(data.size)})</span>
+          )}
+          {isHtml && data && !data.binary && (
+            <>
+              <button
+                type="button"
+                data-testid="workspace-html-mode-toggle"
+                title={showSource ? "Preview HTML" : "View source"}
+                aria-label={showSource ? "Preview HTML" : "View source"}
+                onClick={() => setShowSource((prev) => !prev)}
+                className="rounded p-1 hover:bg-accent"
+              >
+                {showSource ? <Eye className="size-3.5" /> : <Code className="size-3.5" />}
+              </button>
+              <a
+                href={rawUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                data-testid="workspace-html-open-raw"
+                title="Open in new tab"
+                aria-label="Open in new tab"
+                className="rounded p-1 hover:bg-accent"
+              >
+                <ExternalLink className="size-3.5" />
+              </a>
+            </>
           )}
           <button
             title={t("refresh")}
@@ -219,6 +249,15 @@ export function WorkspaceFileView({
         </div>
       </div>
 
+      {showHtmlPreview && data ? (
+        <iframe
+          data-testid="workspace-html-preview"
+          title={data.name}
+          srcDoc={data.content}
+          sandbox="allow-scripts allow-popups allow-popups-to-escape-sandbox"
+          className={cn("w-full border-0 bg-white", FLEX_1, MIN_H_0)}
+        />
+      ) : (
       <ScrollArea className={cn(MIN_H_0, FLEX_1)}>
         {isLoading ? (
           <div className={cn("items-center justify-center p-8", FLEX, FLEX_1)}>
@@ -352,6 +391,7 @@ export function WorkspaceFileView({
           </div>
         )}
       </ScrollArea>
+      )}
     </section>
   );
 }

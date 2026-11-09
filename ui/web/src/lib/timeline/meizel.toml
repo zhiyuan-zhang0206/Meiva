@@ -4,6 +4,7 @@ exports = ["timeline-store.ts", "timeline-width.ts", "timeline.ts", "use-throttl
 "tests" = ["timeline-store.ts", "timeline.ts", "use-timeline.ts"]
 "timeline-scenarios.test.ts" = ["timeline.ts"]
 "timeline-store.test.ts" = ["timeline-store.ts"]
+"timeline-store-events.ts" = ["timeline-plan.ts"]
 "timeline-store.ts" = ["timeline-store-events.ts"]
 "timeline-width.test.ts" = ["timeline-width.ts"]
 "timeline.test.ts" = ["timeline.ts"]

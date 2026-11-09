@@ -153,15 +153,15 @@ export function messageCardConfig(item: BackendTimelineItem): CardConfig | null 
           copy: true,
         };
       }
-      if (kind === "human" || item.source === "system:upload" || Boolean(item.files?.length)) {
+      if (kind === "human") {
         return {
           rich: null,
           icon: User,
           title: "Human",
           titleKey: "timeline.human",
           fixedDefault: true,
-          showTimestamp: kind === "human",
-          copy: kind === "human",
+          showTimestamp: true,
+          copy: true,
         };
       }
       return {

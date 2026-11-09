@@ -237,7 +237,7 @@ export function useTimeline(
   const trackCompactForInvalidation = useCallback(
     (ev: SystemEvent) => {
       if (agentId === null || ev.agent_id !== agentId) return;
-      if (ev.role === "inbound_arrived") {
+      if (ev.role === "inbound_arrived" || ev.role === "inbound_committed") {
         void queryClient.invalidateQueries({ queryKey: ["timeline", ev.agent_id] });
       } else if (ev.role === "agent_updated") {
         const st = useTimelineStore.getState();

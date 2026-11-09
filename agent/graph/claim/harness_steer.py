@@ -33,7 +33,7 @@ async def reserve_harness_steer(ctx: MeivaContext, agent_id: int) -> ClaimedInbo
             "            ORDER BY created_at, id LIMIT 1) "
             "AND status='pending' AND claimed_at IS NULL AND kind='chat' "
             "AND (source='user' OR source LIKE 'ui:page:%%') "
-            "AND NOT (COALESCE(payload, '{}'::jsonb) ?| ARRAY['content_blocks', 'upload_files']) "
+            "AND NOT (COALESCE(payload, '{}'::jsonb) ?| ARRAY['content_blocks', 'upload_files', 'image_uploads']) "
             "AND NOT EXISTS ("
             "  SELECT 1 FROM inbound_messages control WHERE control.agent_id=%s "
             "  AND ((control.status='pending' AND control.kind='cancel') "

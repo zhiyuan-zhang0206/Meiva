@@ -173,6 +173,57 @@ describe("reloadSnapshot", () => {
     const ids = useTimelineStore.getState().items.map((i) => i.item_id);
     expect(ids).toEqual(["0.0", "1.0", "2.0", "3.0", "4.0", "5.0"]);
   });
+
+  it("drops disjoint older local items when a newer tail snapshot leaves a mid-array gap", () => {
+    act(() => {
+      useTimelineStore.setState({
+        items: [
+          item({ item_id: "h0.0", kind: "system_prompt", payload: "PROMPT" }),
+          item({ item_id: "h1.0", kind: "system_marker", source: "timezone", payload: "tz" }),
+          item({ item_id: "h131.0", kind: "agent_chat", payload: "first reply" }),
+          item({ item_id: "h217.0", kind: "code_output", payload: "out" }),
+        ],
+        olderFetchCount: 3,
+      });
+      useTimelineStore.getState().reloadSnapshot(
+        [
+          item({ item_id: "h0.0", kind: "system_prompt", payload: "PROMPT" }),
+          item({ item_id: "h1.0", kind: "system_marker", source: "timezone", payload: "tz" }),
+          item({ item_id: "h227.0", kind: "agent_code", payload: "cmd" }),
+          item({ item_id: "h228.0", kind: "code_output", payload: "ok" }),
+        ],
+        229,
+        true,
+      );
+    });
+    const s = useTimelineStore.getState();
+    expect(s.items.map((i) => i.item_id)).toEqual(["h0.0", "h1.0", "h227.0", "h228.0"]);
+    expect(s.hasMoreOlder).toBe(true);
+    expect(s.olderFetchCount).toBe(0);
+  });
+
+  it("trimOldestWhileFollowing retains recent primary messages across long work runs", () => {
+    const workItems = Array.from({ length: 280 }, (_, idx) =>
+      item({ item_id: `h${idx + 10}.0`, kind: "agent_code", payload: `step ${idx}` }),
+    );
+    act(() => {
+      useTimelineStore.setState({
+        items: [
+          item({ item_id: "h0.0", kind: "system_prompt", payload: "PROMPT" }),
+          item({ item_id: "h1.0", kind: "system_marker", source: "timezone", payload: "tz" }),
+          item({ item_id: "h8.0", kind: "inbound_chat", source: "user", payload: "human input" }),
+          item({ item_id: "h9.0", kind: "agent_chat", payload: "agent reply", user_facing: true }),
+          ...workItems,
+        ],
+        hasMoreOlder: false,
+      });
+      useTimelineStore.getState().trimOldestWhileFollowing(250);
+    });
+    const s = useTimelineStore.getState();
+    expect(s.items.some((i) => i.item_id === "h8.0")).toBe(true);
+    expect(s.items.some((i) => i.item_id === "h9.0")).toBe(true);
+    expect(s.hasMoreOlder).toBe(false);
+  });
 });
 
 describe("compact_done hard reset (incremental design)", () => {

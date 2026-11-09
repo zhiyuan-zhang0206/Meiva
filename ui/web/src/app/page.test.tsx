@@ -400,12 +400,14 @@ it("places only the active agent's pending questions above the composer, outside
   })));
   wrap(<HomePage />);
   const toggle = await screen.findByRole("button", { name: "1 question waiting" });
+  expect(toggle.getAttribute("aria-expanded")).toBe("true");
   expect(screen.getByTestId("timeline").getAttribute("data-item-count")).toBe("1");
   const queue = screen.getByTestId("pending-questions");
   expect(screen.getByTestId("timeline").contains(queue)).toBe(false);
   expect(Boolean(queue.compareDocumentPosition(screen.getByTestId("composer")) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
-  fireEvent.click(toggle);
   expect(screen.getByRole("heading", { name: "Question for 7" })).toBeTruthy();
   expect(screen.queryByText("Question for 8")).toBeNull();
   expect(queue.querySelectorAll("textarea")).toHaveLength(1);
+  fireEvent.click(toggle);
+  expect(toggle.getAttribute("aria-expanded")).toBe("false");
 });

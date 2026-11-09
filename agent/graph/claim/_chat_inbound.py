@@ -8,8 +8,11 @@ image upload as a native base64 block the model decodes.
 
 from __future__ import annotations
 
-from collections.abc import Callable
+import base64
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass
 from datetime import datetime
+from pathlib import Path
 from typing import Any, TypeGuard
 
 from langchain_core.messages import HumanMessage
@@ -17,12 +20,91 @@ from langchain_core.messages import HumanMessage
 from agent.db import ClaimedInbound
 from agent.messages import InboundTimes, inbound_message
 from base.agents.messages.envelope import inbound_head, inbound_tail
-from base.agents.messages.inbound_images import inbound_upload_files, parse_upload_url
+from base.agents.messages.inbound_images import (
+    image_mime_for,
+    inbound_upload_files,
+    parse_upload_url,
+)
 from base.agents.messages.injection_scan import scan_inbound_content
 from base.agents.messages.security_finding import SecurityFindingEntry
 from base.agents.messages.timestamp_policy import TimestampPolicy
 from base.agents.upload_delivery.paths import UploadClient, fetch_upload_b64
 from base.log import logger
+
+
+@dataclass(frozen=True, slots=True)
+class _DeliveredImageUpload:
+    name: str
+    size: int
+    content_type: str
+    url: str
+    path: str | None
+
+
+def _nonneg_int(val: object) -> int | None:
+    if isinstance(val, int) and not isinstance(val, bool) and val >= 0:
+        return val
+    return None
+
+
+def _parse_single_image_upload(agent_id: int, raw: object) -> _DeliveredImageUpload | None:
+    if not _is_object_dict(raw):
+        return None
+    name, content_type, batch_id = raw.get("name"), raw.get("content_type"), raw.get("batch_id")
+    size, ordinal, path = (
+        _nonneg_int(raw.get("size")),
+        _nonneg_int(raw.get("ordinal")),
+        raw.get("path"),
+    )
+    if (
+        not isinstance(name, str)
+        or not isinstance(content_type, str)
+        or not isinstance(batch_id, str)
+        or len(batch_id) != 32
+        or size is None
+        or ordinal is None
+        or (path is not None and not isinstance(path, str))
+    ):
+        return None
+    mime = image_mime_for(name, content_type) if name else None
+    if mime is None:
+        return None
+    return _DeliveredImageUpload(
+        name=name,
+        size=size,
+        content_type=mime,
+        url=f"/api/agents/{agent_id}/uploads/{batch_id}/{ordinal}",
+        path=path,
+    )
+
+
+def _parse_image_uploads(
+    agent_id: int, payload: Mapping[str, object] | None
+) -> list[_DeliveredImageUpload]:
+    raw_images = payload.get("image_uploads") if payload else None
+    if not _is_object_list(raw_images):
+        return []
+    return [
+        parsed
+        for raw in raw_images
+        if (parsed := _parse_single_image_upload(agent_id, raw)) is not None
+    ]
+
+
+def _read_image_upload_b64(
+    img: _DeliveredImageUpload, *, gateway: Callable[[], UploadClient]
+) -> str | None:
+    if img.path:
+        local_path = Path(img.path)
+        if local_path.is_file():
+            return base64.standard_b64encode(local_path.read_bytes()).decode("ascii")
+    try:
+        resp = gateway().get(img.url, timeout=15.0)
+        resp.raise_for_status()
+        return base64.standard_b64encode(resp.content).decode("ascii")
+    except Exception as e:
+        logger.warning("claim: delivered image upload {!r} unavailable: {!r}", img.name, e)
+        return None
 
 
 def _is_object_list(value: object) -> TypeGuard[list[object]]:
@@ -31,6 +113,63 @@ def _is_object_list(value: object) -> TypeGuard[list[object]]:
 
 def _is_object_dict(value: object) -> TypeGuard[dict[object, object]]:
     return isinstance(value, dict)
+
+
+def _attach_upload_files(
+    message: HumanMessage, agent_id: int, payload: Mapping[str, Any] | None
+) -> None:
+    upload_files = inbound_upload_files(agent_id, payload)
+    if upload_files:
+        message.additional_kwargs["meiva_upload_files"] = [
+            file.model_dump() for file in upload_files
+        ]
+
+
+def _build_chat_inbound_with_uploads(
+    item: ClaimedInbound,
+    image_uploads: list[_DeliveredImageUpload],
+    *,
+    picked_up_at: datetime,
+    scan_src: str,
+    read_security_enabled: Callable[[], bool],
+    envelope_inputs: TimestampPolicy,
+    expand_command: Callable[[str], str],
+    gateway: Callable[[], UploadClient],
+) -> tuple[HumanMessage, SecurityFindingEntry | None]:
+    raw_text = expand_command(item.content)
+    finding = scan_inbound_content(raw_text, source=scan_src, enabled=read_security_enabled())
+    head = inbound_head(item.source, created_at=item.created_at, inputs=envelope_inputs)
+    content: list[dict[str, Any]] = [
+        {"type": "text", "text": head + raw_text + inbound_tail(item.source)}
+    ]
+    image_urls: list[str] = []
+    for img in image_uploads:
+        image_urls.append(img.url)
+        b64 = _read_image_upload_b64(img, gateway=gateway)
+        if b64 is not None:
+            content.append(
+                {"type": "image_url", "image_url": {"url": f"data:{img.content_type};base64,{b64}"}}
+            )
+    message = inbound_message(
+        content=content,
+        source=item.source,
+        inbound_id=item.id,
+        body_start=len(head),
+        times=InboundTimes(arrived_at=item.created_at, picked_up_at=picked_up_at),
+        image_urls=image_urls,
+    )
+    message.additional_kwargs["meiva_image_uploads"] = [
+        {
+            "name": img.name,
+            "size": img.size,
+            "content_type": img.content_type,
+            "url": img.url,
+            "path": img.path,
+        }
+        for img in image_uploads
+    ]
+    _attach_upload_files(message, item.agent_id, item.payload)
+    return message, finding
 
 
 def build_chat_inbound(
@@ -69,11 +208,22 @@ def build_chat_inbound(
     # meiva:link agent/messages/docs/message-format.md
     scan_src = f"inbound.chat:{item.source}"
     raw_blocks = item.payload.get("content_blocks") if item.payload else None
+    image_uploads = _parse_image_uploads(item.agent_id, item.payload)
+    if image_uploads:
+        return _build_chat_inbound_with_uploads(
+            item,
+            image_uploads,
+            picked_up_at=picked_up_at,
+            scan_src=scan_src,
+            read_security_enabled=read_security_enabled,
+            envelope_inputs=envelope_inputs,
+            expand_command=expand_command,
+            gateway=gateway,
+        )
     if not _is_object_list(raw_blocks):
         raw = expand_command(item.content)
         finding = scan_inbound_content(raw, source=scan_src, enabled=read_security_enabled())
         head = inbound_head(item.source, created_at=item.created_at, inputs=envelope_inputs)
-        upload_files = inbound_upload_files(item.agent_id, item.payload)
         message = inbound_message(
             content=head + raw + inbound_tail(item.source),
             source=item.source,
@@ -81,10 +231,7 @@ def build_chat_inbound(
             body_start=len(head),
             times=InboundTimes(arrived_at=item.created_at, picked_up_at=picked_up_at),
         )
-        if upload_files:
-            message.additional_kwargs["meiva_upload_files"] = [
-                file.model_dump() for file in upload_files
-            ]
+        _attach_upload_files(message, item.agent_id, item.payload)
         return message, finding
     blocks: list[dict[str, Any]] = [
         {str(k): v for k, v in b.items()} for b in raw_blocks if _is_object_dict(b)

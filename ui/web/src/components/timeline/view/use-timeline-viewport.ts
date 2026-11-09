@@ -5,12 +5,196 @@ import { isAtBottom, type StickyController, type StickyThresholds } from "@/lib/
 
 import { rememberTimelinePosition, watchReadingNavigation } from "../model/reading-position";
 
+export interface ScrollToBottomRide {
+  active: boolean;
+  snapping: boolean;
+  movedScroll: boolean;
+  initialTop: number;
+  lastTop: number;
+  targetHeight: number;
+  idleFrames: number;
+  settledFrames: number;
+  totalFrames: number;
+  rafId: number | null;
+}
+
+export function createScrollToBottomRide(): ScrollToBottomRide {
+  return {
+    active: false,
+    snapping: false,
+    movedScroll: false,
+    initialTop: 0,
+    lastTop: 0,
+    targetHeight: 0,
+    idleFrames: 0,
+    settledFrames: 0,
+    totalFrames: 0,
+    rafId: null,
+  };
+}
+
+function hasTailSpacer(viewport: HTMLElement): boolean {
+  return viewport.querySelector('[data-timeline-spacer="after"], [data-timeline-spacer="turn-after"]') !== null;
+}
+
+function isPinnedAtTrueBottom(viewport: HTMLElement): boolean {
+  return viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight <= 1 && !hasTailSpacer(viewport);
+}
+
+export function cancelScrollToBottomRide(ride: ScrollToBottomRide): void {
+  if (ride.rafId !== null) {
+    cancelAnimationFrame(ride.rafId);
+    ride.rafId = null;
+  }
+  ride.active = false;
+  ride.snapping = false;
+}
+
+export function startScrollToBottomRide({
+  ride,
+  viewport,
+  controller,
+  pinToBottom,
+  measureAtBottom,
+  trimFollowing,
+}: {
+  ride: ScrollToBottomRide;
+  viewport: HTMLElement;
+  controller: StickyController;
+  pinToBottom: (viewport: HTMLElement, freshRun?: boolean) => void;
+  measureAtBottom: () => void;
+  trimFollowing: (allowDuringRide?: boolean) => boolean;
+}): void {
+  cancelScrollToBottomRide(ride);
+  const dist = viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight;
+  if (dist <= 1 && !hasTailSpacer(viewport)) {
+    pinToBottom(viewport, true);
+    trimFollowing(true);
+    return;
+  }
+
+  ride.active = true;
+  ride.snapping = dist <= 1;
+  ride.movedScroll = dist <= 1;
+  ride.initialTop = viewport.scrollTop;
+  ride.lastTop = viewport.scrollTop;
+  ride.targetHeight = viewport.scrollHeight;
+  ride.idleFrames = 0;
+  ride.settledFrames = 0;
+  ride.totalFrames = 0;
+
+  const finalizeAtBottom = () => {
+    cancelScrollToBottomRide(ride);
+    if (viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight > 0.5) {
+      pinToBottom(viewport, true);
+    } else {
+      controller.notifyPinnedToBottom(
+        {
+          scrollTop: viewport.scrollTop,
+          scrollHeight: viewport.scrollHeight,
+          clientHeight: viewport.clientHeight,
+        },
+        true,
+      );
+    }
+    measureAtBottom();
+  };
+
+  const tick = () => {
+    ride.rafId = null;
+    if (!ride.active) return;
+    if (!viewport.isConnected) {
+      cancelScrollToBottomRide(ride);
+      return;
+    }
+    ride.totalFrames += 1;
+    if (!controller.isSticky()) controller.requestStick();
+
+    const currentTop = viewport.scrollTop;
+    if (Math.abs(currentTop - ride.initialTop) > 0.5) {
+      ride.movedScroll = true;
+    }
+
+    if (isPinnedAtTrueBottom(viewport)) {
+      ride.snapping = true;
+      ride.settledFrames += 1;
+      if (ride.settledFrames >= 2) {
+        if (trimFollowing(true)) {
+          ride.settledFrames = 0;
+          pinToBottom(viewport, true);
+          ride.lastTop = viewport.scrollTop;
+          ride.rafId = requestAnimationFrame(tick);
+          return;
+        }
+        finalizeAtBottom();
+        return;
+      }
+      ride.lastTop = currentTop;
+      ride.rafId = requestAnimationFrame(tick);
+      return;
+    }
+
+    ride.settledFrames = 0;
+
+    if (
+      !ride.snapping &&
+      ride.totalFrames >= 8 &&
+      (hasTailSpacer(viewport) || Math.abs(viewport.scrollHeight - ride.targetHeight) > 4)
+    ) {
+      ride.snapping = true;
+      pinToBottom(viewport, true);
+      ride.lastTop = viewport.scrollTop;
+      ride.idleFrames = 0;
+      ride.rafId = requestAnimationFrame(tick);
+      return;
+    }
+
+    if (Math.abs(currentTop - ride.lastTop) > 0.5) {
+      ride.idleFrames = 0;
+      ride.lastTop = currentTop;
+    } else {
+      ride.idleFrames += 1;
+      const stallThreshold = ride.movedScroll ? 3 : 12;
+      if (ride.snapping || ride.idleFrames >= stallThreshold) {
+        ride.snapping = true;
+        const beforePin = viewport.scrollTop;
+        pinToBottom(viewport, true);
+        ride.lastTop = viewport.scrollTop;
+        ride.idleFrames = 0;
+        if (Math.abs(viewport.scrollTop - beforePin) <= 0.5 && ride.totalFrames >= 30) {
+          cancelScrollToBottomRide(ride);
+          measureAtBottom();
+          trimFollowing(true);
+          return;
+        }
+      }
+    }
+
+    if (ride.totalFrames >= 240) {
+      finalizeAtBottom();
+      trimFollowing(true);
+      return;
+    }
+
+    ride.rafId = requestAnimationFrame(tick);
+  };
+
+  ride.rafId = requestAnimationFrame(tick);
+  if (dist > 1) {
+    viewport.scrollTo({ top: viewport.scrollHeight, behavior: "smooth" });
+  } else {
+    pinToBottom(viewport, true);
+    ride.lastTop = viewport.scrollTop;
+  }
+}
+
 export function useTimelineViewport({
   wrapperRef,
   viewportRef,
   contentRef,
   controller,
   stickyThresholds,
+  scrollToBottomRideRef,
   holdRestoredPositionRef,
   pendingRestoreRef,
   restoreProbeRef,
@@ -40,6 +224,7 @@ export function useTimelineViewport({
   contentRef: RefObject<HTMLDivElement | null>;
   controller: StickyController;
   stickyThresholds: StickyThresholds;
+  scrollToBottomRideRef: RefObject<ScrollToBottomRide>;
   holdRestoredPositionRef: RefObject<boolean>;
   pendingRestoreRef: RefObject<SavedScroll | null>;
   restoreProbeRef: RefObject<{ height: number; passes: number }>;
@@ -50,7 +235,7 @@ export function useTimelineViewport({
   measureAtBottom: () => void;
   maybeColdFill: () => void;
   pinToBottom: (viewport: HTMLElement, freshRun?: boolean) => void;
-  trimFollowing: () => void;
+  trimFollowing: (allowDuringRide?: boolean) => boolean;
   prepareHistoryPull: (viewport: HTMLElement) => void;
   historyPullActive: () => boolean;
   pullScroll: (viewport: HTMLElement) => boolean;
@@ -84,7 +269,16 @@ export function useTimelineViewport({
       const boundaryCorrection = pullScroll(viewport);
       if (historyPullActive()) return;
       const direction = holdRestoredPositionRef.current && !pendingRestoreRef.current ? "none" : controller.handleScroll(snapshot());
-      if (direction === "up") coldFillRef.current.open = false;
+      if (direction === "up" && !scrollToBottomRideRef.current.active) coldFillRef.current.open = false;
+
+      if (scrollToBottomRideRef.current.active) {
+        scrollToBottomRideRef.current.movedScroll = true;
+        if (!controller.isSticky()) controller.requestStick();
+        if (isPinnedAtTrueBottom(viewport)) {
+          scrollToBottomRideRef.current.snapping = true;
+          controller.notifyPinnedToBottom(snapshot(), true);
+        }
+      }
 
       const isPrependEcho = prependEchoRef.current || boundaryCorrection;
       prependEchoRef.current = false;
@@ -104,11 +298,32 @@ export function useTimelineViewport({
       }
     };
     viewport.addEventListener("scroll", onScroll, { passive: true });
-    const onScrollEnd = (event: Event) => { if (event.target === viewport) pullScrollEnd(); };
+    const onScrollEnd = (event: Event) => {
+      if (event.target !== viewport) return;
+      pullScrollEnd();
+      const ride = scrollToBottomRideRef.current;
+      if (ride.active) {
+        ride.snapping = true;
+        if (!isPinnedAtTrueBottom(viewport)) {
+          pinToBottom(viewport, true);
+          ride.lastTop = viewport.scrollTop;
+          ride.idleFrames = 0;
+          ride.settledFrames = 0;
+        } else {
+          controller.notifyPinnedToBottom(snapshot(), true);
+        }
+      }
+    };
     viewport.addEventListener("scrollend", onScrollEnd);
-    const stopWatchingReadingInput = watchReadingNavigation(viewport, wrapperRef.current, () => { holdRestoredPositionRef.current = false; });
+    const stopWatchingReadingInput = watchReadingNavigation(viewport, wrapperRef.current, () => {
+      cancelScrollToBottomRide(scrollToBottomRideRef.current);
+      holdRestoredPositionRef.current = false;
+    });
 
     const onWheel = (e: WheelEvent) => {
+      if (!e.ctrlKey && e.deltaY < -2 && Math.abs(e.deltaY) >= Math.abs(e.deltaX)) {
+        cancelScrollToBottomRide(scrollToBottomRideRef.current);
+      }
       if (!e.ctrlKey && e.deltaY !== 0 && Math.abs(e.deltaY) >= Math.abs(e.deltaX)) holdRestoredPositionRef.current = false;
       if (!e.ctrlKey && Math.abs(e.deltaY) >= Math.abs(e.deltaX)) controller.handleWheel(e.deltaY, snapshot());
       if (e.deltaY !== 0 && !controller.isSticky() && !isAtBottom(snapshot(), stickyThresholds)) pendingRestoreRef.current = null;
@@ -117,6 +332,7 @@ export function useTimelineViewport({
     viewport.addEventListener("wheel", onWheel, { passive: false });
 
     const onTouchStart = (e: TouchEvent) => {
+      cancelScrollToBottomRide(scrollToBottomRideRef.current);
       holdRestoredPositionRef.current = false;
       controller.handleTouchStart();
       pullTouchStart(e, viewport);
@@ -156,7 +372,18 @@ export function useTimelineViewport({
       prepareHistoryPull(viewport);
       applyPendingRestore(viewport);
       settleRestoredPosition(viewport, true);
-      if (!historyPullActive() && !holdRestoredPositionRef.current && controller.handleLayoutChange(snapshot())) pinToBottom(viewport);
+      const ride = scrollToBottomRideRef.current;
+      const shouldPinFromLayout =
+        !historyPullActive() && !holdRestoredPositionRef.current && controller.handleLayoutChange(snapshot());
+      if (ride.active) {
+        if (ride.snapping) {
+          pinToBottom(viewport, true);
+          ride.lastTop = viewport.scrollTop;
+          ride.settledFrames = 0;
+        }
+      } else if (shouldPinFromLayout) {
+        pinToBottom(viewport);
+      }
       measureAtBottom();
       maybeColdFill();
       trimFollowing();
@@ -181,6 +408,7 @@ export function useTimelineViewport({
     contentRef,
     controller,
     stickyThresholds,
+    scrollToBottomRideRef,
     holdRestoredPositionRef,
     pendingRestoreRef,
     restoreProbeRef,

@@ -173,6 +173,37 @@ describe("WorkspaceFileView", () => {
     });
   });
 
+  it("renders html files in a sandboxed preview iframe by default and toggles to source view", async () => {
+    transport.getWorkspaceFile.mockResolvedValue({
+      path: "research/learning-library.html",
+      name: "learning-library.html",
+      extension: ".html",
+      content: "<!doctype html><html><body><h1>Interactive Report</h1></body></html>",
+      size: 68,
+      binary: false,
+      modified_at: "2026-11-09T12:00:00Z",
+    });
+
+    renderWithBrowser(
+      <WorkspaceFileView
+        agentId={1}
+        target={{ agentId: 1, path: "research/learning-library.html" }}
+        mobile={false}
+      />,
+      { wrapper: TestWrapper },
+    );
+
+    const iframe = await screen.findByTestId("workspace-html-preview");
+    expect(iframe.getAttribute("srcdoc")).toContain("<h1>Interactive Report</h1>");
+    expect(iframe.getAttribute("sandbox")).toContain("allow-scripts");
+
+    fireEvent.click(screen.getByTestId("workspace-html-mode-toggle"));
+    expect(await screen.findByTestId("workspace-code-content")).toBeTruthy();
+
+    fireEvent.click(screen.getByTestId("workspace-html-mode-toggle"));
+    expect(await screen.findByTestId("workspace-html-preview")).toBeTruthy();
+  });
+
   it("allows returning to to_user.md or going back in history", () => {
     transport.getWorkspaceFile.mockResolvedValue({
       path: "test.py",

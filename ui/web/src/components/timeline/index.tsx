@@ -28,7 +28,12 @@ import { useOlderHistoryPull } from "./model/use-older-history-pull";
 import { useSendAnchor, useThreadPin } from "./model/use-viewport-arrivals";
 import { usePrependAnchor } from "./view/use-prepend-anchor";
 import { useTimelineExpansion } from "./view/use-timeline-expansion";
-import { useTimelineViewport } from "./view/use-timeline-viewport";
+import {
+  cancelScrollToBottomRide,
+  createScrollToBottomRide,
+  startScrollToBottomRide,
+  useTimelineViewport,
+} from "./view/use-timeline-viewport";
 import { useReanchorOnWidthChange } from "./model/width-change-anchor";
 import { useStickyThresholds } from "./model/sticky-thresholds";
 import { LoadOlderSpinner, LoadOlderKeyboardButton, ColdLoadSpinner, ScrollToBottomButton } from "./overlays";
@@ -187,13 +192,19 @@ export const TimelineView = memo(function TimelineView({
   const isFollowing = useCallback(() => !holdRestoredPositionRef.current && controller.isSticky(), [controller]);
   const canonicalItemsRef = useRef(canonicalItems);
   const retainedItemsMaxRef = useRef(retainedItemsMax);
+  const scrollToBottomRideRef = useRef(createScrollToBottomRide());
 
-  const trimFollowing = useCallback(() => {
-    if (!controller.isSticky() || holdRestoredPositionRef.current) return;
+  useEffect(() => () => cancelScrollToBottomRide(scrollToBottomRideRef.current), []);
+
+  const trimFollowing = useCallback((allowDuringRide = false) => {
+    if (!controller.isSticky() || holdRestoredPositionRef.current) return false;
+    if (!allowDuringRide && scrollToBottomRideRef.current.active) return false;
     const store = useTimelineStore.getState();
-    if (store.items !== canonicalItemsRef.current) return;
-    if (store.compactBuffer || store.items.length <= retainedItemsMaxRef.current) return;
+    if (store.items !== canonicalItemsRef.current) return false;
+    if (store.compactBuffer || store.items.length <= retainedItemsMaxRef.current) return false;
+    const before = store.items;
     store.trimOldestWhileFollowing(retainedItemsMaxRef.current);
+    return useTimelineStore.getState().items !== before;
   }, [controller]);
   useLayoutEffect(() => {
     canonicalItemsRef.current = canonicalItems;
@@ -237,6 +248,10 @@ export const TimelineView = memo(function TimelineView({
   const measureAtBottom = useCallback(() => {
     const viewport = viewportRef.current;
     if (!viewport) return;
+    if (scrollToBottomRideRef.current.active) {
+      setAtBottom(true);
+      return;
+    }
     if (holdRestoredPositionRef.current) {
       setAtBottom(viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight <= 1);
       return;
@@ -297,6 +312,7 @@ export const TimelineView = memo(function TimelineView({
   // asked for the message they just wrote, so the saved row no longer owns it.
   // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.md
   const cancelBookmark = useCallback(() => {
+    cancelScrollToBottomRide(scrollToBottomRideRef.current);
     pendingAnchorRef.current = null;
     pendingRestoreRef.current = null;
     settledRestoreRef.current = null;
@@ -321,6 +337,7 @@ export const TimelineView = memo(function TimelineView({
   });
 
   useLayoutEffect(() => {
+    cancelScrollToBottomRide(scrollToBottomRideRef.current);
     coldFillRef.current = { pages: 0, open: true, inFlight: false, sawLoading: false };
     prependEchoRef.current = false;
   }, [threadKey]);
@@ -411,6 +428,7 @@ export const TimelineView = memo(function TimelineView({
     contentRef,
     controller,
     stickyThresholds,
+    scrollToBottomRideRef,
     holdRestoredPositionRef,
     pendingRestoreRef,
     restoreProbeRef,
@@ -492,24 +510,66 @@ export const TimelineView = memo(function TimelineView({
   });
 
   // meiva:note
-  // An expanded live work block owns the viewport's top edge: the block streams
-  // downward from a fixed top instead of the tail pulling the reader along
-  // (user ruling 2026-11-09). The controller is told once per change; the flag
-  // only suppresses growth pins, so the reader's own scroll to the bottom still
-  // re-follows and a completed or collapsed block hands the tail back.
-  // meiva:link ui/web/src/docs/frontend-components/timeline-view/deep-collapse.md
+  // Expanding an active working block jumps directly to its bottom and follows
+  // the tail so the reader sees the latest in-progress step as it streams
+  // (user ruling 2026-11-09). Expanding a settled block calls
+  // `notifyBlockExpanded` instead so the viewport stays where the reader clicked.
+  // meiva:link ui/web/src/docs/frontend-components/timeline-view/live-block.md
   const lastGroup = groupEntries.at(-1);
   const liveBlockExpanded = lastGroup !== undefined && lastGroup.isLiveTurn && lastGroup.runExpanded;
+  const prevLiveBlockExpandedRef = useRef(false);
+  const pendingLiveExpandPinRef = useRef(false);
   useLayoutEffect(() => {
+    const opened = liveBlockExpanded && !prevLiveBlockExpandedRef.current;
+    prevLiveBlockExpandedRef.current = liveBlockExpanded;
+    const shouldFollowOpenedLiveBlock =
+      pendingLiveExpandPinRef.current ||
+      (opened && (controller.isSticky() || controller.isAnchored()));
     controller.notifyLiveBlock(liveBlockExpanded);
-  }, [controller, liveBlockExpanded]);
+    if (shouldFollowOpenedLiveBlock) {
+      pendingLiveExpandPinRef.current = false;
+      const viewport =
+        viewportRef.current ??
+        wrapperRef.current?.querySelector<HTMLElement>('[data-slot="scroll-area-viewport"]') ??
+        null;
+      if (viewport) {
+        maintainSendAnchor();
+        pinToBottom(viewport, true);
+        setAtBottom(true);
+        startScrollToBottomRide({
+          ride: scrollToBottomRideRef.current,
+          viewport,
+          controller,
+          pinToBottom,
+          measureAtBottom,
+          trimFollowing,
+        });
+      }
+    }
+  }, [controller, liveBlockExpanded, maintainSendAnchor, measureAtBottom, pinToBottom, trimFollowing]);
 
   const handleToggleTurn = useCallback(
     (id: string, currentlyExpanded: boolean) => {
-      if (!currentlyExpanded) controller.notifyBlockExpanded();
+      if (!currentlyExpanded) {
+        const isLiveTurnToggle =
+          lastGroup !== undefined &&
+          lastGroup.isLiveTurn &&
+          (lastGroup.groupKey === id ||
+            (lastGroup.group.kind === "turn" && lastGroup.group.members[0]?.item.item_id === id));
+        if (isLiveTurnToggle) {
+          cancelBookmark();
+          controller.requestStick();
+          maintainSendAnchor();
+          setAtBottom(true);
+          pendingLiveExpandPinRef.current = true;
+        } else {
+          cancelScrollToBottomRide(scrollToBottomRideRef.current);
+          controller.notifyBlockExpanded();
+        }
+      }
       toggleTurn(id, currentlyExpanded);
     },
-    [controller, toggleTurn],
+    [cancelBookmark, controller, lastGroup, maintainSendAnchor, toggleTurn],
   );
 
   const handleScrollToBottom = useCallback(() => {
@@ -519,16 +579,19 @@ export const TimelineView = memo(function TimelineView({
       null;
     if (!viewport) return;
 
-    pendingAnchorRef.current = null; pendingRestoreRef.current = null;
-    holdRestoredPositionRef.current = false;
+    cancelBookmark();
     controller.requestStick();
+    maintainSendAnchor();
     setAtBottom(true);
-    if (viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight > 1) {
-      viewport.scrollTo({ top: viewport.scrollHeight, behavior: "smooth" });
-    } else {
-      pinToBottom(viewport, true);
-    }
-  }, [controller, pendingAnchorRef, pinToBottom]);
+    startScrollToBottomRide({
+      ride: scrollToBottomRideRef.current,
+      viewport,
+      controller,
+      pinToBottom,
+      measureAtBottom,
+      trimFollowing,
+    });
+  }, [cancelBookmark, controller, maintainSendAnchor, measureAtBottom, pinToBottom, trimFollowing]);
 
   return (
     <div ref={wrapperRef} className={cn("relative", FLEX_1, MIN_H_0, OVERFLOW_HIDDEN)}>

@@ -163,8 +163,7 @@ describe("InspectorPanel", () => {
     expect(screen.queryByText("LLM stage")).toBeNull();
     expect(screen.getByText("20m")).toBeTruthy();
     expect(screen.getByText("8m")).toBeTruthy();
-    expect(screen.getByText("Idle")).toBeTruthy();
-    expect(screen.getByText("30m")).toBeTruthy();
+    expect(screen.queryByText("Idle")).toBeNull();
 
     expect(screen.getByText("Liveness")).toBeTruthy();
     expect(screen.queryByText("State")).toBeNull();
@@ -215,11 +214,11 @@ describe("InspectorPanel", () => {
     // meiva:note
     // Both cost blocks wait while the windowed read is pending — the panel does not guess which
     // mode this agent ran, so neither is fabricated away before the amount lands — and they spin
-    // with the other seven activity cells.
-    for (const label of ["Cost (subscription)", "Cost (API)", "LLM calls", "Tokens", "Cache hit", "TPS", "LLM output", "Code execution", "Idle"]) {
+    // with the other six activity cells.
+    for (const label of ["Cost (subscription)", "Cost (API)", "LLM calls", "Tokens", "Cache hit", "TPS", "LLM output", "Code execution"]) {
       expect(within(activity).getByText(label)).toBeTruthy();
     }
-    expect(activity.querySelectorAll(".grid .animate-spin")).toHaveLength(9);
+    expect(activity.querySelectorAll(".grid .animate-spin")).toHaveLength(8);
     expect(activity.querySelectorAll(".animate-pulse")).toHaveLength(0);
 
     expect(screen.queryByText("Page")).toBeNull();

@@ -13,7 +13,8 @@ import { FLEX, OVERFLOW_HIDDEN, QUESTION_REGION_MAX_HEIGHT_CLASS } from "@/lib/l
 import { dropOpenNotices } from "@/lib/notifications/use-notices";
 
 // meiva:note
-// The collapsed bar has one stable row above the composer. Answers expand over
+// The queue opens expanded by default when questions are waiting, while the
+// collapsed bar occupies one stable row above the composer. Answers expand over
 // the timeline without resizing it; hidden mounted forms retain every draft.
 // meiva:link ui/web/src/docs/frontend-state/shared-context/questions.md
 export function PendingQuestions({ questions, failed, maxWidthCss }: {
@@ -23,7 +24,7 @@ export function PendingQuestions({ questions, failed, maxWidthCss }: {
 }) {
   const t = useTranslations("noticeDetail");
   const cache = useQueryClient();
-  const [expanded, setExpanded] = useState(false);
+  const [expanded, setExpanded] = useState(true);
   const contentId = useId();
   if (!questions.length && !failed) return null;
   return <section data-testid="pending-questions" aria-label={t("pendingQuestions", { count: questions.length })}
