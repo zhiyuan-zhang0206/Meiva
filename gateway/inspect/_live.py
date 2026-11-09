@@ -14,7 +14,7 @@ from psycopg_pool import ConnectionPool
 from base.agents.messages.inbound import not_passive_inbound
 from base.agents.observation.evidence import AgentObservation, observation
 from base.agents.observation.snapshot import OpenNotice
-from base.api_contracts.agent_contract import AgentStatus, Harness, LivenessState
+from base.api_contracts.agent_contract import AgentStatus, LivenessState
 from base.db.rows import query_one
 from base.host.boundary.json_values import is_object_dict
 from gateway.inspect._heartbeat import HeartbeatCadence, HeartbeatState, plan_heartbeat
@@ -45,8 +45,7 @@ class InspectDbRows(NamedTuple):
 
 # meiva:note
 # One `agents_meta` row with the live facts the inspector needs; `config_overlay` and
-# `birth_config` are the stored jsonb maps, and `harness` NULL for a row born before the
-# column existed.
+# `birth_config` are the stored jsonb maps.
 @dataclass(frozen=True)
 class _AgentLiveRow:
     birth_config: Mapping[str, object] | None
@@ -60,8 +59,6 @@ class _AgentLiveRow:
     liveness_state: str
     last_probe_at: datetime | None
     machine_probed_at: datetime | None
-    harness: str | None
-    observed_model: str | None
     heartbeat_backoff_level: int | None
 
 
@@ -73,7 +70,7 @@ class _PendingRow:
 
 
 # meiva:note
-# Build the live overlay dictionary, falling back to birth_config and external harness metric observations.
+# Build the live overlay dictionary, falling back to birth_config for llm_model and reasoning_effort.
 def _resolve_live_overlay(row: _AgentLiveRow) -> dict[str, object]:
     overlay: dict[str, object] = (
         dict(row.config_overlay) if is_object_dict(row.config_overlay) else {}
@@ -86,8 +83,6 @@ def _resolve_live_overlay(row: _AgentLiveRow) -> dict[str, object]:
             overlay["llm_model"] = birth_model
     if "reasoning_effort" not in overlay and "reasoning_effort" in birth:
         overlay["reasoning_effort"] = birth["reasoning_effort"]
-    if row.harness != Harness.MEIVA and row.observed_model:
-        overlay["llm_model"] = row.observed_model
     return overlay
 
 
@@ -104,11 +99,6 @@ def db_rows_blocking(pool: ConnectionPool, agent_id: int) -> InspectDbRows:
             "       liveness_state, last_probe_at, "
             "       (SELECT mp.last_probe_at FROM machine_probe mp "
             "        WHERE mp.machine_name = agents_meta.machine) AS machine_probed_at, "
-            "       harness, "
-            "       (SELECT amo.model FROM agent_metric_observations amo "
-            "        WHERE amo.agent_id = agents_meta.id AND amo.model IS NOT NULL "
-            "        AND amo.occurred_at >= COALESCE(agents_meta.harness_configured_at, '-infinity') "
-            "        ORDER BY amo.occurred_at DESC LIMIT 1) AS observed_model, "
             "       heartbeat_backoff_level "
             "FROM agents_meta WHERE id = %s",
             (agent_id,),

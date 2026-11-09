@@ -45,6 +45,8 @@ _GATEWAY_SESSIONS = {
     "ttl-reaper",
     "schedule-manager",
     "insights",
+    "cloudflared",
+    "tailscale",
 }
 _AGENT_RUNNER_SESSIONS = {
     "loki",
@@ -61,6 +63,8 @@ _AGENT_RUNNER_SESSIONS = {
     "otel-collector",
     "pty-sessions",
     "schedule-manager",
+    "cloudflared",
+    "tailscale",
 }
 
 

@@ -15,10 +15,12 @@ compaction thresholds on its 1M context window.
 
 | Plugin | Responsibility |
 |---|---|
+| [meiva_cloudflared — Cloudflared Tunnel Keepalive Plugin](meiva_cloudflared/README.md) | Cloudflared tunnel keepalive watchdog service |
 | [meiva_code — Coding Convention Plugin](meiva_code/docs/meiva_code.md) | Coding workspace and context |
 | [meiva_fleet — Fleet Plugin Overview](meiva_fleet/docs/meiva_fleet.md) | Agent collaboration and tasks |
 | [meiva_memory — Memory Pool Plugin](meiva_memory/docs/meiva_memory.md) | Long-term memory |
 | [meiva_self_evolution — Self-Evolution Plugin](meiva_self_evolution/README.md) | Self-evolution hooks and compact reminder |
+| [meiva_tailscale — Tailscale Mesh VPN Keepalive Plugin](meiva_tailscale/README.md) | Tailscale mesh VPN keepalive watchdog service |
 | [meiva_to_user — To-User Panel Soft-Limit Reminder](meiva_to_user/docs/meiva_to_user.md) | To-user panel soft-limit reminder |
 | [meiva_usage — Scheduled Multi-Account Usage and Balance Collectors](meiva_usage/README.md) | Scheduled multi-account usage and balance collectors |
 

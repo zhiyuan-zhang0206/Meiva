@@ -126,8 +126,10 @@ def find_text_tool(
         items = cached_items  # the screen the caller last saw
         fresh = False
     else:
-        path, _size, _scale, _pixels = capture_screen(helper, agent_id, stamp=stamp, home=home)
+        path, _size, scale, _pixels = capture_screen(helper, agent_id, stamp=stamp, home=home)
         items = _ocr_screen(path, ocr_cache, home=home)
+        if ocr_cache is not None:
+            ocr_cache["scale"] = scale
         fresh = True
     matches = match_ocr_boxes(items, query, mode)
     return {

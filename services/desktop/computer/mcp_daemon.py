@@ -97,7 +97,7 @@ from .config import (
 from .execute import TOOLS, DesktopHelper, execute_tool, mcp_result, priority
 from .ocr import OcrCache
 from .protocol import Response, WireRequest
-from .screen import snapshot_stamp
+from .screen import measured_tool_scale, snapshot_stamp
 from .session import ScreenSession
 from .task_sessions import TaskSessionTracker
 
@@ -390,17 +390,11 @@ class ComputerMcpDaemon:
         self, tool: str, args: dict[str, object], result: dict[str, object]
     ) -> None:
         """Remember the scale and pointer the tool's result established, for later conversions."""
-        if tool == "snapshot" and "frame" not in result:
-            # click/scroll convert with the scale the caller saw.
-            screen = result["screen"]
-            if not is_object_dict(screen):
-                raise TypeError("the snapshot result carries no screen")
-            self._scale = _float_field(screen, "scale")
-        elif tool == "click_text":
-            # The click landed where OCR found the text; record the
-            # pointer AND the scale its capture measured, so later
-            # click/scroll convert like this call did.
-            self._scale = _float_field(result, "scale")
+        ocr_scale = self._ocr_cache.get("scale")
+        self._scale = measured_tool_scale(
+            tool, args, result, self._scale, ocr_scale, self._ax_session.visual_scale
+        )
+        if tool == "click_text":
             self._pointer = (_float_field(result, "x"), _float_field(result, "y"))
         if "frame" in args:
             return

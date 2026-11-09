@@ -1,0 +1,7 @@
+exports = ["daemon.py", "declaration.py"]
+
+[uses]
+"daemon.py" = ["declaration.py"]
+
+[roots]
+"daemon.py" = { kinds = ["environ", "home", "pid", "platform"], why = "daemon entry point: resolves MEIVA_HOME, PATH for binary lookup, own PID for pidfile, and host platform for macOS Tailscale.app recovery" }

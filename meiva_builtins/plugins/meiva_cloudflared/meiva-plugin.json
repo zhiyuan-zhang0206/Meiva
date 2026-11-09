@@ -1,0 +1,15 @@
+{
+  "apiVersion": 2,
+  "name": "meiva_cloudflared",
+  "version": "1.0.0",
+  "description": "Cloudflared tunnel keepalive service",
+  "engines": {
+    "meiva": ">=2026.10.1"
+  },
+  "contributions": {
+    "config": {
+      "schema": "default_config.py"
+    }
+  },
+  "category": "builtin"
+}

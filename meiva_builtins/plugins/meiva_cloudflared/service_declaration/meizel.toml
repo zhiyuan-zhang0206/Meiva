@@ -1,0 +1,7 @@
+exports = ["daemon.py", "declaration.py"]
+
+[uses]
+"daemon.py" = ["declaration.py"]
+
+[roots]
+"daemon.py" = { kinds = ["environ", "home", "pid"], why = "daemon entry point: resolves MEIVA_HOME, user home for ~/.cloudflared/config.yml, PATH for binary lookup, and own PID for pidfile and process filtering" }

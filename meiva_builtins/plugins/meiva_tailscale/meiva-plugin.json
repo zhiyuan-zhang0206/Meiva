@@ -1,0 +1,15 @@
+{
+  "apiVersion": 2,
+  "name": "meiva_tailscale",
+  "version": "1.0.0",
+  "description": "Tailscale mesh VPN keepalive service",
+  "engines": {
+    "meiva": ">=2026.10.1"
+  },
+  "contributions": {
+    "config": {
+      "schema": "default_config.py"
+    }
+  },
+  "category": "builtin"
+}

@@ -75,3 +75,67 @@ def test_unexpected_clipping_is_an_error(helper: _Display, tmp_path: Path) -> No
     helper.png = (400, 170)
     with pytest.raises(ComputerUseError, match="dimensions"):
         screen.capture_region(helper, CaptureRegion(0, 0, 200, 100), path=tmp_path / "capture.png")
+
+
+class _ScaleHelper:
+    def __init__(self, size: ScreenSize) -> None:
+        self._size = size
+
+    def screen_size(self) -> ScreenSize:
+        return self._size
+
+
+@pytest.mark.parametrize(
+    ("size", "mode", "expected"),
+    [
+        ({"x": 0.0, "y": 0.0, "w": 1920.0, "h": 1080.0, "scale": 1.0}, (1920, 1920), 1.0),
+        ({"x": 0.0, "y": 0.0, "w": 1920.0, "h": 1080.0, "scale": 1.0}, (1920, 3840), 2.0),
+        ({"x": 0.0, "y": 0.0, "w": 1710.0, "h": 1107.0, "scale": 1.0}, (1710, 3420), 2.0),
+        ({"x": 0.0, "y": 0.0, "w": 1710.0, "h": 1107.0, "scale": 2.0}, None, 2.0),
+        ({"x": 0.0, "y": 0.0, "w": 1710.0, "h": 1107.0, "scale": 1.0}, None, 1.0),
+        ({"x": 0.0, "y": 0.0, "w": 1710.0, "h": 1107.0, "scale": 1.0}, (1920, 3840), 1.0),
+    ],
+)
+def test_cold_start_current_scale_reconciles_display_modes(
+    size: ScreenSize, mode: tuple[int, int] | None, expected: float
+) -> None:
+    sh = _ScaleHelper(size)
+    assert screen.current_scale(sh, None, display_mode=lambda: mode) == expected
+    assert screen.current_scale(sh, 1.0, display_mode=lambda: mode) == 1.0
+    assert screen.current_scale(sh, 2.0, display_mode=lambda: mode) == 2.0
+
+
+def test_measured_tool_scale_updates_whole_screen_producers_and_keeps_region_local() -> None:
+    assert (
+        screen.measured_tool_scale(
+            "snapshot",
+            {"region": {"x": 10, "y": 20, "w": 100, "h": 50}},
+            {"source": "region", "frame": {"scale": 2.0}},
+            None,
+        )
+        is None
+    )
+    assert (
+        screen.measured_tool_scale(
+            "snapshot",
+            {"region": {"x": 10, "y": 20, "w": 100, "h": 50}},
+            {"source": "region", "frame": {"scale": 2.0}},
+            1.0,
+        )
+        == 1.0
+    )
+    assert (
+        screen.measured_tool_scale("find_text", {"text": "ok"}, {"fresh": True}, None, 2.0, None)
+        == 2.0
+    )
+    assert (
+        screen.measured_tool_scale(
+            "ax_tree",
+            {"include_ocr_gap": True},
+            {"visual_only": 1, "tree": "[e1] window"},
+            None,
+            None,
+            2.0,
+        )
+        == 2.0
+    )

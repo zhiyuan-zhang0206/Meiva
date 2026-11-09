@@ -56,7 +56,9 @@ class DanglingPlugin(PluginsConfigError):  # noqa: N818
 # nothing is broken: the plugin is gone on purpose. The PR that deletes a built-in plugin adds
 # its name here. A name that is not listed stays a failure: an enabled plugin whose directory is
 # gone is how codex_usage and deepseek_balance ran unnoticed on macmini (2026-09-11).
-RETIRED_BUILTIN_PLUGINS: frozenset[str] = frozenset({"meiva_silent_idle"})
+RETIRED_BUILTIN_PLUGINS: frozenset[str] = frozenset(
+    {"meiva_silent_idle", "meiva_sdk_reminder", "meiva_syntax_fix"}
+)
 
 
 class DuplicatePlugin(PluginsConfigError):  # noqa: N818

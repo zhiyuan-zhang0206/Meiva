@@ -4,11 +4,16 @@ daemon.
 
 from __future__ import annotations
 
+import ctypes
 import struct
+from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Protocol, TypedDict
 
+from base.host.boundary.fields import optional_float_field
+from base.host.boundary.json_values import is_object_dict
+from base.host.boundary.untyped import object_of
 from base.host.permissions_helper.wire import (
     AppsResult,
     AxActResult,
@@ -211,15 +216,118 @@ def _pixel_scale(pixels_w: int, logical_w: float) -> float:
     return pixels_w / logical_w
 
 
-def current_scale(helper: ScaleHelper, measured: float | None) -> float:
-    """The physical->logical scale for coordinate conversion.
+# meiva:note
+# Logical width and physical pixel width of the active main display mode from CoreGraphics
+# (`CGDisplayCopyDisplayMode`), or `None` when unavailable.
+def main_display_mode_dimensions() -> tuple[int, int] | None:
+    try:
+        cg = ctypes.CDLL("/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics")
+        cg.CGMainDisplayID.argtypes = []
+        cg.CGMainDisplayID.restype = ctypes.c_uint32
+        cg.CGDisplayCopyDisplayMode.argtypes = [ctypes.c_uint32]
+        cg.CGDisplayCopyDisplayMode.restype = ctypes.c_void_p
+        cg.CGDisplayModeGetWidth.argtypes = [ctypes.c_void_p]
+        cg.CGDisplayModeGetWidth.restype = ctypes.c_size_t
+        cg.CGDisplayModeGetPixelWidth.argtypes = [ctypes.c_void_p]
+        cg.CGDisplayModeGetPixelWidth.restype = ctypes.c_size_t
+        cg.CGDisplayModeRelease.argtypes = [ctypes.c_void_p]
+        cg.CGDisplayModeRelease.restype = None
+        display_id = object_of(cg.CGMainDisplayID)
+        if not isinstance(display_id, int):
+            return None
+        mode = object_of(cg.CGDisplayCopyDisplayMode, display_id)
+        if not isinstance(mode, int) or mode == 0:
+            return None
+        try:
+            width = object_of(cg.CGDisplayModeGetWidth, mode)
+            pixel_width = object_of(cg.CGDisplayModeGetPixelWidth, mode)
+            if not isinstance(width, int) or not isinstance(pixel_width, int):
+                return None
+            return width, pixel_width
+        finally:
+            _ = object_of(cg.CGDisplayModeRelease, mode)
+    except (OSError, AttributeError):
+        return None
 
-    Prefers the daemon's own measurement (last snapshot, ``_pixel_scale``);
-    before any snapshot, falls back to the helper's live report.
-    """
+
+# meiva:note
+# Backing scale from a helper `screen_size` report plus the active CoreGraphics display mode
+# `(width_pt, pixel_width)`. Older permissions-helper builds compute `scale` from
+# `CGDisplayPixelsWide` over `CGDisplayBounds.width`, both of which CoreGraphics reports in logical
+# points on HiDPI/Retina modes (`scale=1` on a `2x` display). When `size["scale"] <= 1` and the
+# active display mode's logical width matches `size["w"]`, `pixel_width / width_pt` supplies the
+# backing scale.
+def resolve_screen_scale(
+    size: ScreenSize,
+    *,
+    display_mode: Callable[[], tuple[int, int] | None] = main_display_mode_dimensions,
+) -> float:
+    reported = float(size["scale"])
+    logical_w = float(size["w"])
+    if reported > 1 or logical_w <= 0:
+        return reported
+    mode = display_mode()
+    if mode is None:
+        return reported
+    mode_w, pixel_w = mode
+    if mode_w <= 0 or pixel_w <= mode_w or abs(mode_w - logical_w) > 1:
+        return reported
+    return pixel_w / mode_w
+
+
+# meiva:note
+# The physical->logical scale for coordinate conversion: prefers the daemon's own measurement
+# (`_pixel_scale`); before any snapshot, falls back to the helper's live report reconciled with the
+# active CoreGraphics display mode when `scale <= 1`.
+def current_scale(
+    helper: ScaleHelper,
+    measured: float | None,
+    *,
+    display_mode: Callable[[], tuple[int, int] | None] = main_display_mode_dimensions,
+) -> float:
     if measured is not None:
         return measured
-    return float(helper.screen_size()["scale"])
+    return resolve_screen_scale(helper.screen_size(), display_mode=display_mode)
+
+
+def _required_float(record: dict[str, object], key: str) -> float:
+    value = optional_float_field(record, key)
+    if value is None:
+        raise TypeError(f"{key} is not a number")
+    return value
+
+
+def _snapshot_scale(result: dict[str, object], current: float | None) -> float | None:
+    if "frame" in result:
+        return current
+    screen = result["screen"]
+    if not is_object_dict(screen):
+        raise TypeError("the snapshot result carries no screen")
+    return _required_float(screen, "scale")
+
+
+# meiva:note
+# Updated whole-screen physical->logical scale after `tool` completes with `result`. Every
+# whole-screen `capture_screen` producer (`snapshot` without `frame`, `click_text`, fresh
+# `find_text`, and `ax_tree` with `include_ocr_gap`) establishes the latest measured scale; local
+# frame captures (`region` / `window`) never replace or seed the global scale.
+def measured_tool_scale(
+    tool: str,
+    args: dict[str, object],
+    result: dict[str, object],
+    current: float | None,
+    ocr_scale: float | None = None,
+    visual_scale: float | None = None,
+) -> float | None:
+    if tool == "snapshot":
+        return _snapshot_scale(result, current)
+    if tool == "click_text":
+        return _required_float(result, "scale")
+    if tool == "find_text":
+        return ocr_scale if result.get("fresh") is True and ocr_scale is not None else current
+    if tool == "ax_tree" and bool(args.get("include_ocr_gap")) and "visual_only" in result:
+        return visual_scale if visual_scale is not None else current
+    return current
 
 
 # meiva:note
