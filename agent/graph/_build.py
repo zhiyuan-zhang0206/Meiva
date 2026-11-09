@@ -37,16 +37,12 @@ from langgraph.types import Command
 from agent.graph.hooks.framework import hooks_at
 from agent.graph.hooks.node import hook_node
 from agent.nodes import (
-    AFTER_EXEC,
-    AFTER_INIT,
-    BEFORE_EXEC,
-    BEFORE_LLM,
+    BEFORE_TURN,
     CLAIM,
     EXEC,
     HARNESS_TURN,
     INIT_CONTEXT,
     LLM,
-    NodeName,
 )
 from agent.state import BaseAgentState, build_agent_state
 from base.agents.context import MeivaContext
@@ -59,25 +55,6 @@ from .exec.node import ExecGoto, exec_node
 from .exec.process import ParentFacts, SubprocessExecProcess
 from .llm.goto import LlmGoto
 from .llm.node import llm_node
-
-
-def _after_exec_default_next(_state: BaseAgentState) -> NodeName:
-    """After after_exec runs, always go back to claim — the claim node decides
-    whether to wait or immediately continue based on pending inbound + state.halted.
-
-    Always going back to claim, rather than only when halted=True, ensures that
-    user-sent chat in the middle of a multi-step loop can be promptly claimed
-    + merged into the next LLM round (instead of sitting in the inbound table
-    waiting until the agent finally halts).
-
-    Claim node behavior:
-    - Pending inbound → dispatch, goto before_llm
-    - No pending + halted=True / messages empty → turn boundary: goto END with
-      exit_requested=False (one invocation = one turn); the runloop re-invokes
-      and the fresh invocation's claim does the long wait (IDLING)
-    - No pending + halted=False + messages non-empty → immediately goto before_llm (no block)
-    """
-    return CLAIM
 
 
 def build_graph(
@@ -93,18 +70,8 @@ def build_graph(
     #     root read for it: the parent facts every exec child is launched from, and the
     #     generator the llm node's retry jitter and the exec envelope identities are drawn from.
     #
-    #     9-Node topology:
-    #         START → after_init → init_context → claim → before_llm → llm → before_exec → exec → after_exec
-    #                                   ↑          ↑                                              │
-    #                                   │          └──────────────────────────────────────────────┘
-    #                                   │          (always back to claim; claim decides wait or
-    #                                   │           continue based on halted + pending)
-    #                                   ├── harness_turn: claim hands the whole turn to an external
-    #                                   │   harness session instead of before_llm; the three native
-    #                                   │   nodes above it never run on such an agent
-    #                                   └── every compaction: the requester empties `messages`,
-    #                                       parks the post-compact tail in `context_reset`, and
-    #                                       routes here to have the standing head re-established
+    #     6-Node topology:
+    #         START → init_context → claim → before_turn → (llm ↔ exec | harness_turn) → claim
     #
     #     Frontend timeline sync: each node **enter** renders a timeline snapshot
     #     from the in-memory `state.messages` and publishes it via
@@ -122,9 +89,8 @@ def build_graph(
     #     by item_id.
     #
     #     **Routing entirely via Command(goto=)** — the graph build declares a single static edge
-    #     add_edge(START, AFTER_INIT); business nodes hardcode default next; hook
-    #     container Nodes accept a default_next parameter (NodeName or callable
-    #     based on state) + decide based on update["goto"] override.
+    #     add_edge(START, INIT_CONTEXT); business nodes hardcode default next; the hook
+    #     container Node accepts a default_next parameter + decides based on update["goto"] override.
     #
     #     Every node gets `input_schema=state_cls` (the class `build_agent_state` returns): LangGraph would
     #     otherwise narrow a node's state to the class its first parameter is annotated with, and that
@@ -151,45 +117,24 @@ def build_graph(
         return await llm_node(state, runtime, config, rng=rng)
 
     g.add_node(  # type: ignore[arg-type]
-        AFTER_INIT,
-        hook_node(  # pyright: ignore[reportArgumentType]
-            "after_init", default_next=INIT_CONTEXT, hooks=hooks_at("after_init", extensions)
-        ),
-        input_schema=state_cls,
-    )
-    g.add_node(  # type: ignore[arg-type]
         INIT_CONTEXT,
         init_context_node,  # pyright: ignore[reportArgumentType]
         input_schema=state_cls,
+        destinations=(CLAIM, BEFORE_TURN, HARNESS_TURN),
     )
     g.add_node(CLAIM, claim_node, input_schema=state_cls)  # type: ignore[arg-type]
     g.add_node(  # type: ignore[arg-type]
-        BEFORE_LLM,
+        BEFORE_TURN,
         hook_node(  # pyright: ignore[reportArgumentType]
-            "before_llm", default_next=LLM, hooks=hooks_at("before_llm", extensions)
+            "before_turn", default_next=LLM, hooks=hooks_at("before_turn", extensions)
         ),
         input_schema=state_cls,
+        destinations=(LLM, HARNESS_TURN, CLAIM),
     )
     g.add_node(LLM, llm, input_schema=state_cls)  # type: ignore[arg-type]
-    g.add_node(  # type: ignore[arg-type]
-        BEFORE_EXEC,
-        hook_node(  # pyright: ignore[reportArgumentType]
-            "before_exec", default_next=EXEC, hooks=hooks_at("before_exec", extensions)
-        ),
-        input_schema=state_cls,
-    )
     g.add_node(EXEC, execute, input_schema=state_cls)  # type: ignore[arg-type]
-    g.add_node(  # type: ignore[arg-type]
-        AFTER_EXEC,
-        hook_node(  # pyright: ignore[reportArgumentType]
-            "after_exec",
-            default_next=_after_exec_default_next,
-            hooks=hooks_at("after_exec", extensions),
-        ),
-        input_schema=state_cls,
-    )
     g.add_node(HARNESS_TURN, harness_turn_node, input_schema=state_cls)  # pyright: ignore[reportArgumentType, reportCallIssue, reportUnknownMemberType]
-    g.add_edge(START, AFTER_INIT)
+    g.add_edge(START, INIT_CONTEXT)
     if checkpointer is None:
         checkpointer = MemorySaver()
     return g.compile(checkpointer=checkpointer)  # pyright: ignore[reportUnknownMemberType]

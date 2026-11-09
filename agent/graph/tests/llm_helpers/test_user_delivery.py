@@ -92,7 +92,7 @@ async def test_natural_end_requires_publication_and_reminds_once(
     config: RunnableConfig = {"configurable": {"thread_id": str(agent_id)}}
     first = await llm_node(state, runtime, config, rng=seeded_rng())
     first_update = AgentState.model_validate(first.update)
-    assert first.goto == "before_llm"
+    assert first.goto == "before_turn"
     assert first_update.halted is False
     assert "without publishing" in first_update.messages[-1].text
     corrected = AgentState(
@@ -122,7 +122,7 @@ async def test_natural_end_requires_publication_and_reminds_once(
     db_conn.commit()
     third = await llm_node(state, runtime, config, rng=seeded_rng())
     third_update = AgentState.model_validate(third.update)
-    assert third.goto == "after_exec" and len(third_update.messages) == 1
+    assert third.goto == "claim" and len(third_update.messages) == 1
 
 
 async def test_compacted_context_restores_unread_and_unanswered_deliveries(

@@ -94,7 +94,7 @@ async def test_claim_resurrect_kind_appends_marker_and_continues(
         ),
     )
 
-    assert cmd.goto == "before_llm"
+    assert cmd.goto == "before_turn"
     assert cmd.update is not None
     msgs = cast("list[AnyMessage]", cmd.update["messages"])
     assert len(msgs) == 1
@@ -262,7 +262,7 @@ async def test_claim_auto_resurrect_compact_request_batch_compacts_and_wakes(
     )
 
     assert cmd.goto == "init_context"
-    assert cmd.update["context_reset"].resume == "before_llm"  # type: ignore[index]
+    assert cmd.update["context_reset"].resume == "before_turn"  # type: ignore[index]
     msgs = compact_tail(cmd.update)
     assert msgs[0].content == compose_summary_message("LLM-generated summary")
     # resurrect marker appended after the summary — the revive still wakes the agent
@@ -337,7 +337,7 @@ async def test_claim_fork_kind_appends_identity_marker_and_continues(
         thread_config(tid),
     )
 
-    assert cmd.goto == "before_llm"
+    assert cmd.goto == "before_turn"
     assert cmd.update is not None
     msgs = cast("list[AnyMessage]", cmd.update["messages"])
     from agent.messages.guard import guarded_add_messages
@@ -401,7 +401,7 @@ async def test_claim_fork_preserves_the_inherited_prefix(
         thread_config(tid),
     )
 
-    assert cmd.goto == "before_llm"
+    assert cmd.goto == "before_turn"
     from agent.messages.guard import guarded_add_messages
 
     delta = cast(list[BaseMessage], (cmd.update or {})["messages"])

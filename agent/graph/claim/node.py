@@ -53,7 +53,7 @@ from agent.graph._attach_drain import build_attach_drain
 from agent.graph.hooks.user_delivery import delivery_baseline
 from agent.graph.node_log import StallConfig, flush_node_exit_aggregate, node_lifecycle
 from agent.messages import has_conversation
-from agent.nodes import BEFORE_LLM, CLAIM, END
+from agent.nodes import BEFORE_TURN, CLAIM, END
 from agent.ownership.inbound import RuntimeOwnershipLostError
 from base.agents.context import MeivaContext, agent_id_from_config
 from base.agents.history.harness_messages import (
@@ -113,7 +113,7 @@ async def claim_node_impl(
     if ctx.ops_pool is None:
         if state.halted:
             return Command[ClaimGoto](goto=END)
-        return Command[ClaimGoto](update={"halted": False}, goto=route_target(ctx, BEFORE_LLM))
+        return Command[ClaimGoto](update={"halted": False}, goto=route_target(ctx, BEFORE_TURN))
 
     agent_id = agent_id_from_config(config)
 
@@ -151,7 +151,7 @@ async def claim_node_impl(
             )
         return Command[ClaimGoto](
             update={"halted": False, "turn_active": True},
-            goto=route_target(ctx, BEFORE_LLM),
+            goto=route_target(ctx, BEFORE_TURN),
         )
 
     return await settle_claimed_batch(ctx, state, agent_id, batch)
@@ -183,6 +183,7 @@ async def _settle_external_harness_batch(
             "inbound_ids": inbound_ids,
             "claimed_chat_ids": claimed_chat_ids,
             "timeline_items": [item.model_dump(mode="json") for item in items],
+            "messages": pending,
         }
     elif items and ctx.ops_pool is not None:
         async with async_write_transaction(ctx.ops_pool) as pool_conn:
@@ -251,7 +252,7 @@ async def settle_claimed_batch(
                 for item in batch
                 if item.kind == "chat" and item.id in st.committed_chat_ids
             ],
-            enters_harness_turn=outcome.command.goto in (BEFORE_LLM, "harness_turn"),  # pyright: ignore[reportUnknownMemberType]
+            enters_harness_turn=outcome.command.goto == BEFORE_TURN,  # pyright: ignore[reportUnknownMemberType]
             update=update,
         )
 

@@ -137,7 +137,7 @@ async def test_claim_auto_resurrect_chat_batch_wakes_and_keeps_chat(
         thread_config(tid),
     )
 
-    assert cmd.goto == "before_llm"
+    assert cmd.goto == "before_turn"
     assert cmd.update is not None
     assert cmd.update["halted"] is False
     contents = [str(m.content) for m in cast("list[AnyMessage]", cmd.update["messages"])]

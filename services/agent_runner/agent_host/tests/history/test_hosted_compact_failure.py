@@ -50,8 +50,8 @@ async def prepare_graph(
     # Delta write model (#3180): fold delta-written messages on read (daemon parity).
     wrap_saver_reads_with_delta_reconstruction(saver)
     builder: Any = StateGraph(states.AgentState, context_schema=MeivaContext)
-    builder.add_node("claim", claim_node, destinations=("before_llm", "claim", "__end__"))
-    builder.add_node("before_llm", model, destinations=("claim",))
+    builder.add_node("claim", claim_node, destinations=("before_turn", "claim", "__end__"))
+    builder.add_node("before_turn", model, destinations=("claim",))
     builder.add_edge(START, "claim")
     graph = builder.compile(checkpointer=saver)
     config: RunnableConfig = {"configurable": {"thread_id": str(agent)}}

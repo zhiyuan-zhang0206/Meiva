@@ -147,7 +147,7 @@ async def test_invalid_final_reply_gets_one_immediate_correction(
     model = ScriptedModel(scripts=[[end_turn_chunk("Unmarked.")], [end_turn_chunk(retry_text)]])
     runtime = llm_runtime(model, model_catalog=model_catalog, database_gate=database_gate)
     result = await llm_node(_STATE, runtime, _config_with_thread(), rng=_rng())
-    assert result.goto == "before_llm"
+    assert result.goto == "before_turn"
     assert result.update is not None
     messages: list[AnyMessage] = result.update["messages"]
     reply, note = messages
@@ -157,7 +157,7 @@ async def test_invalid_final_reply_gets_one_immediate_correction(
 
     state = AgentState(messages=[*_STATE.messages, reply, note], halted=False)
     result = await llm_node(state, runtime, _config_with_thread(), rng=_rng())
-    assert result.goto == "after_exec"
+    assert result.goto == "claim"
     assert result.update is not None
     assert result.update["halted"] is True
     corrected: list[AnyMessage] = result.update["messages"]

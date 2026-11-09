@@ -117,7 +117,7 @@ async def test_reasoning_only_completion_halts_for_every_tool_outcome(
         hosted_resources=hosted_resources,
     )
 
-    assert result.goto == "after_exec"
+    assert result.goto == "claim"
     assert _halted(result) is True
     assert not loguru_records.events("silent_idle")
     assert len(loguru_records.events("llm_usage")) == 1

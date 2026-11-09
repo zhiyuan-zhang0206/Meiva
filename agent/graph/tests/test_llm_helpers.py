@@ -261,7 +261,7 @@ async def test_cancel_branch_publishes_cancelled_and_returns_halted(
     )
     # (b) Command shape: goto=after_exec + halted=True
     assert isinstance(result, Command)
-    assert result.goto == "after_exec"
+    assert result.goto == "claim"
     assert result.update["halted"] is True
     # (c) cancel path does not call handler.finish() —— no llm_done / token_usage emit
     roles = [e.role for e in events]
@@ -320,7 +320,7 @@ async def test_stream_normal_completion_no_cancelled_event(
     )
     # (b) Command shape: end_turn + no tool_calls → halted=True goto=after_exec
     assert isinstance(result, Command)
-    assert result.goto == "after_exec"
+    assert result.goto == "claim"
     assert result.update["halted"] is True
     # (c) finish() called → LLMDone emitted
     assert "llm_done" in [e.role for e in events], (
@@ -357,7 +357,7 @@ async def test_reasoning_tokens_without_action_end_the_turn(
     )
 
     assert isinstance(result, Command)
-    assert result.goto == "after_exec"
+    assert result.goto == "claim"
     assert result.update["halted"] is True
     msgs = cast("list[BaseMessage]", result.update["messages"])
     assert len(msgs) == 1
@@ -486,7 +486,7 @@ async def test_cancel_event_set_before_first_chunk_returns_halted_no_publish_don
     events = await live_events.typed()
 
     assert isinstance(result, Command)
-    assert result.goto == "after_exec"
+    assert result.goto == "claim"
     assert result.update is not None
     assert result.update["halted"] is True
     # clean discard: no message committed
@@ -526,7 +526,7 @@ async def test_thinking_blocks_without_action_end_the_turn(
     )
 
     assert isinstance(result, Command)
-    assert result.goto == "after_exec"
+    assert result.goto == "claim"
     assert result.update["halted"] is True
     msgs = cast("list[BaseMessage]", result.update["messages"])
     assert len(msgs) == 1
@@ -563,7 +563,7 @@ async def test_deepseek_reasoning_content_without_action_ends_the_turn(
     )
 
     assert isinstance(result, Command)
-    assert result.goto == "after_exec"
+    assert result.goto == "claim"
     assert result.update["halted"] is True
     msgs = cast("list[BaseMessage]", result.update["messages"])
     assert len(msgs) == 1

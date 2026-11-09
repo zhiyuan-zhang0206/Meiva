@@ -34,11 +34,11 @@ from base.packages.plugins.extensions import ExtensionRegistry, PluginContributi
 from base.paths import meiva_home
 
 
-def _runner(*hooks: Hook, plugin: str | None = None, name: str = "before_llm"):
+def _runner(*hooks: Hook, plugin: str | None = None, name: str = "before_turn"):
     """A runner over `hooks`, all attributed to `plugin` (None = framework hooks)."""
     return make_hook_runner(
         name,  # pyright: ignore[reportArgumentType]
-        "exec" if name == "before_exec" else "llm",
+        "llm",
         [(plugin, hook) for hook in hooks],
     )
 
@@ -234,18 +234,11 @@ async def test_runner_propagates_hook_exceptions(database_gate: ProcessDbGate):
 
 
 def test_registry_routes_each_hook_to_its_declared_point():
-    """A plugin's declared hooks come back at exactly the point they were declared on, tagged with
-    the plugin, and an undeclared point is empty — no cross-connection between points."""
     h1 = _ReturnHook(None)
     h2 = _ReturnHook(None)
-    registry = ExtensionRegistry(
-        (("demo", PluginContributions(before_llm=(h1,), before_exec=(h2,))),)
-    )
+    registry = ExtensionRegistry((("demo", PluginContributions(before_turn=(h1, h2))),))
 
-    assert list(registry.hooks("before_llm")) == [("demo", h1)]
-    assert list(registry.hooks("before_exec")) == [("demo", h2)]
-    assert list(registry.hooks("after_exec")) == []
-    assert list(registry.hooks("after_init")) == []
+    assert list(registry.hooks("before_turn")) == [("demo", h1), ("demo", h2)]
 
 
 async def test_runner_is_a_function_of_the_hooks_it_was_built_with(database_gate: ProcessDbGate):
@@ -253,7 +246,7 @@ async def test_runner_is_a_function_of_the_hooks_it_was_built_with(database_gate
     what the already-built runner runs. The registry is a value, not a live global."""
     calls: list[str] = []
     source: list[tuple[str | None, Hook]] = [(None, _RecordHook("built", calls))]
-    runner = make_hook_runner("before_llm", "llm", source)
+    runner = make_hook_runner("before_turn", "llm", source)
 
     source.append((None, _RecordHook("late", calls)))
     await runner(_empty_state(), _empty_runtime(database_gate=database_gate), _empty_config())
@@ -307,7 +300,7 @@ async def test_plugin_hook_state_update_records_activation(
         _empty_state(), _empty_runtime(database_gate=database_gate), _empty_config()
     )
     assert _activations(loguru_records) == [
-        ("myplugin", "hooks", "before_llm", "_ReturnHook wrote halted")
+        ("myplugin", "hooks", "before_turn", "_ReturnHook wrote halted")
     ]
 
 
@@ -317,7 +310,7 @@ async def test_each_hook_is_attributed_to_the_plugin_it_was_paired_with(
     """The plugin name rides the `(plugin, hook)` pair, so two plugins' hooks at one edge are
     attributed separately, and a framework hook (None) between them records nothing."""
     runner = make_hook_runner(
-        "before_llm",
+        "before_turn",
         "llm",
         [
             ("alpha", _ReturnHook({"goto": "exec"})),
@@ -361,10 +354,10 @@ async def test_activation_key_matches_the_ledger_entry(
     joins onto the `Contribution` the same declaration yields, with no second
     identifier space to keep in sync."""
     hook = _ReturnHook({"halted": True})
-    registry = ExtensionRegistry((("myplugin", PluginContributions(before_exec=(hook,))),))
+    registry = ExtensionRegistry((("myplugin", PluginContributions(before_turn=(hook,))),))
     ledger = registry.records("myplugin")
 
-    runner = make_hook_runner("before_exec", "exec", list(registry.hooks("before_exec")))
+    runner = make_hook_runner("before_turn", "llm", list(registry.hooks("before_turn")))
     await runner(_empty_state(), _empty_runtime(database_gate=database_gate), _empty_config())
     assert [(c.plugin, c.surface, c.identifier) for c in ledger] == [
         (plugin, surface, identifier)
@@ -375,17 +368,13 @@ async def test_activation_key_matches_the_ledger_entry(
 async def test_runner_emits_one_hook_timing_event_per_pass(
     loguru_records: LogRecords, database_gate: ProcessDbGate
 ):
-    """Every hook-runner pass logs one `hook_timing` event carrying per-hook
-    durations — the sub-span replacement that makes a slow before_llm /
-    before_exec node attributable to its hook from the events alone (the
-    node span has no sub-spans and is otherwise a black box)."""
     runner = _runner(_RecordHook("a", []), _ReturnHook({"halted": True}))
 
     await runner(_empty_state(), _empty_runtime(database_gate=database_gate), _empty_config())
 
     timing = loguru_records.extras(event="hook_timing")
     assert len(timing) == 1
-    for fragment in ("hook before_llm", "_RecordHook", "_ReturnHook"):
+    for fragment in ("hook before_turn", "_RecordHook", "_ReturnHook"):
         assert len(loguru_records.extras(event="hook_timing", message=fragment)) == 1
     hook_ms = timing[0]["hook_ms"]
     assert is_object_dict(hook_ms)

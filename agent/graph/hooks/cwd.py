@@ -11,6 +11,25 @@ from base.agents.context import MeivaContext
 from base.log import logger
 from base.paths import workspace_dir, workspaces_root
 
+TO_DO_BETTER_FILENAME = "to_do_better.md"
+
+
+def ensure_to_do_better(target: MeivaContext | Path) -> None:
+    if isinstance(target, MeivaContext):
+        if target.meiva_home is None or target.identity is None or target.identity.agent_id is None:
+            return
+        workspace = workspace_dir(target.identity.agent_id, home=target.meiva_home)
+    else:
+        workspace = target
+    try:
+        (workspace / TO_DO_BETTER_FILENAME).touch(exist_ok=True)
+    except OSError as exc:
+        logger.warning(
+            "meiva_self_evolution: could not touch {path}: {exc}",
+            path=workspace / TO_DO_BETTER_FILENAME,
+            exc=exc,
+        )
+
 
 def _logical_cwd_error(cwd: Path) -> OSError | None:
     try:

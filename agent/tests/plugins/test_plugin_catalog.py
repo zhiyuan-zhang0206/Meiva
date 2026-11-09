@@ -75,7 +75,7 @@ def demo_section(_slices: object, *, catalog: ModelCatalog) -> str:
 
 def contribute() -> PluginContributions:
     return PluginContributions(
-        system_prompt_sections=(demo_section,), before_llm=(_DemoHook(),), state=(DemoState,)
+        system_prompt_sections=(demo_section,), before_turn=(_DemoHook(),), state=(DemoState,)
     )
 """
 
@@ -83,7 +83,7 @@ def contribute() -> PluginContributions:
 def _demo_manifest(name: str, *, runtime: bool) -> str:
     contributions: dict[str, list[str]] = {"sdkWraps": ["files.read"]}
     if runtime:
-        contributions |= {"hooks": ["before_llm"], "systemPromptSections": ["demo_section"]}
+        contributions |= {"hooks": ["before_turn"], "systemPromptSections": ["demo_section"]}
     return json.dumps(
         {
             "apiVersion": 2,
@@ -150,7 +150,7 @@ def test_declarations_are_attributed_to_the_declaring_plugin(unit_home: Path):
         "systemPromptSections": 1,
     }
     by_surface = {c.surface: c for c in view.contributions}
-    assert by_surface["hooks"].identifier == "before_llm"
+    assert by_surface["hooks"].identifier == "before_turn"
     assert by_surface["state"].identifier == "demo__counter"
     assert by_surface["sdkWraps"].identifier == "files.read"
     assert by_surface["systemPromptSections"].identifier == "demo_section"
@@ -210,8 +210,8 @@ _MANIFEST = """{
   "version": "1.0.0",
   "engines": {"meiva": ">=0.1.0"},
   "contributions": {
-    "hooks": ["before_llm", "after_exec"],
-    "systemPromptSections": ["demo_section"],
+    "hooks": ["before_turn"],
+    "systemPromptSections": ["demo_section", "missing_section"],
     "skills": ["something-on-disk"]
   }
 }"""
@@ -247,7 +247,7 @@ def demo_section(_slices: object, *, catalog: ModelCatalog) -> str:
 
 def contribute() -> PluginContributions:
     return PluginContributions(
-        system_prompt_sections=(demo_section,), before_llm=(_DeclaredHook(),)
+        system_prompt_sections=(demo_section,), before_turn=(_DeclaredHook(),)
     )
 """
 
@@ -266,9 +266,9 @@ def test_declared_vs_registered_reports_both_directions(unit_home: Path):
         (e.surface, e.identifier): e.status for e in catalog_mod.declared_vs_registered(view)
     }
 
-    assert statuses[("hooks", "before_llm")] == "ok"
-    assert statuses[("hooks", "after_exec")] == "declared-not-registered"
+    assert statuses[("hooks", "before_turn")] == "ok"
     assert statuses[("systemPromptSections", "demo_section")] == "ok"
+    assert statuses[("systemPromptSections", "missing_section")] == "declared-not-registered"
     assert statuses[("sdkWraps", "files.write")] == "registered-not-declared"
 
 
@@ -313,7 +313,7 @@ def test_a_dashed_name_resolves_to_the_plugin_directory(unit_home: Path):
     )
 
 
-_HOOK_POINTS = ("after_init", "before_llm", "before_exec", "after_exec")
+_HOOK_POINTS = ("before_turn",)
 
 
 def _gate_runtime(
@@ -394,12 +394,12 @@ def test_a_plugin_whose_manifest_and_contribute_agree_is_admitted(
         unit_home,
         "gate_ok",
         _GATE_PLUGIN,
-        manifest=_gate_manifest("gate_ok", hooks=("before_llm",), sections=("gate_section",)),
-        runtime=_gate_runtime(("before_llm",)),
+        manifest=_gate_manifest("gate_ok", hooks=("before_turn",), sections=("gate_section",)),
+        runtime=_gate_runtime(("before_turn",)),
     )
     _enable(gate_ok=True)
 
-    assert _registered(load_failures) == {"gate_ok": ("before_llm",)}
+    assert _registered(load_failures) == {"gate_ok": ("before_turn",)}
     assert load_failures == []
 
 
@@ -407,15 +407,15 @@ def test_a_plugin_whose_manifest_and_contribute_agree_is_admitted(
     ("manifest_hooks", "provided_hooks", "problem"),
     [
         pytest.param(
-            ("before_llm", "after_exec"),
-            ("before_llm",),
-            "hooks: 'after_exec' is declared but the plugin does not provide it",
+            ("before_turn",),
+            (),
+            "hooks: 'before_turn' is declared but the plugin does not provide it",
             id="declared-hook-missing-from-contribute",
         ),
         pytest.param(
-            ("before_llm",),
-            ("before_llm", "after_exec"),
-            "hooks: 'after_exec' is provided but not declared",
+            (),
+            ("before_turn",),
+            "hooks: 'before_turn' is provided but not declared",
             id="provided-hook-not-declared",
         ),
     ],
@@ -438,12 +438,12 @@ def test_a_plugin_whose_manifest_and_contribute_disagree_on_hooks_is_excluded(
         unit_home,
         "gate_ok",
         _GATE_PLUGIN,
-        manifest=_gate_manifest("gate_ok", hooks=("before_llm",), sections=("gate_section",)),
-        runtime=_gate_runtime(("before_llm",)),
+        manifest=_gate_manifest("gate_ok", hooks=("before_turn",), sections=("gate_section",)),
+        runtime=_gate_runtime(("before_turn",)),
     )
     _enable(gate_bad=True, gate_ok=True)
 
-    assert _registered(load_failures) == {"gate_ok": ("before_llm",)}
+    assert _registered(load_failures) == {"gate_ok": ("before_turn",)}
     [(name, exc)] = load_failures
     assert name == "gate_bad"
     assert isinstance(exc, ContributionMismatch)
@@ -479,8 +479,8 @@ def test_a_plugin_whose_manifest_and_contribute_disagree_on_sections_is_excluded
         unit_home,
         "gate_bad",
         _GATE_PLUGIN,
-        manifest=_gate_manifest("gate_bad", hooks=("before_llm",), sections=manifest_sections),
-        runtime=_gate_runtime(("before_llm",), section=provides_section),
+        manifest=_gate_manifest("gate_bad", hooks=("before_turn",), sections=manifest_sections),
+        runtime=_gate_runtime(("before_turn",), section=provides_section),
     )
     _enable(gate_bad=True)
 
@@ -493,19 +493,19 @@ def test_a_plugin_whose_manifest_and_contribute_disagree_on_sections_is_excluded
 
 def test_a_plugin_without_a_manifest_is_excluded(load_failures: LoadFailures, unit_home: Path):
     bare = _write_plugin(
-        unit_home, "gate_bare", _GATE_PLUGIN, runtime=_gate_runtime(("before_llm", "after_exec"))
+        unit_home, "gate_bare", _GATE_PLUGIN, runtime=_gate_runtime(("before_turn",))
     )
     (bare / "meiva-plugin.json").unlink()
     _write_plugin(
         unit_home,
         "gate_ok",
         _GATE_PLUGIN,
-        manifest=_gate_manifest("gate_ok", hooks=("before_llm",), sections=("gate_section",)),
-        runtime=_gate_runtime(("before_llm",)),
+        manifest=_gate_manifest("gate_ok", hooks=("before_turn",), sections=("gate_section",)),
+        runtime=_gate_runtime(("before_turn",)),
     )
     _enable(gate_bare=True, gate_ok=True)
 
-    assert _registered(load_failures) == {"gate_ok": ("before_llm",)}
+    assert _registered(load_failures) == {"gate_ok": ("before_turn",)}
     [(name, exc)] = load_failures
     assert name == "gate_bare"
     assert isinstance(exc, ManifestError)
@@ -517,24 +517,24 @@ def test_an_invalid_state_declaration_excludes_the_plugin(
     unit_home: Path,
 ):
     core_state = "class GateState(BaseModel):\n    halted: bool = False\n"
-    ok_manifest = _gate_manifest("gate_ok", hooks=("before_llm",), sections=("gate_section",))
+    ok_manifest = _gate_manifest("gate_ok", hooks=("before_turn",), sections=("gate_section",))
     _write_plugin(
         unit_home,
         "gate_state",
         _GATE_PLUGIN,
         manifest=ok_manifest,
-        runtime=_gate_runtime(("before_llm",), state=core_state),
+        runtime=_gate_runtime(("before_turn",), state=core_state),
     )
     _write_plugin(
         unit_home,
         "gate_ok",
         _GATE_PLUGIN,
         manifest=ok_manifest,
-        runtime=_gate_runtime(("before_llm",)),
+        runtime=_gate_runtime(("before_turn",)),
     )
     _enable(gate_state=True, gate_ok=True)
 
-    assert _registered(load_failures) == {"gate_ok": ("before_llm",)}
+    assert _registered(load_failures) == {"gate_ok": ("before_turn",)}
     [(name, exc)] = load_failures
     assert name == "gate_state"
     assert isinstance(exc, ValueError)

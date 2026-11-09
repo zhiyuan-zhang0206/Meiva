@@ -74,7 +74,7 @@ async def test_completion_after_tool_result_ends_without_forced_output(
     )
     assert isinstance(result.update, dict)
     update = cast(dict[str, Any], result.update)
-    assert result.goto == "after_exec"
+    assert result.goto == "claim"
     assert update["halted"] is True
     messages: list[Any] = update["messages"]
     assert len(messages) == 1

@@ -56,7 +56,7 @@ def test_every_node_receives_the_plugins_state_channels() -> None:
     assert agent_state.AgentState is agent_state.BaseAgentState
 
 
-NATIVE_NODES = frozenset({"before_llm", "llm", "before_exec", "exec", "after_exec"})
+NATIVE_NODES = frozenset({"llm", "exec"})
 
 
 class FakeEngine:
@@ -91,13 +91,22 @@ class FakeEngine:
         return None
 
 
+async def _empty_stream(*_a: object, **_kw: object) -> AsyncIterator[Any]:
+    for item in ():
+        yield item
+
+
 def make_context(harness: Harness, engine: FakeEngine | None) -> MeivaContext:
+    llm = MagicMock()
+    llm.bind_tools.return_value = llm
+    llm.astream.side_effect = _empty_stream
     return MeivaContext(
         meiva_home=resolve_meiva_home(),
         environ=os.environ,
         harness=harness,
         harness_bridge=engine,
-        llm=MagicMock(),
+        llm=llm,
+        rng=_rng(),
         event_publisher=MagicMock(),
         agent=AgentSlices.resolve(default_reader=defaults()),
         catalog=build_model_catalog(home=meiva_home()),
@@ -168,30 +177,30 @@ async def test_an_external_harness_never_enters_the_native_turn_nodes() -> None:
 
 
 # meiva:note
-# Stopped at before_llm on purpose: the native loop needs a model, tool calls and a
-# subprocess to finish, and none of that is what this test is about. Seeing the native
-# verdict reach its own node is the control that the harness run's empty native set is
-# not an empty run.
+# Stopped at llm on purpose: the native loop needs tool calls and a subprocess to finish,
+# and none of that is what this test is about. Seeing the native verdict reach its own
+# node is the control that the harness run's empty native set is not an empty run.
 # meiva:link agent/graph/docs/graph.md
 async def test_the_built_in_loop_never_enters_the_harness_node() -> None:
-    seen = await executed_nodes(Harness.MEIVA, None, stop_at=frozenset({"before_llm"}))
+    seen = await executed_nodes(Harness.MEIVA, None, stop_at=frozenset({"llm"}))
 
-    assert "before_llm" in seen, "the built-in loop still runs its own nodes"
+    assert "before_turn" in seen
+    assert "llm" in seen, "the built-in loop still runs its own nodes"
     assert "harness_turn" not in seen
 
 
 # meiva:note
 # The compaction path parks its destination in `ContextReset.resume` and lets
-# `init_context` jump there, so the harness rewrite has to happen at that jump too:
+# `init_context` jump there, so the harness rewrite has to happen at `before_turn` too:
 # routing only claim's verdicts left a compacted external-harness agent resuming into
-# `before_llm`, where the native model answered and the CLI session sat idle.
+# `llm`, where the native model answered and the CLI session sat idle.
 # meiva:link agent/graph/docs/harness-turn.md
 async def test_a_context_reset_keeps_an_external_harness_off_the_native_nodes() -> None:
     engine = FakeEngine()
     state = AgentState(
         messages=[],
         context_reset=ContextReset(
-            resume="before_llm", tail=[HumanMessage(content="the compacted summary")]
+            resume="before_turn", tail=[HumanMessage(content="the compacted summary")]
         ),
     )
     seen: list[str] = []
@@ -203,6 +212,7 @@ async def test_a_context_reset_keeps_an_external_harness_off_the_native_nodes() 
         seen.extend(chunk.keys())
 
     assert "init_context" in seen
+    assert "before_turn" in seen
     assert "harness_turn" in seen, "the reset resumes into the harness node"
     assert len(engine.submitted) == 1
     assert "# Role & Operating Context — Agent #6984" in engine.submitted[0]
@@ -214,7 +224,7 @@ def test_route_target_rewrites_only_the_work_verdict() -> None:
     external = make_context(Harness.CLAUDE_CODE, FakeEngine())
     native = make_context(Harness.MEIVA, None)
 
-    assert route_target(external, "before_llm") == "harness_turn"
-    assert route_target(native, "before_llm") == "before_llm"
-    for goto in ("claim", "__end__", "init_context", "harness_turn"):
+    assert route_target(external, "llm") == "harness_turn"
+    assert route_target(native, "llm") == "llm"
+    for goto in ("before_turn", "claim", "__end__", "init_context", "harness_turn"):
         assert route_target(external, goto) == goto

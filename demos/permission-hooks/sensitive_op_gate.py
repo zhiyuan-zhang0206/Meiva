@@ -275,4 +275,4 @@ sensitive_op_gate = _SensitiveOpGateHook()
 
 
 def contribute() -> PluginContributions:
-    return PluginContributions(before_exec=(sensitive_op_gate,))
+    return PluginContributions(before_turn=(sensitive_op_gate,))

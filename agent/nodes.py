@@ -1,8 +1,5 @@
 from base.agents.context.external_attachment.nodes import (
-    AFTER_EXEC,
-    AFTER_INIT,
-    BEFORE_EXEC,
-    BEFORE_LLM,
+    BEFORE_TURN,
     CLAIM,
     END,
     EXEC,
@@ -13,10 +10,7 @@ from base.agents.context.external_attachment.nodes import (
 )
 
 __all__ = [
-    "AFTER_EXEC",
-    "AFTER_INIT",
-    "BEFORE_EXEC",
-    "BEFORE_LLM",
+    "BEFORE_TURN",
     "CLAIM",
     "END",
     "EXEC",
@@ -35,12 +29,9 @@ __all__ = [
 # that does not exist. `agent/tests/test_node_names.py` holds the table to `NodeName`.
 _NODE_BY_NAME: dict[str, NodeName] = {
     CLAIM: CLAIM,
-    BEFORE_LLM: BEFORE_LLM,
+    BEFORE_TURN: BEFORE_TURN,
     LLM: LLM,
-    BEFORE_EXEC: BEFORE_EXEC,
     EXEC: EXEC,
-    AFTER_EXEC: AFTER_EXEC,
-    AFTER_INIT: AFTER_INIT,
     INIT_CONTEXT: INIT_CONTEXT,
     HARNESS_TURN: HARNESS_TURN,
     END: END,

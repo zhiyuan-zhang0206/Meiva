@@ -312,7 +312,7 @@ def test_assumed_persistence_name(output: str, earlier: list[str], expected: str
 
 
 async def test_first_hit_injects_note_and_marks(reminder_plugin_loaded: Any):
-    hook = reminder_plugin_loaded.contribute().after_exec[0]
+    hook = reminder_plugin_loaded.contribute().before_turn[1]
     state = make_state(_cell("subprocess.run(['ls'])"))
     result = await hook(state, make_runtime(), make_config())
 
@@ -329,7 +329,7 @@ async def test_first_hit_injects_note_and_marks(reminder_plugin_loaded: Any):
 
 
 async def test_second_hit_same_category_no_append(reminder_plugin_loaded: Any):
-    hook = reminder_plugin_loaded.contribute().after_exec[0]
+    hook = reminder_plugin_loaded.contribute().before_turn[1]
     state = make_state(_cell("subprocess.run(['ls'])"), meiva_sdk_reminder__reminded={"shell"})
     result = await hook(state, make_runtime(), make_config())
     assert result is None
@@ -341,7 +341,7 @@ async def test_code_every_time_cadence_hints_two_consecutive_matching_cells(
     """`every_time` bypasses the reminded gate for code categories, so two
     consecutive shell cells each receive the shell hint."""
     runtime = make_runtime(sdk_code_reminder_cadence="every_time")
-    hook = reminder_plugin_loaded.contribute().after_exec[0]
+    hook = reminder_plugin_loaded.contribute().before_turn[1]
 
     first = await hook(make_state(_cell("subprocess.run(['first'])")), runtime, make_config())
     assert first is not None
@@ -364,7 +364,7 @@ async def test_code_once_cadence_hints_only_first_consecutive_matching_cell(
     """`once_per_compaction` (the default) preserves the existing behavior:
     the first shell cell hints and the next shell cell in the window no-ops."""
     runtime = make_runtime(sdk_code_reminder_cadence="once_per_compaction")
-    hook = reminder_plugin_loaded.contribute().after_exec[0]
+    hook = reminder_plugin_loaded.contribute().before_turn[1]
 
     first = await hook(make_state(_cell("subprocess.run(['first'])")), runtime, make_config())
     assert first is not None
@@ -378,7 +378,7 @@ async def test_code_once_cadence_hints_only_first_consecutive_matching_cell(
 
 
 async def test_different_categories_each_fire_once(reminder_plugin_loaded: Any):
-    hook = reminder_plugin_loaded.contribute().after_exec[0]
+    hook = reminder_plugin_loaded.contribute().before_turn[1]
     # shell already reminded; this cell hits shell + wait -> only wait is fresh.
     state = make_state(
         _cell("subprocess.run(['ls'])\ntime.sleep(2)"),
@@ -398,7 +398,7 @@ async def test_wait_with_watcher_marked_silently_no_hint(reminder_plugin_loaded:
     """A cell that sleeps while already naming `watcher` is the agent working
     with the watcher primitive itself — the wait hint is suppressed but the
     category is marked seen (so it fires neither now nor later this window)."""
-    hook = reminder_plugin_loaded.contribute().after_exec[0]
+    hook = reminder_plugin_loaded.contribute().before_turn[1]
     state = make_state(_cell("meiva.watcher.at('5m', name='test')\ntime.sleep(1)"))
     result = await hook(state, make_runtime(), make_config())
 
@@ -412,7 +412,7 @@ async def test_wait_with_watcher_marked_silently_no_hint(reminder_plugin_loaded:
 async def test_wait_with_watcher_suppressed_other_category_still_hints(reminder_plugin_loaded: Any):
     """When a watcher-naming sleep cell also trips another category, the wait
     hint is suppressed (but marked) while the other category still hints."""
-    hook = reminder_plugin_loaded.contribute().after_exec[0]
+    hook = reminder_plugin_loaded.contribute().before_turn[1]
     state = make_state(_cell("subprocess.run(['ls'])\nmeiva.watcher\ntime.sleep(1)"))
     result = await hook(state, make_runtime(), make_config())
 
@@ -426,7 +426,7 @@ async def test_wait_with_watcher_suppressed_other_category_still_hints(reminder_
 async def test_wait_with_watcher_already_marked_is_noop(reminder_plugin_loaded: Any):
     """A second watcher-naming sleep cell, wait already marked -> no-op (the
     silent suppression does not re-fire or re-persist)."""
-    hook = reminder_plugin_loaded.contribute().after_exec[0]
+    hook = reminder_plugin_loaded.contribute().before_turn[1]
     state = make_state(
         _cell("meiva.watcher.at('5m', name='test')\ntime.sleep(1)"),
         meiva_sdk_reminder__reminded={"wait"},
@@ -440,7 +440,7 @@ async def test_compaction_rearms_silent_watcher_path(reminder_plugin_loaded: Any
     WITHOUT emitting a message — pin that a re-arm still persists the bookmark
     advance and re-marks wait, with no hint message. Guards a refactor that
     moved the bookmark write under the hint-emit branch from stranding it."""
-    hook = reminder_plugin_loaded.contribute().after_exec[0]
+    hook = reminder_plugin_loaded.contribute().before_turn[1]
     state = make_state(
         _cell("meiva.watcher.at('5m', name='test')\ntime.sleep(1)"),
         meiva_sdk_reminder__reminded={"wait"},
@@ -459,7 +459,7 @@ async def test_wait_suppressed_with_stale_other_category_marks_only(reminder_plu
     """A watcher+sleep cell that also trips an already-reminded category: nothing
     hints (the other category is stale) but wait is still newly marked — the
     `silent - reminded` branch where `hinted` is empty yet `newly_seen` is not."""
-    hook = reminder_plugin_loaded.contribute().after_exec[0]
+    hook = reminder_plugin_loaded.contribute().before_turn[1]
     state = make_state(
         _cell("subprocess.run(['ls'])\nmeiva.watcher\ntime.sleep(1)"),
         meiva_sdk_reminder__reminded={"shell"},
@@ -475,7 +475,7 @@ async def test_watcher_named_without_sleep_does_not_suppress(reminder_plugin_loa
     """Naming `watcher` only suppresses when the cell also trips the wait
     trigger. A watcher mention beside a non-wait idiom still hints that idiom
     and does not mark wait (guards the `"wait" in matched` conjunct)."""
-    hook = reminder_plugin_loaded.contribute().after_exec[0]
+    hook = reminder_plugin_loaded.contribute().before_turn[1]
     state = make_state(_cell("meiva.watcher\nsubprocess.run(['ls'])"))
     result = await hook(state, make_runtime(), make_config())
 
@@ -486,7 +486,7 @@ async def test_watcher_named_without_sleep_does_not_suppress(reminder_plugin_loa
 
 
 async def test_multi_category_cell_lists_all_in_order(reminder_plugin_loaded: Any):
-    hook = reminder_plugin_loaded.contribute().after_exec[0]
+    hook = reminder_plugin_loaded.contribute().before_turn[1]
     code = "subprocess.run(['ls'])\ntime.sleep(1)\nopen('f')\nrequests.get('u')"
     state = make_state(_cell(code))
     result = await hook(state, make_runtime(), make_config())
@@ -504,7 +504,7 @@ async def test_multi_category_cell_lists_all_in_order(reminder_plugin_loaded: An
 
 
 async def test_compaction_rearms_category(reminder_plugin_loaded: Any):
-    hook = reminder_plugin_loaded.contribute().after_exec[0]
+    hook = reminder_plugin_loaded.contribute().before_turn[1]
     # shell was reminded last context window (bookmark 0); a compaction advanced
     # the version to 1 -> the set re-arms and shell hints again.
     state = make_state(
@@ -524,7 +524,7 @@ async def test_compaction_rearms_category(reminder_plugin_loaded: Any):
 
 
 async def test_compaction_not_advanced_keeps_dedup(reminder_plugin_loaded: Any):
-    hook = reminder_plugin_loaded.contribute().after_exec[0]
+    hook = reminder_plugin_loaded.contribute().before_turn[1]
     # version == bookmark -> no re-arm; shell already reminded -> no-op.
     state = make_state(
         _cell("subprocess.run(['ls'])"),
@@ -537,7 +537,7 @@ async def test_compaction_not_advanced_keeps_dedup(reminder_plugin_loaded: Any):
 
 
 async def test_no_tool_calls_is_noop(reminder_plugin_loaded: Any):
-    hook = reminder_plugin_loaded.contribute().after_exec[0]
+    hook = reminder_plugin_loaded.contribute().before_turn[1]
     # An assistant message with no tool_calls (the model spoke + paused) +
     # no trailing ToolMessage -> the tail shape does not match -> no-op.
     state = make_state(
@@ -550,7 +550,7 @@ async def test_no_tool_calls_is_noop(reminder_plugin_loaded: Any):
 async def test_assistant_without_toolcall_before_output_is_noop(reminder_plugin_loaded: Any):
     """messages[-2] is an AIMessage but it carries no tool_calls (defensive on
     the [-2] shape) -> no-op rather than indexing tool_calls[0]."""
-    hook = reminder_plugin_loaded.contribute().after_exec[0]
+    hook = reminder_plugin_loaded.contribute().before_turn[1]
     ai = AIMessage(content="spoke", id="a1")  # no tool_calls
     out = ToolMessage(content="x", tool_call_id="c1", id="o1")
     state = make_state([ai, out])
@@ -559,7 +559,7 @@ async def test_assistant_without_toolcall_before_output_is_noop(reminder_plugin_
 
 
 async def test_code_matches_nothing_is_noop(reminder_plugin_loaded: Any):
-    hook = reminder_plugin_loaded.contribute().after_exec[0]
+    hook = reminder_plugin_loaded.contribute().before_turn[1]
     state = make_state(_cell("total = sum(range(10))\nprint(total)"))
     result = await hook(state, make_runtime(), make_config())
     assert result is None
@@ -571,7 +571,7 @@ async def test_files_hint_not_fired_when_listing_via_stdlib_content_via_sdk(
     """The user-reported false trigger (2026-08-26): a cell lists file names
     with stdlib glob while reading content through meiva.files — the files hint
     must not fire, and nothing is marked."""
-    hook = reminder_plugin_loaded.contribute().after_exec[0]
+    hook = reminder_plugin_loaded.contribute().before_turn[1]
     code = "import glob\nfor p in glob.glob('*.md'):\n    meiva.files.read(p)"
     result = await hook(make_state(_cell(code)), make_runtime(), make_config())
     assert result is None
@@ -580,7 +580,7 @@ async def test_files_hint_not_fired_when_listing_via_stdlib_content_via_sdk(
 async def test_files_hint_fires_for_direct_open_read(reminder_plugin_loaded: Any):
     """A cell that genuinely bypasses meiva.files for content (open()) still
     receives the files hint."""
-    hook = reminder_plugin_loaded.contribute().after_exec[0]
+    hook = reminder_plugin_loaded.contribute().before_turn[1]
     result = await hook(
         make_state(_cell("data = open('f.txt').read()")),
         make_runtime(),
@@ -595,14 +595,14 @@ async def test_files_hint_fires_for_direct_open_read(reminder_plugin_loaded: Any
 async def test_hint_not_fired_for_trigger_words_in_string_literal(reminder_plugin_loaded: Any):
     """A cell whose only 'open(' occurrence sits inside a string literal (e.g.
     a grep pattern or printed example) gets no files hint (literal masking)."""
-    hook = reminder_plugin_loaded.contribute().after_exec[0]
+    hook = reminder_plugin_loaded.contribute().before_turn[1]
     code = "for line in meiva.shell.run(\"grep -rn 'open(' .\").splitlines():\n    print(line)"
     result = await hook(make_state(_cell(code)), make_runtime(), make_config())
     assert result is None
 
 
 async def test_short_history_is_noop(reminder_plugin_loaded: Any):
-    hook = reminder_plugin_loaded.contribute().after_exec[0]
+    hook = reminder_plugin_loaded.contribute().before_turn[1]
     state = make_state([ToolMessage(content="x", tool_call_id="c1", id="o1")])
     result = await hook(state, make_runtime(), make_config())
     assert result is None
@@ -612,7 +612,7 @@ async def test_short_history_is_noop(reminder_plugin_loaded: Any):
 
 
 async def test_nameerror_for_name_used_in_earlier_cell_hints(reminder_plugin_loaded: Any):
-    hook = reminder_plugin_loaded.contribute().after_exec[0]
+    hook = reminder_plugin_loaded.contribute().before_turn[1]
     messages = _cell("cache = {'ready': True}", id_suffix="1") + _cell(
         "print(cache)", nameerror_output("cache"), id_suffix="2"
     )
@@ -633,7 +633,7 @@ async def test_nameerror_for_name_used_in_earlier_cell_hints(reminder_plugin_loa
 async def test_nameerror_with_python_suggestion_suffix_hints(reminder_plugin_loaded: Any):
     """Python may append a `Did you mean` clause to the NameError line; the
     stable `name 'X' is not defined` prefix still identifies the failure."""
-    hook = reminder_plugin_loaded.contribute().after_exec[0]
+    hook = reminder_plugin_loaded.contribute().before_turn[1]
     output = nameerror_output("listt") + ". Did you mean: 'list'?"
     messages = _cell("listt = [1]", id_suffix="1") + _cell("print(listt)", output, id_suffix="2")
 
@@ -643,7 +643,7 @@ async def test_nameerror_with_python_suggestion_suffix_hints(reminder_plugin_loa
 async def test_nameerror_without_prior_whole_name_is_noop(reminder_plugin_loaded: Any):
     """A substring in an earlier cell does not count, and the current cell is
     excluded from the search even though it necessarily contains the name."""
-    hook = reminder_plugin_loaded.contribute().after_exec[0]
+    hook = reminder_plugin_loaded.contribute().before_turn[1]
     messages = _cell("cached_value = 1", id_suffix="1") + _cell(
         "print(cache)", nameerror_output("cache"), id_suffix="2"
     )
@@ -653,7 +653,7 @@ async def test_nameerror_without_prior_whole_name_is_noop(reminder_plugin_loaded
 
 async def test_nameerror_hint_disabled_is_noop(reminder_plugin_loaded: Any):
     runtime = make_runtime(sdk_nameerror_hint_enabled=False)
-    hook = reminder_plugin_loaded.contribute().after_exec[0]
+    hook = reminder_plugin_loaded.contribute().before_turn[1]
     messages = _cell("cache = 1", id_suffix="1") + _cell(
         "print(cache)", nameerror_output("cache"), id_suffix="2"
     )
@@ -662,7 +662,7 @@ async def test_nameerror_hint_disabled_is_noop(reminder_plugin_loaded: Any):
 
 
 async def test_repeated_nameerror_for_same_name_hints_once_per_window(reminder_plugin_loaded: Any):
-    hook = reminder_plugin_loaded.contribute().after_exec[0]
+    hook = reminder_plugin_loaded.contribute().before_turn[1]
     first_messages = _cell("cache = 1", id_suffix="1") + _cell(
         "print(cache)", nameerror_output("cache"), id_suffix="2"
     )
@@ -683,7 +683,7 @@ async def test_repeated_nameerror_for_same_name_hints_once_per_window(reminder_p
 
 @pytest.mark.parametrize("name", ["len", "for"])
 async def test_nameerror_hint_skips_builtins_and_keywords(reminder_plugin_loaded: Any, name: str):
-    hook = reminder_plugin_loaded.contribute().after_exec[0]
+    hook = reminder_plugin_loaded.contribute().before_turn[1]
     messages = _cell(f"{name} = 1", id_suffix="1") + _cell(
         f"print({name})", nameerror_output(name), id_suffix="2"
     )

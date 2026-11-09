@@ -21,7 +21,6 @@ from langgraph.types import Overwrite
 from agent.graph.exec.node import exec_node_impl
 from agent.graph.exec.process import SubprocessExecProcess
 from agent.graph.exec.tests.process_inputs import live_parent_facts
-from agent.graph.hooks.framework import framework_hooks
 from agent.hooks.security import deliver_security_findings
 from agent.state import AgentState, build_agent_state
 from base.agents.context import MeivaContext
@@ -63,10 +62,6 @@ async def _run_hook(state: AgentState, *, enabled: bool = True) -> dict[str, Any
         )
     )
     return await deliver_security_findings(state, runtime, _CONFIG)  # type: ignore[arg-type]
-
-
-def test_the_hook_runs_after_exec() -> None:
-    assert deliver_security_findings in framework_hooks()["after_exec"]
 
 
 async def test_no_pending_finding_is_a_no_op() -> None:
@@ -163,8 +158,8 @@ async def test_a_real_childs_finding_reaches_the_model_through_the_hook(
         ]
     )
 
-    async def after_exec(state: Any) -> dict[str, Any] | None:
-        return await deliver_security_findings(state, runtime, _CONFIG)  # type: ignore[arg-type]
+    def claim(_state: Any) -> dict[str, Any]:
+        return {}
 
     builder: Any = StateGraph(AgentState, context_schema=MeivaContext)
     builder.add_node(
@@ -172,9 +167,9 @@ async def test_a_real_childs_finding_reaches_the_model_through_the_hook(
         partial(exec_node_impl, process=SubprocessExecProcess(live_parent_facts(), rng=_rng())),
         input_schema=AgentState,
     )
-    builder.add_node("after_exec", after_exec)
+    builder.add_node("claim", claim)
     builder.add_edge(START, "exec")
-    builder.add_edge("after_exec", END)
+    builder.add_edge("claim", END)
     result = await builder.compile().ainvoke(dict(state), context=runtime.context, config=_CONFIG)
 
     assert [m.type for m in result["messages"]] == ["ai", "tool", "human"]

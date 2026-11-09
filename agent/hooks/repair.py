@@ -66,6 +66,7 @@ from agent.hooks._registry import Hook
 from agent.messages import exec_output_message
 from base.agents.context import MeivaContext, agent_id_from_config
 from base.agents.messages.kwargs import ExecStatus
+from base.api_contracts.agent_contract import Harness
 from base.log import logger
 
 INTERRUPTED_TOOL_RESULT = (
@@ -204,6 +205,8 @@ class _RepairDanglingToolPairingHook(Hook):
         config: RunnableConfig,
         /,
     ) -> dict[str, object] | None:
+        if runtime.context.harness is not Harness.MEIVA:
+            return None
         repairs = dangling_tool_pairing_repairs(
             state.messages,
             created_at=runtime.context.require_clock().now(),

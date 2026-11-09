@@ -97,7 +97,8 @@ def range_allows(raw: str, version: str) -> bool:
 _NAME_FORMAT_RE = re.compile(r"^[a-z0-9][a-z0-9_.-]*$")
 NAME_RE = re.compile(r"^([A-Za-z0-9][A-Za-z0-9_.-]*)")
 
-HOOK_POINTS = ("after_init", "before_llm", "before_exec", "after_exec")
+HookPoint = Literal["before_turn"]
+HOOK_POINTS: tuple[HookPoint, ...] = ("before_turn",)
 CONTRIBUTION_KEYS = {
     "hooks",
     "sdkNamespaces",

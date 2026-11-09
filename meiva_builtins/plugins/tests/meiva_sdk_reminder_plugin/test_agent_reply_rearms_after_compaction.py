@@ -307,7 +307,7 @@ async def test_real_runner_compaction_wins_no_note(
     reminder_entry = ("meiva_sdk_reminder", reminder_hook)
     compact_entry = (None, compact_hook)
     hooks = [reminder_entry, compact_entry] if reminder_first else [compact_entry, reminder_entry]
-    runner = make_hook_runner("before_llm", default_next="llm", hooks=hooks)
+    runner = make_hook_runner("before_turn", default_next="llm", hooks=hooks)
     sys_msg = SystemMessage(content="<sys>")
     msgs: list[AnyMessage] = [
         sys_msg,
@@ -355,7 +355,7 @@ async def test_after_exec_leaves_exec_output_untouched(reminder_plugin_loaded: A
     exec_output message keeps its content + every additional_kwargs field."""
     from agent.messages import exec_output_message
 
-    hook = reminder_plugin_loaded.contribute().after_exec[0]
+    hook = reminder_plugin_loaded.contribute().before_turn[1]
     out = exec_output_message(
         content="original stdout",
         tool_call_id="c1",
@@ -449,7 +449,7 @@ async def test_multiple_calls_match_results_by_id(
     )
     results = [ToolMessage(content=output, tool_call_id=str(i)) for i, output in enumerate(outputs)]
     state = make_state([ai, *results, HumanMessage(content="attachment")])
-    result = await reminder_plugin_loaded.contribute().after_exec[0](
+    result = await reminder_plugin_loaded.contribute().before_turn[1](
         state, make_runtime(), make_config()
     )
     assert result is not None

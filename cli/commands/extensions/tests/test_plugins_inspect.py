@@ -64,7 +64,7 @@ def test_no_argument_lists_every_surface_and_every_plugin(capsys: pytest.Capture
     for surface in SURFACES:
         assert f"surface {surface.id}\n" in out
     assert "entry        base.packages.plugins.extensions.PluginContributions(" in out
-    assert "before_llm: tuple[GraphHook, ...] = ()" in out
+    assert "before_turn: tuple[GraphHook, ...] = ()" in out
     assert "plugin demo  enabled  builtin  hooks 1, sdkWraps 1" in out
     assert "plugin quiet  disabled  builtin  (not loaded)" in out
 

@@ -428,4 +428,4 @@ def test_the_drift_hook_is_a_framework_before_llm_hook_run_last() -> None:
     """Framework-owned and unconditional — the index under-reporting is a
     correctness problem, not a plugin's optional layer. It runs last at the edge, after repair's
     guard and compact's possible full replacement."""
-    assert framework_hooks()["before_llm"][-1] is newly_installed_skills
+    assert framework_hooks()["before_turn"][-1] is newly_installed_skills

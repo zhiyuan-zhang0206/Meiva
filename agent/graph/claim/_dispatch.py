@@ -28,7 +28,7 @@ from agent.graph.hooks.compact import (
 from agent.graph.prompt import context_notes
 from agent.hooks.compact_events import emit_compact_finished, emit_compact_started
 from agent.messages import NoteTag, security_note_message, system_note_message
-from agent.nodes import BEFORE_LLM, CLAIM, END
+from agent.nodes import BEFORE_TURN, CLAIM, END
 from base.agents.context import MeivaContext
 from base.agents.messages.envelope import sender_class
 from base.agents.messages.inbound import InboundKind
@@ -59,7 +59,7 @@ class BatchState:
     """
 
     new_msgs: list[BaseMessage] = field(default_factory=list[BaseMessage])
-    next_goto: ClaimGoto = BEFORE_LLM
+    next_goto: ClaimGoto = BEFORE_TURN
     compact_payload: tuple[str, str, str | None] | None = None
     """(summary_text, compact_kind, compact_run_id) — the run id pairs the
     live CompactStarted/CompactFinished events; None for the agent-authored
@@ -208,7 +208,7 @@ async def _handle_system_note(
         now=now,
     )
     if tag is NoteTag.LIFECYCLE_RESTART and st.next_goto == CLAIM:
-        st.next_goto = BEFORE_LLM
+        st.next_goto = BEFORE_TURN
 
 
 def _close_superseded_compact(ctx: MeivaContext, agent_id: int, st: BatchState) -> None:

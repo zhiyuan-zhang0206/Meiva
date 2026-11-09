@@ -1,19 +1,14 @@
 from __future__ import annotations
 
-from pathlib import Path
-
-from langchain_core.runnables import RunnableConfig
-from langgraph.runtime import Runtime
-
-from agent.hooks import Hook
-from agent.state import AgentState
-from base.agents.context import MeivaContext
+from agent.graph.hooks.cwd import (
+    TO_DO_BETTER_FILENAME as TO_DO_BETTER_FILENAME,
+)
+from agent.graph.hooks.cwd import (
+    ensure_to_do_better as ensure_to_do_better,
+)
 from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
 from base.packages.plugins.extensions import PluginContributions
-from base.paths import workspace_dir
-
-TO_DO_BETTER_FILENAME = "to_do_better.md"
 
 REMINDER = (
     "If this context window produced a lesson worth keeping — a mistake you made, a wrong "
@@ -33,32 +28,7 @@ def self_evolution_compact_reminder(slices: AgentSlices, *, catalog: ModelCatalo
     return REMINDER
 
 
-# meiva:note
-# Seeding creates only a missing file and never overwrites one: a lesson recorded in an earlier session survives every restart.
-# meiva:link meiva_builtins/plugins/meiva_self_evolution/README.md
-def ensure_to_do_better(workspace: Path) -> None:
-    path = workspace / TO_DO_BETTER_FILENAME
-    if not path.exists():
-        path.touch()
-
-
-class SeedToDoBetterHook(Hook):
-    async def __call__(
-        self,
-        _state: AgentState,
-        runtime: Runtime[MeivaContext],
-        _config: RunnableConfig,
-        /,
-    ) -> dict[str, object] | None:
-        identity = runtime.context.identity
-        agent_id = None if identity is None else identity.agent_id
-        if agent_id is not None:
-            ensure_to_do_better(workspace_dir(agent_id, home=runtime.context.require_meiva_home()))
-        return None
-
-
 def contribute() -> PluginContributions:
     return PluginContributions(
         compact_reminder_sections=(self_evolution_compact_reminder,),
-        after_init=(SeedToDoBetterHook(),),
     )

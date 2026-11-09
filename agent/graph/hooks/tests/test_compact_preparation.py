@@ -128,7 +128,7 @@ async def test_invalid_contributor_result_does_not_mark_preparation_as_shown() -
 @pytest.mark.parametrize("compact_first", [True, False])
 async def test_soft_reminder_composes_with_another_message_writer(compact_first: bool) -> None:
     hooks = [(None, compact_reminder), ("peer", _PeerReminder())]
-    runner = make_hook_runner("before_llm", "llm", hooks if compact_first else hooks[::-1])
+    runner = make_hook_runner("before_turn", "llm", hooks if compact_first else hooks[::-1])
     state = AgentState(
         messages=[
             HumanMessage(content="history " * 200),

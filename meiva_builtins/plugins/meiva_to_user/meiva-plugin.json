@@ -7,7 +7,7 @@
   },
   "contributions": {
     "hooks": [
-      "after_exec"
+      "before_turn"
     ],
     "sdkWraps": [
       "files.write",

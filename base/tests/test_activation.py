@@ -23,16 +23,16 @@ def _emitted_tuples(loguru_records: LogRecords) -> list[tuple[str, str, str, str
 
 def test_records_an_attributed_firing(loguru_records: LogRecords) -> None:
     activation.record(
-        "meiva_syntax_fix", "hooks", "before_exec", detail="wrote messages", model="m"
+        "meiva_syntax_fix", "hooks", "before_turn", detail="wrote messages", model="m"
     )
 
     assert _emitted_tuples(loguru_records) == [
-        ("meiva_syntax_fix", "hooks", "before_exec", "wrote messages")
+        ("meiva_syntax_fix", "hooks", "before_turn", "wrote messages")
     ]
 
 
 def test_unattributed_firing_records_nothing(loguru_records: LogRecords) -> None:
-    activation.record(None, "hooks", "before_llm", detail="wrote messages", model="m")
+    activation.record(None, "hooks", "before_turn", detail="wrote messages", model="m")
 
     assert _emitted_tuples(loguru_records) == []
 
@@ -57,7 +57,9 @@ def test_emit_failure_is_swallowed() -> None:
 
     sink_id = logger.add(_raise_sink, catch=False)
     try:
-        activation.record("meiva_memory", "hooks", "after_exec", detail="wrote messages", model="m")
+        activation.record(
+            "meiva_memory", "hooks", "before_turn", detail="wrote messages", model="m"
+        )
     finally:
         logger.remove(sink_id)
 

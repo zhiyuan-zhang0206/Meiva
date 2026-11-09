@@ -10,7 +10,7 @@
 
 `_MemoryWriteCheckHook` checks the notes the `files.write` / `append` / `edit` wraps recorded and adds at most one `memory_write_check` reminder; it never blocks, rewrites or raises. Details: [Memory write check — Rule and Duplicate Reminders for Written Notes](memory-write-check.md).
 
-### Passive memory recall (before_llm hook)
+### Passive memory recall (before_turn hook)
 
 ```python
 class _PassiveMemoryRecallHook(Hook):
@@ -19,13 +19,13 @@ class _PassiveMemoryRecallHook(Hook):
     ) -> dict | None: ...
 
 passive_memory_recall_before_llm = _PassiveMemoryRecallHook()
-# declared in contribute(): before_llm=(passive_memory_recall_before_llm,)
+# declared in contribute(): before_turn=(passive_memory_recall_before_llm,)
 ```
 
 **Trigger and behavior**: the hook is a no-op when `settings.passive_memory_recall_enabled` is off, triggers when any inbound since the last AIMessage is not from a peer agent, defers (returns None) when auto-compact would also fire in the same turn, and injects the matched note references as `system_note` messages the agent sees on its next turn; the built-in `memory` sub-state's `injected_paths` holds this window's notes. The gate, the deferral reason and the injected shape: [Passive Recall Hook](memory-recall-hook.md).
 
 The recall engine (search + rendering beyond gating) is in the core `agent/graph/recall/memory_recall.py:passive_memory_recall`;
-this plugin only provides the before_llm wiring + trigger gate. It also bundles memory skills: `meiva.skills.meiva_memory`
+this plugin only provides the before_turn wiring + trigger gate. It also bundles memory skills: `meiva.skills.meiva_memory`
 (Memory Steward maintenance manual — daily merge, health check, note consolidation, query service) +
 `meiva.skills.meiva_memory.consolidation` sub-skill (`meiva memory` CLI daily merge — commit / push / rebuild index).
 
@@ -45,7 +45,7 @@ There is no writer: an agent writes notes with `meiva.files.write` (see the writ
 
 ## Key dependencies
 
-- [Agent Hooks](../../../../agent/hooks/docs/hooks.md) — before_llm hook system
+- [Agent Hooks](../../../../agent/hooks/docs/hooks.md) — before_turn hook system
 - [Standing Context — What Sits Behind the System Prompt](../../../../agent/graph/docs/context-notes/context-notes.md) — where this plugin's index + inherited notes are laid down
 - [Context Window — Context Management](../../../../agent/graph/docs/context-window/context-window.md) — memory injection affects context
 - [Memory-Indexer — Memory Pool Vector Index](../../../../services/docs/gateway_side/memory_indexer/memory-indexer.md) — background indexing service

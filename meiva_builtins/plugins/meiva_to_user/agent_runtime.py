@@ -118,6 +118,6 @@ to_user_limit_after_exec = _ToUserLimitHook()
 
 def contribute() -> PluginContributions:
     return PluginContributions(
-        after_exec=(to_user_limit_after_exec,),
+        before_turn=(to_user_limit_after_exec,),
         state=(MeivaToUserState,),
     )

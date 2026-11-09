@@ -39,7 +39,7 @@ from agent.graph.tool_calls import code_from_args
 from agent.hooks.understanding_chunks import due_chunk_update
 from agent.llm.usage import log_llm_usage
 from agent.messages.reply_visibility import has_invalid_reply_visibility, reply_visibility_note
-from agent.nodes import AFTER_EXEC, BEFORE_EXEC, BEFORE_LLM
+from agent.nodes import BEFORE_TURN, CLAIM, EXEC
 from agent.state_channels import CircuitState
 from base.agents.context import MeivaContext, agent_id_from_config
 from base.agents.messages.kwargs import NoteTag, read_meiva_kwargs
@@ -403,7 +403,7 @@ async def _llm_node_impl(
         empty_kw = {"meiva_non_human_wake": True} if state.non_human_wake else {}
         return Command[LlmGoto](
             update={"messages": [AIMessage(content="", additional_kwargs=empty_kw)]},
-            goto=BEFORE_EXEC,
+            goto=EXEC,
         )
     final_msg = assemble_final_message(chunks, catalog=ctx.require_catalog())
     final_msg.id = message_id
@@ -444,19 +444,19 @@ async def _llm_node_impl(
         if note is not None:
             return Command[LlmGoto](
                 update={"messages": [final_msg, note], "halted": False, **cut_update},
-                goto=BEFORE_LLM,
+                goto=BEFORE_TURN,
             )
         if has_invalid_reply_visibility(final_msg):
             note = reply_visibility_note(ctx.require_clock().now())
             already_correcting = _is_reply_correction(state.messages)
             return Command[LlmGoto](
                 update={"messages": [final_msg, note], "halted": already_correcting, **cut_update},
-                goto=AFTER_EXEC if already_correcting else BEFORE_LLM,
+                goto=CLAIM if already_correcting else BEFORE_TURN,
             )
         logger.info("[halt] {body}", event="halt", body="no tool_call (idle)", agent_id=agent_id)
         return Command[LlmGoto](
             update={"messages": [final_msg], "halted": True, **cut_update},
-            goto=AFTER_EXEC,
+            goto=CLAIM,
         )
     logger.info(
         "[code] {body}",
@@ -464,4 +464,4 @@ async def _llm_node_impl(
         body=code_from_args(final_msg.tool_calls[0]["args"], source="llm final_msg tool_call"),
         agent_id=agent_id,
     )
-    return Command[LlmGoto](update={"messages": [final_msg], **cut_update}, goto=BEFORE_EXEC)
+    return Command[LlmGoto](update={"messages": [final_msg], **cut_update}, goto=EXEC)

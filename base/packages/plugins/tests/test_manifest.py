@@ -143,7 +143,7 @@ def test_bad_engine_range_fails() -> None:
 
 
 def test_hook_points_validated() -> None:
-    _manifest(contributions={"hooks": ["after_init", "before_exec"]})
+    _manifest(contributions={"hooks": ["before_turn"]})
     with pytest.raises(ManifestError):
         _manifest(contributions={"hooks": ["before_init"]})
 

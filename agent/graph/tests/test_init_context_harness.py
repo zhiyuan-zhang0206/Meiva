@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Mapping
+from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
@@ -17,8 +19,13 @@ from langgraph.runtime import Runtime
 from psycopg_pool import AsyncConnectionPool
 
 from agent.graph._init_context import init_context_node
+from agent.graph.claim.harness_turn import harness_turn_node
+from agent.graph.claim.node import claim_node
+from agent.graph.hooks.framework import hooks_at
+from agent.graph.hooks.node import hook_node
 from agent.messages import NoteTag, system_note_message
-from agent.state import AgentState, CapabilitiesState, ContextReset
+from agent.state import AgentState, CapabilitiesState, ContextReset, SkillRecallState
+from base import paths
 from base.agents.context import MeivaContext
 from base.agents.context.identity import AgentIdentity
 from base.agents.history.harness_messages import load_harness_timeline_items
@@ -31,6 +38,12 @@ from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
+from base.lm.harness import Usage
+from base.lm.harness.engine import HarnessTurn
+from base.lm.provider_api import Decision, DecisionResult, Question
+from base.packages.composer_commands import CommandCatalog
+from base.packages.extensions import install_registry
+from base.packages.extensions.install_registry import InstalledPackage
 from base.packages.plugin_providers import build_model_catalog
 from base.packages.plugins.extensions import (
     EMPTY,
@@ -38,6 +51,7 @@ from base.packages.plugins.extensions import (
     ExtensionRegistry,
     PluginContributions,
 )
+from base.packages.tests.model_catalog import inert_keys
 from base.paths import meiva_home, resolve_meiva_home
 from meiva.tests.fixtures.pin_agent import snapshot_clients
 
@@ -163,7 +177,7 @@ async def test_external_context_reset_preserves_the_tail_behind_handoff(
         HumanMessage(content="The real compact summary", id="compact-summary")
     ]
     command = await init_context_node(
-        AgentState(context_reset=ContextReset(tail=tail, resume="before_llm")),
+        AgentState(context_reset=ContextReset(tail=tail, resume="before_turn")),
         _runtime(None, harness=harness, database_gate=database_gate),
         _config(42),
     )
@@ -174,7 +188,7 @@ async def test_external_context_reset_preserves_the_tail_behind_handoff(
     assert "# Role & Operating Context — Agent #42" in prompt
     assert prompt.endswith("The real compact summary")
     assert command.update["context_reset"] == ContextReset()
-    assert command.goto == "harness_turn"
+    assert command.goto == "before_turn"
 
 
 @pytest.mark.parametrize("harness", [Harness.CLAUDE_CODE, Harness.CODEX])
@@ -206,3 +220,171 @@ async def test_the_built_in_loop_writes_no_cursor(
     assert command.update is not None
     assert "messages" in command.update
     assert "harness_pending_input" not in command.update
+
+
+def _make_antigravity_recall_runtime(
+    *,
+    tid: int,
+    unit_home: Path,
+    aops_pool: AsyncConnectionPool[Any],
+    event_bus: EventBus,
+    database_gate: ProcessDbGate,
+    scorer_calls: list[str],
+    recorded_prompts: list[str],
+) -> Runtime[MeivaContext]:
+    class _Scorer:
+        async def decide(self, state: str, questions: Mapping[str, Question]) -> DecisionResult:
+            scorer_calls.append(state)
+            return DecisionResult(
+                {
+                    qid: Decision(
+                        top="true" if qid == "beta" else "false",
+                        probabilities={"true": 0.9, "false": 0.1}
+                        if qid == "beta"
+                        else {"true": 0.0, "false": 1.0},
+                    )
+                    for qid in questions
+                },
+                input_tokens=50,
+            )
+
+    base_catalog = build_model_catalog(home=unit_home)
+    provider = base_catalog.decision_provider_of("jev-1.13.0")
+    assert provider is not None
+
+    def _build_scorer(_ctx: Any) -> _Scorer:
+        return _Scorer()
+
+    catalog = replace(
+        base_catalog,
+        decision_providers={
+            **base_catalog.decision_providers,
+            provider.prefix: replace(provider, build=_build_scorer),
+        },
+    )
+
+    class _Bridge:
+        model = "claude-sonnet-5"
+
+        async def run_turn(self, prompt: str, *, key: str, on_event: Any = None) -> HarnessTurn:
+            del key, on_event
+            recorded_prompts.append(prompt)
+            return HarnessTurn(
+                turn_id="t1",
+                text="MEIVA_DISPLAY_TO_USER\nRelease notes drafted.",
+                usage=Usage(0, 0),
+                cost_usd=None,
+                subtype="success",
+                is_error=False,
+                interrupted=False,
+            )
+
+    bridge: Any = _Bridge()
+    return Runtime(
+        context=MeivaContext(
+            meiva_home=unit_home,
+            environ=os.environ,
+            user_home=Path.home(),
+            identity=AgentIdentity(agent_id=tid, owns_loop=True),
+            clients=snapshot_clients(),
+            harness=Harness.ANTIGRAVITY,
+            harness_bridge=bridge,
+            ops_pool=aops_pool,
+            llm=AsyncMock(),
+            event_publisher=MagicMock(),
+            agent=AgentSlices.resolve(
+                {
+                    "skills_to_inject_into_system_prompt": ["*"],
+                    "skills_to_expand_at_start": [],
+                },
+                default_reader=defaults(),
+            ),
+            extensions=EMPTY,
+            db=Database.from_settings(gate=database_gate),
+            bus=event_bus,
+            catalog=catalog,
+            provider_keys=inert_keys(catalog),
+            clock_factory=Clock.from_settings,
+            commands=CommandCatalog.system(skills=list, home=unit_home),
+        )
+    )
+
+
+def _seed_beta_skill_and_inbound(
+    unit_home: Path, db_conn: psycopg.Connection[Any], tid: int
+) -> None:
+    skills = paths.skills_dir(unit_home)
+    (skills / "beta").mkdir(parents=True, exist_ok=True)
+    (skills / "beta" / "SKILL.md").write_text(
+        "---\nname: beta\ndescription: beta release skill\n---\n\nBODY\n",
+        encoding="utf-8",
+    )
+    install_registry.register(InstalledPackage(name="beta", type="skill"), home=unit_home)
+    with db_conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO agents_meta (id, status) VALUES (%s, 'running') "
+            "ON CONFLICT (id) DO UPDATE SET status = 'running'",
+            (tid,),
+        )
+        cur.execute(
+            "INSERT INTO inbound_messages (agent_id, content, source, kind) "
+            "VALUES (%s, %s, 'user', 'chat')",
+            (tid, "please use beta to draft the release notes"),
+        )
+    db_conn.commit()
+
+
+async def test_antigravity_claim_before_turn_harness_turn_recalls_skill_and_prepends_prompt(
+    unit_home: Path,
+    db_conn: psycopg.Connection[Any],
+    aops_pool: AsyncConnectionPool[Any],
+    event_bus: EventBus,
+    database_gate: ProcessDbGate,
+) -> None:
+    tid = create_agent(db_conn)
+    _seed_beta_skill_and_inbound(unit_home, db_conn, tid)
+
+    scorer_calls: list[str] = []
+    recorded_prompts: list[str] = []
+    runtime = _make_antigravity_recall_runtime(
+        tid=tid,
+        unit_home=unit_home,
+        aops_pool=aops_pool,
+        event_bus=event_bus,
+        database_gate=database_gate,
+        scorer_calls=scorer_calls,
+        recorded_prompts=recorded_prompts,
+    )
+    cfg = _config(tid)
+
+    claim_cmd = await claim_node(AgentState(), runtime, cfg)
+    assert claim_cmd.goto == "before_turn"
+    assert claim_cmd.update is not None
+    pending: dict[str, Any] = claim_cmd.update["harness_pending_input"]
+    assert len(pending["messages"]) == 1
+
+    state_after_claim = AgentState(**claim_cmd.update)
+    before_turn_fn = hook_node(
+        "before_turn", lambda _s: "harness_turn", hooks_at("before_turn", EMPTY)
+    )
+    bt_cmd = await before_turn_fn(state_after_claim, runtime, cfg)
+    assert bt_cmd.goto == "harness_turn"
+    assert bt_cmd.update is not None
+    assert "please use beta to draft the release notes" in scorer_calls[0]
+    assert bt_cmd.update["skill_recall"] == SkillRecallState(prompted={"beta"}, window=0)
+    updated_pending: dict[str, Any] = bt_cmd.update["harness_pending_input"]
+    updated_prompt: str = updated_pending["prompt"]
+    assert updated_prompt.index("meiva.skills.beta") < updated_prompt.index(
+        "please use beta to draft the release notes"
+    )
+
+    state_after_bt = state_after_claim.model_copy(update=bt_cmd.update)
+    assert state_after_bt.messages == []
+    ht_cmd = await harness_turn_node(
+        state_after_bt,
+        Runtime(context=replace(runtime.context, ops_pool=None)),
+        cfg,
+    )
+    assert ht_cmd.goto == "claim"
+    assert "meiva.skills.beta" in recorded_prompts[0]
+    assert "please use beta to draft the release notes" in recorded_prompts[0]

@@ -19,11 +19,9 @@ from agent.graph.claim.harness_steer import (
     recover_harness_steer,
     reserve_harness_steer,
 )
-from agent.graph.claim.harness_tool_format import is_object_sequence
 from agent.graph.claim.lost_turn import report_lost_turn
 from agent.graph.claim.timeline import append_turn_timeline
 from agent.graph.claim.turn_stamp import persist_last_active
-from agent.graph.hooks.framework import harness_pre_turn_hooks
 from agent.graph.hooks.user_delivery import (
     capture_items,
     delivery_end_reminder,
@@ -37,7 +35,6 @@ from agent.graph.interrupt import (
 )
 from agent.graph.llm_errors import FatalLLMStreamError
 from agent.graph.node_log import StallConfig, node_lifecycle
-from agent.hooks import call_graph_hook
 from agent.messages.reply_visibility import reply_visibility_note
 from agent.nodes import CLAIM, HARNESS_TURN
 from base.agents.context import MeivaContext, agent_id_from_config
@@ -181,28 +178,6 @@ def turn_key(messages: Sequence[BaseMessage], *, cursor: int = 0) -> str:
     return f"window-{cursor + len(messages)}"
 
 
-async def _run_pre_turn_hooks(
-    state: _state.AgentState,
-    runtime: Runtime[MeivaContext],
-    config: RunnableConfig,
-) -> tuple[list[BaseMessage], dict[str, Any]]:
-    ctx = runtime.context
-    if ctx.ops_pool is None:
-        return [], {}
-    pre_messages: list[BaseMessage] = []
-    hook_updates: dict[str, Any] = {}
-    for _plugin, hook in harness_pre_turn_hooks(ctx.plugin_registry()):
-        result = await call_graph_hook(hook, state, runtime, config)
-        if not is_object_dict(result) or not result:
-            continue
-        for key, value in result.items():
-            if key == "messages" and is_object_sequence(value):
-                pre_messages.extend(m for m in value if isinstance(m, BaseMessage))
-            elif key != "goto":
-                hook_updates[key] = value
-    return pre_messages, hook_updates
-
-
 # meiva:note
 # The graph waits for one big turn. Observable activities are committed by the
 # projector while the harness works, independently of the terminal outcome.
@@ -216,7 +191,6 @@ async def harness_turn_node(
     event_publisher = ctx.event_publisher
     assert event_publisher is not None, "harness_turn requires ctx.event_publisher"  # noqa: S101
     agent_id = agent_id_from_config(config)
-    pre_messages, hook_updates = await _run_pre_turn_hooks(state, runtime, config)
     async with node_lifecycle(
         HARNESS_TURN,
         messages=state.messages,
@@ -233,8 +207,6 @@ async def harness_turn_node(
             ctx,
             agent_id,
             event_publisher,
-            pre_messages=pre_messages,
-            hook_updates=hook_updates,
         )
 
 

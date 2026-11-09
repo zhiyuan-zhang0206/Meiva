@@ -174,6 +174,6 @@ async def test_claim_does_not_drain_mid_turn(
 
     command = await claim_node_impl(state, runtime, config)
 
-    assert command.goto == "before_llm"
+    assert command.goto == "before_turn"
     assert command.update is not None
     assert "attach" not in cast("dict[str, Any]", command.update)

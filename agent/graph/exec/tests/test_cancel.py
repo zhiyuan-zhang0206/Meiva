@@ -100,7 +100,7 @@ async def test_exec_node_preserves_durable_interrupt_attribution(
         {"configurable": {"thread_id": str(agent_id)}},
         process=process,
     )
-    assert result.goto == "after_exec"
+    assert result.goto == "claim"
     assert result.update["halted"] is True
     message = cast(ToolMessage, result.update["messages"][0])
     assert marker in message.content
@@ -127,7 +127,7 @@ async def test_exec_node_cancel_event_returns_cancelled_command(
 
     result = await exec_node(state, runtime, _CONFIG, process=process)
 
-    assert result.goto == "after_exec"
+    assert result.goto == "claim"
     content = _tool_content(result)
     assert "Code execution output" in content
     assert "[cancelled by user]" in content
@@ -167,7 +167,7 @@ async def test_exec_node_timeout_returns_a_marker_and_does_not_halt(
         state, exec_runtime(database_gate=database_gate), _CONFIG, process=process
     )
 
-    assert result.goto == "after_exec"
+    assert result.goto == "claim"
     content = _tool_content(result)
     assert "Code execution output" in content
     assert "[timeout after 60s]" in content
