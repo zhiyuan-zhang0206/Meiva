@@ -185,24 +185,27 @@ def frontend_service_cmd(
 ) -> str:
     # meiva:note
     # Two properties make this the one place the frontend command is authored.
-    # `exec` on the serve stage hands the pid to `pnpm run start`, so a graceful
-    # stop's SIGTERM reaches it (`base.sessions.env_forwarding.exec_into` rejects a
-    # compound command whose final stage does not exec — the shape that once made a
-    # respawn unlaunchable). The build is a prelude owned by
-    # `base.cluster.frontend_build`: it rebuilds only when the source digest or the
-    # baked NEXT_PUBLIC_* values changed, which keeps a start that changed nothing
-    # from re-running a production Next.js build.
+    # `exec` on the serve stage hands the pid directly to `./node_modules/.bin/next`
+    # without intermediate `pnpm` / `sh` wrappers, so a graceful stop's SIGTERM reaches
+    # `next-server` itself (`base.sessions.env_forwarding.exec_into` rejects a compound
+    # command whose final stage does not exec — the shape that once made a respawn
+    # unlaunchable). The prelude owned by `base.cluster.frontend_build` verifies that
+    # `127.0.0.1:<port>` is free before touching `.next`, and rebuilds only when the
+    # source digest or baked NEXT_PUBLIC_* values changed.
     # meiva:link base/cluster/docs/frontend-build.md
     frontend_dir = Path(frontend_dir).as_posix()
+    quoted_dir = shlex.quote(frontend_dir)
     build_env = fe_build_env(gateway_port=gateway_port, browser_origins=browser_origins)
     origins = (
         f" --browser-origins {shlex.quote(','.join(browser_origins))}" if browser_origins else ""
     )
     build = (
         f"{build_env} .venv/bin/python -m base.cluster.frontend_build ensure"
-        f" --dir {shlex.quote(frontend_dir)} --gateway-port {gateway_port}{origins}"
+        f" --dir {quoted_dir} --gateway-port {gateway_port} --port {port}{origins}"
     )
-    return f"{build} && cd {frontend_dir} && exec pnpm run start -p {port}"
+    return (
+        f"{build} && cd {quoted_dir} && exec ./node_modules/.bin/next start -H 127.0.0.1 -p {port}"
+    )
 
 
 def redis_admin_url(redis_url: str, admin_password: str) -> str:

@@ -617,3 +617,112 @@ async def test_a_crashing_unit_reaches_absent_in_real_processes(
         assert len(recorder.events("root_unit_failure_state")) == 2, "a repaired unit stays silent"
     finally:
         await owner.shutdown()
+
+
+async def test_crashing_unit_with_identityless_alive_probe_still_restarts_and_reports_absent(
+    clock: _Clock, recorder: _Recorder, tmp_path: Path
+) -> None:
+    hold = tmp_path / "hold"
+    timers = clock_over(clock)
+    owner = _real_root(tmp_path, timers, "exit_soon", "0.05", str(hold))
+    await owner.start()
+    try:
+        facts = await _wait_recorded_exit(owner)
+        assert facts.observed_absent
+        registry = ProbeRegistry()
+        registry.register(
+            "worker", lambda: DaemonProbe.up("orphan listener on 3001 answers HTTP 200")
+        )
+        monitor = HealthMonitor(
+            owner,
+            registry,
+            config=HealthConfig(
+                interval_s=0.01,
+                startup_grace_s=0.0,
+                max_restart_attempts=3,
+                restart_backoff_s=(60.0, 300.0, 900.0),
+            ),
+            clock=timers,
+        )
+
+        await monitor.run_round()
+        assert monitor.snapshot()["worker"].last_verdict == "down"
+        assert monitor.snapshot()["worker"].restart_attempts == 1
+        await _wait_recorded_exit(owner)
+
+        clock.advance(60.0)
+        await monitor.run_round()
+        assert monitor.snapshot()["worker"].restart_attempts == 2
+        await _wait_recorded_exit(owner)
+
+        for _ in range(3):
+            clock.advance(60.0)
+            await monitor.run_round()
+        events = recorder.events("root_unit_failure_state")
+        assert len(events) == 1
+        assert events[0]["unit"] == "worker"
+        assert events[0]["kind"] == "absent"
+        assert "managed unit process is absent while probe answered" in str(events[0]["detail"])
+    finally:
+        await owner.shutdown()
+
+
+async def test_absent_managed_unit_is_not_reset_by_an_unowned_alive_port_probe(
+    clock: _Clock, recorder: _Recorder
+) -> None:
+    supervisor = _Supervisor()
+    supervisor.facts = UnitFailureFacts(
+        intent_running=True,
+        restart_failed=None,
+        last_error="unexpected exit: exit 1",
+        observed_absent=True,
+    )
+    monitor = _monitor(
+        supervisor,
+        _Cell(DaemonProbe.up("frontend application on 3001 answers HTTP")),
+        timers=clock,
+    )
+    for _ in range(3):
+        await monitor.run_round()
+        clock.advance(60.0)
+    state = monitor.snapshot()["svc"]
+    assert state.last_verdict == "down"
+    assert "managed unit process is absent while probe answered" in state.last_detail
+    assert state.restart_attempts == 3
+    assert state.breaker_open
+    assert len(recorder.events("root_unit_breaker_open")) == 1
+
+
+async def test_active_managed_unit_resets_breaker_when_port_probe_is_alive(
+    clock: _Clock, recorder: _Recorder
+) -> None:
+    supervisor = _Supervisor()
+    supervisor.facts = UnitFailureFacts(
+        intent_running=True,
+        restart_failed=None,
+        observed_absent=True,
+    )
+    monitor = _monitor(
+        supervisor,
+        _Cell(DaemonProbe.up("frontend application on 3001 answers HTTP")),
+        timers=clock,
+    )
+    for _ in range(3):
+        await monitor.run_round()
+        clock.advance(60.0)
+    assert monitor.snapshot()["svc"].breaker_open
+
+    # meiva:note
+    # Negative control: once the managed unit is running (`observed_absent=False`), the
+    # same ALIVE probe resets `restart_attempts` and closes the breaker.
+    supervisor.facts = UnitFailureFacts(
+        intent_running=True,
+        restart_failed=None,
+        observed_absent=False,
+    )
+    await monitor.run_round()
+    state = monitor.snapshot()["svc"]
+    assert state.last_verdict == "alive"
+    assert state.restart_attempts == 0
+    assert not state.breaker_open
+    assert len(recorder.events("root_unit_breaker_closed")) == 1

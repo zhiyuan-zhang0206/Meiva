@@ -53,7 +53,7 @@ def _gone(process: psutil.Process | None) -> bool:
         return True
 
 
-async def test_late_child_is_not_a_service_replacement_gate(tmp_path: Path) -> None:
+async def test_in_group_late_child_is_escalated_and_reaped_on_down(tmp_path: Path) -> None:
     ready, child_file = tmp_path / "ready", tmp_path / "late-child.pid"
     owner = _supervisor(tmp_path / "root", "forked_late_child", str(child_file), str(ready))
     await owner.start()
@@ -64,6 +64,30 @@ async def test_late_child_is_not_a_service_replacement_gate(tmp_path: Path) -> N
         leader = cast(int, units[0]["pid"])
         assert os.getpgid(leader) == leader
         assert os.getsid(leader) == os.getsid(0)
+        await owner.down("svc")
+        await _wait_for(child_file)
+        child = _late_child(child_file)
+        assert _gone(child), (
+            "in-group survivor must be escalated via PGID SIGKILL before down completes"
+        )
+        assert owner._units["svc"].generation is None
+        assert not (tmp_path / "root" / "custody").exists()
+    finally:
+        if child is not None and not _gone(child):
+            child.kill()
+        await owner.shutdown()
+
+
+async def test_detached_session_child_is_not_a_service_replacement_gate(tmp_path: Path) -> None:
+    ready, child_file = tmp_path / "ready", tmp_path / "detached-child.pid"
+    owner = _supervisor(tmp_path / "root", "detached_late_child", str(child_file), str(ready))
+    await owner.start()
+    await _wait_for(ready)
+    child: psutil.Process | None = None
+    try:
+        units = cast("list[dict[str, Any]]", (await owner.status())["units"])
+        leader = cast(int, units[0]["pid"])
+        assert os.getpgid(leader) == leader
         await owner.down("svc")
         await _wait_for(child_file)
         child = _late_child(child_file)
