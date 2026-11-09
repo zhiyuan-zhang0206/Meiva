@@ -2,7 +2,7 @@
 # Which entries of a feed an rss run takes and builds, over values: the `--since` cutoff, the
 # date window and newest-first order, and the sync plan against what the raw mirror already
 # holds. `feed.py` reads the clock and the mirror and executes the plan.
-# meiva:link meiva_builtins/skills/integrations/web-sources/docs/web-sources.meiva.okf.md
+# meiva:link meiva_builtins/skills/integrations/web-sources/README.md
 
 from __future__ import annotations
 

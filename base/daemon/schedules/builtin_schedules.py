@@ -2,7 +2,7 @@
 # One manifest entry, one row: create a missing row with the manifest's
 # `default_enabled`, resync a drifted script and command, and never touch an
 # existing row's enabled state, description or status.
-# meiva:link base/daemon/schedules/docs/builtin-provisioning.meiva.okf.md
+# meiva:link base/daemon/schedules/docs/builtin-provisioning.md
 from __future__ import annotations
 
 import hashlib

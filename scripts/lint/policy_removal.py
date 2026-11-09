@@ -25,7 +25,7 @@
 # never reports as clean.
 # An added entry is reported and never asked about: a widening is what the reviewer reads in the
 # diff, not a declaration to write.
-# meiva:link meizel/docs/checker/policy/policy.meiva.okf.md
+# meiva:link meizel/docs/checker/policy/policy.md
 
 
 from __future__ import annotations

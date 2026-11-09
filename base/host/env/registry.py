@@ -382,7 +382,7 @@ def child_env(environ: Mapping[str, str]) -> dict[str, str]:
 # This process's live environment, read-only: the one door below the config boot for a composition
 # root that hands the environment down as a value. A caller that must hand a child a modified view
 # of it copies first (`dict(process_environment())`).
-# meiva:link base/host/env/docs/registry.meiva.okf.md
+# meiva:link base/host/env/docs/registry.md
 def process_environment() -> Mapping[str, str]:
     return os.environ
 

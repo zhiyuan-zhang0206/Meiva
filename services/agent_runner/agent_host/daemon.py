@@ -194,7 +194,7 @@ def plugins_fingerprint(root: Path) -> str:
 # life; on a fingerprint change it logs the names that changed and raises SIGTERM at
 # itself, which starts the graceful exit: running turns settle at their restart, the
 # drains run, then the supervisor restarts the host fresh.
-# meiva:link services/agent_runner/agent_host/lifecycle/docs/graceful-exit.meiva.okf.md
+# meiva:link services/agent_runner/agent_host/lifecycle/docs/graceful-exit.md
 async def watch_plugins_for_restart(
     root: Path,
     *,

@@ -151,7 +151,7 @@ def render_unit(ctx: BootUnitContext) -> str:
         # meiva:note
         # The Linux counterpart of the launchd job PATH: the root this unit starts inherits
         # it into every service, and `claude`/`agy` install into the user's ~/.local/bin.
-        # meiva:link base/lm/harness/docs/harness.meiva.okf.md
+        # meiva:link base/lm/harness/docs/harness.md
         (
             "PATH",
             harness_unit_path(

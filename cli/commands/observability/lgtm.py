@@ -8,7 +8,7 @@ from cli.commands.observability._lgtm_provisioning import verify_dashboard_provi
 from services.supervision.healthchecks.lgtm import is_lgtm_host, lgtm_roles, probe_backend
 
 
-# meiva:link cli/commands/observability/docs/lgtm/dashboard-provisioning.meiva.okf.md
+# meiva:link cli/commands/observability/docs/lgtm/dashboard-provisioning.md
 def cmd_lgtm_status(
     *, home: Path, machine: MachineIdentityReader, observability: LgtmSettings
 ) -> int:

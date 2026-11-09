@@ -54,7 +54,7 @@ from base.api_contracts.agent_contract import Harness
 # then resumes where this batch was headed), or HARNESS_TURN (the same "has
 # work" verdict on an agent whose loop runs in an external CLI). Narrower than
 # `NodeName` on purpose, so pyright catches a goto claim has no business making.
-# meiva:link agent/graph/docs/harness-turn.meiva.okf.md
+# meiva:link agent/graph/docs/harness-turn.md
 ClaimGoto = Literal["before_llm", "claim", "__end__", "init_context", "harness_turn"]
 
 # Kinds whose dispatch is gated on the routing winner.
@@ -76,7 +76,7 @@ ROUTING_KINDS: frozenset[InboundKind] = frozenset(
 # both, which is why only this one target is rewritten. A reset's parked `resume` is
 # the same verdict one node later, so it goes through here too — otherwise a
 # compaction hands an external-harness agent back to `before_llm`.
-# meiva:link agent/graph/docs/harness-turn.meiva.okf.md
+# meiva:link agent/graph/docs/harness-turn.md
 @overload
 def route_target(ctx: MeivaContext, goto: ClaimGoto) -> ClaimGoto: ...
 

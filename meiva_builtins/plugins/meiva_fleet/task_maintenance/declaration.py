@@ -19,7 +19,7 @@
 # It sits beside the daemon it declares, behind the `services.py` re-export the loader reads,
 # because pyright resolves an import against the checked directory's root first: a root-level
 # `services.py` would shadow the repository's `services` package for every file beside it.
-# meiva:link meiva_builtins/plugins/meiva_fleet/task_maintenance/docs/task-maintenance/task-maintenance.meiva.okf.md
+# meiva:link meiva_builtins/plugins/meiva_fleet/task_maintenance/docs/task-maintenance/task-maintenance.md
 from __future__ import annotations
 
 from functools import partial

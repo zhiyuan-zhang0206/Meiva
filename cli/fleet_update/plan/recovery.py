@@ -6,7 +6,7 @@
 # what took it down -- either its stop completed here, or the host's own stop journal records a
 # failed or unfinished stop. A host that is still running is never touched, and no code is rolled
 # back: the switch phase never started.
-# meiva:link cli/docs/fleet-update-window/failed-stop-recovery.meiva.okf.md
+# meiva:link cli/docs/fleet-update-window/failed-stop-recovery.md
 
 from __future__ import annotations
 

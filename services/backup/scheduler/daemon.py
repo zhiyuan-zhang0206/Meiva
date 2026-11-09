@@ -1,6 +1,6 @@
 # meiva:note
 # A failed dump is reported and waits for the next backup hour, without making health request a restart solely for that failure.
-# meiva:link services/backup/scheduler/docs/timing-and-exit.meiva.okf.md
+# meiva:link services/backup/scheduler/docs/timing-and-exit.md
 
 from __future__ import annotations
 
@@ -263,7 +263,7 @@ def scheduler_database(
 
 # meiva:note
 # SIGTERM exits within the shutdown bound even while a default-executor job is wedged.
-# meiva:link services/backup/scheduler/docs/timing-and-exit.meiva.okf.md
+# meiva:link services/backup/scheduler/docs/timing-and-exit.md
 def main() -> None:
     from base.deploy.schema.migrations import assert_schema_current
 

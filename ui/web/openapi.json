@@ -7589,23 +7589,6 @@
         }
       }
     },
-    "/api/okf/graph": {
-      "get": {
-        "summary": "Get Okf Graph",
-        "description": "Build the OKF graph from the live `.meiva.okf.md` tree and render it\ninto the self-contained D3 template — open directly in a browser tab.",
-        "operationId": "get_okf_graph_api_okf_graph_get",
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          }
-        }
-      }
-    },
     "/api/tasks/{task_id}": {
       "get": {
         "summary": "Get Task",

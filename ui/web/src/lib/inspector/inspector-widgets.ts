@@ -1,4 +1,4 @@
-// meiva:link ui/web/src/docs/frontend-components/inspector/inspector.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/inspector/inspector.md
 export const INSPECT_SECTION_ORDER = {
   costActivity: 900,
   context: 600,

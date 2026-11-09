@@ -44,7 +44,7 @@ class DownloadProgress:
         return self._hasher.hexdigest()
 
 
-# meiva:link base/deploy/release/docs/collector-artifact.meiva.okf.md
+# meiva:link base/deploy/release/docs/collector-artifact.md
 def stream_download(
     url: str,
     dest: Path,
@@ -101,7 +101,7 @@ def _download_policy(limits: DownloadLimits) -> Policy:
     )
 
 
-# meiva:link base/deploy/release/docs/collector-artifact.meiva.okf.md
+# meiva:link base/deploy/release/docs/collector-artifact.md
 def download_with_retry(
     url: str, tarball: Path, *, open_url: StreamingUrlOpener, timers: Timers, limits: DownloadLimits
 ) -> str:

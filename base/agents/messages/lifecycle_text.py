@@ -3,7 +3,7 @@
 # that ended an unfinished turn leaves for the agent to read. The claim node renders the
 # acceptance markers from `by_who`; the host's restart apply writes `restart_resume_note`
 # into the same transaction that applies the restart.
-# meiva:link agent/graph/docs/turn-interrupts.meiva.okf.md
+# meiva:link agent/graph/docs/turn-interrupts.md
 
 
 # meiva:note

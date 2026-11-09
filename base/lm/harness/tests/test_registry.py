@@ -84,7 +84,7 @@ def test_non_positive_agent_id_is_refused(tmp_path: Path) -> None:
 # The registry outlives the field that names a harness: records written before it
 # existed must still load, and a record must never be resumed by a different
 # harness than the one that wrote it. These three tests are the contract.
-# meiva:link base/lm/harness/docs/harness.meiva.okf.md
+# meiva:link base/lm/harness/docs/harness.md
 def legacy_document() -> dict[str, object]:
     return {
         "agent_id": 6984,

@@ -1,4 +1,4 @@
-# meiva:link base/deploy/release/docs/collector-artifact.meiva.okf.md
+# meiva:link base/deploy/release/docs/collector-artifact.md
 from __future__ import annotations
 
 import hashlib
@@ -49,7 +49,7 @@ def test_download_with_retry_preserves_contract(
     capsys: pytest.CaptureFixture[str],
     failures: int,
 ) -> None:
-    # meiva:link base/deploy/release/docs/collector-artifact.meiva.okf.md
+    # meiva:link base/deploy/release/docs/collector-artifact.md
     errors = [OSError(f"reset {i}") for i in range(1, failures + 1)]
     timers = ManualTimers(start=10.0)
     tarball = tmp_path / "t.tar.gz"

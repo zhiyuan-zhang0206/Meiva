@@ -285,7 +285,7 @@ harness's production dependencies is covered by the post-merge full runs, as for
 
 The documentation predicate reuses base.deploy.git.repo_change.is_doc_path, the same
 owner as CI's frontend/backend classifier. It recognizes the existing project doc
-axes and top-level Markdown, plus `.meiva.okf.md` files in a component's `docs/`
+axes and top-level Markdown, plus Markdown files in a component's `docs/`
 layer, including under scripts/ and ui/web/. Test data in a `tests/` directory
 does not qualify as a component document. Other nested Markdown, including
 AGENTS.md and SKILL.md, retains its code-directory classification.

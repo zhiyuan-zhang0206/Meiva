@@ -1,6 +1,6 @@
 # meiva:note
 # Deadline arithmetic of one streaming model request as values. The stream consumer reads the monotonic clock and asks these functions how long the next chunk may take and whether the attempt's total ceiling is spent.
-# meiva:link agent/graph/llm/docs/llm.meiva.okf.md
+# meiva:link agent/graph/llm/docs/llm.md
 from __future__ import annotations
 
 from dataclasses import dataclass

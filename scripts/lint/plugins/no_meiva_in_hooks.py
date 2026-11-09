@@ -2,7 +2,7 @@
 # Forbid `import meiva` in the modules where graph hooks live: a hook operates on the graph `state`
 # it is handed, and the SDK's state slot exists only in the exec child, so reaching for it reads
 # another agent's turn — or nothing at all.
-# meiva:link scripts/lint/docs/no-meiva-in-hooks.meiva.okf.md
+# meiva:link scripts/lint/docs/no-meiva-in-hooks.md
 
 from __future__ import annotations
 
@@ -14,7 +14,7 @@ _REPO_ROOT = Path(__file__).parent.parent.parent.parent
 
 sys.path.insert(0, str(_REPO_ROOT))
 
-# meiva:link scripts/docs/scripts.meiva.okf.md
+# meiva:link scripts/docs/scripts.md
 from meizel import lint_common  # noqa: E402
 from meizel.graph.universe import SourceTree  # noqa: E402
 

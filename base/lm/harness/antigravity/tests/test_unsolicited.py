@@ -40,7 +40,7 @@ def result_frame(text: str, *, status: str = "SUCCESS") -> dict[str, object]:
 # into the session's frame handler because the CLI cannot be asked to print one on
 # demand; everything around the frame (a real turn, a real process) still runs against
 # `fake_agy`, which speaks the same NDJSON framing.
-# meiva:link base/lm/harness/docs/attribution.meiva.okf.md
+# meiva:link base/lm/harness/docs/attribution.md
 async def test_a_result_with_no_turn_in_flight_is_not_a_fault(tmp_path: Path) -> None:
     delivered: list[UnsolicitedOutput] = []
     harness = await start(tmp_path, turns=[say("mine")], unsolicited=delivered.append)
@@ -83,7 +83,7 @@ async def test_a_late_result_does_not_reopen_a_completed_turn(tmp_path: Path) ->
 # A result that lands mid-turn is indistinguishable from ours at the protocol level, so
 # the turn ends either way. What must not happen is the frame's own `response` becoming
 # the reply: the text is what this turn streamed, and the frame only fills a gap.
-# meiva:link base/lm/harness/docs/attribution.meiva.okf.md
+# meiva:link base/lm/harness/docs/attribution.md
 async def test_a_foreign_result_does_not_replace_the_reply_text(tmp_path: Path) -> None:
     harness = await start(tmp_path, turns=[{**say("partial"), "pace": 0.4}])
     try:

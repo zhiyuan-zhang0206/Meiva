@@ -1,0 +1,40 @@
+# LLM Billing Catalog
+
+`base/lm/pricing/__init__.py` + `pricing_catalog_archive.json` + provider `PriceRates` — how one call becomes one dollar figure. `base.lm.pricing.archive.load_archive` reads `pricing_catalog_archive.json` (`parse_archive` is the pure parse the catalog builder is handed).
+
+`billing.py` owns provider-call billing spans beside their price selection. Its
+contracts and cache-write/catalog tests live in `tests/providers/`; usage accounting
+and syntax repair import this owner directly.
+
+## Selection
+
+- The reviewed archive is the reconciliation ledger: every model has official-source provenance (`source_url` + `source_checked_at`) plus gapless effective periods, input-token tiers, and optional recurring UTC rate windows. It is the input for bot synchronization and retains catalog-only services.
+- Provider plugins are the runtime source for chat prices; their declaration forms (flat trio, periods lattice, sibling modules) and the two scripts that gate and rewrite them live in [Provider Price Declarations, the Drift Gate and the Nightly Rewrite](provider-declarations.md). Registration parses that declaration through the archive parser, then intentionally removes the overlapping archive row from the in-memory runtime catalog. Catalog-only services such as `gemini-embedding-2`, plus the retired DeepSeek names the page reconciliation still prices, select the archive directly. Frozen-instant tests require all 47 repository plugin prices to equal the archive across historical, current, daily-window, and future instants.
+- Archived prices and provider-plugin prices declare a stable `vendor` alongside the bare model key. Billing events preserve that separation; see [`pricing_catalog_schema.md`](pricing_catalog_schema.md).
+- `rates_at(model, at, input_tokens)` selects one exact 3-rate tuple `(cache_miss, cache_hit, out)` USD/M. `quote()` returns those rates and the computed cost atomically, so a scheduled boundary cannot split the event snapshot; `cost_usd()` remains the compatibility reader and returns `None` for unknown models.
+- Cache-hit and cache-miss input are priced separately on purpose — a 2-tuple once overestimated a 30-case batch by ~70x ($56.38 against $0.8).
+- Optional `cache_write_5m`, `cache_write_1h`, and `cache_write_30m` rates belong to each selected tier/window. Cache writes are subdivisions of total input, removed from ordinary input before pricing, never added as extra input. Anthropic declares 1.25x input for 5-minute writes and 2x for 1-hour writes, including Fast services ([official pricing](https://platform.claude.com/docs/en/about-claude/pricing), checked 2026-10-08). A reported write without its declared rate makes the call unpriced.
+- `pricing/cache_writes.py` counts each write once: the TTL breakdown supersedes its aggregate. OpenAI defaults to 30 minutes; Anthropic defaults to 5 minutes. See [Cache-write pricing](cache-writes.md).
+- Date-only future increases with no provider timezone use the documented conservative UTC+14 boundary and carry an `effective_time_note`; exact published instants are used unchanged.
+- Cost is computed at usage time with the price in force then and recorded on the usage event as a snapshot, so a price change never rewrites history.
+
+## Sourcing
+
+- The commit-time drift gate and the nightly reconciliation that rewrites provider declarations are specified in [Provider Price Declarations, the Drift Gate and the Nightly Rewrite](provider-declarations.md); both compare declared periods, tiers and windows against the archive, and the reconciliation gates on the DeepSeek page's column markers and the footnote bodies they cite.
+- Archive period boundaries must be ISO-8601 strings or null. Synchronization rejects malformed boundary values with the model, period and field in the diagnostic before writing any provider source.
+- **Never convert a vendor's CNY prices.** Alibaba publishes USD per model rather than converting at one rate: qwen3.8-max implies ~7.27 CNY/USD, qwen3.8-27b ~7.08. Deriving 27b at max's rate gives 0.4125/1.65/0.0825 against the published 0.424/1.696/0.085 — a ~3% error baked into every cost row. Read the model page's own USD column.
+- **A tier boundary must be an exact token count**, and the parser validates gapless coverage. Alibaba's docs express Qwen boundaries only as `Input<=256k`, so a tiered Qwen cannot be registered off the docs website; an account's own `GET /api/v1/models` reports `"range_name": "Default"` (single flat tier) and is the authority on tiering. All three registered Qwen models are flat.
+- **qwen3.8-flash uses the landed Model Studio EN page's Beijing USD column** (`$0.113 / $0.014 / $0.382`, checked 2026-09-02). The earlier QwenCloud figures tracked the Singapore column, overstated Beijing cost, and are retired (see the module docstring).
+- Rates are **region-specific**, and Qwen's endpoint is configurable (`MEIVA_DASHSCOPE_BASE_URL`). The archive's Qwen entries are Beijing; Singapore prices the same models differently (qwen3.8-max $2.00/$0.25/$6.00 against Beijing's $1.65/$0.206/$4.951). Repointing the base URL at another region means re-checking the archive and plugin price.
+
+## Published model rates
+
+Model-specific rates and caveats: [Published Model Rates](../../docs/pricing-model-rates.md).
+
+## Notes
+
+- **DeepSeek reasoning tokens** count into output and bill at the merged output rate; `usage_metadata` reports them separately but the underlying rate is the same.
+- Providers reporting a cache hit through the OpenAI `prompt_tokens_details.cached_tokens` field reach `cache_read` with no per-vendor wiring — langchain-openai maps it, `tally_tokens` sums it, `quote()` prices it.
+- **Embeddings** are priced through the catalog like chat models, with `tok_out=0` and no cache-metering fields. All input is billed at the ordinary input rate. `image_input` records the image-embedding rate for future multimodal use; today's memory-search driver embeds text only.
+
+- Key deps: [Language Model Provider Layer](../../docs/lm/lm.md) (the provider overview this split out of)

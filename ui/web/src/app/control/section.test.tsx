@@ -1,7 +1,7 @@
 // meiva:note
 // The heading is part of the route's first paint; the body mounts one frame
 // later, which is what keeps the route transition cheap.
-// meiva:link ui/web/src/docs/frontend-components/control-page-load.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/control-page-load.md
 
 import { screen, waitFor } from "@testing-library/react";
 import { renderWithBrowser } from "@/test-support/render";

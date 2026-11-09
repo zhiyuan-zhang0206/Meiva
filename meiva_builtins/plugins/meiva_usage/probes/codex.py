@@ -1,6 +1,6 @@
 # meiva:note
 # Probe for OpenAI Codex rate limit metrics.
-# meiva:link meiva_builtins/plugins/meiva_usage/docs/meiva_usage.meiva.okf.md
+# meiva:link meiva_builtins/plugins/meiva_usage/README.md
 
 from __future__ import annotations
 
@@ -185,7 +185,7 @@ def _communicate_codex_rpc(
 # meiva:note
 # Execute initialize and rateLimits read over JSON-RPC with codex app-server.
 # Fixed argv runs the local codex app-server child process.
-# meiva:link meiva_builtins/plugins/meiva_usage/docs/meiva_usage.meiva.okf.md
+# meiva:link meiva_builtins/plugins/meiva_usage/README.md
 def default_codex_rpc_runner(
     home: Path,
     environ: Mapping[str, str],

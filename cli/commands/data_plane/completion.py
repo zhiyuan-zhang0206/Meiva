@@ -14,7 +14,7 @@
 # `ensure_pooler` renders the userlist for `home` but writes it under the process home, and
 # `stop_pgbouncer` and the maintenance stop find the pooler there too. Those paths move to `home`
 # when base's `pooler.*` functions take it.
-# meiva:link cli/commands/data_plane/docs/data-plane-pooler-and-stop.meiva.okf.md
+# meiva:link cli/commands/data_plane/docs/data-plane-pooler-and-stop.md
 
 from __future__ import annotations
 

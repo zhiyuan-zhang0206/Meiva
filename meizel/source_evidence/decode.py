@@ -1,7 +1,7 @@
 # meiva:note
 # This boundary accepts only the version-one supplied-index JSON shape and freezes every sequence.
 # No application schema dependency is introduced into the standard-library-only Meizel process.
-# meiva:link meizel/docs/checker/typescript-evidence.meiva.okf.md
+# meiva:link meizel/docs/checker/typescript-evidence.md
 
 from __future__ import annotations
 

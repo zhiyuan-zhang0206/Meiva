@@ -2,7 +2,7 @@
 # One window from the operator's seat: `run`/`split` stop every host before they start any,
 # name the phase that failed, and never repeat a half; what the dry run plans, what one log
 # holds, and the alert silence the window opens before its first stop and closes after its up.
-# meiva:link cli/docs/fleet-update-window/fleet-update-window.meiva.okf.md
+# meiva:link cli/docs/fleet-update-window/fleet-update-window.md
 
 from __future__ import annotations
 
@@ -114,7 +114,7 @@ def test_run_reports_up_failure_without_repeating_down(
 # A host whose converge aborted leaves the rest of the cluster running: the run
 # names that host's step and reason, keeps going, and exits 3 — distinct from a
 # refusal (2) and from a failure before any host started (1).
-# meiva:link cli/docs/fleet-update-window/fleet-update-window.meiva.okf.md
+# meiva:link cli/docs/fleet-update-window/fleet-update-window.md
 def test_a_host_that_fails_to_start_does_not_stop_the_others(
     env: tuple[Cluster, Callable[..., int]], capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -333,7 +333,7 @@ def test_the_dry_run_lists_the_silence_without_opening_it(
 # The same run with a marker left over from an earlier wave: the failure is reported at the
 # start with the start's own words, not with an older step's. This is the direction that keeps
 # a stale record from sending the reader to a cause that was never this attempt's.
-# meiva:link cli/docs/fleet-update-window/fleet-update-window.meiva.okf.md
+# meiva:link cli/docs/fleet-update-window/fleet-update-window.md
 def test_a_marker_from_an_earlier_wave_is_not_blamed_for_this_start(
     env: tuple[Cluster, Callable[..., int]], capsys: pytest.CaptureFixture[str]
 ) -> None:

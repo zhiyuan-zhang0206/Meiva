@@ -67,7 +67,7 @@ class ErrorCode(StrEnum):
 # Who asked for a state change, in wire form. Values never leave the process:
 # `env_keys` names variables (never their values), and `argv` arrives already
 # redacted and truncated by the client.
-# meiva:link base/native_process/root_control/docs/lifecycle-caller.meiva.okf.md
+# meiva:link base/native_process/root_control/docs/lifecycle-caller.md
 class CallerPayload(TypedDict):
     pid: int
     ppid: int
@@ -165,7 +165,7 @@ def _verb_request(
 # meiva:note
 # Validate the optional caller block fail-fast; a verb that changes nothing
 # rejects it rather than dropping it silently.
-# meiva:link base/native_process/root_control/docs/lifecycle-caller.meiva.okf.md
+# meiva:link base/native_process/root_control/docs/lifecycle-caller.md
 def _parse_caller(raw: object, verb: str) -> CallerPayload | None:
     if raw is None:
         return None

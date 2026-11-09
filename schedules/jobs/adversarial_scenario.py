@@ -7,7 +7,7 @@
 # requests while the batch updates the partner document and collects counts, and leaving the
 # scope, including by an error, shuts the server down, joins the thread and closes the socket.
 # A failure of the serving loop surfaces when the scope is left.
-# meiva:link schedules/docs/adversarial-eval.meiva.okf.md
+# meiva:link schedules/docs/adversarial-eval.md
 
 from __future__ import annotations
 

@@ -381,7 +381,7 @@ export default tseslint.config(
 
   // meiva:note
   // Test-only modules stay test-only: a shipped module must not import a *-test-mock, test-support/ or *.test module. Test files and the doubles themselves are exempt, because they are the intended importers.
-  // meiva:link ui/web/src/docs/frontend-components/test-only-imports.meiva.okf.md
+  // meiva:link ui/web/src/docs/frontend-components/test-only-imports.md
   {
     files: ["src/**/*.{ts,tsx}"],
     ignores: ["**/*.test.{ts,tsx}", "**/*-test-mock.{ts,tsx}", "**/test-support/**"],

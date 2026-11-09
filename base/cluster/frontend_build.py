@@ -1,4 +1,4 @@
-# meiva:link base/cluster/docs/frontend-build.meiva.okf.md
+# meiva:link base/cluster/docs/frontend-build.md
 # meiva:note
 # The frontend's production build is reused only when every input that produced it
 # is unchanged; the key lives inside `.next`, so deleting the build deletes the
@@ -88,7 +88,7 @@ def _source_entry_record(path: Path, encoded: bytes) -> bytes:
 # Hash every tracked or untracked-non-ignored path, mode and content under
 # `frontend_dir` without binding the repository's `HEAD`, so commits outside
 # `frontend_dir` keep the same digest while mid-read edits or checkouts fail closed.
-# meiva:link base/cluster/docs/frontend-build.meiva.okf.md
+# meiva:link base/cluster/docs/frontend-build.md
 def frontend_source_digest(frontend_dir: Path) -> str:
     if not frontend_dir.is_dir():
         raise FileNotFoundError(frontend_dir)

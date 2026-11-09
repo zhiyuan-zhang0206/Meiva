@@ -106,7 +106,7 @@ def compare(schema: dict[str, list[str]], live: dict[str, dict[str, str]]) -> Dr
     )
 
 
-# meiva:link scripts/audit/docs/schema-drift.meiva.okf.md
+# meiva:link scripts/audit/docs/schema-drift.md
 def classify_table(name: str, declared: set[str]) -> str:
     # meiva:note
     # Why a live table is not in the DDL: a runtime partition, runtime DDL, or history.

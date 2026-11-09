@@ -1,6 +1,6 @@
 # meiva:note
 # The effects behind the MCP daemon's socket ownership guards (Task #1142). The ghost-storm root cause: a respawn storm (restarter or rollout wave relaunching the daemon while the previous detached process is unreachable by session kill) leaves ghost daemons listening on an unlinked inode. Two hazards follow, both guarded here: a new daemon unlinked the socket file unconditionally before binding, severing the LIVE socket of the serving daemon (it became a ghost); and a killed ghost's exit cleanup unlinked the socket file again, by then someone else's. So a start refuses a live socket, reaps this unit's stale daemons before binding, and unlinks only the file it bound itself. What each guard decides lives in `_startup.py`; this module probes the socket, reads the process table, kills, and unlinks.
-# meiva:link meiva/mcps/docs/mcps.meiva.okf.md
+# meiva:link meiva/mcps/docs/mcps.md
 from __future__ import annotations
 
 import json

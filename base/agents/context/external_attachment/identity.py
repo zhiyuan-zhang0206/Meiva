@@ -15,7 +15,7 @@ from typing import Protocol
 # the next restart. `merge_delta` is the only write path for plugin state, and it
 # takes the expected version so two attachments cannot silently overwrite each
 # other.
-# meiva:link base/agents/context/external_attachment/docs/external-attachment.meiva.okf.md
+# meiva:link base/agents/context/external_attachment/README.md
 
 
 class IdentitySource(Protocol):

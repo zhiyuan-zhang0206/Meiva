@@ -2,7 +2,7 @@
 # A machine read resolves no clients and loads no plugins. The in-process spec tests share a
 # process whose SDK state earlier tests may already have changed, so this one reads the machine
 # in a fresh interpreter and checks that nothing was installed or attempted.
-# meiva:link meiva/self/docs/self.meiva.okf.md
+# meiva:link meiva/self/README.md
 
 from __future__ import annotations
 

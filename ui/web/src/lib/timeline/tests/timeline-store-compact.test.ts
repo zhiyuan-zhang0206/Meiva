@@ -83,7 +83,7 @@ describe("applyTokenUsage", () => {
 // A send request is one event with a payload: the sequence alone cannot say
 // which message to park, and a fold that moves items must not fabricate a new
 // one - only the reader's own send does.
-// meiva:link ui/web/src/docs/frontend-state/frontend-state.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-state/frontend-state.md
 describe("send anchor request", () => {
   it("requestSendAnchor stamps a new sequence and carries the stored inbound", () => {
     act(() => {

@@ -12,7 +12,7 @@
 // would be refused by the structure lint. The two values stay unrelated — `Browser.navigation` is
 // the page's history object, `AppNavigation` is the app router, and neither is built from the other.
 // If `lib/` is ever regrouped around a routing layer of its own, this package moves there.
-// meiva:link ui/web/src/docs/frontend-state/browser-port.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-state/browser-port.md
 import type { Route } from "next";
 
 export interface AppNavigation {

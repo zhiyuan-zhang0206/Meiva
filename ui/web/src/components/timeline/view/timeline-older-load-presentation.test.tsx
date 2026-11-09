@@ -15,7 +15,7 @@ const items = [makeItem({ item_id: "10.0", kind: "agent_chat", payload: "ten" })
 // meiva:note
 // The strip is in the DOM in both states, so a missing ring is an assertion
 // about the element rather than about a null query.
-// meiva:link ui/web/src/docs/frontend-components/timeline-view/loading-ring.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/timeline-view/loading-ring.md
 function strip() {
   return screen.getByTestId("load-older-spinner");
 }
@@ -24,7 +24,7 @@ function strip() {
 // The strip above the messages presents the reader's own older-page read. The
 // in-flight flag alone is a concurrency guard that four callers hold, and keying
 // the strip on it showed a ring nobody asked for (user report 2026-10-29).
-// meiva:link ui/web/src/docs/frontend-components/timeline-view/history-paging.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/timeline-view/history-paging.md
 describe("the older-page strip presents the reader's own request only", () => {
   it("an automatic fill in flight stays invisible", () => {
     render(<TimelineView items={items} hasMoreOlder loadingOlder onLoadOlder={vi.fn()} />);
@@ -38,7 +38,7 @@ describe("the older-page strip presents the reader's own request only", () => {
   // element is created or its animation name changes, so a stable node carrying
   // the same `animate-spin` proves the spin ran on through every update. A
   // conversation that reports every 0.5 s re-renders this surface at that rate.
-  // meiva:link ui/web/src/docs/frontend-components/timeline-view/loading-ring.meiva.okf.md
+  // meiva:link ui/web/src/docs/frontend-components/timeline-view/loading-ring.md
   it("the reader's request presents one ring that a 0.5 s update stream never rebuilds", () => {
     const requested: OlderLoadOrigin[] = [];
     function Surface() {

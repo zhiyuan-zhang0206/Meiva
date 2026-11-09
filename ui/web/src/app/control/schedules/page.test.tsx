@@ -26,7 +26,7 @@ beforeEach(() => {
 
 // meiva:note
 // Every render keeps the highlighter pending: a script block's plain text is what these assertions read, and the real chunk would tokenize it mid-test.
-// meiva:link ui/web/src/docs/frontend-components/code-blocks.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/code-blocks.md
 const pendingHighlighter = createLazyChunk({
   name: "schedules-test-highlighter",
   importModule: () => new Promise<never>(() => undefined),
@@ -229,7 +229,7 @@ describe("SchedulesPage", () => {
   it("hovering or focusing the expand button warms the code-highlighter chunk (intent prefetch)", async () => {
     // meiva:note
     // Regression coverage for the P2 adversarial-review finding on Meiva #3463: this wiring had no assertion that pointer-enter/focus actually invokes the prefetch, only that a mocked no-op did not blow up. Each event gets a fresh chunk and that chunk's import is the probe, so a row wired to anything else never calls it.
-    // meiva:link ui/web/src/docs/frontend-components/code-blocks.meiva.okf.md
+    // meiva:link ui/web/src/docs/frontend-components/code-blocks.md
     transport.listSchedules.mockResolvedValue([SCHEDULE]);
     const hoverImport = vi.fn(() => new Promise<never>(() => undefined));
     wrap(<SchedulesPageView navigate={pushSpy} />, createLazyChunk({ name: "test-highlighter", importModule: hoverImport }));

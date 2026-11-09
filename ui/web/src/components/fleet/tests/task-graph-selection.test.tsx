@@ -12,7 +12,7 @@ import { renderWithProviders } from "@/test-support/render";
 // meiva:note
 // The route hands its surfaces a `navigate`; a suite passes a spy, so a jump can be read
 // without replacing `next/navigation`.
-// meiva:link ui/web/src/docs/frontend-components/fleet-view.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/fleet-view.md
 const navigate = vi.fn();
 
 const getTask = vi.fn<(id: number) => Promise<TaskRow>>();
@@ -52,7 +52,7 @@ const TASK_WINDOWS = ["24h", "7d", "30d", "all"] as const;
 // and answered by the fake transport, preferences come from the settings cache, and the settings
 // surface answers reads and writes — the same providers the app mounts, no replaced module.
 // `cacheTasks` is the refetch a mounted board sees when the list arrives after it.
-// meiva:link ui/web/src/docs/frontend-components/fleet-view.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/fleet-view.md
 function cacheTasks(queryClient: QueryClient, tasks: readonly TaskRow[]): void {
   for (const window of TASK_WINDOWS) {
     queryClient.setQueryData<TaskListResponse>(["tasks", "graph", window], { tasks });

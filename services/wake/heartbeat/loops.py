@@ -1,4 +1,4 @@
-# meiva:link services/wake/heartbeat/docs/dispatch-round.meiva.okf.md
+# meiva:link services/wake/heartbeat/docs/dispatch-round.md
 from __future__ import annotations
 
 import asyncio
@@ -27,7 +27,7 @@ class LivenessRound(Protocol):
     async def run_round(self) -> None: ...
 
 
-# meiva:link services/wake/heartbeat/docs/dispatch-round.meiva.okf.md
+# meiva:link services/wake/heartbeat/docs/dispatch-round.md
 async def sleep_with_liveness(liveness: LoopProgress, total_s: float, *, timers: Timers) -> None:
     remaining = total_s
     while remaining > 0:
@@ -37,7 +37,7 @@ async def sleep_with_liveness(liveness: LoopProgress, total_s: float, *, timers:
         remaining -= step
 
 
-# meiva:link services/wake/heartbeat/docs/dispatch-round.meiva.okf.md
+# meiva:link services/wake/heartbeat/docs/dispatch-round.md
 async def dispatch_loop(dispatch: DispatchRound, liveness: LoopProgress, *, timers: Timers) -> None:
     step = dispatch.interval_s
     failures = RoundFailureBudget("heartbeat poll")
@@ -59,7 +59,7 @@ async def dispatch_loop(dispatch: DispatchRound, liveness: LoopProgress, *, time
             failures.failed(exc)
 
 
-# meiva:link services/wake/heartbeat/docs/dispatch-round.meiva.okf.md
+# meiva:link services/wake/heartbeat/docs/dispatch-round.md
 async def liveness_loop(
     observation: LivenessRound, liveness: LoopProgress, *, timers: Timers
 ) -> None:

@@ -228,7 +228,7 @@ def _spent_budget(exc: BaseException) -> bool:
 
 # meiva:note
 # Every turn_end record carries its owning agent's id, passed explicitly at the emit site: the process-wide log binding is the no-agent sentinel and the Inspector activity projection drops unattributed records. The record of an attempt that halts the model loop is emitted by the turn boundary instead (claim), which is the only place that knows whether the turn ended there and the reason it ended with.
-# meiva:link agent/graph/llm/docs/turn-records.meiva.okf.md
+# meiva:link agent/graph/llm/docs/turn-records.md
 async def llm_attempt(
     state: _state.AgentState,
     runtime: Runtime[MeivaContext],

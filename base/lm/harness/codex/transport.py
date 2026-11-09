@@ -28,7 +28,7 @@ from base.lm.harness.codex.frames import (
 # One app-server payload can be a full command output or an item list, so the
 # reader's line limit is far above asyncio's 64 KiB default: a longer line would
 # raise ValueError inside readline() and kill the session stream.
-# meiva:link base/lm/harness/codex/docs/codex.meiva.okf.md
+# meiva:link base/lm/harness/codex/docs/codex.md
 STREAM_LIMIT_BYTES = 8 * 1024 * 1024
 
 
@@ -66,7 +66,7 @@ class AppServerTransport(Protocol):
 # the same pipe or the turn parks forever. Replies and notifications interleave
 # with those requests, so a single reader loop owns dispatch and everything the
 # session sees arrives through the two injected handlers.
-# meiva:link base/lm/harness/codex/docs/codex.meiva.okf.md
+# meiva:link base/lm/harness/codex/docs/codex.md
 class StdioAppServer:
     def __init__(
         self,

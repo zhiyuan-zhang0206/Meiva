@@ -138,7 +138,7 @@ describe("messageCardConfig", () => {
     // meiva:note
     // Another agent's message is content this agent read, so opening the work
     // block shows it instead of a collapsed header (user ruling 2026-11-09).
-    // meiva:link ui/web/src/docs/frontend-components/timeline-view/deep-collapse.meiva.okf.md
+    // meiva:link ui/web/src/docs/frontend-components/timeline-view/deep-collapse.md
     expect(cfg!.fixedDefault).toBe(true);
   });
 
@@ -223,7 +223,7 @@ describe("MessageCard", () => {
   // MessageCard is only the borderless secondary container: any hover chrome
   // belongs to TimelineRow, so MessageCard never mounts group/msgcard or extra
   // sibling chrome elements of its own.
-  // meiva:link ui/web/src/docs/frontend-components/timeline-view/card-chrome.meiva.okf.md
+  // meiva:link ui/web/src/docs/frontend-components/timeline-view/card-chrome.md
   it("renders the container alone — hover chrome belongs to the row, not the card", () => {
     const { container } = render(
       <MessageCard config={cfg}>
@@ -244,7 +244,7 @@ describe("MessageCard", () => {
 describe("CardHeader", () => {
   // meiva:note
   // The item timestamp left the header when it moved to the card's hover footer, so the header carries only the toggle chrome; the stamp's own placement is asserted at the TimelineView level.
-  // meiva:link ui/web/src/docs/frontend-components/timeline-view/card-chrome.meiva.okf.md
+  // meiva:link ui/web/src/docs/frontend-components/timeline-view/card-chrome.md
   it("carries no item timestamp — the stamp lives in the card's hover footer", () => {
     const event = item("system_marker", {
       source: "sdk_hint",
@@ -292,7 +292,7 @@ describe("CardHeader", () => {
   it("hovering or focusing the toggle warms the code-highlighter chunk (intent prefetch)", () => {
     // meiva:note
     // Regression coverage for the P2 adversarial-review finding on Meiva #3463: this wiring had no assertion that pointer-enter/focus actually invokes the prefetch, only that a mocked no-op did not blow up. Each event gets a fresh chunk and that chunk's import is the probe, so a header wired to anything else never calls it.
-    // meiva:link ui/web/src/docs/frontend-components/code-blocks.meiva.okf.md
+    // meiva:link ui/web/src/docs/frontend-components/code-blocks.md
     const cfg = messageCardConfig(baseItem)!;
 
     const hoverImport = vi.fn(() => new Promise<never>(() => undefined));

@@ -1,6 +1,6 @@
 # meiva:note
 # Unknown errors retain identity and never enter retry waiting, even with a provider cause.
-# meiva:link base/packages/tests/lm/docs/contracts.meiva.okf.md
+# meiva:link base/packages/tests/lm/docs/contracts.md
 
 from pathlib import Path
 

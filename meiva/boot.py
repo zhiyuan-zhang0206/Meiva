@@ -11,7 +11,7 @@
 # identity, next to the SDK process bootstrap it builds on. The plugin-state codec stays here:
 # the agent layer owns it, both attachments replay through it, and one load site keeps the upward
 # edge counted once.
-# meiva:link meiva/docs/boot-contracts.meiva.okf.md
+# meiva:link meiva/docs/boot-contracts.md
 
 from __future__ import annotations
 
@@ -735,7 +735,7 @@ def bind_launched_context() -> MeivaContext | None:
 # `meiva.shell` choosing a working directory) keep their own fallback, while the
 # reads that need an identity report this reason. A cell that failed half-way
 # leaves a plugin surface with no identity behind it, so the failure drops it.
-# meiva:link meiva/self/harness/docs/harness-attach.meiva.okf.md
+# meiva:link meiva/self/harness/docs/harness-attach.md
 _HARNESS_HANDLE_ENV = "MEIVA_HARNESS_HANDLE"
 
 

@@ -1,4 +1,4 @@
-# meiva:link cli/docs/operator-surfaces/public-client-wire.meiva.okf.md
+# meiva:link cli/docs/operator-surfaces/public-client-wire.md
 
 from __future__ import annotations
 

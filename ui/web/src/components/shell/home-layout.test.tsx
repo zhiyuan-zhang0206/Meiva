@@ -175,7 +175,7 @@ describe("HomeLayout frame contract", () => {
     // meiva:note
     // A server render has no page to read: the provider carries the inert browser the composition
     // root builds there.
-    // meiva:link ui/web/src/docs/frontend-state/browser-port.meiva.okf.md
+    // meiva:link ui/web/src/docs/frontend-state/browser-port.md
     const html = renderToString(
       <BrowserProvider browser={browserOver(null, () => undefined)}>
         <HomeLayout
@@ -235,7 +235,7 @@ describe("HomeLayout frame contract", () => {
     // The ui handle paints `after:top-0 after:bottom-0`; a caller-side inset
     // overrides it, and none may: a line that stops above the composer reads as
     // broken next to the ones that run edge to edge.
-    // meiva:link ui/web/src/docs/frontend-components/fleet-view.meiva.okf.md
+    // meiva:link ui/web/src/docs/frontend-components/fleet-view.md
     for (const handle of handles) {
       expect(handle.className).not.toContain("after:top-[");
       expect(handle.style.getPropertyValue("--home-divider-line-top")).toBe("");
@@ -260,7 +260,7 @@ describe("HomeLayout frame contract", () => {
     // The group stays mounted so the conversation keeps its component; only the
     // sidebar's own panel and divider leave, and the sole remaining panel takes
     // the whole group.
-    // meiva:link ui/web/src/docs/frontend-components/home-shell-chrome/home-shell-chrome.meiva.okf.md
+    // meiva:link ui/web/src/docs/frontend-components/home-shell-chrome/home-shell-chrome.md
     const groups = screen.getAllByTestId("resizable-panel-group");
     expect(groups).toHaveLength(2);
     expect(directPanelIds(groups[0])).toEqual(["panel-main"]);
@@ -371,7 +371,7 @@ describe("HomeLayout collapsed frame", () => {
     // the whole main subtree: the conversation rebuilt, its height flashed, and
     // the reader's position came back from the per-entry bookmark instead of
     // staying put (user report 2026-10-20).
-    // meiva:link ui/web/src/docs/frontend-components/home-shell-chrome/home-shell-chrome.meiva.okf.md
+    // meiva:link ui/web/src/docs/frontend-components/home-shell-chrome/home-shell-chrome.md
     const main = <section data-testid="main-timeline" />;
     const props = { sidebar: <aside data-testid="agent-tree" />, main, inspector: null, isNarrow: false, isLarge: true };
 

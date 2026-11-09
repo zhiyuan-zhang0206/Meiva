@@ -12,11 +12,11 @@ from base.packages.text_budget import LengthBudget, Level, Unit, evaluate
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 
-# meiva:link scripts/lint/docs/agents-md-size.meiva.okf.md
+# meiva:link scripts/lint/docs/agents-md-size.md
 _HARD_CEILING = 245
 
 
-# meiva:link scripts/lint/docs/agents-md-size.meiva.okf.md
+# meiva:link scripts/lint/docs/agents-md-size.md
 def main(_argv: list[str] | None = None, *, repo_root: Path | None = None) -> int:
     agents_md = (repo_root or _REPO_ROOT) / "AGENTS.md"
     if not agents_md.exists():
@@ -36,7 +36,7 @@ def main(_argv: list[str] | None = None, *, repo_root: Path | None = None) -> in
             f"task belongs in docs/conventions/, where it is read on demand. Move that section out. "
             f"If the ceiling genuinely needs to move, bump _HARD_CEILING in "
             f"scripts/lint/agents_md_size.py in the same PR and justify it in the commit message. "
-            f"See scripts/lint/docs/agents-md-size.meiva.okf.md.",
+            f"See scripts/lint/docs/agents-md-size.md.",
         )
         return 1
     return 0

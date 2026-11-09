@@ -262,7 +262,6 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
         Idempotency.AT_LEAST_ONCE_WITH_KEY,
         note="withdraw only the observed global notice; keyed replay never selects a later notice",
     ),
-    ("GET", "/api/okf/graph"): RouteContract(),
     ("POST", "/api/keyed/v1/packages/draft"): RouteContract(
         Idempotency.AT_LEAST_ONCE_WITH_KEY,
         note="raw draft identity and original immutable birth snapshot",

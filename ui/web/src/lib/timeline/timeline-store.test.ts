@@ -288,7 +288,7 @@ function runFlagCase(
 // running turn's "Working for" header counts from while no block is in flight. It must follow
 // every thread event (that is the whole point — the number keeps moving with no block live) and it
 // must never survive a thread switch (another conversation's events are not this turn's activity).
-// meiva:link ui/web/src/docs/frontend-components/timeline-view/deep-collapse.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/timeline-view/deep-collapse.md
 describe("liveAnchorAt (the running turn's live clock anchor)", () => {
   it("records the page clock of each event the active thread receives", () => {
     act(() => {

@@ -25,7 +25,7 @@ from services.agent_runner.agent_ops import in_flight
 # meiva:note
 # One answer per failure class, so a caller can tell "gone" (stop) from "too large"
 # (ask for the file rather than the rendering) without reading the body text.
-# meiva:link gateway/agents/docs/to-user-read-failures.meiva.okf.md
+# meiva:link gateway/agents/docs/to-user-read-failures.md
 _STATUS: dict[ToUserReadFailure, tuple[int, bytes]] = {
     ToUserReadFailure.GONE: (404, b"Referenced file is no longer available"),
     ToUserReadFailure.TOO_LARGE: (413, b"Referenced file is larger than the resource budget"),

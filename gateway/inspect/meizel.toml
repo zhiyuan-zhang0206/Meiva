@@ -1,4 +1,4 @@
-exports = ["neighbors.py", "okf_graph.py", "router.py", "schemas.py"]
+exports = ["neighbors.py", "router.py", "schemas.py"]
 
 [uses]
 "_live.py" = ["_heartbeat.py", "schemas.py"]

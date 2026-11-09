@@ -31,13 +31,13 @@ interface Props {
   // drawer closed on a phone, the icon row is gone and an unreviewed P0 would be invisible
   // (user 2026-10-21). It rides the restore button on desktop and the menu button on a
   // phone, and each button's label names it, so the closed state stays quiet but not blind.
-  // meiva:link ui/web/src/docs/frontend-components/home-shell-chrome/home-shell-chrome.meiva.okf.md
+  // meiva:link ui/web/src/docs/frontend-components/home-shell-chrome/home-shell-chrome.md
   alertCount?: number;
   // meiva:note
   // A control that belongs to the viewport's right edge rather than to the
   // centred conversation column: the home page passes the reopen control of a
   // collapsed right panel here (user 2026-10-20).
-  // meiva:link ui/web/src/docs/frontend-components/home-shell-chrome/home-shell-chrome.meiva.okf.md
+  // meiva:link ui/web/src/docs/frontend-components/home-shell-chrome/home-shell-chrome.md
   pinnedRight?: ReactNode;
   children?: ReactNode;
   /** Timeline column cap — the bar floats above the timeline surface and
@@ -57,7 +57,7 @@ export function HeaderBar({ label, onOpenSidebar, sidebarCollapsed, onToggleSide
   // centred, so an in-flow button rode to x=320 of a 1440 viewport and read as
   // if it belonged to the text (user 2026-10-20). It is pinned to the bar and
   // the label keeps a matching inset, so the two never collide at narrow widths.
-  // meiva:link ui/web/src/docs/frontend-components/home-shell-chrome/home-shell-chrome.meiva.okf.md
+  // meiva:link ui/web/src/docs/frontend-components/home-shell-chrome/home-shell-chrome.md
   return (
     <header
       className={cn(
@@ -96,7 +96,7 @@ export function HeaderBar({ label, onOpenSidebar, sidebarCollapsed, onToggleSide
         // and centred, so an in-flow control rode to the middle of the viewport
         // and read as part of the timeline (same rule as the rail's restore
         // button, user 2026-10-20).
-        // meiva:link ui/web/src/docs/frontend-components/home-shell-chrome/home-shell-chrome.meiva.okf.md
+        // meiva:link ui/web/src/docs/frontend-components/home-shell-chrome/home-shell-chrome.md
         <div className="hidden md:flex absolute right-2 top-1/2 -translate-y-1/2 items-center">
           {pinnedRight}
         </div>

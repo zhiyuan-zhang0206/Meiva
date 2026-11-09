@@ -12,7 +12,7 @@
 # already reach: `base.lm.attach` packs a note's content blocks and `base.agents.messages`
 # builds the notes themselves. The agent layer importing the LLM layer is the one legal
 # direction; the reverse would be a cycle.
-# meiva:link agent/messages/docs/message-format.meiva.okf.md
+# meiva:link agent/messages/docs/message-format.md
 from __future__ import annotations
 
 __all__ = [
@@ -29,7 +29,7 @@ SYSTEM_NOTE_CLOSE = "</system_note>"
 # meiva:note
 # The tags with the newline that always separates them from a body, so a reader can cut a
 # body out by offset without parsing the text.
-# meiva:link agent/messages/docs/message-format.meiva.okf.md
+# meiva:link agent/messages/docs/message-format.md
 SYSTEM_NOTE_LEAD = f"{SYSTEM_NOTE_OPEN}\n"
 SYSTEM_NOTE_TRAIL = f"\n{SYSTEM_NOTE_CLOSE}"
 
@@ -42,7 +42,7 @@ def unwrap_system_note(text: str) -> str:
     # meiva:note
     # A message written before the note carried tags comes back unchanged, so a reader can
     # apply this unconditionally.
-    # meiva:link agent/messages/docs/message-format.meiva.okf.md
+    # meiva:link agent/messages/docs/message-format.md
     if not (text.startswith(SYSTEM_NOTE_LEAD) and text.endswith(SYSTEM_NOTE_TRAIL)):
         return text
     return text[len(SYSTEM_NOTE_LEAD) : -len(SYSTEM_NOTE_TRAIL)]

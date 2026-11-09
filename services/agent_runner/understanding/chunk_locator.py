@@ -2,8 +2,8 @@
 # Single-segment chunk location for the understanding consumer: reads `compact_segment_shape`
 # metadata on sealed boundaries and reconstructs only the one checkpoint segment that holds the
 # claimed chunk.
-# meiva:link base/agents/history/docs/range-read-contracts.meiva.okf.md
-# meiva:link base/agents/history/hierarchy/docs/chunks.meiva.okf.md
+# meiva:link base/agents/history/docs/range-read-contracts.md
+# meiva:link base/agents/history/hierarchy/docs/chunks.md
 
 from __future__ import annotations
 

@@ -9,7 +9,7 @@ export type OlderSegmentLoadResult = "loaded" | "exhausted" | "unready" | "abort
 // two automatic fills (the cold first-viewport fill, compact-history retention)
 // read history nobody pulled for, and presenting them showed a ring the reader
 // never triggered (user report 2026-10-29).
-// meiva:link ui/web/src/docs/frontend-components/timeline-view/history-paging.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/timeline-view/history-paging.md
 export type OlderLoadOrigin = "reader" | "background";
 
 export function startsTurn(event: SystemEvent): boolean {

@@ -36,7 +36,7 @@ _LABEL = 13
 _INDENT = " " * (2 + _LABEL)
 
 
-# meiva:link cli/commands/extensions/docs/plugin-inspection.meiva.okf.md
+# meiva:link cli/commands/extensions/docs/plugin-inspection.md
 def cmd_plugins_inspect(name: str | None, *, catalog: Catalog) -> int:
     if name is None:
         _print_surfaces(catalog)
@@ -196,7 +196,7 @@ def _where(exc: BaseException) -> str:
     return f" (at {frames[-1].filename}:{frames[-1].lineno})" if frames else ""
 
 
-# meiva:link cli/commands/extensions/docs/plugin-inspection.meiva.okf.md
+# meiva:link cli/commands/extensions/docs/plugin-inspection.md
 def cmd_plugins_verify(*, rng: random.Random, home: Path, environ: Mapping[str, str]) -> int:
     from agent.state import plugin_state_schema
     from meiva.sdk_surface.extensions import load_extensions

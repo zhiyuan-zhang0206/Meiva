@@ -106,7 +106,7 @@ export interface ForceGroup {
 // key differs (display.graph_force_params / display.task_force_params.v2,
 // user ruling 2026-08-10 #1127: the two graphs are independent UIs and must
 // not share tuning state).
-// meiva:link ui/web/src/docs/frontend-components/fleet-view.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/fleet-view.md
 // meiva:note
 // alphaDecay defaults to 0.08 rather than d3's 0.0228. At 0.0228 the 40-node
 // Agent Graph ran 295 ticks — 4.9 s at 60 fps — and every node travelled 108 px
@@ -115,7 +115,7 @@ export interface ForceGroup {
 // (1.4 s) with the same layout and no overlapping nodes, and the entrance still
 // shows a landing. Only a default changes: a browser that already stored
 // display.*_force_params keeps its value, and the slider range stays 0.001-0.2.
-// meiva:link ui/web/src/docs/frontend-components/fleet-view.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/fleet-view.md
 export const FORCE_DEFAULTS: ForceParams = {
   nodeSizeMin: 18,
   nodeSizeMax: 26,

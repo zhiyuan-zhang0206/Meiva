@@ -75,7 +75,7 @@ def test_creation_replay_survives_a_closed_notice(
     # receipt lookup precedes the mutable target checks. Closing is the only way past
     # an open notice (user ruling 2026-10-21), so the replay is checked against a
     # dismissed row.
-    # meiva:link gateway/agents/docs/notice-receipts.meiva.okf.md
+    # meiva:link gateway/agents/docs/notice-receipts.md
     agent = seed_agent(db_conn)
     path = f"/api/agents/{agent}/notices"
     with gateway_test_client() as client:

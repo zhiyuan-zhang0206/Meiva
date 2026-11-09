@@ -3,7 +3,7 @@
 # run-once LaunchAgent in the user's `gui/<uid>` domain, because the permissions helper's launchd
 # job lives there and an SSH session cannot load it. The script submits the job, waits for its
 # `ONESHOT_RC=` line, prints the job's log and removes the job.
-# meiva:link cli/docs/fleet-update.meiva.okf.md
+# meiva:link cli/docs/fleet-update.md
 
 from __future__ import annotations
 

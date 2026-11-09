@@ -49,7 +49,7 @@ export interface InsightsShellProps {
 // them to the shell. The shell owns the layout, the nav and the anchor scroll, and takes each body
 // as a required prop, so a test renders the shell with its own stand-ins instead of replacing the
 // section modules.
-// meiva:link ui/web/src/docs/frontend-components/control-page-load.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/control-page-load.md
 export default function InsightsPage() {
   return <InsightsShell Status={StatusPage} Ops={OpsPage} Alerts={AlertsSection} />;
 }
@@ -75,7 +75,7 @@ export function InsightsShell({ Status, Ops, Alerts }: InsightsShellProps) {
   // meiva:note
   // The outer row clips (overflow-hidden): the nav rail and the content column each own their
   // vertical scroll, so the document/body never gains a third scrollbar.
-  // meiva:link ui/web/src/docs/frontend-components/control-page-load.meiva.okf.md
+  // meiva:link ui/web/src/docs/frontend-components/control-page-load.md
   return (
     <div className={cn(FLEX, FLEX_1, MIN_H_0, FLEX_COL)}>
       <header className={cn("shrink-0 items-center gap-1.5 border-b border-border px-4 py-2", FLEX)}>

@@ -2,7 +2,7 @@
 # `settle_turn_end` is the turn boundary: the held model call becomes one `turn_end` record,
 # and the reason recorded on it is the one this decision point resolved — never a guess made
 # where the event is written.
-# meiva:link agent/graph/llm/docs/turn-records.meiva.okf.md
+# meiva:link agent/graph/llm/docs/turn-records.md
 from __future__ import annotations
 
 from langchain_core.messages import HumanMessage

@@ -27,8 +27,8 @@ from base.packages.plugins.extensions import PluginContributions
 # clean-slate rule `safe_load_plugin_module` already follows: nothing resolves a provider module by
 # name after a load — each caller keeps the object it was handed — so restoring the entry an
 # earlier loader left would only keep a name alive that a retry re-executes.
-# meiva:link base/lm/docs/provider-plugins.meiva.okf.md
-# meiva:link docs/plugins/module-loading/fixed-name-registration-audit.meiva.okf.md
+# meiva:link base/lm/docs/provider-plugins.md
+# meiva:link docs/plugins/module-loading/fixed-name-registration-audit.md
 def _load_one(
     builder: CatalogBuilder, name: str, provider_py: Path, *, is_builtin: bool, home: Path
 ) -> None:
@@ -59,7 +59,7 @@ def _load_one(
         raise
 
 
-# meiva:link base/lm/docs/provider-plugins.meiva.okf.md
+# meiva:link base/lm/docs/provider-plugins.md
 def _declaration(
     module: ModuleType, *, name: str, plugin_dir: Path, home: Path
 ) -> PluginContributions:

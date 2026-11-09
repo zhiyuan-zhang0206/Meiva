@@ -95,4 +95,4 @@ Agent loguru JSONL (`agent-{N}.log`) is not scraped — it already reaches Loki
 structured via OTLP.
 
 The emitter wiring behind that stream, the unified `events` schema (and its
-legacy `agent_events` mirror), and the monthly partitioning are in [the logging owner](../../../../base/log/docs/log.meiva.okf.md).
+legacy `agent_events` mirror), and the monthly partitioning are in [the logging owner](../../../../base/log/docs/log.md).

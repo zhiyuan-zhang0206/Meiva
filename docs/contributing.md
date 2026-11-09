@@ -7,7 +7,7 @@ discuss unresolved design, contract or dependency choices with the user. Follow
 
 ## Find the owner
 
-Read the relevant component's local `docs/` and the [OKF index](index.meiva.okf.md).
+Read the relevant component's local `docs/` and the [OKF index](README.md).
 Use `scripts/audit/where_used.py` before changing a symbol or contract so the
 change includes real consumers, tests, patch targets and current documentation.
 Cross-cutting rules live in [conventions](conventions/README.md); historical
@@ -134,13 +134,13 @@ schema changes, immutable migration history and baseline verification.
 ### Locality gate (meizel)
 
 `python -m meizel check` judges every first-party dependency against the
-`meizel.toml` manifests (see [the checker](../meizel/docs/checker/checker.meiva.okf.md)).
+`meizel.toml` manifests (see [the checker](../meizel/docs/checker/checker.md)).
 A commit runs `check --changed` on the staged files, a push and CI run the whole
 `check`, and CI also compares recorded debt with the base branch.
 
 Directories that still carry recorded debt are strict-to-be: the recorded
 violations pass, anything new fails, and the debt may only shrink
-([recorded debt](../meizel/docs/checker/debt/debt.meiva.okf.md)).
+([recorded debt](../meizel/docs/checker/debt/debt.md)).
 
 - Fix a violation instead of recording it. Move the code, use the public door,
   inject the collaborator, or declare the edge in the manifest of the directory
@@ -178,12 +178,12 @@ violations pass, anything new fails, and the debt may only shrink
   patch-shaped codes `patch-raising-false` and `test-subclass-override` (a test class that
   overrides a method of production code). Do not add one;
   pass the dependency in as an explicit parameter
-  ([patching](../meizel/docs/checker/patching/patching.meiva.okf.md)). When a symbol is renamed, `debt carry
+  ([patching](../meizel/docs/checker/patching/patching.md)). When a symbol is renamed, `debt carry
   --rename-target OLD=NEW` moves its entries; when a function or class moves to another file,
   `debt carry --move-symbol OLD_FILE::NAME=NEW_FILE` does. A change that moves a top-level function
   or class between files also declares the move in its pull request body, one line per move
   (`Symbol-Move: <old file>::<name> -> <new file> — <why>`), so `debt diff` measures the same site
-  once instead of twice; see [the debt diff](../meizel/docs/checker/debt/diff.meiva.okf.md). `debt sites --code <patch code>
+  once instead of twice; see [the debt diff](../meizel/docs/checker/debt/diff.md). `debt sites --code <patch code>
   --target-prefix <prefix>` lists where a target is patched (file, line, form), and `debt diff
   --by-target` reports what a change paid down per target; a codemod PR pastes the latter.
 - Only a composition root reads the world. A file that takes `settings`, the environment, the
@@ -196,8 +196,8 @@ violations pass, anything new fails, and the debt may only shrink
   and the process-wide object that does (`SYSTEM_TIMERS`, `Clock`) are listed in
   `meizel.policy.toml` as readers, and using one is a read of its kind; an entry whose
   definition moved fails as `stale-reader`, so a PR that moves or renames one updates the entry
-  ([ambient reads](../meizel/docs/checker/ambient.meiva.okf.md),
-  [readers](../meizel/docs/checker/ambient-readers.meiva.okf.md)).
+  ([ambient reads](../meizel/docs/checker/ambient.md),
+  [readers](../meizel/docs/checker/ambient-readers.md)).
 - `meizel.policy.toml` lists every allowance a manifest cannot grant itself (`[external]` sites,
   `[dynamic-attrs]` sites, `[loads]` sites, default-argument injections) and every exemption of the lint rules in
   `meizel/` (ambient state, clock lattice, single owners, setenv in tests, per-agent settings,
@@ -206,7 +206,7 @@ violations pass, anything new fails, and the debt may only shrink
   file unless the task names the entry. An added entry is a line the reviewer reads in the diff;
   a removed one narrows what every gate still reports, so the PR body says why, one line per
   removal: `Policy-Removal: <table>[.<entry>] — <why it is no longer needed> — <what replaces it,
-  or the gap it leaves>` ([the policy file](../meizel/docs/checker/policy/policy.meiva.okf.md)).
+  or the gap it leaves>` ([the policy file](../meizel/docs/checker/policy/policy.md)).
 
 Before submitting, review your own diff with
 [review-contribution](../.agents/skills/review-contribution/SKILL.md). It routes

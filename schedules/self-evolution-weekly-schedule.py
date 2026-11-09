@@ -1,4 +1,4 @@
-# meiva:link schedules/docs/self-evolution.meiva.okf.md
+# meiva:link schedules/docs/self-evolution.md
 
 import os
 from datetime import UTC, datetime

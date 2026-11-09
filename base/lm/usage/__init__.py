@@ -111,7 +111,7 @@ def log_usage_from_message(
     # meiva:note
     # A message carries at most one usage record: the direct-call meter stamps `meiva_usage`
     # before a caller that also accounts for the call gets to log it.
-    # meiva:link base/lm/usage/docs/usage.meiva.okf.md
+    # meiva:link base/lm/usage/README.md
     if not _accountable(msg):
         return None
     usage_metadata = msg.usage_metadata

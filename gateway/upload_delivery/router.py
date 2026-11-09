@@ -1,4 +1,4 @@
-# meiva:link gateway/upload_delivery/docs/delivered-uploads/delivered-uploads.meiva.okf.md
+# meiva:link gateway/upload_delivery/docs/delivered-uploads/delivered-uploads.md
 
 from typing import Annotated
 from uuid import UUID

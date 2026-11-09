@@ -9,7 +9,7 @@
 # through `read_database_delivery` therefore replaced "this process runs <cwd>, not the home's
 # source checkout <source>" with "no database login was delivered by this process's startup entry",
 # which hid the cause of a whole failed external-harness attach (#6418).
-# meiva:link base/cluster/authority/docs/wiring.meiva.okf.md
+# meiva:link base/cluster/authority/docs/wiring.md
 
 from __future__ import annotations
 

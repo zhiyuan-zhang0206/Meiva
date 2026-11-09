@@ -6,7 +6,7 @@
 # export while terminated, request-scoped bundle staging and target import, atomic
 # `SELECT ... FOR UPDATE` Postgres cutover (with target rollback on CAS conflict), step-3 wake
 # (`resurrect-explicit`) on to_machine with completion message, and post-commit workspace retirement.
-# meiva:link gateway/agents/docs/agent-transfer.meiva.okf.md
+# meiva:link gateway/agents/docs/agent-transfer.md
 
 from __future__ import annotations
 

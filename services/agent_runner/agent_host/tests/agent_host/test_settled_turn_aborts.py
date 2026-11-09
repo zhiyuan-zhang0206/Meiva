@@ -4,7 +4,7 @@
 # `BaseChatModel` through the production `llm_override` seam (`module:build_test_llm`) so
 # `claim_node`, `llm_node`, `PendingTurnFailure`, `settle_turn_failure`, `stall_guard`, and
 # `HostedServiceResources` all run unmodified.
-# meiva:link services/docs/agent_runner_side/agent_runner_side.meiva.okf.md
+# meiva:link services/docs/agent_runner_side/agent_runner_side.md
 
 from __future__ import annotations
 

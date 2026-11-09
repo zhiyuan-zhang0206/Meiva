@@ -3,7 +3,7 @@
 # whole cluster before and after the stops: the alert silence. The source of
 # each is the operator's checkout, so the first update that carries a change to one already runs
 # it. A reply that cannot be read costs a warning, never the window.
-# meiva:link cli/docs/fleet-update-window/fleet-update-window.meiva.okf.md
+# meiva:link cli/docs/fleet-update-window/fleet-update-window.md
 
 from __future__ import annotations
 
@@ -24,7 +24,7 @@ def program_text(path: Path) -> str:
 # meiva:note
 # Open or close the window's alert silence on the gateway host. The program says
 # `SILENCE failed` or `SILENCE skipped` when it cannot, and the window warns and goes on.
-# meiva:link cli/docs/fleet-update-window/fleet-update-window.meiva.okf.md
+# meiva:link cli/docs/fleet-update-window/fleet-update-window.md
 def run_silence(
     s: Session, gateway: str, verb: str, *, hours: float | None = None, comment: str = ""
 ) -> None:

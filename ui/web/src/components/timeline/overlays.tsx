@@ -11,7 +11,7 @@ import { FLEX, OVERFLOW_HIDDEN } from "@/lib/layout/layout";
 // meiva:note
 // The ring's natural box: the pull strip scales it, so this is the height at
 // which the whole circle is on screen.
-// meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.md
 const RING_SIZE = 20;
 
 // meiva:note
@@ -31,7 +31,7 @@ const RING_SIZE = 20;
 // decomposes to 0deg — the ring then paints the same frame forever while
 // getAnimations() reports it running (user report 2026-10-29: "it doesn't spin
 // any more, it's a static animation").
-// meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.md
 function LoadingRing({ arc = 0.72, scale = 1, testId, className }: {
   arc?: number; scale?: number; testId?: string; className?: string;
 }) {
@@ -56,7 +56,7 @@ function LoadingRing({ arc = 0.72, scale = 1, testId, className }: {
 // page backwards on their own, and presenting them lit this strip for history
 // nobody pulled for (user report 2026-10-29). The strip keeps one ring element
 // for the whole request, so its spin never restarts mid-load.
-// meiva:link ui/web/src/docs/frontend-components/timeline-view/loading-ring.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/timeline-view/loading-ring.md
 export function LoadOlderSpinner({ loadingOlder, pullProgress = 0, pullOffset = 0, returning = false }: {
   loadingOlder: boolean; pullProgress?: number; pullOffset?: number; returning?: boolean;
 }) {
@@ -69,7 +69,7 @@ export function LoadOlderSpinner({ loadingOlder, pullProgress = 0, pullOffset = 
   // fixed-size ring is sliced into a bar for the first few pixels of a pull
   // (user report 2026-10-20: "a spinner with no bottom"). Scaling it with the
   // strip keeps the whole ring on screen at every pull distance.
-  // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.meiva.okf.md
+  // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.md
   const ringScale = height > 0 ? Math.min(1, height / RING_SIZE) : 1;
   const arc = loadingOlder ? 0.72 : 0.18 + 0.54 * pullProgress;
   return (
@@ -118,7 +118,7 @@ export function LoadOlderKeyboardButton({ loading, onClick }: { loading: boolean
 // label: one loading vocabulary, and nothing to re-translate (user 2026-10-21). It
 // only appears when this thread has no items yet AND a fetch is in flight — a warm
 // switch or a background refetch keeps its items on screen and never shows this.
-// meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.md
 export function ColdLoadSpinner({ show }: { show: boolean }) {
   const t = useTranslations("timeline");
   if (!show) return null;
@@ -148,7 +148,7 @@ export function ColdLoadSpinner({ show }: { show: boolean }) {
 // refresh in flight does not override that — a ring over the same dead click is
 // the same problem. `atBottom` is the measured distance to the bottom, so
 // content appended above re-decides it.
-// meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.md
 export function ScrollToBottomButton({
   atBottom,
   refreshing = false,

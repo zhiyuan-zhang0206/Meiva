@@ -21,7 +21,7 @@ export interface ContextButtonProps {
   agentId: number | null;
   // meiva:note
   // Controlled expansion state owned by InspectorPanel.
-  // meiva:link ui/web/src/docs/frontend-components/context-breakdown.meiva.okf.md
+  // meiva:link ui/web/src/docs/frontend-components/context-breakdown.md
   open: boolean;
   onOpenChange: (open: boolean) => void;
   contextTokens: number;
@@ -38,7 +38,7 @@ const READOUT_TEXT_CLASS = "hidden sm:inline";
 // that, when clicked, expands the breakdown popover in place (lazy-loaded on
 // expand). Escape, an outside click, the close button, or clicking the meter
 // again collapses it.
-// meiva:link ui/web/src/docs/frontend-components/context-breakdown.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/context-breakdown.md
 export function ContextButton(props: ContextButtonProps) {
   const { agentId, open, onOpenChange, ...meter } = props;
   const buttonRef = useRef<HTMLButtonElement>(null);
@@ -49,7 +49,7 @@ export function ContextButton(props: ContextButtonProps) {
   // Escape / outside pointer-down collapse the panel. Document-level listeners
   // exist only while open; the closing outside click still lands on its target
   // (non-modal — nothing is swallowed).
-  // meiva:link ui/web/src/docs/frontend-components/context-breakdown.meiva.okf.md
+  // meiva:link ui/web/src/docs/frontend-components/context-breakdown.md
   useEffect(() => {
     if (!open) return;
     const onKeyDown = (e: KeyboardEvent) => {
@@ -59,7 +59,7 @@ export function ContextButton(props: ContextButtonProps) {
       // meiva:note
       // The listener sits on the document, so the target is whatever node was pressed: a target that
       // is not a Node belongs to no element and cannot be inside either box.
-      // meiva:link ui/web/src/docs/frontend-components/context-breakdown.meiva.okf.md
+      // meiva:link ui/web/src/docs/frontend-components/context-breakdown.md
       const target = e.target;
       if (!(target instanceof Node)) return;
       if (panelRef.current?.contains(target) || buttonRef.current?.contains(target)) return;

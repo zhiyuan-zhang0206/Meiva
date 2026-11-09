@@ -4,7 +4,7 @@
 // a pinch produces are answers the browser port gives (`fakeBrowser().answerViewport`), so no case
 // installs a stub on the global; the decision itself is `pinnedShellHeight` in
 // lib/browser/viewport.ts and is asserted directly as well.
-// meiva:link ui/web/src/docs/frontend-state/browser-port.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-state/browser-port.md
 
 import { cleanup } from "@testing-library/react";
 import { afterEach, expect, it } from "vitest";

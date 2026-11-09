@@ -41,7 +41,7 @@
 # `fetch_article` is the shared laddered primitive the `rss` adapter imports for its `--full`
 # mode (pulling an entry's full body from its link). A heavy SPA whose content needs a real
 # interactive browser is out of scope here.
-# meiva:link meiva_builtins/skills/integrations/web-sources/docs/web-sources.meiva.okf.md
+# meiva:link meiva_builtins/skills/integrations/web-sources/README.md
 
 from __future__ import annotations
 

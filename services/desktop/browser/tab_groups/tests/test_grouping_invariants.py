@@ -6,7 +6,7 @@
 # the WARNING the daemon must leave when it had to merge a duplicate, and the Python
 # side of ungrouping an agent's last tab (including waking an idled-out service
 # worker before closing the page).
-# meiva:link services/desktop/browser/docs/tab-groups.meiva.okf.md
+# meiva:link services/desktop/browser/docs/tab-groups.md
 from __future__ import annotations
 
 import asyncio
@@ -73,7 +73,7 @@ async def chrome_factory() -> AsyncIterator[Callable[[dict[str, Any]], Awaitable
 # state rather than answer order, keeping the keeper anchored in its window, the
 # same convergence on Chrome start and extension update, and no touch of a group
 # this stack did not name.
-# meiva:link services/desktop/browser/docs/tab-groups.meiva.okf.md
+# meiva:link services/desktop/browser/docs/tab-groups.md
 def test_worker_converges_one_group_per_agent_across_the_browser() -> None:
     source = next(EXTENSION_DIR.glob("group-*.js")).read_text()
     assert "chrome.tabGroups.query({ title })" in source
@@ -216,7 +216,7 @@ async def test_a_malformed_report_warns_and_keeps_the_page(
 # tab closes as a SAVED group, and the extension API neither lists nor deletes one.
 # The daemon therefore ungroups that tab first; these pin the Python half of that
 # contract (including waking an idled-out MV3 service worker before closing).
-# meiva:link services/desktop/browser/docs/tab-groups.meiva.okf.md
+# meiva:link services/desktop/browser/docs/tab-groups.md
 async def test_release_page_ungroups_the_recorded_target_of_the_agent(
     chrome_factory: Callable[[dict[str, Any]], Awaitable[FakeChrome]],
 ) -> None:
@@ -258,7 +258,7 @@ async def test_release_page_wakes_an_idled_out_worker_to_ungroup_the_last_tab(
     # open tab group remains in the tab strip; `release_page` must reload/wake the
     # worker via `loadUnpacked` so closing an agent's tab after >30s removes the
     # group instead of saving a closed group chip.
-    # meiva:link services/desktop/browser/docs/tab-groups.meiva.okf.md
+    # meiva:link services/desktop/browser/docs/tab-groups.md
     model = ChromeModel(loaded=False)
     chrome = await chrome_factory(model.handlers())
     chrome.listings.append([_page("T1"), _page("T2")])

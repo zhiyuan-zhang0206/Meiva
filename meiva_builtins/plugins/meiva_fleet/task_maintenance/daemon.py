@@ -70,7 +70,7 @@ from services.pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfi
 # `base/agents/tasks/reminder_window.py`). A schema-drift exit
 # (`psycopg.ProgrammingError`) is revived by the root health monitor's `/healthz`
 # probe on the next round instead of staying dead.
-# meiva:link meiva_builtins/plugins/meiva_fleet/task_maintenance/docs/task-maintenance/task-maintenance.meiva.okf.md
+# meiva:link meiva_builtins/plugins/meiva_fleet/task_maintenance/docs/task-maintenance/task-maintenance.md
 _log = logging.getLogger("meiva_builtins.plugins.meiva_fleet.task_maintenance.daemon")
 
 
@@ -568,7 +568,7 @@ def run_escalate(
             # already promised: the same category, dedupe and live event a
             # gateway-posted notice gets. Without it, an escalation meant to
             # reach a human reached only the console inbox.
-            # meiva:link base/events/notifications/docs/notifications.meiva.okf.md
+            # meiva:link base/events/notifications/README.md
             announce_sync(pool, bus, receipt.notification_id)
         if receipt.inbound_id is not None:
             announce_reminder(db, bus, receipt.recipient, receipt.inbound_id, receipt.content)

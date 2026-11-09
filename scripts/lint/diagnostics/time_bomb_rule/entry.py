@@ -1,7 +1,7 @@
 # meiva:note
 # The command line: scan directories, target resolution, exit code. The only part
 # that reads the world; the rule modules take what it hands down.
-# meiva:link scripts/lint/docs/time-bomb-rule-parts.meiva.okf.md
+# meiva:link scripts/lint/docs/time-bomb-rule-parts.md
 
 from __future__ import annotations
 

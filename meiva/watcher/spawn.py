@@ -6,7 +6,7 @@
 # files, the machine facts a session starts from, the CLI that delivers the completion notice,
 # the runner env and the interpreter. What the files and the line contain is decided in
 # `launch_plan.py`.
-# meiva:link meiva/watcher/docs/watcher.meiva.okf.md
+# meiva:link meiva/watcher/docs/watcher.md
 
 from __future__ import annotations
 

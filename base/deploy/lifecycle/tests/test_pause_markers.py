@@ -3,7 +3,7 @@
 # one must remove the marker on a serving home, keep it on a home that is not serving, and say
 # which it did. These tests hold the live fact — the agent host's pid and meiva-root's lock —
 # rather than the marker's age, because that is what the sweep reads.
-# meiva:link base/deploy/lifecycle/docs/pause-markers.meiva.okf.md
+# meiva:link base/deploy/lifecycle/docs/pause-markers.md
 
 from __future__ import annotations
 

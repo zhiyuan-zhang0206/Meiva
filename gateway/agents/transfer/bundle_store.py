@@ -5,7 +5,7 @@
 # stages its verified `MEIVA_WS_V1` bytes inside a `with store.stage(transfer_id, bundle_bytes):`
 # block for the duration of the `workspace_transfer_import` RPC and removes them unconditionally on
 # scope exit.
-# meiva:link gateway/agents/docs/agent-transfer.meiva.okf.md
+# meiva:link gateway/agents/docs/agent-transfer.md
 
 from __future__ import annotations
 

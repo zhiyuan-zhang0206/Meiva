@@ -1,4 +1,4 @@
-# meiva:link meiva_builtins/plugins/lm_typesafe/docs/systemone/systemone.meiva.okf.md
+# meiva:link meiva_builtins/plugins/lm_typesafe/docs/systemone/systemone.md
 
 from __future__ import annotations
 

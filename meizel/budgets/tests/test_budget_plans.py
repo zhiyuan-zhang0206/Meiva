@@ -4,7 +4,7 @@
 # Python file, which of a target and a structure directory is judged, and the judged directories with
 # their entry counts. Asserted by value; the same ceilings against a real Git repository are covered
 # by `test_limits.py` and `scripts/lint/tests/test_budget_gate.py`.
-# meiva:link meizel/docs/meizel.meiva.okf.md
+# meiva:link meizel/docs/meizel.md
 
 from __future__ import annotations
 

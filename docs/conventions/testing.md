@@ -47,7 +47,7 @@ unit contracts, run
 `.venv/bin/pytest --test-environment=static`. This scoped process refuses native
 Postgres/Redis and accepts its owned component directories, descendant paths
 and node IDs; other tests keep the native default. CI runs it in the required
-backend static job and excludes the same paths from native shards. See [fixture environments](../../tests/fixtures/docs/static-environment.meiva.okf.md).
+backend static job and excludes the same paths from native shards. See [fixture environments](../../tests/fixtures/docs/static-environment.md).
 
 Check changed Python files with BasedPyright:
 

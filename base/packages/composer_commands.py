@@ -16,7 +16,7 @@ from base.packages.skills.tree import Skill, flatten, identifier, target
 from base.paths import repo_plugins_dir, repo_root, skills_dir
 
 
-# meiva:link base/packages/docs/composer-commands.meiva.okf.md
+# meiva:link base/packages/docs/composer-commands.md
 def load_skill_names(
     provider_roots: Sequence[Path] = (), *, home: Path, environ: Mapping[str, str]
 ) -> list[Skill]:
@@ -31,7 +31,7 @@ def load_skill_names(
     )
 
 
-# meiva:link base/packages/docs/composer-commands.meiva.okf.md
+# meiva:link base/packages/docs/composer-commands.md
 def _commands_enabled() -> bool:
     try:
         return bool(read_declared_flag("agent.commands_enabled", ("agent.commands_enabled",)))
@@ -44,7 +44,7 @@ def _commands_enabled() -> bool:
         return value.strip().lower() in {"1", "true", "yes", "on"}
 
 
-# meiva:link base/packages/docs/composer-commands.meiva.okf.md
+# meiva:link base/packages/docs/composer-commands.md
 class Command(TypedDict):
     name: str
     description: str
@@ -87,7 +87,7 @@ class _SystemCommandEnvironment:
         return CommandSources.system(home=self._home)
 
 
-# meiva:link base/packages/docs/composer-commands.meiva.okf.md
+# meiva:link base/packages/docs/composer-commands.md
 def command_dirs(
     skills: Sequence[Skill], *, sources: CommandSources
 ) -> list[tuple[Path, tuple[str, ...]]]:
@@ -107,7 +107,7 @@ def command_dirs(
     return dirs
 
 
-# meiva:link base/packages/docs/composer-commands.meiva.okf.md
+# meiva:link base/packages/docs/composer-commands.md
 def scan_dir(d: Path, base_ns: tuple[str, ...]) -> dict[str, Command]:
     out: dict[str, Command] = {}
     if not d.is_dir():
@@ -134,7 +134,7 @@ def scan_dir(d: Path, base_ns: tuple[str, ...]) -> dict[str, Command]:
     return out
 
 
-# meiva:link base/packages/docs/composer-commands.meiva.okf.md
+# meiva:link base/packages/docs/composer-commands.md
 def skill_commands(skills: Sequence[Skill]) -> dict[str, Command]:
     out: dict[str, Command] = {}
     for sk in skills:
@@ -149,7 +149,7 @@ def skill_commands(skills: Sequence[Skill]) -> dict[str, Command]:
     return out
 
 
-# meiva:link base/packages/docs/composer-commands.meiva.okf.md
+# meiva:link base/packages/docs/composer-commands.md
 def discover_commands(skills: Sequence[Skill], *, environment: CommandEnvironment) -> list[Command]:
     if not environment.enabled():
         return []
@@ -159,7 +159,7 @@ def discover_commands(skills: Sequence[Skill], *, environment: CommandEnvironmen
     return [out[name] for name in sorted(out)]
 
 
-# meiva:link base/packages/docs/composer-commands.meiva.okf.md
+# meiva:link base/packages/docs/composer-commands.md
 class Invocation(NamedTuple):
     command: Command
     typed_name: str
@@ -169,7 +169,7 @@ class Invocation(NamedTuple):
 _INVOCATION = re.compile(r"(?:\A|(?<=\s))/(\S+)")
 
 
-# meiva:link base/packages/docs/composer-commands.meiva.okf.md
+# meiva:link base/packages/docs/composer-commands.md
 def split_commands(content: str, commands: Sequence[Command]) -> list[Invocation] | None:
     catalog = {match_key(c["name"]): c for c in commands}
     hits = [
@@ -186,7 +186,7 @@ def split_commands(content: str, commands: Sequence[Command]) -> list[Invocation
     return chain
 
 
-# meiva:link base/packages/docs/composer-commands.meiva.okf.md
+# meiva:link base/packages/docs/composer-commands.md
 def _expand_one(inv: Invocation) -> str:
     name = inv.typed_name
     if inv.command["skill_target"]:
@@ -201,7 +201,7 @@ def _expand_one(inv: Invocation) -> str:
     return out
 
 
-# meiva:link base/packages/docs/composer-commands.meiva.okf.md
+# meiva:link base/packages/docs/composer-commands.md
 def expand_command(content: str, commands: Sequence[Command]) -> str:
     if not content.startswith("/"):
         return content
@@ -211,7 +211,7 @@ def expand_command(content: str, commands: Sequence[Command]) -> str:
     return "\n\n".join(_expand_one(inv) for inv in chain)
 
 
-# meiva:link base/packages/docs/composer-commands.meiva.okf.md
+# meiva:link base/packages/docs/composer-commands.md
 @dataclass(frozen=True)
 class CommandCatalog:
     skills: Callable[[], Sequence[Skill]]

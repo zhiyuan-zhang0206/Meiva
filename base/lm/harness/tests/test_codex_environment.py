@@ -25,7 +25,7 @@ SAMPLE_KEY = "sk-proj-sample-value"
 # meiva:note
 # The executable is a local stdio peer, reached through the same resolved binary
 # and real subprocess transport as Codex. No installed Codex CLI is invoked.
-# meiva:link base/lm/harness/docs/harness.meiva.okf.md
+# meiva:link base/lm/harness/docs/harness.md
 def _stub_codex(root: Path) -> str:
     root.mkdir(parents=True, exist_ok=True)
     stub = root / "codex"
@@ -39,7 +39,7 @@ def _stub_codex(root: Path) -> str:
 # Credentials are removed, including empty values, unless API-key billing was
 # explicitly requested. Filtering and copying happen at construction, before
 # start; mutation of the caller's mapping must not change that child's authority.
-# meiva:link base/lm/harness/codex/docs/codex.meiva.okf.md
+# meiva:link base/lm/harness/codex/docs/codex.md
 @pytest.mark.parametrize("api_key_mode", [False, True])
 async def test_session_snapshots_the_environment_received_by_its_process_tree(
     tmp_path: Path, api_key_mode: bool

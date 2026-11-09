@@ -8,13 +8,13 @@ import type { ModelsResponse } from "./types";
 
 // meiva:note
 // The runtime loop an agent is born on, fixed for its whole life: `meiva` is the built-in runtime, the others run the loop on an external CLI. The spawn form offers this choice and never changes it afterwards; a fork keeps its source's value. `launchable` is the platform's own answer to "can this machine actually start a session on it" - a harness can be installed (available) and still not launchable, and the UI says so rather than letting the choice look usable.
-// meiva:link base/agents/docs/harness/harness.meiva.okf.md
+// meiva:link base/agents/docs/harness/harness.md
 
 export type Harness = components["schemas"]["Harness"];
 
 // meiva:note
 // One machine's row: the probe's verdict plus what this build can start.
-// meiva:link ui/web/src/docs/frontend-components/creation-availability/creation-availability.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/creation-availability/creation-availability.md
 export type HarnessAvailability = components["schemas"]["HarnessAvailability"];
 
 export type HarnessModelOption = components["schemas"]["HarnessModelOption"];
@@ -59,7 +59,7 @@ export function providerLabel(provider: string): string {
 // meiva:note
 // Labels are presentation only. Version separators become decimals, vendor
 // spellings retain their branding, and every selection still sends its exact ID.
-// meiva:link ui/web/src/docs/frontend-components/creation-availability/model-presentation.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/creation-availability/model-presentation.md
 export function modelLabel(model: string): string {
   const parts = model.replace(/(\d)-(\d)(?=-|$)/g, "$1.$2").split("-");
   const [provider, ...words] = parts;

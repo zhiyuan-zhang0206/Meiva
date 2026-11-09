@@ -24,7 +24,7 @@ def test_host_dependency_step_runs_first() -> None:
 
 
 def _owner_doc() -> Path:
-    return REPO_ROOT / "cli/commands/lifecycle/docs/start-host-dependencies.meiva.okf.md"
+    return REPO_ROOT / "cli/commands/lifecycle/docs/start-host-dependencies.md"
 
 
 def _bullet_names(text: str, label: str) -> set[str]:

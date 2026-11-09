@@ -2,7 +2,7 @@
 # What a host's lifecycle journal (`run/lifecycle-op.json`) says about how its last operation
 # ended. The journal is the host's own evidence: a stop that exited 0 still counts as failed
 # unless the journal records it complete with rc 0.
-# meiva:link cli/docs/fleet-update-window/failed-stop-recovery.meiva.okf.md
+# meiva:link cli/docs/fleet-update-window/failed-stop-recovery.md
 
 from __future__ import annotations
 

@@ -3,7 +3,7 @@
 # reports a watcher failure, what a watcher's fate reads as, and how a bounded exit ends. The
 # shell in `_watch.py` runs the loop, the task and the logging; every branch that picks between
 # outcomes lives here so a test asserts the verdict instead of observing a spy.
-# meiva:link agent/graph/docs/interrupt-ownership.meiva.okf.md
+# meiva:link agent/graph/docs/interrupt-ownership.md
 
 from __future__ import annotations
 

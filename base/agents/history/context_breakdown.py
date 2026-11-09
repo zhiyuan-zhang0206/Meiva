@@ -117,7 +117,7 @@ def _human_bucket(msg: HumanMessage) -> str:
         # meiva:note
         # The auto-compact summary is injected as an untagged HumanMessage
         # (compose_summary_message); the header inside its system note is its one invariant.
-        # meiva:link base/agents/messages/docs/metadata-contracts.meiva.okf.md
+        # meiva:link base/agents/messages/docs/metadata-contracts.md
         return "compact_summary"
     return "user_input"
 

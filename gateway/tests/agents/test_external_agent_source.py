@@ -156,7 +156,7 @@ async def test_a_system_sourced_chat_reaches_the_agent_as_a_system_note(
     # The upload delivery writes its file list as `system:upload`. The agent reads it enclosed
     # in the system-note tags — framework machinery, not the human speaking — and it is still a
     # chat inbound the claim delivers.
-    # meiva:link agent/messages/docs/message-format.meiva.okf.md
+    # meiva:link agent/messages/docs/message-format.md
     incarnation = await _admit(db_conn, aops_pool, database)
     notice = "Uploaded files on m:\n- a.png: /tmp/a.png"
     with authenticated_gateway(machine=machine_identity) as client:

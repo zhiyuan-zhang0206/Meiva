@@ -17,7 +17,7 @@
 # Writers need INSERT/UPDATE/SELECT on the table (the runner grant lives in the
 # plugin-stats migration and in `base/cluster/provision.py`); the gateway
 # reads with its own (owner) connection.
-# meiva:link gateway/cluster/docs/ops-surfaces.meiva.okf.md
+# meiva:link gateway/cluster/docs/ops-surfaces.md
 
 from __future__ import annotations
 

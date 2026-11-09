@@ -95,7 +95,7 @@ class TimelineItem(BaseModel):
     # stream, IM bridge, and reply suggestions. False demotes unprefixed closing/narration text
     # from non-human background wakes into the collapsible `Details` work block while keeping it
     # inspectable and copyable.
-    # meiva:link base/agents/history/docs/timeline/timeline.meiva.okf.md
+    # meiva:link base/agents/history/docs/timeline/timeline.md
     user_facing: bool = True
     # Image urls on a multimodal `inbound_chat` / `attach` item (None
     # elsewhere): inbound_chat = gateway-relative urls from meiva_image_urls

@@ -38,7 +38,7 @@ from ops.to_user import (
 router = APIRouter()
 _log = logging.getLogger(__name__)
 
-# meiva:link gateway/agents/docs/to-user-read-failures.meiva.okf.md
+# meiva:link gateway/agents/docs/to-user-read-failures.md
 _READ_FAILURES: dict[ToUserReadFailure, tuple[int, str, str]] = {
     ToUserReadFailure.GONE: (
         404,
@@ -61,7 +61,7 @@ _READ_FAILURES: dict[ToUserReadFailure, tuple[int, str, str]] = {
 # meiva:note
 # The route answers a refusal itself: the class names the envelope code, which is
 # what the panel reads, so the status is only how the refusal travels.
-# meiva:link gateway/agents/docs/to-user-read-failures.meiva.okf.md
+# meiva:link gateway/agents/docs/to-user-read-failures.md
 class PanelReadFailed(Exception):  # noqa: N818
     def __init__(self, failure: ToUserReadFailure) -> None:
         super().__init__(failure.value)
@@ -166,7 +166,7 @@ _HTML_POLICY = (
 _PASSIVE_POLICY = "sandbox; default-src 'none'; style-src 'unsafe-inline'"
 
 
-# meiva:link gateway/agents/docs/to-user-resources.meiva.okf.md
+# meiva:link gateway/agents/docs/to-user-resources.md
 def response_policy(media_type: str) -> tuple[str, str]:
 
     if media_type in _HTML_TYPES:

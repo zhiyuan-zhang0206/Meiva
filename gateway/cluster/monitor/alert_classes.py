@@ -100,7 +100,7 @@ class AlertClassTotals(NamedTuple):
 # that still need attention, the same counts for the resolved ones, and how many classes sit
 # on each side. Pure over the rows -- `read_alert_classes` already folded the dismissal and
 # the quiet window into `resolved_by`, so this only splits on it (critical folds into errors).
-# meiva:link gateway/cluster/docs/alert-classes-api.meiva.okf.md
+# meiva:link gateway/cluster/docs/alert-classes-api.md
 def alert_class_totals(rows: Sequence[AlertClassRow]) -> AlertClassTotals:
     warnings = [row for row in rows if row.level == "warning"]
     errors = [row for row in rows if row.level != "warning"]

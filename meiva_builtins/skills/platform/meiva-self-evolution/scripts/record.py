@@ -1,9 +1,9 @@
 # meiva:note
 # `record.py` shapes one self-evolution dataset record from telemetry events, log events, inbound messages, and checkpoint transcripts while staying separate from `collect.py`'s database and HTTP transport. `count_tool_calls` parses executed code with `SyntaxWarning` suppressed so agent regex escapes do not leak into schedule stderr. `_is_exec_fail` matches only terminal failure event names (`exec_envelope` is a wrapper, not a failure). `_msg_text` extracts human-visible text from checkpoint message blocks and skips `thinking` and `tool_use` blocks so silent tool turns do not serialize as `"thinking tool_use"`. Broadcast inbound instructions are excluded from per-agent `corrections` and `followup_prompts`.
-# meiva:link meiva_builtins/skills/platform/meiva-self-evolution/docs/meiva-self-evolution.meiva.okf.md
+# meiva:link meiva_builtins/skills/platform/meiva-self-evolution/docs/meiva-self-evolution.md
 # meiva:note
 # `record._evidence_block` reports what a record is based on; `record._grade` grades that block in priority order — no telemetry events, or no tokens: `none` / `no_telemetry`; no task prompt: `partial` / `no_task`; a lifecycle status other than `terminated`: `partial` / `no_terminal`; all three present: `complete` with no reason. `prompt_source` names the `_task_prompt` branch that supplied the prompt; `task_updates.note` counts note-only receipts; `task_state_changes` counts status receipts whose status differs from the actor's previous declaration on that task, `in_progress` being the birth state. `collect._task_receipts_by_agent` supplies the receipt counts in one grouped query per agent batch, and the inbounds `collect` already fetches carry `claimed`, so the block adds no per-agent query.
-# meiva:link meiva_builtins/skills/platform/meiva-self-evolution/docs/evidence-block-and-grading.meiva.okf.md
+# meiva:link meiva_builtins/skills/platform/meiva-self-evolution/docs/evidence-block-and-grading.md
 from __future__ import annotations
 
 import ast
@@ -207,7 +207,7 @@ def _mode(values: list[str]) -> str:
     return Counter(value for value in values if value).most_common(1)[0][0] if any(values) else ""
 
 
-# meiva:link meiva_builtins/skills/platform/meiva-self-evolution/docs/collection.meiva.okf.md
+# meiva:link meiva_builtins/skills/platform/meiva-self-evolution/docs/collection.md
 def _task_source(source: str, spawner: str) -> str:
     if source in HUMAN_SOURCES:
         return "human"
@@ -218,7 +218,7 @@ def _task_source(source: str, spawner: str) -> str:
     return ""
 
 
-# meiva:link meiva_builtins/skills/platform/meiva-self-evolution/docs/collection.meiva.okf.md
+# meiva:link meiva_builtins/skills/platform/meiva-self-evolution/docs/collection.md
 def _first_human_message(transcript: Sequence[TranscriptRow]) -> str:
     for message in transcript:
         content = message.content or ""
@@ -230,7 +230,7 @@ def _first_human_message(transcript: Sequence[TranscriptRow]) -> str:
     return ""
 
 
-# meiva:link meiva_builtins/skills/platform/meiva-self-evolution/docs/collection.meiva.okf.md
+# meiva:link meiva_builtins/skills/platform/meiva-self-evolution/docs/collection.md
 def _task_prompt(
     spawner: str, messages: Sequence[InboundFact], transcript: Sequence[TranscriptRow]
 ) -> tuple[str, str]:
@@ -244,7 +244,7 @@ def _task_prompt(
     return (inherited, "transcript") if inherited else ("", "none")
 
 
-# meiva:link meiva_builtins/skills/platform/meiva-self-evolution/docs/collection.meiva.okf.md
+# meiva:link meiva_builtins/skills/platform/meiva-self-evolution/docs/collection.md
 def task_prompt_of(record: RecordBody) -> str:
     raw_prompt = record["task_prompt"]
     if raw_prompt.strip():

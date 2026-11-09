@@ -21,7 +21,7 @@
 #
 # `Chrome` is the seam: the module never reaches for CDP itself, so a test drives
 # it with a fake and `CdpChrome` is the only adapter that talks to a real one.
-# meiva:link services/desktop/browser/docs/browser-session-restore.meiva.okf.md
+# meiva:link services/desktop/browser/docs/browser-session-restore.md
 from __future__ import annotations
 
 import asyncio

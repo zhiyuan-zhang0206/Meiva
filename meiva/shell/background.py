@@ -1,4 +1,4 @@
-# meiva:link meiva/shell/docs/shell.meiva.okf.md
+# meiva:link meiva/shell/docs/shell.md
 from __future__ import annotations
 
 import contextlib

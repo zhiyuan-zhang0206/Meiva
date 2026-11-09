@@ -23,5 +23,5 @@ from meiva_builtins.plugins.meiva_memory.pool_ops import (
 # note-adding pull request, while this root file is rewritten once a day because recomputing it
 # per pull request would rewrite an 11.5K-character file on every note and conflict whenever two
 # pull requests are in flight.
-# meiva:link meiva_builtins/plugins/meiva_memory/skills/scripts/docs/rebuild-memory-index.meiva.okf.md
+# meiva:link meiva_builtins/plugins/meiva_memory/skills/scripts/docs/rebuild-memory-index.md
 rebuild_root_memory_index(pool_dir(resolve_meiva_home()))

@@ -1,6 +1,6 @@
 # meiva:note
 # A known process group whose members ignore graceful PTY closure.
-# meiva:link base/sessions/pty/docs/pty_sessions/closure-inputs.meiva.okf.md
+# meiva:link base/sessions/pty/docs/pty_sessions/closure-inputs.md
 
 import os
 import signal

@@ -195,7 +195,7 @@ def test_the_owed_list_and_the_generated_region_may_overlap(tmp_path: Path) -> N
 
 
 def test_any_other_shared_file_forces_a_rebase(tmp_path: Path) -> None:
-    shared = ("scripts/lint/docs/lint.meiva.okf.md",)
+    shared = ("scripts/lint/docs/lint.md",)
     entries = world(pull=view(body=passing_body()), pr_files=shared, main_files=shared)
     done = run_gate(tmp_path, entries)
     assert done.returncode == 1

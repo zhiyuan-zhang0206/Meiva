@@ -10,7 +10,7 @@
 # the point is to run a turn: the report is work the agent asked for, and a note
 # nobody must answer would leave the agent exactly as unaware as before (#5663). The
 # insert publishes its own wake, the way every other inbound does.
-# meiva:link base/lm/harness/docs/attribution.meiva.okf.md
+# meiva:link base/lm/harness/docs/attribution.md
 from __future__ import annotations
 
 from base.agents.inbox.insert import insert_inbound_message

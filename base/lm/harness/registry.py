@@ -21,7 +21,7 @@ _FIELDS = _REQUIRED_FIELDS | {"resumes", "harness"}
 # this default can only ever describe a record older than the field itself — and
 # `load(..., harness=...)` still refuses a record naming another harness, so the
 # fallback never resumes a transcript across harnesses.
-# meiva:link base/lm/harness/docs/harness.meiva.okf.md
+# meiva:link base/lm/harness/docs/harness.md
 LEGACY_HARNESS = "meiva"
 
 
@@ -52,7 +52,7 @@ class SessionRegistry(Protocol):
 # agents apart, and the write is a temp file plus `os.replace` so a reader never
 # sees a half-written record. A corrupt document raises instead of silently
 # resuming a fresh session under an id that already has history.
-# meiva:link base/lm/harness/docs/harness.meiva.okf.md
+# meiva:link base/lm/harness/docs/harness.md
 class FileSessionRegistry:
     def __init__(self, root: Path) -> None:
         self._root = Path(root)

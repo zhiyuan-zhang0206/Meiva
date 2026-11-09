@@ -1,6 +1,6 @@
 # meiva:note
 # A boot ClockConfig captures only its supplied owner's timezone authority and timestamp policy, independently of older Clock handles and other owners.
-# meiva:link base/clock/docs/clock.meiva.okf.md
+# meiva:link base/clock/README.md
 from __future__ import annotations
 
 from typing import Protocol

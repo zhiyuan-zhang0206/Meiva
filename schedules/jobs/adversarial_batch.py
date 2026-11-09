@@ -7,7 +7,7 @@
 # an aborted earlier batch leaves to clean up. The batch marker is replaced atomically after each
 # spawn so a restart can terminate exactly the workers that were started; it is removed only when
 # the batch finishes, so a batch that raised leaves it for the next one to recover.
-# meiva:link schedules/docs/adversarial-eval.meiva.okf.md
+# meiva:link schedules/docs/adversarial-eval.md
 
 from __future__ import annotations
 

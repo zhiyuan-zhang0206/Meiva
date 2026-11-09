@@ -44,13 +44,13 @@ async def test_an_idle_task_report_starts_the_dispatch_hold(tmp_path: Path) -> N
         # meiva:note
         # The report is inbound content: the agent has not read it yet, so it goes to
         # the sink that turns it into an inbound turn.
-        # meiva:link base/lm/harness/claude/docs/background-tasks.meiva.okf.md
+        # meiva:link base/lm/harness/claude/docs/background-tasks.md
         assert [event.text for event in delivered] == [report.text]
 
         # meiva:note
         # Dispatch is held while the CLI answers the notification itself, so that
         # answer cannot be collected into a turn of ours.
-        # meiva:link base/lm/harness/claude/docs/background-tasks.meiva.okf.md
+        # meiva:link base/lm/harness/claude/docs/background-tasks.md
         queued = harness.session.submit("next instruction")
         assert harness.session.active_turn_id is None
         assert harness.session.pending_turns == (queued.turn_id,)
@@ -65,7 +65,7 @@ async def test_an_idle_task_report_starts_the_dispatch_hold(tmp_path: Path) -> N
         # meiva:note
         # The CLI's own answer belongs to no turn of ours and is not re-delivered as
         # new inbound content: the model already wrote it in the provider transcript.
-        # meiva:link base/lm/harness/claude/docs/background-tasks.meiva.okf.md
+        # meiva:link base/lm/harness/claude/docs/background-tasks.md
         assert [event.text for event in delivered] == [report.text]
         assert harness.of(SessionFailed) == [] and harness.of(TurnFaulted) == []
     finally:
@@ -101,7 +101,7 @@ async def test_a_notification_during_a_turn_is_not_delivered_again(tmp_path: Pat
         # meiva:note
         # The running turn received the notification in its own context; a second
         # delivery would be a duplicate turn.
-        # meiva:link base/lm/harness/claude/docs/background-tasks.meiva.okf.md
+        # meiva:link base/lm/harness/claude/docs/background-tasks.md
         assert delivered == []
         [event] = harness.of(UnsolicitedOutput)
         assert "task-1" in event.text
@@ -128,7 +128,7 @@ async def test_an_idle_report_is_not_replayed_into_the_next_turn(tmp_path: Path)
     # the session was idle waits in the queue. The next turn must start from a clean
     # one: left there, a report or a failure that belonged to no turn is read as that
     # turn's own outcome (#5663).
-    # meiva:link base/lm/harness/claude/docs/claude.meiva.okf.md
+    # meiva:link base/lm/harness/claude/docs/claude.md
     harness = await start(tmp_path, scripts=[[Say("its own reply")]])
     try:
         await harness.detach_consumer()

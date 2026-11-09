@@ -690,20 +690,20 @@ def test_heavy_linux_jobs_run_in_digest_pinned_ghcr_runner_container() -> None:
 def test_native_classify_step_preserves_document_and_dispatch_routing(tmp_path: Path) -> None:
     step = _step(_workflow_jobs()["classify"], "Classify changed paths")
     assert step["env"]["HEAD_REF"] == "${{ github.head_ref }}"
-    doc = "scripts/lint/docs/lint.meiva.okf.md"
+    doc = "scripts/lint/docs/lint.md"
     cases = [
         ("pull_request", "codex/docs", (doc,), ("false", "false")),
         ("pull_request", "codex/mixed", (doc, "scripts/tests/test_x.py"), ("false", "true")),
         (
             "pull_request",
             "codex/frontend-docs",
-            ("ui/web/src/docs/page.meiva.okf.md",),
+            ("ui/web/src/docs/page.md",),
             ("false", "false"),
         ),
         (
             "pull_request",
             "codex/test-data",
-            ("ui/web/tests/docs/data.meiva.okf.md",),
+            ("ui/web/tests/docs/data.md",),
             ("true", "false"),
         ),
         ("workflow_dispatch", "", (doc,), ("true", "true")),

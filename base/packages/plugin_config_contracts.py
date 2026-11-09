@@ -1,4 +1,4 @@
-# meiva:link base/packages/plugins/docs/plugin-config/plugin-config.meiva.okf.md
+# meiva:link base/packages/plugins/docs/plugin-config/plugin-config.md
 
 from pathlib import Path
 from typing import Protocol
@@ -7,7 +7,7 @@ from pydantic import BaseModel
 
 
 class PluginConfigChangedError(RuntimeError):
-    # meiva:link base/packages/plugins/docs/plugin-config/plugin-config.meiva.okf.md
+    # meiva:link base/packages/plugins/docs/plugin-config/plugin-config.md
     pass
 
 
@@ -31,7 +31,7 @@ class PluginConfigImages(Protocol):
 
 
 class UnboundPluginConfigImages:
-    # meiva:link base/packages/plugins/docs/plugin-config/plugin-config.meiva.okf.md
+    # meiva:link base/packages/plugins/docs/plugin-config/plugin-config.md
 
     def owner(self, name: str, cls: type[BaseModel]) -> ConfigImage:
         raise RuntimeError(

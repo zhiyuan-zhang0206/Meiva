@@ -7,7 +7,7 @@
 # is recorded twice: a system note in the conversation, worded so it cannot be read as a reply, and
 # a registered event so the count is queryable instead of living in someone's memory. Only a turn
 # that produced nothing is recorded -- one that already streamed text showed the reader something.
-# meiva:link agent/graph/docs/harness-turn.meiva.okf.md
+# meiva:link agent/graph/docs/harness-turn.md
 
 from __future__ import annotations
 

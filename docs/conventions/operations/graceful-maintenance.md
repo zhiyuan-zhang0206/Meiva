@@ -79,7 +79,7 @@ waking them at boot. A turn still running when the host's
 budget (30 seconds) is spent is named at ERROR, cancelled, and not resumed: the step
 it was in is lost, as after a crash. The next `meiva start` takes every restart and
 continuation note the stop left, through the host's pending scan. How the exit is
-built: [agent-host graceful exit](../../../services/agent_runner/agent_host/lifecycle/docs/graceful-exit.meiva.okf.md).
+built: [agent-host graceful exit](../../../services/agent_runner/agent_host/lifecycle/docs/graceful-exit.md).
 
 **The other services follow.** The ops server stops taking connections on SIGTERM and
 lets the requests it already admitted, and the executor work they started, finish

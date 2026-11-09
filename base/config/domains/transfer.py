@@ -5,7 +5,7 @@
 # bundle above them. The defaults are the constants the feature landed with; no commit records why
 # those numbers were chosen (the feature's own description still said 2 GiB / 100,000), so they are
 # a conservative pair an operator can now raise without a code change.
-# meiva:link base/config/docs/workspace-transfer-limits.meiva.okf.md
+# meiva:link base/config/docs/workspace-transfer-limits.md
 from __future__ import annotations
 
 from pydantic import Field

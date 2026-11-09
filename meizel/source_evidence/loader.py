@@ -1,7 +1,7 @@
 # meiva:note
 # Explicit index admission reads the supplied artifact, selected source snapshot and tool inputs.
 # The established UTF-8 reader owns disk access; this loader validates identity, not semantic purity.
-# meiva:link meizel/docs/checker/typescript-evidence.meiva.okf.md
+# meiva:link meizel/docs/checker/typescript-evidence.md
 
 from __future__ import annotations
 

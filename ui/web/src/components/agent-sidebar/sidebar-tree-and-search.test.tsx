@@ -41,7 +41,7 @@ describe("terminated toggle (behind the sidebar settings popover)", () => {
   // meiva:note
   // The display toolbar that sat under the tree is gone: the archive toggle now
   // lives in the settings popover, so every case opens it first.
-  // meiva:link ui/web/src/docs/frontend-components/frontend-components.meiva.okf.md
+  // meiva:link ui/web/src/docs/frontend-components/frontend-components.md
   const openSettings = () => fireEvent.click(screen.getByTestId("sidebar-settings"));
   const toggle = (name: "Show terminated agents" | "Hide terminated agents") =>
     screen.getByRole("button", { name });
@@ -162,7 +162,7 @@ describe("Flat view mode", () => {
     fireEvent.click(screen.getByText("ID"));
     // meiva:note
     // Clicking the active key again flips the direction; the row shows the arrow.
-    // meiva:link ui/web/src/docs/frontend-components/frontend-components.meiva.okf.md
+    // meiva:link ui/web/src/docs/frontend-components/frontend-components.md
     await waitFor(() =>
       expect(screen.getByText("ID").closest("button")?.textContent).toContain("↑"),
     );

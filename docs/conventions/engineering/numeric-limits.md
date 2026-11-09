@@ -65,7 +65,7 @@ descriptions) are repo constants with the reason recorded in their node; the
 memory pool's caps live in the pool's own pre-commit hook — a standalone script
 whose comment states why (`MEIVA_MEMORY_INDEX_CAP`, 16000 characters ≈ 200
 pointer lines; `MEIVA_MEMORY_NOTE_CAP`, 8000 — one atomic fact per note). See
-[the component node](../../../base/packages/docs/text-budget.meiva.okf.md).
+[the component node](../../../base/packages/docs/text-budget.md).
 
 ## The review action
 

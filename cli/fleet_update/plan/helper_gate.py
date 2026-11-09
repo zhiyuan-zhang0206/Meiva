@@ -2,7 +2,7 @@
 # What the helper state of each host refuses a window on: a host that could not answer (naming
 # the fields it owes), a certificate the fleet does not record for that host, a host with no
 # baseline, or a loaded helper the target commit would rebuild or re-sign.
-# meiva:link cli/docs/fleet-update-window/fleet-update-window.meiva.okf.md
+# meiva:link cli/docs/fleet-update-window/fleet-update-window.md
 
 from __future__ import annotations
 

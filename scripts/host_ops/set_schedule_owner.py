@@ -11,7 +11,7 @@
 #
 # The run is one transaction: the schedules row and its `schedule_owner_changes` row commit
 # together, or neither does.
-# meiva:link scripts/host_ops/docs/set-schedule-owner.meiva.okf.md
+# meiva:link scripts/host_ops/docs/set-schedule-owner.md
 from __future__ import annotations
 
 import argparse

@@ -1,6 +1,6 @@
 // meiva:note
 // This adapter owns only holder-initializer evidence; it does not copy note ownership traversal.
-// meiva:link meizel/docs/checker/typescript-evidence.meiva.okf.md
+// meiva:link meizel/docs/checker/typescript-evidence.md
 
 export function sourceEvidence(ts, checker, tree, libraryPaths, relative) {
   const line = node => tree.getLineAndCharacterOfPosition(node.getStart(tree)).line + 1;

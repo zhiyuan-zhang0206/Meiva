@@ -45,7 +45,7 @@ class SseCadence:
 # caller stamps both clocks, so any yielded frame counts as traffic; when nothing is due, neither
 # clock moves (a poll shorter than `keepalive_s` must not keep postponing the comment).
 # Shared with the merged stream.
-# meiva:link gateway/events/docs/sse/sse.meiva.okf.md
+# meiva:link gateway/events/docs/sse/sse.md
 def warm_frame(
     now: float, last_comment: float, last_data_frame: float, cadence: SseCadence
 ) -> tuple[bytes | None, float, float]:

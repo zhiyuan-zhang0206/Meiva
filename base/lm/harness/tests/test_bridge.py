@@ -78,7 +78,7 @@ def completion(turn_id: str, text: str, usage: Usage | None = None) -> TurnCompl
 # queues that turn's completion in order, and the event stream is the queue. That is
 # enough to check the bridge's half — which turn it waits for, what it shows, and
 # what it counts.
-# meiva:link agent/graph/docs/harness-turn.meiva.okf.md
+# meiva:link agent/graph/docs/harness-turn.md
 class FakeSession:
     def __init__(
         self,
@@ -107,7 +107,7 @@ class FakeSession:
         # meiva:note
         # Events a provider emits while the turn runs and before its own result: a
         # message about another turn, a report the provider answered itself.
-        # meiva:link agent/graph/docs/harness-turn.meiva.okf.md
+        # meiva:link agent/graph/docs/harness-turn.md
         self._during = tuple(during)
 
     async def start(self, *, resume: str | None = None, handoff: Handoff | None = None) -> None:
@@ -248,7 +248,7 @@ async def test_a_failure_naming_another_turn_does_not_end_this_one() -> None:
     # The provider's own turn, or a turn an earlier session ran, reports a failure.
     # It names a turn this wait is not running, so acting on it would fail the wrong
     # turn — the other half of the boundary bug in #5663.
-    # meiva:link base/lm/harness/docs/harness.meiva.okf.md
+    # meiva:link base/lm/harness/docs/harness.md
     session = FakeSession(during=[TurnFaulted(turn_id="turn-of-another-session", error="not ours")])
     bridge = make_bridge(session)
 
@@ -285,7 +285,7 @@ async def test_a_retired_fault_naming_no_turn_is_not_blamed_on_the_turn() -> Non
     # The retired shape an adapter that has not migrated still emits. With no turn
     # named it can only be the session's failure, so it must not settle as this
     # turn's own verdict (#5663).
-    # meiva:link base/lm/harness/docs/harness.meiva.okf.md
+    # meiva:link base/lm/harness/docs/harness.md
     session = FakeSession(during=[SessionFaulted(error="stream died")])
     bridge = make_bridge(session)
 
@@ -492,7 +492,7 @@ def test_an_external_harness_builds_its_handoff() -> None:
 # guards the next value someone adds rather than a current one; the tests below pin
 # what each adapter is built with instead. A new harness member with no branch fails
 # there, loudly, before a session starts with another provider's flags.
-# meiva:link base/lm/harness/docs/harness.meiva.okf.md
+# meiva:link base/lm/harness/docs/harness.md
 def test_the_antigravity_wake_document_carries_its_shell_semantics() -> None:
     bridge = bridge_for(
         Harness.ANTIGRAVITY,

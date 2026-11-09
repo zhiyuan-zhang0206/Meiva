@@ -3,7 +3,7 @@
 // batch: the page's session storage when it has it, and this page view's memory when
 // it does not, so a refused storage costs the draft at the next visit rather than the
 // draft now.
-// meiva:link ui/web/src/docs/frontend-components/frontend-components.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/frontend-components.md
 
 import type { BrowserStorage } from "@/lib/browser/browser";
 

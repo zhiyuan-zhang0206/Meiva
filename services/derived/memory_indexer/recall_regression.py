@@ -6,7 +6,7 @@
 # judged. The precision half carries scores on both sides of every step it might be asked to take,
 # so the next cut down cannot report "recall up, precision unchanged" by arithmetic alone.
 # The ranking threshold and cap come from the agent config the entry hands in, never copied here.
-# meiva:link services/docs/gateway_side/memory_indexer/memory-recall-regression.meiva.okf.md
+# meiva:link services/docs/gateway_side/memory_indexer/memory-recall-regression.md
 
 from __future__ import annotations
 

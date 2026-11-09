@@ -1,6 +1,6 @@
 # meiva:note
 # What a coding-tool launch asks for, checked, and the messages a launch composes from it, as functions of values. The launchers (`claude`, `codex`, `antigravity`) read the process and run what these describe.
-# meiva:link meiva/shell/coding_tools/docs/coding-tools.meiva.okf.md
+# meiva:link meiva/shell/coding_tools/README.md
 from __future__ import annotations
 
 import argparse

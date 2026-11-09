@@ -5,7 +5,7 @@
 # 05:00-05:00 day, and the day label is the slot's cluster-timezone date, which can differ from
 # its UTC date. The minute rates are the shell's: `scripts/ci/pull_requests/accounting.py`
 # owns them and the shell hands them in.
-# meiva:link schedules/docs/c9-daily-report.meiva.okf.md
+# meiva:link schedules/docs/c9-daily-report.md
 
 from __future__ import annotations
 

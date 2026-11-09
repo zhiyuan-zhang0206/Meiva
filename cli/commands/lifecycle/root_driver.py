@@ -718,7 +718,7 @@ def stop_dormant_helper_root(
 # meiva:note
 # Stop waves run in dependency order: tier-0 (`agent-host`) drains first, same-wave units stop
 # concurrently, and each `down` call takes the time left of the shared deadline.
-# meiva:link services/agent_runner/agent_host/lifecycle/docs/graceful-exit.meiva.okf.md
+# meiva:link services/agent_runner/agent_host/lifecycle/docs/graceful-exit.md
 def down_units(
     unit_ids: Iterable[str],
     *,

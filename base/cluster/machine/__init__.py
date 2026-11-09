@@ -13,7 +13,7 @@
 # observability-station flags; a host runs their union. Missing name/role and
 # invalid capability tokens retain their explicit errors. Gateway URL and bearer
 # helpers validate the existing client credential policy independently of identity.
-# meiva:link base/cluster/machine/docs/machine.meiva.okf.md
+# meiva:link base/cluster/machine/docs/machine.md
 
 from pathlib import Path
 
@@ -83,7 +83,7 @@ __all__ = [
 # is the exception to "outside the gateway, the CLI and the root, no component holds the
 # cluster secret" (docs/decisions/data/security/2026-10-03-cluster-secret-contraction.md); the live
 # deployment's data plane is local, and this branch only runs when `is_remote`.
-# meiva:link base/cluster/machine/docs/machine.meiva.okf.md
+# meiva:link base/cluster/machine/docs/machine.md
 def accepted_digests(
     access: GatewayAccess,
     *,

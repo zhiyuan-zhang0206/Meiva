@@ -13,7 +13,7 @@ afterEach(cleanupTimelineTest);
 // of the viewport down over a bottom reserve. Everything after that is the
 // point of the change - growth moves the reply, never the reader - until the
 // reader asks for the tail again.
-// meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.md
 
 let top = 0;
 let content = 0;
@@ -75,13 +75,13 @@ describe("send anchor", () => {
     // The row sits at document 1300 and a fifth of the 600px viewport is 120,
     // so the anchored position is 1180 - reachable only because the reserve
     // adds the 380px the reply has not written yet.
-    // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.meiva.okf.md
+    // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.md
     expect(top).toBe(1180);
     expect(reservePx()).toBe(380);
     // meiva:note
     // The viewport is at the bottom of a padded document here, so the control is
     // the reader's only way back into following and stays shown.
-    // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.meiva.okf.md
+    // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.md
     expect(screen.getByTestId("scroll-to-bottom")).toBeTruthy();
 
     content = 1700;

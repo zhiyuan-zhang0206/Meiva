@@ -67,7 +67,7 @@ def test_launchd_path_reaches_the_user_install_dirs(tmp_path: Path) -> None:
 # The producer contract: whatever this job writes must itself pass the check every unit
 # PATH has to pass, so a future edit that narrows the list fails here rather than at the
 # first harness spawn (#5495).
-# meiva:link base/lm/harness/docs/harness.meiva.okf.md
+# meiva:link base/lm/harness/docs/harness.md
 def test_the_launchd_path_passes_the_unit_check(tmp_path: Path) -> None:
     path = read_launchd_path(
         "/x/bin/meiva",

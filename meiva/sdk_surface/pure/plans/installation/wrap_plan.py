@@ -4,7 +4,7 @@
 # itself, whether a layer is async and when a firing is reported. The registration primitive
 # (`wraps.py`) resolves the target in the live `meiva` module and writes the replacement; these
 # functions only choose, so the presentation rules and the counting rule are tested as values.
-# meiva:link meiva/docs/sdk-surface/sdk-surface.meiva.okf.md
+# meiva:link meiva/docs/sdk-surface/sdk-surface.md
 
 from __future__ import annotations
 

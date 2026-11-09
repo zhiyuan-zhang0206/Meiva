@@ -64,7 +64,7 @@ export type Api = ReturnType<typeof createApi>;
 // cancellation stay connected through headers and body consumption, the Inspector
 // client budget leaves serialization and network headroom above the backend work
 // budget, and HTTP rejection keeps its status separate from network failure.
-// meiva:link ui/web/src/docs/frontend-state/api-requests.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-state/api-requests.md
 export function createApi(http: Http) {
   const { send: f, ok, jsonTimed: jsonWithTimeout } = http;
   return {

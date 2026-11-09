@@ -28,7 +28,7 @@
 # `yt_wire.py`, which sources and videos a run takes are `yt_plan.py`, and what a fetched video
 # becomes is `yt_post.py`. Where yt-dlp, the transcription CLI and the mirror are is a
 # `YoutubeConfig` the caller supplies; `feed.py` builds it from the process for agents.
-# meiva:link meiva_builtins/skills/integrations/web-sources/docs/web-sources.meiva.okf.md
+# meiva:link meiva_builtins/skills/integrations/web-sources/README.md
 
 from __future__ import annotations
 

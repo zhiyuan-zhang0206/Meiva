@@ -13,7 +13,7 @@ from base.db.test_db_guard import assert_test_db_url
 # so the test hands this to the child's environment (`ParentFacts.environ`) instead of the
 # owner login. Setup authority stays with the test connection. The password belongs to a
 # private test database only.
-# meiva:link agent/graph/exec/docs/subprocess-tests.meiva.okf.md
+# meiva:link agent/graph/exec/docs/subprocess-tests.md
 @pytest.fixture
 def runner_db_url(db_conn: psycopg.Connection[Any]) -> str:
     url = settings.data_plane.db_url

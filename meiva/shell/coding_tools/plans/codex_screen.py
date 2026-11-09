@@ -1,6 +1,6 @@
 # meiva:note
 # What a Codex launch can tell from the screen it captures: whether the TUI finished MCP startup, whether the first message was submitted, which session id the `/status` card shows, and what the launch tells the operator when a check cannot finish. The launcher captures and waits; these decide what a capture means.
-# meiva:link meiva/shell/coding_tools/docs/coding-tools.meiva.okf.md
+# meiva:link meiva/shell/coding_tools/README.md
 from __future__ import annotations
 
 import re

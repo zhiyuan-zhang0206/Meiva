@@ -1,6 +1,6 @@
 # meiva:note
 # How the daemon reaches one configured MCP server, decided from its `.mcp.json` entry. `plan_connect` answers with the transport (a remote endpoint, a stdio child, or a direct dial of a per-machine service) and `unmet_requirement` says why a host cannot run the server at all; the daemon shell connects what the plan says and raises what the requirement says.
-# meiva:link meiva/mcps/docs/mcps.meiva.okf.md
+# meiva:link meiva/mcps/docs/mcps.md
 from __future__ import annotations
 
 from collections.abc import Mapping

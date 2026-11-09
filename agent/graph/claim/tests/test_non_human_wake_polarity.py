@@ -126,7 +126,7 @@ def test_mid_run_continuations_and_secondary_arrivals_preserve_polarity(
 # meiva:note
 # When a compaction summary/request wins the batch, co-batched CHAT rows are deferred back to
 # `pending` by `_compact_outcome` rather than dispatched in this pass.
-# meiva:link agent/docs/state.meiva.okf.md
+# meiva:link agent/docs/state.md
 def test_deferred_human_chat_during_compaction_does_not_flip_polarity_early() -> None:
     bg_state = AgentState(halted=True, turn_active=True, non_human_wake=True)
     st = BatchState(compact_payload=("summary", "compact_summary", None))

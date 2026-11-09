@@ -1,6 +1,6 @@
 # meiva:note
 # What one Claude Code launch does, as a value: the session it opens, the line it types there, the first message it delivers and the files it prepares. The launcher reads the process, builds the plan from these and runs it step by step.
-# meiva:link meiva/shell/coding_tools/docs/coding-tools.meiva.okf.md
+# meiva:link meiva/shell/coding_tools/README.md
 from __future__ import annotations
 
 import shlex

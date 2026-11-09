@@ -1,6 +1,6 @@
 // meiva:note
 // Raw HTML renders only through the shared sanitize allowlist — scripts, styles, frames and event handlers never reach the DOM; urlTransform keeps HTTP(S)/mailto/page-anchor URLs and sends the rest to about:blank; external HTTP(S) links open in a new tab with rel=noopener noreferrer, and explicit document resolvers may replace registered local references with authenticated resource URLs. remark-cjk-friendly, plus the remark-cjk-friendly-gfm-strikethrough companion required while remark-gfm is in the pipeline, restores bold and strikethrough when delimiters sit against CJK letters or punctuation-led content (curly quotes, straight quotes, corner brackets — task #3314); plain CJK and ASCII emphasis stays unchanged. Both GFM tilde tokenizers disable single-tilde strike-through so home paths and approximations like the reported ~61G and ~/work stay literal, only the double form strikes, and tildes inside inline code are untouched (task #3653). remark-breaks turns single soft line breaks into <br> tags so model replies and natural prose preserve author line breaks rather than collapsing them to spaces. Fenced code retains whitespace even without a language tag, renders as one pre block, and exposes copy controls; a fenced python block routes to the PythonCode surface while inline code never does. Memoization avoids re-parsing unchanged sibling content during streaming. The suite mocks PythonCode, so the tests never run Prism.
-// meiva:link ui/web/src/docs/frontend-components/markdown-surfaces.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/markdown-surfaces.md
 "use client";
 
 import { createContext, memo, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
@@ -35,7 +35,7 @@ import { cn } from "@/lib/format/utils";
 // own source, while a test wraps its tree in `MarkdownMathProvider` with a source built from a fake
 // importer — the same shape the code chunk uses, and the reason no shipped module exports a test-only
 // setter for it.
-// meiva:link ui/web/src/docs/frontend-components/markdown-safe-content.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/markdown-safe-content.md
 const MarkdownMathContext = createContext<MarkdownMathSource>(defaultMarkdownMath);
 
 export function MarkdownMathProvider({
@@ -62,7 +62,7 @@ export const urlTransform: UrlTransform = (url: string): string => {
   return trimmed;
 };
 
-// meiva:link ui/web/src/docs/frontend-components/markdown-safe-content.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/markdown-safe-content.md
 const sanitizeSchema = {
   ...defaultSchema,
   clobberPrefix: "",
@@ -78,7 +78,7 @@ const sanitizeSchema = {
     // meiva:note
     // `language-math` is what lets rehype-katex replace the wrapping <pre> with
     // its display block; without it a display formula keeps code-block chrome.
-    // meiva:link ui/web/src/docs/frontend-components/markdown-surfaces.meiva.okf.md
+    // meiva:link ui/web/src/docs/frontend-components/markdown-surfaces.md
     code: [...(defaultSchema.attributes?.code ?? []), ["className", "language-math", "math-inline", "math-display"]],
   },
 };
@@ -117,7 +117,7 @@ const rehypeResolveUrls: Plugin<[UrlResolver]> = (resolve) => (tree) => {
   walk(tree);
 };
 
-// meiva:link ui/web/src/docs/frontend-components/markdown-surfaces.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/markdown-surfaces.md
 const inlineElements = ["a", "br", "code", "del", "em", "strong", "span", "sub", "sup", "p"];
 
 const baseRehypePlugins = (resolve: UrlTransform, inline: boolean): PluggableList => [
@@ -256,7 +256,7 @@ export interface ChatMarkdownProps {
 
 // meiva:note
 // Headings gain stable, deduplicated slug ids and same-document # links keep targeting them; GFM footnote reference/definition anchor pairs still match after sanitizing; the To user panel treats page-anchor links as in-panel navigation rather than external opens.
-// meiva:link ui/web/src/docs/frontend-components/markdown-safe-content.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/markdown-safe-content.md
 export const ChatMarkdownRenderer = memo(function ChatMarkdownRenderer({
   content,
   components: overrides,

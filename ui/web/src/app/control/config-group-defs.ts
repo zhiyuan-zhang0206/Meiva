@@ -185,7 +185,7 @@ export const GROUP_ENV_VARS: Record<string, string[]> = {
   ],
 };
 
-// meiva:link ui/web/src/app/control/config/docs/configuration.meiva.okf.md
+// meiva:link ui/web/src/app/control/config/docs/configuration.md
 export const HIDDEN_ENV_VARS = new Set<string>([
   "MEIVA_CLUSTER_SECRET",
   "MEIVA_GATEWAY_MAX_RETRIES",

@@ -5,7 +5,7 @@
 # says which are missing and why, `gate_plan.py` decides to pass, install groups or refuse and
 # words each report, and `install_plan.py` words and orders the installs. This module prints the
 # lines, runs the provisioning scripts through the host and reads the host again after them.
-# meiva:link cli/commands/lifecycle/docs/start-host-dependencies.meiva.okf.md
+# meiva:link cli/commands/lifecycle/docs/start-host-dependencies.md
 
 from __future__ import annotations
 

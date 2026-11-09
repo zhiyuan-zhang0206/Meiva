@@ -8,7 +8,7 @@
 # at second precision, with a counter when another send of the same agent shares the second.
 # Nothing here reads a clock, a path or the filesystem: the same inputs always name the same
 # files, so the rules are asserted by value.
-# meiva:link gateway/upload_delivery/docs/delivered-uploads/source-publication.meiva.okf.md
+# meiva:link gateway/upload_delivery/docs/delivered-uploads/source-publication.md
 
 from __future__ import annotations
 

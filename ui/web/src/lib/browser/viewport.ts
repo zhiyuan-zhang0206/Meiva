@@ -4,7 +4,7 @@
 // Safari pans the page to reveal the focused field. The pin is the visual height, and only while
 // the shortfall is big enough to be a keyboard rather than browser chrome, and only at scale 1 —
 // pinning a viewport the reader is already pinch-zooming fights the zoom.
-// meiva:link ui/web/src/docs/frontend-state/browser-port.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-state/browser-port.md
 
 import type { ViewportReading } from "./browser";
 

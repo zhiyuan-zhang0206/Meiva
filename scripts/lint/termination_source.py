@@ -65,7 +65,7 @@ _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 
 sys.path.insert(0, str(_REPO_ROOT))
 
-# meiva:link scripts/docs/scripts.meiva.okf.md
+# meiva:link scripts/docs/scripts.md
 from base.host.env.boot_actions import enter_scratch_home  # noqa: E402
 
 if __name__ == "__main__":

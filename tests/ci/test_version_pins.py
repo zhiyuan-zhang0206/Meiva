@@ -89,7 +89,7 @@ def test_security_policy_names_the_current_version() -> None:
 
 
 def test_app_doc_names_the_crate_version() -> None:
-    text = _text("ui/app/docs/app.meiva.okf.md")
+    text = _text("ui/app/docs/app.md")
     assert f"`Cargo.toml` is version `{_product_version()}`" in text
     assert "mirrors the product version in" in text
     assert "tests/ci/test_version_pins.py" in text

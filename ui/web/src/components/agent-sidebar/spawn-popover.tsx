@@ -19,7 +19,7 @@ import { SidebarIconButton } from "./icon-button";
 // text button took 38% of the width (user 2026-10-20). They now live in a
 // popover behind the header's +, and the form itself is untouched: this shell
 // only decides when SpawnButton is mounted.
-// meiva:link ui/web/src/docs/frontend-components/frontend-components.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/frontend-components.md
 
 interface Props {
   onSpawn: Parameters<typeof SpawnForm>[0]["onSpawn"];
@@ -62,7 +62,7 @@ export function SpawnPopover({ onSpawn, variant }: Props) {
           // column to its content, so a fixed 660px would only hand the slack to one of
           // them. Phones and touch tablets use the stacked form so 44px rows and inline
           // unavailability reasons remain reachable without hover-only tooltips.
-          // meiva:link ui/web/src/docs/frontend-components/creation-availability/creation-availability.meiva.okf.md
+          // meiva:link ui/web/src/docs/frontend-components/creation-availability/creation-availability.md
           className={cn(
             "z-50 max-w-[94vw] max-h-[min(80dvh,var(--radix-popover-content-available-height,80dvh))] overflow-y-auto text-popover-foreground outline-none",
             isNarrow ? "w-[94vw]" : coarsePointer ? "w-[min(26rem,94vw)]" : "w-fit",

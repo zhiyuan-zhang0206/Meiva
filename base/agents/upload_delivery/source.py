@@ -1,4 +1,4 @@
-# meiva:link gateway/upload_delivery/docs/delivered-uploads/delivered-uploads.meiva.okf.md
+# meiva:link gateway/upload_delivery/docs/delivered-uploads/delivered-uploads.md
 
 from dataclasses import dataclass
 from datetime import datetime
@@ -320,7 +320,7 @@ class _DueRow:
 # FOR UPDATE SKIP LOCKED keeps concurrent claims from waiting on each other; a failed
 # copy overwrites the claim with its own backoff (record_failure), and a worker that
 # dies mid-copy costs that batch one claim window and nothing else.
-# meiva:link gateway/upload_delivery/docs/delivered-uploads/delivered-uploads.meiva.okf.md
+# meiva:link gateway/upload_delivery/docs/delivered-uploads/delivered-uploads.md
 def due(
     pool: ConnectionSource,
     limit: int = 8,

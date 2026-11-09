@@ -41,7 +41,7 @@ def test_core_ids_are_unique_and_namespaced() -> None:
 # The core catalog holds the one request the user has to answer. A turn that
 # finished or a task that closed is a log line, so adding another core category
 # is a product decision that starts here, not a convenience.
-# meiva:link base/events/notifications/docs/notifications.meiva.okf.md
+# meiva:link base/events/notifications/README.md
 def test_the_core_catalog_is_the_request_that_needs_an_answer() -> None:
     assert [category.id for category in CORE_CATEGORIES] == ["core.needs_input"]
 
@@ -51,7 +51,7 @@ def test_the_core_catalog_is_the_request_that_needs_an_answer() -> None:
 # ships enabled — a new event the user did not ask to be interrupted for — fails
 # here. Enabling one is the user's switch; a plugin category cannot ship enabled at
 # all (its manifest validator rejects `defaultEnabled: true`).
-# meiva:link base/events/notifications/docs/notifications.meiva.okf.md
+# meiva:link base/events/notifications/README.md
 def test_only_the_request_that_needs_a_reply_ships_enabled() -> None:
     enabled = {category.id for category in CORE_CATEGORIES if category.default_enabled}
     assert enabled == {"core.needs_input"}

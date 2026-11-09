@@ -2,7 +2,7 @@
 # The panel read as the browser sees it: the route names each refusal on the wire
 # (`code`), so the panel picks its words from the server's class instead of the
 # status, and only an unreachable machine says the same request may pass.
-# meiva:link gateway/agents/docs/to-user-read-failures.meiva.okf.md
+# meiva:link gateway/agents/docs/to-user-read-failures.md
 
 from collections.abc import Iterator
 from pathlib import Path

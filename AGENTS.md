@@ -48,7 +48,7 @@ Follow the user's authorized scope.
   `meizel.toml` manifests state; [technology selection](docs/conventions/technology-selection.md)
   explains dependency choices.
 - Package `README.md` files and component-local `docs/` (plus the
-  [architecture index](docs/index.meiva.okf.md)) describe the current system and
+  [architecture index](docs/README.md)) describe the current system and
   package boundaries in standard Markdown; `check_doc_references.py` checks links
   and CLI flags. Update the relevant owner in the same PR as the code.
 - [Documentation maintenance](docs/conventions/doc-maintenance.md) owns placement:

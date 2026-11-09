@@ -3,7 +3,7 @@
 # `- name (type, size): path` line per object, so a control character in it could forge a line a
 # reader takes for the framework's own. `clean_filename` replaces control characters at staging
 # time, and `Object` refuses one on the record side too (task #5855).
-# meiva:link base/agents/upload_delivery/docs/storage.meiva.okf.md
+# meiva:link base/agents/upload_delivery/docs/storage.md
 from __future__ import annotations
 
 import json

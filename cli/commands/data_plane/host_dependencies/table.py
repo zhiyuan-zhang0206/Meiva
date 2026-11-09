@@ -12,7 +12,7 @@
 # `render_table` prints the same rows, and
 # `cli/commands/lifecycle/docs/start-host-dependencies.meiva.okf.md` carries its output, so the
 # document cannot drift from what start enforces.
-# meiva:link cli/commands/lifecycle/docs/start-host-dependencies.meiva.okf.md
+# meiva:link cli/commands/lifecycle/docs/start-host-dependencies.md
 
 from __future__ import annotations
 

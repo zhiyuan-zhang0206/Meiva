@@ -6,7 +6,7 @@
 # (MISSING_UPLOADING, MISSING_DELAYED) is archiving still in flight, which the
 # archiver probe already watches. A MISSING_LOST range named in wal-gaps.json is
 # a recorded decision, not a failure; anything else stays FAILURE.
-# meiva:link services/backup/walg/docs/walg-tick.meiva.okf.md
+# meiva:link services/backup/walg/docs/walg-tick.md
 from __future__ import annotations
 
 import json
@@ -92,7 +92,7 @@ def _to_int(value: object) -> int:
 # integrity verdict: a MISSING_LOST range named in wal-gaps.json leaves the
 # effective status OK, an unnamed one keeps it FAILURE, and an unknown status is
 # an error rather than a pass.
-# meiva:link services/backup/walg/docs/walg-tick.meiva.okf.md
+# meiva:link services/backup/walg/docs/walg-tick.md
 def parse_verdict(text: str, *, recorded_gaps: Sequence[RecordedGap] = ()) -> ChainVerdict:
     try:
         payload = _require_object_dict(
@@ -150,7 +150,7 @@ def _missing_lost(integrity: Mapping[str, object]) -> tuple[MissingRange, ...]:
 # Run the check against the bucket; it lists every archived segment and asks
 # Postgres for its current segment and timeline, so it is handed the owner-only
 # admin socket rather than libpq's default.
-# meiva:link services/backup/walg/docs/walg-tick.meiva.okf.md
+# meiva:link services/backup/walg/docs/walg-tick.md
 def verify_chain(
     pg_admin_url: str, *, path: Path | None, home: Path, environ: Mapping[str, str]
 ) -> ChainVerdict:

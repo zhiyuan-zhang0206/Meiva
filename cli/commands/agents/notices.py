@@ -1,4 +1,4 @@
-# meiva:link cli/docs/operator-surfaces/operator-surfaces.meiva.okf.md
+# meiva:link cli/docs/operator-surfaces/operator-surfaces.md
 
 from __future__ import annotations
 
@@ -192,7 +192,7 @@ def cmd_notices_resolve(
     return 0
 
 
-# meiva:link cli/docs/operator-surfaces/operator-surfaces.meiva.okf.md
+# meiva:link cli/docs/operator-surfaces/operator-surfaces.md
 def _resolve_all(access: GatewayAccess, notices: list[_Notice], rng: random.Random) -> int:
     cleared = 0
     for n in notices:
@@ -207,7 +207,7 @@ def _resolve_all(access: GatewayAccess, notices: list[_Notice], rng: random.Rand
     return cleared
 
 
-# meiva:link cli/docs/operator-surfaces/operator-surfaces.meiva.okf.md
+# meiva:link cli/docs/operator-surfaces/operator-surfaces.md
 def cmd_notices_clear(
     access: GatewayAccess,
     *,

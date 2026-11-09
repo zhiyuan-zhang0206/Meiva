@@ -22,7 +22,7 @@ from base.lm.pricing import (
 # meiva:note
 # Tree scan: the tables below are the checked-in declarations and the archive they mirror, so
 # the PR selector runs this file in every subset (a provider-only edit selects nothing else).
-# meiva:link base/lm/pricing/docs/pricing.meiva.okf.md
+# meiva:link base/lm/pricing/docs/pricing.md
 pytestmark = pytest.mark.registry
 
 _ARCHIVE_PATH = Path(__file__).resolve().parents[5] / "base/lm/pricing/pricing_catalog_archive.json"

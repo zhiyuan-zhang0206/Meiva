@@ -510,7 +510,7 @@ def _type_cast_diagnostics(scans: Iterable[FileScan]) -> list[Diagnostic]:
             (
                 "why: a type assertion does not validate the value",
                 "instead: validate or narrow the value at its boundary",
-                "see: meizel/docs/checker/type-cast.meiva.okf.md",
+                "see: meizel/docs/checker/type-cast.md",
             ),
             DebtKey(
                 scan.path.rpartition("/")[0],
@@ -528,7 +528,7 @@ _WRAPPER_HINTS = (
     "on, so nothing can inject the clock",
     "instead: take the clock as a required `Timers` parameter (or `now: float`) from the root, and "
     "delete the wrapper; one the module passes on as a default or an argument is an injection point",
-    "see: meizel/docs/checker/fake-entropy.meiva.okf.md",
+    "see: meizel/docs/checker/fake-entropy.md",
 )
 _ENTROPY_HINTS = (
     "why: a monotonic or perf-counter reading, an object address and a process-local counter are "
@@ -539,7 +539,7 @@ _ENTROPY_HINTS = (
     "composition root and mint identifiers with `new_uuid(rng)`; keep an interval clock for "
     "durations (`end - start`); a module's clock is a required `Timers` parameter, not a private "
     "wrapper",
-    "see: meizel/docs/checker/fake-entropy.meiva.okf.md",
+    "see: meizel/docs/checker/fake-entropy.md",
 )
 
 
@@ -578,7 +578,7 @@ def _any_collaborator_diagnostics(scans: Iterable[FileScan]) -> list[Diagnostic]
             (
                 "why: an unrestricted Any type disables checking across collaborator boundaries",
                 "instead: use a concrete collaborator type, a Protocol, or narrow object/Mapping values with TypeGuard/TypeIs or isinstance (do not use typing.cast, which [type-cast] forbids)",
-                "see: meizel/docs/checker/any-collaborator.meiva.okf.md",
+                "see: meizel/docs/checker/any-collaborator.md",
             ),
             DebtKey(
                 scan.path.rpartition("/")[0],

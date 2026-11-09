@@ -4,7 +4,7 @@
 # the escalation pass addresses a delegator, but either may already be terminated. Both
 # passes therefore ask this module the same question — who manages this task now — so
 # neither can route to an agent that is already gone.
-# meiva:link meiva_builtins/plugins/meiva_fleet/task_maintenance/docs/task-maintenance/task-maintenance.meiva.okf.md
+# meiva:link meiva_builtins/plugins/meiva_fleet/task_maintenance/docs/task-maintenance/task-maintenance.md
 from collections.abc import Iterable
 from dataclasses import dataclass
 
@@ -98,7 +98,7 @@ def nearest_manager(cur: psycopg.Cursor, task_ids: Iterable[int]) -> dict[int, i
 # the spine suppressed the delivery (category switched off, dedupe window open); the
 # notice row itself still exists for the queue. The caller owns the transaction and
 # announces the staged notification after commit.
-# meiva:link base/events/notifications/docs/notifications.meiva.okf.md
+# meiva:link base/events/notifications/README.md
 def stage_human_notice(
     cur: psycopg.Cursor,
     conn: psycopg.Connection,

@@ -6,7 +6,7 @@
 // Each capability is built by a small function that takes the page's own objects, so every branch
 // — a browser that refuses storage, a page without a clipboard API, a frame with no page at all —
 // is constructed by a test with a plain object, never by stubbing a global.
-// meiva:link ui/web/src/docs/frontend-state/browser-port.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-state/browser-port.md
 
 import type {
   Browser,

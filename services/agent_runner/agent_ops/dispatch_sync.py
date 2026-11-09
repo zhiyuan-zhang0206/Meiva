@@ -72,7 +72,7 @@ def dispatch_sync(
                 # meiva:note
                 # A refused read is the answer, not a crash: the class it carries is
                 # what the gateway turns into the panel's words.
-                # meiva:link gateway/agents/docs/to-user-read-failures.meiva.okf.md
+                # meiva:link gateway/agents/docs/to-user-read-failures.md
                 return OpStatus.FAILED, read_failure_payload(exc)
             return OpStatus.COMPLETED, document.model_dump(mode="json")
         case "upload-receive-v2":

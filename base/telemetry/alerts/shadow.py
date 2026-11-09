@@ -1,7 +1,7 @@
 # meiva:note
 # Immutable alert transition/group facts: every group this module mints is shadow
 # origin, and the retired native delivery origin survives only on rows already written.
-# meiva:link gateway/alerts/docs/alert-shadow-facts.meiva.okf.md
+# meiva:link gateway/alerts/docs/alert-shadow-facts.md
 
 import json
 from collections import defaultdict

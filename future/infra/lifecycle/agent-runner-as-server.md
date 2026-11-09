@@ -4,8 +4,8 @@ The agent host is the only agent execution architecture. One daemon per runner
 schedules agent turns as asyncio tasks. The per-agent process launcher, process
 restarter, boot-attempt recovery and runtime-mode selector are removed.
 
-The implemented contracts live in [Agent Runtime](../../../agent/docs/agent-runtime/agent-runtime.meiva.okf.md),
-[Hosted Runtime Admission](../../../agent/startup/docs/admission.meiva.okf.md) and
+The implemented contracts live in [Agent Runtime](../../../agent/docs/agent-runtime/agent-runtime.md),
+[Hosted Runtime Admission](../../../agent/startup/docs/admission.md) and
 [Graceful Maintenance](../../../docs/conventions/operations/graceful-maintenance.md).
 
 ## Resource boundaries

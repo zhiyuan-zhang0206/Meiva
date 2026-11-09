@@ -1,6 +1,6 @@
 # meiva:note
 # Billing schema assertions use real process-owned tracing; vendor lookup stays in process.
-# meiva:link base/packages/tests/lm/docs/contracts.meiva.okf.md
+# meiva:link base/packages/tests/lm/docs/contracts.md
 
 from pathlib import Path
 
@@ -55,7 +55,7 @@ def test_vendor_of_model_recognizes_registered_core_and_plugin_prefixes(
 ) -> None:
     # meiva:note
     # Vendor attribution uses registered manufacturer identities without guessing.
-    # meiva:link base/packages/tests/lm/docs/contracts.meiva.okf.md
+    # meiva:link base/packages/tests/lm/docs/contracts.md
     from base.lm.usage import vendor_of_model
 
     assert vendor_of_model(model, catalog=model_catalog) == vendor
@@ -70,7 +70,7 @@ def test_vendor_of_model_uses_registered_plugin_display_name(
     # The regression this catches is silently skipping a billable plugin call
     # after provider registration has made the model invokable.
     #
-    # meiva:link base/packages/tests/lm/docs/contracts.meiva.okf.md
+    # meiva:link base/packages/tests/lm/docs/contracts.md
     from base.lm.usage import vendor_of_model
 
     model_catalog = add_bindings(

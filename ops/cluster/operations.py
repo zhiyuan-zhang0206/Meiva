@@ -111,7 +111,7 @@ def cluster_status_op(
 # shows. The probe asks each CLI under bounded timeouts for both login state and live model
 # options + reasoning-effort ladders without starting an agent turn or spending model quota;
 # it runs on the daemon's worker thread so a slow CLI never blocks the event loop.
-# meiva:link base/agents/docs/harness/harness.meiva.okf.md
+# meiva:link base/agents/docs/harness/harness.md
 def harness_probe_op(
     machine: str, *, now: datetime, environ: Mapping[str, str]
 ) -> HarnessProbeResult:

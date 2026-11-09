@@ -10,7 +10,7 @@ from base.host.proc import run_bounded
 # meiva:note
 # The executable and module are fixed. Only a private fixture-file path reaches
 # the child; the database URL is never interpreted as executable program text.
-# meiva:link base/agents/context/docs/clients.meiva.okf.md
+# meiva:link base/agents/context/docs/clients.md
 def test_custom_database_dials_its_own_resource_with_no_process_default(
     db_url: str, tmp_path: Path
 ) -> None:

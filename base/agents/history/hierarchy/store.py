@@ -1,4 +1,4 @@
-# meiva:link base/agents/history/docs/range-read-contracts.meiva.okf.md
+# meiva:link base/agents/history/docs/range-read-contracts.md
 from __future__ import annotations
 
 from collections.abc import Generator, Sequence

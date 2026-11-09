@@ -20,7 +20,7 @@ from base.host.boundary.json_values import is_object_list
 # Raised when a messages-channel mutation violates the append-only invariant (only a
 # full wipe via `RemoveMessage(REMOVE_ALL)`, a tail append, or modifying the last
 # message is allowed).
-# meiva:link agent/messages/docs/messages.meiva.okf.md
+# meiva:link agent/messages/docs/messages.md
 class MessagesMutationError(RuntimeError):
     pass
 
@@ -32,7 +32,7 @@ def _as_any_message(msg: BaseMessage) -> TypeGuard[AnyMessage]:
 # meiva:note
 # Coerces message-likes the same way `add_messages` does so validation fingerprints
 # compare the exact objects the reducer merged.
-# meiva:link agent/messages/docs/messages.meiva.okf.md
+# meiva:link agent/messages/docs/messages.md
 def _coerce(messages: object) -> list[AnyMessage]:
     if not is_message_likes(messages):
         raise TypeError(f"Expected a sequence of messages, got {type(messages).__name__}")
@@ -49,7 +49,7 @@ def _contains_remove_all(delta: object) -> bool:
 # A committed channel value never contains `RemoveMessage` markers; their presence in
 # `current` means the hook runner is merging sibling deltas rather than validating a
 # committed history.
-# meiva:link agent/messages/docs/messages.meiva.okf.md
+# meiva:link agent/messages/docs/messages.md
 def _is_delta(current: object) -> bool:
     msgs: list[object] = current if is_object_list(current) else [current]
     return any(isinstance(m, RemoveMessage) for m in msgs)
@@ -76,7 +76,7 @@ def _violation(before: list[AnyMessage], after: list[AnyMessage], detail: str) -
 # meiva:note
 # Append-only class check: no deletions, survivors stay at the same index and keep
 # their content (except the last message), and new messages form a contiguous suffix.
-# meiva:link agent/messages/docs/messages.meiva.okf.md
+# meiva:link agent/messages/docs/messages.md
 def validate_messages_mutation(before: Sequence[AnyMessage], after: Sequence[AnyMessage]) -> None:
     before = _coerce(before)
     after = _coerce(after)
@@ -129,7 +129,7 @@ def validate_messages_mutation(before: Sequence[AnyMessage], after: Sequence[Any
 # meiva:note
 # Full-wipe class check (`RemoveMessage(REMOVE_ALL)`): any surviving message carried
 # over must keep its exact content and relative order.
-# meiva:link agent/messages/docs/messages.meiva.okf.md
+# meiva:link agent/messages/docs/messages.md
 def validate_rebuild(before: Sequence[AnyMessage], after: Sequence[AnyMessage]) -> None:
     before = _coerce(before)
     after = _coerce(after)
@@ -167,7 +167,7 @@ def validate_rebuild(before: Sequence[AnyMessage], after: Sequence[AnyMessage]) 
 # Fast path for pure tail appends (no `RemoveMessage` and no id already present in
 # `current`), threading `(messages, ids)` across writes in `O(N + K)` while falling
 # back to `None` whenever missing/duplicate/remove shapes need the full diff check.
-# meiva:link agent/messages/docs/messages.meiva.okf.md
+# meiva:link agent/messages/docs/messages.md
 def _try_pure_append(
     current: object,
     delta: object,
@@ -212,7 +212,7 @@ def _try_pure_append(
 
 # meiva:note
 # Validate and apply a message delta to committed history or an intermediate delta.
-# meiva:link agent/messages/docs/messages.meiva.okf.md
+# meiva:link agent/messages/docs/messages.md
 def guarded_add_messages(current: object, delta: object) -> list[AnyMessage]:
     if _is_delta(current):
         return add_messages(current, delta)  # pyright: ignore[reportArgumentType, reportReturnType]
@@ -232,7 +232,7 @@ def guarded_add_messages(current: object, delta: object) -> list[AnyMessage]:
 # meiva:note
 # Replays stored `DeltaChannel` writes in order through `guarded_add_messages` so
 # validation stays batching-invariant when reads combine writes into larger batches.
-# meiva:link agent/messages/docs/messages.meiva.okf.md
+# meiva:link agent/messages/docs/messages.md
 def guarded_delta_reducer(state: object, writes: Sequence[object]) -> list[AnyMessage]:
     result: object = state
     cached: tuple[list[AnyMessage], set[str]] | None = None

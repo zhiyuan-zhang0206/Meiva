@@ -15,7 +15,7 @@ if __name__ == "__main__":
     assert list(buckets) == ["compact_summary"], buckets
     # meiva:note
     # A summary stored before the note carried tags keeps bucketing the same way.
-    # meiva:link base/agents/messages/docs/metadata-contracts.meiva.okf.md
+    # meiva:link base/agents/messages/docs/metadata-contracts.md
     legacy = bucket_messages(
         [HumanMessage(content=f"[system] {COMPACT_SUMMARY_HEADER}\n\nbody")],
         [MessageTokens(7, None, "exact")],

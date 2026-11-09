@@ -124,7 +124,7 @@ def _missing(start: str, end: str, segments: int = 1921) -> dict[str, Any]:
 # meiva:note
 # A recorded gap is an accepted decision, not a broken chain: the effective
 # status turns OK while the raw one stays visible in the summary.
-# meiva:link services/backup/walg/docs/walg-tick.meiva.okf.md
+# meiva:link services/backup/walg/docs/walg-tick.md
 def test_a_recorded_gap_is_not_a_failure() -> None:
     verdict = parse_verdict(json.dumps(_missing(*_bounds())), recorded_gaps=(_gap(),))
 

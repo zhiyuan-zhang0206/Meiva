@@ -12,7 +12,7 @@ from typing import TextIO
 # script the same way `impersonate exec` does (a file, or stdin as `-`) and runs it
 # inside the attachment, so the child's own `meiva.*` calls carry the borrowed
 # identity. The opener is injected so the command is testable without a cluster.
-# meiva:link meiva/self/harness/docs/harness-attach.meiva.okf.md
+# meiva:link meiva/self/harness/docs/harness-attach.md
 AttachmentOpener = Callable[..., AbstractContextManager[object]]
 
 

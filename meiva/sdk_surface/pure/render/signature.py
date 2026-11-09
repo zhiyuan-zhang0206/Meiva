@@ -3,7 +3,7 @@
 # quoted annotations lose their quotes, an enum member `<Mode.X: 1>` shows as `Mode.X` and
 # `typing.` prefixes are dropped; `(...)` for anything that is not callable or has no signature to
 # read. The help renderer (`help.py`) prints what this returns.
-# meiva:link meiva/docs/sdk-surface/sdk-surface.meiva.okf.md
+# meiva:link meiva/docs/sdk-surface/sdk-surface.md
 
 from __future__ import annotations
 

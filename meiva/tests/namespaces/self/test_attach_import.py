@@ -6,7 +6,7 @@
 # needs an identity; a process with a live registration attaches on its first
 # identity read and not during `import meiva` (attaching replays the agent's state
 # snapshot, which opens the database — a provider runs a fresh Python per tool call).
-# meiva:link meiva/self/harness/docs/harness-attach.meiva.okf.md
+# meiva:link meiva/self/harness/docs/harness-attach.md
 
 
 from __future__ import annotations
@@ -57,7 +57,7 @@ def marker(tmp_path: Path) -> Path:
 # meiva:note
 # The probe runs a fixed argv from this file; `sys.executable` is the test's own
 # interpreter, so the subprocess call carries no shell and no caller input.
-# meiva:link meiva/self/harness/docs/harness-attach.meiva.okf.md
+# meiva:link meiva/self/harness/docs/harness-attach.md
 def _run_probe(marker: Path, handle: str | None = None, home: Path | None = None) -> dict[str, Any]:
     env = {key: value for key, value in os.environ.items() if key not in _CLEAN_ENV_STRIP}
     env.pop("MEIVA_HARNESS_HANDLE", None)

@@ -24,7 +24,7 @@ import {
 // Every input arrives as a value and no module is replaced: the roster through props, preferences
 // through the settings cache, the drawer/search selection through the store, the viewport through
 // the fake browser, and the route change through the navigation value the harness hands in.
-// meiva:link ui/web/src/docs/frontend-components/frontend-components.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/frontend-components.md
 
 import { AgentSidebar } from "./index";
 
@@ -94,7 +94,7 @@ describe("DesktopSidebar collapse/expand", () => {
     // meiva:note
     // Two steps on purpose: the + only reveals the form (machine / model /
     // effort / harness), and the form's own Spawn button is what spawns.
-    // meiva:link ui/web/src/docs/frontend-components/frontend-components.meiva.okf.md
+    // meiva:link ui/web/src/docs/frontend-components/frontend-components.md
     fireEvent.click(screen.getByTestId("sidebar-create"));
     const spawn = screen.getByRole<HTMLButtonElement>("button", { name: "Spawn" });
     await waitFor(() => expect(spawn.disabled).toBe(false));
@@ -167,7 +167,7 @@ describe("SidebarBody empty / tree / spawning placeholder", () => {
     expect(screen.getByText("No agents yet.")).toBeTruthy();
     // meiva:note
     // The CTA opens the same form as the header's +.
-    // meiva:link ui/web/src/docs/frontend-components/frontend-components.meiva.okf.md
+    // meiva:link ui/web/src/docs/frontend-components/frontend-components.md
     expect(screen.queryByRole("button", { name: "Spawn" })).toBeNull();
     fireEvent.click(screen.getByTestId("sidebar-create-cta"));
     expect(await screen.findByRole("button", { name: "Spawn" })).toBeTruthy();

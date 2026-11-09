@@ -5,7 +5,7 @@
 # The numbers themselves live only in `settings.transfer` (`base/config/domains/transfer.py`); this
 # module keeps no copy of them, so the ceiling a deployment configures reaches every check and every
 # refusal that describes it.
-# meiva:link base/config/docs/workspace-transfer-limits.meiva.okf.md
+# meiva:link base/config/docs/workspace-transfer-limits.md
 
 from __future__ import annotations
 

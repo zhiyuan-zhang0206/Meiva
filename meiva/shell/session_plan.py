@@ -1,6 +1,6 @@
 # meiva:note
 # What a shell session may be called and live for, and how session ids map onto the names the backend lists, as functions of values. `ShellSessions` reads the backend and the database and asks these what the answers mean.
-# meiva:link meiva/shell/docs/shell.meiva.okf.md
+# meiva:link meiva/shell/docs/shell.md
 from __future__ import annotations
 
 import math

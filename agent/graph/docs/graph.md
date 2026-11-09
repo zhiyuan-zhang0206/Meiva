@@ -1,0 +1,60 @@
+# Agent Graph (LangGraph Execution Graph)
+
+## What it is
+
+Meiva agent's core execution engine—a **9-Node self-looping directed graph** based on LangGraph, entirely routed via `Command(goto=)` for explicit routing. The graph compiles into a `CompiledStateGraph`; **one invocation = one turn**: the runloop (`agent/turn/runloop.py`) invokes the graph once per turn, and claim ends the invocation at the turn boundary (goto END with `exit_requested=False` — nothing left to do but wait) so the per-turn root span/trace closes; the runloop re-invokes on the same checkpointer thread and the fresh invocation's claim does the long wait. `exit_requested=True` (terminate/restart winner, lost lifecycle CAS) is what makes the runloop return and the process exit.
+
+```
+after_init → init_context → claim → before_llm → llm → before_exec → exec → after_exec
+                  ↑           │                                                     │
+                  │           ├─────────────────────────────────────────────────────┘
+                  │           │  (after_exec always returns to claim; claim decides
+                  │           │   end-turn or continue based on halted + pending +
+                  │           │   turn_active)
+                  │           └── harness_turn → claim
+                  │               (an agent whose loop runs in an external CLI: claim
+                  │                sends the whole turn here instead of before_llm, and
+                  │                the native nodes never run — see
+                  │                [[agent/graph/docs/harness-turn.md]])
+                  └── compaction routes claim or llm → init_context to re-establish the
+                      standing message head (post-compact tail parked in context_reset)
+```
+
+For multiple tool calls, `exec` loops to itself until each original ID has a result.
+
+## Core Responsibilities
+
+- **init_context** (`_init_context.py`): Sole owner of the agent's standing message head (`SystemMessage` + the ordered context notes). Native Meiva agents receive the native `execute_code` system prompt; external harnesses receive the rendered handoff document (`handoff.render()`) as `SystemMessage` followed by the standing context notes (`timezone`, `memory`, `agent_id`, `agent_memory`, `inherited_memory`, `preloaded_skills`, and plugin notes) with `harness_cursor=0`. Lays it down whenever `messages` is empty — an agent's first wake, and the turn after any compaction, which routes back here with the post-compact tail parked in `state.context_reset`. A pass-through otherwise.
+- **claim** (`claim/node.py` + `_attach_drain.py` / `claim/_batch.py` / `claim/_routing.py` / `claim/_dispatch.py` / `claim/_decide.py`): At idle turn boundaries, drains pending attachments into one tail HumanMessage before end-turn or wait; otherwise long-waits on Redis pub/sub and dispatches inbound messages (new message / resume / terminate / restart). A non-overflow circuit-breaker heartbeat parks only a heartbeat-only batch; a co-batched chat still routes to `before_llm`. A flagged chat / system-note inbound gets a SECURITY note in claim's own delta ([Prompt-Injection Findings — Who Delivers Which SECURITY Note](inbound-findings.md)). Claiming and settling are separate: `claim_node_impl` claims the batch, and `settle_claimed_batch(ctx, state, agent_id, batch)` takes the claimed rows as a value and runs routing, dispatch, the terminate veto and the decision, so those rules are tested with claimed rows of any kind against the real database. Tests: `agent/graph/claim/tests/`.
+- **harness_turn** (`harness/node.py`): The whole turn for an agent born on an external harness — one submission to its CLI session, the wait for that turn's completion, the reply as an AIMessage, and the same `llm_usage` row the built-in loop writes. Reachable only through claim's `route_target`, so `before_llm`/`llm`/`before_exec`/`exec` never run on such an agent. The session, its resume and its shutdown live in `harness/bridge.py` ([Harness turn (external turn engines)](harness-turn.md)).
+- **before_llm** (hook container): Runs tool-pairing repair, plugins, then remaining framework hooks. Hooks share the original state; their deltas merge in that order.
+- **llm** (`llm/node.py`): Owns automatic compaction and normal streaming inference. Both model operations race the durable interrupt. Interrupted compaction discards results without replacing history or advancing the compact version; completed compaction routes `init_context → claim`. A tagged summary with no later AIMessage gets one ordinary generation before the threshold re-arms; this survives cancellation, new input, and checkpoint recovery. Provider overflow ends the turn and waits for explicit compaction. Streaming cancellation discards partial generations. One streaming request per try; fatal provider errors fail-fast to idle.
+- **before_exec** (hook container): Runs the declared `before_exec` hooks—final checkpoint before tool invocation
+- **exec** (`exec/node.py`): Executes one pending tool call per graph step in one disposable fault-isolation subprocess. Its state delta commits through LangGraph before `exec -> exec` runs the next call; the final result routes to `after_exec`. Progress comes from existing tool-call/result IDs, with no separate execution cursor or state accumulator; cancel/timeout crosses an owned-tree stop → direct-child reap → bounded output EOF barrier
+- **after_exec** (hook container): Runs the declared `after_exec` hooks—cleanup/recording after execution
+
+## Interrupting a turn
+
+Cancel and terminate, the veto rules for a racing chat, and each node's
+discard semantics are owned by [Turn interrupts (cancel, terminate and restart)](turn-interrupts.md).
+
+## Key Dependencies
+
+- [Agent State](../../docs/state.md) — State channel definitions (BaseAgentState + plugin state merging)
+- [Agent Hooks](../../hooks/docs/hooks.md) — Hook registration/execution mechanism
+- [LLM Interface](../llm/docs/llm.md) — LLM node's streaming inference
+- [Tool Calls & Code Execution](tool-calls.md) — exec node's fault-isolated child execution
+- [System Prompt — System Prompt](system-prompt/system-prompt.md) — LLM node's prompt assembly
+
+## Entry Points
+
+- `agent/graph/_build.py:build_graph()` — Assembles the 9-node topology, compiles `CompiledStateGraph`
+- `agent/nodes.py` — Node name constants (`CLAIM`, `BEFORE_LLM`, `LLM`, `BEFORE_EXEC`, `EXEC`, `AFTER_EXEC`, `AFTER_INIT`, `INIT_CONTEXT`, `HARNESS_TURN`; located in `agent/` top-level, not under `agent/graph/`; `agent/graph/_nodes.py` is a compatibility re-export—see `agent/nodes.py` docstring for the hooks⇄graph circular dependency explanation)
+- `agent/graph/__init__.py` — Public API re-exports
+
+## Notes
+
+- No LangGraph conditional edges—all routing is explicit `Command(goto=...)`, so completeness is verifiable at compile time
+- The LLM node retries itself (`agent/graph/llm/_retry.py:retry_policy` reads the agent's `llm_retry_*` config once per node run and `agent/graph/llm/_backoff.py:backoff_wait` decides each wait, defaults max_attempts=6 / initial=30s / max=480s / total=420s / backoff=2): covers multi-provider network jitter + rate-limit bursts, clips waits to the retry budget, records final retry duration, and excludes fatal stream/provider errors (deterministic errors fail fast instead of exhausting retries)
+- after_exec always returns to claim (not only when halted)—allows incoming user chats that arrive mid-multi-step to be claimed promptly
+- Dependency injection via `Runtime[MeivaContext]` (`base/agents/context/__init__.py`), not hardcoded in `build_graph`

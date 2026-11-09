@@ -13,7 +13,7 @@
 // on the body's mount, long before a reader can scroll to it, so the page still
 // lands populated. A deep-link jump keeps landing where it should: useSettledAnchorScroll
 // re-applies it while content above the target is still growing.
-// meiva:link ui/web/src/docs/frontend-components/control-page-load.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/control-page-load.md
 
 import { type ReactNode } from "react";
 

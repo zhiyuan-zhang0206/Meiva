@@ -26,7 +26,7 @@
 // reconcile read, the inspector its two back-visit revalidations — and 0 cold
 // pending tells on a back-visit (the 2026-09-18 audit measured 9-10 before
 // batch 1).
-// meiva:link ui/web/src/docs/frontend-components/inspector/queries-and-refresh.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/inspector/queries-and-refresh.md
 export const INSPECTOR_RETENTION_MS = 30 * 60_000;
 export const CONVERSATION_RETENTION_MS = 30 * 60_000;
 export const BACK_VISIT_REVALIDATE_MAX = 2;

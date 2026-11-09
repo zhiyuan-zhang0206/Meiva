@@ -6,7 +6,7 @@
 # clipping ancestor (`overflow` other than visible, or `content-visibility`
 # paint containment), whereas secondary work items inside `[data-turn-id]` omit
 # below-card timestamps and copy buttons.
-# meiva:link tests/e2e/visual/docs/layout-invariants.meiva.okf.md
+# meiva:link tests/e2e/visual/docs/layout-invariants.md
 
 from __future__ import annotations
 
@@ -40,7 +40,7 @@ def frontend_target(request: pytest.FixtureRequest) -> str:
 # other than visible, or `content-visibility` paint containment), and verify that
 # the expanded work block's child rows mount neither below-card timestamps nor
 # copy controls.
-# meiva:link tests/e2e/visual/docs/layout-invariants.meiva.okf.md
+# meiva:link tests/e2e/visual/docs/layout-invariants.md
 MEASURE_JS = """
 () => {
   const byMembers = (node) =>
@@ -96,7 +96,7 @@ MEASURE_JS = """
 # The suite always stubs `/api/**` and the event stream, so a deployed bundle
 # (`OVERRIDE_BASE_URL`) answers the same rows as the local build: these tests measure
 # their own fixture, never the deployment's data.
-# meiva:link tests/e2e/visual/docs/layout-invariants.meiva.okf.md
+# meiva:link tests/e2e/visual/docs/layout-invariants.md
 def _open_work_block(browser: Browser, base_url: str, width: int = 1280):
     ctx = new_context(browser, width)
     page = open_page(
@@ -158,7 +158,7 @@ def test_last_block_timestamp_is_not_clipped(
 # Thinking / tool call / tool output carry no copy control in the real DOM: the
 # jsdom suite owns the per-kind table, and this asserts the same rule survives the
 # real renderer — PythonCode's own control and the hover band alike.
-# meiva:link ui/web/src/docs/frontend-components/timeline-view/card-chrome.meiva.okf.md
+# meiva:link ui/web/src/docs/frontend-components/timeline-view/card-chrome.md
 def test_copy_belongs_to_message_text_only(
     playwright_browser: Browser, frontend_target: str
 ) -> None:

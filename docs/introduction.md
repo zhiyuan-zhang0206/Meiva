@@ -96,7 +96,7 @@ answerable notice also reaches you as a notification; agents organize across
 conversations through a **shared persistent task graph** (parent/child trees,
 owners, reminders).
 
-→ [How the fleet works](../meiva_builtins/plugins/meiva_fleet/docs/meiva_fleet.meiva.okf.md)
+→ [How the fleet works](../meiva_builtins/plugins/meiva_fleet/docs/meiva_fleet.md)
 
 ### 4. Anti-RL-Bias — first-class verbs for intent
 
@@ -108,7 +108,7 @@ offers idle agents three honest options (working / waiting / done), and
 mechanisms nudge agents that stall, reach for the wrong SDK idiom, or miss a
 newly installed skill. Ambiguous silence becomes supervisable state.
 
-→ [All anti-RL-bias mechanisms](../agent/docs/anti-rl-bias.meiva.okf.md)
+→ [All anti-RL-bias mechanisms](../agent/docs/anti-rl-bias.md)
 
 ### 5. Observability — every turn is a trace
 
@@ -118,7 +118,7 @@ Prometheus + Grafana stack where traces, logs, and metrics share a single UI.
 Underneath, every signal is one unified event stream carrying a trace_id, so
 logs and traces correlate; alerts reach chat end to end.
 
-→ [How observability works](../base/telemetry/otlp/docs/telemetry-otlp/telemetry-otlp.meiva.okf.md)
+→ [How observability works](../base/telemetry/otlp/docs/telemetry-otlp/telemetry-otlp.md)
 
 ### 6. Multi-Machine — a single box is the N=1 case
 
@@ -139,7 +139,7 @@ model that becomes a private channel in the agent's state graph — typed
 read/write handles, fail-fast on conflicts, persisted with the framework
 checkpoint. Write a `plugin.py`, drop it in a directory, done.
 
-→ [How plugins work](plugins/plugins.meiva.okf.md)
+→ [How plugins work](plugins/plugins.md)
 
 ### 8. Skills — the open Agent Skills standard, zero rewrite
 
@@ -149,7 +149,7 @@ folder installs unmodified: from a git URL or straight off disk, no manifest,
 no conversion. A hundred installed skills cost a hundred description lines in
 the prompt, not a hundred bodies — full text loads on demand.
 
-→ [How skills work](skills/skills.meiva.okf.md)
+→ [How skills work](skills/skills.md)
 
 ### 9. Memory — a shared pool that outlives any conversation
 
@@ -160,7 +160,7 @@ taking over loses nothing. A steward agent consolidates, health-checks, and
 commits the pool daily; the index is injected at cold start and after each
 compaction, so standing rules stay in front of the agent.
 
-→ [How memory works](../meiva_builtins/plugins/meiva_memory/docs/meiva_memory.meiva.okf.md)
+→ [How memory works](../meiva_builtins/plugins/meiva_memory/docs/meiva_memory.md)
 
 ---
 
@@ -274,7 +274,7 @@ flowchart LR
 The `gateway` and `agent-runner` capabilities can live on **one box** or be
 **split** across machines. Full component breakdown, data-flow walkthrough, and
 the agent graph topology are in the OKF knowledge graph, rooted at
-[`docs/index.meiva.okf.md`](index.meiva.okf.md).
+[`docs/README.md`](README.md).
 
 **No terminal UI, by design.** The Next.js console above is the only
 supervision surface — plus chat channels (e.g. X, via `meiva mcp install`)
@@ -322,8 +322,8 @@ cluster; that has to come from outside Meiva today. Full policy and reporting:
 | Package manager | uv |
 | Frontend | Next.js 16 + React 19 + Tailwind 4 + shadcn/ui |
 
-[Frontend stack →](../ui/web/docs/web.meiva.okf.md)
-[Connection budget →](../agent/db/docs/db.meiva.okf.md)
+[Frontend stack →](../ui/web/docs/web.md)
+[Connection budget →](../agent/db/docs/db.md)
 [Model registry →](../base/lm/registry.py)
 
 ### Observability (OTel + LGTM)
@@ -336,7 +336,7 @@ LGTM backend (remote Tempo plus native Loki, Prometheus, and Grafana) serves
 Grafana at http://localhost:3003 — traces, logs, and metrics in one UI — and
 backs the gateway's /ops + inspect endpoints:
 [`deploy/lgtm/README.md`](../deploy/lgtm/README.md). See the
-[trace mirror and delivery topology](../base/telemetry/otlp/docs/telemetry-otlp/trace-mirror.meiva.okf.md)
+[trace mirror and delivery topology](../base/telemetry/otlp/docs/telemetry-otlp/trace-mirror.md)
 node for the full design.
 
 ## Key docs — read on demand
@@ -344,14 +344,14 @@ node for the full design.
 | When you need to… | Read |
 |---|---|
 | Get started | **[QUICKSTART.md](../QUICKSTART.md)** |
-| Understand architecture | [`docs/index.meiva.okf.md`](index.meiva.okf.md) |
+| Understand architecture | [`docs/README.md`](README.md) |
 | Install / deploy | [`.agents/skills/meiva-guide/deploy/SKILL.md`](../meiva_builtins/skills/platform/meiva-guide/deploy/SKILL.md) |
 | Set up dev environment | [`docs/conventions/dev-setup.md`](conventions/dev-setup.md) |
 | Run ops / troubleshoot | [`docs/conventions/runbook.md`](conventions/runbook.md) |
 | Write a PR | [CONTRIBUTING.md](../CONTRIBUTING.md) |
 | Follow coding conventions | [`docs/conventions/python-conventions.md`](conventions/python-conventions.md) |
 | Know what NOT to do | [`docs/conventions/non-goals.md`](conventions/non-goals.md) |
-| See glossary | [`docs/index.meiva.okf.md`](index.meiva.okf.md) (OKF terminology sections) |
+| See glossary | [`docs/README.md`](README.md) (OKF terminology sections) |
 
 ## Agent instruction files
 

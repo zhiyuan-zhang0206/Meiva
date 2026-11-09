@@ -161,7 +161,7 @@ def _is_doc_only_path(path: str) -> bool:
         return False
     if len(parts) == 1 or parts[0] in {"docs", "future"}:
         return True
-    return path.endswith(".meiva.okf.md") and "docs" in parts[:-1]
+    return parts[-1] not in {"AGENTS.md", "SKILL.md"} and "docs" in parts[:-1]
 
 
 def _is_frontend_only_path(path: str) -> bool:

@@ -7,7 +7,7 @@ import type { Api } from "../transport/api";
 // meiva:note
 // GET reads the last explicit check, including an empty initial snapshot. Page
 // loads, picker mounts and query invalidation never start a runner probe.
-// meiva:link ui/web/src/docs/frontend-components/creation-availability/creation-availability.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/creation-availability/creation-availability.md
 function snapshotQuery(machine: string | undefined, client: Api) {
   return {
     queryKey: ["harness-availability", machine],

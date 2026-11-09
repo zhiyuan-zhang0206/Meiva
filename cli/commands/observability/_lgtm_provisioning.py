@@ -66,7 +66,7 @@ def _digest(content: str) -> str:
     return hashlib.sha256(content.encode("utf-8")).hexdigest()
 
 
-# meiva:link cli/commands/observability/docs/lgtm/dashboard-provisioning.meiva.okf.md
+# meiva:link cli/commands/observability/docs/lgtm/dashboard-provisioning.md
 def _provision_dashboard(
     dest: Path,
     hashes_path: Path,
@@ -113,7 +113,7 @@ def _provision_dashboard(
             assert_never(rendered_plan)
 
 
-# meiva:link cli/commands/observability/docs/lgtm/dashboard-provisioning.meiva.okf.md
+# meiva:link cli/commands/observability/docs/lgtm/dashboard-provisioning.md
 def _install_dashboard_fallback(
     dest: Path,
     hashes_path: Path,
@@ -217,7 +217,7 @@ def dashboard_facts(path: Path) -> DashboardFacts:
     )
 
 
-# meiva:link cli/commands/observability/docs/lgtm/dashboard-provisioning.meiva.okf.md
+# meiva:link cli/commands/observability/docs/lgtm/dashboard-provisioning.md
 def record_rendered_hash(
     hashes_path: Path, key: str, digest: str, *, source: str = "render"
 ) -> None:
@@ -242,7 +242,7 @@ def record_rendered_hash(
 # after: the checkout copy is its reference output, not its source. It is never orphan-cleanup
 # material, since it has no source template to vanish, so it stays in the rendered set even when
 # generation fails and the previous file must survive.
-# meiva:link cli/commands/converge/docs/rendered-files.meiva.okf.md
+# meiva:link cli/commands/converge/docs/rendered-files.md
 def render_provisioning(
     repo: Path,
     native_dir: Path,
@@ -318,7 +318,7 @@ def _remove_orphans(dest_dir: Path, hashes_path: Path, rendered_relative: set[st
         )
 
 
-# meiva:link cli/commands/observability/docs/lgtm/dashboard-provisioning.meiva.okf.md
+# meiva:link cli/commands/observability/docs/lgtm/dashboard-provisioning.md
 def _prune_ghost_hashes(dest_dir: Path, hashes_path: Path) -> None:
     recorded = _recorded_hashes(hashes_path)
     present = frozenset(
@@ -353,7 +353,7 @@ def _grafana_get(url: str) -> GrafanaReply:
         return GrafanaReply(response.status_code, None)
 
 
-# meiva:link cli/commands/observability/docs/lgtm/dashboard-provisioning.meiva.okf.md
+# meiva:link cli/commands/observability/docs/lgtm/dashboard-provisioning.md
 def verify_dashboard_provisioning(native_dir: Path, *, grafana_url: str) -> list[str]:
     config_dir = native_dir / "config"
     dashboard_path = config_dir / "provisioning" / RENDERED_DASHBOARD_REL

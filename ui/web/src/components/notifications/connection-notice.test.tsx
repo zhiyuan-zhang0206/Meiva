@@ -3,7 +3,7 @@
 // Renders nothing during transient blips or reconnecting states;
 // surfaces as an un-occluded red floating error banner below HeaderBar (top-[52px] z-30)
 // only when connState is "closed" (sustained disconnect >= 15s).
-// meiva:link ui/web/src/docs/frontend-components/frontend-components.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/frontend-components.md
 
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";

@@ -1,7 +1,7 @@
 # meiva:note
 # The per-host pieces a window builds and reads: the macOS one-shot start script and its plist,
 # and the PROBE program run through the host's real shell.
-# meiva:link cli/docs/fleet-update-window/fleet-update-window.meiva.okf.md
+# meiva:link cli/docs/fleet-update-window/fleet-update-window.md
 
 from __future__ import annotations
 

@@ -18,7 +18,7 @@ class HostDispatcherScanFailed(TypedDict):
 # beat: the beat reaps crash corpses and renews host ownership, so a failing beat is the host's
 # first warning that the database is unreachable, long before the third failure ends the process.
 # `will_exit` marks the failure that raises, which is what the 2026-10-18 crash wave was.
-# meiva:link agent/docs/loop.meiva.okf.md
+# meiva:link agent/docs/loop.md
 class HostDatabaseBeatFailed(TypedDict):
     machine: str
     pool: str
@@ -32,7 +32,7 @@ class HostDatabaseBeatFailed(TypedDict):
 # `host_database_beat_recovered` payload — the beat's retry result, emitted when a beat that had
 # failed succeeds again, so an incident review pairs the failures with the recovery instead of
 # reading the gap in the log as silence.
-# meiva:link agent/docs/loop.meiva.okf.md
+# meiva:link agent/docs/loop.md
 class HostDatabaseBeatRecovered(TypedDict):
     machine: str
     pool: str

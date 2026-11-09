@@ -2,7 +2,7 @@
 # The daemon's selection predicate: which idle agents one heartbeat round checks in on.
 # It reads cluster state and returns rows, so a caller can inspect the raw predicate without
 # sending anything; the check-in itself stays in `daemon.py`.
-# meiva:link services/wake/heartbeat/docs/dispatch-round.meiva.okf.md
+# meiva:link services/wake/heartbeat/docs/dispatch-round.md
 
 from __future__ import annotations
 

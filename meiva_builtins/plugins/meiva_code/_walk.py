@@ -1,4 +1,4 @@
-# meiva:link meiva_builtins/plugins/meiva_code/docs/runtime-notes.meiva.okf.md
+# meiva:link meiva_builtins/plugins/meiva_code/docs/runtime-notes.md
 
 from pathlib import Path
 

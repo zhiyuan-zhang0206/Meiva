@@ -522,7 +522,7 @@ def test_a_seat_state_survives_a_round_trip(tmp_path: Path) -> None:
 # The watch's sends are written down before they are made. A transport that refuses -- the
 # `Connection refused` one burn-rate gate met on 2026-10-28 -- leaves the alarm on disk with the
 # reason, which is the whole difference between one log line and a record a later round reads.
-# meiva:link base/events/alarms/docs/alarms.meiva.okf.md
+# meiva:link base/events/alarms/README.md
 def test_a_refused_send_leaves_the_alarm_on_disk(tmp_path: Path) -> None:
     def refuse(_target: int, _text: str) -> None:
         raise RuntimeError("Connection refused")
@@ -541,7 +541,7 @@ def test_a_refused_send_leaves_the_alarm_on_disk(tmp_path: Path) -> None:
 # meiva:note
 # A send the transport accepted is spent: nobody has to tell the lead about it again, and the
 # record keeps the delivery as its last word.
-# meiva:link base/events/alarms/docs/alarms.meiva.okf.md
+# meiva:link base/events/alarms/README.md
 def test_an_accepted_send_is_not_a_pending_alarm(tmp_path: Path) -> None:
     told: list[tuple[int, str]] = []
 
@@ -557,7 +557,7 @@ def test_an_accepted_send_is_not_a_pending_alarm(tmp_path: Path) -> None:
 # meiva:note
 # The next round is the reader: it tells the lead what no transport took, once, and closes it
 # against the round after that.
-# meiva:link base/events/alarms/docs/alarms.meiva.okf.md
+# meiva:link base/events/alarms/README.md
 def test_a_round_reports_an_alarm_no_transport_took_once(tmp_path: Path) -> None:
     def refuse(_target: int, _text: str) -> None:
         raise RuntimeError("Connection refused")
@@ -589,7 +589,7 @@ def test_a_round_reports_an_alarm_no_transport_took_once(tmp_path: Path) -> None
 # meiva:note
 # When the report itself cannot go out, nothing is closed: the alarm stays open, the round says
 # so on its line, and the next round tries again.
-# meiva:link base/events/alarms/docs/alarms.meiva.okf.md
+# meiva:link base/events/alarms/README.md
 def test_a_failed_alarm_report_leaves_the_alarm_open(tmp_path: Path) -> None:
     def refuse(_target: int, _text: str) -> None:
         raise RuntimeError("Connection refused")

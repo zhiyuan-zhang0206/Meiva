@@ -169,7 +169,7 @@ def test_explicit_setting_wins_over_per_model_default(
 def test_explicit_empty_string_beats_per_model_effort(
     add_models: AddModels, *, model_catalog: ModelCatalog
 ) -> None:
-    # meiva:link base/packages/tests/lm/docs/contracts.meiva.okf.md
+    # meiva:link base/packages/tests/lm/docs/contracts.md
     spec = model_catalog.models["deepseek-flash"]
     tuned = ModelSpec(
         provider=spec.provider,
@@ -297,7 +297,7 @@ def test_compact_fractions_are_per_agent_overridable() -> None:
 def test_resolve_setting_degrades_when_owning_domain_not_in_profile(
     *, model_catalog: ModelCatalog
 ) -> None:
-    # meiva:link base/packages/tests/lm/docs/contracts.meiva.okf.md
+    # meiva:link base/packages/tests/lm/docs/contracts.md
     value = resolve_setting(
         "auto_compact_fraction",
         model="deepseek-flash",

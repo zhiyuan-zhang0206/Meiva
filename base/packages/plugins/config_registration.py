@@ -124,7 +124,7 @@ def _reconcile_config_image[C: BaseModel](
     return candidate, cls_keys - disk_keys, disk_keys - cls_keys
 
 
-# meiva:link base/packages/plugins/docs/plugin-config/plugin-config.meiva.okf.md
+# meiva:link base/packages/plugins/docs/plugin-config/plugin-config.md
 def merge_disk_image_schema(owner: ConfigImage) -> tuple[set[str], set[str]]:
     cls, config_path = owner.cls, owner.path
 
@@ -160,7 +160,7 @@ def _per_agent_fields_for(cls: type[BaseModel]) -> set[str]:
     return out
 
 
-# meiva:link base/packages/plugins/docs/plugin-config/plugin-config.meiva.okf.md
+# meiva:link base/packages/plugins/docs/plugin-config/plugin-config.md
 def _framework_field_tables() -> tuple[set[str], set[str], Callable[[str], str]]:
     from base.host.env.config_lite_table import FIELD_DOMAINS, PER_AGENT_FIELDS
 
@@ -283,7 +283,7 @@ def _range_validator(
     return check
 
 
-# meiva:link base/packages/plugins/docs/plugin-config/plugin-config.meiva.okf.md
+# meiva:link base/packages/plugins/docs/plugin-config/plugin-config.md
 _FRAMEWORK_RANGE_VALIDATORS: dict[str, Callable[[object], str | None]] = {
     "reasoning_effort": _validate_reasoning_effort_range,
     "exec_timeout_seconds": _range_validator(gt=0),
@@ -325,7 +325,7 @@ def _validate_framework_overlay_ranges(
             raise InvalidConfigOverlay(f"overlay key {field!r} {error}")
 
 
-# meiva:link base/packages/plugins/docs/plugin-config/plugin-config.meiva.okf.md
+# meiva:link base/packages/plugins/docs/plugin-config/plugin-config.md
 def validate_config_overlay_shape(
     overlay: dict[str, object],
     configs: Mapping[str, BaseModel] | None = None,

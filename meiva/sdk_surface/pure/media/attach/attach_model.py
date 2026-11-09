@@ -4,7 +4,7 @@
 # members unavailable for it and the model an agent actually runs as. The registration shell
 # (`attachment_transport.py`) and the help renderer read the agent's configured model and catalog;
 # these functions only choose.
-# meiva:link meiva/docs/sdk-surface/sdk-surface.meiva.okf.md
+# meiva:link meiva/docs/sdk-surface/sdk-surface.md
 
 from __future__ import annotations
 

@@ -1,6 +1,6 @@
 # meiva:note
 # `events_window.py` holds the decisions of reading `/api/events` over a time window, as values only: the window itself, the week label of a day, and the paging of one read. Every request is offset 0 with a fixed page limit, because Loki offset paging is both quadratic and timeout-prone (the gateway's 60 s Loki budget, observed 2026-08-14); a slice whose page overflows (`meta.has_more`) is bisected in time until each half fits one page. Requests are count-free by design: `meta.total` is opt-in (`with_total=1`) and its count aggregation is exactly the Loki load the gateway shed (2026-08-18), so the plan reads `has_more` only, and a missing `has_more` raises `KeyError` instead of silently truncating. The API window is inclusive on both ends, so rows are deduplicated by surrogate row id across slice boundaries and sorted by `ts` (the API returns newest-first). `collect.py` owns the HTTP and the retry budget; `http_failure_detail` names the responder when that budget is spent.
-# meiva:link meiva_builtins/skills/platform/meiva-self-evolution/docs/collection.meiva.okf.md
+# meiva:link meiva_builtins/skills/platform/meiva-self-evolution/docs/collection.md
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence

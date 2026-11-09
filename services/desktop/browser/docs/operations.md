@@ -1,8 +1,8 @@
 # Shared browser operations
 
-The [shared browser owner](../../../docs/agent_runner_side/browser/browser/browser.meiva.okf.md)
+The [shared browser owner](../../../docs/agent_runner_side/browser/browser/browser.md)
 describes Chrome custody, the shared MCP upstream, native probes and teardown.
-The [in-daemon MCP client](../../../../meiva/mcps/docs/mcps.meiva.okf.md) owns client dispatch;
+The [in-daemon MCP client](../../../../meiva/mcps/docs/mcps.md) owns client dispatch;
 the operating choices below do not redefine either component.
 
 - **Profile source — fresh vs. seeded from your daily Chrome**: the dedicated
@@ -27,7 +27,7 @@ the operating choices below do not redefine either component.
   Converge selects the daily-profile candidate from its captured user session home and OS
   system. Provisioning checks that directory only after preserving any existing destination
   and skipping non-interactive starts; it does not resolve the user's home again.
-- **Capability and readiness:** consult the [browser gating owner](../../../docs/agent_runner_side/browser/browser/gating.meiva.okf.md).
+- **Capability and readiness:** consult the [browser gating owner](../../../docs/agent_runner_side/browser/browser/gating.md).
   `meiva status` surfaces skipped capability reasons. On macOS, a waiting session
   needs the service account's active GUI login and readable login Keychain;
   resolve the reported prerequisite instead of unlocking or editing the profile
@@ -72,7 +72,7 @@ the operating choices below do not redefine either component.
   titles, pins and group titles only — never cookies, tokens or headers. Do not
   reach for Chrome's "continue where you left off" preference instead: measured
   on Chrome 156 it restores an incomplete set and drops grouped tabs
-  ([browser session restore](browser-session-restore.meiva.okf.md)).
+  ([browser session restore](browser-session-restore.md)).
 - **First login is the user's job**: the headed window opens on the host's
   desktop; **you** sign into the target sites (e.g. Google / Xiaohongshu) once — the
   agent does not (and cannot) log in for you. The dedicated profile persists the

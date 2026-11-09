@@ -60,12 +60,12 @@ class NoticeAcceptance:
     # A dismiss whose observed row was already closed writes nothing and must not
     # publish a second resolution: the caller's intent (the notice is closed) is
     # already true, so it is a success, not a conflict.
-    # meiva:link gateway/agents/docs/notice-receipts.meiva.okf.md
+    # meiva:link gateway/agents/docs/notice-receipts.md
     already_closed: bool = False
     # meiva:note
     # The edit's staged delivery: an edit re-notifies through the same spine,
     # inside the same transaction that changed the notice.
-    # meiva:link base/events/notifications/docs/notifications.meiva.okf.md
+    # meiva:link base/events/notifications/README.md
     notification_id: int | None = None
 
 
@@ -137,7 +137,7 @@ def mutate(
         # already closed reaches the caller's desired state, so it answers 200 and
         # records the acceptance instead of turning a retry into a 409. An edit
         # cannot be applied to a closed row, so that path keeps requiring it open.
-        # meiva:link gateway/agents/docs/notice-receipts.meiva.okf.md
+        # meiva:link gateway/agents/docs/notice-receipts.md
         dismiss = not isinstance(body, GuardedNoticeEdit)
         record = _target(conn, agent_id, body.observed_notice_id, require_open=not dismiss)
         if dismiss and record.resolved_at is not None:

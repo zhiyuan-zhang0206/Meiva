@@ -3,7 +3,7 @@
 # only a machine, reads `meiva.self.MACHINE_SPEC`, and reports whether anything was loaded.
 # Usage: `machine_probe.py <repo root>`. The root goes on `sys.path`, so the SDK is imported
 # exactly as a bare script imports it.
-# meiva:link meiva/self/docs/self.meiva.okf.md
+# meiva:link meiva/self/README.md
 
 import json
 import sys

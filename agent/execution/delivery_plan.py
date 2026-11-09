@@ -4,7 +4,7 @@
 # A delivery that raises turns a success into a crash envelope the parent can see, but never
 # replaces a crash the child already reported: that crash stays primary. Every `ResultKind` has a
 # row, and a kind outside them is a protocol violation that raises instead of reading as "no".
-# meiva:link agent/execution/docs/child-boundaries.meiva.okf.md
+# meiva:link agent/execution/docs/child-boundaries.md
 
 from __future__ import annotations
 

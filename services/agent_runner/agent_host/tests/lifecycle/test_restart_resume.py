@@ -4,7 +4,7 @@
 # host runs next. On real Postgres, through the production graph, claim node and host; only
 # the model is a test double. A restart interrupts the call or code run in flight only after
 # it has waited its grace, which these tests grant by ageing the restart row.
-# meiva:link agent/graph/docs/turn-interrupts.meiva.okf.md
+# meiva:link agent/graph/docs/turn-interrupts.md
 
 import asyncio
 import pathlib

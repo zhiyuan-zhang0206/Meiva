@@ -1,0 +1,44 @@
+# Agent Sessions
+
+Services run in named platform-supervisor sessions. Agent execution belongs to
+one `agent-host` service per runner; an agent has no main-process session.
+Interactive shells and watchers are held by the machine's `pty-sessions`
+service and reached through `get_shell_backend(home=...)`. Its socket and ledger are
+scoped to the local `MEIVA_HOME`.
+
+## Names and lifetime
+
+`base/cluster/derive.py:session_name()` assembles `meiva-<service>` names:
+
+- `meiva-agent-host` is the runner daemon.
+- `meiva-agent-<id>-shell-<n>[-<name>]` is a persistent agent shell.
+
+Shell handles are monotonic and never reused after closure. A rebuilt shell
+receives a new handle; an old capture request cannot address its replacement.
+Agent terminate/restart and agent-host or gateway restarts preserve shells.
+`meiva stop` and `meiva restart` explicitly close them; start does not serialize
+their processes or shell variables. Data and profile directories remain on disk.
+
+## Identity and environment
+
+The agent host supplies identity through `Runtime[MeivaContext]`. `base/native_process/turn_identity.py` retains original native admission/resource scopes; it does not attribute ordinary logs or select SDK identity.
+It does not set process-wide agent identity. Disposable execute children carry
+an explicit per-agent request (its `MeivaContext` description); watcher/schedule
+children derive their context from `MEIVA_AGENT_ID`, and a gateway-hosted schedule
+binds one carrying its actor. A bare persistent shell has no agent identity.
+
+`base/sessions/env_forwarding.py:forward_env_dict()` passes host-scope bootstrap values
+to daemon/session children. Cluster values are loaded from the child's actual
+home/gateway projection. Credentials travel through environment/config channels,
+never command-line arguments. `MEIVA_AGENT_ID` is not globally inherited by
+unrelated daemon or shell processes. A persistent shell's base environment is
+the `pty-sessions` service's own environment (minus `MEIVA_PROCESS_PROFILE` and
+`VIRTUAL_ENV`) overlaid with the caller's forwarded env; variables specific to
+the creator, such as `SSH_AUTH_SOCK`, are not carried over.
+
+## Related contracts
+
+- [Agent Lifecycle](lifecycle.md) — agent control
+- [Environment Variables](env-vars.md) — environment surface
+- [PTY sessions — every agent interactive shell lives in the pty-sessions service](../../base/sessions/pty/docs/pty_sessions/pty_sessions.md) — PTY resource owner
+- [Agent-host graceful exit](../../services/agent_runner/agent_host/lifecycle/docs/graceful-exit.md) — what a stop does to each resource

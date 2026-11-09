@@ -41,7 +41,7 @@ export interface TimelineState {
   // nothing else advances, and the header used to freeze at its last number (user report
   // 2026-11-08). It never carries an agent-host timestamp, so a clock skew between the agent's
   // machine and the browser cannot move the number.
-  // meiva:link ui/web/src/docs/frontend-components/timeline-view/deep-collapse.meiva.okf.md
+  // meiva:link ui/web/src/docs/frontend-components/timeline-view/deep-collapse.md
   liveAnchorAt: number;
   connectionState: ConnectionState;
   tokenUsage: number;
@@ -77,7 +77,7 @@ export interface TimelineState {
   // receipt carried none, so the newest user message stands in). The timeline
   // consumes it once the committed row reaches the DOM, parks that row a fixed
   // share down the viewport and stops following.
-  // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.meiva.okf.md
+  // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.md
   sendAnchor: { seq: number; inboundId: number | null };
   requestSendAnchor: (inboundId: number | null) => void;
   invalidateCompactEpoch: () => void;
@@ -140,7 +140,7 @@ export function crossedUnseenCompact(
 // Retaining them when follower trimming caps the 250-item window keeps
 // `crossedUnseenCompact` from misreading re-attached summaries as an unseen
 // compact reset and keeps the oldest non-standing cursor intact.
-// meiva:link ui/web/src/docs/frontend-state/timeline-cache.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-state/timeline-cache.md
 export function retainStandingContextOnTrim(
   items: readonly BackendTimelineItem[],
   maxItems: number,

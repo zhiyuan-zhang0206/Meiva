@@ -1,0 +1,61 @@
+# SKILL.md description gates — scan, length and identity
+
+`lint_skill_descriptions.py` guards every repo-shipped SKILL.md frontmatter at
+merge time. The runtime loader reads every skill's frontmatter while an agent
+assembles its system prompt, so a single malformed repo SKILL.md (an unquoted
+`: ` in a value, a missing field) would otherwise crash unrelated agents
+fleet-wide — this is the merge gate the loader cannot be for itself; the
+runtime loader only skip-warns a malformed *externally-installed* skill. User
+skills under `~/.meiva/skills/` are outside the repo's control and degrade
+gracefully at runtime. The repo-wide no-CJK gate (user ruling 2026-08-27)
+already bans raw CJK anywhere in the repo, so this lint keeps the structural
+gates only.
+
+## Scan universe
+
+Files come from `base.packages.skills.index.SkillIndex.build` — the same
+builder the runtime loader mounts from, so the lint and the loader cannot
+drift (doorplate ⑤). Roots: `meiva_builtins/skills/`, `meiva_builtins/plugins/`
+and the repo's own `.agents/skills/` (`.meiva/skills` and `.claude/skills` are
+links back to it). Entries whose SKILL.md resolves to the same real file are
+reported once. The 2026-08 malformed-frontmatter incident (an
+`meiva-serious-research` practice file three levels deep, unquoted `: ` in its
+description) shipped green because the old glob scanned only one and two
+levels; the depth fix is pinned by tests.
+
+Every repo-shipped SKILL.md under meiva_builtins/skills/, meiva_builtins/plugins/ and .agents/skills/ is materialized through the same SkillIndex.build the runtime loader uses, so the lint cannot drift from the loader; entries resolving to the same real file are reported once, and an entry whose frontmatter fails the runtime parse or lacks required fields is reported as an error and skipped for the remaining gates.
+
+## Description length
+
+A description is the index line an agent reads to decide whether to reach for
+the skill — and for skills injected into the system prompt it sits in *every*
+system prompt. One hard line is enforced here: over 80 units fails, and the
+message says the detail belongs in the skill body rather than in this line —
+where the skill is read only after it is chosen. There is no band below the
+line, not even a non-blocking one: a requested inspection lists the longest
+descriptions by measured length as facts, with no threshold and no "should
+shorten", because a 50-80 flag would teach 50 as the target and buy compressed
+descriptions. Mechanical truncation in the prompt was the wrong fix (full
+descriptions render, length is governed at the source instead).
+
+Units come from the shared `count_words` in `base/packages/text_budget.py` —
+the same CJK-aware measure used repo-wide: one CJK code point, or one
+non-CJK run of letters and digits (underscores do not join runs), is one
+unit. A flat char count is unfair across languages — 80 English characters
+is ~12 words, 80 CJK characters are 80 meaningful characters — so a CJK
+character and a word each count as one unit, which tracks information
+content (and prompt tokens) far better.
+
+A description over the 80-unit hard ceiling prints one error and exits 1 and names the body as the place for the detail; nothing below the line is enforced, and an inspection lists the longest descriptions as facts rather than flagging a band. The length is measured through the shared count_words in base/packages/text_budget.py (one CJK code point or one non-CJK alphanumeric run is one unit; underscores do not join runs), and the constants move only as a deliberate change in the same PR, justified in the commit message.
+
+## Identity gate
+
+The frontmatter `name:` must fold to the same key as the skill's own directory
+(dash and underscore are one name). The check runs against the name the skill
+converges to in the load dir: a plugin's root SKILL.md sits at
+`plugins/<p>/skills/SKILL.md` in the source tree but lands at
+`skills/<p>/SKILL.md` — the load-dir leaf is the plugin name, not the
+`skills` container. The runtime loader refuses a mismatch at scan time; a
+repo skill must never ship one.
+
+Parent: [scripts/content_lint/ — Document and Content Lints](content_lint.md).

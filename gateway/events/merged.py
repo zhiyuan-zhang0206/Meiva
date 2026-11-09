@@ -3,7 +3,7 @@
 # channels, so a browser holds one socket instead of one per projection. Every
 # channel owns its bounded queue and its own error frame; a shed payload is
 # counted for the client and for the ops series, never silently dropped.
-# meiva:link gateway/events/docs/sse/sse.meiva.okf.md
+# meiva:link gateway/events/docs/sse/sse.md
 from __future__ import annotations
 
 import json
@@ -94,7 +94,7 @@ def channel_error_frame(channel: Channel, message: str) -> bytes:
 # its OLDEST payload (the agent-side publisher's own policy) so the newest state
 # survives, and counts every shed or unusable payload for the frame and for the
 # `sse_drop` report.
-# meiva:link gateway/events/docs/sse/sse.meiva.okf.md
+# meiva:link gateway/events/docs/sse/sse.md
 class ChannelQueue:
     def __init__(self, channel: Channel, limit: int) -> None:
         self.channel = channel
@@ -167,7 +167,7 @@ def subscribe_errors(served: Sequence[Channel], exc: BaseException) -> dict[Chan
 
 # meiva:note
 # Open an async Redis pubsub client pair for the merged SSE stream.
-# meiva:link gateway/events/docs/sse/sse.meiva.okf.md
+# meiva:link gateway/events/docs/sse/sse.md
 def open_pubsub(bus: EventBus) -> PubsubPair:
     client = bus.open_async_redis()
     pubsub = client.pubsub()  # pyright: ignore[reportUnknownMemberType]
@@ -282,7 +282,7 @@ def flush_frames(
 # the batch endpoint's cadence. Lifetime defenses mirror `event_stream`:
 # subscription failure is a frame, not a crash; the yields sit inside the try so a
 # client abort still closes the pubsub socket; `stopping` ends a gateway handover.
-# meiva:link gateway/events/docs/sse/sse.meiva.okf.md
+# meiva:link gateway/events/docs/sse/sse.md
 async def _finish(
     pubsub: PubSub,
     client: AuthRetryAsyncRedis,
@@ -386,7 +386,7 @@ async def merged_event_stream(
 # `agents` defaults to no filter, and `agents=0` keeps system-level events only.
 # Each flush is `data: {"ch": .., "events": [..]}` plus `"dropped"` when that
 # channel shed payloads since its previous flush.
-# meiva:link gateway/events/docs/sse/sse.meiva.okf.md
+# meiva:link gateway/events/docs/sse/sse.md
 @router.get("/api/stream")
 async def get_merged_stream(
     request: Request,

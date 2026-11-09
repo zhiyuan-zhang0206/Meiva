@@ -56,7 +56,7 @@ if __name__ == "__main__":
 # What this script reads, once at its own process entry: the checkout's filesystem as a tree, the
 # roles the root manifest declares (the scan scope below is a selection from them), and the shared
 # scan vocabulary that decides which of those files to read.
-# meiva:link scripts/docs/scripts.meiva.okf.md
+# meiva:link scripts/docs/scripts.md
 from meizel import lint_common  # noqa: E402 - standalone script
 from meizel.checkout import source_tree  # noqa: E402
 from meizel.graph.universe import SourceTree  # noqa: E402

@@ -87,7 +87,7 @@ def _apply_steps(
 # the marker `meiva status` reports (first one named) and raises; an advisory-only run clears
 # the marker and raises `ConvergeAdvisoryError`, which a caller that must keep the host coming
 # up treats as a warning. A clean run clears the marker.
-# meiva:link cli/commands/converge/docs/converge-incomplete.meiva.okf.md
+# meiva:link cli/commands/converge/docs/converge-incomplete.md
 def _judge_failures(
     ctx: ConvergeCtx,
     blocking: list[tuple[str, str]],
@@ -131,7 +131,7 @@ def _judge_failures(
 # meiva:note
 # Only the host's prod install owns the marker: a dev cluster's converge must
 # never clear or set the prod home's record.
-# meiva:link cli/commands/converge/docs/converge-incomplete.meiva.okf.md
+# meiva:link cli/commands/converge/docs/converge-incomplete.md
 def record_incomplete(
     meiva_home: Path, *, step: str, error: str, prod_install: bool, now: datetime
 ) -> None:

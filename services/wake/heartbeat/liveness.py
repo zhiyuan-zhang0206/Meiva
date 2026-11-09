@@ -321,7 +321,7 @@ async def _record_snapshot(pool: ConnectionPool, name: str, outcome: ProbeOutcom
 # probe rules own it. One event per pass while the row qualifies, the same
 # shape as `machine_probe_failed`: the trailing-window rule reads "still
 # stopped" from the stream, so no second signal is needed to resolve.
-# meiva:link services/docs/gateway_side/heartbeat-stopped-too-long.meiva.okf.md
+# meiva:link services/docs/gateway_side/heartbeat-stopped-too-long.md
 def report_stopped_too_long(db: Database) -> list[str]:
     with db.connect() as conn:
         rows = query_all(
@@ -351,7 +351,7 @@ def report_stopped_too_long(db: Database) -> list[str]:
     return reported
 
 
-# meiva:link services/wake/heartbeat/docs/liveness-inputs.meiva.okf.md
+# meiva:link services/wake/heartbeat/docs/liveness-inputs.md
 async def run_liveness_pass(
     db: Database,
     pool: ConnectionPool,
@@ -377,7 +377,7 @@ async def run_liveness_pass(
     # Best effort: the stopped-too-long report is an added signal, and a schema
     # that has not taken its columns yet must not take the agent-liveness merge
     # down with it (that merge is what every mounted console reads).
-    # meiva:link services/docs/gateway_side/heartbeat-stopped-too-long.meiva.okf.md
+    # meiva:link services/docs/gateway_side/heartbeat-stopped-too-long.md
     try:
         report_stopped_too_long(db)
     except Exception:

@@ -104,7 +104,7 @@ def unpaired_tool_calls(messages: Sequence[AnyMessage]) -> list[tuple[int, list[
 
 # meiva:note
 # Whether this ToolMessage is the recovery marker, not a real result.
-# meiva:link agent/hooks/docs/hooks.meiva.okf.md
+# meiva:link agent/hooks/docs/hooks.md
 def _is_synthetic_tool_result(message: ToolMessage) -> bool:
     content: object = message.content  # pyright: ignore[reportUnknownMemberType]
     return isinstance(content, str) and content == INTERRUPTED_TOOL_RESULT

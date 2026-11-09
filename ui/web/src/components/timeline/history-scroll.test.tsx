@@ -331,7 +331,7 @@ describe("agent switch reading positions", () => {
     // meiva:note
     // A reader at the bottom has nothing to scroll to, so the control is not in
     // the DOM at all (user report 2026-10-30).
-    // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.meiva.okf.md
+    // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.md
     expect(screen.queryByTestId("scroll-to-bottom")).toBeNull();
   });
   it("keeps following a returned bottom follower as the thread grows", () => {
@@ -405,7 +405,7 @@ describe("agent switch reading positions", () => {
     // A background refetch and an older-page fetch can overlap; two rings spun at
     // once on the same screen (user report 2026-10-20). The pull strip owns the
     // ring while older history loads.
-    // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.meiva.okf.md
+    // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.md
     act(() => { viewport().scrollTop = 700; fireEvent.scroll(viewport()); });
     const button = screen.getByTestId("scroll-to-bottom");
     expect(button.getAttribute("aria-busy")).toBe("false");
@@ -419,7 +419,7 @@ describe("agent switch reading positions", () => {
     // meiva:note
     // Presented only away from the bottom: at the bottom there is nothing to
     // scroll to (user report 2026-10-30).
-    // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.meiva.okf.md
+    // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.md
     act(() => { viewport().scrollTop = 700; fireEvent.scroll(viewport()); });
     const button = screen.getByTestId("scroll-to-bottom");
     const position = viewport().scrollTop;
@@ -492,7 +492,7 @@ it("captures the departing reading position before the native pull reserve is re
 // The ring still rests here while the newest page is read, and one click both
 // scrolls back and takes the control away — the reader is at the bottom again
 // (user report 2026-10-30: an arrow over a click that did nothing).
-// meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.md
 it("rests on the loading ring while new messages arrive, and the click takes it away", () => {
   renderWithBrowser(<QueryClientProvider client={client}><TimelineView items={items} threadKey="ring-click" loadingNew /></QueryClientProvider>);
   act(() => { viewport().scrollTop = 700; fireEvent.scroll(viewport()); });
@@ -514,13 +514,13 @@ it("rests on the loading ring while new messages arrive, and the click takes it 
     vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockImplementation(() => width);
     // meiva:note
     // The first pass only records the width the viewport already had.
-    // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.meiva.okf.md
+    // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.md
     act(() => { resizeCallbacks.forEach((deliver) => deliver()); });
 
     // meiva:note
     // A width change re-wraps every row; the ones above the reader grew, so the
     // pixel offset that used to point at 4.0 now points past it.
-    // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.meiva.okf.md
+    // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.md
     act(() => {
       width = 700;
       aboveSettle = 120;

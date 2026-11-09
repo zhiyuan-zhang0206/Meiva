@@ -4,7 +4,7 @@
 # `next_at`. The slot is reserved before the caller sleeps, so a caller that oversleeps starts
 # late while the caller behind it keeps its own slot: the observed gap compresses by the
 # overshoot but a start never moves earlier than its slot.
-# meiva:link meiva/web/docs/providers.meiva.okf.md
+# meiva:link meiva/web/docs/providers.md
 
 from __future__ import annotations
 

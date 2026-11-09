@@ -60,7 +60,7 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 
 sys.path.insert(0, str(_REPO_ROOT))
 
-# meiva:link scripts/docs/scripts.meiva.okf.md
+# meiva:link scripts/docs/scripts.md
 from meizel import allowances, lint_common  # noqa: E402
 from meizel.checkout import GitRepo, roles_at, source_tree  # noqa: E402
 from meizel.owners import decisions  # noqa: E402

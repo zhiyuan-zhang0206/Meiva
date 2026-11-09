@@ -291,18 +291,18 @@ describe("a clamp after a shrink the commit declared (#5678)", () => {
     // The window replaced estimates with measured heights, so the browser
     // clamps scrollTop when it lays out; the commit that caused it declares
     // the shrink before the clamp's event dispatches.
-    // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.meiva.okf.md
+    // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.md
     ctl.notifyContentShrunk({ scrollTop: 15065, scrollHeight: 15311, clientHeight: 600 });
     // meiva:note
     // The clamp's event lands after rows were added again, so it carries the
     // grown height and the shrink is no longer visible in the snapshot.
-    // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.meiva.okf.md
+    // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.md
     const clamped = { scrollTop: 14811, scrollHeight: 18842, clientHeight: 600 };
     expect(ctl.handleScroll(clamped)).toBe("none");
     expect(ctl.isSticky()).toBe(true);
     // meiva:note
     // The layout pass that follows asks for the pin, so the tail comes back.
-    // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.meiva.okf.md
+    // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.md
     expect(ctl.handleLayoutChange(clamped)).toBe(true);
   });
   it("the same clamp is a departure when the shrink was never declared", () => {
@@ -323,7 +323,7 @@ describe("a clamp after a shrink the commit declared (#5678)", () => {
     pin(ctl, 15665);
     // meiva:note
     // The reader leaves the tail on their own, so the shrink must not pull them back.
-    // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.meiva.okf.md
+    // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.md
     ctl.handleScroll({ scrollTop: 14000, scrollHeight: 15665, clientHeight: 600 });
     expect(ctl.isSticky()).toBe(false);
     ctl.notifyContentShrunk({ scrollTop: 14000, scrollHeight: 15311, clientHeight: 600 });
@@ -339,7 +339,7 @@ describe("the baseline a shrink is measured against (#5680)", () => {
   // commit's 69px shrink reads as growth and the clamp releases the follower.
   // The clamp's echo carries the height already regrown, so only the
   // declaration keeps that 204px move out of the upward run.
-  // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.meiva.okf.md
+  // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.md
   it("a pin refreshes it, so a commit right after a pin declares the shrink", () => {
     const ctl = createStickyController(POINTER_STICKY_THRESHOLDS);
     pin(ctl, 21759);
@@ -359,7 +359,7 @@ describe("the baseline a shrink is measured against (#5680)", () => {
   // spend the declaration on its echo instead of the clamp it predicted. Rows
   // are added again before the reader moves, so the next snapshot carries a
   // bigger height than the previous event saw.
-  // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.meiva.okf.md
+  // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.md
   it("a layout pass records the height and never declares", () => {
     const ctl = createStickyController(POINTER_STICKY_THRESHOLDS);
     pin(ctl, 15665);
@@ -370,7 +370,7 @@ describe("the baseline a shrink is measured against (#5680)", () => {
   // A parked reader keeps no baseline, and a requested stick measures nothing:
   // a height from the position they left cannot predict a shrink, so the first
   // gesture after they come back is theirs.
-  // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.meiva.okf.md
+  // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.md
   it("a parked reader keeps no baseline, so a re-stick cannot read one as a shrink", () => {
     const ctl = createStickyController(POINTER_STICKY_THRESHOLDS);
     pin(ctl, 5000);
@@ -425,7 +425,7 @@ describe("layout changes with no scroll event (handleLayoutChange)", () => {
 // block downward instead of pinning the tail, so opening one stops following and
 // a growth pass reports the position without moving it. Closing or collapsing the
 // block hands the tail back to the ordinary rules (user ruling 2026-11-09).
-// meiva:link ui/web/src/docs/frontend-components/timeline-view/deep-collapse.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/timeline-view/deep-collapse.md
 describe("an expanded live work block owns the top edge (notifyLiveBlock)", () => {
   it("stops following and never pins while the block grows downward", () => {
     const ctl = createStickyController(TOUCH_STICKY_THRESHOLDS);
@@ -1037,7 +1037,7 @@ describe("isAtTail (a saved position's tail measure)", () => {
 // the reader's message is the rest of the document, so "at the bottom" is true
 // while following is off. These cases pin the rule that keeps that reading from
 // resurrecting following, and the point where it stops applying.
-// meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.md
 describe("send anchor over a bottom reserve", () => {
   it("stops following and ignores the at-bottom reading the reserve creates", () => {
     const ctl = createStickyController(POINTER_STICKY_THRESHOLDS);

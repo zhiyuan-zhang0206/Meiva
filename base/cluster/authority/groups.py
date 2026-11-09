@@ -1,6 +1,6 @@
 # meiva:note
 # Group convergence is idempotent, does not change LOGIN, covers future tables and fails a VACUUM skip instead of reporting successful maintenance.
-# meiva:link base/cluster/authority/docs/group-grants.meiva.okf.md
+# meiva:link base/cluster/authority/docs/group-grants.md
 from __future__ import annotations
 
 from typing import LiteralString
@@ -128,7 +128,7 @@ def _grant_runner(conn: Conn, owner: str, runner: str) -> None:
     # UPDATE would also let the role rewrite a delivery's subject or body, which
     # no runner path does. The table-level UPDATE is revoked first so convergence
     # narrows a cluster that already carries the wide grant.
-    # meiva:link base/cluster/authority/docs/group-grants.meiva.okf.md
+    # meiva:link base/cluster/authority/docs/group-grants.md
     _grant(conn, "REVOKE UPDATE ON {} FROM {}", "notification_events", runner)
     _grant(conn, "GRANT UPDATE (announced_at) ON {} TO {}", "notification_events", runner)
     _grant(conn, "GRANT UPDATE (item) ON {} TO {}", "agent_harness_messages", runner)

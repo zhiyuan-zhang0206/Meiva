@@ -1,7 +1,7 @@
 # meiva:note
 # Reading another agent's ledger: a fresh line is the judge, an old one is a judge that stopped
 # looking, and both have to be told apart from a repo with nothing to reclaim.
-# meiva:link scripts/host_ops/docs/worktree-gc.meiva.okf.md
+# meiva:link scripts/host_ops/docs/worktree-gc.md
 
 from __future__ import annotations
 

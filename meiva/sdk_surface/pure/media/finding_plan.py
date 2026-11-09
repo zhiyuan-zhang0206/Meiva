@@ -4,7 +4,7 @@
 # findings of their work next to the result; the facade (`meiva/security.py`) reads whether
 # scanning is enabled and whether an exec turn is running, asks `plan_delivery` what to do, and
 # is the only code that appends to the turn's state update.
-# meiva:link meiva/docs/sdk-surface/sdk-surface.meiva.okf.md
+# meiva:link meiva/docs/sdk-surface/sdk-surface.md
 
 from __future__ import annotations
 

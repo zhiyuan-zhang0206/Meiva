@@ -2,7 +2,7 @@
 # The DeepSeek Search and Fetch tools: build each request, send it paced by the batch's rate
 # limiter, scan what comes back for injection patterns, and return the hits with the findings, or
 # the page.
-# meiva:link meiva/web/docs/providers.meiva.okf.md
+# meiva:link meiva/web/docs/providers.md
 
 from __future__ import annotations
 

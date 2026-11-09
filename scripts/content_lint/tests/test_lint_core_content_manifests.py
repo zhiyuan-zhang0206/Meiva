@@ -230,4 +230,4 @@ def test_the_failure_block_carries_the_reason_and_the_owner_doc(
     err = capsys.readouterr().err.lower()
 
     assert "host version" in err
-    assert "package-manifest.meiva.okf.md" in err
+    assert "package-manifest.md" in err

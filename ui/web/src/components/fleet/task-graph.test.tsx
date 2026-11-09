@@ -3,7 +3,7 @@
 // tests, the d3-force layout is a real, time-driven simulation; these tests drive it just far enough
 // to settle card positions, then assert the SVG / DOM the component renders. Rows arrive the way the
 // app supplies them (the query cache, answered by the fake transport), so no hook module is replaced.
-// meiva:link ui/web/src/docs/frontend-components/fleet-view.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/fleet-view.md
 
 import { QueryClient } from "@tanstack/react-query";
 import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
@@ -19,7 +19,7 @@ import { renderWithProviders } from "@/test-support/render";
 // meiva:note
 // The route hands its surfaces a `navigate`; a suite passes a spy, so a jump can be read
 // without replacing `next/navigation`.
-// meiva:link ui/web/src/docs/frontend-components/fleet-view.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/fleet-view.md
 const navigate = vi.fn();
 
 const getTask = vi.fn<(id: number) => Promise<TaskRow>>();
@@ -59,7 +59,7 @@ const TASK_WINDOWS = ["24h", "7d", "30d", "all"] as const;
 // transport AND pre-seeded in the query cache, so the board paints them on the first frame and its
 // mount refetch agrees. Preferences come from the settings cache the app fills, and the settings
 // surface answers reads and writes, so a clicked mode or toggle survives its reconcile fetch.
-// meiva:link ui/web/src/docs/frontend-components/fleet-view.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/fleet-view.md
 function renderGraph(
   tasks: readonly TaskRow[],
   {
@@ -161,7 +161,7 @@ describe("TaskGraph hover detail card", () => {
     expect(text).toContain("3 reminders");
     // meiva:note
     // The list projection carries no text columns; the card fetches them.
-    // meiva:link ui/web/src/docs/frontend-components/fleet-view.meiva.okf.md
+    // meiva:link ui/web/src/docs/frontend-components/fleet-view.md
     await waitFor(() => expect(screen.getByRole("tooltip").textContent).toContain("A longer description"));
     const fetched = screen.getByRole("tooltip");
     expect(fetched.textContent).toContain("Shipped in #1");
@@ -183,7 +183,7 @@ describe("TaskGraph hover detail card", () => {
     expect(screen.getByTestId("task-detail-failed").textContent).toContain("Could not load the full task");
     // meiva:note
     // The registry fields still render; only the text sections are missing.
-    // meiva:link ui/web/src/docs/frontend-components/fleet-view.meiva.okf.md
+    // meiva:link ui/web/src/docs/frontend-components/fleet-view.md
     expect(screen.getByRole("tooltip").textContent).toContain("no-detail");
   });
 

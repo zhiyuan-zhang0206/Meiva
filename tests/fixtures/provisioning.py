@@ -1,6 +1,6 @@
 # meiva:note
 # Native fixture cleanup covers every public per-test table, uses a private home and test-only URLs, and keeps the full-run selection guard active.
-# meiva:link tests/fixtures/docs/native-provisioning.meiva.okf.md
+# meiva:link tests/fixtures/docs/native-provisioning.md
 from __future__ import annotations
 
 import functools
@@ -34,7 +34,7 @@ _OS_JOBS_AT_START = host_meiva_os_jobs()
 _PROCESS_IMAGE_KEY = pytest.StashKey[LoadedCommit]()
 
 
-# meiva:link tests/docs/test-fixtures/catalog-boot.meiva.okf.md
+# meiva:link tests/docs/test-fixtures/catalog-boot.md
 @pytest.fixture(scope="session", autouse=True)
 def _catalog_cluster_projection() -> Iterator[None]:
     """Deliver real plugin policy for this test worker's catalog consumers.

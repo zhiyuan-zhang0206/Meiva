@@ -1,4 +1,4 @@
-# meiva:link meiva_builtins/plugins/meiva_fleet/docs/notice-questions.meiva.okf.md
+# meiva:link meiva_builtins/plugins/meiva_fleet/docs/notice-questions.md
 
 from enum import StrEnum
 from typing import Annotated, Literal
@@ -84,7 +84,7 @@ def validate_answer(question: NoticeQuestion, answer: NoticeAnswer) -> NoticeAns
     # A selection is optional in both kinds: answering with a comment alone is a
     # real answer (user ruling 2026-10-21), so zero selections are valid as long
     # as the comment says something. An answer carrying neither is not an answer.
-    # meiva:link meiva_builtins/plugins/meiva_fleet/docs/notice-questions.meiva.okf.md
+    # meiva:link meiva_builtins/plugins/meiva_fleet/docs/notice-questions.md
     if selected_count == 0 and answer.comment is None:
         raise ValueError("an answer carries a selection or a comment")
     return answer.model_copy(
@@ -158,7 +158,7 @@ def _selected_numbers(question: ChoiceQuestion, first: str) -> list[int]:
     # (user ruling 2026-10-21), and a numbered client needs one explicit token
     # for "none" or it cannot express it at all. Mixing 0 with real numbers is
     # ambiguous, so it is refused rather than guessed.
-    # meiva:link meiva_builtins/plugins/meiva_fleet/docs/notice-questions.meiva.okf.md
+    # meiva:link meiva_builtins/plugins/meiva_fleet/docs/notice-questions.md
     if 0 in numbers:
         if numbers != [0]:
             raise ValueError("choose no option (0) or option numbers, not both")

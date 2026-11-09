@@ -19,7 +19,7 @@ from ops.rpc_schemas import HarnessProbeResult, HarnessProbeRow
 __all__ = ["availability_rows", "launchable"]
 
 
-# meiva:link base/agents/docs/harness/harness.meiva.okf.md
+# meiva:link base/agents/docs/harness/harness.md
 def launchable(row: HarnessProbeRow, launchable_harnesses: Collection[Harness]) -> bool:
     if row.harness not in launchable_harnesses:
         return False

@@ -4,7 +4,7 @@
 # paths a target names. Nothing here opens a file, lists a directory, resolves a link or starts a
 # process; which files and directories the ceilings judge, what they leave out and what the report
 # says are decided here.
-# meiva:link meizel/docs/meizel.meiva.okf.md
+# meiva:link meizel/docs/meizel.md
 
 from __future__ import annotations
 

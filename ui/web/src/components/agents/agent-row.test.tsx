@@ -37,7 +37,7 @@ afterEach(() => {
 // meiva:note
 // Radix ContextMenu calls pointer-capture / scroll APIs that happy-dom
 // doesn't implement; stub them so the menu can open in the test DOM.
-// meiva:link ui/web/src/docs/frontend-components/frontend-components.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/frontend-components.md
 beforeAll(() => {
   Element.prototype.hasPointerCapture = () => false;
   Element.prototype.setPointerCapture = () => undefined;

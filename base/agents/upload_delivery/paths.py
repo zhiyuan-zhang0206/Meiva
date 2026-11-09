@@ -89,7 +89,7 @@ def resolve_upload_path(directory: Path, name: str) -> Path:
 # Fetch a historical native-image upload from the gateway over HTTP and return
 # (mime_type, base64_ascii). Only an inbound queued with an `image_url` block before
 # uploads unified onto file delivery still names one; nothing writes such a block now.
-# meiva:link base/agents/upload_delivery/docs/storage.meiva.okf.md
+# meiva:link base/agents/upload_delivery/docs/storage.md
 def fetch_upload_b64(
     agent_id: int, name: str, *, client: Callable[[], UploadClient]
 ) -> tuple[str, str]:

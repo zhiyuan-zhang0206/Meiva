@@ -129,7 +129,7 @@ class MachineProbeFailed(TypedDict):
 # window. `stopped_for_s` is how long it has been down, so the alert reports
 # the age without a second query. A host that never started
 # (`stopped_at IS NULL`) is not this signal.
-# meiva:link base/events/docs/events.meiva.okf.md
+# meiva:link base/events/docs/events.md
 class MachineStoppedTooLong(TypedDict):
     machine: str
     stopped_for_s: int

@@ -1,6 +1,6 @@
 # meiva:note
 # Locks `scripts/lint/host_platform_marks.py`: a test names the host it needs, or injects one.
-# meiva:link scripts/lint/docs/host-platform-marks/host-platform-marks.meiva.okf.md
+# meiva:link scripts/lint/docs/host-platform-marks/host-platform-marks.md
 
 from __future__ import annotations
 

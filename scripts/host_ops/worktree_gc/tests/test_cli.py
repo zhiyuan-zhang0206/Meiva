@@ -2,7 +2,7 @@
 # The round end to end, against a throwaway repository: the gate-closed night, a never-list
 # entry, and a tree whose HEAD is detached. None of these reaches `gh`, so the suite answers
 # fast and offline — which is the point of the paths being values.
-# meiva:link scripts/host_ops/docs/worktree-gc.meiva.okf.md
+# meiva:link scripts/host_ops/docs/worktree-gc.md
 
 from __future__ import annotations
 

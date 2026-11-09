@@ -106,7 +106,7 @@ describe("InspectorPanel heartbeat cells (merged into Liveness, Task #1195)", ()
     // The cell prints one instant and nothing else: no `paused` qualifier rides
     // beside the time (user ruling 2026-11-08), and the default form is the
     // date-context absolute one so the reader sees which day the pause ends on.
-    // meiva:link ui/web/src/docs/frontend-components/inspector/section-details/liveness.meiva.okf.md
+    // meiva:link ui/web/src/docs/frontend-components/inspector/section-details/liveness.md
     useFrozenClock("2026-10-17T16:26:00Z");
     getAgentInspectLive.mockResolvedValue(
       liveFixture({
@@ -129,7 +129,7 @@ describe("InspectorPanel heartbeat cells (merged into Liveness, Task #1195)", ()
     // meiva:note
     // `display.date_format` is the one reader preference for absolute vs
     // relative; the cell stays a single line either way.
-    // meiva:link ui/web/src/lib/format/docs/time.meiva.okf.md
+    // meiva:link ui/web/src/lib/format/docs/time.md
     useFrozenClock("2026-10-17T16:26:00Z");
     getAgentInspectLive.mockResolvedValue(
       liveFixture({
@@ -179,7 +179,7 @@ describe("InspectorPanel heartbeat cells (merged into Liveness, Task #1195)", ()
     // The value is computed from the panel's one-second clock, not once at open: a live query that
     // has not refreshed yet must still show a shorter span after the clock moves on, or the panel
     // would print "in 6h" for the rest of the pause.
-    // meiva:link ui/web/src/docs/frontend-components/inspector/section-details/liveness.meiva.okf.md
+    // meiva:link ui/web/src/docs/frontend-components/inspector/section-details/liveness.md
     vi.setSystemTime(new Date("2026-10-17T16:32:00Z"));
     await waitFor(() => expect(screen.getByText("in 6m")).toBeTruthy(), { timeout: 3000 });
   });

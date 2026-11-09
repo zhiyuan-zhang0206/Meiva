@@ -8,7 +8,7 @@
 # subscription covered. Subscription rows still contribute to the token totals. The cluster filter
 # accepts the home cluster's label and rows with no label, as every dashboard read does. The
 # warning/error classes are `gateway.cluster.monitor.alert_classes`.
-# meiva:link gateway/cluster/docs/ops-surfaces.meiva.okf.md
+# meiva:link gateway/cluster/docs/ops-surfaces.md
 
 from __future__ import annotations
 
@@ -61,7 +61,7 @@ class WindowTotals(NamedTuple):
 # Cost is the usage-time snapshot each row carries, never today's registry price. Grouping by
 # `model` returns one row per distinct model in the window so callers resolve vendor slices
 # through `ModelCatalog` without duplicating provider prefixes in SQL.
-# meiva:link gateway/cluster/docs/ops-surfaces.meiva.okf.md
+# meiva:link gateway/cluster/docs/ops-surfaces.md
 def window_totals(
     conn: psycopg.Connection, *, cluster: str, start: datetime, end: datetime
 ) -> WindowTotals:

@@ -120,7 +120,7 @@ def test_parked_deep_history_mounts_a_bounded_window(e2e_env: E2EEnv, kind: str)
     # it with the three-layer shape from `tests/e2e/_timeline.py` (premise,
     # mounted rank, readable payload, each with its own budget) rather than
     # retuning the number (#5679).
-    # meiva:link ui/web/src/docs/frontend-components/timeline-view/bounded-window.meiva.okf.md
+    # meiva:link ui/web/src/docs/frontend-components/timeline-view/bounded-window.md
     page.wait_for_timeout(1500)
     assert older_requests, "keyboard paging did not request older history"
     assert (

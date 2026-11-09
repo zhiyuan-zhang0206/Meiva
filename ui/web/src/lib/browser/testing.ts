@@ -15,7 +15,7 @@
 // It lives beside the port because the hooks in lib/ are the first thing a test drives through it,
 // and lib/ may not import src/test-support/ (that would close a cycle: test-support already
 // reaches lib). `src/test-support/browser.ts` re-exports it for component tests.
-// meiva:link ui/web/src/docs/frontend-state/browser-port.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-state/browser-port.md
 
 import { createElement, type ReactNode } from "react";
 

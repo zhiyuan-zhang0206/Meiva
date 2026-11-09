@@ -1,6 +1,6 @@
 # meiva:note
 # Retry timing of one llm node as values. The node reads its policy once and asks these functions what a failed try means; the clock reading and the jitter roll arrive as arguments.
-# meiva:link agent/graph/llm/docs/llm.meiva.okf.md
+# meiva:link agent/graph/llm/docs/llm.md
 from __future__ import annotations
 
 from dataclasses import dataclass

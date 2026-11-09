@@ -177,7 +177,7 @@ def test_inbound_lines_carry_the_sender_as_their_type_and_drop_the_header_at_the
         # meiva:note
         # A system source's header is the note's open tag; every other header is the sender
         # line ending in a blank line.
-        # meiva:link agent/messages/docs/message-format.meiva.okf.md
+        # meiva:link agent/messages/docs/message-format.md
         system = source is not None and source.startswith("system")
         kwargs: dict[str, object] = {
             "meiva_msg_type": "inbound",

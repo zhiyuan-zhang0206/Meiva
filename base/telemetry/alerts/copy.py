@@ -7,7 +7,7 @@
 # translated: alert labels/annotations data (severity, alertname, summary, generator_url)
 # passes through untranslated. The English set keeps the pre-ruling production strings;
 # {severity}/{alertname}/{time}/{url} are filled in at the call site.
-# meiva:link gateway/alerts/docs/alerts.meiva.okf.md
+# meiva:link gateway/alerts/docs/alerts.md
 
 from __future__ import annotations
 

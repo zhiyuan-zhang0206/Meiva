@@ -21,7 +21,7 @@ function isLifecycleTag(s: string): s is LifecycleTag {
   return (LIFECYCLE_TAGS as readonly string[]).includes(s);
 }
 
-// meiva:link ui/web/src/docs/frontend-components/timeline-view/markers.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/timeline-view/markers.md
 export const MEMORY_SOURCES: ReadonlySet<NoteTag> = new Set<NoteTag>([
   "memory",
   "agent_memory",
@@ -38,7 +38,7 @@ export type MarkerClass =
 // Every NoteTag has a card: lifecycle and memory tags have their own, the rest are notes.
 // The vocabulary is generated from the backend enum, so only a source this build does
 // not know (an untagged message, or a tag newer than the page) falls to ephemeral.
-// meiva:link ui/web/src/docs/frontend-components/timeline-view/markers.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/timeline-view/markers.md
 export function classifyMarker(source: string | null): MarkerClass {
   if (source === null || !isNoteTag(source)) return { kind: "ephemeral" };
   if (isLifecycleTag(source)) return { kind: "lifecycle", tag: source };
@@ -62,7 +62,7 @@ export function isSilentEphemeralPayload(payload: string): boolean {
 // those are markers of machinery, not content the agent read. A recognised
 // NoteTag is never judged by its payload, so a note whose body happens to read
 // like machinery still renders.
-// meiva:link ui/web/src/docs/frontend-components/timeline-view/markers.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/timeline-view/markers.md
 export function isSilentMarker(source: string | null, payload: string): boolean {
   if (source !== null && isNoteTag(source)) return false;
   return isSilentEphemeralPayload(payload);

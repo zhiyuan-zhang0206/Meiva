@@ -23,7 +23,7 @@ class MeivaCodeState(BaseModel):
     # `compact.version`. After compact strips messages, injected_paths is
     # lazily cleared (detected at wrap entry, not actively reset) — the same
     # monotonic version-counter reset `meiva_sdk_reminder` uses.
-    # meiva:link meiva_builtins/plugins/meiva_code/docs/meiva_code.meiva.okf.md
+    # meiva:link meiva_builtins/plugins/meiva_code/docs/meiva_code.md
 
     # Base-channel declaration: this plugin legitimately appends system notes
     # (AGENTS.md / CLAUDE.md context injection) to the framework's `messages`

@@ -2,7 +2,7 @@
 # Local external harness CLI convergence: verifies and aligns installed harness
 # CLIs with this checkout's pinned versions without interrupting running agent
 # processes.
-# meiva:link base/lm/harness/docs/harness.meiva.okf.md
+# meiva:link base/lm/harness/docs/harness.md
 
 from __future__ import annotations
 

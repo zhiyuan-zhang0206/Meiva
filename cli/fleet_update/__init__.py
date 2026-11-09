@@ -1,6 +1,6 @@
 # meiva:note
 # `meiva update {run,down,up}` — cluster-wide source-mode rollout over SSH.
-# meiva:link cli/docs/fleet-update.meiva.okf.md
+# meiva:link cli/docs/fleet-update.md
 
 from __future__ import annotations
 
@@ -46,7 +46,7 @@ class UpdateWindowInputs:
 # and the one-shot job names are stamped with, how often to look again while waiting, and the clock
 # those waits are spent on.
 # Exit codes: 0 done, 1 failed after the first effect, 2 refused before any, 3 a partial `up`.
-# meiva:link cli/docs/fleet-update.meiva.okf.md
+# meiva:link cli/docs/fleet-update.md
 def run_window(
     args: choices.FleetArgs,
     *,

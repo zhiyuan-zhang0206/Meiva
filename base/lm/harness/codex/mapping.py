@@ -37,7 +37,7 @@ def _as_int(value: object) -> int | None:
 # Codex speaks ThreadItem, not the bridge's own vocabulary: a `commandExecution`
 # item is one tool use whose result arrives as the same item completed. A tool
 # result can be megabytes, so the event carries a preview.
-# meiva:link base/lm/harness/codex/docs/codex.meiva.okf.md
+# meiva:link base/lm/harness/codex/docs/codex.md
 TOOL_RESULT_PREVIEW_CHARS = 2000
 
 
@@ -105,7 +105,7 @@ def assistant_text(item: RequestParams, *, final_only: bool = False) -> str | No
 # as the CLI's own `total_tokens` (input + output) shows, so nothing is added here.
 # The other two adapters translate into the same shape; see `Usage` in
 # `base/lm/harness/events.py`.
-# meiva:link base/lm/harness/docs/harness.meiva.okf.md
+# meiva:link base/lm/harness/docs/harness.md
 def usage_from(params: RequestParams) -> Usage:
     last = _as_object(_as_object(params.get("tokenUsage")).get("last"))
     if not last:

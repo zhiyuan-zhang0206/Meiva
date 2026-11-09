@@ -17,7 +17,7 @@ def test_a_harness_report_becomes_a_chat_inbound(
     # inbound row of its own. A `system:harness` chat inbound wakes the agent the way
     # any other message does — which is the whole point, since a note nobody has to
     # answer would leave the agent as unaware as before (task #5663).
-    # meiva:link base/lm/harness/docs/attribution.meiva.okf.md
+    # meiva:link base/lm/harness/docs/attribution.md
     agent_id = create_agent(db_conn)
     text = "Background task bhd09i69m reported completed.\nOutput file: /tmp/tasks/bhd09i69m.output"
 

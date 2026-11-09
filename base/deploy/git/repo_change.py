@@ -29,7 +29,12 @@ def is_doc_path(path: str) -> bool:
     return (
         (path.startswith(_DOC_ROOTS) and "tests" not in directories)
         or (path.endswith(".md") and "/" not in path)
-        or (path.endswith(".meiva.okf.md") and "docs" in directories and "tests" not in directories)
+        or (
+            path.endswith(".md")
+            and path.rsplit("/", 1)[-1] not in {"AGENTS.md", "SKILL.md"}
+            and "docs" in directories
+            and "tests" not in directories
+        )
     )
 
 

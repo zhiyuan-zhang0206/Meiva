@@ -3,7 +3,7 @@
 // transient drops (reconnecting or closed) auto-retry silently via backoff;
 // drops lasting >= CONNECTION_ERROR_DELAY_MS (15s) escalate directly to "closed",
 // and a subsequent "open" immediately clears any pending timer and restores "open".
-// meiva:link ui/web/src/docs/provider-composition.meiva.okf.md
+// meiva:link ui/web/src/docs/provider-composition.md
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, render as rtlRender } from "@testing-library/react";

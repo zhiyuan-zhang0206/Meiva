@@ -26,7 +26,7 @@ interface SendButtonProps
 // shrinks only its paint: p-0.5 clips the background to the 32px content box,
 // which also keeps the glyph centred on the upload icon's axis instead of hanging
 // lower on a bottom-aligned smaller button.
-// meiva:link ui/web/src/docs/frontend-components/home-shell-chrome/home-shell-chrome.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/home-shell-chrome/home-shell-chrome.md
 export function SendButton({ state, className, ...props }: SendButtonProps) {
   return (
     <button

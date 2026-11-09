@@ -73,7 +73,7 @@ def register_plugin_parent_packages(pkg: str, name: str, plugin_dir: Path) -> No
 # already registered from two threads. The answer is to serialize the caller that introduced the
 # second entry — reuse-in-place is the issue #147 identity contract, and a per-execution name would
 # fork it.
-# meiva:link docs/plugins/module-loading/fixed-name-registration-audit.meiva.okf.md
+# meiva:link docs/plugins/module-loading/fixed-name-registration-audit.md
 def load_plugin_module(
     plugin_py: Path, *, name: str, pkg: str, module: str = "plugin"
 ) -> ModuleType:

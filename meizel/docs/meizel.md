@@ -1,0 +1,116 @@
+# meizel/ — Locality Rules
+
+## What is it
+
+`meizel/` is the home of the repository's locality rules. It is tooling, not
+application code: it depends on the standard library only and never imports an
+application package. `scripts/` may import `meizel`; `meizel` never imports
+`scripts`.
+
+The checker's vocabulary of ambient kinds belongs to the repository's policy, not to the code. What
+a repository alone can say is declared in its `meizel.policy.toml`: the kinds of state it keeps
+itself (the keys of `[ambient]`), the functions that read the world for their caller
+(`[ambient-readers.<kind>]`), and every exemption. The checker's own vocabulary is the standard
+library's (`argv`, `environ`, `clock`, `home`, `cwd`, `platform`, `pid`, `random`), so a repository
+with a cache or a queue declares it in its policy and a manifest may name it from then on
+([ambient kinds](ambient-kinds.md)). Some tables still name this repository;
+they are listed in [the host-coupling node](host-coupling.md).
+
+## Top-level packages and their roles
+
+The root `meizel.toml` declares which top-level directories exist and what each is,
+once: `[roles]` maps `application`, `standalone`, `templates`, `examples`, `tooling`, `tests` and
+`frontend` to directories. Every top-level directory that holds Python (hidden
+directories aside) must be listed under exactly one role, and every listed name must
+exist; the manifest parser enforces both, and `[roles]` is accepted in the root manifest
+only. The read and the decision are separate modules: `meizel.checkout` reads the table
+(`read_roles(repo)`, `roles_at(root)`) once per process, at the entry that knows the
+repository, and passes the parsed role -> directories mapping down as a value; `meizel.roles`
+decides over that mapping without touching a file (`parse_roles(text, label=)`,
+`select_packages(declared, *roles)`, `all_packages(declared)`, `check_table(table)`,
+`pytest_test_hosts(declared)`). The lists that other files must keep as text (the pytest
+`testpaths`, the pyright `include`, the wheel packages, the coverage source and the
+package alternations of the pre-commit `files` patterns) sit in marked regions that
+`python -m meizel roles write` regenerates. `meizel check`, including `check --changed`,
+checks all those regions and other Python or TOML literals that list every package of
+a role of three or more. These global `manifest-roles` diagnostics cannot be recorded
+as debt. `roles check` remains a focused command using the same rule owner; it has no
+separate hook. A new package is declared in one place or the check says where.
+
+`standalone` holds independently installed production Python. Its
+[project ownership, imports and independent checks](standalone.md)
+keep production governance separate from the root distribution environment.
+
+## Contents
+
+- `graph/`, `language/` and `contracts/` are the checker, documented in
+  [the checker node](checker/checker.md): `graph/` holds the model,
+  the universe of tracked files, graph algorithms, name scopes and import
+  access, and `universe.py` the two handles a decision layer reads a checkout
+  with — the `Checkout` protocol and the `SourceTree` its `tree` property
+  returns, a frozen dataclass whose reads are function fields, so a module that
+  only decides takes one and reads nothing itself; `language/` the restricted
+  Python forms, pytest fixture requests, mechanical purity and container-budget
+  checks (`purity.py`, `purity_structure.py`) and the file scanner that composes
+  them with import access; `contracts/` the
+  `meizel.toml` manifests, the rule, analysis, recorded debt, the policy file and the commands
+  (`python -m meizel`). The layers form a DAG: `contracts` -> `language` -> `graph`.
+
+- `lint_common.py` — the shared scan vocabulary of the standalone lints: test-path
+  detection, scan-root resolution and the `--only` changed-files mode, over the
+  `SourceTree` its caller built. Changed-files runs widen to a full scan when
+  `meizel/` itself changes, because that changes the verdict of untouched files.
+- `budgets/` — the 800-line file ceiling and the 20-entry directory cap: every
+  judgment is in `budget_plans.py` (both ceilings, which directory entries are
+  candidates, what counts as a Python file, which of a target and a structure
+  directory is judged, which directories a target selects with their entry counts,
+  what counts as a line, the wording and order of both reports and the band
+  below the file ceiling that names a file only when the run's change touches
+  it), while
+  `limits.py` walks and reads the checkout and `directory_budget.py` lists a
+  directory and tests a judged path's links. `scripts/lint/code_structure.py`
+  drives them.
+- `owners/` — one owner per external capability: `decisions.py` holds Rule 5
+  (`decision_table(policy)`: each design decision has exactly one owning module,
+  every other site is a bypass, and a listed exemption that goes stale fails; the
+  owners and the exemptions are in `meizel.policy.toml`, and the caller that reads
+  that policy hands the table down, so a run judging another checkout judges it
+  by that checkout's policy) and
+  `clock_lattice.py` keeps lattice-vocabulary timing constants in the
+  clock-lattice family modules or as aliases of a registered clock.
+- `state/` — dependency injection rules: `ambient_state/` (Rule 9, module-level
+  state read to decide and free-floating background work; see
+  [ambient state](ambient-state.md)),
+  `machine_role.py` (Rule 3, the retired ambient machine-role reader),
+  `no_os_environ.py` (a test does not set a variable `Settings` models) and
+  `turn_scoped_config.py` (no per-agent config through a process global). Both
+  config rules are effect shells: the shell walks the scan directories, reads each
+  file and prints, while `no_os_environ_plan.py` and
+  `turn_scoped_config_plan.py` decide which directories the scan reads, which files
+  the rule judges, which lines of a file are findings and what each finding says,
+  and `lint_paths.py` owns the two decisions both rules share — which explicit
+  targets are Python files and how a path is labelled. The two
+  config rules take the application's config registry as an injected argument;
+  their launchers in `scripts/lint/` bind it, because `meizel` imports no
+  application package. Where production code reads the world is `ambient-read` in
+  `check` ([ambient reads](checker/ambient.md)).
+- `language/` — restrictions on how Python is written:
+  `path_imports.py` (code under `meiva_builtins/` reaches other code
+  through packages, never a file path) and the sibling-import rule, split the
+  way the config rules are: `no_script_sibling_imports.py` is the effect shell
+  that walks the scan roots, reads each file and prints, and
+  `script_siblings.py` decides script mode, guard order, whether a
+  same-directory name is a module file or a package (a file wins), and what each
+  finding says. The shell states what a directory holds — its regular `.py`
+  stems and its directories with an `__init__.py` — and the rule decides which
+  of the two a name means.
+
+Each rule group keeps its tests in its own `tests/` directory. The gate-level
+tests that drive `scripts/lint/code_structure.py` end to end stay with that
+script.
+
+## Type-only guards
+
+The `type-checking` code, the roles and policy it applies to, and how `diagnose` and the
+standalone adapter report it: [[meizel/docs/type-checking.md|the type-only guards
+node]].

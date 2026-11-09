@@ -6,7 +6,7 @@
 # These tests pin that direction, so moving the read back into the strict module — the shape that
 # made `base/cluster/machine/__init__.py` depend on two impure modules — fails here as well as in
 # `meizel check`.
-# meiva:link base/cluster/machine/docs/machine.meiva.okf.md
+# meiva:link base/cluster/machine/docs/machine.md
 
 from __future__ import annotations
 

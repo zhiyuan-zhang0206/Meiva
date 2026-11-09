@@ -21,7 +21,7 @@ def _is_server_map(value: object) -> TypeGuard[dict[str, dict[str, object]]]:
     return isinstance(value, dict)
 
 
-# meiva:link meiva/mcps/docs/mcps.meiva.okf.md
+# meiva:link meiva/mcps/docs/mcps.md
 class MCPError(Exception):
     pass
 
@@ -29,7 +29,7 @@ class MCPError(Exception):
 # meiva:note
 # Preserves the public SDK exception name (`MCPServerNotFound`), matching stdlib
 # `FileNotFoundError` rather than an `*Error` suffix.
-# meiva:link meiva/mcps/docs/mcps.meiva.okf.md
+# meiva:link meiva/mcps/docs/mcps.md
 class MCPServerNotFound(MCPError):  # noqa: N818
     pass
 
@@ -41,7 +41,7 @@ class MCPConnectError(MCPError):
 # meiva:note
 # Preserves the public SDK exception name (`MCPToolNotFound`), matching
 # `MCPServerNotFound` and stdlib `FileNotFoundError`.
-# meiva:link meiva/mcps/docs/mcps.meiva.okf.md
+# meiva:link meiva/mcps/docs/mcps.md
 class MCPToolNotFound(MCPError):  # noqa: N818
     pass
 
@@ -56,7 +56,7 @@ class ToolInfo(TypedDict):
     input_schema: dict[str, object]
 
 
-# meiva:link meiva/mcps/docs/mcps.meiva.okf.md
+# meiva:link meiva/mcps/docs/mcps.md
 def validate_requirements(spec: dict[str, object]) -> dict[str, bool]:
     requires: object = spec.get("requires")
     if requires is None:
@@ -73,7 +73,7 @@ def validate_requirements(spec: dict[str, object]) -> dict[str, bool]:
     return validated
 
 
-# meiva:link meiva/mcps/docs/mcps.meiva.okf.md
+# meiva:link meiva/mcps/docs/mcps.md
 def assert_requirements(spec: dict[str, object], *, host: Host) -> None:
     requires = validate_requirements(spec)
     for key, want in requires.items():
@@ -83,7 +83,7 @@ def assert_requirements(spec: dict[str, object], *, host: Host) -> None:
             )
 
 
-# meiva:link meiva/mcps/docs/mcps.meiva.okf.md
+# meiva:link meiva/mcps/docs/mcps.md
 def server_capability(spec: dict[str, object], *, host: Host) -> tuple[bool, str | None]:
     requires = validate_requirements(spec)
     if requires.get("display") and not display_available(host=host):
@@ -91,7 +91,7 @@ def server_capability(spec: dict[str, object], *, host: Host) -> tuple[bool, str
     return (True, None)
 
 
-# meiva:link meiva/mcps/docs/mcps.meiva.okf.md
+# meiva:link meiva/mcps/docs/mcps.md
 def server_url(spec: dict[str, object]) -> str | None:
     url = spec.get("url")
     if url is None:
@@ -114,12 +114,12 @@ def server_url(spec: dict[str, object]) -> str | None:
     return url
 
 
-# meiva:link meiva/mcps/docs/mcps.meiva.okf.md
+# meiva:link meiva/mcps/docs/mcps.md
 def machine_config_path(*, home: Path) -> Path:
     return home / "mcp.json"
 
 
-# meiva:link meiva/mcps/docs/mcps.meiva.okf.md
+# meiva:link meiva/mcps/docs/mcps.md
 def read_servers(path: Path) -> dict[str, dict[str, object]]:
     if not path.is_file():
         return {}
@@ -137,7 +137,7 @@ def read_servers(path: Path) -> dict[str, dict[str, object]]:
     return section
 
 
-# meiva:link meiva/mcps/docs/mcps.meiva.okf.md
+# meiva:link meiva/mcps/docs/mcps.md
 def builtin_mcp_paths() -> list[Path]:
     root = Path(__file__).resolve().parents[2] / "meiva_builtins" / "mcps"
     if not root.is_dir():
@@ -164,7 +164,7 @@ def _installed_mcp_paths(*, home: Path) -> list[Path]:
     return paths
 
 
-# meiva:link meiva/mcps/docs/mcps.meiva.okf.md
+# meiva:link meiva/mcps/docs/mcps.md
 def installed_mcp_dir(name: str, *, home: Path) -> Path | None:
     from base.packages.extensions.install_registry import installed_mcp_names
 
@@ -180,7 +180,7 @@ def installed_mcp_dir(name: str, *, home: Path) -> Path | None:
 # Resolves the working directory for spawning `name`'s server by layer: machine and
 # plugin entries return `None` (third-party command line), installed MCPs return
 # `$MEIVA_HOME/mcps/<name>/` (package venv), and built-in MCPs return `repo_root()`.
-# meiva:link meiva/mcps/docs/mcps.meiva.okf.md
+# meiva:link meiva/mcps/docs/mcps.md
 def server_cwd(name: str, *, home: Path) -> Path | None:
     if name in read_servers(machine_config_path(home=home)):
         return None
@@ -196,7 +196,7 @@ def server_cwd(name: str, *, home: Path) -> Path | None:
     return None
 
 
-# meiva:link meiva/mcps/docs/mcps.meiva.okf.md
+# meiva:link meiva/mcps/docs/mcps.md
 def plugin_config_paths(*, home: Path) -> list[Path]:
     paths: list[Path] = []
     repo_plugins = Path(__file__).resolve().parents[2] / "meiva_builtins" / "plugins"
@@ -216,7 +216,7 @@ def plugin_config_paths(*, home: Path) -> list[Path]:
 # Merges MCP server declarations in layer order (`meiva_builtins/mcps/` < plugin
 # `.mcp.json` < installed `$MEIVA_HOME/mcps/` < `$MEIVA_HOME/mcp.json`) and filters out
 # servers disabled in `mcp_enabled.json` unless `include_disabled=True`.
-# meiva:link meiva/mcps/docs/mcps.meiva.okf.md
+# meiva:link meiva/mcps/docs/mcps.md
 def load_mcp_config(*, include_disabled: bool = False, home: Path) -> dict[str, dict[str, object]]:
     merged: dict[str, dict[str, object]] = {}
     for path in builtin_mcp_paths():
@@ -234,7 +234,7 @@ def load_mcp_config(*, include_disabled: bool = False, home: Path) -> dict[str, 
     return {k: v for k, v in merged.items() if enabled.get(k, True)}
 
 
-# meiva:link meiva/mcps/docs/mcps.meiva.okf.md
+# meiva:link meiva/mcps/docs/mcps.md
 def is_transport_error(exc: BaseException) -> bool:
     from anyio import BrokenResourceError, ClosedResourceError
     from mcp import MCPError as MCPProtocolError

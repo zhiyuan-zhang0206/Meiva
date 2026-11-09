@@ -21,7 +21,7 @@ import { useApi } from "@/lib/transport/transport-context";
 // meiva:note
 // `labelKey` carries the translator's own key type: a window whose label key is missing fails at
 // this table, not at a cast on the render path.
-// meiva:link ui/web/src/docs/frontend-components/inspector/inspector.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/inspector/inspector.md
 type InspectorKey = Parameters<ReturnType<typeof useTranslations<"inspector">>>[0];
 
 const WINDOWS: { labelKey: InspectorKey; value: number | null }[] = [
@@ -151,7 +151,7 @@ export function CostActivitySection({
   // same day; the unpriced count still rides the sub-line of a block that shows).
   // One agent can show both: a restart can move it to another harness, and the
   // ledger keeps every call under the agent.
-  // meiva:link ui/web/src/docs/frontend-components/inspector/activity.meiva.okf.md
+  // meiva:link ui/web/src/docs/frontend-components/inspector/activity.md
   return (
     <Section
       icon={<Activity className="size-3" />}
@@ -295,7 +295,7 @@ export function CostActivitySection({
 // hides the block even if that mode logged unpriced calls (user ruling 2026-11-08 — the panel must
 // not answer "$0.0000" to a question about cost). Under a block that does show, `N unpriced`
 // marks how many of that mode's calls had no price snapshot and therefore contributed nothing.
-// meiva:link ui/web/src/docs/frontend-components/inspector/activity.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/inspector/activity.md
 function usd(amount: number): string {
   return `$${amount.toFixed(4)}`;
 }

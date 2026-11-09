@@ -1,0 +1,11 @@
+# Code generation tools
+
+`build_app_update_manifest.py` (Tauri archives → `latest.json`),
+`build_android_release.py` (Android build number → Tauri `--config` overlay and
+the `android-latest.json` update manifest), `dump_event_fixtures.py`, `dump_frontend_constants.py`, `dump_openapi.py`, `gen_config_lite_table.py`, `gen_event_registry.py`, `gen_pyright_test_environments.py` (test hosts from pytest `testpaths`; the `executionEnvironments` entries of `pyproject.toml` that keep a tests directory out of its covering entry's Any rules while its root is listed in the data file `pyright_tests_owing_any.txt`, which stays in byte order without repeats (a new prefix goes in its sorted position; the generator refuses a line out of order or listed twice) and which `.gitattributes` union-merges locally so parallel additions do not conflict; written between its GENERATED markers) — one generator per artifact, each with a matching `check-*-fresh.sh` or pre-commit drift gate.
+
+The API type projection and its shared generation/freshness entry point are owned by
+[Generated API types](types.md). OpenAPI retains descriptions; generated
+TypeScript carries declarations only.
+
+Parent: [Scripts](../../docs/scripts.md).

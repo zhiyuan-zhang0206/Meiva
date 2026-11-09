@@ -15,7 +15,7 @@ from services.desktop.permissions_helper import hardened_runtime
 # rebuild. Everything here runs through a caller-supplied `run` (lifecycle's
 # bounded `run_tool`), so a provisioning or signing step that fails aborts the
 # build instead of falling back to an ad-hoc signature.
-# meiva:link services/docs/agent_runner_side/permissions-helper/launchd-and-stable-signing.meiva.okf.md
+# meiva:link services/docs/agent_runner_side/permissions-helper/launchd-and-stable-signing.md
 IDENTITY_NAME = "Meiva Local Signing"
 IDENTITY_ORG = "Meiva"
 VALID_DAYS = 3650

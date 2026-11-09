@@ -191,7 +191,7 @@ describe("RunTimelineRows viewport", () => {
     await paintFrame();
     // meiva:note
     // Let anything a previous test left queued land before the counters below are read: they are shared.
-    // meiva:link ui/web/src/docs/frontend-components/run-timeline/run-timeline.meiva.okf.md
+    // meiva:link ui/web/src/docs/frontend-components/run-timeline/run-timeline.md
     await act(() => new Promise((resolve) => setTimeout(resolve, 120)));
     await paintFrame();
     const before = { ...runTimelineStats };

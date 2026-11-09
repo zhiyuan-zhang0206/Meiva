@@ -3,7 +3,7 @@
 # query they were given: the window's defaults and ordering, the message range, the agent ids. A
 # refusal is a `TimelineRequestError` carrying the status and detail; the HTTP layer turns it into
 # the response, so nothing here knows about FastAPI.
-# meiva:link services/derived/insights/run_timeline/docs/range-projection.meiva.okf.md
+# meiva:link services/derived/insights/run_timeline/docs/range-projection.md
 
 from __future__ import annotations
 

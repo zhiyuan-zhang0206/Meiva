@@ -6,7 +6,7 @@
 # dropped. Then an `agy` turn that reported a failure and said nothing about the cause printed
 # the assistant's own reply as that cause (#6498), which pointed three readers at three
 # different wrong places.
-# meiva:link base/lm/harness/docs/harness.meiva.okf.md
+# meiva:link base/lm/harness/docs/harness.md
 
 from __future__ import annotations
 

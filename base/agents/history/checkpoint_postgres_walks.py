@@ -1,6 +1,6 @@
 # meiva:note
 # checkpoint-postgres 3.1.3 derives the walk cursor from the target itself (langgraph#8556), so only the message-reset suffix reader stays Meiva-owned; delete it once upstream stops body transfer at a reset.
-# meiva:link base/agents/history/docs/checkpoint-replay.meiva.okf.md
+# meiva:link base/agents/history/docs/checkpoint-replay.md
 
 from __future__ import annotations
 

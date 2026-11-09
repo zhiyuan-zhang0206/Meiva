@@ -126,7 +126,7 @@ describe("arrows between agents", () => {
   // meiva:note
   // The palette is one CSS token per kind, shared by the arrows, the legend and the ticks, so a test
   // compares against the token; `link-palette.test.ts` holds the contrast those tokens must keep.
-  // meiva:link ui/web/src/docs/frontend-components/palette.meiva.okf.md
+  // meiva:link ui/web/src/docs/frontend-components/palette.md
   const BLUE = LINK_COLORS.send_message;
   const GREEN = LINK_COLORS.spawn;
   const RED = LINK_COLORS.terminate;

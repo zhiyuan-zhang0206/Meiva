@@ -2,7 +2,7 @@
 # The reading surface for lifecycle operations (task #6024). The rows these tests feed are the
 # shape `audit_events` really holds: a caller block, a spawn block, and — since the fleet window
 # mints them — an operation id, an initiator and a gate verdict per row.
-# meiva:link base/native_process/root_control/docs/lifecycle-caller.meiva.okf.md
+# meiva:link base/native_process/root_control/docs/lifecycle-caller.md
 from __future__ import annotations
 
 import json

@@ -81,7 +81,7 @@ def _antigravity_token(home: Path, *, relative: str, expiry: timedelta) -> None:
 # The stub CLIs these tests install print nothing and exit 1, which is "the CLI could not
 # tell us" — the row then falls back to the stored credential, which is what the older
 # assertions describe. A test about what the CLI itself answers passes its own runner.
-# meiva:link base/agents/docs/harness/harness.meiva.okf.md
+# meiva:link base/agents/docs/harness/harness.md
 def _silent_cli(
     argv: list[str], *, capture_output: bool, text: bool, timeout: float, env: dict[str, str]
 ) -> Any:
@@ -276,7 +276,7 @@ def _silent_after_timeout() -> Any:
 # The machine's answer comes from its CLI, not from a file an installer may not have
 # written: macbook-air runs Claude Code with no ~/.claude/.credentials.json, and asking the
 # file would report a working machine as unknown — which now blocks the spawn (#5498).
-# meiva:link base/agents/docs/harness/harness.meiva.okf.md
+# meiva:link base/agents/docs/harness/harness.md
 def test_the_cli_answer_is_available_without_any_credentials_file(tmp_path: Path) -> None:
     _external_cli(tmp_path, ".local/bin", "claude")
 
@@ -453,7 +453,7 @@ def _no_cursor() -> psycopg.Cursor[Any]:
 # Every declared harness has a launcher today, so the refusal is driven by handing
 # the rule a narrower set: membership is what decides, and this pins the moment a
 # launcher is retired or a harness is declared before one.
-# meiva:link base/agents/docs/harness/harness.meiva.okf.md
+# meiva:link base/agents/docs/harness/harness.md
 def test_a_harness_outside_the_launchable_set_is_refused() -> None:
     with pytest.raises(HarnessNotLaunchable) as refusal:
         resolve_birth_harness(

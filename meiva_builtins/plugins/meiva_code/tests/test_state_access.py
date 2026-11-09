@@ -3,7 +3,7 @@
 # is lazy: it exposes `materialize()`, which loads the agent-runtime face and binds the real state.
 # `read_state` / `update_state` must call it before resolving the handle, and must refuse to run
 # outside an exec turn.
-# meiva:link meiva_builtins/plugins/meiva_code/docs/meiva_code.meiva.okf.md
+# meiva:link meiva_builtins/plugins/meiva_code/docs/meiva_code.md
 from collections.abc import Iterator
 
 import pytest

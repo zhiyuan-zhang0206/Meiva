@@ -39,7 +39,7 @@ type RefusalText = "unavailable" | "tooLarge" | "missing" | "unreadable";
 // error's class: a refusal is permanent for this document version, so only an answer
 // the server called retryable may ask for a retry, and a read that never got an answer
 // at all is the one other case where retrying is honest advice.
-// meiva:link ui/web/src/docs/frontend-state/api-requests.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-state/api-requests.md
 function refusalOf(error: unknown): { text: RefusalText; raw: boolean } {
   if (typeof error !== "object" || error === null || !("status" in error) || typeof error.status !== "number") {
     return { text: "unavailable", raw: false };
@@ -61,7 +61,7 @@ function refusalOf(error: unknown): { text: RefusalText; raw: boolean } {
 // chain to read and the panel opens on the document the route itself loaded. A pushed file entry
 // is marked, so the panel's own Back calls history.back() for it instead of rewriting a deep link
 // that has no in-app entry to return to.
-// meiva:link ui/web/src/docs/frontend-state/navigation-history.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-state/navigation-history.md
 export function ToUserDocumentView({ agentId, document, failure, pending, refresh, mobile, inspecting = false, bodyHidden = false, onInspect, onCollapse, onNavigate, viewportRef }: {
   agentId: number;
   document: ToUserDocument | undefined;
@@ -92,7 +92,7 @@ export function ToUserDocumentView({ agentId, document, failure, pending, refres
   const refusal = failed ? refusalOf(error) : null;
   // meiva:note
   // The chain as one value: a file name may itself contain `/`, so the joined form is not a key.
-  // meiva:link ui/web/src/docs/frontend-state/navigation-history.meiva.okf.md
+  // meiva:link ui/web/src/docs/frontend-state/navigation-history.md
   const fileKey = JSON.stringify(files);
   useEffect(() => { onNavigate?.(); }, [fileKey, onNavigate]);
   const content = current?.content;
@@ -137,7 +137,7 @@ export function ToUserDocumentView({ agentId, document, failure, pending, refres
   // owns the question, which sits below this area as the column's own bottom
   // region, and Inspector, so navigating the keyed body cannot discard an
   // unfinished answer while the bar above the area stays put.
-  // meiva:link ui/web/src/docs/frontend-state/shared-context/shared-context.meiva.okf.md
+  // meiva:link ui/web/src/docs/frontend-state/shared-context/shared-context.md
   // meiva:note
   // The inspector toggle changes nothing on hover: on a 14px icon the
   // background wash reads as a shadow, and the pointer cursor already says the

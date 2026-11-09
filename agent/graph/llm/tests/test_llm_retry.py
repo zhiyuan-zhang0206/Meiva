@@ -87,7 +87,7 @@ def test_transient_failures_are_retried_and_stalls_are_not() -> None:
 # user-visible Error event), while a plain `LLMStreamError` was only logged as a
 # crashed turn — the row settled to idling with no message and no error anyone
 # could see (agent 6933, 2026-10-18).
-# meiva:link agent/graph/llm/docs/llm.meiva.okf.md
+# meiva:link agent/graph/llm/docs/llm.md
 def test_a_stream_stall_is_fatal_so_the_turn_abort_is_announced() -> None:
     stall = LLMStreamStallTimeoutError("LLM stream stalled", stage="ttft")
 

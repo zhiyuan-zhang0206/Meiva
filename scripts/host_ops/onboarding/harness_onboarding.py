@@ -140,7 +140,7 @@ def collect_version(host: Host, binary: str | None) -> str:
 # The Claude check unsets ANTHROPIC_API_KEY first: an exported key makes the CLI
 # report api_key as its auth method even when a subscription login exists, so the
 # answer would describe the environment instead of the stored login.
-# meiva:link scripts/host_ops/docs/harness-onboarding.meiva.okf.md
+# meiva:link scripts/host_ops/docs/harness-onboarding.md
 def collect_login(host: Host, harness: str, binary: str | None) -> str:
     cli = RUNTIME_TO_CLI.get(harness, harness)
     if not binary:
@@ -294,7 +294,7 @@ def npm_global_root_writable(host: Host) -> bool:
     # A distribution node on Linux installs its global packages under /usr/lib/node_modules,
     # which needs root. Ask npm where it would write, then ask the shell whether this user can
     # write there: a user-local prefix beats an install that dies on mkdir.
-    # meiva:link scripts/host_ops/docs/harness-onboarding.meiva.okf.md
+    # meiva:link scripts/host_ops/docs/harness-onboarding.md
     root = host.run("npm root -g", timeout=60)
     directory = root.stdout.strip()
     return bool(directory) and host.run(f'test -w "{directory}"', timeout=60).ok
@@ -305,7 +305,7 @@ def agent_sees(host: Host, binary: str) -> str:
     # The path a service or ssh command resolves for `binary`, empty when it resolves none.
     # The probe preamble adds ~/.local/bin, which a service never has, so this asks the
     # agent's own search path instead.
-    # meiva:link scripts/host_ops/docs/harness-onboarding.meiva.okf.md
+    # meiva:link scripts/host_ops/docs/harness-onboarding.md
     found = host.run(f"command -v {binary}", timeout=60, agent_path=True)
     return found.stdout.strip() if found.ok else ""
 
@@ -320,7 +320,7 @@ def reach_agent_path(
     # meiva:note
     # A user-local install is only useful where a service looks: link it into /usr/local/bin
     # when that is writable, otherwise return the exact command an operator must run.
-    # meiva:link scripts/host_ops/docs/harness-onboarding.meiva.okf.md
+    # meiva:link scripts/host_ops/docs/harness-onboarding.md
     if agent_sees(host, harness.cli):
         return "", ""
     link = f"{link_dir}/{harness.cli}"
@@ -362,7 +362,7 @@ def install_prefix(host: Host, harness: catalog.HarnessSpec) -> str:
     # meiva:note
     # The `--prefix` an install needs when the global npm root is out of reach, empty when
     # npm can write there or the installer is not npm's.
-    # meiva:link scripts/host_ops/docs/harness-onboarding.meiva.okf.md
+    # meiva:link scripts/host_ops/docs/harness-onboarding.md
     if harness.installer.kind != "npm" or npm_global_root_writable(host):
         return ""
     return '"$HOME/.local"'
@@ -374,7 +374,7 @@ def install_on(
     # meiva:note
     # One install on one host; True when a service on that host can then run the binary, so
     # a user-local install that no agent search path reaches is a failure, not an "ok".
-    # meiva:link scripts/host_ops/docs/harness-onboarding.meiva.okf.md
+    # meiva:link scripts/host_ops/docs/harness-onboarding.md
     command = catalog.install_command(harness, wanted, prefix=prefix)
     print(
         f"install {host}: {harness.cli} {wanted}"
@@ -578,7 +578,7 @@ def sync_store(
 # signed in). The columns stay separate because a probe that must never start a
 # process cannot also be the authority on a live login; a row whose sources
 # disagree is printed with the disagreement rather than resolved silently.
-# meiva:link scripts/host_ops/docs/harness-onboarding.meiva.okf.md
+# meiva:link scripts/host_ops/docs/harness-onboarding.md
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="harness_onboarding",

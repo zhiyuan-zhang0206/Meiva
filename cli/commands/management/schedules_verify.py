@@ -18,7 +18,7 @@
 # `--rows-file` sweeps a JSON dump of the table (`[[id, name, script], ...]`) instead of reading it,
 # so this checkout never dials the gateway, and never signals (the signal reports the live table);
 # otherwise a non-clean sweep emits a `schedule_verify_failed` event unless `--no-notify`.
-# meiva:link cli/docs/operator-surfaces/operator-surfaces.meiva.okf.md
+# meiva:link cli/docs/operator-surfaces/operator-surfaces.md
 
 from __future__ import annotations
 

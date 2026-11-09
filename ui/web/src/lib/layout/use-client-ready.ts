@@ -4,7 +4,7 @@
 // This module owns client-side mount timing: whether a frame is shaped by the
 // server snapshot or the client (useClientReady), and when a deferred subtree
 // may mount (useDeferredMount).
-// meiva:link ui/web/src/docs/frontend-components/control-page-load.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/control-page-load.md
 
 import { useEffect, useState, useSyncExternalStore } from "react";
 
@@ -45,7 +45,7 @@ export function useClientReady(): boolean {
 // the route commits at once, and the page fills in over frames instead of
 // holding the main thread for seconds (user 2026-10-20: opening Settings stayed
 // frozen for ~5 s on their machine).
-// meiva:link ui/web/src/docs/frontend-components/control-page-load.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/control-page-load.md
 export const DEFERRED_MOUNT_SLICE_TIMEOUT_MS = 50;
 
 const waiting: (() => void)[] = [];

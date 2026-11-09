@@ -18,7 +18,7 @@ def lifecycle_return_requested(result: Mapping[str, object]) -> bool:
 # meiva:note
 # After a restart claim `halted` is the claim's verdict on the agent it found: set, it was
 # idle; clear, its turn was unfinished and the apply queues the note that continues it.
-# meiva:link agent/graph/docs/turn-interrupts.meiva.okf.md
+# meiva:link agent/graph/docs/turn-interrupts.md
 def restart_resumes_turn(result: Mapping[str, object]) -> bool:
     return bool(result["restart_requested"]) and not bool(result["halted"])
 
@@ -85,7 +85,7 @@ class LifecycleFollowUp:
     exited: bool
 
 
-# meiva:link services/agent_runner/agent_host/lifecycle/docs/graceful-exit.meiva.okf.md
+# meiva:link services/agent_runner/agent_host/lifecycle/docs/graceful-exit.md
 def lifecycle_follow_up(kind: str | None, *, resume_turn: bool) -> LifecycleFollowUp:
     match kind:
         case "restart":

@@ -1,6 +1,6 @@
 # meiva:note
 # The environment a new shell session starts with, as a function of the machine facts a root read once.
-# meiva:link meiva/shell/docs/shell.meiva.okf.md
+# meiva:link meiva/shell/docs/shell.md
 from __future__ import annotations
 
 from collections.abc import Mapping

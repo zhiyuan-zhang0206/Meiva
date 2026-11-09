@@ -198,7 +198,7 @@ PluginStatStatus = Literal["ok", "warn", "error"]
 # point-in-time fact and would be meaningless averaged over a horizon.
 # `updated_at` is when the plugin last wrote the row — the console renders
 # its age, so a refresh that stopped running cannot pass for a fresh value.
-# meiva:link gateway/cluster/docs/ops-surfaces.meiva.okf.md
+# meiva:link gateway/cluster/docs/ops-surfaces.md
 class PluginStat(BaseModel):
     model_config = ConfigDict(
         frozen=True,
@@ -229,7 +229,7 @@ class PluginStat(BaseModel):
 # meiva:note
 # GET /api/stats/dashboard response — the sidebar Status popover's data pulled in one shot.
 # All windowed fields aggregate over the applied_window_hours horizon.
-# meiva:link gateway/cluster/docs/ops-surfaces.meiva.okf.md
+# meiva:link gateway/cluster/docs/ops-surfaces.md
 class StatsDashboard(BaseModel):
     model_config = ConfigDict(
         frozen=True,

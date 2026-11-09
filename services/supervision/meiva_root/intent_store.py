@@ -82,7 +82,7 @@ class RestartFailure:
 # Who asked for the state change this record carries: pid/ppid/uid/cwd/argv name
 # the requesting process locally, `machine` names its host, and `env_keys`
 # carries variable *names* only. Persisted so the attribution outlives it.
-# meiva:link base/native_process/root_control/docs/lifecycle-caller.meiva.okf.md
+# meiva:link base/native_process/root_control/docs/lifecycle-caller.md
 @dataclass(frozen=True, slots=True)
 class CallerFacts:
     pid: int
@@ -104,7 +104,7 @@ class CallerFacts:
 # The wire validates the caller block; this binds it to the record the root
 # persists, so the attribution outlives the requesting process and the root
 # generation that served it.
-# meiva:link base/native_process/root_control/docs/lifecycle-caller.meiva.okf.md
+# meiva:link base/native_process/root_control/docs/lifecycle-caller.md
 def caller_facts(raw: object) -> CallerFacts | None:
     if not is_object_dict(raw):
         return None
@@ -320,7 +320,7 @@ def _encode_caller(caller: CallerFacts) -> dict[str, object]:
 # meiva:note
 # A caller block written by an older root, or none at all, reads as absent:
 # attribution is evidence, never a boot gate.
-# meiva:link base/native_process/root_control/docs/lifecycle-caller.meiva.okf.md
+# meiva:link base/native_process/root_control/docs/lifecycle-caller.md
 def _decode_caller(raw: object) -> CallerFacts | None:
     if raw is None:
         return None

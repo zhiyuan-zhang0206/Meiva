@@ -2,7 +2,7 @@
 # The operation identity a window mints (task #6024): one id per window, the gate verdict the
 # target mode implies, and the shell prologue every effect command carries. Pure values, so the
 # assertions are about the strings a host will read, not about a window.
-# meiva:link cli/docs/fleet-update.meiva.okf.md
+# meiva:link cli/docs/fleet-update.md
 from __future__ import annotations
 
 import shlex

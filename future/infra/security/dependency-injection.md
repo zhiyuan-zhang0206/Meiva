@@ -30,7 +30,7 @@ supplies the package doors and the shrink-only baseline practice the enforcement
   `AgentSlices` (`base/host/env/agent_slices.py`); graph code reads
   `runtime.context.agent`.
 - **One compiled graph** is shared by every agent in a host
-  ([agent runtime](../../../agent/docs/agent-runtime/agent-runtime.meiva.okf.md)).
+  ([agent runtime](../../../agent/docs/agent-runtime/agent-runtime.md)).
 
 ## Target shape
 

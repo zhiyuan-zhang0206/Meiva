@@ -4,7 +4,7 @@
 # and the identity an SDK usage event carries. The facade (`agent_identity.py`, the metering
 # recorder) reads the bound context, a borrowed lease and the external-caller profile the
 # installation carries (parsed once from the process environment by the load) and builds the facts; nothing here reads or writes the process.
-# meiva:link meiva/docs/sdk-surface/sdk-surface.meiva.okf.md
+# meiva:link meiva/docs/sdk-surface/sdk-surface.md
 
 from __future__ import annotations
 

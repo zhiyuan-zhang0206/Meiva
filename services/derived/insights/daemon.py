@@ -2,7 +2,7 @@
 # The insights daemon: the process root that reads the configuration once into an `InsightsConfig`,
 # builds the app from it and serves it on an owner-only unix socket. A changed `.env` reaches the
 # daemon at its next start; the owned pool, socket and pidfile are released at exit.
-# meiva:link services/derived/insights/docs/insights.meiva.okf.md
+# meiva:link services/derived/insights/README.md
 from __future__ import annotations
 
 import asyncio

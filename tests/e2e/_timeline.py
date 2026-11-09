@@ -5,7 +5,7 @@
 # tail, or the payload has not painted yet. These helpers wait on each layer
 # with its own budget and raise with the DOM snapshot that names the one that
 # failed, so a red run carries its own diagnosis.
-# meiva:link ui/web/src/docs/frontend-components/timeline-view/bounded-window.meiva.okf.md
+# meiva:link ui/web/src/docs/frontend-components/timeline-view/bounded-window.md
 
 from __future__ import annotations
 
@@ -20,7 +20,7 @@ from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 # load rather than the mount is what grows. The premise is retried once instead
 # of waited out, which keeps both budgets short enough to fail fast and bounds a
 # stuck mount at two attempts rather than one long wait.
-# meiva:link ui/web/src/docs/frontend-components/timeline-view/bounded-window.meiva.okf.md
+# meiva:link ui/web/src/docs/frontend-components/timeline-view/bounded-window.md
 PREMISE_TIMEOUT_MS = 10_000
 PIN_TIMEOUT_MS = 5_000
 
@@ -55,7 +55,7 @@ def probe_timeline(page: Page, item_id: str) -> dict[str, Any]:
 # The strict "distance to the bottom is zero" assertion stays where the test
 # already makes it, after an explicit scroll-to-bottom, so a reader parked a
 # little short of the tail still exercises the window here instead of failing.
-# meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.meiva.okf.md
+# meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.md
 def wait_for_parked_tail(page: Page, item_id: str, payload: str) -> None:
     attempts: list[dict[str, Any]] = []
     for attempt in range(2):
@@ -137,7 +137,7 @@ _READ_ANCHOR_JS = """() => {
 # still sits where the previous window left it, so reading the anchor in the same
 # frame returns a row thousands of pixels away from the viewport that a later
 # assertion cannot mean anything about (#5678 signature B).
-# meiva:link ui/web/src/docs/frontend-components/timeline-view/bounded-window.meiva.okf.md
+# meiva:link ui/web/src/docs/frontend-components/timeline-view/bounded-window.md
 def move_to_top_and_read_anchor(page: Page) -> dict[str, Any]:
     page.evaluate(_MOVE_TO_TOP_JS)
     page.wait_for_function(_A_ROW_IN_VIEW_JS, timeout=PIN_TIMEOUT_MS)
@@ -156,7 +156,7 @@ _SURFACE_JS = """() => ({
 # setState looped until React raised its update-depth limit (#185), the section ErrorBoundary
 # replaced the timeline, and the next evaluate failed on a null `.closest` that named no layer.
 # Assert the surface itself, so the same shape fails where the reason is readable.
-# meiva:link ui/web/src/docs/frontend-components/timeline-view/bounded-window.meiva.okf.md
+# meiva:link ui/web/src/docs/frontend-components/timeline-view/bounded-window.md
 def assert_timeline_surface(page: Page) -> None:
     surface = page.evaluate(_SURFACE_JS)
     assert surface["timeline"], ("the timeline surface is gone", surface)

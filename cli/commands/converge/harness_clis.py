@@ -1,7 +1,7 @@
 # meiva:note
 # Host converge step for local external harness CLIs: ensures installed CLIs match
 # this checkout's pinned catalog versions.
-# meiva:link base/lm/harness/docs/harness.meiva.okf.md
+# meiva:link base/lm/harness/docs/harness.md
 
 from __future__ import annotations
 

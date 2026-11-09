@@ -17,7 +17,7 @@
 # next turn. A declaration made mid-turn survives the claim pass between the code run that
 # made it and the model call that follows — only a turn that ends or a halt that is emitted
 # clears it.
-# meiva:link agent/graph/llm/docs/turn-records.meiva.okf.md
+# meiva:link agent/graph/llm/docs/turn-records.md
 
 from __future__ import annotations
 

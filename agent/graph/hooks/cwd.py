@@ -60,7 +60,7 @@ def _log_cwd_repair(cwd: Path, fallback: str, exc: OSError | None, owner: str | 
 
 # meiva:note
 # After initialization, a valid persisted logical cwd is preserved, except a cwd inside another agent's workspace (a fork inherits the source's cwd channel): that one is replaced by the invoking agent's workspace, because a workspace is agent identity rather than project context. An absent or unusable cwd is likewise replaced by the invoking agent's workspace, or home when no agent identity exists. The workspaces root comes from `base.paths.workspaces_root()`, its single owner. This does not change the Python process cwd.
-# meiva:link agent/hooks/docs/hooks.meiva.okf.md
+# meiva:link agent/hooks/docs/hooks.md
 class ValidateCwdAfterInitHook(Hook):
     async def __call__(
         self,

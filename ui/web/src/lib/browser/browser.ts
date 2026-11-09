@@ -11,7 +11,7 @@
 // (the user never set it) and `unavailable` (this frame has no storage: a server render, or a
 // browser that refuses it). Each caller decides what each state means; none of them substitutes a
 // default for an unknown answer.
-// meiva:link ui/web/src/docs/frontend-state/browser-port.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-state/browser-port.md
 
 export interface PageLocation {
   readonly href: string;

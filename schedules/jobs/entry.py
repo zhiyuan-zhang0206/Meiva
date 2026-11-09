@@ -1,6 +1,6 @@
 # meiva:note
 # A fresh schedule entry retains the loaded image and one admission gate for database handles instead of relabeling code after checkout changes.
-# meiva:link schedules/docs/entry-composition.meiva.okf.md
+# meiva:link schedules/docs/entry-composition.md
 
 import random
 from collections.abc import Generator

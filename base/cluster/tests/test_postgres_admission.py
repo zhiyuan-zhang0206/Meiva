@@ -1,7 +1,7 @@
 # meiva:note
 # A FIFO in PostgreSQL's configuration holds the real postmaster before it creates its
 # pidfile. Releasing the FIFO lets the same captured native birth finish admission.
-# meiva:link base/cluster/docs/postgres.meiva.okf.md
+# meiva:link base/cluster/docs/postgres.md
 
 from __future__ import annotations
 

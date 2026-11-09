@@ -29,7 +29,7 @@ export interface UserSettingListResponse {
 // ("in 23h") never says which day it lands on (user 2026-10-29). The console
 // prints every future instant through it, so the agent list and the Inspector
 // agree on one answer.
-// meiva:link ui/web/src/lib/format/docs/time.meiva.okf.md
+// meiva:link ui/web/src/lib/format/docs/time.md
 export type DateFormat = "relative" | "absolute";
 
 export const DEFAULT_DATE_FORMAT: DateFormat = "absolute";

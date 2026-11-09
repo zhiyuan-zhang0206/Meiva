@@ -158,7 +158,7 @@ class TestSdkCallsProjection:
 # with a known meiva_msg_type that the render loop has no branch for falls to `_fallback_human_item`
 # — a system_marker with source=None that the frontend renders as the red "unrecognized" alarm (the
 # #1017 regression class: the auto-compact path produced an untagged summary).
-# meiva:link base/agents/history/docs/timeline/timeline.meiva.okf.md
+# meiva:link base/agents/history/docs/timeline/timeline.md
 class TestMeivaMsgTypeDispatch:
     @staticmethod
     def _render(msg: HumanMessage) -> list[TimelineItem]:

@@ -3,7 +3,7 @@
 # metadata and transcript, the markdown rendering of that post and its projection onto the
 # cross-platform S1 item. Nothing here runs yt-dlp, reads the clock or writes a file; the caller
 # supplies the fetch time, the yt-dlp version and the mirror path.
-# meiva:link meiva_builtins/skills/integrations/web-sources/docs/web-sources.meiva.okf.md
+# meiva:link meiva_builtins/skills/integrations/web-sources/README.md
 
 from __future__ import annotations
 

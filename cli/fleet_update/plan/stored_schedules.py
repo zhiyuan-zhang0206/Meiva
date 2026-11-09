@@ -2,7 +2,7 @@
 # What the stored schedule scripts' offline check, run on the gateway under NEW's code, lets the
 # window do: nothing to report, warn and go on, or refuse before anything stops. A red or an
 # unevaluable check would crash-loop the schedule runner after `up`.
-# meiva:link cli/docs/fleet-update-window/fleet-update-window.meiva.okf.md
+# meiva:link cli/docs/fleet-update-window/fleet-update-window.md
 
 from __future__ import annotations
 

@@ -112,7 +112,7 @@ def _has_process_telemetry(rec: RecordBody) -> bool:
     )
 
 
-# meiva:link meiva_builtins/skills/platform/meiva-self-evolution/docs/meiva-self-evolution.meiva.okf.md
+# meiva:link meiva_builtins/skills/platform/meiva-self-evolution/docs/meiva-self-evolution.md
 def abstain_reason(rec: RecordBody) -> str | None:
     grade = rec.get("evidence_grade")
     if grade is not None:

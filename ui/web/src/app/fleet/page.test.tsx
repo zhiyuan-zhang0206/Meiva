@@ -6,7 +6,7 @@ import { FleetPageView } from "./page";
 // meiva:note
 // The supervision surface is a stand-in and the navigator a spy: the view takes both as required
 // props, so this file covers the landmark and the boundary it owns.
-// meiva:link ui/web/src/docs/frontend-state/frontend-state.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-state/frontend-state.md
 function FleetSurface() {
   return <section aria-label="Fleet supervision surface" />;
 }

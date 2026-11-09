@@ -12,7 +12,7 @@ import { cn } from "@/lib/format/utils";
 // including the ones that create something: in a row of equal controls a
 // brighter glyph reads as another family, and the empty roster carries its own
 // full-width create button for discovery.
-// meiva:link ui/web/src/docs/frontend-components/agent-sidebar.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/agent-sidebar.md
 
 export const SIDEBAR_ICON_CLASS =
   "p-1.5 rounded shrink-0 transition-colors text-muted-foreground hover:bg-sidebar-accent hover:text-foreground";

@@ -3,7 +3,7 @@
 # object, or a refusal with a status and an error body), points the provider at `url` through the
 # model factory's `base_url`, and reads back the JSON requests the SDK really sent, so the exchange
 # runs through the genai client instead of a replaced method.
-# meiva:link meiva_builtins/plugins/docs/plugins.meiva.okf.md
+# meiva:link meiva_builtins/plugins/README.md
 from __future__ import annotations
 
 import json

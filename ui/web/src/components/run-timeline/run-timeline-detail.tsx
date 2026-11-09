@@ -135,7 +135,7 @@ function Chips({ heading, nodes, onSelect }: { heading: string; nodes: RunTimeli
   );
 }
 
-// meiva:link ui/web/src/docs/frontend-components/run-timeline/details-panel.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/run-timeline/details-panel.md
 export function NodeDetail({
   agentId,
   snapshot,
@@ -176,7 +176,7 @@ export function NodeDetail({
   );
 }
 
-// meiva:link ui/web/src/docs/frontend-components/run-timeline/details-panel.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/run-timeline/details-panel.md
 export function UnitDetail({
   agentId,
   snapshot,

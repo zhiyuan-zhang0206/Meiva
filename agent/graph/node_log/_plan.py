@@ -3,7 +3,7 @@
 # half of it fires, and whether the enter snapshot renders the whole tail window or only what the
 # agent's cursor has not covered. The shell in `_stall.py` and `_lifecycle.py` arms timers and
 # publishes; a test asserts the plan.
-# meiva:link agent/graph/docs/node-lifecycle.meiva.okf.md
+# meiva:link agent/graph/docs/node-lifecycle.md
 
 from __future__ import annotations
 

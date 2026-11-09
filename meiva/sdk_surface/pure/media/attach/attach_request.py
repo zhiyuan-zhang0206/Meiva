@@ -6,7 +6,7 @@
 # `attach_plan.refusal` once the file facts are known and yields the entry to record;
 # `registers_in_turn` says whether the process may deliver at all. Nothing here reads or writes the
 # process.
-# meiva:link meiva/docs/sdk-surface/sdk-surface.meiva.okf.md
+# meiva:link meiva/docs/sdk-surface/sdk-surface.md
 
 from __future__ import annotations
 

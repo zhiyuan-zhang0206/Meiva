@@ -15,7 +15,7 @@ from base.lm.harness.claude.config import BridgeConfig
 # it. Everything else is the boundary this adapter promises the CLI: the model's full id, the
 # workspace as the CLI's cwd, the capability list, no approval layer, no MCP servers of ours,
 # partial messages on, and the allowlisted child environment.
-# meiva:link base/lm/harness/claude/docs/claude.meiva.okf.md
+# meiva:link base/lm/harness/claude/docs/claude.md
 def option_values(
     config: BridgeConfig,
     *,

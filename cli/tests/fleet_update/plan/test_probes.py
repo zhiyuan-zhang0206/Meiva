@@ -2,7 +2,7 @@
 # What a window refuses on, from what the hosts' probes printed: the host facts, the helper facts
 # of the target commit and the OLD commit the hosts share. The probes' own text is the input and
 # the refusal is the value, so a gate that read the wrong field fails here without a host.
-# meiva:link cli/docs/fleet-update-window/fleet-update-window.meiva.okf.md
+# meiva:link cli/docs/fleet-update-window/fleet-update-window.md
 from __future__ import annotations
 
 import pytest

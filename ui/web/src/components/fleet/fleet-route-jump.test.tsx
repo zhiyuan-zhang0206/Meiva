@@ -4,7 +4,7 @@
 // must not rewrite the durable view preference; malformed params are inert. The real surfaces and
 // the real data hooks run here — a jump is asserted on what it puts on screen, not on a stub that
 // echoes its props. The canvases themselves are covered by graph-view.test / task-graph.test.
-// meiva:link ui/web/src/docs/frontend-components/fleet-view.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/fleet-view.md
 
 import { QueryClient } from "@tanstack/react-query";
 import { cleanup, screen, waitFor } from "@testing-library/react";
@@ -31,7 +31,7 @@ import { renderWithProviders } from "@/test-support/render";
 // meiva:note
 // The route hands its surfaces a `navigate`; a suite passes a spy, so a jump can be read
 // without replacing `next/navigation`.
-// meiva:link ui/web/src/docs/frontend-components/fleet-view.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/fleet-view.md
 const navigate = vi.fn();
 
 const localStorageMock = (() => {
@@ -138,7 +138,7 @@ function task(over: Partial<TaskRow> & { id: number }): TaskRow {
 // The test door for this file: the roster, the notice feed and the task registry a jump lands in
 // enter through the caches the hooks read, in the shape the app stores; the transport answers the
 // reads the surfaces still make, including an empty graph for the Agents tab.
-// meiva:link ui/web/src/docs/frontend-components/fleet-view.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/fleet-view.md
 function wrap(
   ui: ReactElement,
   {

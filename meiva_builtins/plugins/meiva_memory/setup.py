@@ -83,7 +83,7 @@ def _initialize_authoring(
     # meiva:note
     # The authoring stage's provisioning inputs are the `facts` the command read; nothing here
     # reads the process settings.
-    # meiva:link meiva_builtins/plugins/meiva_memory/docs/memory-pool-scaffold.meiva.okf.md
+    # meiva:link meiva_builtins/plugins/meiva_memory/docs/memory-pool-scaffold.md
     from base.deploy.git.memory_repo import (
         MemoryPoolBootstrapFailed,
         MemoryRemoteMissing,
@@ -135,7 +135,7 @@ def _ensure_memory_repo(
 ) -> None:
     # meiva:note
     # Keep the outer probe's logging and error boundary separate from init's probe.
-    # meiva:link meiva_builtins/plugins/meiva_memory/docs/memory-pool-scaffold.meiva.okf.md
+    # meiva:link meiva_builtins/plugins/meiva_memory/docs/memory-pool-scaffold.md
     from base.deploy.git.memory_repo import branch_name, is_initialized
 
     if is_initialized(root=target):
@@ -155,7 +155,7 @@ def _ensure_memory_repo(
 def _initialize_gateway(*, facts: ScaffoldFacts, target: Path) -> None:
     # meiva:note
     # The consolidated checkout's provisioning inputs are the `facts` the command read.
-    # meiva:link meiva_builtins/plugins/meiva_memory/docs/memory-pool-scaffold.meiva.okf.md
+    # meiva:link meiva_builtins/plugins/meiva_memory/docs/memory-pool-scaffold.md
     from base.deploy.git.memory_repo import (
         MemoryRemoteMissing,
         init,
@@ -188,7 +188,7 @@ def _ensure_gateway_memory_repo(
 ) -> None:
     # meiva:note
     # Provision the captured consolidated target only for a gateway-capable unit.
-    # meiva:link meiva_builtins/plugins/meiva_memory/docs/memory-pool-scaffold.meiva.okf.md
+    # meiva:link meiva_builtins/plugins/meiva_memory/docs/memory-pool-scaffold.md
     from base.deploy.git.memory_repo import is_initialized
 
     if "gateway" not in machine.role():

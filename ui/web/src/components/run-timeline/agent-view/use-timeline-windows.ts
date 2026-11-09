@@ -87,7 +87,7 @@ const mergedCache = new Map<string, RunTimelineResponse | undefined>();
 
 // meiva:note
 // A merged multi-window model is rebuilt only when the responses behind it change, not when the viewport does. Panning samples the viewport every 80 ms and every sample re-renders this hook; re-flattening and re-sorting tens of thousands of units per sample kept the drag at 60-100 ms main-thread tasks (user report 2026-10-19). Responses are immutable per query, so their object identity — not their fields — is what makes a cached merge exact: two payloads that agree on snapshot and window but differ in content still merge separately.
-// meiva:link ui/web/src/docs/frontend-components/run-timeline/window-reads.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/run-timeline/window-reads.md
 function cachedMerge(id: number, responses: readonly (RunTimelineResponse | undefined)[]): RunTimelineResponse | undefined {
   const key = `${id}|${identityKey(responses)}`;
   if (mergedCache.has(key)) {
@@ -105,7 +105,7 @@ function cachedMerge(id: number, responses: readonly (RunTimelineResponse | unde
   return merged;
 }
 
-// meiva:link ui/web/src/docs/frontend-components/run-timeline/window-reads.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/run-timeline/window-reads.md
 export function useTimelineWindows(ids: readonly number[], viewport: Viewport | null) {
   const client = useQueryClient();
   const gateway = useApi();

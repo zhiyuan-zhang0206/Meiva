@@ -20,7 +20,7 @@
 # re-runs the plugin surface load at its own boot, so agent code there sees the
 # wrapped version too. Config decides what is imported; not imported = not
 # declared.
-# meiva:link agent/graph/docs/graph.meiva.okf.md
+# meiva:link agent/graph/docs/graph.md
 
 
 import random
@@ -134,7 +134,7 @@ def build_graph(
     #     single-arg StateNode protocol, but runtime accepts the (state, runtime,
     #     config) multi-arg signature. Functionally correct, just stub doesn't narrow.
     #
-    # meiva:link agent/graph/docs/graph.meiva.okf.md
+    # meiva:link agent/graph/docs/graph.md
 
     state_cls = build_agent_state(extensions)
     g = StateGraph(state_cls, context_schema=MeivaContext)

@@ -3,7 +3,7 @@
 # Compare GitHub's live branch protections and active CI workflows with Meiva's required PR
 # admission gate (`scripts/audit/analysis/protection.py`), distinguishing configuration drift from
 # an API or tool failure.
-# meiva:link scripts/audit/docs/audit.meiva.okf.md
+# meiva:link scripts/audit/docs/audit.md
 
 from __future__ import annotations
 

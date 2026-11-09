@@ -1,6 +1,6 @@
 # meiva:note
 # Fixed reader fault for consumers that must propagate invalid capability tokens.
-# meiva:link base/cluster/machine/docs/machine.meiva.okf.md
+# meiva:link base/cluster/machine/docs/machine.md
 
 from __future__ import annotations
 

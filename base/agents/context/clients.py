@@ -1,4 +1,4 @@
-# meiva:link base/agents/context/docs/clients.meiva.okf.md
+# meiva:link base/agents/context/docs/clients.md
 from __future__ import annotations
 
 import threading
@@ -185,7 +185,7 @@ class ClientSet:
             return self._gateway
 
     def with_gateway(self, builder: Callable[[str], httpx.Client]) -> ClientSet:
-        # meiva:link base/agents/context/docs/clients.meiva.okf.md
+        # meiva:link base/agents/context/docs/clients.md
         return ClientSet(
             gateway_url=self._gateway_url,
             database=self._database,
@@ -229,7 +229,7 @@ class ClientSet:
 
     # meiva:note
     # Return this set's lazy event-pipeline producer when no process pipeline is bound.
-    # meiva:link base/agents/context/docs/clients.meiva.okf.md
+    # meiva:link base/agents/context/docs/clients.md
     def event_producer(self) -> Callable[[], EventPipeline] | None:
         from base.telemetry.emitter import pipeline_bound
 

@@ -1,6 +1,6 @@
 # meiva:note
 # Pure placement judgment for machine-placed schedules.
-# meiva:link gateway/schedules/docs/schedules.meiva.okf.md
+# meiva:link gateway/schedules/docs/schedules.md
 
 from __future__ import annotations
 

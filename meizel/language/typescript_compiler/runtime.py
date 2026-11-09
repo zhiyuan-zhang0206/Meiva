@@ -17,7 +17,7 @@ from meizel.lint_common import run_node_analyzer
 TOOL_ROOT = Path(__file__).parents[3]
 
 
-# meiva:link meizel/docs/checker/typescript.meiva.okf.md
+# meiva:link meizel/docs/checker/typescript.md
 def scan_batch(
     universe: Universe, contents: dict[str, str], policy: Policy, sources: Sources
 ) -> dict[str, TsScan]:
@@ -40,7 +40,7 @@ def scan_batch(
     # The compiler comes from this tool's own frontend install, never the checked repository's: the
     # checker runs against repositories that have no frontend at all, and a tree beside the inspected
     # code would be one more thing that code could change under the analysis.
-    # meiva:link meizel/docs/frontend-deps.meiva.okf.md
+    # meiva:link meizel/docs/frontend-deps.md
     # meiva:note
     # The tree is the reader, not the directory read: its predicates take the path they are asked
     # about, so the preflight still observes this installation's frontend and never the checked

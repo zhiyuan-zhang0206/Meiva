@@ -21,7 +21,7 @@ from ops.rpc_schemas import HarnessProbeResult
 # meiva:note
 # Reads retain the last explicit probe for this gateway process. Reading or
 # expiring a snapshot never starts a machine probe; only refresh does that.
-# meiva:link base/agents/docs/harness/availability.meiva.okf.md
+# meiva:link base/agents/docs/harness/availability.md
 class HarnessProbeCache:
     def __init__(self) -> None:
         self._rows: dict[str, list[HarnessAvailability]] = {}
@@ -48,7 +48,7 @@ class HarnessProbeCache:
         # The first HTTP request owns the probe directly; followers share only
         # its result. Cancelling a follower cannot cancel that request's work.
         # Cancelling the leader ends its probe and all followers honestly.
-        # meiva:link base/agents/docs/harness/availability.meiva.okf.md
+        # meiva:link base/agents/docs/harness/availability.md
         try:
             rows = await probe()
             self.store(machine, rows)
@@ -67,7 +67,7 @@ class HarnessProbeCache:
 # birth one there, so its install state would be an answer to a question nobody can
 # act on — it reports 503 like any other unrunnable target, and the form shows
 # `unknown` rather than a `launchable` option that leads nowhere.
-# meiva:link base/agents/docs/harness/availability.meiva.okf.md
+# meiva:link base/agents/docs/harness/availability.md
 async def require_harness_target(
     target: str, *, db: Database, local_machine: MachineIdentityReader
 ) -> None:

@@ -1,0 +1,43 @@
+# Checkpoint Message Replay
+
+`HistoryPostgresSaver` and `HistoryAsyncPostgresSaver` follow an exact
+checkpoint's parent chain. A missing parent without a stored seed or a real
+message reset raises a reconstruction error. A delta channel version with
+neither a seed nor writes is also unavailable. These failures never become
+an empty conversation or a guessed chronological chain.
+
+Both savers are built only over the private checkpoint-postgres surface this
+reader uses: the `_DeltaStage2Row` it constructs, `writes_sort_key`, the
+`_get_overwrite` detector and the three `BasePostgresSaver` methods it drives.
+Construction verifies that surface (`read_private_surface` /
+`verify_private_surface`) and raises when a release renames or reshapes any of
+it, so a changed dependency fails where the saver is built rather than as a
+mis-cut message reset during a replay. `pyproject.toml` caps the package at the
+minor this adapter was written against.
+
+An explicit empty snapshot, an empty write and a fresh non-delta checkpoint
+remain valid empty states. Read-side detection neither repairs nor writes
+checkpoint storage. A real reset permits replay without its older prefix;
+a historical request before that reset still requires its own complete chain.
+
+The public `load_checkpoint_messages` and segment readers preserve the
+original cause through `CheckpointReadError`. Gateway `/timeline` surfaces
+failed reads as 503. `/timeline/retained` reads an explicitly identified compact
+boundary and pages using historical item cursors without loading the live head.
+Its boundary identity and lack of a live message count distinguish retained
+history from execution state. An independently readable retained boundary
+does not prove the current turn can resume safely.
+
+`tests/test_checkpoint_postgres_walks.py` places 1,023 then 1,024 newer
+checkpoints ahead of a target to cross the history reader's page boundary. The
+retained-segment read exercises that older target, including its writes and seed.
+Its serializer test also checks that instrumenting cold readers leaves a shared
+serializer's decode method unchanged; timing one read must not install
+process-wide instrumentation on other readers.
+
+`tests/test_checkpoint_trace.py` correlates a trace ID with checkpoint metadata
+and reconstructs the full stored message channel; spans do not hold that content.
+Its fixture gives distinct message payloads distinct channel versions, because
+the blob key includes channel/version and reusing a version reuses its blob.
+The async case exercises the production stamp function; synchronous read cases
+seed the metadata directly with SQL.

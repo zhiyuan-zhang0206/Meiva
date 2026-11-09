@@ -1,6 +1,6 @@
 # meiva:note
 # What a Claude Code launch can tell from the screen it captures and the markers its launch command leaves: whether the composer is up, whether the executable was missing, whether the CLI is signed out, and how a first message is wrapped for the composer. The launcher captures and waits; these decide what a capture means.
-# meiva:link meiva/shell/coding_tools/docs/coding-tools.meiva.okf.md
+# meiva:link meiva/shell/coding_tools/README.md
 from __future__ import annotations
 
 import re

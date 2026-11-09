@@ -1,0 +1,100 @@
+# Meiva Root
+
+`meiva-root` owns one home's application service tree. Ordinary start prepares a
+validated manifest, launches the root, and requires fresh ownership-bound
+protocol readiness. Repeated start reuses the same generation. Changed service
+membership, commands, per-service environment, or the exact root launch
+environment, or development source bytes requires an explicit prior stop; start cannot drain active work by
+silently replacing its supervisor. The public start intent lock serializes the
+whole preparation and readiness operation for that home. Admission runs before
+converge, schema mutation, or desired service publication. A live identical root
+skips those preparation writes and only reconciles its existing units and readiness.
+
+The manifest freezes command arguments, service environment, stop window, and
+`stop_tier`. Service startup and restart directly read latest configuration from disk.
+The private root
+`launch_digest` binds root's declared launch environment (`launch_input_keys`), the
+home's authoritative `.env` and plugin configuration files, and the development
+source snapshot (tracked plus nonignored untracked files) at start admission;
+root exposes that digest with its native birth in status, without exposing
+secrets. Ambient keys root still hands every unit (proxy, DISPLAY, HOME,
+USER/LOGNAME, TMPDIR and the other temp dirs) are outside
+the digest: a start that differs only in them reuses the running generation,
+which keeps the values it started with, instead of refusing. The deployment
+glue selects services and supplies health and diagnostic participants: [Root deployment wiring](../../meiva_root_glue/docs/meiva_root_glue.md). The generic
+root does not know rollout publication authority or cluster installation.
+Development source remains mutable after admission; this check does not certify
+an immutable running release or seal ignored dependency directories.
+
+## Native ancestry and lifetime
+
+Where each platform anchors the tree, the platform lifetime rules, and how a root
+whose permissions helper was replaced retires itself:
+[Meiva Root — native ancestry and lifetime](ancestry.md).
+
+## Unit intent, failures and unattended stops
+
+Each unit's policy fact, who set it, how a stored stop survives a root restart,
+and when an unattended operator stop is reported:
+[Meiva Root — unit intent, recorded failures and unattended stops](intent.md).
+
+## Left-behind generations
+
+Root records the pid of every unit process it spawns
+(`units/<unit>.pid`) and clears the pidfile when that process exits. A pidfile
+outlives a root that leaves its tree running — a crash, or the code-version
+gate's hard exit from a pool worker thread, which cannot stop an asynchronous
+tree. The next root reads it before it starts the same unit: a recorded birth
+that no longer lives is dropped, and a live one is that unit's previous
+generation, still holding its port, socket or instance lock. Root stops it (TERM
+inside the unit's stop window, then KILL) and only then spawns its own, emitting
+`root_unit_left_behind_reclaimed`. Nothing is adopted: a leftover runs the code
+it started with, and adopting it across a release is the silent drift this
+cleanup exists to end (task #5474).
+
+## Failure-state signals
+
+How a dying unit is retried — the backoff ladder, the circuit breaker and the
+dependency-recovery probe that may replace it early:
+[Meiva Root — restart policy, backoff and circuit breaker](restart-policy.md).
+
+
+The health monitor derives one condition per unit each round: the unit's intent
+is running and it sits in an explicit failure state — a recorded replacement
+failure or exhausted automatic restart attempts
+(`services/supervision/meiva_root/failure_state.py`). The condition is a state, so every
+round that finds it holding emits `root_unit_failure_state` (unit, kind,
+detail, attempts, last error); the observability stack's rules own the debounce and the notification,
+and the signal stops on its own when the condition clears. An open circuit
+breaker reports `kind=breaker_open` and outranks a recorded replacement failure,
+because it is the state an operator must act on and the one whose alert still
+reaches a machine whose database is down; the alert rule also accepts the
+historical `restarts_exhausted` value. A terminal probe
+verdict (unknown identity, inspection error, foreign listener) emits
+`root_unit_not_revivable` on every round it is observed, at WARNING.
+`root_restart_failed` records a replacement error.
+
+An explicit operator stop rests at DEBUG; when that silence itself becomes the
+finding is owned by [Meiva Root — unit intent, recorded failures and unattended stops](intent.md).
+
+## Control contract
+
+This package owns the application service tree. The wire protocol and client sit below every consumer:
+[Root control contract — protocol and Unix-socket client](../../../../base/native_process/root_control/docs/root_control.md).
+
+## Closure and uncertainty
+
+Bounded best-effort group signals and direct-child exit: [Meiva Root service stop](closure.md).
+
+
+## Exact serving generation
+
+Deployment wiring captures loaded source/image identity and canonical home
+before root starts application children. Root status binds those facts to its
+launch digest and native PID/birth. The ordinary start's serving receipt retains
+that generation; readers authenticate the POSIX socket peer and compare the
+live native generation before permitting recovery. Replacing root, changing its
+launch/runtime identity, or losing observable custody invalidates the receipt.
+Generic supervisor fixtures without deployment wiring have no runtime identity
+and cannot publish a production serving receipt. This local evidence adds no
+fleet authority.

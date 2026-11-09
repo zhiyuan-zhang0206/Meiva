@@ -103,7 +103,7 @@ def load_repo_plugin_specs(plugins_dir: Path = REPO_PLUGINS_DIR) -> PluginSpecs:
 # command process, and a `metrics.py` declares `MetricSpec` values rather than Pydantic models, so
 # no annotation is resolved through this entry. A server-side supplier appearing later would need
 # the lock the two face readers hold.
-# meiva:link docs/plugins/module-loading/fixed-name-registration-audit.meiva.okf.md
+# meiva:link docs/plugins/module-loading/fixed-name-registration-audit.md
 def _import_plugin_metrics(module_name: str, metrics_py: Path) -> ModuleType:
     """Import one plugin's ``metrics.py`` from its file location.
 

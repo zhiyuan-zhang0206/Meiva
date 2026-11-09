@@ -29,7 +29,7 @@ def _helper_socket_server(
 ) -> Generator[PermissionsHelperClient]:
     # meiva:note
     # Serve the permissions-helper JSON-line protocol over a real Unix domain socket so tests exercise PermissionsHelperClient.spawn_process end-to-end without subclassing the client.
-    # meiva:link tests/harness/docs/helper-process-tests.meiva.okf.md
+    # meiva:link tests/harness/docs/helper-process-tests.md
     with tempfile.TemporaryDirectory(dir="/tmp", prefix="mhp-") as temp_dir:
         sock_path = Path(temp_dir) / "helper.sock"
         server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
@@ -82,7 +82,7 @@ def _current_process_record(*, generation: str | None = None) -> SessionRecord:
     )
 
 
-# meiva:link tests/harness/docs/helper-process-tests.meiva.okf.md
+# meiva:link tests/harness/docs/helper-process-tests.md
 def test_new_session_preserves_login_shell_env_stderr_and_record(
     unit_home: Path,
 ) -> None:
@@ -263,7 +263,7 @@ def test_kill_signals_record_pid_and_unlinks_only_after_confirmed_death(
             child.wait()
 
 
-# meiva:link tests/harness/docs/helper-process-tests.meiva.okf.md
+# meiva:link tests/harness/docs/helper-process-tests.md
 def test_graceful_delivery_tolerates_whole_second_create_time_drift(
     unit_home: Path,
 ) -> None:

@@ -85,7 +85,7 @@ class _Legacy:
 # the migration (the host settles running turns to their restart, ops drains the requests it
 # admitted), and schedule-manager declares its move to both_services with runner DB access:
 # those deliberate changes are updated in place while every other launch fact stays locked.
-# meiva:link services/agent_runner/agent_host/lifecycle/docs/graceful-exit.meiva.okf.md
+# meiva:link services/agent_runner/agent_host/lifecycle/docs/graceful-exit.md
 _LEGACY = (
     _Legacy("ttl-reaper", "services.upkeep.ttl_reaper.daemon", _GATEWAY, True),
     _Legacy(

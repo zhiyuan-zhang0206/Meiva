@@ -82,7 +82,7 @@ def _record(
 # any process could die. `announced_at` stays NULL until the transport accepts the
 # publication, which is why the dedupe lookup counts an unannounced row too -- the
 # outbox sweep converges it to delivered rather than a second delivery row.
-# meiva:link base/events/notifications/docs/notifications.meiva.okf.md
+# meiva:link base/events/notifications/README.md
 def deliver_in_transaction(
     conn: psycopg.Connection,
     *,
@@ -186,7 +186,7 @@ class SyncPublisher(Protocol):
 # for the outbox sweep. A crash between publish and mark re-announces — an
 # at-least-once push the client already deduplicates on `notification_id` — and is
 # never a lost one.
-# meiva:link base/events/notifications/docs/notifications.meiva.okf.md
+# meiva:link base/events/notifications/README.md
 def announce_sync(pool: ConnectionPool, bus: SyncPublisher | None, notification_id: int) -> bool:
     if bus is None:
         return False

@@ -15,7 +15,7 @@
 # prefix, a CLI schema, a tool call. The reply is text the agent already read; it is evidence
 # about the failure to nobody.
 #
-# meiva:link base/lm/harness/docs/harness.meiva.okf.md
+# meiva:link base/lm/harness/docs/harness.md
 
 from __future__ import annotations
 

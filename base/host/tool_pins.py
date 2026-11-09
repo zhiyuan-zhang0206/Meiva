@@ -3,10 +3,10 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
-# meiva:link base/host/docs/tool-pins.meiva.okf.md
+# meiva:link base/host/docs/tool-pins.md
 UV_VERSION = "0.13.1"
 
-# meiva:link base/host/docs/tool-pins.meiva.okf.md
+# meiva:link base/host/docs/tool-pins.md
 PNPM_VERSION = "11.9.0"
 
 UV_ASSET_SHA256: dict[str, str] = {
@@ -16,7 +16,7 @@ UV_ASSET_SHA256: dict[str, str] = {
     "x86_64-unknown-linux-gnu": "eadd9d27c134ab5ac1ffd4473b97a741407f3ea238288f03121fc4deddf90220",
 }
 
-# meiva:link base/host/docs/tool-pins.meiva.okf.md
+# meiva:link base/host/docs/tool-pins.md
 PGBOUNCER_APT_VERSION = "1.26.0-1.pgdg24.04+1"
 
 REDIS_APT_VERSION = "6:8.2.*"

@@ -4,7 +4,7 @@
 # effective periods, token tiers, rate windows and provenance must be the archive's; a run that
 # compared no priced model fails instead of passing an empty comparison. The flat trio is excluded
 # because it summarizes the base tier at the last synchronization instant.
-# meiva:link base/lm/pricing/docs/pricing.meiva.okf.md
+# meiva:link base/lm/pricing/docs/pricing.md
 
 from __future__ import annotations
 

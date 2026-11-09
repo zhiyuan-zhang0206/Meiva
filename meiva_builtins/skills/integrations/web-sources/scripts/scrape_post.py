@@ -3,7 +3,7 @@
 # the post saved in the raw mirror, the markdown rendering of that post and its projection onto
 # the cross-platform S1 item. Nothing here fetches, reads the clock or writes a file; the caller
 # supplies the URL, the host, the fetch time and the mirror path.
-# meiva:link meiva_builtins/skills/integrations/web-sources/docs/web-sources.meiva.okf.md
+# meiva:link meiva_builtins/skills/integrations/web-sources/README.md
 
 from __future__ import annotations
 

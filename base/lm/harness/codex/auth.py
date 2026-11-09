@@ -7,7 +7,7 @@ from collections.abc import Mapping
 # shipped binary's strings: OPENAI_API_KEY, CODEX_API_KEY, CODEX_ACCESS_TOKEN). Anything
 # else in the environment is the caller's business and rides along unchanged — the
 # runner's home allowlist and the session's registration handle reach the child that way.
-# meiva:link base/lm/harness/codex/docs/codex.meiva.okf.md
+# meiva:link base/lm/harness/codex/docs/codex.md
 SECRET_ENV_NAMES: tuple[str, ...] = ("OPENAI_API_KEY", "CODEX_API_KEY", "CODEX_ACCESS_TOKEN")
 
 
@@ -20,7 +20,7 @@ SECRET_ENV_NAMES: tuple[str, ...] = ("OPENAI_API_KEY", "CODEX_API_KEY", "CODEX_A
 # Claude CLI treats an empty value as absent, which is why that adapter blanks instead).
 # `api_key_mode` is the one explicit choice of per-token billing; only then do the
 # variables ride along.
-# meiva:link base/lm/harness/codex/docs/codex.meiva.okf.md
+# meiva:link base/lm/harness/codex/docs/codex.md
 def build_env(environ: Mapping[str, str], *, api_key_mode: bool = False) -> dict[str, str]:
     env = dict(environ)
     if api_key_mode:

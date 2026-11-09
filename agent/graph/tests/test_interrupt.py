@@ -3,7 +3,7 @@
 # turns into an event. A cancel or terminate counts at once, a restart once its grace has passed,
 # the agent's own terminate never does, and no read claims or consumes the row; claim still owns
 # the command.
-# meiva:link agent/graph/docs/turn-interrupts.meiva.okf.md
+# meiva:link agent/graph/docs/turn-interrupts.md
 
 import asyncio
 

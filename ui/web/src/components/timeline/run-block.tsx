@@ -7,7 +7,7 @@
 // its natural height in the timeline - there is no inner scrollport and no height
 // cap - so a finished block is as tall as it really was and a running one extends
 // downward from a fixed top edge while the reader scrolls the timeline itself.
-// meiva:link ui/web/src/docs/frontend-components/timeline-view/timeline-view.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/timeline-view/timeline-view.md
 
 import { ChevronRight, Layers } from "lucide-react";
 import { useTranslations } from "next-intl";
@@ -46,7 +46,7 @@ interface TurnBlockProps {
   // meiva:note
   // Page-clock time of the thread's last received event; anchors the live clock while no block is
   // in flight. 0 = unknown, and the clock falls back to the in-flight block alone.
-  // meiva:link ui/web/src/docs/frontend-components/timeline-view/deep-collapse.meiva.okf.md
+  // meiva:link ui/web/src/docs/frontend-components/timeline-view/deep-collapse.md
   lastEventAt?: number;
 }
 
@@ -108,7 +108,7 @@ export const TurnBlock = memo(function TurnBlock({
   // harness step transition: user report 2026-11-08, stuck at "Working for 1m 2s" with no event
   // left to advance it). Anchoring on the last received event, not the turn's start, keeps a turn
   // that spans an idle gap (a restart, a wake-up) from counting that gap as work.
-  // meiva:link ui/web/src/docs/frontend-components/timeline-view/deep-collapse.meiva.okf.md
+  // meiva:link ui/web/src/docs/frontend-components/timeline-view/deep-collapse.md
   const liveAnchor =
     liveBlockStartedAt > 0 ? liveBlockStartedAt : turnActive ? lastEventAt : 0;
   const liveNow = useNow(Boolean(turnActive) && liveAnchor > 0);
@@ -135,7 +135,7 @@ export const TurnBlock = memo(function TurnBlock({
   // meiva:note
   // Keep collapsed turn strips single-line by rendering aggregated SDK call chips
   // only when the TurnBlock is expanded.
-  // meiva:link ui/web/src/docs/frontend-components/timeline-view/timeline-view.meiva.okf.md
+  // meiva:link ui/web/src/docs/frontend-components/timeline-view/timeline-view.md
   const sdkChips = expanded && hasSdkCalls ? (
     <span className={cn("flex-wrap items-center gap-x-1.5 gap-y-0.5 pl-5 text-[11px] font-mono opacity-75", FLEX)}>
       {summary.sdkCalls.map((c, i) => (
@@ -212,7 +212,7 @@ export const TurnBlock = memo(function TurnBlock({
 // meiva:note
 // Immediate inline activity row rendered right after human message submission
 // before the first reasoning or tool item arrives, matching TurnBlock's header geometry.
-// meiva:link ui/web/src/docs/frontend-components/timeline-view/timeline-view.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/timeline-view/timeline-view.md
 export const PendingLiveActivityWindow = memo(function PendingLiveActivityWindow() {
   const t = useTranslations("timeline");
   return (

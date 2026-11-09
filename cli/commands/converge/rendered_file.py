@@ -33,7 +33,7 @@ _HASHES: TypeAdapter[dict[str, str]] = TypeAdapter(dict[str, str])
 # 0600 and the rename publishes only the fully written file), so a reader such as Grafana's
 # provisioning watcher never sees a torn render and a config carrying a bearer is never exposed
 # through the process umask.
-# meiva:link cli/commands/converge/docs/rendered-files.meiva.okf.md
+# meiva:link cli/commands/converge/docs/rendered-files.md
 def write_rendered_guarded(
     path: Path,
     content: str,

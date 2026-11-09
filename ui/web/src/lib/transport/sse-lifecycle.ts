@@ -65,7 +65,7 @@ export interface SseTimers {
 // while one is pending is dropped) and waits a capped exponential delay that grows
 // with each consecutive failure and resets on a successful open. Disposal cancels
 // both and makes every later request a no-op.
-// meiva:link ui/web/src/docs/frontend-data-flow/frontend-data-flow.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-data-flow/frontend-data-flow.md
 export function createSseTimers(policy: SseTimerPolicy): SseTimers {
   let disposed = false;
   let watchdog: ReturnType<typeof setTimeout> | null = null;
@@ -105,7 +105,7 @@ export function createSseTimers(policy: SseTimerPolicy): SseTimers {
 // After a legacy source the server closed, ask the session once: an invalid
 // session stops here (the app returns to login), anything else - including an
 // unreachable gateway, which is transient - schedules the capped-backoff reopen.
-// meiva:link ui/web/src/docs/frontend-data-flow/frontend-data-flow.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-data-flow/frontend-data-flow.md
 function probeThenReopen(session: SessionPort, timers: SseTimers, reopen: () => void): void {
   session.checkAuth()
     .then((result) => {

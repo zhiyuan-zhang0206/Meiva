@@ -4,7 +4,7 @@
 # process yields or the failure it means, and the tripwire that keeps an agent-supplied URL off
 # internal hosts. Nothing here starts a process, reads the environment or touches the network;
 # `webscrape.py` runs the argv, and the rss adapter shares the argv and the tripwire.
-# meiva:link meiva_builtins/skills/integrations/web-sources/docs/web-sources.meiva.okf.md
+# meiva:link meiva_builtins/skills/integrations/web-sources/README.md
 
 from __future__ import annotations
 

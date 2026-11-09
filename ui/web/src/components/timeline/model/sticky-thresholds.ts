@@ -11,7 +11,7 @@ import { POINTER_STICKY_THRESHOLDS, TOUCH_STICKY_THRESHOLDS } from "@/lib/layout
 // one so a small deliberate scroll-up escapes. The answer comes from the media
 // query hook, so a server render uses its snapshot (the touch preset) and a
 // client mount reads the real pointer in its first render.
-// meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.md
 export function useStickyThresholds() {
   const coarse = useMediaQuery("(pointer: coarse)");
   return useMemo(

@@ -48,7 +48,7 @@ def test_one_line_past_the_ceiling_fails_with_the_reason_and_the_repair(
     assert "301 lines" in out
     assert "held in context" in out
     assert "references/" in out
-    assert "content_lint.meiva.okf.md" in out
+    assert "content_lint.md" in out
 
 
 def test_a_three_deep_sub_skill_is_scanned(

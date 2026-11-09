@@ -1,0 +1,99 @@
+# Session backend and process supervision
+
+`base/sessions/protocol.py:SessionBackend` defines the named-session interface.
+`base/sessions/backend.py` provides two entry points:
+
+- `get_backend(timers=..., home=...)` selects `PosixProcSessionBackend` or the configured macOS
+  permissions-helper backend. The caller's `Timers` drive their graceful-stop waits
+  (`posixproc.kill_session` takes the same required `timers`). Surviving pause probes
+  and cold-maintenance consumers use this native named-session interface. Current
+  root-supervised service custody is separate.
+- `get_shell_backend(home=...)` selects `PtySessionBackend` for interactive agent shells,
+  watchers and their session consumers. The pty-sessions service owns these
+  shells, so agent exits and agent-host restarts do not end them; stopping the
+  owning service does.
+
+Both are bound to the Meiva home they act on: the session records, logs and the service
+socket live under that `home`, which the entry that resolved it hands down (the factories,
+`posixproc` functions and the helper client take it as a required value and never read the
+process environment for it).
+
+`SessionBackend.service_available()` answers the one question a caller asks after a
+failed `new_session`: can this backend admit a session right now? It defaults to
+True (a backend that launches the process itself has nothing to check).
+`PtySessionBackend` answers it with the service's generation probe, because the
+service reports an *absent* service as "no sessions" on `list`/`has` — a caller that
+read those would call a missing service healthy. The page server uses the answer to
+tell "the service is not there yet" (defer the page to the next reconcile pass) from
+"this request cannot succeed" (close the page).
+
+Native sessions use `base/sessions/record.py:SessionRecord` under the home's
+`run/sessions/` and logs under `logs/`. No PTY is allocated. Native backends
+raise `NotImplementedError` for terminal operations. The protocol's default
+bulk timestamp method falls back to individual reads; backends without a
+source return None rather than inventing uptime.
+
+`base/sessions/env_forwarding.py` supplies child environments and virtualenv
+activation. Native login shells rebuild PATH before the virtualenv prefix is
+restored. Complete child environments travel separately from argv. Compound
+commands must carry their own exec on the supervised stage (`build && exec
+serve`); `exec_into` rejects commands it cannot safely rewrite. The shell-layer
+contract below explains why the outer exec is also required.
+
+PTY operations use short requests through `base/sessions/pty/client.py`; a
+restarted caller dials the service again. Environment and command travel in
+the request body of its 0600 socket, never an argv prefix. The service's base
+environment excludes `MEIVA_PROCESS_PROFILE` and `VIRTUAL_ENV` before overlaying
+caller values. The command is submitted once the login shell is ready. See
+[pty sessions](../pty/docs/pty_sessions/pty_sessions.md).
+
+Each home owns its named-session namespace. `base/cluster/derive.py:session_name`
+derives service names; agent shells use `meiva-agent-<id>-shell-<n>[-<name>]`.
+The session's lifetime belongs to its supervisor, not to the agent that created it.
+Stopping and native process identity remain in [stopping](stopping.md).
+The macOS firewall audit has its own owner:
+[macOS Firewall Manifest](firewall-audit.md).
+
+## Backend implementation contracts
+
+### Native shell launch
+
+The outer exec is unconditional because `/bin/sh` may be dash, which does not
+replace itself for a lone command as macOS bash does. The inner exec is controlled
+by `exec_cmd`: a caller that retains its login shell still needs the supervisor's
+outer shell replaced. Local `posixproc` imports keep backend selection from loading
+that implementation for PTY-only callers.
+
+### Backend routing
+
+The named-session backend selects the helper only on macOS with both helper flags enabled; unreadable settings retain the POSIX route. Interactive shells select the PTY backend independently.
+
+The settings-read fallback precedes spawn selection. Once a helper launch is
+selected, a failed helper call remains loud instead of silently changing the
+process's macOS permission ancestry; the helper failure test covers that separate
+contract.
+
+### PTY allocation
+
+`ARG002` is limited to the inherited `exec_cmd` keyword. The parameter stays in
+place so callers can use the common SessionBackend shape without changing the
+interactive shell lifetime.
+
+### PTY failure verdict
+
+A missing PTY service has no sessions, so kill is a no-op. A service that accepts a connection but does not answer has an unknown kill outcome: the backend returns failure and conservatively reports interruption. Send and capture failures raise RuntimeError naming the operation and session.
+
+The service owns graceful-stop timing; client-side `timeout` and `expected` do
+not override that authority. An unconfirmed kill cannot prove the session idle.
+
+### PTY timestamp batch
+
+One listing avoids a separate round trip per session in a status snapshot. The
+bound test checks the returned epochs and absent/empty cases; it does not count
+network calls.
+
+### Session host generation
+
+A backend names its hosting process's generation, or None when it cannot tell;
+a replacement generation is one new chance for a supervised resident process.
+See [session host generation](host-generation.md).

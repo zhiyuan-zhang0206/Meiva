@@ -4,7 +4,7 @@
 # unmounted, and after a plugin config overlay. The writers (`skill_sources.py` for the skill
 # root, `install.py` for the rest) read the slot, call these functions and store what they
 # return; the transitions never touch the module.
-# meiva:link meiva/docs/sdk-surface/install-lifetime.meiva.okf.md
+# meiva:link meiva/docs/sdk-surface/install-lifetime.md
 
 from __future__ import annotations
 

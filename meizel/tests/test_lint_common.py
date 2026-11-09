@@ -101,7 +101,7 @@ def test_directory_scan_does_not_follow_a_tracked_parent_replaced_by_a_link(tmp_
 # 21 times), and outside it every read goes back to git, so a file created between
 # two runs is never judged by the previous run's file set. Both halves are pinned
 # here because the fast path and the correct path are the same code.
-# meiva:link meizel/docs/lint/lint-common-admission.meiva.okf.md
+# meiva:link meizel/docs/lint/lint-common-admission.md
 def _git_fixture(root: Path, *files: str) -> None:
     import subprocess
 

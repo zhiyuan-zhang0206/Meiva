@@ -125,7 +125,7 @@ def test_gpt6_1_sol_capabilities_and_display_successor(*, model_catalog: ModelCa
 # meiva:note
 # GPT-6.1 Terra is the same-series successor of GPT-5.6 Terra; the older row stays
 # spawnable and only the picker hides it.
-# meiva:link base/lm/docs/pricing-model-rates.meiva.okf.md
+# meiva:link base/lm/docs/pricing-model-rates.md
 def test_gpt6_1_terra_capabilities_and_display_successor(*, model_catalog: ModelCatalog) -> None:
     terra_61 = model_catalog.models["gpt-6.1-terra"]
     assert terra_61.spawnable and terra_61.context_window == 1_050_000
@@ -218,7 +218,7 @@ def test_haiku_5_5_adaptive_capabilities_preserve_manual_predecessor(
 
 # meiva:note
 # Highspeed is the same model at a higher serving price, never a second capability row.
-# meiva:link base/lm/docs/pricing-model-rates.meiva.okf.md
+# meiva:link base/lm/docs/pricing-model-rates.md
 def test_kimi_k3_1_pro_family_and_display_successor(*, model_catalog: ModelCatalog) -> None:
     pro = model_catalog.models["kimi-k3.1-pro"]
     highspeed = model_catalog.models["kimi-k3.1-pro-highspeed"]
@@ -245,7 +245,7 @@ def test_docs_state_the_actual_plugin_catalog_size(*, model_catalog: ModelCatalo
     mappings = len(model_catalog.models) + len(model_catalog.decision_models)
     assert plugin_prices == mappings
     documented = (
-        ("base/lm/pricing/docs/pricing.meiva.okf.md", r"all (\d+) repository plugin prices"),
+        ("base/lm/pricing/docs/pricing.md", r"all (\d+) repository plugin prices"),
         ("base/lm/docs/model-providers-as-plugins.md", r"all (\d+) model/vendor mappings"),
     )
     for relative, pattern in documented:

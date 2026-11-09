@@ -25,7 +25,7 @@ class ScriptExhaustedError(RuntimeError):
 # an explicit visibility line; text without one is folded into Details and answered with a
 # correction note, which spends a model call the script does not contain. `user_facing` is an
 # answer the user reads in the main conversation; `working_note` is text that belongs in Details.
-# meiva:link base/agents/messages/docs/metadata-contracts.meiva.okf.md
+# meiva:link base/agents/messages/docs/metadata-contracts.md
 def user_facing(text: str) -> str:
     return f"{DISPLAY_TO_USER}\n{text}"
 

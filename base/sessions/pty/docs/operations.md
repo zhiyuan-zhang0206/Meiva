@@ -1,8 +1,8 @@
 # PTY allocation operations
 
-The [generation boundary](generation-boundary.meiva.okf.md) owns the freeze effect
+The [generation boundary](generation-boundary.md) owns the freeze effect
 on schedules, watcher exclusions and fail-closed marker repair. The
-[session ledger](pty_sessions/closure-and-ledger.meiva.okf.md) owns inventory and
+[session ledger](pty_sessions/closure-and-ledger.md) owns inventory and
 identity-aware closure. A freeze is not an inspection-only pause: fence any
 reconciler whose existing sessions must be retained before changing generation.
 

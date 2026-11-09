@@ -3,7 +3,7 @@
 # claim node, settlement and checkpointer over a scripted model, and the rows a test reads and
 # ages. A restart's interrupt grace is read from the restart row's own `created_at`, so a test
 # ages that row instead of waiting out the grace.
-# meiva:link services/agent_runner/agent_host/lifecycle/docs/graceful-exit.meiva.okf.md
+# meiva:link services/agent_runner/agent_host/lifecycle/docs/graceful-exit.md
 
 from __future__ import annotations
 

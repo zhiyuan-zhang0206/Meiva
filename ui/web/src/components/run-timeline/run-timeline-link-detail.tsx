@@ -50,7 +50,7 @@ function LinkText({ link }: { link: ResolvedLink["link"] }) {
   );
 }
 
-// meiva:link ui/web/src/docs/frontend-components/run-timeline/details-panel.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/run-timeline/details-panel.md
 export function LinkDetail({ resolved, snapshot, onAddAgent }: { resolved: ResolvedLink; snapshot?: string; onAddAgent: (agent: number) => void }) {
   const t = useTranslations("runTimeline");
   const { formatAbsolute } = useTimeFormat();

@@ -1,0 +1,74 @@
+# Permissions Helper — macOS Desktop Automation Daemon
+
+## What is it
+A signed Swift `.app` owned by launchd holds macOS Screen Recording and
+Accessibility grants and is the required ancestor of `meiva-root` on every macOS
+role. Desktop and protected-file skills call its Unix socket. Root diagnostics
+observe its protocol and native job state; they never reload their ancestor.
+
+**Role affiliation**: the macOS ancestry owner is required for gateway and runner
+roles. Desktop capability probes remain distinct from service ownership. The
+helper is outside the application manifest because it owns root's lifetime.
+
+## Why launchd + Ad-hoc Signing
+The launchd-ownership and signing-identity constraint set moved to its own node: [Permissions Helper — launchd ownership and a fixed signing identity](launchd-and-stable-signing.md).
+
+## Authorization Model
+
+The two grants, the planes they are read on, the helper-owned request
+path and what a rebuild does to them moved to their own node: [Permissions Helper — Authorization Model](authorization.md).
+
+## Three Components
+- `helper/main.swift` — the Swift daemon body (+ `helper/Info.plist`). A socket-less launch (no `MEIVA_PERMISSIONS_HELPER_SOCKET`, no argv[1]) becomes the user-facing panel instance rather than exiting: [panel mode](panel.md). Wire method names: `ping` (with `preflight_screen`, `ax_trusted`, and the `*_v1` capability flags), `request_grants`, `screencapture_region`, `file_list`, `file_read`, `click`, `drag`, `type` (the Python client function is named `type_text`, but the wire method sent is `type`), `key`, `scroll`, `ax_window_info`, `ax_tree` (bounded read-only accessibility walk of one window, advertised as `ping.ax_tree_v1`), `ax_act` (press / show_menu / focus / set_value on an element of the latest walk, advertised as `ping.ax_act_v1`; `ping.ax_act_v2` adds reported platform actions and literal text selection), `window_info`, `session_info`. Accessibility-gated methods are explicitly refused when the helper lacks that grant. File access is limited to `~/Downloads`, `~/Desktop`, and `~/.meiva/incoming`; both the requested path and roots are symlink-resolved, then checked as the exact root or the root plus a `/` boundary. `file_list` returns sorted entry metadata; `file_read` returns base64 content for regular files up to 32 MiB.
+- **One instance, enforced before the socket is touched.** `serve()` takes `flock` on `<socket>.lock` (held for the process lifetime, released by the kernel on exit) and then refuses to start while anything still answers on the socket path; both refusals exit 0, which `KeepAlive{SuccessfulExit:false}` reads as deliberate. The order matters: `serve()` must `unlink` a stale file before `bind`, so a second launch that gets that far rewrites the path under the running daemon and orphans its listening fd — every later connect fails with ECONNREFUSED until the machine restarts, and the helper that owns root custody cannot be replaced without taking the whole tree down. Never execute this binary to inspect grants (use `meiva permissions status` or the SDK): on 2026-10-22 a stray `--check` that inherited `MEIVA_PERMISSIONS_HELPER_SOCKET` lived 10 ms and did exactly that.
+- `wire.py` — typed helper results, explicitly re-exported by `client.py` for existing consumers.
+- `client.py` — Python client. Connects to the local cluster helper via Unix socket, each call one line JSON request/response; `PermissionsHelperError` represents unreachable/timeout/remote error. Its `list_dir()` and `read_file()` wrappers expose the whitelisted file operations. `check_screen_capture()` turns `ping().preflight_screen` into a `base.host.converge.screen_capture.ScreenCaptureStatus`; `check_accessibility()` turns `ping().ax_trusted` into a `base.host.converge.accessibility.AccessibilityStatus`; `request_grants()` is the wire call above. Each result keeps grant denial distinct from helper unreachability.
+- `lifecycle.py` — bounded tool runs, compilation, signing with the fixed identity, and
+  initial LaunchAgent registration. A current signed artifact is reused
+  (`build_state.py` records its content hash and designated requirement). A
+  stale installed artifact is rebuilt in place only once `meiva stop` retired this
+  home's helper (`launchd_job.require_retired_helper`); an explicit
+  `MEIVA_PERMISSIONS_HELPER_ARTIFACT_DIR` artifact is immutable. Boundary:
+  [Permissions Helper — launchd ownership and a fixed signing identity](launchd-and-stable-signing.md). A loaded changed job is refused
+  before any plist write. Isolated preview artifacts never overwrite the normal
+  home or production bundle. IPC paths must fit Darwin's 103-byte usable Unix
+  socket name limit before signing or native registration. The entry builds the `BuildEnv`/`InstallEnv`
+  it runs in ([Permissions Helper — launchd ownership and a fixed signing identity](launchd-and-stable-signing.md)).
+
+
+## Root seeding
+The helper also seeds `meiva-root` (`root_seed` / `root_status` / `root_stop`): [Root seeding — the macOS permission ancestor](root-seeding.md).
+
+## Key Dependencies
+- [Tool Calls & Code Execution](../../../../agent/graph/docs/tool-calls.md) — skills that drive the desktop call this helper via `base.host.permissions_helper.client`
+- [CLI/converge](../../../../cli/docs/cli.md) — the converge phase (`cli/commands/lifecycle/converge_host.py:_ensure_permissions_helper`) builds+signs+loads during `meiva start`; the following `_ensure_screen_capture` and `_ensure_accessibility` steps probe both helper grants and record unavailable statuses for the next agent startup to report
+
+## Entry Points
+- `services/desktop/permissions_helper/lifecycle.py` — bring-up called by converge
+- `services/desktop/permissions_helper/launchd_job.py` — the launchd job surface (label/plist/`launchctl print` read + parse, retirement, replacement guard) shared by lifecycle and the helper healthcheck
+- `base/host/permissions_helper/client.py` — Python-side call entry
+- `services/desktop/permissions_helper/helper/main.swift` — Swift daemon
+- `scripts/host_ops/tcc/preauth.sh` — read-only helper/TCC diagnostics and manual grant list
+
+## Notes
+- macOS only; configuration gate `MEIVA_PERMISSIONS_HELPER_ENABLED`, capability probe `base.host.system.probes.permissions_helper_incapability` (swift/codesign/display).
+- Outside `ServiceSpec`: launchd owns helper keepalive. Root records read-only protocol/job diagnostics; no diagnostic may repair, re-sign, bootout, or force-restart its ancestor.
+
+The `drag` wire method takes finite numeric `start_x`, `start_y`, `end_x`, and
+`end_y` in logical points. It posts a move, left-button down, twelve dragged
+movements at 10 ms intervals, and left-button up. All events are allocated before
+any is posted; a local `defer` posts the release after the drag. Boolean and
+nonfinite values are rejected. The result carries `start` and `end` point objects.
+
+Mouse buttons/counts/modifier chords and bounded holds are advertised as
+`ping.native_input_v1`: [Computer-mcp — native input contracts](../computer-mcp/native-input.md). Desktop-changing
+methods stop with `error_code: "user_abort"` while the pointer is parked at the main
+display's top-left corner (`ping.corner_failsafe_v1`). The helper marks the window each input
+lands on with the system capture badge (`ping.capture_indicator_v1`;
+`indicator_stop` ends it: [Computer-mcp — explicit observation frames](../computer-mcp/observation-frames.md)). Clipboard
+(`ping.clipboard_v1`): [Computer-mcp — clipboard](../computer-mcp/clipboard.md); held mouse buttons
+(`ping.mouse_hold_v1`): [Computer-mcp — mouse hold](../computer-mcp/mouse-hold.md). The
+`move`, `cursor_position`, `list_apps`, `list_windows`, `focus_app` and
+`screencapture_window` methods use the same single-call JSON transport.
+
+Tests: [Native helper test evidence](native-test-evidence.md).

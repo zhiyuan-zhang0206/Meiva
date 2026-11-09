@@ -1,0 +1,75 @@
+# Test Suite
+
+## What it is
+
+`tests/` is Meiva's traditional pytest test suite, covering all modules agent / gateway / cli / base.
+
+## Core responsibilities
+
+### Test layers
+
+| Layer | Location | Description |
+|---|---|---|
+| **Unit tests** | `<pkg>/**/tests/test_{file}.py` | one test file per source file, in the `tests/` directory of the package it tests (`tests/components/{module}/` holds only registered contract and integration tests; `scripts/structure/tests_location.py` refuses any other) |
+| **Integration tests** | `tests/integration/` | cross-module tests; `TestClient` mounts `gateway.app:create_app` in-process + custom `_TestClientTransport` forwarding httpx, **no separate Gateway process** |
+| **E2E tests** | `tests/e2e/` | full-stack end-to-end tests |
+| **Data factories** | `tests/factories/` | test data construction tools |
+
+`scripts/verify/post_deploy_visual/layout_assertions.py` is the shared real-browser structural layer for
+document overflow, viewport containment, center-point occlusion, nonempty blocks,
+settle-before-capture, and the bounded wait that absorbs asynchronously mounted
+panels before declared minimum visible counts are probed. The layout-invariant
+suites share it so their definitions cannot drift.
+`tests/e2e/visual/stubbed_home.py` holds the stubbed Home page the shell-geometry
+suites drive: a fake EventSource, `/api/**` JSON stubs, and the shared context/open/settle helpers.
+
+A package's own tests sit beside the code they prove (`base/packages/plugins/tests/`); integration tests across packages go in the lowest package that may legally import everything they use; end-to-end tests and contract tests that read repository artifacts stay in the top-level `tests/`. Bare `pytest` collects both trees through `testpaths` and `python_files`; `tests/ci/test_collection_roots.py` keeps them complete, so a tracked module under any `tests/` directory that pytest would silently skip (or a helper it would collect as a test) fails a test. The repo-root `conftest.py` plugins apply to every location alike. pyright's checking scope is `[tool.pyright].include` (minus `exclude`), and a pull request's impacted-closure pyright run (`scripts/ci/pull_requests/pyright_scope.py`) keeps only the closure files inside that same scope, so a directory outside it (`schedules/`, `demos/`) is never checked by one path and skipped by the other. pyright holds every `tests/` directory to the same rules as the code beside it: the seven `reportUnknown*`/`reportMissing*` rules are global errors. A tests directory under a root that still owes `reportAny` debt gets a generated `executionEnvironments` entry without the Any rules (`scripts/codegen/gen_pyright_test_environments.py`, prefixes in `scripts/codegen/pyright_tests_owing_any.txt`; the `lint-pyright-test-environments` hook, unconditional at pre-push, and `tests/ci/test_pyright_test_environments.py` fail until it is re-run after such a directory is added, moved or removed). CI prints how many tests each shard ran per `tests/` directory, and the total against the previous main run (`scripts/ci/shard_counts.py`), so a moved test that fell out of the suite shows as a changed count.
+
+### Test layout
+
+Component contracts, infrastructure checks and test discovery: [Test Layout](test-layout.md).
+
+### Global fixtures (repo-root `conftest.py` → `tests/fixtures/` plugins)
+- The repo-root `conftest.py` loads global fixture plugins and explicitly re-exports shared non-autouse fixtures. Their load order and isolation contracts live in [Test Fixtures — Root Plugins](test-fixtures/test-fixtures.md) and [Root Conftest Fixture Re-export](test-fixtures/root-conftest.md).
+- Component conftests opt into their own fixture capabilities; remaining `path_scopes.toml` declarations mount the legacy fixture modules for their named consumers. See [Opt-in Unit Capabilities](../fixtures/unit/docs/unit-fixtures.md) and [Path-scoped Test Fixtures](test-fixtures/path-scopes.md).
+- Some conftests also establish collection or process boundaries. In particular, retain `meiva/conftest.py` even without fixtures: it preserves the SDK package's import identity ([SDK test package import identity](../../meiva/docs/test-imports.md)). The e2e and native-root conftests retain their own process and configuration roles.
+
+### CI integration
+
+Validation ownership across hooks and CI: [Test CI integration](test-ci.md).
+
+## Key dependencies
+
+- [Database Layer](../../agent/db/docs/db.md) — tests use isolated Postgres/Redis
+- [Agent Turn Loop](../../agent/docs/loop.md) — system under test
+- [Gateway & CLI](../../gateway/docs/gateway-cli.md) — integration tests mount `gateway.app:create_app` in-process (TestClient), no separate Gateway process needed
+
+## Entry points
+
+- `.venv/bin/pytest tests/components/agent/test_<subject>.py -q` — run the relevant subject
+- `.venv/bin/pytest tests/components/lifecycle/db_authority/test_<subject>.py -q` — run a
+  database-authority contract; native proof commands belong to their CI workflow
+- Full-suite and coverage execution belong to CI, not local development
+
+## Notes
+
+- **Test strategy**: commit fast + CI full. Locally only run relevant tests, CI is the merge gate
+- **Isolation**: each test gets isolated DB/Redis, avoiding parallel conflicts
+- **Do not** run the full suite locally — Mac mini resources are limited (the `provisioning` and `env_bootstrap` plugins are designed for concurrency isolation: per-session database names + leased ports + Redis channel suffixes, **concurrent sessions will not conflict**, just resource-intensive)
+- **Ports**: every port a test asks this session for is a lease from `base.host.env.port_lease` — a private band (`21000`-`32767`) above the fixed table and below every platform's ephemeral range, allocated under one host-wide `flock` and held for the holder's life. Two xdist workers, or two runs of one shard on one machine, are never given the same number; `bind(':0')` can never be handed one either. `tests/harness/test_port_lease.py` proves both across processes.
+- `gateway/http/middleware/tests/test_agent_error_wire_equivalence.py` parametrized verification of agent ↔ gateway error wire protocol consistency
+
+### Browser frame sample scope
+
+`tests/e2e/state/test_timeline_virtualization.py` takes the best p95 from three
+serial sweeps to reduce load jitter. Its 33 ms gate compares uniform
+`agent_chat` primary-row content. Expanded reasoning rows still check bounded
+DOM and prepend behavior; this sample does not establish a frame-time bound
+for every content shape or every run.
+
+### Android update prompt harness
+
+`tests/ui/test_android_update_check.py` runs the checked-in injected script
+(`ui/app/src-tauri/scripts/update-check.js`) inside a Node VM with canned
+command results, so every assertion observes the real source rather than a copy
+of its selection rules.

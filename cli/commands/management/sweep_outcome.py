@@ -4,7 +4,7 @@
 # are red, the exact lines the sweep prints (its line contract is parsed by the fleet update's
 # pre-update check: one `RESULT` line, one `RED` line per red, `TOOL-ERROR` on exit 2), the exit
 # code, and whether the sweep owes the alert pipeline a signal.
-# meiva:link cli/docs/operator-surfaces/operator-surfaces.meiva.okf.md
+# meiva:link cli/docs/operator-surfaces/operator-surfaces.md
 
 from __future__ import annotations
 

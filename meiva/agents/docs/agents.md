@@ -1,0 +1,63 @@
+# meiva.agents — Agent Interop
+
+## What it is
+
+`meiva.agents` provides inter-agent communication capabilities — spawn new agents, send messages, query status, manage lifecycle. This is the infrastructure for fleet mode.
+
+## Core API
+
+### Lifecycle
+- `spawn(prompt=None, fork_from=None, machine=None, config_overlay=None, label=None, harness=None) → int` — start a new agent, returns agent ID, non-blocking. `harness` selects the initial runtime loop ([Harness](harness.md)). `prompt` is the first message (should be self-contained); `fork_from` copies the parent agent's conversation state as of the call — a fork taken while that agent is inside a tool call carries the call without its result, and the new agent sees it as already interrupted rather than still running; `machine` defaults to self. `config_overlay` carries per-agent config fields; keys it does not name follow the cluster default. `config_overlay={"eval_isolation": true}` starts an eval-isolated agent; `eval_network_allowlist` can explicitly retain `web` or `understand`, while `mcps` and `ui` have no allowlist. Identity-class config you do NOT name (model, reasoning effort, skill set, prompt shaping) is resolved from the cluster default at spawn and frozen onto the new agent for its life — a later default change never re-brains it. `label` sets the new agent's role name, which peers and the fleet view show.
+- `terminate(agent_id, *, message=None, force=False) → TerminateOutcome` — agent exits after completing the current turn; `message` is retained without another response and is visible after resurrection; `force=True` requests interruption instead. An `enqueued` result confirms acceptance, not exit or completion of owned work. Use force only when a clean stop cannot progress. The outcome compares as the acceptance status string and carries `open_tasks` — the tasks the agent still owns as it goes down (at most five, newest first; None when none).
+- `restart(agent_id, message, *, config_overlay=None) → RestartResult` — agent restarts as a fresh process with the same ID after completing the current turn (or interrupting after grace if in flight); non-empty `message` is required explaining why or who requested the restart. Supports switching harness via `config_overlay={"harness": "..."}` when agent is `idling` or `terminated`.
+- `cancel(agent_id) → CancelResult` — cancel the agent's running turn. Returns
+  `cancelled` for a native turn, `enqueued` for an external foreground request,
+  or `not_running` when there is no running turn.
+- `compact(agent_id)` — queue a compaction of the agent's history for its next turn; returns once the request is durable.
+- `resurrect(agent_id, prompt) → ResurrectResult` — wake up a terminated agent on its current harness, preserving its conversation state; `prompt` required.
+
+### Communication
+- `send_message(agent_id, content)` — send a message to a peer agent. If target is terminated, automatically resurrect. Pure INSERT — no state check, no waiting, no delivery receipt.
+- `commands() → list[CommandInfo]` — list slash commands accepted by the peer agent; send `/name <command>` to invoke. One message may invoke several (`/a … /b …`) — the receiver expands the whole chain in order inside that single message. Every command expands the same way; no combination is special-cased or refused.
+- `get_last_message(agent_id) → str | None` — read the last AI message text from the agent (None if none).
+
+### Discovery
+- `list_agents(*, scope="live", query="", before_id=None, limit=100) → AgentDirectoryPage` — read one newest-first page, at most 200 rows; search by label substring or exact ID. `live` includes all nonterminated states; `terminated` and `all` make history explicit. Continue with `next_cursor` and the same filters; no implicit traversal.
+- `get_status(agent_id) → AgentStatus` — current status read directly by ID, independent of directory pages.
+- `list_machines() → list[Machine]` — list all machines and their alive status.
+- `harness_availability() → list[HarnessAvailability]` — which harnesses this machine can run ([Harness](harness.md)).
+- `get_neighbors(agent_id, depth=1, limit=20) → list[Neighbor]` — related agents ranked by connection strength. Connections are established on spawn/fork/resurrect/send_message and decay over time.
+- `get_ancestors(agent_id) → list[Neighbor]` — the spawn/fork chain ABOVE an agent (who spawned whom), nearest ancestor first; `depth` = hops up. Message ties never form ancestors; a user-spawned agent returns [].
+
+### Data Types
+- `AgentDirectoryPage`: agents (`list[AgentRow]`), next_cursor (exclusive ID cursor, or None at the end)
+- `AgentRow`: agent_id, label, status, spawner, fork_source_agent_id, machine, spawned_at, last_active_at, last_inbound_at, heartbeat_paused_until
+  Relative-age display: [Agent and open-task relative ages](relative-age.md).
+- `AgentStatus`: RUNNING / IDLING / TERMINATED — three states, no ops-only states to project away.
+- `Neighbor`: agent_id, label, status, depth (hops from the queried agent — out for neighbors, up for ancestors), score (connection strength)
+- `Machine`: name, description, live (detected at call time, not cached)
+- `Harness`: MEIVA / CLAUDE_CODE / CODEX / ANTIGRAVITY — the runtime loop an agent runs on, selectable at birth and switchable on restart.
+- `HarnessAvailability`: one row per harness — see [Harness](harness.md) for the five fields
+- `TerminateOutcome`: reads as the status string (`enqueued` / `already_terminated`); `status` is the enum, `open_tasks` the still-open task hint (or None). Its optional `shell_sessions` report uses `ShellSessionKillTiming` from `base/api_contracts/agent_contract.py`: `now` means cleanup already ran, `at_exit` means cleanup is scheduled before exit. The SDK validates the response timing and rejects unknown values; JSON spellings are unchanged.
+- `OpenTasksHint`: count of open tasks, up to five `tasks` newest first (id, title, status, updated_at), and `more` — how many beyond those five remain.
+
+## Key Dependencies
+- [Agent State](../../../agent/docs/state.md) — agent state storage
+- [Agent Lifecycle](../../../agent/docs/lifecycle.md) — process lifecycle
+- [Gateway & CLI](../../../gateway/docs/gateway-cli.md) — gateway is the actual entry point for agent spawn
+
+## Notes
+
+The runtime assigns each creation or fork an operation UID and reuses it when replaying the original execution. All SDK calls use the fixed keyed admission path. A fork copies the original resolved checkpoint and first prompt once; replay returns its committed child before inspecting later source state. See [Keyed agent creation](strong-creation.md). Ambiguous transport outcomes are retried automatically under the same UID and replay the original birth.
+
+**Harness.** Spawn selects the initial runtime loop. Restart can switch it, and
+resurrection uses the current harness. Details, value set and the local availability probe:
+[Harness](harness.md). The column contract is
+[agent harness identity](../../../base/agents/docs/harness/harness.md).
+
+**Fork copy boundary.** What `fork_from` copies from the parent checkpoint and how an in-flight
+tool call settles in the child: [Fork copy boundary](fork-copy-boundary.md).
+
+Launch recovery for an accepted agent is handled by the [gateway](../../../gateway/agents/docs/launch-retry.md).
+
+`send_message` is asynchronous insert — returns immediately, does not wait for target agent to receive or process. Target agent is woken if idle.

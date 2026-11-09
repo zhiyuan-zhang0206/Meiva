@@ -13,7 +13,7 @@ import { isParent } from "./remark-shared";
 // delimiter pairs are unambiguous in the source, so this reads the span back from
 // the file and promotes it to a display math node, splitting the paragraph around
 // it. `$...$` and `\(...\)` stay inline.
-// meiva:link ui/web/src/docs/frontend-components/markdown-surfaces.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/markdown-surfaces.md
 
 type MathNode = Extract<Nodes, { type: "math" }>;
 type Block = Paragraph | MathNode;
@@ -38,7 +38,7 @@ function isDisplayDelimited(node: Nodes, source: string): node is InlineMathNode
 // nodes (`pre` around a `code.language-math.math-display`): mdast-util-to-hast
 // has no handler for `math`, and `rehype-katex` replaces the `pre` only when the
 // `code` keeps `language-math`. A bare `math` node renders as its raw TeX text.
-// meiva:link ui/web/src/docs/frontend-components/markdown-surfaces.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/markdown-surfaces.md
 function displayMath(value: string): MathNode {
   return {
     type: "math",

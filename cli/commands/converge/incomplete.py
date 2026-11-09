@@ -14,7 +14,7 @@ from cli.boundary.json_text import loads
 # services up after the aborted converge, so the host looks healthy while one
 # step never applied. One marker per home; only a fully successful converge on
 # that home clears it.
-# meiva:link cli/commands/converge/docs/converge-incomplete.meiva.okf.md
+# meiva:link cli/commands/converge/docs/converge-incomplete.md
 INCOMPLETE_NAME = "converge-incomplete.json"
 
 

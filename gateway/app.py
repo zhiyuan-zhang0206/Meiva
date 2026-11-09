@@ -108,7 +108,6 @@ from gateway.http.model_catalog import (
     load_model_catalog,
 )
 from gateway.http.process import GatewayProcess
-from gateway.inspect import okf_graph as okf_graph_router
 from gateway.inspect import router as inspect_router
 from gateway.lgtm.telemetry_staleness import TelemetryStaleness
 from gateway.mcp_server import endpoint as mcp_server_endpoint
@@ -431,7 +430,7 @@ async def _background_lifetime(
 _OPENAPI_DOCUMENT = TypeAdapter(dict[str, object])
 
 
-# meiva:link gateway/docs/error-responses-and-middleware-order.meiva.okf.md
+# meiva:link gateway/docs/error-responses-and-middleware-order.md
 def create_app(
     config: GatewayConfig,
     *,
@@ -550,7 +549,6 @@ def create_app(
         fleet_graph_router.router,
         frontend_telemetry_router.router,
         grafana_router.router,
-        okf_graph_router.router,
         tasks_router.router,
         task_assignments_router.router,
         plugin_ui_router.router,

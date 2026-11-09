@@ -1,0 +1,50 @@
+# Configuration API
+
+`runtime.py` serves `/api/config`. PUT merges a patch into the affected Settings
+candidate and validates it before persisting: invalid candidates return 400;
+concurrent edits return 409. Host fields target their machine's `.env`, while
+cluster and agent fields use the gateway's configuration owner. GET also exposes
+the resolved model configuration and its field sources.
+
+`default_model.py` serves `/api/config/default-model`. It reads or updates the
+cluster default for new agent births through `base.agents.model.birth_config`. The
+model registry validates writes; existing agents retain their frozen model.
+
+`gateway/app.py` mounts both routers at their existing API paths. Runtime
+configuration endpoints obtain their database and pool from the serving
+app state (`gateway_state(request)`) and pass them explicitly to the machine lookup, capability
+projection and read/audit/write RPC helpers. The audit fanout uses that same
+app database. Role lookups and ops dispatch go to the registry and
+`ops.cluster.rpc` directly: a runner is a row in `machines` and a listener, so a
+test registers one (`gateway/tests/support/runner_ops`). Tunables (the audit default
+count, the model the resolved view explains) are fields of the `GatewayConfig` the app
+was built with (`gateway_config(request)`), never of the global `settings` and never a
+read of the whole configuration view.
+
+What a PUT may write is decided by pure functions in `write_plan.py` (strict):
+the refusal a parsed plan earns, the candidate `.env` patch a validation judges,
+the retryable conflict for a stale `.env`, the restart targets and the
+frontend-facing result. `runtime.py` performs the candidate validation, the host
+op and the cluster write around them. `ConfigAuthority` continues to own
+configuration reads only. Helpers never import the global gateway app. Runtime
+config tests remain in `gateway/tests/routers/config_api/` and default-model API
+tests in `gateway/tests/bootstrap/test_default_model_api.py`; the plan's tests
+are in `gateway/routers/configuration/tests/`.
+
+
+The ordinary configuration surface remains available when model catalog building
+fails. Only resolved-model views and the default-model endpoint acquire that
+catalog. Bootstrap also requires the complete provider-key set before returning
+any configuration, so it never exports a partial payload.
+
+Machine selection is explicit: a supplied `machine` selects host fields even
+when it names the gateway itself. Runner-capable targets use their ops server;
+only this gateway without a runner role uses its local owner. A remote host
+without that capability never falls back to this host's file. Unknown machine
+names are distinct from registered but unavailable hosts.
+
+For combined local host/cluster writes, host validation and application precede
+cluster persistence. Revalidate the cluster candidate after the host edit and use
+that image's digest for compare-and-swap. A host rejection leaves cluster values
+unchanged. Writes persist without an in-memory apply or restart. Audit identity
+comes from authenticated middleware state, never the request body.

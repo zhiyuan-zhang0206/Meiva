@@ -4,7 +4,7 @@
 # an attached controller, the overlay a restart stores with the receipt of a withdrawn model, and
 # the texts of a compaction. Asserted by value; the entries against a real database are covered by
 # `test_self_lifecycle.py`.
-# meiva:link meiva/self/docs/self.meiva.okf.md
+# meiva:link meiva/self/README.md
 
 from __future__ import annotations
 

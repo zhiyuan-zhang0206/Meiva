@@ -1,6 +1,6 @@
 # meiva:note
 # Real SDK billing assertions run in a fresh, explicitly configured process.
-# meiva:link base/packages/tests/lm/docs/contracts.meiva.okf.md
+# meiva:link base/packages/tests/lm/docs/contracts.md
 
 from __future__ import annotations
 
@@ -38,7 +38,7 @@ def schema(tracer: BillingRuntime) -> None:
     # The regression this catches is a billed provider call missing an attribute,
     # losing its original start time, or opening a span without closing it.
     #
-    # meiva:link base/packages/tests/lm/docs/contracts.meiva.okf.md
+    # meiva:link base/packages/tests/lm/docs/contracts.md
     from base.lm.usage import BillingSpan, emit_billing_event
 
     emit_billing_event(
@@ -114,7 +114,7 @@ def unpriced(tracer: BillingRuntime, model_catalog: ModelCatalog) -> None:
     # The regression this catches is treating an unknown catalog price as a
     # priced $0 call, which makes ledger gaps invisible.
     #
-    # meiva:link base/packages/tests/lm/docs/contracts.meiva.okf.md
+    # meiva:link base/packages/tests/lm/docs/contracts.md
     from base.lm.usage import emit_billing_from_message
 
     message = AIMessage(
@@ -137,7 +137,7 @@ def missing_usage(tracer: BillingRuntime, model_catalog: ModelCatalog) -> None:
     # The regression this catches is converting unknown usage into a misleading
     # zero-token ledger event.
     #
-    # meiva:link base/packages/tests/lm/docs/contracts.meiva.okf.md
+    # meiva:link base/packages/tests/lm/docs/contracts.md
     from base.lm.usage import emit_billing_from_message
 
     emit_billing_from_message(

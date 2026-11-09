@@ -3,7 +3,7 @@
 # carry, and the content list a given model receives. A media part becomes the provider-native
 # block the shared attach packing (`base.lm.attach.packing`) builds for the model, so a model
 # receives media in the shape its provider decodes.
-# meiva:link meiva/understand/docs/understand.meiva.okf.md
+# meiva:link meiva/understand/README.md
 
 from __future__ import annotations
 

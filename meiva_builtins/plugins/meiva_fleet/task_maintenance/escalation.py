@@ -31,7 +31,7 @@ class EscalationReceipt:
     # and for a delegator digest, which is an inbound note rather than an inbox
     # notice. The daemon announces it after this transaction commits; a lost
     # announce leaves the row unannounced and the outbox sweep retries it.
-    # meiva:link base/events/notifications/docs/notifications.meiva.okf.md
+    # meiva:link base/events/notifications/README.md
     notification_id: int | None = None
 
 
@@ -144,7 +144,7 @@ def _lock_candidates(
 # gone, and the same words have to serve both (2026-10-30 ruling, task #5862).
 # Liveness lives in `agents_meta` and `routing.nearest_manager` already reads it to
 # pick a recipient; it is deliberately not a claim about the owner.
-# meiva:link meiva_builtins/plugins/meiva_fleet/task_maintenance/docs/task-maintenance/escalation.meiva.okf.md
+# meiva:link meiva_builtins/plugins/meiva_fleet/task_maintenance/docs/task-maintenance/escalation.md
 _STATE_CHANGE_BASIS = "a note or a change on the task would have restarted the reminders"
 
 

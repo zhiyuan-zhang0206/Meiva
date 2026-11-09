@@ -13,7 +13,7 @@ DEFAULT_MODEL = "claude-sonnet-5-5"
 # without a stated reason is a defect, not a default. `DEFAULT_MODEL` is the full
 # id from the model table of the CLI bundled with the SDK, never an alias, so an
 # SDK upgrade cannot silently move the bridge onto another model.
-# meiva:link base/lm/harness/claude/docs/claude.meiva.okf.md
+# meiva:link base/lm/harness/claude/docs/claude.md
 @dataclass(frozen=True, slots=True)
 class BridgeConfig:
     cwd: Path

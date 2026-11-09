@@ -45,7 +45,7 @@ import { useApi, useStreamHub } from "@/lib/transport/transport-context";
 // hands the values down, and this module is the surface that renders them. A test renders the
 // surface with the values it wants and the children it wants to watch; nothing here reads a
 // store, a router or a breakpoint on its own, so no test has to patch a module to steer it.
-// meiva:link ui/web/src/docs/frontend-state/frontend-state.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-state/frontend-state.md
 
 type AgentSidebarSlot = ComponentType<ComponentProps<typeof AgentSidebarComponent>>;
 type ContextPanelSlot = ComponentType<ComponentProps<typeof ContextPanelComponent>>;
@@ -81,13 +81,13 @@ interface TimelineStoreView {
   // down the viewport and stop following the stream, instead of re-pinning to
   // the bottom. The inbound id names that message; null when the receipt
   // carried none.
-  // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.meiva.okf.md
+  // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.md
   requestSendAnchor: (inboundId: number | null) => void;
   // meiva:note
   // Page-clock time of the last event the selected thread received (0 = none). The running turn's
   // live clock anchors on it between blocks, so "Working for" keeps counting through the gap
   // between a committed block and the next one instead of freezing (user report 2026-11-08).
-  // meiva:link ui/web/src/docs/frontend-components/timeline-view/deep-collapse.meiva.okf.md
+  // meiva:link ui/web/src/docs/frontend-components/timeline-view/deep-collapse.md
   liveAnchorAt: number;
 }
 type TimelineViewState = Pick<
@@ -112,7 +112,7 @@ type TimelineViewState = Pick<
 // surface renders, a store selection, or one of the child components the surface draws. `bfcacheId`
 // is the session-history entry the timeline keys its scroll memory on, and `unresolvedAlerts` is the
 // 24-hour alert count in the header badge -- both values, so the surface never looks either up.
-// meiva:link ui/web/src/docs/frontend-state/frontend-state.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-state/frontend-state.md
 export interface HomePageProps {
   showError: (msg: string) => void;
   store: StoreView;
@@ -180,12 +180,12 @@ export function HomePageView(props: HomePageProps) {
     if (sidebar.collapsed) sidebar.setCollapsed(false);
   }, [sidebar]);
 
-  // meiva:link ui/web/src/docs/frontend-state/shared-context/shared-context.meiva.okf.md
+  // meiva:link ui/web/src/docs/frontend-state/shared-context/shared-context.md
   // meiva:note
   // The mode owns the panel: entering inspector while the shared-context column
   // is closed still shows it, because otherwise the mode would be on with
   // nothing to inspect. On mobile the inspector keeps its own sheet.
-  // meiva:link ui/web/src/docs/frontend-state/shared-context/shared-context.meiva.okf.md
+  // meiva:link ui/web/src/docs/frontend-state/shared-context/shared-context.md
   const activeWorkspaceFile = useWorkspaceFileStore((s) => s.activeFile);
   const showContext = isLarge
     ? activeId != null && (contextPanel.open || inspector.open || activeWorkspaceFile != null)
@@ -279,7 +279,7 @@ export function HomePageView(props: HomePageProps) {
   return (
     // meiva:note
     // Both wrapper layers carry FLEX explicitly: the outer one as `flex flex-col` and the inner one as `flex` (HomeLayout's narrow branch is a fragment whose children are flex items of it). A wrapper built from FLEX_COL alone is display:block and the chain collapses to content height -- measured 2026-10-17 at 320/390/768: the timeline surface grew to 4920px inside a 664px viewport, I6 failed, and the composer was pushed off screen.
-    // meiva:link ui/web/src/app/docs/layout-chain.meiva.okf.md
+    // meiva:link ui/web/src/app/docs/layout-chain.md
     <main id="main-content" className={cn(FLEX, FLEX_1, MIN_H_0)}>
       <CodeHighlighterPreloader />
       <div className={cn(FLEX, FLEX_COL, FLEX_1, MIN_H_0, MIN_W_0)}>
@@ -320,7 +320,7 @@ interface HomeContentProps {
   sidebar: SidebarView;
 }
 
-// meiva:link ui/web/src/docs/frontend-state/frontend-state.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-state/frontend-state.md
 function HomeContent({
   activeId,
   activeAgent,
@@ -437,7 +437,7 @@ function HomeContent({
   // right column shows, not which conversation the reader is in, and a title reading
   // "Inspector" made the agent it still belonged to disappear (user 2026-10-21). The mode
   // stays visible in its own pressed toggle and in the column itself.
-  // meiva:link ui/web/src/docs/frontend-components/home-shell-chrome/home-shell-chrome.meiva.okf.md
+  // meiva:link ui/web/src/docs/frontend-components/home-shell-chrome/home-shell-chrome.md
   const activeLabel = activeAgent
     ? `Agent #${activeAgent.agent_id}${activeAgent.label ? ` \u00b7 ${activeAgent.label}` : ""}`
     : "\u2026";

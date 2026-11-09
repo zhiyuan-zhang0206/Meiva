@@ -52,7 +52,7 @@ class ConfigFieldView(BaseModel):
     # into finer semantic sections via its own static map (config-group-defs.ts).
     # "common" = not owned by a single capability (cluster-wide policy or shared
     # host identity).
-    # meiva:link base/docs/configuration/configuration.meiva.okf.md
+    # meiva:link base/docs/configuration/configuration.md
     capability: Capability
     # meiva:note
     # "agent" | "ops" | "gateway" | "all" | "schedule" | "" — which process must

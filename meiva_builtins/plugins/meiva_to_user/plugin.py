@@ -13,7 +13,7 @@ from base.packages.plugins.extensions import PluginContributions, SdkWrap
 from .written import record_panel_write
 
 
-# meiva:link meiva_builtins/plugins/meiva_to_user/docs/panel-write-check.meiva.okf.md
+# meiva:link meiva_builtins/plugins/meiva_to_user/docs/panel-write-check.md
 def wrapped_write(inner: Callable[..., None], path: str | Path, content: str) -> None:
     result = inner(path, content)
     record_panel_write(path)

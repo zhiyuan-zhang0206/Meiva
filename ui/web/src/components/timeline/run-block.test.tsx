@@ -32,7 +32,7 @@ const baseSummary: TurnSummary = {
 // rendered in the timeline's own flow - no inner scrollport, no cap, no spacer
 // window - so a finished block is exactly as tall as it was and a running one
 // extends downward from its header (user ruling 2026-11-09).
-// meiva:link ui/web/src/docs/frontend-components/timeline-view/deep-collapse.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/timeline-view/deep-collapse.md
 describe("TurnBlock expanded body", () => {
   it("renders every row in the timeline's flow, with no inner scrollport and no cap", () => {
     const memberIds = Array.from({ length: 120 }, (_, i) => `${i + 1}.0`);

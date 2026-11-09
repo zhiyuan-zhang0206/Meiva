@@ -12,7 +12,7 @@
 # identity itself, its codec and three hooks. The sequence below (boot, replay,
 # validate, open, admit, flush, close, detach) exists once so a second identity
 # cannot drift from the first one's failure handling.
-# meiva:link base/agents/context/external_attachment/docs/external-attachment.meiva.okf.md
+# meiva:link base/agents/context/external_attachment/README.md
 
 from __future__ import annotations
 

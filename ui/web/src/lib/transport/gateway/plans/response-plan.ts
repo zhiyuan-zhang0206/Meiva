@@ -24,7 +24,7 @@ function isGuideDraftResponse(value: unknown): value is GuideDraftResponse {
 // status: a refusal that names a permanent cause must not reach a reader as "try again".
 // A body without the field (a proxy page, an older server) falls back to the statuses
 // that mean the same request may pass later.
-// meiva:link ui/web/src/docs/frontend-state/api-requests.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-state/api-requests.md
 function retryableFrom(status: number, body: Record<string, unknown> | undefined): boolean {
   if (typeof body?.retryable === "boolean") return body.retryable;
   return status === 408 || status === 429 || status >= 500;
@@ -62,7 +62,7 @@ export class ApiError extends Error {
 // meiva:note
 // A 422 body carries one `{msg}` object per rejected field; only that text is
 // shown, so the operator reads the server's complaint rather than a JSON dump.
-// meiva:link ui/web/src/docs/frontend-state/api-requests.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-state/api-requests.md
 function validationMessage(entry: unknown): string | null {
   if (!isRecord(entry)) return null;
   const msg = entry.msg;
@@ -71,7 +71,7 @@ function validationMessage(entry: unknown): string | null {
 
 // meiva:note
 // The error message is the server's own words, never a generic "failed": a string `detail` is shown as-is, a FastAPI validation list (422) is joined into its messages, and `reason` (the wire enum, e.g. `fork_harness_mismatch`) is appended when the server sent one - a spawn/fork refusal the operator can read instead of a swallowed failure.
-// meiva:link ui/web/src/docs/frontend-state/api-requests.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-state/api-requests.md
 function serverMessage(status: number, body: Record<string, unknown> | undefined, text: string): string {
   const detail = body?.detail;
   const parts: string[] = [];

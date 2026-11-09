@@ -16,7 +16,7 @@ from base.agents.upload_delivery.naming import (
 from base.agents.upload_delivery.paths import MAX_UPLOAD_BYTES
 from base.host.db_authority.unit import UnitIdentity
 
-# meiva:link base/agents/upload_delivery/docs/storage.meiva.okf.md
+# meiva:link base/agents/upload_delivery/docs/storage.md
 PROTOCOL = 2
 BATCH_ID_PATTERN = r"^[0-9a-f]{32}$"
 FILE_ID_PATTERN = r"^[0-9a-f]{32}$"

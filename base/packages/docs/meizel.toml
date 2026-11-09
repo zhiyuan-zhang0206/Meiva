@@ -1,9 +1,8 @@
-exports = ["frontmatter.py", "notes.py", "okf_graph.py"]
+exports = ["frontmatter.py", "notes.py"]
 
 [uses]
 "notes.py" = ["frontmatter.py"]
-"okf_graph.py" = ["frontmatter.py", "notes.py"]
-"tests" = ["frontmatter.py", "notes.py", "okf_graph.py"]
+"tests" = ["frontmatter.py", "notes.py"]
 
 [purity]
 "." = "strict"

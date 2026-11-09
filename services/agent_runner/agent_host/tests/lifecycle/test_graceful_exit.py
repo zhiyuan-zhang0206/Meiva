@@ -4,7 +4,7 @@
 # a test double, reached through the ordinary `llm_override` seam. A restart interrupts what
 # its turn is doing only once it has waited its grace, which these tests grant by ageing the
 # restart row instead of waiting.
-# meiva:link services/agent_runner/agent_host/lifecycle/docs/graceful-exit.meiva.okf.md
+# meiva:link services/agent_runner/agent_host/lifecycle/docs/graceful-exit.md
 
 import asyncio
 import json

@@ -1,0 +1,87 @@
+# OTLP exit flush
+
+`base/telemetry/otlp/telemetry_otlp_sdk.build_providers` builds both SDK providers
+with `shutdown_on_exit=False`, so neither registers an atexit shutdown of
+its own. `base.telemetry.drain_on_exit` is the single ordered exit seam:
+the concrete pipeline closes emitter admission and joins its sole writer,
+then closes its own OTLP admission and observes that same exporter worker
+within the remaining caller deadline. Independent attachments close their own
+pipelines through `ClientSet`, without finalizing or shutting another owner. Provider construction,
+queue draining, FIFO flush and SDK teardown all stay on that worker. A caller
+never becomes a rescue writer or runs provider teardown itself.
+
+## Two wait classes, one deadline
+
+A stop takes one real deadline: the writer observation completes or expires before the exporter observation starts, and each native stage receives only the deadline's remaining real time — never the original allowance, and zero once it is spent. A virtualized clock may drive a cancellable cooldown, but never a native stop observation or its budget.
+
+Waits are two classes. A **cooldown** is the process's own time policy — like
+the collector retry gate, it owns no thread or handle and is no completion
+condition. A virtualized clock may drive it; a stop cancels and releases it at
+once (the deferral's cancel-and-join), and it never consumes the native budget.
+A **native observation** waits for a real thread or handle to end — writer
+join, deferral clock join, worker join, exporter teardown — and only real
+elapsed time ends it, so only real-behavior tests establish its correctness; an
+injected clock does not advance while a native wait consumes real time, and a
+later stage would read a phantom full allowance. Virtual fast-forward may skip
+a cooldown; it can never end a native observation. One stop call takes one
+deadline, hands each stage only the real remainder, and leaves an exhausted
+remainder at zero.
+
+## Why the seam is single
+
+The SDK default (`shutdown_on_exit=True`) registers a provider shutdown on
+atexit at bring-up — mid-life, after `_drain_on_exit`'s import-time
+registration — and atexit runs LIFO, so that shutdown fires first. A record
+emitted inside the drain thread's final batch window (`_FLUSH_INTERVAL_S` =
+0.5 s) then reaches a shut-down processor (`force_flush` returns False) and
+stays mirror-only — every short-lived process's tail record (task #4314
+triage; fixed by task #4320). Building both providers
+`shutdown_on_exit=False` leaves SDK teardown under the OTLP worker reached
+through this ordered seam.
+
+## Accepted semantics
+
+- CLI dispatch drains queued telemetry before returning or propagating an
+  exception. A probe's only heartbeat can be its first event; deferring provider
+  construction until atexit lets the SDK's resource detector encounter an
+  already stopped `concurrent.futures` executor (task #5011). The pre-exit drain
+  uses the emitter's bounded synchronization and leaves provider shutdown here.
+  Commands with no event pipeline do not initialize OTLP.
+- Other processes that exit before provider bring-up (task #4314 triage:
+  lifetimes under ~0.5 s) never builds providers; its records stay
+  mirror-only by design (accepted, task #4320).
+- `base/host/exit_codes.py:hard_exit` skips every atexit handler
+  including this drain (`os._exit`); the queued batch is deliberately not
+  flushed — hard-exit semantics win (accepted, task #4320).
+- A deferred hold's shutdown attempt is reported only to a process that can
+  receive the report. The owner marks itself closing before its own drain; a
+  bring-up that fails after that point — or during an `atexit` sync after Python's
+  `threading._shutdown()` has already stopped `concurrent.futures` executors — is
+  logged only when an event pipeline is bound, and `_emit_backend_event` skips
+  global emission whenever no process pipeline is bound. At interpreter exit the
+  SDK's executors are already shut down, so a watcher's or short-lived external
+  attachment's never-started exporter fails there — with no bound pipeline the report
+  has no reader, and a warning plus traceback for work that finished is suppressed
+  (task #5578). The attempt itself still runs: a process that did bind a pipeline
+  keeps its deferred bring-up and its diagnostics. A worker
+  already live is kept and stopped under the same deadline, subject to the same
+  startup-frozen enabled gate as live completion. Disabled holds keep their unexported records
+  and report unfinished; they do not construct SDK resources. Empty holds construct nothing;
+  interpreter finalization still refuses first construction. The existing age
+  timer is canceled and observed finitely. An in-flight completion remains
+  owned, and its providers remain available until metric replay has finished.
+  Held metrics are replayed once before their logs become visible to the writer.
+  See [OTLP export backpressure](export-backpressure.md).
+
+Parent node: [OTLP export backend & trace ship to Tempo](telemetry-otlp.md).
+
+An unfinished emitter stop reports degraded ordinary delivery and returns without
+closing sinks still used by that writer. Queued or held ordinary records can be
+lost at process exit; no secondary rescue writer is started. The durable audit
+record and SDK participant seal are independent of this observation barrier.
+
+## Lower worker observations
+
+`OtlpWorker` error retention, failed teardown ownership, and `tracing` arm/retry
+shutdown deadlines are defined in
+[OTLP lower worker and tracing shutdown observations](exit-flush-workers.md).

@@ -3,7 +3,7 @@
 # it: the failure a failed load left behind, and the marker that a load is in flight. The writers
 # (`wraps.py` for the marker, `sdk_disable.py` for the failure) read the slot, call these functions
 # and store what they return; nothing here touches the module.
-# meiva:link meiva/docs/sdk-surface/install-lifetime.meiva.okf.md
+# meiva:link meiva/docs/sdk-surface/install-lifetime.md
 
 from __future__ import annotations
 

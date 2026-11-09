@@ -54,7 +54,7 @@ def test_process_binding_uses_owned_writer_without_ambient_factory() -> None:
 # that reports an ordinary absence as a broken sink, and that a later edit could turn into a
 # failed business write. The new assertion pins the opposite contract — the unbound process
 # loses the event, says so exactly once, and names the first event it lost.
-# meiva:link base/telemetry/docs/telemetry.meiva.okf.md
+# meiva:link base/telemetry/README.md
 def test_emit_before_init_drops_the_event_and_says_so_once() -> None:
     child = _run_scenario("cold_emit")
     assert child.returncode == 0, child.stderr
@@ -69,7 +69,7 @@ def test_emit_before_init_drops_the_event_and_says_so_once() -> None:
 # an absence: the metering seam used to route it through `failure_isolated`, which printed a
 # full traceback for a process that simply has no stream. One line, no traceback, and the line
 # says which cause it was.
-# meiva:link base/telemetry/docs/telemetry.meiva.okf.md
+# meiva:link base/telemetry/README.md
 def test_emit_without_a_pipeline_factory_drops_and_says_so_once() -> None:
     child = _run_scenario("emit_without_a_factory")
     assert child.returncode == 0, child.stderr
@@ -83,7 +83,7 @@ def test_emit_without_a_pipeline_factory_drops_and_says_so_once() -> None:
 # The counter-case that keeps the line above honest: a producer that fails for its own reason is
 # a sink failure and must still report with its traceback, or the one-line absence would be
 # swallowing real defects.
-# meiva:link base/telemetry/docs/telemetry.meiva.okf.md
+# meiva:link base/telemetry/README.md
 def test_a_defective_producer_still_reports_a_sink_failure() -> None:
     child = _run_scenario("failing_producer")
     assert child.returncode == 0, child.stderr

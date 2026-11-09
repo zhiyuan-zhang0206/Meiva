@@ -2,7 +2,7 @@
 // AutoExpandTextarea applies the shared send rule: Enter sends, Shift+Enter breaks
 // the line at the caret, an input method keeps its keys, and a touch keyboard keeps
 // Enter as a line break. Each case here fails when that part of the rule is removed.
-// meiva:link ui/web/src/docs/frontend-components/enter-to-send.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/enter-to-send.md
 
 import { fireEvent, screen } from "@testing-library/react";
 import { renderWithBrowser } from "@/test-support/render";

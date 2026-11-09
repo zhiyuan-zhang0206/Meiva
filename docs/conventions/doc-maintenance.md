@@ -131,26 +131,25 @@ stranger reading this on GitHub?"
 
 Reconcile in the same PR as the code.
 
-Structure changes → the OKF node in the `docs/` of the package you touched, plus
-its domain overview (the `<dir>/<dir>.meiva.okf.md` node of the domain's
-directory) when the domain's shape changed. Paths below are the files' real
-paths, `docs/` layer included:
+Structure changes → the documentation in `<package>/README.md` or `<package>/docs/` of the package you touched, plus
+its domain overview when the domain's shape changed. Paths below are the files' real
+paths:
 
 | Change | Domain node |
 |---|---|
-| Agent lifecycle / crash-resurrect | `agent/docs/agent.meiva.okf.md` |
-| SDK surface (`meiva/__init__.py`, new namespaces) | `meiva/docs/meiva.meiva.okf.md` |
-| Gateway routes / SSE / auth | `gateway/docs/gateway.meiva.okf.md` |
-| CLI commands / cluster lifecycle | `cli/docs/cli.meiva.okf.md` |
-| Frontend | `ui/web/docs/web.meiva.okf.md` |
-| Base library / LM providers / config / migrations | `base/docs/base.meiva.okf.md` |
-| Background services | `services/docs/services.meiva.okf.md` |
-| GitHub Actions / CI workflows | `.github/.github.meiva.okf.md` |
-| Plugins / extension points | `docs/plugins/plugins.meiva.okf.md` |
-| Skills | `docs/skills/skills.meiva.okf.md` |
-| MCP integrations | `docs/mcps/mcps.meiva.okf.md` |
-| Test suite | `tests/docs/tests.meiva.okf.md` |
-| Ops scripts | `scripts/docs/scripts.meiva.okf.md` |
+| Agent lifecycle / crash-resurrect | `agent/docs/agent.md` |
+| SDK surface (`meiva/__init__.py`, new namespaces) | `meiva/docs/meiva.md` |
+| Gateway routes / SSE / auth | `gateway/docs/gateway.md` |
+| CLI commands / cluster lifecycle | `cli/docs/cli.md` |
+| Frontend | `ui/web/docs/web.md` |
+| Base library / LM providers / config / migrations | `base/docs/base.md` |
+| Background services | `services/docs/services.md` |
+| GitHub Actions / CI workflows | `.github/README.md` |
+| Plugins / extension points | `docs/plugins/plugins.md` |
+| Skills | `docs/skills/skills.md` |
+| MCP integrations | `docs/mcps/mcps.md` |
+| Test suite | `tests/docs/tests.md` |
+| Ops scripts | `scripts/docs/scripts.md` |
 Process, rule, and observed-behaviour changes → the doc that owns them:
 
 | Change | Doc |

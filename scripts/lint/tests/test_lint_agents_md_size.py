@@ -44,7 +44,7 @@ def test_one_line_past_the_ceiling_fails_with_the_reason_and_the_repair(
     assert "246 lines" in out
     assert "first file every agent reads" in out
     assert "docs/conventions/" in out
-    assert "agents-md-size.meiva.okf.md" in out
+    assert "agents-md-size.md" in out
 
 
 def test_a_missing_agents_md_fails_loud(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:

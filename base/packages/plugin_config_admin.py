@@ -207,7 +207,7 @@ class PluginUpdateResult(BaseModel):
 
 
 def update_all_disk_images(*, plugin_dirs: Mapping[str, Path], home: Path) -> PluginUpdateResult:
-    # meiva:link base/packages/plugins/docs/plugin-config/plugin-config.meiva.okf.md
+    # meiva:link base/packages/plugins/docs/plugin-config/plugin-config.md
     entries = [
         _update_one_disk_image(name, plugin_dir, home=home)
         for name, plugin_dir in sorted(plugin_dirs.items())

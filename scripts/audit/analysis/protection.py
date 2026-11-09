@@ -3,7 +3,7 @@
 # active workflow checks. `branch_protection.py` runs read-only `gh` queries and prints; which
 # status checks must be required, which workflow files must be active, and how a GitHub payload
 # differs from that contract are decided here.
-# meiva:link scripts/audit/docs/audit.meiva.okf.md
+# meiva:link scripts/audit/docs/audit.md
 
 from __future__ import annotations
 

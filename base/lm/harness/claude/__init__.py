@@ -16,7 +16,7 @@ from base.lm.harness.session import SessionTotals, TurnOutcome
 # The package door re-exports the pure half only. `ClaudeSession` and the errors it exports are
 # the adapter's effect shell, so a caller imports them from `base.lm.harness.claude.session`.
 # A door that is `strict` may re-export only `strict` modules.
-# meiva:link base/lm/harness/claude/docs/claude.meiva.okf.md
+# meiva:link base/lm/harness/claude/docs/claude.md
 __all__ = [
     "DEFAULT_MODEL",
     "SECRET_ENV_NAMES",

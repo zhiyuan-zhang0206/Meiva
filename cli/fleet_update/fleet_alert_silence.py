@@ -23,7 +23,7 @@
 #
 #     python - open --hours 4 --comment "..."   # prints `SILENCE opened ...`
 #     python - close                            # prints `SILENCE closed N`
-# meiva:link cli/docs/fleet-update-window/fleet-update-window.meiva.okf.md
+# meiva:link cli/docs/fleet-update-window/fleet-update-window.md
 
 from __future__ import annotations
 

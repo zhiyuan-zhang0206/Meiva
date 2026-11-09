@@ -179,7 +179,7 @@ def install(
     # and `UV_COMPILE_BYTECODE` in the caller's environment must not override the chosen mode.
     # Only steps that can create the environment carry the pin; the universal offline export must
     # not need the pinned interpreter before uv can fetch it.
-    # meiva:link cli/docs/python-install.meiva.okf.md
+    # meiva:link cli/docs/python-install.md
     bytecode_flag = "--compile-bytecode" if compile_bytecode else "--no-compile-bytecode"
     request = _python_request(repo, interpreter)
     pinned = ["--python", request]

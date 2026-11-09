@@ -4,7 +4,7 @@
 # run, into the text `RED id=... missing=...` carries: `<module>` for a missing import,
 # `compile-error:<l>:<m>`, `<Exc>:<msg>`, `undefined-name:<l> <name>`,
 # `call-signature:<l> <call>: <why>` and `tool-error:...` for a child that gave no verdict.
-# meiva:link cli/docs/operator-surfaces/operator-surfaces.meiva.okf.md
+# meiva:link cli/docs/operator-surfaces/operator-surfaces.md
 
 from __future__ import annotations
 

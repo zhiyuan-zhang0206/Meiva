@@ -2,7 +2,7 @@
 # The decision half of one poll beat: forward the accumulated text, keep a silent exec visibly
 # alive, and stop on cancel or deadline. `_subprocess._poll_child` reads the beat's values and
 # carries out the plan. Cancel outranks the deadline on the same beat.
-# meiva:link agent/graph/exec/docs/exec.meiva.okf.md
+# meiva:link agent/graph/exec/docs/exec.md
 
 from __future__ import annotations
 

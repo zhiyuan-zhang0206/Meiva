@@ -33,7 +33,7 @@
 # Container/eval mode has no inbound queue (pool None); subscribe_interrupt then yields an event
 # that never fires, so the wrapped action runs uninterruptibly, as it did before the watcher
 # existed.
-# meiva:link agent/graph/docs/turn-interrupts.meiva.okf.md
+# meiva:link agent/graph/docs/turn-interrupts.md
 
 import asyncio
 import contextlib
@@ -195,7 +195,7 @@ class _OwnedWatch:
 # Pending a base port: the watcher reaches its pool only through `connection()`. The pool stays
 # typed as the concrete psycopg pool until base/ hosts a narrow `InterruptPool` protocol, which
 # `tests/parked_pool.py` then replaces.
-# meiva:link agent/graph/docs/turn-interrupts.meiva.okf.md
+# meiva:link agent/graph/docs/turn-interrupts.md
 @asynccontextmanager
 async def subscribe_interrupt(
     pool: AsyncConnectionSource | None,

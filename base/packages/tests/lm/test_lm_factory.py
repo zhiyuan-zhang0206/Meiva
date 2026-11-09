@@ -39,7 +39,7 @@ def test_a_model_whose_key_is_not_held_fails(model_catalog: ModelCatalog) -> Non
         )
 
 
-# meiva:link base/packages/tests/lm/docs/contracts.meiva.okf.md
+# meiva:link base/packages/tests/lm/docs/contracts.md
 @pytest.mark.parametrize(
     ("prefix", "model", "display", "key_env"),
     (

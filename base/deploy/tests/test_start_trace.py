@@ -1,4 +1,4 @@
-# meiva:link base/deploy/docs/start-trace.meiva.okf.md
+# meiva:link base/deploy/docs/start-trace.md
 
 from __future__ import annotations
 

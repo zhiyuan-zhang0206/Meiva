@@ -2,7 +2,7 @@
 
 import { writeConfigOwners } from "./_owner_writes";
 
-// meiva:link ui/web/src/app/control/config/docs/configuration.meiva.okf.md
+// meiva:link ui/web/src/app/control/config/docs/configuration.md
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ChevronDown, RefreshCw, X } from "lucide-react";

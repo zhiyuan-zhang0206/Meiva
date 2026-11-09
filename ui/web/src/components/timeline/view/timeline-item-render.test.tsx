@@ -59,7 +59,7 @@ describe("ItemView: agent_code + agent_reasoning", () => {
   it("keeps the highlighter pending, so a code block stays plain source", async () => {
     // meiva:note
     // The shared wrapper injects a chunk whose import never resolves. A macrotask is long enough for the real prism chunk to load and tokenize, so a wrapper that lost its provider would show .token spans here — this is what keeps every timeline test reading plain source.
-    // meiva:link ui/web/src/docs/frontend-components/code-blocks.meiva.okf.md
+    // meiva:link ui/web/src/docs/frontend-components/code-blocks.md
     const { container } = render(
       <TimelineView items={[makeItem({ kind: "agent_code", payload: "print(1)\nprint(2)" })]} />,
     );

@@ -1,6 +1,6 @@
 # meiva:note
 # What Claude Code's first-run presets and workspace trust do to its two JSON files, as functions of the file's text. The shell reads the file, asks for the plan, backs the file up when the plan says so and writes the merged document.
-# meiva:link meiva/shell/coding_tools/docs/coding-tools.meiva.okf.md
+# meiva:link meiva/shell/coding_tools/README.md
 from __future__ import annotations
 
 import json

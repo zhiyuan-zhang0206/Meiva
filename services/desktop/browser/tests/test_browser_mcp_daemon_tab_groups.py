@@ -263,7 +263,7 @@ async def test_the_public_surface_is_the_grouping_contract_and_one_ungroup() -> 
     # checks the title and the single member), so this side never names a group.
     # Keep the surface at four names; a new helper here would be a second write
     # path to reconcile.
-    # meiva:link services/desktop/browser/docs/tab-groups.meiva.okf.md
+    # meiva:link services/desktop/browser/docs/tab-groups.md
     public = {n for n in dir(AgentTabGroups) if not n.startswith("_")}
     assert public == {
         "snapshot",
@@ -278,7 +278,7 @@ async def test_close_page_ungroups_the_last_tab_before_the_upstream_closes_it() 
     # meiva:note
     # The ungroup must land BEFORE the close: Chrome saves a group whose last tab
     # closes, and a saved group can no longer be reached.
-    # meiva:link services/desktop/browser/docs/tab-groups.meiva.okf.md
+    # meiva:link services/desktop/browser/docs/tab-groups.md
     order: list[str] = []
 
     class OrderedUpstream(FakeUpstream):
@@ -300,7 +300,7 @@ async def test_close_page_ungroups_the_last_tab_before_the_upstream_closes_it() 
 async def test_release_of_an_agents_pages_also_ungroups_each_before_closing() -> None:
     # meiva:note
     # `release_agent_page` (the termination hook) closes through the same door.
-    # meiva:link services/desktop/browser/docs/tab-groups.meiva.okf.md
+    # meiva:link services/desktop/browser/docs/tab-groups.md
     order: list[str] = []
 
     class OrderedUpstream(FakeUpstream):
@@ -325,7 +325,7 @@ async def test_release_of_an_agents_pages_also_ungroups_each_before_closing() ->
 # reconnect. Chrome is unreachable here on purpose: the attempt itself is the
 # contract, and a failed convergence must degrade to one warning, never to a
 # failed start.
-# meiva:link services/desktop/browser/docs/tab-groups.meiva.okf.md
+# meiva:link services/desktop/browser/docs/tab-groups.md
 class _StubUpstream:
     async def send_ping(self) -> None:
         return None

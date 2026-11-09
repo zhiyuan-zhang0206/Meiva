@@ -179,4 +179,4 @@ not settle the question.
 - why the picker shows one word:
   `ui/web/src/components/agents/harness-picker.tsx`
 - installing a CLI and copying state between machines:
-  `scripts/host_ops/docs/harness-onboarding.meiva.okf.md`
+  `scripts/host_ops/docs/harness-onboarding.md`

@@ -17,7 +17,7 @@ ROOT = Path(__file__).resolve().parents[3]
 # The doubles the rule withdraws, each with the records it holds and a production module beside it.
 # The numbers are published in the checker document in the same change, so a repayment or a new site
 # moves both; a ledger that drops without a line saying why is what this file refuses.
-# meiva:link meizel/docs/checker/test-code.meiva.okf.md
+# meiva:link meizel/docs/checker/test-code.md
 DOCUMENTED = {
     "ui/web/src/app/page-test-mock.tsx": 94,
     "ui/web/src/components/agent-sidebar/sidebar-test-mock.tsx": 140,

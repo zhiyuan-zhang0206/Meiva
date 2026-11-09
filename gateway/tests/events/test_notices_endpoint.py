@@ -667,7 +667,7 @@ def test_concurrent_creations_leave_exactly_one_open_notice(
     # The open-notice check and the local-id allocation share the agent row lock,
     # so concurrent creations under different keys cannot both land: one is
     # accepted and the rest are refused.
-    # meiva:link gateway/agents/docs/notice-receipts.meiva.okf.md
+    # meiva:link gateway/agents/docs/notice-receipts.md
     a = seed_agent(db_conn)
     with gateway_test_client() as client, ThreadPoolExecutor(max_workers=4) as executor:
 

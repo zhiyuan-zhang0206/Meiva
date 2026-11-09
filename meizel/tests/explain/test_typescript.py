@@ -1,6 +1,6 @@
 # meiva:note
 # The shared receipt owns only temporary source files and completed subprocesses, not environment state.
-# meiva:link meizel/docs/checker/typescript-evidence.meiva.okf.md
+# meiva:link meizel/docs/checker/typescript-evidence.md
 
 from __future__ import annotations
 
@@ -60,7 +60,7 @@ def _as_str(value: object) -> str:
 def receipt(tmp_path_factory: pytest.TempPathFactory) -> tuple[Path, Path, set[str]]:
     # meiva:note
     # Fixed git and producer commands own only this temporary source receipt.
-    # meiva:link meizel/docs/checker/typescript-evidence.meiva.okf.md
+    # meiva:link meizel/docs/checker/typescript-evidence.md
     root = tmp_path_factory.mktemp("ts-source-index")
     material = _as_str_dict(json.loads(Path(__file__).with_name("material.json").read_text()))
     files: set[str] = set()
@@ -179,7 +179,7 @@ def test_parse_failure_is_unavailable_instead_of_empty_safe(
 ) -> None:
     # meiva:note
     # Fixed commands build a temporary parse-refusal receipt without executing source.
-    # meiva:link meizel/docs/checker/typescript-evidence.meiva.okf.md
+    # meiva:link meizel/docs/checker/typescript-evidence.md
     root = tmp_path
     subprocess.run(["git", "init", "-q", str(root)], check=True, capture_output=True)  # noqa: S603
     (root / "fault.ts").write_text("const = ;\n")
@@ -218,7 +218,7 @@ def test_frozen_holder_keeps_collection_surface_and_literal_path_separate(
 ) -> None:
     # meiva:note
     # Fixed commands build the exact wrapper/key receipt in an isolated temporary repository.
-    # meiva:link meizel/docs/checker/typescript-evidence.meiva.okf.md
+    # meiva:link meizel/docs/checker/typescript-evidence.md
     subprocess.run(["git", "init", "-q", str(tmp_path)], check=True, capture_output=True)  # noqa: S603
     source = tmp_path / "holder.ts"
     source.write_text(

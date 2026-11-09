@@ -6,7 +6,7 @@
 # bound context), asks this module for the plan and runs it through the base transport, so a test
 # asserts the plan or the request that really went out and never replaces the transport. A
 # `None` timeout or retry count means "the context's own configured value".
-# meiva:link meiva/agents/docs/agents.meiva.okf.md
+# meiva:link meiva/agents/docs/agents.md
 from __future__ import annotations
 
 from collections.abc import Mapping

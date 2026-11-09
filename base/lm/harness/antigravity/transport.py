@@ -44,7 +44,7 @@ Reaper = Callable[[Mapping[int, str], "Iterable[int]"], "tuple[int, ...]"]
 # still reports honestly: `settled` is true only when every observed pid is
 # gone, so a process that survives SIGKILL shows up in `remaining` instead of
 # being rounded up to a clean cancel.
-# meiva:link base/lm/harness/antigravity/docs/antigravity.meiva.okf.md
+# meiva:link base/lm/harness/antigravity/docs/antigravity.md
 def kill_orphans(observed: Mapping[int, str], pids: Iterable[int]) -> tuple[int, ...]:
     killed: list[int] = []
     for pid in pids:
@@ -73,7 +73,7 @@ def kill_orphans(observed: Mapping[int, str], pids: Iterable[int]) -> tuple[int,
 # it by emitting a final `result` and exiting 1. `interrupt()` therefore also
 # ends the process, and the session must respawn with `--conversation` to keep
 # serving turns.
-# meiva:link base/lm/harness/antigravity/docs/antigravity.meiva.okf.md
+# meiva:link base/lm/harness/antigravity/docs/antigravity.md
 class AgyTransport:
     def __init__(
         self,

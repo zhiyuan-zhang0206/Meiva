@@ -24,7 +24,7 @@ _MEMORY_INDEX_FILE = "MEMORY.md"
 _PER_AGENT_MEMORY_DIRNAME = "memory"
 
 
-# meiva:link meiva_builtins/plugins/meiva_memory/docs/memory-inheritance.meiva.okf.md
+# meiva:link meiva_builtins/plugins/meiva_memory/docs/memory-inheritance.md
 def _ancestor_chain(agent_id: int, ctx: MeivaContext) -> tuple[Ancestor, ...] | None:
     import httpx
 
@@ -58,7 +58,7 @@ def _ancestor(row: object) -> Ancestor:
     return Ancestor(agent_id=agent_id, label=label, machine=machine)
 
 
-# meiva:link meiva_builtins/plugins/meiva_memory/docs/memory-inheritance.meiva.okf.md
+# meiva:link meiva_builtins/plugins/meiva_memory/docs/memory-inheritance.md
 def _read_entries(ancestors: tuple[Ancestor, ...], home: Path) -> list[EntryBlocks]:
     entries: list[EntryBlocks] = []
     for ancestor in ancestors:
@@ -87,7 +87,7 @@ def _read_entries(ancestors: tuple[Ancestor, ...], home: Path) -> list[EntryBloc
     return entries
 
 
-# meiva:link meiva_builtins/plugins/meiva_memory/docs/memory-inheritance.meiva.okf.md
+# meiva:link meiva_builtins/plugins/meiva_memory/docs/memory-inheritance.md
 def inherited_memory_note(ctx: MeivaContext) -> HumanMessage | None:
     slices = ctx.require_agent()
     if slices.sandbox.eval_isolation:

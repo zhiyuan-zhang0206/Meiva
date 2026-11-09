@@ -1,0 +1,73 @@
+# Standalone SDK task creation receipts
+
+The runtime assigns an operation UID to each `meiva.tasks.create` call and
+reuses it on replay. Standalone creation and compound creation have separate
+receipts. See [Guarded compound task assignment](../../../../../gateway/agents/task_assignment/README.md)
+for the compound operation.
+
+## Operation identity and request
+
+A creation is scoped by canonical SDK actor agent id and the raw operation key,
+independently of SDK task-update keys and HTTP credential namespaces. There is
+no pre-existing target task id. An existing borrowed identity is validated before
+admission and again after the receipt-key lock wait; an expired lease cannot
+replay or create. This uses established execution provenance, not a new security
+boundary or transaction-scoped lease fence.
+
+The immutable request contains coerced title, description, required parent id,
+priority, effective owner and requested reminder interval. `owner=None` and an
+explicit owner equal to the actor are equivalent. A reminder interval of `None`
+means use the priority default on first creation, and remains distinct from an
+explicit interval even if the resulting seconds initially match. Changes to the
+default policy do not prevent replay of that original request. Reusing a key
+with a different request raises `ValueError`.
+
+## Transaction and original result
+
+The SDK transaction takes a creation-key advisory lock, checks a retained
+receipt, then uses the existing parent lock, open-title uniqueness checks and
+task writer for fresh creation. Task insert, creation audit, owner notification
+intent and immutable receipt commit together. Failure rolls them all back.
+The task writer and shared snapshot model are native
+[creation transaction primitives](../../../../../base/agents/tasks/docs/creation-transactions.md);
+the SDK remains the receipt admission and post-commit owner.
+
+`task_registry.commit_creation` is the transaction half and returns a `CreationResult`:
+the mutable SDK `Task` and, for a fresh acceptance, an immutable `TaskPublication`.
+The publication retains the actor, task id and canonical event lines already admitted as
+JSONB audit/notification facts. It shares no mutable task or event-attribute mapping with
+the caller. Emission materializes independent events from those lines; mutating the SDK
+result or a materialized event cannot rewrite the committed publication facts or retarget
+the task-board refresh. Replay has no publication.
+
+The commit half emits nothing, so stopping after it leaves a committed task whose events
+were never emitted. `publish_creation` emits the publication's events in order and then
+refreshes the task board; `create_in_context` runs the two halves in sequence. The request
+is built by `_task_requests.py`, a `strict` module, from the caller's own arguments. The
+root supplies the current validated reminder default as a value, but only fresh creation
+resolves the effective interval and runs the writer and timestamp renderer.
+
+A receipt stores the complete originally returned `Task` dataclass snapshot,
+including its rendered timestamp strings. Replay validates all fields and the
+canonical status/priority values without filling missing defaults. It returns a
+new `Task` object containing that snapshot, without reading or rewriting the
+current task, parent, ownership, notification queue or reminder state. It does
+not emit another business audit, notification or task-board event. SDK attempt
+metering still observes every invocation.
+
+This result proves the original creation was accepted, not that the task is
+currently open or still exists. Use `meiva.tasks.get(task.id)` for current state.
+Renaming, closing or deleting the original task, deleting its parent, or reusing
+its old title cannot make replay create a replacement. Timestamp rendering is
+not repeated if cluster timezone settings change.
+
+## Retention and remaining scope
+
+`task_creation_receipts` is owned by the standalone creation transaction. Its
+primary key is `(actor_agent_id, operation_key)`; request and result are JSON
+objects. It has no foreign keys to mutable task/agent rows and no automatic TTL.
+Receipt retention must preserve tombstones: deleting a receipt silently enables
+execution of the same operation again. This change introduces no cleanup owner.
+
+`create_and_assign` uses one server-owned compound receipt. Standalone task keys
+do not make a multi-step script atomic.

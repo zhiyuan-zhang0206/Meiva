@@ -6,7 +6,7 @@
 # that could not run at all (a missing shell, a timeout) is a failed scan with its error as the
 # text. The day label is the slot's date in the cluster timezone, which can differ from its UTC
 # date, and the report is stored under that day.
-# meiva:link schedules/docs/debt-sweep.meiva.okf.md
+# meiva:link schedules/docs/debt-sweep.md
 
 from __future__ import annotations
 

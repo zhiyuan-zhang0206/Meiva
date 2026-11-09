@@ -222,7 +222,7 @@ def _pins_of(config_overlay: object, birth_config: object) -> dict[str, object]:
     return resolve_agent_config_pins(overlay, birth)
 
 
-# meiva:link base/agents/observation/docs/observation.meiva.okf.md
+# meiva:link base/agents/observation/README.md
 def agent_supports_vision(
     config_overlay: object,
     birth_config: object,
@@ -246,7 +246,7 @@ def agent_supports_vision(
 # judging a row's behaviour. A subscription harness agent stores the selection its launch probe
 # settled, so the same pins answer for it. Both are unknown (`None`) when the model catalog is
 # unavailable: the card then says nothing rather than guessing a model.
-# meiva:link base/agents/observation/docs/observation.meiva.okf.md
+# meiva:link base/agents/observation/README.md
 def agent_model_and_effort(
     config_overlay: object,
     birth_config: object,

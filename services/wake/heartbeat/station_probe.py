@@ -76,7 +76,7 @@ def _new_rng() -> random.Random:
     return random.Random()  # noqa: S311
 
 
-# meiva:link services/wake/heartbeat/docs/station-probe.meiva.okf.md
+# meiva:link services/wake/heartbeat/docs/station-probe.md
 def resolve_target(
     *, database: Callable[[], Database], config: StationEndpointConfig
 ) -> _StationTarget | None:
@@ -106,7 +106,7 @@ def resolve_target(
 # meiva:note
 # Request targets come from the shared station endpoint resolver, including the
 # station's own ingress advertisement.
-# meiva:link services/wake/heartbeat/docs/station-probe.meiva.okf.md
+# meiva:link services/wake/heartbeat/docs/station-probe.md
 def station_answers(url: str, *, token: str | None, open_url: UrlOpener) -> bool | None:
     if token is None:
         logger.bind(_no_emitter=True, component="station-healthcheck").warning(

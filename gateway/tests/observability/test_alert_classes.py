@@ -113,7 +113,7 @@ def test_classes_are_grouped_with_counts_times_and_most_frequent_first(
 # Two horizons answer different questions: the window says how far back the list looks, the quiet
 # rule says which of those classes still needs attention. A class three hours old is inside the
 # 24-hour window and still resolved, so the default list is the intersection.
-# meiva:link gateway/cluster/docs/ops-surfaces.meiva.okf.md
+# meiva:link gateway/cluster/docs/ops-surfaces.md
 def test_the_window_selects_which_events_form_classes(
     db_conn: psycopg.Connection, client: TestClient
 ) -> None:

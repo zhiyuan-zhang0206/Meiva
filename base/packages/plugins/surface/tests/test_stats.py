@@ -4,7 +4,7 @@
 # last write wins on `(plugin, id)`, the status vocabulary is closed, and what a
 # plugin's refresh wrote is exactly what the dashboard reads back for the
 # console to join against the declaration.
-# meiva:link gateway/cluster/docs/ops-surfaces.meiva.okf.md
+# meiva:link gateway/cluster/docs/ops-surfaces.md
 
 from collections.abc import Iterator
 from datetime import UTC, datetime

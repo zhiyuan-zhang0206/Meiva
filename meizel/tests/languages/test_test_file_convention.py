@@ -10,7 +10,7 @@ from meizel.language.fixtures import is_test_file
 # here beside the near misses they refuse; widening one - a bare `-mock`, a `-fixtures-mock`, a
 # `-fake` - fails this table until someone edits it on purpose, which is what a widened exemption
 # has to look like in review.
-# meiva:link ui/web/src/docs/frontend-components/test-only-imports.meiva.okf.md
+# meiva:link ui/web/src/docs/frontend-components/test-only-imports.md
 ACCEPTED = [
     "pkg/tests/test_budget.py",
     "pkg/tests/budget_test.py",

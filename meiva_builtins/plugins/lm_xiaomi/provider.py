@@ -105,7 +105,7 @@ PROVIDER = ProviderContribution(
         # `400 Unsupported model` while V2.6 Pro on the same account answers 200. A stored
         # config naming this id now fails spawn validation as unknown, and the price history
         # stays in the archive (base/lm/pricing/pricing_catalog_archive.json).
-        # meiva:link base/lm/docs/pricing-model-rates.meiva.okf.md
+        # meiva:link base/lm/docs/pricing-model-rates.md
         "mimo-v2.6-pro": ModelSpec(
             provider="mimo",
             spawnable=True,

@@ -8,7 +8,7 @@
 # nothing twice. A failed reconciliation does not retry; its message names the manual backfill.
 # `accounting` is imported where it is used: a script runs from the repository's installed
 # roots, not from a checkout, so the import resolves when the schedule fires.
-# meiva:link schedules/docs/c9-daily-report.meiva.okf.md
+# meiva:link schedules/docs/c9-daily-report.md
 
 from __future__ import annotations
 

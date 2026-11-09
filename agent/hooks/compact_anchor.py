@@ -50,7 +50,7 @@ def closing_request_of(response: AIMessage, instruction: HumanMessage) -> Closin
 # meiva:note
 # The whole summary travels as one system note, so the model reads where it ends; the
 # header inside it stays the classifier's one invariant.
-# meiva:link agent/messages/docs/message-format.meiva.okf.md
+# meiva:link agent/messages/docs/message-format.md
 def compose_summary_message(summary: str) -> str:
     """The header + the summary, as the single text injected on the agent's
     behalf when its context is replaced. Shared by every compact path so the

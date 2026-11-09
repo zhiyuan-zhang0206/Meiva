@@ -1,6 +1,6 @@
 # meiva:note
 # The single line a background session executes (the command, its log tee, the exit marker and the completion notice) and the launch file that carries it, as functions of values. `background.py` reads the process and the disk and runs what these describe.
-# meiva:link meiva/shell/docs/shell.meiva.okf.md
+# meiva:link meiva/shell/docs/shell.md
 from __future__ import annotations
 
 import re

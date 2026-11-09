@@ -2,7 +2,7 @@
 
 // meiva:note
 // useTimeFormat binds the viewer's clock preferences to time.ts: `display.clock_format` ("24h" default, or "12h") drives every clock render, and `display.date_format` (absolute by default) picks between the date-context form and a relative span for a future instant through formatFuture. A missing key is the default, not an error — user_settings stores only what the viewer changed, so an old row renders like a fresh one; an unrecognized value falls back the same way because the gateway stores values opaquely and a bad row must not take the console down.
-// meiva:link ui/web/src/lib/format/docs/time.meiva.okf.md
+// meiva:link ui/web/src/lib/format/docs/time.md
 
 import { useMemo } from "react";
 

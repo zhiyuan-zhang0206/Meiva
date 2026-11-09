@@ -1,6 +1,6 @@
 # meiva:note
 # The upstream checkpoint schema dependency used by first-start provisioning.
-# meiva:link base/cluster/docs/postgres.meiva.okf.md
+# meiva:link base/cluster/docs/postgres.md
 
 from collections.abc import Sequence
 from pathlib import Path

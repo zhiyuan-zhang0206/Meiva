@@ -4,7 +4,7 @@
 // The arrows between agents: one canvas over the whole chart, redrawn on the frame after a render that
 // changed one of its inputs; a row's track element is looked up once, and `geometryKey` says when a row
 // moved. It draws only — the pointer events stay with the rows below.
-// meiva:link ui/web/src/docs/frontend-components/run-timeline/agent-links.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/run-timeline/agent-links.md
 
 import { useEffect, useRef, type RefObject } from "react";
 
@@ -75,7 +75,7 @@ const BADGE_AT = 0.2;
 // meiva:note
 // Where a badge may sit, in order of preference: just after the arrow leaves its start row, then a step
 // further along or one line up or down, so badges stay near their own arrow.
-// meiva:link ui/web/src/docs/frontend-components/run-timeline/agent-links.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/run-timeline/agent-links.md
 const BADGE_SLOTS: readonly (readonly [number, number])[] = [
   [0.2, 0], [0.26, 0], [0.32, 0], [0.2, -11], [0.26, -11], [0.32, -11],
   [0.2, 11], [0.26, 11], [0.32, 11], [0.38, 0], [0.38, -11], [0.38, 11],

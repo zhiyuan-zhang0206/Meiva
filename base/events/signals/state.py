@@ -11,7 +11,7 @@
 # machine, and it works with the database gone. This one records what is still true across the
 # cluster, and it needs the database. A detector that wants both records the alarm first
 # (durable evidence of the detection) and touches a signal second (the open state).
-# meiva:link base/events/signals/docs/signals.meiva.okf.md
+# meiva:link base/events/signals/README.md
 
 from __future__ import annotations
 

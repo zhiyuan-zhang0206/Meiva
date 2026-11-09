@@ -5,7 +5,7 @@ from __future__ import annotations
 # decides where a batch goes, and `init_context` re-applies the same rewrite when it
 # jumps to a compaction's parked destination — so it is exported here rather than
 # reached for through `_routing`.
-# meiva:link agent/graph/docs/harness-turn.meiva.okf.md
+# meiva:link agent/graph/docs/harness-turn.md
 from ._chat_inbound import build_chat_inbound
 from ._routing import route_target
 

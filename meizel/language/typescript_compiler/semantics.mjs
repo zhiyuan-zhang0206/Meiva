@@ -1,6 +1,6 @@
 // meiva:note
 // Shared rule vocabulary is emitted from compiler nodes and lexical symbols, never source-text matching.
-// meiva:link meizel/docs/checker/typescript.meiva.okf.md
+// meiva:link meizel/docs/checker/typescript.md
 export function semantics(ts, context, tree, out, index, config, test, ambientPolicy) {
   const checker = context.checker;
   const impure = new Set(config.impure_calls);

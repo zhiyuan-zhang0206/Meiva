@@ -203,7 +203,7 @@ def _as_float(value: object) -> float | None:
 # The query is the rendered + re-validated template (see render_metric_query) —
 # a str that psycopg's typing only accepts as LiteralString; injection safety
 # was established by validate_metric_sql, not by psycopg.
-# meiva:link gateway/inspect/docs/inspect.meiva.okf.md
+# meiva:link gateway/inspect/docs/inspect.md
 def _execute_metric(
     conn: Connection, cur: Cursor, spec: MetricSpec, query: str, *, clock: Clock
 ) -> PluginMetricResult:

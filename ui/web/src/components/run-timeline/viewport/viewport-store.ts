@@ -5,7 +5,7 @@ import type { Viewport } from "../model/timeline-model-viewport";
 // animation frame, and only the few labels that must follow it re-render. `get` returns the same object
 // until the bounds move, which is what `useSyncExternalStore` needs; `set` is a no-op when they did not.
 // A viewport change therefore costs one paint per row and no render of the chart's row tree (task #5738).
-// meiva:link ui/web/src/docs/frontend-components/run-timeline/run-timeline.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/run-timeline/run-timeline.md
 
 export interface ViewportStore {
   get(): Viewport;

@@ -8,7 +8,7 @@
 # comes (how a provider failure is scripted), a ready message, or a function of the request. `refuse` makes the
 # factory itself fail for a model (how a missing API key is scripted). The last reply
 # repeats once the script runs out.
-# meiva:link meiva/tests/fixtures/docs/sdk-composition.meiva.okf.md
+# meiva:link meiva/tests/fixtures/docs/sdk-composition.md
 
 from __future__ import annotations
 

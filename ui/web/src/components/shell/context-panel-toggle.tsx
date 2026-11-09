@@ -11,7 +11,7 @@ const pressedClass = "p-1 rounded shrink-0 hover:bg-sidebar-accent";
 // The right region is a panel of the main area, not a sidebar: only the agent tree
 // is chrome. Its button is the document glyph, because that is what the panel
 // shows (the active agent's to-user document + inspector), not a collapsing rail.
-// meiva:link ui/web/src/docs/frontend-components/home-shell-chrome/home-shell-chrome.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/home-shell-chrome/home-shell-chrome.md
 export function ContextPanelToggle({ open, onToggle }: { open: boolean; onToggle: () => void }) {
   const t = useTranslations("sidebar");
   return (

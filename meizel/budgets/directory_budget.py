@@ -2,7 +2,7 @@
 # The effect shell of the file budget's path reading: it lists one directory of the checkout and
 # walks a judged path's links. Which entries are candidates, and which of a target and a structure
 # directory the budget judges, are decided in `meizel.budgets.budget_plans`.
-# meiva:link meizel/docs/meizel.meiva.okf.md
+# meiva:link meizel/docs/meizel.md
 
 from __future__ import annotations
 

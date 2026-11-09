@@ -178,7 +178,7 @@ class TestReasoningEffortDispatch:
     def test_adaptive_claude_defaults_to_summarized_display(
         self, monkeypatch: pytest.MonkeyPatch, *, model_catalog: ModelCatalog
     ) -> None:
-        # meiva:link base/packages/tests/lm/docs/contracts.meiva.okf.md
+        # meiva:link base/packages/tests/lm/docs/contracts.md
         for model in (
             "claude-sonnet-5",
             "claude-opus-5",
@@ -213,7 +213,7 @@ class TestReasoningEffortDispatch:
     def test_adaptive_caller_display_respected(
         self, monkeypatch: pytest.MonkeyPatch, *, model_catalog: ModelCatalog
     ) -> None:
-        # meiva:link base/packages/tests/lm/docs/contracts.meiva.okf.md
+        # meiva:link base/packages/tests/lm/docs/contracts.md
         llm = build_chat_model(
             "claude-sonnet-5",
             thinking={"type": "adaptive", "display": "omitted"},

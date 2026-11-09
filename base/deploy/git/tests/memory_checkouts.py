@@ -34,7 +34,7 @@ def memory_checkout(tmp_path: Path) -> tuple[Path, Path]:
 def make_bundle(source: Path) -> tuple[str, bytes]:
     # meiva:note
     # Create the actual Git wire artifact served by the gateway pool route.
-    # meiva:link base/deploy/git/tests/docs/memory-repo-tests.meiva.okf.md
+    # meiva:link base/deploy/git/tests/docs/memory-repo-tests.md
     init_local_repo("main", source)
     (source / "MEMORY.md").write_text("# shared index\n")
     (source / "health").mkdir()
@@ -51,7 +51,7 @@ def make_bundle(source: Path) -> tuple[str, bytes]:
 def git_http_remote(remote: Path, *, received: Event, release: Event) -> Generator[str]:
     # meiva:note
     # Expose a local bare repository through Git's own CGI backend, holding discovery.
-    # meiva:link base/deploy/git/tests/docs/memory-repo-tests.meiva.okf.md
+    # meiva:link base/deploy/git/tests/docs/memory-repo-tests.md
 
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self) -> None:

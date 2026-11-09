@@ -38,7 +38,7 @@ from base.lm.harness.registry import SessionRegistry
 # native system prompt. Section 3 lists what every attached process may reach, led
 # by `meiva.attach()`, which `import meiva` has already done here; what a particular
 # role may reach is the role's business, not the wake's.
-# meiva:link agent/graph/docs/harness-turn.meiva.okf.md
+# meiva:link agent/graph/docs/harness-turn.md
 HANDOFF_INSTRUCTION = (
     "You are the agent described above. Follow the rules in this document for every turn, "
     "and act on the messages that follow it."
@@ -49,12 +49,12 @@ HANDOFF_INSTRUCTION = (
 # One adapter session per harness. A harness without an entry is a value the release
 # cannot run, and it fails here rather than starting a session with another
 # provider's flags.
-# meiva:link agent/graph/docs/harness-turn.meiva.okf.md
+# meiva:link agent/graph/docs/harness-turn.md
 # meiva:note
 # The environment a harness session runs with. The daemon child environment this starts
 # from is a positive allowlist that carries no PATH, and a session delivery point is where
 # it is rebuilt — the CLI and everything it runs resolve through this (#5491).
-# meiva:link base/lm/harness/docs/harness.meiva.okf.md
+# meiva:link base/lm/harness/docs/harness.md
 def session_environ(environ: Mapping[str, str]) -> dict[str, str]:
     base = dict(environ)
     venv_bin = str(Path(sys.executable).parent)
@@ -125,7 +125,7 @@ def open_session(
 # meiva:note
 # Codex Computer Use dropped the Chinese portion of a mixed-script string in Chrome.
 # The wake document gives fresh Codex sessions the verified plain-text input path.
-# meiva:link base/lm/harness/codex/docs/codex.meiva.okf.md
+# meiva:link base/lm/harness/codex/docs/codex.md
 _CODEX_COMPUTER_USE = HarnessContribution(
     harnesses=frozenset({Harness.CODEX}),
     overlaps=(
@@ -187,7 +187,7 @@ class BridgeRootValues:
 # session otherwise. The handoff is built here from what the host knows — the agent
 # id, the machine it runs on and its workspace — so the waking path has one place to
 # change and the graph sees only `run_turn` and `interrupt`.
-# meiva:link agent/graph/docs/harness-turn.meiva.okf.md
+# meiva:link agent/graph/docs/harness-turn.md
 def bridge_for(
     harness: Harness,
     *,

@@ -24,7 +24,7 @@ from base.host.boundary.json_values import is_object_dict
 # access: `expired` judges at an instant the caller supplies, and
 # `decode_registration` reads an already-parsed document. The file store that reads
 # and writes the row lives in `store.py`.
-# meiva:link meiva/self/harness/docs/harness-attach.meiva.okf.md
+# meiva:link meiva/self/harness/docs/harness-attach.md
 _REQUIRED_FIELDS = frozenset(
     {
         "agent_id",

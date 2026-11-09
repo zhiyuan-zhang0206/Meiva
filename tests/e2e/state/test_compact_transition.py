@@ -128,7 +128,7 @@ def _place_nonsticky_reply(env: E2EEnv, reply: str) -> dict[str, Any]:
     # so a target computed against them can exceed the real maximum and clamp to
     # the bottom. Materialize the tail before centering the reply; where a send
     # leaves the viewport is not this helper's subject.
-    # meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.meiva.okf.md
+    # meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.md
     env.page.evaluate("""() => {
       const viewport = document.querySelector('[role="log"]').closest('[data-slot="scroll-area-viewport"]');
       viewport.scrollTop = viewport.scrollHeight;

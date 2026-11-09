@@ -1,0 +1,79 @@
+# Database access
+
+`base/db/` owns shared database connections, transaction access and database process identity.
+Its component nodes describe the current contracts and implementation.
+
+## Documented components
+
+- [Process database gate](code-version-gate.md) — Process database gate.
+
+## Direct (admin-plane) dials
+
+The URL a `direct=True` dial uses is derived from the home's cluster record (the root hands the resolver the home it runs under), which sits above
+this layer. A composition root therefore hands its `Database` a resolver from
+`base/cluster/dataplane/direct_url.py`:
+
+```python
+resolver = ClusterDirectUrl(machine.host, home=home)
+database = Database(config, gate=gate, direct_url=resolver)
+```
+
+The resolver returns a `DirectResolution`: the URL to dial together with `is_direct` and, when
+it could not resolve, a `reason` naming the URL's host:port and the record's port.
+
+A dial that needs a real backend asks for one, and is refused rather than silently pooled:
+`connect(direct=True)` and `Database.direct_url()` raise `DirectUnavailableError`, worded once in
+`connections.require_direct`. The callers that must have one are the session advisory lock, a
+`pg_dump` (one snapshot across many statements), `VACUUM`/`REINDEX`, and provisioning DDL. An
+ordinary connection never asks the resolver at all, so an agent-runner that only reaches the
+pooler keeps dialing its access URL. A caller that renders the cluster's address instead of
+dialing it — the Grafana datasource host:port — takes `Database.direct_resolution().url` as the
+best answer available. A host that cannot classify a URL refuses exactly when the work truly
+needs the real backend; a read-only verification (the checkpoint schema check) dials the
+ordinary access URL.
+
+The resolver owns one dependency, the lazy local-host reader; `DbConfig` remains the database
+connection slice. Resolution reads that reader only when pooling is on and the URL's host is not
+loopback, to tell this box's URL from a foreign one. Placeholder, unparseable, portless (a Unix
+socket) URLs and every URL while pooling is off are direct without reading it, and no
+resolution reads the cluster record for those shapes. A handle built without a resolver refuses
+a direct dial.
+
+The inbound-message writes, the wake publish and the live-agent reads that once lived in this
+package are owned by [Agent inbox](../../agents/inbox/README.md).
+
+Test admission and dial-fixture evidence: [Test database admission](test-database-safety.md).
+
+## Transactions on a pool
+
+`write_transaction(pool)` takes a `ConnectionSource`: anything that lends one connection for a
+`with` block and commits when the block ends normally. `psycopg_pool.ConnectionPool` is one.
+`base/db/tests/lost_ack.py` holds the other, `LostAckPool`, whose n-th lending commits for real
+and then raises; it produces the one fault a database cannot be asked for (durable work, lost
+acknowledgement), so a function that takes its pool as an argument is tested without a patch.
+
+The async twin is `AsyncConnectionSource` (anything that lends one connection for an `async with`
+block; `AsyncConnectionPool` is one). A borrow that has to wait is built with the real pool: occupy
+its connections and start the borrower. The one fault a real pool cannot be asked for is a lost
+cancellation, which `base/db/tests/swallowed_cancel.py` holds as `CancelSwallowingPool`: its first
+borrow waits until released and absorbs the first cancellation of that wait, and the interrupt
+watcher's tests drive it instead of subclassing a pool.
+
+## Typed rows
+
+A cursor built with the default row factory hands back `tuple[Any, ...]`, so every column read by
+position (`row[7]`) is untyped and a renamed column moves silently. A query whose result code
+reads is run on `conn.cursor(row_factory=class_row(RowCls))`, where `RowCls` is a frozen dataclass
+declared next to the query with one field per selected column, named as the column (`SELECT ... AS
+name` where the column is computed). `cur.fetchone()` then returns `RowCls | None`, `fetchall()`
+returns `list[RowCls]`, and `fetch_one(cur, context)` returns `RowCls` or raises when the query
+returned no row. `fetch_one` takes the cursor's row type through, so a plain cursor still returns a
+tuple. A column psycopg adapts to a Python type (`int`, `str`, `datetime`, `Decimal`, `list[int]`
+for an array) is declared with that type; a `jsonb` column is declared `object` and narrowed where
+it is read. `dict_row` is not a typed alternative: its values are `Any`.
+
+`base/db/rows.py` is the shorthand for the common shape: `query_one(conn, RowCls, sql, params)`
+opens the cursor, runs the statement and returns `RowCls | None`; `query_all` returns
+`list[RowCls]`; `count_one(conn, sql, params)` runs a `SELECT count(*) AS n` statement and returns
+the `int`, raising when an aggregate returns no row. Gateway, CLI and services read through them
+instead of keeping a copy.

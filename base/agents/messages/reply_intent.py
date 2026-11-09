@@ -7,7 +7,7 @@ from base.api_contracts.user_delivery import UserDeliveryMode
 # opening taught in the system prompt and exported to the frontend via `dump_frontend_constants.py`;
 # `USER_REPLY_HEADER` is the exact colon-terminated token matched by both backend timeline
 # projection and frontend SSE stream folding.
-# meiva:link base/agents/messages/docs/metadata-contracts.meiva.okf.md
+# meiva:link base/agents/messages/docs/metadata-contracts.md
 USER_REPLY_HEADER = "Meiva agent to user:"
 USER_REPLY_PREFIX = "Meiva agent to user: "
 
@@ -49,7 +49,7 @@ def parse_reply_visibility(text: str) -> tuple[str, bool] | None:
 # Leading whitespace before the header is tolerated. Horizontal whitespace after the colon
 # and at most one line break (`\r\n` or `\n`) are stripped so both `Meiva agent to user: Hello`
 # and `Meiva agent to user:\nHello` render cleanly while preserving indentation on later lines.
-# meiva:link base/agents/messages/docs/metadata-contracts.meiva.okf.md
+# meiva:link base/agents/messages/docs/metadata-contracts.md
 def strip_user_reply_prefix(text: str) -> tuple[bool, str]:
     trimmed = text.lstrip()
     if not trimmed.startswith(USER_REPLY_HEADER):
@@ -70,7 +70,7 @@ def strip_user_reply_prefix(text: str) -> tuple[bool, str]:
 # meiva:note
 # A legacy wake header with a blank body keeps its raw text in Details.
 # Prefix-mode marker fragments keep their item identity with an empty payload.
-# meiva:link base/agents/messages/docs/metadata-contracts.meiva.okf.md
+# meiva:link base/agents/messages/docs/metadata-contracts.md
 def resolve_agent_reply(
     text: str,
     *,
@@ -95,7 +95,7 @@ def resolve_agent_reply(
     return text, not non_human_wake
 
 
-# meiva:link base/agents/messages/docs/metadata-contracts.meiva.okf.md
+# meiva:link base/agents/messages/docs/metadata-contracts.md
 def normalize_last_message_text(text: str) -> str:
     explicit = parse_reply_visibility(text)
     if explicit is not None:

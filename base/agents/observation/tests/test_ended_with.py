@@ -2,7 +2,7 @@
 # The turn-end vocabulary is a closed set. A declaration outside it is refused where it
 # enters the state — refused, never raised: a field that measures the agent must not fail the
 # work it measures, so the exec boundary records `invalid` and the turn carries on.
-# meiva:link agent/graph/llm/docs/turn-records.meiva.okf.md
+# meiva:link agent/graph/llm/docs/turn-records.md
 from __future__ import annotations
 
 import pytest

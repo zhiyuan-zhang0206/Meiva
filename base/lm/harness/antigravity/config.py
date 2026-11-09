@@ -7,7 +7,7 @@ from pathlib import Path
 # The full model id from `agy models`, never an alias or a display name: the CLI
 # resolves an unknown id to its own default, so a short name would silently move
 # the bridge onto another model after an upgrade.
-# meiva:link base/lm/harness/antigravity/docs/antigravity.meiva.okf.md
+# meiva:link base/lm/harness/antigravity/docs/antigravity.md
 DEFAULT_MODEL = "gemini-4-argon-high"
 
 

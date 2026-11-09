@@ -20,7 +20,7 @@
 # Peak windows are the page's daily UTC hours; the page scopes them Monday through Friday, so
 # this ledger bills weekend hours at peak rates — a known overestimate the archive's
 # daily-recurrence windows cannot express yet.
-# meiva:link base/lm/pricing/docs/pricing.meiva.okf.md
+# meiva:link base/lm/pricing/docs/pricing.md
 
 from __future__ import annotations
 

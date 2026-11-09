@@ -3,7 +3,7 @@
 # statements `meiva/self/plans.py` returns are executed on the agent's own database, and the
 # wake they send is received on the agent's inbound channel. The statements themselves are
 # asserted as values in `test_self_plans.py`; this file only checks that the shell runs them.
-# meiva:link meiva/self/docs/self.meiva.okf.md
+# meiva:link meiva/self/README.md
 
 from __future__ import annotations
 

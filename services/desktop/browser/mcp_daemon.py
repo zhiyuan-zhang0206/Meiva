@@ -159,7 +159,7 @@ class ChromeMcpDaemon:
     # meiva:note
     # Forward to upstream, flagging `dead` on session death and releasing the page's
     # tab group first on `close_page` (best-effort).
-    # meiva:link services/desktop/browser/docs/tab-groups.meiva.okf.md
+    # meiva:link services/desktop/browser/docs/tab-groups.md
     async def _call(self, name: str, args: dict[str, object]) -> types.CallToolResult:
         if name == "close_page":
             closing = _page_id(args.get("pageId"))
@@ -556,7 +556,7 @@ async def _serve_daemon_loop(
             if reapply_session:
                 # meiva:note
                 # Restore saved pins and tab groups in the background once Chrome answers.
-                # meiva:link services/desktop/browser/docs/browser-session-restore.meiva.okf.md
+                # meiva:link services/desktop/browser/docs/browser-session-restore.md
                 reapply_task = tasks.create_task(
                     contained(
                         session_restore.reapply(
@@ -668,7 +668,7 @@ async def _serve_generation(
         # every connection: a duplicate that outlived a Chrome restart, an
         # extension update or a race is merged here, with a WARNING, before any
         # page is created. Idempotent, so a healthy browser costs one query.
-        # meiva:link services/desktop/browser/docs/tab-groups.meiva.okf.md
+        # meiva:link services/desktop/browser/docs/tab-groups.md
         converge = helpers.create_task(
             contained(daemon.tab_groups.converge_all(), "tab group convergence")
         )

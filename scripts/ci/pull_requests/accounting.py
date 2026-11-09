@@ -33,11 +33,11 @@ DEFAULT_LEDGER = _LEDGER_DIR / "ledger.jsonl"
 _TASK_RE = re.compile(r"\(task #(\d+)\)")
 _TRUNK_PR_RE = re.compile(r"trunk-merge/pr-(\d+)/")
 
-# meiva:link scripts/ci/pull_requests/docs/ci-usage.meiva.okf.md
+# meiva:link scripts/ci/pull_requests/docs/ci-usage.md
 _WINDOW_CHUNK_SECONDS = 4 * 3600
 
 
-# meiva:link scripts/ci/pull_requests/docs/ci-usage.meiva.okf.md
+# meiva:link scripts/ci/pull_requests/docs/ci-usage.md
 class CiUsageReadError(RuntimeError):
     pass
 
@@ -85,7 +85,7 @@ class Options:
     json: bool
 
 
-# meiva:link scripts/ci/pull_requests/docs/ci-usage.meiva.okf.md
+# meiva:link scripts/ci/pull_requests/docs/ci-usage.md
 def _gh_output(argv: list[str], *, operation: str, host: Host) -> str:
     try:
         result = host.run(argv, capture_output=True, text=True, timeout=_GH_TIMEOUT_S)
@@ -96,7 +96,7 @@ def _gh_output(argv: list[str], *, operation: str, host: Host) -> str:
     return stdout_text(result)
 
 
-# meiva:link scripts/ci/pull_requests/docs/ci-usage.meiva.okf.md
+# meiva:link scripts/ci/pull_requests/docs/ci-usage.md
 def _gh_api(path: str, *, host: Host) -> object:
     output = _gh_output(["gh", "api", path], operation=path, host=host)
     try:
@@ -114,7 +114,7 @@ def _row_id(row: Mapping[str, object]) -> int:
     return identifier
 
 
-# meiva:link scripts/ci/pull_requests/docs/ci-usage.meiva.okf.md
+# meiva:link scripts/ci/pull_requests/docs/ci-usage.md
 def _read_page(path: str, key: str, *, host: Host) -> tuple[int, list[dict[str, object]]]:
     payload = _gh_api(path, host=host)
     if not is_object_dict(payload):
@@ -132,7 +132,7 @@ def _read_page(path: str, key: str, *, host: Host) -> tuple[int, list[dict[str, 
     return total, rows
 
 
-# meiva:link scripts/ci/pull_requests/docs/ci-usage.meiva.okf.md
+# meiva:link scripts/ci/pull_requests/docs/ci-usage.md
 def _pages(
     path: str, key: str, *, host: Host, max_items: int | None = None
 ) -> list[dict[str, object]]:
@@ -146,7 +146,7 @@ def _pages(
         )
         if expected is not None and total != expected:
             raise CiUsageReadError(f"{path}: incomplete read; total_count changed while paging")
-        # meiva:link scripts/ci/pull_requests/docs/ci-usage.meiva.okf.md
+        # meiva:link scripts/ci/pull_requests/docs/ci-usage.md
         if max_items is not None and total >= max_items:
             raise CiUsageReadError(
                 f"{path}: incomplete read; narrow the window below {max_items} runs"
@@ -189,9 +189,9 @@ def _real_pr_of_trunk_branch(head_ref: str) -> int | None:
 
 # meiva:note
 # A job's billable minutes are the ceiling of its wall duration. The jobs API reports null started/completed for in-progress and cancelled-before-start jobs; those pass through as absent and bill 0 minutes rather than crashing the timestamp parse.
-# meiva:link scripts/ci/pull_requests/docs/accounting.meiva.okf.md
+# meiva:link scripts/ci/pull_requests/docs/accounting.md
 def job_minutes(started: str | None, completed: str | None) -> int:
-    # meiva:link scripts/ci/pull_requests/docs/ci-usage.meiva.okf.md
+    # meiva:link scripts/ci/pull_requests/docs/ci-usage.md
     if started is None or completed is None:
         return 0
     start = datetime.fromisoformat(started.replace("Z", "+00:00"))
@@ -201,7 +201,7 @@ def job_minutes(started: str | None, completed: str | None) -> int:
     return math.ceil((end - start).total_seconds() / 60.0)
 
 
-# meiva:link scripts/ci/pull_requests/docs/ci-usage.meiva.okf.md
+# meiva:link scripts/ci/pull_requests/docs/ci-usage.md
 # meiva:note
 # The `number` of each pull request in `raw`; an entry without an integer one is `error`.
 def _pull_request_numbers(raw: list[object], error: str) -> list[int]:
@@ -214,7 +214,7 @@ def _pull_request_numbers(raw: list[object], error: str) -> list[int]:
     return numbers
 
 
-# meiva:link scripts/ci/pull_requests/docs/ci-usage.meiva.okf.md
+# meiva:link scripts/ci/pull_requests/docs/ci-usage.md
 def _identity_from_prs(
     run: Mapping[str, object], repo: str, real_pr: int | None, *, host: Host
 ) -> tuple[int | None, int | None, int | None]:
@@ -248,9 +248,9 @@ def _merged_pr_of(run: Mapping[str, object], repo: str, *, host: Host) -> int | 
 
 # meiva:note
 # A run's PR and task identity resolves in order: the real PR of a synthetic `trunk-merge/pr-<n>/<uuid>` branch (or the run's PR payload) by PR title; then a push-to-main merge run's merged PR via its merge commit; then the head commit subject for `(task #<id>)`. Agent prefix/branch matching is not performed.
-# meiva:link scripts/ci/pull_requests/docs/accounting.meiva.okf.md
+# meiva:link scripts/ci/pull_requests/docs/accounting.md
 def _run_identity(
-    # meiva:link scripts/ci/pull_requests/docs/ci-usage.meiva.okf.md
+    # meiva:link scripts/ci/pull_requests/docs/ci-usage.md
     run: Mapping[str, object],
     repo: str,
     *,
@@ -287,7 +287,7 @@ def _run_entry(run: Mapping[str, object], repo: str, *, host: Host) -> LedgerEnt
     )
 
 
-# meiva:link scripts/ci/pull_requests/docs/ci-usage.meiva.okf.md
+# meiva:link scripts/ci/pull_requests/docs/ci-usage.md
 def _completed_job_minutes(job: Mapping[str, object]) -> int:
     conclusion = job.get("conclusion")
     if job.get("status") != "completed" or not isinstance(conclusion, str):
@@ -319,7 +319,7 @@ def _fill_job_minutes(entry: LedgerEntry, repo: str, *, host: Host) -> None:
         entry["jobs"] += 1
 
 
-# meiva:link scripts/ci/pull_requests/docs/ci-usage.meiva.okf.md
+# meiva:link scripts/ci/pull_requests/docs/ci-usage.md
 def collect(repo: str, since: str, until: str, *, host: Host) -> list[LedgerEntry]:
     entries: dict[int, dict[str, object]] = {}
     since_dt = datetime.fromisoformat(since.replace("Z", "+00:00"))
@@ -383,11 +383,11 @@ def load_ledger(path: Path) -> dict[int, dict[str, object]]:
 
 # meiva:note
 # append_ledger keys rows by run id: entries already present are skipped, so re-running a window that overlaps the ledger appends only new runs and returns the appended count (a re-fire over the same window appends 0).
-# meiva:link scripts/ci/pull_requests/docs/accounting.meiva.okf.md
+# meiva:link scripts/ci/pull_requests/docs/accounting.md
 def append_ledger(path: Path, entries: Sequence[LedgerEntry]) -> int:
     # meiva:note
     # The JSONL ledger remains append-only and idempotent by run_id. Collection finishes before append begins, so a failed collection leaves existing bytes unchanged and does not append earlier successful rows from that collection. Existing historical rows are not automatically repaired or replaced.
-    # meiva:link scripts/ci/pull_requests/docs/ci-usage.meiva.okf.md
+    # meiva:link scripts/ci/pull_requests/docs/ci-usage.md
     ledger = load_ledger(path)
     fresh = [e for e in entries if e["run_id"] not in ledger]
     if not fresh:
@@ -401,7 +401,7 @@ def append_ledger(path: Path, entries: Sequence[LedgerEntry]) -> int:
 
 # meiva:note
 # report_rows rolls up the last `days` per agent (runs and linux/macos minutes) and prices them at the GitHub-hosted private-repo overage rates (Linux $0.006/min, macOS $0.062/min; corrected 2026-09-06 per GitHub's published pricing). The repo is currently public, so est_usd is a private-repo overage equivalent — phase-2 quotas must gate on MINUTES, not dollars; the account's 3,000 included minutes/month are account-wide across all repos.
-# meiva:link scripts/ci/pull_requests/docs/accounting.meiva.okf.md
+# meiva:link scripts/ci/pull_requests/docs/accounting.md
 def report_rows(
     ledger: Mapping[int, Mapping[str, object]],
     *,
@@ -479,7 +479,7 @@ def _print_entries(entries: Sequence[LedgerEntry]) -> None:
         )
 
 
-# meiva:link scripts/ci/pull_requests/docs/ci-usage.meiva.okf.md
+# meiva:link scripts/ci/pull_requests/docs/ci-usage.md
 def main(argv: list[str], *, host: Host) -> int:
     parser = argparse.ArgumentParser(description="CI usage attribution and ledger")
     parser.add_argument(

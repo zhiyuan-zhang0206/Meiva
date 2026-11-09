@@ -40,7 +40,7 @@ def _rearmed(recorded: MeivaToUserState, compact_version: int) -> tuple[set[str]
     return set(recorded.reminded), recorded.last_seen_compact
 
 
-# meiva:link meiva_builtins/plugins/meiva_to_user/docs/meiva_to_user.meiva.okf.md
+# meiva:link meiva_builtins/plugins/meiva_to_user/docs/meiva_to_user.md
 class _ToUserLimitHook(Hook):
     async def __call__(
         self,
@@ -77,7 +77,7 @@ class _ToUserLimitHook(Hook):
             return cleared
         # meiva:note
         # Panel words come from the shared count_words (base/packages/text_budget.py): every CJK character counts one, every maximal run of letters/digits counts one with underscore not merging runs, and punctuation and whitespace count nothing. The plugin imports the shared metric and keeps no second implementation, so the panel and every other budget read one rule set; the rules are owned by base/packages/docs/text-budget.meiva.okf.md.
-        # meiva:link meiva_builtins/plugins/meiva_to_user/docs/meiva_to_user.meiva.okf.md
+        # meiva:link meiva_builtins/plugins/meiva_to_user/docs/meiva_to_user.md
         count = count_words(document.content or "")
         limit = agent.prompt.to_user_soft_limit_words
         if count <= limit:

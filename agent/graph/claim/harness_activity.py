@@ -29,7 +29,7 @@ def _elapsed(start: datetime, end: datetime) -> int:
 
 # meiva:note
 # Checkpoint each observed activity under one stable timeline position.
-# meiva:link agent/graph/docs/harness-turn.meiva.okf.md
+# meiva:link agent/graph/docs/harness-turn.md
 class HarnessTurnProjector:
     def __init__(
         self,

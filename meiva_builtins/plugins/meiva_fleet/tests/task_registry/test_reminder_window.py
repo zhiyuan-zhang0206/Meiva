@@ -5,7 +5,7 @@
 # description edit and an interval change out. A note counts by user ruling (2026-10-31): an owner
 # answering a reminder with one is still on the task, and reading it as silence escalated tasks
 # nobody had abandoned.
-# meiva:link meiva_builtins/plugins/meiva_fleet/docs/tasks/task_model/task_model_reminders.meiva.okf.md
+# meiva:link meiva_builtins/plugins/meiva_fleet/docs/tasks/task_model/task_model_reminders.md
 
 from __future__ import annotations
 

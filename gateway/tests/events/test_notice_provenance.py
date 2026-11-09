@@ -6,7 +6,7 @@ from gateway.tests.auth.gateway_config import gateway_test_client
 # meiva:note
 # A notice row carries the credential the SERVER verified, not the caller's claim:
 # the path's agent_id says who the caller says it is, this says what proved it.
-# meiva:link gateway/agents/docs/notice-receipts.meiva.okf.md
+# meiva:link gateway/agents/docs/notice-receipts.md
 
 
 def seed_agent(db_conn: psycopg.Connection) -> int:

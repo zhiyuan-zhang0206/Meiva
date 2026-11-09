@@ -9,7 +9,7 @@
 # fixes crontab, and the retry refuses only on systemd. With OS jobs off the
 # gateway boots, provisioning the data plane once. It is a one-off verification
 # recipe, not a CI gate: apt and PyPI need the network and the run takes minutes.
-# meiva:link cli/commands/lifecycle/docs/start-readiness.meiva.okf.md
+# meiva:link cli/commands/lifecycle/docs/start-readiness.md
 
 from __future__ import annotations
 

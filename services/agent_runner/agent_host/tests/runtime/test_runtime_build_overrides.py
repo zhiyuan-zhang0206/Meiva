@@ -160,7 +160,7 @@ class FakeEngine:
     # meiva:note
     # A session bridge that only records being closed: the runtime cache decides when a
     # session dies, and that decision is what these tests pin down.
-    # meiva:link agent/graph/docs/harness-turn.meiva.okf.md
+    # meiva:link agent/graph/docs/harness-turn.md
     def __init__(self) -> None:
         self.harness = Harness.CLAUDE_CODE
         self.model = None
@@ -183,7 +183,7 @@ class SlowClosingEngine(FakeEngine):
     # meiva:note
     # A close that a test can hold open, so the gap between "runtime dropped" and
     # "CLI gone" is observable instead of a race.
-    # meiva:link agent/graph/docs/harness-turn.meiva.okf.md
+    # meiva:link agent/graph/docs/harness-turn.md
     def __init__(self) -> None:
         super().__init__()
         self.release = asyncio.Event()
@@ -323,7 +323,7 @@ async def test_dropping_an_agent_closes_its_session() -> None:
 # moment `_evict` runs, so a wake a second later builds a fresh bridge. Without the
 # join, that bridge would start a second CLI on the resumed session id while the first
 # one is still inside its terminate/kill window.
-# meiva:link agent/graph/docs/harness-turn.meiva.okf.md
+# meiva:link agent/graph/docs/harness-turn.md
 async def test_the_next_turn_waits_for_the_retired_session_to_close() -> None:
     host = AgentHost(
         runtime_owner=uuid4(),

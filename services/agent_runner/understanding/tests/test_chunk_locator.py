@@ -3,8 +3,8 @@
 # full-history stitching across empty, uncompacted and multi-segment threads, lazy
 # `compact_segment_shape` stamping and malformed-metadata repair, and zero reconstruction of
 # stamped older boundaries.
-# meiva:link base/agents/history/docs/range-read-contracts.meiva.okf.md
-# meiva:link base/agents/history/hierarchy/docs/chunks.meiva.okf.md
+# meiva:link base/agents/history/docs/range-read-contracts.md
+# meiva:link base/agents/history/hierarchy/docs/chunks.md
 
 from __future__ import annotations
 

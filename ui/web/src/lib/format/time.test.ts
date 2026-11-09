@@ -124,7 +124,7 @@ describe("formatUpcoming input handling", () => {
 
 // meiva:note
 // The suite pins TZ=UTC (tests/vitest.config.mts), so these timestamps render as UTC wall-clock values.
-// meiva:link ui/web/src/lib/format/docs/time.meiva.okf.md
+// meiva:link ui/web/src/lib/format/docs/time.md
 const INSTANT = "2026-10-17T08:26:07.250Z";
 
 describe("formatAbsolute clock format", () => {
@@ -213,7 +213,7 @@ describe("formatRelative sub-minute bucket", () => {
     // meiva:note
     // Above a minute the wording already starts with a digit, so the flag is a
     // no-op.
-    // meiva:link ui/web/src/docs/frontend-components/home-shell-chrome/home-shell-chrome.meiva.okf.md
+    // meiva:link ui/web/src/docs/frontend-components/home-shell-chrome/home-shell-chrome.md
     expect(formatRelative(new Date(NOW.getTime() - 300_000).toISOString(), NOW, { capitalize: true })).toBe("5m ago");
   });
 

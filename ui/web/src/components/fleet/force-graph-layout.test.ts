@@ -6,7 +6,7 @@ import { layoutOptions } from "./force-graph";
 // The threshold is the whole decision: below it a small graph keeps the live
 // d3 settle (it animates into place), at or above it the layout runs in manual
 // slices so a big graph does not repaint the SVG once per tick.
-// meiva:link ui/web/src/docs/frontend-components/fleet-view.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/fleet-view.md
 describe("layoutOptions", () => {
   it("keeps the live settle below the threshold", () => {
     expect(layoutOptions(199)).toEqual({});

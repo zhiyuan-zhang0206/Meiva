@@ -140,7 +140,7 @@ class PooledPostgresSaver(HistoryAsyncPostgresSaver):
         bound._machine = machine
         return bound
 
-    # meiva:link services/docs/agent_runner_side/checkpoint-writes.meiva.okf.md
+    # meiva:link services/docs/agent_runner_side/checkpoint-writes.md
     async def _verify_owner(
         self,
         conn: AsyncConnection[DictRow],

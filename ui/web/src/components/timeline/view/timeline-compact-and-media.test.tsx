@@ -278,7 +278,7 @@ describe("continuous compact history", () => {
     // meiva:note
     // The released pull is the reader's own read — the only origin that may
     // present the loading strip.
-    // meiva:link ui/web/src/docs/frontend-components/timeline-view/history-paging.meiva.okf.md
+    // meiva:link ui/web/src/docs/frontend-components/timeline-view/history-paging.md
     expect(loadOlder).toHaveBeenCalledWith("reader");
     act(() => {
       viewport.dispatchEvent(new Event("scroll"));

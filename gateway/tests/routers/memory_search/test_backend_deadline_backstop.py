@@ -14,7 +14,7 @@
 # together. Run the same test with `MEIVA_MEMORY_SEARCH_BACKEND_DEADLINE_GRACE_SECONDS=0` (the
 # tied case) and it answers `memory search backend failed: ` instead — that is the reverse
 # control for this fix.
-# meiva:link gateway/routers/docs/memory.meiva.okf.md
+# meiva:link gateway/routers/docs/memory.md
 
 from __future__ import annotations
 

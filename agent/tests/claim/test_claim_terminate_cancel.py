@@ -74,7 +74,7 @@ async def test_claim_terminate_kind_appends_lifecycle_marker_and_routes_to_end(
     # meiva:note
     # The marker is a system note: open tag, the bracketed timestamp (single pair — now_timestamp
     # carries its own), the text, close tag.
-    # meiva:link agent/messages/docs/message-format.meiva.okf.md
+    # meiva:link agent/messages/docs/message-format.md
     assert content.startswith("<system_note>\n[")
     assert content.endswith("\n</system_note>")
     assert "[system [" not in content  # anti-regression: double bracket bug
@@ -418,7 +418,7 @@ async def test_claim_lifecycle_marker_drops_timestamp_when_disabled(
 ):
     # meiva:note
     # message_timestamps=False → no timestamp: the open tag leads, then the text, no stray space.
-    # meiva:link agent/messages/docs/message-format.meiva.okf.md
+    # meiva:link agent/messages/docs/message-format.md
     tid = running_agent()
     insert_inbound_kind(db_conn, tid, "", "terminate", source="user")
     runtime = make_runtime(ops_pool=aops_pool, database_gate=database_gate)

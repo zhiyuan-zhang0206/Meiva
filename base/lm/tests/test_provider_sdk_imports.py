@@ -2,7 +2,7 @@
 # The provider SDKs are entered at their root, through `base.lm.compat.provider_sdks`, because a submodule
 # import from one thread while another thread executes that package's `__init__` gets the
 # half-built package back and fails: four hosted turns dropped on company-mini in 24h (#6538).
-# meiva:link base/lm/compat/docs/compat.meiva.okf.md
+# meiva:link base/lm/compat/README.md
 
 from __future__ import annotations
 

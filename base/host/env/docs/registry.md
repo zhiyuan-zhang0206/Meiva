@@ -1,0 +1,39 @@
+# Environment declaration registry
+
+`base/host/env/registry.py` owns the environment-key inventory and its
+boot/child projections. Settings fields declare aliases and metadata at their
+class declarations (`json_schema_extra`); `config_registry.py` builds the field
+registry without constructing Settings. Before Settings exists, boot-time
+projections read the generated static index in `config_lite_table.py`.
+
+Non-Settings passthrough keys include display/home/account variables, network
+proxy settings, temporary directories. PATH and
+VIRTUAL_ENV are registered inventory keys rebuilt at the delivery site rather
+than copied blindly. Enabled provider-plugin bindings declare removable provider
+keys; those declarations load at the delivery boundaries that consume them.
+
+## Consumers
+
+- **Forwarding** (`child_env(environ)`) — the parent-to-child env view of a daemon or session child. Native launchers receive an environment dict; secrets never ride argv. `session_child_env_keys()` names the same view as a key set for a consumer that must *close* an inherited environment rather than build one — the Claude adapter blanks every other key because its SDK merges the parent environment under the mapping it is given.
+- **Keep/drop** (`env_authority_drop_set(role)` / `env_keep_set(role)`) — dotenv_boot's own-environ surgery, as set-membership queries.
+- **Temp root** (`temp_dir_of(environ)`) — the directory the temp keys of a given dict name, in the order a POSIX tool reads them. A caller holding the child dict names the directory its child will use, where `tempfile.gettempdir()` would answer for the parent process instead.
+
+The consumption matrix decides which process reads each key. Capability/scope
+metadata validates those choices; it does not infer every consumer. Three
+hand-maintained classifications remain in `registry.py`:
+
+- `_HEALTH_PORT_SERVICES` selects services whose declared health-port aliases
+  feed the health/derived environment views.
+- `_IDENTITY_FIELDS` selects fields whose authority belongs to the child's own
+  home rather than the parent's inherited environment.
+- `_DERIVED_FIELDS` selects cluster-isolation fields stripped by `derive_env`.
+
+Adding a field declaration therefore does not automatically update every
+projection: a new consumption role may need a classification edit. Alias lookups
+come from the generated declarations and fail on missing fields. Passthrough
+rows that duplicate Settings aliases are rejected.
+
+## Related owners
+
+- [Configuration and Bootstrap](../../../docs/configuration/configuration.md) — Settings composition and configuration fields.
+- [Host primitives](../../docs/host.md) — host primitives.

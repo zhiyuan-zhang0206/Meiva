@@ -64,7 +64,7 @@ class TaskSummaryRow(BaseModel):
 # `results` is deliberately absent - it is 85% of the full list's bytes and only
 # the hover card shows it, which fetches `GET /api/tasks/{id}` for the one task
 # on screen (user report 2026-10-20: the 24-hour full list was 3.1 MB).
-# meiva:link gateway/routers/docs/routers.meiva.okf.md
+# meiva:link gateway/routers/docs/routers.md
 class TaskGraphRow(TaskSummaryRow):
     description: str
 

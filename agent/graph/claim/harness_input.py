@@ -17,7 +17,7 @@ _CHAT_IDS = TypeAdapter(list[StrictInt])
 
 # meiva:note
 # Persist the staged timeline and consume the exact owned chat rows together.
-# meiva:link agent/graph/docs/harness-turn.meiva.okf.md
+# meiva:link agent/graph/docs/harness-turn.md
 async def commit_harness_input(
     ctx: MeivaContext, agent_id: int, pending_input: Mapping[str, object] | None
 ) -> list[TimelineItem]:
@@ -36,7 +36,7 @@ async def commit_harness_input(
 # meiva:note
 # Retire only the unresolved rows of a staged batch. If acceptance committed as
 # cancellation arrived, the accepted chat already owns the timeline position.
-# meiva:link agent/graph/docs/harness-turn.meiva.okf.md
+# meiva:link agent/graph/docs/harness-turn.md
 async def retire_unconfirmed_harness_input(
     ctx: MeivaContext, agent_id: int, pending_input: Mapping[str, object] | None
 ) -> list[TimelineItem]:

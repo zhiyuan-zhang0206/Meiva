@@ -27,7 +27,7 @@ import { pinnedShellHeight } from "@/lib/browser/viewport";
 //
 // Renders nothing; mounted from app/layout.tsx inside <Providers> — the same file that declares the
 // Android meta — so every route, login included, is covered.
-// meiva:link ui/web/src/docs/frontend-state/browser-port.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-state/browser-port.md
 export function VisualViewportHeightSync() {
   const viewport = useBrowser().viewport;
   useEffect(() => {

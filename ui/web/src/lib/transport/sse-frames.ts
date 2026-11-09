@@ -12,7 +12,7 @@ export type SystemFrame =
 // so it is classified and never fanned out. A batch frame (`[...]` from the
 // all-events stream) keeps its object members and drops the rest instead of
 // casting corrupt members into SystemEvents.
-// meiva:link ui/web/src/docs/frontend-data-flow/frontend-data-flow.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-data-flow/frontend-data-flow.md
 function isHeartbeatPayload(item: unknown): boolean {
   return typeof item === "object" && item !== null && "role" in item && item.role === "heartbeat";
 }

@@ -361,7 +361,7 @@ def resolve_override(override: str, model: str, *, agent_id: int | None = None) 
 # row (the turn loop, compaction, the shared request helpers, the labeler, reply suggestions)
 # builds with meter=False or strips an injected build with unmeter(), and the meter's
 # message stamp stops a second row for the same response.
-# meiva:link base/lm/usage/docs/usage.meiva.okf.md
+# meiva:link base/lm/usage/README.md
 def _metered(
     client: BaseChatModel, *, meter: bool, model: str, catalog: ModelCatalog
 ) -> BaseChatModel:

@@ -37,7 +37,7 @@ _KIMI_EFFORT_LEVELS = ("low", "high", "max")
 # the legacy K2.x `thinking` request field (`ChatMoonshot.thinking` is deliberately left unset),
 # so `thinking={"type": "disabled"}` logs a warning while graded effort (`low`/`high`/`max`,
 # default `max`) rides top-level `reasoning_effort` via `extra_body`.
-# meiva:link base/lm/docs/lm/lm.meiva.okf.md
+# meiva:link base/lm/docs/lm/lm.md
 def build(ctx: BuildContext) -> BaseChatModel:
     from langchain_moonshot import ChatMoonshot
 
@@ -86,7 +86,7 @@ PROVIDER = ProviderContribution(
         # meiva:note
         # Display-only supersession (task #5609): `kimi-k3` stays spawnable for the configs
         # that already name it, while the picker offers Moonshot's post-trained successor.
-        # meiva:link base/lm/docs/pricing-model-rates.meiva.okf.md
+        # meiva:link base/lm/docs/pricing-model-rates.md
         "kimi-k3": ModelSpec(
             provider="kimi",
             spawnable=True,
@@ -129,7 +129,7 @@ PROVIDER = ProviderContribution(
         # same model served 2-3x faster at twice the input/output rate, so it keeps its own id
         # and every fact instead of becoming a `fast_of` row, which derives `<id>-fast` and
         # needs a served-speed receipt.
-        # meiva:link base/lm/docs/pricing-model-rates.meiva.okf.md
+        # meiva:link base/lm/docs/pricing-model-rates.md
         "kimi-k3.1-pro": ModelSpec(
             provider="kimi",
             spawnable=True,

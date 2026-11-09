@@ -22,7 +22,7 @@ def cache_write_tokens(
     # LangChain can clear the aggregate after copying the TTL breakdown; never
     # add both. OpenAI Responses uses a 30-minute default and may prefix its
     # aggregate with the served service tier.
-    # meiva:link base/lm/pricing/docs/pricing.meiva.okf.md
+    # meiva:link base/lm/pricing/docs/pricing.md
     generic = sum(
         _count(details, key)
         for key in details

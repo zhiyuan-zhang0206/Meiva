@@ -13,7 +13,7 @@ from scripts.ci.pull_requests.diagnose import classify_check, diagnose_pr, print
 # cache verdict that used to read as a test failure, and a genuine test assertion. The
 # classification is operator-facing, so what it says has to match what happened — a runner
 # whose mirror is down must never read like a red test.
-# meiva:link scripts/ci/pull_requests/docs/diagnostics.meiva.okf.md
+# meiva:link scripts/ci/pull_requests/docs/diagnostics.md
 
 
 def test_a_held_dpkg_lock_reads_as_infrastructure() -> None:

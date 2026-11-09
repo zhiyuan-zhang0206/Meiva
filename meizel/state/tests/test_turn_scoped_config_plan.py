@@ -3,7 +3,7 @@
 # read a per-agent field through the bare settings singleton, through the model layering by name or
 # through the process-global plugin map. Asserted by value; the rule end to end against a temporary
 # tree is `test_lint_turn_scoped_config.py`.
-# meiva:link meizel/docs/meizel.meiva.okf.md
+# meiva:link meizel/docs/meizel.md
 
 from __future__ import annotations
 

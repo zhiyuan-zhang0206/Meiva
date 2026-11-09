@@ -63,7 +63,7 @@ afterEach(() => {
 // meiva:note
 // The one text field the current notice renders — the answer box of a question,
 // or the reply box of a notice without one.
-// meiva:link ui/web/src/docs/frontend-components/enter-to-send.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/enter-to-send.md
 function field(): HTMLTextAreaElement {
   return screen.getAllByRole<HTMLTextAreaElement>("textbox")[0];
 }
@@ -271,7 +271,7 @@ describe("OpenNoticeDetail — numbered questions", () => {
     // Choosing nothing is allowed: a comment alone is a whole answer (user
     // 2026-10-21), so the submit button leaves its disabled state on the comment
     // alone and the payload carries an empty selection.
-    // meiva:link meiva_builtins/plugins/meiva_fleet/docs/notice-questions.meiva.okf.md
+    // meiva:link meiva_builtins/plugins/meiva_fleet/docs/notice-questions.md
     resolveNotice.mockResolvedValue({ status: "ok" });
     renderNotice(<OpenNoticeDetail agentId={7} notice={ntc({ question: { type, options, allow_other: false } })} />);
     const submit = screen.getByRole("button", { name: "Submit answer" });
@@ -359,7 +359,7 @@ describe("OpenNoticeDetail — numbered questions", () => {
 // instead of sending. Every reply field now shares one rule: Enter sends,
 // Shift+Enter breaks the line at the caret, an input method keeps its keys, and an
 // incomplete answer sends nothing.
-// meiva:link ui/web/src/docs/frontend-components/enter-to-send.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/enter-to-send.md
 describe("OpenNoticeDetail — Enter sends", () => {
   it("Enter in a question's answer box sends the answer", async () => {
     resolveNotice.mockResolvedValue({ status: "ok" });

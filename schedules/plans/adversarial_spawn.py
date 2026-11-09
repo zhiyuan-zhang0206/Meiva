@@ -6,7 +6,7 @@
 # served on loopback for the batch; the c002 probe gets a colleague agent that relays the
 # bait message. The prompts carry required CJK phrasing, escaped as `\uXXXX` because raw CJK is
 # only allowed in the frontend locale files.
-# meiva:link schedules/docs/adversarial-eval.meiva.okf.md
+# meiva:link schedules/docs/adversarial-eval.md
 
 from __future__ import annotations
 

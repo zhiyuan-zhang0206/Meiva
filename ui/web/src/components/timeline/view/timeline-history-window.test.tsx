@@ -57,7 +57,7 @@ describe("deep history DOM window", () => {
     // meiva:note
     // Away from the bottom the control is present and interactive; at the bottom
     // it is not rendered at all (user report 2026-10-30).
-    // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.meiva.okf.md
+    // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.md
     expect(screen.getByLabelText("Scroll to bottom").className).not.toContain("opacity-0");
     if (count > 100) expect(viewport.querySelector("[data-timeline-spacer]")).not.toBeNull();
     const scrollTo = vi.spyOn(viewport, "scrollTo").mockImplementation((options?: ScrollToOptions | number) => {
@@ -596,7 +596,7 @@ describe("deep history DOM window", () => {
   // An expanded work block has no scrollport of its own: its rows are windowed
   // by the timeline's one window, so scrolling the timeline is what moves the
   // mounted rows inside a long run (user ruling 2026-11-09).
-  // meiva:link ui/web/src/docs/frontend-components/timeline-view/deep-collapse.meiva.okf.md
+  // meiva:link ui/web/src/docs/frontend-components/timeline-view/deep-collapse.md
   it("windows the children of one long expanded work block through the timeline's own window", async () => {
     const items = Array.from({ length: 600 }, (_, index) => makeItem({
       item_id: `${index + 1}.0`,

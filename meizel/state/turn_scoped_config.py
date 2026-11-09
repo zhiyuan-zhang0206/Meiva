@@ -2,7 +2,7 @@
 # The effect shell of the turn-scoped-config rule: it walks the scan directories, resolves and reads
 # each file, then prints the report. Which files the rule skips, which reads are findings and the
 # text of every heading are decided in `meizel.state.turn_scoped_config_plan`.
-# meiva:link meizel/docs/meizel.meiva.okf.md
+# meiva:link meizel/docs/meizel.md
 
 from __future__ import annotations
 

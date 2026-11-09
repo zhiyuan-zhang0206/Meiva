@@ -21,7 +21,7 @@ from ._stall import stall_guard
 # meiva:note
 # Per-agent count of the messages the last published timeline snapshot covered. It is process
 # state: one host serves many agents, so it outlives any one node and is keyed by agent id.
-# meiva:link agent/graph/docs/node-lifecycle.meiva.okf.md
+# meiva:link agent/graph/docs/node-lifecycle.md
 SNAPSHOT_CURSOR: dict[int, int] = {}
 
 _NODE_EXIT_AGGREGATE: dict[int, list[dict[str, Any]]] = {}
@@ -29,7 +29,7 @@ _NODE_EXIT_AGGREGATE: dict[int, list[dict[str, Any]]] = {}
 _NODE_EXIT_AGGREGATE_CAP = 32
 
 
-# meiva:link agent/graph/docs/node-lifecycle.meiva.okf.md
+# meiva:link agent/graph/docs/node-lifecycle.md
 def flush_node_exit_aggregate(agent_id: int) -> None:
     entries = _NODE_EXIT_AGGREGATE.pop(agent_id, [])
     if not entries:
@@ -43,7 +43,7 @@ def flush_node_exit_aggregate(agent_id: int) -> None:
     )
 
 
-# meiva:link agent/graph/docs/node-lifecycle.meiva.okf.md
+# meiva:link agent/graph/docs/node-lifecycle.md
 def _accumulate_node_exit(
     agent_id: int,
     node_name: str,
@@ -67,7 +67,7 @@ def _accumulate_node_exit(
 # arms the diagnostic probe around the body and `timeline_limit` bounds a full-window snapshot.
 # Normal and cancelled exits buffer per agent until the turn boundary flush; an exception exit
 # logs at once, inside the `except`, so the record carries the live traceback.
-# meiva:link agent/graph/docs/node-lifecycle.meiva.okf.md
+# meiva:link agent/graph/docs/node-lifecycle.md
 @contextlib.asynccontextmanager
 async def node_lifecycle(
     node_name: str,

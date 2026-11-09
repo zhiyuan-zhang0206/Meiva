@@ -8,7 +8,7 @@
 // lib/ may not import src/test-support/ (test-support already reaches lib), so a hook test here
 // mounts this page by hand; component tests use `@/test-support/render`, the same thing with less
 // boilerplate.
-// meiva:link ui/web/src/docs/frontend-state/browser-port.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-state/browser-port.md
 
 // meiva:note
 // @vitest-environment happy-dom

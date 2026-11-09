@@ -1,12 +1,12 @@
 # meiva:note
 # Unified runtime config — per-domain sub-models aggregated into one `settings`.
-# meiva:link base/docs/configuration/configuration.meiva.okf.md
+# meiva:link base/docs/configuration/configuration.md
 
 # meiva:note
 # pydantic-settings validates types at startup (format errors blow up immediately),
 # centralizes defaults in one place, and replaces scattered `os.environ.get()` with
 # attribute access.
-# meiva:link base/docs/configuration/configuration.meiva.okf.md
+# meiva:link base/docs/configuration/configuration.md
 
 # meiva:note
 # The former flat `Settings` god object is split by owning domain into sub-models
@@ -16,7 +16,7 @@
 # (`settings.lm.llm_model`). The split is invisible to `.env`: every MEIVA_* alias is
 # unchanged, so `.env` files, `_enforce_cluster_env_authority`, the bootstrap
 # payload, and the config PUT keep working byte-for-byte.
-# meiva:link base/docs/configuration/configuration.meiva.okf.md
+# meiva:link base/docs/configuration/configuration.md
 
 # meiva:note
 # Layout: the sub-models live in `base/config/domains/` (grouped by owner:
@@ -25,7 +25,7 @@
 # metadata) in `base/config/admin/`. Grouping is by folder only: the registry stays
 # the flat `DOMAIN_MODELS` / `model_classes()` in `base/config/config_registry.py`, and a
 # component's own config slice belongs in that component's package, not here.
-# meiva:link base/docs/configuration/configuration.meiva.okf.md
+# meiva:link base/docs/configuration/configuration.md
 
 # meiva:note
 # Precedence: env var > Field default. `$MEIVA_HOME/.env` is the single source of
@@ -33,7 +33,7 @@
 # (`set_key` / `unset_key` by alias; see `base/config/runtime_config.py`), and
 # pydantic-settings reads it at startup. There is no separate override layer: a
 # value lives in exactly one place.
-# meiva:link base/docs/configuration/configuration.meiva.okf.md
+# meiva:link base/docs/configuration/configuration.md
 
 # meiva:note
 # Boot-lite boot (task #3621)
@@ -49,13 +49,13 @@
 # construct every domain at boot. Settings-lite maintenance verbs
 # (`MEIVA_CONFIG_FETCH=skip`) keep their deferred load — a broken `.env` stays
 # repairable.
-# meiva:link base/docs/configuration/configuration.meiva.okf.md
+# meiva:link base/docs/configuration/configuration.md
 
 # meiva:note
 # Third-party-library-consumed secrets (ANTHROPIC_API_KEY, ...) are modeled
 # as fields — our own Python code accesses via `settings.<domain>.X.get_secret_value()`;
 # the LangChain SDK still reads `os.environ` itself (we do not prevent it).
-# meiva:link base/docs/configuration/configuration.meiva.okf.md
+# meiva:link base/docs/configuration/configuration.md
 
 # meiva:note
 # The metadata machinery (`get_config_metadata`, `BOOTSTRAP_FIELDS`,
@@ -78,14 +78,14 @@
 #   a single capability (cluster-wide policy or the shared host identity).
 # - per_agent: whether a spawn/restart `config_overlay` may override the field
 # - lifecycle: frozen | live — REQUIRED on every per_agent field (see below)
-# meiva:link base/docs/configuration/configuration.meiva.okf.md
+# meiva:link base/docs/configuration/configuration.md
 
 # meiva:note
 # The per-agent config lifecycle axis (`lifecycle`)
 # `per_agent=True` says a field CAN be overridden for one agent. `lifecycle` says
 # what happens to that field when NOBODY overrode it — i.e. how a running agent
 # tracks a later change to the cluster default:
-# meiva:link base/docs/configuration/configuration.meiva.okf.md
+# meiva:link base/docs/configuration/configuration.md
 
 # meiva:note
 # - **frozen** — resolved ONCE at the spawn boundary from the then-current default,
@@ -100,14 +100,14 @@
 #   edit reaches every agent on its next restart. This is the right class for
 #   operational knobs (compaction thresholds, stream timeouts, recall tuning): they
 #   tune the runtime around the agent, they do not define it.
-# meiva:link base/docs/configuration/configuration.meiva.okf.md
+# meiva:link base/docs/configuration/configuration.md
 
 # meiva:note
 # An explicit `config_overlay` is ORTHOGONAL to this axis and always wins:
 # `config_overlay > birth_config > current default`. The two stores are deliberately
 # separate so provenance survives — "the user chose this for this agent" and "this
 # was merely the cluster default the day it was born" must stay distinguishable.
-# meiva:link base/docs/configuration/configuration.meiva.okf.md
+# meiva:link base/docs/configuration/configuration.md
 
 # meiva:note
 # **Boundary**: `lifecycle` applies only to `per_agent=True` fields. A field that is
@@ -116,11 +116,11 @@
 # one is a category error and the registry rejects it. Plugin `Config` fields
 # (`base/packages/plugins/config_registration.py`) are outside this registry and are not part of
 # the frozen set; they behave as `live` and only an explicit overlay pins them.
-# meiva:link base/docs/configuration/configuration.meiva.okf.md
+# meiva:link base/docs/configuration/configuration.md
 
 # meiva:note
 # Resolution + stamping mechanics: `base/agents/model/birth_config.py`.
-# meiva:link base/docs/configuration/configuration.meiva.okf.md
+# meiva:link base/docs/configuration/configuration.md
 
 # meiva:note
 # Reading per-agent fields from turn-scoped code
@@ -130,7 +130,7 @@
 # default. The exec child and the SDK (`meiva/`) run one agent per process, so
 # their settings carry that agent's overlay. Enforced by
 # `scripts/lint/turn_scoped_config.py`.
-# meiva:link base/docs/configuration/configuration.meiva.okf.md
+# meiva:link base/docs/configuration/configuration.md
 from __future__ import annotations
 
 import os

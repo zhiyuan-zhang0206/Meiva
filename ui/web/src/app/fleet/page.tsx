@@ -5,7 +5,7 @@
 // `useRouter` is a client hook, and importing it into a server component fails the production build
 // (RSC boundary — neither tsc, eslint nor vitest sees it). Every other route that reads the router
 // (`/`, `/control/guide`, `/control/schedules`) is a client component for the same reason.
-// meiva:link ui/web/src/docs/frontend-components/fleet-view.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/fleet-view.md
 
 // meiva:note
 // /fleet — full-screen multi-agent supervision view. Renders the live agent
@@ -44,7 +44,7 @@ export interface FleetPageViewProps {
 // `navigate`, and names the surface itself for the view, which owns the landmark and the boundary.
 // A test renders the view with its own stand-in surface and a spy instead of replacing either
 // module.
-// meiva:link ui/web/src/docs/frontend-state/frontend-state.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-state/frontend-state.md
 export default function FleetPage() {
   const router = useRouter();
   const diagnostics = useStreamHub().transport.diagnostics;
@@ -56,7 +56,7 @@ export function FleetPageView({ FleetView, navigate, diagnostics }: FleetPageVie
   // meiva:note
   // <main> landmark (Task #1051 a11y) -- the fleet page is a primary surface; same pattern as
   // app/page.tsx.
-  // meiva:link ui/web/src/docs/frontend-state/frontend-state.meiva.okf.md
+  // meiva:link ui/web/src/docs/frontend-state/frontend-state.md
   return (
     <main id="main-content" className={cn(FLEX, FLEX_1, MIN_H_0, MIN_W_0)}>
       <ErrorBoundary diagnostics={diagnostics}>

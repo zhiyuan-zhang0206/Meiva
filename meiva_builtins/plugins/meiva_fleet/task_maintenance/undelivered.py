@@ -4,7 +4,7 @@
 # because it never sent, the counters stay quiet because they never advanced, and the task
 # simply sits (task #6399, the gap #8596 exposed). This module answers the one question the
 # counters cannot: has a reminder reached this owner at all?
-# meiva:link meiva_builtins/plugins/meiva_fleet/task_maintenance/docs/task-maintenance/task-maintenance.meiva.okf.md
+# meiva:link meiva_builtins/plugins/meiva_fleet/task_maintenance/docs/task-maintenance/task-maintenance.md
 from dataclasses import dataclass
 
 from psycopg_pool import ConnectionPool

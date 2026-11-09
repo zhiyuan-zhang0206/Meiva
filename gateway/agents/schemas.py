@@ -112,7 +112,7 @@ class SystemNoteIn(BaseModel):
 
 
 class ResolveNoticeIn(BaseModel):
-    # meiva:link gateway/agents/docs/notice-receipts.meiva.okf.md
+    # meiva:link gateway/agents/docs/notice-receipts.md
 
     model_config = ConfigDict(extra="forbid")
     action: Literal["answer", "dismiss", "read"]
@@ -127,7 +127,7 @@ class ResolveNoticeIn(BaseModel):
 
 
 class NoticeCreateIn(BaseModel):
-    # meiva:link meiva_builtins/plugins/meiva_fleet/docs/notify.meiva.okf.md
+    # meiva:link meiva_builtins/plugins/meiva_fleet/docs/notify.md
 
     model_config = ConfigDict(extra="forbid")
     title: str
@@ -146,7 +146,7 @@ class NoticeCreateIn(BaseModel):
 
 
 class NoticeEditIn(BaseModel):
-    # meiva:link meiva_builtins/plugins/meiva_fleet/docs/notify.meiva.okf.md
+    # meiva:link meiva_builtins/plugins/meiva_fleet/docs/notify.md
 
     title: str | None = None
     content: str | None = None
@@ -155,7 +155,7 @@ class NoticeEditIn(BaseModel):
 
 
 class NoticeItem(BaseModel):
-    # meiva:link meiva_builtins/plugins/meiva_fleet/docs/notify.meiva.okf.md
+    # meiva:link meiva_builtins/plugins/meiva_fleet/docs/notify.md
 
     id: int
     agent_id: int
@@ -178,7 +178,7 @@ class NoticeItem(BaseModel):
     # The credential fact the server verified for the request that wrote this row:
     # cluster_bearer / machine_token:<class> / user_session / internal. None on rows
     # written before the column existed — never a caller's own claim.
-    # meiva:link gateway/agents/docs/notice-receipts.meiva.okf.md
+    # meiva:link gateway/agents/docs/notice-receipts.md
     source_verified_by: str | None = None
     expire_at: datetime | None
 
@@ -193,7 +193,7 @@ class NoticesCursor(BaseModel):
 
 
 class NoticesFeed(BaseModel):
-    # meiva:link gateway/routers/docs/frontend-ui-data.meiva.okf.md
+    # meiva:link gateway/routers/docs/frontend-ui-data.md
 
     open: list[NoticeItem]
     awaiting: list[NoticeItem]

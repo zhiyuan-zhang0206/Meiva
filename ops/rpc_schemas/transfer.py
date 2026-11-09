@@ -2,7 +2,7 @@
 # Agent cross-machine transfer wire contracts: the public CLI-to-gateway REST request and
 # response, the gateway-to-source-runner binary workspace export request and bundle manifest, and
 # the four `POST /ops` envelopes that prepare, import, finalize and abort a target workspace.
-# meiva:link gateway/agents/docs/agent-transfer.meiva.okf.md
+# meiva:link gateway/agents/docs/agent-transfer.md
 
 from __future__ import annotations
 

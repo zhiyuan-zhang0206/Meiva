@@ -7,7 +7,7 @@
 # in `sys.modules` whose spec is still initializing. A module that finished importing
 # and lost the attribute must stay an error — that is a rename or a deletion, not a
 # race, and skipping it would silently stop closing the previous test's pool.
-# meiva:link tests/fixtures/docs/native-provisioning.meiva.okf.md
+# meiva:link tests/fixtures/docs/native-provisioning.md
 from __future__ import annotations
 
 import importlib.machinery

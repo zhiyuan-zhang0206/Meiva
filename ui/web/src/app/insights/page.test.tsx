@@ -20,7 +20,7 @@ import { InsightsShell } from "./page";
 // The section bodies are stand-ins: the shell takes each one as a required prop. They carry the
 // section element ids (their bodies are covered by each page's own test file) so the nav's
 // sub-anchor jumps have a real target.
-// meiva:link ui/web/src/docs/frontend-components/control-page-load.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/control-page-load.md
 function StatusBody() {
   return (
     <div id="status-services">
@@ -83,7 +83,7 @@ describe("InsightsPage shell", () => {
     // about the second one. On a slow CI worker Ops was still queued when this line
     // ran, so the assertion has to wait for it like the composition test below does
     // (CI red 2026-10-21, twice, same point; green locally at every speed tried).
-    // meiva:link ui/web/src/docs/frontend-components/control-page-load.meiva.okf.md
+    // meiva:link ui/web/src/docs/frontend-components/control-page-load.md
     await waitFor(() => expect(screen.getByText("OPS_BODY")).toBeTruthy());
   });
 

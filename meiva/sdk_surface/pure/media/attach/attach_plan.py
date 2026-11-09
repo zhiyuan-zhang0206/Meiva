@@ -4,7 +4,7 @@
 # read the file facts. The registration shell (`attachment_transport.register_media`) reads the
 # process, the file system and the model catalog and executes the answer. Nothing here reads
 # or writes the process, so the order of the gates is tested as a table.
-# meiva:link meiva/docs/sdk-surface/sdk-surface.meiva.okf.md
+# meiva:link meiva/docs/sdk-surface/sdk-surface.md
 
 from __future__ import annotations
 

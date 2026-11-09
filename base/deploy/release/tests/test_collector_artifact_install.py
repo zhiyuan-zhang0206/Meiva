@@ -1,4 +1,4 @@
-# meiva:link base/deploy/release/docs/collector-artifact.meiva.okf.md
+# meiva:link base/deploy/release/docs/collector-artifact.md
 from __future__ import annotations
 
 import io

@@ -47,7 +47,7 @@
 # list fetch aborts the run (exit 1, no emission — old Prometheus values stay).
 # Timeline failures degrade to cached or partial records and are counted in
 # ``stats``.
-# meiva:link scripts/ci/docs/ci.meiva.okf.md
+# meiva:link scripts/ci/docs/ci.md
 
 
 from __future__ import annotations

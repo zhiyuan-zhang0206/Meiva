@@ -307,7 +307,7 @@ describe("TimelineView expanded work block height", () => {
   // inner scrollport, no viewport-relative cap, whatever its position. A
   // finished block is as tall as the work really was and the reader scrolls the
   // timeline itself (user ruling 2026-11-09).
-  // meiva:link ui/web/src/docs/frontend-components/timeline-view/deep-collapse.meiva.okf.md
+  // meiva:link ui/web/src/docs/frontend-components/timeline-view/deep-collapse.md
   it("keeps historical turns collapsed until opened, then renders them at their natural height", () => {
     const { container } = render(<TimelineView items={[
       makeItem({ item_id: "1.0", kind: "agent_reasoning", payload: "Earlier thought" }),

@@ -6,7 +6,7 @@
 # 1. Disconnected code islands (0 incoming paths from production roots or test suites).
 # 2. Fake-test-preserved islands (reachable ONLY from tests/fixtures, 0 paths from any [roots]).
 # 3. Island clusters (connected components of dead or test-only preserved modules).
-# meiva:link meizel/docs/meizel.meiva.okf.md
+# meiva:link meizel/docs/meizel.md
 
 from __future__ import annotations
 

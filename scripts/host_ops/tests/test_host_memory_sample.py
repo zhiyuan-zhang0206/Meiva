@@ -2,7 +2,7 @@
 # Process-level checks for the read-only host memory sampler: unit ranking,
 # unbounded-limit decoding and log rotation, plus the degrade path when the
 # kernel files are absent.
-# meiva:link scripts/host_ops/docs/host-memory-sample.meiva.okf.md
+# meiva:link scripts/host_ops/docs/host-memory-sample.md
 from __future__ import annotations
 
 from pathlib import Path

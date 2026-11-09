@@ -14,7 +14,7 @@
 # Each scenario runs in a fresh interpreter (`child_lazy_load.py`) against a real plugin
 # directory in the test home. The plugin counts its own executions in a file, so a load that
 # happened or did not happen is read from the plugin, not from a replaced loader.
-# meiva:link meiva/docs/boot-contracts.meiva.okf.md
+# meiva:link meiva/docs/boot-contracts.md
 
 from __future__ import annotations
 

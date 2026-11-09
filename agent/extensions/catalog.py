@@ -234,7 +234,7 @@ def _return_annotation(signature: inspect.Signature) -> object:
     return object_of(getattr, signature, "return_annotation")
 
 
-# meiva:link agent/extensions/docs/catalog.meiva.okf.md
+# meiva:link agent/extensions/docs/catalog.md
 def entry_point_signature(entry_point: type) -> str:
     signature = inspect.signature(entry_point)
     signature = signature.replace(
@@ -278,7 +278,7 @@ class Catalog:
     plugins: tuple[PluginView, ...]
 
     def plugin(self, name: str) -> PluginView:
-        # meiva:link agent/extensions/docs/catalog.meiva.okf.md
+        # meiva:link agent/extensions/docs/catalog.md
         known = {p.name for p in self.plugins}
         resolved = names.find(name, known) or name
         for view in self.plugins:
@@ -294,7 +294,7 @@ class UnknownPluginError(Exception):
     pass
 
 
-# meiva:link agent/extensions/docs/catalog.meiva.okf.md
+# meiva:link agent/extensions/docs/catalog.md
 def build_catalog(*, sampling: SamplingPolicyOwner, home: Path) -> Catalog:
     from agent.state import plugin_state_schema
     from base.packages.plugins.loading.registry import declarations
@@ -385,7 +385,7 @@ def _repo_plugins_dir() -> Path:
     return paths.repo_plugins_dir()
 
 
-# meiva:link agent/extensions/docs/catalog.meiva.okf.md
+# meiva:link agent/extensions/docs/catalog.md
 def declared_vs_registered(view: PluginView) -> tuple[DiffEntry, ...]:
     entries: list[DiffEntry] = []
     for surface in SURFACES:
@@ -408,7 +408,7 @@ def _is_object_list(value: object) -> TypeGuard[list[object]]:
     return isinstance(value, list)
 
 
-# meiva:link agent/extensions/docs/catalog.meiva.okf.md
+# meiva:link agent/extensions/docs/catalog.md
 def _declared_identifiers(manifest: PluginManifest, key: str) -> set[str]:
     declared = manifest.contributions.get(key)
     if declared is None:

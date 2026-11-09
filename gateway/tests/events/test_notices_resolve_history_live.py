@@ -285,7 +285,7 @@ def test_live_empty_after_cursor(db_conn: psycopg.Connection) -> None:
 # The published event carries the GLOBAL id, not the agent-local one: the SDK's id
 # space is local and the frontend feed matches on global ids, so a local id here
 # leaves the resolved row in the open list until a refresh.
-# meiva:link gateway/agents/docs/notice-receipts.meiva.okf.md
+# meiva:link gateway/agents/docs/notice-receipts.md
 def test_resolution_publishes_global_notice_id(
     db_conn: psycopg.Connection, event_bus: EventBus
 ) -> None:

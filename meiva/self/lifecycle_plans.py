@@ -5,7 +5,7 @@
 # and the texts of a compaction. The facade (`meiva/self/__init__.py`) reads the bound context, the
 # database row and the installation, runs the SQL `plans.py` returns and publishes the wake; these
 # functions only choose.
-# meiva:link meiva/self/docs/self.meiva.okf.md
+# meiva:link meiva/self/README.md
 
 from __future__ import annotations
 

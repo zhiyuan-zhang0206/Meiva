@@ -43,7 +43,7 @@ _PROBED = [
 # one that cannot launch today, so adding an adapter does not turn this red and
 # removing one does. The built-in runtime is the exception the rule names: it needs
 # neither an install, a login, nor a CLI model probe.
-# meiva:link base/agents/docs/harness/harness.meiva.okf.md
+# meiva:link base/agents/docs/harness/harness.md
 @pytest.mark.parametrize("harness", list(Harness))
 def test_launchable_needs_a_launcher_and_a_machine_that_can_run_it(harness: Harness) -> None:
     models = [] if harness is Harness.MEIVA else [_MODEL]
@@ -86,7 +86,7 @@ def test_rows_carry_status_and_reason_through() -> None:
     # Billing travels with the harness, not with the model or the route: the
     # built-in runtime is metered, the external CLIs run on subscriptions, and the
     # spawn picker shows rates only for the metered one (user 2026-10-20).
-    # meiva:link base/agents/docs/harness/harness.meiva.okf.md
+    # meiva:link base/agents/docs/harness/harness.md
     assert [row.billing for row in probed] == [
         "api",
         "subscription",

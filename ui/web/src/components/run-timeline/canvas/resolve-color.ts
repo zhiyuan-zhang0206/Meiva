@@ -6,7 +6,7 @@
 // The resolver is a value built from the browser port's media answers (`colorResolver`), so a
 // component takes it from `useColorResolver` and the paint code receives it — nothing here asks
 // the window which color scheme it prefers.
-// meiva:link ui/web/src/docs/frontend-components/run-timeline/agent-links.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/run-timeline/agent-links.md
 
 import { useMemo } from "react";
 

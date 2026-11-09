@@ -1,4 +1,4 @@
-# meiva:link schedules/docs/debt-sweep.meiva.okf.md
+# meiva:link schedules/docs/debt-sweep.md
 
 import os
 import sys

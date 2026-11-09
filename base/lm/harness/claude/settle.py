@@ -10,7 +10,7 @@ from base.lm.harness.session import SessionTotals, TurnOutcome
 # How one result message settles a turn: what the outcome is, what the stream is told, and what
 # the session has spent afterwards. Pure, so the two shapes the base session consumes cannot
 # disagree about the text, the step count or the running total.
-# meiva:link base/lm/harness/claude/docs/claude.meiva.okf.md
+# meiva:link base/lm/harness/claude/docs/claude.md
 
 
 # meiva:note
@@ -36,7 +36,7 @@ class ResultSettlement:
 # boundary nor a failure. It is recorded so the stream keeps one entry per turn the provider
 # ran, and it is not delivered as new inbound content — the agent already read the reply in the
 # provider's transcript, unlike the report that asked for it (#5663).
-# meiva:link base/lm/harness/claude/docs/claude.meiva.okf.md
+# meiva:link base/lm/harness/claude/docs/claude.md
 def result_output(fields: ResultFields) -> UnsolicitedOutput:
     return UnsolicitedOutput(source=fields.origin_kind or "result", text=fields.result_text or "")
 
@@ -45,7 +45,7 @@ def result_output(fields: ResultFields) -> UnsolicitedOutput:
 # The turn's text is what the assistant streamed, falling back to the result's own text when it
 # streamed none; `num_turns` is the larger of the CLI's count and the steps this session saw,
 # never below one; and the session id a result names wins over the one the init reported.
-# meiva:link base/lm/harness/claude/docs/claude.meiva.okf.md
+# meiva:link base/lm/harness/claude/docs/claude.md
 def settle_result(
     fields: ResultFields,
     *,

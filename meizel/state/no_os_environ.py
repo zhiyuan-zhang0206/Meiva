@@ -9,7 +9,7 @@
 # This module is the effect shell of that rule: it locates the repository, reads the policy, walks
 # the scan directories, reads each judged file and prints. Which directories and files it judges and
 # what it prints are decided in `meizel.state.no_os_environ_plan`.
-# meiva:link meizel/docs/meizel.meiva.okf.md
+# meiva:link meizel/docs/meizel.md
 
 from __future__ import annotations
 

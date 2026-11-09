@@ -13,7 +13,7 @@ from base.packages.skills.tree import Skill, Tree, flatten
 from base.packages.skills.tree_builder import SkillIndexBuilder
 
 
-# meiva:link meiva/skills/docs/skills.meiva.okf.md
+# meiva:link meiva/skills/README.md
 def scan_tree(skills_root: Path, gate: set[str] | None, provider_roots: Sequence[Path]) -> Tree:
     builder = SkillIndexBuilder()
     builder.mount(skills_root, gate, SkillIndex.cached([skills_root]).entries)
@@ -22,7 +22,7 @@ def scan_tree(skills_root: Path, gate: set[str] | None, provider_roots: Sequence
     return builder.tree
 
 
-# meiva:link meiva/skills/docs/skills.meiva.okf.md
+# meiva:link meiva/skills/README.md
 def skills_in(roots: list[Path]) -> list[Skill]:
     builder = SkillIndexBuilder()
     for root in roots:

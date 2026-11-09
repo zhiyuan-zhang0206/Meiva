@@ -28,7 +28,7 @@ _BACKGROUND_FIX = (
 )
 # meiva:note
 # The document that states the rule; the message of this owner points here.
-_DOC = "meizel/docs/ambient-state.meiva.okf.md"
+_DOC = "meizel/docs/ambient-state.md"
 
 # meiva:note
 # Why the rule exists, per mechanism rather than per rule: the rules that report the same kind of

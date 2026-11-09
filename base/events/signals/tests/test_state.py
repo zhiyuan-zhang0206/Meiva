@@ -2,7 +2,7 @@
 # What the write path has to guarantee: one open row per condition, a closed row that stays as
 # history, and no commit of its own -- the caller's transaction decides. Each test names the
 # mechanism it proves, not a symptom it happened to see.
-# meiva:link base/events/signals/docs/signals.meiva.okf.md
+# meiva:link base/events/signals/README.md
 
 from __future__ import annotations
 

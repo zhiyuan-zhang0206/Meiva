@@ -41,7 +41,7 @@ def _is_response_error(exc: Exception) -> bool:
 # is one) is logged as an ACL misconfiguration rather than swallowed - this agent's redis
 # ACL user is not granted its own `<prefix>:inbound:*` channel. The channel comes from
 # `inbound_channel`, so it matches `RedisInboundListener` and stays inside the ACL grant.
-# meiva:link meiva/self/docs/self.meiva.okf.md
+# meiva:link meiva/self/README.md
 def publish_inbound_wake(
     redis: _RedisPublisher | _LazyRedis, agent_id: int, *, events_channel: str
 ) -> None:

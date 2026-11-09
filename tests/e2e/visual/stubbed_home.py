@@ -339,7 +339,7 @@ _FAKE_SSE_TEMPLATE = """
 # tall and its LAST child is the one whose chrome band sits against the collapse
 # wrapper's clip line. Every item is stamped: the band under the last block is
 # the timestamp this fixture exists to measure.
-# meiva:link tests/e2e/visual/docs/layout-invariants.meiva.okf.md
+# meiva:link tests/e2e/visual/docs/layout-invariants.md
 def work_block_items() -> Sequence[Mapping[str, object]]:
     items = [
         {
@@ -388,7 +388,7 @@ def work_block_items() -> Sequence[Mapping[str, object]]:
 # The default conversation as the one `timeline_snapshot` event both stream
 # drivers send: the timer-fed fake starts from it, and a scripted suite seeds the
 # page with it before emitting its own turn.
-# meiva:link tests/e2e/visual/docs/layout-invariants.meiva.okf.md
+# meiva:link tests/e2e/visual/docs/layout-invariants.md
 def timeline_snapshot(items: Sequence[Mapping[str, object]] | None = None) -> dict[str, object]:
     snapshot_items = _timeline_items() if items is None else items
     return {
@@ -403,7 +403,7 @@ def timeline_snapshot(items: Sequence[Mapping[str, object]] | None = None) -> di
 # The pre-app EventSource fake for one snapshot: `items` replaces the default
 # conversation, and a caller that supplies its own rows gets no streamed delta —
 # the delta appends to an item id only the default conversation has.
-# meiva:link tests/e2e/visual/docs/layout-invariants.meiva.okf.md
+# meiva:link tests/e2e/visual/docs/layout-invariants.md
 def _fake_sse_js(items: Sequence[Mapping[str, object]] | None = None) -> str:
     snapshot = timeline_snapshot(items)
     delta = (
@@ -425,7 +425,7 @@ _FAKE_SSE_JS = _fake_sse_js()
 # never about a timer or a real turn's pacing. `open_page(..., scripted_sse=True)`
 # swaps the timer-fed fake above for this one; the page then shows exactly what
 # the suite emits, in the order emitted.
-# meiva:link tests/e2e/visual/docs/layout-invariants.meiva.okf.md
+# meiva:link tests/e2e/visual/docs/layout-invariants.md
 _SCRIPTED_SSE_JS = """
 (() => {
   const CLOSED = 2;
@@ -509,7 +509,7 @@ def open_page(
     # the `/api/agents/1/timeline` stub agree on it; `settings` replaces the
     # `/api/settings` rows, which is how a suite picks a Display mode without
     # clicking through the UI.
-    # meiva:link tests/e2e/visual/docs/layout-invariants.meiva.okf.md
+    # meiva:link tests/e2e/visual/docs/layout-invariants.md
     page = ctx.new_page()
     # The fake EventSource is ALWAYS injected (timeline invariants need the
     # stream even against a deployed bundle; the fleet page ignores it).
@@ -517,7 +517,7 @@ def open_page(
     # `scripted_sse` hands the stream to the suite instead of the timer: the page
     # then renders only the events the suite emits, so a geometry measurement is
     # reproducible from the recorded event list alone.
-    # meiva:link tests/e2e/visual/docs/layout-invariants.meiva.okf.md
+    # meiva:link tests/e2e/visual/docs/layout-invariants.md
     fake_sse = (
         _SCRIPTED_SSE_JS
         if scripted_sse

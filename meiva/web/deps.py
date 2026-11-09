@@ -1,4 +1,4 @@
-# meiva:link meiva/web/docs/web.meiva.okf.md
+# meiva:link meiva/web/docs/web.md
 
 from __future__ import annotations
 

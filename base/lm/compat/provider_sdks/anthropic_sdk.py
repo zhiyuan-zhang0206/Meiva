@@ -14,7 +14,7 @@
 # The one root import here loads that whole graph, so a second thread asking for this module waits
 # on its lock and then reads a complete package. Every other site reaches the SDK through this
 # module; a submodule import of its own (`from anthropic.types import ...`) reopens the race.
-# meiva:link base/lm/compat/docs/compat.meiva.okf.md
+# meiva:link base/lm/compat/README.md
 
 import anthropic
 

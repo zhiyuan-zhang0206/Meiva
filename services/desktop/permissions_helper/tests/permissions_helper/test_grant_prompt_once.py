@@ -3,7 +3,7 @@
 # focus, so a daemon that re-asks on a timer turns one missing grant into a stream of
 # interruptions. These tests pin that discipline at the source level (every prompt call
 # site lives inside a gate) and by running the sliced gate against stubbed probes.
-# meiva:link services/docs/agent_runner_side/permissions-helper/authorization.meiva.okf.md
+# meiva:link services/docs/agent_runner_side/permissions-helper/authorization.md
 from __future__ import annotations
 
 import shutil

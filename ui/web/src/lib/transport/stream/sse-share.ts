@@ -109,7 +109,7 @@ export class ProfileSseTransport {
   // `solo` owns that source without the profile lock (plain HTTP has no
   // navigator.locks, and the per-provider fallback is exactly the case that
   // exhausts a browser's six connections per origin).
-  // meiva:link ui/web/src/docs/frontend-data-flow/frontend-data-flow.meiva.okf.md
+  // meiva:link ui/web/src/docs/frontend-data-flow/frontend-data-flow.md
   constructor(
     private readonly env: StreamTransport,
     private readonly session: SessionPort,
@@ -478,7 +478,7 @@ export class ProfileSseTransport {
   // count means the server shed payloads: both surface to providers so they
   // reconcile instead of silently rendering a gap. An unattributable frame is
   // counted by every merged channel, as a corrupt frame is counted today.
-  // meiva:link ui/web/src/docs/frontend-data-flow/frontend-data-flow.meiva.okf.md
+  // meiva:link ui/web/src/docs/frontend-data-flow/frontend-data-flow.md
   private publishMergedFrame(raw: string): void {
     const frame = parseMergedFrame(raw);
     if (frame === null) {

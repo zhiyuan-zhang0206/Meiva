@@ -61,7 +61,7 @@ def _declared(plugin: str, face: str, contribute: object) -> PluginContributions
     return contributions
 
 
-# meiva:link base/packages/plugins/docs/runtime-contributions.meiva.okf.md
+# meiva:link base/packages/plugins/docs/runtime-contributions.md
 # meiva:note
 # Declare each enabled plugin from the faces of `faces` this process has already imported. A face is
 # listed only when its module is present and its `contribute()` ran, so the answer is what this process
@@ -111,7 +111,7 @@ def loaded_state_classes() -> frozenset[type[BaseModel]]:
     return frozenset(classes)
 
 
-# meiva:link base/packages/plugins/docs/runtime-contributions.meiva.okf.md
+# meiva:link base/packages/plugins/docs/runtime-contributions.md
 # meiva:note
 # Admit the enabled plugins whose manifest agrees with the faces this process loaded. Each plugin is
 # judged against its own faces alone (`PluginDeclaration.keys`), so asking for every face does not make

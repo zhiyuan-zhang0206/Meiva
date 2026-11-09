@@ -312,7 +312,7 @@ def _shutdown_child(failure: str, home: Path) -> subprocess.CompletedProcess[str
 # A SIGTERM while the dispatcher serves (the plugin watcher raises one at itself) runs the
 # graceful exit instead of a failure: `run` returns, with no exception, after the same drain
 # and release.
-# meiva:link services/agent_runner/agent_host/lifecycle/docs/graceful-exit.meiva.okf.md
+# meiva:link services/agent_runner/agent_host/lifecycle/docs/graceful-exit.md
 @pytest.mark.parametrize(
     "failure,exception",
     [

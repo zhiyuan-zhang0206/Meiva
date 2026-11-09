@@ -1,4 +1,4 @@
-# meiva:link base/packages/plugins/docs/plugin-config/plugin-config.meiva.okf.md
+# meiva:link base/packages/plugins/docs/plugin-config/plugin-config.md
 from __future__ import annotations
 
 import sys

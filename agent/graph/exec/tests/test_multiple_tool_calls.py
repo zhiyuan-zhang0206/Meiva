@@ -344,7 +344,7 @@ async def test_a_compacting_call_discards_the_findings_of_its_batch(
 # meiva:note
 # The turn-end declaration is agent input, so it is validated where it enters the state and
 # never reaches a `turn_end` record outside the closed set.
-# meiva:link agent/graph/llm/docs/turn-records.meiva.okf.md
+# meiva:link agent/graph/llm/docs/turn-records.md
 async def test_a_turn_end_declaration_reaches_the_state(database_gate: ProcessDbGate) -> None:
     result = await _run_calls(
         _state(

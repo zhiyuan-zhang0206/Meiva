@@ -155,7 +155,7 @@ The agent still has ordinary tools to perform the requested preparation.
 This is best-effort preparation, not a callback executed on every compact:
 hard automatic compaction and manual requests may bypass it. Do not rely on
 it for the only copy of critical state. See
-[context management](../../../agent/graph/docs/context-window/context-window.meiva.okf.md).
+[context management](../../../agent/graph/docs/context-window/context-window.md).
 
 | Field | Meaning | Closes |
 |---|---|---|

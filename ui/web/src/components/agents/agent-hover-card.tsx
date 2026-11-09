@@ -4,7 +4,7 @@
 // Cold entry waits 400ms so pointers sweeping across the tree never flash tooltips; once a card
 // opens, moving to another row within 300ms skips the delay for sequential scanning, and leaving
 // closes the pointer-events-none card immediately.
-// meiva:link ui/web/src/docs/frontend-components/agent-sidebar.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/agent-sidebar.md
 
 import * as Popover from "@radix-ui/react-popover";
 import { useTranslations } from "next-intl";
@@ -234,7 +234,7 @@ export function AgentHoverCard({
   // harness settled at launch — so a name here is what the provider is asked for, not what
   // somebody typed. A missing half renders nothing rather than a placeholder: the roster could
   // not resolve it (model catalog unavailable), and the card does not guess.
-  // meiva:link ui/web/src/docs/frontend-components/agent-sidebar.meiva.okf.md
+  // meiva:link ui/web/src/docs/frontend-components/agent-sidebar.md
   return (
     <Popover.Portal>
       <Popover.Content

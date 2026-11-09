@@ -13,7 +13,7 @@
 // `unavailable` (a frame with no storage — a server render, or a browser that
 // refuses site data) leaves the page view's own choice standing in, so toggling
 // still works for as long as the tab lives.
-// meiva:link ui/web/src/docs/frontend-state/frontend-state.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-state/frontend-state.md
 
 import { useCallback, useSyncExternalStore } from "react";
 

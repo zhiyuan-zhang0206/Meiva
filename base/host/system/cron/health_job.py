@@ -1,4 +1,4 @@
-# meiva:link base/host/docs/health-probe-job.meiva.okf.md
+# meiva:link base/host/docs/health-probe-job.md
 
 from __future__ import annotations
 

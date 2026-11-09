@@ -482,7 +482,7 @@ describe("math through the lazy KaTeX surface", () => {
     // The reported shape: a prose line, then `$$` on its own line with no blank
     // line between. remark-math parses that pair as *inline* math, so two
     // formulas landed mid-paragraph and wrapped inside a 390px column.
-    // meiva:link ui/web/src/docs/frontend-components/markdown-surfaces.meiva.okf.md
+    // meiva:link ui/web/src/docs/frontend-components/markdown-surfaces.md
     const content = [
       "\u6211\u4eec\u5b9e\u73b0\u4e86\u9010\u795e\u7ecf\u5143\u81ea\u9002\u5e94\u4e0a\u9650\uff1a",
       "$$m_{0,l,j} = \\text{clip}\\!\\left(q_{35}(u_{l,j} > 0),\\; 0.05\\right), \\qquad \\tau_{e,l,j} = \\frac{m_{0,l,j}}{2}$$",
@@ -495,7 +495,7 @@ describe("math through the lazy KaTeX surface", () => {
     expect(container.querySelectorAll(".katex-display").length).toBe(2);
     // meiva:note
     // The prose that preceded the pair stays its own paragraph.
-    // meiva:link ui/web/src/docs/frontend-components/markdown-surfaces.meiva.okf.md
+    // meiva:link ui/web/src/docs/frontend-components/markdown-surfaces.md
     const paragraphs = [...container.querySelectorAll("p")].map((node) => node.textContent);
     expect(paragraphs.some((text) => text.includes("\u6211\u4eec\u5b9e\u73b0\u4e86\u9010\u795e\u7ecf\u5143\u81ea\u9002\u5e94\u4e0a\u9650"))).toBe(true);
     expect(paragraphs.some((text) => text.includes("m_{0,l,j}") || text.includes("clip"))).toBe(false);

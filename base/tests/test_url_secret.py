@@ -463,7 +463,7 @@ class TestSelfMachineHostParity:
     # (the config sub-model cannot import base.cluster.machine — circular), so pin its
     # precedence (env MEIVA_MACHINE_HOST > localhost) to the real resolver: each source case
     # asserts both return the same value, so a future drift in either side fails here.
-    # meiva:link base/cluster/machine/docs/machine.meiva.okf.md
+    # meiva:link base/cluster/machine/docs/machine.md
 
     def _pin(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *, env: str | None

@@ -10,12 +10,12 @@ import {
 // meiva:note
 // The hover card's geometry and pointer decisions, stated as values: where the card goes, where the
 // safe-zone bridge spans the gap, and what a pointer leaving the node or card does next.
-// meiva:link ui/web/src/docs/frontend-components/fleet-view.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/fleet-view.md
 
 // meiva:note
 // A node's page box (left edge, top edge, square side) as the placement takes it: the right edge
 // anchors the beside placements, the left edge the flip.
-// meiva:link ui/web/src/docs/frontend-components/fleet-view.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/fleet-view.md
 function nodeBox(left: number, top: number): HoverCardNodeBox {
   return { x: left + 36, y: top, flipX: left, h: 36 };
 }
@@ -36,7 +36,7 @@ describe("placeHoverCard", () => {
     // meiva:note
     // QA #990: the flip anchors at the node's LEFT edge. Anchoring at the right edge parked the
     // card on the node it describes (~70% overlap at the canvas edge).
-    // meiva:link ui/web/src/docs/frontend-components/fleet-view.meiva.okf.md
+    // meiva:link ui/web/src/docs/frontend-components/fleet-view.md
     expect(
       placeHoverCard({
         canvas: { left: 0, top: 0, width: 300, height: 400 },
@@ -51,7 +51,7 @@ describe("placeHoverCard", () => {
     // meiva:note
     // QA #990 on a 320x390 canvas: the card goes above the node and horizontally centred, clear of
     // the message band below it. Clamping to the left pad instead would cover the node.
-    // meiva:link ui/web/src/docs/frontend-components/fleet-view.meiva.okf.md
+    // meiva:link ui/web/src/docs/frontend-components/fleet-view.md
     expect(
       placeHoverCard({
         canvas: { left: 0, top: 0, width: 320, height: 390 },

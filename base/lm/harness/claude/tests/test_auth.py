@@ -30,7 +30,7 @@ def test_oauth_blanks_both_credential_variables() -> None:
 # The bridge hands each session a registration handle; a tool the CLI spawns needs it
 # to attach as the agent it belongs to. A live turn found it dropped here, so its own
 # Bash could not say which agent it was.
-# meiva:link base/lm/harness/claude/docs/claude.meiva.okf.md
+# meiva:link base/lm/harness/claude/docs/claude.md
 def test_the_registration_handle_reaches_the_cli() -> None:
     env = build_env(
         {
@@ -78,7 +78,7 @@ def test_describe_never_contains_the_secret() -> None:
 # key we merely omit comes straight back. The host's own model keys are blanked by name
 # instead: on 2026-10-21 a claude session's Bash tool could read the host's
 # OPENAI_API_KEY because that variable was in the supervisor's environment (#5512).
-# meiva:link base/lm/harness/claude/docs/claude.meiva.okf.md
+# meiva:link base/lm/harness/claude/docs/claude.md
 def test_a_host_credential_never_reaches_the_session() -> None:
     env = build_env(
         {},
@@ -117,7 +117,7 @@ def test_the_session_path_wins_over_the_host_path() -> None:
 # allowlist entry starts carrying one (#5512, acceptance reworded by 405 on 2026-10-22: the
 # three provider keys stay present with an empty value — not ABSENT — and "empty" is what
 # makes them unusable).
-# meiva:link base/lm/harness/claude/docs/claude.meiva.okf.md
+# meiva:link base/lm/harness/claude/docs/claude.md
 def test_no_spawned_value_carries_a_host_secret() -> None:
     secrets = ("sk-host-openai-value", "host-codex-value", "sk-ant-host-value")
     host = {

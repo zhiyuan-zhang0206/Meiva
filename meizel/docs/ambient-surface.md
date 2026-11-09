@@ -1,0 +1,93 @@
+# meizel/ — Ambient Surface
+
+`ambient_surface.py` holds, for the modules that carry the channels (`CHANNEL_MODULES`: `os`,
+`os.path`, `sys`, `time`, `datetime`, `platform`, `socket`, `getpass`, `pwd`, `grp`, `tempfile`,
+`shutil`, `locale`, `uuid`, `random`, `secrets`, `threading`, `multiprocessing`, `resource`,
+`sysconfig`, `pathlib`, `zoneinfo`, `fileinput`, `site`, `email.utils`, `netrc`, `ssl`, `ctypes.util`,
+`webbrowser`), one judgment for every public name, in groups of names that share a reason. The builtin `input` is judged as the name
+`builtins.input` (the scanner spells an unshadowed `input` that way); `builtins` is not a channel
+module, because its other names read nothing. A judgment is a kind, or `None` with the reason the name is not a read of the
+world: a type, a constant, an effect on files the purity layer judges, a function of its inputs.
+The scanner looks a dotted name up by its longest judged prefix (`os.environ.get` is judged as
+`os.environ`, `datetime.datetime.now` as itself).
+
+A call that reads several channels lists every kind (a tuple in `g(...)`) and is one acquisition per
+kind at the same line; the debt key `file#kind target` is unchanged, so one call is several keys. How
+an entry lists them, and the names that do, are in
+[the multiple kinds node](ambient-surface-multiple-kinds.md).
+
+Three forms of entry carry more than a kind:
+
+- A name with an `unless` clause (`tempfile.mkdtemp`, `shutil.which`, `time.strftime`,
+  `datetime.fromtimestamp`) reads the world only when the call does not give the parameter a
+  value. It is the clause a policy reader uses, read for the call: `mkdtemp(dir=base)` reads
+  nothing, `mkdtemp()` reads `TMPDIR`, and an explicit `None` is still a read. A reference to the
+  name without a call acquires nothing. The clause spares the call as a whole, every kind the entry
+  lists: `mkdtemp(dir=base)` still draws a random name and records nothing, because the caller has
+  no argument that could hand that name in; `make_msgid(domain=...)` is spared only the host name,
+  so the entry has no clause and the host name is over-recorded
+  ([the multiple kinds node](ambient-surface-multiple-kinds.md) gives both).
+- An interval clock (`interval`) is the plain use of `time` for a deadline, a duration or a TTL; it
+  is a window onto the world only in a function that also waits ([the node on what a call depends on](ambient-kinds-calls.md) describes when).
+- A method whose receiver the analysis cannot resolve, because it has no types (`METHOD_READS`):
+  `parser.parse_args()` reads `sys.argv`, `moment.astimezone()` the host's zone,
+  `path.absolute()` and `Path("~").expanduser()` the working directory and the home. A path built
+  from the function's own parameters is the caller's value, so it reads nothing.
+- Any `unless` clause handed a parameter that defaults to `None` is the same read as one handed
+  nothing: `def main(argv=None): parser.parse_args(argv)` makes argparse fall back to
+  `sys.argv[1:]`, and `def make(parent=None): tempfile.TemporaryDirectory(dir=parent)` makes
+  `tempfile` fall back to `TMPDIR` and mint a random name when no parent is passed. Only the
+  function's own facts decide: the argument is a `Name` that is a parameter of the enclosing
+  function with a `None` default and the body never binds it again (`argv = [] if argv is None
+  else argv` is a decision the analysis does not follow, so that form records nothing). A required
+  parameter (`def main(argv: list[str])`, `def make(parent: Path)`) records nothing, and no caller
+  is asked.
+
+
+## Closed by construction
+
+The table is closed in two ways, so that a read the vocabulary forgot cannot pass as a name that was
+never looked at:
+
+- `ambient-unjudged` is a plain error (never recordable debt) on a non-test file that uses a member
+  of a channel module that no entry judges (`os.some_new_function`). The member of the module, not
+  the module, is what is judged: `import os.path` alone is not a use. A private name
+  (`sys._getframe`) is outside the interface and is judged only where an entry lists it
+  (`sys._xoptions`).
+- `meizel/graph/tests/test_ambient_surface.py` compares the table with the modules themselves: every
+  public name of every channel module on this interpreter, and every name the type checker's
+  typeshed lists for any platform or interpreter version, must be judged by an entry of its own
+  (or by a pattern for a whole family, as `os.O_*`); an entry that names nothing, or a name two
+  groups both judge, fails. An interpreter upgrade that adds `os.some_function` fails the test
+  before it can reach the rule.
+- No channel module is judged by a bare `*`: a test fails on one. A family of constants may take a
+  prefix pattern (`os.O_*`, `socket.AF_*`), because its members differ in nothing that matters,
+  but a function a module gains later must be listed by hand, so that it cannot inherit a kind
+  nobody chose.
+- A second test pins every name that carries a kind, and the kinds it carries (`_READS`, written out
+  by hand, not derived from the table; a name of several kinds is listed under each): moving `socket.if_nametoindex` into the network group, or
+  dropping it from the host group, turns it red, which the completeness test alone would not do
+  when the name stays judged by some entry. The names each module defines are read from a child
+  that runs `channel_module_names.py`, a script that imports the standard library only, in a
+  `python -I` interpreter, so that a library another test imported cannot add names.
+
+### Judging a new name
+
+When `ambient-unjudged` or the test names a name:
+
+1. Ask which channel the call learns something from that the caller did not name. A function of
+   its arguments (a path join, a format) reads none. The file system and the network are not
+   kinds: they are the purity layer's.
+2. If it reads a channel, pick the kind of that channel above. If the read depends on an optional
+   argument, give the group an `unless` clause for that parameter; if it is a clock read for a
+   duration, mark it `interval`; if only a method name betrays it, add it to `METHOD_READS`.
+3. If it reads nothing, give the group `None` and one sentence of why. A constant, a type and an
+   effect each have a shared sentence in the table; reuse it.
+4. A kind the channels above do not cover is a change to the vocabulary: it needs the maintainers,
+   a channel row here and an `AmbientKind` member.
+
+The judgments that differ from the obvious spelling, the modules inspected and left out, and the
+forms the analysis cannot see are in [[meizel/docs/ambient-surface-judgments.md|the ambient
+surface judgments node]].
+
+Parent: [the ambient kinds node](ambient-kinds.md).

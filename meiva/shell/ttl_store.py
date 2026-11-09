@@ -1,6 +1,6 @@
 # meiva:note
 # The SQL behind a shell session's deadline: the per-agent session counter, the mandatory deadline row, and the guarded renewal with its audit row. The module imports psycopg, so `ShellSessions` loads it when a session is created or renewed and `import meiva` stays light.
-# meiva:link meiva/shell/docs/shell.meiva.okf.md
+# meiva:link meiva/shell/docs/shell.md
 from __future__ import annotations
 
 from collections.abc import Callable

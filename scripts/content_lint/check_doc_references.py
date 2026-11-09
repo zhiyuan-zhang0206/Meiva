@@ -106,6 +106,7 @@ and each one backtracked catastrophically on ordinary prose.
 
 from __future__ import annotations
 
+import os
 import re
 import subprocess
 import sys
@@ -371,6 +372,34 @@ def check_links(doc: Path, line: str, *, allow_planned: bool = False) -> list[st
     return missing
 
 
+_WIKILINK_RE = re.compile(r"\[\[([^\]|]+)(?:\|[^\]]*)?\]\]")
+
+
+# meiva:note
+# Resolve a wikilink target against tracked nodes when any exist in the repository under test.
+def _resolve_wikilink(current_path: str, target: str, all_paths: set[str]) -> str | None:
+    target = target.strip()
+    if not all_paths or "://" in target:
+        return None
+    ext = ".meiva.okf.md"
+    suffixed = target if target.endswith(ext) else target + ext
+    cur_dir = Path(current_path).parent
+    candidates = (
+        target,
+        suffixed,
+        os.path.normpath(str(cur_dir / target)).replace(os.sep, "/"),
+        os.path.normpath(str(cur_dir / suffixed)).replace(os.sep, "/"),
+        target.lstrip("/"),
+        suffixed.lstrip("/"),
+    )
+    for cand in candidates:
+        if cand in all_paths:
+            return cand
+    base = Path(suffixed).name
+    matches = [p for p in all_paths if Path(p).name == base]
+    return matches[0] if len(matches) == 1 else None
+
+
 def okf_nodes(repo: Path = REPO) -> frozenset[str]:
     """Every tracked `.meiva.okf.md` path — the universe a wikilink resolves in."""
     # meiva:note
@@ -398,21 +427,17 @@ def check_wikilinks(
     `resolve_wikilink` the node graph uses. `lint_meiva_okf.py` reports a miss in a
     node as a warning, which no hook prints; this makes it block, and reaches the
     non-node docs that linter never opens."""
-    # Imported here: a module-level import of application code would run before
-    # `enter_scratch_home()` below.
-    from base.packages.docs.okf_graph import WIKILINK_RE, resolve_wikilink
-
     all_nodes = okf_nodes(repo) if nodes is None else nodes
     missing: list[str] = []
     try:
         cur = doc.relative_to(repo).as_posix()
     except ValueError:
         cur = doc.name
-    for match in WIKILINK_RE.finditer(line):
+    for match in _WIKILINK_RE.finditer(line):
         target = match.group(1).strip()
         if _in_code_span(line, match.start()):
             continue
-        if resolve_wikilink(cur, target, set(all_nodes)) is not None:
+        if _resolve_wikilink(cur, target, set(all_nodes)) is not None:
             continue
         if allow_planned and _PLANNED.match(line, match.end()):
             continue

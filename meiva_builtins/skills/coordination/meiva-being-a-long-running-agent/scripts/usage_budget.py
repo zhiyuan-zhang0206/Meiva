@@ -1,6 +1,6 @@
 # meiva:note
 # `usage_budget.py` holds the decisions of the usage CLI over values only: how a window timestamp and an agent id are read, the budget reminder a report earns, and what a polling round does next. A reminder leaves the receiving agent in charge of graceful disposition: it states the cost against the limit and names the options, and it terminates nobody and grants no spending. `agent_usage.py` reads the database and the clock, sends the reminder and waits.
-# meiva:link meiva_builtins/skills/coordination/meiva-being-a-long-running-agent/docs/meiva-being-a-long-running-agent.meiva.okf.md
+# meiva:link meiva_builtins/skills/coordination/meiva-being-a-long-running-agent/README.md
 from __future__ import annotations
 
 import math

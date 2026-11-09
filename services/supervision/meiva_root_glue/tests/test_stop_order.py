@@ -2,7 +2,7 @@
 # The generated manifest declares the agent-host first, and root's whole-tree stop follows
 # declaration order, so a launchd or systemd stop of root takes the agent-host down first,
 # as `meiva stop` does from the same order.
-# meiva:link services/agent_runner/agent_host/lifecycle/docs/graceful-exit.meiva.okf.md
+# meiva:link services/agent_runner/agent_host/lifecycle/docs/graceful-exit.md
 
 from __future__ import annotations
 

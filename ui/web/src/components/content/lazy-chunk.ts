@@ -1,6 +1,6 @@
 // meiva:note
 // One deferred module, shared: the first caller starts the dynamic import, later callers join that attempt, a resolved value stays readable synchronously so a prefetched chunk paints highlighted on the first render, and a rejected attempt is dropped so the next call retries instead of pinning the fallback for the session. The chunk is a value the component receives; `report` carries where a failed attempt is logged (production logs, a test collects), so a test never resets module state it would leak into the next one.
-// meiva:link ui/web/src/docs/frontend-components/code-blocks.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/code-blocks.md
 
 import { errMsg } from "@/lib/contracts/errors";
 

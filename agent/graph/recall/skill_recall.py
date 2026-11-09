@@ -208,7 +208,7 @@ async def recall_skills(
 # for work and must not already carry the method. Uncertain answers pass, because a missed
 # offer costs a redo while an extra offer costs one line. The gate reads one message, never
 # the conversation: measured 2026-10-18 at $0.000036 per call against $0.0006 per recall pass.
-# meiva:link agent/graph/docs/skill-recall.meiva.okf.md
+# meiva:link agent/graph/docs/skill-recall.md
 PEER_GATE_PREAMBLE = "One message another agent sent to this agent:\n\n"
 
 PEER_GATE_WORK = YesNo(
@@ -235,7 +235,7 @@ PEER_GATE_METHOD = YesNo(
 # a clear status/acknowledgement message, a brief that states the method, or a failed decision
 # call. A gate failure falls back to the behaviour before peer messages were considered, so a
 # broken gate never changes what an agent sees.
-# meiva:link agent/graph/docs/skill-recall.meiva.okf.md
+# meiva:link agent/graph/docs/skill-recall.md
 async def peer_gate_passes(
     text: str,
     *,

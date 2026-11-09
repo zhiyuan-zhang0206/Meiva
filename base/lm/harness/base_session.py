@@ -36,7 +36,7 @@ from base.lm.harness.session import (
 # ordered inbound turn promotion, key-based idempotency replay, bounded outbound
 # delta dropping, background task-group lifecycle,
 # and `SessionRegistry` binding/resumption.
-# meiva:link base/lm/harness/docs/harness.meiva.okf.md
+# meiva:link base/lm/harness/docs/harness.md
 
 
 class TurnTicket:
@@ -60,7 +60,7 @@ class TurnTicket:
         # The name the provider gave the turn this ticket runs, when it gives one.
         # An adapter sets it as soon as it learns the name; `_claim` is the only
         # reader, and a ticket whose provider names no turns keeps it None.
-        # meiva:link base/lm/harness/docs/harness.meiva.okf.md
+        # meiva:link base/lm/harness/docs/harness.md
         self.provider_turn_id: str | None = None
         self.interrupt_requested = False
         self.interrupt_ready = asyncio.Event()
@@ -103,7 +103,7 @@ class TurnTicket:
 # question the other two do — where this session's output goes — and because every adapter
 # builds one binding already, so an adapter that starts mapping unowned output needs no
 # signature change (#5663).
-# meiva:link base/lm/harness/docs/harness.meiva.okf.md
+# meiva:link base/lm/harness/docs/harness.md
 @dataclass(frozen=True)
 class SessionBinding:
     agent_id: int | None = None
@@ -223,7 +223,7 @@ class BaseHarnessSession[ConfigT: SessionConfig](ExitStatus):
     # from the queue after a hold, and every start discards what nobody consumed. A turn
     # that begins from a queue the idle period filled would otherwise read an event that
     # belonged to no turn as its own outcome (#5663).
-    # meiva:link base/lm/harness/docs/harness.meiva.okf.md
+    # meiva:link base/lm/harness/docs/harness.md
     def _start_turn(self, ticket: TurnTicket) -> None:
         self._discard_unconsumed_events()
         self._active = ticket
@@ -238,7 +238,7 @@ class BaseHarnessSession[ConfigT: SessionConfig](ExitStatus):
     # turn this session never started, or already finished, has no owner, and the
     # caller routes it to `_unsolicited` instead. That is what keeps a provider's
     # own turn from being read as our turn's boundary (#5663).
-    # meiva:link base/lm/harness/docs/harness.meiva.okf.md
+    # meiva:link base/lm/harness/docs/harness.md
     def _claim(self, origin_id: str | None = None) -> TurnTicket | None:
         ticket = self._active
         if ticket is None or (origin_id is not None and origin_id != ticket.provider_turn_id):
@@ -250,7 +250,7 @@ class BaseHarnessSession[ConfigT: SessionConfig](ExitStatus):
     # boundary: it is recorded in the event stream and handed to the sink, which
     # delivers it the way any other inbound reaches the agent. A session without a
     # sink (a demo, a unit test) still records it.
-    # meiva:link base/lm/harness/docs/harness.meiva.okf.md
+    # meiva:link base/lm/harness/docs/harness.md
     def _unsolicited(self, event: UnsolicitedOutput) -> None:
         self._emit(event)
         sink = self._unsolicited_sink
@@ -300,7 +300,7 @@ class BaseHarnessSession[ConfigT: SessionConfig](ExitStatus):
     # meiva:note
     # Events dropped because no turn was running when they arrived: the counter a
     # session's owner reads to see whether an idle provider said something nobody took.
-    # meiva:link base/lm/harness/docs/attribution.meiva.okf.md
+    # meiva:link base/lm/harness/docs/attribution.md
     @property
     def unconsumed_events(self) -> int:
         return self._unconsumed_events
@@ -398,7 +398,7 @@ class BaseHarnessSession[ConfigT: SessionConfig](ExitStatus):
     # takes the same path as any other idle message instead of being collected into a
     # turn of ours and committed as our reply. The bound exists because a provider
     # that never reports the end of its turn must cost one wait, not a wedged agent.
-    # meiva:link base/lm/harness/docs/harness.meiva.okf.md
+    # meiva:link base/lm/harness/docs/harness.md
     def _hold_dispatch(self, seconds: float) -> None:
         if seconds <= 0:
             raise ValueError(f"a dispatch hold must expire, got {seconds}s")
@@ -427,7 +427,7 @@ class BaseHarnessSession[ConfigT: SessionConfig](ExitStatus):
     # a provider's report about its own turn, a leftover completion — is read by the
     # next turn as its own outcome, which is how an idle session poisoned a turn it
     # had nothing to do with (#5663). The stream's own end marker is not a leftover.
-    # meiva:link base/lm/harness/docs/harness.meiva.okf.md
+    # meiva:link base/lm/harness/docs/harness.md
     def _discard_unconsumed_events(self) -> None:
         while True:
             try:

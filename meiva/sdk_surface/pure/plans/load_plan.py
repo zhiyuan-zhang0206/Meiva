@@ -4,7 +4,7 @@
 # these functions only choose the step, so the order of the checks (a recorded failure first,
 # then an installation that already satisfies the request, then a load in flight) is tested
 # as a table instead of through a process. Nothing here reads or writes the process.
-# meiva:link meiva/docs/boot-contracts.meiva.okf.md
+# meiva:link meiva/docs/boot-contracts.md
 
 from __future__ import annotations
 

@@ -84,7 +84,7 @@ class ChromeModel:
         # What the worker reports for `meivaGroup` (a convergence of one window) and
         # for `meivaConvergeAll` (one report per group it found). A test sets the
         # merge it wants to see reported, or the failure `converge_all` must degrade.
-        # meiva:link services/desktop/browser/docs/tab-groups.meiva.okf.md
+        # meiva:link services/desktop/browser/docs/tab-groups.md
         self.report = report or {
             "title": "Meiva #7",
             "windowId": 1,
@@ -389,7 +389,7 @@ def test_worker_is_stateless_and_only_ever_ungroups_an_agents_last_tab() -> None
     # `meivaUngroupLast`: it must check the title AND that the group has no other
     # member, so a group the user made is never touched. There is still no delete
     # and no storage.
-    # meiva:link services/desktop/browser/docs/tab-groups.meiva.okf.md
+    # meiva:link services/desktop/browser/docs/tab-groups.md
     source = next(EXTENSION_DIR.glob("group-*.js")).read_text()
     assert not re.search(r"\bcolor\s*:", source)
     assert not re.search(r"tabs\.remove|tabGroups\.remove|storage\.", source)
@@ -398,7 +398,7 @@ def test_worker_is_stateless_and_only_ever_ungroups_an_agents_last_tab() -> None
     assert "members.length !== 1" in source
     # meiva:note
     # The ungroup is the last thing the function does, and nothing else calls it.
-    # meiva:link services/desktop/browser/docs/tab-groups.meiva.okf.md
+    # meiva:link services/desktop/browser/docs/tab-groups.md
     assert source.count("tabs.ungroup") == 1
 
 

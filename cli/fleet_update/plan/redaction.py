@@ -3,7 +3,7 @@
 # secret, a password inside a URL. The hosts' own output goes through here line by line before
 # it is printed or written, so a command that echoes its environment cannot leak it into the log
 # an operator pastes into a ticket.
-# meiva:link cli/docs/fleet-update.meiva.okf.md
+# meiva:link cli/docs/fleet-update.md
 
 from __future__ import annotations
 

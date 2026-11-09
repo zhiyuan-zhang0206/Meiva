@@ -221,7 +221,7 @@ def test_the_shared_package_does_not_reach_into_an_adapter() -> None:
     # pull in one adapter. The check is on the module source because an
     # import-time side effect is exactly what this test exists to prevent, and
     # importing in-process cannot prove absence.
-    # meiva:link base/lm/harness/docs/harness.meiva.okf.md
+    # meiva:link base/lm/harness/docs/harness.md
     import base.lm.harness as shared
 
     source = Path(shared.__file__).read_text()

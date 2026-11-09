@@ -257,7 +257,7 @@ def browser_reach(
 # whether the dependency recovered. A wedged cluster fails the observation, never
 # the process: the probe runner's deadline turns an overdue worker into UNAVAILABLE,
 # and an unobserved database never closes a breaker.
-# meiva:link services/supervision/meiva_root_glue/docs/meiva_root_glue.meiva.okf.md
+# meiva:link services/supervision/meiva_root_glue/docs/meiva_root_glue.md
 def database_recovery_probe(database: Callable[[], Database]) -> Callable[[], DaemonProbe]:
 
     def probe() -> DaemonProbe:

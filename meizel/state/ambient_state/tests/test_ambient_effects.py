@@ -394,7 +394,7 @@ def test_a_site_message_carries_the_reason_the_owner_and_the_rule_document(
 
     assert reason in message
     assert "owns" in message
-    assert "meizel/docs/ambient-state.meiva.okf.md" in message
+    assert "meizel/docs/ambient-state.md" in message
 
 
 # meiva:note

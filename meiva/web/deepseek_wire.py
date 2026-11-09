@@ -1,7 +1,7 @@
 # meiva:note
 # What the DeepSeek Search and Fetch tools are sent and how their answers are read, as plain
 # values. Both tools take a JSON POST authenticated with `DEEPSEEK_API_KEY`.
-# meiva:link meiva/web/docs/providers.meiva.okf.md
+# meiva:link meiva/web/docs/providers.md
 
 from __future__ import annotations
 

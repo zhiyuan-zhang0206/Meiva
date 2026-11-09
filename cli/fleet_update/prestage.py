@@ -2,7 +2,7 @@
 # Warm NEW's dependency caches and external harness CLIs while the cluster is still serving, so
 # neither `switch` nor `meiva start` spends the outage downloading wheels, npm tarballs or agent
 # harness binaries. Nothing inside `$S` or `$S/.venv` is mutated here.
-# meiva:link cli/docs/fleet-update.meiva.okf.md
+# meiva:link cli/docs/fleet-update.md
 
 from __future__ import annotations
 

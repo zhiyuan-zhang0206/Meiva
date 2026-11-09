@@ -25,7 +25,7 @@ beforeAll(async () => {
 // meiva:note
 // The file names the panel puts in the address bar: the workspace-relative path of the linked
 // document, and the absolute path of a file outside the workspace.
-// meiva:link ui/web/src/docs/frontend-state/navigation-history.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-state/navigation-history.md
 const plot = "reports/plot.png";
 const details = "reports/details.md";
 const report = "/tmp/file.pdf";
@@ -169,7 +169,7 @@ describe("To user navigation history", () => {
   // meiva:note
   // Why the chain carries file names: the address bar says which file is open, so the reader can
   // trust and edit the link instead of looking at a digest (user 2026-11-07).
-  // meiva:link ui/web/src/docs/frontend-state/navigation-history.meiva.okf.md
+  // meiva:link ui/web/src/docs/frontend-state/navigation-history.md
   it("names the open file in the address bar", () => {
     const { browser } = show(root(), { linked: nested() });
     fireEvent.click(screen.getByRole("link", { name: "Details" }));
@@ -188,7 +188,7 @@ describe("To user navigation history", () => {
   // meiva:note
   // A link shared before 2026-11-07 carries the digest chain; it still opens the document it names,
   // and the panel's own navigation writes the readable parameter back into the entry.
-  // meiva:link ui/web/src/docs/frontend-state/navigation-history.meiva.okf.md
+  // meiva:link ui/web/src/docs/frontend-state/navigation-history.md
   it("still opens a link that carries the old digest chain", async () => {
     const legacy = `http://fake.local/?agent_id=7&reference=${"a".repeat(64)}`;
     const { browser } = show(root(), { linked: nested(), browser: fakeBrowser({ href: legacy }) });
@@ -232,7 +232,7 @@ describe("To user document bar", () => {
     // Inspector is a mode: while it is on, the bar says what the panel is
     // showing and the same button that entered it is the way out (user
     // 2026-10-20), instead of a second close control inside the panel.
-    // meiva:link ui/web/src/docs/frontend-state/shared-context/shared-context.meiva.okf.md
+    // meiva:link ui/web/src/docs/frontend-state/shared-context/shared-context.md
     show(document("# Status"), { onInspect: vi.fn(), inspecting: true });
     expect(screen.getByText("Inspector")).toBeTruthy();
     expect(screen.queryByText("Shared context")).toBeNull();
@@ -246,7 +246,7 @@ describe("To user document bar", () => {
     // The bar is the inspector mode's one control surface: the document's own
     // navigation (home, back) and its refresh read the document body the mode
     // hides, so they leave with it (user 2026-10-20).
-    // meiva:link ui/web/src/docs/frontend-state/shared-context/shared-context.meiva.okf.md
+    // meiva:link ui/web/src/docs/frontend-state/shared-context/shared-context.md
     show(document("# Status", "2026-10-17T06:00:00Z"), {
       onInspect: vi.fn(),
       onCollapse: vi.fn(),
@@ -328,7 +328,7 @@ describe("To user refusals", () => {
   // One test, two classes: a refusal the server called permanent reads differently from
   // one it called temporary, and only the permanent one hands over the file itself — the
   // copy follows the response's code, never the status (user 2026-10-28).
-  // meiva:link ui/web/src/docs/frontend-state/shared-context/shared-context.meiva.okf.md
+  // meiva:link ui/web/src/docs/frontend-state/shared-context/shared-context.md
   it("tells a permanent refusal from one worth retrying, and hands over the file", async () => {
     show(document("[Details](details.md)"), {
       linked: new ApiError(413, "too large", { code: "to_user_document_too_large", retryable: false }),

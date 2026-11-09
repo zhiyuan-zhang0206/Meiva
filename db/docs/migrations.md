@@ -3,7 +3,7 @@
 The model itself — baseline vs post-baseline deltas, the applied **set** keyed by
 migration name, the immutability of merged migrations, expand-contract for lossy
 operations, and the bidirectional `assert_schema_current` check — is in
-[migration model](../../base/deploy/schema/docs/migrations.meiva.okf.md). What follows is how you operate it.
+[migration model](../../base/deploy/schema/docs/migrations.md). What follows is how you operate it.
 
 ## Applying migrations
 
@@ -149,4 +149,4 @@ caught only by real cross-machine force-terminate in prod).
 — a designed runtime object (checkpoint tables, `telemetry_events` partitions)
 or unexplained residue. Run it before writing a migration for an object you
 cannot find in the baseline, and after an upgrade:
-[schema drift audit](../../scripts/audit/docs/schema-drift.meiva.okf.md).
+[schema drift audit](../../scripts/audit/docs/schema-drift.md).

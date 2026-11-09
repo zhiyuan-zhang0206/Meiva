@@ -1,4 +1,4 @@
-# meiva:link base/host/docs/health-probe-job.meiva.okf.md
+# meiva:link base/host/docs/health-probe-job.md
 
 from __future__ import annotations
 
@@ -106,7 +106,7 @@ def reload_launchd_job(label: str, plist_path: Path, *, host: Host) -> int:
 # its status cannot answer "is it gone"; `launchctl print` can (exit 0 = launchd still holds
 # it, any non-zero = absence). A job that survives its bootout keeps running the code it was
 # loaded with, so an unproven retirement returns False and reports rather than claiming success.
-# meiva:link base/host/docs/host.meiva.okf.md
+# meiva:link base/host/docs/host.md
 def bootout_launchd_job(label: str, *, host: Host) -> bool:
     host.run(
         ["launchctl", "bootout", f"gui/{host.uid}/{label}"],

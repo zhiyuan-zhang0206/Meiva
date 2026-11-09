@@ -81,7 +81,7 @@ def test_load_writes_default_when_no_local_file(tmp_path: Path, store: PluginEna
 
 
 def test_load_reads_local_file(tmp_path: Path, store: PluginEnableStore):
-    # meiva:link base/packages/plugins/docs/plugin-config/enable-state.meiva.okf.md
+    # meiva:link base/packages/plugins/docs/plugin-config/enable-state.md
 
     _make_plugin_dir("compact", tmp_path)
     store.path.write_text(json.dumps({"plugins": {"compact": {"enabled": False}}}))

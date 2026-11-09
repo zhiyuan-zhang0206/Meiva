@@ -2,7 +2,7 @@
 # What `up` verifies once the hosts are started, and in which order: the roster gate, a package
 # refresh and the drift checks on every host. One failure never erases what the window learned
 # about the others.
-# meiva:link cli/docs/fleet-update.meiva.okf.md
+# meiva:link cli/docs/fleet-update.md
 
 from __future__ import annotations
 

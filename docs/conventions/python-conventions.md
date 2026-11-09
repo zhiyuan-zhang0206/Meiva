@@ -91,7 +91,7 @@ use which, and a name another file uses is public. Reaching a private name or mo
 `private-name` / `private-module`; entering a directory through a child it does not export is
 `not-exported`; a dependency nobody declared is `undeclared-edge`; patching anything is a
 `*-patch` diagnostic. Existing violations are recorded debt that may only shrink. See
-[the checker](../../meizel/docs/checker/checker.meiva.okf.md) and the
+[the checker](../../meizel/docs/checker/checker.md) and the
 [contributing guide](../contributing.md#locality-gate-meizel). Use an existing capability,
 pass the required dependency explicitly, or verify public behavior. Agent visibility remains owned
 by the existing SDK surface metadata and Installation; do not introduce another SDK member list.
@@ -543,7 +543,7 @@ A test does not replace a name in another module (`monkeypatch.setattr`,
 control something, the production code takes it as a parameter, a constructor argument
 for a class or a required keyword for a function, and the test passes a fake or a
 value. Every patch is recorded meizel debt that may only shrink
-([patching](../../meizel/docs/checker/patching/patching.meiva.okf.md)), and a new one fails the
+([patching](../../meizel/docs/checker/patching/patching.md)), and a new one fails the
 check.
 
 Why:
@@ -637,7 +637,7 @@ implementations of ports, then passes them down as arguments.
 
 That is checked, not held by reviewers: a file that is not a root and reaches one of
 those is an `ambient-read` of `meizel check`
-([ambient reads](../../meizel/docs/checker/ambient.meiva.okf.md)). A root declares itself
+([ambient reads](../../meizel/docs/checker/ambient.md)). A root declares itself
 under `[roots]` in its directory's `meizel.toml` with the kinds it reads (`settings`, `db`,
 `bus`, `argv`, `environ`, `clock`, `home`, `cwd`, `platform`, `pid`, `random`) and a reason. The existing reads are recorded debt of the directory
 that holds them and may only shrink; a file under `purity = "strict"` has none. This reverses
@@ -671,7 +671,7 @@ A `time.monotonic_ns()`, `perf_counter()`, `id(obj)` or `itertools.count()` read
 identity or randomness: two processes started together draw the same value and a restart repeats it.
 Spending one in an f-string, a `uuid5`, a seed, a remainder or a bit mask, and a private
 `def _monotonic(): return time.monotonic()` that nothing injects, is `fake-entropy`
-([fake entropy](../../meizel/docs/checker/fake-entropy.meiva.okf.md)); a duration (`end - start`) is
+([fake entropy](../../meizel/docs/checker/fake-entropy.md)); a duration (`end - start`) is
 the plain use of an interval clock.
 
 ### Existing patches
@@ -683,7 +683,7 @@ patched thing injectable, convert the tests of that component in the same change
 it serves the debt that remains and is not a pattern for a new test.
 
 Three kinds of test-support file patch on purpose and are listed under `[approved-patches.files]`
-in `meizel.policy.toml` ([patching](../../meizel/docs/checker/patching/patching.meiva.okf.md)): an autouse guard
+in `meizel.policy.toml` ([patching](../../meizel/docs/checker/patching/patching.md)): an autouse guard
 that keeps the suite off the host, the entry of a subprocess a test starts, and the global setup of
 the test runner. A test module is never listed; adding an entry is a decision the reviewer reads in
 `policy diff`.
@@ -710,7 +710,7 @@ met:
 - asserting how a mock was called (`assert_called_once_with`, `call_args`,
   `call_count`): see form 2 above.
 
-Both codes are recorded debt like a patch ([patching](../../meizel/docs/checker/patching/patching.meiva.okf.md)):
+Both codes are recorded debt like a patch ([patching](../../meizel/docs/checker/patching/patching.md)):
 the existing sites stay until their component is converted, and a new one fails the check.
 A fault has two legitimate routes. A real resource makes it: revoke `INSERT` or `UPDATE`,
 a read-only transaction, a closed pool, a held lock, a trigger that raises, a renamed
@@ -752,7 +752,7 @@ why.
 Production `typing.cast` calls are a recorded `type-cast` ratchet: validate or
 narrow a value at its boundary rather than asserting its type. Meizel resolves
 the callable's import identity, and existing calls may only retain their recorded
-count. See [type assertion ratchet](../../meizel/docs/checker/type-cast.meiva.okf.md)
+count. See [type assertion ratchet](../../meizel/docs/checker/type-cast.md)
 for source scope and baseline boundaries. This does not ban legitimate `object`
 raw inputs or introduce a general prohibition on every `Any` annotation.
 

@@ -83,7 +83,7 @@ export function useInView(): [(node: Element | null) => void, boolean] {
 // seconds even spread over idle slices (user report 2026-10-20: the total is
 // what hurts, not the size of one commit). A section outside the margin stays
 // unmounted until the reader scrolls near it.
-// meiva:link ui/web/src/docs/frontend-components/control-page-load.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/control-page-load.md
 const NEAR_MARGIN = "100% 0px 100% 0px";
 
 export function useEverNearViewport(): [(node: Element | null) => void, boolean] {

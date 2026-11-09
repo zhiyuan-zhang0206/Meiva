@@ -1,7 +1,7 @@
 # meiva:note
 # What the window learns from one host's probe before anything stops, and what it refuses on:
 # a dirty checkout, a post-checkout hook (the guard recurses), or an unfinished release operation.
-# meiva:link cli/docs/fleet-update-window/fleet-update-window.meiva.okf.md
+# meiva:link cli/docs/fleet-update-window/fleet-update-window.md
 
 from __future__ import annotations
 

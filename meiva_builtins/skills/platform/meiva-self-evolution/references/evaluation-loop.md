@@ -80,4 +80,4 @@ A run whose evidence grades below `complete` abstains instead of scoring: it
 stays in `per_task` and in `invalid` with reason `abstain:<reason>`, while `n`
 and `mean` cover scored runs only, and `mean` is `null` when nothing scored.
 Compare a mean only when it is not `null` — the rule is
-[score abstention](../docs/meiva-self-evolution.meiva.okf.md).
+[score abstention](../docs/meiva-self-evolution.md).

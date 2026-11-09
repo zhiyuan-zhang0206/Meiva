@@ -33,7 +33,7 @@ export interface ContextMeterProps {
 // The caller only mounts this once `contextTokens > 0` (an agent that has run at
 // least one LLM call). When `maxContextTokens` is 0 (a model with no known
 // window) the gauge and thresholds are omitted and only the raw count shows.
-// meiva:link ui/web/src/docs/frontend-components/context-breakdown.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/context-breakdown.md
 export function ContextMeter({
   contextTokens,
   maxContextTokens,

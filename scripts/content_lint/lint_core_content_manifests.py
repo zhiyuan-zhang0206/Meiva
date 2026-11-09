@@ -213,7 +213,7 @@ def main(argv: list[str], *, home: Path, repo_root: Path | None = None) -> int:
             f"`requires_commit` that does not resolve claims support nothing tested. Set the "
             f"range and the pin from the derived version above, or move the manifest to the "
             f"plugin that really owns the code. See "
-            f"docs/plugins/package-manifest.meiva.okf.md and "
+            f"docs/plugins/package-manifest.md and "
             f"docs/conventions/engineering/host-versioning.md.",
             file=sys.stderr,
         )

@@ -56,7 +56,7 @@ sys.path.insert(0, str(_REPO_ROOT))
 # meiva:note
 # What this script reads, once at its own process entry: the checkout's filesystem as a tree, the
 # tracked names it scans, and the shared scan vocabulary that decides which of them to read.
-# meiva:link scripts/docs/scripts.meiva.okf.md
+# meiva:link scripts/docs/scripts.md
 from meizel import lint_common  # noqa: E402 - standalone script
 from meizel.checkout import source_tree, tracked_files  # noqa: E402
 from meizel.graph.universe import SourceTree  # noqa: E402

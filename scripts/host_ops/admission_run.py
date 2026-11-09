@@ -2,7 +2,7 @@
 # meiva:note
 # Simplified passthrough runner for host jobs with CLI compatibility for historical
 # admission flags.
-# meiva:link scripts/host_ops/docs/admission-run/admission-run.meiva.okf.md
+# meiva:link scripts/host_ops/docs/admission-run/admission-run.md
 from __future__ import annotations
 
 import argparse

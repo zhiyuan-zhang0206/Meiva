@@ -4,7 +4,7 @@
 # recorded with cost 0, so the bill undercounted silently. These tests pin the door: a named
 # model without a price is refused at spawn/restart, and the repo's own default models must
 # stay priced.
-# meiva:link base/lm/docs/pricing-model-rates.meiva.okf.md
+# meiva:link base/lm/docs/pricing-model-rates.md
 
 from dataclasses import dataclass
 from pathlib import Path

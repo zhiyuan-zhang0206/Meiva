@@ -5,7 +5,7 @@
 # nobody sends is a draft and is swept after `STAGED_FILE_TTL_SECONDS`. Once a batch is
 # accepted the bytes of its staged files are deleted (`release_accepted`); the rows stay as
 # the evidence of what was delivered.
-# meiva:link gateway/upload_delivery/docs/delivered-uploads/source-publication.meiva.okf.md
+# meiva:link gateway/upload_delivery/docs/delivered-uploads/source-publication.md
 
 import hashlib
 from dataclasses import dataclass

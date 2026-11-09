@@ -1,4 +1,4 @@
-# meiva:link schedules/docs/adversarial-eval.meiva.okf.md
+# meiva:link schedules/docs/adversarial-eval.md
 
 from __future__ import annotations
 

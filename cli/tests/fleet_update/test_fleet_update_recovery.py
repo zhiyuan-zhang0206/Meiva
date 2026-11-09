@@ -1,7 +1,7 @@
 # meiva:note
 # A failed stop must leave the cluster serving, not half stopped: these tests drive the stop phase
 # to fail on one host and read back which hosts the window started again.
-# meiva:link cli/docs/fleet-update-window/fleet-update-window.meiva.okf.md
+# meiva:link cli/docs/fleet-update-window/fleet-update-window.md
 from __future__ import annotations
 
 from collections.abc import Callable

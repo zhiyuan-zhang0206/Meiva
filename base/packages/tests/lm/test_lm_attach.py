@@ -85,7 +85,7 @@ def test_blocks_interleave_each_caption_line_with_its_media(
     # The leading notice is one complete system note in its own block; the caption lines
     # follow it outside the note, each directly before its media block. The tag pair never
     # adds or moves a block.
-    # meiva:link agent/messages/docs/message-format.meiva.okf.md
+    # meiva:link agent/messages/docs/message-format.md
     assert [b.get("type") for b in pack.blocks] == ["text", "text", "image_url", "text"]
     assert pack.blocks[0] == {
         "type": "text",
@@ -383,7 +383,7 @@ def test_empty_and_all_skipped_entries_preserve_the_text_notice(
     assert pack is not None
     # meiva:note
     # The notice block keeps its complete system note; the skipped entry's caption follows.
-    # meiva:link agent/messages/docs/message-format.meiva.okf.md
+    # meiva:link agent/messages/docs/message-format.md
     assert [b.get("type") for b in pack.blocks] == ["text", "text"]
     assert pack.text.startswith("<system_note>\nFiles attached during this turn:")
     assert pack.text.endswith("cannot receive image")

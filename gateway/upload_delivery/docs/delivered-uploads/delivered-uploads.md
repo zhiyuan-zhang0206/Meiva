@@ -1,0 +1,114 @@
+# Delivered upload acceptance and recovery
+
+`POST /api/keyed/v1/agents/{id}/uploads` accepts `{"file_ids": [...], "text": "..."}`
+(or multipart files) with a verified credential, explicit `principal-v1` and caller
+`Idempotency-Key`. It promises at most one `system:upload` delivery inbound (plus
+one companion `user` inbound when `text` is non-empty), only **after** confirmed
+copy, and only within a bounded number of copy attempts: a batch that cannot be
+copied is held. Per-file staging (`/uploads/staged`) is owned by
+[source publication](source-publication.md).
+SDK/MCP callers are not activated. Agent IDs must be
+positive signed BIGINT values, validated before native storage or database work.
+
+The original ordered display names, bytes/SHA-256, sizes and content types identify
+the request. Same key with different valid input returns 409. A fresh manifest
+validates suffix/name length, URL delimiters, ASCII content type and object order
+before claiming files. Display names remain metadata; finals use bounded UUID,
+ordinal and true suffix, with a 217-byte basename budget that also fits the
+native create-only temporary name. `Acceptance` is the immutable historical 202 snapshot,
+not evidence that a URL remains accessible, remote files remain present or an
+agent ran. Auth is repeated for every replay and read; no persisted bearer secret.
+
+## Native ownership and receiving
+
+The [source publication owner](source-publication.md)
+describes original unit binding, two-phase file publication, shared physical quota
+and manifest-bound object serving. Receiving reservations and final files remain
+retained; a historical key never retargets another unit.
+
+## Gateway round and versioned receiver
+
+Each Gateway lifespan retains its own recovery handle for start and close;
+`app.state.upload_recovery` only exposes that handle to HTTP handlers. A later
+app-state replacement cannot leave the original recovery TaskGroup unstopped.
+
+`gateway.upload_delivery.worker.UploadRecovery` belongs to Gateway lifespan,
+including pure Gateway topology without Ops. Four intents run in a scoped
+TaskGroup; due selection and final acceptance borrow short transactions, with no
+DB connection held across RPC/HTTP. A batch gets `source.MAX_COPY_ATTEMPTS` (3) copy
+attempts spaced by a short linear backoff. `source.due()` claims what it returns: the
+same statement pushes `next_attempt_at` a claim window ahead
+(`upload_recovery_claim_seconds` from the gateway's own config owner, 300 s by default) under
+`FOR UPDATE SKIP LOCKED`, so two Gateway processes sharing a database never copy one
+batch twice. The claim is scheduling, not proof another writer died: a failed copy
+replaces it with its own backoff, and a worker that dies mid-copy delays only that batch
+by one window.
+Source placement is checked before copy and again under locks before inbound.
+
+The worker takes its one environment fact as a value from the lifespan: the claim window.
+It reads no home of its own, because every delivery is the receiver's copy: the staging
+directory the source published into is this unit's internal state, not the agent's
+workspace, so even a batch that stays on one machine goes through `upload-receive-v1`.
+The receiving unit derives the delivered directory from its own home
+(`GatewayConfig.upload_staging_root` names the source side;
+`gateway.upload_dir_name` = `MEIVA_UPLOAD_DIR_NAME` names the delivered directory inside
+`<MEIVA_HOME>/workspaces/<agent id>`). What a failed copy means (held for good, or retried
+under backoff) is the pure verdict of `failure_plan.py`; the worker only records it. `GatewayConfig.upload_recovery_enabled` turns the background loop off for a test
+that drives the rounds itself. With no shortcut there is no path that skips the receiver:
+a gateway whose own machine runs no Ops daemon holds every delivery after the retry
+budget, and the staged bytes stay in staging so a person's re-upload of the same files
+finds them.
+
+The independently known Ops kind `upload-receive-v1` requires explicit integer
+protocol 1 (missing/bool/float/unknown refused), exact target unit and strict
+manifest. It receives no transport idempotency key and does not use uncertain
+RPC response caching. Unknown old consumers reject before effects; no fallback
+to another op. Native source/copy metadata and quota admission
+commit first. Download and create-only publication borrow no DB connection;
+receiver commit follows actual verify/fsync. Network work has a bounded round.
+
+Every receiver retry verifies/fills actual objects, including a historical ready
+copy. Conflicting finals never get replaced. Missing ready objects require quota
+reservation again before fill; wrong home, different manifest, source unavailable
+or incompatible protocol cannot become a usable copy proof. Native readiness
+requires the supported version, unit, manifest digest and absolute batch namespace.
+There is no same-unit shortcut: a copy that never leaves the machine is verified,
+quota-reserved and published create-only exactly like a remote one, so its storage is
+accounted in the agent's workspace. No promise survives operator deletion of
+irreplaceable bytes.
+
+## One inbound and honest status
+
+`source.complete` locks the retained intent and checks supplied immutable source,
+target and manifest first. Existing accepted IID/outcome returns before mutable
+target checks, even after IID/agent deletion; it never
+recreates a deleted IID. Only pending state can accept a fresh late proof. HOLD
+is not automatically unsealed by another overlapping worker.
+
+For pending delivery, the transaction locks current agent/placement and matching
+registered unit, then calls `insert_chat_inbound_in_transaction` with fixed
+batch-derived ID, source `system:upload` (`meiva_uploaded_files` metadata) and,
+when `message_text` is non-empty, `{batch_id}:text` with source `user`. Original
+IID, copy proof and delivery outcome commit in the same transaction. Rollback
+creates neither acceptance nor chat; lost commit response recovers the original
+outcome. No mutable-target FK or TTL deletes this evidence.
+
+Authenticated `.../uploads/{batch}` projects receiving/pending/accepted/HOLD,
+`directory`, `message_text`, `files`, frozen source/target, attempts, next retry, safe failure reason and retained IID.
+Accepted means chat acceptance, not execution. A receiver outage is retried until the
+third failed copy, which HOLDs the batch; unsupported protocol, native conflict/quota,
+missing source or changed/deleted placement HOLD at once. Every HOLD is visible in the
+status and emits the `upload_delivery_held` anomaly event; nothing retries a HOLD. There is no operator cancel/unseal/retarget endpoint in
+this contribution. Restoration or cancellation requires a separate reviewed policy.
+
+The worker wakes the target once, right after `source.complete` commits (the same
+publish-wake and resurrect-if-terminated path as ordinary chat delivery). A failed
+wake is logged and not repeated: the accepted chat stays a pending inbound that the
+agent's next ordinary wake delivers. Deleted/done IID is never requeued. A stopping gateway stops fresh work. Lifespan stops
+rounds and drains actual shielded native futures before closing the pool; cancelling
+an HTTP wait does not pretend its filesystem/DB thread ended. Ops retains its
+existing request and native-worker drainage (`agent_ops/in_flight.py`).
+
+See [silent upload owner](../../../routers/docs/upload-batches.md) for the
+native-image silent save. This is server Outbox recovery of one
+upload domain, not a generic workflow or client Outbox.

@@ -99,4 +99,4 @@ def test_the_summary_names_the_reason_and_the_owner_document(
 
     assert "acyclic" in err
     assert "raising the baseline is not the repair" in err
-    assert "scripts/lint/docs/lint.meiva.okf.md" in err
+    assert "scripts/lint/docs/lint.md" in err

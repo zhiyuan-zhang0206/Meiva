@@ -3,7 +3,7 @@
 # through the operator's own `ssh`, found on the PATH the process was started with; every line
 # the hosts print, and every line the window says, is redacted and written to both the console
 # and a log only its owner can read.
-# meiva:link cli/docs/fleet-update.meiva.okf.md
+# meiva:link cli/docs/fleet-update.md
 
 from __future__ import annotations
 

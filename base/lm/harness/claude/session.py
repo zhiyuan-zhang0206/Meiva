@@ -59,7 +59,7 @@ from base.lm.harness.process import (
 # control events are not. Cancellation is a control message plus an assertion:
 # `interrupt()` reports whether the tool's child processes were actually reaped, and
 # `settled=None` when the CLI pid is unobservable — never a silent pass.
-# meiva:link base/lm/harness/claude/docs/claude.meiva.okf.md
+# meiva:link base/lm/harness/claude/docs/claude.md
 CANCEL_POLL_SECONDS = 0.02
 _EVENT_STREAM_END = EVENT_STREAM_END
 
@@ -110,7 +110,7 @@ class ClaudeSession(BaseHarnessSession[BridgeConfig]):
         # PATH, and the bridge child this session runs in is handed an environment with
         # none (#5491). Pin the CLI we resolved; an injected SDK is a test double and must
         # not require the binary to exist.
-        # meiva:link base/lm/harness/docs/harness.meiva.okf.md
+        # meiva:link base/lm/harness/docs/harness.md
         self._cli_path: str | None = None if sdk is not None else config.cli_path
         self._client: ClaudeClientProtocol | None = None
         self._cli_pid: int | None = None
@@ -150,7 +150,7 @@ class ClaudeSession(BaseHarnessSession[BridgeConfig]):
         # CLI to stop each one first turns that teardown into a provider-managed stop. A
         # stop that fails is not the close's failure: the residue check that follows is
         # what reports whatever kept running.
-        # meiva:link base/lm/harness/claude/docs/claude.meiva.okf.md
+        # meiva:link base/lm/harness/claude/docs/claude.md
         client, live = self._client, list(self._background.open_task_ids)
         self._background = BackgroundTasks()
         self._pending_steers.clear()
@@ -186,7 +186,7 @@ class ClaudeSession(BaseHarnessSession[BridgeConfig]):
     # via `query()`, relaxing the RPC-ACK requirement to transport write confirmation.
     # It is available while an active turn is running and not interrupted. Ordinary
     # `submit()` continues to queue one turn at a time.
-    # meiva:link base/lm/harness/claude/docs/claude.meiva.okf.md
+    # meiva:link base/lm/harness/claude/docs/claude.md
     @property
     def steering_available(self) -> bool:
         ticket = self._active
@@ -317,7 +317,7 @@ class ClaudeSession(BaseHarnessSession[BridgeConfig]):
     # One dispatch table, keyed by the provider's own class name: a result is a turn
     # boundary, the task messages are reports about work outside the turn, the session
     # messages are about the session, and everything else is inside the running turn.
-    # meiva:link base/lm/harness/claude/docs/background-tasks.meiva.okf.md
+    # meiva:link base/lm/harness/claude/docs/background-tasks.md
     def _handle(self, message: object) -> None:
         kind = message_kind(type(message).__name__)
         match kind:

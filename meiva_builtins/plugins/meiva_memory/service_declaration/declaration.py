@@ -20,7 +20,7 @@
 # It lives in this subdirectory, behind the `services.py` re-export the loader reads, because pyright
 # resolves an import against the checked directory's root first: a root-level `services.py` would
 # shadow the repository's `services` package for every file beside it.
-# meiva:link meiva_builtins/plugins/meiva_memory/docs/meiva_memory.meiva.okf.md
+# meiva:link meiva_builtins/plugins/meiva_memory/docs/meiva_memory.md
 from __future__ import annotations
 
 from functools import partial

@@ -2,7 +2,7 @@
 # Binary `POST /workspace/export` route on `agent-ops`: validates a small `WorkspaceExportRequest`
 # JSON body and streams back the self-verifying `MEIVA_WS_V1` archive of `<home>/workspaces/<id>`
 # after verifying the agent's Postgres placement and non-running fence.
-# meiva:link gateway/agents/docs/agent-transfer.meiva.okf.md
+# meiva:link gateway/agents/docs/agent-transfer.md
 
 from __future__ import annotations
 

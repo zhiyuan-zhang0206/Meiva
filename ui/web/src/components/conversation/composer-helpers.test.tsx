@@ -6,8 +6,8 @@
 // 3. Non-credential fields suppress Password/Credit-Card/Address autofill sheets by default, while
 //    explicit credential fields (`username`, `current-password`, `new-password`, `one-time-code`)
 //    keep password-manager integration intact.
-// meiva:link ui/web/src/docs/frontend-components/enter-to-send.meiva.okf.md
-// meiva:link ui/web/src/docs/mobile-and-tablet-ux.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/enter-to-send.md
+// meiva:link ui/web/src/docs/mobile-and-tablet-ux.md
 
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";

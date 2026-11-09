@@ -1,4 +1,4 @@
-# meiva:link base/agents/upload_delivery/docs/storage.meiva.okf.md
+# meiva:link base/agents/upload_delivery/docs/storage.md
 
 import hashlib
 import os

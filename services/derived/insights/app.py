@@ -1,4 +1,4 @@
-# meiva:link services/derived/insights/docs/insights.meiva.okf.md
+# meiva:link services/derived/insights/README.md
 from __future__ import annotations
 
 import random

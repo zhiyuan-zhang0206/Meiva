@@ -13,7 +13,7 @@
 #
 # The target, the file selection and the watermark decisions are in `plans/trace_ship_*.py`; this
 # module reads the settings and the mirror, POSTs and keeps the watermark.
-# meiva:link base/telemetry/otlp/docs/telemetry-otlp/trace-mirror.meiva.okf.md
+# meiva:link base/telemetry/otlp/docs/telemetry-otlp/trace-mirror.md
 
 from __future__ import annotations
 

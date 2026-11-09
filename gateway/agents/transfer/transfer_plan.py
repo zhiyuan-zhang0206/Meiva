@@ -3,7 +3,7 @@
 # cross-machine transfers.
 #
 # No database, filesystem, network, clock, or randomness access lives here (`purity = "strict"`).
-# meiva:link gateway/agents/docs/agent-transfer.meiva.okf.md
+# meiva:link gateway/agents/docs/agent-transfer.md
 
 from __future__ import annotations
 

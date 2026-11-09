@@ -71,13 +71,13 @@ HarnessGoto = Literal["claim", "harness_turn"]
 # meiva:note
 # This tick keeps host custody alive while a harness owns the invocation. Provider
 # activity is recorded separately by the timeline projector.
-# meiva:link agent/graph/docs/harness-turn.meiva.okf.md
+# meiva:link agent/graph/docs/harness-turn.md
 PROGRESS_TICK_SECONDS = 60.0
 
 
 # meiva:note
 # Filter out agent replies from a sequence of messages.
-# meiva:link agent/graph/docs/harness-turn.meiva.okf.md
+# meiva:link agent/graph/docs/harness-turn.md
 def pending_messages(
     messages_or_state: _state.AgentState | Sequence[BaseMessage],
 ) -> list[BaseMessage]:
@@ -116,7 +116,7 @@ def render_message(message: BaseMessage) -> str:
 # the cursor plus its length stands in; retrying the same window at the same cursor
 # reuses the key, while a later note-only turn (such as a second heartbeat) gets a
 # distinct key instead of replaying the first.
-# meiva:link agent/graph/docs/harness-turn.meiva.okf.md
+# meiva:link agent/graph/docs/harness-turn.md
 def turn_key(messages: Sequence[BaseMessage], *, cursor: int = 0) -> str:
     for message in reversed(messages):
         inbound_id = read_meiva_kwargs(message).get("meiva_inbound_id")
@@ -150,7 +150,7 @@ async def _run_pre_turn_hooks(
 # meiva:note
 # The graph waits for one big turn. Observable activities are committed by the
 # projector while the harness works, independently of the terminal outcome.
-# meiva:link agent/graph/docs/harness-turn.meiva.okf.md
+# meiva:link agent/graph/docs/harness-turn.md
 async def harness_turn_node(
     state: _state.AgentState,
     runtime: Runtime[MeivaContext],
@@ -383,7 +383,7 @@ async def _await_foreground(
 # A foreground cancel sends a control request while the event reader remains
 # alive. Only its observed terminal outcome can end the foreground. Stop
 # admitting steering at handback, and settle any receipt already in flight.
-# meiva:link agent/graph/docs/harness-turn.meiva.okf.md
+# meiva:link agent/graph/docs/harness-turn.md
 async def _with_foreground_controls(
     execute: Callable[[], Awaitable[HarnessTurn]],
     request_cancel: Callable[[], Awaitable[None]],
@@ -529,7 +529,7 @@ async def _checkpoint_activity(
 # ExceptionGroup, and the node matches a faulted session on the error's own type, so
 # the identity has to survive this scope. A cancelled turn keeps its CancelledError
 # for the same reason.
-# meiva:link agent/graph/docs/harness-turn.meiva.okf.md
+# meiva:link agent/graph/docs/harness-turn.md
 async def _ticking(
     mark: Callable[[int], None],
     agent_id: int,
@@ -565,7 +565,7 @@ async def _ticking(
 # meiva:note
 # Tell the live view the turn ended. Its committed activities remain visible and
 # the durable cancel stays pending for the next claim pass.
-# meiva:link agent/graph/docs/harness-turn.meiva.okf.md
+# meiva:link agent/graph/docs/harness-turn.md
 def _announce_cancel(ctx: MeivaContext, agent_id: int) -> None:
     assert ctx.event_publisher is not None, "a cancelled harness turn requires ctx.event_publisher"  # noqa: S101
     ctx.event_publisher.emit(Cancelled(agent_id=agent_id).model_dump_json())
@@ -576,7 +576,7 @@ def _announce_cancel(ctx: MeivaContext, agent_id: int) -> None:
 # row is still pending and claim dispatches it on the next pass, while a raise here
 # would turn the user's stop into a failed turn. Process observations are diagnostics.
 # The foreground ends only when the executor reports a terminal outcome.
-# meiva:link agent/graph/docs/harness-turn.meiva.okf.md
+# meiva:link agent/graph/docs/harness-turn.md
 async def interrupt_engine(agent_id: int, bridge: TurnEngine) -> str | None:
     try:
         report = await bridge.interrupt()
@@ -605,7 +605,7 @@ async def interrupt_engine(agent_id: int, bridge: TurnEngine) -> str | None:
 # `source` so the two runtimes stay comparable. A turn whose provider reported no
 # tokens is not logged at all: an all-zero row would read as a free call rather than
 # as a provider that said nothing.
-# meiva:link agent/graph/docs/harness-turn.meiva.okf.md
+# meiva:link agent/graph/docs/harness-turn.md
 def _resolve_pricing_model(raw_model: str, catalog: ModelCatalog) -> str:
     candidate = raw_model.removesuffix("[1m]")
     for suffix in ("", "-high", "-medium", "-low", "-minimal"):
@@ -650,7 +650,7 @@ def log_turn_usage(ctx: MeivaContext, agent_id: int, model: str | None, turn: Ha
         # is logged, so a raise here deletes a reply the user paid for — a provider
         # that reports token counts in a shape the price book rejects must not cost
         # the answer, and the recorded warning keeps the gap visible.
-        # meiva:link agent/graph/docs/harness-turn.meiva.okf.md
+        # meiva:link agent/graph/docs/harness-turn.md
         logger.warning(
             "[{label}] {body}",
             label="harness",

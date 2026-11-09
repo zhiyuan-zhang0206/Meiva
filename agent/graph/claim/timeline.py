@@ -1,6 +1,6 @@
 # meiva:note
 # A turn that fails before its first activity leaves a system note in harness history.
-# meiva:link agent/graph/docs/harness-turn.meiva.okf.md
+# meiva:link agent/graph/docs/harness-turn.md
 
 from __future__ import annotations
 

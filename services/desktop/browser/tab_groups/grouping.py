@@ -73,7 +73,7 @@
 # unique new target, a wedged Chrome -- is logged as a WARNING and swallowed: the
 # browser operation it decorates must succeed or fail on its own merits (see
 # docs/decisions/engineering/design/contracts/2026-10-12-presentation-only-failure-degrades-with-warning.md).
-# meiva:link services/desktop/browser/docs/tab-groups.meiva.okf.md
+# meiva:link services/desktop/browser/docs/tab-groups.md
 
 from __future__ import annotations
 
@@ -135,7 +135,7 @@ WORKER_WAIT_S = 5.0
 # Bound on the pre-close ungroup. It runs inline before `close_page` and wakes
 # the service worker via `loadUnpacked` when Chrome stopped the idle worker
 # (~30s after the last grouping event), so its budget matches `WORKER_WAIT_S`.
-# meiva:link services/desktop/browser/docs/tab-groups.meiva.okf.md
+# meiva:link services/desktop/browser/docs/tab-groups.md
 UNGROUP_TIMEOUT_S = 5.0
 _WORKER_POLL_S = 0.1
 
@@ -184,7 +184,7 @@ def stage_extension(extension_dir: Path) -> None:
 # What one convergence found and did, as the worker reports it: the title, the
 # keeper's window, the group ids it saw across the browser (before the merge),
 # the group it kept, how many groups it merged away and how many tabs it moved.
-# meiva:link services/desktop/browser/docs/tab-groups.meiva.okf.md
+# meiva:link services/desktop/browser/docs/tab-groups.md
 @dataclass(frozen=True)
 class Convergence:
     title: str
@@ -228,7 +228,7 @@ def _convergence(raw: object) -> Convergence:
 # meiva:note
 # A merged duplicate is a defect that got repaired, not a normal path: name the
 # agent, the keeper window and every group id, so the log says what happened.
-# meiva:link services/desktop/browser/docs/tab-groups.meiva.okf.md
+# meiva:link services/desktop/browser/docs/tab-groups.md
 def _warn_merged(report: Convergence, *, who: str) -> None:
     if report.merged <= 0:
         return
@@ -286,7 +286,7 @@ def _worker_file() -> str:
 
 # meiva:note
 # The service-worker file name this checkout ships (public door to `_worker_file`).
-# meiva:link services/desktop/browser/docs/browser-session-restore.meiva.okf.md
+# meiva:link services/desktop/browser/docs/browser-session-restore.md
 def shipped_worker() -> str:
     return _worker_file()
 
@@ -344,7 +344,7 @@ async def _uninstall_stale_extensions(
 # rejecting `Target.attachToTarget`; trying the newest listed target first and
 # falling through to `Extensions.loadUnpacked` on `RuntimeError` wakes the worker
 # without reloading a live one.
-# meiva:link services/desktop/browser/docs/tab-groups.meiva.okf.md
+# meiva:link services/desktop/browser/docs/tab-groups.md
 async def _worker_session(
     ws: ClientConnection,
     ids: Iterator[int],
@@ -416,7 +416,7 @@ async def _await_worker_script(
 # worker over CDP. Shared by `AgentTabGroups` and `session_restore.CdpChrome` in
 # `browser-mcp` so startup layout restore, convergence, page grouping and
 # pre-close ungrouping never reload the extension underneath each other.
-# meiva:link services/desktop/browser/docs/tab-groups.meiva.okf.md
+# meiva:link services/desktop/browser/docs/tab-groups.md
 class ExtensionWorker:
     def __init__(
         self,
@@ -460,7 +460,7 @@ class ExtensionWorker:
 # `new_page` -> `group_new_page`; `group_new_page` returns after one short target
 # listing and finishes the grouping in a background task. No method raises, and
 # every failure is a WARNING.
-# meiva:link services/desktop/browser/docs/tab-groups.meiva.okf.md
+# meiva:link services/desktop/browser/docs/tab-groups.md
 class AgentTabGroups:
     def __init__(
         self,
@@ -483,7 +483,7 @@ class AgentTabGroups:
         # page id -> (agent id, CDP target id) for the pages this daemon grouped:
         # the only way to find an agent's tab again at close time, when the
         # upstream hands us a page id and the extension needs a target id.
-        # meiva:link services/desktop/browser/docs/tab-groups.meiva.okf.md
+        # meiva:link services/desktop/browser/docs/tab-groups.md
         self._pages: dict[int, tuple[int, str]] = {}
 
     # meiva:note
@@ -507,7 +507,7 @@ class AgentTabGroups:
     # `before` is the matching `snapshot()`; None skips. Finds the new page's
     # target with one short listing, records `page_id` for `release_page`, then
     # hands the grouping to a background task and returns.
-    # meiva:link services/desktop/browser/docs/tab-groups.meiva.okf.md
+    # meiva:link services/desktop/browser/docs/tab-groups.md
     async def group_new_page(
         self, agent_id: int, before: frozenset[str] | None, page_id: int | None = None
     ) -> None:
@@ -541,7 +541,7 @@ class AgentTabGroups:
     # under the daemon's lock, bounded by `UNGROUP_TIMEOUT_S` (including waiting
     # on `ExtensionWorker`'s lock and waking an idled-out worker), and reports a
     # failure as a WARNING: a page that must close still closes.
-    # meiva:link services/desktop/browser/docs/tab-groups.meiva.okf.md
+    # meiva:link services/desktop/browser/docs/tab-groups.md
     async def release_page(self, page_id: int) -> None:
         recorded = self._pages.pop(page_id, None)
         if recorded is None:
@@ -568,7 +568,7 @@ class AgentTabGroups:
     # meiva:note
     # Converge every agent's groups across the browser: the keeper of each title
     # absorbs its duplicates, and any duplicate merged is logged as a WARNING.
-    # meiva:link services/desktop/browser/docs/tab-groups.meiva.okf.md
+    # meiva:link services/desktop/browser/docs/tab-groups.md
     async def converge_all(self) -> None:
         try:
             reports = await self._converge_all_call()

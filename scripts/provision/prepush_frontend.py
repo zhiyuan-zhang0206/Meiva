@@ -24,7 +24,7 @@ _WEB = "ui/web/"
 _CODE = (".ts", ".tsx", ".js", ".mjs", ".mts")
 # meiva:note
 # _TYPE_INPUTS names the canonical schema/type artifacts without runtime imports (openapi.json, types-generated.ts): their consumers are proven by project tsc and the codegen-freshness hook, so a change confined to them schedules no related Vitest run while a changed runtime source still does.
-# meiva:link scripts/provision/docs/prepush-selection.meiva.okf.md
+# meiva:link scripts/provision/docs/prepush-selection.md
 _TYPE_INPUTS = {"ui/web/openapi.json", "ui/web/src/lib/contracts/types-generated.ts"}
 _GLOBAL = {
     "ui/web/package.json",
@@ -40,7 +40,7 @@ _GLOBAL = {
 }
 # meiva:note
 # _DISK_CONSUMERS pairs each input read from disk outside Vitest's import graph (fixtures, locale files, css, layout, gate html) with the contract test that proves it; a new out-of-graph reader must join the table or its push-stage verification silently disappears. The input side is matched by prefix against the contribution paths.
-# meiva:link scripts/provision/docs/prepush-selection.meiva.okf.md
+# meiva:link scripts/provision/docs/prepush-selection.md
 _DISK_CONSUMERS = (
     ("ui/web/src/", "src/lib/auth/localstorage-policy.test.ts"),
     ("ui/web/messages/", "src/i18n/messages-layout.test.ts"),
@@ -66,14 +66,14 @@ _PROBE_TIMEOUT_S = 120
 _VERSION = re.compile(r"v?\d+(?:\.\d+)+")
 
 
-# meiva:link scripts/provision/docs/prepush-selection.meiva.okf.md
+# meiva:link scripts/provision/docs/prepush-selection.md
 def _query(*args: str) -> str:
     return subprocess.run(["git", *args], check=True, capture_output=True, text=True).stdout
 
 
 # meiva:note
 # The selection range is the branch contribution — merge-base(origin/main, HEAD)..HEAD, resolved by scripts/hooks/prepush-base.sh — never an old remote push tip. Renames and deletions keep both sides visible: --no-renames splits a rename into its deletion and addition. An unknown range is an error, never an empty change set.
-# meiva:link scripts/provision/docs/prepush-selection.meiva.okf.md
+# meiva:link scripts/provision/docs/prepush-selection.md
 def contribution() -> list[str]:
     base = subprocess.run(
         ["bash", str(_SCRIPTS / "hooks" / "prepush-base.sh")],
@@ -92,7 +92,7 @@ def _run(tool: str, command: list[str]) -> int:
 
 # meiva:note
 # Vitest's `related` mode defaults passWithNoTests=true; the selector overrides it to false: an empty affected collection is missing evidence, never a passing test run.
-# meiva:link scripts/provision/docs/prepush-selection.meiva.okf.md
+# meiva:link scripts/provision/docs/prepush-selection.md
 def _vitest(paths: list[str], *, related: bool = False) -> int:
     return _run(
         "vitest",
@@ -185,7 +185,7 @@ def _related_sources(existing: list[str], direct: list[str]) -> list[str]:
 # `node_modules` satisfies every structural signal while holding none of the tools; structure only
 # chooses which explanation to print. The exit status is not consulted on its own: pnpm answered
 # that failed probe with status 0 in this repository, so the answered version is what counts.
-# meiva:link scripts/provision/docs/prepush-selection.meiva.okf.md
+# meiva:link scripts/provision/docs/prepush-selection.md
 def _environment_verdict() -> str | None:
     try:
         probe = subprocess.run(
@@ -285,7 +285,7 @@ def _touches_rsc_or_build(web: list[str], existing: list[str]) -> bool:
 # Incremental pull-request CI passes `--base <sha>` directly so execution never consults the host
 # load guard or local lockfile, and widens to full ESLint, Vitest and Next.js build checks whenever
 # global configuration, local ESLint rules, RSC boundaries or file deletions appear in the diff.
-# meiva:link scripts/provision/docs/prepush-selection.meiva.okf.md
+# meiva:link scripts/provision/docs/prepush-selection.md
 def run_ci_incremental(base: str) -> int:
     paths = _query("diff", "--name-only", "--no-renames", "-z", base, "HEAD").split("\0")[:-1]
     web = [p for p in paths if p.startswith(_WEB)]

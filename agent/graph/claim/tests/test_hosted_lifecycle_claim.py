@@ -3,7 +3,7 @@
 # `restart_preserves_idle`: an agent that was idle stays idle and reads the acceptance marker;
 # any other agent had an unfinished turn, which the host's apply continues with one queued
 # note, so claim adds no marker for it.
-# meiva:link agent/graph/docs/turn-interrupts.meiva.okf.md
+# meiva:link agent/graph/docs/turn-interrupts.md
 
 from datetime import UTC, datetime
 

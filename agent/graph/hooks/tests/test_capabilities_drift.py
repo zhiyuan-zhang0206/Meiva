@@ -58,7 +58,7 @@ def _slices(pins: Mapping[str, Any] | None = None) -> AgentSlices:
     )
 
 
-# meiva:link agent/graph/docs/system-prompt/capability-index-freshness.meiva.okf.md
+# meiva:link agent/graph/docs/system-prompt/capability-index-freshness.md
 def _runtime(
     *,
     ops_pool: AsyncConnectionPool | None,

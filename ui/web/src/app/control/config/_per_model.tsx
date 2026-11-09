@@ -40,7 +40,7 @@ function shadowedLayers(
   return out;
 }
 
-// meiva:link ui/web/src/app/control/config/docs/configuration.meiva.okf.md
+// meiva:link ui/web/src/app/control/config/docs/configuration.md
 export function PerModelPanel({
   id,
   onFocusField,

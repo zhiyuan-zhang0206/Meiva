@@ -37,7 +37,7 @@ def _object_rows(raw: object) -> list[dict[str, object]]:
 
 # meiva:note
 # _FAILURE_SIGNATURES is ordered and first match wins: each entry is (regex over the failing log, classification, suggested action) matched case-insensitively; with no match, a check whose name contains "lint" classifies as a deterministic lint failure and anything else as unclassified. The classification and action strings are the operator-facing diagnosis text.
-# meiva:link scripts/ci/pull_requests/docs/diagnostics.meiva.okf.md
+# meiva:link scripts/ci/pull_requests/docs/diagnostics.md
 _FAILURE_SIGNATURES: list[tuple[str, str, str]] = [
     (
         r"over the 800-line hard ceiling",
@@ -64,7 +64,7 @@ _FAILURE_SIGNATURES: list[tuple[str, str, str]] = [
 ]
 
 
-# meiva:link scripts/ci/pull_requests/docs/diagnostics.meiva.okf.md
+# meiva:link scripts/ci/pull_requests/docs/diagnostics.md
 def _pr_view(pr: str, repo: str, fields: str, *, host: Host) -> dict[str, object] | None:
     try:
         result = host.run(
@@ -156,7 +156,7 @@ def _synthetic_test_prs(pr: str, repo: str, *, host: Host) -> list[dict[str, obj
 # For an OPEN PR, mergeable=CONFLICTING reports merge_conflict. A base behind main is not an issue
 # since the queue retired (2026-11-01): nothing requires a fresh base before landing, so reporting
 # it would be noise. Merged and closed PRs report mergeable=UNKNOWN by definition.
-# meiva:link scripts/ci/pull_requests/docs/diagnostics.meiva.okf.md
+# meiva:link scripts/ci/pull_requests/docs/diagnostics.md
 def _pr_level_issues(view: dict[str, object]) -> list[dict[str, object]]:
     issues: list[dict[str, object]] = []
     mergeable = view.get("mergeable")

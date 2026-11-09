@@ -366,7 +366,7 @@ def _async_loop(
 # The door that promises a wait which draws nothing: the policy's backoff plus its Retry-After, and
 # a policy whose `jitter` mode asks for noise is refused here at build time, because this loop has
 # no generator to draw from. `retry_jittered` is the drawing door.
-# meiva:link base/host/docs/resilience.meiva.okf.md
+# meiva:link base/host/docs/resilience.md
 def retry(
     policy: Policy, *, sleep: Callable[[float], None] = retry_sleep
 ) -> Callable[[Callable[[], T]], T]:

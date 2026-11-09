@@ -93,7 +93,7 @@ function MessageCard({
   );
 }
 
-// meiva:link ui/web/src/docs/frontend-components/run-timeline/details-panel.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/run-timeline/details-panel.md
 export function PreviewMessage({
   text,
   source,
@@ -123,7 +123,7 @@ export function PreviewMessage({
   );
 }
 
-// meiva:link ui/web/src/docs/frontend-components/run-timeline/details-panel.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/run-timeline/details-panel.md
 export function TimelineMessages({
   agentId,
   snapshot,

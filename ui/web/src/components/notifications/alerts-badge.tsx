@@ -7,7 +7,7 @@
 // the sidebar collapsed the row is gone, so the same count rides the restore button at the
 // bar's left edge and the count stays visible without opening the rail (user 2026-10-21).
 // Clicking jumps to the alert section, and nothing renders at zero — a zero badge is noise.
-// meiva:link ui/web/src/docs/frontend-components/frontend-components.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/frontend-components.md
 
 import { Bell } from "lucide-react";
 import { useTranslations } from "next-intl";
@@ -21,7 +21,7 @@ import { cn } from "@/lib/format/utils";
 // One count bubble for both surfaces that show it: the sidebar's bell and the collapsed
 // rail's restore button. Past 99 the digits would widen the bubble past the icon it sits
 // on, so it reads "99+" (the exact count is in the alert section).
-// meiva:link ui/web/src/docs/frontend-components/frontend-components.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/frontend-components.md
 export function AlertsCountPill({ count, testId = "alerts-count-pill" }: { count: number; testId?: string }) {
   return (
     <span

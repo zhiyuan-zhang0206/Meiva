@@ -2,7 +2,7 @@
 # OLD is the one commit every host agrees on that is not NEW. Hosts that disagree, or an OLD the
 # operator's checkout does not carry, refuse the window. OLD only feeds the `.python-version`
 # refusal: it decides nothing about what stops or starts.
-# meiva:link cli/docs/fleet-update-window/fleet-update-window.meiva.okf.md
+# meiva:link cli/docs/fleet-update-window/fleet-update-window.md
 
 from __future__ import annotations
 

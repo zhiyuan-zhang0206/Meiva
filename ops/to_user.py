@@ -68,7 +68,7 @@ def read_to_user(
 # The gateway owns what the reader sees, so only the class crosses the wire as
 # `reason`; `error` carries the local detail (exception type, budget, relative name)
 # for the gateway's log.
-# meiva:link gateway/agents/docs/to-user-read-failures.meiva.okf.md
+# meiva:link gateway/agents/docs/to-user-read-failures.md
 def read_failure_payload(exc: OSError | ValueError) -> dict[str, object]:
     return {"error": f"{type(exc).__name__}: {exc}", "reason": read_failure(exc).value}
 

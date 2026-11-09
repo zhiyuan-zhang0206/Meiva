@@ -19,7 +19,7 @@ from base.log import logger
 # child's environment: the registration document keeps its sha256, so a reader of
 # `$MEIVA_HOME` cannot take over a live session, and no file inside the workspace
 # carries a credential the sandbox would refuse to write.
-# meiva:link base/lm/harness/docs/harness.meiva.okf.md
+# meiva:link base/lm/harness/docs/harness.md
 HANDLE_ENV = "MEIVA_HARNESS_HANDLE"
 
 # meiva:note
@@ -35,7 +35,7 @@ SecureRandom = NewType("SecureRandom", random.Random)
 # that says anything else, and the reader owns that vocabulary: this module cannot import
 # it, because the SDK surface sits above `base`, so the word is repeated here and a test
 # pins the pair the moment both land.
-# meiva:link base/lm/harness/docs/harness.meiva.okf.md
+# meiva:link base/lm/harness/docs/harness.md
 ATTACHED = "attached"
 
 _REQUIRED = frozenset(
@@ -60,7 +60,7 @@ _REQUIRED = frozenset(
 # `expires_at` is required here even though a reader may accept its absence: the row is
 # a bearer capability, and `descends_from(controller_pid)` cannot tell a reused pid from
 # the original, so only an expiry keeps a dead controller's claim from living forever.
-# meiva:link base/lm/harness/docs/harness.meiva.okf.md
+# meiva:link base/lm/harness/docs/harness.md
 @dataclass(frozen=True, slots=True)
 class HarnessRegistration:
     agent_id: int
@@ -102,7 +102,7 @@ def handle_digest(handle: str) -> str:
 # because a sandbox may forbid every path outside its workspace. A process that dies
 # without retiring its line leaves it to `sweep`, which drops an entry whose controller
 # is gone or whose `expires_at` has passed.
-# meiva:link base/lm/harness/docs/harness.meiva.okf.md
+# meiva:link base/lm/harness/docs/harness.md
 class RegistrationStore:
     def __init__(self, root: Path) -> None:
         self._root = Path(root)
@@ -211,7 +211,7 @@ def _parse(value: str) -> datetime:
 # `PermissionError` means it exists under another user, i.e. alive. A pid reused by an
 # unrelated process reads as alive, which leaves one stale line for an operator rather
 # than deleting a live session's — the safe direction for a record that gates attachment.
-# meiva:link base/lm/harness/docs/harness.meiva.okf.md
+# meiva:link base/lm/harness/docs/harness.md
 def _alive(pid: int) -> bool:
     if pid <= 0:
         return False

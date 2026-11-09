@@ -1,6 +1,6 @@
 # meiva:note
 # A stale runner revision cannot execute a newer script, while current revision admission is recorded before successful completion.
-# meiva:link services/wake/schedule_manager/docs/runner-composition.meiva.okf.md
+# meiva:link services/wake/schedule_manager/docs/runner-composition.md
 
 from __future__ import annotations
 

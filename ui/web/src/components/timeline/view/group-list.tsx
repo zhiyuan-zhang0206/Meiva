@@ -46,7 +46,7 @@ function memberTurnIdentity(
 // Walking groups and members from newest to oldest keeps an active trailing
 // TurnBlock mounted with its measured inner row heights and scrollport intact
 // even when its oldest item is trimmed or an adjacent head run merges in.
-// meiva:link ui/web/src/docs/frontend-components/timeline-view/deep-collapse.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/timeline-view/deep-collapse.md
 function computeTurnKeySnapshot(
   groups: RankedTimelineGroup[],
   threadKey: string | undefined,
@@ -194,7 +194,7 @@ export function useTimelineGroupWindow({
     // meiva:note
     // Manual toggles take precedence over the live expansion preference,
     // including when the turn settles.
-    // meiva:link ui/web/src/docs/frontend-components/timeline-view/deep-collapse.meiva.okf.md
+    // meiva:link ui/web/src/docs/frontend-components/timeline-view/deep-collapse.md
     const isLiveTurn = group.kind === "turn" && isLastTurn && turnActive;
     const runExpanded = group.kind === "turn" && (turnOverrides.has(groupKey)
       ? (turnOverrides.get(groupKey) ?? false)
@@ -341,7 +341,7 @@ export function TimelineGroupList({
   // Immediately after a human user submits a message (before the first reasoning
   // or tool item arrives), render the inline PendingLiveActivityWindow row so the
   // user gets instant visual feedback with zero layout shift.
-  // meiva:link ui/web/src/docs/frontend-components/timeline-view/timeline-view.meiva.okf.md
+  // meiva:link ui/web/src/docs/frontend-components/timeline-view/timeline-view.md
   const lastGroup = groups.length > 0 ? groups[groups.length - 1] : null;
   const showPendingActivityWindow =
     turnActive &&

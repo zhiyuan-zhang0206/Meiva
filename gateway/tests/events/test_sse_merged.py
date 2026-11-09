@@ -24,7 +24,7 @@ from base.telemetry.tests.capture.event_capture import emitted_events as emitted
 # Pins the merged stream's contract: one frame per channel per flush with the
 # channel named, per-source failures scoped to the channels they serve, and the
 # bounded-queue drop that must reach both the frame and `sse_drop`.
-# meiva:link gateway/events/docs/sse/sse.meiva.okf.md
+# meiva:link gateway/events/docs/sse/sse.md
 from gateway.events.merged import (
     ALERTS_CHANNEL,
     CHANNELS,

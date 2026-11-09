@@ -71,7 +71,7 @@ def _check_values(table: str, column: str) -> set[str]:
 # until a later contract migration drops them (`db/docs/migrations.md` rule 2:
 # narrowing the CHECK immediately would fail on deployments with historical rows
 # or require lossily rewriting stored provenance).
-# meiva:link base/agents/docs/harness/harness.meiva.okf.md
+# meiva:link base/agents/docs/harness/harness.md
 _RETIRED_DB_CHECK_VALUES: dict[tuple[str, str], frozenset[str]] = {
     ("agents_meta", "harness"): frozenset({"kimi_code"}),
 }

@@ -15,7 +15,7 @@ MACHINE_OFFLINE_AFTER_FAILURES = 2
 # minutes on 2026-10-20, and the 2026-10-14 stack sat stopped for 53 minutes
 # with nothing reporting it (task #5464). A declared `--maintenance-for`
 # window suppresses the report until it expires.
-# meiva:link services/docs/gateway_side/heartbeat-stopped-too-long.meiva.okf.md
+# meiva:link services/docs/gateway_side/heartbeat-stopped-too-long.md
 MACHINE_STOPPED_TOO_LONG_S = 20 * 60
 
 

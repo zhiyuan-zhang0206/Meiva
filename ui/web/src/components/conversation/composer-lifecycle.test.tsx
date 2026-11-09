@@ -221,7 +221,7 @@ describe("Composer input lifecycle", () => {
     // meiva:note
     // The page refused the write, so the attempt lives in memory for this page view; the stale copy
     // the server-rendered tab started with is still there.
-    // meiva:link ui/web/src/docs/frontend-state/browser-port.meiva.okf.md
+    // meiva:link ui/web/src/docs/frontend-state/browser-port.md
     expect(sessionStorage.getItem(attemptKey)).toContain("stale-client-id");
     first.unmount();
     renderComposerTree(<Composer {...baseProps} mode="idle" agentId={agentId} onSend={onSend} />);
@@ -298,7 +298,7 @@ describe("Composer input lifecycle", () => {
     // meiva:note
     // The textarea stays editable mid-flight: `readOnly` here would tear down an
     // Android IME connection and silently drop the next voice-input commit.
-    // meiva:link ui/web/src/docs/frontend-components/frontend-components.meiva.okf.md
+    // meiva:link ui/web/src/docs/frontend-components/frontend-components.md
     fireEvent.change(ta, { target: { value: "later edit" } });
     expect(ta.value).toBe("later edit");
     const image = new File(["png"], "later.png", { type: "image/png" });

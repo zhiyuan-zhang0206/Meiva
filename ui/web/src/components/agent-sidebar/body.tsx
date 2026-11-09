@@ -59,7 +59,7 @@ export function SidebarBody(props: InnerProps) {
   const { sort } = useSidebarSort();
   // meiva:note
   // Quiet defaults (RCS): opt-in (`=== true`, default off).
-  // meiva:link ui/web/src/docs/frontend-components/agent-sidebar.meiva.okf.md
+  // meiva:link ui/web/src/docs/frontend-components/agent-sidebar.md
   const { settings: userSettings } = useUserSettings();
   const showAgentStatus = userSettings["display.show_agent_status"] === true;
 
@@ -101,7 +101,7 @@ export function SidebarBody(props: InnerProps) {
           // Zero agents is the one moment the create action needs words: a bare
           // + does not explain itself to someone who has never spawned (the
           // header keeps the icon for every other visit).
-          // meiva:link ui/web/src/docs/frontend-components/frontend-components.meiva.okf.md
+          // meiva:link ui/web/src/docs/frontend-components/frontend-components.md
           <div className="px-4 py-4 text-xs text-muted-foreground">
             {searchQuery ? t("noResults") : null}
             {!searchQuery && (

@@ -15,7 +15,7 @@ export const assetUrl = (path: string): string => `${API_BASE}${path}`;
 // against the configured gateway origin, with slow requests reported to the
 // transport telemetry sink. Hooks and components receive it through ApiProvider
 // (transport-context.tsx); a few call sites still import it directly.
-// meiva:link ui/web/src/docs/frontend-state/api-requests.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-state/api-requests.md
 export const api = createApi(
   createHttp(systemHttpTransport(), API_BASE, {
     reportSlow: (report) => {

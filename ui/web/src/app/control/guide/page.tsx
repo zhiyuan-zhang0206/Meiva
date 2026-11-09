@@ -23,7 +23,7 @@ import { useApi } from "@/lib/transport/transport-context";
 // meiva:note
 // This route is the guide page's composition root: it reads the router and hands the shell a
 // `navigate`, so a test passes a spy instead of replacing `next/navigation`.
-// meiva:link ui/web/src/docs/frontend-state/frontend-state.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-state/frontend-state.md
 export default function GuidePage() {
   const router = useRouter();
   const navigate = useCallback((href: Route) => { router.push(href); }, [router]);

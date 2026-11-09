@@ -9,7 +9,7 @@
 # Pending a base port: base/ is to host a narrow `InterruptPool` protocol and this fake. Then this
 # file is deleted and `subscribe_interrupt` types its pool with the protocol, so `as_pool` and its
 # cast go with it.
-# meiva:link agent/graph/docs/interrupt-ownership.meiva.okf.md
+# meiva:link agent/graph/docs/interrupt-ownership.md
 
 import asyncio
 from collections.abc import AsyncGenerator

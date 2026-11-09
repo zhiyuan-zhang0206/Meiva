@@ -129,7 +129,7 @@ def test_fresh_mirror_install_preserves_graph_hashes_markers_and_editable(
 # meiva:note
 # `--no-config` hides `[tool.uv] compile-bytecode`, and `UV_COMPILE_BYTECODE` may be set in the
 # caller's shell, so every installing step carries the chosen bytecode flag explicitly.
-# meiva:link cli/docs/python-install.meiva.okf.md
+# meiva:link cli/docs/python-install.md
 def _assert_installs_bytecode_flag(
     calls: list[list[str]], *, expected: int, flag: str = "--compile-bytecode"
 ) -> None:

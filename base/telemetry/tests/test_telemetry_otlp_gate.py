@@ -181,7 +181,7 @@ def test_disabled_backend_does_not_read_identity(tmp_path: Path) -> None:
 # closing — a warning plus traceback in a watcher's log for a process whose work finished
 # (#5578). `stop()` therefore marks the backend closing *before* its own drain, which is
 # where that bring-up used to happen.
-# meiva:link base/telemetry/otlp/docs/telemetry-otlp/exit-flush.meiva.okf.md
+# meiva:link base/telemetry/otlp/docs/telemetry-otlp/exit-flush.md
 def test_stop_marks_the_exporter_closing_before_the_drain(tmp_path: Path) -> None:
     from datetime import UTC, datetime
 

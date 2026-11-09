@@ -98,7 +98,7 @@ class AgentKernel:
 # The knobs a hosted turn hands its external CLI. Separate from `kernel` because they
 # decide how another program is launched, not how this agent's own loop runs, and they
 # are the daemon-domain settings a turn resolves.
-# meiva:link base/lm/harness/docs/harness.meiva.okf.md
+# meiva:link base/lm/harness/docs/harness.md
 @dataclass(frozen=True)
 class HarnessCli:
     harness_skip_permissions: bool

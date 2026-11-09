@@ -1,0 +1,128 @@
+# Agent Router Surfaces
+
+## Lifecycle and state
+
+`history/` groups conversation, timeline and context read models with their tests.
+Mutation routes remain in `gateway/agents/`.
+
+`/api/agents/*` covers spawn, terminate, resurrect, restart, cancel, compact,
+send_message, list, and patch — all in the `gateway/agents/` package. CRUD
+and spawn live in `router.py`; lifecycle actions live in `lifecycle.py`; message
+and state reads live in `state.py`; `forward.py` provides the cross-machine
+forwarding helpers. New message delivery retains an exact-input home-machine wake and bounded sender retry. Billing batch recovery is removed.
+
+`POST /api/agents/{id}/cancel` and `/compact` are plain unkeyed requests:
+[Cancel and Compact Requests](../control-acceptance.md) owns their contract. `/api/models` lists models,
+their declared `fast_of` relationships and reasoning effort options.
+`/api/agents/{id}/exited` finalizes agent exit.
+
+The model picker receives `superseded_by` and each model's reasoning-effort
+options from the registry. `gateway/tests/test_agents_endpoints.py` compares
+those options with the corresponding provider binding: shared vocabularies
+match its declared levels, while Gemini's per-model vocabularies stay within the
+binding's fallback. The published effort default is the model's tuning value,
+nonempty and within its options. A cluster-wide effort pin does not replace
+that picker default.
+
+Lifecycle handlers pass the actual request app's database, pool and `GatewayConfig` to
+`forward_to_home_machine`; home lookup borrows that pool, RPC uses that database, and the
+config carries the dispatch budget (`lifecycle_attempt_timeout_seconds`,
+`lifecycle_retries`, `lifecycle_deadline_seconds`: an offline runner becomes a named 502
+inside the caller's window). MCP termination reaches the same handler through the app, so
+`terminate_agent_with_open_tasks` serves the advisory task hint and shell TTL cleanup for
+both. Forward helpers do not import the assembled `gateway.app`.
+
+`gateway/agents/launch/forward.py` holds the effects (the registry read, the dispatch and the
+clock bound around it); every decision is a pure function in a strict module:
+`lifecycle_plan` (the op a request becomes, the typed error a failed, silent or unreachable
+runner stands for) and `launch_plan` (a spawn target's refusal, the `spawn-launch`
+payload, the launch receipt and the launch state a failure records). A test serves the runner on a real listener
+(`gateway/tests/support/runner_ops`) and asserts the response and the envelopes it received, or
+passes values to the plan functions.
+
+## Spawn boundary
+
+[Agent Spawn Boundary](router-spawn.md) owns fork config
+constraints, creation acceptance and launch retries.
+
+## List projections
+
+`GET /api/agents` is a bounded, newest-first directory page with explicit
+scope, label/ID search and a keyset cursor. `GET /api/agents/roster` returns
+live cards and their minimal ancestor closure in one database snapshot;
+unrelated terminated rows receive no per-agent enrichment. Cards carry
+attention counts/priority and an open impersonation session number plus that
+lease's phase (`open_impersonation_status`: `requested` / `accepted` /
+`active`, or null), never notice bodies — only `active` means the agent is
+actually taken over, which the console projects to a distinct `impersonated`
+status. Selected or bookmarked agents
+use the independent ID detail endpoint. SDK, CLI and MCP consume the same
+page contract; no implicit list-all or field-projection compatibility modes
+remain.
+
+Cards and detail expose the same typed `availability` projection independently
+of lifecycle `status` and `liveness_state`.
+
+`POST /api/agents/{id}/impersonation/force-expire` accepts the session number
+the caller observed. It performs a gateway-local DB transition and wake with
+standard gateway authentication, returns `expired` or `not_open`, and returns
+404 for an unknown agent; no home-runner forwarding.
+
+## Per-agent observability
+
+- `/api/agents/{id}/born-chain` returns the immutable birth chain above an
+  agent (nearest ancestor first, each row carrying label / status / machine /
+  depth) — one recursive `agents_meta.born_spawner` walk with none of
+  `/neighbors`' tie graph. It is the read the inherited-memory context note
+  resolves at every window establishment (`plugins/meiva_memory/inherit.py`), so
+  it is kept deliberately light: no neighbor ranking, no Loki live tail.
+- `/api/agents/{id}/pending` lists the queued `status='pending'` chat inbounds
+  and stamps each row with `sender`, the closed category of its `source` tag
+  (`user` / `agent` / `automation` / `system`, computed by
+  `base/agents/messages/envelope.py:sender_class`). `ui:page:<name>` counts as
+  the user — the envelope renders it with the same bare timestamp as `user`,
+  and it is a user interaction with a page the agent served. An absent or
+  unrecognized tag is `system`, never the user. Read surfaces select the
+  category instead of parsing tags.
+- `/api/agents/{id}/token-usage` exposes per-model soft and hard compact
+  thresholds for the ContextMeter gauge.
+- `/api/agents/{id}/context-breakdown` sums per-message token counts
+  (`base/agents/history/message_tokens.py`) of the latest request into kind
+  buckets, each with `estimated` / `exact_fraction`; `base/agents/history/context_breakdown.py`.
+
+Receipts: [System Note Acceptance](../system-note.md), [Guarded launch retry acceptance](../launch-retry.md).
+
+
+## Recovery and message boundaries
+
+A failed catalog does not invalidate an already committed chat receipt. Replay
+compares the normalized original content before current model checks.
+Plain text delivery (`POST /api/agents/{id}/messages`) does not need model metadata;
+file and image uploads use the staged + batch upload delivery routes
+(`/api/keyed/v1/agents/{id}/uploads*`). A keyed delivery's receipt answers
+`duplicate: true` when the key already names a stored message — the original row
+comes back and nothing new is queued. That key space is cluster-wide, so a caller
+scopes its own keys by sender and target. The 1 MiB
+message limit bounds pending/checkpoint storage and telemetry volume.
+
+Termination's open-task hint and shell-TTL cleanup are advisory after acceptance.
+Failed hint/cleanup work is logged; it cannot undo or block accepted termination.
+The TTL reaper eventually retires leftover shell rows. Label edits and their audit
+fact commit together; agent-attributed edits also reach the active impersonation
+lease log through the shared audit owner.
+
+Context-budget views require a catalog even when checkpoint counts are absent.
+An unavailable catalog is an explicit 503 rather than a fabricated zero ceiling.
+The existing unknown-model-window display handling and checkpoint-read tolerance
+remain separate from catalog availability.
+
+## Model capability availability
+
+Directory, roster and ID-addressed detail remain readable after a retained model
+catalog startup failure. Their required `supports_vision` field is null until a
+healthy gateway generation can resolve it; other database facts and enum checks
+remain unchanged. Projection ownership is
+[Agent observation evidence](../../../../base/agents/observation/README.md). Creation and image messages
+still require a complete catalog. Ordinary text delivery records an inbound
+receipt, and an exact-work stop records cancellation acceptance: neither receipt
+proves that the runner executed the message or ended the work.
