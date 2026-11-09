@@ -298,25 +298,19 @@ def _required_float(record: dict[str, object], key: str) -> float:
 
 
 def _snapshot_scale(result: dict[str, object], current: float | None) -> float | None:
-    if "frame" not in result:
-        screen = result["screen"]
-        if not is_object_dict(screen):
-            raise TypeError("the snapshot result carries no screen")
-        return _required_float(screen, "scale")
-    if current is None and result.get("source") == "region":
-        frame = result["frame"]
-        if not is_object_dict(frame):
-            raise TypeError("the snapshot result carries no frame")
-        return _required_float(frame, "scale")
-    return current
+    if "frame" in result:
+        return current
+    screen = result["screen"]
+    if not is_object_dict(screen):
+        raise TypeError("the snapshot result carries no screen")
+    return _required_float(screen, "scale")
 
 
 # meiva:note
-# Updated physical->logical scale after `tool` completes with `result`. Whole-screen `snapshot` and
-# `click_text` always establish the latest measured scale; `find_text` (when `fresh=True`) and
-# `ax_tree` (when `include_ocr_gap` captured the screen) likewise measure the full screen; a region
-# `snapshot` seeds `current` only on a cold start (`current is None`) so an existing whole-screen
-# scale is preserved.
+# Updated whole-screen physical->logical scale after `tool` completes with `result`. Every
+# whole-screen `capture_screen` producer (`snapshot` without `frame`, `click_text`, fresh
+# `find_text`, and `ax_tree` with `include_ocr_gap`) establishes the latest measured scale; local
+# frame captures (`region` / `window`) never replace or seed the global scale.
 def measured_tool_scale(
     tool: str,
     args: dict[str, object],

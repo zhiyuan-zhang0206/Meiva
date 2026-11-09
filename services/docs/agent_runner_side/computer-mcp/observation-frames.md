@@ -24,12 +24,10 @@ backend. Neither frame selects an app persistently or implicitly focuses it.
 within the current main display. It preserves negative global origins and
 measures backing scale from the PNG, rejecting inconsistent dimensions.
 Partial clipping, regions on another display and mixed-display rectangles
-are outside this capture contract. A local capture must not replace an
-already established whole-screen scale or whole-screen OCR cache; on a cold
-start before any whole-screen observation, a main-display region capture
-seeds the daemon's scale from its measured PNG ratio, while cold-start
-`current_scale` fallback reconciles `screen_size` reports against the active
-CoreGraphics display mode.
+are outside this capture contract. A local capture must not replace or seed
+the daemon's whole-screen scale or whole-screen OCR cache; cold-start
+`current_scale` fallback in `computer-mcp` reconciles `screen_size` reports
+against the active CoreGraphics display mode.
 
 ## Public operations
 
