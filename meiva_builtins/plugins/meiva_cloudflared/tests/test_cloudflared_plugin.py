@@ -113,7 +113,7 @@ def test_default_config_validation() -> None:
     with pytest.raises(ValidationError):
         _ = CloudflaredConfig(cloudflared_check_interval_seconds=500.0)
 
-    assert default_config.contribute().config is CloudflaredConfig
+    assert default_config.contribute().config is default_config.CloudflaredConfig
     assert plugin.contribute().config is None
 
 

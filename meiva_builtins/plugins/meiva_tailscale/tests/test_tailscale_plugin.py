@@ -66,7 +66,7 @@ def test_default_config_validation() -> None:
     with pytest.raises(ValidationError):
         _ = TailscaleConfig(tailscale_check_interval_seconds=900.0)
 
-    assert default_config.contribute().config is TailscaleConfig
+    assert default_config.contribute().config is default_config.TailscaleConfig
     assert plugin.contribute().config is None
 
 
