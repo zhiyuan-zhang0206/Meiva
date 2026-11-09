@@ -1,0 +1,4 @@
+exports = ["dream_gather.py"]
+
+[roots]
+"dream_gather.py" = { kinds = ["clock", "home", "argv"], why = "Process entry of the Dream Phase 2 signal-gathering probe script: resolves the Meiva home once for the default pool and source checkout paths, reads the current UTC date when --today is omitted, and parses its command-line arguments once in main" }

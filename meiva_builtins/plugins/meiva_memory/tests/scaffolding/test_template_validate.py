@@ -273,6 +273,17 @@ def test_validate_note_accepts_a_complete_note(tmp_path: Path) -> None:
         )
         == []
     )
+    assert (
+        validator.validate_note(
+            _note(
+                tmp_path,
+                '---\ndescription: "Rule summary"\nsources:\n  - "repo:meiva:scripts/hooks/diff_checks.py"\n'
+                'verified: "2026-11-09"\nstale_after: "2026-12-01"\n---\n# Rule\n',
+                "dream.md",
+            )
+        )
+        == []
+    )
 
 
 @pytest.mark.parametrize(
@@ -285,6 +296,38 @@ def test_validate_note_accepts_a_complete_note(tmp_path: Path) -> None:
             [
                 "Field 'description' is YAML-misread: raw text differs from the parsed value "
                 "(an unquoted ' #' or ': ' truncates it) — wrap the value in double quotes"
+            ],
+        ),
+        (
+            "---\nsources: not-a-list\n---\n# Heading\n",
+            ["Field 'sources' must be a list of non-empty strings"],
+        ),
+        (
+            '---\nsources:\n  - "repo:meiva:a.py"\n  - "  "\n---\n# Heading\n',
+            ["Field 'sources' must be a list of non-empty strings"],
+        ),
+        (
+            "---\nverified: 2026-11-09\n---\n# Heading\n",
+            [
+                "Field 'verified' must be a quoted YYYY-MM-DD date string: datetime.date(2026, 11, 9)"
+            ],
+        ),
+        (
+            '---\nstale_after: "not-a-date"\n---\n# Heading\n',
+            ["Field 'stale_after' must be a quoted YYYY-MM-DD date string: 'not-a-date'"],
+        ),
+        (
+            "---\nverified: 2026-11-09 # trailing comment\n---\n# Heading\n",
+            [
+                "Field 'verified' must be a quoted YYYY-MM-DD date string: datetime.date(2026, 11, 9)",
+            ],
+        ),
+        (
+            "---\nstale_after: soon # comment\n---\n# Heading\n",
+            [
+                "Field 'stale_after' is YAML-misread: raw text differs from the parsed value "
+                "(an unquoted ' #' or ': ' truncates it) — wrap the value in double quotes",
+                "Field 'stale_after' must be a quoted YYYY-MM-DD date string: 'soon'",
             ],
         ),
     ],

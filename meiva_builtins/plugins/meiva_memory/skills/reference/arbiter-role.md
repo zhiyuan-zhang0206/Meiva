@@ -79,14 +79,15 @@ cd "$W"
      notes and ≤ 20 subdirectories per directory).
 
 2. **Phase 2 — Gather Signal (Three Incremental Signal Sources)**:
+   - Run `dream_gather.py` first (`~/.meiva/source/.venv/bin/python ~/.meiva/source/meiva_builtins/plugins/meiva_memory/skills/consolidation/scripts/dream_gather.py --pool "$W"`) to intersect note `sources:` against repository file trees and recent `git log` changes, flag expired `stale_after` and aging `verified` notes, list pure-Markdown or legacy notes needing Dream OKF enrichment, and surface pool churn/conflict hotspots.
    - **Recent Session Transcripts (`USER_INPUT`)**: Scan recent session transcripts
      for user corrections, rulings, reversals, and explicit decisions, ordered by
      timestamp so newer rulings supersede older ones.
    - **World Truth Probes (External Ground-Truth Verification)**: Verify claims in
      existing notes against observable ground truth across multiple domains:
      - *Multi-repo codebases & file trees* (`~/.meiva/source`, project checkouts):
-       check `git log`, file path and symbol existence, and deleted scripts or
-       retired contracts (such as removed CLI tools or retired merge queues).
+       check `missing_path` and `git_changed` items from `dream_gather.py`, symbol
+       existence, and deleted scripts or retired contracts.
      - *Cluster runtime & database registries* (`agents`, `schedules`, `tasks`,
        machine topology): check active vs. terminated agents, live schedule cron
        times, and task status so notes naming terminated agents or obsolete
@@ -97,7 +98,7 @@ cd "$W"
      workspace memory directories (and legacy `MEMORY.md` files) to extract
      durable, reusable cross-agent rules and facts into the shared pool.
 
-3. **Phase 3 — Consolidation (Canonical One-Topic-One-File & State Overwrite)**:
+3. **Phase 3 — Consolidation (Canonical One-Topic-One-File, State Overwrite & Auto-OKF)**:
    - **One topic, one canonical file (dateless naming)**: Maintain a single dateless
      canonical note per rule or topic slot (e.g. `meiva/rulings/merge/meiva-merge-policy.md`,
      `meiva/rulings/subagent-dispatch-policy.md`, or root standing files like
@@ -109,6 +110,11 @@ cd "$W"
      superseded, reversed, or fragmented historical notes (git history preserves
      the audit trail). Never leave conflicting old notes or stack chronological
      patch disclaimers at the bottom of stale notes.
+   - **Dream-Time Auto-OKF Maintenance**: Working agents write pure Markdown without
+     frontmatter. During consolidation, populate/refresh the four canonical OKF
+     fields on canonical notes (`description`, `sources`, `verified: "YYYY-MM-DD"`,
+     and optional `stale_after: "YYYY-MM-DD"`) while stripping legacy `type`,
+     `meiva_agent`, `meiva_machine`, and `tags` fields.
    - **De-relativize time**: Convert relative time expressions (`"today"`,
      `"this morning"`, `"recently"`, `"next week"`) into explicit ISO dates
      (`YYYY-MM-DD`).
@@ -198,9 +204,9 @@ git -C ~/.meiva/memory worktree add -q -B mem/dream-<mmdd-hhmm> $W origin/main
       and the indexer re-embeds the changed notes
 ```
 
-## Note Format & Validator Rules
+## Note Format & Validator Rules (Two-Stage OKF)
 
-Write notes directly as pure Markdown (`# Title` + a short high-level description paragraph + body; YAML frontmatter is optional):
+Working agents write notes directly as pure Markdown (`# Title` + a short high-level description paragraph + body; YAML frontmatter is optional at write time):
 
 ```markdown
 # <Title>
@@ -210,8 +216,9 @@ Write notes directly as pure Markdown (`# Title` + a short high-level descriptio
 <Body with details, Why, and How to apply...>
 ```
 
-- No `type`, `meiva_agent`, `timestamp`, `tags`, `description`, or HTML attribution comments are required.
-- If optional YAML frontmatter (`--- ... ---`) is included, `validate.py` checks only that it is a valid YAML mapping without unquoted `' #'` or `': '` truncation.
+- At write time, no `type`, `meiva_agent`, `meiva_machine`, `timestamp`, `tags`, `description`, or HTML attribution comments are required.
+- During Dream consolidation, the Memory Arbiter populates/refreshes four canonical OKF fields on canonical notes (`description`, `sources`, `verified: "YYYY-MM-DD"`, and optional `stale_after: "YYYY-MM-DD"`) and strips legacy boilerplate fields.
+- If optional YAML frontmatter (`--- ... ---`) is included, `validate.py` checks that it is a valid YAML mapping without unquoted `' #'` or `': '` truncation, and validates the types of optional `sources` (list of non-empty strings) and `verified` / `stale_after` (quoted `YYYY-MM-DD` date strings).
 - `index.md` is an optional directory-level high-level description (not a mandatory generated file-pointer inventory).
 - Every directory holds at most **20 `.md` notes** and at most **20 subdirectories** (`validate_structure`).
 - Run `python3 validate.py` (in the pool or worktree checkout) to check all files — once `validate` is green, squash-merge the PR and run `meiva memory refresh`.

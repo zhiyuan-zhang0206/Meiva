@@ -42,23 +42,33 @@ and remove/prune the temporary worktree immediately afterwards.
      spawn per-machine stewards to open worktree PRs against `main`.
 
 3. **Phase 2 — Gather Signal (Three Incremental Sources):**
+   - Run the deterministic Phase 2 probe helper first against the worktree:
+     ```bash
+     ~/.meiva/source/.venv/bin/python ~/.meiva/source/meiva_builtins/plugins/meiva_memory/skills/consolidation/scripts/dream_gather.py --pool "$W"
+     ```
+     (`dream_gather.py` scans optional `sources` / `verified` / `stale_after` across
+     notes, intersects `repo:<alias>:<path>` anchors with repository file trees and
+     recent `git log` commits after `verified`, flags expired `stale_after` and
+     aging `verified` notes, lists pure-Markdown or legacy notes needing Dream OKF
+     headers, and surfaces recent pool churn/conflict hotspots.)
    - **Recent Session Transcripts (`USER_INPUT`)**: Scan recent session transcripts
      for user corrections, rulings, reversals, and explicit decisions, ordered by
      timestamp so newer rulings supersede older ones.
    - **World Truth Probes (External Ground-Truth Verification)**: Verify claims in
      existing notes against observable ground truth across multiple domains:
      - *Multi-repo codebases & file trees* (`~/.meiva/source`, project checkouts):
-       check `git log`, path/symbol existence, and retired contracts or scripts.
+       inspect every `missing_path` and `git_changed` item reported by
+       `dream_gather.py`, plus symbol/contract existence and retired scripts.
      - *Cluster runtime & database registries* (`agents`, `schedules`, `tasks`,
        machine topology): check active vs. terminated agents, live schedule triggers,
-       and task status.
+       and task status (including `db:...` anchors surfaced by `dream_gather.py`).
      - *Host environment & embedded probes*: check machine configuration and
        `<!-- fact-check: <cmd> -->` directives.
    - **Per-Agent Workspace Memory (`~/.meiva/workspaces/*/memory/`)**: Scan agent
      workspace memory directories (and legacy `MEMORY.md` files) to harvest
      durable, reusable cross-agent rules and facts into the shared pool.
 
-4. **Phase 3 — Consolidation (Canonical One-Topic-One-File & State Overwrite):**
+4. **Phase 3 — Consolidation (Canonical One-Topic-One-File, State Overwrite & Auto-OKF):**
    - **One topic, one canonical file**: Keep a single dateless canonical note per
      rule or topic slot (e.g. `meiva/rulings/merge/meiva-merge-policy.md`, or root
      standing files like `collaboration-preferences.md`), rather than accumulating
@@ -68,6 +78,16 @@ and remove/prune the temporary worktree immediately afterwards.
      the canonical note in place with the current truth and `git rm` superseded,
      reversed, or fragmented historical notes. Do not leave conflicting old notes
      or append chronological patch disclaimers at the bottom of stale notes.
+   - **Two-Stage OKF Maintenance (Write-Time Pure Markdown -> Dream Auto-OKF)**:
+     Working agents write pure Markdown without YAML frontmatter. During Dream
+     consolidation, populate or refresh the four canonical OKF fields on canonical
+     notes (and strip legacy `type`, `meiva_agent`, `meiva_machine`, `tags`
+     boilerplate):
+     - `description`: One-line high-density summary for `MEMORY.md` pointers and previews.
+     - `sources`: List of bound external truth anchors (`"repo:meiva:<path>"`,
+       `"repo:memory:<path>"`, `"db:meiva_main:<table>"`).
+     - `verified`: Quoted `"YYYY-MM-DD"` date of this World Truth verification.
+     - `stale_after`: Optional quoted `"YYYY-MM-DD"` expiration date for temporary rules.
    - **De-relativize time**: Convert relative time words (`"today"`, `"yesterday"`,
      `"this morning"`) into explicit ISO dates (`YYYY-MM-DD`).
 

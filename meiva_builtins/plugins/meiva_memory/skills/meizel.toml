@@ -1,1 +1,1 @@
-exports = ["scripts"]
+exports = ["consolidation", "scripts"]
