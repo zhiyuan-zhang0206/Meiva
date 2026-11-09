@@ -1436,6 +1436,21 @@ reportAny = "error"
 reportExplicitAny = "error"
 
 [[tool.pyright.executionEnvironments]]
+root = "meiva_builtins/plugins/meiva_cloudflared/service_declaration"
+reportAny = "error"
+reportExplicitAny = "error"
+
+[[tool.pyright.executionEnvironments]]
+root = "meiva_builtins/plugins/meiva_cloudflared/tests"
+reportAny = "error"
+reportExplicitAny = "error"
+
+[[tool.pyright.executionEnvironments]]
+root = "meiva_builtins/plugins/meiva_cloudflared"
+reportAny = "error"
+reportExplicitAny = "error"
+
+[[tool.pyright.executionEnvironments]]
 root = "meiva_builtins/plugins/meiva_code"
 reportAny = "error"
 reportExplicitAny = "error"
@@ -1462,6 +1477,21 @@ reportExplicitAny = "error"
 
 [[tool.pyright.executionEnvironments]]
 root = "meiva_builtins/plugins/meiva_self_evolution"
+reportAny = "error"
+reportExplicitAny = "error"
+
+[[tool.pyright.executionEnvironments]]
+root = "meiva_builtins/plugins/meiva_tailscale/service_declaration"
+reportAny = "error"
+reportExplicitAny = "error"
+
+[[tool.pyright.executionEnvironments]]
+root = "meiva_builtins/plugins/meiva_tailscale/tests"
+reportAny = "error"
+reportExplicitAny = "error"
+
+[[tool.pyright.executionEnvironments]]
+root = "meiva_builtins/plugins/meiva_tailscale"
 reportAny = "error"
 reportExplicitAny = "error"
 
