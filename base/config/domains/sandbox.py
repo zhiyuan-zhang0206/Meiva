@@ -222,21 +222,6 @@ class SandboxSettings(EnvSettings):
         },
     )
 
-    syntax_fix_ruff_format: bool = Field(
-        title="Format code with Ruff before execution",
-        default=True,
-        alias="MEIVA_SYNTAX_FIX_RUFF_FORMAT",
-        description="Run `ruff format` on each code block before exec (after deterministic syntax fixes), keeping in-context code canonical. Toggle for ablation.",
-        json_schema_extra={
-            "restart_required": "agent",
-            "writable": True,
-            "sensitive": False,
-            "scope": "cluster-default",
-            "per_agent": True,
-            "lifecycle": "live",
-        },
-    )
-
     mcp_connect_timeout_seconds: float = Field(
         title="MCP server connection timeout (seconds)",
         default=60.0,

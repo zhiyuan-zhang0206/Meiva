@@ -188,7 +188,7 @@ def test_enum_field_exposes_type_and_choices() -> None:
         resp = client.get("/api/config")
     assert resp.status_code == 200
     fields = {f["name"]: f for f in resp.json()["fields"]}
-    enum_field = fields["agent_reply_reminder_cadence"]
+    enum_field = fields["to_user_limit_reminder_cadence"]
     assert enum_field["field_type"] == "enum"
     assert enum_field["choices"] == ["once_per_compaction", "every_time"]
     # A scalar field carries no choices.
@@ -445,17 +445,17 @@ def test_put_rejects_unknown_field(clean_overrides: Path) -> None:
 def test_put_accepts_valid_enum_value(clean_overrides: Path) -> None:
     """A cluster enum field accepts a value inside its choices and lands in .env."""
     with gateway_test_client() as client:
-        resp = client.put("/api/config", json={"agent_reply_reminder_cadence": "every_time"})
+        resp = client.put("/api/config", json={"to_user_limit_reminder_cadence": "every_time"})
     assert resp.status_code == 200, resp.text
     assert resp.json()["applied"] is True
-    assert unit_env_aliases()["MEIVA_AGENT_REPLY_REMINDER_CADENCE"] == "every_time"
+    assert unit_env_aliases()["MEIVA_TO_USER_LIMIT_REMINDER_CADENCE"] == "every_time"
 
 
 def test_put_rejects_invalid_enum_value(clean_overrides: Path) -> None:
     """A value outside the enum's choices 400s atomically (nothing written), so an
     unknown enum can never reach .env and blow up Settings at the next restart."""
     with gateway_test_client() as client:
-        resp = client.put("/api/config", json={"agent_reply_reminder_cadence": "sometimes"})
+        resp = client.put("/api/config", json={"to_user_limit_reminder_cadence": "sometimes"})
     assert resp.status_code == 400, resp.text
     assert "invalid enum value" in resp.json()["detail"]
     assert unit_env_aliases() == {}

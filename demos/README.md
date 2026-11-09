@@ -16,7 +16,6 @@ Each demo lives in its own category folder under `demos/<category>/`.
 | **Multi-Model Switching** | `multi-model/` | Config overlay | 3 agents | Side-by-side model comparison |
 | **Tiered Model Routing** | `multi-model/` | Config overlay | Multi-agent | Cost-aware model routing by phase |
 | **Chrome MCP** | `chrome-mcp/` | Browser | 1 agent | Shared browser context between user and agents |
-| **Permission Hooks** | `permission-hooks/` | Hooks | 1 agent | Sensitive-operation gate examples |
 
 > Orchestrator reference scripts live at `meiva_builtins/skills/coordination/meiva-dynamic-workflow/references/`
 > (the two runnable lite demos are in its `scripts/` instead).
@@ -63,11 +62,8 @@ demos/
 │       ├── store.js
 │       ├── style.css
 │       └── test.js
-├── long-running/
-│   └── long-running-health-monitor.md
-└── permission-hooks/
-    ├── README.md
-    └── sensitive_op_gate.py
+└── long-running/
+    └── long-running-health-monitor.md
 ```
 
 ## One completion protocol, two checkpoint signals

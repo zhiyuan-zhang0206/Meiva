@@ -564,19 +564,19 @@ def test_plugins_activated_counts_per_contribution() -> None:
         (
             "plugin_activation",
             {
-                "plugin": "meiva_syntax_fix",
+                "plugin": "meiva_self_evolution",
                 "surface": "hooks",
-                "identifier": "before_exec",
-                "detail": "_SyntaxFixHook wrote messages",
+                "identifier": "before_turn",
+                "detail": "SeedToDoBetterHook",
                 "model": "m",
             },
         ),
         (
             "plugin_activation",
             {
-                "plugin": "meiva_syntax_fix",
+                "plugin": "meiva_self_evolution",
                 "surface": "hooks",
-                "identifier": "before_exec",
+                "identifier": "before_turn",
                 "detail": "",
                 "model": "m",
             },
@@ -597,7 +597,7 @@ def test_plugins_activated_counts_per_contribution() -> None:
     fired, skipped = record_mod._plugins_activated(record_mod.event_facts(events))
     assert fired == {
         "meiva_code/sdkWraps/files.read": 1,
-        "meiva_syntax_fix/hooks/before_exec": 2,
+        "meiva_self_evolution/hooks/before_turn": 2,
     }
     assert skipped == 0
 

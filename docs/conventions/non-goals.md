@@ -51,7 +51,7 @@ first and ask "what changed that made it worth doing".
 - **Per-agent code-execution sandboxing as the general security boundary**:
   `execute_code` runs the agent's generated Python in the agent process on the
   host — no seccomp, no gVisor, no per-call sandbox around any single agent's
-  turn. The `before_exec` hook (`demos/permission-hooks/`) is a pattern-matching
+  turn. Pattern-matching checks are a
   mitigation, not a boundary (see the `base/agents/messages/injection_scan.py` docstring). Isolation is
   a deployment decision — a dedicated OS user, machine, or VM per cluster — not
   a runtime property Meiva enforces around the code it executes. This is

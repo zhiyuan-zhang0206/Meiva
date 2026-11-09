@@ -6,6 +6,9 @@
     "meiva": ">=2026.10.1"
   },
   "contributions": {
+    "hooks": [
+      "before_turn"
+    ],
     "compactReminderSections": [
       "self_evolution_compact_reminder"
     ]

@@ -34,8 +34,8 @@ write was recorded; otherwise it always clears the record and then:
 - skips entirely under `eval_isolation`.
 
 Cadence is `to_user_limit_reminder_cadence`: `once_per_compaction` (default) reminds at
-most once per context window, re-armed by a compaction (the same `reminded` set +
-`last_seen_compact` bookmark `meiva_sdk_reminder` uses) and by the panel coming back
+most once per context window, re-armed by a compaction (via a `reminded` set +
+`last_seen_compact` bookmark) and by the panel coming back
 within its limit; `every_time` reminds on every over-limit write.
 
 ### State

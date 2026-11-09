@@ -51,62 +51,10 @@ class ThresholdStep(BaseModel):
     value: float | None = None
 
 
+# meiva:note
+# One plugin or core metric over the live event stream or a permitted SQL source.
+# meiva:link deploy/lgtm/config/grafana/provisioning/dashboards/README.md
 class MetricSpec(BaseModel):
-    """One plugin metric over the live event stream or a permitted SQL source.
-
-    Fields:
-        name: globally unique id (``^[a-z][a-z0-9_]*$``). Convention:
-            ``<plugin>_<what>`` (e.g. ``meiva_syntax_fix_rate``).
-        title: Grafana panel title.
-        description: what the metric measures / its event provenance.
-        event_name: the event name the query filters on — lowercase letters,
-            digits, ``_`` and ``-`` (hyphens appear in the live vocabulary,
-            e.g. ``recall-filter``).
-        category: the event category (audit | telemetry | log).
-        unit: Grafana unit id (``short``, ``percent``, ``ops``, ``s``, ...).
-        panel: Grafana panel type — ``timeseries`` / ``stat`` / ``barchart`` / ``table`` / ``logs``.
-            A ``logs`` panel is a raw stream view whose LogQL skips the
-            ``{event_name}``/``{category}`` placeholder rule (the ``raw_view``
-            waiver; only the stream-selector and ``| json`` checks apply).
-        query: Grafana query template. LogQL templates select the live event
-            stream and use ``{event_name}`` / ``{category}`` placeholders;
-            ``{{agent_id}}`` is inspector-only and rendered as a label filter.
-        targets: extra query templates rendered as refId B/C/... targets on
-            the same panel (multi-series panels — e.g. the core TPS panels'
-            max/min-agent series). Validated like ``query``.
-        options / custom / field_defaults: optional panel-look overrides
-            merged into the generated panel's ``options`` /
-            ``fieldConfig.defaults.custom`` / ``fieldConfig.defaults`` (the
-            generator's defaults win for keys not present here). An empty
-            ``thresholds`` list (``[]``) suppresses the default green-base
-            step entirely (panels without any thresholds).
-        thresholds: optional absolute-threshold steps (green base + red at the
-            given value by default when a bare number list would suffice).
-        panel_id / section / order / position: dashboard placement pins
-            (2026-09-17, task #3697) — the as-is panel id, the section row it
-            belongs to, the panel's render rank within that section, and an
-            explicit grid position for the rare panel whose placement
-            deviates from the flow layout. Core panels carry the as-is
-            values; plugin panels leave them None (the renderer allocates
-            ids per plugin block and uses the plugin name as the section).
-        transformations: optional Grafana transformations copied verbatim
-            into the panel (e.g. the PR-flow day tables' joinByField +
-            organize), for the panels whose rendered shape needs them.
-        time_basis: how the number relates to time, rendered by the registry
-            so the title and the query cannot drift (panel titles state their
-            time basis — user ruling 2026-09-14). ``per_minute``: every query
-            part is one ``[Nm]`` bucket aggregate written without a divisor;
-            rendering appends `` / N`` and the title gains ``(per minute)``.
-            ``window``: every part aggregates over ``$__range`` and the title
-            gains ``(window)``. None when the unit already says it (``/
-            minute``, TPS) or the basis is something else (a trailing gauge).
-        output: which surfaces consume this metric — ``grafana`` (dashboard
-            JSON, this wave), ``inspector`` (per-agent panels, reserved).
-            A query carrying ``{{agent_id}}`` must NOT include ``grafana``.
-        plugin: filled by the data registry from the declaring plugin's entry — never set
-            it yourself.
-    """
-
     model_config = ConfigDict(frozen=True)
 
     name: str = Field(pattern=r"^[a-z][a-z0-9_]{0,63}$")

@@ -47,12 +47,6 @@
   "meiva_builtins/plugins/meiva_code/tests/test_meiva_code_walk.py": [
     "skipif(not subprocess.run(['which', 'git'], capture_output=True, check=False).stdout)"
   ],
-  "meiva_builtins/plugins/meiva_syntax_fix/tests/test_syntax_fix.py": [
-    "skipif(sys.version_info < (3, 12))",
-    "skipif(sys.version_info < (3, 12))",
-    "skipif(sys.version_info < (3, 12))",
-    "skipif(sys.version_info < (3, 12))"
-  ],
   "scripts/provision/tests/test_apt_lock.py": [
     "skipif(not Path('/proc').is_dir())"
   ],

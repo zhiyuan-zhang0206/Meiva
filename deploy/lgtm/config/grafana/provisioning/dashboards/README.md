@@ -44,7 +44,7 @@ restored by task #3689). All sections are **expanded by default**
    cost USD, LLM errors, and per-agent Top 20.
 3. **`Gateway & execution`** — gateway latency p50/p95/p99/max + p95/p99 and
    sample count by route, turn duration, exec outcomes, exec-envelope transfer
-   cost (size / serialize, task #2174), syntax-fix triggers,
+   cost (size / serialize, task #2174),
    halt classes, SDK Top 20, frontend interactions ×3, settings changes.
 4. **`Fleet`** — windowed agent spawns by source, windowed lifecycle totals,
    delivery-stalled total, SSE backlog, and the Max Agent ID growth curve
@@ -52,16 +52,14 @@ restored by task #3689). All sections are **expanded by default**
 5. **`meiva_fleet`** — the task-completion-rate panel.
 6. **`meiva_memory`** — passive-recall runs / empty ratio / deadline-skip ratio /
    skips plus the search latency and the notes injected per pass.
-7. **`meiva_syntax_fix`** — the syntax-fix metric panels: fix count (per minute)
-   and fixes (window).
-8. **`Host & data plane`** — the former `meiva-host-dataplane` panels: host
+7. **`Host & data plane`** — the former `meiva-host-dataplane` panels: host
    CPU / memory / load / filesystem / disk / network throughput + Postgres
    connections / transactions / size + Redis memory / clients / throughput.
-9. **`Cost analysis`** — two cost projections, interval-bucketed cost, and
+8. **`Cost analysis`** — two cost projections, interval-bucketed cost, and
    Top-20 cost drill-downs by model and agent. Every panel reads usage-time
    `attributes_cost_usd` snapshots from telemetry `llm_usage` events
    (2026-08-23 #384).
-10. **`PR flow`** — PR ready→merged median/p90 by day, from the daily export
+9. **`PR flow`** — PR ready→merged median/p90 by day, from the daily export
    job's Prometheus gauges (task #2139).
 
 The dashboard timezone is `Asia/Shanghai` (2026-08-23 #384). All panels follow
@@ -236,8 +234,7 @@ of mass-editing targets.
    `tests/components/plugins/test_plugin_metrics_logql.py` also locks every registered
    grafana spec against the JSON.
 
-Shipped examples: `meiva_builtins/plugins/meiva_syntax_fix/metrics.py` (syntax_fix
-trend/stat), `meiva_builtins/plugins/meiva_fleet/metrics.py` (task completion
+Shipped examples: `meiva_builtins/plugins/meiva_fleet/metrics.py` (task completion
 rate), `meiva_builtins/plugins/meiva_memory/metrics.py` (passive-recall runs /
 empty ratio / deadline-skip ratio plus search latency and notes injected).
 

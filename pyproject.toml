@@ -354,9 +354,6 @@ check-typed-exception = true
 # brew_prefix resolves the Homebrew prefix through a fixed argv; the optional
 # formula name is a local literal, not external input.
 "base/host/tool_pins.py" = ["S603"]
-# meiva_syntax_fix uses fullwidth chars in docstrings as examples of what the fixer targets,
-# and carries Chinese notes from data analysis of real error corpora.
-"meiva_builtins/plugins/meiva_syntax_fix/*" = ["RUF001", "RUF002", "RUF003"]
 # CJK regex explanation comment — legitimate.
 "scripts/lint/agent_docstrings.py" = ["RUF003"]
 
@@ -887,9 +884,6 @@ root = "meiva_builtins/plugins/meiva_memory/skills/scripts/tests"
 
 [[tool.pyright.executionEnvironments]]
 root = "meiva_builtins/plugins/meiva_memory/tests"
-
-[[tool.pyright.executionEnvironments]]
-root = "meiva_builtins/plugins/meiva_syntax_fix/tests"
 
 [[tool.pyright.executionEnvironments]]
 root = "meiva_builtins/plugins/meiva_to_user/tests"
@@ -1467,17 +1461,7 @@ reportAny = "error"
 reportExplicitAny = "error"
 
 [[tool.pyright.executionEnvironments]]
-root = "meiva_builtins/plugins/meiva_sdk_reminder"
-reportAny = "error"
-reportExplicitAny = "error"
-
-[[tool.pyright.executionEnvironments]]
 root = "meiva_builtins/plugins/meiva_self_evolution"
-reportAny = "error"
-reportExplicitAny = "error"
-
-[[tool.pyright.executionEnvironments]]
-root = "meiva_builtins/plugins/meiva_syntax_fix"
 reportAny = "error"
 reportExplicitAny = "error"
 

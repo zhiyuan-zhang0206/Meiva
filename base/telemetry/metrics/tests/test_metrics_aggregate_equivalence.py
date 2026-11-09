@@ -107,7 +107,6 @@ def test_cache_write_cost_snapshots_survive_aggregation_and_unpriced_calls(
 
 def _write_full_thread_scenario(fake: TelemetryStream, aid: int) -> None:
     _add(fake, event="code", agent_id=aid, payload={"body": "print(1)"})
-    _add(fake, event="syntax_fix", agent_id=aid, payload={"fixes": "ruff,ruff_format"})
     _add(fake, event="exec", agent_id=aid, payload={"body": "1\n", "ok": True})
     _add(
         fake,
@@ -127,9 +126,7 @@ def _write_full_thread_scenario(fake: TelemetryStream, aid: int) -> None:
 
 
 def _assert_full_thread_text_digest(text: str) -> None:
-    assert "7 events / 1 agents" in _norm(text)
-    assert "syntax_fix trigger counts (per code block):" in text
-    assert "ruff                        1  100%" in text
+    assert "6 events / 1 agents" in _norm(text)
     assert "exec: 1 ok / 0 failed  (success 100.0%)" in text
     assert "llm: 1 calls  in=1000 out=200 cached=800 reason=0" in text
     assert "cache hit overall: 80.0%   cost: $0.0003" in text
@@ -138,9 +135,6 @@ def _assert_full_thread_text_digest(text: str) -> None:
 
 
 def _assert_full_thread_data_fragment(data: ReportData) -> None:
-    sx = data["metrics"]["syntax_fix"]
-    assert sx["trigger_counts"] == {"ruff": 1, "ruff_format": 1}
-    assert sx["code_blocks"] == 1
     assert data["metrics"]["exec"]["exec_ok"] == 1
     assert data["metrics"]["exec"]["exec_failed"] == 0
     llm = data["metrics"]["llm_turns"]
@@ -150,7 +144,7 @@ def _assert_full_thread_data_fragment(data: ReportData) -> None:
 
 
 def _assert_full_thread_rollup(roll: dict[int, Any], aid: int) -> None:
-    assert roll[aid]["events"] == 7
+    assert roll[aid]["events"] == 6
     assert roll[aid]["llm_calls"] == 1
     assert roll[aid]["turn_total"] == 1
     assert roll[aid]["exec_ok"] == 1
@@ -173,8 +167,8 @@ def test_equivalence_full_thread(fake: TelemetryStream) -> None:
 
     # since-compact window (no compact rows here) — identical counts
     text2, _data2, roll2 = _run_aggregate(fake, since_compact=True)
-    assert "7 events / 1 agents" in _norm(text2)
-    assert roll2[aid]["events"] == 7
+    assert "6 events / 1 agents" in _norm(text2)
+    assert roll2[aid]["events"] == 6
 
 
 def test_plugin_activation_section_is_the_obsolescence_gauge(fake: TelemetryStream) -> None:
@@ -198,8 +192,8 @@ def test_plugin_activation_section_is_the_obsolescence_gauge(fake: TelemetryStre
             },
         )
 
-    _act("meiva_syntax_fix", "hooks", "before_exec", "old-model")
-    _act("meiva_syntax_fix", "hooks", "before_exec", "old-model")
+    _act("meiva_memory", "hooks", "before_turn", "old-model")
+    _act("meiva_memory", "hooks", "before_turn", "old-model")
     _act("meiva_code", "sdkWraps", "files.read", "new-model")
 
     text, data, _roll = _run_aggregate(fake)
@@ -207,15 +201,15 @@ def test_plugin_activation_section_is_the_obsolescence_gauge(fake: TelemetryStre
     assert section["total_activations"] == 3
     assert section["distinct_plugins"] == 2
     assert section["by_contribution"] == [
-        {"contribution": "meiva_syntax_fix/hooks/before_exec", "count": 2},
+        {"contribution": "meiva_memory/hooks/before_turn", "count": 2},
         {"contribution": "meiva_code/sdkWraps/files.read", "count": 1},
     ]
     assert section["by_plugin_model"] == {
-        "meiva_syntax_fix@old-model": 2,
+        "meiva_memory@old-model": 2,
         "meiva_code@new-model": 1,
     }
     assert "plugin activations: 3 across 2 plugins" in text
-    assert "meiva_syntax_fix/hooks/before_exec" in text
+    assert "meiva_memory/hooks/before_turn" in text
 
 
 def test_plugin_activation_section_empty_when_nothing_fired(fake: TelemetryStream) -> None:
@@ -306,22 +300,6 @@ def test_equivalence_since_compact_cutoffs(fake: TelemetryStream) -> None:
     assert roll2[a2]["events"] == 1
 
 
-def test_equivalence_syntax_fix_block_edges(fake: TelemetryStream) -> None:
-    """fixes before any code (dropped), none sentinel, (n) suffixes, multi-kind
-    events, blocks with no attached fix, two agents with different block counts."""
-    a1, a2 = 1, 2
-    _add(fake, event="syntax_fix", agent_id=a1, payload={"fixes": "ruff"})  # before any code
-    _add(fake, event="code", agent_id=a1, payload={"body": "a"})
-    _add(fake, event="syntax_fix", agent_id=a1, payload={"fixes": "none"})
-    _add(fake, event="code", agent_id=a1, payload={"body": "b"})
-    _add(fake, event="syntax_fix", agent_id=a1, payload={"fixes": "chinese_punct(3),ruff_format"})
-    _add(fake, event="code", agent_id=a1, payload={"body": "c"})
-    _add(fake, event="code", agent_id=a2, payload={"body": "d"})
-    _add(fake, event="syntax_fix", agent_id=a2, payload={"fixes": "ruff_format"})
-    _add(fake, event="syntax_fix", agent_id=a2, payload={"fixes": "missing_imports(2)"})
-    _run_aggregate(fake)
-
-
 def test_equivalence_agent_filter(fake: TelemetryStream) -> None:
     a1, a2 = 1, 2
     for aid in (a1, a2):
@@ -347,15 +325,6 @@ def test_equivalence_window_respects_days(fake: TelemetryStream) -> None:
 
 _MODELS = ["mimo-v2.5-pro", "gpt-5.6-sol", "no-such-model", ""]
 _EXC = ["ValueError", "TypeError", "NameError", None, ""]
-_FIXES = [
-    "ruff",
-    "ruff_format",
-    "chinese_punct(3)",
-    "missing_imports(2)",
-    "none",
-    "",
-    "ruff,ruff_format",
-]
 _HALT = ["no tool_call (idle)", "system_halt (compact)", "lifecycle AgentTermination", "other"]
 _SPAWN = ["user", "agent:1", "scheduler", "cron", ""]
 _LIFECYCLE = ["agent_spawned", "agent_resurrected"]
@@ -365,8 +334,6 @@ _NONRELEVANT = ["log", "node_enter", "node_exit", "text", "status_change"]
 def _random_payload(rng: random.Random, event_name: str) -> dict[str, Any]:
     if event_name == "code":
         return {"body": "x" * rng.randint(0, 500)}
-    if event_name == "syntax_fix":
-        return {"fixes": rng.choice(_FIXES)}
     if event_name == "exec":
         return {"body": "o" * rng.randint(0, 200), "ok": True}
     if event_name in ("exec_failed", "exec_timeout", "exec_cancelled"):
@@ -405,7 +372,6 @@ def test_equivalence_randomized(fake: TelemetryStream) -> None:
     pool = [
         *[
             "code",
-            "syntax_fix",
             "exec",
             "llm_usage",
             "turn_end",
@@ -431,7 +397,6 @@ def test_equivalence_randomized(fake: TelemetryStream) -> None:
         text, data, _roll = _run_aggregate(fake, days=days)
         # structure: every section present, per-agent rollups subset the total
         assert set(data["metrics"]) == {
-            "syntax_fix",
             "exec",
             "llm_turns",
             "agent_activity",

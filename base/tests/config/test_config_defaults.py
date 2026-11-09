@@ -1,44 +1,6 @@
 from __future__ import annotations
 
-from pathlib import Path
-
 import pytest
-
-from base import config
-from base.config.service_read import ConfigAuthority
-
-
-@pytest.fixture
-def authority(tmp_path: Path) -> ConfigAuthority:
-    return ConfigAuthority(config.settings, config.settings, tmp_path / ".env")
-
-
-def test_sdk_code_reminder_cadence_config_contract(authority: ConfigAuthority) -> None:
-    from base.config import FIELD_INFOS, get_config_metadata
-
-    field = FIELD_INFOS["sdk_code_reminder_cadence"]
-    extra = field.json_schema_extra
-    assert isinstance(extra, dict)
-    assert field.default == "once_per_compaction"
-    assert field.alias == "MEIVA_SDK_CODE_REMINDER_CADENCE"
-    assert extra["per_agent"] is True
-    assert extra["lifecycle"] == "live"
-    meta = next(
-        m for m in get_config_metadata(authority=authority) if m.name == "sdk_code_reminder_cadence"
-    )
-    assert meta.choices == ["once_per_compaction", "every_time"]
-
-
-def test_sdk_nameerror_hint_enabled_config_contract() -> None:
-    from base.config import FIELD_INFOS
-
-    field = FIELD_INFOS["sdk_nameerror_hint_enabled"]
-    extra = field.json_schema_extra
-    assert isinstance(extra, dict)
-    assert field.default is True
-    assert field.alias == "MEIVA_SDK_NAMEERROR_HINT_ENABLED"
-    assert extra["per_agent"] is True
-    assert extra["lifecycle"] == "live"
 
 
 def test_llm_model_code_default_is_deepseek_flash() -> None:

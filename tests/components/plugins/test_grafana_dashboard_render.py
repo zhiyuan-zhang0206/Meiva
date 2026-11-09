@@ -73,7 +73,7 @@ _REPO_ROOT = Path(__file__).resolve().parents[3]
 _DASHBOARD_FILE = (
     _REPO_ROOT / "deploy/lgtm/config/grafana/provisioning/dashboards/meiva-ops-main.json"
 )
-_PLUGINS = ("meiva_fleet", "meiva_memory", "meiva_syntax_fix")
+_PLUGINS = ("meiva_fleet", "meiva_memory")
 
 # Empty since S2 (task #3697) registered the last 18 panels — the Events
 # trio, the gateway sample count, and the host + memory-search gauges. Kept as
@@ -521,7 +521,7 @@ def test_repo_supplier_loads_the_shipped_plugins() -> None:
     assert result.loaded == list(_PLUGINS)
     assert result.failed == []
     grafana = [spec for spec in result.specs if "grafana" in spec.output]
-    assert len(grafana) == 9
+    assert len(grafana) == 7
     assert {spec.plugin for spec in result.specs} == set(_PLUGINS)
 
 

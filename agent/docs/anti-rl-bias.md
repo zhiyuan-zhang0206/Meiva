@@ -20,27 +20,21 @@ continue to supervise outstanding work.
    suppresses nudges for a declared window; real wake-ups still arrive), or done
    (terminate). Opt-out is an active agent choice, not an escalation chain
    ([why](../../docs/decisions/runtime/processes/health/2026-06-22-heartbeat-opt-out-over-escalation.md)).
-2. **SDK reminder** — `meiva_builtins/plugins/meiva_sdk_reminder/`
-   ([meiva_sdk_reminder — SDK Reminder Plugin](../../meiva_builtins/plugins/meiva_sdk_reminder/README.md)).
-   Hints the first time the agent reaches for a native-Python equivalent
-   (`subprocess` → `meiva.shell.run`, `time.sleep` loops → `meiva.watcher`,
-   `open()` → `meiva.files`, `requests` → `meiva.web`), and reminds an agent that
-   a plain text reply reaches nobody — the verb is `meiva.agents.send_message`.
-3. **Capabilities drift check** — `agent/graph/hooks/capabilities.py`. Before every LLM
+2. **Capabilities drift check** — `agent/graph/hooks/capabilities.py`. Before every LLM
    call the live skill index is diffed against the snapshot the context window
    was built from; skills installed since are named in one system note, so an
    agent cannot silently rebuild a capability it already has.
-4. **Task progress reminders** — the gateway tasks API (`remind_interval_seconds`).
+3. **Task progress reminders** — the gateway tasks API (`remind_interval_seconds`).
    The owner of an in-progress task is periodically reminded to post progress;
    reminders cannot be disabled (capped at 24 h), so a task that goes dark is a
    visible fact.
-5. **Delivery semantics** — a bare text turn delivers nothing:
+4. **Delivery semantics** — a bare text turn delivers nothing:
    `meiva.agents.send_message` (peers) and `meiva.ui.notify` (the user) are the only
    delivery verbs, so "not done yet" must be said out loud and silence reads as
    busy ([why](../../docs/decisions/agents/messages/2026-08-01-one-send-is-one-inbound.md)).
-6. **Standing memory injection** — the memory index (`MEMORY.md`) is injected at
+5. **Standing memory injection** — the memory index (`MEMORY.md`) is injected at
    cold start and after every compact, so long-lived rules stay in front of the
    agent ([Memory Injection — The Three Memory Notes Behind the System Prompt](../graph/docs/context-notes/memory-injection.md)).
-7. **Prompt-layer discipline** — agents give scope and trade-offs, never time
+6. **Prompt-layer discipline** — agents give scope and trade-offs, never time
    estimates, and describe current behavior
    ([`communicating-with-user.md`](../../docs/conventions/communicating-with-user.md)).

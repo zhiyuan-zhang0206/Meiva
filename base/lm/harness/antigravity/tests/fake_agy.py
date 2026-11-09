@@ -133,8 +133,8 @@ def _start_rpc_server(
                 items = cast("list[dict[str, Any]]", payload.get("items") or [])
                 text = str(items[0].get("text") or "") if items else ""
                 _record(received_path, text)
-                steered.put(text)
                 self._respond(200, {})
+                steered.put(text)
                 return
             self._respond(404, {"message": f"unknown path: {self.path}"})
 

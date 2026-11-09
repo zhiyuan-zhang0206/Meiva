@@ -7,7 +7,6 @@ from base.events.contract import (
     HALT_KEYS,
     LLM_USAGE_KEYS,
     SDK_CALL_KEYS,
-    SYNTAX_FIX_KEYS,
     TURN_END_KEYS,
 )
 from base.telemetry.metrics.core import exec_envelope, frontend
@@ -23,7 +22,6 @@ PACK_MODULES: tuple[ModuleType, ...] = (exec_envelope, frontend)
 _LLM_ATTR = {k: f"attributes_{k}" for k in LLM_USAGE_KEYS}
 _TURN_ATTR = {k: f"attributes_{k}" for k in TURN_END_KEYS}
 _HALT_ATTR = {k: f"attributes_{k}" for k in HALT_KEYS}
-_FIX_ATTR = {k: f"attributes_{k}" for k in SYNTAX_FIX_KEYS}
 _FRONTEND_ATTR = {k: f"attributes_{k}" for k in FRONTEND_INTERACTION_KEYS}
 _SDK_ATTR = {k: f"attributes_{k}" for k in SDK_CALL_KEYS}
 
@@ -375,77 +373,6 @@ def core_metrics() -> list[MetricSpec]:
             section="Gateway & execution",
             order=4,
             position=(12, 120),
-        )
-    )
-
-    specs.append(
-        MetricSpec(
-            name="meiva_obs_syntax_fix_by_kind",
-            title="Syntax fix triggers by kind",
-            time_basis="per_minute",
-            description=(
-                "Syntax-fix trigger counts per minute (5-minute buckets / 5), "
-                "bucketed by the fix kinds in attributes.fixes (substring regex "
-                "matching; an event with several fix kinds counts once per kind, "
-                "'none'/null/unknown goes to other). event_name='syntax_fix', "
-                "category='telemetry' (90d retention)."
-            ),
-            event_name="syntax_fix",
-            category="telemetry",
-            unit="short",
-            panel="timeseries",
-            query_type="logql",
-            query=event_count(
-                f'category={{category}} | {_FIX_ATTR["fixes"]}=~".*ruff_format.*"',
-                "5m",
-                matchers="event_name={event_name}",
-            ),
-            targets=[
-                event_count(
-                    f'category={{category}} | {_FIX_ATTR["fixes"]}=~".*ruff.*" | {_FIX_ATTR["fixes"]}!~".*ruff_format.*"',
-                    "5m",
-                    matchers="event_name={event_name}",
-                ),
-                event_count(
-                    f'category={{category}} | {_FIX_ATTR["fixes"]}=~".*invalid_escape.*"',
-                    "5m",
-                    matchers="event_name={event_name}",
-                ),
-                event_count(
-                    f'category={{category}} | {_FIX_ATTR["fixes"]}=~".*missing_imports.*"',
-                    "5m",
-                    matchers="event_name={event_name}",
-                ),
-                event_count(
-                    f'category={{category}} | {_FIX_ATTR["fixes"]}=~".*chinese_punct.*"',
-                    "5m",
-                    matchers="event_name={event_name}",
-                ),
-                event_count(
-                    f'category={{category}} | {_FIX_ATTR["fixes"]}=~".*bracket_matching.*"',
-                    "5m",
-                    matchers="event_name={event_name}",
-                ),
-                event_count(
-                    f"category={{category}} | "
-                    f'{_FIX_ATTR["fixes"]}!~".*(ruff|invalid_escape|missing_imports|chinese_punct|bracket_matching).*"',
-                    "5m",
-                    matchers="event_name={event_name}",
-                ),
-            ],
-            target_names=[
-                "ruff_format",
-                "ruff",
-                "invalid_escape",
-                "missing_imports",
-                "chinese_punct",
-                "bracket_matching",
-                "other",
-            ],
-            output=["grafana"],
-            panel_id=26,
-            section="Gateway & execution",
-            order=5,
         )
     )
 

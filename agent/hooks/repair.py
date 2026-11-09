@@ -32,11 +32,10 @@
 #
 # Shape contract: detection treats an unpaired tool_call as a crash artifact,
 # because every live path preserves pairing — exec always writes a ToolMessage,
-# syntax_fix supplies its own ToolMessage when it skips exec, and the llm node's
-# completion branch bypasses exec only when tool_calls is empty. A future hook
-# that intentionally withholds a tool_result would be reinterpreted as a crash
-# and handed a synthetic [interrupted] result — keep the pairing invariant when
-# extending the hook surface.
+# and the llm node's completion branch bypasses exec only when tool_calls is
+# empty. A future hook that intentionally withholds a tool_result would be
+# reinterpreted as a crash and handed a synthetic [interrupted] result — keep
+# the pairing invariant when extending the hook surface.
 #
 # Every repair returns one REMOVE_ALL_MESSAGES rebuild: the original AIMessage
 # and any synthetic [interrupted] ToolMessage therefore share one messages-channel

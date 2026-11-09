@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from typing import Literal
-
 from pydantic import Field
 
 from base.config.base import EnvSettings
@@ -70,65 +68,6 @@ class AgentCompactionSettings(EnvSettings):
         ),
         json_schema_extra={
             "help_text": "Leave unset for the model default; a value at or above the automatic threshold disables the reminder.",
-            "restart_required": "agent",
-            "writable": True,
-            "sensitive": False,
-            "scope": "cluster-default",
-            "per_agent": True,
-            "lifecycle": "live",
-        },
-    )
-
-    agent_reply_reminder_cadence: Literal["once_per_compaction", "every_time"] = Field(
-        title="Agent reply reminder frequency",
-        default="once_per_compaction",
-        alias="MEIVA_AGENT_REPLY_REMINDER_CADENCE",
-        description=(
-            "How often the agent-reply reminder fires — the note pointing at "
-            "`meiva.agents.send_message` when another agent's message arrives (a plain "
-            "text reply is never delivered). 'once_per_compaction': at most once per "
-            "context window (default). 'every_time': on every agent inbound."
-        ),
-        json_schema_extra={
-            "restart_required": "agent",
-            "writable": True,
-            "sensitive": False,
-            "scope": "cluster-default",
-            "per_agent": True,
-            "lifecycle": "live",
-        },
-    )
-
-    sdk_code_reminder_cadence: Literal["once_per_compaction", "every_time"] = Field(
-        title="SDK alternative reminder frequency",
-        default="once_per_compaction",
-        alias="MEIVA_SDK_CODE_REMINDER_CADENCE",
-        description=(
-            "How often SDK code-category reminders fire — the notes pointing at "
-            "the matching `meiva` primitive after a native Python equivalent is "
-            "detected. 'once_per_compaction': at most once per category per context "
-            "window (default). 'every_time': on every matching code cell."
-        ),
-        json_schema_extra={
-            "restart_required": "agent",
-            "writable": True,
-            "sensitive": False,
-            "scope": "cluster-default",
-            "per_agent": True,
-            "lifecycle": "live",
-        },
-    )
-
-    sdk_nameerror_hint_enabled: bool = Field(
-        title="Show hint for missing names from earlier code cells",
-        default=True,
-        alias="MEIVA_SDK_NAMEERROR_HINT_ENABLED",
-        description=(
-            "Whether to surface an interpreter-persistence hint when an "
-            "execute_code NameError references a name used in an earlier code "
-            "cell. Enabled by default; disable to suppress the hint."
-        ),
-        json_schema_extra={
             "restart_required": "agent",
             "writable": True,
             "sensitive": False,

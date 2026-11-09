@@ -70,6 +70,7 @@ async def test_steering_available_reflects_active_turn_lifecycle(tmp_path: Path)
 async def test_steer_writes_to_active_session_and_preserves_running_turn(tmp_path: Path) -> None:
     steered_turn = {
         **say("first", step_index=1),
+        "pace": 0.1,
         "wait_for_steer": True,
         "steered_steps": say("finish", step_index=2)["steps"],
         "result": {"response": "first\nfinish", "num_turns": 2},

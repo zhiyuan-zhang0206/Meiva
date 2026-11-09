@@ -14267,8 +14267,7 @@
           "meta",
           "metrics"
         ],
-        "title": "MetricsReport",
-        "description": "GET /api/metrics response — aggregate report over events for the\nsettings Metrics tab.\n\n`metrics` is intentionally a free-form map (one key per registered metric\nunit, e.g. \"syntax_fix\" / \"exec\" / \"llm_turns\" / \"agent_activity\"). Typing\neach unit's shape here would couple the schema to the metric registry and\ndefeat the \"add a metric = one function\" extensibility, so the frontend\ncarries the per-unit data shapes in hand-written TypeScript instead of\ngenerated types."
+        "title": "MetricsReport"
       },
       "ModelInfo": {
         "properties": {

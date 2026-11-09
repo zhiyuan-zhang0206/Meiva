@@ -10,7 +10,6 @@ from gateway.tests.auth.gateway_config import GatewayTestClient, gateway_test_cl
 from gateway.tests.events.event_rows import telemetry_event
 
 _UNITS = {
-    "syntax_fix",
     "exec",
     "llm_turns",
     "agent_activity",
@@ -69,7 +68,6 @@ def test_metrics_empty_db_returns_envelope_with_all_units(db_conn: psycopg.Conne
 def test_metrics_wires_payload_field_names(db_conn: psycopg.Connection) -> None:
     aid = _insert_agent(db_conn)
     _insert_event(db_conn, event="code", agent_id=aid, payload={"body": "print(1)"})
-    _insert_event(db_conn, event="syntax_fix", agent_id=aid, payload={"fixes": "ruff,ruff_format"})
     _insert_event(db_conn, event="exec", agent_id=aid, payload={"body": "1\n", "ok": True})
     _insert_event(
         db_conn,
@@ -84,7 +82,6 @@ def test_metrics_wires_payload_field_names(db_conn: psycopg.Connection) -> None:
     with _metrics_client() as client:
         body = client.get("/api/metrics").json()
     m = body["metrics"]
-    assert m["syntax_fix"]["trigger_counts"] == {"ruff": 1, "ruff_format": 1}
     assert m["exec"]["exec_ok"] == 1
     assert m["exec"]["exec_total"] == 1
     assert m["llm_turns"]["tokens_in"] == 1000

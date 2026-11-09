@@ -124,7 +124,7 @@ def _unpersisted(names: set[str]) -> list[str]:
 
 def test_the_source_scan_still_finds_the_readers() -> None:
     names, _prefixes = _queried_by_sql()
-    assert {"llm_usage", "turn_end", "sse_drop", "service_started", "syntax_fix"} <= set(names)
+    assert {"llm_usage", "turn_end", "sse_drop", "service_started"} <= set(names)
     assert len(_reader_sources()) >= 10
 
 

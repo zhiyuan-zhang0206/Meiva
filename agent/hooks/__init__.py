@@ -9,8 +9,6 @@ from ._registry import Hook, HookName, call_graph_hook, make_hook_runner, merge_
 BUILTIN_PLUGINS: tuple[str, ...] = (
     "meiva_fleet",
     "meiva_code",
-    "meiva_syntax_fix",
-    "meiva_sdk_reminder",
     "meiva_memory",
     "meiva_self_evolution",
     "meiva_to_user",

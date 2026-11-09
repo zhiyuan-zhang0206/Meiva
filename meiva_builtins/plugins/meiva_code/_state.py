@@ -21,8 +21,8 @@ class MeivaCodeState(BaseModel):
     # docstring + `_wrapped_read` comment).
     # - last_seen_compact: bookmark compared against the built-in
     # `compact.version`. After compact strips messages, injected_paths is
-    # lazily cleared (detected at wrap entry, not actively reset) — the same
-    # monotonic version-counter reset `meiva_sdk_reminder` uses.
+    # lazily cleared (detected at wrap entry, not actively reset) via a
+    # monotonic version-counter comparison.
     # meiva:link meiva_builtins/plugins/meiva_code/docs/meiva_code.md
 
     # Base-channel declaration: this plugin legitimately appends system notes

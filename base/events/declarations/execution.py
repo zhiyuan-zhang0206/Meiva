@@ -79,12 +79,6 @@ class ExecMemoryGuardSkipped(TypedDict):
     free_swap_bytes: int
 
 
-class SyntaxFix(TypedDict):
-    """`syntax_fix` payload."""
-
-    fixes: str
-
-
 EVENTS: dict[str, EventSpec] = {
     # exec lifecycle
     "exec": telemetry_event("exec", "execute_code succeeded", payload=ExecPayload, persist=True),
@@ -145,11 +139,4 @@ EVENTS: dict[str, EventSpec] = {
         "code", "LLM generated code block", payload=ExecPayload, tier="noise", persist=True
     ),
     "text": telemetry_event("text", "LLM text output", tier="noise"),
-    "syntax_fix": telemetry_event(
-        "syntax_fix",
-        "syntax repair executed",
-        payload=SyntaxFix,
-        tier="noise",
-        persist=True,
-    ),
 }

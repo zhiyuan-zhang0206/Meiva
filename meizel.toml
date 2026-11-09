@@ -5,7 +5,7 @@
 "meiva_builtins" = ["agent", "meiva", "base", "services"]
 "cli" = ["agent", "meiva", "base", "ops", "services"]
 "conftest.py" = ["tests"]
-"demos" = ["agent", "base"]
+"demos" = ["base"]
 "gateway" = ["agent", "meiva", "meiva_builtins", "base", "ops", "services"]
 "ops" = ["base"]
 "schedules" = ["base", "meiva", "meiva_builtins", "scripts"]
