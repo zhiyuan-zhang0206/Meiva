@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+from decimal import Decimal
 
 import psycopg
 import pytest
@@ -17,7 +18,7 @@ from gateway.inspect.tests.rows import returned_id
 
 def _agent(conn: psycopg.Connection, *, liveness_state: str, harness: str = "meiva") -> int:
     agent_id = returned_id(conn, "INSERT INTO agents(label) VALUES ('liveness') RETURNING id")
-    conn.execute(
+    _ = conn.execute(
         "INSERT INTO agents_meta(id, spawner, status, machine, liveness_state, harness) "
         "VALUES (%s, 'user', 'idling', 'machine', %s, %s)",
         (agent_id, liveness_state, harness),
@@ -39,13 +40,101 @@ def test_inspector_populates_observed_model_for_external_harness(
     db_conn: psycopg.Connection, database: Database
 ) -> None:
     aid = _agent(db_conn, liveness_state="online", harness="codex")
-    write_observations(
-        [MetricObservation(1, aid, datetime.now(UTC), "usage", model="gpt-5.4", usage_calls=1)],
+    now = datetime.now(UTC)
+    _ = write_observations(
+        [
+            MetricObservation(
+                1,
+                aid,
+                now,
+                "usage",
+                model="gpt-5.4",
+                usage_calls=1,
+                cost_usd=Decimal("0.01"),
+                cost_usd_subscription=Decimal("0.01"),
+            )
+        ],
         db=db_conn,
     )
     db_conn.commit()
     with database.pool(max_size=1) as pool:
         assert db_rows_blocking(pool, aid).config_overlay["llm_model"] == "gpt-5.4"
+        _ = write_observations(
+            [
+                MetricObservation(
+                    2,
+                    aid,
+                    now + timedelta(seconds=1),
+                    "usage",
+                    model="gpt-6.1-sol",
+                    usage_calls=1,
+                    unpriced_calls=1,
+                    unpriced_calls_subscription=1,
+                )
+            ],
+            db=db_conn,
+        )
+        db_conn.commit()
+        assert db_rows_blocking(pool, aid).config_overlay["llm_model"] == "gpt-6.1-sol"
+
+
+def test_inspector_ignores_api_decision_model_observations_for_external_harness(
+    db_conn: psycopg.Connection, database: Database
+) -> None:
+    aid = _agent(db_conn, liveness_state="online", harness="codex")
+    now = datetime.now(UTC)
+    _ = db_conn.execute(
+        'UPDATE agents_meta SET birth_config = \'{"llm_model": "gpt-6.1-sol"}\', '
+        'config_overlay = \'{"llm_model": "gpt-6.1-sol"}\' WHERE id = %s',
+        (aid,),
+    )
+    _ = write_observations(
+        [
+            MetricObservation(
+                1,
+                aid,
+                now,
+                "usage",
+                model="jev-1.13.0",
+                usage_calls=1,
+                cost_usd=Decimal("0.00003"),
+                cost_usd_subscription=Decimal(0),
+                unpriced_calls_subscription=0,
+            )
+        ],
+        db=db_conn,
+    )
+    db_conn.commit()
+    with database.pool(max_size=1) as pool:
+        assert db_rows_blocking(pool, aid).config_overlay["llm_model"] == "gpt-6.1-sol"
+        _ = write_observations(
+            [
+                MetricObservation(
+                    2,
+                    aid,
+                    now + timedelta(seconds=1),
+                    "usage",
+                    model="gpt-6.1-sol",
+                    usage_calls=1,
+                    cost_usd=Decimal("0.05"),
+                    cost_usd_subscription=Decimal("0.05"),
+                ),
+                MetricObservation(
+                    3,
+                    aid,
+                    now + timedelta(seconds=2),
+                    "usage",
+                    model="jev-1.13.0",
+                    usage_calls=1,
+                    cost_usd=Decimal("0.00003"),
+                    cost_usd_subscription=Decimal(0),
+                    unpriced_calls_subscription=0,
+                ),
+            ],
+            db=db_conn,
+        )
+        db_conn.commit()
+        assert db_rows_blocking(pool, aid).config_overlay["llm_model"] == "gpt-6.1-sol"
 
 
 def test_inspector_ignores_usage_from_before_the_harness_transition(
@@ -53,20 +142,40 @@ def test_inspector_ignores_usage_from_before_the_harness_transition(
 ) -> None:
     aid = _agent(db_conn, liveness_state="online", harness="claude_code")
     switched_at = datetime.now(UTC)
-    db_conn.execute(
+    _ = db_conn.execute(
         "UPDATE agents_meta SET harness_configured_at = %s, "
         'config_overlay = \'{"llm_model": "sonnet"}\' WHERE id = %s',
         (switched_at, aid),
     )
-    write_observations(
-        [MetricObservation(1, aid, switched_at - timedelta(seconds=1), "usage", model="gpt-5.4")],
+    _ = write_observations(
+        [
+            MetricObservation(
+                1,
+                aid,
+                switched_at - timedelta(seconds=1),
+                "usage",
+                model="gpt-5.4",
+                unpriced_calls=1,
+                unpriced_calls_subscription=1,
+            )
+        ],
         db=db_conn,
     )
     db_conn.commit()
     with database.pool(max_size=1) as pool:
         assert db_rows_blocking(pool, aid).config_overlay["llm_model"] == "sonnet"
-        write_observations(
-            [MetricObservation(2, aid, switched_at, "usage", model="claude-sonnet-5-5")],
+        _ = write_observations(
+            [
+                MetricObservation(
+                    2,
+                    aid,
+                    switched_at,
+                    "usage",
+                    model="claude-sonnet-5-5",
+                    unpriced_calls=1,
+                    unpriced_calls_subscription=1,
+                )
+            ],
             db=db_conn,
         )
         db_conn.commit()
@@ -79,8 +188,19 @@ def test_a_meiva_agent_keeps_its_own_model_choice(
     db_conn: psycopg.Connection, database: Database
 ) -> None:
     aid = _agent(db_conn, liveness_state="online")
-    write_observations(
-        [MetricObservation(1, aid, datetime.now(UTC), "usage", model="gpt-5.4", usage_calls=1)],
+    _ = write_observations(
+        [
+            MetricObservation(
+                1,
+                aid,
+                datetime.now(UTC),
+                "usage",
+                model="gpt-5.4",
+                usage_calls=1,
+                unpriced_calls=1,
+                unpriced_calls_subscription=1,
+            )
+        ],
         db=db_conn,
     )
     db_conn.commit()
