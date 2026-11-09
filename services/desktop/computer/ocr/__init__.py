@@ -46,9 +46,11 @@ class OcrItem(TypedDict):
 
 
 # meiva:note
-# The last OCR result the daemon keeps for `find_text(snapshot_fresh=false)`.
+# The last OCR result the daemon keeps for `find_text(snapshot_fresh=false)`, and the capture
+# scale `find_text` measured when it refreshed it.
 class OcrCache(TypedDict, total=False):
     items: list[OcrItem]
+    scale: float
 
 
 SOURCE = Path(__file__).with_name("ocr.swift")

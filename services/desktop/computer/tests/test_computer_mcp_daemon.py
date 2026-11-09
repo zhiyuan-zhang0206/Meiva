@@ -397,6 +397,36 @@ async def test_click_before_any_snapshot_falls_back_to_helper_scale(
     assert ("click", {"x": 50.0, "y": 100.0, "double": False}) in fake_helper.calls
 
 
+# meiva:note
+# Regression (#6643): when an older helper reports `screen_size.scale=1` on a 2x Retina display
+# (`CGDisplayPixelsWide` returning logical width), a cold-start region snapshot or fresh `find_text`
+# seeds the daemon's scale from the captured PNG so a subsequent direct click converts at 2x.
+async def test_cold_start_region_snapshot_and_find_text_seed_scale_when_helper_reports_one(
+    fake_helper: FakeHelper,
+    audit_log: AuditLog,
+    *,
+    database_gate: ProcessDbGate,
+) -> None:
+    fake_helper.screen = {"x": 0.0, "y": 0.0, "w": 1710.0, "h": 1107.0, "scale": 1.0}
+    fake_helper.png_size = (400, 200)
+    d = computer_daemon(database_gate=database_gate, helper=fake_helper)
+    region_snap = await ok_result(
+        d, "snapshot", {"region": {"x": 100, "y": 150, "w": 200, "h": 100}}
+    )
+    assert region_snap["frame"]["scale"] == 2.0
+    await call(d, "click", {"x": 400, "y": 300})
+    assert ("click", {"x": 200.0, "y": 150.0, "double": False}) in fake_helper.calls
+
+    fake_helper.calls.clear()
+    fake_helper.png_size = (3420, 2214)
+    FakeOcr([{"text": "Continue", "x": 380.0, "y": 290.0, "w": 40.0, "h": 20.0}])
+    d2 = computer_daemon(database_gate=database_gate, helper=fake_helper)
+    found = await ok_result(d2, "find_text", {"text": "Continue"})
+    assert found["fresh"] is True and found["count"] == 1
+    await call(d2, "click", {"x": 400, "y": 300})
+    assert ("click", {"x": 200.0, "y": 150.0, "double": False}) in fake_helper.calls
+
+
 async def test_snapshot_include_ocr_adds_text_boxes(
     fake_helper: FakeHelper,
     audit_log: AuditLog,
