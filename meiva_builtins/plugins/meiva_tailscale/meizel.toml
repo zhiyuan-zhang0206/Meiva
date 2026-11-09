@@ -1,0 +1,6 @@
+exports = ["default_config.py", "plugin.py", "service_declaration", "services.py"]
+
+[uses]
+"services.py" = ["service_declaration"]
+"service_declaration" = ["default_config.py"]
+"tests" = ["default_config.py", "plugin.py", "service_declaration", "services.py"]

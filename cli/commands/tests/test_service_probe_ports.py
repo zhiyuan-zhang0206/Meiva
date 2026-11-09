@@ -49,6 +49,8 @@ _EXPECTED_SESSIONS = {
     "loki",
     "prometheus",
     "grafana",
+    "cloudflared",
+    "tailscale",
 }
 
 
