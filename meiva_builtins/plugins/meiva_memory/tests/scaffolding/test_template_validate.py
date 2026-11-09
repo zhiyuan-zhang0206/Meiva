@@ -381,7 +381,7 @@ def test_note_helpers(tmp_path: Path) -> None:
     assert validator.is_note_name("topic.md")
     assert not any(
         validator.is_note_name(name)
-        for name in ("MEMORY.md", "index.md", "log.md", "AGENTS.md", "x.txt")
+        for name in ("MEMORY.md", "INHERIT.md", "index.md", "log.md", "AGENTS.md", "x.txt")
     )
     parts = validator.note_parts(_GOOD)
     assert parts is not None

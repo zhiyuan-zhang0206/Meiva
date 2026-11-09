@@ -199,6 +199,18 @@ def test_per_agent_framing_makes_no_path_resolution_claim(memory_plugin: Any) ->
     from meiva_builtins.plugins.meiva_memory.notes import PER_AGENT_FRAMING
 
     assert "resolve" not in PER_AGENT_FRAMING
+    assert "memory/INHERIT.md" in PER_AGENT_FRAMING
+    assert "meiva:inheritable" not in PER_AGENT_FRAMING
+
+
+def test_discipline_describes_three_memory_layers(memory_plugin: Any) -> None:
+    section = memory_plugin.memory_discipline_section(
+        _slices(), catalog=build_model_catalog(home=meiva_home())
+    )
+    assert "Shared pool (meiva.memory.PATH)" in section
+    assert "Personal self (memory/MEMORY.md + memory/<slug>.md in your workspace)" in section
+    assert "Descendant inheritance (memory/INHERIT.md in your workspace)" in section
+    assert "meiva:inheritable" not in section
 
 
 def test_memory_index_injection_guard(

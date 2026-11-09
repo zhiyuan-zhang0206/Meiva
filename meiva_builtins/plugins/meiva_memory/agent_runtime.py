@@ -64,7 +64,7 @@ def state_handle() -> PluginStateHandle[MemoryWriteState]:
 _DISCIPLINE = """\
 # Remembering across sessions
 
-Your memory — two stores, one discipline.
+Your memory — three layers, one discipline.
 
 - Shared pool (meiva.memory.PATH): notes every agent can read. Restrained by
   design: only reusable rules (each with a Why and a How to apply), facts many
@@ -72,10 +72,18 @@ Your memory — two stores, one discipline.
   git history already carries them. Judge each note by one question: "would a
   new agent reading this in a year behave differently?" If not, it does not
   belong in the pool.
-- Personal (memory/ in your workspace): your own durable state, maintained by
-  you alone. Verbose is fine here: process details, half-formed understanding,
-  notes of uncertain future value — keep them personal until they earn a place
-  in the pool.
+- Personal self (memory/MEMORY.md + memory/<slug>.md in your workspace): your
+  own durable state tied to your own identity (how you interact with the user,
+  your own role boundaries, and working state across compactions), maintained by
+  you alone and visible only to you — never inherited by descendants. Verbose is fine here:
+  process details, half-formed understanding, notes of uncertain
+  future value — keep them personal until they earn a place in the pool.
+- Descendant inheritance (memory/INHERIT.md in your workspace): when you own a
+  domain and spawn child agents to solve problems, write the domain context,
+  architectural invariants, and execution rules that all descendants must inherit
+  into `memory/INHERIT.md` (and optional detail files under `memory/inherit/<slug>.md`)
+  as pure Markdown with no special tags. Every descendant on your spawn chain
+  automatically inherits `memory/INHERIT.md` at startup.
 
 Unsure which store? Personal — the pool is for rules other agents will use,
 not your working details.

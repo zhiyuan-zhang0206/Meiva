@@ -363,12 +363,13 @@ async def test_personal_notes_get_the_rules_but_no_duplicate_search(
 async def test_index_files_and_vanished_notes_are_skipped(
     hook: Any, search: _MemoryGateway, stores: tuple[Path, Path], runtime: Runtime[MeivaContext]
 ):
-    pool, _ = stores
+    pool, own = stores
     _write(pool, "MEMORY.md", "no frontmatter, an index")
     _write(pool, "topics/index.md", "an index")
+    _write(own, "INHERIT.md", "# Descendant Rules\n\nPure markdown inheritance.\n")
 
     result = await hook(
-        _state({"MEMORY.md", "topics/index.md", "gone.md"}),
+        _state({"MEMORY.md", "topics/index.md", "gone.md"}, {"INHERIT.md"}),
         runtime,
         RunnableConfig(),
     )

@@ -179,7 +179,8 @@ def test_chunk_text_restores_each_indexed_row() -> None:
 
 def test_chunk_text_is_none_for_a_row_the_file_no_longer_has() -> None:
     assert chunk_text(_NOTE, KIND_BODY, 5) is None
-    assert chunk_text("no frontmatter, only body", KIND_DESC, 0) is None
+    assert chunk_text("no frontmatter, only body", KIND_DESC, 0) == "no frontmatter, only body"
+    assert chunk_text("   \n\n  ", KIND_DESC, 0) is None
 
 
 def test_chunk_text_indexes_long_bodies_by_the_indexer_rules() -> None:
@@ -250,7 +251,7 @@ async def test_each_candidate_is_its_own_request_with_its_own_state(
     assert runbook.index("the query") < runbook.index("path: ops/runbook.md")
     assert "b.md" not in runbook and "ops/runbook.md" not in other
     assert "description: Gateway deploy runbook" in runbook
-    assert "description: (none)" in other
+    assert "description: body b" in other
     assert "restarting the gateway" in runbook.split("excerpt:\n", 1)[1]
     assert {model for model, _, _ in judge.calls} == {_MODEL}
 
@@ -521,7 +522,11 @@ def test_description_and_tags_survive_malformed_frontmatter(tmp_path: Path) -> N
 
     assert (scalar.description, scalar.tags, scalar.chunk) == ("123", [], "123")
     assert (bad_yaml.description, bad_yaml.tags) == ("", [])
-    assert (plain.description, plain.tags, plain.chunk) == ("", [], "# Just a heading")
+    assert (plain.description, plain.tags, plain.chunk) == (
+        "Just a heading",
+        [],
+        "# Just a heading",
+    )
 
 
 async def test_no_candidates_asks_no_question(

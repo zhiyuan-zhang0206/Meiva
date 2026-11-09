@@ -60,9 +60,9 @@ class TestPrimaryPath:
         assert results[0]["path"] == "notes/foo.md"
         assert results[1]["path"] == "bar.md"
         # meiva:note
-        # description is empty because stub files have no YAML frontmatter
-        assert results[0]["description"] == ""
-        assert results[1]["description"] == ""
+        # pure-Markdown files without frontmatter extract their lead paragraph as description
+        assert results[0]["description"] == "x"
+        assert results[1]["description"] == "y"
         # meiva:note
         # each result carries the matched chunk and its relevance score
         assert [(item["chunk"], item["score"]) for item in results] == [("x", 0.5), ("y", 0.5)]
@@ -111,9 +111,9 @@ title: No Description
         assert results[0]["path"] == "with_desc.md"
         assert results[0]["description"] == "A note about the user's health"
         assert results[1]["path"] == "no_desc.md"
-        assert results[1]["description"] == ""
+        assert results[1]["description"] == "No desc"
         assert results[2]["path"] == "no_frontmatter.md"
-        assert results[2]["description"] == ""
+        assert results[2]["description"] == "Just a heading — No YAML."
         assert set(body) == {"results"}
 
     # meiva:note

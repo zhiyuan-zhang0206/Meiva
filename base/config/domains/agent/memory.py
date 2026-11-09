@@ -76,10 +76,9 @@ class AgentMemorySettings(EnvSettings):
         description=(
             "How many ancestors up the birth chain an agent inherits from, in "
             "hops (1 = the direct birth parent), nearest first. 0 disables "
-            "inheritance. An ancestor declares shareable content by wrapping it "
-            "in `<!-- meiva:inheritable -->` … `<!-- /meiva:inheritable -->` inside "
-            "a personal memory entry; the child reads those blocks when its "
-            "context window is established. Cap 10: chains are short, so a "
+            "inheritance. An ancestor declares shareable content in its "
+            "workspace `memory/INHERIT.md` file; the child reads that file when "
+            "its context window is established. Cap 10: chains are short, so a "
             "higher value only invites an accidental whole-family pull."
         ),
         json_schema_extra={

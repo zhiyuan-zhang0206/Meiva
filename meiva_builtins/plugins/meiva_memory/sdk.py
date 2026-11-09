@@ -51,8 +51,10 @@ path so a changed `meiva.cwd` cannot misplace it. A topic subfolder is fine.
 
 _PERSONAL_PATH_DOC = (
     """Root folder of your own notes: the memory folder of your workspace. Only you maintain it.
-Keep one line per note in MEMORY.md in this folder, `- [Title](file.md) - description`; the
-notes themselves stay beside it.
+Keep one line per personal note in MEMORY.md in this folder, `- [Title](file.md) - description`;
+the personal notes (`<slug>.md`) stay beside it and are visible only to you.
+To pass domain context and execution rules to descendants you spawn, write pure Markdown in
+`INHERIT.md` (and optional detail files under `inherit/<slug>.md`) in this folder.
 
 Write a note with `meiva.files.write(meiva.memory.PERSONAL_PATH / "name.md", text)`.
 """

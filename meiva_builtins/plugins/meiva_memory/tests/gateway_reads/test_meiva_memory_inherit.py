@@ -21,18 +21,13 @@ from base.paths.home import resolve_meiva_home
 from meiva.tests.fixtures.gateway_wire import GatewayStub, GatewayWire
 from meiva_builtins.plugins.meiva_memory.inheritance import inherit
 from meiva_builtins.plugins.meiva_memory.inheritance.inherited_blocks import (
-    INHERITABLE_CLOSE,
-    INHERITABLE_OPEN,
     Ancestor,
     EntryBlocks,
     SizeCaps,
-    parse_inheritable_blocks,
+    extract_inherit_body,
     render_inherited,
     split_ancestors,
 )
-
-OPEN = INHERITABLE_OPEN
-CLOSE = INHERITABLE_CLOSE
 
 pytestmark = pytest.mark.usefixtures("unit_home")
 
@@ -53,16 +48,20 @@ def _context(
     )
 
 
-def _wrap(*blocks: str) -> str:
-    return "\n\n".join(f"{OPEN}\n{block}\n{CLOSE}" for block in blocks)
-
-
 def _note_text(note: HumanMessage) -> str:
     return note.text
 
 
 def _note_tag(note: HumanMessage) -> object:
     return read_meiva_kwargs(note).get("meiva_note_tag")
+
+
+def _write_inherit(agent_id: int, body: str) -> Path:
+    mem = meiva_home() / "workspaces" / str(agent_id) / "memory"
+    mem.mkdir(parents=True, exist_ok=True)
+    path = mem / "INHERIT.md"
+    path.write_text(body, encoding="utf-8")
+    return path
 
 
 def _write_entry(agent_id: int, slug: str, body: str) -> Path:
@@ -100,39 +99,23 @@ def _entries(*texts: str, agent_id: int = 7, label: str | None = None) -> list[E
     ]
 
 
-def test_parser_reads_a_single_block() -> None:
-    text = f"intro\n{OPEN}\nthe rule\n{CLOSE}\noutro"
-    assert parse_inheritable_blocks(text).blocks == ("the rule",)
+def test_extract_inherit_body_reads_pure_markdown() -> None:
+    text = "# Domain Rules\n\nAlways work in an isolated git worktree.\n"
+    assert (
+        extract_inherit_body(text) == "# Domain Rules\n\nAlways work in an isolated git worktree."
+    )
 
 
-def test_parser_reads_multiple_blocks_in_order() -> None:
-    assert parse_inheritable_blocks(_wrap("A", "B")).blocks == ("A", "B")
+def test_extract_inherit_body_skips_optional_frontmatter() -> None:
+    text = "---\ntitle: Inherit\ndescription: Domain rules\n---\n\n# Rules\n\nReal body.\n"
+    assert extract_inherit_body(text) == "# Rules\n\nReal body."
 
 
-def test_parser_skips_frontmatter_and_takes_only_the_body() -> None:
-    text = f"---\nname: x\ndescription: {OPEN}\nnot a block\n---\n\n{OPEN}\nreal\n{CLOSE}"
-    assert parse_inheritable_blocks(text).blocks == ("real",)
-
-
-def test_parser_normalizes_crlf() -> None:
-    text = f"---\r\nname: x\r\n---\r\n\r\n{OPEN}\r\ncrlf block\r\n{CLOSE}"
-    assert parse_inheritable_blocks(text).blocks == ("crlf block",)
-
-
-def test_parser_drops_malformed_fences_with_a_warning() -> None:
-    unclosed = parse_inheritable_blocks(f"{OPEN}\nsecret\nstill open")
-    assert unclosed.blocks == ()
-    assert unclosed.warnings == ("unclosed open fence — block dropped",)
-
-    stray_close = parse_inheritable_blocks(f"body\n{CLOSE}\nmore")
-    assert stray_close.blocks == ()
-    assert stray_close.warnings == ("close fence without an open ignored",)
-
-    nested = parse_inheritable_blocks(f"{OPEN}\nouter\n{OPEN}\ninner\n{CLOSE}")
-    assert nested.blocks == ("outer\ninner",)
-    assert nested.warnings == ("nested open fence ignored",)
-
-    assert parse_inheritable_blocks(f"{OPEN}\n{CLOSE}").blocks == ()
+def test_extract_inherit_body_normalizes_crlf_and_strips_blank() -> None:
+    text = "---\r\nname: x\r\n---\r\n\r\ncrlf block\r\n"
+    assert extract_inherit_body(text) == "crlf block"
+    assert extract_inherit_body("   \n\t\n  ") == ""
+    assert extract_inherit_body("---\ntitle: empty\n---\n   \n") == ""
 
 
 def test_depth_slices_the_chain_and_remote_ancestors_are_set_apart() -> None:
@@ -268,10 +251,12 @@ def test_an_empty_chain_and_a_local_ancestor_without_a_store_yield_no_note(
     assert inherit.inherited_memory_note(ctx) is None
 
 
-def test_direct_parent_blocks_are_injected(
+def test_direct_parent_inherit_md_is_injected_and_personal_notes_stay_private(
     wire: GatewayWire, machine_identity: MachineIdentityReader
 ) -> None:
-    _write_entry(600311, "family-rules", f"private\n\n{_wrap('Report in Chinese.')}\n")
+    _write_entry(600311, "MEMORY", "- [Private](private.md) - private\n")
+    _write_entry(600311, "private", "private personal note that must never be inherited\n")
+    _write_inherit(600311, "# Parent Domain\n\nReport in Chinese.\n")
     _chain(wire, 1, _row(600311, machine_identity.name(), label="Parent"))
 
     note = inherit.inherited_memory_note(_context(wire.context.clients, machine_identity))
@@ -281,18 +266,17 @@ def test_direct_parent_blocks_are_injected(
     content = _note_text(note)
     assert content.startswith("<system_note>\nMemory your ancestors chose to share")
     assert "verify facts that conflict with current evidence" in content
-    assert "## ancestor #600311 (Parent) — memory/family-rules.md" in content
+    assert "## ancestor #600311 (Parent) — memory/INHERIT.md" in content
     assert "Report in Chinese." in content
     assert "private" not in content
 
 
-def test_blocks_render_nearest_first_with_sorted_entries(
+def test_blocks_render_nearest_ancestor_first(
     wire: GatewayWire, machine_identity: MachineIdentityReader
 ) -> None:
     here = machine_identity.name()
-    _write_entry(600321, "b-entry", _wrap("b block"))
-    _write_entry(600321, "a-entry", _wrap("a block one", "a block two"))
-    _write_entry(600322, "grandparent", _wrap("grandparent block"))
+    _write_inherit(600321, "parent block one\n\nparent block two")
+    _write_inherit(600322, "grandparent block")
     _chain(wire, 1, _row(600321, here, label="Parent"), _row(600322, here, depth=2))
 
     note = inherit.inherited_memory_note(
@@ -302,15 +286,16 @@ def test_blocks_render_nearest_first_with_sorted_entries(
     assert note is not None
     content = _note_text(note)
     assert content.index("#600321") < content.index("#600322")
-    assert content.index("memory/a-entry.md") < content.index("memory/b-entry.md")
-    assert "a block one\n\na block two" in content
+    assert "## ancestor #600321 (Parent) — memory/INHERIT.md" in content
+    assert "## ancestor #600322 — memory/INHERIT.md" in content
+    assert "parent block one\n\nparent block two" in content
     assert "grandparent block" in content
 
 
 def test_remote_ancestors_are_skipped_and_footered(
     wire: GatewayWire, machine_identity: MachineIdentityReader
 ) -> None:
-    _write_entry(600341, "local", _wrap("local block"))
+    _write_inherit(600341, "local block")
     _chain(
         wire,
         1,
@@ -373,7 +358,7 @@ def test_a_chain_row_of_the_wrong_shape_is_a_contract_break(
 def test_chain_is_read_at_each_establishment(
     wire: GatewayWire, machine_identity: MachineIdentityReader
 ) -> None:
-    _write_entry(600351, "rules", _wrap("fresh block"))
+    _write_inherit(600351, "fresh block")
     _chain(wire, 1, _row(600351, machine_identity.name()))
     ctx = _context(wire.context.clients, machine_identity)
 
@@ -386,7 +371,7 @@ def test_chain_is_read_at_each_establishment(
 def test_content_is_deterministic(
     wire: GatewayWire, machine_identity: MachineIdentityReader
 ) -> None:
-    _write_entry(600361, "rules", _wrap("stable block"))
+    _write_inherit(600361, "stable block")
     _chain(wire, 1, _row(600361, machine_identity.name()))
     ctx = _context(wire.context.clients, machine_identity)
 
@@ -400,7 +385,7 @@ def test_content_is_deterministic(
 def test_the_size_caps_come_from_the_agents_slices(
     wire: GatewayWire, machine_identity: MachineIdentityReader
 ) -> None:
-    entry = _write_entry(600371, "big", _wrap("x" * 200))
+    entry = _write_inherit(600371, "x" * 200)
     _chain(wire, 1, _row(600371, machine_identity.name()))
 
     note = inherit.inherited_memory_note(
@@ -416,7 +401,7 @@ def test_the_fork_graft_builds_the_new_agents_own_chain(
 ) -> None:
     from meiva_builtins.plugins.meiva_memory import agent_runtime
 
-    _write_entry(600401, "rules", _wrap("fork chain block"))
+    _write_inherit(600401, "fork chain block")
     _chain(wire, 5, _row(600401, machine_identity.name(), label="Fork parent"))
     registry = ExtensionRegistry((("meiva_memory", agent_runtime.contribute()),))
     declared = [note for _plugin, note in registry.context_notes()]
