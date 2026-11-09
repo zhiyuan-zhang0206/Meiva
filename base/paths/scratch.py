@@ -48,18 +48,12 @@ class TempFileScratch:
         return Path(tempfile.gettempdir())
 
     # meiva:note
-    # Two calls, not one with `dir=parent`: a `dir` argument spares the whole call from the ambient
-    # scan, so `TemporaryDirectory(prefix, dir=parent)` would hide the draw a `parent=None` really
-    # makes. Written apart, the ledger sees the call that reads the environment and draws the name,
-    # and the one that only takes the caller's directory.
+    # Because `parent` defaults to `None`, `TemporaryDirectory(prefix=prefix, dir=parent)` still
+    # reads `TMPDIR` and draws a random name when no parent is passed; `[roots]` licenses both on
+    # this module.
     @contextmanager
     def make(self, *, prefix: str = "", parent: Path | None = None) -> Generator[Path]:
-        space = (
-            tempfile.TemporaryDirectory(prefix=prefix)
-            if parent is None
-            else tempfile.TemporaryDirectory(prefix=prefix, dir=parent)
-        )
-        with space as name:
+        with tempfile.TemporaryDirectory(prefix=prefix, dir=parent) as name:
             yield Path(name)
 
 
