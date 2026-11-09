@@ -189,7 +189,7 @@ describe("InspectorPanel", () => {
     expect(screen.queryByText("Alerts")).toBeNull();
   });
 
-  it("renders one spinner per pending metric, never a placeholder bar, for persistent sections without speculative sparse sections", () => {
+  it("renders one spinner per pending section with no metric card skeleton or speculative sparse sections", () => {
     const qc = createInspectorQueryClient();
     qc.setQueryData(AGENTS_QUERY_KEY, rosterFixture({ harness: "meiva" }));
     getAgentInspectLive.mockReturnValue(new Promise<AgentInspectLive>(() => undefined));
@@ -203,22 +203,18 @@ describe("InspectorPanel", () => {
     const liveness = screen.getByLabelText("Liveness loading");
     expect(liveness.getAttribute("aria-busy")).toBe("true");
     for (const label of ["Birth", "Next heartbeat", "Last pause", "Harness", "Model", "Machine", "Status"]) {
-      expect(within(liveness).getByText(label)).toBeTruthy();
+      expect(within(liveness).queryByText(label)).toBeNull();
     }
-    expect(liveness.querySelectorAll(".grid .animate-spin")).toHaveLength(7);
+    expect(liveness.querySelectorAll(".animate-spin")).toHaveLength(1);
     expect(liveness.querySelectorAll(".animate-pulse")).toHaveLength(0);
 
     const activity = screen.getByLabelText("Activity loading");
     expect(activity.getAttribute("aria-busy")).toBe("true");
     expect(screen.getAllByText("Activity")).toHaveLength(1);
-    // meiva:note
-    // Both cost blocks wait while the windowed read is pending — the panel does not guess which
-    // mode this agent ran, so neither is fabricated away before the amount lands — and they spin
-    // with the other six activity cells.
     for (const label of ["Cost (subscription)", "Cost (API)", "LLM calls", "Tokens", "Cache hit", "TPS", "LLM output", "Code execution"]) {
-      expect(within(activity).getByText(label)).toBeTruthy();
+      expect(within(activity).queryByText(label)).toBeNull();
     }
-    expect(activity.querySelectorAll(".grid .animate-spin")).toHaveLength(8);
+    expect(activity.querySelectorAll(".animate-spin")).toHaveLength(1);
     expect(activity.querySelectorAll(".animate-pulse")).toHaveLength(0);
 
     expect(screen.queryByText("Page")).toBeNull();
@@ -230,7 +226,7 @@ describe("InspectorPanel", () => {
     expect(screen.queryByText("Loading…")).toBeNull();
   });
 
-  it("keeps Liveness and Activity section and card DOM nodes mounted in place across initial resolve and window switches", async () => {
+  it("keeps Liveness and Activity section DOM nodes mounted in place across initial resolve and window switches without metric skeleton cards", async () => {
     let releaseLive: (v: AgentInspectLive) => void = () => undefined;
     let releaseWindowed: (v: AgentInspectStatistics) => void = () => undefined;
     getAgentInspectLive.mockReturnValue(
@@ -250,11 +246,9 @@ describe("InspectorPanel", () => {
     render(<InspectorPanel agentId={1} />);
 
     const livenessSection = screen.getByLabelText("Liveness loading");
-    const birthCard = within(livenessSection).getByText("Birth").parentElement;
+    expect(within(livenessSection).queryByText("Birth")).toBeNull();
     const activitySection = screen.getByLabelText("Activity loading");
-    const costCard = within(activitySection).getByText("Cost (API)").parentElement;
-    expect(birthCard).not.toBeNull();
-    expect(costCard).not.toBeNull();
+    expect(within(activitySection).queryByText("Cost (API)")).toBeNull();
 
     releaseLive(liveFixture({ shells: [], config_overlay: {} }));
     releaseWindowed(fixture({ window_hours: 24 }));
@@ -263,15 +257,15 @@ describe("InspectorPanel", () => {
     await waitFor(() => expect(screen.getByText("test-host")).toBeTruthy());
 
     expect(screen.getByText("Liveness").closest("section")).toBe(livenessSection);
-    expect(within(livenessSection).getByText("Birth").parentElement).toBe(birthCard);
+    expect(within(livenessSection).getByText("Birth")).toBeTruthy();
     expect(screen.getByText("Activity").closest("section")).toBe(activitySection);
-    expect(within(activitySection).getByText("Cost (API)").parentElement).toBe(costCard);
+    expect(within(activitySection).getByText("Cost (API)")).toBeTruthy();
 
     fireEvent.change(screen.getByLabelText("Cost + activity window"), {
       target: { value: "1" },
     });
     await waitFor(() => expect(screen.getByLabelText("Activity loading")).toBe(activitySection));
-    expect(within(activitySection).getByText("Cost (API)").parentElement).toBe(costCard);
+    expect(within(activitySection).queryByText("Cost (API)")).toBeNull();
   });
 
   it("shows current state while statistics and plugins are pending", async () => {

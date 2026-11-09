@@ -16,8 +16,8 @@ has an accessible name while the screen shows only motion.
 in for: not a bar where a value will land, not a grey block standing in for a
 chart, not a ghost of the page's structure. A skeleton that does not match the
 real structure reads as broken layout, and one that does match is only a slower
-thing to look at. Where the resolved content has a height, the loading frame keeps
-it — the run-timeline panel at the chart's height, the inspector's `17px` value
-line — so the swap costs no jump.
+thing to look at. Where a resolved chart frame has a fixed height, the loading frame keeps
+it — such as the run-timeline panel at the chart's height — while the inspector's
+pending sections render a single `Spinner` without empty `Metric` card skeletons.
 
 Parent: [Frontend Components](frontend-components.md).

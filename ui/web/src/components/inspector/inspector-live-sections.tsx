@@ -191,41 +191,37 @@ export function LivenessSection({
       title={t("sectionLiveness")}
       loading={!inspect && pending}
     >
-      {!inspect && !pending ? (
-        <InspectReadError
-          message={errorMessage}
-          retryLabel={t("retryInspector")}
-          pending={fetching}
-          onRetry={onRetry}
-        />
+      {!inspect ? (
+        pending ? null : (
+          <InspectReadError
+            message={errorMessage}
+            retryLabel={t("retryInspector")}
+            pending={fetching}
+            onRetry={onRetry}
+          />
+        )
       ) : (
         <div className="grid grid-cols-2 gap-1">
           <Metric
             className="col-span-2"
             label={t("metricBirth")}
-            value={
-              inspect
-                ? `${formatRelative(inspect.spawned_at, now, { capitalize: true })}, ${formatAbsolute(inspect.spawned_at)}`
-                : undefined
-            }
+            value={`${formatRelative(inspect.spawned_at, now, { capitalize: true })}, ${formatAbsolute(inspect.spawned_at)}`}
           />
-          <Metric label={t("metricNextHeartbeat")} value={next} />
+          <Metric label={t("metricNextHeartbeat")} value={next ?? "—"} />
           <Metric
             label={t("metricLastPause")}
             value={
-              inspect
-                ? lastPause
-                  ? `${formatRelative(lastPause.at, now, { capitalize: true })} · ${formatInterval(Math.round(lastPause.duration_s))}`
-                  : t("neverPaused")
-                : undefined
+              lastPause
+                ? `${formatRelative(lastPause.at, now, { capitalize: true })} · ${formatInterval(Math.round(lastPause.duration_s))}`
+                : t("neverPaused")
             }
           />
-          <Metric label={t("metricHarness")} value={inspect ? (harness ? harnessLabel(harness) : "—") : undefined} />
-          <Metric label={t("metricModel")} value={inspect ? (model === undefined ? "—" : modelLabel(model)) : undefined} />
-          <Metric label={t("metricMachine")} value={inspect?.machine} />
+          <Metric label={t("metricHarness")} value={harness ? harnessLabel(harness) : "—"} />
+          <Metric label={t("metricModel")} value={model === undefined ? "—" : modelLabel(model)} />
+          <Metric label={t("metricMachine")} value={inspect.machine} />
           <Metric
             label={t("metricStatus")}
-            value={status !== undefined ? (statusKey ? tStatus(statusKey) : status) : undefined}
+            value={statusKey ? tStatus(statusKey) : inspect.status}
           />
         </div>
       )}

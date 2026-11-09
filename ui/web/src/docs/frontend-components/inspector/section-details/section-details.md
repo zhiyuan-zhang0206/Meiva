@@ -61,7 +61,7 @@ what a pause or a queued wake renders, are in
 
 **Widgets.** Plugin widgets render through the shared section chrome
 (`inspector-section.tsx`), which also owns `Section` loading attributes and
-`Metric`'s `17px` pending breathing bar, so plugin sections and built-in ones
+`Metric`'s card primitive, so plugin sections and built-in ones
 share one header and card primitive; the widget section itself renders only the
 closed-set kinds the console knows (`InspectWidgetSection`), renders nothing
 while pending or empty, and a widgets fetch failure leaves the rest of the panel
