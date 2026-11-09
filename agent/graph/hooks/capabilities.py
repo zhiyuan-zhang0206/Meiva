@@ -44,6 +44,7 @@ from agent.hooks import Hook
 from agent.messages import NoteTag, system_note_message
 from agent.state import CapabilitiesState
 from base.agents.context import MeivaContext
+from base.api_contracts.agent_contract import Harness
 from base.log import logger
 
 
@@ -70,7 +71,7 @@ class _NewlyInstalledSkillsHook(Hook):
             # the host filesystem gained mid-run is exactly what that excludes.
             return None
 
-        if auto_compact_will_fire(
+        if runtime.context.harness is Harness.MEIVA and auto_compact_will_fire(
             state, runtime.context.require_agent(), catalog=runtime.context.require_catalog()
         ):
             # Not politeness — the only safe move. Compaction writes

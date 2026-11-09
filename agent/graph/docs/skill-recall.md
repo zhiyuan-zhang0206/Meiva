@@ -4,7 +4,7 @@ The `# Capabilities` index asks the agent to match every task against it by hand
 
 ## When it fires
 
-`agent/graph/hooks/skill_recall.py:SkillRecallHook` is a framework `before_llm` hook, registered after compact's reminder and before the capability-index drift check (drift stays last). It fires when the messages added since the last assistant turn include an inbound from a **person** (`user`, `ui:page:<name>`) or a **schedule** (`schedule:<id>`); `agent/messages/__init__.py:tail_has_skill_recall_inbound` is that gate. With `skill_recall_peer_messages` on (off by default), a peer agent's message also fires, after the peer gate below. A system notice, a watcher or a shell completion never triggers it, and memory recall's wider gate is untouched. It also stays quiet in an eval-isolated run and on a turn where auto-compact is predicted (the note would be wiped with the history).
+`agent/graph/hooks/skill_recall.py:SkillRecallHook` is a framework `before_llm` hook, registered after compact's reminder and before the capability-index drift check (drift stays last). It fires when the messages added since the last assistant turn include an inbound from a **person** (`user`, `ui:page:<name>`) or a **schedule** (`schedule:<id>`); `agent/messages/__init__.py:tail_has_skill_recall_inbound` is that gate. With `skill_recall_peer_messages` on (on by default), a peer agent's message also fires, after the peer gate below. A system notice, a watcher or a shell completion never triggers it, and memory recall's wider gate is untouched. It also stays quiet in an eval-isolated run and on a native-loop turn where auto-compact is predicted (the note would be wiped with the history).
 
 ## What is asked
 

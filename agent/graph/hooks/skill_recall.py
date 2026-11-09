@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
+from langchain_core.messages import AIMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.runtime import Runtime
 from langgraph.types import Overwrite
@@ -16,6 +17,7 @@ from agent.hooks import Hook
 from agent.messages import last_agent_inbound_text, tail_has_skill_recall_inbound
 from agent.state import SkillRecallState
 from base.agents.context import MeivaContext, agent_id_from_config
+from base.api_contracts.agent_contract import Harness
 from base.host.env.agent_slices import AgentSlices
 from base.log import logger
 
@@ -88,7 +90,9 @@ class SkillRecallHook(Hook):
         if not candidates:
             return []
         catalog = runtime.context.require_catalog()
-        if auto_compact_will_fire(state, agent, catalog=catalog):
+        if runtime.context.harness is Harness.MEIVA and auto_compact_will_fire(
+            state, agent, catalog=catalog
+        ):
             logger.info(
                 "[{label}] {body}",
                 label=_LABEL,
@@ -103,6 +107,13 @@ class SkillRecallHook(Hook):
         peer_text = last_agent_inbound_text(state.messages)
         if peer_text is None:
             return []
+        is_first_turn = (
+            not state.skill_recall.prompted
+            and not state.skill_reads
+            and not any(isinstance(m, AIMessage) for m in state.messages)
+        )
+        if is_first_turn:
+            return candidates
         passed = await peer_gate_passes(
             peer_text,
             agent=agent,

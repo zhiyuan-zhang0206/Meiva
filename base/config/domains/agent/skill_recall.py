@@ -144,7 +144,7 @@ class AgentSkillRecallSettings(EnvSettings):
 
     skill_recall_peer_messages: bool = Field(
         title="Suggest skills for peer messages",
-        default=False,
+        default=True,
         alias="MEIVA_SKILL_RECALL_PEER_MESSAGES",
         description=(
             "Also consider turns woken by another agent's message, not only by a person or a "
