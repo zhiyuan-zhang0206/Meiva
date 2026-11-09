@@ -23,6 +23,11 @@ from meiva_builtins.plugins.meiva_memory.template.validate import note_parts
 _LEGACY_FIELDS = ("type", "meiva_agent", "meiva_machine", "tags", "timestamp", "generated")
 _CONFLICT_MARKER = "<<<<<<< "
 _COMMIT_PREFIX = "__COMMIT__"
+_IGNORED_GIT_CHANGED_TARGETS = frozenset(
+    {"pyproject.toml", "meizel.toml", "meizel.policy.toml", ".pre-commit-config.yaml"}
+)
+_OPTIONAL_REPO_ALIASES = frozenset({"monsora"})
+_SEMANTIC_SOURCE_PREFIXES = ("user:", "env:")
 
 
 @dataclass(frozen=True)
@@ -159,6 +164,8 @@ def _check_repo_source(
     raw_target = parts[2].split("#", 1)[0].strip()
     repo_root = repos.get(alias)
     if repo_root is None or not repo_root.is_dir():
+        if alias in _OPTIONAL_REPO_ALIASES:
+            return None
         return {"note": note.path, "source": source, "reason": "unmapped_repo", "detail": alias}
     if not (repo_root / raw_target).exists():
         return {
@@ -167,6 +174,8 @@ def _check_repo_source(
             "reason": "missing_path",
             "detail": f"{alias}:{raw_target}",
         }
+    if raw_target in _IGNORED_GIT_CHANGED_TARGETS:
+        return None
     touch = _matching_touch(touches_by_repo.get(alias, {}), raw_target)
     if touch is None:
         return None
@@ -224,11 +233,17 @@ def _pool_dirty_notes(pool: Path) -> list[str]:
 
 
 def _pool_churn_hotspots(
+    pool: Path,
     pool_touches: Mapping[str, tuple[_dt.date, str, int]],
 ) -> list[dict[str, object]]:
     rows: list[tuple[int, str, str, str]] = []
     for rel, (dt_val, sha, count) in pool_touches.items():
-        if count < 2 or not rel.endswith(".md") or Path(rel).name in RESERVED:
+        if (
+            count < 2
+            or not rel.endswith(".md")
+            or Path(rel).name in RESERVED
+            or not (pool / rel).is_file()
+        ):
             continue
         rows.append((-count, rel, sha, dt_val.isoformat()))
     rows.sort()
@@ -236,6 +251,28 @@ def _pool_churn_hotspots(
         {"note": rel, "commits": -neg_count, "latest_commit": sha, "latest_date": dt_str}
         for neg_count, rel, sha, dt_str in rows
     ]
+
+
+def _workspace_memory_candidates(home: Path, since_cutoff: _dt.date) -> list[dict[str, str]]:
+    workspaces = home / "workspaces"
+    if not workspaces.is_dir():
+        return []
+    candidates: list[dict[str, str]] = []
+    paths = sorted({*workspaces.glob("*/memory/*.md"), *workspaces.glob("*/memory/inherit/*.md")})
+    for path in paths:
+        try:
+            st = path.stat()
+        except OSError:
+            continue
+        if st.st_size <= 0:
+            continue
+        mod_date = _dt.datetime.fromtimestamp(st.st_mtime, tz=_dt.UTC).date()
+        if mod_date < since_cutoff:
+            continue
+        rel = path.relative_to(workspaces).as_posix()
+        agent_id = rel.split("/", 1)[0]
+        candidates.append({"agent_id": agent_id, "path": rel, "modified": mod_date.isoformat()})
+    return candidates
 
 
 def _scan_note_sources(
@@ -252,7 +289,7 @@ def _scan_note_sources(
                 drift = _check_repo_source(rec, src, repo_map, touches_by_repo, since_cutoff)
                 if drift is not None:
                     source_drift.append(drift)
-            else:
+            elif not src.startswith(_SEMANTIC_SOURCE_PREFIXES):
                 external_probes.append({"note": rec.path, "source": src})
     return source_drift, external_probes
 
@@ -288,11 +325,13 @@ def _aging_entries(
 def gather_signals(
     pool: Path,
     *,
+    home: Path | None = None,
     repos: Mapping[str, Path] | None = None,
     today: _dt.date,
     since_days: int = 7,
     max_verified_age_days: int = 30,
 ) -> dict[str, object]:
+    resolved_home = home if home is not None else resolve_meiva_home()
     repo_map: dict[str, Path] = {"memory": pool, **(dict(repos) if repos is not None else {})}
     records = [
         rec for rel in _all_pool_notes(pool) if (rec := _read_note_record(pool, rel)) is not None
@@ -317,8 +356,9 @@ def gather_signals(
         "expired_notes": _expired_entries(records, today),
         "aging_verified_notes": _aging_entries(records, today, max_verified_age_days),
         "missing_okf_notes": missing_okf,
+        "workspace_memory_candidates": _workspace_memory_candidates(resolved_home, since_cutoff),
         "pool_hotspots": {
-            "churn_hotspots": _pool_churn_hotspots(pool_window_touches),
+            "churn_hotspots": _pool_churn_hotspots(pool, pool_window_touches),
             "conflict_markers": conflict_notes,
             "uncommitted_notes": _pool_dirty_notes(pool),
         },
@@ -336,10 +376,28 @@ def _append_drift_section(lines: list[str], report: Mapping[str, object]) -> Non
     lines.append(f"## Source Drift ({len(drifts)})")
     if not drifts:
         lines.append("- (none)")
-        return
     for row in drifts:
         lines.append(
             f"- `{row.get('note')}` -> `{row.get('source')}` [{row.get('reason')}]: {row.get('detail')}"
+        )
+
+    probes = _dict_items(report.get("external_source_probes"))
+    lines.append(f"\n## External Source Probes ({len(probes)})")
+    if not probes:
+        lines.append("- (none)")
+    for row in probes:
+        lines.append(f"- `{row.get('note')}` -> `{row.get('source')}`")
+
+
+def _append_workspace_section(lines: list[str], report: Mapping[str, object]) -> None:
+    candidates = _dict_items(report.get("workspace_memory_candidates"))
+    lines.append(f"\n## Workspace Memory Candidates ({len(candidates)})")
+    if not candidates:
+        lines.append("- (none)")
+        return
+    for row in candidates:
+        lines.append(
+            f"- agent `{row.get('agent_id')}`: `{row.get('path')}` (modified: {row.get('modified')})"
         )
 
 
@@ -405,6 +463,7 @@ def render_report(report: Mapping[str, object]) -> str:
     _append_drift_section(lines, report)
     _append_hotspot_section(lines, report)
     _append_lifecycle_sections(lines, report)
+    _append_workspace_section(lines, report)
     return "\n".join(lines) + "\n"
 
 
@@ -413,6 +472,9 @@ def _parse_repo_specs(specs: Sequence[str], home: Path) -> dict[str, Path]:
     default_meiva = home / "source"
     if default_meiva.is_dir():
         repos["meiva"] = default_meiva
+    default_monsora = Path("~/MonsoraV2").expanduser()
+    if default_monsora.is_dir():
+        repos["monsora"] = default_monsora.resolve()
     for spec in specs:
         alias, sep, raw_path = spec.partition("=")
         if not sep or not alias.strip() or not raw_path.strip():
@@ -470,15 +532,20 @@ def main(argv: Sequence[str] | None = None) -> int:
     repos = _parse_repo_specs(args.repo, home)
     report = gather_signals(
         pool,
+        home=home,
         repos=repos,
         today=today,
         since_days=args.since_days,
         max_verified_age_days=args.max_verified_age_days,
     )
-    if args.json_output:
-        print(json.dumps(report, indent=2, sort_keys=True))
-    else:
-        print(render_report(report), end="")
+    try:
+        if args.json_output:
+            print(json.dumps(report, indent=2, sort_keys=True))
+        else:
+            print(render_report(report), end="")
+        _ = sys.stdout.flush()
+    except BrokenPipeError:
+        return 0
     return 0
 
 

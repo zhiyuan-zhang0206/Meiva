@@ -1,6 +1,6 @@
-"""meiva_memory plugin — shared memory pool: the full `meiva.memory` surface + passive recall hook + write check + daily consolidation skill.
+"""meiva_memory plugin — shared memory pool: the full `meiva.memory` surface + passive recall hook + daily consolidation skill.
 
-Four capabilities live under one plugin because they share the same domain (the
+Three capabilities live under one plugin because they share the same domain (the
 shared memory pool at meiva.memory.PATH):
 
 1. **meiva.memory namespace** (PATH + PERSONAL_PATH + search) — the agent-facing SDK surface.
@@ -17,7 +17,8 @@ shared memory pool at meiva.memory.PATH):
    gates.
 
 3. **Memory stewardship + daily consolidation** (bundled skills) — the pool is
-   a git repo. Once a day the day's notes are committed, pushed, and re-indexed
+   a git repo. Once a day the day's notes are consolidated (Dream-time OKF
+   enrichment, `validate.py`, index rebuild), committed, pushed, and re-indexed
    so search stays current. The procedure varies by deployment: single-box runs
    `skills/scripts/consolidate.py`; multi-host spawns one steward per machine, then
    the arbiter merges all PRs. The stewardship playbook (role, health checks,
@@ -25,22 +26,7 @@ shared memory pool at meiva.memory.PATH):
    consolidation procedure is the meiva.skills.meiva_memory.consolidation
    sub-skill.
 
-4. **Memory write check** — wraps `meiva.files.write` / `append` / `edit` to record which memory
-   notes (.md files under PATH or PERSONAL_PATH) an exec call wrote, and an after_exec hook
-   (`agent_runtime.py`, logic in `write_checks.py`) that checks them in the agent process: the
-   pool's own single-note rules (`template/validate.py`) for every note, and for shared notes a
-   duplicate search whose probabilities a decision model produces. The outcome only ever adds a
-   reminder note: the write is never blocked, rewritten or made to raise, and a check that fails or
-   runs out of time is logged and dropped. The wraps are the only part inside the exec subprocess
-   (`written_notes.py`): no network request and no httpx or decision-model import.
-
-   Wrap order: plugins stack in name order and the later one is outermost, so `meiva_memory` sits
-   outside `meiva_code`'s cwd-tracking wraps of the same two targets. It calls the layer below
-   exactly once, hands back its result (or lets its exception propagate), and only then records
-   the path; because it sees the caller's raw path it resolves a relative one against the
-   tracked `meiva.cwd` itself.
-
-Disabling this plugin removes the entire meiva.memory surface, passive recall, the write check,
+Disabling this plugin removes the entire meiva.memory surface, passive recall,
 and the bundled memory skills.
 
 Passive recall in detail:
@@ -85,7 +71,7 @@ retries on the next turn.
 
 from __future__ import annotations
 
-__description__ = "Shared memory pool: meiva.memory SDK surface (PATH + PERSONAL_PATH + search) + passive recall hook (auto-surfaces relevant notes) + write check (rule and duplicate reminders for notes written with meiva.files) + daily consolidation skill (commit, push, re-index)"
+__description__ = "Shared memory pool: meiva.memory SDK surface (PATH + PERSONAL_PATH + search) + passive recall hook (auto-surfaces relevant notes) + daily Meiva Dream consolidation skill (Dream-only validate.py, auto-OKF, index rebuild, commit, push, re-index)"
 
 # This module is the plugin's SDK **surface** — the only face an agent-launched
 # child loads (task #3633). Its agent-runtime registrations (the two context-note

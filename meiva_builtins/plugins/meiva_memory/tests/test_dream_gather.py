@@ -44,11 +44,33 @@ def _init_git_repo(path: Path) -> Path:
     return path
 
 
+def _git_rm(repo: Path, rel: str, iso_date: str, message: str) -> None:
+    rm_res = run_bounded(["git", "-C", str(repo), "rm", "-q", rel], capture_output=True, timeout=30)
+    assert rm_res.returncode == 0
+    env = {
+        **os.environ,
+        "GIT_AUTHOR_NAME": "Test",
+        "GIT_AUTHOR_EMAIL": "test@example.com",
+        "GIT_COMMITTER_NAME": "Test",
+        "GIT_COMMITTER_EMAIL": "test@example.com",
+        "GIT_AUTHOR_DATE": f"{iso_date}T12:00:00+00:00",
+        "GIT_COMMITTER_DATE": f"{iso_date}T12:00:00+00:00",
+    }
+    commit_res = run_bounded(
+        ["git", "-C", str(repo), "commit", "-m", message],
+        capture_output=True,
+        env=env,
+        timeout=30,
+    )
+    assert commit_res.returncode == 0
+
+
 def _seed_pool_and_code_repo(tmp_path: Path) -> dict[str, object]:
     code_repo = _init_git_repo(tmp_path / "meiva")
     _git_commit(code_repo, "pkg/stable.py", "y = 1\n", "2026-08-20", "stable file")
     _git_commit(code_repo, "pkg/mod.py", "x = 1\n", "2026-10-25", "init mod")
     _git_commit(code_repo, "pkg/mod.py", "x = 2\n", "2026-11-05", "update mod after verified")
+    _git_commit(code_repo, "pyproject.toml", "[project]\n", "2026-11-06", "manifest touch")
 
     pool = _init_git_repo(tmp_path / "pool")
     _git_commit(
@@ -70,19 +92,51 @@ def _seed_pool_and_code_repo(tmp_path: Path) -> dict[str, object]:
         '---\ndescription: "Canonical rule"\nsources:\n'
         '  - "repo:meiva:pkg/mod.py"\n'
         '  - "repo:meiva:pkg/stable.py"\n'
+        '  - "repo:meiva:pyproject.toml"\n'
         '  - "repo:meiva:pkg/missing.py"\n'
+        '  - "repo:monsora:app/main.py"\n'
         '  - "repo:other:foo.py"\n'
         '  - "db:meiva_main:schedules#1"\n'
+        '  - "user:ruling"\n'
+        '  - "user:preference"\n'
+        '  - "env:macmini"\n'
         'verified: "2026-11-01"\n---\n'
     )
     _git_commit(pool, "canonical.md", canonical_body + "# Canonical\n", "2026-11-04", "v1")
     _git_commit(pool, "canonical.md", canonical_body + "# Canonical v2\n", "2026-11-06", "v2")
+    _git_commit(pool, "deleted-20261101.md", "# Old v1\n", "2026-11-04", "old v1")
+    _git_commit(pool, "deleted-20261101.md", "# Old v2\n", "2026-11-05", "old v2")
+    _git_rm(pool, "deleted-20261101.md", "2026-11-06", "delete fragment")
     _ = (pool / "pure-untracked.md").write_text(
         "# Pure Markdown\n\nSummary.\n\n<<<<<<< HEAD\nconflict\n",
         encoding="utf-8",
     )
+
+    home = tmp_path / "home"
+    ws_recent = home / "workspaces" / "405" / "memory" / "MEMORY.md"
+    ws_recent.parent.mkdir(parents=True, exist_ok=True)
+    _ = ws_recent.write_text("# Agent 405 Memory\n", encoding="utf-8")
+    recent_ts = _dt.datetime(2026, 11, 8, 12, 0, tzinfo=_dt.UTC).timestamp()
+    os.utime(ws_recent, (recent_ts, recent_ts))
+
+    ws_inherit = home / "workspaces" / "405" / "memory" / "inherit" / "domain.md"
+    ws_inherit.parent.mkdir(parents=True, exist_ok=True)
+    _ = ws_inherit.write_text("# Inherited Rule\n", encoding="utf-8")
+    os.utime(ws_inherit, (recent_ts, recent_ts))
+
+    ws_empty = home / "workspaces" / "405" / "memory" / "empty.md"
+    _ = ws_empty.write_text("", encoding="utf-8")
+    os.utime(ws_empty, (recent_ts, recent_ts))
+
+    ws_old = home / "workspaces" / "99" / "memory" / "old.md"
+    ws_old.parent.mkdir(parents=True, exist_ok=True)
+    _ = ws_old.write_text("# Old\n", encoding="utf-8")
+    old_ts = _dt.datetime(2026, 10, 1, 12, 0, tzinfo=_dt.UTC).timestamp()
+    os.utime(ws_old, (old_ts, old_ts))
+
     return dream_gather.gather_signals(
         pool,
+        home=home,
         repos={"meiva": code_repo},
         today=_dt.date(2026, 11, 9),
         since_days=7,
@@ -137,6 +191,20 @@ def test_gather_signals_detects_lifecycle_okf_gaps_and_hotspots(tmp_path: Path) 
     assert [row.get("note") for row in churn if is_object_dict(row)] == ["canonical.md"]
     assert hotspots["conflict_markers"] == ["pure-untracked.md"]
     assert hotspots["uncommitted_notes"] == ["pure-untracked.md"]
+
+
+def test_gather_signals_detects_workspace_candidates_and_renders_sections(tmp_path: Path) -> None:
+    report = _seed_pool_and_code_repo(tmp_path)
+    assert report["workspace_memory_candidates"] == [
+        {"agent_id": "405", "path": "405/memory/MEMORY.md", "modified": "2026-11-08"},
+        {"agent_id": "405", "path": "405/memory/inherit/domain.md", "modified": "2026-11-08"},
+    ]
+    rendered = dream_gather.render_report(report)
+    assert "## External Source Probes (1)" in rendered
+    assert "- `canonical.md` -> `db:meiva_main:schedules#1`" in rendered
+    assert "## Workspace Memory Candidates (2)" in rendered
+    assert "- agent `405`: `405/memory/MEMORY.md` (modified: 2026-11-08)" in rendered
+    assert "- agent `405`: `405/memory/inherit/domain.md` (modified: 2026-11-08)" in rendered
 
 
 def test_dream_gather_cli_json_and_markdown(

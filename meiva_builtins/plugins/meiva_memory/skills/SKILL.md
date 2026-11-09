@@ -18,21 +18,19 @@ arbiter or steward role. Follow the role and scope supplied by the current task.
 - To write or update a note, search first, then write it with `meiva.files.write`
   under `meiva.memory.PATH` (shared) or `meiva.memory.PERSONAL_PATH` (your own)
   directly in **pure Markdown** (`# Title` + a concise high-level description
-  paragraph + body, ≤ 8000 chars; YAML frontmatter is optional at write time, and
-  legacy `type`, `meiva_agent`, `meiva_machine`, `timestamp`, `tags`, or HTML
-  attribution comments are retired — during Meiva Dream consolidation, the Memory
-  Arbiter automatically maintains `description`, `sources`, `verified`, and
-  optional `stale_after` on canonical notes). Maintain **one canonical dateless
-  file per rule or topic slot**: when a ruling or fact changes, overwrite the
-  existing canonical note in place (and `git rm` superseded date-suffixed
-  fragments during consolidation) rather than creating a new date-suffixed fork,
-  and write explicit `YYYY-MM-DD` dates instead of relative time words. After the
-  write call a reminder may name a rule the note breaks or an existing note
-  governing the same rule or subject slot; fix the former and merge into the
-  latter. Directory `index.md` files are optional high-level directory
-  descriptions rather than generated file inventories. Never commit directly on
-  the shared checkout's `main`; remote-backed pool commits use an isolated git
-  worktree + PR.
+  paragraph + body, ≤ 8000 chars) with **zero write-time validation or YAML
+  frontmatter burden** (legacy `type`, `meiva_agent`, `meiva_machine`,
+  `timestamp`, `tags`, or HTML attribution comments are retired — `validate.py`,
+  canonical OKF frontmatter (`description`, `sources`, `verified`, and optional
+  `stale_after`), and `MEMORY.md` index rebuilds run **only during the Meiva
+  Dream consolidation stage**). Maintain **one canonical dateless file per rule
+  or topic slot**: when a ruling or fact changes, overwrite the existing
+  canonical note in place (and `git rm` superseded date-suffixed fragments
+  during consolidation) rather than creating a new date-suffixed fork, and write
+  explicit `YYYY-MM-DD` dates instead of relative time words. Directory
+  `index.md` files are optional high-level directory descriptions rather than
+  generated file inventories. Never commit directly on the shared checkout's
+  `main`; remote-backed pool commits use an isolated git worktree + PR.
 - When recording user preferences or corrections, read
   [user-dimension maintenance](reference/user-dimension.md). Search first,
   update the existing standing note, and keep durable shared facts in the pool.
@@ -47,8 +45,9 @@ arbiter or steward role. Follow the role and scope supplied by the current task.
   health checks, workspace-note curation, schedules, and collaboration
   responsibilities.
 
-Validate changed notes with the pool's own validator. Keep its metadata,
-ownership, size, and index rules; large source material belongs in the configured
-Vault with a searchable pointer. A successful commit or merge does not prove
-the gateway search index was refreshed. Preserve the user's existing authority
-for writes, messages, schedules, and maintenance.
+During the Meiva Dream consolidation stage (and only then), `validate.py`, OKF
+frontmatter enrichment, and index rebuilds enforce the pool's metadata,
+locality, size, and pointer rules; large source material belongs in the
+configured Vault with a searchable pointer. A successful commit or merge does
+not prove the gateway search index was refreshed. Preserve the user's existing
+authority for writes, messages, schedules, and maintenance.
