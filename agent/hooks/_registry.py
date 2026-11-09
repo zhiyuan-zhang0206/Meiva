@@ -59,6 +59,7 @@ from pydantic.fields import FieldInfo
 from agent import state as _state
 from agent.nodes import NodeName, node_name
 from base.agents.context import MeivaContext
+from base.api_contracts.agent_contract import Harness
 from base.host.boundary.json_values import is_object_dict
 from base.host.boundary.untyped import object_sequence
 from base.log import logger
@@ -299,6 +300,8 @@ def make_hook_runner(
             next_node = default_next(state)
         else:
             next_node = default_next
+        if next_node == "llm" and runtime.context.harness is not Harness.MEIVA:
+            next_node = "harness_turn"
         return Command[NodeName](update=update, goto=next_node)
 
     return run

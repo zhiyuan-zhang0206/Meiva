@@ -108,7 +108,7 @@ def test_a_face_this_process_did_not_import_does_not_gate_its_keys(unit_home: Pa
             "child_scope",
             {
                 "sdkWraps": ["files.write"],
-                "hooks": ["before_llm"],
+                "hooks": ["before_turn"],
                 "systemPromptSections": ["runtime_section"],
             },
         ),

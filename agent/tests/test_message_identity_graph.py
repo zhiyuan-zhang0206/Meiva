@@ -45,7 +45,7 @@ def test_graph_input_node_and_working_copy_output_have_persisted_ids(
                 writers,
                 {"messages": [AIMessage(content="same text")]},
                 name,
-                "before_llm",
+                "before_turn",
                 BaseAgentState.model_fields,
             )
         return {"messages": [direct, working, *update["messages"]]}

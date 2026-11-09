@@ -28,7 +28,7 @@ from agent.graph.llm_errors import (
     LLMStreamError,
     classify_and_log_provider_error,
 )
-from agent.nodes import AFTER_EXEC
+from agent.nodes import CLAIM
 from base.agents.context import MeivaContext
 from base.events.live.projection import Cancelled
 from base.log import logger
@@ -92,7 +92,7 @@ async def race_stream_vs_cancel(
                 body="discarded partial generation",
                 event="llm_cancelled",
             )
-            return Command[LlmGoto](update=interrupt_halt(interrupted.reason), goto=AFTER_EXEC)
+            return Command[LlmGoto](update=interrupt_halt(interrupted.reason), goto=CLAIM)
 
         except LLMStreamError:
             raise

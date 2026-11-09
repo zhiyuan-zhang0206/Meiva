@@ -68,18 +68,25 @@ from agent.graph.exec._notes import merge_exec_notes
 from agent.graph.interrupt import interrupt_halt, subscribe_interrupt
 from agent.graph.node_log import StallConfig, node_lifecycle
 from agent.graph.tool_calls import code_from_args, normalize_tool_calls
+from agent.hooks import Hook
+from agent.hooks.reply_visibility import deliver_reply_visibility_correction
+from agent.hooks.security import deliver_security_findings
 from agent.messages import exec_output_message
-from agent.nodes import AFTER_EXEC, EXEC
+from agent.nodes import BEFORE_TURN, CLAIM, EXEC
 from agent.state import AttachState, validate_plugin_state_keys
+from base import paths
 from base.agents.context import MeivaContext, agent_id_from_config
 from base.agents.messages.kwargs import ExecStatus, read_meiva_kwargs
+from base.agents.messages.security_finding import SecurityFindingEntry
 from base.agents.observation import ended_with
 from base.agents.sdk.operation_ids import ExecutionIdentity
 from base.events.live.projection import Cancelled, ExecOutput, ExecStart
 from base.events.live.publisher import AgentEventPublisher
 from base.host.boundary.json_values import is_object_list
+from base.host.boundary.untyped import object_of
 from base.host.env.agent_slices import AgentSlices
 from base.log import logger
+from base.packages.plugins.loading.plugin_loader import load_plugin_module
 
 from ._crop import CropLimits
 from ._dispatch import CrashFacts, DispatchKind, DispatchPlan, plan_dispatch
@@ -113,20 +120,7 @@ from ._stream import (
 from .output import ExecEnvelope, OutputLimits, overflow_dir, wrap_code_output
 from .process import ExecProcess
 
-# Each exec step commits one call; remaining calls return to EXEC before AFTER_EXEC.
-ExecGoto = Literal["exec", "after_exec"]
-
-# The `ExecResult` sum type — 5 mutually exclusive variants + a shared output
-# field — lives in `_result.py` (moved there so the exec-subprocess
-# machinery can construct the same type without importing this module, which
-# would close an import cycle). Re-exported here: exec_node's match dispatch
-# and existing tests keep importing from agent.graph.exec.node.
-#
-# Lifecycle priority is implemented at the construction site
-# (`_construct_exec_result`): if a lifecycle exc exists, `ExecLifecycle` is
-# constructed directly, skipping the cancelled/timed_out branches — the
-# "lifecycle always wins" race decision moved from dispatch site to
-# construction site; exec_node match no longer has to consider the race.
+ExecGoto = Literal["before_turn", "exec", "claim"]
 
 
 async def exec_node(
@@ -594,7 +588,7 @@ async def _exec_single_call(
 
 def _remaining_exec_calls(
     messages: Sequence[AnyMessage],
-) -> tuple[AIMessage, list[AnyMessage], list[ToolCall]]:
+) -> tuple[AIMessage, list[AnyMessage], list[ToolCall], set[str]]:
     """Derive progress from committed result IDs, without a separate cursor."""
     completed: set[str] = set()
     for message in reversed(messages):
@@ -609,8 +603,98 @@ def _remaining_exec_calls(
                 message,
                 [normalized] if normalized is not None else [],
                 [call for call in calls if (call["id"] or "") not in completed],
+                completed,
             )
     raise ValueError("exec_node: no preceding AIMessage")
+
+
+async def _run_syntax_fix(
+    state: _state.AgentState,
+    runtime: Runtime[MeivaContext],
+    config: RunnableConfig,
+) -> dict[str, object] | None:
+    mod = load_plugin_module(
+        paths.repo_plugins_dir() / "meiva_syntax_fix" / "agent_runtime.py",
+        name="meiva_syntax_fix",
+        pkg="meiva_builtins.plugins",
+        module="agent_runtime",
+    )
+    hook = object_of(getattr, mod, "syntax_fix_before_exec")
+    if isinstance(hook, Hook):
+        return await hook(state, runtime, config)
+    return None
+
+
+def _extract_messages(raw: object) -> list[BaseMessage]:
+    return [m for m in raw if isinstance(m, BaseMessage)] if is_object_list(raw) else []
+
+
+def _extract_findings(raw: object) -> list[SecurityFindingEntry]:
+    return [f for f in raw if isinstance(f, SecurityFindingEntry)] if is_object_list(raw) else []
+
+
+async def _apply_after_exec_hooks(
+    state: _state.AgentState,
+    runtime: Runtime[MeivaContext],
+    config: RunnableConfig,
+    update: dict[str, object],
+) -> None:
+    new_msgs = _extract_messages(update.get("messages"))
+    new_findings = _extract_findings(update.get("security_findings"))
+    post_state = state.model_copy(
+        update={
+            "messages": [*state.messages, *new_msgs],
+            "security_findings": [*state.security_findings, *new_findings],
+        }
+    )
+    sec_update = await deliver_security_findings(post_state, runtime, config)
+    vis_update = (
+        await deliver_reply_visibility_correction(post_state, runtime, config)
+        if runtime.context.clock_factory is not None
+        else None
+    )
+    extra_msgs: list[BaseMessage] = []
+    if sec_update is not None:
+        extra_msgs.extend(_extract_messages(sec_update.get("messages")))
+        if "security_findings" in sec_update:
+            update["security_findings"] = sec_update["security_findings"]
+    if vis_update is not None:
+        extra_msgs.extend(_extract_messages(vis_update.get("messages")))
+    if extra_msgs:
+        update["messages"] = [*new_msgs, *extra_msgs]
+
+
+async def _apply_syntax_fix_if_first_call(
+    state: _state.AgentState,
+    runtime: Runtime[MeivaContext],
+    config: RunnableConfig,
+    replacements: list[AnyMessage],
+    calls: list[ToolCall],
+    completed: set[str],
+) -> tuple[list[AnyMessage], list[ToolCall], Command[ExecGoto] | None]:
+    if completed:
+        return replacements, calls, None
+    fix_res = await _run_syntax_fix(state, runtime, config)
+    if fix_res is None:
+        return replacements, calls, None
+    if "goto" in fix_res:
+        return (
+            replacements,
+            calls,
+            Command[ExecGoto](
+                update={"messages": fix_res["messages"], "halted": False},
+                goto=BEFORE_TURN,
+            ),
+        )
+    fix_msgs = fix_res.get("messages")
+    if is_object_list(fix_msgs) and fix_msgs and isinstance(fix_msgs[0], AIMessage):
+        fixed_ai = normalize_tool_calls(fix_msgs[0]) or fix_msgs[0]
+        return (
+            [fixed_ai],
+            [call for call in fixed_ai.tool_calls if (call["id"] or "") not in completed],
+            None,
+        )
+    return replacements, calls, None
 
 
 def _skipped_call_results(
@@ -650,12 +734,19 @@ async def exec_node_impl(
     *,
     process: ExecProcess,
 ) -> Command[ExecGoto]:
-    message, replacements, calls = _remaining_exec_calls(state.messages)
+    message, replacements, calls, completed = _remaining_exec_calls(state.messages)
     if not calls:
-        return Command[ExecGoto](
-            update={"messages": state.pending_exec_notes, "pending_exec_notes": []},
-            goto=AFTER_EXEC,
-        )
+        empty_update: dict[str, object] = {
+            "messages": state.pending_exec_notes,
+            "pending_exec_notes": [],
+        }
+        await _apply_after_exec_hooks(state, runtime, config, empty_update)
+        return Command[ExecGoto](update=empty_update, goto=CLAIM)
+    replacements, calls, early_cmd = await _apply_syntax_fix_if_first_call(
+        state, runtime, config, replacements, calls, completed
+    )
+    if early_cmd is not None:
+        return early_cmd
     agent_id = agent_id_from_config(config)
     call = calls[0]
     issued_at = read_meiva_kwargs(message).get("meiva_created_at")
@@ -673,7 +764,7 @@ async def exec_node_impl(
     if compacted:
         update["pending_exec_notes"] = []
         update["security_findings"] = Overwrite([])
-        return Command[ExecGoto](update=update, goto=AFTER_EXEC)
+        return Command[ExecGoto](update=update, goto=CLAIM)
 
     results = [message for message in step.messages if isinstance(message, ToolMessage)]
     notes = merge_exec_notes(
@@ -693,7 +784,8 @@ async def exec_node_impl(
 
     update["messages"] = replacements + results + notes
     update["pending_exec_notes"] = []
-    return Command[ExecGoto](update=update, goto=AFTER_EXEC)
+    await _apply_after_exec_hooks(state, runtime, config, update)
+    return Command[ExecGoto](update=update, goto=CLAIM)
 
 
 _exec_node_impl = exec_node_impl

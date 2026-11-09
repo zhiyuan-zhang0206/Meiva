@@ -247,7 +247,7 @@ class TestSyntaxFixBeforeExec:
             state, make_runtime(llm_override=UNAVAILABLE), self._config()
         )
         assert result is not None
-        assert result.get("goto") == "after_exec"
+        assert result.get("goto") == "before_turn"
         assert "halted" in result
         assert len(update_messages(result)) == 2
         tool_msg = update_messages(result)[1]
@@ -282,7 +282,7 @@ class TestSyntaxFixBeforeExec:
             self._broken_state(broken), make_runtime(llm_override=UNAVAILABLE), self._config()
         )
         assert result is not None
-        assert result.get("goto") == "after_exec"
+        assert result.get("goto") == "before_turn"
         assert len(update_messages(result)) == 2
         assert "SyntaxError" in update_messages(result)[1].content
 

@@ -424,7 +424,7 @@ async def test_hook_drops_orphan_tool_result_in_the_5333_shape() -> None:
 
 
 def test_repair_is_the_first_framework_before_llm_hook() -> None:
-    assert framework_hooks()["before_llm"][0] is repair_dangling_tool_pairing
+    assert framework_hooks()["before_turn"][0] is repair_dangling_tool_pairing
 
 
 @pytest.mark.parametrize("first_finished", [False, True])

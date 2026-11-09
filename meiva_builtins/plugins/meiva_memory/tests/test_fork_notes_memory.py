@@ -122,7 +122,7 @@ async def test_fork_end_to_end_keeps_source_notes_and_grafts_own(
             thread_config(tid),
         )
 
-    assert cmd.goto == "before_llm"
+    assert cmd.goto == "before_turn"
     update = cast(dict[str, object], cmd.update or {})
     from agent.messages.guard import guarded_add_messages
 

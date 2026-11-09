@@ -2,7 +2,7 @@
 
 ## Responsibility
 
-`_PassiveMemoryRecallHook` is the plugin's `before_llm` wiring for passive recall:
+`_PassiveMemoryRecallHook` is the plugin's `before_turn` wiring for passive recall:
 it decides whether this turn searches and where the result lands. The search,
 scoring and rendering are the core engine's
 (`agent/graph/recall/memory_recall.py:passive_memory_recall`); the recall

@@ -31,6 +31,7 @@ from base.paths import workspace_dir
 
 from .claim import route_target
 from .claim.harness_turn import pending_messages, render_messages, turn_key
+from .hooks.cwd import ValidateCwdAfterInitHook, ensure_to_do_better
 from .node_log import StallConfig, node_lifecycle
 from .prompt.context_notes import (
     context_notes,
@@ -121,10 +122,11 @@ def _pending_input_payload(
     notes: Sequence[BaseMessage],
     tail: Sequence[BaseMessage],
 ) -> dict[str, Any]:
+    tail_msgs = pending_messages(tail)
     pending: list[BaseMessage] = [
         SystemMessage(content=handoff.render()),
         *notes,
-        *pending_messages(tail),
+        *tail_msgs,
     ]
     inbound_ids = [
         iid for m in pending if isinstance(iid := read_meiva_kwargs(m).get("meiva_inbound_id"), int)
@@ -133,6 +135,7 @@ def _pending_input_payload(
         "prompt": render_messages(pending),
         "key": turn_key(pending),
         "inbound_ids": inbound_ids,
+        "messages": tail_msgs,
     }
 
 
@@ -143,6 +146,7 @@ async def _establish_external_harness_context(
     notes: Sequence[BaseMessage],
     reset: ContextReset,
     indexed: set[str],
+    cwd_update: dict[str, object] | None = None,
 ) -> Command[NodeName]:
     warm_session = getattr(ctx.harness_bridge, "session_id", None) is not None
     handoff = await _seed_harness_timeline(
@@ -158,10 +162,11 @@ async def _establish_external_harness_context(
             set_handoff(handoff)
     target = route_target(ctx, reset.resume)
     ext_update: dict[str, Any] = {
+        **(cwd_update or {}),
         "capabilities": CapabilitiesState(indexed=indexed),
         "context_reset": ContextReset(),
     }
-    if target == "harness_turn" and reset.tail:
+    if target in ("before_turn", "harness_turn") and reset.tail:
         grounded = handoff or _build_grounded_handoff(ctx, agent_id=agent_id)
         ext_update["harness_pending_input"] = _pending_input_payload(grounded, notes, reset.tail)
     return Command[NodeName](update=ext_update, goto=target)
@@ -238,6 +243,8 @@ async def init_context_node(
         timeline_limit=runtime.context.require_agent().read("display", "timeline_default_limit"),
         publish_timeline=runtime.context.harness is Harness.MEIVA,
     ):
+        cwd_update = await ValidateCwdAfterInitHook()(state, runtime, config)
+        ensure_to_do_better(runtime.context)
         reset = state.context_reset
         if runtime.context.harness is Harness.MEIVA and state.messages:
             # History intact — nothing to establish. A parked tail here would
@@ -252,10 +259,13 @@ async def init_context_node(
                     len(reset.tail),
                 )
                 return Command[NodeName](
-                    update={"context_reset": ContextReset()},
+                    update={**(cwd_update or {}), "context_reset": ContextReset()},
                     goto=route_target(runtime.context, reset.resume),
                 )
-            return Command[NodeName](goto=route_target(runtime.context, reset.resume))
+            return Command[NodeName](
+                update=cwd_update or None,
+                goto=route_target(runtime.context, reset.resume),
+            )
 
         # Container mode (eval harness): no ops_pool, so no inbound queue, no
         # workspace, and nothing the notes describe. The head is the system
@@ -296,6 +306,7 @@ async def init_context_node(
                 notes=notes,
                 reset=reset,
                 indexed=indexed,
+                cwd_update=cwd_update,
             )
 
         head: list[BaseMessage] = [
@@ -315,6 +326,7 @@ async def init_context_node(
             *reset.tail,
         ]
         update: dict[str, Any] = {
+            **(cwd_update or {}),
             "messages": head,
             "capabilities": CapabilitiesState(indexed=indexed),
             # Clear the channel: the reset has been served. Written back as

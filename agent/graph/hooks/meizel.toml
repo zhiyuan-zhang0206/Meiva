@@ -3,7 +3,7 @@ exports = ["compact.py", "cwd.py", "framework.py", "node.py", "tests", "user_del
 [uses]
 "capabilities.py" = ["compact.py"]
 "cwd.py" = []
-"framework.py" = ["capabilities.py", "compact.py", "cwd.py", "skill_recall.py"]
+"framework.py" = ["capabilities.py", "compact.py", "skill_recall.py"]
 "skill_recall.py" = ["compact.py"]
 "tests" = ["capabilities.py", "compact.py", "framework.py", "skill_recall.py"]
 

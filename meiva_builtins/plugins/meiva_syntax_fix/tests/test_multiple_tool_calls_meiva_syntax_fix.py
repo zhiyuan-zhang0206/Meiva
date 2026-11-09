@@ -55,12 +55,12 @@ def _graph(state_cls: type[AgentState], **compile_options: Any) -> Any:
         input_schema=state_cls,
     )
 
-    def after_exec(_state: object) -> dict[str, object]:
+    def before_turn(_state: object) -> dict[str, object]:
         return {}
 
-    builder.add_node("after_exec", after_exec)
+    builder.add_node("before_turn", before_turn)
     builder.add_edge(START, "exec")
-    builder.add_edge("after_exec", END)
+    builder.add_edge("before_turn", END)
     return builder.compile(**compile_options)
 
 
@@ -152,7 +152,7 @@ async def test_unfixable_single_call_error_result_carries_creation_time(
     )
 
     assert update is not None
-    assert update["goto"] == "after_exec"
+    assert update["goto"] == "before_turn"
     _, error = update_messages(update)
     assert isinstance(error, ToolMessage)
     kwargs = read_meiva_kwargs(error)

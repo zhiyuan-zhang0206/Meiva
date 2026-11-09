@@ -38,6 +38,7 @@ from base.agents.history.closing_request import ClosingRequest
 from base.agents.history.compact_boundary import mark_compact_boundary
 from base.agents.messages.kwargs import MeivaMsgType, read_meiva_kwargs
 from base.agents.to_user import DOCUMENT_FILENAME
+from base.api_contracts.agent_contract import Harness
 from base.clock import Timers
 from base.events.live.projection import Cancelled, CompactDone, CompactionMode, CompactionStatus
 from base.host.env.agent_slices import AgentSlices
@@ -574,6 +575,8 @@ class _CompactReminderHook(Hook):
         _config: RunnableConfig,
         /,
     ) -> dict[str, Any] | None:
+        if runtime.context.harness is not Harness.MEIVA:
+            return None
         agent = runtime.context.require_agent()
         catalog = runtime.context.require_catalog()
         if _summary_awaits_reply(state.messages) or auto_compact_will_fire(

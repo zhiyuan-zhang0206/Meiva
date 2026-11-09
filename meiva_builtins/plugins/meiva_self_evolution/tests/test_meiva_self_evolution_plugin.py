@@ -96,30 +96,22 @@ async def test_compact_reminder_omits_the_section_without_a_workspace_path() -> 
     assert "[meiva_self_evolution]" not in text
 
 
-async def test_after_init_seeds_a_missing_file_and_keeps_an_existing_one(
+def test_ensure_to_do_better_seeds_a_missing_file_and_keeps_an_existing_one(
     unit_home: Path,
 ) -> None:
-    hook = agent_runtime.SeedToDoBetterHook()
-    runtime = Runtime(
-        context=MeivaContext(
-            identity=AgentIdentity(agent_id=11, owns_loop=True), meiva_home=resolve_meiva_home()
-        )
+    context = MeivaContext(
+        identity=AgentIdentity(agent_id=11, owns_loop=True), meiva_home=resolve_meiva_home()
     )
     path = unit_home / "workspaces" / "11" / TO_DO_BETTER_FILENAME
 
-    assert await hook(AgentState(), runtime, {}) is None
+    agent_runtime.ensure_to_do_better(context)
     assert path.is_file()
 
     path.write_text("Lesson: check the failing shard first.", encoding="utf-8")
-    await hook(AgentState(), runtime, {})
+    agent_runtime.ensure_to_do_better(context)
     assert path.read_text(encoding="utf-8") == "Lesson: check the failing shard first."
 
 
-async def test_after_init_without_an_identity_writes_nothing(unit_home: Path) -> None:
-    hook = agent_runtime.SeedToDoBetterHook()
-
-    assert (
-        await hook(AgentState(), Runtime(context=MeivaContext(meiva_home=resolve_meiva_home())), {})
-        is None
-    )
+def test_ensure_to_do_better_without_an_identity_writes_nothing(unit_home: Path) -> None:
+    agent_runtime.ensure_to_do_better(MeivaContext(meiva_home=resolve_meiva_home()))
     assert not (unit_home / "workspaces").exists()

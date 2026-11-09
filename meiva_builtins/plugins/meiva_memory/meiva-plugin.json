@@ -7,7 +7,7 @@
   },
   "contributions": {
     "hooks": [
-      "before_llm"
+      "before_turn"
     ],
     "sdkNamespaces": [
       "memory"

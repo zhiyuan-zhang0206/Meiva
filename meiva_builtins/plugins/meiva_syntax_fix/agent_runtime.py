@@ -251,9 +251,9 @@ async def _handle_compile_failure(
         created_at=repair.clock.now(),
     )
     return {
-        "goto": "after_exec",
+        "goto": "before_turn",
         "messages": [fixed_msg, tool_msg],
-        "halted": False,  # route to before_llm -> agent retries
+        "halted": False,
     }
 
 
@@ -316,6 +316,13 @@ class _SyntaxFixHook(Hook):
             return None
         last_msg = normalize_tool_calls(original) or original
         changed = last_msg is not original
+        if (
+            runtime.context.agent is None
+            or runtime.context.catalog is None
+            or runtime.context.provider_keys is None
+            or runtime.context.clock_factory is None
+        ):
+            return None
         slices = runtime.context.require_agent()
         inputs = FixInputs(
             ruff_format=slices.sandbox.syntax_fix_ruff_format,
@@ -344,4 +351,4 @@ syntax_fix_before_exec = _SyntaxFixHook()
 
 def contribute() -> PluginContributions:
     """What this plugin declares for the agent runtime."""
-    return PluginContributions(before_exec=(syntax_fix_before_exec,))
+    return PluginContributions()

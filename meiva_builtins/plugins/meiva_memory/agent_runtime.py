@@ -299,7 +299,7 @@ def contribute() -> PluginContributions:
     """What this plugin declares for the agent runtime."""
     return PluginContributions(
         system_prompt_sections=(memory_discipline_section,),
-        before_llm=(passive_memory_recall_before_llm,),
+        before_turn=(passive_memory_recall_before_llm,),
         context_notes=(
             ContextNote(memory_index_note, rank=RANK_CLUSTER_MEMORY),
             ContextNote(per_agent_memory_note, on_fork=True, rank=RANK_PER_AGENT_MEMORY),

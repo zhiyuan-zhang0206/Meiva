@@ -23,7 +23,6 @@ from agent.tests.test_state_slot import (
 from agent.tests.test_state_slot import (
     reset_state_slot as reset_state_slot,
 )
-from base.agents.messages.security_finding import SecurityFindingEntry
 from base.db.code_version_gate import ProcessDbGate
 from meiva.sdk_surface import process_context
 
@@ -70,9 +69,6 @@ async def test_exec_node_preserves_state_update_on_lifecycle(*, database_gate: P
 
 
 async def test_exec_node_commits_security_finding_to_graph_state(*, database_gate: ProcessDbGate):
-    """A finding raised inside the exec child rides the state update into
-    `state.security_findings`; the exec node itself adds no note to its messages
-    delta (the after_exec hook delivers it) and the host keeps no findings of its own."""
     state = BaseAgentState(
         messages=[ai_message_with_code(scan_flagged_code("shell.run"))],
         halted=False,
@@ -84,19 +80,16 @@ async def test_exec_node_commits_security_finding_to_graph_state(*, database_gat
     )
 
     update = cast(dict[str, Any], cmd.update)
-    assert [m.type for m in update["messages"]] == ["tool"]
+    assert [m.type for m in update["messages"]] == ["tool", "human"]
     assert update["messages"][0].tool_call_id == "call_1"
-    assert update["security_findings"] == [
-        SecurityFindingEntry(source="shell.run", triggers=["ignore previous instructions"])
-    ]
+    assert update["messages"][1].additional_kwargs["meiva_note_tag"] == "security"
+    assert "shell.run" in update["messages"][1].content
+    assert update["security_findings"] == Overwrite([])
 
 
 async def test_exec_node_keeps_plugin_notes_after_toolmessage_beside_findings(
     *, database_gate: ProcessDbGate
 ):
-    """Order in the exec's messages delta: ToolMessage, then the plugin's context
-    notes — the tool_use adjacency is preserved — while the finding for the same
-    context file goes to the graph-state channel."""
     state_cls = messages_plugin_state_cls()
 
     code = (
@@ -114,12 +107,14 @@ async def test_exec_node_keeps_plugin_notes_after_toolmessage_beside_findings(
 
     update = cast(dict[str, Any], cmd.update)
     msgs = update["messages"]
-    assert [m.type for m in msgs] == ["tool", "human"], (
-        f"expected [tool, plugin], got {[m.type for m in msgs]}"
+    assert [m.type for m in msgs] == ["tool", "human", "human"], (
+        f"expected [tool, plugin, security], got {[m.type for m in msgs]}"
     )
     assert msgs[1].id == "p1"
     assert msgs[1].content == "project note"
-    assert [f.source for f in update["security_findings"]] == ["context-file:/repo/AGENTS.md"]
+    assert msgs[2].additional_kwargs["meiva_note_tag"] == "security"
+    assert "context-file:/repo/AGENTS.md" in msgs[2].content
+    assert update["security_findings"] == Overwrite([])
 
 
 async def test_exec_node_checkpoints_child_attachment(

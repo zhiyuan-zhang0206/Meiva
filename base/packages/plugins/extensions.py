@@ -27,8 +27,8 @@ class SectionFn(Protocol):
     def __call__(self, slices: AgentSlices, /, *, catalog: ModelCatalog) -> str: ...
 
 
-HookPoint = Literal["after_init", "before_llm", "before_exec", "after_exec"]
-HOOK_POINTS: tuple[HookPoint, ...] = ("after_init", "before_llm", "before_exec", "after_exec")
+HookPoint = Literal["before_turn"]
+HOOK_POINTS: tuple[HookPoint, ...] = ("before_turn",)
 
 
 # meiva:note
@@ -88,10 +88,7 @@ class PluginContributions:
     system_prompt_sections: tuple[SectionFn, ...] = ()
     compact_reminder_sections: tuple[SectionFn, ...] = ()
     context_notes: tuple[ContextNote, ...] = ()
-    after_init: tuple[GraphHook, ...] = ()
-    before_llm: tuple[GraphHook, ...] = ()
-    before_exec: tuple[GraphHook, ...] = ()
-    after_exec: tuple[GraphHook, ...] = ()
+    before_turn: tuple[GraphHook, ...] = ()
     state: tuple[type[BaseModel], ...] = ()
     metrics: tuple[MetricSpec, ...] = ()
     inspect_widgets: tuple[InspectWidgetSpec, ...] = ()
@@ -114,10 +111,7 @@ class PluginContributions:
             compact_reminder_sections=self.compact_reminder_sections
             + other.compact_reminder_sections,
             context_notes=self.context_notes + other.context_notes,
-            after_init=self.after_init + other.after_init,
-            before_llm=self.before_llm + other.before_llm,
-            before_exec=self.before_exec + other.before_exec,
-            after_exec=self.after_exec + other.after_exec,
+            before_turn=self.before_turn + other.before_turn,
             state=self.state + other.state,
             metrics=self.metrics + other.metrics,
             inspect_widgets=self.inspect_widgets + other.inspect_widgets,
@@ -135,14 +129,8 @@ class PluginContributions:
 
     def hooks(self, point: HookPoint) -> tuple[GraphHook, ...]:
         match point:
-            case "after_init":
-                return self.after_init
-            case "before_llm":
-                return self.before_llm
-            case "before_exec":
-                return self.before_exec
-            case "after_exec":
-                return self.after_exec
+            case "before_turn":
+                return self.before_turn
 
     def as_records(self, plugin: str) -> tuple[Contribution, ...]:
         return (

@@ -126,7 +126,7 @@ async def test_claim_compact_summary_returns_before_llm_with_halted_false(
 
     # Compact path detours through init_context, resuming at BEFORE_LLM (default)
     assert cmd.goto == "init_context"
-    assert cmd.update["context_reset"].resume == "before_llm"  # type: ignore[index]
+    assert cmd.update["context_reset"].resume == "before_turn"  # type: ignore[index]
     # halted must be False (clears halted to enter next LLM round), cannot be True / missing
     assert cmd.update["halted"] is False  # type: ignore[index]
     # update dict key is the literal 'halted', cannot be 'HALTED' / 'XXhaltedXX'

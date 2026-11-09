@@ -6,9 +6,6 @@
     "meiva": ">=2026.10.1"
   },
   "contributions": {
-    "hooks": [
-      "before_exec"
-    ],
     "metrics": [
       "meiva_syntax_fix_count",
       "meiva_syntax_fix_total"

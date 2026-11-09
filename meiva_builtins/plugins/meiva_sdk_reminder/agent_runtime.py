@@ -107,6 +107,8 @@ class _SdkReminderAfterExecHook(Hook):
         self, state: AgentState, runtime: Runtime[MeivaContext], config: RunnableConfig, /
     ) -> dict[str, object] | None:
         """Match each result by ID, retaining the per-compaction hint cadence."""
+        if tail_has_agent_inbound(state.messages):
+            return None
         ai_index = next(
             (
                 i
@@ -300,7 +302,6 @@ sdk_reminder_agent_reply_before_llm = _SdkReminderAgentReplyHook()
 def contribute() -> PluginContributions:
     """What this plugin declares for the agent runtime."""
     return PluginContributions(
-        before_llm=(sdk_reminder_agent_reply_before_llm,),
-        after_exec=(_SdkReminderAfterExecHook(),),
+        before_turn=(sdk_reminder_agent_reply_before_llm, _SdkReminderAfterExecHook()),
         state=(MeivaSdkReminderState,),
     )

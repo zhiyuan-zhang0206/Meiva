@@ -2,19 +2,16 @@ from typing import Literal
 
 # meiva:note
 # Each constant is narrowed to its own Literal so narrow goto types like
-# `Command[Literal["before_exec", "after_exec"]]` accept `goto=BEFORE_EXEC`;
+# `Command[Literal["before_turn", "exec", "claim"]]` accept `goto=BEFORE_TURN`;
 # annotating with the broader `NodeName` would fail narrow Command type checks.
 # meiva:link agent/graph/docs/graph.md
 CLAIM: Literal["claim"] = "claim"
-BEFORE_LLM: Literal["before_llm"] = "before_llm"
+BEFORE_TURN: Literal["before_turn"] = "before_turn"
 LLM: Literal["llm"] = "llm"
-BEFORE_EXEC: Literal["before_exec"] = "before_exec"
 EXEC: Literal["exec"] = "exec"
-AFTER_EXEC: Literal["after_exec"] = "after_exec"
-AFTER_INIT: Literal["after_init"] = "after_init"
 INIT_CONTEXT: Literal["init_context"] = "init_context"
 # meiva:note
-# The whole turn of a non-native harness: claim routes here instead of before_llm when
+# The whole turn of a non-native harness: before_turn routes here instead of llm when
 # the agent runs on an external CLI, because that CLI owns the model call, the tool
 # calls and the transcript in one loop. The native nodes never run under it.
 # meiva:link agent/graph/docs/harness-turn.md
@@ -30,23 +27,17 @@ END: Literal["__end__"] = "__end__"
 # may route to graph termination (for example, a terminate co-batched with other work).
 # meiva:link agent/graph/docs/graph.md
 NodeName = Literal[
-    "claim",
-    "before_llm",
-    "llm",
-    "before_exec",
-    "exec",
-    "after_exec",
-    "after_init",
     "init_context",
+    "claim",
+    "before_turn",
+    "llm",
+    "exec",
     "harness_turn",
     "__end__",
 ]
 
 __all__ = [
-    "AFTER_EXEC",
-    "AFTER_INIT",
-    "BEFORE_EXEC",
-    "BEFORE_LLM",
+    "BEFORE_TURN",
     "CLAIM",
     "END",
     "EXEC",

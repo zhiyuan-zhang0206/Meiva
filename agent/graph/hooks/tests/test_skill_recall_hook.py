@@ -211,7 +211,7 @@ def _offered(update: dict[str, Any] | None) -> list[str]:
 def test_the_hook_is_a_framework_before_llm_hook_and_drift_stays_last() -> None:
     from agent.graph.hooks.capabilities import newly_installed_skills
 
-    hooks = framework_hooks()["before_llm"]
+    hooks = framework_hooks()["before_turn"]
     assert any(isinstance(hook, SkillRecallHook) for hook in hooks)
     assert hooks[-1] is newly_installed_skills
 

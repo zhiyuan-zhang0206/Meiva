@@ -52,12 +52,12 @@ def _graph(state_cls: type[AgentState], *, process: ExecProcess, **compile_optio
     builder: Any = StateGraph(state_cls, context_schema=MeivaContext)
     builder.add_node("exec", partial(exec_node_impl, process=process), input_schema=state_cls)
 
-    def after_exec(_state: object) -> dict[str, object]:
+    def claim(_state: object) -> dict[str, object]:
         return {}
 
-    builder.add_node("after_exec", after_exec)
+    builder.add_node("claim", claim)
     builder.add_edge(START, "exec")
-    builder.add_edge("after_exec", END)
+    builder.add_edge("claim", END)
     return builder.compile(**compile_options)
 
 
@@ -321,8 +321,10 @@ async def test_findings_of_every_call_in_a_batch_reach_the_state(
         process=SubprocessExecProcess(live_parent_facts(), rng=_rng()),
     )
 
-    assert [f.source for f in result["security_findings"]] == ["web.fetch", "shell.run"]
-    assert [m.type for m in result["messages"]] == ["ai", "tool", "tool"]
+    assert result["security_findings"] == []
+    assert [m.type for m in result["messages"]] == ["ai", "tool", "tool", "human", "human"]
+    assert "web.fetch" in result["messages"][3].content
+    assert "shell.run" in result["messages"][4].content
 
 
 async def test_a_compacting_call_discards_the_findings_of_its_batch(

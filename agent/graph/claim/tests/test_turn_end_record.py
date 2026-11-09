@@ -9,7 +9,7 @@ from langchain_core.messages import HumanMessage
 from langgraph.types import Command
 
 from agent.graph.claim.turn_end import settle_turn_end
-from agent.nodes import BEFORE_LLM, END
+from agent.nodes import BEFORE_TURN, END
 from agent.state import AgentState
 from base.log.tests.log_records import LogRecords
 
@@ -77,7 +77,7 @@ def test_a_declared_reason_wins_over_the_boundary_default(loguru_records: LogRec
 def test_a_continuing_turn_emits_the_record_without_a_reason(loguru_records: LogRecords) -> None:
     state = _state(turn_end_held_seconds=1.5, ended_with="done")
 
-    command = settle_turn_end(state, Command(goto=BEFORE_LLM), agent_id=7)
+    command = settle_turn_end(state, Command(goto=BEFORE_TURN), agent_id=7)
 
     (record,) = _records(loguru_records)
     assert "ended_with" not in record, "a turn that continues has not ended, so it has no reason"
@@ -101,13 +101,13 @@ def test_a_lifecycle_end_is_not_recorded_as_running_out_of_input(
 # meiva:note
 # exec → claim → llm: the claim between a declaration and the halt must not eat it.
 def test_a_declaration_survives_the_claim_pass_before_the_halt(loguru_records: LogRecords) -> None:
-    command: Command[str] = Command(goto=BEFORE_LLM)
+    command: Command[str] = Command(goto=BEFORE_TURN)
 
     assert settle_turn_end(_state(ended_with="done"), command, agent_id=7) is command
 
 
 def test_nothing_held_and_nothing_declared_costs_one_read(loguru_records: LogRecords) -> None:
-    command: Command[str] = Command(goto=BEFORE_LLM)
+    command: Command[str] = Command(goto=BEFORE_TURN)
 
     assert settle_turn_end(_state(), command, agent_id=7) is command
     assert _records(loguru_records) == []

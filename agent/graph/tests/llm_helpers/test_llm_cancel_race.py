@@ -88,7 +88,7 @@ async def test_llm_node_cancel_event_race_discards_partial(
     await trigger
 
     assert isinstance(result, Command)
-    assert result.goto == "after_exec"
+    assert result.goto == "claim"
     update = result.update
     assert update is not None
     assert update["halted"] is True
@@ -131,7 +131,7 @@ async def test_llm_node_restart_interrupt_discards_partial_and_marks_the_turn_un
     await trigger
 
     assert isinstance(result, Command)
-    assert result.goto == "after_exec"
+    assert result.goto == "claim"
     assert result.update == {"halted": True, "interrupted_by_restart": True}
 
 
@@ -193,7 +193,7 @@ async def test_llm_node_cancel_event_race_discards_partial_tool_call(
     await trigger
 
     assert isinstance(result, Command)
-    assert result.goto == "after_exec"
+    assert result.goto == "claim"
     update = result.update
     assert update is not None
     assert update["halted"] is True
@@ -236,7 +236,7 @@ async def test_llm_node_cancel_event_race_no_partial_returns_halted(
     assert _has_cancelled(await live_events.typed(), agent_id)
 
     assert isinstance(result, Command)
-    assert result.goto == "after_exec"
+    assert result.goto == "claim"
     assert result.update is not None
     assert result.update["halted"] is True
     assert _committed_messages(result.update) == []

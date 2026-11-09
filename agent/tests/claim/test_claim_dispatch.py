@@ -192,7 +192,7 @@ async def test_claim_chat_kind_appends_humanmessage_with_envelope(
     )
 
     assert isinstance(cmd, Command)
-    assert cmd.goto == "before_llm"
+    assert cmd.goto == "before_turn"
     assert cmd.update is not None
     msgs = cast("list[AnyMessage]", cmd.update["messages"])
     # Claim appends the batch and nothing else — the standing head (SystemMessage
@@ -496,7 +496,7 @@ async def test_container_mode_continues_without_touching_messages(*, database_ga
         thread_config(1),
     )
     assert isinstance(cmd, Command)
-    assert cmd.goto == "before_llm"
+    assert cmd.goto == "before_turn"
     assert cmd.update == {"halted": False}
 
 
@@ -523,7 +523,7 @@ async def test_container_mode_continue_clears_halted(*, database_gate: ProcessDb
         thread_config(1),
     )
     assert isinstance(cmd, Command)
-    assert cmd.goto == "before_llm"
+    assert cmd.goto == "before_turn"
     assert cmd.update["halted"] is False  # type: ignore[index]
 
 
@@ -552,7 +552,7 @@ async def test_claim_multi_step_continue_no_inbound(
         ),
     )
     assert isinstance(cmd, Command)
-    assert cmd.goto == "before_llm"
+    assert cmd.goto == "before_turn"
     assert cmd.update["halted"] is False  # type: ignore[index]
     # key: messages should not be injected with anything (multi-step continue does not touch messages)
     assert cmd.update.get("messages") in ([], None) or "messages" not in (cmd.update or {})  # type: ignore[union-attr]
@@ -679,6 +679,6 @@ async def test_claim_node_wrapper_returns_underlying_command(
 
     # wrapper must return Command, goto field must be 'before_llm' as decided by _claim_node_impl
     assert isinstance(cmd, Command)
-    assert cmd.goto == "before_llm"
+    assert cmd.goto == "before_turn"
     # update must contain chat dispatch's messages
     assert "messages" in (cmd.update or {})  # type: ignore[operator]

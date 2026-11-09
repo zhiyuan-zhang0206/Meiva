@@ -41,7 +41,7 @@ SURFACES: tuple[Surface, ...] = (
         "(state: AgentState, runtime: Runtime[MeivaContext], config: RunnableConfig, /)"
         " -> dict | None",
         note=(
-            "`after_init` / `before_llm` / `before_exec` / `after_exec` of what `contribute()` "
+            "`before_turn` of what `contribute()` "
             "returns: a Hook instance runs at that graph edge; the returned dict is a state "
             "update (key 'goto' overrides routing), None is a no-op, and two hooks writing one "
             "reducerless key in a pass is a hard error"

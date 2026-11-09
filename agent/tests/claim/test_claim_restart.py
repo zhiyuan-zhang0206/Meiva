@@ -75,7 +75,7 @@ async def test_claim_system_note_kind_appends_system_note_and_continues(
         ),
     )
 
-    assert cmd.goto == "before_llm"
+    assert cmd.goto == "before_turn"
     assert cmd.update is not None
     msgs = cast("list[AnyMessage]", cmd.update["messages"])
     assert len(msgs) == 1
@@ -128,7 +128,7 @@ async def test_claim_co_batched_task_notes_preserve_task_links(
         ),
     )
 
-    assert cmd.goto == "before_llm"
+    assert cmd.goto == "before_turn"
     assert cmd.update is not None
     notes = cast(list[AnyMessage], cmd.update["messages"])
     assert [note.additional_kwargs.get("meiva_task_id") for note in notes] == [1, 2]

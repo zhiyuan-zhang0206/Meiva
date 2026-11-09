@@ -226,12 +226,12 @@ async def test_compaction_returns_through_claim_then_generates_before_compacting
     )
     db_conn.commit()
     resumed = await claim_node(state, runtime, config)
-    assert resumed.goto == "before_llm"
+    assert resumed.goto == "before_turn"
     state = _apply(state, resumed)
     assert not auto_compact_will_fire(state, runtime.context.require_agent(), catalog=catalog)
     assert await compact_reminder(state, runtime, config) is None
     generated = await llm_node(state, runtime, config, rng=_rng())
-    assert generated.goto == "after_exec"
+    assert generated.goto == "claim"
     state = _apply(state, generated)
     assert state.messages[-1].content == "MEIVA_DISPLAY_TO_USER\nresumed ordinary work"
     assert state.compact.version == 1

@@ -7,8 +7,7 @@
   },
   "contributions": {
     "hooks": [
-      "before_llm",
-      "after_exec"
+      "before_turn"
     ]
   },
   "category": "builtin"

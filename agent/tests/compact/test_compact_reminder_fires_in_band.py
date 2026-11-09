@@ -12,7 +12,7 @@ from langchain_core.messages import AnyMessage, HumanMessage, SystemMessage
 from langgraph.runtime import Runtime
 from psycopg_pool import AsyncConnectionPool
 
-from agent.graph.claim.node import BEFORE_LLM, END, claim_node
+from agent.graph.claim.node import BEFORE_TURN, END, claim_node
 from agent.graph.hooks.compact import (
     COMPACTION_INSTRUCTION,
     compose_summary_message,
@@ -279,8 +279,8 @@ async def test_compact_summary_preserves_agent_continuity(
     reset = cmd.update["context_reset"]
     assert isinstance(reset, ContextReset)
     resume = reset.resume
-    assert resume == BEFORE_LLM, (
-        f"after compact should continue conversation (resume=BEFORE_LLM), actual {resume}"
+    assert resume == BEFORE_TURN, (
+        f"after compact should continue conversation (resume=BEFORE_TURN), actual {resume}"
     )
 
 

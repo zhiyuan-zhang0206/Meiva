@@ -1,19 +1,14 @@
 # Harness turn
 
 `agent/graph/claim/harness_turn.py`, `base/lm/harness/bridge.py` run an external harness for Meiva. The claim node keeps owning the durable inbound queue, the lifecycle
-commands and the turn boundary; when the batch would hand work to the built-in
-loop, it routes to `harness_turn` instead:
+commands and the turn boundary; both native and external harnesses route from `claim` to `before_turn`, which then routes to `llm` (native) or `harness_turn` (external):
 
 ```
-claim ──(native)──→ before_llm → llm → before_exec → exec → after_exec
-  └──(harness)────→ harness_turn ──→ claim
+claim → before_turn ──(native)───→ llm ↔ exec ──→ claim
+          └───────────(harness)──→ harness_turn ─→ claim
 ```
 
-The rewrite lives in `route_target`, and it covers one more producer than claim's
-own verdicts: a compaction parks its destination in `ContextReset.resume` and
-`init_context` jumps there, so that jump goes through `route_target` too. Without it
-a compacted external-harness agent resumes into `before_llm`, where the native model
-answers while the CLI session sits idle.
+The rewrite from `llm` to `harness_turn` lives in `route_target`, while `before_turn` is shared by both runtimes. On an external harness, `claim` stores the newly claimed inbound `BaseMessage`s in `harness_pending_input["messages"]`; `before_turn` populates a temporary `hook_state.messages` view so pre-turn hooks (`SkillRecallHook`, `newly_installed_skills`, and plugin `before_turn` hooks) inspect the real inbound messages and prepend any emitted notes onto `harness_pending_input["prompt"]` while keeping `state.messages` empty (`[]`) in the checkpoint. A compaction parks its destination in `ContextReset.resume` (`before_turn`) and `init_context` routes there so the post-reset turn also runs `before_turn` before entering `harness_turn`.
 
 ## Turn boundaries
 

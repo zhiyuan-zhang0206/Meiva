@@ -19,7 +19,7 @@ from agent.graph.hooks.compact import (
 from agent.hooks.compact_anchor import closing_of
 from agent.hooks.compact_events import emit_compact_finished
 from agent.hooks.history_dump import dump_history, history_dump_note
-from agent.nodes import BEFORE_LLM, CLAIM, END, INIT_CONTEXT
+from agent.nodes import BEFORE_TURN, CLAIM, END, INIT_CONTEXT
 from base.agents.context import MeivaContext
 from base.agents.messages.kwargs import MeivaMsgType, NoteTag, read_meiva_kwargs
 from base.events.live.projection import CompactDone, CompactionStatus
@@ -61,7 +61,7 @@ def _cancel_outcome(ctx: MeivaContext, agent_id: int, st: BatchState) -> _Outcom
         return _Outcome(
             command=Command[ClaimGoto](
                 update={"messages": st.new_msgs, "halted": False},
-                goto=BEFORE_LLM,
+                goto=BEFORE_TURN,
             )
         )
     return _Outcome(
@@ -155,7 +155,7 @@ def _fallthrough_outcome(st: BatchState) -> _Outcome:
 
     publish_snapshot = st.next_goto == END and bool(st.new_msgs)
     halted = st.restart_preserves_idle and not st.committed_chat_ids
-    goto = BEFORE_LLM if st.committed_chat_ids and st.next_goto == CLAIM else st.next_goto
+    goto = BEFORE_TURN if st.committed_chat_ids and st.next_goto == CLAIM else st.next_goto
     return _Outcome(
         command=Command[ClaimGoto](
             update={

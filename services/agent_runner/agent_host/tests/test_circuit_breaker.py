@@ -490,7 +490,7 @@ async def test_chat_cobatched_with_open_breaker_heartbeat_reaches_llm(
         thread_config(tid),
     )
 
-    assert cmd.goto == "before_llm"
+    assert cmd.goto == "before_turn"
     assert cmd.update is not None
     assert cmd.update["halted"] is False
     messages = cast("list[BaseMessage]", cmd.update["messages"])
@@ -566,7 +566,7 @@ async def test_claim_does_not_park_while_breaker_closed(
         thread_config(tid),
     )
 
-    assert cmd.goto == "before_llm"
+    assert cmd.goto == "before_turn"
 
 
 async def test_heartbeat_normal_when_breaker_closed(
@@ -603,7 +603,7 @@ async def test_heartbeat_normal_when_breaker_closed(
     msgs = cast("list[BaseMessage]", cmd.update["messages"])
     assert len(msgs) == 1
     assert "Heartbeat." in msgs[0].content
-    assert cmd.goto == "before_llm"
+    assert cmd.goto == "before_turn"
 
 
 # ── breaker close (llm node) ──

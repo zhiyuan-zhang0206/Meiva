@@ -240,7 +240,9 @@ async def test_a_broken_sdk_expand_entry_is_named_once_in_the_head(
     assert "meiva.context" in content
     assert "meiva.shell" not in content
 
-    second = await init_context_node(AgentState(messages=msgs), runtime, _config(tid))
+    second = await init_context_node(
+        AgentState(messages=msgs, cwd=str(Path.home())), runtime, _config(tid)
+    )
 
     assert second.update is None
     assert second.goto == "claim"
@@ -253,7 +255,10 @@ async def test_intact_window_is_a_pass_through(
 ) -> None:
     """A live conversation is left alone — no head, no re-injection, no update."""
     tid = create_agent(db_conn)
-    state = AgentState(messages=[SystemMessage(content="sys"), HumanMessage(content="prev")])
+    state = AgentState(
+        messages=[SystemMessage(content="sys"), HumanMessage(content="prev")],
+        cwd=str(Path.home()),
+    )
 
     cmd = await init_context_node(
         state, _runtime(aops_pool, _registry("memory"), database_gate=database_gate), _config(tid)
@@ -275,7 +280,7 @@ async def test_parked_tail_lands_behind_the_head(
     summary = HumanMessage(content="THE-SUMMARY")
     chat = HumanMessage(content="a chat that arrived with the compact")
     state = AgentState(
-        context_reset=ContextReset(tail=[summary, chat], resume="before_llm"),
+        context_reset=ContextReset(tail=[summary, chat], resume="before_turn"),
     )
 
     cmd = await init_context_node(
@@ -291,7 +296,7 @@ async def test_parked_tail_lands_behind_the_head(
     assert msgs[1:3] == notes
     assert msgs[3] is summary
     assert msgs[4] is chat
-    assert cmd.goto == "before_llm"
+    assert cmd.goto == "before_turn"
 
 
 async def test_consumed_reset_is_cleared(
@@ -456,7 +461,7 @@ async def test_a_skill_installed_after_establishment_reaches_the_next_turn(
     assert "beta" not in str(head[0].content)
 
     state = AgentState(messages=head, capabilities=established.update["capabilities"])  # type: ignore[index]
-    drift_hook = framework_hooks()["before_llm"][-1]  # the capability-index drift check runs last
+    drift_hook = framework_hooks()["before_turn"][-1]  # the capability-index drift check runs last
     update = await drift_hook(
         state,
         _runtime(
@@ -532,7 +537,7 @@ async def test_a_compaction_in_the_same_pass_keeps_its_summary_and_its_head(
         capabilities=established.update["capabilities"],  # type: ignore[index]
     )
     cmd = await make_hook_runner(
-        "before_llm", "llm", [(None, hook) for hook in framework_hooks()["before_llm"]]
+        "before_turn", "llm", [(None, hook) for hook in framework_hooks()["before_turn"]]
     )(
         state,
         _runtime(
@@ -619,7 +624,7 @@ def test_parked_tail_survives_the_checkpoint_round_trip() -> None:
             ),
             HumanMessage(content="a chat co-batched with the compact"),
         ],
-        resume="before_llm",
+        resume="before_turn",
     )
 
     restored = serde.loads_typed(serde.dumps_typed(parked))
@@ -631,7 +636,7 @@ def test_parked_tail_survives_the_checkpoint_round_trip() -> None:
     # The kwargs are what the timeline classifies the summary by — a bare
     # HumanMessage would render as a user turn.
     assert restored.tail[0].additional_kwargs["meiva_msg_type"] == "compact_summary"
-    assert restored.resume == "before_llm"
+    assert restored.resume == "before_turn"
 
 
 # `capabilities.indexed` crosses the checkpointer too — it is written by this

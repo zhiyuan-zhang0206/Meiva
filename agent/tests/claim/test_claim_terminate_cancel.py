@@ -222,7 +222,7 @@ async def test_claim_hosted_still_dispatches_an_available_batch(
         ),
     )
 
-    assert cmd.goto == "before_llm"
+    assert cmd.goto == "before_turn"
     assert cmd.update["turn_active"] is True  # type: ignore[index]
     assert cmd.update.get("turn_idle") in (None, False)  # type: ignore[union-attr]
 
@@ -314,7 +314,7 @@ async def test_claim_cancel_with_chat_cobatch_wakes_to_process_chat(
     )
 
     # wake to run the LLM on the new chat, not idle
-    assert cmd.goto == "before_llm"
+    assert cmd.goto == "before_turn"
     assert cmd.update["halted"] is False  # type: ignore[index]
     # the co-batched chat is committed and drives the turn
     assert cmd.update is not None
@@ -362,7 +362,7 @@ async def test_claim_cancel_before_chat_cobatch_wakes_to_process_chat(
         ),
     )
 
-    assert cmd.goto == "before_llm"
+    assert cmd.goto == "before_turn"
     assert cmd.update["halted"] is False  # type: ignore[index]
     assert cmd.update is not None
     msgs = cast("list[AnyMessage]", cmd.update["messages"])

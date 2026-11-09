@@ -61,7 +61,7 @@ def assert_repaired_notice(committed: BaseAgentState, notice: NoticeHook) -> Non
 async def test_repair_preserves_the_plugin_note_and_state_across_turns() -> None:
     notice = NoticeHook("notice")
     extensions = ExtensionRegistry(
-        (("notice", PluginContributions(state=(NoticeState,), before_llm=(notice,))),)
+        (("notice", PluginContributions(state=(NoticeState,), before_turn=(notice,))),)
     )
     state = build_agent_state(extensions)(
         messages=[
@@ -76,10 +76,10 @@ async def test_repair_preserves_the_plugin_note_and_state_across_turns() -> None
     before = state.model_dump()
     hooks = [
         (plugin, hook)
-        for plugin, hook in hooks_at("before_llm", extensions)
+        for plugin, hook in hooks_at("before_turn", extensions)
         if hook is notice or hook is repair_dangling_tool_pairing
     ]
-    run = make_hook_runner("before_llm", "llm", hooks)
+    run = make_hook_runner("before_turn", "llm", hooks)
     runtime = Runtime(
         context=MeivaContext(
             agent=AgentSlices.resolve(default_reader=defaults()),
@@ -107,15 +107,14 @@ async def test_repair_preserves_the_plugin_note_and_state_across_turns() -> None
     assert notice.observed[-1] == (tuple(message.id for message in committed.messages), 0, True)
 
 
-@pytest.mark.parametrize("point", ["after_init", "before_llm", "before_exec", "after_exec"])
+@pytest.mark.parametrize("point", ["before_turn"])
 def test_only_repair_precedes_plugins_and_every_other_order_is_preserved(point: HookPoint) -> None:
     first, second, third = (NoticeHook(name) for name in ("first", "second", "third"))
-    declarations = dict.fromkeys(
-        ("after_init", "before_llm", "before_exec", "after_exec"), (first, second)
-    )
-    last = dict.fromkeys(("after_init", "before_llm", "before_exec", "after_exec"), (third,))
     extensions = ExtensionRegistry(
-        (("alpha", PluginContributions(**declarations)), ("beta", PluginContributions(**last)))
+        (
+            ("alpha", PluginContributions(before_turn=(first, second))),
+            ("beta", PluginContributions(before_turn=(third,))),
+        )
     )
     hooks = hooks_at(point, extensions)
     plugins = [("alpha", first), ("alpha", second), ("beta", third)]
@@ -124,11 +123,7 @@ def test_only_repair_precedes_plugins_and_every_other_order_is_preserved(point: 
     assert [type(hook) for owner, hook in hooks if owner is None] == [
         type(hook) for hook in framework
     ]
-    if point == "before_llm":
-        assert hooks[0] == (None, repair_dangling_tool_pairing)
-        assert sum(hook is repair_dangling_tool_pairing for _, hook in hooks) == 1
-        assert hooks[1:4] == plugins
-        assert all(owner is None for owner, _ in hooks[4:])
-    else:
-        assert hooks[:3] == plugins
-        assert all(owner is None for owner, _ in hooks[3:])
+    assert hooks[0] == (None, repair_dangling_tool_pairing)
+    assert sum(hook is repair_dangling_tool_pairing for _, hook in hooks) == 1
+    assert hooks[1:4] == plugins
+    assert all(owner is None for owner, _ in hooks[4:])
