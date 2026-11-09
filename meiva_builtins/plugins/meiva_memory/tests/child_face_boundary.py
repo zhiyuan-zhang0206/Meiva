@@ -23,9 +23,9 @@ ABSOLUTE = (
 
 
 def import_faces() -> list[str]:
-    from meiva_builtins.plugins.meiva_memory import plugin, written_notes
+    from meiva_builtins.plugins.meiva_memory import plugin
 
-    return [plugin.__name__, written_notes.__name__]
+    return [plugin.__name__]
 
 
 faces = import_faces()

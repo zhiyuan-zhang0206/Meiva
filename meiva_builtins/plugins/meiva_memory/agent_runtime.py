@@ -15,7 +15,6 @@ from collections.abc import Collection
 
 from langchain_core.runnables import RunnableConfig
 from langgraph.runtime import Runtime
-from langgraph.types import Overwrite
 
 from agent.graph.hooks.compact import auto_compact_will_fire
 from agent.graph.prompt.context_notes import (
@@ -25,8 +24,8 @@ from agent.graph.prompt.context_notes import (
 )
 from agent.graph.recall.memory_recall import PassiveRecall, passive_memory_recall
 from agent.hooks import Hook
-from agent.messages import NoteTag, system_note_message, tail_has_recallable_inbound
-from agent.state import AgentState, MemoryState, PluginStateHandle
+from agent.messages import tail_has_recallable_inbound
+from agent.state import AgentState, MemoryState
 from base.agents.context import MeivaContext
 from base.api_contracts.agent_contract import Harness
 from base.host.env.agent_slices import AgentSlices
@@ -34,18 +33,10 @@ from base.lm.catalog import ModelCatalog
 from base.lm.harness.handoff import EntryPoint, HarnessContribution
 from base.log import logger
 from base.packages.plugins.extensions import ContextNote, PluginContributions
-from base.paths import memory_dir, workspace_dir
+from base.paths import memory_dir
 
-from ._state import MemoryWriteState
 from .inheritance.inherit import inherited_memory_note
 from .notes import memory_index_note, per_agent_memory_note
-from .write_checks import check_written_notes, render_reminder
-
-
-def state_handle() -> PluginStateHandle[MemoryWriteState]:
-    """The typed handle over this plugin's state — a view over the turn's state slot, built per use."""
-    return PluginStateHandle(MemoryWriteState, "meiva_memory")
-
 
 # The two memory indexes are declared in `contribute()` below, so `init_context` lays them down
 # with the framework's notes whenever a window is established. The ranks pin them into the
@@ -141,15 +132,17 @@ Correcting stale memory is an obligation, not an option:
   that already covers the ground. Update it if it exists; create only when
   nothing does. Deleting an entry that turns out to be wrong is a valid write.
 
-Write notes directly as pure Markdown: start with a `# Title` heading, followed
-by a concise high-level description paragraph stating the rule or fact, then
-the body (including a "Why:" line and a "How to apply:" line for rules and
-project constraints). No YAML frontmatter is needed at write time (never write
-legacy `type: Memory`, `meiva_agent`, `meiva_machine`, `type/<x>` tags, or HTML
-attribution comments); during Meiva Dream consolidation, the Memory Arbiter
-automatically maintains canonical OKF provenance and lifecycle fields
-(`description`, `sources`, `verified`, and optional `stale_after`). Each note
-must stay under 8000 characters.
+Write notes boldly and directly as pure Markdown whenever you learn a durable
+rule, fact, or user correction — do not hesitate or over-ceremonialize writes:
+start with a `# Title` heading, followed by a concise high-level description
+paragraph stating the rule or fact, then the body (including a "Why:" line and
+a "How to apply:" line for rules and project constraints).
+No YAML frontmatter is needed at write time (never write legacy `type: Memory`,
+`meiva_agent`, `meiva_machine`, `type/<x>` tags, or HTML attribution comments);
+Meiva Dream consolidation and the Memory Arbiter handle organization,
+deduplication, and canonical OKF provenance and lifecycle fields (`description`,
+`sources`, `verified`, and optional `stale_after`). Each note must stay under
+8000 characters.
 
 A memory is a claim, not a source of truth. Your sources differ in how they can
 be checked:
@@ -291,81 +284,6 @@ class _PassiveMemoryRecallHook(Hook):
 passive_memory_recall_before_llm = _PassiveMemoryRecallHook()
 
 
-# ── Memory write check (after_exec hook) ────────────────────────────────
-
-
-class _MemoryWriteCheckHook(Hook):
-    """After an exec call that wrote memory notes with `meiva.files`, check them and add one
-    reminder note when something needs the agent's attention.
-
-    The wraps in `plugin.py` recorded the notes inside the exec subprocess; this hook reads the
-    record, always clears it, and runs `check_written_notes` under
-    `memory_write_check_deadline_seconds`. It never blocks, rewrites or rejects a write, and it
-    never fails the turn: a check that runs out of time or hits an unexpected error is logged and
-    dropped (the agent simply hears nothing about those notes). No-op, with no service call, when
-    nothing was recorded.
-    """
-
-    async def __call__(
-        self,
-        state: AgentState,
-        runtime: Runtime[MeivaContext],
-        _config: RunnableConfig,
-        /,
-    ) -> dict[str, object] | None:
-        handle = state_handle()
-        recorded = handle.view(state)
-        if not recorded.shared_notes and not recorded.personal_notes:
-            return None
-        cleared = handle.delta(
-            {"shared_notes": Overwrite(set()), "personal_notes": Overwrite(set())}
-        )
-        agent = runtime.context.require_agent()
-        if agent.sandbox.eval_isolation:
-            return cleared
-        identity = runtime.context.identity
-        agent_id = None if identity is None else identity.agent_id
-        if agent_id is None:
-            return cleared
-        deadline = agent.memory.memory_write_check_deadline_seconds
-        home = runtime.context.require_meiva_home()
-        try:
-            reports = await asyncio.wait_for(
-                check_written_notes(
-                    recorded.shared_notes,
-                    recorded.personal_notes,
-                    pool=memory_dir(home=home),
-                    personal_root=workspace_dir(agent_id, home=home) / "memory",
-                    agent=agent,
-                    context=runtime.context,
-                ),
-                timeout=deadline,
-            )
-        except TimeoutError:
-            logger.info(
-                "[memory-write-check] skip: the check exceeded its {:g}s deadline", deadline
-            )
-            return cleared
-        except Exception:
-            # A reminder must never cost the agent its turn: this hook runs inside the agent
-            # process, where an escaping exception would end it.
-            logger.opt(exception=True).error("[memory-write-check] check failed; no reminder")
-            return cleared
-        if not reports:
-            return cleared
-        now = runtime.context.require_clock().now()
-        note = system_note_message(
-            content=render_reminder(reports),
-            tag=NoteTag.MEMORY_WRITE_CHECK,
-            picked_up_at=now,
-            created_at=now,
-        )
-        return {**cleared, "messages": [note]}
-
-
-memory_write_check_after_exec = _MemoryWriteCheckHook()
-
-
 _MEMORY_HARNESS_CONTRIBUTION = HarnessContribution(
     harnesses=frozenset({Harness.CLAUDE_CODE, Harness.CODEX, Harness.ANTIGRAVITY}),
     entries=(
@@ -382,8 +300,6 @@ def contribute() -> PluginContributions:
     return PluginContributions(
         system_prompt_sections=(memory_discipline_section,),
         before_llm=(passive_memory_recall_before_llm,),
-        after_exec=(memory_write_check_after_exec,),
-        state=(MemoryWriteState,),
         context_notes=(
             ContextNote(memory_index_note, rank=RANK_CLUSTER_MEMORY),
             ContextNote(per_agent_memory_note, on_fork=True, rank=RANK_PER_AGENT_MEMORY),
