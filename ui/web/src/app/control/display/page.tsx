@@ -36,6 +36,7 @@ import {
   TIMELINE_WIDTH_PX_STEP,
 } from "@/lib/timeline/timeline-width";
 import { themePackId, useThemePacks } from "@/lib/plugins/use-theme-packs";
+import { normalizeThemeMode } from "@/lib/layout/theme-runtime";
 import { readStoredSetting, useDebouncedSetting, useUserSettings } from "@/lib/state/use-user-settings";
 import { FLEX } from "@/lib/layout/layout";
 import { ModelPickerSection } from "./_model_picker";
@@ -137,25 +138,36 @@ export default function DisplaySettingsPage({ mode = "all" }: { mode?: "general"
       </SettingsSection>
       )}
 
-      {/* Skins exist only when a plugin contributes one, so the section
-          appears with the first pack rather than standing empty offering the
-          console's own palette as the only choice. */}
-      {general && themePacks.length > 0 && (
-        <SettingsSection id="display-theme" title="Theme">
+      {general && (
+        <SettingsSection id="display-theme" title={t("theme")}>
           <RadioRow
             icon={Palette}
-            label="Skin"
-            description={t("themeDescription")}
+            label={t("appearance")}
+            description={t("appearanceDescription")}
             options={[
-              { value: "", label: "Default (Meiva)" },
-              ...themePacks.map((p) => ({
-                value: themePackId(p),
-                label: `${p.name} (${p.plugin})${p.dark_tokens ? "" : " — no dark variant"}`,
-              })),
+              { value: "system", label: t("themeSystem") },
+              { value: "light", label: t("themeLight") },
+              { value: "dark", label: t("themeDark") },
             ]}
-            value={readStoredSetting(settings["display.theme_pack"], "")}
-            onChange={(v) => setSetting("display.theme_pack", v === "" ? null : v)}
+            value={normalizeThemeMode(settings["display.theme"])}
+            onChange={(v) => setSetting("display.theme", normalizeThemeMode(v))}
           />
+          {themePacks.length > 0 && (
+            <RadioRow
+              icon={Palette}
+              label="Skin"
+              description={t("themeDescription")}
+              options={[
+                { value: "", label: "Default (Meiva)" },
+                ...themePacks.map((p) => ({
+                  value: themePackId(p),
+                  label: `${p.name} (${p.plugin})${p.dark_tokens ? "" : " — no dark variant"}`,
+                })),
+              ]}
+              value={readStoredSetting(settings["display.theme_pack"], "")}
+              onChange={(v) => setSetting("display.theme_pack", v === "" ? null : v)}
+            />
+          )}
         </SettingsSection>
       )}
 

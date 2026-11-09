@@ -1,7 +1,7 @@
 "use client";
 
 import { QueryCache, QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 import { AppUpdateBanner } from "@/components/app/app-settings";
 import { AppConnectionBanner } from "@/components/connection/app-connection-banner";
@@ -18,7 +18,7 @@ import type { AppNavigation } from "@/lib/browser/navigation/navigation";
 import { NavigationProvider } from "@/lib/browser/navigation/navigation-provider";
 import { SystemNavigationProvider } from "@/lib/browser/navigation/system-navigation";
 import { API_BASE, ApiError, api } from "@/lib/transport/api";
-import type { ThemeRuntime } from "@/lib/layout/theme-runtime";
+import { normalizeThemeMode, type ThemeRuntime } from "@/lib/layout/theme-runtime";
 import type { Api } from "@/lib/transport/api";
 import { NonceProvider } from "@/lib/auth/nonce-context";
 import { StreamHub } from "@/lib/transport/stream/stream-hub";
@@ -212,9 +212,22 @@ export function Providers({
 
 // meiva:note
 // The two surfaces that paint from the current scheme take it as a value: this is the one place that
-// reads the theme provider, so both components are driven by a prop a test can set.
+// reads the theme provider, so both components are driven by a prop a test can set. It also bridges
+// the DB-backed `display.theme` preference ("system" | "light" | "dark", default "system") into the
+// theme runtime once settings load.
 function ThemedSlots({ theme }: { theme: ThemeRuntime }) {
   const resolvedTheme = theme.useResolvedTheme();
+  const themeMode = theme.useThemeMode?.();
+  const { settings, isLoading } = useUserSettings();
+  const desiredTheme = normalizeThemeMode(settings["display.theme"]);
+  const activeTheme = themeMode?.theme;
+  const applyTheme = themeMode?.setTheme;
+  useEffect(() => {
+    if (isLoading || !applyTheme) return;
+    if (activeTheme !== desiredTheme) {
+      applyTheme(desiredTheme);
+    }
+  }, [isLoading, applyTheme, activeTheme, desiredTheme]);
   return (
     <>
       <ThemePackTokens resolvedTheme={resolvedTheme} />

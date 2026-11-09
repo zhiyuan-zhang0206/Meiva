@@ -37,6 +37,7 @@ export interface LiveDocument {
 
 export interface LiveViewport {
   readonly height: number;
+  readonly width?: number;
   readonly scale: number;
   addEventListener(type: "resize" | "scroll", listener: () => void): void;
   removeEventListener(type: "resize" | "scroll", listener: () => void): void;
@@ -50,7 +51,7 @@ export interface LiveResizeObserver {
   disconnect(): void;
 }
 
-export type LivePageEventType = "popstate" | "resize" | "scroll";
+export type LivePageEventType = "popstate" | "resize" | "scroll" | "orientationchange";
 
 export interface LivePage {
   readonly location: { readonly href: string; assign(url: string): void };
@@ -68,6 +69,7 @@ export interface LivePage {
   sessionStorage(): Storage | null;
   matchMedia(query: string): MediaQueryList;
   readonly innerHeight: number;
+  readonly innerWidth?: number;
   readonly visualViewport: LiveViewport | null;
   scrollTo(x: number, y: number): void;
   readonly navigator: LiveNavigator;
@@ -267,10 +269,17 @@ export function viewportOver(page: LivePage | null): BrowserViewport {
         ? { layoutHeight: 0, visual: null }
         : {
             layoutHeight: page.innerHeight,
+            ...(page.innerWidth === undefined ? {} : { layoutWidth: page.innerWidth }),
             visual:
               page.visualViewport === null
                 ? null
-                : { height: page.visualViewport.height, scale: page.visualViewport.scale },
+                : {
+                    height: page.visualViewport.height,
+                    ...(page.visualViewport.width === undefined
+                      ? {}
+                      : { width: page.visualViewport.width }),
+                    scale: page.visualViewport.scale,
+                  },
           },
     resetScroll() {
       page?.scrollTo(0, 0);
@@ -278,15 +287,30 @@ export function viewportOver(page: LivePage | null): BrowserViewport {
     subscribe(onChange) {
       const visual = page?.visualViewport ?? null;
       if (page === null || visual === null) return () => undefined;
+      const timers = new Set<number>();
+      const onOrientationChange = () => {
+        onChange();
+        for (const delayMs of [100, 300]) {
+          const timer = page.setTimeout(() => {
+            timers.delete(timer);
+            onChange();
+          }, delayMs);
+          timers.add(timer);
+        }
+      };
       visual.addEventListener("resize", onChange);
       visual.addEventListener("scroll", onChange);
       page.addEventListener("resize", onChange);
       page.addEventListener("scroll", onChange);
+      page.addEventListener("orientationchange", onOrientationChange);
       return () => {
+        for (const timer of timers) page.clearTimeout(timer);
+        timers.clear();
         visual.removeEventListener("resize", onChange);
         visual.removeEventListener("scroll", onChange);
         page.removeEventListener("resize", onChange);
         page.removeEventListener("scroll", onChange);
+        page.removeEventListener("orientationchange", onOrientationChange);
       };
     },
   };
@@ -389,6 +413,9 @@ export const browser: Browser =
         matchMedia: (query) => window.matchMedia(query),
         get innerHeight() {
           return window.innerHeight;
+        },
+        get innerWidth() {
+          return window.innerWidth;
         },
         get visualViewport() {
           return window.visualViewport;

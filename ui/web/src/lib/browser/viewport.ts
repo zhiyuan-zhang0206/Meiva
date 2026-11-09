@@ -16,6 +16,11 @@ import type { ViewportReading } from "./browser";
 export const KEYBOARD_MIN_VISUAL_VIEWPORT_DELTA_PX = 150;
 
 // meiva:note
+// The width shortfall that indicates a stuck landscape layout viewport after rotating to
+// portrait on iPadOS CriOS / WKWebView, rather than a desktop vertical scrollbar (~15-17px).
+export const VIEWPORT_WIDTH_PIN_MIN_DELTA_PX = 24;
+
+// meiva:note
 // The height the shell is pinned to while the keyboard is up, or null to keep the layout
 // viewport's. Rounded: a fractional visual height would leak half pixels into the shell height.
 export function pinnedShellHeight(
@@ -27,4 +32,23 @@ export function pinnedShellHeight(
   if (visual.scale !== 1) return null;
   if (reading.layoutHeight - visual.height <= minShortfall) return null;
   return Math.round(visual.height);
+}
+
+// meiva:note
+// The width the shell is pinned to when an unzoomed visual viewport is narrower than the layout
+// viewport (iPadOS CriOS rotation from landscape to portrait leaves the tab's layout viewport
+// width stuck at the landscape dimension even across reloads), or null when the layout viewport
+// already matches.
+export function pinnedShellWidth(
+  reading: ViewportReading,
+  minShortfall: number = VIEWPORT_WIDTH_PIN_MIN_DELTA_PX,
+): number | null {
+  const visual = reading.visual;
+  if (visual === null) return null;
+  if (visual.scale !== 1) return null;
+  const layoutWidth = reading.layoutWidth;
+  const visualWidth = visual.width;
+  if (layoutWidth === undefined || visualWidth === undefined || visualWidth <= 0) return null;
+  if (layoutWidth - visualWidth <= minShortfall) return null;
+  return Math.round(visualWidth);
 }

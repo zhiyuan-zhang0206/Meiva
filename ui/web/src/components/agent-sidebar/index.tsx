@@ -242,7 +242,7 @@ function MobileSidebar(props: MobileProps) {
   return (
     <div
       className={cn(
-        "fixed inset-x-0 top-0 z-50 h-[var(--visual-viewport-height,100dvh)] pt-[env(safe-area-inset-top)] pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)]",
+        "fixed inset-x-0 top-0 z-50 w-[var(--visual-viewport-width,100%)] h-[var(--visual-viewport-height,100dvh)] pt-[env(safe-area-inset-top)] pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)]",
         FLEX,
       )}
     >

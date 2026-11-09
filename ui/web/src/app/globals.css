@@ -244,6 +244,8 @@
   html,
   body {
     overscroll-behavior-y: none;
+    max-width: 100%;
+    overflow-x: hidden;
   }
   /* Code surfaces must render glyph-for-glyph. Geist Mono ligates coding
      sequences (=== / != / => / <= ...) into single glyphs — e.g. === becomes

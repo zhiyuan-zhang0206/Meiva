@@ -1,10 +1,11 @@
 "use client";
 
 import * as Popover from "@radix-ui/react-popover";
-import { ArrowUpDown, Eye, EyeOff, LayoutList, ListTree, SlidersHorizontal } from "lucide-react";
+import { ArrowUpDown, Eye, EyeOff, LayoutList, ListTree, Monitor, Moon, SlidersHorizontal, Sun } from "lucide-react";
 import { useTranslations } from "next-intl";
 
 import { SORT_DEFAULT_DIR, useSidebarSort, type FlatSortKey } from "@/lib/agents/sidebar";
+import { normalizeThemeMode, type ThemeMode } from "@/lib/layout/theme-runtime";
 import { useUserSettings } from "@/lib/state/use-user-settings";
 
 import { SidebarIconButton } from "./icon-button";
@@ -50,6 +51,7 @@ export function SidebarSettingsPopover({
   const { sort, setSort } = useSidebarSort();
   const { settings, setSetting } = useUserSettings();
   const showAgentStatus = settings["display.show_agent_status"] === true;
+  const activeTheme: ThemeMode = normalizeThemeMode(settings["display.theme"]);
 
   return (
     <Popover.Root>
@@ -108,6 +110,33 @@ export function SidebarSettingsPopover({
               </button>
             );
           })}
+
+          <div className="px-2 pt-2 pb-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground/70">
+            {t("theme")}
+          </div>
+          <div className={cn("gap-1 p-0.5 rounded bg-sidebar-accent/40", FLEX)} role="group" aria-label={t("theme")}>
+            {([
+              ["system", t("themeSystem"), Monitor],
+              ["light", t("themeLight"), Sun],
+              ["dark", t("themeDark"), Moon],
+            ] as const).map(([mode, label, Icon]) => (
+              <button
+                key={mode}
+                type="button"
+                onClick={activeTheme === mode ? undefined : () => setSetting("display.theme", mode)}
+                aria-pressed={activeTheme === mode}
+                className={cn(
+                  "items-center justify-center gap-1 rounded px-1.5 py-1 text-xs transition-colors",
+                  FLEX,
+                  FLEX_1,
+                  activeTheme === mode ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground",
+                )}
+              >
+                <Icon className="size-3.5" />
+                <span>{label}</span>
+              </button>
+            ))}
+          </div>
 
           <div className="px-2 pt-2 pb-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground/70">
             {t("display")}

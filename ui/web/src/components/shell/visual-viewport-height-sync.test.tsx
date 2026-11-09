@@ -10,7 +10,12 @@ import { cleanup } from "@testing-library/react";
 import { afterEach, expect, it } from "vitest";
 
 import { fakeBrowser, type FakeBrowser } from "@/lib/browser/testing";
-import { KEYBOARD_MIN_VISUAL_VIEWPORT_DELTA_PX, pinnedShellHeight } from "@/lib/browser/viewport";
+import {
+  KEYBOARD_MIN_VISUAL_VIEWPORT_DELTA_PX,
+  pinnedShellHeight,
+  pinnedShellWidth,
+  VIEWPORT_WIDTH_PIN_MIN_DELTA_PX,
+} from "@/lib/browser/viewport";
 import { renderWithBrowser } from "@/test-support/render";
 
 import { VisualViewportHeightSync } from "./visual-viewport-height-sync";
@@ -23,7 +28,11 @@ const LAYOUT_HEIGHT = 800;
 afterEach(() => {
   cleanup();
   document.documentElement.style.height = "";
+  document.documentElement.style.width = "";
+  document.documentElement.style.maxWidth = "";
+  document.documentElement.style.overflowX = "";
   document.documentElement.style.removeProperty("--visual-viewport-height");
+  document.documentElement.style.removeProperty("--visual-viewport-width");
   document.documentElement.style.removeProperty("--safe-area-bottom");
 });
 
@@ -128,4 +137,58 @@ it("decides the pin from the reading alone", () => {
   // meiva:note
   // A caller can raise the threshold without touching the module's own constant.
   expect(pinnedShellHeight({ layoutHeight: layout, visual: { height: 480, scale: 1 } }, 400)).toBeNull();
+});
+
+it("pins the shell width when an unzoomed visual viewport is narrower than a stuck layout viewport (iPad Chrome rotation)", () => {
+  const browser = fakeBrowser({
+    viewport: {
+      layoutHeight: 820,
+      layoutWidth: 1180,
+      visual: { height: 1180, width: 820, scale: 1 },
+    },
+  });
+  const { unmount } = renderWithBrowser(<VisualViewportHeightSync />, { browser });
+
+  expect(document.documentElement.style.width).toBe("820px");
+  expect(document.documentElement.style.maxWidth).toBe("820px");
+  expect(document.documentElement.style.overflowX).toBe("hidden");
+  expect(document.documentElement.style.getPropertyValue("--visual-viewport-width")).toBe("820px");
+  expect(browser.actions.viewportScrollResets).toBe(1);
+
+  browser.answerViewport({
+    layoutHeight: 820,
+    layoutWidth: 1180,
+    visual: { height: 820, width: 1180, scale: 1 },
+  });
+  expect(document.documentElement.style.width).toBe("");
+  expect(document.documentElement.style.maxWidth).toBe("");
+  expect(document.documentElement.style.overflowX).toBe("");
+  expect(document.documentElement.style.getPropertyValue("--visual-viewport-width")).toBe("");
+  expect(browser.actions.viewportScrollResets).toBe(2);
+
+  unmount();
+});
+
+it("decides the width pin from the reading alone", () => {
+  expect(
+    pinnedShellWidth({
+      layoutHeight: 820,
+      layoutWidth: 1180,
+      visual: { height: 1180, width: 820, scale: 1 },
+    }),
+  ).toBe(820);
+  expect(
+    pinnedShellWidth({
+      layoutHeight: 820,
+      layoutWidth: 1180,
+      visual: { height: 1180, width: 1180 - VIEWPORT_WIDTH_PIN_MIN_DELTA_PX, scale: 1 },
+    }),
+  ).toBeNull();
+  expect(
+    pinnedShellWidth({
+      layoutHeight: 820,
+      layoutWidth: 1180,
+      visual: { height: 1180, width: 590, scale: 2 },
+    }),
+  ).toBeNull();
 });

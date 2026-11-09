@@ -27,4 +27,8 @@ export const SYSTEM_THEME: ThemeRuntime = {
     </ThemeProvider>
   ),
   useResolvedTheme: () => useTheme().resolvedTheme,
+  useThemeMode: () => {
+    const { theme, setTheme } = useTheme();
+    return { theme, setTheme };
+  },
 };

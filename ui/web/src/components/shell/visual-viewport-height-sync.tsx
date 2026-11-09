@@ -3,7 +3,7 @@
 import { useEffect } from "react";
 
 import { useBrowser } from "@/lib/browser/browser-provider";
-import { pinnedShellHeight } from "@/lib/browser/viewport";
+import { pinnedShellHeight, pinnedShellWidth } from "@/lib/browser/viewport";
 
 // meiva:note
 // Keeps the app shell in step with the visual viewport while the on-screen keyboard is up (task
@@ -32,16 +32,26 @@ export function VisualViewportHeightSync() {
   const viewport = useBrowser().viewport;
   useEffect(() => {
     const rootStyle = document.documentElement.style;
-    const clearPin = () => {
+    const clearHeightPin = () => {
       rootStyle.height = "";
       rootStyle.removeProperty("--visual-viewport-height");
       rootStyle.removeProperty("--safe-area-bottom");
+    };
+    const clearWidthPin = () => {
+      rootStyle.width = "";
+      rootStyle.maxWidth = "";
+      rootStyle.overflowX = "";
+      rootStyle.removeProperty("--visual-viewport-width");
+    };
+    const clearPin = () => {
+      clearHeightPin();
+      clearWidthPin();
     };
     const sync = () => {
       const reading = viewport.read();
       const pinned = pinnedShellHeight(reading);
       if (pinned === null) {
-        clearPin();
+        clearHeightPin();
       } else {
         // meiva:note
         // CSS `vh`/`dvh` and `position: fixed` resolve against the layout viewport on WebKit,
@@ -52,6 +62,15 @@ export function VisualViewportHeightSync() {
         rootStyle.height = `${pinned}px`;
         rootStyle.setProperty("--visual-viewport-height", `${pinned}px`);
         rootStyle.setProperty("--safe-area-bottom", "0px");
+      }
+      const pinnedWidth = pinnedShellWidth(reading);
+      if (pinnedWidth === null) {
+        clearWidthPin();
+      } else {
+        rootStyle.width = `${pinnedWidth}px`;
+        rootStyle.maxWidth = `${pinnedWidth}px`;
+        rootStyle.overflowX = "hidden";
+        rootStyle.setProperty("--visual-viewport-width", `${pinnedWidth}px`);
       }
       if (reading.visual !== null) {
         viewport.resetScroll();

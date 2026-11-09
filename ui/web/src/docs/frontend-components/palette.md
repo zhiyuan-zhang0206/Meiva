@@ -63,8 +63,6 @@ Neither is cosmetic, and neither is fixed by choosing colours:
 - timestamps use `text-muted-foreground/80`, not `/60` — at 10px, `/60` measured
   3.3–3.6:1, below the 4.5:1 floor for small text.
 
-## What the app cannot do yet
+## Appearance mode (`display.theme`)
 
-There is no in-app light/dark toggle: `next-themes` follows the system, so the two
-reachable states are OS-dark and OS-light. A per-user override would be a new
-setting, not a palette change.
+The color mode (`"system"` | `"light"` | `"dark"`) is persisted in `user_settings` under `display.theme` (default `"system"` in `USER_SETTING_DEFAULTS`) and bridged to `next-themes` (`ThemeRuntime.useThemeMode`) in `ThemedSlots` (`ui/web/src/components/shell/providers.tsx`). Users can switch between `System`, `Light`, and `Dark` in `Control -> Preferences -> General -> Theme` (`ui/web/src/app/control/display/page.tsx`) or from the sidebar quick settings popover (`ui/web/src/components/agent-sidebar/settings-popover.tsx`).

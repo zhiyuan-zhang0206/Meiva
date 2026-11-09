@@ -37,6 +37,12 @@
     "coreNeedsInput": "Agent is waiting on your answer"
   },
   "awaitingReplyDescription": "Show the total number of notices awaiting a reply in the sidebar header.",
+  "theme": "Theme",
+  "appearance": "Appearance",
+  "appearanceDescription": "Follow the system color scheme or force light or dark mode.",
+  "themeSystem": "System",
+  "themeLight": "Light",
+  "themeDark": "Dark",
   "themeDescription": "Choose the interface color palette.",
   "replySuggestionsSummary": "Suggest replies when an agent finishes a turn."
 }
