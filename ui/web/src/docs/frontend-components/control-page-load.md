@@ -1,0 +1,19 @@
+# Settings and Insights first paint
+
+Settings mounts only the selected category. General starts with communication
+style and model preferences, followed by everyday notification, writing and
+appearance settings. Advanced has independent Agent settings, Resources & services,
+and Interface details areas. Machine selection belongs only to resources. Legacy
+machine and display-detail anchors select the corresponding Advanced area; everyday
+preference anchors select General. The header and navigation render immediately. Section bodies and
+field groups still use the idle mount queue, so Advanced does not mount its entire
+field catalog in one frame. Insights retains its vertical anchor layout.
+
+The home sidebar prefetches the Settings route in production; the loading boundary
+shows the Settings title while a cold route arrives. APIs start when their category
+mounts. Unmounting a category stops its polling while query caching supports revisits.
+
+Settings inventories keep implementation metadata out of ordinary rows. Skills
+show the name and enablement control; their source layer still governs editability
+without being displayed. MCP rows omit transport summaries (commands, socket paths
+and endpoint URLs). Plugin descriptions remain visible as capability summaries.

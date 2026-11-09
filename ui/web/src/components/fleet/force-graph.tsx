@@ -47,7 +47,7 @@ import { FLEX, OVERFLOW_HIDDEN } from "@/lib/layout/layout";
 // 4.4 s of main-thread time in the first six seconds at 4x CPU throttle, nearly
 // all of it style/layout rather than script. Below the threshold the live
 // settle stays - a small graph animating into place is the point of it.
-// meiva:link ui/web/src/docs/frontend-components/fleet-view.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/fleet-view.md
 const PREWARM_NODE_THRESHOLD = 200;
 const PREWARM_TICKS = 240;
 
@@ -245,7 +245,7 @@ export const ForceGraph = memo(function ForceGraph({
               // meiva:note
               // The layout's id is the union d3 accepts; only a numeric one can name a node here,
               // and a non-numeric id simply draws nothing.
-              // meiva:link ui/web/src/docs/frontend-components/fleet-view.meiva.okf.md
+              // meiva:link ui/web/src/docs/frontend-components/fleet-view.md
               const n = typeof sim.id === "number" ? nodeById.get(sim.id) : undefined;
               if (!n) return null;
               const r = radiusOf(n.score, maxScore, params.nodeSizeMin, params.nodeSizeMax);

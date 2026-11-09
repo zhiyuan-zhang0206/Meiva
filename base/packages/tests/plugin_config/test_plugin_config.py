@@ -99,7 +99,7 @@ def test_bind_non_basemodel_raises(isolated_registry: dict[str, BaseModel]):
     # meiva:note
     # The deliberately invalid class must reach runtime admission; an annotation
     # cannot replace the binder's rejection before it publishes a config.
-    # meiva:link base/packages/plugins/docs/plugin-config/plugin-config.meiva.okf.md
+    # meiva:link base/packages/plugins/docs/plugin-config/plugin-config.md
     with pytest.raises(TypeError, match="BaseModel subclass"):
         bind_plugin_config(
             PluginConfigOwner(

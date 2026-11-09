@@ -54,7 +54,7 @@ class FakeAppServer:
         # meiva:note
         # A gate a test can hold shut to keep `turn/start` unanswered, so it can push a
         # notification into the window where the turn exists but its name does not.
-        # meiva:link base/lm/harness/docs/attribution.meiva.okf.md
+        # meiva:link base/lm/harness/docs/attribution.md
         self.turn_start_gate: asyncio.Future[None] | None = None
         self.turn_start_id: str | None = None
         self._notification_handler: NotificationHandler | None = None
@@ -124,7 +124,7 @@ class FakeAppServer:
         # The real app-server process ends with the transport; a fake that stayed
         # "alive" would make every close test pay the adapter's settle window and stop
         # modelling the fact the close path checks.
-        # meiva:link base/lm/harness/docs/harness.meiva.okf.md
+        # meiva:link base/lm/harness/docs/harness.md
         if self.probe is not None and self._pid is not None:
             self.probe.reap(self._pid)
         if self._closed_handler is not None:

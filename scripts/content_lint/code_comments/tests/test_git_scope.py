@@ -181,7 +181,7 @@ def test_the_changed_check_reads_only_the_sources_it_selected(
 # Local verification before staging compares tracked working-tree edits against HEAD without
 # grandfathering new prose, while keeping untouched legacy comments in the same file outside strict
 # scope and leaving default `changed` strict about snapshot mismatches.
-# meiva:link scripts/content_lint/code_comments/docs/incremental.meiva.okf.md
+# meiva:link scripts/content_lint/code_comments/docs/incremental.md
 def test_worktree_changed_catches_unstaged_new_prose_while_preserving_legacy_notes(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:

@@ -13,7 +13,7 @@
 #
 # A value this module cannot map is passed through unchanged, and `unknown` is never guessed
 # into an alias. The mapping and its evidence live in `aliases.py`.
-# meiva:link base/docs/configuration/configuration.meiva.okf.md
+# meiva:link base/docs/configuration/configuration.md
 
 from __future__ import annotations
 

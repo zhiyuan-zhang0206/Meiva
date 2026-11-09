@@ -5,7 +5,7 @@ import { isImeComposition, isSendEnter, type KeyStroke } from "./enter-to-send";
 // meiva:note
 // A plain Enter on a mouse or trackpad, as a React keydown hands it over; each case
 // overrides the one field it is about.
-// meiva:link ui/web/src/docs/frontend-components/enter-to-send.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/enter-to-send.md
 function stroke(overrides: Partial<KeyStroke> = {}): KeyStroke {
   return {
     key: "Enter",

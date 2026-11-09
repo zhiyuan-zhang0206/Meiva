@@ -77,7 +77,7 @@ class HostedServiceResources:
 
     # meiva:note
     # Keep a foreground child inside the service join span while its caller classifies its outcome.
-    # meiva:link base/native_process/docs/native_process.meiva.okf.md
+    # meiva:link base/native_process/README.md
     def hold_task(self, scope: HostedTurnResources, task: asyncio.Task[object]) -> None:
         self._require_task_scope(scope)
         self._pending.add(task)
@@ -88,7 +88,7 @@ class HostedServiceResources:
     # Existing turns may create settlement work after service stop begins; `_pending` keeps
     # that actual `Task` inside the join deadline even if its caller returned or raised, while
     # `settled` excludes bounded handled aborts from `failures`.
-    # meiva:link base/native_process/docs/native_process.meiva.okf.md
+    # meiva:link base/native_process/README.md
     def retain_task(
         self,
         scope: HostedTurnResources,

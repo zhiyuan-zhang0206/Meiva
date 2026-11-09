@@ -59,7 +59,7 @@ def _split_top_level(body: str) -> list[str]:
     return parts
 
 
-# meiva:link scripts/audit/docs/schema-drift.meiva.okf.md
+# meiva:link scripts/audit/docs/schema-drift.md
 def schema_columns(sql: str) -> dict[str, list[str]]:
     # meiva:note
     # Every table the DDL creates (and every column it adds), with its columns in order.

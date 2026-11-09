@@ -550,7 +550,7 @@ class TaskUpdated(_Base):
 # renders from this role instead of deriving its own trigger from agent state. The
 # payload is the row just written to `notification_events`, so a reconnecting
 # client deduplicates on `notification_id`.
-# meiva:link base/events/notifications/docs/notifications.meiva.okf.md
+# meiva:link base/events/notifications/README.md
 class NotificationEmitted(_Base):
     role: Literal["notification"] = "notification"
     notification_id: int

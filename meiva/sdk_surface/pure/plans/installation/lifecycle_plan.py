@@ -4,7 +4,7 @@
 # (and the refusal of a first load with no owner to retain), and the failure a rollback ends with.
 # The loader (`extensions.py`) and the installer (`install.py`) read the process and run the
 # effects; these functions only choose.
-# meiva:link meiva/docs/sdk-surface/install-lifetime.meiva.okf.md
+# meiva:link meiva/docs/sdk-surface/install-lifetime.md
 
 from __future__ import annotations
 

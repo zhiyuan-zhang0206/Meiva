@@ -112,7 +112,7 @@ def _gh_api(path: str, *, run: AuditProcess) -> object:
 
 # meiva:note
 # uv audit JSON carries no severity; each advisory id is graded through OSV's reviewed severity, and an advisory OSV cannot grade is unknown and counts as actionable.
-# meiva:link scripts/ci/docs/dependency-audit.meiva.okf.md
+# meiva:link scripts/ci/docs/dependency-audit.md
 def osv_severity(advisory_ids: list[str], fetch: Fetch) -> str:
     for advisory_id in advisory_ids:
         try:
@@ -289,7 +289,7 @@ def _advisory_vulnerability(
     )
 
 
-# meiva:link scripts/ci/docs/dependency-audit.meiva.okf.md
+# meiva:link scripts/ci/docs/dependency-audit.md
 def pnpm_vulnerabilities(
     audit_json: Mapping[str, object], dev_only_roots: frozenset[str] | None = None
 ) -> list[Vulnerability]:
@@ -307,7 +307,7 @@ def pnpm_vulnerabilities(
 
 # meiva:note
 # An audit tool exiting 1 with complete JSON findings is accepted; non-JSON output, an error payload or any other exit code raises as an incomplete audit.
-# meiva:link scripts/ci/docs/dependency-audit.meiva.okf.md
+# meiva:link scripts/ci/docs/dependency-audit.md
 def run_json(argv: list[str], cwd: Path, *, run: AuditProcess) -> dict[str, object]:
     result = run(argv, capture_output=True, text=True, cwd=cwd, timeout=600)
     try:
@@ -323,7 +323,7 @@ def run_json(argv: list[str], cwd: Path, *, run: AuditProcess) -> dict[str, obje
     return parsed
 
 
-# meiva:link scripts/ci/docs/dependency-audit.meiva.okf.md
+# meiva:link scripts/ci/docs/dependency-audit.md
 PINS: tuple[tuple[str, str, str], ...] = (
     ("zonky Postgres", "base/cluster/dataplane/runtime_binaries.py", r'^PG_VERSION = "([^"]+)"'),
     ("pgvector", "base/cluster/dataplane/runtime_binaries.py", r'^PGVECTOR_VERSION = "([^"]+)"'),
@@ -349,7 +349,7 @@ def pinned_version(path: str, pattern: str, root: Path = _REPO_ROOT) -> str:
 
 # meiva:note
 # The zonky Postgres row compares only within the pinned major: a major bump is an expand step, not what the row reports.
-# meiva:link scripts/ci/docs/dependency-audit.meiva.okf.md
+# meiva:link scripts/ci/docs/dependency-audit.md
 def zonky_latest(pinned: str, metadata_xml: str) -> str:
     major = pinned.split(".", 1)[0]
     versions = [match[1] for match in re.finditer(r"<version>([^<]+)</version>", metadata_xml)]
@@ -405,7 +405,7 @@ def latest_binaries(
 
 # meiva:note
 # A run is actionable when any finding is critical, high or unknown, or any pinned binary is behind; a dev-only finding with no forward fix is listed but does not make the run actionable.
-# meiva:link scripts/ci/docs/dependency-audit.meiva.okf.md
+# meiva:link scripts/ci/docs/dependency-audit.md
 def is_actionable(vulnerabilities: list[Vulnerability], binaries: list[Binary]) -> bool:
     return any(
         v.severity in _ACTIONABLE_SEVERITIES and not v.dev_only_no_fix for v in vulnerabilities
@@ -494,7 +494,7 @@ def _system_open(
 
 # meiva:note
 # The one tracked issue is located by its marker among non-pull-request issues, updated while the run is actionable, opened when missing, and closed with a comment when clean.
-# meiva:link scripts/ci/docs/dependency-audit.meiva.okf.md
+# meiva:link scripts/ci/docs/dependency-audit.md
 def sync_issue(repo: str, body: str, *, actionable: bool, gh: Callable[[list[str]], str]) -> str:
     marked = f'select((.body // "") | contains("{MARKER}"))'
     listing = gh(
@@ -556,7 +556,7 @@ def sync_issue(repo: str, body: str, *, actionable: bool, gh: Callable[[list[str
 
 # meiva:note
 # A run renders the marker-prefixed three-section report from the audit tools and the canonical pins, and runs `uv audit` with the uv version pinned in base/host/tool_pins.py.
-# meiva:link scripts/ci/docs/dependency-audit.meiva.okf.md
+# meiva:link scripts/ci/docs/dependency-audit.md
 def main(argv: list[str], *, run: AuditProcess, open_url: UrlOpener) -> int:
     parser = argparse.ArgumentParser(description="Weekly dependency audit report")
     parser.add_argument("--out", type=Path, required=True)

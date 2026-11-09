@@ -14,7 +14,7 @@
 // (graph), Tasks (task graph), Inbox (the unified notice queue) — become
 // full-screen tabs, each filling the viewport, with a tab bar at the bottom to
 // switch between them.
-// meiva:link ui/web/src/docs/frontend-components/fleet-view.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/fleet-view.md
 
 "use client";
 
@@ -88,7 +88,7 @@ export function FleetView({ navigate }: { navigate: (href: Route) => void }) {
   // one of three things: `found` is the stored choice, `absent` leaves the default ("agents")
   // standing, and `unavailable` only means the tab is not remembered across visits — this visit
   // still works.
-  // meiva:link ui/web/src/docs/frontend-state/browser-port.meiva.okf.md
+  // meiva:link ui/web/src/docs/frontend-state/browser-port.md
   const browser = useBrowser();
   const storage = browser.local;
   const navigation = browser.navigation;
@@ -138,7 +138,7 @@ export function FleetView({ navigate }: { navigate: (href: Route) => void }) {
   // `unread_notice_count`), a second derivation of the same fact: the roster holds
   // live agents only, so a terminated owner's open notice counted in the list and
   // not in the badge, and the two numbers disagreed on the same screen.
-  // meiva:link ui/web/src/docs/frontend-components/fleet-view.meiva.okf.md
+  // meiva:link ui/web/src/docs/frontend-components/fleet-view.md
   const noticeFeed = useNotices();
   const inboxCount = useMemo(
     () => noticeFeed.awaiting.length,

@@ -19,7 +19,7 @@ interface AutoExpandTextareaProps
 // rule itself lives in lib/input/enter-to-send.ts. `focusVisible` reaches Textarea.
 // `coarsePointer` is whether the primary pointer is a finger: omitted, this field
 // reads it, and a caller that already knows it passes it in.
-// meiva:link ui/web/src/docs/frontend-components/enter-to-send.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/enter-to-send.md
 export const AutoExpandTextarea = React.forwardRef<
   HTMLTextAreaElement,
   AutoExpandTextareaProps

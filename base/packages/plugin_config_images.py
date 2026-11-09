@@ -1,4 +1,4 @@
-# meiva:link base/packages/plugins/docs/plugin-config/plugin-config.meiva.okf.md
+# meiva:link base/packages/plugins/docs/plugin-config/plugin-config.md
 """Whole plugin config images: validation, revision and one locked atomic writer."""
 
 import hashlib
@@ -18,7 +18,7 @@ from base.packages.plugin_config_contracts import (
 
 
 def config_image_path(plugin: str, *, home: Path) -> Path:
-    # meiva:link base/packages/plugins/docs/plugin-config/plugin-config.meiva.okf.md
+    # meiva:link base/packages/plugins/docs/plugin-config/plugin-config.md
     return home.resolve() / "configs" / plugin / "config.json"
 
 
@@ -39,7 +39,7 @@ class PluginConfigOwner:
 
 @dataclass(frozen=True)
 class DiskPluginConfigImages:
-    # meiva:link base/packages/plugins/docs/plugin-config/plugin-config.meiva.okf.md
+    # meiva:link base/packages/plugins/docs/plugin-config/plugin-config.md
 
     home: Path
 

@@ -4,7 +4,7 @@
 # a borrowed identity, not a native agent loop and not from inside an exec turn. The facts are
 # values the attachment shell reads once from the process, so the refusal is testable without
 # booting one; `subject` names what is being attached in the message.
-# meiva:link meiva/docs/sdk-surface/sdk-surface.meiva.okf.md
+# meiva:link meiva/docs/sdk-surface/sdk-surface.md
 
 from __future__ import annotations
 

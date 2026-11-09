@@ -31,7 +31,7 @@ def descends(controller_pid: int, lineage: ProcessLineage) -> bool:
 # the controller the row names. They are a pure function of the row, the machine, the
 # process lineage and the instant, so the decision is testable without booting a
 # process, and a row that stops qualifying stops the caller at its next action.
-# meiva:link meiva/self/harness/docs/harness-attach.meiva.okf.md
+# meiva:link meiva/self/harness/docs/harness-attach.md
 def require_live_registration(
     registration: HarnessRegistration,
     *,

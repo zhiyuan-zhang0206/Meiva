@@ -1,4 +1,4 @@
-# meiva:link base/deploy/docs/start-trace.meiva.okf.md
+# meiva:link base/deploy/docs/start-trace.md
 # meiva:note
 # `meiva start` is attributed phase by phase; the record is printed only when the
 # run asks for it and is never read to decide anything.

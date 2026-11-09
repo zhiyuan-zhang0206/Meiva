@@ -131,7 +131,7 @@ def validate_stop_reason(final_msg: AIMessage, *, catalog: ModelCatalog) -> None
 # before its terminal frame reports missing-terminal-reason diagnostics, and then reject a
 # missing `usage_metadata` on an otherwise normal terminal frame as `LLMStreamCorruptedError`
 # (agent 113 metadata-loss guard).
-# meiva:link agent/graph/llm/docs/failures-and-retry.meiva.okf.md
+# meiva:link agent/graph/llm/docs/failures-and-retry.md
 def assemble_final_message(chunks: list[AIMessageChunk], *, catalog: ModelCatalog) -> AIMessage:
     accumulated = chunks[0]
     for c in chunks[1:]:

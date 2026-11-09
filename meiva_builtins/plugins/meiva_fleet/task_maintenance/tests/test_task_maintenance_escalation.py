@@ -25,7 +25,7 @@ from meiva_builtins.plugins.meiva_fleet.task_maintenance.tests.failing_writes im
 # asserts reminders and an unchanged task state, never a verdict on the owner: this
 # pass reads task bookkeeping only, and a note restarts the window, so N reminders in a
 # row mean nothing was recorded on the task.
-# meiva:link meiva_builtins/plugins/meiva_fleet/task_maintenance/docs/task-maintenance/escalation.meiva.okf.md
+# meiva:link meiva_builtins/plugins/meiva_fleet/task_maintenance/docs/task-maintenance/escalation.md
 _TASK_TITLE = count(1)
 
 
@@ -107,7 +107,7 @@ def stalled_subtask(db: psycopg.Connection, *, reminder_count: int = 3) -> tuple
 # which is the real shape of the user leg — a top-level task descends from the
 # ownerless system root, so no delegating agent exists to catch the stall and
 # the user is told instead.
-# meiva:link base/events/notifications/docs/notifications.meiva.okf.md
+# meiva:link base/events/notifications/README.md
 def human_leg_subtask(db: psycopg.Connection, *, reminder_count: int = 3) -> tuple[int, int, int]:
     parent = make_task(db, owner=None, remind_interval_seconds=None)
     owner = make_agent(db)
@@ -252,7 +252,7 @@ def test_delegator_escalation_rearms_after_owner_update(
 # Redis outage the transport already models: `publish_best_effort_sync` reports
 # the publication as failed by returning None. The producer must neither record
 # that as delivered nor lose the notice.
-# meiva:link base/events/notifications/docs/notifications.meiva.okf.md
+# meiva:link base/events/notifications/README.md
 class _RecordingBus:
     def __init__(self) -> None:
         self.events: list[dict[str, Any]] = []
@@ -287,7 +287,7 @@ def test_user_escalation_delivers_a_needs_input_notification(
     # one live `notification` event, next to the inbox notice that was already
     # there. The defect: the escalation wrote `agent_notices` and published only
     # an `agent_updated` console refresh, so it never reached a phone or the Mac.
-    # meiva:link base/events/notifications/docs/notifications.meiva.okf.md
+    # meiva:link base/events/notifications/README.md
     owner, tid, _parent = human_leg_subtask(db_conn)
     live: Any = _RecordingBus()
 
@@ -315,7 +315,7 @@ def test_user_escalation_survives_a_lost_announce(
     # and the delivery row are committed before anything is announced, and the
     # outbox sweep publishes that delivery once the transport is back. The stall
     # is delayed, never dropped.
-    # meiva:link base/events/notifications/docs/notifications.meiva.okf.md
+    # meiva:link base/events/notifications/README.md
     owner, _tid, _parent = human_leg_subtask(db_conn)
     live: Any = _RecordingBus()
     live.drop = True
@@ -345,7 +345,7 @@ def test_delegator_escalation_is_not_a_user_notification(
     # The delegator leg stays an agent note: telling an agent about a stalled
     # subtask must not ping the user. The real bus is requested because that leg
     # also opens the owner's inbound wake directly.
-    # meiva:link base/events/notifications/docs/notifications.meiva.okf.md
+    # meiva:link base/events/notifications/README.md
     parent_owner, owner, _tid = stalled_subtask(db_conn)
 
     assert run_escalate(pool, database, event_bus, 3, 0.0) == 1
@@ -361,7 +361,7 @@ def test_delegator_escalation_is_not_a_user_notification(
 # reminders and an unchanged state but may never rule on the owner. An owner that
 # answered in chat and one that is gone look identical to this pass, and the same
 # words serve both (2026-10-30, task #5862).
-# meiva:link meiva_builtins/plugins/meiva_fleet/task_maintenance/docs/task-maintenance/escalation.meiva.okf.md
+# meiva:link meiva_builtins/plugins/meiva_fleet/task_maintenance/docs/task-maintenance/escalation.md
 _VERDICT_WORDS = ("unresponsive", "stalled", "not responding")
 
 

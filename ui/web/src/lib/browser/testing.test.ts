@@ -2,7 +2,7 @@
 // The fake is the port every component test reads through, so it gets the same scrutiny: each
 // capability answers what the test set, records what the component asked, and never touches the
 // real window.
-// meiva:link ui/web/src/docs/frontend-state/browser-port.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-state/browser-port.md
 
 import { describe, expect, it } from "vitest";
 

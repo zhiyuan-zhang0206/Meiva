@@ -14,7 +14,7 @@
 # module of the same package assigns (``models=MODELS``, ``with_fast_variants(PROVIDER,
 # FAST_PRICES)``), so the reader parses every source of the package and follows a module-level
 # name to the literal it names. Nothing is executed either way.
-# meiva:link base/lm/pricing/docs/pricing.meiva.okf.md
+# meiva:link base/lm/pricing/docs/pricing.md
 
 from __future__ import annotations
 

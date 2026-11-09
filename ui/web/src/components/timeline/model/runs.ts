@@ -4,7 +4,7 @@
 // secondary work/context items (including pre-token llmWaiting thinking items)
 // and bare ephemeral markers; groupIntoTurns folds maximal runs of adjacent
 // secondary items into collapsible TurnBlocks.
-// meiva:link ui/web/src/docs/frontend-components/timeline-view/deep-collapse.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/timeline-view/deep-collapse.md
 
 import type { BackendTimelineItem } from "@/lib/contracts/types";
 import { EXTERNAL_AGENT_PREFIX } from "@/lib/format/inbound-source";
@@ -35,7 +35,7 @@ const EN_TURN: TurnTranslator = (key, values) => {
 // meiva:note
 // Mirrors base/agents/messages/envelope.py sender classes: agent:*, external_agent:*,
 // human (user / ui:page:*), and system wake-ups/notices.
-// meiva:link ui/web/src/docs/frontend-components/timeline-view/deep-collapse.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/timeline-view/deep-collapse.md
 export function inboundKind(source: string | null): "human" | "agent" | "external_agent" | "system" {
   const s = source ?? "";
   if (s.startsWith("agent:")) return "agent";
@@ -50,7 +50,7 @@ export type ItemClass = "primary" | "secondary" | "bare";
 // Human inbound messages wrap as "<header>\n\n<body>" on a single leading line
 // (bounded below 200 chars) so the frontend can hide the leading timestamp line
 // on human messages while still sending it to the agent.
-// meiva:link agent/messages/docs/message-format.meiva.okf.md
+// meiva:link agent/messages/docs/message-format.md
 export function splitEnvelope(payload: string): { header: string; body: string } {
   const idx = payload.indexOf("\n\n");
   if (idx > 0 && idx < 200 && !payload.slice(0, idx).includes("\n")) {
@@ -66,7 +66,7 @@ export function splitEnvelope(payload: string): { header: string; body: string }
 // grouping prevents invisible items from splitting adjacent TurnBlocks or
 // mounting empty vertical padding gaps. NoteTag markers are NOT here - every
 // note the agent read now renders (user ruling 2026-11-09).
-// meiva:link ui/web/src/docs/frontend-components/timeline-view/deep-collapse.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/timeline-view/deep-collapse.md
 export function isSilentTimelineItem(item: BackendTimelineItem): boolean {
   if (item.kind === "system_marker" && isSilentMarker(item.source, item.payload)) {
     return true;
@@ -127,7 +127,7 @@ export interface TurnSummary {
   // Sum of committed/frozen block durations (thinkingMs + codeMs + execMs),
   // excluding idle wall-clock gaps across restarts or wake-ups; shared by both
   // "Working for X" (plus live delta) and settled "Worked for X".
-  // meiva:link ui/web/src/docs/frontend-components/timeline-view/timeline-view.meiva.okf.md
+  // meiva:link ui/web/src/docs/frontend-components/timeline-view/timeline-view.md
   readonly workedMs: number;
   readonly lastLiveKind: "reasoning" | "code" | "output" | null;
   readonly lastLiveStartedAt: number;
@@ -191,7 +191,7 @@ export function summarizeTurn(items: readonly BackendTimelineItem[]): TurnSummar
       // meiva:note
       // `attach` and non-user-facing `agent_chat` (internal background-wake notes)
       // land here so every secondary member contributes to a non-empty summary count.
-      // meiva:link ui/web/src/docs/frontend-components/timeline-view/timeline-view.meiva.okf.md
+      // meiva:link ui/web/src/docs/frontend-components/timeline-view/timeline-view.md
       systemNotes += 1;
     }
   }
@@ -265,7 +265,7 @@ export function formatTurnSummary(summary: TurnSummary, t: TurnTranslator = EN_T
   // meiva:note
   // Omit the ever-present system prompt from the collapsed turn label while
   // keeping compact summaries, memories, system notes, and agent messages in sentence case.
-  // meiva:link ui/web/src/docs/frontend-components/timeline-view/timeline-view.meiva.okf.md
+  // meiva:link ui/web/src/docs/frontend-components/timeline-view/timeline-view.md
   if (summary.compactSummaries > 0) {
     parts.push(
       summary.compactSummaries === 1

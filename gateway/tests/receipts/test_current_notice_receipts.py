@@ -67,7 +67,7 @@ def test_original_snapshot_survives_a_later_close_and_deletion(
     # One open notice per agent (user ruling 2026-10-21) means a later post cannot
     # replace this row, so the edit branch reaches the same state by closing it
     # explicitly: the observed row is no longer current either way.
-    # meiva:link gateway/agents/docs/notice-receipts.meiva.okf.md
+    # meiva:link gateway/agents/docs/notice-receipts.md
     if not dismiss:
         closed = client.post(
             f"/api/keyed/v1/agents/{agent}/notices/{notice}/resolve",
@@ -80,7 +80,7 @@ def test_original_snapshot_survives_a_later_close_and_deletion(
         # meiva:note
         # Dismiss is idempotent: the observed row is already closed, so a fresh key
         # answers 200 with that closed row instead of a 409 (user ruling 2026-10-22).
-        # meiva:link gateway/agents/docs/notice-receipts.meiva.okf.md
+        # meiva:link gateway/agents/docs/notice-receipts.md
         assert fresh.status_code == 200, fresh.text
         assert fresh.json()["resolved_at"] is not None
     else:
@@ -278,7 +278,7 @@ def test_creation_waits_for_guarded_owner_lock(
         # meiva:note
         # The creation still waits for the edit's transaction, then finds the row
         # open and is refused (one open notice per agent, user ruling 2026-10-21).
-        # meiva:link gateway/agents/docs/notice-receipts.meiva.okf.md
+        # meiva:link gateway/agents/docs/notice-receipts.md
         assert later.result(timeout=10).status_code == 409
     assert db_conn.execute(
         "SELECT title FROM agent_notices WHERE agent_id=%s AND resolved_at IS NULL", (agent,)
@@ -319,7 +319,7 @@ def test_dismissing_a_closed_notice_is_idempotent(
     # The second dismiss reaches a state the caller asked for, so it succeeds and
     # records its own acceptance; the resolution event is published once, by the
     # call that actually closed the row.
-    # meiva:link gateway/agents/docs/notice-receipts.meiva.okf.md
+    # meiva:link gateway/agents/docs/notice-receipts.md
     agent = seed_agent(db_conn)
     notice = insert_notice(db_conn, agent, "A")
     first = _send(client, agent, notice, True)
@@ -332,7 +332,7 @@ def test_dismissing_a_closed_notice_is_idempotent(
     ).fetchone() == (2,)
     # meiva:note
     # An edit of the same closed row is still refused: it cannot be applied.
-    # meiva:link gateway/agents/docs/notice-receipts.meiva.okf.md
+    # meiva:link gateway/agents/docs/notice-receipts.md
     assert _send(client, agent, notice, False, title="later").status_code == 409
 
 

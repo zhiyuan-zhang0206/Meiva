@@ -93,7 +93,7 @@ const EMPTY_GRAPH: WireFleetGraph = {
 // fails), and the roster cache holds the agents the view resolves lineage against. Both enter the
 // same providers the app mounts, so no hook module is replaced; the settings cache is seeded empty
 // so the force sliders read defaults instead of fetching.
-// meiva:link ui/web/src/docs/frontend-components/fleet-view.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/fleet-view.md
 function renderGraph(
   ui: ReactElement,
   {
@@ -342,7 +342,7 @@ describe("GraphView lineage, hover, and empty states", () => {
 
     // meiva:note
     // Leaving the node without crossing onto the card waits out the grace window and then hides.
-    // meiva:link ui/web/src/docs/frontend-components/fleet-view.meiva.okf.md
+    // meiva:link ui/web/src/docs/frontend-components/fleet-view.md
     fireEvent.mouseLeave(group);
     await waitFor(() => expect(screen.queryByRole("tooltip")).toBeNull());
   });

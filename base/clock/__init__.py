@@ -1,4 +1,4 @@
-# meiva:link base/clock/docs/clock.meiva.okf.md
+# meiva:link base/clock/README.md
 from __future__ import annotations
 
 import asyncio

@@ -4,7 +4,7 @@
 # (base/agents/messages/reply_intent.py) and the NoteTag value set (base/agents/messages/kwargs.py).
 # The frontend imports the generated file, so the two sides cannot drift apart. Run it after
 # changing a source, or let pre-commit's `constants-codegen-fresh` hook fail on drift.
-# meiva:link base/agents/messages/docs/metadata-contracts.meiva.okf.md
+# meiva:link base/agents/messages/docs/metadata-contracts.md
 
 from __future__ import annotations
 

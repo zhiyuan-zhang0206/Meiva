@@ -1,4 +1,4 @@
-# meiva:link meiva_builtins/plugins/docs/plugins.meiva.okf.md
+# meiva:link meiva_builtins/plugins/README.md
 from __future__ import annotations
 
 from typing import TYPE_CHECKING

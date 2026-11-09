@@ -29,7 +29,7 @@ import { HomePageView } from "./home-view";
 // props alone, and a test drives it by passing the values and the children it wants to watch
 // instead of replacing a module. Keep hook reads here; keep anything that decides what the
 // surface shows out of this function.
-// meiva:link ui/web/src/docs/frontend-state/frontend-state.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-state/frontend-state.md
 export default function HomePage() {
   return (
     <AgentEventStreamProvider>
@@ -42,7 +42,7 @@ export default function HomePage() {
 // The wiring sits under <AgentEventStreamProvider>: the timeline, token usage and pending-message
 // reads subscribe to the active agent's event stream, and a provider cannot supply a read its own
 // component makes.
-// meiva:link ui/web/src/docs/frontend-state/frontend-state.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-state/frontend-state.md
 function HomePageWiring() {
   const showToast = useStore((state) => state.showToast);
   const focusComposer = useStore((state) => state.focusComposer);
@@ -62,7 +62,7 @@ function HomePageWiring() {
   const timeline = useTimeline(agents.activeId, showError, agents.activeAgent?.status);
   // meiva:note
   // Populates `useTimelineStore` token-usage fields read by InspectorPanel's Context section.
-  // meiva:link ui/web/src/docs/frontend-components/inspector/section-details/section-details.meiva.okf.md
+  // meiva:link ui/web/src/docs/frontend-components/inspector/section-details/section-details.md
   useTokenUsage(agents.activeId, showError);
   const store = useMemo(
     () => ({ focusComposer, composerFocusToken, setMobileSidebarOpen }),

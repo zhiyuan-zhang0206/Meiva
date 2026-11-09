@@ -56,7 +56,7 @@ export const STATUS_POPOVER_CLASS =
 // quotas) sits in its own unwindowed section above the `Usage` block, matching the
 // Inspector panel's separation between live state and windowed metrics so the window
 // selector only governs the time-aggregated grid below.
-// meiva:link ui/web/src/docs/frontend-components/agent-sidebar.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/agent-sidebar.md
 export function StatusCards({
   stats,
   error,
@@ -121,7 +121,7 @@ export function StatusCards({
     // rendered, `$0.00` included (user ruling 2026-11-08): "no API spend" and "no subscription
     // call" are answers a reader asked for, and hiding a zero half would make the pair look like
     // the one number it replaced. The inspector does the opposite — it hides a zero block.
-    // meiva:link ui/web/src/docs/frontend-components/agent-sidebar.meiva.okf.md
+    // meiva:link ui/web/src/docs/frontend-components/agent-sidebar.md
     {
       label: t("costApi"),
       value: windowMismatch
@@ -258,7 +258,7 @@ export function StatusCards({
             // meiva:note
             // The select offers exactly the known windows, so the pick is looked up in that list: a
             // value the list does not hold changes nothing rather than being asserted into the type.
-            // meiva:link ui/web/src/docs/frontend-components/agent-sidebar.meiva.okf.md
+            // meiva:link ui/web/src/docs/frontend-components/agent-sidebar.md
             onChange={(v) => {
               const picked = STATS_WINDOWS.find((h) => String(h) === v);
               if (picked !== undefined) onWindowChange(picked);
@@ -311,7 +311,7 @@ export function StatusCards({
 // row exists yet (no credential, or no refresh has run); `stale` dims a value
 // whose last write is old, so a stopped refresh cannot pass for a fresh one —
 // the age itself rides the tooltip.
-// meiva:link ui/web/src/docs/frontend-components/agent-sidebar.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/agent-sidebar.md
 function PluginStatCard({ card }: { card: PluginStatCardModel }) {
   const t = useTranslations("sidebar");
   const now = useWallDate();
@@ -359,7 +359,7 @@ function PluginStatCard({ card }: { card: PluginStatCardModel }) {
 // opens a small popover panel) on the left, and the four nav shortcuts
 // (Memory Graph / Fleet / Insights / Control) on the right. These moved here
 // from the header bar; the collapsed rail keeps icon-only versions.
-// meiva:link ui/web/src/docs/frontend-components/agent-sidebar.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/agent-sidebar.md
 export function SidebarFooter({ activeAgentId }: { activeAgentId: number | null }) {
   const t = useTranslations("sidebar");
   const navT = useTranslations("nav");
@@ -376,7 +376,7 @@ export function SidebarFooter({ activeAgentId }: { activeAgentId: number | null 
     // nothing here is derived from the composer's band — no shared primitive,
     // no minimum row height borrowed from the composer's controls, and no
     // tracking of the composer's measured height (user report 2026-10-29).
-    // meiva:link ui/web/src/docs/frontend-components/home-shell-chrome/bottom-rules.meiva.okf.md
+    // meiva:link ui/web/src/docs/frontend-components/home-shell-chrome/bottom-rules.md
     <div
       data-testid="sidebar-footer"
       className="border-t border-border px-2 py-1"
@@ -470,13 +470,13 @@ function SidebarNavButton({
 // meiva:note
 // Windowed Warning / Error event totals, presented like the other status cards.
 // Formal Grafana alerts have their own header badge and history.
-// meiva:link ui/web/src/docs/frontend-components/alert-classes.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/alert-classes.md
 // meiva:note
 // The pair counts only classes that still need attention: the server resolves a class that
 // stopped happening, so a pulse that ended hours ago cannot keep this badge red (user ruling
 // 2026-11-08). What it does count stays visible, and the tooltip names the resolved events, so a
 // pair that fell from "3000 / 64" to "0 / 0" is accountable rather than mysterious.
-// meiva:link ui/web/src/docs/frontend-components/agent-sidebar.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/agent-sidebar.md
 function WarningErrorCard({
   stats,
   placeholder,

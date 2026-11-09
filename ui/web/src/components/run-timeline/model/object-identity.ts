@@ -1,6 +1,6 @@
 // meiva:note
 // Response objects from the query cache are immutable, so their identity — not their fields — is what makes a cache of a pure function over them exact: two payloads that agree on snapshot and window but differ in content still key apart.
-// meiva:link ui/web/src/docs/frontend-components/run-timeline/window-reads.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/run-timeline/window-reads.md
 const ids = new WeakMap<object, number>();
 let nextId = 1;
 

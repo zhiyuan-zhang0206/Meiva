@@ -136,7 +136,7 @@ ACCESSIBILITY_ITEM = PermissionItem(
 # tailnet (100.64/10) connection. A LIVE_EVENT row is reported, never read:
 # `probe.grant_for` answers UNKNOWN for it, which does not block the gate, and no helper
 # capability can report it before that first packet (#5541).
-# meiva:link base/host/permissions_helper/grants/docs/grants.meiva.okf.md
+# meiva:link base/host/permissions_helper/grants/README.md
 LOCAL_NETWORK_ITEM = PermissionItem(
     id="local-network",
     group="desktop",

@@ -33,7 +33,7 @@
 # feed and its entries are, which entries a run takes and what each becomes are values in
 # `rss_post.py` and `rss_plan.py`. How the run reaches the web is an `RssConfig` the composition
 # root (`main`) builds from the environment.
-# meiva:link meiva_builtins/skills/integrations/web-sources/docs/web-sources.meiva.okf.md
+# meiva:link meiva_builtins/skills/integrations/web-sources/README.md
 
 from __future__ import annotations
 

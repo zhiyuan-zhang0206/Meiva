@@ -8,7 +8,7 @@
 # Synchronization preserves the complete lattice: effective periods, input-token tiers and
 # recurring UTC windows. The flat ``PriceRates`` fields remain the base tier covering the
 # synchronization instant.
-# meiva:link base/lm/pricing/docs/pricing.meiva.okf.md
+# meiva:link base/lm/pricing/docs/pricing.md
 
 from __future__ import annotations
 
@@ -597,7 +597,7 @@ def sync_plugin_rates(
 # in the tree changed; it is compared only where it is the whole declaration, on a provider that
 # carries no periods, and otherwise required to name a base tier this model's archive states.
 # Zero provider faces, zero scanned sources or zero priced models is an error, never a green run.
-# meiva:link base/lm/pricing/docs/pricing.meiva.okf.md
+# meiva:link base/lm/pricing/docs/pricing.md
 def lattice_drift(archive_path: Path, repo_root: Path) -> LatticeDrift:
     root = repo_root.resolve(strict=True)
     archive = _regular_file(archive_path, root, label="pricing archive")

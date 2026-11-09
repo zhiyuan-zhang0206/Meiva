@@ -31,7 +31,7 @@ _INSERT = (
 # accepted the publication. The pending scan is oldest first and never takes a row
 # a producer staged moments ago, so a sweep cannot duplicate an announce that is
 # still in flight.
-# meiva:link base/events/notifications/docs/notifications.meiva.okf.md
+# meiva:link base/events/notifications/README.md
 _SELECT_UNANNOUNCED = (
     "SELECT id, category, subject, body, href, importance, agent_id "
     "FROM notification_events WHERE id = %s AND announced_at IS NULL"
@@ -48,7 +48,7 @@ _MARK_ANNOUNCED = (
 # The recovery read: the newest deliveries after a client cursor, so a client that
 # was offline catches up instead of losing the live event. Newest-first because
 # the cap must drop the OLDEST row of a long gap, not the most recent one.
-# meiva:link base/events/notifications/docs/notifications.meiva.okf.md
+# meiva:link base/events/notifications/README.md
 _SELECT_RECENT = (
     "SELECT id, category, subject, body, href, importance, agent_id, created_at "
     "FROM notification_events WHERE id > %s ORDER BY id DESC LIMIT %s"

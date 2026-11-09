@@ -9,7 +9,7 @@
 // declared defaults, which is the frame the library renders with nothing stored at all; the
 // distinction still matters on the write side, where the port reports whether the layout was
 // kept.
-// meiva:link ui/web/src/docs/frontend-state/browser-port.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-state/browser-port.md
 
 import { useMemo } from "react";
 import type { LayoutStorage } from "react-resizable-panels";

@@ -1,5 +1,5 @@
-# meiva:link agent/graph/docs/context-notes/context-notes.meiva.okf.md
-# meiva:link agent/graph/docs/harness-turn.meiva.okf.md
+# meiva:link agent/graph/docs/context-notes/context-notes.md
+# meiva:link agent/graph/docs/harness-turn.md
 
 from __future__ import annotations
 
@@ -219,7 +219,7 @@ def _build_grounded_handoff(ctx: MeivaContext, *, agent_id: int) -> Handoff:
     )
 
 
-# meiva:link agent/graph/docs/context-notes/context-notes.meiva.okf.md
+# meiva:link agent/graph/docs/context-notes/context-notes.md
 async def init_context_node(
     state: _state.AgentState,
     runtime: Runtime[MeivaContext],
@@ -288,7 +288,7 @@ async def init_context_node(
             )
         )
 
-        # meiva:link agent/graph/docs/harness-turn.meiva.okf.md
+        # meiva:link agent/graph/docs/harness-turn.md
         if runtime.context.harness is not Harness.MEIVA:
             return await _establish_external_harness_context(
                 runtime.context,

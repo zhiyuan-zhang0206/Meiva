@@ -1,4 +1,4 @@
-# meiva:link gateway/docs/error-responses-and-middleware-order.meiva.okf.md
+# meiva:link gateway/docs/error-responses-and-middleware-order.md
 from collections.abc import Generator
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
@@ -257,7 +257,7 @@ def test_missing_or_wrong_admission_headers_cannot_write(
     assert _counts(db_conn) == before
 
 
-# meiva:link gateway/docs/error-responses-and-middleware-order.meiva.okf.md
+# meiva:link gateway/docs/error-responses-and-middleware-order.md
 def test_revoked_principals_cannot_replay(
     client: GatewayTestClient,
     db_conn: psycopg.Connection,

@@ -4,7 +4,7 @@
 # The effect shell of `meizel.graph.universe`: the universe holds what a checkout contains, this
 # module is the only place that runs git against it, reads a file from it, or writes one back.
 # `mode = "none"` in `meizel/meizel.toml` records that split.
-# meiva:link meizel/docs/checker/purity.meiva.okf.md
+# meiva:link meizel/docs/checker/purity.md
 
 from __future__ import annotations
 

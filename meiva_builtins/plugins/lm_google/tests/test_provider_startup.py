@@ -7,7 +7,7 @@
 # Guard shape: the assertion reads this module's own AST rather than `sys.modules` or a timer.
 # A sibling test that imports the SDK would make a `sys.modules` check pass vacuously, and a
 # wall-clock threshold is the wrong instrument for "did this import happen at module scope".
-# meiva:link base/lm/docs/provider-plugins.meiva.okf.md
+# meiva:link base/lm/docs/provider-plugins.md
 
 from __future__ import annotations
 

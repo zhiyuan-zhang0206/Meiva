@@ -53,7 +53,7 @@ export interface SpanItem {
 
 // meiva:note
 // Only the run of items that can intersect the view is projected (`visibleRun`): the rows arrive sorted by `u0`, so a binary search finds the first candidate and the walk back covers an item that began before the view but still covers it. A pan therefore costs what is on screen, not what is loaded behind it: laying out a 52 000-unit deep zoom-out took ~190 ms per viewport sample (user report 2026-10-19). The placements also need no sort, because the axis is linear and the rows are already in `u0` order.
-// meiva:link ui/web/src/docs/frontend-components/run-timeline/axis-and-keyboard.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/run-timeline/axis-and-keyboard.md
 export function layoutSpans(
   items: readonly SpanItem[],
   view: Viewport,

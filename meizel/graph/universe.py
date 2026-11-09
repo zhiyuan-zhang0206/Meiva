@@ -3,7 +3,7 @@
 #
 # Data only. `meizel.checkout` builds one from a checkout, runs git for it, and reads the files the
 # universe names; nothing here touches the filesystem.
-# meiva:link meizel/docs/checker/purity.meiva.okf.md
+# meiva:link meizel/docs/checker/purity.md
 
 from __future__ import annotations
 
@@ -75,7 +75,7 @@ def parent_of(path: str) -> str:
 # does over them; every other field takes the path it is asked about, so a tree also answers for a
 # directory outside its root. `tracked` is `meizel.checkout.tracked_files` bound to `root`: its
 # keyword arguments (`include_untracked`, `regular`) stay the shell's.
-# meiva:link meizel/docs/lint/lint-common-admission.meiva.okf.md
+# meiva:link meizel/docs/lint/lint-common-admission.md
 @dataclass(frozen=True, slots=True)
 class SourceTree:
     root: Path

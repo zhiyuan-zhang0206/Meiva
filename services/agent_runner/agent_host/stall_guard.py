@@ -61,7 +61,7 @@ class TurnStallTimeoutError(RuntimeError):
 # meiva:note
 # Retrieve a finished foreground invocation's result, recording only unsettled errors into
 # `HostedServiceResources` so handled turn aborts do not fail daemon shutdown.
-# meiva:link services/docs/agent_runner_side/agent_runner_side.meiva.okf.md
+# meiva:link services/docs/agent_runner_side/agent_runner_side.md
 def _unwrap_invocation_result(
     service: HostedServiceResources,
     scope: HostedTurnResources,

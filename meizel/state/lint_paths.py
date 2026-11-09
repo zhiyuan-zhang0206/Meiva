@@ -2,7 +2,7 @@
 # What both config-read rules share about the paths they scan: how a path is labelled in a finding,
 # and which explicit targets are Python files the scan reads. The shells resolve, walk and read;
 # nothing here touches the filesystem.
-# meiva:link meizel/docs/meizel.meiva.okf.md
+# meiva:link meizel/docs/meizel.md
 
 from __future__ import annotations
 

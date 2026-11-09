@@ -224,7 +224,7 @@ def init_telemetry(
 # reader through that binding, so an owner uses this to decide whether its own diagnostic is
 # reportable — a process with no pipeline (a watcher child, a one-shot script) has nowhere
 # for it to go (#5578).
-# meiva:link base/telemetry/otlp/docs/telemetry-otlp/exit-flush.meiva.okf.md
+# meiva:link base/telemetry/otlp/docs/telemetry-otlp/exit-flush.md
 def pipeline_bound() -> bool:
     return process_state["pipeline"] is not None
 
@@ -399,7 +399,7 @@ def prepare_event(
 # one. It is an absence, not a failure: `emit_prepared` drops the event and says so once per
 # process, exactly as it does when no producer was supplied at all, and it says the two causes
 # apart. Anything else a producer raises stays a sink failure and keeps its traceback.
-# meiva:link base/telemetry/docs/telemetry.meiva.okf.md
+# meiva:link base/telemetry/README.md
 class NoPipelineFactoryError(RuntimeError): ...
 
 
@@ -431,7 +431,7 @@ _UNBOUND_MESSAGES = {
 # is: one line per process naming the first `event_name` it cost. A raise is one edit away from
 # failing the write, and a traceback per event reads as a broken sink. A producer that is
 # supplied and then fails stays a sink failure, reported exactly as before.
-# meiva:link base/telemetry/docs/telemetry.meiva.okf.md
+# meiva:link base/telemetry/README.md
 def emit_prepared(
     event: Event,
     *,
@@ -463,7 +463,7 @@ def emit_prepared(
 # "nothing happened" or a traceback per event that reads as a broken sink. The cause is part of
 # the line: a process that was given no producer and a client set that cannot build one are
 # different mistakes to go and fix.
-# meiva:link base/telemetry/docs/telemetry.meiva.okf.md
+# meiva:link base/telemetry/README.md
 def _report_unbound_emission(reason: str, event_name: str) -> None:
     said = process_state["emission_skipped_said"]
     if reason in said:

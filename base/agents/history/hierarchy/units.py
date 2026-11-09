@@ -283,7 +283,7 @@ def _inbound_content(msg: BaseMessage) -> str:
     # source, without the envelope's closing tag. Every inbound records the offset and a
     # message without it raises `ValueError`; a missing source renders like the user's (see
     # `_inbound_type`) and carries no closing tag.
-    # meiva:link agent/messages/docs/message-format.meiva.okf.md
+    # meiva:link agent/messages/docs/message-format.md
     kwargs = read_meiva_kwargs(msg)
     start = kwargs.get("meiva_inbound_body_start")
     if start is None:

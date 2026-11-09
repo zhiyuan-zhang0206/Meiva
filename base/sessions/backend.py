@@ -61,7 +61,7 @@ class PosixProcSessionBackend(SessionBackend):
     ) -> bool:
         # meiva:note
         # Login-shell native sessions always exec the outer shell and exec the inner shell only when exec_cmd=True. They pass the caller's complete environment separately from argv. Without login_shell the command is forwarded unchanged.
-        # meiva:link base/sessions/docs/session-backend.meiva.okf.md
+        # meiva:link base/sessions/docs/session-backend.md
         cmd = self.format_command(cmd, cwd, login_shell=login_shell, exec_cmd=exec_cmd)
         from base.sessions import posixproc
 
@@ -77,7 +77,7 @@ class PosixProcSessionBackend(SessionBackend):
     ) -> tuple[bool, str]:
         # meiva:note
         # The native backend accepts the shared expected keyword without changing its supervisor's kill verdict. It has no separate force-escalation warning to quiet.
-        # meiva:link base/sessions/docs/session-backend.meiva.okf.md
+        # meiva:link base/sessions/docs/session-backend.md
         del expected
         from base.sessions import posixproc
 
@@ -129,7 +129,7 @@ class PtySessionBackend(SessionBackend):
     ) -> bool:
         # meiva:note
         # PTY sessions require a login shell, carry the child environment through the service request, and report service allocation refusal as False. The shared exec_cmd parameter is intentionally unused because an interactive shell stays alive.
-        # meiva:link base/sessions/docs/session-backend.meiva.okf.md
+        # meiva:link base/sessions/docs/session-backend.md
         if not login_shell:
             raise NotImplementedError(f"{type(self).__name__} only creates login shells")
         try:
@@ -142,7 +142,7 @@ class PtySessionBackend(SessionBackend):
     def service_available(self) -> bool:
         # meiva:note
         # The generation probe is the one question an absent service answers differently: `list` and `has` report an absent service as "no sessions", so a caller that read those would admit nothing and still call the service healthy. A live service always reports a generation.
-        # meiva:link base/sessions/docs/session-backend.meiva.okf.md
+        # meiva:link base/sessions/docs/session-backend.md
         return client.host_generation(socket_path=self._config.socket_path) is not None
 
     def send(self, name: str, text: str) -> None:
@@ -166,7 +166,7 @@ class PtySessionBackend(SessionBackend):
 
     @staticmethod
     def _call[T](op: str, name: str, call: Callable[..., T], *args: object, **kwargs: object) -> T:
-        # meiva:link base/sessions/docs/session-backend.meiva.okf.md
+        # meiva:link base/sessions/docs/session-backend.md
         try:
             return call(*args, **kwargs)
         except (client.ServiceError, client.ServiceUnavailableError) as exc:
@@ -193,7 +193,7 @@ class PtySessionBackend(SessionBackend):
         timeout: float = 15.0,
         expected: bool = False,
     ) -> tuple[bool, str, bool]:
-        # meiva:link base/sessions/docs/session-backend.meiva.okf.md
+        # meiva:link base/sessions/docs/session-backend.md
         del timeout, expected
         try:
             verdict = client.kill(name, graceful=graceful, socket_path=self._socket)
@@ -211,7 +211,7 @@ class PtySessionBackend(SessionBackend):
     def session_started_ats(self, names: list[str]) -> dict[str, float | None]:
         # meiva:note
         # A timestamp batch answers every requested name from one service listing; absent names map to None and an empty request returns an empty mapping.
-        # meiva:link base/sessions/docs/session-backend.meiva.okf.md
+        # meiva:link base/sessions/docs/session-backend.md
         if not names:
             return {}
         started = {
@@ -225,7 +225,7 @@ class PtySessionBackend(SessionBackend):
                 return info.generation
         return None
 
-    # meiva:link base/sessions/docs/host-generation.meiva.okf.md
+    # meiva:link base/sessions/docs/host-generation.md
     def host_generation(self) -> str | None:
         return client.host_generation(socket_path=self._socket)
 
@@ -233,7 +233,7 @@ class PtySessionBackend(SessionBackend):
         return logs_path(self._home) / f"{name}.out.log"
 
 
-# meiva:link base/sessions/docs/session-backend.meiva.okf.md
+# meiva:link base/sessions/docs/session-backend.md
 def helper_spawn_enabled(*, macos: bool = is_macos()) -> bool:
     if not macos:
         return False
@@ -248,14 +248,14 @@ def helper_spawn_enabled(*, macos: bool = is_macos()) -> bool:
         return False
 
 
-# meiva:link base/sessions/docs/session-backend.meiva.okf.md
+# meiva:link base/sessions/docs/session-backend.md
 def get_backend(*, timers: Timers, home: Path, macos: bool = is_macos()) -> SessionBackend:
     if helper_spawn_enabled(macos=macos):
         return HelperProcSessionBackend(partial(helper_client, home=home), timers, home)
     return PosixProcSessionBackend(timers, home)
 
 
-# meiva:link base/sessions/docs/session-backend.meiva.okf.md
+# meiva:link base/sessions/docs/session-backend.md
 def get_shell_backend(*, home: Path) -> SessionBackend:
     # meiva:note
     # The shell backend of `home`: the PTY service listening under its run directory, and the

@@ -29,7 +29,7 @@ class ModelPricing(BaseModel):
 
 # meiva:note
 # One model and its reasoning-effort ladder probed live from an external harness CLI.
-# meiva:link base/agents/docs/harness/harness-models.meiva.okf.md
+# meiva:link base/agents/docs/harness/harness-models.md
 class HarnessModelOption(BaseModel):
     id: str
     reasoning_effort_options: list[str] = Field(default_factory=list)
@@ -42,7 +42,7 @@ class HarnessModelOption(BaseModel):
 # is this build's answer to "can a session actually be started on it there" —
 # a harness can be installed and signed in and still not launchable, and the
 # spawn form says so instead of letting the choice look usable.
-# meiva:link base/agents/docs/harness/harness.meiva.okf.md
+# meiva:link base/agents/docs/harness/harness.md
 class HarnessAvailability(BaseModel):
     harness: Harness
     status: HarnessStatus
@@ -51,7 +51,7 @@ class HarnessAvailability(BaseModel):
     # meiva:note
     # How this harness bills: `api` is metered per token and its rates are worth
     # showing while a model is chosen, `subscription` is not (user 2026-10-20).
-    # meiva:link base/agents/docs/harness/harness.meiva.okf.md
+    # meiva:link base/agents/docs/harness/harness.md
     billing: HarnessBilling
     models: list[HarnessModelOption] = Field(default_factory=list)
 

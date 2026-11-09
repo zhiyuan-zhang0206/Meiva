@@ -1,6 +1,6 @@
 # meiva:note
 # Score a judge against a balanced case set next to the two trivial baselines: accuracy must strictly beat max(always-pass, always-fail), and "uncertain" counts as neither correct nor caught so abstaining cannot inflate the score.
-# meiva:link meiva_builtins/skills/platform/meiva-self-evolution/docs/meiva-self-evolution.meiva.okf.md
+# meiva:link meiva_builtins/skills/platform/meiva-self-evolution/docs/meiva-self-evolution.md
 
 from __future__ import annotations
 

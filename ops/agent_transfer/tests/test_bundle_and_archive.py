@@ -1,7 +1,7 @@
 # meiva:note
 # Unit and filesystem tests for deterministic `MEIVA_WS_V1` workspace packing, safe extraction
 # without `extractall`, symlink ancestor escape protection, quota enforcement, and atomic rollback.
-# meiva:link gateway/agents/docs/agent-transfer.meiva.okf.md
+# meiva:link gateway/agents/docs/agent-transfer.md
 
 from __future__ import annotations
 

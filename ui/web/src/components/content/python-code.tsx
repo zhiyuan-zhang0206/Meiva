@@ -1,6 +1,6 @@
 // meiva:note
 // Python code block with syntax highlighting, a copy button and a streaming cursor on the last line. React.memo skips re-highlighting while `code` / `streaming` are unchanged, which matters during streaming: Prism tokenization is this component's main CPU cost. The ~85KB highlighter must stay out of the first-load bundle, so one shared lazy chunk carries it — every code block reads that chunk from context, and the prefetch triggers (a card header's pointer-enter/focus intent, CodeHighlighterPreloader's idle callback, the schedules row's expand button) warm the same chunk ahead of the click that needs it. Until it resolves the block renders plain source with the copy control; a rejected load drops the attempt so the next mount retries.
-// meiva:link ui/web/src/docs/frontend-components/code-blocks.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/code-blocks.md
 "use client";
 
 import { createContext, memo, useContext, useEffect, useState, type ReactNode } from "react";
@@ -59,7 +59,7 @@ interface Props {
   // Offer the hover Copy control. A surface that shows code as the agent's
   // machinery rather than as text to reuse — the timeline's tool-call block —
   // passes false (user 2026-10-29: Copy marks messages, not tool calls).
-  // meiva:link ui/web/src/docs/frontend-components/code-blocks.meiva.okf.md
+  // meiva:link ui/web/src/docs/frontend-components/code-blocks.md
   copy?: boolean;
 }
 
@@ -120,7 +120,7 @@ export const PythonCode = memo(function PythonCode({ code, streaming = false, co
 // Rendered while the highlighter chunk is still loading — plain, unhighlighted
 // source rather than a blank body, so the code and, on a surface that offers it,
 // its copy control are available immediately.
-// meiva:link ui/web/src/docs/frontend-components/code-blocks.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/code-blocks.md
 function PlainCode({ code, streaming, copy = true }: Props) {
   return (
     <div className="group relative">

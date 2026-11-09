@@ -14,7 +14,7 @@ from base.host.boundary.untyped import object_of
 # The record lives in wal-gaps.json beside this module, so adding one is a
 # reviewed change rather than a verifier setting: the chain check keeps failing
 # for every gap the file does not name.
-# meiva:link services/backup/walg/docs/walg-tick.meiva.okf.md
+# meiva:link services/backup/walg/docs/walg-tick.md
 RECORDED_GAPS_PATH = Path(__file__).with_name("wal-gaps.json")
 
 _SEGMENT = re.compile(r"^[0-9A-F]{24}$")
@@ -23,7 +23,7 @@ _SEGMENT = re.compile(r"^[0-9A-F]{24}$")
 # meiva:note
 # A malformed record stops the chain check: guessing which gaps are accepted
 # would turn a data defect into a green verify.
-# meiva:link services/backup/walg/docs/walg-tick.meiva.okf.md
+# meiva:link services/backup/walg/docs/walg-tick.md
 class RecordedGapError(RuntimeError):
     pass
 

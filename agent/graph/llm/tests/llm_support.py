@@ -1,6 +1,6 @@
 # meiva:note
 # The pieces the llm node tests share: a chat model that plays scripted tries, a stream handler that can fail, and the runtime a node runs in. The model is the node's real collaborator (`ctx.llm`); nothing here replaces a name in another module.
-# meiva:link agent/graph/llm/docs/llm.meiva.okf.md
+# meiva:link agent/graph/llm/docs/llm.md
 from __future__ import annotations
 
 import asyncio

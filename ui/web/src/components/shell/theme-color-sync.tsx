@@ -8,7 +8,7 @@ import { useEffect } from "react";
 // Chrome tints the status bar and navigation bar like the page — including when
 // the in-app theme overrides the OS preference, which the SSR media queries
 // cannot see.
-// meiva:link ui/web/src/docs/frontend.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend.md
 // meiva:note
 // `resolvedTheme` is the scheme the page actually shows (`"system"` already resolved by the theme
 // provider), and it is a value here rather than a hook: the effect re-runs when the scheme changes,

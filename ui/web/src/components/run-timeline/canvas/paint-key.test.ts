@@ -1,7 +1,7 @@
 // meiva:note
 // The row canvases skip a paint when their key is unchanged, so the key carries every input the painters
 // read: these tests change one input at a time and fail if one stops reaching it.
-// meiva:link ui/web/src/docs/frontend-components/run-timeline/run-timeline.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/run-timeline/run-timeline.md
 
 import { describe, expect, it } from "vitest";
 

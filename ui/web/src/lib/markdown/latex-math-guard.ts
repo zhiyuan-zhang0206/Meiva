@@ -3,7 +3,7 @@
 // commits a token: CJK or typography punctuation outside TeX text-mode groups, unbraced Markdown
 // `**` emphasis runs, and currency-leading phrases (`$30 for ...`, `($30) and ...`) reject a
 // candidate `$...$` span so surrounding emphasis, code and links still parse normally.
-// meiva:link ui/web/src/docs/frontend-components/markdown-safe-content.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/markdown-safe-content.md
 
 const FENCED_MATH = /(?:^|\n)[ \t]{0,3}(?:`{3,}|~{3,})[ \t]*math\b/;
 

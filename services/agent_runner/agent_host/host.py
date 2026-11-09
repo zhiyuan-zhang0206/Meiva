@@ -160,7 +160,7 @@ class AgentHost:
         # One registry for every external session this host starts: the agent id ->
         # session id documents a resume reads, shared by all harnesses and scoped per
         # harness at each bridge. File-backed, so it outlives this process.
-        # meiva:link agent/graph/docs/harness-turn.meiva.okf.md
+        # meiva:link agent/graph/docs/harness-turn.md
         self._harness_registry = FileSessionRegistry(harness_sessions_dir(home=home))
         self._registrations = RegistrationStore(harness_registrations_dir(home=home))
         self._sessions = HarnessSessions(
@@ -306,7 +306,7 @@ class AgentHost:
                     # fleet-wide the ping was noise. The durable record is telemetry
                     # plus the settled agent row; this DEBUG line (the file sink
                     # records DEBUG) keeps it greppable without flooding INFO.
-                    # meiva:link base/events/notifications/docs/notifications.meiva.okf.md
+                    # meiva:link base/events/notifications/README.md
                     if not outcome.crashed:
                         logger.debug("hosted turn finished for agent {agent_id}", agent_id=agent_id)
             except asyncio.CancelledError:
@@ -370,7 +370,7 @@ class AgentHost:
     # Every hosted turn builds its runtime here, so this is where the agent's retired
     # session is joined: without that wait the next turn starts a second CLI on the
     # session id the first one still holds.
-    # meiva:link agent/graph/docs/harness-turn.meiva.okf.md
+    # meiva:link agent/graph/docs/harness-turn.md
     async def _build_runtime(
         self,
         agent_id: int,
@@ -417,7 +417,7 @@ class AgentHost:
     # adapter's read loop, so it only hands the report to the owner that writes it off
     # the loop; the write is an ordinary inbound, which is what makes the agent take a
     # turn over it.
-    # meiva:link base/lm/harness/docs/attribution.meiva.okf.md
+    # meiva:link base/lm/harness/docs/attribution.md
     def _report_unsolicited(self, agent_id: int, event: UnsolicitedOutput) -> None:
         self._sessions.notify(agent_id, event, db=self._db, bus=self._bus)
 
@@ -464,7 +464,7 @@ class AgentHost:
     # transcript. The close runs even when a joined service reported a primary failure,
     # because a leaked session survives the process that owns it. Sessions retired
     # earlier (a dropped runtime) are joined here through their own owner.
-    # meiva:link agent/graph/docs/harness-turn.meiva.okf.md
+    # meiva:link agent/graph/docs/harness-turn.md
     async def _close_runtimes(self) -> None:
         runtimes = list(self._runtimes.values())
         self._runtimes.clear()

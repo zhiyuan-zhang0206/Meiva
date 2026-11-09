@@ -6,7 +6,7 @@
 # path check and byte-for-byte manifest comparison fails closed on unknown, extra, missing, or
 # altered entries. The ceilings a check enforces arrive as `budget.WorkspaceTransferLimits`, and the
 # refusal vocabulary lives in `errors.py`, so this module owns the wire format and nothing else.
-# meiva:link gateway/agents/docs/agent-transfer.meiva.okf.md
+# meiva:link gateway/agents/docs/agent-transfer.md
 
 from __future__ import annotations
 

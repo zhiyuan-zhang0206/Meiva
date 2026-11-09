@@ -56,7 +56,7 @@ class LivenessState(StrEnum):
 # the built-in runtime, the others run the loop on an external CLI. The model is a
 # separate choice, `spawn(harness=...)` picks it, a fork keeps its source's, and
 # `harness_availability()` reports what this machine can run.
-# meiva:link base/agents/docs/harness/harness.meiva.okf.md
+# meiva:link base/agents/docs/harness/harness.md
 class Harness(StrEnum):
     MEIVA = "meiva"
     CLAUDE_CODE = "claude_code"
@@ -71,7 +71,7 @@ class Harness(StrEnum):
 # The frontend hides rates for `subscription` harnesses and shows them for `api`
 # ones. Per harness, not per model: the same model costs differently depending on
 # which loop runs it.
-# meiva:link base/agents/docs/harness/harness.meiva.okf.md
+# meiva:link base/agents/docs/harness/harness.md
 class HarnessBilling(StrEnum):
     API = "api"
     SUBSCRIPTION = "subscription"
@@ -94,7 +94,7 @@ if set(HARNESS_BILLING) != set(Harness):
 # `llm_usage` row names the loop that ran the call in its `source`, so this tuple is what tells a
 # subscription call from a metered one — one owner for the vocabulary the cost split and the
 # ops dashboard both read.
-# meiva:link base/agents/docs/harness/harness.meiva.okf.md
+# meiva:link base/agents/docs/harness/harness.md
 SUBSCRIPTION_HARNESSES: tuple[str, ...] = tuple(
     harness.value
     for harness, billing in HARNESS_BILLING.items()
@@ -106,7 +106,7 @@ SUBSCRIPTION_HARNESSES: tuple[str, ...] = tuple(
 # The billing mode of one `llm_usage.source`. A subscription harness pays nothing per token; every
 # other source — the native loop, compaction, `web.fetch`, `understand`, a decision model, a batch
 # or embedding caller — is metered API work, and an absent source is the native loop's own call.
-# meiva:link base/agents/docs/harness/harness.meiva.okf.md
+# meiva:link base/agents/docs/harness/harness.md
 def harness_billing_of_source(source: str | None) -> HarnessBilling:
     if source is None:
         return HarnessBilling.API
@@ -142,7 +142,7 @@ def is_spawner_agent_id_malformed(spawner: str) -> bool:
 # because the graph routes its turns to `harness_turn`, whose bridge opens an
 # adapter session; removing a value retires its launcher and leaves rows born on
 # it inert, which is the rollback.
-# meiva:link base/agents/docs/harness/harness.meiva.okf.md
+# meiva:link base/agents/docs/harness/harness.md
 LAUNCHABLE_HARNESSES: frozenset[Harness] = frozenset(
     (
         Harness.MEIVA,
@@ -175,7 +175,7 @@ def coerce_harness(value: object) -> Harness:
 # installed and signed in, `unavailable` is missing or not signed in, and
 # `unknown` is installed with a sign-in state this process cannot read — reported
 # as unknown rather than guessed in either direction.
-# meiva:link base/agents/docs/harness/harness.meiva.okf.md
+# meiva:link base/agents/docs/harness/harness.md
 HarnessStatus = Literal["available", "unavailable", "unknown"]
 
 
@@ -183,7 +183,7 @@ HarnessStatus = Literal["available", "unavailable", "unknown"]
 # One model option and its reasoning-effort ladder as reported live by an
 # external harness CLI probe. `reasoning_effort_options` is empty when the CLI
 # model accepts no effort control (`reasoning_effort_default` is then `None`).
-# meiva:link base/agents/docs/harness/harness-models.meiva.okf.md
+# meiva:link base/agents/docs/harness/harness-models.md
 @dataclass(frozen=True)
 class ProbedHarnessModel:
     id: str
@@ -414,7 +414,7 @@ class ForkConfigChangeNotAllowed(ForkError, MeivaAgentError):  # noqa: N818 — 
 # A fork may not change the harness it runs on or fork an external harness: it
 # continues a native meiva agent's identity. Asking to fork an external harness
 # or onto an external harness is refused here rather than silently accepted.
-# meiva:link base/agents/docs/harness/harness.meiva.okf.md
+# meiva:link base/agents/docs/harness/harness.md
 class ForkHarnessMismatch(ForkError, MeivaAgentError, ValueError):  # noqa: N818
     reason = ErrorReason.FORK_HARNESS_MISMATCH
     http_status = 400
@@ -425,7 +425,7 @@ class ForkHarnessMismatch(ForkError, MeivaAgentError, ValueError):  # noqa: N818
 # a runtime loop that can never run, and the stored harness is immutable, so the
 # agent could be neither run nor moved onto another loop. Raising before the row
 # exists is what keeps every stored value a claim about a loop that can start.
-# meiva:link base/agents/docs/harness/harness.meiva.okf.md
+# meiva:link base/agents/docs/harness/harness.md
 class HarnessNotLaunchable(MeivaAgentError):  # noqa: N818
     reason = ErrorReason.HARNESS_NOT_LAUNCHABLE
     http_status = 400

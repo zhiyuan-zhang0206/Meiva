@@ -6,7 +6,7 @@
 // network hiccup, quick cluster restart) auto-retry silently without any banner or
 // jitter; only a sustained disconnect outlasting CONNECTION_ERROR_DELAY_MS (15s) escalates
 // to a floating red error banner with a manual Retry button.
-// meiva:link ui/web/src/docs/frontend-components/frontend-components.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/frontend-components.md
 
 import { useTranslations } from "next-intl";
 

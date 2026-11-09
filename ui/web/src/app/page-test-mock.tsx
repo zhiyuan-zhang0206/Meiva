@@ -137,7 +137,7 @@ export function makeAgent(overrides: Partial<AgentRow>): AgentRow {
 
 // meiva:note
 // A timeline row with the fields the surface reads; the rest are the contract's defaults.
-// meiva:link ui/web/src/docs/frontend-state/frontend-state.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-state/frontend-state.md
 export function makeItem(
   overrides: Pick<BackendTimelineItem, "item_id" | "kind" | "payload"> & Partial<BackendTimelineItem>,
 ): BackendTimelineItem {
@@ -259,7 +259,7 @@ export function homePageProps(): HomePageProps {
 
 // meiva:note
 // The home surface as a test renders it: the real one, with the values `hooksState` holds.
-// meiva:link ui/web/src/docs/frontend-state/frontend-state.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-state/frontend-state.md
 export function HomePageBound() {
   return <HomePageView {...homePageProps()} />;
 }

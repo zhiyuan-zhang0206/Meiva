@@ -33,7 +33,7 @@ class FatalLLMStreamError(LLMStreamError):
 # names WHAT bound expired — "ttft" (no first chunk), "mid-stream" (gap after at
 # least one chunk) or "total" (the per-attempt duration ceiling); it rides the
 # exception for diagnostics without parsing the message.
-# meiva:link agent/graph/llm/docs/failures-and-retry.meiva.okf.md
+# meiva:link agent/graph/llm/docs/failures-and-retry.md
 class LLMStreamStallTimeoutError(FatalLLMStreamError):
     def __init__(self, message: str, *, stage: str = "unknown") -> None:
         super().__init__(message)
@@ -173,7 +173,7 @@ def classify_and_log_provider_error(
 # keeps re-raising the original transient exception while the host settles the turn with
 # `halted=True` and structured `(error_class, provider, status)` diagnostics without opening
 # the permanent heartbeat circuit breaker.
-# meiva:link agent/graph/llm/docs/failures-and-retry.meiva.okf.md
+# meiva:link agent/graph/llm/docs/failures-and-retry.md
 class LLMRetryExhaustedError(FatalLLMStreamError):
     def __init__(
         self,
@@ -189,7 +189,7 @@ class LLMRetryExhaustedError(FatalLLMStreamError):
         self.status = status
 
 
-# meiva:link agent/graph/llm/docs/failures-and-retry.meiva.okf.md
+# meiva:link agent/graph/llm/docs/failures-and-retry.md
 def retry_exhausted_error(exc: Exception) -> LLMRetryExhaustedError:
     classification = classify_error(exc)
     error = LLMRetryExhaustedError(
@@ -214,7 +214,7 @@ def retry_exhausted_error(exc: Exception) -> LLMRetryExhaustedError:
 # plus the user-visible `Error` event) without re-streaming or crashing the turn.
 # Thinking-block drift (#167/#168: `signature_delta` without `thinking_delta`) is repaired in
 # place by `sanitize_thinking_blocks` rather than raised here.
-# meiva:link agent/graph/llm/docs/failures-and-retry.meiva.okf.md
+# meiva:link agent/graph/llm/docs/failures-and-retry.md
 class LLMStreamCorruptedError(FatalLLMStreamError):
     pass
 
@@ -225,7 +225,7 @@ class LLMStreamCorruptedError(FatalLLMStreamError):
 # `stop_sequence` / `pause_turn`). Subclasses `FatalLLMStreamError` so the turn settles once
 # with `halted=True` and a user-visible `Error` event without automatic re-streaming, while
 # exposing `stop_reason` and `output_tokens` directly as attributes.
-# meiva:link agent/graph/llm/docs/failures-and-retry.meiva.okf.md
+# meiva:link agent/graph/llm/docs/failures-and-retry.md
 class LLMStreamUnexpectedStopReasonError(FatalLLMStreamError):
     def __init__(
         self,

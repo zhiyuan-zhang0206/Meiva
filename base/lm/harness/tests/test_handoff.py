@@ -135,7 +135,7 @@ def test_empty_cluster_and_entries_render_placeholders(tmp_path: Path) -> None:
 # the field set is pinned here against the version — an adapter that reads
 # version 1 must never silently receive a different shape. Add a field, bump
 # HANDOFF_VERSION, extend this tuple; anything less fails here first.
-# meiva:link base/lm/harness/docs/harness.meiva.okf.md
+# meiva:link base/lm/harness/docs/harness.md
 PINNED_HANDOFF_FIELDS = (
     "agent_id",
     "instruction",

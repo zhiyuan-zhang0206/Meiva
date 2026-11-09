@@ -1,4 +1,4 @@
-// meiva:link ui/web/src/docs/frontend-components/run-timeline/axis-and-keyboard.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/run-timeline/axis-and-keyboard.md
 
 import type { useTranslations } from "next-intl";
 

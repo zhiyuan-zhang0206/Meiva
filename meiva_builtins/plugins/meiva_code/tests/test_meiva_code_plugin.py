@@ -101,7 +101,7 @@ def get_injected_context_notes(state_update: dict[str, object]) -> list[dict[str
         ):
             # meiva:note
             # system_note_message wraps the content in the system-note envelope.
-            # meiva:link agent/messages/docs/message-format.meiva.okf.md
+            # meiva:link agent/messages/docs/message-format.md
             content = msg.content
             assert isinstance(content, str)
             assert content.startswith("<system_note>\n") and content.endswith("\n</system_note>")

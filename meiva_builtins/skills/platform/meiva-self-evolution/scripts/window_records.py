@@ -1,6 +1,6 @@
 # meiva:note
 # `window_records.py` turns the rows one collection read into the dataset's records, as values only: events grouped per agent, the agents that become records, and each record with the code-body counters added. `collect.py` reads the events, rows and transcripts and hands them in. An agent with no lifecycle row is no real run and is skipped; one whose role label marks a benchmark or probe spawn is excluded (`test_ids` is empty when the caller asked for them), and `Selection` reports both drops so the daily sentinel can tell a TEST-only window from a broken data source.
-# meiva:link meiva_builtins/skills/platform/meiva-self-evolution/docs/collection.meiva.okf.md
+# meiva:link meiva_builtins/skills/platform/meiva-self-evolution/docs/collection.md
 from __future__ import annotations
 
 import re

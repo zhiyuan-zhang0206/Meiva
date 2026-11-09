@@ -301,7 +301,7 @@ class UnitRegistry:
     # meiva:note
     # Attach children finish in earlier waves than their parent; siblings at the same attach
     # level group by ascending `stop_tier` in declaration order.
-    # meiva:link services/supervision/meiva_root/docs/closure.meiva.okf.md
+    # meiva:link services/supervision/meiva_root/docs/closure.md
     def stop_waves(self, unit_id: str = ROOT_ID) -> tuple[tuple[str, ...], ...]:
         if unit_id == ROOT_ID:
             return tuple(self._children_waves(ROOT_ID))
@@ -318,7 +318,7 @@ class UnitRegistry:
     # meiva:note
     # Every unit, children before parents and tier by tier, preserving declaration order within
     # each wave so tier-0 units stop before later tiers.
-    # meiva:link services/agent_runner/agent_host/lifecycle/docs/graceful-exit.meiva.okf.md
+    # meiva:link services/agent_runner/agent_host/lifecycle/docs/graceful-exit.md
     def all_stop_order(self) -> tuple[str, ...]:
         return tuple(unit for wave in self.all_stop_waves() for unit in wave)
 

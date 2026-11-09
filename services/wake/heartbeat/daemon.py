@@ -126,14 +126,14 @@ BACKOFF_MAX_WINDOWS = 64
 # lives in agents_meta.heartbeat_backoff_level (survives daemon restarts); the consecutive-no-op
 # counter is in-process only, so a restart recounts from zero. Real inbound or a pause resets
 # the level to 0.
-# meiva:link services/docs/gateway_side/heartbeat.meiva.okf.md
+# meiva:link services/docs/gateway_side/heartbeat.md
 _BACKOFF_MAX_LEVEL = 16  # schema CHECK bound; the raise-time cap is tighter
 
 
 # meiva:note
 # The highest backoff level whose stretched interval still stays under the configured ceiling;
 # past it the selection SQL's LEAST clamp is what holds the floor.
-# meiva:link services/docs/gateway_side/heartbeat.meiva.okf.md
+# meiva:link services/docs/gateway_side/heartbeat.md
 def backoff_max_level(interval_s: float) -> int:
     if interval_s <= 0:
         return 0
@@ -481,7 +481,7 @@ class DispatchConfig:
     backoff_max_interval_s: float
 
 
-# meiva:link services/wake/heartbeat/docs/dispatch-round.meiva.okf.md
+# meiva:link services/wake/heartbeat/docs/dispatch-round.md
 class HeartbeatDispatch:
     def __init__(
         self,

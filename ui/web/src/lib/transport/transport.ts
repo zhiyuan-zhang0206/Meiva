@@ -25,7 +25,7 @@ export type UploadRequest = Pick<
 // it (read before and after each request), the upload channel and key entropy.
 // system-transport.ts builds this from the real globals; tests build it from a
 // real local server or a double that injects a fault the network cannot.
-// meiva:link ui/web/src/docs/frontend-state/api-requests.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-state/api-requests.md
 export interface HttpTimers {
   readonly setTimeout: (callback: () => void, ms: number) => ReturnType<typeof setTimeout>;
   readonly clearTimeout: (handle: ReturnType<typeof setTimeout>) => void;
@@ -73,7 +73,7 @@ export interface PageFacts {
 // locks and the page. `openChannel` and `locks` are null where the platform has
 // no BroadcastChannel or Web Locks, which selects the per-page fallback. The wall
 // clock and the tab id only name a tab and stamp interest freshness.
-// meiva:link ui/web/src/docs/frontend-data-flow/merged-stream.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-data-flow/merged-stream.md
 export interface StreamTimers {
   readonly setTimeout: (callback: () => void, ms: number) => ReturnType<typeof setTimeout>;
   readonly clearTimeout: (handle: ReturnType<typeof setTimeout>) => void;

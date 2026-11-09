@@ -8,7 +8,7 @@
 // the visible Send button submits there. The primary pointer arrives as an
 // argument (each field reads it with use-coarse-pointer.ts), so this module stays
 // a pure decision.
-// meiva:link ui/web/src/docs/frontend-components/enter-to-send.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/enter-to-send.md
 
 export interface KeyStroke {
   key: string;

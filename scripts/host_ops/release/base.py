@@ -22,7 +22,7 @@ _REPO_ROOT = Path(__file__).resolve().parents[3]
 if sys.path[:1] != [str(_REPO_ROOT)]:
     sys.path.insert(0, str(_REPO_ROOT))
 
-# meiva:link scripts/docs/scripts.meiva.okf.md
+# meiva:link scripts/docs/scripts.md
 from base.host.boundary.options import options  # noqa: E402
 from cli.fleet_update.plan.release_target import (  # noqa: E402
     ReleaseCertificate,

@@ -303,7 +303,7 @@ class _AgentLabelRow:
     spawner_label: str | None
 
 
-# meiva:link meiva_builtins/skills/platform/meiva-self-evolution/docs/collection.meiva.okf.md
+# meiva:link meiva_builtins/skills/platform/meiva-self-evolution/docs/collection.md
 def _inbounds_by_agent(
     conn: psycopg.Connection, agent_ids: list[int], window_from: datetime, window_to: datetime
 ) -> dict[int, list[Inbound]]:
@@ -535,7 +535,7 @@ def collect_one(
     gateway: GatewayAccess,
     now: datetime,
 ) -> Record:
-    # meiva:link meiva_builtins/skills/platform/meiva-self-evolution/docs/collection.meiva.okf.md
+    # meiva:link meiva_builtins/skills/platform/meiva-self-evolution/docs/collection.md
     window = Window(now - timedelta(days=7), now)
     telemetry = fetch_events_window("telemetry", window, gateway=gateway, agent_id=agent_id)
     audit = fetch_events_window("audit", window, gateway=gateway, agent_id=agent_id)

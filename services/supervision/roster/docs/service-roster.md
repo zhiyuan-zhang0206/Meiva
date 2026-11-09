@@ -6,9 +6,9 @@ it never produces a partial-success roster or enables a service by failing open.
 
 `services.supervision.roster.composition.build_services()` owns the applicable service specifications. The
 table below is a readable inventory of that registration. Native custody
-and readiness belong to [Meiva Root](../../../../services/supervision/meiva_root/docs/meiva_root.meiva.okf.md),
-[host lifecycle](../../../../cli/commands/lifecycle/docs/lifecycle.meiva.okf.md) and
-[the service domain](../../../../services/docs/services.meiva.okf.md).
+and readiness belong to [Meiva Root](../../meiva_root/docs/meiva_root.md),
+[host lifecycle](../../../../cli/commands/lifecycle/docs/lifecycle.md) and
+[the service domain](../../../docs/services.md).
 
 The package door exports the original `ServiceSpec` and standard-healthz builders
 for plugins and declaration consumers. Full roster callers import

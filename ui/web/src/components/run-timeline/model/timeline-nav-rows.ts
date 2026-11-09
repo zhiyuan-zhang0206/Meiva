@@ -58,7 +58,7 @@ export function navRowIds(data: NavData, options: RowOptions = ALL_ROWS): string
 
 // meiva:note
 // A row's items are built once per data and axis, together with the two lookups the layout and the hit test ask for on every frame: the same items as spans in `u0` order, and the key-to-item map. Rebuilding them per render made a deep zoom-out recreate 52 000 keys and a 52 000-entry map on every viewport sample (user report 2026-10-19).
-// meiva:link ui/web/src/docs/frontend-components/run-timeline/axis-and-keyboard.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/run-timeline/axis-and-keyboard.md
 export interface NavRow {
   items: NavItem[];
   keyed: readonly SpanItem[];

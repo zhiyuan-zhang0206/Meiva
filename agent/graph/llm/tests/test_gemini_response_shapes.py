@@ -5,7 +5,7 @@
 # These hand-built fixtures (no live API call) pin that a real turn keeps its
 # text and its tool call through chunk folding instead of becoming an empty
 # message.
-# meiva:link agent/graph/llm/docs/llm.meiva.okf.md
+# meiva:link agent/graph/llm/docs/llm.md
 from __future__ import annotations
 
 from langchain_core.messages import AIMessage, AIMessageChunk, UsageMetadata

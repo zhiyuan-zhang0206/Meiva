@@ -85,7 +85,7 @@ describe("StatusCards tri-state (loading / data / error)", () => {
   // The pair states what is happening now. A class the server resolved (dismissed, or quiet for
   // its window) is not in these two numbers, and the tooltip names the resolved events so a
   // number that fell is accountable rather than mysterious (user ruling 2026-11-08).
-  // meiva:link ui/web/src/docs/frontend-components/agent-sidebar.meiva.okf.md
+  // meiva:link ui/web/src/docs/frontend-components/agent-sidebar.md
   it("shows unresolved events only and accounts for the resolved ones in the tooltip", async () => {
     state.agents = [makeAgent({ agent_id: 1 })];
     state.stats = {
@@ -498,7 +498,7 @@ describe("StatusCards window selector", () => {
   // 2026-11-08): `$0.00` is an answer, and hiding it would make the pair read as the single
   // total it replaced. The Inspector keeps the opposite rule; these assertions pin the split,
   // not a shared zero-hiding policy.
-  // meiva:link ui/web/src/docs/frontend-components/agent-sidebar.meiva.okf.md
+  // meiva:link ui/web/src/docs/frontend-components/agent-sidebar.md
   it.each([
     { cost: 0, subscription: 0, api: "$0.00", sub: "$0.00", case: "both halves zero" },
     { cost: 12.5, subscription: 0, api: "$12.50", sub: "$0.00", case: "subscription half zero" },

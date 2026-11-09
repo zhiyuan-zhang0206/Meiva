@@ -303,7 +303,7 @@ export function GraphView({
                 // The canvas carries a bare status string (the task board reuses it with task
                 // statuses), so the card narrows it through the display vocabulary: a known status
                 // reads its colour and label, and an unknown one shows neither.
-                // meiva:link ui/web/src/docs/frontend-components/fleet-view.meiva.okf.md
+                // meiva:link ui/web/src/docs/frontend-components/fleet-view.md
                 className={cn(
                   "size-2 rounded-full bg-current",
                   statusKey === null ? "text-slate-400" : STATUS_TEXT[statusKey],

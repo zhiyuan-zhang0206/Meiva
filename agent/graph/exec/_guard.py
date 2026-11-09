@@ -1,7 +1,7 @@
 # meiva:note
 # What the agent is told when the editable-install guard stops an exec before any child starts:
 # a poisoned install that names its records, or an inspection that itself failed.
-# meiva:link agent/graph/exec/docs/exec.meiva.okf.md
+# meiva:link agent/graph/exec/docs/exec.md
 
 from __future__ import annotations
 

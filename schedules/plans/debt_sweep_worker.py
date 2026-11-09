@@ -5,7 +5,7 @@
 # against the report artifact and reconciles the single ledger. The event payload mirrors the
 # declared `debt_sweep_daily` event. The dry run renders exactly what a real run would send,
 # with a preview dispatch, so an operator can read it without touching the cluster.
-# meiva:link schedules/docs/debt-sweep.meiva.okf.md
+# meiva:link schedules/docs/debt-sweep.md
 
 from __future__ import annotations
 

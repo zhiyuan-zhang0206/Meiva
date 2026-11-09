@@ -178,7 +178,7 @@ class TestAttachItems:
         # meiva:note
         # The joined payload keeps every entry line (notice + all three); the notice's own
         # system note renders as its text.
-        # meiva:link agent/messages/docs/message-format.meiva.okf.md
+        # meiva:link agent/messages/docs/message-format.md
         assert item.payload == (
             "Files attached during this turn:\n"
             '- [1] first.png (image/png, 1 B) — "one"\n'

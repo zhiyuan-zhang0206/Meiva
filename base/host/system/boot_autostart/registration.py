@@ -1,4 +1,4 @@
-# meiva:link base/host/docs/boot-autostart.meiva.okf.md
+# meiva:link base/host/docs/boot-autostart.md
 
 from __future__ import annotations
 

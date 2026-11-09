@@ -48,12 +48,12 @@ const pathFor = (ids: readonly number[]) => `/insights/run/${ids.join(",")}`;
 
 // meiva:note
 // The URL preserves agents in addition order without duplicates and the last agent cannot be removed. Message indices belong to their snapshot: replacing it invalidates the selection before effects run. Block selection and arrow selection exclude each other. The context card follows only the selected agent and message/node, independently of the viewport. The page owns legend highlighting so zoom and pan retain it.
-// meiva:link ui/web/src/docs/frontend-components/run-timeline/window-reads.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/run-timeline/window-reads.md
 // meiva:note
 // `createContext` is the canvases' drawing surface, handed down to `RunTimelineRows`: a route test
 // passes a recording context so it can read what was painted, and the app leaves it out so the
 // canvases use the page's own `getContext("2d")`.
-// meiva:link ui/web/src/docs/frontend-components/run-timeline/run-timeline.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/run-timeline/run-timeline.md
 export default function AgentViewPage({
   params,
   createContext,
@@ -73,7 +73,7 @@ export default function AgentViewPage({
   // meiva:note
   // The viewport lives in a store, not in this component's state: a wheel tick must not re-render the page,
   // the detail card or the rows. This page keeps only a debounced copy, for deciding what data to read.
-  // meiva:link ui/web/src/docs/frontend-components/run-timeline/run-timeline.meiva.okf.md
+  // meiva:link ui/web/src/docs/frontend-components/run-timeline/run-timeline.md
   const [requestView, setRequestView] = useState<Viewport | null>(null);
 
   const [linkKeys, setLinkKeys] = useState<readonly string[]>([]);
@@ -182,7 +182,7 @@ export default function AgentViewPage({
   // meiva:note
   // The store outlives every data load; the effect below moves it to the view the loaded data implies, before
   // the frame that would paint anything, so no placeholder is ever drawn.
-  // meiva:link ui/web/src/docs/frontend-components/run-timeline/run-timeline.meiva.okf.md
+  // meiva:link ui/web/src/docs/frontend-components/run-timeline/run-timeline.md
   const store = useMemo(() => viewportStore({ from: 0, to: 0 }), []);
   const wholeView = useMemo(
     () => (firstView === null ? null : base === null ? firstView : clampViewport(firstView, base)),
@@ -194,7 +194,7 @@ export default function AgentViewPage({
   // meiva:note
   // Every zoom and pan lands here: the store moves, the canvases paint in their next frame, and this page
   // re-renders only when the settled copy below asks for data it does not have (task #5738).
-  // meiva:link ui/web/src/docs/frontend-components/run-timeline/run-timeline.meiva.okf.md
+  // meiva:link ui/web/src/docs/frontend-components/run-timeline/run-timeline.md
   const onView = (next: Viewport) => store.set(base === null ? next : clampViewport(next, base));
   const loadedKey = useMemo(() => initialWindows.map((window) => `${window.from}:${window.to}`).join(","), [initialWindows]);
   useEffect(() => {
@@ -206,7 +206,7 @@ export default function AgentViewPage({
       // meiva:note
       // A gesture inside the data already loaded needs no read, so it must not re-render the page either: the
       // first real view still passes through, because the rows read one window around it before anyone moves.
-      // meiva:link ui/web/src/docs/frontend-components/run-timeline/run-timeline.meiva.okf.md
+      // meiva:link ui/web/src/docs/frontend-components/run-timeline/run-timeline.md
       if (!(next.to > next.from)) return;
       const spans = loadedKey === "" ? [] : loadedKey.split(",").map((pair) => pair.split(":").map(Number));
       const covered = handed && spans.length > 0 && spans.every(([from, to]) => next.from >= from && next.to <= to);
@@ -435,7 +435,7 @@ const VIEW_REQUEST_SETTLE_MS = 80;
 // meiva:note
 // The line above the chart naming the visible range: it follows the store, so a wheel tick rewrites one
 // sentence instead of re-rendering the page and its rows (task #5738).
-// meiva:link ui/web/src/docs/frontend-components/run-timeline/run-timeline.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/run-timeline/run-timeline.md
 function WindowSummary({ store, nodes, units }: { store: ViewportStore; nodes: number; units: number }) {
   const t = useTranslations("runTimeline");
   const { formatAbsolute } = useTimeFormat();

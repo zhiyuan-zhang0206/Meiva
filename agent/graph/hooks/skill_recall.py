@@ -22,7 +22,7 @@ from base.log import logger
 _LABEL = "skill-recall"
 
 
-# meiva:link agent/graph/docs/skill-recall.meiva.okf.md
+# meiva:link agent/graph/docs/skill-recall.md
 class SkillRecallHook(Hook):
     # meiva:note
     # No-op when the feature is off, in an eval run, when the tail holds no person or schedule
@@ -65,7 +65,7 @@ class SkillRecallHook(Hook):
     # candidates can be exhausted for a whole window, and a predicted auto-compact would wipe
     # the note this turn. Paying the peer gate first would spend one request per inbound on a
     # session that can no longer be offered anything.
-    # meiva:link agent/graph/docs/skill-recall.meiva.okf.md
+    # meiva:link agent/graph/docs/skill-recall.md
     async def _candidates(
         self,
         state: _state.AgentState,

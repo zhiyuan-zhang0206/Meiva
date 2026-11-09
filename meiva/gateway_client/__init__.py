@@ -119,7 +119,7 @@ def get(
 # meiva:note
 # `use_client` accepts any HTTP client test double or `httpx.Client` and returns it unchanged so
 # callers keep the concrete type of the client they passed into the context manager.
-# meiva:link meiva/agents/docs/agents.meiva.okf.md
+# meiva:link meiva/agents/docs/agents.md
 @contextmanager
 def use_client[T](client: T) -> Generator[T]:
     """Route every SDK call in the block through *client* — a FastAPI `TestClient` for an

@@ -112,7 +112,7 @@ function displaySkillName(name: string): string {
 // meiva:note
 // llm_model is not an override a reader compares — it is the agent's own state, shown in
 // Liveness beside its harness (user 2026-10-21). Every other key stays.
-// meiva:link ui/web/src/docs/frontend-state/shared-context/shared-context.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-state/shared-context/shared-context.md
 const CONFIG_OVERLAY_HIDDEN_KEYS = new Set(["llm_model"]);
 
 export function ConfigOverlaySection({ inspect }: { inspect: AgentInspectLive }) {
@@ -140,7 +140,7 @@ export function ConfigOverlaySection({ inspect }: { inspect: AgentInspectLive })
 // meiva:note
 // The values are keys of the agent-row catalog this section renders with, so the table is checked
 // against that catalog instead of cast at the call site.
-// meiva:link ui/web/src/docs/frontend-components/inspector/inspector.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/inspector/inspector.md
 type AgentRowKey = Parameters<ReturnType<typeof useTranslations<"agentRow">>>[0];
 
 const STATUS_LABEL_KEY: Readonly<Record<string, AgentRowKey | undefined>> = {
@@ -171,7 +171,7 @@ export function LivenessSection({
   // current state, not to its configuration overrides: the title bar stopped naming the
   // harness (user 2026-10-21), and the overlay's llm_model row is hidden below, so the
   // two facts a reader checks first sit together here.
-  // meiva:link ui/web/src/docs/frontend-state/shared-context/shared-context.meiva.okf.md
+  // meiva:link ui/web/src/docs/frontend-state/shared-context/shared-context.md
   const harness = rosterRow?.harness;
   const model = typeof inspect?.config_overlay.llm_model === "string" ? inspect.config_overlay.llm_model : undefined;
   const offline = inspect?.liveness_state === "offline";
@@ -240,7 +240,7 @@ export function LivenessSection({
 // status is, so its end is the answer while it runs; otherwise the projected check-in is. The
 // value follows the reader's `display.date_format` ("Tomorrow 15:21" or "in 22h"), absolute by
 // default (user 2026-10-29). With neither instant there is nothing to print but an em dash.
-// meiva:link ui/web/src/docs/frontend-components/inspector/section-details/liveness.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/inspector/section-details/liveness.md
 function nextHeartbeatTime(
   hb: HeartbeatInfo,
   now: Date,

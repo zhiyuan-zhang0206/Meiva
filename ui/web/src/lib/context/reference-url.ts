@@ -4,7 +4,7 @@ export const FILE_PARAM = "file";
 // The digest parameter panel links carried before 2026-11-07. A shared link outlives the spelling
 // of the address bar, so a chain of digests is still read — the owning machine resolves it — and
 // the panel's next navigation rewrites the entry with `file`.
-// meiva:link ui/web/src/docs/frontend-state/navigation-history.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-state/navigation-history.md
 export const LEGACY_PARAM = "reference";
 
 // meiva:note
@@ -12,7 +12,7 @@ export const LEGACY_PARAM = "reference";
 // `?agent_id=405&file=reports/runbook.md` instead of a digest. Form encoding would write the
 // separators as `%2F` and undo that, so a file keeps its `/` and only what a query string
 // cannot carry is escaped.
-// meiva:link ui/web/src/docs/frontend-state/navigation-history.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-state/navigation-history.md
 export function encodeFile(value: string): string {
   return encodeURIComponent(value).replace(/%2F/gi, "/");
 }

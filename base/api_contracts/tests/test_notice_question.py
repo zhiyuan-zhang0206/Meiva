@@ -61,7 +61,7 @@ def test_a_numbered_reply_can_choose_nothing(kind: str) -> None:
     # meiva:note
     # `0` is the numbered clients' way to say "no option" so that a comment-only
     # answer is expressible outside the Web (user ruling 2026-10-21).
-    # meiva:link meiva_builtins/plugins/meiva_fleet/docs/notice-questions.meiva.okf.md
+    # meiva:link meiva_builtins/plugins/meiva_fleet/docs/notice-questions.md
     question = choice(kind)
     answer = parse_numbered_answer(question, "0\nNeither fits; hold until Monday.")
     assert answer.option_ids == []
@@ -110,7 +110,7 @@ def test_a_comment_alone_is_a_valid_answer(kind: str) -> None:
     # meiva:note
     # Answering without choosing anything is allowed in both kinds (user ruling
     # 2026-10-21); the comment is then the whole answer.
-    # meiva:link meiva_builtins/plugins/meiva_fleet/docs/notice-questions.meiva.okf.md
+    # meiva:link meiva_builtins/plugins/meiva_fleet/docs/notice-questions.md
     question = choice(kind)
     answer = validate_answer(question, NoticeAnswer(comment="Please decide later"))
     assert answer.option_ids == []

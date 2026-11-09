@@ -12,7 +12,7 @@ from ._plan import StallConfig, stall_probe
 # The chain of awaited frames from a task's outermost coroutine down to the leaf it is suspended
 # on. `Task.get_stack()` stops at the outermost suspension point, which cannot name the blocked
 # call.
-# meiva:link agent/graph/docs/node-lifecycle.meiva.okf.md
+# meiva:link agent/graph/docs/node-lifecycle.md
 def awaiter_chain_lines(task: asyncio.Task[Any]) -> list[str]:
     lines: list[str] = []
     awaitable: Any = task.get_coro()
@@ -59,7 +59,7 @@ def _real_stderr() -> TextIO | None:
 # the threshold and faulthandler dumps every thread's frames one stagger later, both disarmed on
 # the way out. faulthandler's timer is process-global, which is why nothing but this guard may arm
 # it.
-# meiva:link agent/graph/docs/node-lifecycle.meiva.okf.md
+# meiva:link agent/graph/docs/node-lifecycle.md
 @contextlib.contextmanager
 def stall_guard(node_name: str, config: StallConfig) -> Generator[None]:
     probe = stall_probe(node_name, config)

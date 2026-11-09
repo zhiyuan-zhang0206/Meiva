@@ -1,6 +1,6 @@
 // meiva:note
 // Both ordinary checking and optional source evidence use this tool-owned compiler installation.
-// meiva:link meizel/docs/checker/typescript.meiva.okf.md
+// meiva:link meizel/docs/checker/typescript.md
 import fs from 'node:fs';
 import path from 'node:path';
 import {createRequire} from 'node:module';

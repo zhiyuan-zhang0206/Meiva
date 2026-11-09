@@ -1,6 +1,6 @@
 # meiva:note
 # Pure unit tests for `gateway.agents.transfer.transfer_plan` and `TransferBundleStore`.
-# meiva:link gateway/agents/docs/agent-transfer.meiva.okf.md
+# meiva:link gateway/agents/docs/agent-transfer.md
 
 from __future__ import annotations
 

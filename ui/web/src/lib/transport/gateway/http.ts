@@ -19,7 +19,7 @@ export interface HttpTelemetry {
 // caller's cancellation connected through both the headers and the body, and a
 // deadline rejects with a TimeoutError. Cross-origin gateway requests carry the
 // session cookie because every request is sent with credentials included.
-// meiva:link ui/web/src/docs/frontend-state/api-requests.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-state/api-requests.md
 export interface Http {
   readonly url: (path: string) => string;
   readonly send: (path: string, init?: RequestInit) => Promise<Response>;
@@ -51,7 +51,7 @@ function ok<T>(res: Response): Promise<T> {
 // meiva:note
 // Legacy endpoints expose raw HTTP text (including statusText fallback), while
 // ordinary endpoints decode structured API errors through ok. Body ownership stays here.
-// meiva:link ui/web/src/docs/frontend-state/api-requests.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-state/api-requests.md
 function accepted(res: Response): Promise<void> {
   if (res.ok) return Promise.resolve();
   return res.text().catch(() => "").then((text) => {

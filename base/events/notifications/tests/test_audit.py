@@ -230,7 +230,7 @@ def test_the_report_carries_every_section_a_consumer_reads() -> None:
 # `--explain` answers the question the summary cannot: for one candidate, was it
 # delivered, and if not, was it the switch or the dedupe window (and how long the
 # agent had waited). The JSON carries the same rows so a report can be built on them.
-# meiva:link base/events/notifications/docs/notifications.meiva.okf.md
+# meiva:link base/events/notifications/README.md
 def test_explain_names_the_outcome_of_every_candidate() -> None:
     result = replay(
         [_notice(0, 1, {"ask": "a"}), _notice(10, 1, {"ask": "a"}), _notice(120, 1, {"ask": "a"})],

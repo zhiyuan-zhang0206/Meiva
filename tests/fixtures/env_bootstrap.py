@@ -188,7 +188,7 @@ os.environ["MEIVA_EVENTS_CHANNEL"] = _TEST_EVENTS_CHANNEL
 # re-pin their own env per test.
 os.environ["MEIVA_CONFIG_FETCH"] = "skip"
 
-# meiva:link tests/docs/test-fixtures/history-dump-isolation.meiva.okf.md
+# meiva:link tests/docs/test-fixtures/history-dump-isolation.md
 os.environ["MEIVA_COMPACT_HISTORY_DUMP"] = "false"
 
 # meiva:note
@@ -353,7 +353,7 @@ os.environ["MEIVA_TELEMETRY_OTLP_PORT"] = "4318"
 # rendered a station endpoint on 4319 where the render test asserts the CI default. Pinned
 # like the local port, not popped like the endpoint below: it is a plain value with no
 # explicit-set signal behind it.
-# meiva:link tests/docs/test-fixtures/test-fixtures.meiva.okf.md
+# meiva:link tests/docs/test-fixtures/test-fixtures.md
 os.environ["MEIVA_OBSERVABILITY_OTLP_PORT"] = "4318"
 # The collector endpoint is a value AND a signal: any env value marks the
 # field explicitly set (killing the port-derived default) and opens the OTLP

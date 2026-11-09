@@ -1,6 +1,6 @@
 # meiva:note
 # The host root supplies its configuration authority and producer without eagerly constructing a complete Settings view for a profile-restricted process.
-# meiva:link services/agent_runner/agent_host/lifecycle/docs/configuration.meiva.okf.md
+# meiva:link services/agent_runner/agent_host/lifecycle/docs/configuration.md
 
 import random
 from collections.abc import Callable

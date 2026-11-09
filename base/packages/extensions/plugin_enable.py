@@ -1,4 +1,4 @@
-# meiva:link base/packages/plugins/docs/plugin-config/enable-state.meiva.okf.md
+# meiva:link base/packages/plugins/docs/plugin-config/enable-state.md
 
 from pathlib import Path
 

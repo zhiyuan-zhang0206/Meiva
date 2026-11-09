@@ -8,7 +8,7 @@
 # builds the caller block from `MEIVA_OPERATION_ID` and the trio below, and every lifecycle
 # command's audit row carries them (`cli/database/lifecycle_audit.py`). This module only mints
 # and spells them.
-# meiva:link cli/docs/fleet-update.meiva.okf.md
+# meiva:link cli/docs/fleet-update.md
 
 from __future__ import annotations
 

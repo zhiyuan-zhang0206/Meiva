@@ -47,7 +47,7 @@ HARNESS_MODEL_SELECTION_VERSION = 1
 # Before execution selection existed, external agents stored a native history model in the same
 # fields. Only a stamped birth opts those pins into CLI execution; old sessions keep their CLI
 # defaults on resume. Unknown stored versions fail rather than reinterpret historical choices.
-# meiva:link base/agents/docs/harness/harness-models.meiva.okf.md
+# meiva:link base/agents/docs/harness/harness-models.md
 def uses_harness_model_selection(birth_config: Mapping[str, object] | None) -> bool:
     if birth_config is None or HARNESS_MODEL_SELECTION_KEY not in birth_config:
         return False

@@ -4,7 +4,7 @@
 # answers `dict[str, object]`, so every field arrives here as `object`; these
 # readers decide what a row may contain, and a wrong-typed field raises with
 # its name instead of flowing on as a wrong-typed value.
-# meiva:link meiva/agents/docs/agents.meiva.okf.md
+# meiva:link meiva/agents/docs/agents.md
 
 from __future__ import annotations
 

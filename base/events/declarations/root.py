@@ -262,7 +262,7 @@ class ConvergeFilePreserved(TypedDict):
 # meiva:note
 # One row per repository-owned converge destination that drifted from the record
 # and was restored from its source.
-# meiva:link cli/commands/converge/docs/rendered-files.meiva.okf.md
+# meiva:link cli/commands/converge/docs/rendered-files.md
 class ConvergeFileOverwritten(TypedDict):
     path: str
     key: str
@@ -275,7 +275,7 @@ class ConvergeFileOverwritten(TypedDict):
 # that hangs or fails still names its caller. `caller` is the block the wire
 # carries (CallerPayload), so the audit row and the root's intent record name
 # the same pid, argv and host (task #5325).
-# meiva:link base/native_process/root_control/docs/lifecycle-caller.meiva.okf.md
+# meiva:link base/native_process/root_control/docs/lifecycle-caller.md
 class LifecycleRequest(TypedDict):
     verb: str
     units: list[str]

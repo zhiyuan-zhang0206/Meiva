@@ -90,7 +90,7 @@ class RateLimitObserved:
 # reports the uncached remainder, OpenAI already totals — so each adapter folds
 # its provider's numbers into this shape at its mapping boundary, and every
 # consumer downstream can add them up without asking which harness produced them.
-# meiva:link base/lm/harness/docs/harness.meiva.okf.md
+# meiva:link base/lm/harness/docs/harness.md
 @dataclass(frozen=True, slots=True)
 class Usage:
     input_tokens: int = 0
@@ -153,7 +153,7 @@ class SessionClosed:
 # changed is what `turn_id=None` means: nothing. It no longer reaches a turn, and
 # a failure that names none can only end the session it came from. Each adapter
 # moves to the two names below in its own change, and this class goes with the last.
-# meiva:link base/lm/harness/docs/harness.meiva.okf.md
+# meiva:link base/lm/harness/docs/harness.md
 class SessionFaulted:
     def __init__(self, error: str, turn_id: str | None = None) -> None:
         self.error = error
@@ -162,7 +162,7 @@ class SessionFaulted:
 
 # meiva:note
 # One turn failed, and this event names it, so only that turn can be ended by it.
-# meiva:link base/lm/harness/docs/attribution.meiva.okf.md
+# meiva:link base/lm/harness/docs/attribution.md
 @dataclass(frozen=True, slots=True)
 class TurnFaulted(SessionFaulted):
     turn_id: str
@@ -171,7 +171,7 @@ class TurnFaulted(SessionFaulted):
 
 # meiva:note
 # The session itself failed. It cannot name a turn, and no reader may infer one.
-# meiva:link base/lm/harness/docs/attribution.meiva.okf.md
+# meiva:link base/lm/harness/docs/attribution.md
 @dataclass(frozen=True, slots=True)
 class SessionFailed(SessionFaulted):
     error: str
@@ -186,7 +186,7 @@ class SessionFailed(SessionFaulted):
 # session hands it to its sink, which delivers it the way any other inbound is
 # delivered. `source` is the provider's own name for it; `text` is what the agent
 # should read.
-# meiva:link base/lm/harness/docs/attribution.meiva.okf.md
+# meiva:link base/lm/harness/docs/attribution.md
 @dataclass(frozen=True, slots=True)
 class UnsolicitedOutput:
     source: str
@@ -221,6 +221,6 @@ BridgeEvent = (
 # `TextDelta` and `ReasoningDelta` alone are droppable: a consumer that falls behind
 # may skip incremental stream deltas, but never a turn boundary, a tool result or a
 # session binding, because losing one of those loses structure rather than detail.
-# meiva:link base/lm/harness/docs/harness.meiva.okf.md
+# meiva:link base/lm/harness/docs/harness.md
 def is_droppable(event: object) -> bool:
     return isinstance(event, (TextDelta, ReasoningDelta))

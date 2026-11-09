@@ -66,7 +66,7 @@ export function aggregateColumns(
     // meiva:note
     // Every column here came from `best`, so the reader states that instead of asserting it: a column
     // that somehow has no entry draws nothing.
-    // meiva:link ui/web/src/docs/frontend-components/run-timeline/run-timeline.meiva.okf.md
+    // meiva:link ui/web/src/docs/frontend-components/run-timeline/run-timeline.md
     const held = best.get(column);
     if (held === undefined) continue;
     const { key } = held;

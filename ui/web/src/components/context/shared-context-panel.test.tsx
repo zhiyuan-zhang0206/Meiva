@@ -181,7 +181,7 @@ it("starts a new agent or referenced document at the top of the shared reading a
   // meiva:note
   // The document is keyed by agent, so switching agents rebuilds the reading
   // area: it starts at the top instead of carrying the previous agent's offset.
-  // meiva:link ui/web/src/docs/frontend-state/shared-context/shared-context.meiva.okf.md
+  // meiva:link ui/web/src/docs/frontend-state/shared-context/shared-context.md
   expect(readingArea().scrollTop).toBe(0);
 });
 
@@ -216,7 +216,7 @@ it.each([false, true])("pins the title bar outside the reading viewport, so a sc
   // The bar belongs to the column, not to the reading area: both modes keep it
   // out of the scrolling element, so a scroll never carries it away. Shared
   // Context and Inspector each scroll only their own body.
-  // meiva:link ui/web/src/docs/frontend-state/shared-context/shared-context.meiva.okf.md
+  // meiva:link ui/web/src/docs/frontend-state/shared-context/shared-context.md
   snapshot.inspectorOpen = inspector;
   renderPanelView();
   if (inspector) expect(await screen.findByTestId("shared-inspector")).toBeTruthy();
@@ -260,7 +260,7 @@ it("keeps the narrow Inspector toggle beside Back through mode changes", () => {
   // meiva:note
   // Narrow Inspector replaces the whole document section, so leaving it rebuilds
   // the reading area; the position comes back from the panel's own record.
-  // meiva:link ui/web/src/docs/frontend-state/shared-context/shared-context.meiva.okf.md
+  // meiva:link ui/web/src/docs/frontend-state/shared-context/shared-context.md
   expect(readingArea().scrollTop).toBe(180);
 });
 

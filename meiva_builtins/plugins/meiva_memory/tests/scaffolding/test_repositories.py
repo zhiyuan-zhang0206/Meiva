@@ -1,6 +1,6 @@
 # meiva:note
 # Provisioning's real repository effects and per-invocation target capture.
-# meiva:link meiva_builtins/plugins/meiva_memory/docs/memory-pool-scaffold.meiva.okf.md
+# meiva:link meiva_builtins/plugins/meiva_memory/docs/memory-pool-scaffold.md
 
 from __future__ import annotations
 

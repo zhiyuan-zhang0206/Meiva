@@ -3,7 +3,7 @@
 WAL archiving ships every completed WAL segment, encrypted, to an OSS prefix
 through a pinned WAL-G
 ([decision](../../../../docs/decisions/data/backup/2026-10-02-walg-physical-backup.md),
-[node](walg.meiva.okf.md)). It is off until
+[node](walg.md)). It is off until
 `MEIVA_WALG_CONFIG_FILE` is set; unset, nothing of it runs. It archives WAL and, once a
 day, takes a base backup, verifies the archived chain and applies retention;
 `meiva backup walg restore` recovers one into a directory you name — the end of the
@@ -65,7 +65,7 @@ health probe reports it. After a start, `SELECT pg_switch_wal();` and an increas
 `archived_count` in `pg_stat_archiver` show a segment arriving in the bucket.
 
 **The daily tick.** `meiva backup walg run` executes the supervised backup,
-verification and retention path described by the [daily tick owner](walg-tick.meiva.okf.md).
+verification and retention path described by the [daily tick owner](walg-tick.md).
 The registered daily job writes `$MEIVA_HOME/logs/walg.log`. Run the first backup
 by hand and inspect it: its duration and upload volume are not established for a
 new bucket. A concurrent run stands down; a deployment or unavailable Postgres
@@ -132,7 +132,7 @@ settings are launch arguments). The objects stay in the bucket; deleting them is
 There is no way to stop archiving without a restart: when archiving misbehaves, repair
 its cause (credentials, network, disk).
 
-**Health and investigation.** The [archiving owner](walg.meiva.okf.md) specifies
+**Health and investigation.** The [archiving owner](walg.md) specifies
 all probe states, thresholds and skip semantics. For a reported failure, inspect
 `meiva backup walg status`, the end of `walg.log`, the archiver state and the pinned
 key before acting. A broken chain cannot recreate missing segments: take a new

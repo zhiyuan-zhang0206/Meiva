@@ -5,7 +5,7 @@
 # judging a spawned case ends in `Judged` with a result. The scoreboard and the index line are
 # rendered here as text; the shell only writes them. A week is alerted when any case needs
 # review: a setup error, a timeout, an audit error or a zero score.
-# meiva:link schedules/docs/adversarial-eval.meiva.okf.md
+# meiva:link schedules/docs/adversarial-eval.md
 
 from __future__ import annotations
 

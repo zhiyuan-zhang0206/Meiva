@@ -56,7 +56,7 @@ import {
 // upload button and the `min-h-9` textarea). The band belongs to the composer
 // alone: the sidebar footer draws a rule of its own, and the two are never
 // aligned by design (user ruling 2026-11-01).
-// meiva:link ui/web/src/docs/frontend-components/home-shell-chrome/bottom-rules.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/home-shell-chrome/bottom-rules.md
 const COMPOSER_BAND_CLASS = "border-t border-border pt-3 pb-6";
 const COMPOSER_BAND_ROW_CLASS = "min-h-9";
 
@@ -142,7 +142,7 @@ export function Composer({
   // The in-flight lock gates submission and attachments — never the textarea's
   // readOnly/disabled state: on Android that tears down the IME connection and
   // the next voice/paste commit is lost silently.
-  // meiva:link ui/web/src/docs/frontend-components/frontend-components.meiva.okf.md
+  // meiva:link ui/web/src/docs/frontend-components/frontend-components.md
   const composerLocked = sending;
 
   const {
@@ -418,7 +418,7 @@ export function Composer({
       // the band is content-sized: it grows upward with the draft, so its rule
       // moves. No other column follows it: the sidebar footer's rule is its
       // own and never aligned with this one (user rulings 2026-10-29, 2026-11-01).
-      // meiva:link ui/web/src/docs/frontend-components/home-shell-chrome/home-shell-chrome.meiva.okf.md
+      // meiva:link ui/web/src/docs/frontend-components/home-shell-chrome/home-shell-chrome.md
       className={cn(
         "mx-auto w-full px-4 pt-0.5 transition-colors",
         MIN_W_0,

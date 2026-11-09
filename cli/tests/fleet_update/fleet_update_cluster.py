@@ -82,7 +82,7 @@ _FAKE_SSH = Path(__file__).with_name("fake_ssh.py")
 # meiva:note
 # The OS passwd home of the user running pytest. `host_commands.HOME` derives `$H` from `$HOME`,
 # ignoring `MEIVA_HOME`, so every host-shell helper refuses to run if `HOME` still resolves here.
-# meiva:link cli/tests/fleet_update/docs/fleet-update-harness.meiva.okf.md
+# meiva:link cli/tests/fleet_update/docs/fleet-update-harness.md
 def operator_home() -> Path:
     return Path(pwd.getpwuid(os.getuid()).pw_dir).resolve()
 
@@ -159,7 +159,7 @@ def ssh_on_path(bin_dir: Path, script: Path) -> Path:
 # `run_started_at`, `roster_reads`, `lease_reads`, `silence_open`, `silence_hours`,
 # `silence_comment`, `violations`); and the healthy baseline every host reports (`host_up`,
 # `journal`, `journal_after_stop`, `helper_hash`, `helper_cert_root`).
-# meiva:link cli/tests/fleet_update/docs/fleet-update-harness.meiva.okf.md
+# meiva:link cli/tests/fleet_update/docs/fleet-update-harness.md
 class Cluster:
     def __init__(self, old: str, new: str, *, repo: Path, workdir: Path) -> None:
         self.old = old
@@ -197,7 +197,7 @@ class Cluster:
         # The daemon each host still runs, the last stop journal its lifecycle file holds, and the
         # two stop failures a test can stage: one that takes the daemon with it (the #5438 shape)
         # and one that leaves it running (a failed stop is not automatically an outage).
-        # meiva:link cli/docs/fleet-update-window/fleet-update-window.meiva.okf.md
+        # meiva:link cli/docs/fleet-update-window/fleet-update-window.md
         self.host_up: dict[str, bool] = dict.fromkeys(self.hosts, True)
         self.journal: dict[str, dict[str, Any] | None] = dict.fromkeys(self.hosts)
         self.stop_fails: dict[str, int] = {}

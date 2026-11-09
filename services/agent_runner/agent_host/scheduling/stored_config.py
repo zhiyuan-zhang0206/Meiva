@@ -10,7 +10,7 @@ __all__ = ["StoredConfig", "config_fingerprint"]
 # meiva:note
 # JSONB key order must not invalidate a cached runtime. Keep the two columns
 # separate and preserve the string coercion of non-JSON decoded scalars.
-# meiva:link services/agent_runner/agent_host/lifecycle/docs/configuration.meiva.okf.md
+# meiva:link services/agent_runner/agent_host/lifecycle/docs/configuration.md
 def config_fingerprint(
     config_overlay: dict[str, object] | None,
     birth_config: dict[str, object] | None,
@@ -27,7 +27,7 @@ def config_fingerprint(
 # meiva:note
 # The stored row stays mutable and retains the supplied maps, including nested
 # aliases. Its fingerprint is evaluated from those maps when requested.
-# meiva:link services/agent_runner/agent_host/lifecycle/docs/configuration.meiva.okf.md
+# meiva:link services/agent_runner/agent_host/lifecycle/docs/configuration.md
 @dataclass
 class StoredConfig:
     machine: str

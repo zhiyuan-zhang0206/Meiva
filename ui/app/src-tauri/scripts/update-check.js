@@ -1,6 +1,6 @@
 // meiva:note
 // The injected prompt asks the native check once per session, publishes an available build on window.__MEIVA_APP__.update (notifying the console via 'meiva-app-update'), and falls back to the download page when an install fails. Each case runs the checked-in script in a Node VM with canned command results.
-// meiva:link ui/app/docs/android-updates.meiva.okf.md
+// meiva:link ui/app/docs/android-updates.md
 (function () {
   var cfg = window.__MEIVA_APP__;
   if (!cfg || cfg.platform !== "android" || !cfg.version) return;

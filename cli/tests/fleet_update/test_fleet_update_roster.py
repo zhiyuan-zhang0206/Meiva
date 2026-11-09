@@ -2,7 +2,7 @@
 # Reading the cluster's roster through the hosts themselves: when a re-read is owed while
 # heartbeats catch up, what an unlisted laptop may be, the name a host reports versus the ssh
 # alias it was reached by, and every shape of reply that is not a roster.
-# meiva:link cli/docs/fleet-update-window/fleet-update-window.meiva.okf.md
+# meiva:link cli/docs/fleet-update-window/fleet-update-window.md
 
 from __future__ import annotations
 

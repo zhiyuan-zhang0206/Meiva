@@ -112,7 +112,7 @@ describe("Spawn flow", () => {
 // meiva:note
 // A send hands the timeline the message the gateway stored, so it can park that
 // message instead of re-pinning to the bottom; the view does the placing.
-// meiva:link ui/web/src/docs/frontend-state/frontend-state.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-state/frontend-state.md
 describe("send hands the timeline its own message", () => {
   it("send succeeds → requestSendAnchor carries the stored inbound", async () => {
     hooksState.activeId = 5;

@@ -23,7 +23,7 @@ from base.lm.harness.events import (
 # nothing, which is how a newer SDK stays compatible. Tool results are the one
 # payload that can be megabytes, so the event carries a preview — the model
 # already has the full content through the SDK's own transcript.
-# meiva:link base/lm/harness/claude/docs/claude.meiva.okf.md
+# meiva:link base/lm/harness/claude/docs/claude.md
 TOOL_RESULT_PREVIEW_CHARS = 2000
 
 
@@ -50,7 +50,7 @@ class ResultFields:
     # this session submitted, `task-notification` for the CLI's own turn over a
     # background task it finished without us, and nothing at all on a CLI too old to
     # name it. `_claim` is what decides which of those can be our turn's boundary.
-    # meiva:link base/lm/harness/claude/docs/claude.meiva.okf.md
+    # meiva:link base/lm/harness/claude/docs/claude.md
     origin_kind: str | None
     interrupted: bool
 
@@ -200,7 +200,7 @@ def _rate_limit(message: object, turn_id: str | None) -> list[BridgeEvent]:
 # running (that turn's model already read it) or answered it in a turn of its own.
 # Either way it is the agent's to read, so it maps to `UnsolicitedOutput` and the
 # session decides whether anyone has seen it yet.
-# meiva:link base/lm/harness/claude/docs/claude.meiva.okf.md
+# meiva:link base/lm/harness/claude/docs/claude.md
 def _task_notification(message: object, turn_id: str | None) -> list[BridgeEvent]:
     del turn_id
     task_id = _text(getattr(message, "task_id", None)) or "unknown"
@@ -219,7 +219,7 @@ def _task_notification(message: object, turn_id: str | None) -> list[BridgeEvent
 # The status a `task_updated` message reports, or None when it reports none: the
 # adapter stops tracking the task it names, so a task that never reported `completed`
 # is still stopped by `close()` rather than left running under a dead session.
-# meiva:link base/lm/harness/claude/docs/background-tasks.meiva.okf.md
+# meiva:link base/lm/harness/claude/docs/background-tasks.md
 def task_update_status(message: object) -> str | None:
     return _text(_as_dict(getattr(message, "patch", None)).get("status"))
 
@@ -246,7 +246,7 @@ _HANDLERS = {
 # sum — a live turn read as 8 in, 17391 cache-read, 6621 cache-write, which is a
 # 24020-token prompt. Reporting the remainder alone understates the prompt and
 # trips the pricing invariant that cached tokens cannot exceed input.
-# meiva:link base/lm/harness/docs/harness.meiva.okf.md
+# meiva:link base/lm/harness/docs/harness.md
 def _usage(raw: object) -> Usage:
     data = _as_dict(raw)
     cache_read = _int_or_zero(data.get("cache_read_input_tokens"))

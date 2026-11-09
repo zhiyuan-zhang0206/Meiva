@@ -4,7 +4,7 @@
 # Root writes one pidfile per unit right after it spawns that unit's process, and
 # clears it when that process exits. The pidfile outlives a root that left its children
 # behind, allowing the next root to stop the leftover process before spawning a replacement.
-# meiva:link services/supervision/meiva_root/docs/meiva_root.meiva.okf.md
+# meiva:link services/supervision/meiva_root/docs/meiva_root.md
 
 from __future__ import annotations
 

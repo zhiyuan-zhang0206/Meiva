@@ -7,7 +7,7 @@
 # note publishes no wake and is ignored by the pending-wake scanner and heartbeat suppression, so
 # a cluster update never triggers a thundering-herd wakeup or breaks prompt prefix caches; the
 # agent claims the note in `created_at` order on its next real wake.
-# meiva:link services/agent_runner/agent_host/lifecycle/docs/graceful-exit.meiva.okf.md
+# meiva:link services/agent_runner/agent_host/lifecycle/docs/graceful-exit.md
 
 from __future__ import annotations
 

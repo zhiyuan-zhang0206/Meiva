@@ -17,7 +17,7 @@ _NOW = datetime(2026, 3, 4, 5, 6, 7, tzinfo=UTC)
 # The marker is what makes an aborted converge visible after `meiva start` has
 # brought the services up: the step name and its reason survive in the home.
 # The loop that records it on a failed step is tested with the selection loop.
-# meiva:link cli/commands/converge/docs/converge-incomplete.meiva.okf.md
+# meiva:link cli/commands/converge/docs/converge-incomplete.md
 def test_the_prod_install_records_the_failing_step(tmp_path: Path) -> None:
     home = tmp_path / "home"
 

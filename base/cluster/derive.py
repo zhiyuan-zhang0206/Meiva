@@ -192,7 +192,7 @@ def frontend_service_cmd(
     # `base.cluster.frontend_build`: it rebuilds only when the source digest or the
     # baked NEXT_PUBLIC_* values changed, which keeps a start that changed nothing
     # from re-running a production Next.js build.
-    # meiva:link base/cluster/docs/frontend-build.meiva.okf.md
+    # meiva:link base/cluster/docs/frontend-build.md
     frontend_dir = Path(frontend_dir).as_posix()
     build_env = fe_build_env(gateway_port=gateway_port, browser_origins=browser_origins)
     origins = (

@@ -3,7 +3,7 @@
 # builds both files in a temporary repository and asserts on the report the hook prints:
 # the counts prove the comparison covered something, and the labels name the period a hand
 # edit broke.
-# meiva:link base/lm/pricing/docs/pricing.meiva.okf.md
+# meiva:link base/lm/pricing/docs/pricing.md
 from __future__ import annotations
 
 import json

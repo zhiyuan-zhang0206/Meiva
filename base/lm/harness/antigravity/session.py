@@ -47,7 +47,7 @@ from base.lm.harness.session import SessionTotals, TurnOutcome
 # whole file: an interrupt kills the `agy` process. `interrupt()` therefore retires the transport,
 # and the next turn respawns it with `--conversation`, so the transcript survives even though the
 # process does not.
-# meiva:link base/lm/harness/antigravity/docs/antigravity.meiva.okf.md
+# meiva:link base/lm/harness/antigravity/docs/antigravity.md
 class AgySession(BaseHarnessSession[AntigravityConfig]):
     def __init__(
         self,
@@ -76,7 +76,7 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
         # from one it never asked for is whether it wrote a turn out and has not seen
         # that turn end. The name is set before the write, so a `result` that races
         # the send still has an owner (#5664).
-        # meiva:link base/lm/harness/docs/attribution.meiva.okf.md
+        # meiva:link base/lm/harness/docs/attribution.md
         self._sent_turn: str | None = None
         self._turn_steps: list[Usage] = []
 
@@ -141,7 +141,7 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
         # A bare `agy` resolves against the child's PATH, and a harness child is handed an
         # environment with none (#5491). Pin the CLI we resolved; the rest of the argv
         # prefix (a test's fake CLI, an operator's flags) rides unchanged.
-        # meiva:link base/lm/harness/docs/harness.meiva.okf.md
+        # meiva:link base/lm/harness/docs/harness.md
         resolved = resolve_harness_binary(
             self.config.executable[0], path_env=(self._environ or {}).get("PATH")
         )
@@ -257,7 +257,7 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
     # A step that never reaches DONE — a turn cut short by a result that was not ours —
     # still streamed text the agent already saw, so it belongs in the reply rather than
     # in a bucket nobody reads (#5664).
-    # meiva:link base/lm/harness/docs/attribution.meiva.okf.md
+    # meiva:link base/lm/harness/docs/attribution.md
     def _flush_step_text(self) -> str:
         leftover = "".join("".join(bucket) for _, bucket in sorted(self._step_text.items())).strip()
         self._step_text.clear()
@@ -275,7 +275,7 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
     # becomes unsolicited output instead of closing a turn that never ran it. Mid-turn
     # the two are indistinguishable, which is why the turn's reply text is built from
     # this ticket's own parts rather than from the frame (#5664).
-    # meiva:link base/lm/harness/docs/attribution.meiva.okf.md
+    # meiva:link base/lm/harness/docs/attribution.md
     def _handle_result_event(self, payload: dict[str, object]) -> None:
         ticket = self._active
         if ticket is not None and self._sent_turn == ticket.turn_id:

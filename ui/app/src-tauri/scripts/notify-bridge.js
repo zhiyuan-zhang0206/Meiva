@@ -3,7 +3,7 @@
 // delivery decision, the category switches and deduplication live in the
 // notification spine; this bridge only deduplicates by `notification_id` inside
 // one webview session and turns a native tap into the Inbox deep link.
-// meiva:link ui/app/docs/app.meiva.okf.md
+// meiva:link ui/app/docs/app.md
 (function () {
   if (window.top !== window) return;
   if (location.protocol === "tauri:" || location.hostname === "tauri.localhost") return;
@@ -41,7 +41,7 @@
     // `/fleet?notice=3103`). Everything else — a scheme, a protocol-relative
     // `//host`, a backslash the URL parser folds into a slash — would take the
     // webview off the console, and the value comes off the wire.
-    // meiva:link ui/app/docs/notifications.meiva.okf.md
+    // meiva:link ui/app/docs/notifications.md
     function legalTarget(href) {
       return (
         typeof href === "string" &&
@@ -78,7 +78,7 @@
         // meiva:note
         // The delivery's own notice when the bridge saw one; the inbox otherwise, so
         // an install whose first tap precedes any delivery still lands there.
-        // meiva:link ui/app/docs/notifications.meiva.okf.md
+        // meiva:link ui/app/docs/notifications.md
         target = new URL(loadTarget() || "fleet#inbox", cfg.entryUrl);
         if (target.origin !== new URL(cfg.entryUrl).origin) return;
       } catch (error) {
@@ -128,7 +128,7 @@
     // can arrive out of order, and an earlier delivery can have been published
     // while this webview was away. The delivery log is the only authority for the
     // cursor, so a live event asks for a catch-up and that read moves it.
-    // meiva:link ui/app/docs/notifications.meiva.okf.md
+    // meiva:link ui/app/docs/notifications.md
     function onNotification(event) {
       if (typeof event.notification_id !== "number") return;
       if (remember(event.notification_id)) {
@@ -137,7 +137,7 @@
         // meiva:note
         // Remember where this delivery points BEFORE the user can tap it: the tap is
         // consumed by the native side, which then only asks the bridge for a target.
-        // meiva:link ui/app/docs/notifications.meiva.okf.md
+        // meiva:link ui/app/docs/notifications.md
         rememberTarget(event.href);
       }
       scheduleCatchUp();
@@ -161,7 +161,7 @@
     // would jump the cursor over rows the client never saw. A first run (no
     // cursor yet) is the one deliberate exception: it adopts `latest_id` instead
     // of replaying history at the user.
-    // meiva:link ui/app/docs/notifications.meiva.okf.md
+    // meiva:link ui/app/docs/notifications.md
     function catchUp() {
       var after = loadCursor();
       var url =

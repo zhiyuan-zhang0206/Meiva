@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # meiva:note
 # `daily_scan.py` is the shell of the daily scan: it collects the window through `collect.py`, writes the dataset and the full report, and prints the compact view. `scan_report.py` holds every decision about what the report says and whether the scan alerts, over values only; the coverage floor and the clock reading are read once by `process_env` and travel in `ScanEnv`. `main` returns the exit code, which `__main__` raises: `scan_report.alert_verdict` decides it in one order (empty window, low coverage, regression), and `1` is a hard failure of the arguments.
-# meiva:link meiva_builtins/skills/platform/meiva-self-evolution/docs/coverage-sentinel.meiva.okf.md
+# meiva:link meiva_builtins/skills/platform/meiva-self-evolution/docs/coverage-sentinel.md
 """Daily incremental self-evolution scan.
 
 Collects the past N days (default 1) of real agent runs into a trace

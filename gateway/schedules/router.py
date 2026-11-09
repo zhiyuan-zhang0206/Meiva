@@ -241,7 +241,7 @@ def _sync_schedule_mutation(
     return needs_sync
 
 
-# meiva:link gateway/schedules/docs/router-contracts.meiva.okf.md
+# meiva:link gateway/schedules/docs/router-contracts.md
 def update_blocking(
     pool: ConnectionPool,
     schedule_id: int,
@@ -339,7 +339,7 @@ def _reconstruct_created_row(
     )
 
 
-# meiva:link gateway/schedules/docs/router-contracts.meiva.okf.md
+# meiva:link gateway/schedules/docs/router-contracts.md
 def create_blocking(
     pool: ConnectionPool,
     body: ScheduleCreate,
@@ -652,7 +652,7 @@ async def guarded_draft_schedule(
     return ScheduleDraftResponse(agent_id=spawned.id)
 
 
-# meiva:link gateway/schedules/docs/router-contracts.meiva.okf.md
+# meiva:link gateway/schedules/docs/router-contracts.md
 def fetch_full_blocking(pool: ConnectionPool, schedule_id: int) -> ScheduleFullRow:
 
     with pool.connection() as conn:
@@ -662,7 +662,7 @@ def fetch_full_blocking(pool: ConnectionPool, schedule_id: int) -> ScheduleFullR
     return row
 
 
-# meiva:link gateway/schedules/docs/router-contracts.meiva.okf.md
+# meiva:link gateway/schedules/docs/router-contracts.md
 def control_blocking(
     pool: ConnectionPool, schedule_id: int, action: plans.ControlAction, key: str | None
 ) -> tuple[ScheduleFullRow, bool]:

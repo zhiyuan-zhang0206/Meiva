@@ -11,7 +11,7 @@ let mockMode: string | undefined = "dark";
 // meiva:note
 // Next renders one media-scoped theme-color per scheme for the first paint; the
 // sync overwrites both so an in-app override beats the OS preference.
-// meiva:link ui/web/src/docs/frontend.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend.md
 function metas(): HTMLMetaElement[] {
   return [...document.querySelectorAll<HTMLMetaElement>('meta[name="theme-color"]')];
 }

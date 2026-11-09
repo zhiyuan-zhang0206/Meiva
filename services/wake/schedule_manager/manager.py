@@ -77,7 +77,7 @@ _log = logging.getLogger(__name__)
 # lag on a crash is fine and keeps the polling cheap.
 POLL_INTERVAL_S = 5.0
 
-# meiva:link services/wake/schedule_manager/docs/host-replacement.meiva.okf.md
+# meiva:link services/wake/schedule_manager/docs/host-replacement.md
 INTERRUPTED_HOST_REPLACED = "interrupted (session host replaced)"
 
 # Repo root (services/wake/schedule_manager/../../.. == <repo>/) — the cwd the runner launches from, so its
@@ -382,13 +382,13 @@ class ScheduleManager:
             _log.warning("schedule %s process lost; automatic relaunch disabled", schedule_id)
             emit_process_lost(schedule_id)
 
-    # meiva:link services/wake/schedule_manager/docs/host-replacement.meiva.okf.md
+    # meiva:link services/wake/schedule_manager/docs/host-replacement.md
     def _read_host_generation(self) -> str | None:
         return self._backend.host_generation()
 
     # meiva:note
     # While the session host does not answer, one reconcile pass takes no action: no session is declared lost, no schedule changes status, and no launch is attempted.
-    # meiva:link services/wake/schedule_manager/docs/host-replacement.meiva.okf.md
+    # meiva:link services/wake/schedule_manager/docs/host-replacement.md
     def _note_host_generation_unknown(self, now: float) -> None:
         if not host_unknown_due(self._host_generation_unknown_logged, now):
             return
@@ -398,7 +398,7 @@ class ScheduleManager:
             "(an absent host means unknown, never an empty one)"
         )
 
-    # meiva:link services/wake/schedule_manager/docs/host-replacement.meiva.okf.md
+    # meiva:link services/wake/schedule_manager/docs/host-replacement.md
     def _reclaim_after_host_replacement(
         self, schedule_id: int, wanted: Desired, now: float
     ) -> bool:

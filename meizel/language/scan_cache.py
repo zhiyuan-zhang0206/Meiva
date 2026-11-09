@@ -1,6 +1,6 @@
 # meiva:note
 # Content-addressed JSON serialization and SQLite-backed caching for `FileScan` and `Sources`.
-# meiva:link meizel/docs/checker/checker.meiva.okf.md
+# meiva:link meizel/docs/checker/checker.md
 
 from __future__ import annotations
 

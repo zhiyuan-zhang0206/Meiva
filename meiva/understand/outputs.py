@@ -2,7 +2,7 @@
 # The saved copy of a `meiva.understand` answer, decided from values: the file name and body of
 # one result, and which earlier results fall out of the ring. The shell in `answer.py` writes the
 # file and deletes the stale ones.
-# meiva:link meiva/understand/docs/understand.meiva.okf.md
+# meiva:link meiva/understand/README.md
 
 from __future__ import annotations
 

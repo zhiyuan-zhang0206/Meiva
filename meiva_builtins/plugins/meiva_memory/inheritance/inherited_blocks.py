@@ -2,7 +2,7 @@
 # The inherited-memory decisions as values: which birth-chain rows this host can read, how the
 # fenced blocks of each ancestor entry are clipped to the two size caps, and the note text that
 # results. Warnings travel back as strings for the caller to log.
-# meiva:link meiva_builtins/plugins/meiva_memory/docs/memory-inheritance.meiva.okf.md
+# meiva:link meiva_builtins/plugins/meiva_memory/docs/memory-inheritance.md
 from __future__ import annotations
 
 from collections.abc import Sequence

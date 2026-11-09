@@ -3,7 +3,7 @@
 # runner and then the gateway, and switch every checkout to NEW. A failed stop brings back the
 # hosts this run already stopped. Each question a step asks of a host is decided in `plan/`; this
 # module reads the hosts, runs the commands and says the lines those decisions return.
-# meiva:link cli/docs/fleet-update.meiva.okf.md
+# meiva:link cli/docs/fleet-update.md
 
 from __future__ import annotations
 
@@ -100,7 +100,7 @@ def _fetch_and_probe(s: Session, alias: str, new: str) -> dict[str, str]:
     return probe_helper(s, alias, new)
 
 
-# meiva:link cli/docs/fleet-update-window/fleet-update-window.meiva.okf.md
+# meiva:link cli/docs/fleet-update-window/fleet-update-window.md
 def _preflight(s: Session, args: FleetArgs, new: str) -> _Preflight:
     hosts = start_order(args.gateway, tuple(args.runner))
     probed = s.run_all(hosts, lambda alias: probe_host(s, alias))
@@ -151,7 +151,7 @@ def _preflight(s: Session, args: FleetArgs, new: str) -> _Preflight:
     )
 
 
-# meiva:link cli/docs/fleet-update-window/fleet-update-window.meiva.okf.md
+# meiva:link cli/docs/fleet-update-window/fleet-update-window.md
 def _stored_schedules(s: Session, args: FleetArgs, new: str) -> None:
     out = s.run(
         args.gateway,
@@ -209,7 +209,7 @@ def _restart_wave(s: Session, args: FleetArgs, to_restart: tuple[str, ...]) -> f
 # a boot attempt spends the boot budget, and on macOS the failing attempt that spends it exits 0
 # (launchd has no attempt limit), so a failed recovery would read as success and never reach
 # `needs manual:`.
-# meiva:link cli/docs/fleet-update-window/failed-stop-recovery.meiva.okf.md
+# meiva:link cli/docs/fleet-update-window/failed-stop-recovery.md
 def _recover_after_failed_stop(
     s: Session,
     args: FleetArgs,
@@ -301,7 +301,7 @@ def _stop_wave(s: Session, args: FleetArgs, pre: _Preflight) -> None:
         raise FailedError(f"{exc}{_STOP_HINT}") from exc
 
 
-# meiva:link cli/docs/fleet-update.meiva.okf.md
+# meiva:link cli/docs/fleet-update.md
 def down(s: Session, args: FleetArgs, resolved_new: str | None) -> None:
     if resolved_new is not None:
         new = resolved_new

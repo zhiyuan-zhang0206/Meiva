@@ -41,7 +41,7 @@ def write_default_disk_image(plugin: str, cls: type[BaseModel], *, home: Path) -
 
 # meiva:note
 # An agent's flat overlay routes each key to its single owning plugin; framework-scope keys stay with base/config/agent_pins.py. A key whose owner is unknown or ambiguous is dropped rather than raised, matching the framework pins reader's drift tolerance: the stored map was validated against a schema that may no longer exist, and a read must not be stricter than the boot that would consume it. Absent and empty overlays resolve to no pins.
-# meiva:link base/packages/plugins/docs/plugin-config/config-view.meiva.okf.md
+# meiva:link base/packages/plugins/docs/plugin-config/config-view.md
 def resolve_agent_plugin_pins(
     config_overlay: Mapping[str, object] | None,
     configs: Mapping[str, BaseModel],
@@ -64,7 +64,7 @@ def resolve_agent_plugin_pins(
 
 # meiva:note
 # A missing plugin cluster projection raises InvalidConfigData only when the plugin declares cluster fields and the unit expects a fetch: not config_source_is_local() and should_fetch_from_gateway(). A unit whose config source is local composes from its own authority image - for the gateway-capable unit that owns its image, a missing packet is its normal state (task #5234). A present projection must equal the declared cluster fields exactly (SchemaDriftError) and the composed model must validate (InvalidConfigData); a local-source unit keeps its own values.
-# meiva:link base/packages/plugins/docs/plugin-config/config-view.meiva.okf.md
+# meiva:link base/packages/plugins/docs/plugin-config/config-view.md
 def with_cluster_policy[C: BaseModel](
     plugin: str,
     config: C,
@@ -134,7 +134,7 @@ def _is_object_dict(value: object) -> TypeGuard[dict[str, object]]:
     return isinstance(value, dict)
 
 
-# meiva:link base/packages/plugins/docs/plugin-config/plugin-config.meiva.okf.md
+# meiva:link base/packages/plugins/docs/plugin-config/plugin-config.md
 def read_service_config[C: BaseModel](
     plugin: str, cls: type[C], *, environ: Mapping[str, str]
 ) -> C | None:

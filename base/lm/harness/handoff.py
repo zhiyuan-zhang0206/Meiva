@@ -11,7 +11,7 @@ from base.api_contracts.agent_contract import Harness
 # the same six sections are rendered for Claude, Codex and Antigravity, and a waking
 # agent reads them on its first turn. Changing the dataclass fields or the section
 # order means bumping `HANDOFF_VERSION`, and the field-set test fails until you do.
-# meiva:link base/lm/harness/docs/harness.meiva.okf.md
+# meiva:link base/lm/harness/docs/harness.md
 HANDOFF_VERSION = 1
 
 DEFAULT_OVERLAPS: tuple[str, ...] = (

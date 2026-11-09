@@ -12,7 +12,7 @@
 # the reader a later wake reports from. One path, one format, one reader: every guard on a
 # machine writes here, so any periodic job can answer "what fired while nobody was listening"
 # without knowing which guard fired it.
-# meiva:link base/events/alarms/docs/alarms.meiva.okf.md
+# meiva:link base/events/alarms/README.md
 
 from __future__ import annotations
 
@@ -57,7 +57,7 @@ _TEXT_CHARS = 500
 # meiva:note
 # One detection, as the guards and the reader see it: what fired, on what, the judgement and the
 # reading behind it, who owns it, and how far it got.
-# meiva:link base/events/alarms/docs/alarms.meiva.okf.md
+# meiva:link base/events/alarms/README.md
 @dataclass(frozen=True)
 class Alarm:
     id: str
@@ -75,7 +75,7 @@ class Alarm:
 
     # meiva:note
     # One line for whoever reads the alarm: what fired, on what, and what for.
-    # meiva:link base/events/alarms/docs/alarms.meiva.okf.md
+    # meiva:link base/events/alarms/README.md
     def line(self) -> str:
         told = "delivered" if self.delivered else f"NOT delivered: {self.delivery_error}"
         return (
@@ -173,7 +173,7 @@ def mark_notified(home: Path, alarm_ids: Iterable[str], *, now: datetime) -> Non
 
 # meiva:note
 # Close one alarm: whoever owns it has seen it and is acting.
-# meiva:link base/events/alarms/docs/alarms.meiva.okf.md
+# meiva:link base/events/alarms/README.md
 def acknowledge(home: Path, alarm_id: str, *, now: datetime) -> None:
     _append(home, now, {"event": "acked", "id": alarm_id, "at": now.isoformat()})
 

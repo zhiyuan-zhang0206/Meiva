@@ -1,6 +1,6 @@
 # meiva:note
 # Observe real sleep calls in this process while retaining nonzero production retry delays.
-# meiva:link base/packages/tests/lm/docs/contracts.meiva.okf.md
+# meiva:link base/packages/tests/lm/docs/contracts.md
 
 import random
 import sys

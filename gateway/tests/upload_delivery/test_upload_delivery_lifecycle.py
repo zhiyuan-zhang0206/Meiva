@@ -226,7 +226,7 @@ async def test_accepted_upload_wakes_once_and_releases_staged_bytes(
     # meiva:note
     # The accepted batch writes a system-sourced upload notice followed by the user message
     # in one transaction, and wakes the agent once with the user message's inbound_id.
-    # meiva:link gateway/upload_delivery/docs/delivered-uploads/delivered-uploads.meiva.okf.md
+    # meiva:link gateway/upload_delivery/docs/delivered-uploads/delivered-uploads.md
     with client.app.state.db_pool.connection() as conn:
         assert conn.execute(
             "SELECT source FROM inbound_messages WHERE agent_id=%s ORDER BY id", (agent,)

@@ -33,7 +33,7 @@ export function omittedIn(data: readonly RunTimelineResponse[], visible: Viewpor
     ...data.filter((item) => overlaps(viewportOf(item.window), visible)).map((item) => item.units_omitted));
 }
 
-// meiva:link ui/web/src/docs/frontend-components/run-timeline/window-reads.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/run-timeline/window-reads.md
 export function mergeWindows(data: readonly RunTimelineResponse[], view: Viewport | null): RunTimelineResponse | undefined {
   const first = data.at(0);
   if (first === undefined) return undefined;

@@ -20,7 +20,7 @@ import {
 // the page that cursor reaches, `tasksWindow` the window those task rows answer under, `cold` an
 // empty cache, and the two pairs of `…Fails` / `…Pending` flags are the endpoints refusing or
 // never answering.
-// meiva:link ui/web/src/docs/frontend-components/fleet-view.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/fleet-view.md
 interface QueueSeed {
   open?: NoticeItem[];
   awaiting?: NoticeItem[];
@@ -123,7 +123,7 @@ function agent(over: {
 // meiva:note
 // The endpoint that answers nothing: the case that needs a query still in flight (no rows, no
 // error) hands this in, so "loading" is the hook's own state rather than a stubbed one.
-// meiva:link ui/web/src/docs/frontend-components/fleet-view.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/fleet-view.md
 function neverSettles<T>(): Promise<T> {
   return new Promise<T>(() => undefined);
 }
@@ -132,7 +132,7 @@ function neverSettles<T>(): Promise<T> {
 // The test door for this file: the cache carries the rows the app would have fetched, and the fake
 // transport answers the same endpoints so a refetch agrees with it. The two hook modules stay real,
 // so a case that reads a cursor or a failure is reading the hook's own answer.
-// meiva:link ui/web/src/docs/frontend-components/fleet-view.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/fleet-view.md
 function renderQueue(
   agents: AgentRow[],
   props: Omit<ComponentProps<typeof InboxQueue>, "agents"> = {},
@@ -159,7 +159,7 @@ function renderQueue(
     // meiva:note
     // The open feed asks with no cursor; the history asks with one, so the same endpoint answers
     // both the way the gateway does. A case that makes it fail or hang says which of the two.
-    // meiva:link ui/web/src/docs/frontend-components/fleet-view.meiva.okf.md
+    // meiva:link ui/web/src/docs/frontend-components/fleet-view.md
     const history = params !== undefined;
     if (history ? seed.historyPending : seed.openPending) return neverSettles();
     if (history ? seed.historyFails : seed.openFails) return Promise.reject(new Error("inbox unavailable"));
@@ -281,7 +281,7 @@ describe("InboxQueue — resolved history (collapsed disclosure)", () => {
   // meiva:note
   // "Show more" is the history's own cursor: the first page says another follows, the endpoint
   // answers that cursor with the second page, and the second page's row appears.
-  // meiva:link ui/web/src/docs/frontend-components/fleet-view.meiva.okf.md
+  // meiva:link ui/web/src/docs/frontend-components/fleet-view.md
   it("pages back with Show more once the disclosure is open", async () => {
     setFeed({
       resolved: [ni({ id: 60, title: "r1" })],
@@ -332,7 +332,7 @@ describe("InboxQueue — task grouping", () => {
   // The binding is the window the queue asks under, so the case states it as one: a registry that
   // only answers under a different window reaches the queue empty, and the same rows under seven
   // days group. A hook replaced by a test could not tell those two apart.
-  // meiva:link ui/web/src/docs/frontend-components/fleet-view.meiva.okf.md
+  // meiva:link ui/web/src/docs/frontend-components/fleet-view.md
   it("reads the task registry under the seven-day window and under no other", () => {
     withRegistry("30d");
     setFeed({ awaiting: [n({ id: 1, title: "q-mgr", priority: "P2", agent_id: 30 })] });

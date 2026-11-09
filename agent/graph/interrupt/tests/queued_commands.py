@@ -3,7 +3,7 @@
 # route or a peer would, so a test that needs an interrupt writes the row the watcher reads
 # instead of replacing the watcher. `waited_s` backdates the row: a restart interrupts only after
 # its grace has passed on the database clock.
-# meiva:link agent/graph/docs/turn-interrupts.meiva.okf.md
+# meiva:link agent/graph/docs/turn-interrupts.md
 
 import psycopg
 

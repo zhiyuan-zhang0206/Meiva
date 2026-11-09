@@ -1,6 +1,6 @@
 // meiva:note
 // Behavior lock for the local no-test-only-import rule: a production module may not reach a test double, a test-support module or a test file. The valid cases pin the limits of the naming convention, since a rule that fires on a helper whose name merely contains "test" would be turned off rather than obeyed.
-// meiva:link ui/web/src/docs/frontend-components/test-only-imports.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/test-only-imports.md
 import { RuleTester } from "eslint";
 import { describe, it } from "vitest";
 

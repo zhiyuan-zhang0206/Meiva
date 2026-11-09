@@ -1,7 +1,7 @@
 # meiva:note
 # Public entry door of `ops.agent_transfer`: the refusal vocabulary, the budget a transfer must fit,
 # and the pure framing checks the gateway shares with both runners.
-# meiva:link gateway/agents/docs/agent-transfer.meiva.okf.md
+# meiva:link gateway/agents/docs/agent-transfer.md
 
 from ops.agent_transfer.budget import (
     WorkspaceTransferLimits as WorkspaceTransferLimits,

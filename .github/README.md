@@ -1,0 +1,119 @@
+# .github
+
+## What it is
+
+`.github/` holds CI, proof, release and repository-automation workflows under
+`workflows/` and the issue/PR
+templates ([Issue Intake](issue-intake.md)).
+
+GitHub-hosted runners: general CI and operational automation use
+`ubuntu-24.04`, while app CI / release also use macOS 14. Public-repo hosted minutes let the same CI
+lane run for the canonical repo and forks without repository gating. `ci-image/` and `workflows/ci-runner-image.yml` build and publish the pre-baked Ubuntu 24.04 runner image to GHCR ([Repository Automation](repository-automation.md)).
+
+Each job provisions its own toolchain; [CI data plane](ci-data-plane.md) describes
+the native database prerequisites and isolated test clusters.
+
+## Core responsibilities
+
+### `workflows/ci.yml` — the repository's gate
+
+One pre-merge workflow for pull requests and manual full-suite dispatch: the
+classify gate, the sharded suites behind the four required check names, the
+fail-closed backend test gate and the artifact rules are [The ci.yml workflow](ci-workflow.md).
+
+### `workflows/refresh-test-durations.yml` — daily shard timing refresh
+
+[Nightly Test Duration Refresh](refresh-test-durations.md): isolated measurement; an Actions cache
+carries the timings to CI.
+
+### `workflows/ci-app.yml` — path-filtered native app gate
+
+Changes under `ui/app/` or the app release/test tooling run Rust format,
+desktop clippy on Ubuntu and macOS, an `aarch64` debug APK build after
+applying the generated-project overlay, and the Android-overlay + updater-manifest
+pytest files. The path filter keeps unrelated backend/frontend changes from
+installing Tauri's native toolchain.
+
+### `workflows/release-gate.yml` and `workflows/promote-release.yml` — Release Train and channel promotion
+
+`release-gate.yml` runs every 6 hours (`cron: '17 */6 * * *'`, skipping cleanly
+when `channel/latest` already certifies `main` `HEAD`) and on `workflow_dispatch`
+(supporting manual and `-hf<N>` hotfix cuts). It runs the full verification
+matrix — backend static + structure + 8 static shards + 8 native shards,
+frontend, 4-shard Playwright e2e, hosted e2e, Linux container boundary, and
+release notes — then mints an annotated `vYYYY.MM.DD.HHMMSS[-hfN]` tag carrying
+a `meiva-release/v1` JSON certificate and advances `channel/latest`, without
+reverse commits on `main` and without creating a GitHub Release.
+`promote-release.yml` (`workflow_dispatch`) verifies a certified release tag via
+`scripts/host_ops/release/promote.py` before advancing `channel/stable`. Both
+workflows publish Git tags only: the GitHub Releases page carries artifact
+deliverables (`android-*`, `app-*` and their `*-latest` feeds), whose `Latest`
+badge a cluster release must not take. See
+[host versioning](../docs/conventions/engineering/host-versioning.md) and the
+[Git-only cluster release decision](../docs/decisions/engineering/tooling/2026-11-07-cluster-releases-stay-git-only.md).
+
+`release-gate.yml` also publishes, so a cron slot GitHub never started cannot be
+filled by dispatching it. `workflows/main-typecheck.yml` is the check-only
+backfill: `workflow_dispatch` only (optional `ref`, default `main`), `contents:
+read`, one hosted-runner job that runs the full `basedpyright` and the pyright
+test-environment drift check, and no step that tags, pushes or releases.
+
+### `workflows/release-app.yml` — macOS app release
+
+Called by `release-gate.yml` when a certified release includes `ui/app` changes
+since `app-latest` (or triggered by an `app-v<major>.<minor>.<patch>` tag or
+manual `workflow_dispatch`), building a universal macOS DMG and updater archive
+with a monotonic run-number SemVer (`<major>.<minor>.<patch + run_number>`).
+Complete secret groups activate Apple and Tauri updater signing; missing groups retain unsigned
+build evidence. Signed updater archives become `latest.json` (recording the
+packaged `commit`), published to the mutable `app-latest` feed asset (and to the
+immutable version release for `app-v*` tags). Manual dispatch with `dry_run=true`
+builds without publishing.
+
+### Action pinning
+
+Every `uses:` is pinned to a **commit SHA** with the human-readable version in a
+trailing comment. A moving tag like `@v6` is a mutable pointer the action's owner
+can repoint at any time, which is a supply-chain write into every CI run.
+`dependabot.yml` watches the `github-actions` ecosystem weekly so the pins are
+updated by a reviewable PR rather than drifting silently or going stale.
+
+### Repository automation and external-state audits
+
+Proof workflow triggers, CI reruns, official-price proposals, the weekly
+branch-protection drift loop and the pull-request attribution reminder are detailed in
+[Repository Automation](repository-automation.md).
+
+## Key dependencies
+
+- [Test Suite](../tests/docs/tests.md) — the suite the CI gates run.
+- [Scripts](../scripts/docs/scripts.md) — `scripts/ci/cli.py` (`check_ci`) polls a PR's CI to a verdict;
+  release scripts mint tag certificates, advance channels, bisect train regressions, and build the app updater manifest; the branch
+  audit compares GitHub's live protection state with `scripts/audit/analysis/protection.py`.
+- [Meiva App](../ui/app/docs/app.md) — native app built and released by the two
+  app workflows.
+- The hosted runner image supplies the base OS; everything Meiva-specific is
+  installed by the job's own steps, so a CI change never depends on out-of-band
+  host state.
+
+## Entry points
+
+- Events: each workflow's own `on:` block owns its trigger list, and this node
+  does not restate it — a copy drifts. `ci.yml` gates pull requests (and manual
+  dispatch), while `release-gate.yml` certifies full-suite releases on `main`.
+- Manual full run: `workflow_dispatch` on `ci.yml`; structure and secret-scan use fetched ancestry.
+- Local verification: lint/codegen at commit, heavy checks at pre-push, and
+  targeted tests — see the [hook runbook](../docs/conventions/runbook.md#git-hooks-pre-commit--pre-push).
+
+## Notes
+
+- **Artifact publishing never gates.** Every `ci.yml` upload continues on error;
+  coverage data retries once and records any missing shard explicitly.
+- **CI owns the merge gate.** Structural checks, code-comment migration and
+  conditional codegen are described in [Structure and documentation gates](structure-gates.md).
+- General CI's `paths-ignore` applies to `push` only; PR `classify` chooses
+  suites, then [CI test selection](test-selection.md) governs backend subsets.
+  Conservative fallbacks and Trunk merge-tree branches retain the full suite.
+- Job names are surfaced to reviewers as check names; renaming one silently
+  changes what a branch-protection rule matches.
+- Duration refresh cadence and measured-versus-applied provenance: [policy](../scripts/ci/docs/duration-refresh.md).

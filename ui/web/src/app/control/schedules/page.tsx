@@ -55,7 +55,7 @@ const EMPTY_FORM: ScheduleCreate = {
 // meiva:note
 // This route is the schedules page's composition root: it reads the router and hands the shell a
 // `navigate`, so a test passes a spy instead of replacing `next/navigation`.
-// meiva:link ui/web/src/docs/frontend-state/frontend-state.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-state/frontend-state.md
 export default function SchedulesPage() {
   const router = useRouter();
   const navigate = useCallback((href: Route) => { router.push(href); }, [router]);
@@ -167,7 +167,7 @@ export function SchedulesPageView({ navigate }: SchedulesPageViewProps) {
   // The body warms the syntax-highlighter chunk once idle, ahead of a script actually being
   // expanded (see python-code.tsx), then presents three blocks: the natural-language create form,
   // the raw create form, and the schedule table.
-  // meiva:link ui/web/src/docs/frontend-state/frontend-state.meiva.okf.md
+  // meiva:link ui/web/src/docs/frontend-state/frontend-state.md
   return (
     <div className="space-y-4">
       <CodeHighlighterPreloader />

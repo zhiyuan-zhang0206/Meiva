@@ -115,7 +115,7 @@ __all__ = [
 ]
 
 
-# meiva:link base/telemetry/otlp/docs/telemetry-otlp/exit-flush.meiva.okf.md
+# meiva:link base/telemetry/otlp/docs/telemetry-otlp/exit-flush.md
 def remaining_time(deadline: float, now: float) -> float:
     return max(0.0, deadline - now)
 
@@ -192,7 +192,7 @@ def endpoint_reachable(endpoint: str) -> bool:
 # Emit init status into the unified stream; never affect backend setup. When the collector is
 # unavailable, the event reaches the JSONL mirror even though its OTLP copy cannot leave the
 # process. Processes with no bound event pipeline have no global stream to receive this event.
-# meiva:link base/telemetry/otlp/docs/telemetry-otlp/exit-flush.meiva.okf.md
+# meiva:link base/telemetry/otlp/docs/telemetry-otlp/exit-flush.md
 def _emit_backend_event(event_name: str, **attributes: object) -> None:
     if not pipeline_bound():
         return
@@ -202,7 +202,7 @@ def _emit_backend_event(event_name: str, **attributes: object) -> None:
 
 # meiva:note
 # Whether provider setup failed because Python already shut down its exit executors.
-# meiva:link base/telemetry/otlp/docs/telemetry-otlp/exit-flush.meiva.okf.md
+# meiva:link base/telemetry/otlp/docs/telemetry-otlp/exit-flush.md
 def _executor_shutdown_at_exit(exc: BaseException) -> bool:
     return sys.is_finalizing() or (
         isinstance(exc, RuntimeError) and "after interpreter shutdown" in str(exc)
@@ -272,7 +272,7 @@ class OtlpBackend:
         # meiva:note
         # Set when the owner starts closing. A bring-up failure after this point is only
         # reportable if the process bound an event pipeline to carry the report (#5578).
-        # meiva:link base/telemetry/otlp/docs/telemetry-otlp/exit-flush.meiva.okf.md
+        # meiva:link base/telemetry/otlp/docs/telemetry-otlp/exit-flush.md
         self._closing = False
         # Child deferral (task #3816 M4b) — policy in base.telemetry.otlp.telemetry_otlp_defer;
         # the lambdas look the backend methods up per call so test seams stay live.
@@ -376,7 +376,7 @@ class OtlpBackend:
     # The pipeline calls this before its own drain: that drain is where a never-started
     # exporter gets brought up for the first time at interpreter exit, an attempt the SDK
     # can no longer honour. Marking it keeps that failure out of a log nobody can act on.
-    # meiva:link base/telemetry/otlp/docs/telemetry-otlp/exit-flush.meiva.okf.md
+    # meiva:link base/telemetry/otlp/docs/telemetry-otlp/exit-flush.md
     def begin_close(self) -> None:
         self._closing = True
 
@@ -384,7 +384,7 @@ class OtlpBackend:
         """Close admission and observe this exporter within one local deadline."""
         self.begin_close()
         self.begin_close()
-        # meiva:link base/telemetry/otlp/docs/telemetry-otlp/exit-flush.meiva.okf.md
+        # meiva:link base/telemetry/otlp/docs/telemetry-otlp/exit-flush.md
         if not math.isfinite(timeout) or timeout < 0:
             raise ValueError("OTLP timeout must be finite and non-negative")
         deadline = time.monotonic() + timeout
@@ -575,7 +575,7 @@ class OtlpBackend:
             # attempt could not deliver anything either. That covers both `stop()` setting
             # `self._closing` (#5578) and an `atexit` sync (`ExternalAttachment.close`) running
             # after `threading._shutdown()` has already stopped `concurrent.futures` executors.
-            # meiva:link base/telemetry/otlp/docs/telemetry-otlp/exit-flush.meiva.okf.md
+            # meiva:link base/telemetry/otlp/docs/telemetry-otlp/exit-flush.md
             if (self._closing or _executor_shutdown_at_exit(exc)) and not pipeline_bound():
                 return False
             self._init_failed_at = time.monotonic()

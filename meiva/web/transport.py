@@ -2,7 +2,7 @@
 # The one place a provider request leaves the process: it waits its turn at the rate limiter,
 # sends the request through the shared retry policy, and turns an HTTP, connection or JSON
 # failure into the caller's error type. The request and the wording come from `wire.py`.
-# meiva:link meiva/web/docs/providers.meiva.okf.md
+# meiva:link meiva/web/docs/providers.md
 
 from __future__ import annotations
 

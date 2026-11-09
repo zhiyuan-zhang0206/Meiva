@@ -10,7 +10,7 @@ import { cn } from "@/lib/format/utils";
 
 // meiva:note
 // To user document images open at full size on click: the inline image is a button, and the enlarged copy is portalled to document.body (Escape, the close button, or a click on the backdrop dismisses it). Portalling is required because the document pane scrolls inside a contained box, which would clip a fixed layer.
-// meiva:link ui/web/src/docs/frontend-components/markdown-surfaces.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/markdown-surfaces.md
 export function ZoomableImage({ src, alt, className }: {
   src: string;
   alt: string;

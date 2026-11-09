@@ -2,7 +2,7 @@
 # The rule's door: it puts the checkout root on the path (pre-commit runs this
 # as a script path, where neither `meizel` nor `scripts` is importable) and hands
 # out `main`. What each part owns is in the node below.
-# meiva:link scripts/lint/docs/time-bomb-rule-parts.meiva.okf.md
+# meiva:link scripts/lint/docs/time-bomb-rule-parts.md
 
 
 from __future__ import annotations

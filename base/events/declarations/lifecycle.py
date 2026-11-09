@@ -49,7 +49,7 @@ class NodeExit(TypedDict):
 # close that leaves processes behind names how many. Emit sites: the interrupt pair in
 # `agent/graph/claim/harness_turn.py:interrupt_engine`, the rest in
 # `base/lm/harness/process.py:settle_close` and the session closers that call it.
-# meiva:link base/lm/harness/docs/harness.meiva.okf.md
+# meiva:link base/lm/harness/docs/harness.md
 class HarnessInterrupt(TypedDict):
     agent_id: int
     settled: bool | None

@@ -1,0 +1,37 @@
+# LM Media Capabilities and Attachments
+
+`ModelSpec.media_types` declares a registered model's native `image`, `pdf`,
+`audio`, and `video` support; an empty set means text-only. It replaces the
+per-model `vision` bool while leaving the provider-plugin v1 binding contract
+unchanged.
+
+`registry.media_types_for_model()` resolves one answer in order: a registered
+core or plugin model's `ModelSpec.media_types`; an unregistered plugin's
+`ProviderBinding.vision` (image-only); then the core `_VISION_MODEL_PREFIXES`
+fallback (image-only). No match is text-only. `model_supports_vision()` is the
+message-endpoint image gate derived from that result. The resolution lives on
+the `base.lm.registry` data leaf (factory re-exports it), so importing it
+does not pull the LangChain-backed factory — the exec child's boot-path media
+gate relies on that.
+
+`registry.attach_modalities_for_model()` is the attach gate: `ModelSpec.attach_modalities`
+when the entry declares an attach-specific opinion (must be a subset of `media_types`,
+enforced by the registry), else the native `media_types` — attach registers files into
+the same message pipeline, so the native matrix is the default contract (ruling
+2026-08-28). An empty result means attach is unavailable: `meiva.self.attach` is hidden
+from the SDK docs and raises on call.
+
+`attach.py` is a pure packer that runs when an exec call that registered files
+finishes. It re-stats registered files, reports rejected files in a leading text
+caption, and emits native image, document, or media blocks after applying
+capability, count, size, and image dimension limits. The limits, the
+`ATTACH_MEDIA_MIME` suffix table and `media_type_for_mime` (a MIME type's
+`ModelSpec.media_types` vocabulary entry: image, pdf, audio, video) live in the
+import-free `attach_constants.py` leaf, shared with the SDK surfaces
+(`meiva.sdk_surface.attachment_transport`, `meiva.understand`,
+`agent.graph._attach_merge`) so none of them pulls the provider stack.
+`meiva.understand` also builds its media blocks with the packer's `media_block`
+and judges a file's size with its `file_size_error`, so a model receives media
+from either path in the one shape its provider decodes. Modality rejection happens at registration
+(`attach()`), so the packer's caption-skip is only the safety net for entries
+registered before a model change.

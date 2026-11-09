@@ -3,7 +3,7 @@
 # caller-visible clock, which calls read the real clock, which names are
 # window-shaped, and what counts as a fixed calendar literal. Why each name
 # is in (or deliberately out of) a set is in the node below.
-# meiva:link scripts/lint/docs/time-bomb-rule-parts.meiva.okf.md
+# meiva:link scripts/lint/docs/time-bomb-rule-parts.md
 
 from __future__ import annotations
 

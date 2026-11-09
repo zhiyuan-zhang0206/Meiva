@@ -3,7 +3,7 @@
 # every listed machine agrees on one commit, the package refresh and the drift checks. What each
 # answer means is decided in `plan/`; this reads the answers and records one line per host. Like
 # the rest of `cli.fleet_update`, nothing here imports application code.
-# meiva:link cli/docs/fleet-update-window/fleet-update-window.meiva.okf.md
+# meiva:link cli/docs/fleet-update-window/fleet-update-window.md
 
 from __future__ import annotations
 
@@ -45,7 +45,7 @@ def machine_names(s: Session, aliases: tuple[str, ...]) -> dict[str, str]:
 # Read the roster until every listed machine is online and agrees on one commit. A host this run
 # already knows failed to start is expected to be offline: waiting the whole roster window for it
 # would turn one host's failure into everybody's timeout.
-# meiva:link cli/docs/fleet-update.meiva.okf.md
+# meiva:link cli/docs/fleet-update.md
 def roster(
     s: Session,
     args: FleetArgs,

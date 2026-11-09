@@ -1,6 +1,6 @@
 # meiva:note
 # The process root owns one admitted SDK arm; billing and public spans observe its shared readiness.
-# meiva:link base/telemetry/otlp/docs/telemetry-otlp/exit-flush.meiva.okf.md
+# meiva:link base/telemetry/otlp/docs/telemetry-otlp/exit-flush.md
 
 from __future__ import annotations
 

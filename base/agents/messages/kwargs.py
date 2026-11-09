@@ -31,7 +31,7 @@ class ExecStatus(StrEnum):
 
 # meiva:note
 # NoteTag is a closed cross-stack set: scripts/codegen/dump_frontend_constants.py generates its values into the frontend (constants-generated.ts), where every member renders as a lifecycle, memory or generic note marker, so a new member needs only its gateway timestamp classification. The value set itself is a wire contract, locked by value-set tests against silent renames.
-# meiva:link base/agents/messages/docs/metadata-contracts.meiva.okf.md
+# meiva:link base/agents/messages/docs/metadata-contracts.md
 class NoteTag(StrEnum):
     SDK_HINT = "sdk_hint"
     AGENT_REPLY = "agent_reply"
@@ -135,7 +135,7 @@ def message_read_time(msg: BaseMessage) -> str | None:
 
 # meiva:note
 # COMPACT_SUMMARY_HEADER opens every replacement compact summary, inside the system note `compose_summary_message` wraps it in, and is the read side's classifier for the untagged summary HumanMessage; it is also the standing "a compaction just happened" signal, without which an agent re-reads a /compact order in the summary's verbatim tail and runs it again every turn. The string lives in the leaf message-contract module so gateway and insights callers import it without agent.graph.
-# meiva:link base/agents/messages/docs/metadata-contracts.meiva.okf.md
+# meiva:link base/agents/messages/docs/metadata-contracts.md
 COMPACT_SUMMARY_HEADER = (
     "Your context was just compacted. The following is the summary of your own prior context:"
 )
@@ -143,7 +143,7 @@ COMPACT_SUMMARY_HEADER = (
 # meiva:note
 # The opening marker summaries carried before the note had tags; stored summaries are
 # immutable, so the classifier still recognizes them.
-# meiva:link base/agents/messages/docs/metadata-contracts.meiva.okf.md
+# meiva:link base/agents/messages/docs/metadata-contracts.md
 _LEGACY_COMPACT_SUMMARY_PREFIX = "[system] "
 
 
@@ -151,6 +151,6 @@ def is_compact_summary_text(text: str) -> bool:
     # meiva:note
     # Whether the text is a replacement compact summary: the note that opens it. Accepts the
     # current wrapped form and the legacy opening of one written before the note had tags.
-    # meiva:link base/agents/messages/docs/metadata-contracts.meiva.okf.md
+    # meiva:link base/agents/messages/docs/metadata-contracts.md
     stripped = text.removeprefix(SYSTEM_NOTE_LEAD).removeprefix(_LEGACY_COMPACT_SUMMARY_PREFIX)
     return stripped.startswith(COMPACT_SUMMARY_HEADER)

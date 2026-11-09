@@ -5,7 +5,7 @@
 # day: below it the week is too quiet for meaningful analysis). A main check at or above
 # `HIGH_WEEKLY_EVENTS` also arms the mid-week follow-up, whose own bar is half that high
 # threshold, counted from the follow-up window rather than from the whole week.
-# meiva:link schedules/docs/self-evolution.meiva.okf.md
+# meiva:link schedules/docs/self-evolution.md
 
 from __future__ import annotations
 

@@ -288,7 +288,7 @@ export const useTimelineStore = create<TimelineState>()((set, get) => ({
   // The compact transition buffer owns a reader anchor across re-keying; trim
   // once it releases. Follower trimming also sets `retentionCappedSeq` so any
   // active post-compact retention walk stops instead of re-fetching evicted pages.
-  // meiva:link ui/web/src/docs/frontend-state/timeline-cache.meiva.okf.md
+  // meiva:link ui/web/src/docs/frontend-state/timeline-cache.md
   trimOldestWhileFollowing: (maxItems) => {
     const state = get();
     if (state.compactBuffer || state.items.length <= maxItems) return;

@@ -4,7 +4,7 @@
 # refused before any model is built. Which model answers is `routing.py`; what content it receives
 # is `content.py`. Every model goes through the same provider factory as every other LLM path.
 # The shell in `answer.py` reads the files, builds the model and invokes it.
-# meiva:link meiva/understand/docs/understand.meiva.okf.md
+# meiva:link meiva/understand/README.md
 
 from __future__ import annotations
 

@@ -20,7 +20,7 @@ from cli.database.runtime import CommandRuntime
 # Write the session ledger a later `meiva start` restores (see session_restore).
 # Called before the services phase: that phase is what signals the `meiva-browser`
 # session, so waiting for the stop's own `browser` phase would find Chrome already gone.
-# meiva:link services/desktop/browser/docs/browser-session-restore.meiva.okf.md
+# meiva:link services/desktop/browser/docs/browser-session-restore.md
 def record_browser_session(command: CommandRuntime, *, now: datetime) -> None:
     from services.desktop.browser import session_restore
 

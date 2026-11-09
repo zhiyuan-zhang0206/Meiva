@@ -1,4 +1,4 @@
-# meiva:link base/cluster/docs/frontend-build.meiva.okf.md
+# meiva:link base/cluster/docs/frontend-build.md
 
 from __future__ import annotations
 

@@ -30,7 +30,7 @@ function webSocketOrigin(gatewayOrigin: string): string {
 
 // meiva:note
 // A forwarded HTTPS host with no explicit port clears the loopback listener's port. Forwarded HTTP protocol matching is case-insensitive.
-// meiva:link ui/web/src/lib/auth/docs/content-security-policy.meiva.okf.md
+// meiva:link ui/web/src/lib/auth/docs/content-security-policy.md
 export function browserFacingRequestUrl(request: Request): URL {
   const requestUrl = new URL(request.url);
   const protocol = firstHeaderValue(request.headers.get("x-forwarded-proto"))?.toLowerCase();
@@ -48,7 +48,7 @@ export function browserFacingRequestUrl(request: Request): URL {
 
 // meiva:note
 // Production script policy uses a nonce and strict-dynamic without unsafe-eval or unsafe-inline. Style elements require the nonce while style attributes allow unsafe-inline. Connections are limited to the current page's own origin and the gateway HTTP and WebSocket origins.
-// meiva:link ui/web/src/lib/auth/docs/content-security-policy.meiva.okf.md
+// meiva:link ui/web/src/lib/auth/docs/content-security-policy.md
 export function buildContentSecurityPolicy({
   nonce,
   gatewayOrigin,

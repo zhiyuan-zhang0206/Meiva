@@ -6,12 +6,12 @@ Current topology and authority have component owners:
 
 | Topic | Owner |
 |---|---|
-| Home identity, capabilities, init, ports and admitted checkout | [Start identity](../../cli/docs/start_identity.meiva.okf.md) |
-| Owned or remote-managed PostgreSQL, Redis and PgBouncer startup | [Data-plane startup](../../cli/commands/data_plane/docs/data-plane-startup/data-plane-startup.meiva.okf.md) |
-| Native PostgreSQL custody and admin authority | [PostgreSQL owner](../../base/cluster/docs/postgres.meiva.okf.md) |
-| Runtime DB/API delivery and remote runner bootstrap | [Authority wiring](../../base/cluster/authority/docs/wiring.meiva.okf.md) |
-| Sealed unit bundle exposure and compromise boundary | [Unit bundle](../../base/host/db_authority/docs/unit-bundle.meiva.okf.md) |
-| Agent checkpoint persistence and crash replay | [Agent startup](../../agent/startup/docs/startup.meiva.okf.md) |
+| Home identity, capabilities, init, ports and admitted checkout | [Start identity](../../cli/docs/start_identity.md) |
+| Owned or remote-managed PostgreSQL, Redis and PgBouncer startup | [Data-plane startup](../../cli/commands/data_plane/docs/data-plane-startup/data-plane-startup.md) |
+| Native PostgreSQL custody and admin authority | [PostgreSQL owner](../../base/cluster/docs/postgres.md) |
+| Runtime DB/API delivery and remote runner bootstrap | [Authority wiring](../../base/cluster/authority/docs/wiring.md) |
+| Sealed unit bundle exposure and compromise boundary | [Unit bundle](../../base/host/db_authority/docs/unit-bundle.md) |
+| Agent checkpoint persistence and crash replay | [Agent startup](../../agent/startup/docs/startup.md) |
 
 Initialize the home before starting it. For a split cluster, start the gateway
 before joining or starting runners; their Settings construction requires its
@@ -19,7 +19,7 @@ bootstrap endpoint. Use the [deployment capability](../../.agents/skills/meiva-g
 for the installation sequence. Ordinary start refuses missing or contradictory
 identity rather than inferring it from an existing listener or directory.
 
-Checkpoint schema admission belongs to [agent infrastructure](../../agent/docs/infra.meiva.okf.md).
+Checkpoint schema admission belongs to [agent infrastructure](../../agent/docs/infra.md).
 For an upstream checkpoint dependency change, follow the
 [checkpoint migration rule](../../db/docs/migrations.md#checkpoint-dependency-upgrades).
 The interval's replay contract belongs to the agent startup owner above; its
@@ -53,7 +53,7 @@ Use the checkout's own real `.venv`, clear inherited `VIRTUAL_ENV`, and run
 `guard_editable_venv.py` before dependency operations as described in
 [development setup](dev-setup.md#development-in-a-worktree) and
 [testing environment](testing.md#environment). The
-[editable-install guard](../../cli/commands/docs/editable-install-guard.meiva.okf.md)
+[editable-install guard](../../cli/commands/docs/editable-install-guard.md)
 owns exact-root validation and explicit repair; ordinary startup does not
 permit changing another checkout's installation.
 
@@ -65,7 +65,7 @@ is recorded in [the editable-pointer incident](../postmortems/0006-an-editable-i
 
 ### Manual editable-install recovery
 
-Use the [editable-install guard](../../cli/commands/docs/editable-install-guard.meiva.okf.md)
+Use the [editable-install guard](../../cli/commands/docs/editable-install-guard.md)
 from the affected stable checkout, then recheck both editable records before
 removing a worktree. [Development setup](dev-setup.md#development-in-a-worktree)
 owns environment isolation and dependency commands.
@@ -74,12 +74,12 @@ Runtime facts needed to choose the checkout and operation have component owners:
 
 | Question | Current owner |
 |---|---|
-| Which home and initialized identity a CLI may operate | [Start identity](../../cli/docs/start_identity.meiva.okf.md) |
-| Which checkout supplies the CLI and Python installation | [Python installation](../../cli/docs/python-install.meiva.okf.md) |
-| PostgreSQL, PgBouncer and Redis startup/custody | [Data-plane startup](../../cli/commands/data_plane/docs/data-plane-startup/data-plane-startup.meiva.okf.md) |
-| Database roles and credential delivery | [Authority](../../base/cluster/authority/docs/authority.meiva.okf.md), [wiring](../../base/cluster/authority/docs/wiring.meiva.okf.md), [unit bundle exposure](../../base/host/db_authority/docs/unit-bundle.meiva.okf.md) |
-| Source-start host integration | [Host converge](../../cli/commands/converge/docs/converge-host-wiring.meiva.okf.md) |
-| External agent skill ownership and update | [Package commands](../../cli/commands/extensions/packages/docs/packages.meiva.okf.md) |
+| Which home and initialized identity a CLI may operate | [Start identity](../../cli/docs/start_identity.md) |
+| Which checkout supplies the CLI and Python installation | [Python installation](../../cli/docs/python-install.md) |
+| PostgreSQL, PgBouncer and Redis startup/custody | [Data-plane startup](../../cli/commands/data_plane/docs/data-plane-startup/data-plane-startup.md) |
+| Database roles and credential delivery | [Authority](../../base/cluster/authority/docs/authority.md), [wiring](../../base/cluster/authority/docs/wiring.md), [unit bundle exposure](../../base/host/db_authority/docs/unit-bundle.md) |
+| Source-start host integration | [Host converge](../../cli/commands/converge/docs/converge-host-wiring.md) |
+| External agent skill ownership and update | [Package commands](../../cli/commands/extensions/packages/docs/packages.md) |
 | Schedule source, provisioning and stored-script verification | [Schedules](../../schedules/README.md) |
 
 Use the [deployment capability](../../meiva_builtins/skills/platform/meiva-guide/deploy/SKILL.md)
@@ -96,12 +96,12 @@ nodes of the packages that own the code:
 
 | What | Node |
 |---|---|
-| `$MEIVA_HOME` layout, what derives from the home | `base/paths/docs/paths.meiva.okf.md` |
-| plugin enable config (`plugins_config.json`) | `base/packages/plugins/docs/enable_config.meiva.okf.md` |
-| `installed.json` schema, installable shapes, the scanner gate | `base/packages/extensions/docs/install_registry/install_registry.meiva.okf.md` |
-| `meiva plugins` / `skill` / `mcp` verbs, MCP merge layers, secret channel | `cli/commands/extensions/packages/docs/packages.meiva.okf.md` |
-| machine name, capability set, `machines` table, spawn-target 400 invariant | `base/cluster/machine/docs/machine.meiva.okf.md` |
-| which services each capability contributes | `services/docs/services.meiva.okf.md` |
+| `$MEIVA_HOME` layout, what derives from the home | `base/paths/docs/paths.md` |
+| plugin enable config (`plugins_config.json`) | `base/packages/plugins/docs/enable_config.md` |
+| `installed.json` schema, installable shapes, the scanner gate | `base/packages/extensions/docs/install_registry/install_registry.md` |
+| `meiva plugins` / `skill` / `mcp` verbs, MCP merge layers, secret channel | `cli/commands/extensions/packages/docs/packages.md` |
+| machine name, capability set, `machines` table, spawn-target 400 invariant | `base/cluster/machine/docs/machine.md` |
+| which services each capability contributes | `services/docs/services.md` |
 
 Three operational consequences worth stating here:
 
@@ -115,11 +115,11 @@ Three operational consequences worth stating here:
 
 ## Long-running processes: one service per session
 
-Service registration belongs to [the service domain](../../services/docs/services.meiva.okf.md);
+Service registration belongs to [the service domain](../../services/docs/services.md);
 native custody and generation-bound readiness belong to
-[Meiva Root](../../services/supervision/meiva_root/docs/meiva_root.meiva.okf.md).
+[Meiva Root](../../services/supervision/meiva_root/docs/meiva_root.md).
 Persistent interactive shells use the
-[PTY generation boundary](../../base/sessions/pty/docs/generation-boundary.meiva.okf.md).
+[PTY generation boundary](../../base/sessions/pty/docs/generation-boundary.md).
 When stopping an older release, verify the actual native inventory as well as
 the desired roster; configuration alone is not evidence of termination.
 
@@ -168,11 +168,11 @@ A temporary Postgres uses its native shutdown; failures preserve PGDATA for
 investigation. No full-family disappearance census is performed.
 
 Application service commands, admitted PATH and process ancestry belong to
-[start identity](../../cli/docs/start_identity.meiva.okf.md) and
-[root supervision](../../services/supervision/meiva_root/docs/meiva_root.meiva.okf.md).
+[start identity](../../cli/docs/start_identity.md) and
+[root supervision](../../services/supervision/meiva_root/docs/meiva_root.md).
 Enumerate application services through `meiva status`; persistent shells through
 `meiva sessions list`. Idle and paused agent identities remain durable even when
-no active turn task is running; see [agent runtime](../../agent/docs/agent-runtime/agent-runtime.meiva.okf.md).
+no active turn task is running; see [agent runtime](../../agent/docs/agent-runtime/agent-runtime.md).
 
 PTY closure is best effort: known shell sessions close with bounded signals;
 background or detached processes can remain. Known job leftovers are diagnostic.
@@ -243,14 +243,14 @@ while per-agent model/runtime caches remain bounded.
   warm-up above), but it does not eagerly connect to every configured MCP
   server: each server connection opens only on that tool's first call, and the
   tool schema itself is cached on disk for 24h so repeat discovery costs no
-  round trip. [`docs/mcps/mcps.meiva.okf.md`](../mcps/mcps.meiva.okf.md).
+  round trip. [`docs/mcps/mcps.md`](../mcps/mcps.md).
 - **Fixed, small per-agent connection budget** — 2 pooled Postgres
   connections (shared with the LangGraph checkpoint saver) + one Redis
   subscription per agent, with pgbouncer transaction pooling in front of the
   cluster's Postgres so the connection count does not scale 1:1 with fleet
   size (hosted mode replaces per-agent pools with one bounded workload pool and
   one fixed four-connection control pool for the runner).
-  [`agent/db/docs/db.meiva.okf.md`](../../agent/db/docs/db.meiva.okf.md).
+  [`agent/db/docs/db.md`](../../agent/db/docs/db.md).
 
 None of this claims memory stops mattering — it is the honest current floor.
 The next walls once memory is handled: the heartbeat's
@@ -749,7 +749,7 @@ writes the new secret, and journals each step with fingerprints, never secrets.
 **The pinned file is backup-critical material**: nothing re-derives it, and losing it
 makes every logical backup of the home unreadable; escrow a copy with the gateway's
 backup keys ([decision](../decisions/data/backup/2026-09-28-backup-passphrase-minted-at-birth.md),
-[passphrase](../../services/backup/artifact/docs/passphrase.meiva.okf.md)). Restart the
+[passphrase](../../services/backup/artifact/docs/passphrase.md)). Restart the
 gateway. No remote unit is affected: its machine API token and telemetry token do not
 derive from the secret, so no new capability bundle is needed. It does not change
 Postgres, Redis, ACLs, or PgBouncer.
@@ -799,8 +799,8 @@ programmatic rotation API at all.
 ## Code flow & Events
 
 Event publication and payloads belong to
-[the live event bus](../../base/events/live/docs/live/live.meiva.okf.md);
-interrupt and control belong to [the agent graph](../../agent/graph/docs/graph.meiva.okf.md).
+[the live event bus](../../base/events/live/docs/live/live.md);
+interrupt and control belong to [the agent graph](../../agent/graph/docs/graph.md).
 
 ### Exec run-directory hygiene
 
@@ -969,7 +969,7 @@ Review any `core.hooksPath` override before removing it and installing.
 A commit hook's cost follows the change, not the repository. The per-file
 Python and content lints take the changed files (`--only FILE...`; the contract,
 and what widens the run to a full scan, is the
-[changed-files mode](../../scripts/lint/docs/changed-files-mode.meiva.okf.md)). The
+[changed-files mode](../../scripts/lint/docs/changed-files-mode.md)). The
 code-generation freshness hooks, whose check needs the whole project, run only
 when one of the inputs in their `files:` filter changed. ESLint lints the changed
 frontend files (`scripts/hooks/precommit-eslint.sh`) and the whole project when the
@@ -1092,20 +1092,20 @@ enforcement; the structural CI job already skips the four duplicate hooks.
 
 ## CI (Continuous Integration)
 
-The [GitHub Actions overview](../../.github/.github.meiva.okf.md) owns workflow
+The [GitHub Actions overview](../../.github/README.md) owns workflow
 composition, suite selection and hosted runners. The
-[native test gate](../../.github/test-gate.meiva.okf.md) owns result semantics;
-[native CI infrastructure](../../.github/ci-data-plane.meiva.okf.md) owns isolated
+[native test gate](../../.github/test-gate.md) owns result semantics;
+[native CI infrastructure](../../.github/ci-data-plane.md) owns isolated
 database prerequisites. [Testing](testing.md) owns scoped contributor checks.
 Runtime operation and CI verification are separate: test and build processes
 must not target a production home.
 
 ## Root-owned application lifecycle
 
-[Host lifecycle](../../cli/commands/lifecycle/docs/lifecycle.meiva.okf.md),
-[start identity](../../cli/docs/start_identity.meiva.okf.md),
-[Meiva Root](../../services/supervision/meiva_root/docs/meiva_root.meiva.okf.md) and
-[native closure](../../services/supervision/meiva_root/docs/closure.meiva.okf.md)
+[Host lifecycle](../../cli/commands/lifecycle/docs/lifecycle.md),
+[start identity](../../cli/docs/start_identity.md),
+[Meiva Root](../../services/supervision/meiva_root/docs/meiva_root.md) and
+[native closure](../../services/supervision/meiva_root/docs/closure.md)
 own service selection, launch generations, platform ancestry, readiness and
 stop/destroy custody. Consult these owners before changing a running generation;
 missing native evidence cannot establish readiness or exit.

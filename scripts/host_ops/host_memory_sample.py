@@ -5,7 +5,7 @@
 # descendant units with their limits. Nothing here writes to the cgroup tree,
 # signals a process or raises an alert; the linked document owns the contract
 # and the operator unit that runs it.
-# meiva:link scripts/host_ops/docs/host-memory-sample.meiva.okf.md
+# meiva:link scripts/host_ops/docs/host-memory-sample.md
 from __future__ import annotations
 
 import argparse

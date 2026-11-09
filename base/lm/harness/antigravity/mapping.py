@@ -155,7 +155,7 @@ def assistant_text(
 # is input + output, with `cache_read_tokens` inside the input figure rather than
 # beside it. Stated so the next reader does not add the cache count twice; see
 # `Usage` in `base/lm/harness/events.py`.
-# meiva:link base/lm/harness/docs/harness.meiva.okf.md
+# meiva:link base/lm/harness/docs/harness.md
 def parse_usage(payload: object) -> Usage:
     usage = _mapping(payload)
     raw_in = _int(usage.get("input_tokens"))

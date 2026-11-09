@@ -17,7 +17,7 @@ from gateway.http.middleware.error_envelope import error_response
 # meiva:note
 # The request headers a forwarded call inherits: the credentials the auth middleware reads,
 # plus the Host and Origin it checks on a trusted network.
-# meiva:link gateway/mcp_server/docs/mcp-endpoint/mcp-endpoint.meiva.okf.md
+# meiva:link gateway/mcp_server/docs/mcp-endpoint/mcp-endpoint.md
 _FORWARDED_HEADERS = ("authorization", "cookie", "host", "origin")
 _API_BASE_URL = "http://mcp-forward.invalid"
 _SPAWNER = "mcp"
@@ -154,7 +154,7 @@ def _register_tools(server: MCPServer, app: FastAPI) -> None:
         )
 
 
-# meiva:link gateway/mcp_server/docs/mcp-endpoint/model-capability-failures.meiva.okf.md
+# meiva:link gateway/mcp_server/docs/mcp-endpoint/model-capability-failures.md
 def build_manager(app: FastAPI):  # noqa: ANN201
 
     server = MCPServer("meiva", instructions=server_instructions())

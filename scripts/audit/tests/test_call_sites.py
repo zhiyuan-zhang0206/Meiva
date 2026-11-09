@@ -2,7 +2,7 @@
 # Locks `scripts/audit/call_sites.py` and the judge behind it: a call is judged by the argument it
 # carries, and an argument list the judge cannot read is reported as unproven rather than counted
 # either way.
-# meiva:link scripts/audit/docs/call-sites.meiva.okf.md
+# meiva:link scripts/audit/docs/call-sites.md
 
 from __future__ import annotations
 

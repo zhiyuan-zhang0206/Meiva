@@ -71,7 +71,7 @@ def test_two_edges_that_each_break_the_cycle_alone_are_not_both_dropped() -> Non
 # `meizel.checkout` is the shell that answers it. These tests pin that direction, so moving the
 # reader back into the model — the shape where one file both declared and read a universe — fails
 # here as well as in `meizel check`.
-# meiva:link meizel/docs/checker/purity.meiva.okf.md
+# meiva:link meizel/docs/checker/purity.md
 _MODEL = Path(model.__file__).resolve()
 _SHELL = _MODEL.parent.parent / "checkout.py"
 _EFFECT_MODULES = {"os", "shutil", "subprocess", "tempfile"}

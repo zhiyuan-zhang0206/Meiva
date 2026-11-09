@@ -37,7 +37,7 @@ __all__ = [
 
 # meiva:note
 # system_marker.show_timestamp hides the ts for ambient context and the one-time guidance notes (compact reminder, SDK hint, agent reply, silent idle-continue, security, exec timeout, timezone, the to_user soft limit, skipped SDK-expand entries); heartbeats, lifecycle_* transitions, task notifications, and NEW_SKILLS keep it. NEW_SKILLS stays visible deliberately: the drift note is the only place that mid-window install is visible. The split is closed over NoteTag — a new member needs an explicit decision.
-# meiva:link base/agents/history/docs/timeline/note-timestamp-policy.meiva.okf.md
+# meiva:link base/agents/history/docs/timeline/note-timestamp-policy.md
 _NO_TIMESTAMP_NOTE_TAGS = frozenset(
     {
         NoteTag.MEMORY,
@@ -75,7 +75,7 @@ def _inbound_text(content: MessageContent) -> str:
     # A message's text blocks joined, each rendered as its own text: a block that is one
     # complete system note loses its envelope, because the framing is not content the card
     # shows. The attach notice and a system-sourced inbound's body are the two such blocks.
-    # meiva:link agent/messages/docs/message-format.meiva.okf.md
+    # meiva:link agent/messages/docs/message-format.md
     from base.lm.reasoning import content_blocks
 
     if isinstance(content, str):
@@ -93,7 +93,7 @@ def _inbound_text(content: MessageContent) -> str:
 
 # meiva:note
 # The render is incremental-safe: `start` renders only messages[start:] while item_ids keep ABSOLUTE msg_idx (streaming SSE ids stay aligned); msg_count is ALWAYS the full len(messages) — the frontend's future-partial boundary depends on it; segment_prefix is reserved for cold-loaded compact history and prefixes local ids. An unrecognized message shape raises — fail-loud.
-# meiva:link base/agents/history/docs/timeline/timeline.meiva.okf.md
+# meiva:link base/agents/history/docs/timeline/timeline.md
 def build_timeline_items(
     messages: Sequence[BaseMessage],
     *,
@@ -225,7 +225,7 @@ def _inbound_item(
         # meiva:note
         # A system source's body sits inside the envelope's note tags; the card shows the
         # text, not the framing (the source metadata classifies it).
-        # meiva:link agent/messages/docs/message-format.meiva.okf.md
+        # meiva:link agent/messages/docs/message-format.md
         payload=_inbound_text(raw_content),
         created_at=kwargs_read_time(kwargs),
         inbound_id=embedded_id,
@@ -250,7 +250,7 @@ def _attach_images(content: MessageContent) -> list[str] | None:
     return urls or None
 
 
-# meiva:link base/agents/history/docs/timeline/timeline.meiva.okf.md
+# meiva:link base/agents/history/docs/timeline/timeline.md
 def _attach_image_captions(content: MessageContent) -> list[str] | None:
     from base.lm.reasoning import content_blocks
 
@@ -340,7 +340,7 @@ def _compact_item(
     )
 
 
-# meiva:link base/agents/history/docs/timeline/timeline.meiva.okf.md
+# meiva:link base/agents/history/docs/timeline/timeline.md
 def _fallback_human_item(msg_idx: int, content: str, created_at: str | None) -> TimelineItem:
     return TimelineItem(
         item_id=f"{msg_idx}.0",
@@ -352,7 +352,7 @@ def _fallback_human_item(msg_idx: int, content: str, created_at: str | None) -> 
     )
 
 
-# meiva:link base/agents/history/docs/timeline/timeline.meiva.okf.md
+# meiva:link base/agents/history/docs/timeline/timeline.md
 def timeline_default_limit(*, limit_reader: Callable[[], int]) -> int:
     return limit_reader()
 
@@ -469,7 +469,7 @@ def _chat_item(ctx: _AiBlockContext, block_idx: int, raw_text: str) -> TimelineI
     )
 
 
-# meiva:link base/agents/history/docs/timeline/timeline.meiva.okf.md
+# meiva:link base/agents/history/docs/timeline/timeline.md
 def _content_block_item(
     block: object,
     pos: int,
@@ -534,7 +534,7 @@ def _tool_call_code_and_source(
     return code, tool_source
 
 
-# meiva:link base/agents/history/docs/timeline/timeline.meiva.okf.md
+# meiva:link base/agents/history/docs/timeline/timeline.md
 def _tool_call_items(
     msg: AIMessage,
     msg_idx: int,

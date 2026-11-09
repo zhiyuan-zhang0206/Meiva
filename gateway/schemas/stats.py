@@ -11,7 +11,7 @@ from enum import IntEnum
 # 1h / 6h / 24h / 3d / 7d / 30d. An `IntEnum` (rather than `int` + range check) makes
 # FastAPI 422 any non-whitelisted value instead of aggregating an arbitrary window, while
 # coercing string query params that `Literal[1, 6, ...]` would reject.
-# meiva:link gateway/cluster/docs/ops-surfaces.meiva.okf.md
+# meiva:link gateway/cluster/docs/ops-surfaces.md
 class StatsWindowHours(IntEnum):
     M5 = 0
     H1 = 1

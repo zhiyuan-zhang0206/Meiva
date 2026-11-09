@@ -1,6 +1,6 @@
 # meiva:note
 # Re-export harness catalog and installer specifications from their owner in base.host.env.
-# meiva:link base/lm/harness/docs/harness.meiva.okf.md
+# meiva:link base/lm/harness/docs/harness.md
 
 from __future__ import annotations
 

@@ -4,7 +4,7 @@
 // with `singleDollarTextMath: false` so it still owns `$$...$$` and the `mdast-util-math` compiler,
 // while every rejected `$`, `\(` or `\[` rolls back during tokenization before emphasis, inline
 // code, autolinks or CommonMark character escapes run.
-// meiva:link ui/web/src/docs/frontend-components/markdown-safe-content.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/markdown-safe-content.md
 
 import type {} from "micromark-extension-math";
 import type {

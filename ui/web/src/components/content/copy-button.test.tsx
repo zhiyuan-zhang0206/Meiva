@@ -4,7 +4,7 @@
 // component asked the page to do; the two delivery paths behind the port (the async clipboard API
 // and the execCommand fallback for plain-HTTP LAN) are the system implementation's own test, in
 // lib/browser/system-browser.test.ts.
-// meiva:link ui/web/src/docs/frontend-state/browser-port.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-state/browser-port.md
 
 import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";

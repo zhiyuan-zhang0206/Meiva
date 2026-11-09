@@ -1,6 +1,6 @@
 # meiva:note
 # Probe for Claude Code usage metrics.
-# meiva:link meiva_builtins/plugins/meiva_usage/docs/meiva_usage.meiva.okf.md
+# meiva:link meiva_builtins/plugins/meiva_usage/README.md
 
 from __future__ import annotations
 
@@ -28,7 +28,7 @@ from meiva_builtins.plugins.meiva_usage.types import (
 # meiva:note
 # Read Claude credentials from macOS Keychain using generic password query.
 # Fixed argv executes macOS security CLI without untrusted command injection.
-# meiva:link meiva_builtins/plugins/meiva_usage/docs/meiva_usage.meiva.okf.md
+# meiva:link meiva_builtins/plugins/meiva_usage/README.md
 def read_macos_keychain_claude_credentials(
     account: str,
     *,

@@ -5,7 +5,7 @@
 // they took), and how many small labels followed the viewport (`followers`). They are published on
 // `window.__runTimelineStats` only when the page was asked for them before load
 // (`window.__runTimelineStatsWanted`), so an ordinary visitor pays a handful of number adds.
-// meiva:link ui/web/src/docs/frontend-components/run-timeline/run-timeline.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/run-timeline/run-timeline.md
 
 export interface RunTimelineStats {
   relayouts: number;

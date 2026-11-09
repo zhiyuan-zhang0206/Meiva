@@ -58,7 +58,7 @@ export function MarkerBody({ payload, markdown = false }: { payload: string; mar
 // The marker vocabulary is generated from the backend NoteTag, so a non-null source this
 // build does not know is a tag newer than the loaded page; reloading picks it up. A null
 // source is an untagged message, which no reload fixes.
-// meiva:link ui/web/src/docs/frontend-components/timeline-view/markers.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/timeline-view/markers.md
 function UnknownMarkerChip({ source, payload }: { source: string | null; payload: string }) {
   const t = useTranslations("markers");
   console.warn("[timeline] unrecognized system_marker", { source, payload });
@@ -94,7 +94,7 @@ function EphemeralMarker({ label, isError = false }: { label: string; isError?: 
   );
 }
 
-// meiva:link ui/web/src/docs/frontend-components/timeline-view/markers.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/timeline-view/markers.md
 export function EphemeralSystemMarker({
   source,
   payload,

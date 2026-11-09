@@ -21,7 +21,7 @@ def _pool(db_url: str) -> ConnectionPool[psycopg.Connection[TupleRow]]:
 # An `EventBus` whose publication is observed instead of sent. `drop` is the
 # Redis outage the transport already models: `publish_best_effort_sync` reports
 # the publication as failed by returning None, and the delivery must stay owed.
-# meiva:link base/events/notifications/docs/notifications.meiva.okf.md
+# meiva:link base/events/notifications/README.md
 class RecordingBus:
     def __init__(self) -> None:
         self.events: list[dict[str, Any]] = []
@@ -67,7 +67,7 @@ def _age(conn: psycopg.Connection, notification_id: int, seconds: float) -> None
 # meiva:note
 # A failed announce is not a delivery: the row stays unannounced, which is the
 # outbox condition, and the same call succeeds once the transport is back.
-# meiva:link base/events/notifications/docs/notifications.meiva.okf.md
+# meiva:link base/events/notifications/README.md
 def test_a_failed_announce_leaves_the_row_owed(db_conn: psycopg.Connection, db_url: str) -> None:
     agent_id = create_agent(db_conn)
     db_conn.commit()
@@ -90,7 +90,7 @@ def test_a_failed_announce_leaves_the_row_owed(db_conn: psycopg.Connection, db_u
 # The crash case: a producer committed the delivery and died before publishing.
 # The sweep is what makes that recoverable, and a second sweep must not push the
 # same delivery again.
-# meiva:link base/events/notifications/docs/notifications.meiva.okf.md
+# meiva:link base/events/notifications/README.md
 def test_the_sweep_announces_a_committed_but_unannounced_delivery(
     db_conn: psycopg.Connection, db_url: str
 ) -> None:
@@ -104,7 +104,7 @@ def test_the_sweep_announces_a_committed_but_unannounced_delivery(
         assert record is not None
         # meiva:note
         # The producer died here: committed, never announced.
-        # meiva:link base/events/notifications/docs/notifications.meiva.okf.md
+        # meiva:link base/events/notifications/README.md
         _age(db_conn, record.id, 120)
         assert republish_pending(pool, bus, min_age_seconds=30, limit=10) == 1
         assert _announced_at(db_conn, record.id) is not None
@@ -129,7 +129,7 @@ def test_a_fresh_row_is_left_to_its_producer(db_conn: psycopg.Connection, db_url
 # meiva:note
 # A notice's delivery is owed from the moment the notice commits, so the sweep
 # recovers a notice whose post-commit announce never ran.
-# meiva:link base/events/notifications/docs/notifications.meiva.okf.md
+# meiva:link base/events/notifications/README.md
 def test_the_sweep_recovers_a_committed_notice_with_no_announce(
     db_conn: psycopg.Connection, db_url: str
 ) -> None:
@@ -152,7 +152,7 @@ def test_the_sweep_recovers_a_committed_notice_with_no_announce(
         assert staged is not None
         # meiva:note
         # ... and the process died before announcing it.
-        # meiva:link base/events/notifications/docs/notifications.meiva.okf.md
+        # meiva:link base/events/notifications/README.md
         _age(db_conn, staged, 120)
         assert republish_pending(pool, bus, min_age_seconds=30, limit=10) == 1
     delivered = bus.notifications()
@@ -165,7 +165,7 @@ def test_the_sweep_recovers_a_committed_notice_with_no_announce(
 # deliveries behind it: the failing row stays unannounced for the next sweep, the
 # rest go out now. The failure is the transport's own — an exception out of the
 # publish call, not the `None` it returns for a known Redis failure.
-# meiva:link base/events/notifications/docs/notifications.meiva.okf.md
+# meiva:link base/events/notifications/README.md
 class ExplodingBus(RecordingBus):
     def __init__(self, subject: str) -> None:
         super().__init__()

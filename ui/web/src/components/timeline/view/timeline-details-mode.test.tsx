@@ -248,7 +248,7 @@ describe("ItemTimestamp", () => {
 
 // meiva:note
 // The item stamp and Copy share one right-aligned footer OUTSIDE the message block for both human bubbles and agent prose.
-// meiva:link ui/web/src/docs/frontend-components/timeline-view/card-chrome.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/timeline-view/card-chrome.md
 describe("card hover footer", () => {
   it("timestamp and Copy share the right-aligned band under the block, outside the message box", () => {
     const humanItem = makeItem({
@@ -279,7 +279,7 @@ describe("card hover footer", () => {
     // message box as a sibling inside `.timeline-item`, which pads its bottom
     // by 1rem and gives that height back with a negative margin. So the chrome
     // stands in whitespace that already existed, and never overlaps the body.
-    // meiva:link ui/web/src/docs/frontend-components/timeline-view/card-chrome.meiva.okf.md
+    // meiva:link ui/web/src/docs/frontend-components/timeline-view/card-chrome.md
     const proseBox = band?.previousElementSibling;
     expect(proseBox?.textContent).toContain("hello");
     expect(proseBox?.contains(band ?? null)).toBe(false);

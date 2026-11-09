@@ -3,7 +3,7 @@
 # reads every judged file, then asks `meizel.budgets.budget_plans` for the verdict. The ceilings,
 # the exclusions, which paths and directories a target judges, what counts as a line or an entry and
 # every word of the report are decided in that strict module.
-# meiva:link meizel/docs/meizel.meiva.okf.md
+# meiva:link meizel/docs/meizel.md
 
 from __future__ import annotations
 

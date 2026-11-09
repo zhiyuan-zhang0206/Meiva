@@ -3,7 +3,7 @@
 # with nothing delivered behind any of it. It stays below the gateway layer -- the
 # functions take the Alertmanager webhook alert shape as a plain dict and the router owns
 # the transport -- because the events-maintenance reconciliation shares the key parsing.
-# meiva:link gateway/alerts/docs/alerts.meiva.okf.md
+# meiva:link gateway/alerts/docs/alerts.md
 
 from __future__ import annotations
 

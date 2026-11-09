@@ -3,7 +3,7 @@
 # configured model, and a target whose files mix types goes to the one model that accepts all of
 # them. Decided from values (the catalog, the configured models, the types present) before any
 # model is built. The media types are the catalog's `ModelSpec.media_types` vocabulary.
-# meiva:link meiva/understand/docs/understand.meiva.okf.md
+# meiva:link meiva/understand/README.md
 
 from __future__ import annotations
 

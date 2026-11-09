@@ -18,7 +18,7 @@ const resolveNotice = vi.fn<
 // meiva:note
 // The rows the queue renders: seeded into the notice caches before the render, in the shape the app
 // stores them, so the real feed hook (and the real optimistic drop) runs.
-// meiva:link ui/web/src/docs/frontend-components/fleet-view.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/fleet-view.md
 interface FeedRows {
   open: NoticeItem[];
   awaiting: NoticeItem[];
@@ -113,7 +113,7 @@ function agent(over: {
 // meiva:note
 // The test door for this file: the queue's rows enter through the notice caches the feed hook reads,
 // and the exports stay empty — the same values the app would have fetched.
-// meiva:link ui/web/src/docs/frontend-components/fleet-view.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/fleet-view.md
 function renderQueue(
   agents: AgentRow[],
   props: Omit<ComponentProps<typeof InboxQueue>, "agents"> = {},

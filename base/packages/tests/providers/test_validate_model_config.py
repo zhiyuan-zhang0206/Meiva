@@ -11,7 +11,7 @@ from pydantic import TypeAdapter
 from base.host.proc import run_bounded
 
 
-# meiva:link tests/docs/test-fixtures/catalog-boot.meiva.okf.md
+# meiva:link tests/docs/test-fixtures/catalog-boot.md
 def _roster_models() -> list[str]:
     with tempfile.TemporaryDirectory(prefix="meiva-model-roster-") as home:
         result = run_bounded(

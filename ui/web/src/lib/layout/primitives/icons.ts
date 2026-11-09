@@ -8,6 +8,6 @@
 // Not every glyph in the shell is a control: an inline mark inside a text row
 // (the pending strip's clock, the stop glyph on the send button) keeps its own
 // optical size, because 16px would break the line it sits in.
-// meiva:link ui/web/src/docs/frontend-components/home-shell-chrome/home-shell-chrome.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/home-shell-chrome/home-shell-chrome.md
 export const ICON_SIZE_CLASS = "size-4";
 export const ICON_SIZE_PX = 16;

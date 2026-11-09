@@ -13,7 +13,7 @@ export const LINK_KINDS: readonly LinkKind[] = ["send_message", "user_message", 
 // meiva:note
 // One token per kind, shared by the arrows, the legend and the event ticks; each theme keeps every kind
 // at 4.5:1 or better against `--card`, which the fixed hexes fell to 1.4-3.1:1 against once drawn.
-// meiva:link ui/web/src/docs/frontend-components/palette.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/palette.md
 export const LINK_COLORS: Record<LinkKind, string> = {
   send_message: "var(--link-message)",
   user_message: "var(--link-user)",
@@ -71,7 +71,7 @@ const inboundIndex = new WeakMap<RunTimelineResponse, Map<number, RunTimelineUni
 
 // meiva:note
 // A link names its receiving block by `inbound_id`, and finding that block by scanning the agent's units made resolution O(links x units): 3000 links over 52 000 loaded units took ~250 ms, once per viewport sample, which is what froze panning on a deep zoom-out (user report 2026-10-19). The index is built once per response and reused; responses are immutable per window.
-// meiva:link ui/web/src/docs/frontend-components/run-timeline/agent-links.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/run-timeline/agent-links.md
 function inboundOf(data: RunTimelineResponse): Map<number, RunTimelineUnit> {
   const cached = inboundIndex.get(data);
   if (cached !== undefined) return cached;
@@ -86,7 +86,7 @@ const resolvedCache = new WeakMap<readonly RunTimelineLink[], Map<string, Resolv
 
 // meiva:note
 // Resolution is a pure function of the fetched links and the loaded responses, but the page recomputes it on every viewport sample because the arrays around it are rebuilt. The result is cached per links array and response identity, so a pan inside loaded coverage reuses it; fetches and responses are immutable, which is what makes identity exact.
-// meiva:link ui/web/src/docs/frontend-components/run-timeline/agent-links.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/run-timeline/agent-links.md
 function resolutionKey(inView: ReadonlySet<number>, loaded: ReadonlyMap<number, RunTimelineResponse>): string {
   return `${[...inView].sort((a, b) => a - b).join(",")}|${[...loaded.keys()].sort((a, b) => a - b).join(",")}|${identityKey([...loaded.values()])}`;
 }

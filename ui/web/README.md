@@ -11,13 +11,13 @@ the memory graph.
 - SSE keeps Query read models live for visible pages, with a global stream,
   selected-agent subscriptions and a separate alerts stream. HTTPS can share
   transports across pages; authoritative snapshots repair lifecycle state.
-  See [frontend data flow](src/docs/frontend-data-flow/frontend-data-flow.meiva.okf.md).
+  See [frontend data flow](src/docs/frontend-data-flow/frontend-data-flow.md).
 - No Next rewrites proxy for `/api` — the frontend connects to the gateway
   directly (`API_BASE` resolution in `src/lib/api.ts`); same-origin reverse
   proxy in prod.
-- State rules live in `src/docs/frontend-state/frontend-state.meiva.okf.md` and
-  `src/docs/frontend-data-flow/frontend-data-flow.meiva.okf.md`; layout and component
-  contracts live in `src/docs/frontend-components/frontend-components.meiva.okf.md`.
+- State rules live in `src/docs/frontend-state/frontend-state.md` and
+  `src/docs/frontend-data-flow/frontend-data-flow.md`; layout and component
+  contracts live in `src/docs/frontend-components/frontend-components.md`.
 
 ## Development
 

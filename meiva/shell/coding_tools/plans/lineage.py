@@ -1,6 +1,6 @@
 # meiva:note
 # Who dispatched a launch, as a function of what the launcher could read. The launcher reads the dispatching agent, its ancestors and its directory row from the cluster; a read that failed arrives as None and degrades the block to less lineage instead of failing the launch. A missing label is not an error either: the directory may not know the agent yet, and the block still names it by id. Only the id is load-bearing.
-# meiva:link meiva/shell/coding_tools/docs/coding-tools.meiva.okf.md
+# meiva:link meiva/shell/coding_tools/README.md
 from __future__ import annotations
 
 import datetime as dt

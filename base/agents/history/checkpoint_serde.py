@@ -195,7 +195,7 @@ _RETIRED_MODULE_BYTES = tuple({entry.module.encode() for entry in RETIRED_CHECKP
 # meiva:note
 # Attachment can discard a retired root value without also discarding a live
 # container that happens to hold an old type or name somewhere inside it.
-# meiva:link base/agents/context/external_attachment/docs/external-attachment.meiva.okf.md
+# meiva:link base/agents/context/external_attachment/README.md
 def is_retired_checkpoint_value(blob: bytes) -> bool:
     if not any(module in blob for module in _RETIRED_MODULE_BYTES):
         return False

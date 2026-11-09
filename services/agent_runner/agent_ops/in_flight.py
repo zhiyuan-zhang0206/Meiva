@@ -82,7 +82,7 @@ async def drain(
 #     loop as a bounded drain instead of cancelling every in-flight request at once: SIGTERM
 #     cancels this task out of `serve_forever`, and only that cancellation is absorbed. A
 #     server that stops serving by itself is a failure, not a stop, and propagates.
-# meiva:link services/agent_runner/agent_host/lifecycle/docs/graceful-exit.meiva.okf.md
+# meiva:link services/agent_runner/agent_host/lifecycle/docs/graceful-exit.md
 async def serve_until_sigterm(
     server: asyncio.Server, *, requests: RequestTokens, workers: WorkerFutures, timers: Timers
 ) -> None:

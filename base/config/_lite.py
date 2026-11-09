@@ -271,7 +271,7 @@ def _log_upgrade(reason: str) -> None:
 # and are never handed to a component. A component that must see a later change is handed the
 # `ConfigBoot` as a real resource and builds a fresh value at its unit of work. A view always
 # resolves this instance, including after upgrade.
-# meiva:link base/config/docs/config-roots.meiva.okf.md
+# meiva:link base/config/docs/config-roots.md
 class ConfigBoot:
     __slots__ = (
         "_lock",

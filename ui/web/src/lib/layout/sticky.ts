@@ -88,7 +88,7 @@ const DEFAULT_STICKY_THRESHOLDS = TOUCH_STICKY_THRESHOLDS;
 // anchor puts that message here and holds it, so the reply streams into the
 // space below it instead of dragging the reader's place down chunk by chunk
 // (user request 2026-11-09).
-// meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.md
 export const SEND_ANCHOR_TOP_SHARE = 0.2;
 
 export interface ScrollSnapshot {
@@ -135,7 +135,7 @@ export interface StickyController {
   isSticky(): boolean;
   // meiva:note
   // Whether the reader is watching the tail right now: inside the bottom zone, or only short of it because a chunk grew the content ahead of the pin that will follow it. A position save reads this instead of a raw distance, so a switch away inside a streaming frame still records "follow the bottom" rather than a row's pixel, and a released reader parked mid-history is never mistaken for one.
-  // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.meiva.okf.md
+  // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.md
   isAtTail(view: ScrollSnapshot): boolean;
   /** Feed every viewport scroll event here (snapshot read from the live
    * DOM, not the event). Upward movement accumulates into a run; a run of
@@ -200,7 +200,7 @@ export interface StickyController {
   // clamp was taken for a gesture and released a follower 107px short). It
   // never declares: the observer's own pin follows in the same callback and
   // that pin's scroll event would spend the declaration on its echo.
-  // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.meiva.okf.md
+  // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.md
   recordContentHeight(view: ScrollSnapshot | null): void;
   // meiva:note
   // Declares that the content got shorter under a reader who is following.
@@ -213,7 +213,7 @@ export interface StickyController {
   // heights released a reader parked on the tail, and every later growth then
   // pinned nothing). The commit is also the only caller: it is the one pass
   // that knows a clamp is coming and is not itself about to re-pin.
-  // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.meiva.okf.md
+  // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.md
   notifyContentShrunk(view: ScrollSnapshot): void;
   /** Report a programmatic restore of a saved position (back/forward
    *  re-entry of a kept history entry): following resumes exactly when the
@@ -230,14 +230,14 @@ export interface StickyController {
   // document, not at the tail of the conversation - so the at-bottom
   // reconciliation must not resurrect following until the reply has eaten the
   // reserve and left the reader genuinely away from the bottom.
-  // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.meiva.okf.md
+  // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.md
   notifyAnchored(view: ScrollSnapshot): void;
   // meiva:note
   // Whether a send anchor still holds the bottom up. The scroll-to-bottom
   // control reads this: while the reserve is there the viewport is already at
   // the bottom by position, but the button is not a dead click - it is the
   // reader's way back into following.
-  // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.meiva.okf.md
+  // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.md
   isAnchored(): boolean;
   // meiva:note
   // Reports whether an expanded live work block owns the viewport. While it does,
@@ -246,14 +246,14 @@ export interface StickyController {
   // screen (user ruling 2026-11-09). Opening one stops following; the reader's
   // own return to the bottom still re-follows, and the next layout pass after the
   // block closes (or collapses) pins as usual.
-  // meiva:link ui/web/src/docs/frontend-components/timeline-view/deep-collapse.meiva.okf.md
+  // meiva:link ui/web/src/docs/frontend-components/timeline-view/deep-collapse.md
   notifyLiveBlock(open: boolean): void;
   // meiva:note
   // Reports that the reader manually expanded a work block to inspect its
   // contents. Opening a block stops following and marks the departure as
   // deliberate so the layout growth from that expansion does not re-stick or pin
   // the viewport to the bottom while the reader is hovering over the block.
-  // meiva:link ui/web/src/docs/frontend-components/timeline-view/deep-collapse.meiva.okf.md
+  // meiva:link ui/web/src/docs/frontend-components/timeline-view/deep-collapse.md
   notifyBlockExpanded(): void;
   // There is deliberately no notify() for non-pin programmatic scrolls
   // (prepend compensation). They need none: the only reader of the
@@ -295,7 +295,7 @@ export function createStickyController(
   // A commit made the content shorter than the last one, and the clamp it
   // causes has not been reported yet. Spent by the first upward move and
   // cleared by anything else, so a stale flag cannot swallow a real gesture.
-  // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.meiva.okf.md
+  // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.md
   let shrinkPending = false;
   // meiva:note
   // The content height the last layout pass left behind, or null while nobody
@@ -304,7 +304,7 @@ export function createStickyController(
   // and only one of them commits. Only a follower keeps it: a window that resized while the
   // reader was parked is never compared against, and the commit that re-sticks
   // them starts a fresh baseline.
-  // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.meiva.okf.md
+  // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.md
   let contentHeight: number | null = null;
   // Whether the previous observation put the viewport inside the bottom
   // zone. Distinguishes "arrived from outside" (reconcile, fresh run) from
@@ -319,12 +319,12 @@ export function createStickyController(
   // point where the reply has filled the reserve and position means what it
   // says again - and by any performed pin or restore, which take the viewport
   // back deliberately.
-  // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.meiva.okf.md
+  // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.md
   let anchored = false;
   // meiva:note
   // An expanded live work block owns the viewport's top edge: growth extends it
   // downward instead of pinning the tail. See `notifyLiveBlock`.
-  // meiva:link ui/web/src/docs/frontend-components/timeline-view/deep-collapse.meiva.okf.md
+  // meiva:link ui/web/src/docs/frontend-components/timeline-view/deep-collapse.md
   let liveBlockOpen = false;
 
   // Following: remember where the bottom was, so a later growth can be
@@ -371,7 +371,7 @@ export function createStickyController(
   // The anchor lets go the moment the viewport is away from the bottom for
   // real: from there the ordinary rules decide again, so a reader who scrolls
   // back down re-follows and one who stays keeps their place.
-  // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.meiva.okf.md
+  // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.md
   const releaseAnchor = (view: ScrollSnapshot) => {
     if (anchored && !isAtBottom(view, thresholds)) anchored = false;
   };
@@ -406,7 +406,7 @@ export function createStickyController(
           // meiva:note
           // The browser clamp from the shrink declared by the commit that
           // caused it. Not a gesture, and not the run's to spend.
-          // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.meiva.okf.md
+          // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.md
           shrinkPending = false;
           if (atBottom) stick(view);
         } else if (view.scrollHeight - view.scrollTop - view.clientHeight <= 0) {
@@ -461,7 +461,7 @@ export function createStickyController(
       // meiva:note
       // A wheel is the reader speaking: the clamp it might have been waiting
       // for is no longer what this signal is about.
-      // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.meiva.okf.md
+      // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.md
       shrinkPending = false;
       // Upward intent. Absorb it while at the bottom (resting-finger
       // twitches during streaming must not break following) or while still
@@ -553,7 +553,7 @@ export function createStickyController(
       // starts from it. `stick` alone is not: `requestStick` starts following
       // without reading anything, and a height it invented would let a parked
       // window predict a shrink that never happens.
-      // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.meiva.okf.md
+      // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.md
       contentHeight = view.scrollHeight;
     },
 
@@ -566,7 +566,7 @@ export function createStickyController(
       // A shrink only clamps a reader who was on the tail, and the clamp leaves
       // the viewport exactly at the new bottom. Anything short of that is a
       // shrink below a reader parked mid-history - nothing to declare.
-      // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.meiva.okf.md
+      // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.md
       if (!sticky) {
         contentHeight = null;
         return;

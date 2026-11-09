@@ -3,7 +3,7 @@
 # one verdict, over values: the cut points, the token budget of a piece and the highest answer.
 # The checker (`injection_check.py`) calls the decision model once per piece; these functions
 # only choose, so each is tested directly.
-# meiva:link meiva/docs/sdk-surface/sdk-surface.meiva.okf.md
+# meiva:link meiva/docs/sdk-surface/sdk-surface.md
 
 from __future__ import annotations
 

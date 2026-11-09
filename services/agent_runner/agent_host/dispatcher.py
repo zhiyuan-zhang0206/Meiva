@@ -198,7 +198,7 @@ class TurnScheduler:
     # whose turn task still runs; those turns finish and do not loop again. A wake
     # refused from here on loses nothing: its inbound stays pending in Postgres for the
     # next host's scan.
-    # meiva:link services/agent_runner/agent_host/lifecycle/docs/graceful-exit.meiva.okf.md
+    # meiva:link services/agent_runner/agent_host/lifecycle/docs/graceful-exit.md
     def stop_admission(self) -> frozenset[int]:
         self._stopping = True
         return self.active_agents

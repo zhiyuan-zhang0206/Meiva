@@ -1,6 +1,6 @@
 # meiva:note
 # Child environments are closed before application imports; SDK globals never cross cases.
-# meiva:link base/packages/tests/lm/docs/contracts.meiva.okf.md
+# meiva:link base/packages/tests/lm/docs/contracts.md
 
 import sys
 from pathlib import Path

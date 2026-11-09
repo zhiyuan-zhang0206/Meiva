@@ -4,7 +4,7 @@
 # `contribute()` directly, so a new SDK wrap can pass every unit test and then be
 # silently skipped in a real agent (the loader is fail-soft). This runs the loader's
 # gate for each face this plugin declares, with that face's own manifest keys.
-# meiva:link meiva_builtins/plugins/meiva_code/docs/meiva_code.meiva.okf.md
+# meiva:link meiva_builtins/plugins/meiva_code/docs/meiva_code.md
 from pathlib import Path
 
 

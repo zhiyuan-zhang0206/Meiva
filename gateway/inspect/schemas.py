@@ -144,7 +144,7 @@ class HeartbeatLastPause(BaseModel):
 # meiva:note
 # One of four mutually-exclusive heartbeat display states — a pause, a queued wake, a projected
 # check-in, or nothing — each with the rule and the daemon predicate behind it.
-# meiva:link gateway/inspect/docs/heartbeat.meiva.okf.md
+# meiva:link gateway/inspect/docs/heartbeat.md
 class HeartbeatInfo(BaseModel):
     model_config = ConfigDict(frozen=True)
 

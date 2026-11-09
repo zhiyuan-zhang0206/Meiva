@@ -6,7 +6,7 @@
 # then reads a stop that never ends: this repository's wedge watch skipped its own checks for half
 # an hour after the 2026-10-21 wave. A start is where the claim stops being true, so a start that
 # reaches readiness removes the markers whose claim its own live state contradicts, and says which.
-# meiva:link base/deploy/lifecycle/docs/pause-markers.meiva.okf.md
+# meiva:link base/deploy/lifecycle/docs/pause-markers.md
 
 from __future__ import annotations
 

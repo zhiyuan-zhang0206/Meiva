@@ -43,7 +43,7 @@ async def bound(turn: TurnTicket) -> None:
 # feeds a message the session did not ask for and asserts the same three things:
 # the wait it is not ours does not end, no failure is invented, and the reply that
 # arrives later is the turn's own.
-# meiva:link base/lm/harness/docs/attribution.meiva.okf.md
+# meiva:link base/lm/harness/docs/attribution.md
 def completed(turn_id: str, *, text: str = "BGDONE") -> dict[str, object]:
     return {
         "id": turn_id,
@@ -128,7 +128,7 @@ async def test_an_error_naming_a_turn_of_ours_faults_only_that_turn(tmp_path: Pa
         # A turn-scoped failure is the bridge's to act on: it ends that turn's wait and
         # retires nothing else. The session-level failure is the other shape, and this
         # test is what keeps the two from collapsing back into one (#5663).
-        # meiva:link base/lm/harness/docs/attribution.meiva.okf.md
+        # meiva:link base/lm/harness/docs/attribution.md
         assert [event.turn_id for event in harness.of(TurnFaulted)] == [turn.turn_id]
         assert harness.of(SessionFailed) == [], "one turn failing does not condemn the session"
         assert not turn.settled, "the ticket settles on the turn boundary, not on the fault"
@@ -221,7 +221,7 @@ async def test_a_notification_from_another_thread_is_ignored(tmp_path: Path) -> 
 # meiva:note
 # `turn/started` can supply the interrupt target while early activity waits for
 # the authoritative response. The receipt leads even when completion arrived first.
-# meiva:link base/lm/harness/docs/attribution.meiva.okf.md
+# meiva:link base/lm/harness/docs/attribution.md
 async def test_turn_started_binds_the_name_before_the_response(tmp_path: Path) -> None:
     harness = await start(tmp_path, max_buffered_events=4)
     try:

@@ -39,7 +39,7 @@ NOTICE_FYI_TTL_DAYS = 30
 # here during pickup and leave when provider acceptance is committed or delivery
 # uncertainty is recorded.
 # The strip also needs the payload for attachments.
-# meiva:link base/agents/inbox/docs/inbox.meiva.okf.md
+# meiva:link base/agents/inbox/README.md
 def list_pending_inbounds(db: psycopg.Connection, agent_id: int) -> list[InboundRow]:
     with db.cursor() as cur:
         cur.execute(

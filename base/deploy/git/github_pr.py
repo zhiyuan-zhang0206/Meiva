@@ -50,7 +50,7 @@ def memory_repo_slug(remote: str) -> str:
 def github_auth_blocker(*, host: Host) -> str | None:
     # meiva:note
     # Report a missing or unauthenticated gh CLI before remote configuration is needed.
-    # meiva:link base/deploy/git/docs/memory-repo.meiva.okf.md
+    # meiva:link base/deploy/git/docs/memory-repo.md
     if host.which("gh") is None:
         return "gh CLI not installed"
 
@@ -72,7 +72,7 @@ def github_auth_blocker(*, host: Host) -> str | None:
 def github_permission_blocker(*, host: Host, slug: str) -> str | None:
     # meiva:note
     # Report whether the authenticated gh account can write the selected repository.
-    # meiva:link base/deploy/git/docs/memory-repo.meiva.okf.md
+    # meiva:link base/deploy/git/docs/memory-repo.md
     try:
         perm = host.run(
             ["gh", "repo", "view", slug, "--json", "viewerPermission", "-q", ".viewerPermission"],

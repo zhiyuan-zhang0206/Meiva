@@ -2,7 +2,7 @@
 # Comprehensive tests for external harness transcript and session relocation
 # across cross-machine workspace transfer (Claude Code, Antigravity, Codex).
 #
-# meiva:link gateway/agents/docs/agent-transfer.meiva.okf.md
+# meiva:link gateway/agents/docs/agent-transfer.md
 
 from __future__ import annotations
 

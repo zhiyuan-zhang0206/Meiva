@@ -42,7 +42,7 @@
 # and importing a light submodule (`agent_traceback`) no longer drags the node
 # set into the importer — the exec child imports those before user code runs
 # (startup-path laziness, task #3585).
-# meiva:link agent/graph/docs/graph.meiva.okf.md
+# meiva:link agent/graph/docs/graph.md
 
 
 from typing import TYPE_CHECKING

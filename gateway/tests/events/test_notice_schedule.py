@@ -7,7 +7,7 @@ from gateway.tests.auth.gateway_config import gateway_test_client
 # A notice posted from a schedule's own process records which schedule that was, so the row
 # answers "which schedule sent this" without reading that process's environment after the fact.
 # The caller reports the id; the server refuses one that names no schedule row.
-# meiva:link gateway/agents/docs/notice-receipts.meiva.okf.md
+# meiva:link gateway/agents/docs/notice-receipts.md
 
 
 def seed_agent(db_conn: psycopg.Connection) -> int:

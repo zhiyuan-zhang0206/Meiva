@@ -7,7 +7,7 @@
 # Runs on meiva_test DB (real SQL): the window's telemetry rows are INSERTed into
 # `telemetry_events` (audit rows into `audit_events`), and the `agents` table's
 # live_count is populated via INSERT of real rows.
-# meiva:link gateway/cluster/docs/ops-surfaces.meiva.okf.md
+# meiva:link gateway/cluster/docs/ops-surfaces.md
 
 from __future__ import annotations
 
@@ -395,7 +395,7 @@ def test_dashboard_provider_api_costs_exclude_subscription_harnesses(
     # meiva:note
     # codex 9.0 + claude_code 14.0: the same rows' subscription half, kept apart from the metered
     # API sum and its vendor slices rather than folded into or dropped from them.
-    # meiva:link gateway/cluster/docs/ops-surfaces.meiva.okf.md
+    # meiva:link gateway/cluster/docs/ops-surfaces.md
     assert math.isclose(body["subscription_cost_usd"], 23.0)
     assert math.isclose(body["openai_cost_usd"], 12.75)
     assert math.isclose(body["anthropic_cost_usd"], 6.75)

@@ -1,4 +1,4 @@
-# meiva:link schedules/docs/c9-daily-report.meiva.okf.md
+# meiva:link schedules/docs/c9-daily-report.md
 
 import os
 from datetime import UTC, datetime

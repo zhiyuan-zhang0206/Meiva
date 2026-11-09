@@ -17,7 +17,7 @@ import { renderWithProviders } from "@/test-support/render";
 // meiva:note
 // The route hands its surfaces a `navigate`; a suite passes a spy, so a jump can be read
 // without replacing `next/navigation`.
-// meiva:link ui/web/src/docs/frontend-components/fleet-view.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/fleet-view.md
 const navigate = vi.fn();
 
 const getTask = vi.fn<(id: number) => Promise<TaskRow>>();
@@ -57,7 +57,7 @@ const TASK_WINDOWS = ["24h", "7d", "30d", "all"] as const;
 // fake transport AND pre-seeded in the query cache, so the board paints them on the first frame and
 // its mount refetch agrees. Preferences come from the same settings cache the app fills, so a test
 // states the stored mode/toggles/window instead of replacing the hook that reads them.
-// meiva:link ui/web/src/docs/frontend-components/fleet-view.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/fleet-view.md
 function renderGraph(
   tasks: readonly TaskRow[],
   {

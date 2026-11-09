@@ -2,7 +2,7 @@
 # The words each host is sent, and what the window keeps out of its own log. A command is a value:
 # these pin the shape every host receives -- the gateway's flags, the checkout order, the
 # one-shot job on macOS -- and that a credential never reaches the console or the log.
-# meiva:link cli/docs/fleet-update.meiva.okf.md
+# meiva:link cli/docs/fleet-update.md
 from __future__ import annotations
 
 import os

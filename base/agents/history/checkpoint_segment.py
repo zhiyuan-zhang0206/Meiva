@@ -1,4 +1,4 @@
-# meiva:link base/agents/history/docs/range-read-contracts.meiva.okf.md
+# meiva:link base/agents/history/docs/range-read-contracts.md
 from __future__ import annotations
 
 from collections.abc import Generator, Mapping, Sequence
@@ -164,7 +164,7 @@ class CheckpointSegmentReader:
     # Single-connection reader for one agent's checkpoints: caches any segment reconstructed in
     # this call and lazily stamps `compact_segment_shape` on sealed boundary rows so subsequent
     # range locations never replay prior boundary delta chains.
-    # meiva:link base/agents/history/docs/range-read-contracts.meiva.okf.md
+    # meiva:link base/agents/history/docs/range-read-contracts.md
 
     def __init__(
         self,

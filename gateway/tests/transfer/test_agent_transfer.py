@@ -2,7 +2,7 @@
 # End-to-end integration tests for `POST /api/agents/{agent_id}/transfer` across two real
 # `local_runner` `agent-ops` daemons with isolated homes, real Postgres, and a dialable loopback
 # gateway bundle endpoint. Zero monkeypatching.
-# meiva:link gateway/agents/docs/agent-transfer.meiva.okf.md
+# meiva:link gateway/agents/docs/agent-transfer.md
 
 from __future__ import annotations
 

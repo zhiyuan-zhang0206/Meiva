@@ -232,7 +232,7 @@ describe("spawn table model & effort columns", () => {
     // Rates are the decision only when the harness meters them (user 2026-10-20):
     // input / cache read / output for the built-in runtime, nothing for a
     // subscription harness.
-    // meiva:link ui/web/src/docs/frontend-components/creation-availability/creation-availability.meiva.okf.md
+    // meiva:link ui/web/src/docs/frontend-components/creation-availability/creation-availability.md
     expect(within(column(form, MODEL_COLUMN)).getByText(/\$[\d.]+ \/ \$[\d.]+ \/ \$[\d.]+/)).toBeTruthy();
     pick(form, HARNESS_COLUMN, "Claude Code");
     form = await table();
@@ -321,7 +321,7 @@ describe("spawn table model & effort columns", () => {
     // The machine is the first column, so several hosts are rows rather than a
     // footer list; the down host keeps its row, disabled and titled with the
     // reason (user 2026-10-20).
-    // meiva:link ui/web/src/docs/frontend-components/creation-availability/creation-availability.meiva.okf.md
+    // meiva:link ui/web/src/docs/frontend-components/creation-availability/creation-availability.md
     expect(selected(form, MACHINE_COLUMN, "a-host")).toBe(true);
     expect(row(form, MACHINE_COLUMN, /b-host/).hasAttribute("disabled")).toBe(true);
     pick(form, MACHINE_COLUMN, "a-host");
@@ -370,7 +370,7 @@ describe("unavailable model catalog", () => {
 // cases pin the properties the table cases pin - the pick reaches the spawn, a
 // pick that is never spawned is not stored, a refusal is readable - against the
 // layout the phone actually gets.
-// meiva:link ui/web/src/docs/frontend-components/creation-availability/creation-availability.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/creation-availability/creation-availability.md
 describe.each(["table", "stack"] as const)("%s API model visibility", (layout) => {
   it.each([
     { harness: "claude_code", label: "Claude Code", provider: "claude", model: "claude-sonnet-5-5" },

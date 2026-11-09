@@ -3,7 +3,7 @@
 # target in the operator's repository, the host probe, and the helper facts of the commit it
 # switches to. The decisions on what these reads refuse live in `plan/release_target.py`,
 # `plan/host_probe.py` and `plan/helper_gate.py`.
-# meiva:link cli/docs/fleet-update.meiva.okf.md
+# meiva:link cli/docs/fleet-update.md
 
 from __future__ import annotations
 

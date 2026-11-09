@@ -3,7 +3,7 @@
 # which playlist entries are new relative to what the raw mirror already holds (the mirror is the
 # watermark), and what a follow or a backfill takes. `yt_run.py` asks yt-dlp, reads the mirror and
 # executes the plan.
-# meiva:link meiva_builtins/skills/integrations/web-sources/docs/web-sources.meiva.okf.md
+# meiva:link meiva_builtins/skills/integrations/web-sources/README.md
 
 from __future__ import annotations
 

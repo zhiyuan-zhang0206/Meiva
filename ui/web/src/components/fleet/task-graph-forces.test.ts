@@ -134,7 +134,7 @@ describe("TaskGraph square layout under the shared defaults", () => {
     // default cools faster. At alphaDecay 0.0228 the steps were 1.215 / 1.321; at
     // 0.08 they are 1.137 / 1.361, i.e. the knob still spreads the board at both
     // steps and the top step improved. The top threshold stays 1.15.
-    // meiva:link ui/web/src/docs/frontend-components/fleet-view.meiva.okf.md
+    // meiva:link ui/web/src/docs/frontend-components/fleet-view.md
     expect(atMid).toBeGreaterThan(atZero * 1.1);
     expect(atMax).toBeGreaterThan(atMid * 1.15);
   });

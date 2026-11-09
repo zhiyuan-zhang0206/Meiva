@@ -1,0 +1,131 @@
+# Lifecycle caller attribution
+
+The root supervisor used to record only *that* an operator stopped a unit
+(`source: operator`), never *who*. Two incidents proved the gap: on 2026-10-15 a
+recovery action had no recorded origin, and on 2026-10-18 19:24 a whole-tree
+stop→start on ubuntu could only be attributed by cross-reading sshd logs and
+crontab writes (task #5325).
+
+## On the wire
+
+A state-changing request (`up`, `down`, `force-down`, `restart`, `shutdown`)
+carries an optional `caller` object; `parse_request` validates its shape
+fail-fast and rejects it on every other verb:
+
+    {"verb": "down", "name": "gateway", "caller": {
+        "pid": 4821, "ppid": 4800, "uid": 501,
+        "cwd": "/Users/x/.meiva/source",
+        "argv": ["meiva", "stop", "-y"],
+        "agent_id": "1818", "machine": "macmini",
+        "operation_id": "stop@1792322999",
+        "env_keys": ["DEEPSEEK_API_KEY"]}}
+
+`caller_identity(environ)` in `base/native_process/root_control/client.py` builds it. The `pid`,
+`ppid` and `uid` it carries are read at that boundary on purpose — the file is a declared root for
+them — because the root decides a request's authority on who is actually connected; a value the
+caller supplied would describe the caller by its own account.
+
+- `argv` is truncated (32 items, 200 characters each) and **redacted** — a
+  sensitive flag (`--token`, `--password`, `-p`, …) loses its value, whether it
+  is separate or `--flag=value`.
+- `env_keys` carries the **names** of credential-shaped variables that were set,
+  never their values.
+- `machine` is the kernel hostname, so two hosts cannot be confused. The
+  configured cluster name would load `base.config` from a module it already
+  reaches, closing an import cycle.
+- `operation_id` is the `MEIVA_OPERATION_ID` the launcher exported (a local-pause
+  or rollout operation), or absent when the caller is a bare command.
+
+## In the root
+
+`services/supervision/meiva_root/intent_store.py` persists the block as
+`caller` in each unit's intent record, beside `intent`, `source` and
+`restart_failed`. A record written before this field existed still reads (the
+decode accepts the legacy field set), and an unreadable block reads as absent —
+attribution is evidence, never a boot gate.
+
+## The audit event
+
+The intent record answers "what is this unit's state"; it cannot answer "who
+stopped the whole cluster, when, from which host, with which command" without
+reading every unit's file. So the requester records that fact itself, as an
+`audit_event` named `lifecycle_request` (`base/events/declarations/root.py`):
+
+- one row per **batch** — `meiva stop` records `down` (or `force-down` when it
+  escalates) with every unit it is about to take down; `meiva start` records `up`
+  with the units it is about to resume, and a cold start records the whole roster
+  it is about to launch;
+- written **before** the first request leaves the process, so a request that
+  hangs, is refused, or outlives its caller still names the caller;
+- `caller` carries the same block the wire carries — one fact, two readers;
+- `source` is `agent:<N>` when `MEIVA_AGENT_ID` is set and `user` otherwise. A
+  boot job's retried start is not an operator request and records nothing;
+- `head_sha` is the prod source's commit at the moment of the request — the
+  version the operator was looking at, so a stop and the start that ends it can
+  be compared without a checkout scan.
+
+## The result event
+
+A request alone cannot tell "stopped and came back on new code" from "stopped and
+never came back": both are a request followed by silence. The command therefore
+records a second row when it exits, `lifecycle_result`
+(`base/events/declarations/root.py`): the verb and units of its last request,
+`outcome` (`ok`/`failed`), how many `seconds` it held, the same `head_sha`, and
+the same caller. A missing result next to a request is now the signature of a
+command that died mid-flight, and a stop followed by a start whose `head_sha`
+equals it is a same-code restart — the two facts the 2026-10-14 outage could not
+be answered from once its logs had rotated (task #5464).
+
+`cli/database/lifecycle_audit.py` owns the writer; the operator command
+that holds the database scopes it with `operator_lifecycle_audit(...)`, passing its
+environment and home, which
+also yields the `CommandAudit` the body calls `exited(code)` on. Recording goes
+through `record_audit_reported`, not a standalone write: `audit_events` is the
+system of record and the unified stream its projection, and a database that is
+already down is exactly the state `meiva start` repairs — the record must never
+fail the command that repairs it.
+
+## Protocol compatibility
+
+The `caller` field is **not** backward compatible. A root older than this change
+rejects the whole request (`invalid_request: unknown request field(s): ['caller']`),
+and the client surfaces it — so `meiva stop` fails against an old root, while
+`meiva start` answers with a generation/digest mismatch and asks for a stop
+first. The supported flow is unaffected: the fleet stops on the old checkout
+before pulling. A bare `git pull` followed by `meiva restart` on a dev box is
+not — stop with the old checkout, or kill the root, before pulling.
+
+## Known boundaries
+
+- A cold start (`meiva start` with no live root) sends no `up` request to any
+  root, so nothing on the wire carries a caller. It records one `up` row with
+  the roster it is about to launch **before** the manifest is published and the
+  root spawned, so a start that dies during bring-up still names who asked for
+  it (task #5535). A warm start keeps the per-batch rows `reconcile_units`
+  writes.
+- `meiva stop` sends `down` with `force=True`, so its rows carry
+  `verb="force-down"` while a restart's down leg carries `"down"`. The field is
+  faithful to the wire verb; use `caller.argv` for the command that was run.
+- `MEIVA_AGENT_ID` is self-declared and forgeable. The caller block is
+  **evidence, not authentication**.
+
+## What this does not do
+
+It records, it does not authorize: the block is not authenticated beyond the
+kernel-reported socket peer, and no permission model keys on it.
+
+The audit has three reads and three failure policies
+(2026-10-31 ruling, `meiva/rulings/prod/audit-identity-unreadable-must-refuse-20261031.md`):
+
+- **the caller block refuses.** A lifecycle command that cannot name its caller
+  exits with `AuditUnavailableError` before the command body runs, because the
+  block is the only fact that says who asked and an operator can destroy the read
+  on purpose (a removed working directory). Accepting it would hand out one
+  unattributed execution per `rm -rf`.
+- **the enrichment reads are best-effort.** What launched the command and the
+  source commit only make the row richer; a failure prints one line and the row
+  keeps the attribution it has.
+- **the sink is best-effort.** A recorder that cannot be built or written never
+  fails the command that repairs the host.
+
+Parent: [Root control contract — protocol and Unix-socket client](root_control.md).

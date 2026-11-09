@@ -4,7 +4,7 @@
 # native `llm` node and the external-harness `harness_turn` node. It lives here rather
 # than in either node because `agent/graph/llm` already reaches `claim`, so a claim ->
 # llm import would close a package cycle (#5511).
-# meiva:link agent/graph/llm/docs/turn-records.meiva.okf.md
+# meiva:link agent/graph/llm/docs/turn-records.md
 
 from __future__ import annotations
 

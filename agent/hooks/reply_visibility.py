@@ -1,6 +1,6 @@
 # meiva:note
 # Deliver visibility corrections after an assistant's tool results have committed.
-# meiva:link base/agents/messages/docs/metadata-contracts.meiva.okf.md
+# meiva:link base/agents/messages/docs/metadata-contracts.md
 
 from langchain_core.messages import AIMessage
 from langchain_core.runnables import RunnableConfig

@@ -1,6 +1,6 @@
 # meiva:note
 # Proxying preserves public paths, queries and upstream statuses, strips browser credentials, rejects isolated callers and keeps gateway/service declarations aligned.
-# meiva:link gateway/routers/docs/insights-proxy.meiva.okf.md
+# meiva:link gateway/routers/docs/insights-proxy.md
 from __future__ import annotations
 
 from datetime import datetime

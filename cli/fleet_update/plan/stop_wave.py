@@ -3,7 +3,7 @@
 # gateway last: a runner keeps working while the gateway it reports to is still up. The
 # operator's stop choices reach every host verbatim; `--keep-infra` or `--stop-infra` reaches the
 # gateway's stop only.
-# meiva:link cli/docs/fleet-update.meiva.okf.md
+# meiva:link cli/docs/fleet-update.md
 
 from __future__ import annotations
 

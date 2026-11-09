@@ -25,7 +25,7 @@ function answerFromDraft(question: NoticeQuestion, draft: Draft): NoticeAnswer |
   // Choosing nothing is allowed in both kinds: a comment alone is a whole answer
   // (user ruling 2026-10-21). Submitting still needs one of the two, which is
   // what the disabled button expresses.
-  // meiva:link meiva_builtins/plugins/meiva_fleet/docs/notice-questions.meiva.okf.md
+  // meiva:link meiva_builtins/plugins/meiva_fleet/docs/notice-questions.md
   const count = draft.optionIds.length;
   if (count > 1 && question.type === "single_select") return null;
   if (count === 0 && !comment) return null;
@@ -40,7 +40,7 @@ function answerFromDraft(question: NoticeQuestion, draft: Draft): NoticeAnswer |
 // onAnswerChange reports the answer the current draft would submit (null while
 // incomplete), which is what enables Submit; onSubmit sends an answer, and Enter
 // in the active answer or Note field calls it with the answer built from that draft.
-// meiva:link ui/web/src/docs/frontend-components/enter-to-send.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/enter-to-send.md
 export function NoticeQuestionForm({
   question,
   pending,
@@ -70,7 +70,7 @@ export function NoticeQuestionForm({
   // meiva:note
   // Enter sends whatever the draft already answers; an incomplete draft sends
   // nothing, exactly like the disabled Submit button.
-  // meiva:link ui/web/src/docs/frontend-components/enter-to-send.meiva.okf.md
+  // meiva:link ui/web/src/docs/frontend-components/enter-to-send.md
   const draftAnswer = answerFromDraft(question, draft);
   const send = () => {
     if (pending || !draftAnswer) return;

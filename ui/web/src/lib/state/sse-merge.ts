@@ -29,7 +29,7 @@ export function useMergedSseChannels(): readonly SseChannel[] {
   // Switch on with an empty channel set is a half state: no source would carry
   // anything. It is reported once from an effect (rendering stays pure) and
   // treated as "do not merge" rather than silently becoming zero channels.
-  // meiva:link ui/web/src/docs/frontend-data-flow/frontend-data-flow.meiva.okf.md
+  // meiva:link ui/web/src/docs/frontend-data-flow/frontend-data-flow.md
   const halfState = on && MERGED_SSE_CHANNELS.length === 0;
   useEffect(() => {
     if (!halfState || warnState.warnedEmptySelection) return;

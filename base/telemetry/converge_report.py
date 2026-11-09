@@ -9,7 +9,7 @@ from base.telemetry.emitter import emit
 # render, so the drift stays visible without reading converge output. `path` is
 # the preserved destination, `key` the hash-sidecar key (or managed name),
 # `surface` the renderer.
-# meiva:link cli/commands/converge/docs/rendered-files.meiva.okf.md
+# meiva:link cli/commands/converge/docs/rendered-files.md
 def report_converge_preserve(*, path: str, key: str, surface: str) -> None:
     try:
         emit(

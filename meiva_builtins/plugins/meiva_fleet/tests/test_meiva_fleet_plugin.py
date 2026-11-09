@@ -440,7 +440,7 @@ def test_fleet_declares_compact_preparation_in_its_manifest() -> None:
 # The fleet plugin declares no notification category: a closed task is not a
 # request that needs the user's reply, and no other task event is one either.
 # Adding one is a product decision, not a test fix.
-# meiva:link base/events/notifications/docs/notifications.meiva.okf.md
+# meiva:link base/events/notifications/README.md
 def test_fleet_declares_no_notification_category() -> None:
     from pathlib import Path
 

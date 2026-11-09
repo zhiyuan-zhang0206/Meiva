@@ -3,7 +3,7 @@
 # rule skips, which of a file's lines read a per-agent field through a process global, and the text
 # of each of the three report headings. The shell walks the scan directories, resolves and reads
 # each file, and prints.
-# meiva:link meizel/docs/meizel.meiva.okf.md
+# meiva:link meizel/docs/meizel.md
 
 from __future__ import annotations
 

@@ -19,12 +19,12 @@ _DEFAULTED = re.compile(r"\$\{(\w+):-([^}]*)\}")
 # credential path means nothing anywhere else. The request arrives as a literal
 # appended to this source, so no secret reaches an argv (visible in `ps`) or a
 # temporary file, and one request is one process.
-# meiva:link scripts/host_ops/docs/harness-onboarding.meiva.okf.md
+# meiva:link scripts/host_ops/docs/harness-onboarding.md
 # meiva:note
 # A credential path names variables this machine's shell would expand, and this
 # program runs on the target rather than inside the application, so there is no
 # settings owner to route through.
-# meiva:link scripts/host_ops/docs/harness-onboarding.meiva.okf.md
+# meiva:link scripts/host_ops/docs/harness-onboarding.md
 def _env_value(name: str, fallback: str) -> str:
     return os.environ.get(name, fallback)
 

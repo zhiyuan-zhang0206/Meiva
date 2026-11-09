@@ -308,7 +308,7 @@ describe("useTimeline mount + pagination", () => {
   // The strip above the messages presents the reader's own read; the in-flight
   // flag is the concurrency guard that four callers hold. Recording the origin
   // where the request begins is what lets the two differ.
-  // meiva:link ui/web/src/docs/frontend-components/timeline-view/history-paging.meiva.okf.md
+  // meiva:link ui/web/src/docs/frontend-components/timeline-view/history-paging.md
   it("marks an older-page read as the reader's own only when the reader asked for it", async () => {
     timeline.queue(resolves(tlResp([
       snapshotItem({ item_id: "10.0", kind: "agent_chat", payload: "newest" }),

@@ -276,7 +276,7 @@ def plan_attachments(
     # (base/agents/history/timeline._attach_image_captions). The notice is one complete
     # system note inside its own block — the captions interleave with media, so a note
     # spanning them would move blocks; block count and order stay as they are.
-    # meiva:link agent/messages/docs/message-format.meiva.okf.md
+    # meiva:link agent/messages/docs/message-format.md
     blocks: list[dict[str, object]] = [{"type": "text", "text": state.caption_lines[0]}]
     media_index = 0
     for line_block, delivered_flag in zip(state.line_blocks, state.delivered_flags, strict=True):

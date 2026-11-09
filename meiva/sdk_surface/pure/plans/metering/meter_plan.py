@@ -3,7 +3,7 @@
 # treats a member it found, the name an MCP tool call is metered under and the usage identity a
 # call is stamped with. The metering shell (`metering.py`) walks the live namespace and reads the
 # bound context; these functions only choose.
-# meiva:link meiva/docs/sdk-surface/sdk-surface.meiva.okf.md
+# meiva:link meiva/docs/sdk-surface/sdk-surface.md
 
 from __future__ import annotations
 

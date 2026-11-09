@@ -3,7 +3,7 @@
 # every runner: a runner registers with the gateway, so it must find one when it starts and may
 # keep reporting to one until it has stopped. Preflight, checkout, verification and recovery walk
 # the start order.
-# meiva:link cli/docs/fleet-update.meiva.okf.md
+# meiva:link cli/docs/fleet-update.md
 
 from __future__ import annotations
 

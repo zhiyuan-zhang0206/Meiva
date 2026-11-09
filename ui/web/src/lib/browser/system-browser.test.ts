@@ -2,7 +2,7 @@
 // The real implementation, driven by a page object a test builds: every branch — a browser that
 // refuses storage, a page without the async clipboard, a frame with no page at all — is a value
 // here, so nothing stubs a global.
-// meiva:link ui/web/src/docs/frontend-state/browser-port.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-state/browser-port.md
 
 import { describe, expect, it } from "vitest";
 

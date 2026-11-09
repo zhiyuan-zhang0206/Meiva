@@ -1,6 +1,6 @@
 # meiva:note
 # Small scripts that stand in for the coding tools a launch starts, installed where a real session finds them first: the pty-sessions service runs with the test home as its HOME, so a line in the home's `.bash_profile` puts the shim directory ahead of any program the machine has. The scripts are real child processes of a real shell; they render what the real TUI renders and write what they receive to a file the test reads back.
-# meiva:link meiva/shell/coding_tools/docs/coding-tools.meiva.okf.md
+# meiva:link meiva/shell/coding_tools/README.md
 from __future__ import annotations
 
 import contextlib

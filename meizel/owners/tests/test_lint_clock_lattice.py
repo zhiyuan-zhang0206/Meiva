@@ -415,7 +415,7 @@ def test_the_rule_module_refuses_to_start_itself() -> None:
 # reuse are pinned end to end: a violation created between two runs is reported by
 # the second (the reuse does not outlive the run), and a touch of an unrelated file
 # does not change the verdict (the file set is re-read, not remembered).
-# meiva:link meizel/docs/lint/lint-common-admission.meiva.okf.md
+# meiva:link meizel/docs/lint/lint-common-admission.md
 def _git_run(root: Path, *args: str) -> None:
     subprocess.run(["git", "-C", str(root), *args], check=True, capture_output=True)  # noqa: S603
 

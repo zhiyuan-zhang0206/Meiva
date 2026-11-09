@@ -1,0 +1,61 @@
+# meiva-self-evolution skill — Mining regressions from real runs
+
+## What it is
+Meiva improves by observing its **real usage**. This skill (`$MEIVA_HOME/skills/meiva-self-evolution/`) weekly turns the real agent runs from the past week into a **trace dataset**, finds failed/stumbling runs, ties them to recently modified skills/plugins, and proposes concrete fixes. The dataset is a cumulative durable asset — growing a little each week, it's the target material for iterating skills/plugins. **It is explicitly not** a pre-merge gate, benchmark, or synthetic test suite: it reads things that really happened.
+
+## Backpropagation analogy
+The evaluation loop optimizes skill text like backpropagation optimizes weights: forward pass = agent runs a task with current skills; loss = `rubric.py` scoring (completeness + efficiency); **backward pass (gradient) = directly ask the agent "what should change"**; weight update = edit skill text. The backward pass is **80% agent self-reflection** (the agent that ran the task knows best where it stumbled, ask it first), 20% another worker mining traces.
+
+## Boundaries
+
+The entrypoint routes collection and mining to `references/batch-workflow.md`,
+optional safe replay to `references/evaluation-loop.md`, and method explanation
+to `references/method-context.md`. Replay remains optional, with the existing
+read/compute safety and evidence constraints; schedules retain their own
+authorization scope.
+Output data lands in `$MEIVA_HOME/self_evolution/` (per-deployment private), not in the repo. Triggered by a weekly cron job spawn; the skill directory name contains hyphens, so `scripts/` itself cannot be a package — all of it (the CLI entry points `daily_scan.py` / `evaluate.py` / `mine.py` / `aggregate.py` / `collect.py` / `render_report.py`, plus the shared collection/scoring/report modules they import as flat siblings, `record.py` / `record_shape.py` / `record_inputs.py` / `window_records.py` / `events_window.py` / `scan_report.py` / `audit.py` / `label.py` / `rubric.py`) runs only via `.venv/bin/python`, importing each other through a one-line `__file__`-derived `sys.path` guard (structure Rule 6's endorsed within-skill exception). `render_report.py`'s template lives beside it in `assets/report_template.html`.
+
+## Record assembly
+
+`collect.py` reads the events, the inbounds and the transcripts and `record.py`
+assembles the record from those values; what counts as a run's task, and which
+inbounds may be read for it, is the [collection contract](collection.md).
+
+The decisions are `strict` modules over values: `events_window.py` (the window and
+how the events API is paged), `window_records.py` (which agents become records and
+the records themselves), `record_shape.py` (the record's shape, one owner for the
+producer and every reader of it), `record.py` (one record and its evidence grade),
+`scan_report.py` (what the daily report says and whether the scan alerts), `audit.py`
+and `label.py`. The shells (`collect.py`, `daily_scan.py`) read the database, the
+gateway and the clock and hand the values in; a process root (`process_env`) builds
+the database handle, the gateway access, the clock reading and the home once.
+
+## evidence block and grading
+
+Each record's `evidence` block, its fields and the coverage grade derived from
+them are specified in
+[the evidence-block node](evidence-block-and-grading.md).
+
+## Score abstention
+
+`rubric.scores()` returns `overall=None` and names the missing evidence in `abstain`, instead of scoring a trace it has no evidence for. Scoring saturates at 1.0 when nothing was recorded: `has_output` is the only evidence-bearing completion term, and every efficiency term is best when the run did nothing. The record's `evidence_grade` owns the judgement: anything other than `complete` abstains with the record's own `unknown_reason` (`no_telemetry`, `no_task`, `no_terminal`). Records written before the evidence block exists fall back to the same three checks on their own fields. `evaluate.gather` normalizes `task_prompt` through `task_prompt_of`, keeps abstained replays in `per_task` but out of `n` and the mean, and records `abstain:<reason>` as their verification reason.
+
+## Judge calibration
+
+Any model judge used by the loop is scored against `scripts/calibrate.py` before its verdicts are
+trusted. The harness takes a balanced case set (half expected-pass, half expected-fail) and reports
+sensitivity, specificity, abstain rate and the two trivial baselines; accuracy must strictly beat
+both baselines, and `uncertain` never counts as correct, so a judge cannot score by abstaining.
+On a random run sample almost every run passes, so an always-pass stub outscores a real judge —
+agreement measured there describes the sample, not the judge.
+
+`tests/fixtures/eval_calibration/cases.json` holds 24 synthetic cases (12 pass, 12 fail) covering
+promise-only finals and false claims of an external effect; `synthesize_failure` derives new fail
+cases from passing packets. Run the baselines with `--judge always-pass`; a real judge is plugged
+in from code as `calibrate(load_cases(path), my_judge)` — the CLI does not import judges
+dynamically. The process exits non-zero when the judge does not beat both baselines.
+
+## Key dependencies
+- [Skills index](../../../README.md) — full skills catalog
+- [Skill System](../../../../../meiva/skills/README.md) — the target of mining regressions is the skill library itself
+- [skill-creator](../../skill-creator/README.md) — found fixes land via creating/modifying skills

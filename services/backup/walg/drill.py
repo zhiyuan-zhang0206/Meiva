@@ -32,7 +32,7 @@
 #
 # A drill never raises and never stops the backup that follows it: the outcome is a
 # `DrillRecord` for the state file, whose failure the health probe reports.
-# meiva:link services/backup/walg/docs/walg-restore.meiva.okf.md
+# meiva:link services/backup/walg/docs/walg-restore.md
 
 
 from __future__ import annotations

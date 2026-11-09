@@ -1,6 +1,6 @@
 # meiva:note
 # Traceloop owns one provider per process; exercise its real arm rather than reset SDK globals.
-# meiva:link base/packages/tests/lm/docs/contracts.meiva.okf.md
+# meiva:link base/packages/tests/lm/docs/contracts.md
 
 import sys
 from collections.abc import Generator

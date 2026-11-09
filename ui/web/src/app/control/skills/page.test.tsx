@@ -22,7 +22,7 @@ beforeEach(() => {
 // meiva:note
 // The page navigates through the app's navigation port, not Next's router: the moves it asked for
 // are read off the fake that stands in for the port.
-// meiva:link ui/web/src/docs/frontend-state/frontend-state.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-state/frontend-state.md
 const navigation = fakeNavigation();
 
 afterEach(cleanup);
@@ -38,7 +38,7 @@ function wrap(ui: React.ReactElement) {
   // meiva:note
   // The page carries timeline cards, which age their stamps on the page's wall clock: the provider
   // the app mounts is what `useWallNow` reads, and without it the render throws.
-  // meiva:link ui/web/src/docs/frontend-components/control-page-load.meiva.okf.md
+  // meiva:link ui/web/src/docs/frontend-components/control-page-load.md
   const Page = navigationWrapper(navigation);
   return render(
     <WallClockProvider wallNow={() => Date.now()}>

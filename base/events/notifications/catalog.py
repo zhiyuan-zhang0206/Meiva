@@ -2,7 +2,7 @@
 # A notification is a request that needs the user's reply. An event the user does
 # not have to answer — a finished turn, a closed task — belongs in the log, the
 # task board or the inbox that already carries it, never in this catalog.
-# meiva:link base/events/notifications/docs/notifications.meiva.okf.md
+# meiva:link base/events/notifications/README.md
 
 from __future__ import annotations
 
@@ -40,7 +40,7 @@ class NotificationCategory:
 # resolve an ownership clash at delivery time. The catalog holds requests, not
 # events: `core.needs_input` is the only thing the user has to answer, so it is
 # the only core category. A finished turn or a closed task is a log line.
-# meiva:link base/events/notifications/docs/notifications.meiva.okf.md
+# meiva:link base/events/notifications/README.md
 CORE_CATEGORIES: tuple[NotificationCategory, ...] = (
     NotificationCategory(
         id="core.needs_input",
@@ -113,7 +113,7 @@ def _importance(entry: Mapping[str, object]) -> Importance:
 # One owner for the manifest-to-category mapping: the gateway reads plugins to serve
 # the switch list, and the CLI reads the same manifests to replay their categories, so
 # the field names and the `<plugin>.` namespace rule may not be spelled twice.
-# meiva:link base/events/notifications/docs/notifications.meiva.okf.md
+# meiva:link base/events/notifications/README.md
 def category_from_manifest(entry: Mapping[str, object], *, plugin: str) -> NotificationCategory:
     category = NotificationCategory(
         id=_text(entry, "id"),

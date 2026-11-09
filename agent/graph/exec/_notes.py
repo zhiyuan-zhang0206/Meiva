@@ -31,7 +31,7 @@ from langgraph.graph.message import add_messages
 # Merge the plugin's in-memory system notes into the exec's messages delta.
 # The exec node defers notes until all tool results commit, preserving
 # tool_use -> tool_result adjacency.
-# meiva:link agent/graph/exec/docs/exec-notes.meiva.okf.md
+# meiva:link agent/graph/exec/docs/exec-notes.md
 def merge_exec_notes(
     state_messages_update: list[AnyMessage],
     plugin_messages: Sequence[BaseMessage] | None,

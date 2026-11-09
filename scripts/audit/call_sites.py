@@ -17,7 +17,7 @@
 # that judgment belongs to the author who made the change. `--enforce` exits 1 when any call is
 # `missing`, which is the form a CI job can use; an `unproven` call never fails it, because one
 # `*args` helper up the stack would otherwise decide the verdict for every caller behind it.
-# meiva:link scripts/audit/docs/call-sites.meiva.okf.md
+# meiva:link scripts/audit/docs/call-sites.md
 
 from __future__ import annotations
 

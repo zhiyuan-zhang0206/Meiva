@@ -28,7 +28,7 @@ def _is_str_object_dict(value: object) -> TypeGuard[dict[str, object]]:
 # ids under its own `<plugin>.` prefix, so the merged catalog treats a duplicate
 # id as a programming error. The manifests and the enabled set are parameters so
 # the merge has one owner and a test can hand it a real directory.
-# meiva:link base/events/notifications/docs/notifications.meiva.okf.md
+# meiva:link base/events/notifications/README.md
 def categories_from_manifests(
     installed: Mapping[str, Path], enabled: set[str]
 ) -> dict[str, NotificationCategory]:

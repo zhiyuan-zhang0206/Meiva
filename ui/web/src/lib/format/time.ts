@@ -1,10 +1,10 @@
 // meiva:note
 // This module is the single owner of turning an ISO instant into text a person reads; it replaced nine drifting implementations at the tz audit (2026-08). Views see BROWSER-LOCAL time, a deliberate divergence from the cluster `MEIVA_TIMEZONE` an agent sees — consistency means one wording scheme per audience, not one clock for every audience. Three shapes, one job each: `formatAbsolute` (full precision) for a dedicated "when exactly" slot, `formatShort` (compact) for space-constrained rows, and `formatRelative` (one signed wording, `in 4m` / `5m ago` / `just now`) for every relative-time surface.
-// meiva:link ui/web/src/lib/format/docs/time.meiva.okf.md
+// meiva:link ui/web/src/lib/format/docs/time.md
 
 // meiva:note
 // Clock times are written in one of two formats, chosen by the viewer's `display.clock_format` setting and 24-hour by default: `15:45` or `3:45 PM`. `formatClockText` is the single owner of that choice for the viewer's local zone; every formatter here takes `clockFormat` so no call site can hard-code a 12-hour clock. Timezone names are never appended: the viewer's own zone is implied context.
-// meiva:link ui/web/src/lib/format/docs/time.meiva.okf.md
+// meiva:link ui/web/src/lib/format/docs/time.md
 
 import {
   DEFAULT_CLOCK_FORMAT,
@@ -24,7 +24,7 @@ function pad2(value: number): string {
 
 // meiva:note
 // ClockTextOptions picks the clock reading and its precision: `seconds` appends `:SS`, and `milliseconds` appends `.mmm` (implying seconds).
-// meiva:link ui/web/src/lib/format/docs/time.meiva.okf.md
+// meiva:link ui/web/src/lib/format/docs/time.md
 export interface ClockTextOptions {
   clockFormat?: ClockFormat;
   seconds?: boolean;
@@ -33,7 +33,7 @@ export interface ClockTextOptions {
 
 // meiva:note
 // formatClockText renders the viewer-local wall clock and is the one place the 12/24-hour choice is made: `15:45` in 24-hour or `3:45 PM` in 12-hour, with optional seconds and milliseconds for the run-timeline axis.
-// meiva:link ui/web/src/lib/format/docs/time.meiva.okf.md
+// meiva:link ui/web/src/lib/format/docs/time.md
 export function formatClockText(d: Date, opts: ClockTextOptions = {}): string {
   const { clockFormat = DEFAULT_CLOCK_FORMAT, seconds = false, milliseconds = false } = opts;
   const hour24 = d.getHours();
@@ -48,7 +48,7 @@ export function formatClockText(d: Date, opts: ClockTextOptions = {}): string {
 
 // meiva:note
 // FormatAbsoluteOptions: `weekday` inserts the abbreviated weekday between date and time, and `clockFormat` chooses 24- or 12-hour (default 24).
-// meiva:link ui/web/src/lib/format/docs/time.meiva.okf.md
+// meiva:link ui/web/src/lib/format/docs/time.md
 export interface FormatAbsoluteOptions {
   weekday?: boolean;
   clockFormat?: ClockFormat;
@@ -56,7 +56,7 @@ export interface FormatAbsoluteOptions {
 
 // meiva:note
 // formatAbsolute renders the viewer-local full datetime with seconds: `2026-07-25 02:53:29`, `2026-07-25 Sat 02:53:29` with the weekday, and `2:53:29 AM` on the 12-hour clock. An unparseable iso string yields an empty string; the caller substitutes its own placeholder.
-// meiva:link ui/web/src/lib/format/docs/time.meiva.okf.md
+// meiva:link ui/web/src/lib/format/docs/time.md
 export function formatAbsolute(iso: string, opts: FormatAbsoluteOptions = {}): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return "";
@@ -76,7 +76,7 @@ export function formatAbsolute(iso: string, opts: FormatAbsoluteOptions = {}): s
 
 // meiva:note
 // FormatShortOptions: `includeDate` prefixes `M/D` (default true; false gives a bare clock cell for a time today), and `clockFormat` chooses 24- or 12-hour (default 24).
-// meiva:link ui/web/src/lib/format/docs/time.meiva.okf.md
+// meiva:link ui/web/src/lib/format/docs/time.md
 export interface FormatShortOptions {
   includeDate?: boolean;
   clockFormat?: ClockFormat;
@@ -84,7 +84,7 @@ export interface FormatShortOptions {
 
 // meiva:note
 // formatShort renders the compact form `7/12 15:45` (`1:45 PM` on the 12-hour clock), or a bare wall-clock cell with `includeDate: false`, for space-constrained rows where the viewer's own clock is implied. An unparseable iso string yields an em dash.
-// meiva:link ui/web/src/lib/format/docs/time.meiva.okf.md
+// meiva:link ui/web/src/lib/format/docs/time.md
 export function formatShort(iso: string, opts: FormatShortOptions = {}): string {
   const { includeDate = true, clockFormat = DEFAULT_CLOCK_FORMAT } = opts;
   const d = new Date(iso);
@@ -111,7 +111,7 @@ export function formatUptime(seconds: number): string {
 
 // meiva:note
 // Signed relative time in both directions: `in 4m` (future), `5m ago` (past), and `just now` under a minute; seconds through years. The one wording scheme every relative-time surface in the app uses, so a copy change belongs here rather than at a call site. An unparseable iso string yields an em dash.
-// meiva:link ui/web/src/lib/format/docs/time.meiva.okf.md
+// meiva:link ui/web/src/lib/format/docs/time.md
 export function formatRelative(
   iso: string,
   now: Date,
@@ -124,7 +124,7 @@ export function formatRelative(
   // meiva:note
   // `capitalize` is for a value that starts its own cell ("Just now, 10:17"),
   // not for one that continues a sentence ("Updated just now"). Pass it there.
-  // meiva:link ui/web/src/lib/format/docs/time.meiva.okf.md
+  // meiva:link ui/web/src/lib/format/docs/time.md
   if (mag < 60) return capitalize ? "Just now" : "just now";
   const min = Math.floor(mag / 60);
   let span: string;
@@ -148,7 +148,7 @@ export interface FormatUpcomingOptions {
 
 // meiva:note
 // formatUpcoming renders an upcoming instant as a clock time in the viewer's format (24-hour by default, 12-hour when `clockFormat` says so) plus the day context its viewer-local calendar date requires, and never as a bare clock time for a future day: clock only later today, 'Tomorrow' on the next local date, a weekday name from two to six days, a day count with the date from seven to 29 days, and the date alone from 30 days. The boundary is local midnight, not 24 elapsed hours, so a DST day still counts as one day. A past instant keeps the shared relative wording and an unparseable input yields an em dash.
-// meiva:link ui/web/src/lib/format/docs/time.meiva.okf.md
+// meiva:link ui/web/src/lib/format/docs/time.md
 export function formatUpcoming(
   iso: string | Date,
   now: Date,

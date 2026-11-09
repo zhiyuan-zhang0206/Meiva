@@ -7,7 +7,7 @@
 # file. The shell checks the file first and passes `ScanMissing` instead of running it. A
 # timeout and a missing script wake the agent but send no daily report; every finished scan
 # sends one, whatever its exit code.
-# meiva:link schedules/docs/self-evolution.meiva.okf.md
+# meiva:link schedules/docs/self-evolution.md
 
 from __future__ import annotations
 

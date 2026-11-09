@@ -1,4 +1,4 @@
-# meiva:link base/packages/plugins/docs/plugin-config/enable-state.meiva.okf.md
+# meiva:link base/packages/plugins/docs/plugin-config/enable-state.md
 
 import json
 from dataclasses import dataclass
@@ -82,7 +82,7 @@ def discover_plugins(*, home: Path) -> dict[str, Path]:
 
 
 def discover_plugin_dirs(*, repo_dir: Path, user_dir: Path) -> dict[str, Path]:
-    # meiva:link base/packages/plugins/docs/plugin-config/enable-state.meiva.okf.md
+    # meiva:link base/packages/plugins/docs/plugin-config/enable-state.md
     discovered: dict[str, Path] = {}
     if repo_dir.exists():
         for p in sorted(repo_dir.iterdir()):
@@ -185,12 +185,12 @@ def _default_config(known_plugins: set[str]) -> PluginsConfig:
 
 @dataclass(frozen=True)
 class PluginEnableStore:
-    # meiva:link base/packages/plugins/docs/plugin-config/enable-state.meiva.okf.md
+    # meiva:link base/packages/plugins/docs/plugin-config/enable-state.md
 
     path: Path
 
     def read(self) -> dict[str, object] | None:
-        # meiva:link base/packages/plugins/docs/plugin-config/enable-state.meiva.okf.md
+        # meiva:link base/packages/plugins/docs/plugin-config/enable-state.md
         p = self.path
         if not p.exists():
             return None
@@ -201,11 +201,11 @@ class PluginEnableStore:
         return data
 
     def write(self, raw: dict[str, object]) -> None:
-        # meiva:link base/packages/plugins/docs/plugin-config/enable-state.meiva.okf.md
+        # meiva:link base/packages/plugins/docs/plugin-config/enable-state.md
         self.path.write_text(json.dumps(raw, indent=2))
 
     def load(self, known_plugins: set[str], *, allow_dangling: bool = False) -> PluginsConfig:
-        # meiva:link base/packages/plugins/docs/plugin-config/enable-state.meiva.okf.md
+        # meiva:link base/packages/plugins/docs/plugin-config/enable-state.md
         raw = self.read() or {}
 
         if not raw or not raw.get("plugins"):
@@ -243,7 +243,7 @@ class PluginEnableStore:
         return _with_cluster_policy(cfg, home=self.path.parent)
 
     def set_enabled(self, name: str, *, enabled: bool, known: set[str]) -> PluginsConfig:
-        # meiva:link base/packages/plugins/docs/plugin-config/enable-state.meiva.okf.md
+        # meiva:link base/packages/plugins/docs/plugin-config/enable-state.md
         resolved = skill_naming.find(name, known)
         if resolved is None:
             raise DanglingPlugin(
@@ -269,7 +269,7 @@ class PluginEnableStore:
     def load_for_runtime(
         self, known_plugins: set[str], *, report: load_report.Reporter
     ) -> PluginsConfig:
-        # meiva:link base/packages/plugins/docs/plugin-config/enable-state.meiva.okf.md
+        # meiva:link base/packages/plugins/docs/plugin-config/enable-state.md
         try:
             return self.load(known_plugins)
         except DanglingPlugin as exc:
@@ -283,12 +283,12 @@ def local_config_path(*, home: Path) -> Path:
 
 
 def write_local(raw: dict[str, object], *, home: Path) -> None:
-    # meiva:link base/packages/plugins/docs/plugin-config/enable-state.meiva.okf.md
+    # meiva:link base/packages/plugins/docs/plugin-config/enable-state.md
     PluginEnableStore(local_config_path(home=home)).write(raw)
 
 
 def load(known_plugins: set[str], *, allow_dangling: bool = False, home: Path) -> PluginsConfig:
-    # meiva:link base/packages/plugins/docs/plugin-config/enable-state.meiva.okf.md
+    # meiva:link base/packages/plugins/docs/plugin-config/enable-state.md
     return PluginEnableStore(local_config_path(home=home)).load(
         known_plugins, allow_dangling=allow_dangling
     )
@@ -313,7 +313,7 @@ def report_dangling(exc: DanglingPlugin, report: load_report.Reporter | None = N
 
 
 def load_for_runtime(known_plugins: set[str], *, home: Path) -> PluginsConfig:
-    # meiva:link base/packages/plugins/docs/plugin-config/enable-state.meiva.okf.md
+    # meiva:link base/packages/plugins/docs/plugin-config/enable-state.md
     return PluginEnableStore(local_config_path(home=home)).load_for_runtime(
         known_plugins, report=load_report.reporter(None)
     )
@@ -335,7 +335,7 @@ def installed_plugin_dirs(*, home: Path) -> dict[str, Path]:
 
 
 def set_local_enabled(name: str, *, enabled: bool, home: Path) -> PluginsConfig:
-    # meiva:link base/packages/plugins/docs/plugin-config/enable-state.meiva.okf.md
+    # meiva:link base/packages/plugins/docs/plugin-config/enable-state.md
     return PluginEnableStore(local_config_path(home=home)).set_enabled(
         name, enabled=enabled, known=set(discover_plugins(home=home))
     )

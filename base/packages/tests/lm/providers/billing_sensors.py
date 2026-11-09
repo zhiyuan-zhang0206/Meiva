@@ -1,6 +1,6 @@
 # meiva:note
 # Observe public SDK calls and inject a real processor failure without replacing tracer lookup.
-# meiva:link base/packages/tests/lm/docs/contracts.meiva.okf.md
+# meiva:link base/packages/tests/lm/docs/contracts.md
 
 from __future__ import annotations
 

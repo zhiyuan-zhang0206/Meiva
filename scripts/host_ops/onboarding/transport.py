@@ -15,7 +15,7 @@ LOCAL_HOST_NAMES = frozenset({"local", "localhost"})
 # without the interactive profile, so an installed CLI is indistinguishable from
 # a missing one; these are the directories the harness probe falls back to, plus
 # the system paths a trimmed PATH loses.
-# meiva:link scripts/host_ops/docs/harness-onboarding.meiva.okf.md
+# meiva:link scripts/host_ops/docs/harness-onboarding.md
 PATH_PREAMBLE = (
     'export PATH="$HOME/.local/bin:$HOME/.npm-global/bin:$HOME/.bun/bin:'
     '/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"'
@@ -25,7 +25,7 @@ PATH_PREAMBLE = (
 # The search path a service or ssh command actually gets: no profile runs, so the
 # system directories are the whole list. Install verification uses it, because a
 # binary only a login shell finds is missing for the agent that needs it.
-# meiva:link scripts/host_ops/docs/harness-onboarding.meiva.okf.md
+# meiva:link scripts/host_ops/docs/harness-onboarding.md
 AGENT_PATH = "/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 
 SSH_OPTIONS = ("-o", "BatchMode=yes", "-o", "ConnectTimeout=10")
@@ -119,7 +119,7 @@ class Host:
             # argv is assembled from a validated host name and fixed options; no
             # caller-supplied string reaches it unquoted, because a run() payload
             # travels on stdin and every other argument is a literal or a path.
-            # meiva:link scripts/host_ops/docs/harness-onboarding.meiva.okf.md
+            # meiva:link scripts/host_ops/docs/harness-onboarding.md
             completed = subprocess.run(  # noqa: S603
                 argv, input=stdin, capture_output=True, timeout=timeout, check=False
             )

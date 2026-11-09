@@ -5,7 +5,7 @@
 // for that viewport, and repaints only when what it would draw changed (`paintKey`) — so a wheel tick
 // costs one paint per row and no React render of the row tree (task #5738). A pointer layer turns a
 // position into the item under it (`hitTest`).
-// meiva:link ui/web/src/docs/frontend-components/run-timeline/run-timeline.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/run-timeline/run-timeline.md
 
 import { useEffect, useRef } from "react";
 
@@ -67,7 +67,7 @@ export function TrackCanvas({
   // meiva:note
   // The frame callback reads the newest closure, so a render that changed the selection hands over a new
   // paint and key without restarting the frame loop.
-  // meiva:link ui/web/src/docs/frontend-components/run-timeline/run-timeline.meiva.okf.md
+  // meiva:link ui/web/src/docs/frontend-components/run-timeline/run-timeline.md
   useEffect(() => {
     latest.current = { paint, paintKey };
   });
@@ -125,7 +125,7 @@ export function TrackCanvas({
   // meiva:note
   // A render that changed what the row would draw (a new selection, a new highlight) asks for a frame of its
   // own: the viewport did not move, but the picture it draws did.
-  // meiva:link ui/web/src/docs/frontend-components/run-timeline/run-timeline.meiva.okf.md
+  // meiva:link ui/web/src/docs/frontend-components/run-timeline/run-timeline.md
   useEffect(() => {
     bump.current();
   });

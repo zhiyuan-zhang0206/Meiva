@@ -2,7 +2,7 @@
 # How the window reads what the programs it ships answer: the stored-schedule check
 # and the alert silence. Each reply is text a host printed, and each reading is a value: a
 # reply that cannot be read costs a warning, never a crash and never a silent pass.
-# meiva:link cli/docs/fleet-update-window/fleet-update-window.meiva.okf.md
+# meiva:link cli/docs/fleet-update-window/fleet-update-window.md
 from __future__ import annotations
 
 import pytest

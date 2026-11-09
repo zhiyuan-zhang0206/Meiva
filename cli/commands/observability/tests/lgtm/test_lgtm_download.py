@@ -1,4 +1,4 @@
-# meiva:link cli/commands/observability/docs/lgtm/lgtm.meiva.okf.md
+# meiva:link cli/commands/observability/docs/lgtm/lgtm.md
 # meiva:note
 # The native LGTM archive download and install against real HTTP listeners on port 0.
 #

@@ -243,7 +243,7 @@ def _windowed_tasks(
 # the 3 MB of `results` text stays off the list (user report 2026-10-20: the
 # full 24-hour list was 3.1 MB and 85% of it was `results`, which only the
 # hover card renders).
-# meiva:link gateway/routers/docs/routers.meiva.okf.md
+# meiva:link gateway/routers/docs/routers.md
 @router.get("/api/tasks/{task_id}", dependencies=[Depends(deny_isolated_result_read)])
 def get_task(request: Request, task_id: int) -> TaskRow:
     with gateway_state(request).db_pool.connection() as conn:
@@ -288,7 +288,7 @@ def _list_tasks(
 # full registry; a windowed list still carries every kept task's out-of-window
 # ancestors flagged ghost=True (see _windowed_tasks). No pagination - the
 # registry is bounded. Order by created_at DESC so the newest tasks surface first.
-# meiva:link gateway/routers/docs/routers.meiva.okf.md
+# meiva:link gateway/routers/docs/routers.md
 def get_tasks(
     request: Request,
     window: str = Query("all", pattern="^(24h|7d|30d|all)$"),
@@ -401,7 +401,7 @@ def _validate_patch_title(cur: Cursor, task_id: int, title: str | None) -> None:
 # Commit the task and its owner-change inbounds in the same transaction.
 # The route awaits task-note delivery after this function returns, so no
 # network or process wake can roll back the owner assignment.
-# meiva:link gateway/routers/docs/routers.meiva.okf.md
+# meiva:link gateway/routers/docs/routers.md
 def patch_task_blocking(
     pool: ConnectionPool,
     task_id: int,

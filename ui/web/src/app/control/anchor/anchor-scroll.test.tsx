@@ -7,7 +7,7 @@
 // scrollHeight is stubbed to simulate async content arriving. The scroll itself
 // is the browser port's, so a case reads what was scrolled where from the fake
 // page instead of a DOM stub.
-// meiva:link ui/web/src/docs/frontend-state/browser-port.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-state/browser-port.md
 
 import { cleanup, render } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";

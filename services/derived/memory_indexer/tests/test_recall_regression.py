@@ -3,7 +3,7 @@
 # gateway, an index or a model. One test drives the whole fixture through both halves at two
 # thresholds: that is the property the set exists for, and it fails if either half loses its
 # direction.
-# meiva:link services/docs/gateway_side/memory_indexer/memory-recall-regression.meiva.okf.md
+# meiva:link services/docs/gateway_side/memory_indexer/memory-recall-regression.md
 
 from __future__ import annotations
 

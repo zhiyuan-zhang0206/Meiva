@@ -61,7 +61,7 @@ class HarnessClosedError(RuntimeError):
 # different failure from a turn that died mid-flight: nothing was sent, so there is no
 # half-written transcript to reconcile — but from the graph's side both mean the same
 # thing, and both settle the turn as a reported abort rather than a host crash.
-# meiva:link base/lm/harness/docs/harness.meiva.okf.md
+# meiva:link base/lm/harness/docs/harness.md
 class HarnessSetupError(RuntimeError):
     pass
 
@@ -73,7 +73,7 @@ class ScopedSessionRegistry:
     # it. An adapter takes a registry and would otherwise have to remember which harness it
     # is; the scope makes the answer structural, and a record written by another harness is
     # refused at load instead of resuming a transcript the provider cannot read.
-    # meiva:link base/lm/harness/docs/harness.meiva.okf.md
+    # meiva:link base/lm/harness/docs/harness.md
     inner: SessionRegistry
     harness: Harness
 
@@ -99,7 +99,7 @@ class HarnessBridge:
     # agent, so a second reader would split the stream rather than add one.
     # On a fresh session, the handoff document is co-delivered in the first turn's
     # submission rather than run as a separate prelude turn.
-    # meiva:link agent/graph/docs/harness-turn.meiva.okf.md
+    # meiva:link agent/graph/docs/harness-turn.md
     def __init__(
         self,
         harness: Harness,
@@ -257,7 +257,7 @@ class HarnessBridge:
     # meiva:note
     # The renewal has the turn's lifetime. Preserve the original turn exception so
     # callers can distinguish cancellation, an adapter fault, and a session closure.
-    # meiva:link base/lm/harness/docs/harness.meiva.okf.md
+    # meiva:link base/lm/harness/docs/harness.md
     async def _wait_with_registration(
         self, session: HarnessSession, turn_id: str, on_event: TurnEventSink | None
     ) -> HarnessTurn:
@@ -307,7 +307,7 @@ class HarnessBridge:
     # inbound rebuilds one from the registry — the provider still holds the transcript, so a
     # crashed CLI costs one turn instead of every later one. Retirement is not `close`: the
     # bridge stays open for that next turn, which is why the two are separate calls.
-    # meiva:link base/lm/harness/docs/harness.meiva.okf.md
+    # meiva:link base/lm/harness/docs/harness.md
     async def _retire(self, session: HarnessSession, reason: str) -> None:
         if self._session is session:
             self._session = None
@@ -328,7 +328,7 @@ class HarnessBridge:
     # Every row expires so a reused controller pid cannot inherit a crashed host's
     # bearer capability. A running turn renews its registration independently of provider
     # output. The identity check prevents an interrupt or close from resurrecting a row.
-    # meiva:link base/lm/harness/docs/harness.meiva.okf.md
+    # meiva:link base/lm/harness/docs/harness.md
     async def _renew_registration(self, session: HarnessSession) -> None:
         interval = self._registration_ttl.total_seconds() / 3
         while self._session is session:
@@ -347,7 +347,7 @@ class HarnessBridge:
 
     # meiva:note
     # A renewal preserves the handle, controller and creation time for this session.
-    # meiva:link base/lm/harness/docs/harness.meiva.okf.md
+    # meiva:link base/lm/harness/docs/harness.md
     def _register(self, external_session_id: str) -> None:
         if self._registrations is None or self._digest is None:
             return
@@ -424,7 +424,7 @@ class HarnessBridge:
         # asked to watch and the payload names the turn being run. Anything else is
         # another turn's speech: this turn neither delivers it nor is blamed for it
         # (#5663).
-        # meiva:link base/lm/harness/docs/attribution.meiva.okf.md
+        # meiva:link base/lm/harness/docs/attribution.md
         if on_event is None:
             return False
         if not isinstance(
@@ -453,7 +453,7 @@ class HarnessBridge:
 # turn's own verdict; a failure or a report that names another turn is not
 # ours to act on, and neither is output the provider produced for a turn we
 # never ran (#5663).
-# meiva:link base/lm/harness/docs/harness.meiva.okf.md
+# meiva:link base/lm/harness/docs/harness.md
 def _raise_if_faulted(event: BridgeEvent, turn_id: str) -> None:
     if isinstance(event, TurnFaulted):
         if event.turn_id == turn_id:
@@ -469,7 +469,7 @@ def _raise_if_faulted(event: BridgeEvent, turn_id: str) -> None:
         # splits the same way: naming a turn is turn-scoped, naming none is the
         # session's own failure. It is checked last because the two events above
         # are also instances of it.
-        # meiva:link base/lm/harness/docs/harness.meiva.okf.md
+        # meiva:link base/lm/harness/docs/harness.md
         if event.turn_id is None:
             raise HarnessClosedError(f"harness session failed: {event.error}")
         if event.turn_id == turn_id:

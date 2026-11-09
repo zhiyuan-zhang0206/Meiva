@@ -4,7 +4,7 @@
 # reason the store table exists — it says whether copying a login invalidates the
 # machine it came from, and `sync` withholds every store whose answer is not
 # `static`.
-# meiva:link base/lm/harness/docs/harness.meiva.okf.md
+# meiva:link base/lm/harness/docs/harness.md
 
 from __future__ import annotations
 
@@ -91,7 +91,7 @@ class HarnessSpec:
 # reason the store table exists — it says whether copying a login invalidates the
 # machine it came from, and `sync` withholds every store whose answer is not
 # `static`. The measurements behind each verdict live in the runbook.
-# meiva:link base/lm/harness/docs/harness.meiva.okf.md
+# meiva:link base/lm/harness/docs/harness.md
 CATALOG: dict[str, HarnessSpec] = {
     "claude": HarnessSpec(
         cli="claude",
@@ -210,7 +210,7 @@ def install_command(harness: HarnessSpec, version: str | None = None, *, prefix:
     # The shell command that installs `harness` at `version`. `prefix` redirects an npm
     # install away from a global root this user cannot write (a system node without sudo);
     # script installers own their own destination.
-    # meiva:link base/lm/harness/docs/harness.meiva.okf.md
+    # meiva:link base/lm/harness/docs/harness.md
     wanted = harness.pinned_version if version is None else version
     if harness.installer.kind == "npm":
         where = f" --prefix {prefix}" if prefix else ""
@@ -255,7 +255,7 @@ def staged_install_command(harness: HarnessSpec, staging_dir: str) -> str:
     # `$HOME/.local/bin/agy` already exists, and supports `--dir <path>` so we stage
     # on the same filesystem, verify `--version`, and `os.replace` atomically without
     # interrupting running `agy` processes or triggering `ETXTBSY`.
-    # meiva:link base/lm/harness/docs/harness.meiva.okf.md
+    # meiva:link base/lm/harness/docs/harness.md
     if harness.installer.kind != "script" or harness.installer.pins:
         raise ValueError(f"staged install requires unpinned script installer; got {harness.cli}")
     return f"curl -fsSL {harness.installer.target} | bash -s -- --dir {shlex.quote(staging_dir)}"

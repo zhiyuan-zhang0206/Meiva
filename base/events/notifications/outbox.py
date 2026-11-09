@@ -15,7 +15,7 @@ _log = logging.getLogger("base.events.notifications.outbox")
 # because the transport failed the announce or the process died between the
 # producing commit and the publish. This module turns those rows back into live
 # events.
-# meiva:link base/events/notifications/docs/notifications.meiva.okf.md
+# meiva:link base/events/notifications/README.md
 
 
 # meiva:note
@@ -27,7 +27,7 @@ _log = logging.getLogger("base.events.notifications.outbox")
 # it — so a Redis outage delays pushes instead of dropping them. Re-announcing a
 # row whose mark was lost is at-least-once on purpose: clients deduplicate on
 # `notification_id`, and a duplicate ping is cheaper than a missing decision.
-# meiva:link base/events/notifications/docs/notifications.meiva.okf.md
+# meiva:link base/events/notifications/README.md
 def republish_pending(
     pool: ConnectionPool, bus: SyncPublisher | None, *, min_age_seconds: float, limit: int
 ) -> int:
@@ -39,7 +39,7 @@ def republish_pending(
         # One row's failure must not decide the rest of the batch. The row stays
         # unannounced, so the next sweep returns to it, while the deliveries
         # behind it go out now instead of waiting for it to clear.
-        # meiva:link base/events/notifications/docs/notifications.meiva.okf.md
+        # meiva:link base/events/notifications/README.md
         try:
             if announce_sync(pool, bus, notification_id):
                 announced += 1

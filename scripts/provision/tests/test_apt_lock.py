@@ -36,7 +36,7 @@ _HOLDER = Path(__file__).with_name("lock_holder.py")
 # every invocation that unpacks packages must have a wait before it in the same action.
 # `--download-only` is excluded on purpose — it fetches archives and never touches the dpkg
 # lock, so a wait there would be a rule with no failure behind it.
-# meiva:link scripts/provision/docs/apt-lock.meiva.okf.md
+# meiva:link scripts/provision/docs/apt-lock.md
 _APT_INSTALL_MARKERS = (
     "playwright install-deps chromium",
     "apt-get install -y",
@@ -155,7 +155,7 @@ def test_every_install_step_waits_for_the_lock_first() -> None:
 # failure, because the cached .deb path can still install what the mirror could not deliver.
 # Pinning it here keeps a future edit from turning the diagnosis back into a hard stop on a
 # job that used to pass (2026-10-22: e2e shards failed on exactly that).
-# meiva:link scripts/provision/docs/apt-lock.meiva.okf.md
+# meiva:link scripts/provision/docs/apt-lock.md
 def test_the_lock_wait_never_fails_a_step_by_itself() -> None:
     wrapper = _REPO_ROOT / "scripts/provision/wait_apt_lock.sh"
     text = wrapper.read_text(encoding="utf-8")

@@ -39,7 +39,7 @@ export const viewport: Viewport = {
   // `theme-color`; without it the system chrome stays light under a dark page.
   // These are the first-paint values — the palette owns them (`--theme-color`
   // in globals.css) and `ThemeColorSync` follows an in-app theme override.
-  // meiva:link ui/web/src/docs/frontend.meiva.okf.md
+  // meiva:link ui/web/src/docs/frontend.md
   themeColor: [
     { media: "(prefers-color-scheme: light)", color: "#FFFFFF" },
     { media: "(prefers-color-scheme: dark)", color: "#292824" },

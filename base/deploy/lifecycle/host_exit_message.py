@@ -5,7 +5,7 @@
 # `run/host-exit-message.json` under the home before signalling `agent-host`. `GracefulExit`
 # consumes and unlinks the record once at the start of its drain so the explanation reaches
 # interrupted turns and idle agents on that machine without leaking into a later stop.
-# meiva:link services/agent_runner/agent_host/lifecycle/docs/graceful-exit.meiva.okf.md
+# meiva:link services/agent_runner/agent_host/lifecycle/docs/graceful-exit.md
 
 from __future__ import annotations
 

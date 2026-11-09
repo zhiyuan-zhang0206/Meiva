@@ -10,13 +10,13 @@ from base.paths import memory_dir, workspace_dir
 
 _MEMORY_INDEX_FILE = "MEMORY.md"
 
-# meiva:link meiva_builtins/plugins/meiva_memory/docs/memory-index-notes.meiva.okf.md
+# meiva:link meiva_builtins/plugins/meiva_memory/docs/memory-index-notes.md
 _PER_AGENT_MEMORY_DIRNAME = "memory"
 
-# meiva:link meiva_builtins/plugins/meiva_memory/docs/memory-index-notes.meiva.okf.md
+# meiva:link meiva_builtins/plugins/meiva_memory/docs/memory-index-notes.md
 _NO_CONTENT = "(no content)"
 
-# meiva:link meiva_builtins/plugins/meiva_memory/docs/memory-index-notes.meiva.okf.md
+# meiva:link meiva_builtins/plugins/meiva_memory/docs/memory-index-notes.md
 _FRAMING = (
     "The shared memory pool index — visible to every agent. Below is MEMORY.md "
     "at meiva.memory.PATH: a Setup section carrying inline the few facts every "
@@ -29,7 +29,7 @@ _FRAMING = (
 )
 
 
-# meiva:link meiva_builtins/plugins/meiva_memory/docs/memory-index-notes.meiva.okf.md
+# meiva:link meiva_builtins/plugins/meiva_memory/docs/memory-index-notes.md
 def memory_index_note(ctx: MeivaContext) -> HumanMessage | None:
     slices = ctx.require_agent()
     if slices.sandbox.eval_isolation or not slices.read("agent", "memory_index_inject_enabled"):
@@ -58,7 +58,7 @@ def memory_index_note(ctx: MeivaContext) -> HumanMessage | None:
     )
 
 
-# meiva:link meiva_builtins/plugins/meiva_memory/docs/memory-index-notes.meiva.okf.md
+# meiva:link meiva_builtins/plugins/meiva_memory/docs/memory-index-notes.md
 PER_AGENT_FRAMING = (
     "Your personal memory index. Where a compact summary records what happened "
     "in one conversation round, this persists across compactions and sessions.\n\n"
@@ -77,7 +77,7 @@ PER_AGENT_FRAMING = (
     "shared pool (meiva.memory)."
 )
 
-# meiva:link meiva_builtins/plugins/meiva_memory/docs/memory-index-notes.meiva.okf.md
+# meiva:link meiva_builtins/plugins/meiva_memory/docs/memory-index-notes.md
 _OVER_CAP_NOTE = (
     "\n\n---\n[maintenance] This index is {lines} lines, over the "
     "{cap}-line soft cap — move detail into entry files and prune stale "
@@ -85,7 +85,7 @@ _OVER_CAP_NOTE = (
 )
 
 
-# meiva:link meiva_builtins/plugins/meiva_memory/docs/memory-index-notes.meiva.okf.md
+# meiva:link meiva_builtins/plugins/meiva_memory/docs/memory-index-notes.md
 def _per_agent_maintenance_suffix(text: str, *, cap: int) -> str:
     verdict = evaluate(text, LengthBudget(Unit.LINES, soft=max(cap, 0)))
     if verdict.level is Level.OK:
@@ -93,7 +93,7 @@ def _per_agent_maintenance_suffix(text: str, *, cap: int) -> str:
     return _OVER_CAP_NOTE.format(lines=verdict.measured, cap=cap)
 
 
-# meiva:link meiva_builtins/plugins/meiva_memory/docs/memory-index-notes.meiva.okf.md
+# meiva:link meiva_builtins/plugins/meiva_memory/docs/memory-index-notes.md
 def per_agent_memory_note(ctx: MeivaContext) -> HumanMessage | None:
     if not ctx.require_agent().read("agent", "memory_per_agent_inject_enabled"):
         logger.debug("[per-agent-memory] disabled by settings")

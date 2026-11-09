@@ -2,7 +2,7 @@
 # The answer of `GET /api/notifications/audit`: the gateway builds it from the audit report and the
 # `meiva notices audit` command reads it back, so both name the same fields. Times are the ISO
 # strings the audit writes (the OpenAPI schema and the frontend types follow them).
-# meiva:link base/events/notifications/docs/notifications.meiva.okf.md
+# meiva:link base/events/notifications/README.md
 
 from __future__ import annotations
 

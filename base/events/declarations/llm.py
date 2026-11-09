@@ -7,7 +7,7 @@ from base.events.vocabulary import LLM_ERROR_FAMILY, EventSpec, telemetry_event
 
 # meiva:note
 # LLM usage events preserve the rates in force at the call and its computed USD cost; readers must not reprice history against the current registry. Calls with unknown prices omit the cost/rate snapshot and set unpriced, while calls is one on every metered call.
-# meiva:link base/events/docs/llm-payloads.meiva.okf.md
+# meiva:link base/events/docs/llm-payloads.md
 class LlmUsage(TypedDict):
     model: str
     calls: int
@@ -44,7 +44,7 @@ class LlmUsage(TypedDict):
 # "nothing to defer":
 # no production agent is asked to declare yet, so production records read `no_input` and
 # `budget` only — count the unlabelled share before reading any other one.
-# meiva:link agent/graph/llm/docs/turn-records.meiva.okf.md
+# meiva:link agent/graph/llm/docs/turn-records.md
 class TurnEnd(TypedDict):
     ok: bool
     duration_seconds: float
@@ -57,7 +57,7 @@ class TurnEnd(TypedDict):
 # carries on and its record says `invalid` instead of the declaration, while the text the
 # agent wrote rides here. A rising count is feedback on the vocabulary — the set does not
 # cover what agents want to say — not noise to be suppressed.
-# meiva:link agent/graph/llm/docs/turn-records.meiva.okf.md
+# meiva:link agent/graph/llm/docs/turn-records.md
 class TurnEndDeclarationRejected(TypedDict):
     raw_ended_with: str
     raw_ended_with_reason: str | None
@@ -77,7 +77,7 @@ class LlmRetry(TypedDict):
 
 # meiva:note
 # billing is independent of the transient/permanent error class: exhausted credit can require human action in either class. error_type preserves the provider body error.type alone, while error.code may affect billing classification without replacing error_type.
-# meiva:link base/events/docs/llm-payloads.meiva.okf.md
+# meiva:link base/events/docs/llm-payloads.md
 class LlmProviderError(TypedDict):
     error_class: str
     provider: str

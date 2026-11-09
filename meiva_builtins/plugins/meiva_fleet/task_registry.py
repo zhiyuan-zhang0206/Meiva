@@ -600,7 +600,7 @@ def publish_update(
 # A closed task is a log line, not a notification: nobody has to answer it, and
 # the task board, the committed row and its `task_updated` event already record
 # the close.
-# meiva:link base/events/notifications/docs/notifications.meiva.okf.md
+# meiva:link base/events/notifications/README.md
 def _log_closed(actor: int, task_id: int, title: str) -> None:
     logger.info(
         "task #{task_id} closed by agent {actor}: {title}",

@@ -384,4 +384,4 @@ Type annotations do not always determine the emitted runtime metric kind.
 with emit sites. Its non-derived metric table is currently empty. Any proposed addition requires
 a live Prometheus check and a recorded reason; historical samples do not
 establish current emission. Naming and type translation remain owned by the
-[metrics mapping](../../../../../../base/telemetry/otlp/docs/telemetry-otlp/metrics-mapping.meiva.okf.md).
+[metrics mapping](../../../../../../base/telemetry/otlp/docs/telemetry-otlp/metrics-mapping.md).

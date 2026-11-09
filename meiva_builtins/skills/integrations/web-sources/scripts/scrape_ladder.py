@@ -3,7 +3,7 @@
 # produced a usable article, how a Jina Reader answer becomes one, and which links on a list page
 # are articles. `webscrape.py` fetches the pages, runs these decisions and escalates when they
 # say so.
-# meiva:link meiva_builtins/skills/integrations/web-sources/docs/web-sources.meiva.okf.md
+# meiva:link meiva_builtins/skills/integrations/web-sources/README.md
 
 from __future__ import annotations
 

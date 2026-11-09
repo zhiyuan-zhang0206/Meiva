@@ -18,7 +18,7 @@ Python uses `#`, JavaScript and TypeScript use `//`.
 # meiva:note
 # The gateway re-resolves the principal on every refresh, so a cached token
 # cannot outlive a role change.
-# meiva:link base/agents/context/gateway_client/docs/memory-search.meiva.okf.md
+# meiva:link base/agents/context/gateway_client/docs/memory-search.md
 def refresh() -> None: ...
 ```
 
@@ -27,7 +27,7 @@ lines at the same column are its body; a bare comment line separates paragraphs.
 or more `meiva:link` lines close the block:
 
 ```python
-# meiva:link base/sessions/docs/session-backend.meiva.okf.md
+# meiva:link base/sessions/docs/session-backend.md
 def kill_session(...) -> None: ...
 ```
 

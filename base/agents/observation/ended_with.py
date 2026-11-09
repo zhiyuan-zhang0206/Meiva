@@ -20,7 +20,7 @@
 # measured failure rate becomes a function of the model's phrasing. `problem` says why a
 # declaration was refused; the exec boundary records the marker and reports the rejected
 # text as `turn_end_declaration_rejected`.
-# meiva:link agent/graph/llm/docs/turn-records.meiva.okf.md
+# meiva:link agent/graph/llm/docs/turn-records.md
 
 from __future__ import annotations
 

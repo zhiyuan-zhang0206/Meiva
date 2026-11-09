@@ -42,7 +42,7 @@ def _chat_items(gateway_url: str, agent_id: int, wanted: tuple[str, ...]) -> lis
 # folded into Details (never promoted to the main conversation), and the model is asked once to
 # correct it. Every other e2e scenario scripts a compliant model; this one is the negative case
 # that keeps the folding behaviour inside the tested surface.
-# meiva:link base/agents/messages/docs/metadata-contracts.meiva.okf.md
+# meiva:link base/agents/messages/docs/metadata-contracts.md
 @pytest.mark.scenario("tests.e2e.fakes.scenarios.message_flow:build_visibility_correction")
 def test_unmarked_text_folds_into_details_and_the_correction_asks_once(
     e2e_env: E2EEnv,

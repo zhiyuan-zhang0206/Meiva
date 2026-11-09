@@ -92,7 +92,7 @@ def install_graceful_shutdown(label: str) -> None:
 # it the KeyboardInterrupt route of `install_graceful_shutdown` applies, except that a
 # SIGTERM received inside leaves the signal ignored: a retry cannot abort the exit the
 # first one started.
-# meiva:link services/agent_runner/agent_host/lifecycle/docs/graceful-exit.meiva.okf.md
+# meiva:link services/agent_runner/agent_host/lifecycle/docs/graceful-exit.md
 @contextlib.contextmanager
 def sigterm_requests_exit(label: str, request: Callable[[], None]) -> Generator[None]:
     loop = asyncio.get_running_loop()

@@ -7,7 +7,7 @@
 // secondary steps (thinking, code, output, inter-agent messages, notes) render
 // inside collapsible TurnBlocks / the Live Activity Window through `./card` and
 // `./row`.
-// meiva:link ui/web/src/docs/frontend-components/timeline-view/card-chrome.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/timeline-view/card-chrome.md
 //
 // -- Color mapping -- lives entirely in `./card`:messageCardConfig. ItemView
 // carries no per-kind border / background; it just emits the inner content
@@ -67,7 +67,7 @@ export function streamingParseIntervalMs(payloadLength: number): number {
 // meiva:note
 // Strip the backend `<header>\n\n` envelope from human user messages so Copy
 // puts only the user's words on the clipboard.
-// meiva:link ui/web/src/docs/frontend-components/timeline-view/card-chrome.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/timeline-view/card-chrome.md
 export function copyPayloadFor(item: BackendTimelineItem): string {
   if (
     item.kind === "inbound_chat" &&
@@ -84,7 +84,7 @@ export function copyPayloadFor(item: BackendTimelineItem): string {
 // leading notice line renders dimmed, and every thumbnail opens a lightbox on
 // click instead of navigating away. Multimodal inbound_chat shares the same
 // lightbox thumbnails.
-// meiva:link agent/messages/docs/message-format.meiva.okf.md
+// meiva:link agent/messages/docs/message-format.md
 function Thumbnail({
   src,
   alt,
@@ -201,7 +201,7 @@ function Thumbnail({
 // caption line of each image (1:1 with `images`), so a line matches at most one image and
 // skipped entries (no image, "not delivered" reason) fall through as plain rows. The
 // leading notice line renders dimmed and small.
-// meiva:link agent/messages/docs/message-format.meiva.okf.md
+// meiva:link agent/messages/docs/message-format.md
 function AttachContent({
   payload,
   images,
@@ -220,7 +220,7 @@ function AttachContent({
     // meiva:note
     // The backend always opens the payload with its notice line, and the envelope framing
     // is stripped before it reaches the timeline.
-    // meiva:link agent/messages/docs/message-format.meiva.okf.md
+    // meiva:link agent/messages/docs/message-format.md
     const isNotice = i === 0;
     return (
       <Fragment key={i}>

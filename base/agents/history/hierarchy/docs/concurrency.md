@@ -1,0 +1,76 @@
+# Consumer Concurrency
+
+A cluster has dozens of agents, nearly always one compacting or crossing a chunk, and one chunk call
+takes 1 to 5 minutes, so a consumer that works one job at a time falls behind for good. The loop of
+`services/agent_runner/understanding/chunk_consumer.py` ([Chunk-triggered Understanding](chunks.md))
+therefore claims due jobs concurrently up to `max_in_flight` (`DEFAULT_MAX_IN_FLIGHT = 2` on the
+live host loop so post-outage backlogs cannot saturate the runner's CPU or database pool; unbounded
+when `None` in replay and unit tests).
+
+## Model
+
+The agent-host operation root lives in `services/agent_runner/understanding/`.
+It holds the host's `ConfigBoot` and captures only the policy needed at each existing phase;
+base planning and generation receive values and explicit model, clock and database resources.
+Feature admission stays at the resident loop's first execution. Replay bypasses that gate.
+A group check reads cadence before its lease, under the lease and after model construction for
+`must_close`; each level and each rebuild horizon repeat those phases. Group generation reads
+reasoning before model construction, then corrections and cadence. The clock is not read at any
+phase: the consumer receives the process clock the agent host built at its entry, and every
+`TimestampPolicy` a chunk mints -- the matter filter's and the generation's -- renders with it,
+while the timestamp switch is still read at that phase. One generation conversation keeps its
+captured correction budget.
+
+The source remains the host's next-start configuration. A later explicit change to this same
+owner is observed at the next phase; this is not a configuration-file watcher or automatic hot
+reload. The clock is the exception: it is fixed when the host starts, so a change to the timezone
+applies at the next start, not at the next phase. `GroupingModels` remains the model-cache contract shared by root grouping and rebuild.
+
+- The loop owns one `TaskGroup`. While a job is due it claims and starts the job as a task of that
+  group; a finishing job wakes the loop (else it polls every 2 s). A job is in flight from claim
+  through its upper-level checks. Nothing is spawned outside the group; cancelling the loop cancels the
+  jobs (each job's shielded settle fails it as `host stopping`; a row that could not be settled stays
+  `running` until the next claim fails it after the 60-minute lease).
+- Per-agent order is the claim's, not the loop's: `_CLAIM_SQL` hands out an agent's oldest live job
+  only, so the next job of an agent is not claimable until the previous is `done`, `failed` or
+  `skipped`, on this runner or any other (a chunk no longer depends on the previous one, so this
+  keeps the upper-level checks in message order rather than protecting the chunks). It also bounds
+  what runs at once to the number of agents with a pending job. Several claims, on one loop or
+  several runners, rely on `FOR UPDATE SKIP LOCKED`.
+- A job task never raises: a crash is that job's `failed`, a settle that cannot reach the database
+  leaves the row `running` until its lease lapses and the next claim fails it. The loop's own poll catches and logs.
+- The blocking model calls (`_describe`, the grouping call) run on a one-thread `ThreadPoolExecutor`
+  that the job owns and shuts down when it ends, not the host's default executor, which the whole host
+  shares and a few minutes-long calls would starve. `ModelCache` is lock-guarded.
+- Rate limiting is the provider's: a 429 or a 5xx is retried inside `invoke_response` (five retries,
+  `UNDERSTANDING_RETRY_ATTEMPTS`, the shared exponential backoff 2 s doubling to 30 s with jitter, honouring `Retry-After`); a call
+  that still fails is a generation failure and the job ends `failed` (`understanding_chunk_failed`)
+  without another attempt; only a wait (the checkpoint not caught up) goes back to the queue. `MEIVA_LLM_MAX_CONCURRENT`
+  still applies inside each call when set.
+- `understanding_backlog` carries `in_flight` (this runner) beside the cluster's `pending` / `running`.
+
+The jobs table stays: it hands work from an agent's turn to the background durably, and it is not a
+rate limiter.
+
+## Upper-level checks
+
+`understanding_group_state` per `(agent, level)`: the lease is one atomic upsert, so of several
+concurrent callers one checks and the rest return, and the durable count makes the level due again
+later. Because the job is `done` before its checks run, the same agent's next job may land leaves
+while a check runs; `write_groups` therefore sets the baseline to the open count read in its own
+transaction. A newest open node is never grouped, so such leaves cannot be inside the call's groups.
+
+## Replay
+
+Compaction segments are independent (a chunk is described on its own). `understanding_replay.py consume AGENT` runs
+`replay_jobs`: it claims one agent's jobs per `(agent, segment)`, so segments run side by side and
+one segment's jobs in order, and skips upper-level checks (later segments' leaves land first and
+would leave gaps); `regroup` builds the upper levels in message order afterwards. Live consumers
+never claim per segment.
+
+## Order of leaves
+
+Live jobs of one agent run serially in enqueue order, which is message order. A leaf that
+nevertheless lands before an already grouped one (`write_group_nodes`) emits
+`understanding_leaf_out_of_order` and queues nothing: the upper levels stay as they are until a
+manual build's rebuild regroups them in message order.

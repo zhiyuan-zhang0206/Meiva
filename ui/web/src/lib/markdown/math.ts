@@ -4,7 +4,7 @@
 // enforces Pandoc and prose boundaries on `$...$` at tokenize time and adds
 // `\(...\)` / `\[...\]`; `remarkDisplayMathRecovery` promotes single-paragraph
 // `$$...$$` and `\[...\]` spans into display blocks.
-// meiva:link ui/web/src/docs/frontend-components/markdown-safe-content.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/markdown-safe-content.md
 import type { PluggableList } from "unified";
 
 import remarkDisplayMathRecovery from "./remark-display-math-recovery";

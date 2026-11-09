@@ -65,7 +65,7 @@ export const TIMELINE_TURN_ROW_GAP_PX = 4;
 // Pending answers overlay the conversation above its composer. Bound the inner
 // viewport against the visible height, including an open on-screen keyboard;
 // the ScrollArea root is auto-height and must not clip its unbounded viewport.
-// meiva:link ui/web/src/docs/frontend-state/shared-context/questions.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-state/shared-context/questions.md
 export const QUESTION_REGION_MAX_HEIGHT_CLASS =
   "max-h-[calc(var(--visual-viewport-height,100dvh)*0.45)]";
 

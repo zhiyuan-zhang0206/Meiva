@@ -11,7 +11,7 @@
 # is not the one-shot LaunchAgent. A refusal is recorded as a violation the test reads back, and
 # the command exits non-zero. Standard library only: it runs once per command, so startup is the
 # cost.
-# meiva:link cli/tests/fleet_update/docs/fleet-update-harness.meiva.okf.md
+# meiva:link cli/tests/fleet_update/docs/fleet-update-harness.md
 # meiva:note
 # The state this double reads and writes (`FLEET_CLUSTER_STATE`), declared here because the file
 # keeps its bookkeeping untyped on purpose: it is a program-level double — the `ssh` the tests put

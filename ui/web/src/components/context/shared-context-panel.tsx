@@ -13,7 +13,7 @@ import type { useToUser } from "@/lib/context/use-to-user";
 import { useInspectorOpen } from "@/lib/inspector/inspector-panel-store";
 import { cn } from "@/lib/format/utils";
 
-// meiva:link ui/web/src/docs/frontend-state/shared-context/shared-context.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-state/shared-context/shared-context.md
 export function SharedContextPanel({ agentId, document, mobile, onClose, onCollapse }: {
   agentId: number;
   document: ReturnType<typeof useToUser>;

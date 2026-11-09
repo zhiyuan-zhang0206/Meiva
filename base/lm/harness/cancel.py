@@ -16,7 +16,7 @@ class ProcessObservation:
 # every process that outlived the sweep so the caller decides instead of assuming. `killed` lists
 # the pids an adapter SIGKILLed after the CLI exited on SIGINT without its tool tree (only the
 # Antigravity transport reaps that way).
-# meiva:link base/lm/harness/docs/harness.meiva.okf.md
+# meiva:link base/lm/harness/docs/harness.md
 @dataclass(frozen=True, slots=True)
 class CancelReport:
     turn_id: str | None

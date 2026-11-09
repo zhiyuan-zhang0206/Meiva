@@ -1,6 +1,6 @@
 # meiva:note
 # The child preserves the code-reached distinction and a full crash envelope, including a fallback when the normal protocol writer fails.
-# meiva:link agent/execution/docs/child-boundaries.meiva.okf.md
+# meiva:link agent/execution/docs/child-boundaries.md
 
 from __future__ import annotations
 

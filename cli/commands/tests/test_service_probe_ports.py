@@ -149,7 +149,7 @@ def test_frontend_build_injects_gateway_port(explicit_port_roster: dict[str, obj
     # NEXT_PUBLIC_GATEWAY_PORT; it must ride the command line from the single source
     # of truth (MEIVA_GATEWAY_PORT), and the build guard must receive the same value
     # so a changed port is a changed build key.
-    # meiva:link base/cluster/docs/frontend-build.meiva.okf.md
+    # meiva:link base/cluster/docs/frontend-build.md
     cmd = str(explicit_port_roster["frontend_cmd"])
     assert "NEXT_PUBLIC_GATEWAY_PORT=8800" in cmd
     assert ".venv/bin/python -m base.cluster.frontend_build ensure" in cmd

@@ -107,7 +107,7 @@ def _remaining(deadline: float) -> float:
     return deadline - time.monotonic()
 
 
-# meiva:link cli/commands/observability/docs/lgtm/lgtm.meiva.okf.md
+# meiva:link cli/commands/observability/docs/lgtm/lgtm.md
 def stream_download(
     url: str, destination: Path, *, limits: DownloadLimits, deadline: float
 ) -> None:
@@ -181,7 +181,7 @@ def _download_policy(limits: DownloadLimits, *, deadline: float) -> Policy:
 #
 # Each attempt starts from an empty file, so the bytes reported for a failed attempt are the ones
 # that attempt received.
-# meiva:link cli/commands/observability/docs/lgtm/lgtm.meiva.okf.md
+# meiva:link cli/commands/observability/docs/lgtm/lgtm.md
 def download_with_retry(url: str, archive: Path, *, limits: DownloadLimits) -> None:
     started = time.monotonic()
     deadline = started + limits.total_budget_s

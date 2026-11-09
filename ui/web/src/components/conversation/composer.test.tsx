@@ -278,7 +278,7 @@ describe("Composer button mode dispatch", () => {
     // The 2026-10-29 ruling split a 20px gap into 6px for the list (its pb-1.5)
     // and 4px here (pt-1); the user then read that line as too airy, so the two
     // shares are 4px (the timeline's pb-1) and 2px (this root's pt-0.5).
-    // meiva:link ui/web/src/docs/frontend-components/home-shell-chrome/home-shell-chrome.meiva.okf.md
+    // meiva:link ui/web/src/docs/frontend-components/home-shell-chrome/home-shell-chrome.md
     renderComposerTree(<Composer {...baseProps} mode="idle" />);
     const root = screen.getByTestId("composer");
     expect(root.className.split(" ")).toContain("pt-0.5");
@@ -300,7 +300,7 @@ describe("Composer button mode dispatch", () => {
   // The band grows upward with the draft, and that is the whole story: the
   // composer publishes nothing another column could follow (user report
   // 2026-10-29 — the sidebar's divider tracked this one for a day).
-  // meiva:link ui/web/src/docs/frontend-components/home-shell-chrome/bottom-rules.meiva.okf.md
+  // meiva:link ui/web/src/docs/frontend-components/home-shell-chrome/bottom-rules.md
   it("publishes no band geometry for another column to track", () => {
     renderComposerTree(<Composer {...baseProps} mode="idle" />);
     expect(document.documentElement.style.getPropertyValue("--composer-band-height")).toBe("");
@@ -311,7 +311,7 @@ describe("Composer button mode dispatch", () => {
     // viewport clearance); the sidebar footer draws an independent rule that is
     // never aligned with this one (user ruling 2026-11-01). The band padding box
     // is the 36px control row, not the composer's root.
-    // meiva:link ui/web/src/docs/frontend-components/home-shell-chrome/bottom-rules.meiva.okf.md
+    // meiva:link ui/web/src/docs/frontend-components/home-shell-chrome/bottom-rules.md
     renderComposerTree(<Composer {...baseProps} mode="idle" />);
     const band = screen.getByTestId("composer-band");
     const bandClasses = band.className.split(" ");

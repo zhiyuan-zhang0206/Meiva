@@ -4,7 +4,7 @@
 # `ServiceError: internal error in close_all`. A refusal on a birth that disappears right after is
 # the disappearance this module already treats as normal; a birth that outlives the short wait is
 # a real permission problem and must stay loud.
-# meiva:link base/sessions/pty/docs/pty_sessions/pty_sessions.meiva.okf.md
+# meiva:link base/sessions/pty/docs/pty_sessions/pty_sessions.md
 
 from __future__ import annotations
 

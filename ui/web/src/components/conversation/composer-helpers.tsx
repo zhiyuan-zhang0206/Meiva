@@ -187,7 +187,7 @@ export function ComposerAttachmentStrip({
 // meiva:note
 // The composer reads only these keydown fields, so the handler takes a plain
 // value: a React keydown satisfies it, and a test supplies one without a cast.
-// meiva:link ui/web/src/docs/frontend-components/enter-to-send.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/enter-to-send.md
 export interface ComposerKeyDown extends KeyStroke {
   ctrlKey: boolean;
   altKey: boolean;

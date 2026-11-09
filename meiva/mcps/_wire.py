@@ -3,7 +3,7 @@
 # and the bytes of one line. The functions take the MCP SDK's own `Tool` and `CallToolResult` and
 # return plain dicts. Content keeps the camelCase wire contract agents parse (`isError`,
 # `structuredContent`) while the SDK's own fields are snake_case.
-# meiva:link meiva/mcps/docs/mcps.meiva.okf.md
+# meiva:link meiva/mcps/docs/mcps.md
 from __future__ import annotations
 
 import json

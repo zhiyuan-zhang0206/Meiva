@@ -1,4 +1,4 @@
-// meiva:link ui/web/src/docs/frontend-components/fleet-view.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/fleet-view.md
 
 "use client";
 
@@ -28,7 +28,7 @@ export interface NoticesFeedWire {
 }
 
 export interface NoticesFeed {
-  // meiva:link meiva_builtins/plugins/meiva_fleet/docs/notify.meiva.okf.md
+  // meiva:link meiva_builtins/plugins/meiva_fleet/docs/notify.md
   open: NoticeItem[];
   /** Open require_response notices — the "waiting on you" worklist. */
   awaiting: NoticeItem[];

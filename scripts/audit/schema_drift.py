@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# meiva:link scripts/audit/docs/schema-drift.meiva.okf.md
+# meiva:link scripts/audit/docs/schema-drift.md
 
 from __future__ import annotations
 

@@ -1,6 +1,6 @@
 # meiva:link docs/conventions/python-conventions.md
-# meiva:link scripts/lint/docs/lint.meiva.okf.md
-# meiva:link meizel/docs/ambient-state.meiva.okf.md
+# meiva:link scripts/lint/docs/lint.md
+# meiva:link meizel/docs/ambient-state.md
 
 from __future__ import annotations
 
@@ -623,7 +623,7 @@ def main(
             f"every shared fact owned once, so each violation is a boundary that will be crossed "
             f"again until the side it is on is fixed: move the code to the side the rule allows, "
             f"or declare the edge in the meizel.toml of the directory where the two sides meet. "
-            f"Raising the baseline is not the repair. See scripts/lint/docs/lint.meiva.okf.md and "
+            f"Raising the baseline is not the repair. See scripts/lint/docs/lint.md and "
             f"docs/conventions/architecture/code-placement-and-purity.md.",
             file=sys.stderr,
         )

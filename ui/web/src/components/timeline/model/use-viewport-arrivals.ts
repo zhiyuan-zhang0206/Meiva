@@ -13,7 +13,7 @@ import { useTimelineStore } from "@/lib/timeline/timeline-store";
 // picked a position, so the saved one no longer owns the viewport. The pin is
 // immediate; the anchor waits for its row to mount, because until then there is
 // nothing to park.
-// meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.md
 
 export interface ThreadPinArgs {
   threadKey: string | undefined;
@@ -63,7 +63,7 @@ export function useThreadPin({
 // the missing height and gives it back as the reply grows, so scrollHeight - and
 // with it the reader's viewport - stays where it is. The controller owns the
 // follow flag; this hook only writes positions and reports them.
-// meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.md
 export interface SendAnchorArgs {
   items: readonly BackendTimelineItem[];
   viewportRef: RefObject<HTMLElement | null>;
@@ -89,7 +89,7 @@ function reserveHeight(element: HTMLElement): number {
 // meiva:note
 // Which committed row a send anchor belongs to: the inbound the receipt named,
 // or, when the receipt carried none, the newest user message the timeline shows.
-// meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.md
 function targetItemId(
   items: readonly BackendTimelineItem[],
   inboundId: number | null,
@@ -125,7 +125,7 @@ export function useSendAnchor({
   // showed, so it is not owed here), the inbound still waiting for its row
   // (`undefined` = nothing owed, `null` = the newest user message stands in),
   // and the position being held (null while no reserve is outstanding).
-  // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.meiva.okf.md
+  // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.md
   const consumedSeq = useRef(request.seq);
   const pending = useRef<number | null | undefined>(undefined);
   const anchoredTop = useRef<number | null>(null);
@@ -147,7 +147,7 @@ export function useSendAnchor({
       // meiva:note
       // Following again: the reserve no longer holds the reader, and keeping it
       // would park blank space between them and the tail.
-      // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.meiva.okf.md
+      // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.md
       anchoredTop.current = null;
       writeReserve(0);
       return;
@@ -161,7 +161,7 @@ export function useSendAnchor({
     // settling no longer owns the viewport. Released here rather than when the
     // request arrives: until the row mounts there is nothing to park, and a
     // bookmark that lands first is still the reader's place.
-    // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.meiva.okf.md
+    // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.md
     cancelBookmark();
     const reserve = reserveRef.current;
     const rowTop = node.getBoundingClientRect().top - viewport.getBoundingClientRect().top + viewport.scrollTop;
@@ -173,7 +173,7 @@ export function useSendAnchor({
     // meiva:note
     // The reserved height makes `top` reachable, so the browser keeps it; a
     // clamp would become the held position instead of a fight with the layout.
-    // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.meiva.okf.md
+    // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.md
     anchoredTop.current = viewport.scrollTop;
     controller.notifyAnchored(snapshotOf(viewport));
     measureAtBottom();

@@ -47,7 +47,7 @@ def _deliveries(conn: psycopg.Connection, agent_id: int) -> list[tuple[str, str 
 # meiva:note
 # Staging is the producer's whole job: the delivery row commits with the notice,
 # and `announced_at IS NULL` says no live event has gone out yet.
-# meiva:link base/events/notifications/docs/notifications.meiva.okf.md
+# meiva:link base/events/notifications/README.md
 def test_a_response_notice_stages_one_unannounced_delivery(
     db_conn: psycopg.Connection, db_url: str
 ) -> None:
@@ -73,7 +73,7 @@ def test_a_response_notice_stages_one_unannounced_delivery(
 # The delivery names the notice it is about: a transport that can open a link
 # opens this notice, not the inbox in general, so a tap answers "which one is
 # this?" instead of leaving the user to search a queue.
-# meiva:link base/events/notifications/docs/notifications.meiva.okf.md
+# meiva:link base/events/notifications/README.md
 def test_a_notice_delivery_links_to_the_notice(db_conn: psycopg.Connection, db_url: str) -> None:
     agent_id = create_agent(db_conn)
     db_conn.commit()

@@ -2,7 +2,7 @@
 # What `up` concludes from the roster and the per-host answers: which machines it waits for, how
 # long to keep waiting, which hosts are reported skipped, and the line each listed host ends with.
 # The inputs are what the gateway's roster program printed and what each step returned.
-# meiva:link cli/docs/fleet-update.meiva.okf.md
+# meiva:link cli/docs/fleet-update.md
 from __future__ import annotations
 
 import json

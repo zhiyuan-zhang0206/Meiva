@@ -4,7 +4,7 @@
 # The decision itself is `base.cluster.machine.accepted_digests`; this module reads the two inputs it
 # takes — the digests an installed unit capability admits (None when none is installed) and, when
 # there is none, the gateway home's active write generation.
-# meiva:link base/cluster/machine/docs/machine.meiva.okf.md
+# meiva:link base/cluster/machine/docs/machine.md
 
 from __future__ import annotations
 

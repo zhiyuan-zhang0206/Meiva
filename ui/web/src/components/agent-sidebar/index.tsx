@@ -43,7 +43,7 @@ export function AgentSidebar(props: Props) {
   // column shows, not whether the agent tree is reachable (user 2026-10-20,
   // reversing the earlier mode-hides-the-rail rule). `display.sidebar_collapsed`
   // remains the only thing that collapses it.
-  // meiva:link ui/web/src/docs/frontend-state/shared-context/shared-context.meiva.okf.md
+  // meiva:link ui/web/src/docs/frontend-state/shared-context/shared-context.md
   const collapsed = collapsedSetting;
   const { viewMode, setViewMode } = useSidebarViewMode();
   // Show-terminated is a DB-backed user setting (display.show_terminated), the
@@ -165,7 +165,7 @@ function DesktopSidebar(props: DesktopProps) {
   // The waiting count is a live signal, not a setting: it moved from the removed
   // toolbar row to the header, next to the controls, and stays opt-in behind
   // notification.awaiting_reply (quiet defaults).
-  // meiva:link ui/web/src/docs/frontend-components/frontend-components.meiva.okf.md
+  // meiva:link ui/web/src/docs/frontend-components/frontend-components.md
   const { settings } = useUserSettings();
   const waiting = props.agents.reduce((n, a) => n + a.awaiting_response_count, 0);
   const awaitingBadge =
@@ -236,7 +236,7 @@ function MobileSidebar(props: MobileProps) {
   // The drawer keeps the same four controls as the rail: the body is a list, so
   // create and the display settings live in its header on every width. Without
   // this the drawer lost both when the body's spawn bar and toolbar went away.
-  // meiva:link ui/web/src/docs/frontend-components/frontend-components.meiva.okf.md
+  // meiva:link ui/web/src/docs/frontend-components/frontend-components.md
   const { mobileOpen, onMobileClose, onSearchOpen, viewMode, onToggleViewMode, showTerminated, onToggleTerminated } = props;
   if (!mobileOpen) return null;
   return (
@@ -285,4 +285,4 @@ function MobileSidebar(props: MobileProps) {
 // restore button in HeaderBar instead of a badge in this rail: an unreviewed P0 must
 // not be invisible for as long as the reader keeps the rail closed (user 2026-10-21).
 // Every other opted-in signal still lives behind the deliberate pull of expanding.
-// meiva:link ui/web/src/docs/frontend-components/frontend-components.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/frontend-components.md

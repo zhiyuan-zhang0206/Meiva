@@ -8,7 +8,7 @@ import random
 # channels (a node annotated with the static base class would silently drop them), and
 # an agent on an external harness reaches `harness_turn` instead of the native turn
 # nodes. Both run a real compiled graph rather than reading `_build.py`.
-# meiva:link agent/graph/docs/graph.meiva.okf.md
+# meiva:link agent/graph/docs/graph.md
 from collections.abc import AsyncIterator
 from typing import Any
 from unittest.mock import MagicMock
@@ -64,7 +64,7 @@ class FakeEngine:
     # A turn engine that answers at once. The graph test drives the real compiled
     # graph — real claim, real init_context, real routing — and swaps only the
     # provider session, which is the one thing a test cannot run.
-    # meiva:link agent/graph/docs/harness-turn.meiva.okf.md
+    # meiva:link agent/graph/docs/harness-turn.md
     def __init__(self, reply: str = "MEIVA_DISPLAY_TO_USER\nthe harness answered") -> None:
         self.reply = reply
         self.harness = Harness.CLAUDE_CODE
@@ -135,7 +135,7 @@ async def executed_nodes(
 # meiva:note
 # `astream` is typed as an overload set that is partially unknown under this repo's
 # strict test rules; the one ignore keeps the driver readable at the call site.
-# meiva:link agent/graph/docs/graph.meiva.okf.md
+# meiva:link agent/graph/docs/graph.md
 def _stream(graph: Any, state: AgentState, context: MeivaContext) -> AsyncIterator[dict[str, Any]]:
     return graph.astream(  # pyright: ignore[reportUnknownMemberType]
         state,
@@ -172,7 +172,7 @@ async def test_an_external_harness_never_enters_the_native_turn_nodes() -> None:
 # subprocess to finish, and none of that is what this test is about. Seeing the native
 # verdict reach its own node is the control that the harness run's empty native set is
 # not an empty run.
-# meiva:link agent/graph/docs/graph.meiva.okf.md
+# meiva:link agent/graph/docs/graph.md
 async def test_the_built_in_loop_never_enters_the_harness_node() -> None:
     seen = await executed_nodes(Harness.MEIVA, None, stop_at=frozenset({"before_llm"}))
 
@@ -185,7 +185,7 @@ async def test_the_built_in_loop_never_enters_the_harness_node() -> None:
 # `init_context` jump there, so the harness rewrite has to happen at that jump too:
 # routing only claim's verdicts left a compacted external-harness agent resuming into
 # `before_llm`, where the native model answered and the CLI session sat idle.
-# meiva:link agent/graph/docs/harness-turn.meiva.okf.md
+# meiva:link agent/graph/docs/harness-turn.md
 async def test_a_context_reset_keeps_an_external_harness_off_the_native_nodes() -> None:
     engine = FakeEngine()
     state = AgentState(

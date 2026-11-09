@@ -5,7 +5,7 @@
 # walks the live namespace and writes the recorders; these functions only choose, so the
 # identity rule that tells a recorder from a wrapper that copied its attributes is tested as
 # values.
-# meiva:link meiva/docs/sdk-surface/sdk-surface.meiva.okf.md
+# meiva:link meiva/docs/sdk-surface/sdk-surface.md
 
 from __future__ import annotations
 

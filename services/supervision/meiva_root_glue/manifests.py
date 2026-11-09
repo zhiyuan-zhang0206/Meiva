@@ -72,7 +72,7 @@ _KNOWN_CAPABILITIES = frozenset(get_args(MachineRole))
 # `otel-collector` (tier 3) stops after producers have flushed; and the LGTM storage backends
 # (`loki`, `prometheus`, `tempo`, tier 4) stop last so the collector's shutdown flush lands.
 # Startup is concurrent, so tier position changes nothing at start.
-# meiva:link services/agent_runner/agent_host/lifecycle/docs/graceful-exit.meiva.okf.md
+# meiva:link services/agent_runner/agent_host/lifecycle/docs/graceful-exit.md
 STOPS_FIRST = "agent-host"
 _STOP_ORDER_TIER: dict[str, int] = {
     STOPS_FIRST: 0,

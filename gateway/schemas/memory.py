@@ -110,7 +110,7 @@ class MemoryRefreshResponse(BaseModel):
 # meiva:note
 # GET /api/memory/note carries the parsed fields plus the markdown body with its YAML
 # frontmatter already stripped, so a reader renders the note instead of re-parsing it.
-# meiva:link gateway/routers/docs/memory.meiva.okf.md
+# meiva:link gateway/routers/docs/memory.md
 class MemoryNoteResponse(BaseModel):
     model_config = ConfigDict(frozen=True)
 

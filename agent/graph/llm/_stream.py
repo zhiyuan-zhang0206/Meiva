@@ -117,7 +117,7 @@ async def _publish_keepalives(handler: RedisStreamHandler) -> None:
 
 # meiva:note
 # An owned `asyncio.timeout` deadline wraps only the model's `__anext__`. Expiry raises `LLMStreamStallTimeoutError`; an ordinary model or callback `TimeoutError` keeps its identity without claiming that timer expired. `bounds.ttft_seconds` bounds the first chunk (slower models may have a long cold start), `bounds.inter_chunk_seconds` every later one, `bounds.total_seconds` the whole attempt even when every gap stays healthy. `StopAsyncIteration` is not wrapped in a timeout (an empty stream must not wait), and `chunk_idx` separates the TTFT stall from the mid-stream one for ops. Returns the monotonic arrival times of the first and last chunk, the stream's decode window; an empty stream returns `(None, None)`, and a stall propagates no timestamps because the attempt is discarded.
-# meiva:link agent/graph/llm/docs/llm.meiva.okf.md
+# meiva:link agent/graph/llm/docs/llm.md
 async def consume_stream_with_stall_timeout(
     stream_iter: AsyncIterator[AIMessage],
     *,

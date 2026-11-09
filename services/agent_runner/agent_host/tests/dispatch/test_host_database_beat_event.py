@@ -2,7 +2,7 @@
 # The database beat's failure and recovery are structured events (task #5767), so "what did the
 # beat see before the host exited" is answerable from the event stream. A log line that merely
 # mentions the words is not the event — the control below keeps the two apart.
-# meiva:link agent/docs/loop.meiva.okf.md
+# meiva:link agent/docs/loop.md
 
 from __future__ import annotations
 

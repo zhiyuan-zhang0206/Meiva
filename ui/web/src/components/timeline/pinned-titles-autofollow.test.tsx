@@ -77,7 +77,7 @@ describe("TimelineView bounded work blocks during scroll", () => {
   it("renders its code blocks from the injected pending chunk", async () => {
     // meiva:note
     // The setup injects a chunk whose import never resolves so the code item stays plain text while the test drives scroll geometry; a macrotask is long enough for the real prism chunk to load, so a tree that lost its provider would show .token spans here.
-    // meiva:link ui/web/src/docs/frontend-components/code-blocks.meiva.okf.md
+    // meiva:link ui/web/src/docs/frontend-components/code-blocks.md
     const { container } = setupExpandedBlock();
     await new Promise((resolve) => setTimeout(resolve, 50));
     expect(container.querySelector("[data-testid='python-code'] .token")).toBeNull();
@@ -89,7 +89,7 @@ describe("TimelineView bounded work blocks during scroll", () => {
     // meiva:note
     // The body has no inner scrollport and no cap: it is as tall as its content
     // and the timeline around it is what scrolls (user ruling 2026-11-09).
-    // meiva:link ui/web/src/docs/frontend-components/timeline-view/deep-collapse.meiva.okf.md
+    // meiva:link ui/web/src/docs/frontend-components/timeline-view/deep-collapse.md
     expect(screen.queryByTestId("turn-scroll-viewport")).toBeNull();
 
     viewport.scrollTop = 1400;

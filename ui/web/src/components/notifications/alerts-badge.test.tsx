@@ -1,7 +1,7 @@
 // meiva:note
 // The sidebar alerts badge: the unresolved count from the ["alerts"] cache, rendered
 // beside the Settings shortcut, and nothing at all at zero.
-// meiva:link ui/web/src/docs/frontend-components/frontend-components.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/frontend-components.md
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, render, screen } from "@testing-library/react";

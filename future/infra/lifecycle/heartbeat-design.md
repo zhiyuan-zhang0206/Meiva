@@ -2,7 +2,7 @@
 
 **Current ownership:** this original proposal is archived; its rejected
 backoff/escalation design is not pending work. Current behavior belongs to
-[heartbeat](../../../services/docs/gateway_side/heartbeat.meiva.okf.md), and the adopted
+[heartbeat](../../../services/docs/gateway_side/heartbeat.md), and the adopted
 choice is [opt-out over escalation](../../../docs/decisions/runtime/processes/health/2026-06-22-heartbeat-opt-out-over-escalation.md).
 The original research and partial-landing notes below are preserved as evidence.
 
@@ -156,7 +156,7 @@ anything the fleet lead should know?"
 > durable pending-work scans and host health checks. Idle has no task or
 > per-agent process to probe. The escalation proposal below is historical
 > research, not the current heartbeat implementation; see
-> `services/docs/gateway_side/heartbeat.meiva.okf.md` for the implemented contract.
+> `services/docs/gateway_side/heartbeat.md` for the implemented contract.
 
 #### Trigger
 

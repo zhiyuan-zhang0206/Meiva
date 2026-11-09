@@ -141,7 +141,7 @@ def test_mark_stopping_stamps_then_register_clears(
 
 # meiva:note
 # The maintenance-window columns of `name`'s composed row.
-# meiva:link base/cluster/machine/docs/machines-table.meiva.okf.md
+# meiva:link base/cluster/machine/docs/machines-table.md
 def _read_window(name: str) -> tuple[datetime | None, str | None]:
     with psycopg.connect(settings.data_plane.db_url) as conn, conn.cursor() as cur:
         cur.execute(

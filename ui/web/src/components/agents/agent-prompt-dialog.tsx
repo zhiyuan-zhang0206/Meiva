@@ -34,7 +34,7 @@ export interface PromptDialogProps {
 // A prompt is a message: the field sends the way every other send-type field does
 // (Enter sends, Shift+Enter breaks the line). Closing the dialog resets the text,
 // so the next open starts blank.
-// meiva:link ui/web/src/docs/frontend-components/enter-to-send.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/enter-to-send.md
 export function PromptDialog({
   open,
   onOpenChange,

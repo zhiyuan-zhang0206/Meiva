@@ -394,7 +394,7 @@ def _emit_auto_resolved(event_class: EventClass, days: int) -> None:
 # happening now, so it stops counting as unresolved without anyone dismissing it. The window is
 # the caller's — the gateway's read paths pass their configured one — because the horizons
 # differ; what is shared is the rule, not the number.
-# meiva:link services/docs/gateway_side/events_maintenance/events_maintenance.meiva.okf.md
+# meiva:link services/docs/gateway_side/events_maintenance/events_maintenance.md
 ResolutionKind = Literal["dismissed", "quiet"]
 
 QUIET: Final[ResolutionKind] = "quiet"

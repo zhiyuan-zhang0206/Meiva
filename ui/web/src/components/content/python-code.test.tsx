@@ -15,7 +15,7 @@ import { PythonCode, PythonCodeHighlighterProvider } from "./python-code";
 //
 // The copy button inside the block writes through the browser port, so the assertion is what the
 // component asked the page to do, not a stub of `navigator.clipboard`.
-// meiva:link ui/web/src/docs/frontend-components/code-blocks.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/code-blocks.md
 
 const realImport = () =>
   import("prism-react-renderer").then((module) => module.Highlight);

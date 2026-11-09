@@ -3,7 +3,7 @@
 // felt it: the click stamp, the route change, the first frame after, the longest
 // task and how many frames the browser actually produced while the route was
 // stuck. The fallback is the floor under a navigation that never commits.
-// meiva:link ui/web/src/docs/frontend-state/frontend-state.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-state/frontend-state.md
 
 // meiva:note
 // @vitest-environment happy-dom

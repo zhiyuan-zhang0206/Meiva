@@ -3,7 +3,7 @@
 # asserts the comment state a run leaves behind, because this workflow may never become a merge
 # blocker. The mock keeps comments in a JSON file and evaluates the workflow's own --jq programs
 # with the real jq in raw-output mode, as `gh api --jq` prints strings.
-# meiva:link .github/repository-automation.meiva.okf.md
+# meiva:link .github/repository-automation.md
 
 import json
 import os

@@ -341,7 +341,7 @@ def uninstall(*, retaining_sampling: SamplingPolicyOwner | None = None) -> Insta
         # A `LOADING` marker is not an installation: leave it in place (a load may be
         # in flight; a failed attempt stays un-retried), a fresh install overwrites it.
         return None
-    # meiva:link meiva/docs/sdk-surface/install-lifetime.meiva.okf.md
+    # meiva:link meiva/docs/sdk-surface/install-lifetime.md
     if installation.sampling is not retaining_sampling:
         atexit.unregister(installation.sampling.close)
     setattr(meiva_module(), SLOT, None)

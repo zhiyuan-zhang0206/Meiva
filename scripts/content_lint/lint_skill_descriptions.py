@@ -16,11 +16,11 @@ from base.packages.text_budget import count_words
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 
-# meiva:link scripts/content_lint/docs/lint-skill-descriptions.meiva.okf.md
+# meiva:link scripts/content_lint/docs/lint-skill-descriptions.md
 _HARD_CEILING = 80
 
 
-# meiva:link scripts/content_lint/docs/lint-skill-descriptions.meiva.okf.md
+# meiva:link scripts/content_lint/docs/lint-skill-descriptions.md
 def _skill_entries(root: Path) -> list[SkillFile]:
     index = SkillIndex.build(
         [
@@ -51,13 +51,13 @@ def main(_argv: list[str] | None = None, *, repo_root: Path | None = None) -> in
             continue
         rel = skill_md.relative_to(root)
 
-        # meiva:link scripts/content_lint/docs/lint-skill-descriptions.meiva.okf.md
+        # meiva:link scripts/content_lint/docs/lint-skill-descriptions.md
         if entry.error is not None:
             print(f"{rel}: {entry.error}")
             errors += 1
             continue
 
-        # meiva:link scripts/content_lint/docs/lint-skill-descriptions.meiva.okf.md
+        # meiva:link scripts/content_lint/docs/lint-skill-descriptions.md
         description = entry.description
         if description is None:
             raise RuntimeError(f"skill index contract violated for {skill_md}")
@@ -70,13 +70,13 @@ def main(_argv: list[str] | None = None, *, repo_root: Path | None = None) -> in
                 f"for — the detail belongs in the body, where it is read only after the skill "
                 f"is chosen. Move that detail into the skill and keep this line a summary; do "
                 f"not condense the body to make room here. See "
-                f"scripts/content_lint/docs/lint-skill-descriptions.meiva.okf.md."
+                f"scripts/content_lint/docs/lint-skill-descriptions.md."
             )
             errors += 1
 
         # meiva:note
         # The frontmatter name must fold (dash and underscore are one name) to the same key as the skill's load-dir leaf — for a plugin's root SKILL.md the leaf is the plugin name, not the skills container — and a mismatch prints one error and exits 1, matching the runtime loader's refusal.
-        # meiva:link scripts/content_lint/docs/lint-skill-descriptions.meiva.okf.md
+        # meiva:link scripts/content_lint/docs/lint-skill-descriptions.md
         parts = entry.folder.relative_to(root).parts
         if (
             len(parts) == 4
@@ -93,7 +93,7 @@ def main(_argv: list[str] | None = None, *, repo_root: Path | None = None) -> in
                 f"directory name {dir_name!r} — dash and underscore are one name; "
                 f"rename the frontmatter name to match the directory (the directory "
                 f"is the identity source). See "
-                f"scripts/content_lint/docs/lint-skill-descriptions.meiva.okf.md."
+                f"scripts/content_lint/docs/lint-skill-descriptions.md."
             )
             errors += 1
     if errors:
@@ -101,7 +101,7 @@ def main(_argv: list[str] | None = None, *, repo_root: Path | None = None) -> in
             f"\n{errors} SKILL.md frontmatter error(s). The frontmatter is what the skill index "
             f"is built from: the name selects the skill and the description is the line an agent "
             f"reads before loading it, so both must describe the skill that is actually there. "
-            f"See scripts/content_lint/docs/lint-skill-descriptions.meiva.okf.md.",
+            f"See scripts/content_lint/docs/lint-skill-descriptions.md.",
             file=sys.stderr,
         )
         return 1

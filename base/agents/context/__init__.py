@@ -345,7 +345,7 @@ class MeivaContext:
     # loop: the eval driver, the exec child and every test build one without saying so, and
     # the built-in loop is what they run. `harness_turn` and claim route on this value, and
     # an agent's harness is immutable, so one row never runs two engines.
-    # meiva:link base/agents/docs/harness/harness.meiva.okf.md
+    # meiva:link base/agents/docs/harness/harness.md
     harness: Harness = Harness.MEIVA
 
     # meiva:note
@@ -353,7 +353,7 @@ class MeivaContext:
     # runtime it caches, so it lives and dies with that runtime; a run on the built-in loop
     # carries none and never asks for one. `require_harness_bridge` fails instead of
     # falling back, because a missing engine is a wiring defect, not a mode.
-    # meiva:link agent/graph/docs/harness-turn.meiva.okf.md
+    # meiva:link agent/graph/docs/harness-turn.md
     harness_bridge: TurnEngine | None = None
 
     clients: ClientSet = field(default_factory=ClientSet)
@@ -396,7 +396,7 @@ class MeivaContext:
     # The external-harness session this run submits its turn to. A missing engine is a
     # wiring defect — the run says it is on another harness and carries no way to reach
     # it — so it raises rather than falling back to the built-in loop.
-    # meiva:link agent/graph/docs/harness-turn.meiva.okf.md
+    # meiva:link agent/graph/docs/harness-turn.md
     def require_harness_bridge(self) -> TurnEngine:
         if self.harness_bridge is None:
             raise RuntimeError(

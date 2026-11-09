@@ -1,0 +1,73 @@
+# meiva-guide.external-agents skill — Drive external coding agents
+
+## What it is
+`claude`, `codex`, and `agy` (Antigravity) are coding-agent CLIs that can be given tasks and let them plan+execute (`$MEIVA_HOME/skills/meiva-guide/external-agents/`); DeepSeek Harness (`dsh`) joins them as a prompt-driven executor (`scripts/spawn_dsh.py`, relay plugin `scripts/meiva-relay-dsh/`). Treat each as "another agent". `meiva-workflow` owns the delegation decision; this sub-skill owns the **two modes** a session can run in — Mode A, a supervised file-driven worker, and Mode B, a file-less takeover that replaces the launching agent (inline `--prompt`, no task/work files, no supervisor). The session primitives themselves (`meiva.shell`'s run / sessions, `meiva.watcher`) are **not repeated here** — it explicitly points to those, not re-derives.
+
+## Judgments carried
+- **Execution surface**: launch scripts run from an Meiva agent context; human and external operators arrange that agent through the CLI. The executor manual comes from the checkout owning the Meiva runtime, independently of where this skill is installed.
+- **Tool choice**: verify availability and capability using the actual installed tool; use `meiva-workflow` for task decomposition and verification criteria.
+- **Persistent sessions are the default**: start in `meiva.shell.sessions`, steer across rounds; headless one-shot (`claude -p` / `codex exec`) is rarely needed. **Flags and models drift with versions**, text is a snapshot not a contract.
+- **Two modes, no leakage**: Mode A's task/work files and supervisor belong to delegated workers only; a takeover runs file-less and supervisor-less (`--prompt`), with start = interruption (checkpoint + pause) and end = one resume system note.
+- **Availability is three states behind one word**: the spawn picker greys a row with a single `unavailable`, and which probe state (`available` / `unavailable` / `unknown`) sits behind it decides the advice. The diagnosis order, the per-harness login checks and the two false alarms (a macOS Keychain login read over SSH, an absent `~/.claude/.credentials.json`) are in `references/harness-availability.md`; `dsh` is not a harness value, so the picker never describes it.
+
+## Canonical Codex lifecycle
+
+The entrypoint retains the mode choice and takeover contract. The file-driven
+worker procedure lives in `references/delegated-workers.md`, read after Mode A
+is selected; a takeover does not load it. Per-tool and interruption references
+remain available independently.
+
+`scripts/spawn_codex.py` is a thin command-line entry over
+`meiva/shell/coding_tools/README.md` (`meiva.shell.coding_tools`; so are
+`scripts/spawn_claude.py` and `scripts/spawn_antigravity.py`). Every launch owns a generation of its own under the
+resolved cluster home plus resolved workspace plus `codex`, so several can share
+a workspace; the record carries its owner and full Persistent Shell handle, and
+the workspace basename appears only in display suffixes. A launch first reclaims
+the workspace's dead generations; transitions are serialized by
+the host-local owner journal (`base/sessions/docs/coding-session-owner.md`).
+
+Codex runs on the host user's own `~/.codex` with per-session `-c` overrides
+(workspace trust, no startup update check), so its conversation outlives the
+shell: each launch prints the Codex session id (`codex_session`, from
+`/status`) and `--resume` reopens it after an interruption (Claude and Antigravity alike, with
+`claude_session` and `antigravity_session`); a handoff still starts fresh. The launcher starts a quiet supervisor before Codex only in the
+supervised mode (without `--prompt`); it terminalizes the exact generation and reclaims its
+PTY/private state on current-generation `DONE` or `HANDOFF`, explicit cancel,
+owner termination, Codex death, or absolute expiry. A `--prompt` launch starts no
+supervisor — explicit cancel and expiry are its stop paths, and the next
+launch reclaims a dead record. Every Codex generation additionally
+owns an explicit shared app server, and the launcher wires it: `codex app-server
+--listen` on a private per-generation socket (`codex_app_server_socket`), a
+janitor that ends the server when the coding session dies, the TUI connected
+with `--remote`, and `codex_app_server=<endpoint>` printed so a takeover request
+can record it (`--codex-remote`) and the relay delivers into the same server. Notifications
+use non-resurrecting system notes.
+
+## Supervision verdicts
+
+`scripts/watch_work.py` is one self-contained file (an agent copies it into a watcher, so it
+imports no sibling), and its decisions are plain functions over values: `generic_verdict`
+(a wake-only watcher: baseline, deleted file, hard limit, new or unchanged actionable status,
+stall, heartbeat) and `canonical_verdict` (a generation-owning supervisor: the terminal reason,
+a current `NEED_INPUT`, a stall), both over a `Beat` (what the poll saw and how long ago) and a
+`Cadence` (the poll, stall, heartbeat and hard-limit seconds, defaulting to the constants an
+agent raises for a slow model). The shell reads the work file, the owner record, the gateway
+and the PTY, executes the verdict, and reads each clock once per beat. A gateway that is
+unreachable or answers 5xx cannot prove the owner dead, so the owner counts as alive and the
+outage is reported once and its end once; any other refusal ends the supervisor loudly.
+
+## Published copies
+
+`meiva start` publishes this sub-skill's parent guide
+into the global skill directory of each external agent surface it finds (Codex,
+Claude Code, Gemini CLI, Grok, Qwen Code, Cursor Agent, Antigravity App/IDE and
+CLI, DeepSeek Harness), so a session can read them without the Meiva checkout. `references/supported-clients.md` is the matrix of
+those directories with its evidence, the presence rule, duplicate visibility and
+the tools deliberately left out.
+
+## Key dependencies
+- `meiva_builtins/skills/README.md` — full skills catalog
+- `meiva/shell/docs/shell.md` — `sessions` (new/send/send_keys/capture/kill) session primitive itself
+- `meiva/watcher/docs/watcher.md` — wait for it to produce results when supervising long tasks
+- `base/sessions/docs/coding-session-owner.md` — per-launch generations, the dead-sibling sweep, and exact cleanup
+- `meiva/shell/coding_tools/README.md` — the launch logic behind the Claude, Codex, and Antigravity spawn scripts

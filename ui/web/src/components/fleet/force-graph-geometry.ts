@@ -200,7 +200,7 @@ export function useHoverCardState(
     // the uncapped inner content wrapper re-places the card on every growth while
     // keeping the outer tooltip shell overflow-visible so the safe-zone bridge
     // spanning the gap to the node is never clipped by overflow-y:auto.
-    // meiva:link ui/web/src/docs/frontend-components/force-graph.meiva.okf.md
+    // meiva:link ui/web/src/docs/frontend-components/force-graph.md
     const place = () => {
       const card = hoverCardRef.current;
       const bridge = hoverBridgeRef.current;
@@ -271,7 +271,7 @@ export function useHoverCardState(
 // placement rules (beside the node top-aligned, flipped to the left edge, slid within the column or
 // capped to the column height when tall, centred on a narrow canvas, lifted over the legend) are
 // decided by values a test can state.
-// meiva:link ui/web/src/docs/frontend-components/force-graph.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/force-graph.md
 export interface HoverCardBox {
   readonly width: number;
   readonly height: number;
@@ -441,7 +441,7 @@ export function hoverCardBridge({
 // meiva:note
 // Symmetrical grace window for node-to-card and card-to-node pointer travel: direct transitions
 // across the safe-zone bridge hold immediately, while diagonal trips wait out the grace window.
-// meiva:link ui/web/src/docs/frontend-components/force-graph.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/force-graph.md
 export const HOVER_CARD_HIDE_GRACE_MS = 200;
 
 export type HoverCardLeave = "hold" | "wait";

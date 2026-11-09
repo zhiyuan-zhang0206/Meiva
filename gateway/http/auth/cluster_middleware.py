@@ -81,7 +81,7 @@ def _origin_refused() -> JSONResponse:
 # that does not verify is a client error and stays a 401, so a misconfigured machine fails
 # now instead of working silently until the mode is switched back. A stale session cookie
 # is not: a browser cannot clear it.
-# meiva:link gateway/http/auth/docs/web-sessions.meiva.okf.md
+# meiva:link gateway/http/auth/docs/web-sessions.md
 async def cluster_auth_middleware(
     request: Request,
     call_next: Callable[[Request], Awaitable[Response]],

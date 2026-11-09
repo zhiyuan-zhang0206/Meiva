@@ -12,7 +12,7 @@
 # `--maintenance-for T` lets the boot job resume after that instant, and the
 # existing `machine_stopped_too_long` alert (20 minutes) catches a stop nobody
 # came back for.
-# meiva:link cli/commands/lifecycle/docs/stand-down.meiva.okf.md
+# meiva:link cli/commands/lifecycle/docs/stand-down.md
 
 from __future__ import annotations
 

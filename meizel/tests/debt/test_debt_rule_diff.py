@@ -775,4 +775,4 @@ def test_the_growth_failure_says_why_and_where_to_look(
 
     assert "only shrink" in err
     assert "debt diff --by-target" in err
-    assert "meizel/docs/checker/debt/debt.meiva.okf.md" in err
+    assert "meizel/docs/checker/debt/debt.md" in err

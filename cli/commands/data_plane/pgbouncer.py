@@ -34,7 +34,7 @@
 # different backends a transaction hands out.
 #
 # POSIX only (macOS brew or Linux apt `pgbouncer`).
-# meiva:link cli/commands/data_plane/docs/data-plane-startup/data-plane-startup.meiva.okf.md
+# meiva:link cli/commands/data_plane/docs/data-plane-startup/data-plane-startup.md
 
 from __future__ import annotations
 
@@ -500,7 +500,7 @@ def ensure_pgbouncer_step(ctx: ConvergeCtx) -> None:
     #
     # A missing pooler binary is reported here and refused by data-plane bring-up; the
     # start-wide host dependency preflight installs it before converge.
-    # meiva:link cli/commands/data_plane/docs/data-plane-startup/data-plane-startup.meiva.okf.md
+    # meiva:link cli/commands/data_plane/docs/data-plane-startup/data-plane-startup.md
     missing = converge_pgbouncer(data_plane_config_from_boot(ctx.read_config()), ctx.meiva_home)
     if missing is not None:
         hint = _install_hint(macos=ctx.host.platform.system == "darwin")

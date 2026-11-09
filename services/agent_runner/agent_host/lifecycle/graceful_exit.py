@@ -8,7 +8,7 @@
 # an exit message was staged, idle agents receive a passive lifecycle note without being
 # woken; an unannotated exit leaves idle agents untouched. A turn past the budget is named
 # and cancelled, and not resumed.
-# meiva:link services/agent_runner/agent_host/lifecycle/docs/graceful-exit.meiva.okf.md
+# meiva:link services/agent_runner/agent_host/lifecycle/docs/graceful-exit.md
 
 from __future__ import annotations
 

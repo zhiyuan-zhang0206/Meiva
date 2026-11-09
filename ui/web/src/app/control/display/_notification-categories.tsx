@@ -5,7 +5,7 @@
 // gateway's merged catalog. A category the user has not touched shows the
 // server's default; toggling one writes the whole switch map to
 // `notifications.categories`, which every transport already honors.
-// meiva:link base/events/notifications/docs/notifications.meiva.okf.md
+// meiva:link base/events/notifications/README.md
 
 import { Bell } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";

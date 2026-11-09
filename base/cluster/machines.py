@@ -312,7 +312,7 @@ def mark_stopping(
         # composition cannot clobber it, and only on a host that is now fully
         # stopped: a co-located peer still serving means this host is up. A stop
         # without a window clears whatever a previous one declared.
-        # meiva:link base/cluster/machine/docs/machines-table.meiva.okf.md
+        # meiva:link base/cluster/machine/docs/machines-table.md
         cur.execute(
             "UPDATE machines SET maintenance_until = CASE "
             "WHEN %s::bigint IS NULL THEN NULL ELSE NOW() + make_interval(secs => %s::bigint) END, "
@@ -432,7 +432,7 @@ def _recompute_machine_row(cur: psycopg.Cursor, name: str) -> None:
         # COALESCEd: every later recompute of an already-stopped host would
         # otherwise move the stop time forward and "stopped since" would never
         # age (the stopped-too-long rule reads it).
-        # meiva:link base/cluster/machine/docs/machines-table.meiva.okf.md
+        # meiva:link base/cluster/machine/docs/machines-table.md
         cur.execute(
             "UPDATE machines SET stopped_at = COALESCE(stopped_at, NOW()) WHERE name = %s",
             (name,),

@@ -1,6 +1,6 @@
 # meiva:note
 # A bounded real HTTP pool response, shared by Git and provisioning consumers.
-# meiva:link base/deploy/git/tests/docs/memory-repo-tests.meiva.okf.md
+# meiva:link base/deploy/git/tests/docs/memory-repo-tests.md
 
 from __future__ import annotations
 

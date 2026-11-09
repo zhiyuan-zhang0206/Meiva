@@ -18,7 +18,7 @@ def _install(root: Path, name: str) -> Path:
 # The session spawns the CLI it resolved, not the bare name: a harness child is handed an
 # allowlisted environment with no PATH, so `codex` would resolve against the OS default and
 # fail with a bare "No such file or directory" from a real spawn (#5491).
-# meiva:link base/lm/harness/docs/harness.meiva.okf.md
+# meiva:link base/lm/harness/docs/harness.md
 def test_a_codex_session_resolves_the_cli_it_spawns(tmp_path: Path) -> None:
     installed = _install(tmp_path / "bin", "codex")
     empty = tmp_path / "empty"
@@ -37,7 +37,7 @@ def test_a_codex_session_resolves_the_cli_it_spawns(tmp_path: Path) -> None:
 # The session environment is the delivery point that rebuilds PATH: the daemon child
 # environment it starts from is an allowlist that carries none, so without this the CLI
 # and every tool it runs are unresolvable even when the host can see them (#5491).
-# meiva:link base/lm/harness/docs/harness.meiva.okf.md
+# meiva:link base/lm/harness/docs/harness.md
 def test_a_session_environment_carries_the_dirs_a_harness_installs_into(
     tmp_path: Path,
 ) -> None:

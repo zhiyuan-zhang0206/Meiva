@@ -1,7 +1,7 @@
 # meiva:note
 # The judgement rules, each handed a value: no file, no clock, no git. These are the cases that
 # used to be reachable only by running the whole tool against a real volume.
-# meiva:link scripts/host_ops/docs/worktree-gc.meiva.okf.md
+# meiva:link scripts/host_ops/docs/worktree-gc.md
 
 from __future__ import annotations
 

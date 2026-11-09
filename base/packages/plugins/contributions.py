@@ -23,7 +23,7 @@ SurfaceId = Literal[
 ]
 
 
-# meiva:link base/packages/plugins/docs/runtime-contributions.meiva.okf.md
+# meiva:link base/packages/plugins/docs/runtime-contributions.md
 @dataclass(frozen=True)
 class Contribution:
     surface: SurfaceId

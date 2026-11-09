@@ -39,7 +39,7 @@ class FrontendObservation:
 # caller's tree: whether node_modules exists, whether pnpm installed it, and the digests of the
 # lockfile it installed against and of the lockfile the tree carries. The tree decides where the
 # reads come from, so this module stays a decision.
-# meiva:link meizel/docs/frontend-deps.meiva.okf.md
+# meiva:link meizel/docs/frontend-deps.md
 def observe(tree: SourceTree, frontend: Path) -> FrontendObservation:
     return FrontendObservation(
         node_modules=tree.is_dir(frontend / NODE_MODULES),
@@ -62,7 +62,7 @@ def _digest(tree: SourceTree, path: Path) -> str | None:
 # meiva:note
 # One verdict per install shape, in the order the probes can tell them apart: no tree at all, a tree
 # with no pnpm metadata (installed before #8085), a tree pnpm built for another lockfile.
-# meiva:link meizel/docs/frontend-deps.meiva.okf.md
+# meiva:link meizel/docs/frontend-deps.md
 def classify(observation: FrontendObservation) -> FrontendDeps:
     if not observation.node_modules:
         return FrontendDeps.MISSING
@@ -76,7 +76,7 @@ def classify(observation: FrontendObservation) -> FrontendDeps:
 # meiva:note
 # A refusal names the state it found and the one command that ends it; a ready tree has no refusal,
 # and asking for one is a programming error rather than a message.
-# meiva:link meizel/docs/frontend-deps.meiva.okf.md
+# meiva:link meizel/docs/frontend-deps.md
 def refusal(state: FrontendDeps) -> str:
     frontend = "/".join(FRONTEND_DIR)
     tree = f"{frontend}/{NODE_MODULES}"

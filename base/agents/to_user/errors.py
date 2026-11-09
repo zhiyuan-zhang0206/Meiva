@@ -6,7 +6,7 @@ from enum import StrEnum
 # difference earns a class: `gone` and `unreadable` answer the same way for the
 # same document version, so nothing retries them, while `too_large` names a byte
 # budget the file exceeds and ends when the file shrinks.
-# meiva:link gateway/agents/docs/to-user-read-failures.meiva.okf.md
+# meiva:link gateway/agents/docs/to-user-read-failures.md
 class ToUserReadFailure(StrEnum):
     GONE = "gone"
     TOO_LARGE = "too_large"
@@ -19,12 +19,12 @@ class ToUserReadFailure(StrEnum):
 # is classified by its own kind, so a raise site only names this class where the
 # budget is the reason. The name states the state, not an error class, because the
 # panel tells the reader what it could not show.
-# meiva:link gateway/agents/docs/to-user-read-failures.meiva.okf.md
+# meiva:link gateway/agents/docs/to-user-read-failures.md
 class ToUserFileTooLarge(ValueError):  # noqa: N818
     pass
 
 
-# meiva:link gateway/agents/docs/to-user-read-failures.meiva.okf.md
+# meiva:link gateway/agents/docs/to-user-read-failures.md
 def read_failure(exc: OSError | ValueError) -> ToUserReadFailure:
     if isinstance(exc, ToUserFileTooLarge):
         return ToUserReadFailure.TOO_LARGE

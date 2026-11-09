@@ -2,7 +2,7 @@
 # What one history request reads from the gateway's configuration, as values: the config the
 # gateway app was built with, plus the cluster's `.env` for the understanding options a
 # gateway-profile process does not hold.
-# meiva:link gateway/agents/history/docs/configuration.meiva.okf.md
+# meiva:link gateway/agents/history/docs/configuration.md
 
 from fastapi import Request
 

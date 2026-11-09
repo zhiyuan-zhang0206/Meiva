@@ -7,7 +7,7 @@
 # while a silent 0 would have skipped the week's deep run. A reply without a total raises.
 # The follow-up slot is armed by the main check, in this process only: a restart between the
 # two forgets it, as it always has.
-# meiva:link schedules/docs/self-evolution.meiva.okf.md
+# meiva:link schedules/docs/self-evolution.md
 
 from __future__ import annotations
 

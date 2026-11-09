@@ -244,7 +244,7 @@ def test_the_roster_has_standard_daemons_and_each_one_has_a_port_slot() -> None:
 # outlast root's default TERM window, so their roster entries declare `HOST_STOP_CEILING_S`
 # and `OPS_STOP_CEILING_S`. Each window must be exactly its ceiling plus the margin; every
 # other standard daemon declares none and renders none.
-# meiva:link services/agent_runner/agent_host/lifecycle/docs/graceful-exit.meiva.okf.md
+# meiva:link services/agent_runner/agent_host/lifecycle/docs/graceful-exit.md
 _DECLARED_STOP_CEILINGS = {"agent-host": HOST_STOP_CEILING_S, "ops": OPS_STOP_CEILING_S}
 
 

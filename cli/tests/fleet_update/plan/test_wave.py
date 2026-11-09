@@ -1,7 +1,7 @@
 # meiva:note
 # The order and the flags of a window's stops, and what the window does about a stop that failed:
 # the plan's answers as values, with no host to ask.
-# meiva:link cli/docs/fleet-update-window/failed-stop-recovery.meiva.okf.md
+# meiva:link cli/docs/fleet-update-window/failed-stop-recovery.md
 from __future__ import annotations
 
 import pytest

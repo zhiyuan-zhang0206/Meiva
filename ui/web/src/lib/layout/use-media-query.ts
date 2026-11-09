@@ -21,7 +21,7 @@ import { useBrowser } from "@/lib/browser/browser-provider";
 // value used to live in `useState` + `useEffect`, where every client-side mount committed the
 // mobile-first frame first and corrected it after the passive flush — a painted wrong frame
 // whenever a commit and the flush straddled a rendering pass.
-// meiva:link ui/web/src/docs/frontend-state/browser-port.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-state/browser-port.md
 export function useMediaQuery(query: string, serverMatches = false): boolean {
   const browser = useBrowser();
   const asked = useMemo(() => browser.media.query(query), [browser, query]);

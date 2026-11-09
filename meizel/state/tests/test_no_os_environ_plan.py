@@ -6,7 +6,7 @@
 #
 # The bodies below spell the variable through `_NAME` because this file is a test file itself: a
 # literal `monkeypatch.setenv("<managed name>"` here would be a finding of the very rule it tests.
-# meiva:link meizel/docs/meizel.meiva.okf.md
+# meiva:link meizel/docs/meizel.md
 
 from __future__ import annotations
 

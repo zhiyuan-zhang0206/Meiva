@@ -111,7 +111,7 @@ def inbound_message(
     times: InboundTimes,
     image_urls: list[str] | None = None,
 ) -> HumanMessage:
-    # meiva:link agent/messages/docs/message-format.meiva.okf.md
+    # meiva:link agent/messages/docs/message-format.md
     kwargs: dict[str, object] = {
         "meiva_msg_type": MeivaMsgType.INBOUND.value,
         "meiva_source": source,

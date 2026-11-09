@@ -294,7 +294,7 @@ describe("selecting", () => {
   });
 });
 
-// meiva:link ui/web/src/docs/frontend-components/run-timeline/axis-and-keyboard.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/run-timeline/axis-and-keyboard.md
 // meiva:note
 // The chart applies one viewport update per animation frame (task #5712), so a gesture lands on the next
 // frame rather than inside the dispatch: awaiting here is what a browser frame does for a person.

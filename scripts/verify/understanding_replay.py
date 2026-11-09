@@ -1,6 +1,6 @@
 # meiva:note
 # The replay entry refuses a non-preview host before capturing its process image or creating a database; an admitted report retains one captured database gate.
-# meiva:link scripts/verify/docs/understanding-replay.meiva.okf.md
+# meiva:link scripts/verify/docs/understanding-replay.md
 
 from __future__ import annotations
 

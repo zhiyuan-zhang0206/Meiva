@@ -1,6 +1,6 @@
 # meiva:note
 # One agent's real shell sessions for a test: the pty-sessions service the `pty_service` fixture runs under the test's home, and the throwaway database with the agent's counter row seeded. Nothing is faked: a session a test creates is a real bash behind the service, and its deadline row lands in the real `agent_shell_ttls` table. A test module's conftest imports `live_shell` together with `pty_service`.
-# meiva:link meiva/shell/docs/shell.meiva.okf.md
+# meiva:link meiva/shell/docs/shell.md
 from __future__ import annotations
 
 from pathlib import Path

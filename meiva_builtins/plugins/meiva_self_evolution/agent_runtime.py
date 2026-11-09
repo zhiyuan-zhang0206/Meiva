@@ -25,7 +25,7 @@ REMINDER = (
 
 # meiva:note
 # The reminder is conditional, not a per-window obligation: a window with nothing worth keeping writes nothing, and leaving the file alone is not a missed duty. It stays silent when the workspace is not in the system prompt, where the path would name something the agent cannot see.
-# meiva:link meiva_builtins/plugins/meiva_self_evolution/docs/meiva_self_evolution.meiva.okf.md
+# meiva:link meiva_builtins/plugins/meiva_self_evolution/README.md
 def self_evolution_compact_reminder(slices: AgentSlices, *, catalog: ModelCatalog) -> str:
     del catalog
     if not slices.read("agent", "workspace_in_system_prompt"):
@@ -35,7 +35,7 @@ def self_evolution_compact_reminder(slices: AgentSlices, *, catalog: ModelCatalo
 
 # meiva:note
 # Seeding creates only a missing file and never overwrites one: a lesson recorded in an earlier session survives every restart.
-# meiva:link meiva_builtins/plugins/meiva_self_evolution/docs/meiva_self_evolution.meiva.okf.md
+# meiva:link meiva_builtins/plugins/meiva_self_evolution/README.md
 def ensure_to_do_better(workspace: Path) -> None:
     path = workspace / TO_DO_BETTER_FILENAME
     if not path.exists():

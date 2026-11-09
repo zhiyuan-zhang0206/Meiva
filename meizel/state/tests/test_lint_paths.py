@@ -2,7 +2,7 @@
 # `meizel/state/lint_paths.py` unit tests: which explicit targets a scan reads and how a path is
 # labelled in a finding. Asserted by value; the two rules that use them are covered end to end by
 # `test_lint_no_os_environ.py` and `test_lint_turn_scoped_config.py`.
-# meiva:link meizel/docs/meizel.meiva.okf.md
+# meiva:link meizel/docs/meizel.md
 
 from __future__ import annotations
 

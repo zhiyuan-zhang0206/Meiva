@@ -1,6 +1,6 @@
 # meiva:note
 # What one MCP daemon runs with, and when it retries, as values. `main` reads the process once and builds the `DaemonConfig`; every function below the entry point takes it (or one field of it). The retry rule is a function of the attempt number and whether the failure was a transport error, so the request loop only sleeps for the delay this module returns.
-# meiva:link meiva/mcps/docs/mcps.meiva.okf.md
+# meiva:link meiva/mcps/docs/mcps.md
 from __future__ import annotations
 
 from dataclasses import dataclass, field

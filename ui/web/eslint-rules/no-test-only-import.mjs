@@ -1,6 +1,6 @@
 // meiva:note
 // A shipped module must not import a test-only one: a *-test-mock module, anything under test-support/, or a *.test / *.spec file. The import would drag the double's fixtures and fake transports into the bundle and turn it into a production dependency nothing would notice going stale. Tests and the doubles themselves are the intended importers, so the config scopes this rule to non-test files.
-// meiva:link ui/web/src/docs/frontend-components/test-only-imports.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/test-only-imports.md
 const TEST_ONLY = [
   /(?:^|\/)[^/]*-test-mock(?:\.[cm]?[jt]sx?)?$/,
   /(?:^|\/)test-support(?:\/|$)/,

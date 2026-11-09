@@ -257,7 +257,7 @@ def test_utf8_digest_preserves_newlines() -> None:
 
 # meiva:note
 # The external maintenance script uses the selected installation's interpreter and real writer while preserving schedule enabled/stopped state; it stores the new body without executing it.
-# meiva:link scripts/host_ops/tests/docs/schedule-maintenance.meiva.okf.md
+# meiva:link scripts/host_ops/tests/docs/schedule-maintenance.md
 def test_external_file_uses_installed_runtime_and_real_writer(
     db_conn: psycopg.Connection,
     database: Database,

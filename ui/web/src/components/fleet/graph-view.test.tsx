@@ -6,7 +6,7 @@
 // hover, select-on-click, open-on-double-click, and the loading / empty / error placeholders. Rows
 // arrive through the fake transport, so no data hook is replaced. The pure structure helpers have
 // their own tests in fleet-graph.test.ts.
-// meiva:link ui/web/src/docs/frontend-components/fleet-view.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/fleet-view.md
 
 import { QueryClient } from "@tanstack/react-query";
 import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
@@ -73,7 +73,7 @@ function edge(
 // lineageById through the query cache; the default empty seed stops the mounted roster query from
 // fetching in tests that do not exercise lineage (the fetch itself is asserted separately). The
 // settings cache is seeded empty so the force sliders read defaults instead of fetching.
-// meiva:link ui/web/src/docs/frontend-components/fleet-view.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/fleet-view.md
 function renderGraph(
   ui: ReactElement,
   {

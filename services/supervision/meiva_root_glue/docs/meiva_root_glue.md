@@ -1,0 +1,106 @@
+# Root deployment wiring
+
+`services.supervision.meiva_root_glue.glue:build_wiring` is the deployment hook for the
+[root supervisor](../../meiva_root/docs/meiva_root.md). It selects readiness
+probes for the exact units in the loaded manifest. A missing probe refuses
+wiring before any service spawns. Adding a plugin service follows the same
+`ServiceSpec.identity_probe` contract as a core service.
+
+The roster contract test checks the daemon's literal health, logging, shutdown and
+pidfile identities. It follows a callable's default inside the function that owns
+that parameter and fields of an unmodified frozen dependency default. Overrides,
+rebindings and nested parameter scopes do not provide that evidence. The check
+also follows the public pidfile owner; a source mutation of either standard daemon's
+shutdown name must remain visible. This is static identity evidence, not a running
+daemon readiness test.
+
+The manifest generator (`manifests.py`) also derives each unit's stop window and
+`stop_tier`: a `ServiceSpec` that declares `stop_ceiling_s` (its own SIGTERM
+cleanup can outlast root's default window) gets `stop_timeout_s = ceiling + STOP_MARGIN_S`.
+The gateway's ceiling is uvicorn's drain budget
+(`gateway.gateway_graceful_shutdown_timeout_seconds`) plus the lifespan cleanup
+allowance, read from the same setting the launch hands uvicorn; browser-mcp's is
+its bounded shutdown steps (`services/desktop/browser/shutdown_budget.py`). Stop
+tiers order shutdown into five waves while letting independent units inside a
+tier stop concurrently: tier `0` (`agent-host`) drains active turns first; tier
+`1` stops application producers including `browser-mcp`; tier `2` stops
+`browser` once `browser-mcp` has disconnected from Chrome; tier `3` stops
+`otel-collector` after producers flush; and tier `4` stops `loki`, `prometheus`,
+and `tempo` in parallel once the collector's shutdown flush lands. See
+[Meiva Root service stop](../../meiva_root/docs/closure.md).
+
+`HealthMonitor` owns application-service retry scheduling. Only a fresh DOWN
+observation may request replacement. The supervisor must settle native custody
+before replacement; unknown ownership, unavailable inspection, foreign listeners,
+and an operator-held unit cannot authorize recovery. A protocol response alone
+cannot certify a service: its responding listener must belong to the captured
+root generation. No service probe starts a session or an OS job.
+
+Each round `HealthMonitor` emits `root_unit_failure_state` for every unit in a
+failure state ([Meiva Root — one application service owner](../../meiva_root/docs/meiva_root.md)); the drill
+assembly shares that path. Wiring also supplies the breaker's dependency probe:
+`diagnostic_probes.database_recovery_probe` runs one bounded `SELECT 1` per round
+while any unit's breaker is open, so a machine whose hosts died with the
+database comes back by itself once the database answers.
+
+`RootHealthRounds` drives one service health round and the independent
+[diagnostic roster](diagnostics.md). Diagnostic
+failures never acquire service or native-resource lifecycle authority.
+The daemon owns a lexical `asyncio.TaskGroup` for wired participants and supplies
+it through `WiringContext.participant_tasks`. The assembly injects that group
+into each monitor; their public `start()` / `stop()` contract stays unchanged.
+Unknown round failures propagate to the daemon and produce a nonzero exit.
+Stop attempts every participant in reverse order, then raises all stop failures;
+the daemon still closes the control socket and attempts the tree shutdown once.
+Primary failures and concrete shutdown refusals retain their exception leaves.
+Child-exit watchers retain their separate supervisor ownership so participant
+failure does not cancel native exit observation before bounded child teardown.
+
+Deployment drills can assemble the generic health monitor without the
+host diagnostic roster.
+
+On macOS the permissions helper is the root's ancestor and carries the permission
+boundary. Root observes it but cannot restart or upgrade it from inside its own
+tree. On Linux the Meiva tree starts at root; no helper diagnostic is registered.
+When unit memory budgets (`agent-host`, `exec-host`) are configured on Linux,
+`build_wiring` repairs an absent `XDG_RUNTIME_DIR` from `/run/user/<uid>` onto
+`supervisor`'s pre-start launch environment (`set_launch_env`), probes
+`systemd-run --user --scope` under that exact `supervisor.launch_environ()`, and
+installs the `systemd-run --user` launch rewrite only when the probe succeeds;
+each unit's own `manifest.env` still overrides those defaults.
+Postgres, Redis, and PgBouncer have separate native data-plane custody so they can
+remain available during application maintenance.
+
+Durable update completion belongs to the external transition executor,
+outside the subtree it stops. Root diagnostics does not invoke the pin, schema,
+code-update, or pause-recovery controllers. The old controller graph and hold
+watchdog eligibility/attempt state have been removed. No OS watchdog-probe or
+hold-watchdog job remains.
+
+The deployment hook initializes the event pipeline as process `meiva-root`.
+`root_health_expected` announces the observer before its first round, and a zero
+expectation explicitly retires it on intentional stop. `root_health_tick` advances
+only after service and diagnostic work return, including explicit unavailable
+verdicts after observation deadlines. It certifies progress, not service health.
+Grafana separately detects expected roots that have no completed sample or a
+stale sample; diagnostic verdict events and status carry failure evidence.
+
+Root observation events carry a fixed-length SHA-256 `home_id` of the resolved
+home path. Freshness grouping retains it so another cluster on the same host
+cannot mask missing rounds; the event body also carries the full home path.
+
+## Per-generation startup observations
+
+Root observes each selected service immediately. Automatic restart eligibility
+wait until that captured native generation is first observed ALIVE or its startup
+budget expires. The deadline is measured from root's retained monotonic launch
+time; a changed generation starts a new window, and a response spanning a
+replacement is UNAVAILABLE. This is observation of actual readiness, not a claim
+that starting means healthy.
+
+Deployment wiring supplies the same readiness tiers used by start:
+`base.deploy.progress_timeout.CRITICAL_SERVICE_SESSIONS` (Gate, gateway, frontend,
+agent-host) uses 180 seconds; other services use 45 seconds.
+Generic root monitoring has no CLI import. A failed replacement still becomes
+eligible for bounded retry after its window; the spent automatic restart count
+is retained during grace, and a fresh healthy response clears it.

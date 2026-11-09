@@ -1,4 +1,4 @@
-# meiva:link base/host/docs/boot-autostart.meiva.okf.md
+# meiva:link base/host/docs/boot-autostart.md
 
 from pathlib import Path
 from xml.sax.saxutils import escape
@@ -16,7 +16,7 @@ def launchd_plist_content(
     environment_home: Path,
     path_env: str,
 ) -> str:
-    # meiva:link base/host/docs/boot-autostart.meiva.okf.md
+    # meiva:link base/host/docs/boot-autostart.md
     argument_lines = "\n".join(f"        <string>{escape(arg)}</string>" for arg in arguments)
     return f"""<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"

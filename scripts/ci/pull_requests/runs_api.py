@@ -1,4 +1,4 @@
-# meiva:link scripts/ci/pull_requests/docs/event-export.meiva.okf.md
+# meiva:link scripts/ci/pull_requests/docs/event-export.md
 
 from __future__ import annotations
 

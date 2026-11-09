@@ -244,7 +244,7 @@ def test_the_cluster_status_fetch_without_a_credential_raises_instead_of_dialing
     # The API always authenticates: with neither a token nor a secret the call is named, not
     # sent as a blank bearer. The credential precedence itself is base.cluster.machine's
     # contract.
-    # meiva:link base/cluster/machine/docs/machine.meiva.okf.md
+    # meiva:link base/cluster/machine/docs/machine.md
     with serving({}) as gateway:
         credentialless = replace(access_to(gateway.url), cluster_secret="")
         with pytest.raises(GatewayApiTokenMissing):

@@ -19,7 +19,7 @@ from base.lm.harness.handoff import (
 # "succeeds" while the second command runs in the wrong directory, or a resident
 # bootstrap that dies with the turn. The text lives here, next to the code that
 # cannot change the behaviour.
-# meiva:link base/lm/harness/antigravity/docs/antigravity.meiva.okf.md
+# meiva:link base/lm/harness/antigravity/docs/antigravity.md
 SHELL_SEMANTICS: tuple[str, ...] = (
     "Every `run_command` call starts a fresh shell: `cd` and `export` do not carry over "
     "to the next call. Put the working directory and every variable in the same command "

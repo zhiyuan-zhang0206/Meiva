@@ -357,7 +357,7 @@ class TestWaitSeam:
         assert {"retry_sleep", "retry_asleep"} <= set(resilience.__all__)
 
     def test_retry_sleeps_through_the_callable_it_is_handed(self, timers: _RecordingTimers) -> None:
-        # meiva:link base/host/docs/host.meiva.okf.md
+        # meiva:link base/host/docs/host.md
         run = retry(
             Policy(max_attempts=3, backoff=ExponentialBackoff(1.0, 2.0, 8.0), jitter="none"),
             sleep=timers.sleep,

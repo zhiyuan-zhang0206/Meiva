@@ -2,7 +2,7 @@
 # What an SDK call is stamped with, decided over facts the recorder read: the identity an SDK
 # usage event carries, and the refusals of a remote admission that cannot carry a borrowed
 # lease. Nothing here reads or writes the process.
-# meiva:link meiva/docs/sdk-surface/sdk-surface.meiva.okf.md
+# meiva:link meiva/docs/sdk-surface/sdk-surface.md
 
 from __future__ import annotations
 

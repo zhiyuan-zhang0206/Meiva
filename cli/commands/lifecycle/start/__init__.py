@@ -343,7 +343,7 @@ def _report_running_tree(
 # meiva:note
 # The browser's restore proof, in two counts: URL restoration and the pin/group
 # reapply fail independently, so one number would hide the second.
-# meiva:link services/desktop/browser/docs/browser-session-restore.meiva.okf.md
+# meiva:link services/desktop/browser/docs/browser-session-restore.md
 def _report_browser_session(start: _Start) -> None:
     from services.desktop.browser import session_restore
 

@@ -1,4 +1,4 @@
-# meiva:link base/lm/docs/decision-models.meiva.okf.md
+# meiva:link base/lm/docs/decision-models.md
 
 from __future__ import annotations
 

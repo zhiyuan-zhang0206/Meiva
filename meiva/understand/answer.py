@@ -5,7 +5,7 @@
 # and calls `run`. What each call is (`calls.py`) and what is saved (`outputs.py`) are decided
 # from values; this shell builds the model through the real provider factory, reads and writes
 # the files, and returns the findings of what goes in and out next to the answers.
-# meiva:link meiva/understand/docs/understand.meiva.okf.md
+# meiva:link meiva/understand/README.md
 
 from __future__ import annotations
 

@@ -45,7 +45,7 @@ export function TaskHoverCard({
   // The list carries no text columns; the card fetches the one row it shows and
   // renders its description/result once it lands. A failed read says so in one
   // line instead of an empty card.
-  // meiva:link ui/web/src/docs/frontend-components/fleet-view.meiva.okf.md
+  // meiva:link ui/web/src/docs/frontend-components/fleet-view.md
   const full = useQuery({
     queryKey: ["task", task.id],
     queryFn: () => client.getTask(task.id),

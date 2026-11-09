@@ -96,7 +96,7 @@ async def _subscribe_error_frame(
 
 # meiva:note
 # Poll one non-subscribe message from the Redis pubsub handle with a bounded timeout.
-# meiva:link gateway/events/docs/sse/sse.meiva.okf.md
+# meiva:link gateway/events/docs/sse/sse.md
 async def get_pubsub_message(pubsub: PubSub, timeout: float) -> Mapping[str, object] | None:
     return await pubsub.get_message(  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
         ignore_subscribe_messages=True,
@@ -108,7 +108,7 @@ async def get_pubsub_message(pubsub: PubSub, timeout: float) -> Mapping[str, obj
 # Each cleanup step is independently suppressed + logged so one failure does not
 # swallow another; `channels` accepts the whole subscription set of one pubsub
 # connection, which the merged stream subscribes to both of its sources on.
-# meiva:link gateway/events/docs/sse/sse.meiva.okf.md
+# meiva:link gateway/events/docs/sse/sse.md
 async def close_pubsub(
     pubsub: PubSub, client: AuthRetryAsyncRedis, channels: str | Sequence[str]
 ) -> None:
@@ -117,7 +117,7 @@ async def close_pubsub(
     async def _unsubscribe() -> None:
         # meiva:note
         # Unsubscribe all channels on the pubsub socket before closing it.
-        # meiva:link gateway/events/docs/sse/sse.meiva.okf.md
+        # meiva:link gateway/events/docs/sse/sse.md
         await pubsub.unsubscribe(*names)  # pyright: ignore[reportUnknownMemberType]
 
     for step, coro_fn in (

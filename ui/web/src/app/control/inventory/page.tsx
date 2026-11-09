@@ -1,6 +1,6 @@
 "use client";
 
-// meiva:link gateway/extensions/docs/inventory.meiva.okf.md
+// meiva:link gateway/extensions/docs/inventory.md
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";

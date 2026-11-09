@@ -74,8 +74,8 @@ def test_a_legacy_fyi_row_does_not_block_and_a_second_notice_is_refused(
     event_bus: EventBus,
     model_catalog: ModelCatalog,
 ):
-    # meiva:link gateway/agents/docs/notice-receipts.meiva.okf.md
-    # meiva:link meiva/docs/ui.meiva.okf.md
+    # meiva:link gateway/agents/docs/notice-receipts.md
+    # meiva:link meiva/docs/ui.md
     agent_id = seed_agent(db_conn)
     pin_agent(agent_id)
     with db_conn.cursor() as cur:
@@ -174,7 +174,7 @@ def test_notify_with_expire_at_valid(
     # Absolute and relative deadlines both land in the row. One notice stays open
     # per agent (user ruling 2026-10-21), so the second post needs the first one
     # dismissed.
-    # meiva:link meiva_builtins/plugins/meiva_fleet/docs/notify.meiva.okf.md
+    # meiva:link meiva_builtins/plugins/meiva_fleet/docs/notify.md
     from datetime import datetime, timedelta
 
     agent_id = seed_agent(db_conn)

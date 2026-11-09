@@ -6,8 +6,8 @@
 # they must not differ in how the process around it is built, or a fix to one boot path silently
 # misses the other. This module owns that half; the SDK process bootstrap it builds on stays in
 # `meiva/boot.py`.
-# meiva:link meiva/docs/boot-contracts.meiva.okf.md
-# meiva:link base/agents/context/external_attachment/docs/external-attachment.meiva.okf.md
+# meiva:link meiva/docs/boot-contracts.md
+# meiva:link base/agents/context/external_attachment/README.md
 
 from __future__ import annotations
 

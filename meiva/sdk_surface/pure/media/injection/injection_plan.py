@@ -3,7 +3,7 @@
 # judged at all and what finding a verdict yields. The checker (`injection_check.py`) reads the
 # process and calls the decision model; these functions only choose, so the order of the gates is
 # tested directly. How the page is cut and how the answers fold lives in `injection_pieces.py`.
-# meiva:link meiva/docs/sdk-surface/sdk-surface.meiva.okf.md
+# meiva:link meiva/docs/sdk-surface/sdk-surface.md
 
 from __future__ import annotations
 

@@ -633,7 +633,7 @@ export function mergeSnapshotWithStreaming(
 ): BackendTimelineItem[] {
   // meiva:note
   // A delayed HTTP read can carry an older revision than one delivered by SSE.
-  // meiva:link ui/web/src/docs/frontend-state/timeline-cache.meiva.okf.md
+  // meiva:link ui/web/src/docs/frontend-state/timeline-cache.md
   const committedById = new Map(snapshot.map((it) => [it.item_id, it]));
   const clientExtras = prev.filter((it) => {
     const committed = committedById.get(it.item_id);

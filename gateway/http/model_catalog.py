@@ -33,7 +33,7 @@ def request_catalog(request: Request) -> ModelCatalog | CatalogLoadFailure:
     return state_as(request, CatalogAppState).catalog
 
 
-# meiva:link gateway/http/docs/model-catalog.meiva.okf.md
+# meiva:link gateway/http/docs/model-catalog.md
 def load_model_catalog(build: Callable[[], ModelCatalog]) -> ModelCatalog | CatalogLoadFailure:
     try:
         return build()

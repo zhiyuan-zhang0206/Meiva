@@ -1,6 +1,6 @@
 // meiva:note
 // timeline.tsx component test — ItemView per-kind render + envelope split + system_marker dispatch + LifecycleChip + UnknownMarkerChip + InterruptedNotice + CopyButton. jsdom does not actually render scroll, so scroll behavior is not tested (the sticky state machine was extracted to lib/sticky.ts and is covered by sticky.test.ts). ChatMarkdown / PythonCode / ScrollArea are mocked as stubs to reduce noise and avoid the runtime complexity of react-markdown / Prism / base-ui.
-// meiva:link ui/web/src/docs/frontend-components/timeline-view/timeline-view.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/timeline-view/timeline-view.md
 
 import { act, fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -275,7 +275,7 @@ describe("bounded timeline history (#4702)", () => {
     // meiva:note
     // The fill reads history the reader never asked for, so it must not present
     // the loading strip above the messages (user report 2026-10-29).
-    // meiva:link ui/web/src/docs/frontend-components/timeline-view/history-paging.meiva.okf.md
+    // meiva:link ui/web/src/docs/frontend-components/timeline-view/history-paging.md
     expect(loadOlder).toHaveBeenCalledWith("background");
     for (let i = 0; i < 8; i++) layoutChange();
     expect(loadOlder).toHaveBeenCalledTimes(1);
@@ -407,7 +407,7 @@ describe("bounded timeline history (#4702)", () => {
 // composer's (pt-0.5), and the list's share only reaches the rule because the
 // log keeps a trailing element to hold it — the last row overflows the log
 // instead when that element goes.
-// meiva:link ui/web/src/docs/frontend-components/home-shell-chrome/home-shell-chrome.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/home-shell-chrome/home-shell-chrome.md
 describe("the gap above the composer rule", () => {
   it("keeps the list's share of the gap: pb-6, and a trailing element to hold it", () => {
     render(<TimelineView items={[

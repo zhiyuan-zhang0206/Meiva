@@ -3,7 +3,7 @@
 # what was delivered, so a switched-off category has no rows to count, and a switch
 # cannot be simulated from the rows its own policy dropped. The gateway serves the
 # resulting report; `meiva notices audit` only renders it.
-# meiva:link base/events/notifications/docs/notifications.meiva.okf.md
+# meiva:link base/events/notifications/README.md
 
 from __future__ import annotations
 
@@ -197,7 +197,7 @@ def load_candidates(
 # posting: the spine keys a re-ask by the question the notice carries now, so the
 # post is keyed question-less and the edit by its question. Under the simulated
 # `notice:<id>` key both collapse into one, which is the switch under audit.
-# meiva:link base/events/notifications/docs/notifications.meiva.okf.md
+# meiva:link base/events/notifications/README.md
 def notice_candidates(
     *,
     notice_id: int,

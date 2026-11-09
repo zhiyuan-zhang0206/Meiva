@@ -8,7 +8,7 @@
 # A module that finished importing and no longer owns the attribute is a rename or a
 # deletion, and stays an AttributeError: swallowing it would silently stop closing
 # the pool the previous test left behind.
-# meiva:link tests/fixtures/docs/native-provisioning.meiva.okf.md
+# meiva:link tests/fixtures/docs/native-provisioning.md
 from __future__ import annotations
 
 import sys

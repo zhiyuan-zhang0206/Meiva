@@ -2,7 +2,7 @@
 # The decision half of exec result dispatch: which outcome an `ExecResult` is, whether the turn
 # halts, the status and the text handed to the envelope, and which markers the envelope carries.
 # `node.dispatch_exec_result` wraps, logs and announces what this plan says.
-# meiva:link agent/graph/exec/docs/exec.meiva.okf.md
+# meiva:link agent/graph/exec/docs/exec.md
 
 from __future__ import annotations
 

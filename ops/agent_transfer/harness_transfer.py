@@ -2,7 +2,7 @@
 # Packaging, relocation, path rewriting, and restoration of external harness session
 # records and transcripts (Claude Code, Antigravity, Codex) across cross-machine transfers.
 #
-# meiva:link gateway/agents/docs/agent-transfer.meiva.okf.md
+# meiva:link gateway/agents/docs/agent-transfer.md
 
 from __future__ import annotations
 

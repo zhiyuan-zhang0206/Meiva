@@ -1,6 +1,6 @@
 # meiva:note
 # Where an external harness CLI lives, and the PATH its child process runs with.
-# meiva:link base/lm/harness/docs/harness.meiva.okf.md
+# meiva:link base/lm/harness/docs/harness.md
 
 from __future__ import annotations
 
@@ -19,7 +19,7 @@ from base.paths.home import user_home
 # name resolves against the OS default (/usr/bin:/bin:/usr/sbin:/sbin) and every
 # external harness failed to start from a real spawn while `which codex` in a shell
 # worked (#5491). The launchd job that starts the runner sees the same gap.
-# meiva:link base/lm/harness/docs/harness.meiva.okf.md
+# meiva:link base/lm/harness/docs/harness.md
 HARNESS_BIN_DIRS = (
     ".local/bin",
     ".npm-global/bin",
@@ -42,7 +42,7 @@ _SYSTEM_BIN_DIRS = ("/usr/bin", "/bin", "/usr/sbin", "/sbin")
 # meiva:note
 # A miss, carrying the PATH and every directory that was searched: the bare ENOENT from
 # an exec names only the program, which is what made the first real spawn hard to read.
-# meiva:link base/lm/harness/docs/harness.meiva.okf.md
+# meiva:link base/lm/harness/docs/harness.md
 class HarnessBinaryNotFoundError(FileNotFoundError):
     pass
 
@@ -53,7 +53,7 @@ def resolve_user_home(home: Path | None = None) -> Path:
 
 # meiva:note
 # `HARNESS_BIN_DIRS` (or a caller's list) with the relative entries anchored at `home`.
-# meiva:link base/lm/harness/docs/harness.meiva.okf.md
+# meiva:link base/lm/harness/docs/harness.md
 def harness_bin_dirs(
     home: Path | None = None, bin_dirs: Sequence[str] | None = None
 ) -> tuple[str, ...]:
@@ -66,7 +66,7 @@ def harness_bin_dirs(
 # `(path, on_path)` for `program`; `on_path` says PATH itself resolved it. A CLI installed
 # as a symlink (Homebrew's `codex` points at its npm entry) comes back as the executable
 # found, not its target: the target is a script the kernel may not be able to exec.
-# meiva:link base/lm/harness/docs/harness.meiva.okf.md
+# meiva:link base/lm/harness/docs/harness.md
 def locate_harness_binary(
     program: str,
     *,
@@ -88,7 +88,7 @@ def locate_harness_binary(
 # Absolute path of the CLI a harness session runs, or a report of what was tried. An
 # explicit path (one carrying a separator) is used as given: a deployment that pins the
 # binary in configuration must not be steered onto another install.
-# meiva:link base/lm/harness/docs/harness.meiva.okf.md
+# meiva:link base/lm/harness/docs/harness.md
 def resolve_harness_binary(
     program: str,
     *,
@@ -121,7 +121,7 @@ def _child_bin_dirs(home: Path | None = None) -> list[str]:
 # meiva:note
 # PATH for a harness child: what the host has, then every known install dir, then the
 # system dirs, de-duplicated in that order.
-# meiva:link base/lm/harness/docs/harness.meiva.okf.md
+# meiva:link base/lm/harness/docs/harness.md
 def harness_child_path(*, path_env: str | None = None, home: Path | None = None) -> str:
     entries = [
         *(path_env or "").split(os.pathsep),
@@ -135,7 +135,7 @@ def harness_child_path(*, path_env: str | None = None, home: Path | None = None)
 # `environ` plus a PATH the harness and its own children can resolve through. The
 # allowlisted child environment deliberately carries no PATH; a session delivery point is
 # where it is rebuilt, the same rule the daemon's venv activation follows.
-# meiva:link base/lm/harness/docs/harness.meiva.okf.md
+# meiva:link base/lm/harness/docs/harness.md
 def with_harness_path(environ: Mapping[str, str], *, home: Path | None = None) -> dict[str, str]:
     return {**environ, "PATH": harness_child_path(path_env=environ.get("PATH"), home=home)}
 
@@ -145,7 +145,7 @@ def with_harness_path(environ: Mapping[str, str], *, home: Path | None = None) -
 # where `claude`/`agy` do not exist (#5491). Producers compose a unit PATH through this
 # one builder and it refuses a result that omits a harness directory, so the omission
 # fails where the unit is written instead of at the first spawn.
-# meiva:link base/lm/harness/docs/harness.meiva.okf.md
+# meiva:link base/lm/harness/docs/harness.md
 class HarnessPathIncompleteError(RuntimeError):
     pass
 

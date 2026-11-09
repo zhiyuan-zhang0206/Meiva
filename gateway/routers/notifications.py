@@ -57,7 +57,7 @@ class NotificationDeliveriesResponse(BaseModel):
 # meiva:note
 # The merged catalog with the user's switch already applied, so the console
 # renders exactly what the spine will honor.
-# meiva:link base/events/notifications/docs/notifications.meiva.okf.md
+# meiva:link base/events/notifications/README.md
 @router.get("/api/notifications/categories")
 async def get_notification_categories(request: Request) -> NotificationCategoriesResponse:
     pool = gateway_state(request).db_pool
@@ -83,7 +83,7 @@ async def get_notification_categories(request: Request) -> NotificationCategorie
 # `delivered: false` means the spine suppressed the notification — the category is
 # switched off, or the same `(category, dedupe_key)` fired inside the dedupe
 # window. The caller has nothing to retry.
-# meiva:link base/events/notifications/docs/notifications.meiva.okf.md
+# meiva:link base/events/notifications/README.md
 @router.post("/api/agents/{agent_id}/notifications", status_code=201)
 async def post_notification(
     agent_id: int, body: NotificationCreateIn, request: Request
@@ -124,7 +124,7 @@ async def post_notification(
 # client can set its cursor without replaying history. The category switches and
 # deduplication were already applied when these rows were written; this endpoint
 # re-decides nothing.
-# meiva:link base/events/notifications/docs/notifications.meiva.okf.md
+# meiva:link base/events/notifications/README.md
 @router.get("/api/notifications")
 async def get_notifications(
     request: Request,
@@ -164,7 +164,7 @@ def _audit_clock_inputs(tz: str | None, now: datetime | None, clock: Clock) -> t
 # the notice rows, the switches from the stored overrides and the declared catalog
 # from the installed manifests. A bad window, zone, category or simulation is a 422;
 # `tz` defaults to the cluster clock's configured zone, never the caller's.
-# meiva:link base/events/notifications/docs/notifications.meiva.okf.md
+# meiva:link base/events/notifications/README.md
 @router.get("/api/notifications/audit")
 async def get_notification_audit(
     request: Request,

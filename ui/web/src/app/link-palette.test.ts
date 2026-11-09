@@ -2,7 +2,7 @@
 // The run-timeline arrows take one CSS token per kind, drawn 1.6 px wide straight over the chart's card,
 // so every kind clears 4.5:1 against `--card` in both themes (the fixed hexes fell to 1.4-3.1:1 once
 // drawn, task #5712).
-// meiva:link ui/web/src/docs/frontend-components/palette.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/palette.md
 
 import { readFileSync } from "node:fs";
 import { join } from "node:path";

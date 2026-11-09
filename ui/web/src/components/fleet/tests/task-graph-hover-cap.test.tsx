@@ -18,7 +18,7 @@ import { renderWithProviders } from "@/test-support/render";
 // meiva:note
 // The route hands its surfaces a `navigate`; a suite passes a spy, so a jump can be read
 // without replacing `next/navigation`.
-// meiva:link ui/web/src/docs/frontend-components/fleet-view.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/fleet-view.md
 const navigate = vi.fn();
 
 afterEach(cleanup);
@@ -67,7 +67,7 @@ const TASK_WINDOWS = ["24h", "7d", "30d", "all"] as const;
 // fake transport AND pre-seeded in the query cache, so the board paints them on the first frame and
 // its mount refetch agrees instead of failing unanswered. `fetchRejects` is the unreachable gateway:
 // with rows seeded that is the stale-while-error state, with none the cold failure.
-// meiva:link ui/web/src/docs/frontend-components/fleet-view.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/fleet-view.md
 function renderGraph(
   tasks: readonly TaskRow[],
   {
@@ -105,7 +105,7 @@ function renderGraph(
 // meiva:note
 // jsdom reports a zero-size canvas and node, so the inner scroll container is capped while the
 // outer tooltip shell stays overflow-visible for the safe-zone bridge.
-// meiva:link ui/web/src/docs/frontend-components/fleet-view.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/fleet-view.md
 function expectCappedCard(card: HTMLElement) {
   expect(card.className).toContain("pointer-events-auto");
   expect(card.querySelector('[data-testid="hover-card-bridge"]')).not.toBeNull();

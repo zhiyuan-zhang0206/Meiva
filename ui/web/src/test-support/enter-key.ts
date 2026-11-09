@@ -4,7 +4,7 @@
 // when the component did not cancel it, performs the edit a browser performs —
 // through the textarea's own value setter, because React patches that property on
 // the element and a native edit is what makes it see a change.
-// meiva:link ui/web/src/docs/frontend-components/enter-to-send.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/enter-to-send.md
 
 import { fireEvent } from "@testing-library/react";
 

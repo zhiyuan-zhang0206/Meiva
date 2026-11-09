@@ -255,7 +255,7 @@ def workspace_path(home: Path, agent_id: int) -> Path:
 # (`FileSessionRegistry`'s one JSON document per agent). It outlives a process on
 # purpose: resurrect resumes the transcript by that id, so the pair has to survive
 # the restart that loses everything else. The writer creates the directory.
-# meiva:link base/lm/harness/docs/harness.meiva.okf.md
+# meiva:link base/lm/harness/docs/harness.md
 def harness_sessions_dir(*, home: Path) -> Path:
     return _root(home) / "harness" / "sessions"
 
@@ -265,7 +265,7 @@ def harness_sessions_dir(*, home: Path) -> Path:
 # document per agent, written by the controller, read by the crash sweep and by an
 # operator. Kept apart from the resume registry beside it: this one describes a live
 # attachment, that one describes a transcript.
-# meiva:link base/lm/harness/docs/harness.meiva.okf.md
+# meiva:link base/lm/harness/docs/harness.md
 def harness_registrations_dir(*, home: Path) -> Path:
     return _root(home) / "harness" / "registrations"
 

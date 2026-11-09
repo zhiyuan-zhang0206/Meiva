@@ -123,7 +123,7 @@ describe("Cost blocks by billing mode (user ruling 2026-11-08)", () => {
   // the metric cell's own children (label, amount, and only when the mode has
   // unpriced calls a sub-line), so a suffix riding the amount or a stray third row
   // fails here.
-  // meiva:link ui/web/src/docs/frontend-components/inspector/activity.meiva.okf.md
+  // meiva:link ui/web/src/docs/frontend-components/inspector/activity.md
   const metricCell = (label: string): HTMLElement => {
     const cell = screen.getByText(label).parentElement;
     if (cell === null) throw new Error(`the ${label} metric rendered no cell`);

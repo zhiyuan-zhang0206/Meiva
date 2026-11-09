@@ -2,7 +2,7 @@
 # The module view the rules ask: lazy ASTs, top-level functions, fixed-instant
 # names, and the per-function summary rule 2 quotes. A module is parsed only
 # when a rule reaches it, and the answer lives for the run.
-# meiva:link scripts/lint/docs/time-bomb-rule-parts.meiva.okf.md
+# meiva:link scripts/lint/docs/time-bomb-rule-parts.md
 
 from __future__ import annotations
 

@@ -15,14 +15,14 @@ _log = logging.getLogger("gateway.events.notification_outbox")
 # The resident loop over the outbox: `base.events.notifications.outbox` owns what
 # one sweep does, this module owns when the gateway runs it — every
 # `notification_outbox_interval_seconds`, and never while the unit is stopping.
-# meiva:link base/events/notifications/docs/notifications.meiva.okf.md
+# meiva:link base/events/notifications/README.md
 
 
 # meiva:note
 # A failed sweep is a log line, never a crash: every row it did not reach stays
 # unannounced, which is exactly the condition that brings the next sweep back to
 # it. The loop stops with the gateway's background lifetime.
-# meiva:link base/events/notifications/docs/notifications.meiva.okf.md
+# meiva:link base/events/notifications/README.md
 async def run(pool: ConnectionPool, bus: EventBus, *, interval_seconds: float, batch: int) -> None:
     while True:
         try:

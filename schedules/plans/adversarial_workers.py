@@ -5,7 +5,7 @@
 # asks this module what to do next; it sleeps, terminates and polls again as told. Known workers
 # are read by id and never found by enumerating the directory; only leftovers from an earlier
 # batch are searched for, by their labels, among live agents.
-# meiva:link schedules/docs/adversarial-eval.meiva.okf.md
+# meiva:link schedules/docs/adversarial-eval.md
 
 from __future__ import annotations
 
@@ -76,7 +76,7 @@ WaitStep = Settled | Poll | GiveUp
 # finished seconds after spawning and audited empty transcripts (adversarial-eval
 # 2026-35, 2026-08-26). A worker that finished but failed to self-terminate still ends a
 # turn IDLING with the report message the audit reads.
-# meiva:link schedules/docs/adversarial-eval.meiva.okf.md
+# meiva:link schedules/docs/adversarial-eval.md
 def worker_done(read: WorkerRead) -> bool:
     match read.phase:
         case WorkerPhase.TERMINATED:

@@ -78,7 +78,7 @@ def cdp_reachable(port: int) -> bool:
 # The launch line. `--restore-last-session` reopens the profile's last session, and
 # only a deliberate `meiva stop` asks for it (through the session ledger):
 # relaunching after a crash must not replay the tab set the profile died with.
-# meiva:link services/desktop/browser/docs/browser-session-restore.meiva.okf.md
+# meiva:link services/desktop/browser/docs/browser-session-restore.md
 def chrome_args(
     binary: str, port: int, profile: Path, *, restore_last_session: bool = False
 ) -> list[str]:

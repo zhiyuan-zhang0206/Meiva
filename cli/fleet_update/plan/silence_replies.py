@@ -3,7 +3,7 @@
 # A silence that cannot open or close costs the operator a noisier window, never the window
 # itself: the program prints `SILENCE failed` or `SILENCE skipped` and the window warns and goes
 # on.
-# meiva:link cli/docs/fleet-update-window/fleet-update-window.meiva.okf.md
+# meiva:link cli/docs/fleet-update-window/fleet-update-window.md
 
 from __future__ import annotations
 

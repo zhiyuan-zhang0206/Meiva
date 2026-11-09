@@ -97,7 +97,7 @@ function materializeNode(node: HTMLElement): boolean {
 // Resolve auto-sized rows up to and including the newly keyed anchor before reading
 // its position, keeping measured heights until reconciliation so off-screen rows do
 // not collapse back to intrinsic placeholders before paint.
-// meiva:link ui/web/src/docs/frontend-components/timeline-view/timeline-view.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/timeline-view/timeline-view.md
 function measureRenderedAnchor(viewport: HTMLElement, anchorNode: HTMLElement): number {
   materializeNode(anchorNode);
   let anchorTop = anchorNode.getBoundingClientRect().top;
@@ -152,7 +152,7 @@ function restoreAnchorScrollTop(viewport: HTMLElement, target: HTMLElement, scre
 // Transfer a visible reading row across a compact re-key before the next browser paint.
 // The store announces the transition before publishing it to React so layout measurement
 // captures pre-mutation screen coordinates even when multiple writes batch into one render.
-// meiva:link ui/web/src/docs/frontend-components/timeline-view/timeline-view.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/timeline-view/timeline-view.md
 export function useCompactTransitionAnchor(options: {
   controller: StickyController;
   viewportRef: { current: HTMLElement | null };
@@ -228,7 +228,7 @@ export function useCompactTransitionAnchor(options: {
       // meiva:note
       // A finite retention budget may exclude the anchor; fall back to the nearest
       // surviving coordinate in the same or adjacent segment.
-      // meiva:link ui/web/src/docs/frontend-components/timeline-view/timeline-view.meiva.okf.md
+      // meiva:link ui/web/src/docs/frontend-components/timeline-view/timeline-view.md
       let nearestDistance: [number, number, number] | null = null;
       for (const node of nodes) {
         const parts = nodeCoordinates(node, bufferedCoordinates).find((value) => value !== null);

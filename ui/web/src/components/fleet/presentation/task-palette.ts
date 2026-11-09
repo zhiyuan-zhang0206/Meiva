@@ -1,6 +1,6 @@
 // meiva:note
 // Task rendering, chrome and contracts share these module-owned palette records and legend values.
-// meiva:link ui/web/src/docs/frontend-components/fleet-view.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/fleet-view.md
 
 import type { TaskStatus, TaskSummaryRow } from "@/lib/contracts/types";
 

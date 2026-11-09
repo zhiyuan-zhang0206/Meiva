@@ -1,6 +1,6 @@
 # meiva:note
 # Every scan prints one headline: `batch <total> runs · judgeable <n> (<share>) · unknown <n> (<reason counts>) · scored <n>`. A run is judgeable when its label is `ok`, `fumbled` or `failed`; the share is judgeable over total, and `n/a` when the window is empty; `scored` counts runs whose `rubric.scores(record)["overall"]` is not `None`, so it tracks what the rubric could actually judge. `alert_verdict` decides the exit code in one order: an empty window is a data-quality failure of the source (`empty-window`, unless the TEST- filter explains it), a judgeable share below the floor is `data-quality: low-coverage` naming the largest unknown reason, a `failed` or `fumbled` run is `regression`, and anything else exits 0. The render prints the low-coverage alert line but never lists an unknown run as worth mining. The coverage floor and the header's timestamp are values the caller passes in (`ScanView`), so the whole report is a function of its inputs.
-# meiva:link meiva_builtins/skills/platform/meiva-self-evolution/docs/coverage-sentinel.meiva.okf.md
+# meiva:link meiva_builtins/skills/platform/meiva-self-evolution/docs/coverage-sentinel.md
 from __future__ import annotations
 
 import sys

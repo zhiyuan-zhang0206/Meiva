@@ -70,7 +70,7 @@ export interface EventStreamContextValue {
 // an unauthenticated GET would only feed a retry storm. A legacy source that the
 // server closes is probed once: an invalid session stops, anything else retries
 // with capped exponential backoff.
-// meiva:link ui/web/src/docs/frontend-data-flow/frontend-data-flow.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-data-flow/frontend-data-flow.md
 interface SseConnectionResult {
   subscribe: EventStreamContextValue["subscribe"];
   sseOpen: boolean;

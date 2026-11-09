@@ -67,7 +67,7 @@ class LoggingConnectionPool(AsyncConnectionPool[_CT]):
         # meiva:note
         # The borrow in flight on each task of THIS pool: `_getconn_unchecked` and
         # `_check_connection` run inside that task and add their share to its span.
-        # meiva:link agent/db/docs/db.meiva.okf.md
+        # meiva:link agent/db/docs/db.md
         self._pool_name = pool_name
         self._slow_acquire_warn_seconds = slow_acquire_warn_seconds
         self._borrow_spans: WeakKeyDictionary[asyncio.Task[object], _BorrowSpan] = (

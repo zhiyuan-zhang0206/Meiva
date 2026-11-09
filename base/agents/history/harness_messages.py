@@ -242,7 +242,7 @@ class _HarnessTimelineRow:
 # Insert the next flat activity or advance the revision of an existing one. None denotes
 # a sequence, identity, or revision conflict; an obsolete runtime raises before reading
 # or writing timeline items.
-# meiva:link base/agents/history/docs/timeline/timeline.meiva.okf.md
+# meiva:link base/agents/history/docs/timeline/timeline.md
 async def aupsert_harness_timeline_item(
     conn: AsyncConnection,
     agent_id: int,

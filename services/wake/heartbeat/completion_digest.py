@@ -118,7 +118,7 @@ class DigestRound(Protocol):
     async def run_round(self) -> None: ...
 
 
-# meiva:link services/wake/heartbeat/docs/completion-digest.meiva.okf.md
+# meiva:link services/wake/heartbeat/docs/completion-digest.md
 @dataclass(frozen=True)
 class CompletionDigestRound:
     pool: ConnectionPool
@@ -144,6 +144,6 @@ class CompletionDigestRound:
         )
 
 
-# meiva:link services/wake/heartbeat/docs/completion-digest.meiva.okf.md
+# meiva:link services/wake/heartbeat/docs/completion-digest.md
 async def completion_digest_loop(digest: DigestRound, progress: LoopProgress) -> None:
     await round_loop.run_rounds("completion-digest", progress, digest.interval_s, digest.run_round)

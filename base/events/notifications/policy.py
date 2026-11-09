@@ -32,7 +32,7 @@ def enabled_for(category: NotificationCategory, overrides: Mapping[str, bool]) -
 # A category is suppressed by the user's switch or by its dedupe window; nothing
 # else. A null dedupe key opts out of deduplication entirely, which is how a
 # once-per-turn category stays deliverable.
-# meiva:link base/events/notifications/docs/notifications.meiva.okf.md
+# meiva:link base/events/notifications/README.md
 def decide(
     category: NotificationCategory,
     *,

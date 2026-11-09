@@ -1,7 +1,7 @@
 # meiva:note
 # How a window reports a host that did not come up: the step it failed at and why, one line per
 # listed host in the matrix, and the exit that tells automation a partial up from a refusal.
-# meiva:link cli/docs/fleet-update-window/fleet-update-window.meiva.okf.md
+# meiva:link cli/docs/fleet-update-window/fleet-update-window.md
 
 from __future__ import annotations
 

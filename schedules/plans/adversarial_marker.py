@@ -6,7 +6,7 @@
 # found at the start of a batch means the previous process died mid-batch: that is recorded
 # as an alerted index line, its workers are terminated and the owner is woken. The index is
 # append-only JSON lines under `results/index.jsonl`.
-# meiva:link schedules/docs/adversarial-eval.meiva.okf.md
+# meiva:link schedules/docs/adversarial-eval.md
 
 from __future__ import annotations
 

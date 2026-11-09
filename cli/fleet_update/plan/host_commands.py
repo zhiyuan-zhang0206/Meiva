@@ -1,7 +1,7 @@
 # meiva:note
 # The shell text each host runs, as values. A window sends these over SSH unchanged: the hosts'
 # own checkout, venv and `meiva` do the work, and this module names the order of their words.
-# meiva:link cli/docs/fleet-update.meiva.okf.md
+# meiva:link cli/docs/fleet-update.md
 
 from __future__ import annotations
 

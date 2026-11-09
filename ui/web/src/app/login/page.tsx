@@ -14,7 +14,7 @@ import { cn } from "@/lib/format/utils";
 // meiva:note
 // `redirectHome` sends an already-authenticated session back to the conversation; the route builds
 // it from the router.
-// meiva:link ui/web/src/docs/frontend-state/frontend-state.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-state/frontend-state.md
 export interface LoginPageViewProps {
   status: ReturnType<typeof useAuth>["status"];
   redirectHome: () => void;
@@ -24,7 +24,7 @@ export interface LoginPageViewProps {
 // This route is the login page's composition root: it reads the session and the router and hands
 // the shell the two things the shell acts on, so a test renders the shell with a status and a spy
 // instead of replacing the auth module and `next/navigation`.
-// meiva:link ui/web/src/docs/frontend-state/frontend-state.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-state/frontend-state.md
 export default function LoginPage() {
   const { status } = useAuth();
   const router = useRouter();
@@ -37,7 +37,7 @@ export function LoginPageView({ status, redirectHome }: LoginPageViewProps) {
 
   // meiva:note
   // Redirect to home if already authenticated.
-  // meiva:link ui/web/src/docs/frontend-state/frontend-state.meiva.okf.md
+  // meiva:link ui/web/src/docs/frontend-state/frontend-state.md
   useEffect(() => {
     if (status === "authenticated") {
       redirectHome();

@@ -367,7 +367,7 @@ _GROWTH_GUIDE = (
     "presented as allowed. Pay the violation down; record it only when the exception is deliberate "
     "and the change explains it. `python -m meizel debt diff --by-target` shows what moved per "
     "target and `python -m meizel debt sites --code <code>` shows where it sits. See "
-    "meizel/docs/checker/debt/debt.meiva.okf.md and meizel/docs/checker/debt/diff.meiva.okf.md."
+    "meizel/docs/checker/debt/debt.md and meizel/docs/checker/debt/diff.md."
 )
 
 

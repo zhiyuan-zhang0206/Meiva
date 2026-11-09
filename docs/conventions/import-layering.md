@@ -5,7 +5,7 @@ not see. Read before adding an import that points "up", and when `meizel check` 
 
 **Source of truth.** The root `meizel.toml` (`[uses]`, and the recorded `[debt]` of the
 directories). This page says what the declarations mean; where the two differ, the manifests win.
-How the rule works: [the checker](../../meizel/docs/checker/checker.meiva.okf.md). Direction between
+How the rule works: [the checker](../../meizel/docs/checker/checker.md). Direction between
 modules of one package (`base.x` against `base.y`) is the manifest of that package.
 
 ## The stack
@@ -25,7 +25,7 @@ below them, in `base` (`base.api_contracts`) or `ops`.
 |---|---|
 | `base < meiva < agent < gateway < cli` | no declared edge pointing up the stack |
 | `services.agent_runner.agent_host` sits above `agent`; nothing below it imports it | nothing declares a use of `services`, below `cli` |
-| `services` does not import the agent kernel, except the hosted runner and the targets it uses | `"services/agent_runner/agent_host" = ["agent/...", ...]`: an edge narrowed to the one source and its listed targets ([narrowed endpoints](../../meizel/docs/checker/narrowing.meiva.okf.md)) |
+| `services` does not import the agent kernel, except the hosted runner and the targets it uses | `"services/agent_runner/agent_host" = ["agent/...", ...]`: an edge narrowed to the one source and its listed targets ([narrowed endpoints](../../meizel/docs/checker/narrowing.md)) |
 | `base` does not import `services` | `base` declares no use of `services` |
 | `services` does not import `cli` | `services` declares no use of `cli` |
 | `ops` imports `base` but not `gateway` or `cli`; `base` does not import `ops`; `gateway` and `cli` are independent | no edge from `ops` to `gateway` or `cli`, none from `base` to `ops` |
@@ -39,7 +39,7 @@ Legacy locality violations (such as test-only patches or remaining cross-package
 exemptions: each fact is a recorded debt in the manifest of the directory that owns it, counted per
 source and target, so a new violation fails `meizel check` and the recorded ones can only shrink. All
 `cycle-edge` debts across the repository have been eliminated (`0` remaining). `python -m meizel debt`
-shows what is left. See [recorded debt](../../meizel/docs/checker/debt/debt.meiva.okf.md).
+shows what is left. See [recorded debt](../../meizel/docs/checker/debt/debt.md).
 
 ## Packages outside the stack
 

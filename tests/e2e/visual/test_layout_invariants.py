@@ -23,7 +23,7 @@ from tests.e2e.visual.stubbed_home import (
     wait_layout_settled,
 )
 
-# meiva:link tests/e2e/visual/docs/layout-invariants.meiva.okf.md
+# meiva:link tests/e2e/visual/docs/layout-invariants.md
 VIEWPORTS = [320, 390, 768]
 
 
@@ -134,7 +134,7 @@ def _capture_inspector_states(page: Page, panel: Locator, prefix: str) -> None:
     page.screenshot(path=str(evidence / f"{prefix}-scroll.png"))
 
 
-# meiva:link tests/e2e/visual/docs/layout-invariants.meiva.okf.md
+# meiva:link tests/e2e/visual/docs/layout-invariants.md
 def test_timeline_scrollbar_hover_reveal(playwright_browser: Browser, frontend_target: str) -> None:
     ctx = new_context(playwright_browser, 1280)
     try:
@@ -290,7 +290,7 @@ def test_fleet_layout_invariants(
         ctx.close()
 
 
-# meiva:link tests/e2e/visual/docs/layout-invariants.meiva.okf.md
+# meiva:link tests/e2e/visual/docs/layout-invariants.md
 VIEWPORT_HEIGHT = 664
 KEYBOARD_HEIGHT = 480
 
@@ -407,7 +407,7 @@ def test_keyboard_edges_leave_the_shell_intact(
 def test_expanded_work_block_bounded_scroll_and_no_sticky(
     width: int, theme: str, playwright_browser: Browser, frontend_target: str
 ) -> None:
-    # meiva:link tests/e2e/visual/docs/layout-invariants.meiva.okf.md
+    # meiva:link tests/e2e/visual/docs/layout-invariants.md
     context = new_context(playwright_browser, width)
     try:
         page = open_page(
@@ -471,8 +471,8 @@ def test_expanded_work_block_bounded_scroll_and_no_sticky(
 # (`pt-0.5`, 2px). The jsdom half of these contracts is in composer.test.tsx /
 # footer.test.tsx / header-bar.test.tsx — those pin the classes, these measure
 # the pixels.
-# meiva:link ui/web/src/docs/frontend-components/home-shell-chrome/bottom-rules.meiva.okf.md
-# meiva:link ui/web/src/docs/frontend-components/home-shell-chrome/home-shell-chrome.meiva.okf.md
+# meiva:link ui/web/src/docs/frontend-components/home-shell-chrome/bottom-rules.md
+# meiva:link ui/web/src/docs/frontend-components/home-shell-chrome/home-shell-chrome.md
 BOTTOM_RULE_VIEWPORTS = [(768, 900), (1024, 900), (1440, 900), (1920, 1080)]
 BOTTOM_RULE_GAP_PX = 26
 SHELL_ICON_PX = 16
@@ -567,7 +567,7 @@ def test_bottom_rule_gap_is_halved(
 # the footer turns that case red; with the coupling gone the footer holds its own
 # band through the draft and through every chunk.
 #
-# meiva:link tests/e2e/visual/docs/layout-invariants.meiva.okf.md
+# meiva:link tests/e2e/visual/docs/layout-invariants.md
 STREAM_VIEWPORTS = [(1024, 900), (1440, 900)]
 STREAM_CHUNKS = 24
 DRAFT_LINES = 10
@@ -601,7 +601,7 @@ def _measure_bottom_rule(page: Page) -> dict[str, BottomRuleBox]:
 # a different one. The page is not measured until the stream reports a bound
 # handler and the seeded snapshot is on screen, so a dropped event fails loudly
 # instead of leaving the geometry an assertion about nothing.
-# meiva:link tests/e2e/visual/docs/layout-invariants.meiva.okf.md
+# meiva:link tests/e2e/visual/docs/layout-invariants.md
 def _open_scripted_stream(
     playwright_browser: Browser, width: int, height: int, base_url: str
 ) -> tuple[BrowserContext, Page]:

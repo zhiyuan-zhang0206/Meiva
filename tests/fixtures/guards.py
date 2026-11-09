@@ -195,7 +195,7 @@ def stub_everywhere(
     stub_boundaries(monkeypatch, ((module, name, stub),))
 
 
-# meiva:link tests/fixtures/docs/native-provisioning.meiva.okf.md
+# meiva:link tests/fixtures/docs/native-provisioning.md
 def stub_boundaries(
     monkeypatch: pytest.MonkeyPatch, boundaries: Sequence[tuple[object, str, object]]
 ) -> None:

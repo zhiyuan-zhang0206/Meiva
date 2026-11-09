@@ -4,7 +4,7 @@
 # start choices are forwarded unchanged, never checked against the diff. One choice is a set of
 # flags of which exactly one is given, so a required mutually exclusive argparse group would name
 # only the first missing one.
-# meiva:link cli/docs/fleet-update.meiva.okf.md
+# meiva:link cli/docs/fleet-update.md
 
 from __future__ import annotations
 

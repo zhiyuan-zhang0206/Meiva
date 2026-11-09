@@ -3,7 +3,7 @@
 # rows file), every script is dry-imported by a real child process, and the failure signal lands in
 # a real event pipeline. The decisions -- which rows are red, the exact lines, whether a signal is
 # owed -- are `sweep_outcome`'s and `child_verdict`'s, asserted as values in their own tests.
-# meiva:link cli/docs/operator-surfaces/operator-surfaces.meiva.okf.md
+# meiva:link cli/docs/operator-surfaces/operator-surfaces.md
 from __future__ import annotations
 
 import json

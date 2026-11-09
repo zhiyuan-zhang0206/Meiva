@@ -135,7 +135,7 @@ def test_with_harness_path_replaces_the_inherited_path_and_keeps_the_other_keys(
 # A unit that writes its own narrow PATH puts every service under it back on the OS
 # default, where `claude` and `agy` do not exist; the refusal names the unit and the
 # directories it dropped (#5491, #5495).
-# meiva:link base/lm/harness/docs/harness.meiva.okf.md
+# meiva:link base/lm/harness/docs/harness.md
 def test_a_unit_path_that_omits_a_harness_directory_is_refused(tmp_path: Path) -> None:
     with pytest.raises(HarnessPathIncompleteError) as raised:
         require_harness_paths("/usr/bin:/bin", home=tmp_path, what="the test unit PATH")

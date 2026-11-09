@@ -1,0 +1,37 @@
+# Task Escalation — Delegator Digest and Human Notice
+
+## Responsibility
+
+When reminders accumulate and the task's state has not changed, the daemon stops
+asking the owner and tells someone who can act: the task's manager, or the human
+queue when there is no live manager. The copy states that evidence and nothing
+more — see **Copy** below. The sweep that scans, reminds and backs off is
+[Task-Maintenance](task-maintenance.md)'s
+to state; this node holds the escalation rules and their boundary cases. Like the
+rest of the daemon it only sends messages and inserts notices, never modifies task
+status.
+
+## Escalate
+
+- **Escalate**: fires when a task has gone Fleet `task_escalate_n` (default 3) of its own cadence periods (`max(task_reminder_backoff_seconds, remind_interval_seconds)`) without a state change, and at least one reminder has reached its owner. The threshold counts cadence silence, not delivered reminders: the per-owner digest window throttles delivery, so counting reminders would let the window stretch the wait. The notice headline states that elapsed silence ("no state change for 12.4h; reassign or cancel") rather than a reminder count. Two paths: **with a manager** (`routing.nearest_manager`: the owner of the nearest ancestor task that is not terminated — the direct parent's owner in the common case, so an agent terminated after delegating cannot swallow the digest) → per-owner digest chat to that manager; **without one** → INSERT a require_response `agent_notices` on the owner (`task_id`=that task, `priority` inherited, headline "Task #N \"title\" — no state change for <elapsed>; reassign or cancel"). The notice attaches to the agent but **audience is human**: the human queue reads it, and the spine stages its `core.needs_input` delivery in the same transaction, so the stall also pings the user. The delegation path is **at most once per overdue window**: it fires at `>=` threshold while `escalated_at` is unset, and the delivered digest's own transaction stamps `escalated_at` (a failed delivery leaves it unset and the next sweep retries; a write the policy counts clears it with the reminder counters, re-arming the next window — by default a note counts, so answering a reminder with a log line re-arms it). The user path uses `>=` (an already-open notice **skips the round and retries next sweep**, so slipping past the threshold never permanently misses the window), and the sent notice itself is the idempotency marker, keeping "at most one open notice per agent". Candidate discovery does not authorize delivery: each batch locks current tasks and their discovered parents in stable id order with `FOR NO KEY UPDATE SKIP LOCKED`, then rechecks the task window and current parent owner. Locked or newly reparented tasks defer to a later sweep. All recipient identities are locked in stable id order; human notice open checks and local-id allocation share the gateway creator's physical `agents` lock. Digest insertion and escalation markers commit together in one batch transaction; a failure rolls the entire batch back. Live hints and `task_escalation` telemetry follow commit. Resolving a human notice still permits a later sweep to re-alert.
+
+## Copy
+
+Both legs describe the task, not the owner. The evidence this pass holds is
+`reminder_count`, the task's state (nothing has been recorded on it since the
+reminders began) and the ancestor owners; a note restarts the window exactly like a
+change to the work does, so consecutive reminders mean the task saw neither. An
+owner that answered in chat, worked in a shell or advanced a peer's task is
+indistinguishable here from one that is gone, and the same words have to serve both — so neither
+message may describe the owner's condition at all; both state the reminders and the
+unchanged state, and end in an action. Liveness does exist in `agents_meta` and
+`routing.nearest_manager` reads it, but only to choose a recipient: it is not a
+claim about the owner (2026-10-30 ruling, task #5862). The reminder digest made
+the same correction earlier (user ruling 2026-10-17: a check-in, not an overdue
+verdict).
+
+## Entry Points
+
+- `meiva_builtins/plugins/meiva_fleet/task_maintenance/escalation.py` — accepts escalation from locked current state, before any live hints
+
+Parent: [Task-Maintenance](task-maintenance.md).

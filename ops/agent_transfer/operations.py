@@ -5,7 +5,7 @@
 #   snapshot `session_index`, and packing `<home>/workspaces/<agent_id>`.
 # - `prepare_target_op`, `import_workspace_op`, `finalize_transfer_op`, `abort_transfer_op`: serve
 #   the four `POST /ops` arms on target and source runners.
-# meiva:link gateway/agents/docs/agent-transfer.meiva.okf.md
+# meiva:link gateway/agents/docs/agent-transfer.md
 
 from __future__ import annotations
 

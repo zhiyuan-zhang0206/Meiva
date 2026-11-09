@@ -4,7 +4,7 @@
 #
 # Known workers are read with `get_status` and `get_last_message` by id and never by listing the
 # directory. `plan_wait` decides after every poll; this module sleeps and terminates as it says.
-# meiva:link schedules/docs/adversarial-eval.meiva.okf.md
+# meiva:link schedules/docs/adversarial-eval.md
 
 from __future__ import annotations
 

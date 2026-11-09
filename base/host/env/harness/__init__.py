@@ -1,6 +1,6 @@
 # meiva:note
 # External harness catalog specifications, binary resolution, and convergence engine.
-# meiva:link base/lm/harness/docs/cli-convergence.meiva.okf.md
+# meiva:link base/lm/harness/docs/cli-convergence.md
 
 from __future__ import annotations
 

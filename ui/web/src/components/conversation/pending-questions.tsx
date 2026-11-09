@@ -15,7 +15,7 @@ import { dropOpenNotices } from "@/lib/notifications/use-notices";
 // meiva:note
 // The collapsed bar has one stable row above the composer. Answers expand over
 // the timeline without resizing it; hidden mounted forms retain every draft.
-// meiva:link ui/web/src/docs/frontend-state/shared-context/questions.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-state/shared-context/questions.md
 export function PendingQuestions({ questions, failed, maxWidthCss }: {
   questions: readonly NoticeItem[];
   failed: boolean;

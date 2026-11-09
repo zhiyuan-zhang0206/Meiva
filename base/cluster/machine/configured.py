@@ -1,6 +1,6 @@
 # meiva:note
 # Configuration-backed machine identity owner for composition roots.
-# meiva:link base/cluster/machine/docs/machine.meiva.okf.md
+# meiva:link base/cluster/machine/docs/machine.md
 
 from __future__ import annotations
 

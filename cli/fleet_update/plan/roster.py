@@ -3,7 +3,7 @@
 # commit. A host this run already knows failed to start is expected to be offline, so waiting the
 # whole roster window for it would turn one host's failure into everybody's timeout. Machines the
 # roster lists that the window was not asked about are reported and never block.
-# meiva:link cli/docs/fleet-update.meiva.okf.md
+# meiva:link cli/docs/fleet-update.md
 
 from __future__ import annotations
 

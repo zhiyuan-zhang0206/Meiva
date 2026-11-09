@@ -1,7 +1,7 @@
 // meiva:note
 // What a row's canvas would draw, as one string that changes exactly when one of its inputs does, so a
 // render that changes nothing visible costs no paint; a test changes them one at a time.
-// meiva:link ui/web/src/docs/frontend-components/run-timeline/run-timeline.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/run-timeline/run-timeline.md
 
 import { useSyncExternalStore } from "react";
 

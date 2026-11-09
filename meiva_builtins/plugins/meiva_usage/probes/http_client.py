@@ -1,6 +1,6 @@
 # meiva:note
 # HTTP JSON client implementation using standard library urllib.
-# meiva:link meiva_builtins/plugins/meiva_usage/docs/meiva_usage.meiva.okf.md
+# meiva:link meiva_builtins/plugins/meiva_usage/README.md
 
 from __future__ import annotations
 
@@ -38,7 +38,7 @@ def _read_body(
 # meiva:note
 # Execute an HTTP request and parse JSON response without leaking secrets.
 # Scheme is validated to http/https; urllib is used for zero third-party dependencies.
-# meiva:link meiva_builtins/plugins/meiva_usage/docs/meiva_usage.meiva.okf.md
+# meiva:link meiva_builtins/plugins/meiva_usage/README.md
 def urllib_json_fetcher(req: HttpJsonRequest) -> Mapping[str, object]:
     parsed_url = urllib.parse.urlparse(req.url)
     if parsed_url.scheme not in ("http", "https"):

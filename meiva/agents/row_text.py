@@ -1,7 +1,7 @@
 # meiva:note
 # Relative ages describe elapsed time, not local wall-clock changes. The SDK facade supplies
 # aware timestamps; this value-only formatter keeps the existing unit and negative-age rules.
-# meiva:link meiva/agents/docs/relative-age.meiva.okf.md
+# meiva:link meiva/agents/docs/relative-age.md
 
 from datetime import UTC, datetime
 

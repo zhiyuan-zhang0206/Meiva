@@ -7,7 +7,7 @@
 # Cluster probe sub-fan-out lives here because /api/status is the
 # consumer; agent-runner probes go through a `status_probe` op
 # round-trip so it stays at constant wall-time regardless of N machines.
-# meiva:link gateway/cluster/docs/ops-surfaces.meiva.okf.md
+# meiva:link gateway/cluster/docs/ops-surfaces.md
 
 from __future__ import annotations
 
@@ -229,7 +229,7 @@ def _compute_stats_dashboard(
 # The runtime values behind plugin-declared status cards, for the response.
 # Not windowed: a plugin value is a point in time (`PluginStat`), and the console
 # joins these rows against `contributions.ui.stats` declarations by `(plugin, id)`.
-# meiva:link gateway/cluster/docs/ops-surfaces.meiva.okf.md
+# meiva:link gateway/cluster/docs/ops-surfaces.md
 def _plugin_stat_rows(pool: ConnectionPool) -> list[PluginStat]:
     return [
         PluginStat(

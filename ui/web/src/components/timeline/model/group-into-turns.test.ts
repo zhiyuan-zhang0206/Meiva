@@ -244,7 +244,7 @@ describe("groupIntoTurns", () => {
   // meiva:note
   // A note marker is content the agent read, so it stays inside the work block
   // instead of being filtered out (user ruling 2026-11-09).
-  // meiva:link ui/web/src/docs/frontend-components/timeline-view/markers.meiva.okf.md
+  // meiva:link ui/web/src/docs/frontend-components/timeline-view/markers.md
   it("keeps a note marker inside the work block", () => {
     const items = [
       item("agent_reasoning"),

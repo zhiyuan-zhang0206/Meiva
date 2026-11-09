@@ -76,7 +76,7 @@ class FakeEngine:
     # The turn engine as the node sees it: a protocol member or two and one call.
     # Recording the submission is what lets a test say which messages the harness
     # received and under which key, without a provider or a process.
-    # meiva:link agent/graph/docs/harness-turn.meiva.okf.md
+    # meiva:link agent/graph/docs/harness-turn.md
     def __init__(
         self,
         reply: str = "MEIVA_DISPLAY_TO_USER\nthe answer",
@@ -257,7 +257,7 @@ async def test_a_turn_logs_usage_under_the_harness(loguru_records: LogRecords) -
 # an unpriced bill must leave a hole in a row, never take the reply with it. The usage
 # here carries more cache reads than prompt tokens, which is exactly what `quote`
 # rejects — the shape a provider produces when the adapter misreports its fields.
-# meiva:link agent/graph/docs/harness-turn.meiva.okf.md
+# meiva:link agent/graph/docs/harness-turn.md
 async def test_an_unpriceable_usage_keeps_the_reply_and_reports_the_gap(
     loguru_records: LogRecords,
 ) -> None:
@@ -326,7 +326,7 @@ async def test_a_faulted_session_settles_the_turn_as_a_fatal_stream_abort(
 # or whose submission was refused settles the turn with a reported abort and idles for
 # the next inbound, the same way a dead model stream does. Before this, the exception
 # escaped the node and cost the host a crash per wake.
-# meiva:link agent/graph/docs/harness-turn.meiva.okf.md
+# meiva:link agent/graph/docs/harness-turn.md
 async def test_a_session_that_cannot_start_settles_the_turn_as_a_fatal_stream_abort() -> None:
     class UnstartableEngine(FakeEngine):
         async def run_turn(
@@ -399,7 +399,7 @@ async def test_replayed_completion_does_not_log_provider_usage_twice(
 # whole life while its transcript held the text (#5511, measured on codex / claude /
 # antigravity agents on 2026-10-21). The harness node now stamps it where the native one
 # does, so the reader needs no branch of its own.
-# meiva:link agent/graph/docs/harness-turn.meiva.okf.md
+# meiva:link agent/graph/docs/harness-turn.md
 async def test_a_completed_turn_stamps_the_reply_as_the_last_message(
     redis_url: str,
     db_conn: psycopg.Connection,

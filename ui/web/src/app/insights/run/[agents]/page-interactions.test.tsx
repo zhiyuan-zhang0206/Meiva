@@ -113,7 +113,7 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-// meiva:link ui/web/src/docs/frontend-components/run-timeline/axis-and-keyboard.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/run-timeline/axis-and-keyboard.md
 function wheel(target: Element, init: WheelEventInit, count = 1) {
   act(() => {
     for (let i = 0; i < count; i++) {

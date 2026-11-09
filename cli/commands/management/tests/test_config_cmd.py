@@ -1,4 +1,4 @@
-# meiva:link cli/docs/config.meiva.okf.md
+# meiva:link cli/docs/config.md
 from __future__ import annotations
 
 import os

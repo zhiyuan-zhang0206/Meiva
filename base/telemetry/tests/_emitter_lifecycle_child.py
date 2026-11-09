@@ -57,7 +57,7 @@ def owned_writer() -> None:
 # says so for the first one only. A raise here would fail the business write these calls sit in;
 # silence would make a blind process read as an idle one. `remove()` leaves one sink so the
 # parent counts records rather than copies of one record.
-# meiva:link base/telemetry/docs/telemetry.meiva.okf.md
+# meiva:link base/telemetry/README.md
 def cold_emit() -> None:
     logger.remove()
     logger.add(sys.stderr, enqueue=False)
@@ -73,7 +73,7 @@ def cold_emit() -> None:
 # A producer that answers `NoPipelineFactoryError` is declaring an absence, not failing: three
 # emissions over two causes, one line per cause, and no traceback anywhere. `remove()` leaves
 # one sink so the parent counts records rather than copies of one record.
-# meiva:link base/telemetry/docs/telemetry.meiva.okf.md
+# meiva:link base/telemetry/README.md
 def emit_without_a_factory() -> None:
     logger.remove()
     logger.add(sys.stderr, enqueue=False)
@@ -94,7 +94,7 @@ def emit_without_a_factory() -> None:
 # meiva:note
 # The other half of the same seam: a producer whose own defect is a real sink failure keeps the
 # report and the traceback. Folding it into the one-line absence would swallow the failure.
-# meiva:link base/telemetry/docs/telemetry.meiva.okf.md
+# meiva:link base/telemetry/README.md
 def failing_producer() -> None:
     logger.remove()
     logger.add(sys.stderr, enqueue=False)

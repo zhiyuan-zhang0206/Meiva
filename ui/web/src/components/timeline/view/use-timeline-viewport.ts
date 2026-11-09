@@ -67,7 +67,7 @@ export function useTimelineViewport({
   // layout: the reserve is a height the stream consumes, so it belongs to this
   // pass and not to a later one, where the reader would see the reserve and the
   // growth fight for one frame.
-  // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.meiva.okf.md
+  // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.md
   maintainSendAnchor: () => void;
 }) {
   useEffect(() => {
@@ -91,7 +91,7 @@ export function useTimelineViewport({
 
       // meiva:note
       // The reader moved: that movement is the position from here on, so the bookmark and the hold that protected it are both spent. Keeping the hold alive here silenced the controller (holding reads every scroll as "none"), which is how a restored reader who then scrolled to the bottom stopped following for good.
-      // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.meiva.okf.md
+      // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.md
       if (direction !== "none" && !isPrependEcho) {
         pendingRestoreRef.current = null;
         holdRestoredPositionRef.current = false;
@@ -151,7 +151,7 @@ export function useTimelineViewport({
       // could otherwise compare against a stale baseline. The pin below re-seats
       // the reader anyway, which is why this pass records the height and does
       // not declare a shrink.
-      // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.meiva.okf.md
+      // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.md
       controller.recordContentHeight(snapshot());
       prepareHistoryPull(viewport);
       applyPendingRestore(viewport);

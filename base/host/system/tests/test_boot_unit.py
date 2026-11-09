@@ -129,7 +129,7 @@ def test_render_unit_binds_home_and_checkout(ctx: BootUnitContext) -> None:
 # The unit's PATH is the one every service under it inherits, so it must reach the
 # directories harness CLIs install into; the check names the unit and the missing
 # directories rather than letting a spawn fail later (#5491, #5495).
-# meiva:link base/lm/harness/docs/harness.meiva.okf.md
+# meiva:link base/lm/harness/docs/harness.md
 def test_the_unit_path_reaches_every_harness_directory(ctx: BootUnitContext) -> None:
     unit = render_unit(ctx)
     match = re.search(r'Environment="PATH=([^"]+)"', unit)

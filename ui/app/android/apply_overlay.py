@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# meiva:link ui/app/docs/app.meiva.okf.md
+# meiva:link ui/app/docs/app.md
 
 from __future__ import annotations
 
@@ -58,7 +58,7 @@ def patch_manifest(manifest_xml: str) -> str:
 
 _MAIN_ACTIVITY_MARKER = "// Meiva system-bar insets overlay."
 
-# meiva:link ui/app/docs/android-shell-chrome.meiva.okf.md
+# meiva:link ui/app/docs/android-shell-chrome.md
 _MAIN_ACTIVITY_INSETS = """
     {marker}
     val meivaContent = findViewById<View>(android.R.id.content)

@@ -4,7 +4,7 @@
 # file's lines set an environment variable the settings singleton models, and the text of a finding
 # and of the summary. The shell locates the repository, reads the policy, walks the scan
 # directories, reads each judged file and prints.
-# meiva:link meizel/docs/meizel.meiva.okf.md
+# meiva:link meizel/docs/meizel.md
 
 from __future__ import annotations
 

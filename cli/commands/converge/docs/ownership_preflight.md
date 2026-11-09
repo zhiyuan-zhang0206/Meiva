@@ -1,0 +1,25 @@
+# Converge Ownership Preflight
+
+`cli/commands/converge/ownership_preflight.py` is the first converge step
+(`CONVERGE_STEPS[0]`), running before the `$MEIVA_HOME` directory skeleton and
+every write-capable step so the repair command always prints before any step can
+fail on a foreign-owned path. On POSIX it compares `Path.stat().st_uid` to the
+current user (`ctx.host.uid`) for the home directory, `.env`, `logs/`, `configs/`,
+`secrets/`, and the source tree when it exists.
+
+The step is a thin shell: it stats the key paths and reads the user's names, and
+`ownership_plan.py` (a `strict` pure module) turns those values into the warnings,
+the repair commands, and the banner and log lines. A test hands the plan owners it
+wants, or runs the shell over a real home with a `Host` whose `uid` differs from the
+files' owner.
+
+This is a heuristic rather than an exhaustive ownership audit: it checks only
+these top-level paths, while each printed `chown -R` repair command covers the
+relevant subtree.
+
+Findings are warning-only: converge and start continue, while the console and
+`$MEIVA_HOME/logs/ownership_preflight.log` name each foreign-owned path and its
+exact `sudo chown -R <user>:<group> <path>` repair command. It intentionally
+does not chown automatically. If the root-owned log directory itself prevents
+the log write, the console warning remains and explains that the log is
+unavailable. Non-POSIX backends skip the check.

@@ -1,6 +1,6 @@
 // meiva:note
 // Explicit one-process producer: sources and locked compiler inputs are hashed, never evaluated.
-// meiva:link meizel/docs/checker/typescript-evidence.meiva.okf.md
+// meiva:link meizel/docs/checker/typescript-evidence.md
 
 import fs from 'node:fs';
 import path from 'node:path';

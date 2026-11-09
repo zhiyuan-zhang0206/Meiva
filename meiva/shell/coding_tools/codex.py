@@ -54,7 +54,7 @@ from .plans.pacing import CodexWaits, Pacing
 # OPENAI_API_KEY outranks the ChatGPT login in `~/.codex/auth.json` and bills per token.
 # `env -u` removes it rather than blanking it: the CLI asks whether the variable is
 # present. The names come from the adapter's one list, not a second copy.
-# meiva:link base/lm/harness/codex/docs/codex.meiva.okf.md
+# meiva:link base/lm/harness/codex/docs/codex.md
 _DROP_CREDENTIALS: str = "env " + " ".join(f"-u {name}" for name in SECRET_ENV_NAMES) + " "
 
 DEFAULT_TTL_SECONDS = 4 * 3600

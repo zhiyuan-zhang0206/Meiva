@@ -8,7 +8,7 @@ from base.telemetry.delivery.reporting import report_sink_failure
 PLUGIN_ACTIVATION_EVENT = "plugin_activation"
 
 
-# meiva:link base/packages/plugins/docs/runtime-contributions.meiva.okf.md
+# meiva:link base/packages/plugins/docs/runtime-contributions.md
 def record(
     plugin: str | None,
     surface: SurfaceId,

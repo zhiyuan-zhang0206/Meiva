@@ -8,7 +8,7 @@
 # value somebody must edit on purpose, in a diff a reviewer sees. This table is that value. Adding
 # a workflow, removing one, or changing any `on:` block turns this test red, and the fix is to say
 # out loud what changed -- not to teach the test to accept it.
-# meiva:link .github/ci-workflow.meiva.okf.md
+# meiva:link .github/ci-workflow.md
 from __future__ import annotations
 
 from pathlib import Path

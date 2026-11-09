@@ -1,6 +1,6 @@
 # meiva:note
 # What an llm turn and a compaction mean for understanding chunks, decided from values: nothing, the segment's baseline, or a chunk to enqueue with the state that follows it. The shell in understanding_chunks.py reads the config, enqueues, and writes the state; the trigger rule itself is base's `plan_chunk`.
-# meiva:link agent/hooks/docs/hooks.meiva.okf.md
+# meiva:link agent/hooks/docs/hooks.md
 from __future__ import annotations
 
 from dataclasses import dataclass

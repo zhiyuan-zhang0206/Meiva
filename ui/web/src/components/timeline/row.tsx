@@ -25,14 +25,14 @@ import { inboundKind, isSilentTimelineItem } from "./model/runs";
 // meiva:note
 // How long a touch keeps the chrome band up: long enough to read the time and
 // reach Copy, short enough that it is gone before the next message is read.
-// meiva:link ui/web/src/docs/frontend-components/timeline-view/card-chrome.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/timeline-view/card-chrome.md
 const TOUCH_REVEAL_MS = 6000;
 
 // meiva:note
 // Per-item card-config WeakMap cache keyed on item reference so unchanged rows
 // receive a reference-stable CardConfig across streaming commits and preserve
 // TimelineRow's memo.
-// meiva:link ui/web/src/docs/frontend-components/timeline-view/streaming-rows.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/timeline-view/streaming-rows.md
 const configCache = new WeakMap<BackendTimelineItem, CardConfig | null>();
 export function cardConfigFor(item: BackendTimelineItem): CardConfig | null {
   if (configCache.has(item)) return configCache.get(item) ?? null;
@@ -47,7 +47,7 @@ export function cardConfigFor(item: BackendTimelineItem): CardConfig | null {
 // sharing right-aligned CARD_FOOTER_CLS below the block), secondary items render
 // as collapsible MessageCard rows inside TurnBlocks, and config === null renders
 // bare ephemeral markers.
-// meiva:link ui/web/src/docs/frontend-components/timeline-view/timeline-view.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/timeline-view/timeline-view.md
 export const TimelineRow = memo(function TimelineRow({
   item,
   config,
@@ -65,7 +65,7 @@ export const TimelineRow = memo(function TimelineRow({
   // meiva:note
   // True when a secondary item's body is expanded and settled; combined with
   // config.copy to gate the inline Copy button on secondary message cards.
-  // meiva:link ui/web/src/docs/frontend-components/timeline-view/card-chrome.meiva.okf.md
+  // meiva:link ui/web/src/docs/frontend-components/timeline-view/card-chrome.md
   copyable: boolean;
   onToggle: (id: string, kind: BackendTimelineItem["kind"]) => void;
   timelineSource?: "buffer" | "canonical";
@@ -79,7 +79,7 @@ export const TimelineRow = memo(function TimelineRow({
   // meiva:note
   // Coarse touch pointers lack hover, so touching a primary message or copyable
   // secondary card reveals its chrome band temporarily and hides it again after TOUCH_REVEAL_MS.
-  // meiva:link ui/web/src/docs/frontend-components/timeline-view/card-chrome.meiva.okf.md
+  // meiva:link ui/web/src/docs/frontend-components/timeline-view/card-chrome.md
   const [touchRevealed, setTouchRevealed] = useState(false);
   const revealTimer = useRef<number | null>(null);
   const revealForTouch = useCallback((event: ReactPointerEvent) => {
@@ -114,7 +114,7 @@ export const TimelineRow = memo(function TimelineRow({
   // below-card timestamps and float a hover-revealed Copy pill inside the
   // expanded body's bottom-right corner when `config.copy` is true (inter-agent
   // messages and non-user-facing agent_chat) so inter-card spacing stays uniform.
-  // meiva:link ui/web/src/docs/frontend-components/timeline-view/card-chrome.meiva.okf.md
+  // meiva:link ui/web/src/docs/frontend-components/timeline-view/card-chrome.md
   const isUploadRow =
     item.kind === "inbound_chat" &&
     (item.source === "system:upload" || Boolean(item.files?.length));

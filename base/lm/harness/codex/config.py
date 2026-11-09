@@ -20,7 +20,7 @@ APPROVAL_DECISIONS = ("accept", "decline")
 # when it is set to "untrusted"/"on-request" the server asks the bridge and
 # `approval_decision` answers. `model=None` inherits the codex config default
 # instead of pinning an id that the account may not serve.
-# meiva:link base/lm/harness/codex/docs/codex.meiva.okf.md
+# meiva:link base/lm/harness/codex/docs/codex.md
 @dataclass(frozen=True, slots=True)
 class CodexConfig:
     cwd: Path

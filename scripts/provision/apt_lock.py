@@ -11,7 +11,7 @@
 #
 # Exit 0 = free (now or after waiting); 1 = still held when the ceiling expired; 2 = the
 # lock could not be inspected — apt's lock file is root-owned, so run this under sudo.
-# meiva:link scripts/provision/docs/apt-lock.meiva.okf.md
+# meiva:link scripts/provision/docs/apt-lock.md
 
 from __future__ import annotations
 
@@ -33,7 +33,7 @@ EXIT_UNINSPECTABLE = 2
 # A missing lock file means nothing holds it — the caller is about to run apt, which
 # creates the file itself with the ownership the platform expects. Creating it here could
 # leave a lock file apt cannot use.
-# meiva:link scripts/provision/docs/apt-lock.meiva.okf.md
+# meiva:link scripts/provision/docs/apt-lock.md
 def lock_is_free(path: Path) -> bool:
     if not path.exists():
         return True
@@ -58,7 +58,7 @@ def lock_is_free(path: Path) -> bool:
 # Only used to explain an expired wait: the verdict itself comes from the lock probe, which
 # is the same mechanism apt uses. /proc answers on Linux only, so an empty result means
 # "could not say", never "nobody".
-# meiva:link scripts/provision/docs/apt-lock.meiva.okf.md
+# meiva:link scripts/provision/docs/apt-lock.md
 def holders(path: Path) -> list[int]:
     proc = Path("/proc")
     if not proc.is_dir():

@@ -4,7 +4,7 @@
 // <ApiProvider>. Both helpers mount the same two providers the app mounts -- a fake browser
 // and the fake transport -- and nest a caller's own wrapper inside them, so a test composes
 // the real tree with fakes and no test replaces a module.
-// meiva:link ui/web/src/docs/frontend-state/browser-port.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-state/browser-port.md
 import {
   render as rtlRender,
   renderHook as rtlRenderHook,

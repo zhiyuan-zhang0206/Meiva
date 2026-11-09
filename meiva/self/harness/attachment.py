@@ -20,7 +20,7 @@
 # its role is complete. Everything else that a caller might forbid — spawning
 # agents, scheduling, spending on `understand` — is a review convention, not a
 # runtime rule.
-# meiva:link meiva/self/harness/docs/harness-attach.meiva.okf.md
+# meiva:link meiva/self/harness/docs/harness-attach.md
 
 from __future__ import annotations
 

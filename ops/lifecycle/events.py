@@ -87,7 +87,7 @@ async def publish_notice_resolved(
 # This is the inbox hint only. The delivery decision for a notice that needs an
 # answer is staged in the notice's own transaction and announced by the producer
 # after it commits, so the hint and the user-facing event cannot disagree.
-# meiva:link base/events/notifications/docs/notifications.meiva.okf.md
+# meiva:link base/events/notifications/README.md
 async def publish_notice_posted(
     bus: EventBus,
     agent_id: int,

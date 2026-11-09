@@ -21,6 +21,7 @@ from pathlib import Path
 from psycopg import Connection
 
 from base.events.alarms import mark_delivered, mark_notified, open_alarms, record
+from base.host.boundary.json_values import is_object_dict, is_object_list
 from base.daemon.schedules.inputs import ScheduleInputs
 from base.native_process.root_control.client import RootClientError, root_process
 from base.sessions.backend import get_shell_backend
@@ -93,7 +94,7 @@ _FIRES = (
 # itself so a later move cannot leave the record pointing at a path that no longer exists. An alarm
 # waits this long before a round reports it: the sender is still inside its request before that, and
 # a ten-minute round that reported its own fresh alarm would tell the lead twice.
-# meiva:link base/events/alarms/docs/alarms.meiva.okf.md
+# meiva:link base/events/alarms/README.md
 _REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
 _SOURCE = Path(__file__).resolve().relative_to(_REPOSITORY_ROOT).as_posix()
 _ALARM_NOT_BEFORE = timedelta(minutes=15)
@@ -102,7 +103,7 @@ _ALARM_NOT_BEFORE = timedelta(minutes=15)
 # meiva:note
 # The message call this job performs, passed in by the composition root: a test hands in the
 # refusal it needs to see recorded, and nothing here resolves the SDK's sender by name.
-# meiva:link base/events/alarms/docs/alarms.meiva.okf.md
+# meiva:link base/events/alarms/README.md
 SendMessage = Callable[[int, str], None]
 
 
@@ -110,7 +111,7 @@ SendMessage = Callable[[int, str], None]
 # One message a round will send, with the record of why: `kind` is the rung (`wake`, `report`,
 # `escalate`, `seats`), `subject` the duty or owner it is about, `judgement` the reading that made
 # it fire, and `reading` the numbers behind that judgement.
-# meiva:link base/events/alarms/docs/alarms.meiva.okf.md
+# meiva:link base/events/alarms/README.md
 @dataclass(frozen=True)
 class Notice:
     kind: str
@@ -126,7 +127,7 @@ class Notice:
 # transport's answer is appended to the same record. A refusal comes back as its reason -- a line
 # in the round, never the end of it -- and a send that raised still leaves a record the next round
 # can read, which is what one refused send on 2026-10-28 did not.
-# meiva:link base/events/alarms/docs/alarms.meiva.okf.md
+# meiva:link base/events/alarms/README.md
 def send_notice(home: Path, notice: Notice, *, now: datetime, send: SendMessage) -> str | None:
     alarm = record(
         home,
@@ -152,7 +153,7 @@ def send_notice(home: Path, notice: Notice, *, now: datetime, send: SendMessage)
 # The reader every guard on this host shares: the alarms no transport took, told to the lead once,
 # then closed against the next round. A report that fails leaves them open and is named on the
 # line; the report itself is not recorded, because a report about alarms must not become one.
-# meiva:link base/events/alarms/docs/alarms.meiva.okf.md
+# meiva:link base/events/alarms/README.md
 def report_pending_alarms(
     home: Path, *, now: datetime, report_agent: int, send: SendMessage
 ) -> tuple[str, ...]:
@@ -171,7 +172,7 @@ def report_pending_alarms(
 # meiva:note
 # What the alarm's record keeps of the observation behind it: the numbers a reader can weigh
 # without asking the round what it meant.
-# meiva:link base/events/alarms/docs/alarms.meiva.okf.md
+# meiva:link base/events/alarms/README.md
 def _reading(observation: Observation) -> str:
     parts = [f"sessions={observation.sessions}"]
     if observation.active_minutes is not None:
@@ -232,6 +233,14 @@ def observe(conn: Connection, entry: WatchedAgent, *, now: datetime) -> Observat
     return Observation(status, sessions, active_minutes, paused_minutes, late, tuple(unread))
 
 
+def _float_or_zero(value: object) -> float:
+    if not value:
+        return 0.0
+    if isinstance(value, int | float | str):
+        return float(value)
+    raise TypeError(type(value).__name__)
+
+
 def read_state(path: Path) -> dict[int, WatchState]:
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
@@ -239,14 +248,15 @@ def read_state(path: Path) -> dict[int, WatchState]:
         return {}
     states: dict[int, WatchState] = {}
     for key, value in payload.items():
-        if not isinstance(value, dict):
+        if not is_object_dict(value):
             continue
+        silent = value.get("silent_since")
         try:
             states[int(key)] = WatchState(
-                silent_since=value.get("silent_since"),
-                last_wake_at=float(value.get("last_wake_at") or 0.0),
-                last_report_at=float(value.get("last_report_at") or 0.0),
-                last_escalate_at=float(value.get("last_escalate_at") or 0.0),
+                silent_since=float(silent) if isinstance(silent, int | float) else None,
+                last_wake_at=_float_or_zero(value.get("last_wake_at")),
+                last_report_at=_float_or_zero(value.get("last_report_at")),
+                last_escalate_at=_float_or_zero(value.get("last_escalate_at")),
             )
         except (TypeError, ValueError):
             continue
@@ -405,21 +415,21 @@ def read_seat_state(path: Path) -> dict[int, SeatState]:
         payload = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return {}
-    if not isinstance(payload, dict) or payload.get("version") != 1:
+    if not is_object_dict(payload) or payload.get("version") != 1:
         return {}
     agents = payload.get("agents")
-    if not isinstance(agents, dict):
+    if not is_object_dict(agents):
         return {}
     states: dict[int, SeatState] = {}
     for key, value in agents.items():
-        if not isinstance(value, dict):
+        if not is_object_dict(value):
             continue
         try:
             agent_id = int(key)
         except ValueError:
             continue
         raw = value.get("absent")
-        absent = tuple(str(item) for item in raw) if isinstance(raw, list) else ()
+        absent = tuple(str(item) for item in raw) if is_object_list(raw) else ()
         woke = value.get("woke_at")
         states[agent_id] = SeatState(
             absent=absent, woke_at=float(woke) if isinstance(woke, int | float) else None

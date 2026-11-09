@@ -60,7 +60,7 @@ describe("CopyButton feedback state machine", () => {
 // (timeline/buttons.tsx) nor a body-level one (PythonCode / EnvelopeContent).
 // A whitelist, not "everything except …", so a kind added later must opt in
 // instead of inheriting a button (user 2026-10-29).
-// meiva:link ui/web/src/docs/frontend-components/timeline-view/card-chrome.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/timeline-view/card-chrome.md
 describe("Copy is scoped to message text (per-kind whitelist)", () => {
   const cases: {
     label: string;
@@ -161,7 +161,7 @@ describe("Copy is scoped to message text (per-kind whitelist)", () => {
 // The hover band itself (position, reveal, focus, touch) is unchanged by the
 // whitelist; these assertions pin that it still exists wherever a kind does
 // offer Copy.
-// meiva:link ui/web/src/docs/frontend-components/timeline-view/card-chrome.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/timeline-view/card-chrome.md
 describe("block-level copy actions (hover band)", () => {
   it("marks a visible publication read via invisible anchor while keeping hover reveal on the footer", async () => {
     resetTransport();
@@ -246,7 +246,7 @@ describe("block-level copy actions (hover band)", () => {
 
   // meiva:note
   // The reveal itself is CSS (`group-hover`/`group-focus-within`) and jsdom has no paint engine to evaluate it, so the tests pin the structure the browser turns into the behavior: hidden means no paint AND no hit-testing, focus inside the card reveals it for keyboard users, and a touch brings it up for a few seconds because a phone has no hover to gate on.
-  // meiva:link ui/web/src/docs/frontend-components/timeline-view/card-chrome.meiva.okf.md
+  // meiva:link ui/web/src/docs/frontend-components/timeline-view/card-chrome.md
   it("footer is hidden and click-through until the card is hovered or focused", () => {
     render(
       <TimelineView
@@ -268,7 +268,7 @@ describe("block-level copy actions (hover band)", () => {
     expect(band?.className).toContain("group-focus-within/msgcard:pointer-events-auto");
     // meiva:note
     // Nothing keeps it painted on a coarse pointer: a phone reveals it by touch.
-    // meiva:link ui/web/src/docs/frontend-components/timeline-view/card-chrome.meiva.okf.md
+    // meiva:link ui/web/src/docs/frontend-components/timeline-view/card-chrome.md
     expect(band?.className).not.toContain("pointer-coarse:opacity-100");
   });
   it("reveals the footer when the block is touched, and only then", () => {
@@ -276,7 +276,7 @@ describe("block-level copy actions (hover band)", () => {
     // A phone has no hover, so touching the block brings the time and Copy up for
     // a few seconds; leaving the band painted put chrome under every message for
     // good (user 2026-10-22).
-    // meiva:link ui/web/src/docs/frontend-components/timeline-view/card-chrome.meiva.okf.md
+    // meiva:link ui/web/src/docs/frontend-components/timeline-view/card-chrome.md
     render(<TimelineView items={[makeItem({ kind: "agent_chat", payload: "ok" })]} />);
     const band = screen.getByLabelText("Copy message").parentElement;
     const row = screen.getByLabelText("Copy message").closest(".timeline-item");
@@ -300,7 +300,7 @@ describe("block-level copy actions (hover band)", () => {
     // meiva:note
     // The stamp is 9px and the band 12px; at the body's size-3 the glyph read as
     // visibly bigger than the time beside it (user 2026-10-22).
-    // meiva:link ui/web/src/docs/frontend-components/timeline-view/card-chrome.meiva.okf.md
+    // meiva:link ui/web/src/docs/frontend-components/timeline-view/card-chrome.md
     render(<TimelineView items={[makeItem({ kind: "agent_chat", payload: "ok" })]} />);
     const icon = screen.getByLabelText("Copy message").querySelector("svg");
     expect(icon?.getAttribute("class")).toContain("size-2.5");
@@ -493,7 +493,7 @@ describe("splitEnvelope idx === 0 boundary", () => {
 // The pin is driven by the thread key alone, consumed by one useLayoutEffect;
 // a send reaches the timeline only as ordinary content growth. jsdom does not
 // render scroll, so the pin itself stays covered by sticky.test.ts.
-// meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.md
 describe("force-scroll: renders without a scroll-token prop", () => {
   it("mounts and renders content (the pin needs no prop)", () => {
     render(<TimelineView items={[makeItem({ kind: "agent_chat", payload: "x" })]} />);

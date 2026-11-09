@@ -2,7 +2,7 @@
 # The lifecycle requests the SDK sends for one agent, as values: the same contract as
 # `meiva/gateway_client/plans.py`. The actor a call acts as and the idempotency keys are minted by
 # the facade and arrive here as strings.
-# meiva:link meiva/agents/docs/agents.meiva.okf.md
+# meiva:link meiva/agents/docs/agents.md
 from __future__ import annotations
 
 from collections.abc import Mapping

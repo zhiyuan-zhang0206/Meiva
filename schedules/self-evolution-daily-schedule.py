@@ -1,4 +1,4 @@
-# meiva:link schedules/docs/self-evolution.meiva.okf.md
+# meiva:link schedules/docs/self-evolution.md
 
 import os
 import sys
@@ -20,7 +20,7 @@ _REPORT_AGENT_ENV = "MEIVA_SELF_EVOLUTION_DAILY_REPORT_AGENT"
 # The measured full day is about 113 minutes with two collect streams running
 # (2026-09-25), so 180 minutes is roughly 1.6x contended time: the bound separates a slow
 # scan from a wedged one, and the extra margin only delays wedge detection.
-# meiva:link schedules/docs/self-evolution.meiva.okf.md
+# meiva:link schedules/docs/self-evolution.md
 _SCAN_TIMEOUT_SECONDS = 10800
 
 

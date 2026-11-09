@@ -148,7 +148,7 @@ async def wait_gone(
 # A session's process tree plus its root, as `{pid: command}`. `descendants` answers a
 # different question — what the process started — and a close has to wait for both, since
 # the root is what holds the transcript.
-# meiva:link base/lm/harness/docs/harness.meiva.okf.md
+# meiva:link base/lm/harness/docs/harness.md
 def watch_tree(probe: ChildProbe, pid: int | None) -> dict[int, str]:
     watched = snapshot(probe, pid)
     if pid is not None:
@@ -163,7 +163,7 @@ def watch_tree(probe: ChildProbe, pid: int | None) -> dict[int, str]:
 # "closed" while its CLI still holds the transcript is the one state the next session
 # on that agent must not race. The wait is bounded by the adapter's own settle window,
 # and what is left over is reported, never rounded up to success.
-# meiva:link base/lm/harness/docs/harness.meiva.okf.md
+# meiva:link base/lm/harness/docs/harness.md
 async def settle_close(
     probe: ChildProbe,
     observed: Mapping[int, str],
@@ -180,7 +180,7 @@ async def settle_close(
         # private transport structure, so a shape change leaves it permanently None and
         # an "all gone" report would be a zero-value fallback dressed up as a total.
         # `interrupt()` already answers `settled=None` here; a close answers the same.
-        # meiva:link base/lm/harness/docs/harness.meiva.okf.md
+        # meiva:link base/lm/harness/docs/harness.md
         logger.info(
             "[{label}] {body}",
             label="harness",

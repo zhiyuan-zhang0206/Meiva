@@ -66,7 +66,7 @@ def build_chat_inbound(
     # its text is scanned before entering the conversation. The scan runs on the raw
     # content before envelope wrapping: the framing around it is trusted text and must not
     # trip the scan itself, and image blocks are binary.
-    # meiva:link agent/messages/docs/message-format.meiva.okf.md
+    # meiva:link agent/messages/docs/message-format.md
     scan_src = f"inbound.chat:{item.source}"
     raw_blocks = item.payload.get("content_blocks") if item.payload else None
     if not _is_object_list(raw_blocks):

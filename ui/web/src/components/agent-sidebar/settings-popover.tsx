@@ -19,13 +19,13 @@ import { FLEX, FLEX_1 } from "@/lib/layout/layout";
 // and two gears in one column read as the same destination (user 2026-10-20).
 // The waiting count is NOT here - it is a live signal, and it moved to the
 // header badge.
-// meiva:link ui/web/src/docs/frontend-components/agent-sidebar.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/agent-sidebar.md
 
 const SORT_KEYS: readonly FlatSortKey[] = ["id", "last_active", "status"];
 // meiva:note
 // The keys are wire field names (`last_active`), not words: each one carries a
 // label so the menu never shows a raw key.
-// meiva:link ui/web/src/docs/frontend-components/agent-sidebar.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/agent-sidebar.md
 const SORT_LABEL: Record<FlatSortKey, (t: (key: "sortId" | "sortActivity" | "status") => string) => string> = {
   id: (t) => t("sortId"),
   last_active: (t) => t("sortActivity"),

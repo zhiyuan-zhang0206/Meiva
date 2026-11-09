@@ -1,4 +1,4 @@
-# meiva:link gateway/routers/docs/upload-batches.meiva.okf.md
+# meiva:link gateway/routers/docs/upload-batches.md
 
 from __future__ import annotations
 

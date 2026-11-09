@@ -4,7 +4,7 @@ from typing import Literal
 # Each constant is narrowed to its own Literal so narrow goto types like
 # `Command[Literal["before_exec", "after_exec"]]` accept `goto=BEFORE_EXEC`;
 # annotating with the broader `NodeName` would fail narrow Command type checks.
-# meiva:link agent/graph/docs/graph.meiva.okf.md
+# meiva:link agent/graph/docs/graph.md
 CLAIM: Literal["claim"] = "claim"
 BEFORE_LLM: Literal["before_llm"] = "before_llm"
 LLM: Literal["llm"] = "llm"
@@ -17,7 +17,7 @@ INIT_CONTEXT: Literal["init_context"] = "init_context"
 # The whole turn of a non-native harness: claim routes here instead of before_llm when
 # the agent runs on an external CLI, because that CLI owns the model call, the tool
 # calls and the transcript in one loop. The native nodes never run under it.
-# meiva:link agent/graph/docs/harness-turn.meiva.okf.md
+# meiva:link agent/graph/docs/harness-turn.md
 HARNESS_TURN: Literal["harness_turn"] = "harness_turn"
 
 # meiva:note
@@ -28,7 +28,7 @@ END: Literal["__end__"] = "__end__"
 # meiva:note
 # Every legal `Command(goto=...)` target. END is included because any node or hook
 # may route to graph termination (for example, a terminate co-batched with other work).
-# meiva:link agent/graph/docs/graph.meiva.okf.md
+# meiva:link agent/graph/docs/graph.md
 NodeName = Literal[
     "claim",
     "before_llm",

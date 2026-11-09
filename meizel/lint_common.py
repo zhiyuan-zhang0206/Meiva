@@ -255,14 +255,14 @@ def _missing_frontend_dependencies(stderr: str) -> str | None:
 # meiva:note
 # This I/O boundary starts one tool-owned analyzer with JSON stdin and bounded heap/time.
 # Successful fact production is not a semantic purity proof of the scanned code.
-# meiva:link meizel/docs/frontend-deps.meiva.okf.md
+# meiva:link meizel/docs/frontend-deps.md
 def run_node_analyzer(
     tree: SourceTree, producer: Path, payload: str, *, frontend: Path | None = None
 ) -> str:
     # meiva:note
     # A frontend tree this checkout did not install from its own lockfile answers for a graph the
     # lockfile does not describe, so the refusal happens before node starts and names the fix.
-    # meiva:link meizel/docs/frontend-deps.meiva.okf.md
+    # meiva:link meizel/docs/frontend-deps.md
     if frontend is not None:
         state = classify(observe(tree, frontend))
         if state is not FrontendDeps.READY:

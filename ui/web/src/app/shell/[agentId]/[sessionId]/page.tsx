@@ -84,7 +84,7 @@ function useResolvedTheme(theme: TerminalTheme): "light" | "dark" {
 // This route is the shell monitor's composition root: it resolves the route params and the history
 // entry (both `next/navigation` reads) and hands them to the view, so a test passes values instead
 // of replacing the router module.
-// meiva:link ui/web/src/docs/frontend-state/frontend-state.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-state/frontend-state.md
 export default function ShellMonitorPage() {
   const params = useParams<{ agentId: string; sessionId: string }>();
   const { bfcacheId } = useRouter();
@@ -104,7 +104,7 @@ export function ShellMonitorView({ params, bfcacheId }: ShellMonitorViewProps) {
   // promise) needs a state+effect unwrap, which left the first commit (and the whole SSR output)
   // on the invalid-params branch -- the "full page reload" flash on entry. Number() keeps the NaN
   // guard for broken links (/shell/NaN/NaN).
-  // meiva:link ui/web/src/docs/frontend-state/frontend-state.meiva.okf.md
+  // meiva:link ui/web/src/docs/frontend-state/frontend-state.md
   const agentId = Number(params.agentId);
   const sessionId = Number(params.sessionId);
   const validParams = Number.isFinite(agentId) && Number.isFinite(sessionId);
@@ -251,7 +251,7 @@ export function ShellMonitorView({ params, bfcacheId }: ShellMonitorViewProps) {
   // green: a failing poll turns it amber + "stale" while the pane keeps showing the last-good
   // output below, and a healthy poll is green + "live". The terminal pane below is theme-aware via
   // that toggle.
-  // meiva:link ui/web/src/docs/frontend-state/frontend-state.meiva.okf.md
+  // meiva:link ui/web/src/docs/frontend-state/frontend-state.md
   return (
     <main id="main-content" className={cn("h-full bg-background text-foreground", FLEX, MIN_H_0, FLEX_COL)}>
       <header className={cn("items-center gap-3 border-b border-border px-3 py-2 sm:px-4", FLEX)}>

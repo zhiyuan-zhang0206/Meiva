@@ -29,7 +29,7 @@ def _caller(**overrides: object) -> dict[str, object]:
 # meiva:note
 # A state-changing request carries who asked; a verb that changes nothing
 # rejects the block instead of silently dropping it.
-# meiva:link base/native_process/root_control/docs/lifecycle-caller.meiva.okf.md
+# meiva:link base/native_process/root_control/docs/lifecycle-caller.md
 def test_a_down_request_carries_its_caller() -> None:
     request = parse_request(
         json.dumps({"verb": "down", "name": "gateway", "caller": _caller()}).encode()

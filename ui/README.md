@@ -1,0 +1,9 @@
+# User interfaces
+
+The UI domain is organized around a strict three-layer boundary:
+
+1. **Core HTTP/SSE contracts** ([Gateway](../gateway/docs/gateway.md)) — authentication, agent lifecycle, timeline, fleet supervision, and delivered notification events.
+2. **Shared web console** ([Frontend](web/docs/web.md)) — the single Next.js product UI served behind the gate for both browser tabs and native shells.
+3. **Native host shell** ([Meiva App](app/docs/app.md)) — one thin Tauri 2 application for **macOS and Android** that loads the remote web console and adds only platform-native capabilities (window/tray residency, Keystore/env auto-login, event-driven local notifications, and native updates) across the typed `window.__MEIVA_APP__` host bridge (`ui/web/src/components/app/bridge.ts`).
+
+Their component nodes own implementation details; this overview defines the layer boundary without duplicating them.

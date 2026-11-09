@@ -48,7 +48,7 @@ export type AgentEntry =
   | { id: number; status: "loading" }
   | { id: number; status: "failed" };
 
-// meiva:link ui/web/src/docs/frontend-components/run-timeline/axis-and-keyboard.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/run-timeline/axis-and-keyboard.md
 export function RunTimelineRows({
   entries,
   base,
@@ -202,7 +202,7 @@ export function RunTimelineRows({
   // meiva:note
   // The arrows that are lit and land on a block light that block with them, so an arrow's landing point
   // reads as one block instead of a place in a dense lane.
-  // meiva:link ui/web/src/docs/frontend-components/run-timeline/agent-links.meiva.okf.md
+  // meiva:link ui/web/src/docs/frontend-components/run-timeline/agent-links.md
   const linkTargets = new Map<number, Set<string>>();
   for (const arrow of [hoverArrow, linkKeys.length === 0 ? null : { members: linkKeys }]) {
     if (arrow === null) continue;
@@ -285,7 +285,7 @@ export function RunTimelineRows({
   // meiva:note
   // The narrowed class is taken out of the highlight before the callback runs: a property read does
   // not keep its narrowing inside a closure, and naming the value is what makes the call safe.
-  // meiva:link ui/web/src/docs/frontend-components/run-timeline/run-timeline.meiva.okf.md
+  // meiva:link ui/web/src/docs/frontend-components/run-timeline/run-timeline.md
   const sourceClass = highlight?.cls === "human" || highlight?.cls === "agent" ? highlight.cls : null;
   const sources =
     sourceClass === null ? [] : [...new Set(agents.flatMap((agent) => inboundSources(agent.data.units, sourceClass)))].sort();

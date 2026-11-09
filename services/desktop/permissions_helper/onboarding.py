@@ -63,7 +63,7 @@ def gate_host(
 
 # meiva:note
 # After requesting, the gate re-probes and reports what the system says. A child that reports 'granted' while the system still denies leaves the item denied, and a request that raised no dialog (macOS answers a denied or already-asked grant silently) leaves the grant exactly as it was.
-# meiva:link services/desktop/permissions_helper/docs/onboarding.meiva.okf.md
+# meiva:link services/desktop/permissions_helper/docs/onboarding.md
 def check(*, host: GateHost, now: datetime, run_id: str) -> GateReport:
     if host.client is None:
         return gate.not_applicable(now)
@@ -141,7 +141,7 @@ def _ask_items(
 
 # meiva:note
 # onboard probes first and then asks. An automatic pass (the converge step, so every start) requests exactly the rows the system reports not_determined -- Screen Recording and Accessibility through the helper's `request_grants`, folders and Automation targets through their own children. A row whose record is denied is not asked again automatically, and a stale row (record granted, helper not restarted) is never asked at all: neither can be resolved by another dialog. An explicit pass (the `meiva permissions onboard` verb, the console's Ask button) also asks denied prompt-mode rows, which is the only way back to a denied grant without a terminal. No caller attests that a person is present: a dialog nobody answers stays pending, and that cost was chosen over discovering a missing grant in the middle of a task.
-# meiva:link services/desktop/permissions_helper/docs/onboarding.meiva.okf.md
+# meiva:link services/desktop/permissions_helper/docs/onboarding.md
 def onboard(
     *,
     host: GateHost,
@@ -178,7 +178,7 @@ def defer(*, host: GateHost, now: datetime) -> None:
     gate.mark_deferred(now=now, path=host.record_path)
 
 
-# meiva:link services/desktop/permissions_helper/docs/onboarding.meiva.okf.md
+# meiva:link services/desktop/permissions_helper/docs/onboarding.md
 def restart_helper() -> str:
     return (
         "The permissions helper re-reads a grant only at process start, and it is the"

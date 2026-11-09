@@ -6,7 +6,7 @@
 # revision by the rollout's update legs, with `meiva skill update` as the manual way. The
 # bound separates a slow scan from a wedged one: a measured full day is about 113 minutes with
 # two collect streams running (2026-09-25), and the timeout is roughly 1.6x that.
-# meiva:link schedules/docs/self-evolution.meiva.okf.md
+# meiva:link schedules/docs/self-evolution.md
 
 from __future__ import annotations
 

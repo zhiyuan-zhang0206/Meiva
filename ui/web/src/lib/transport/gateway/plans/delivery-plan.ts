@@ -75,7 +75,7 @@ function unexpected(state: DeliveryState, event: DeliveryEvent): Error {
 // the server never saw the message, so the original body is posted once more with
 // the same id. A definite refusal ends the send at once; ambiguity that lasts
 // through every attempt becomes an unconfirmed delivery the caller keeps a draft for.
-// meiva:link ui/web/src/docs/frontend-state/api-requests.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-state/api-requests.md
 export function nextDeliveryStep(state: DeliveryState, event: DeliveryEvent): DeliveryStep {
   switch (state.stage) {
     case "start":

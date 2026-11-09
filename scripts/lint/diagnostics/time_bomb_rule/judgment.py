@@ -2,7 +2,7 @@
 # The three rules and their messages: rule 1 judges source files, rules 2 and 3
 # judge test files. The wording of every finding is part of the contract other
 # suites quote, so a sentence change here is a change of contract.
-# meiva:link scripts/lint/docs/time-bomb-rule-parts.meiva.okf.md
+# meiva:link scripts/lint/docs/time-bomb-rule-parts.md
 
 from __future__ import annotations
 

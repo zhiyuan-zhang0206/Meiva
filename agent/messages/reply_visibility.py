@@ -1,6 +1,6 @@
 # meiva:note
 # Inspect generated assistant text and build model-only visibility feedback.
-# meiva:link base/agents/messages/docs/metadata-contracts.meiva.okf.md
+# meiva:link base/agents/messages/docs/metadata-contracts.md
 
 from datetime import datetime
 

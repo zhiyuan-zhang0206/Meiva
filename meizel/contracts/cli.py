@@ -31,7 +31,7 @@ __all__ = ["CommandDeps", "build_parser", "dispatch"]
 
 # meiva:note
 # This text is consumed by argparse as native CLI help, not discarded source prose.
-# meiva:link meizel/docs/checker/checker.meiva.okf.md
+# meiva:link meizel/docs/checker/checker.md
 _DESCRIPTION = (
     "Command line: check, explain, impacted, tests, sync --prune, bootstrap, debt and roles."
 )

@@ -1,6 +1,6 @@
 # meiva:note
 # Pure payload and credential parsing functions for meiva_usage.
-# meiva:link meiva_builtins/plugins/meiva_usage/docs/meiva_usage.meiva.okf.md
+# meiva:link meiva_builtins/plugins/meiva_usage/README.md
 
 from __future__ import annotations
 

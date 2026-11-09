@@ -4,7 +4,7 @@
 // The footer's icon row is ordered by standing state first, navigation second: the
 // unresolved-alert bell leads it, ahead of Fleet (user 2026-10-21), and renders only
 // while the count is non-zero.
-// meiva:link ui/web/src/docs/frontend-components/agent-sidebar.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/agent-sidebar.md
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, screen } from "@testing-library/react";
@@ -67,7 +67,7 @@ describe("SidebarFooter icon row", () => {
   // report 2026-10-29 — a divider that followed the composer's line read as its
   // own apparatus) nor borrows the composer's band (its `pt-3 pb-6` padding and
   // `min-h-9` control row), which would make the footer's rule derive from the composer's.
-  // meiva:link ui/web/src/docs/frontend-components/home-shell-chrome/bottom-rules.meiva.okf.md
+  // meiva:link ui/web/src/docs/frontend-components/home-shell-chrome/bottom-rules.md
   it("keeps its own band height instead of tracking the composer", () => {
     renderFooter(<SidebarFooter activeAgentId={7} />);
     const footer = screen.getByTestId("sidebar-footer");
@@ -89,7 +89,7 @@ describe("SidebarFooter icon row", () => {
     // meiva:note
     // User ruling 2026-10-29: the composer's upload glyph (16px) is the
     // reference for the shell's icon buttons.
-    // meiva:link ui/web/src/docs/frontend-components/home-shell-chrome/home-shell-chrome.meiva.okf.md
+    // meiva:link ui/web/src/docs/frontend-components/home-shell-chrome/home-shell-chrome.md
     renderFooter(<SidebarFooter activeAgentId={7} />);
     const icons = screen.getByTestId("sidebar-footer").querySelectorAll("svg");
     expect(icons.length).toBeGreaterThan(0);

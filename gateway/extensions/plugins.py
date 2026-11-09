@@ -1,4 +1,4 @@
-# meiva:link gateway/extensions/docs/inventory.meiva.okf.md
+# meiva:link gateway/extensions/docs/inventory.md
 
 from pathlib import Path
 from typing import Literal

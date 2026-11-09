@@ -1,6 +1,6 @@
 # meiva:note
 # Reverse Python import closure over a repository snapshot, backed by the checkout SQLite cache.
-# meiva:link meizel/docs/checker/checker.meiva.okf.md
+# meiva:link meizel/docs/checker/checker.md
 
 from __future__ import annotations
 

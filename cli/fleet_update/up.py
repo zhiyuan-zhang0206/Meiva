@@ -6,7 +6,7 @@
 # behind a single abort that leaves the remaining hosts untouched. The one dependency is the
 # gateway: a runner joins the cluster through it, so when it did not start the runners are not
 # attempted (each would only fail on the unreachable gateway) and the matrix says so.
-# meiva:link cli/docs/fleet-update-window/fleet-update-window.meiva.okf.md
+# meiva:link cli/docs/fleet-update-window/fleet-update-window.md
 
 from __future__ import annotations
 
@@ -63,7 +63,7 @@ def _start_one(
     return None
 
 
-# meiva:link cli/docs/fleet-update-window/fleet-update-window.meiva.okf.md
+# meiva:link cli/docs/fleet-update-window/fleet-update-window.md
 def up(s: Session, args: FleetArgs) -> list[HostFailure]:
     # meiva:note
     # Start the gateway first and then all runners in parallel, then verify every host: one

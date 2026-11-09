@@ -24,7 +24,7 @@ class NotificationKind(StrEnum):
 # meiva:note
 # Classify the notification envelope here. The payload of `item/started` or
 # `item/completed` determines which bridge event the item produces.
-# meiva:link base/lm/harness/codex/docs/codex.meiva.okf.md
+# meiva:link base/lm/harness/codex/docs/codex.md
 _KINDS = {
     "item/agentMessage/delta": NotificationKind.TEXT_DELTA,
     "item/reasoning/summaryTextDelta": NotificationKind.REASONING_DELTA,
@@ -44,7 +44,7 @@ _KINDS = {
 # a turn-scoped notification, the `turn` object's own id for `turn/completed` — so a message that
 # names a turn this session never bound has an owner of its own and no ticket adopts it (#5663).
 # An empty `turn` is every kind that carries no completed turn.
-# meiva:link base/lm/harness/docs/attribution.meiva.okf.md
+# meiva:link base/lm/harness/docs/attribution.md
 @dataclass(frozen=True, slots=True)
 class Inbound:
     kind: NotificationKind
@@ -69,7 +69,7 @@ class ItemStep:
 # the partial state gathered under an older name — a name that changed mid-turn is the provider
 # replaying another turn's transcript, and what was gathered under the old name is not ours
 # (#5663).
-# meiva:link base/lm/harness/docs/attribution.meiva.okf.md
+# meiva:link base/lm/harness/docs/attribution.md
 @dataclass(frozen=True, slots=True)
 class Bind:
     name: str
@@ -136,7 +136,7 @@ class Settlement:
 # One app-server connection serves one thread, and a notification naming another one belongs to work
 # this session never asked for: a fork, or a thread the CLI opened for itself. The protocol puts
 # `threadId` on every turn-scoped notification, so the check is one look-up (#5663).
-# meiva:link base/lm/harness/docs/attribution.meiva.okf.md
+# meiva:link base/lm/harness/docs/attribution.md
 def inbound(method: str, params: RequestParams, *, session_id: str | None) -> Inbound | None:
     kind = _KINDS.get(method)
     if kind is None:
@@ -171,7 +171,7 @@ def item(kind: NotificationKind, params: RequestParams) -> ItemStep:
 # has answered. Binding that name is what lets the items that follow be attributed without
 # guessing: only a turn this session is in the middle of starting may take a name, so a name
 # announced at any other moment belongs to a turn we did not start (#5663).
-# meiva:link base/lm/harness/docs/attribution.meiva.okf.md
+# meiva:link base/lm/harness/docs/attribution.md
 def binding(container: RequestParams, *, previous: str | None, starting: bool) -> Bind | None:
     if not starting:
         return None
@@ -185,7 +185,7 @@ def binding(container: RequestParams, *, previous: str | None, starting: bool) -
 # An error the server will not retry, on a turn this session is not running, is news about the
 # provider rather than a verdict on our turn: the caller routes it to the sink instead of ending a
 # wait it has nothing to do with (#5663).
-# meiva:link base/lm/harness/docs/attribution.meiva.okf.md
+# meiva:link base/lm/harness/docs/attribution.md
 def error_report(params: RequestParams) -> ErrorReport | None:
     if bool(params.get("willRetry", False)):
         return None
@@ -196,7 +196,7 @@ def error_report(params: RequestParams) -> ErrorReport | None:
 # meiva:note
 # The reply a completed turn carries, read out for a turn this session did not run: it is content
 # nobody here has read, and the only part of such a turn worth handing on (#5663).
-# meiva:link base/lm/harness/docs/attribution.meiva.okf.md
+# meiva:link base/lm/harness/docs/attribution.md
 def unclaimed_text(turn: RequestParams) -> str:
     items = turn.get("items")
     if not is_object_list(items):

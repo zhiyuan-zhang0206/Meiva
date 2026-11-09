@@ -1,6 +1,6 @@
 # meiva:note
 # What the MCP daemon decides before it binds its socket, as values: which socket the launch arguments name, whether a live occupant forbids starting, and which other daemon processes are ghosts of this unit that must be reaped first. The shell in `_guards.py` reads the process table and the socket and kills what these functions select.
-# meiva:link meiva/mcps/docs/mcps.meiva.okf.md
+# meiva:link meiva/mcps/docs/mcps.md
 from __future__ import annotations
 
 from collections.abc import Iterable, Sequence

@@ -24,7 +24,7 @@ CLOCK_READ_TIMEOUT_S = 2.0
 # above. It must outlast a restart's interrupt grace, the interrupt poll and the unwind
 # that follows the abort, or the graceful exit would cancel a turn its own restart was
 # about to interrupt.
-# meiva:link services/agent_runner/agent_host/lifecycle/docs/graceful-exit.meiva.okf.md
+# meiva:link services/agent_runner/agent_host/lifecycle/docs/graceful-exit.md
 HOST_GRACEFUL_EXIT_DRAIN_S = 30.0
 
 # meiva:note
@@ -33,7 +33,7 @@ HOST_GRACEFUL_EXIT_DRAIN_S = 30.0
 # turn's next boundary without cutting anything short. Cancel and terminate interrupt at
 # once. The age is the restart row's own `created_at`, read by the interrupt watcher's poll
 # (`agent.db.pending_interrupt_reason`).
-# meiva:link agent/graph/docs/turn-interrupts.meiva.okf.md
+# meiva:link agent/graph/docs/turn-interrupts.md
 RESTART_INTERRUPT_GRACE_S = 10.0
 
 # meiva:note

@@ -6,7 +6,7 @@
 // as a right-aligned user bubble and unboxed canvas Markdown prose respectively,
 // while secondary work items inside TurnBlocks render through borderless
 // MessageCard + CardHeader (chevron + icon + title/summary).
-// meiva:link ui/web/src/docs/frontend-components/timeline-view/card-chrome.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/timeline-view/card-chrome.md
 
 import {
   Bot,
@@ -50,17 +50,17 @@ export interface CardConfig {
   // block shows the conversation the agent had instead of a stack of collapsed
   // headers (user ruling 2026-11-09). False for machinery steps (thinking, code,
   // output, compact envelopes, the system prompt, lifecycle and memory markers).
-  // meiva:link ui/web/src/docs/frontend-components/timeline-view/deep-collapse.meiva.okf.md
+  // meiva:link ui/web/src/docs/frontend-components/timeline-view/deep-collapse.md
   readonly fixedDefault: boolean;
   // meiva:note
   // Whether the card stamps the item's timestamp in its right-aligned hover footer.
-  // meiva:link ui/web/src/docs/frontend-components/timeline-view/card-chrome.meiva.okf.md
+  // meiva:link ui/web/src/docs/frontend-components/timeline-view/card-chrome.md
   readonly showTimestamp: boolean;
   // meiva:note
   // Explicit per-kind Copy whitelist: only human/agent inbound_chat and agent_chat
   // offer Copy; machinery kinds (thinking, tool calls/output, system prompt,
   // attach, system notes) offer none.
-  // meiva:link ui/web/src/docs/frontend-components/timeline-view/card-chrome.meiva.okf.md
+  // meiva:link ui/web/src/docs/frontend-components/timeline-view/card-chrome.md
   readonly copy: boolean;
 }
 
@@ -219,7 +219,7 @@ export function messageCardConfig(item: BackendTimelineItem): CardConfig | null 
 // primary messages (`.timeline-item` 1rem bottom padding + -1rem margin hand-back
 // in globals.css), right-aligned for both human bubbles and agent prose, and
 // stays invisible/click-through until hovered, focused, or touch-revealed.
-// meiva:link ui/web/src/docs/frontend-components/timeline-view/card-chrome.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/timeline-view/card-chrome.md
 export const CARD_FOOTER_CLS = cn(
   "absolute bottom-0 right-1 h-3 items-center justify-end gap-1.5 sm:right-1.5",
   "pointer-events-none opacity-0 transition-opacity duration-150 motion-reduce:transition-none",

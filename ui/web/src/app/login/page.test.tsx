@@ -2,7 +2,7 @@
 // LoginPageView tests — session-aware shell around LoginForm: loading shows the "Checking session"
 // placeholder, an already-authenticated session redirects home, otherwise the page renders the
 // form. The shell takes the session status and the redirect as required props; the form is real.
-// meiva:link ui/web/src/docs/frontend-state/frontend-state.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-state/frontend-state.md
 import { cleanup, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -14,7 +14,7 @@ import { LoginPageView } from "./page";
 // meiva:note
 // The form authenticates through the real `AuthProvider` reading the fake transport the test
 // door mounts, so the shell's status and the form's login are both real values here.
-// meiva:link ui/web/src/docs/frontend-state/browser-port.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-state/browser-port.md
 function withAuth({ children }: { children: React.ReactNode }) {
   return <AuthProvider>{children}</AuthProvider>;
 }

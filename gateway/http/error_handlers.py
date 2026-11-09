@@ -51,7 +51,7 @@ async def meiva_agent_error_handler(request: Request, exc: MeivaAgentError) -> J
     )
 
 
-# meiva:link gateway/docs/error-responses-and-middleware-order.meiva.okf.md
+# meiva:link gateway/docs/error-responses-and-middleware-order.md
 def cors_headers(request: Request) -> dict[str, str]:
 
     origin = request.headers.get("origin")

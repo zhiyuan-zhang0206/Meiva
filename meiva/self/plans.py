@@ -41,7 +41,7 @@ _UPDATE_PAUSED_UNTIL = (
 # meiva:note
 # One statement the `meiva.self` shell runs on its cursor. The lifecycle entries decide what
 # to write here, as values; the shell owns the transaction, the cursor and the wake.
-# meiva:link meiva/self/docs/self.meiva.okf.md
+# meiva:link meiva/self/README.md
 @dataclass(frozen=True, slots=True)
 class SqlStatement:
     sql: LiteralString
@@ -52,7 +52,7 @@ class SqlStatement:
 # The rows a self-restart writes, in order: the overlay merge when one was given, then the
 # restart inbound carrying it. The overlay arrives already validated and normalised by the
 # shell, which checks the final stored pair under the row lock before running these.
-# meiva:link meiva/self/docs/self.meiva.okf.md
+# meiva:link meiva/self/README.md
 def restart_statements(
     agent_id: int, message: str, config_overlay: Mapping[str, object] | None
 ) -> tuple[SqlStatement, ...]:
@@ -79,7 +79,7 @@ def compact_statement(agent_id: int, summary: str) -> SqlStatement:
 # meiva:note
 # A heartbeat pause must be a positive number of seconds no larger than the configured
 # limit; the limit is the shell's reading of the agent's setting, passed in as a value.
-# meiva:link meiva/self/docs/self.meiva.okf.md
+# meiva:link meiva/self/README.md
 def pause_duration(duration: float, limit: float) -> float:
     if not duration > 0:
         raise ValueError(f"duration must be greater than 0 seconds, got {duration!r}")

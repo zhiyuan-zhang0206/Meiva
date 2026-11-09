@@ -152,7 +152,7 @@ class AgentRuntime:
     # together with the explicit drops (terminate, restart, crash) and host shutdown.
     # A built-in runtime carries no bridge and never asks for one; harness is immutable
     # per agent, so a rebuilt runtime cannot switch engines under the same id.
-    # meiva:link agent/graph/docs/harness-turn.meiva.okf.md
+    # meiva:link agent/graph/docs/harness-turn.md
     harness: Harness = Harness.MEIVA
     harness_bridge: TurnEngine | None = None
     last_used: float = field(default_factory=time.monotonic)
@@ -336,7 +336,7 @@ async def cached_runtime(
 # returns to its configured size as active runtimes settle. What it evicted is
 # returned so the caller can close the sessions those runtimes hold: dropping the
 # entry is what retires an external harness runtime.
-# meiva:link agent/graph/docs/harness-turn.meiva.okf.md
+# meiva:link agent/graph/docs/harness-turn.md
 def evict_runtimes(
     runtimes: OrderedDict[int, AgentRuntime],
     in_flight: set[int],
@@ -527,7 +527,7 @@ def refresh_cached_runtime(
 # group joins at host shutdown. `start` runs at the top of every hosted turn, which is
 # always before a runtime can be dropped; a retirement without it is a wiring defect
 # and raises rather than silently leaving the session open.
-# meiva:link agent/graph/docs/harness-turn.meiva.okf.md
+# meiva:link agent/graph/docs/harness-turn.md
 # meiva:note
 # The host's owner of the harness I/O a turn must not wait for. Two kinds share it
 # because they share the shape: work a session triggers that outlives the turn asking
@@ -543,7 +543,7 @@ def refresh_cached_runtime(
 # — becomes an inbound. The session's read loop hands it here rather than writing from
 # the loop, and a failed write is logged and dropped: the report is lost, and the
 # session that made it must not die over a database error (#5663).
-# meiva:link agent/graph/docs/harness-turn.meiva.okf.md
+# meiva:link agent/graph/docs/harness-turn.md
 class HarnessSessions:
     def __init__(
         self, registrations: RegistrationStore, *, record_exit: ExitRecorder, clock: Clock
@@ -593,7 +593,7 @@ class HarnessSessions:
     # calls it before it builds a runtime, which is the only ordering that keeps one
     # resumed session id from having two CLIs at once. A cancelled waiter leaves the
     # close running, and a failed close keeps refusing admission on every later join.
-    # meiva:link agent/graph/docs/harness-turn.meiva.okf.md
+    # meiva:link agent/graph/docs/harness-turn.md
     async def join(self, agent_id: int) -> None:
         task = self._retiring.get(agent_id)
         if task is None:
@@ -624,7 +624,7 @@ class HarnessSessions:
     # the read loop that reported the event must not wait for one. A failure is logged
     # here and answered with None, so the shared collector treats it as a settled task
     # rather than as a session teardown that failed.
-    # meiva:link base/lm/harness/docs/attribution.meiva.okf.md
+    # meiva:link base/lm/harness/docs/attribution.md
     async def _notify(
         self, agent_id: int, event: UnsolicitedOutput, *, db: Database, bus: EventBus
     ) -> BaseException | None:
@@ -661,7 +661,7 @@ class HarnessSessions:
     # meiva:note
     # One agent's failed teardown is a retained admission fence, not a TaskGroup
     # failure that cancels the other agents' teardown tasks.
-    # meiva:link agent/graph/docs/harness-turn.meiva.okf.md
+    # meiva:link agent/graph/docs/harness-turn.md
     async def _close(self, agent_id: int, bridge: TurnEngine, reason: str) -> BaseException | None:
         try:
             await bridge.close(reason=reason)

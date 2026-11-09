@@ -3,7 +3,7 @@
 # request for a query or a page, the hits and page bodies a JSON answer carries, and the model
 # call that answers a prompt about a page. Nothing here touches the network, the clock or the
 # process; `transport.py` sends a request and the provider modules join the two.
-# meiva:link meiva/web/docs/providers.meiva.okf.md
+# meiva:link meiva/web/docs/providers.md
 
 from __future__ import annotations
 

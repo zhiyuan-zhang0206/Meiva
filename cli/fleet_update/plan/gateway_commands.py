@@ -2,7 +2,7 @@
 # The commands the window runs against the cluster as a whole: the gateway's roster program
 # (shipped over stdin), the packages refresh and the drift checks on each host, the machine name
 # each host boots into, and the pre-update check of the stored schedule table.
-# meiva:link cli/docs/fleet-update.meiva.okf.md
+# meiva:link cli/docs/fleet-update.md
 
 from __future__ import annotations
 

@@ -124,7 +124,7 @@ def _run(
 ) -> dict[str, object]:
     # meiva:note
     # Each Android update prompt case executes the checked-in injected script with canned native command results and reads the state published on window.__MEIVA_APP__.update.
-    # meiva:link tests/docs/tests.meiva.okf.md
+    # meiva:link tests/docs/tests.md
     scenario = {
         "config": {
             "platform": platform,

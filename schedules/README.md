@@ -138,8 +138,8 @@ scope (`schedules/jobs/adversarial_scenario.py`). One batch-local executor serve
 requests while the batch updates the partner document and collects counts. Leaving
 the batch, including by an error, shuts down the server, joins the worker and
 closes the socket. Server-loop failures propagate to the schedule's existing
-batch-error reporting. [The batch](docs/adversarial-eval.meiva.okf.md) and
-[the debt sweep](docs/debt-sweep.meiva.okf.md) each keep their decisions in
+batch-error reporting. [The batch](docs/adversarial-eval.md) and
+[the debt sweep](docs/debt-sweep.md) each keep their decisions in
 strict modules under `schedules/plans/` and their effects in shells under
 `schedules/jobs/`.
 
@@ -205,7 +205,7 @@ A template is thin: its `__main__` block reads the schedule id, the timezone, th
 operator's report-recipient variable and the start time once, builds the values its
 job needs and calls `run_loop`. What a schedule decides lives in a strict pure module
 under `schedules/plans/`, and what it does lives in a shell under `schedules/jobs/`;
-[the loop and the agent directory](docs/loop-and-directory.meiva.okf.md) say how. The
+[the loop and the agent directory](docs/loop-and-directory.md) say how. The
 C9 job imports its accounting dependency through `scripts.ci.pull_requests.accounting`
 where it runs. Materialization changes the script directory, not the installed module
 roots (`schedules/tests/test_scripts_entry.py` runs every template from a copy). Tests

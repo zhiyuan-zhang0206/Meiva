@@ -46,7 +46,7 @@ interface Props {
   // meiva:note
   // Page-clock time of the thread's last received event; anchors the running turn's live clock
   // through the gaps where no block is in flight (0 = unknown).
-  // meiva:link ui/web/src/docs/frontend-components/timeline-view/deep-collapse.meiva.okf.md
+  // meiva:link ui/web/src/docs/frontend-components/timeline-view/deep-collapse.md
   lastEventAt?: number;
 
   hasMoreOlder?: boolean;
@@ -56,7 +56,7 @@ interface Props {
   // first-viewport fill and compact-history retention all hold;
   // `readerLoadingOlder` says the reader asked for it, and only that presents
   // the loading strip above the messages.
-  // meiva:link ui/web/src/docs/frontend-components/timeline-view/history-paging.meiva.okf.md
+  // meiva:link ui/web/src/docs/frontend-components/timeline-view/history-paging.md
   loadingOlder?: boolean;
   readerLoadingOlder?: boolean;
   onLoadOlder?: (origin: OlderLoadOrigin) => void;
@@ -107,7 +107,7 @@ export const TimelineView = memo(function TimelineView({
   // composer's rule silently falls to the composer's share alone (measured
   // 10px → 4px at 1440x900 with it removed). Delete it only together with a
   // replacement that keeps the padding.
-  // meiva:link ui/web/src/docs/frontend-components/home-shell-chrome/home-shell-chrome.meiva.okf.md
+  // meiva:link ui/web/src/docs/frontend-components/home-shell-chrome/home-shell-chrome.md
   const endRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   const viewportRef = useRef<HTMLElement | null>(null);
@@ -118,7 +118,7 @@ export const TimelineView = memo(function TimelineView({
   // streams in, which is what keeps the reader's own message parked a fixed
   // share down the viewport. It sits outside the content column so it carries
   // no row spacing, and useSendAnchor writes its height directly.
-  // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.meiva.okf.md
+  // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.md
   const sendReserveRef = useRef<HTMLDivElement>(null);
 
   const pendingRestoreRef = useRef<SavedScroll | null>(scrollMemoryKey ? readScrollMemory(scrollMemoryKey) : null);
@@ -127,7 +127,7 @@ export const TimelineView = memo(function TimelineView({
   const settledRestoreRef = useRef<SavedScroll | null>(null);
   // meiva:note
   // Consecutive layout passes at the same content height. A bookmark beyond the reachable end is only unreachable once the content has stopped growing - before that, the height is still arriving and waiting is correct.
-  // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.meiva.okf.md
+  // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.md
   const restoreProbeRef = useRef<{ height: number; passes: number }>({ height: -1, passes: 0 });
   const restoreInFlight = useCallback(() => pendingRestoreRef.current !== null || (settledRestoreRef.current !== null && holdRestoredPositionRef.current), []);
   const initialRestorePassRef = useRef(true);
@@ -209,7 +209,7 @@ export const TimelineView = memo(function TimelineView({
   // user scroll-up (#5678). The controller owns the baseline this comparison
   // runs against and drops it for a parked reader, so a reader who is not
   // following pays no layout read here.
-  // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.meiva.okf.md
+  // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.md
   const declareShrink = useCallback(() => {
     const viewport = viewportRef.current;
     if (!viewport) return;
@@ -246,7 +246,7 @@ export const TimelineView = memo(function TimelineView({
     // a send anchor holds the bottom up, so the viewport is "at the bottom" by
     // position while the button still has a job (resume following). Hiding it
     // there would leave the reader no way back.
-    // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.meiva.okf.md
+    // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.md
     setAtBottom(
       !controller.isAnchored() &&
       isAtBottom(
@@ -295,7 +295,7 @@ export const TimelineView = memo(function TimelineView({
   // meiva:note
   // A send takes the viewport from any bookmark it was settling: the reader
   // asked for the message they just wrote, so the saved row no longer owns it.
-  // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.meiva.okf.md
+  // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.md
   const cancelBookmark = useCallback(() => {
     pendingAnchorRef.current = null;
     pendingRestoreRef.current = null;
@@ -345,7 +345,7 @@ export const TimelineView = memo(function TimelineView({
   // The pull gesture and the keyboard control are the reader's only two
   // requests for an older page; every other backward read here is an automatic
   // fill and stays unpresented.
-  // meiva:link ui/web/src/docs/frontend-components/timeline-view/history-paging.meiva.okf.md
+  // meiva:link ui/web/src/docs/frontend-components/timeline-view/history-paging.md
   const pullOlderPage = useCallback(() => loadOneOlderPage("reader"), [loadOneOlderPage]);
 
   const canPullOlder = useCallback(() =>
@@ -497,7 +497,7 @@ export const TimelineView = memo(function TimelineView({
   // (user ruling 2026-11-09). The controller is told once per change; the flag
   // only suppresses growth pins, so the reader's own scroll to the bottom still
   // re-follows and a completed or collapsed block hands the tail back.
-  // meiva:link ui/web/src/docs/frontend-components/timeline-view/deep-collapse.meiva.okf.md
+  // meiva:link ui/web/src/docs/frontend-components/timeline-view/deep-collapse.md
   const lastGroup = groupEntries.at(-1);
   const liveBlockExpanded = lastGroup !== undefined && lastGroup.isLiveTurn && lastGroup.runExpanded;
   useLayoutEffect(() => {
@@ -553,7 +553,7 @@ export const TimelineView = memo(function TimelineView({
           // Live Activity Window and the composer's top rule (matching ChatGPT,
           // Gemini, and Claude web layouts), paired with endRef below so the
           // padding applies cleanly inside the log container.
-          // meiva:link ui/web/src/docs/frontend-components/home-shell-chrome/home-shell-chrome.meiva.okf.md
+          // meiva:link ui/web/src/docs/frontend-components/home-shell-chrome/home-shell-chrome.md
           className={cn("mx-auto w-full px-2 pb-6 space-y-3 sm:px-4", BAR_CLEAR_TOP_PADDING_CLASS, virtualEnabled && "timeline-virtual")}
         >
           {turnAnnouncement ? (

@@ -1,0 +1,89 @@
+# Meiva Root service stop
+
+Root launches application services as its direct children. Each POSIX child
+leads a process group (`process_group=0`) in root's own session, preserving the
+macOS signed-helper permission ancestry. The captured `OwnedProcess` birth
+protects ordinary signaling from a PID now naming another process.
+
+Stop sends TERM to the known leader's group only while that birth remains live
+and still leads that group. A leader no longer in its original group receives
+an identity-checked direct signal. Root never signals its own process group.
+Concrete identity and OS failures propagate; an already-gone process is normal.
+There is no process-table scan, descendant capture, durable spawning record,
+custody reconciliation, or proof that a former group is empty.
+
+Root waits for its existing child watcher within the manifest's
+`stop_timeout_s`, or `SupervisorConfig.stop_timeout_s` (10 seconds) when absent.
+A declared window may not exceed `ROOT_HEALTH_INTERVAL_S` (60 seconds), checked
+when the manifest loads: an automatic replacement stop runs inside a health
+round, so a longer window would stall every other unit's probe. The service
+roster derives declared windows from each service's own stop ceiling plus
+`STOP_MARGIN_S` in `services/supervision/meiva_root_glue/manifests.py`.
+
+Each unit manifest also carries an optional nonnegative integer `stop_tier`
+(default `1`), included in the unit's manifest digest and exposed in `status()`.
+`UnitRegistry.stop_waves` and `all_stop_waves` order attach children strictly
+ahead of their attach parents and group siblings at the same attach depth by
+ascending `stop_tier` in declaration order. Daemon shutdown, `down`, and
+`restart` stop each wave concurrently via `asyncio.gather` and begin the next
+wave only after every unit in the current wave has settled, while disjoint
+top-level attach subtrees hold independent locks so concurrent per-unit `down`
+requests inside the same wave also run in parallel.
+
+The declared window is the whole budget. When it expires, root re-checks the
+captured birth and sends one SIGKILL to the leader's group, then waits
+`stop_kill_reap_s` (2 seconds) for the reap; `root_unit_stop_escalated` records
+the generation it killed. When the birth is missing or no longer matches, root
+never signals: it emits `root_unit_stop_aborted` with `identity_unavailable` or
+`identity_changed`. Either refusal raises `UnitStopTimeoutError`, a `RuntimeError`
+identifying the unit, PID, window and the fact that stopped it. A generation that
+survives SIGKILL past the reap window raises the same error and is not retried.
+Every successful stop logs `root_unit_stopped` with its measured duration, so a
+unit whose real stop time approaches its declared window is visible before it
+hangs. Explicit force skips the graceful window and goes straight to that kill.
+
+During an automatic health replacement, that timeout remains the unit's recorded
+`restart_failed.down` state. Health consumes only this typed refusal (including
+grouped refusals), keeps the spent restart attempt and continues observing other
+units. A generation that survived its window is gone, so a replacement may start;
+a refused stop keeps the original generation owned and no replacement starts.
+Exhausting the finite restart budget opens the unit's circuit breaker: observation
+and failure reporting stay active, and the unit keeps its place on the ladder's
+capped cadence, or one immediate attempt per dependency-recovery grant while the
+breaker is open, so a refused stop never becomes a silent dead end (task #5315).
+Unknown errors, including leaves of a mixed exception
+group, and cancellation still propagate to root. Explicit stop, restart and
+daemon shutdown continue to report refusals to their callers.
+
+The watcher reaps the direct child, publishes its exit and drops that generation.
+An unexpected exit is eligible for the existing health scheduler's replacement;
+no historical custody file blocks spawning. Operator intent, input-seal validation
+and recorded restart failures retain their existing owners.
+
+Supervisor retains every actual watcher Task across generation replacement,
+retrieves its completion, and immediately records an unknown original error.
+That error remains at this Supervisor and is raised at shutdown; it does not
+cancel other root participants. `exited` certifies a completed native reap and
+is never set by an error or cancellation cleanup path. Shutdown closes birth
+admission, attempts every child stop without escalation (a child still closing is
+reported by custody, not killed), and observes its retained watchers for an
+independent finite join budget (0.2 seconds by default). A refused child's watch
+continues to observe its real reap. `unfinished_watches` exposes the actual live
+Task identities; a bounded return does not certify their termination. Repeated
+shutdown can collect a late error from the same original owner. Multiple
+failures retain their original objects, including an existing operation failure.
+
+Group signaling is best effort. A child forked during the leader's TERM handler,
+a process that moved to another group/session, or descendants left after a root
+crash may remain. Their disappearance is not a service-replacement requirement.
+The root instance lock still prevents two live supervisors for one run directory;
+it is not a crash-recovery process inventory.
+
+Daemon shutdown attempts bounded child closure once and propagates failures. It
+does not wait indefinitely for another stop request or retain a cold-start lock
+for descendants. Native tests cover parentage, group TERM, direct-child timeouts, escalation at
+the window, an unwaitable birth, the reap window, force, PID reuse, ordinary
+replacement, and explicitly cleaned late children.
+The reaped-first hook awaits `proc.wait()` before returning from spawn. Its
+native test checks that root still terminates on TERM when the unit has already
+exited and birth lookup yields no identity.

@@ -21,7 +21,7 @@ import { useApi } from "@/lib/transport/transport-context";
 // meiva:note
 // The map's values are the translator's own keys, so a missing or misspelled message key is a type
 // error at this table instead of a cast at the call site.
-// meiva:link ui/web/src/docs/frontend-components/context-breakdown.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/context-breakdown.md
 type ContextBreakdownKey = Parameters<ReturnType<typeof useTranslations<"contextBreakdown">>>[0];
 
 const CATEGORY_MESSAGE_KEY: Readonly<Record<string, ContextBreakdownKey | undefined>> = {
@@ -51,7 +51,7 @@ export interface CategoryHighlight {
 // meiva:note
 // A transport failure may carry the gateway's HTTP status. The guard is what makes reading it safe:
 // the value is an Error, the property exists, and it is a number; anything else answers null.
-// meiva:link ui/web/src/docs/frontend-components/context-breakdown.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/context-breakdown.md
 function isStatusError(value: unknown): value is Error & { readonly status: number } {
   return value instanceof Error && "status" in value && typeof value.status === "number";
 }
@@ -60,7 +60,7 @@ function httpStatus(error: unknown): number | null {
   return isStatusError(error) ? error.status : null;
 }
 
-// meiva:link ui/web/src/docs/frontend-components/context-breakdown.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/context-breakdown.md
 export function ContextBreakdownCard({
   agentId,
   at,
@@ -118,7 +118,7 @@ export function ContextBreakdownCard({
   );
 }
 
-// meiva:link ui/web/src/docs/frontend-components/context-breakdown.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/context-breakdown.md
 export function ContextBreakdownBody({
   agentId,
   categoryHighlight,
@@ -137,7 +137,7 @@ export function ContextBreakdownBody({
   return <BreakdownQuery query={query} categoryHighlight={categoryHighlight} />;
 }
 
-// meiva:link ui/web/src/docs/frontend-components/context-breakdown.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/context-breakdown.md
 function BreakdownQuery({
   query,
   categoryHighlight,
@@ -177,7 +177,7 @@ function BreakdownQuery({
 
 // meiva:note
 // Category shares use the input total. System-note markers and automation are merged only for display, with summed tokens and propagated estimation, then sorted by descending tokens. Unknown category names remain visible. Sections begin collapsed; categories without corresponding timeline blocks are labels rather than toggle buttons.
-// meiva:link ui/web/src/docs/frontend-components/context-breakdown.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/context-breakdown.md
 function BreakdownContent({
   data,
   categoryHighlight,

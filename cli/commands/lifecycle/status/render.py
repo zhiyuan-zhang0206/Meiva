@@ -51,7 +51,7 @@ def banner_lines(repo: str, roles: frozenset[str] | None) -> tuple[str, ...]:
 # meiva:note
 # A converge that aborted leaves a marker in this home; print it first,
 # because the services may be up while one step never applied.
-# meiva:link cli/commands/converge/docs/converge-incomplete.meiva.okf.md
+# meiva:link cli/commands/converge/docs/converge-incomplete.md
 def converge_lines(summary: str | None) -> tuple[str, ...]:
     return () if summary is None else (f"converge: INCOMPLETE {summary}",)
 

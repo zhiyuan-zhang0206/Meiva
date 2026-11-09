@@ -2,7 +2,7 @@
 # The contract of the `max_concurrent` knob every SDK batch API shares (`meiva.web.search`,
 # `meiva.web.fetch`, `meiva.understand`): its default ceiling and the check that fails before any
 # work is scheduled. The executor that honours it (`meiva/sdk_surface/batch.py`) only schedules.
-# meiva:link meiva/docs/sdk-surface/sdk-surface.meiva.okf.md
+# meiva:link meiva/docs/sdk-surface/sdk-surface.md
 
 from __future__ import annotations
 

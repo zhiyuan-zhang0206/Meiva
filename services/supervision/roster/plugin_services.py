@@ -110,7 +110,7 @@ def _declared_plugin_services(
 # commands, and a `services.py` declares `ServiceSpec` dataclasses rather than Pydantic models that
 # would resolve annotations through this entry. A concurrent caller appearing later makes the lock
 # the shape to reach for, since the name is fixed.
-# meiva:link docs/plugins/module-loading/fixed-name-registration-audit.meiva.okf.md
+# meiva:link docs/plugins/module-loading/fixed-name-registration-audit.md
 def load_plugin_module(name: str, services_py: Path) -> object:
     """Load and register ``services.py`` so its own healthcheck is importable.
 

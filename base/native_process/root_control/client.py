@@ -39,7 +39,7 @@ _DEFAULT_TIMEOUT_S = 30.0
 # meiva:note
 # Audit metadata, not a place to leak one: argv is bounded and sensitive values
 # are replaced, and environment *values* never leave the process.
-# meiva:link base/native_process/root_control/docs/lifecycle-caller.meiva.okf.md
+# meiva:link base/native_process/root_control/docs/lifecycle-caller.md
 _ARGV_ITEMS = 32
 _ARG_CHARS = 200
 _REDACTED = "<redacted>"
@@ -132,7 +132,7 @@ def current_uid() -> int:
 # a second time a question the caller had already answered. The rest of the block stays read: the
 # parent, the working directory, the user id and the kernel hostname have no owner above these
 # call sites, and a parameter for them would move the read rather than remove it.
-# meiva:link base/native_process/root_control/docs/lifecycle-caller.meiva.okf.md
+# meiva:link base/native_process/root_control/docs/lifecycle-caller.md
 def caller_identity(environ: Mapping[str, str], *, pid: int) -> CallerPayload:
     return CallerPayload(
         pid=pid,
@@ -152,7 +152,7 @@ def caller_identity(environ: Mapping[str, str], *, pid: int) -> CallerPayload:
 
 # meiva:note
 # Names of credential-shaped variables, never their values.
-# meiva:link base/native_process/root_control/docs/lifecycle-caller.meiva.okf.md
+# meiva:link base/native_process/root_control/docs/lifecycle-caller.md
 def sensitive_env_keys(environ: Mapping[str, str]) -> list[str]:
     return sorted(name for name in environ if _SENSITIVE_ENV.search(name))
 
@@ -197,7 +197,7 @@ def _sensitive_short_value(arg: str) -> str | None:
 # The host this request came from. The kernel hostname is used rather than the
 # configured cluster name: resolving that one loads base.config, which already
 # reaches this layer and would close an import cycle.
-# meiva:link base/native_process/root_control/docs/lifecycle-caller.meiva.okf.md
+# meiva:link base/native_process/root_control/docs/lifecycle-caller.md
 def _machine_name() -> str:
     return socket.gethostname().split(".")[0]
 

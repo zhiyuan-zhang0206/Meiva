@@ -119,7 +119,7 @@ def _ts_prefix(ctx: MeivaContext) -> str:
 
 # meiva:note
 # Ordinary claim and foreground steering share the chat envelope and security note.
-# meiva:link agent/messages/docs/message-format.meiva.okf.md
+# meiva:link agent/messages/docs/message-format.md
 def prepare_chat_inbound(ctx: MeivaContext, item: ClaimedInbound) -> list[BaseMessage]:
     now = ctx.require_clock().now()
     return _scanned_messages(
@@ -493,7 +493,7 @@ async def _handle_resurrect(
 
 # meiva:note
 # A fork appends its lifecycle marker and its own context notes after the inherited history and never rewrites that history: the inherited messages stay byte-identical so the first fork of a checkpoint reuses the provider prefix cache its source warmed. The marker states that the identity, memory and skill notes above it belong to the source; the shared memory index is not re-grafted.
-# meiva:link agent/graph/docs/context-notes/context-notes.meiva.okf.md
+# meiva:link agent/graph/docs/context-notes/context-notes.md
 async def _handle_fork(
     agent_id: int,
     item: ClaimedInbound,
@@ -636,7 +636,7 @@ def _is_dispatched_for_polarity(
 # (`COMPACT_SUMMARY`, `COMPACT_REQUEST`, `CANCEL`, interrupted-turn restart resume) and
 # mid-run secondary arrivals preserve the active run's polarity; waking from idle on purely
 # non-human inbounds sets `True`.
-# meiva:link agent/docs/state.meiva.okf.md
+# meiva:link agent/docs/state.md
 def resolve_non_human_wake(
     state: _state.AgentState,
     batch: Sequence[ClaimedInbound],

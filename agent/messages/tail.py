@@ -66,7 +66,7 @@ def tail_has_agent_inbound(messages: list[AnyMessage]) -> bool:
 # gate reads, never the conversation. Every inbound-typed message carries the contract field, so
 # a source that is missing or not a string stops the scan (`_source_of`) instead of skipping the
 # message it belongs to.
-# meiva:link agent/messages/docs/message-format.meiva.okf.md
+# meiva:link agent/messages/docs/message-format.md
 def last_agent_inbound_text(messages: list[AnyMessage]) -> str | None:
     for msg in reversed(messages):
         if isinstance(msg, AIMessage):

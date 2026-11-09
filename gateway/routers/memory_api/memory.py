@@ -61,7 +61,7 @@ def unreadable_reports() -> rerank.UnreadableReports:
 
 
 def build_search_gate(max_concurrency: int) -> asyncio.Semaphore:
-    # meiva:link gateway/routers/docs/memory.meiva.okf.md
+    # meiva:link gateway/routers/docs/memory.md
     return asyncio.Semaphore(max_concurrency)
 
 
@@ -69,7 +69,7 @@ def build_search_gate(max_concurrency: int) -> asyncio.Semaphore:
 # The query embedder every search shares: the configured provider holding the root's catalog.
 # The root builds it once when the catalog loaded, so an unknown `embedding_backend` fails the
 # start instead of every search.
-# meiva:link gateway/routers/docs/memory.meiva.okf.md
+# meiva:link gateway/routers/docs/memory.md
 def build_embedder(
     settings: MemorySearchSettings,
     catalog: ModelCatalog,
@@ -92,7 +92,7 @@ def build_embedder(
 
 @asynccontextmanager
 async def _bounded_semaphore(semaphore: asyncio.Semaphore, budget: float) -> AsyncGenerator[None]:
-    # meiva:link gateway/routers/docs/memory.meiva.okf.md
+    # meiva:link gateway/routers/docs/memory.md
     try:
         await asyncio.wait_for(semaphore.acquire(), timeout=budget)
     except TimeoutError as exc:
@@ -112,7 +112,7 @@ async def _backend_topk(
     fingerprint: str,
     inputs: MemorySearchSettings,
 ) -> list[ChunkHit]:
-    # meiva:link gateway/routers/docs/memory.meiva.okf.md
+    # meiva:link gateway/routers/docs/memory.md
     from services.derived.memory_indexer.backends import factory
 
     return await factory.get_backend(
@@ -163,7 +163,7 @@ async def _backend_topk(
     ),
 )
 async def post_memory_search(request: Request, body: MemorySearchRequest) -> MemorySearchResponse:
-    # meiva:link gateway/routers/docs/memory.meiva.okf.md
+    # meiva:link gateway/routers/docs/memory.md
     inputs = gateway_config(request).memory_search
     catalog = require_model_catalog(request)
     provider = state_as(request, MemoryAppState).memory_embedder
@@ -240,7 +240,7 @@ async def _vector_candidates(
     inputs: MemorySearchSettings,
     plan: memory_plan.SearchPlan,
 ) -> list[ChunkHit]:
-    # meiva:link gateway/routers/docs/memory.meiva.okf.md
+    # meiva:link gateway/routers/docs/memory.md
     from services.derived.memory_indexer.embeddings.base import EmbeddingAPIError
 
     gate = state_as(request, MemoryAppState).memory_search_gate
@@ -293,7 +293,7 @@ async def _vector_candidates(
 async def post_memory_refresh(request: Request) -> MemoryRefreshResponse:
     # meiva:note
     # Refresh updates the same captured memory_root that the app reads. Its keep-local and track-branch values are the ones the gateway was built with. Git runs off the ASGI event loop so another request can complete while a refresh waits.
-    # meiva:link gateway/routers/docs/memory.meiva.okf.md
+    # meiva:link gateway/routers/docs/memory.md
     from base.deploy.git import memory_repo
 
     config = gateway_config(request)
@@ -323,7 +323,7 @@ async def post_memory_refresh(request: Request) -> MemoryRefreshResponse:
 def get_memory_note(request: Request, path: str) -> MemoryNoteResponse:
     # meiva:note
     # A note path must resolve inside memory_root to a readable Markdown note. Absolute paths, traversal, null bytes, missing files and invalid frontmatter share the 404 surface rather than exposing filesystem errors.
-    # meiva:link gateway/routers/docs/memory.meiva.okf.md
+    # meiva:link gateway/routers/docs/memory.md
     root = gateway_state(request).gateway_config.memory_root.resolve()
     rel = Path(path)
     if rel.is_absolute() or rel.suffix != ".md":

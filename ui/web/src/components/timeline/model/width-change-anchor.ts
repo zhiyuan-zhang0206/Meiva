@@ -13,7 +13,7 @@ import { applySavedTimelineScroll } from "./use-timeline-window";
 // The viewport is queried from the scroll area wrapper, as the timeline's own
 // effects do; the entry key is the one this timeline already saves its bookmark
 // under, so the anchor being re-applied is the reader's own.
-// meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.md
 interface Args {
   wrapperRef: RefObject<HTMLDivElement | null>;
   entriesRef: RefObject<{ entryKey: string; contentKey: string } | null>;
@@ -29,7 +29,7 @@ interface Args {
 // closing the sidebar moves this column by a sixth of the window with nothing
 // about the content changed. The bookmark's anchor survives that: re-apply it
 // after the reflow, and leave a reader in the bottom zone to the pin.
-// meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.md
 export function useReanchorOnWidthChange({
   wrapperRef, entriesRef, holdRef, controller, compactBuffer, canonicalItems,
 }: Args): void {

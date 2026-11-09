@@ -342,7 +342,7 @@ describe("Scroll-to-bottom button + multi-item render order", () => {
   // The control is absent while the reader is at the bottom — the former rule
   // kept it in the DOM and faded, which left a hover target over a click that
   // did nothing (user report 2026-10-30).
-  // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.meiva.okf.md
+  // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.md
   it("Scroll-to-bottom control is absent while the reader is at the bottom", () => {
     render(<TimelineView items={[]} />);
     expect(screen.queryByLabelText("Scroll to bottom")).toBeNull();
@@ -373,7 +373,7 @@ describe("cold-load spinner", () => {
 // only) rather than a frozen frame. `motion-reduce:animate-none` is the
 // regression this pins — a still ring reads as stuck, not busy (user report
 // 2026-10-29: "it doesn't spin any more, it's a static animation").
-// meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.md
 describe("loading ring motion (cold load, pull strip, scroll-to-bottom)", () => {
   const expectRingMoves = (ring: Element | null) => {
     expect(ring).not.toBeNull();
@@ -425,7 +425,7 @@ describe("load-older circle (revealed above the messages)", () => {
   // (user report 2026-10-20). The ring scales with the strip instead, and that
   // scale rides the `scale` property: an inline transform would re-run the spin
   // keyframes as a matrix interpolation and leave the ring still.
-  // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.meiva.okf.md
+  // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.md
   it("a short pull scales the ring instead of slicing it into a bar", () => {
     render(<LoadOlderSpinner loadingOlder={false} pullProgress={0.4} pullOffset={8} />);
     const ring = screen.getByTestId("load-older-spinner").querySelector("svg") as SVGElement;

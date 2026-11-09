@@ -408,7 +408,7 @@ def insert_agent_birth(
     # Settled before anything is written: a fork naming a different harness than its
     # source is refused here, so a caller that skipped request validation cannot
     # bypass the rule.
-    # meiva:link base/agents/docs/harness/harness.meiva.okf.md
+    # meiva:link base/agents/docs/harness/harness.md
     born_harness = resolve_birth_harness(cur, harness, fork_from, spawner=spawner)
     new_id = _insert_agent_identity(conn, label)
     config, birth_config = _resolve_birth_overlay(

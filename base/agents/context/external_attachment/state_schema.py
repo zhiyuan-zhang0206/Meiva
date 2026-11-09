@@ -52,7 +52,7 @@ def default_cwd() -> str:
     return ""
 
 
-# meiva:link agent/docs/state.meiva.okf.md
+# meiva:link agent/docs/state.md
 class BaseAgentState(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
@@ -124,7 +124,7 @@ _BASE_STATE_FIELDS: frozenset[str] = _BASE_FIELDS
 # Fails fast when a plugin writes undeclared base fields or unregistered keys to
 # `meiva.state_update`. `state_cls` is typed as `type[Any]` because dynamically built
 # `AgentState` subclasses are passed alongside `BaseModel` types.
-# meiva:link agent/docs/state.meiva.okf.md
+# meiva:link agent/docs/state.md
 def validate_plugin_state_keys[V](update: dict[str, V], state_cls: type[BaseModel]) -> dict[str, V]:
     if not update:
         return update
@@ -154,7 +154,7 @@ def validate_plugin_state_keys[V](update: dict[str, V], state_cls: type[BaseMode
 _MESSAGES_REDUCER = object()
 
 
-# meiva:link agent/docs/state.meiva.okf.md
+# meiva:link agent/docs/state.md
 def is_messages_reducer_form(m: object) -> bool:
     if m is add_messages or m is guarded_add_messages:
         return True
@@ -167,7 +167,7 @@ def _is_object_tuple(value: object) -> TypeGuard[tuple[object, ...]]:
     return isinstance(value, tuple)
 
 
-# meiva:link agent/docs/state.meiva.okf.md
+# meiva:link agent/docs/state.md
 def messages_annotation_key(annotation: object) -> tuple[object, ...]:
     meta = object_of(getattr, annotation, "__metadata__", None)
     if _is_object_tuple(meta) and meta:
@@ -185,7 +185,7 @@ def _replace_with_new(_old: object, new: object) -> object:
     return new
 
 
-# meiva:link agent/docs/state.meiva.okf.md
+# meiva:link agent/docs/state.md
 def resolve_reducer(field: FieldInfo) -> Callable[..., object]:
     for m in object_sequence(field.metadata):
         if isinstance(m, DeltaChannel):
@@ -197,7 +197,7 @@ def resolve_reducer(field: FieldInfo) -> Callable[..., object]:
     return _replace_with_new
 
 
-# meiva:link agent/docs/state.meiva.okf.md
+# meiva:link agent/docs/state.md
 def accumulate_delta(acc: object, new: object, reducer: Callable[..., object]) -> object:
     if is_messages_reducer_form(reducer):
         acc_list = acc if is_object_list(acc) else [acc]
@@ -206,7 +206,7 @@ def accumulate_delta(acc: object, new: object, reducer: Callable[..., object]) -
     return reducer(acc, new)
 
 
-# meiva:link agent/docs/state.meiva.okf.md
+# meiva:link agent/docs/state.md
 def plugin_state_schema(extensions: ExtensionRegistry) -> PluginStateSchema:
     extra_fields: dict[str, _StateFieldSpec] = {}
     namespace_fields: dict[str, set[str]] = {}
@@ -274,7 +274,7 @@ def _plugin_namespace_view(state: BaseAgentState, plugin: str) -> SimpleNamespac
     return SimpleNamespace(**{name: getattr(state, f"{prefix}{name}") for name in fields})
 
 
-# meiva:link agent/docs/state.meiva.okf.md
+# meiva:link agent/docs/state.md
 def build_agent_state(extensions: ExtensionRegistry) -> type[BaseAgentState]:
     schema = plugin_state_schema(extensions)
     if not schema.extra_fields and not schema.namespace_fields:
@@ -306,7 +306,7 @@ def build_agent_state(extensions: ExtensionRegistry) -> type[BaseAgentState]:
 AgentState = BaseAgentState
 
 
-# meiva:link agent/docs/state.meiva.okf.md
+# meiva:link agent/docs/state.md
 def checkpoint_msgpack_allowlist(
     plugin_state_classes: Iterable[type[BaseModel]] = (),
 ) -> frozenset[tuple[str, str]]:
@@ -316,7 +316,7 @@ def checkpoint_msgpack_allowlist(
     return frozenset(entries)
 
 
-# meiva:link agent/docs/state.meiva.okf.md
+# meiva:link agent/docs/state.md
 def build_checkpoint_serde(
     plugin_state_classes: Iterable[type[BaseModel]] = (),
 ) -> JsonPlusSerializer:

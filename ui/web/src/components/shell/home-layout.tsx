@@ -76,7 +76,7 @@ interface Props {
 // Both column dividers paint the handle's own full-height line: an inset segment
 // stopped above the composer and below the title bar, which read as a broken
 // line next to dividers that do run edge to edge (user report 2026-10-20).
-// meiva:link ui/web/src/docs/frontend-components/fleet-view.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/fleet-view.md
 function HomeDividerHandle({ parts }: { parts: LayoutParts }) {
   const { Handle } = parts;
   return <Handle />;
@@ -200,7 +200,7 @@ export function HomeLayout({
   // put (user report 2026-10-20). The library reads a stored layout only when
   // its key count matches the panels present, so the collapsed single-panel
   // group lands on 100% rather than the stored two-panel split.
-  // meiva:link ui/web/src/docs/frontend-components/home-shell-chrome/home-shell-chrome.meiva.okf.md
+  // meiva:link ui/web/src/docs/frontend-components/home-shell-chrome/home-shell-chrome.md
   return (
     <>
       {/* Desktop and compact frames have different layout ids, so breakpoint

@@ -1,4 +1,4 @@
-# meiva:link gateway/upload_delivery/docs/delivered-uploads/delivered-uploads.meiva.okf.md
+# meiva:link gateway/upload_delivery/docs/delivered-uploads/delivered-uploads.md
 
 import asyncio
 import logging

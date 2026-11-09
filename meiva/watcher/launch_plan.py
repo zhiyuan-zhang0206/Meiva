@@ -4,7 +4,7 @@
 # bootstrap source establishes the agent identity, arms the orphan guard and the optional
 # timeout watchdog, and runs the script as `__main__`), and the single shell line the session
 # executes. `spawn.run` writes the files and sends the line.
-# meiva:link meiva/watcher/docs/launch-line.meiva.okf.md
+# meiva:link meiva/watcher/docs/launch-line.md
 
 from __future__ import annotations
 

@@ -44,7 +44,7 @@ export function useTasks(
     // meiva:note
     // Projection and window join the key so neither can reuse the other's rows.
     // The SSE fold owner invalidates ["tasks"] which prefix-matches all.
-    // meiva:link ui/web/src/docs/frontend-components/fleet-view.meiva.okf.md
+    // meiva:link ui/web/src/docs/frontend-components/fleet-view.md
     queryKey: ["tasks", fields, window],
     queryFn: () => api.getTasks({ window, fields }),
     retry: false,
@@ -52,7 +52,7 @@ export function useTasks(
     // Slow reconciliation poll beneath the SSE invalidation below - a CONSTANT
     // interval (not success-gated), so a failed poll keeps retrying and the board
     // self-heals instead of freezing when SSE is also down.
-    // meiva:link ui/web/src/docs/frontend-components/fleet-view.meiva.okf.md
+    // meiva:link ui/web/src/docs/frontend-components/fleet-view.md
     refetchInterval: 30_000,
   });
 
@@ -61,7 +61,7 @@ export function useTasks(
     // Stale-while-error: once we have data, keep serving it even if the latest
     // poll failed (error carries the failure so the view can flag it). Only fall
     // back to the empty list when there is nothing loaded yet.
-    // meiva:link ui/web/src/docs/frontend-components/fleet-view.meiva.okf.md
+    // meiva:link ui/web/src/docs/frontend-components/fleet-view.md
     if (data) {
       return { tasks: data.tasks, loading: false, error: isError };
     }

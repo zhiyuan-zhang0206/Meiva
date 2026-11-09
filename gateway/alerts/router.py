@@ -3,7 +3,7 @@
 # SSE tail); this router is the only writer of `alerts` and delivers an alert nowhere
 # else. The auth split between the Grafana webhook and the UI/SDK callers is stated in
 # the document this site links.
-# meiva:link gateway/alerts/docs/alerts.meiva.okf.md
+# meiva:link gateway/alerts/docs/alerts.md
 
 from __future__ import annotations
 

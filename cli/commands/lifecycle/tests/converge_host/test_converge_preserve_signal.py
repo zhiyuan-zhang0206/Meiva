@@ -54,7 +54,7 @@ def test_preserve_hit_reports_converge_file_preserved(
 # A repository-owned surface is restored and the drift is still reported: the
 # render wins, and the fact that someone edited it does not go silent. The
 # record follows the restore, so the next converge is a clean write.
-# meiva:link cli/commands/converge/docs/rendered-files.meiva.okf.md
+# meiva:link cli/commands/converge/docs/rendered-files.md
 def test_overwrite_policy_restores_the_render_and_reports_the_drift(
     tmp_path: Path, emitted_events: EmittedEvents
 ) -> None:

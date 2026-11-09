@@ -125,5 +125,5 @@ def test_the_description_failure_points_at_the_body_not_a_second_target(
     out = (captured.out + captured.err).lower()
 
     assert "body" in out
-    assert "lint-skill-descriptions.meiva.okf.md" in out
+    assert "lint-skill-descriptions.md" in out
     assert "aim under" not in out

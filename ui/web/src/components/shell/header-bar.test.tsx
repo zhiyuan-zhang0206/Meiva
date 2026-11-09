@@ -91,7 +91,7 @@ describe("HeaderBar", () => {
     // The conversation column is capped and centred; an in-flow button sat at
     // x=320 of a 1440 viewport (user 2026-10-20), so the button is pinned to the
     // bar and the label keeps a matching inset.
-    // meiva:link ui/web/src/docs/frontend-components/home-shell-chrome/home-shell-chrome.meiva.okf.md
+    // meiva:link ui/web/src/docs/frontend-components/home-shell-chrome/home-shell-chrome.md
     render(
       <HeaderBar
         label="x"
@@ -112,7 +112,7 @@ describe("HeaderBar", () => {
     // meiva:note
     // User 2026-10-21: the icon row leaves with the rail, so the one standing signal
     // rides the restore button instead of disappearing with it.
-    // meiva:link ui/web/src/docs/frontend-components/home-shell-chrome/home-shell-chrome.meiva.okf.md
+    // meiva:link ui/web/src/docs/frontend-components/home-shell-chrome/home-shell-chrome.md
     render(
       <HeaderBar label="x" onOpenSidebar={vi.fn()} sidebarCollapsed onToggleSidebar={vi.fn()} alertCount={4} />,
     );
@@ -130,7 +130,7 @@ describe("HeaderBar", () => {
     // meiva:note
     // The drawer is the phone's sidebar: closed, it hides the same icon row the
     // desktop rail hides, so the count rides the menu button that opens it.
-    // meiva:link ui/web/src/docs/frontend-components/home-shell-chrome/home-shell-chrome.meiva.okf.md
+    // meiva:link ui/web/src/docs/frontend-components/home-shell-chrome/home-shell-chrome.md
     render(<HeaderBar label="x" onOpenSidebar={vi.fn()} sidebarCollapsed={false} onToggleSidebar={vi.fn()} alertCount={2} />);
     expect(screen.getByTestId("mobile-sidebar-alert-count").textContent).toBe("2");
     expect(screen.getByRole("button", { name: /Open sidebar/ }).getAttribute("aria-label")).toContain("2 unresolved alerts");
@@ -140,7 +140,7 @@ describe("HeaderBar", () => {
     // meiva:note
     // User ruling 2026-10-29: the phone's menu glyph was a step larger than the
     // icon row it opens; the bar and the sidebar footer now share one size.
-    // meiva:link ui/web/src/docs/frontend-components/home-shell-chrome/home-shell-chrome.meiva.okf.md
+    // meiva:link ui/web/src/docs/frontend-components/home-shell-chrome/home-shell-chrome.md
     const { container } = render(
       <HeaderBar label="x" onOpenSidebar={vi.fn()} sidebarCollapsed onToggleSidebar={vi.fn()} />,
     );

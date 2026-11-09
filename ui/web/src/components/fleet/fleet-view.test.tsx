@@ -15,7 +15,7 @@ import { SETTINGS_QUERY_KEY } from "@/lib/state/use-user-settings";
 // meiva:note
 // vitest+happy-dom has no localStorage by default — the view persists its mobile
 // tab there, so provide a simple in-memory mock.
-// meiva:link ui/web/src/docs/frontend-components/fleet-view.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/fleet-view.md
 const localStorageMock = (() => {
   const store = new Map<string, string>();
   return {
@@ -40,7 +40,7 @@ const putSettingMock = vi.fn((key: string, value: unknown) => {
 // meiva:note
 // What a test states about the queue: the three lists the feed hook renders. The rows are seeded
 // into the notice caches in the shape the app stores them, so the real hook flattens them.
-// meiva:link ui/web/src/docs/frontend-components/fleet-view.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/fleet-view.md
 interface FeedRows {
   open: NoticeItem[];
   awaiting: NoticeItem[];
@@ -57,7 +57,7 @@ import { resetTransport, transport } from "@/test-support/fake-api";
 // meiva:note
 // The route hands its surfaces a `navigate`; a suite passes a spy, so a jump can be read
 // without replacing `next/navigation`.
-// meiva:link ui/web/src/docs/frontend-components/fleet-view.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/fleet-view.md
 const navigate = vi.fn();
 beforeEach(() => {
   resetTransport();
@@ -91,7 +91,7 @@ afterEach(() => {
 // page list enter through the caches the hooks read — the shape the app stores — and the transport
 // answers the reads the panels still make, including the graph the Agents tab mounts. The settings
 // cache holds what the test stated, so a persisted choice is a value, not a stubbed store.
-// meiva:link ui/web/src/docs/frontend-components/fleet-view.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/fleet-view.md
 function wrap(
   ui: ReactElement,
   { agents = [], notices = NO_NOTICES }: { agents?: AgentRow[]; notices?: FeedRows } = {},
@@ -355,7 +355,7 @@ describe("FleetView (mobile)", () => {
   // say "Inbox 4" over a list of two. The badge now reads the panel's own feed: the
   // agents below claim 1 decision + 3 unread FYI (4), but the queue only
   // includes the response-required notice. Legacy FYI must not inflate its badge.
-  // meiva:link ui/web/src/docs/frontend-components/fleet-view.meiva.okf.md
+  // meiva:link ui/web/src/docs/frontend-components/fleet-view.md
   it("shows the Inbox badge from the same feed the panel renders", () => {
     const agents: AgentRow[] = [
       makeAgent({

@@ -104,7 +104,7 @@ describe("TurnBlock component", () => {
     // No inner scrollport and no height cap: the body is part of the timeline's
     // own flow, so the block is exactly as tall as its content (user ruling
     // 2026-11-09).
-    // meiva:link ui/web/src/docs/frontend-components/timeline-view/deep-collapse.meiva.okf.md
+    // meiva:link ui/web/src/docs/frontend-components/timeline-view/deep-collapse.md
     expect(screen.queryByTestId("turn-scroll-viewport")).toBeNull();
     const rail = screen.getByTestId("detail-content").parentElement;
     expect(rail?.className).toContain("ml-1.5");
@@ -195,7 +195,7 @@ describe("TurnBlock component", () => {
   // block is in flight, so the old live delta keyed only on `lastLiveStartedAt` was zero and the
   // header froze at its last number while the turn kept running. The clock now falls back to the
   // turn's last observed activity, so it advances through the gap.
-  // meiva:link ui/web/src/docs/frontend-components/timeline-view/deep-collapse.meiva.okf.md
+  // meiva:link ui/web/src/docs/frontend-components/timeline-view/deep-collapse.md
   it("keeps ticking between blocks, when no block is in flight", () => {
     vi.useFakeTimers();
     try {

@@ -5,7 +5,7 @@ from pydantic import BaseModel, Field
 OVER_LIMIT = "over_limit"
 
 
-# meiva:link meiva_builtins/plugins/meiva_to_user/docs/meiva_to_user.meiva.okf.md
+# meiva:link meiva_builtins/plugins/meiva_to_user/docs/meiva_to_user.md
 class MeivaToUserState(BaseModel):
     panel_written: bool = False
     reminded: set[str] = Field(default_factory=set)

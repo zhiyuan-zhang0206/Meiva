@@ -68,7 +68,7 @@ export function useTimelineRowInteractions({
   // meiva:note
   // One viewport update per animation frame: a wheel spin or a drag delivers several events between two
   // frames, and each one used to re-render the whole chart and repaint every row.
-  // meiva:link ui/web/src/docs/frontend-components/run-timeline/axis-and-keyboard.meiva.okf.md
+  // meiva:link ui/web/src/docs/frontend-components/run-timeline/axis-and-keyboard.md
   const viewFrame = useRef<number | null>(null);
   const waiting = useRef<Viewport | null>(null);
   const show = (next: Viewport) => {

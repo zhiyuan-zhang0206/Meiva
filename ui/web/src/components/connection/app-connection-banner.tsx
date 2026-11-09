@@ -53,7 +53,7 @@ function ConnectionHealthProvider() {
   // Count failure only in the foreground, using the transport's own document.
   // Repeated errors retain one deadline. Returning to a failed visible stream
   // requests immediate repair; a healthy stream survives focus changes untouched.
-  // meiva:link ui/web/src/docs/provider-composition.meiva.okf.md
+  // meiva:link ui/web/src/docs/provider-composition.md
   const syncForeground = useCallback(() => {
     const foreground = isForeground();
     const previous = foregroundRef.current;

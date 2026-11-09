@@ -1,6 +1,6 @@
 # meiva:note
 # The agent-facing notice surface: post, resolve or withdraw, and the inbox feeds.
-# meiva:link gateway/routers/docs/frontend-ui-data.meiva.okf.md
+# meiva:link gateway/routers/docs/frontend-ui-data.md
 
 from __future__ import annotations
 
@@ -112,7 +112,7 @@ _SELECT = (
 # `_ACTION_RESOLUTION` maps an action to its stored resolution explicitly, never
 # inferred from reply presence. The caps bound one response's payload; the
 # configurable surface is the *default* window (user ruling 2026-09-17 / #3696).
-# meiva:link gateway/routers/docs/frontend-ui-data.meiva.okf.md
+# meiva:link gateway/routers/docs/frontend-ui-data.md
 _ACTION_RESOLUTION = {"answer": "answered", "dismiss": "dismissed"}
 _OPEN_FEED_MAX_LIMIT = 500
 _RESOLVED_PAGE_MAX_LIMIT = 100
@@ -126,7 +126,7 @@ def publish_response_required_hint(bus: EventBus, agent_id: int) -> None:
     except Exception:
         # meiva:note
         # The row is durable; a failed projection refresh must not fail the write.
-        # meiva:link gateway/routers/docs/frontend-ui-data.meiva.okf.md
+        # meiva:link gateway/routers/docs/frontend-ui-data.md
         _log.exception(
             "unable to publish response-required notice hint", extra={"agent_id": agent_id}
         )
@@ -135,7 +135,7 @@ def publish_response_required_hint(bus: EventBus, agent_id: int) -> None:
 def _open_notices_blocking(
     pool: ConnectionPool, limit: int, *, agent_id: int | None = None
 ) -> list[NoticeItem]:
-    # meiva:link gateway/routers/docs/frontend-ui-data.meiva.okf.md
+    # meiva:link gateway/routers/docs/frontend-ui-data.md
     with pool.connection() as conn, conn.cursor(row_factory=class_row(NoticeItem)) as cur:
         agent_clause = "" if agent_id is None else "AND n.agent_id = %s "
         params = (limit,) if agent_id is None else (agent_id, limit)
@@ -183,7 +183,7 @@ async def get_open_notices(
     limit: Annotated[int | None, Query(ge=1, le=_OPEN_FEED_MAX_LIMIT)] = None,
     agent_id: Annotated[int | None, Query(ge=1)] = None,
 ) -> list[NoticeItem]:
-    # meiva:link gateway/routers/docs/frontend-ui-data.meiva.okf.md
+    # meiva:link gateway/routers/docs/frontend-ui-data.md
     if limit is None:
         limit = gateway_config(request).display.notices_open_default_limit
     return await asyncio.to_thread(
@@ -195,7 +195,7 @@ async def get_open_notices(
 
 
 def _notices_after_blocking(pool: ConnectionPool, after: int, limit: int) -> list[NoticeItem]:
-    # meiva:link gateway/routers/docs/frontend-ui-data.meiva.okf.md
+    # meiva:link gateway/routers/docs/frontend-ui-data.md
     with pool.connection() as conn, conn.cursor(row_factory=class_row(NoticeItem)) as cur:
         cur.execute(
             _SELECT
@@ -212,7 +212,7 @@ async def get_notices_live(
     after: Annotated[int, Query(ge=0)] = 0,
     limit: Annotated[int | None, Query(ge=1, le=_OPEN_FEED_MAX_LIMIT)] = None,
 ) -> list[NoticeItem]:
-    # meiva:link gateway/routers/docs/frontend-ui-data.meiva.okf.md
+    # meiva:link gateway/routers/docs/frontend-ui-data.md
     if limit is None:
         limit = gateway_config(request).display.notices_open_default_limit
     return await asyncio.to_thread(
@@ -228,7 +228,7 @@ async def get_notices_feed(
     before_at: Annotated[datetime | None, Query()] = None,
     before_id: Annotated[int | None, Query()] = None,
 ) -> NoticesFeed:
-    # meiva:link gateway/routers/docs/frontend-ui-data.meiva.okf.md
+    # meiva:link gateway/routers/docs/frontend-ui-data.md
     if (before_at is None) != (before_id is None):
         raise HTTPException(
             status_code=422, detail="before_at and before_id must be supplied together"
@@ -272,7 +272,7 @@ async def post_notice_resolve(
     # meiva:note
     # Resolution and reply delivery share one durable receipt. A dismissal is a
     # notice-system event, never user authorization or ordinary user speech.
-    # meiva:link agent/messages/docs/message-format.meiva.okf.md
+    # meiva:link agent/messages/docs/message-format.md
     idempotency_key = notice_key(request, idempotency_key)
     action = body.action
     reply = body.reply
@@ -336,7 +336,7 @@ async def post_notice_resolve(
     # meiva:note
     # Every notice resolution rides the notice-system source (reply / dismiss); the claim node
     # wraps both as a system note, so no User-role message is consumed.
-    # meiva:link agent/messages/docs/message-format.meiva.okf.md
+    # meiva:link agent/messages/docs/message-format.md
     deliver_source = (
         "system:notice-reply"
         if reply is not None or body.answer is not None
@@ -401,7 +401,7 @@ async def post_notice_resolve(
 # transaction — a one-open-notice check plus insert for notify, an observed-row
 # update for edit/dismiss — plus the event publishes. The agent_notices table is
 # the single truth source and every writer goes through the same code.
-# meiva:link meiva_builtins/plugins/meiva_fleet/docs/notify.meiva.okf.md
+# meiva:link meiva_builtins/plugins/meiva_fleet/docs/notify.md
 # meiva:note
 #
 # Pause semantics: data-plane like every other agent write — the quiesce has
@@ -416,7 +416,7 @@ async def post_notice_create(
     request: Request,
     idempotency_key: str = Header(alias="Idempotency-Key", min_length=1, max_length=128),
 ) -> dict[str, object]:
-    # meiva:link meiva_builtins/plugins/meiva_fleet/docs/notify.meiva.okf.md
+    # meiva:link meiva_builtins/plugins/meiva_fleet/docs/notify.md
     idempotency_key = notice_key(request, idempotency_key)
     request_body: dict[str, object] = body.model_dump(
         mode="json", exclude={"question"} if body.question is None else set()
@@ -473,7 +473,7 @@ async def post_notice_create(
             # out, instead of resolving the first one on the writer's behalf.
             # Legacy FYI rows (require_response false, unwritable since
             # 2026-10-19) are not notices and never block a poster.
-            # meiva:link meiva_builtins/plugins/meiva_fleet/docs/notify.meiva.okf.md
+            # meiva:link meiva_builtins/plugins/meiva_fleet/docs/notify.md
             with conn.cursor(row_factory=class_row(_OpenNotice)) as open_cur:
                 open_cur.execute(
                     "SELECT local_id, title FROM agent_notices "
@@ -587,7 +587,7 @@ async def post_notice_create(
     # meiva:note
     # The posted event publishes after the commit, by GLOBAL id; the SDK's return
     # value carries LOCAL ids. Best-effort, never raises.
-    # meiva:link gateway/agents/docs/notice-receipts.meiva.okf.md
+    # meiva:link gateway/agents/docs/notice-receipts.md
     if not replayed:
         await _ops.publish_notice_posted(
             gateway_state(request).bus,
@@ -650,7 +650,7 @@ def notice_key(request: Request, key: str) -> str:
 # meiva:note
 # `announce_sync` publishes only an unannounced row, so a replay repairs a lost
 # announce without pushing one that already landed.
-# meiva:link base/events/notifications/docs/notifications.meiva.okf.md
+# meiva:link base/events/notifications/README.md
 async def announce_notice_delivery(request: Request, notification_id: int | None) -> None:
     if notification_id is None:
         return

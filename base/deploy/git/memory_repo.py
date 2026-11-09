@@ -24,22 +24,22 @@ _DEFAULT_GITIGNORE = """\
 
 
 class MemoryRemoteMissing(RuntimeError):  # noqa: N818
-    # meiva:link base/deploy/git/docs/memory-repo.meiva.okf.md
+    # meiva:link base/deploy/git/docs/memory-repo.md
     pass
 
 
 class MemoryPoolBootstrapFailed(RuntimeError):  # noqa: N818
-    # meiva:link base/deploy/git/docs/memory-repo.meiva.okf.md
+    # meiva:link base/deploy/git/docs/memory-repo.md
     pass
 
 
 class MemoryRepoUninitialized(RuntimeError):  # noqa: N818
-    # meiva:link base/deploy/git/docs/memory-repo.meiva.okf.md
+    # meiva:link base/deploy/git/docs/memory-repo.md
     pass
 
 
 class MemoryBranchMismatch(RuntimeError):  # noqa: N818
-    # meiva:link base/deploy/git/docs/memory-repo.meiva.okf.md
+    # meiva:link base/deploy/git/docs/memory-repo.md
     pass
 
 
@@ -54,7 +54,7 @@ def memory_remote(raw: str) -> str:
 
 
 def branch_name(*, machine: MachineIdentityReader) -> str:
-    # meiva:link base/deploy/git/docs/memory-repo.meiva.okf.md
+    # meiva:link base/deploy/git/docs/memory-repo.md
     if "agent-runner" in machine.role():
         return f"machine-{machine.name()}"
     return "main"
@@ -63,7 +63,7 @@ def branch_name(*, machine: MachineIdentityReader) -> str:
 def pull_main(*, root: Path, keep_local: bool, branch: str) -> str:
     # meiva:note
     # pull_main fast-forwards the supplied root from origin/<branch> and returns its HEAD. keep_local only reads HEAD, including when no remote or requested branch exists. Divergence fails without discarding local commits.
-    # meiva:link base/deploy/git/docs/memory-repo.meiva.okf.md
+    # meiva:link base/deploy/git/docs/memory-repo.md
     if keep_local:
         return run_git("rev-parse", "HEAD", cwd=root)
     run_git("fetch", "origin", branch, cwd=root)
@@ -81,7 +81,7 @@ GIT_TIMEOUT_S = 120.0
 def run_git(*args: str, cwd: Path, timeout: float = GIT_TIMEOUT_S) -> str:
     # meiva:note
     # run_git passes the per-command timeout to run_bounded, raises CalledProcessError for nonzero exits, and propagates TimeoutExpired. It returns stripped stdout only on success.
-    # meiva:link base/deploy/git/docs/memory-repo.meiva.okf.md
+    # meiva:link base/deploy/git/docs/memory-repo.md
     argv = ["git", *args]
 
     result = run_bounded(
@@ -100,7 +100,7 @@ def run_git(*args: str, cwd: Path, timeout: float = GIT_TIMEOUT_S) -> str:
 
 
 def init_local_repo(branch: str, cwd: Path) -> None:
-    # meiva:link base/deploy/git/docs/memory-repo.meiva.okf.md
+    # meiva:link base/deploy/git/docs/memory-repo.md
     cwd.parent.mkdir(parents=True, exist_ok=True)
     subprocess.run(  # noqa: S603
         ["git", "init", "-q", "-b", branch, str(cwd)], check=True
@@ -129,7 +129,7 @@ def _stream_pool(
     *,
     max_bytes: int = POOL_SNAPSHOT_MAX_BYTES,
 ) -> tuple[str | None, bytes]:
-    # meiva:link base/deploy/git/docs/memory-repo.meiva.okf.md
+    # meiva:link base/deploy/git/docs/memory-repo.md
     with client.stream("GET", url, headers=headers) as resp:
         if resp.status_code != 200:
             raise MemoryPoolBootstrapFailed(f"GET {url} -> HTTP {resp.status_code}")
@@ -150,7 +150,7 @@ def _stream_pool(
 def download_pool_snapshot(
     url: str, headers: dict[str, str], *, max_bytes: int = POOL_SNAPSHOT_MAX_BYTES
 ) -> tuple[str | None, bytes]:
-    # meiva:link base/deploy/git/docs/memory-repo.meiva.okf.md
+    # meiva:link base/deploy/git/docs/memory-repo.md
     try:
         with httpx.Client(timeout=_POOL_FETCH_TIMEOUT_S) as client:
             return _stream_pool(client, url, headers, max_bytes=max_bytes)
@@ -159,7 +159,7 @@ def download_pool_snapshot(
 
 
 def bootstrap_from_gateway(*, target: Path, branch: str, access: GatewayAccess) -> None:
-    # meiva:link base/deploy/git/docs/memory-repo.meiva.okf.md
+    # meiva:link base/deploy/git/docs/memory-repo.md
     import shutil
     import tempfile
 
@@ -187,7 +187,7 @@ def bootstrap_from_gateway(*, target: Path, branch: str, access: GatewayAccess) 
 
 
 def _unpack_bundle(bundle_bytes: bytes, head: str | None, tmp_dir: Path, *, branch: str) -> Path:
-    # meiva:link base/deploy/git/docs/memory-repo.meiva.okf.md
+    # meiva:link base/deploy/git/docs/memory-repo.md
     bundle_path = tmp_dir / "pool.bundle"
     bundle_path.write_bytes(bundle_bytes)
     checkout_dir = tmp_dir / "pool"
@@ -215,7 +215,7 @@ def _unpack_bundle(bundle_bytes: bytes, head: str | None, tmp_dir: Path, *, bran
 
 @dataclass(frozen=True)
 class RepoStatus:
-    # meiva:link base/deploy/git/docs/memory-repo.meiva.okf.md
+    # meiva:link base/deploy/git/docs/memory-repo.md
     branch: str
     is_clean: bool
     local_commits_on_branch: int
@@ -227,7 +227,7 @@ class RepoStatus:
 def reconcile_initialized(
     *, root: Path, branch: str, keep_local: bool, allow_main_switch: bool
 ) -> None:
-    # meiva:link base/deploy/git/docs/memory-repo.meiva.okf.md
+    # meiva:link base/deploy/git/docs/memory-repo.md
     current = run_git("rev-parse", "--abbrev-ref", "HEAD", cwd=root)
     if current != branch:
         if allow_main_switch:
@@ -249,7 +249,7 @@ def reconcile_initialized(
 def init(*, root: Path, branch: str, remote: str) -> None:
     # meiva:note
     # Clone the selected remote into the selected checkout, select or publish the requested branch, and seed the shared gitignore only when missing. The plugin's scaffold decides whether a checkout needs initialization before calling this operation.
-    # meiva:link base/deploy/git/docs/memory-repo.meiva.okf.md
+    # meiva:link base/deploy/git/docs/memory-repo.md
     subprocess.run(  # noqa: S603
         ["git", "clone", remote, str(root)],
         check=True,
@@ -271,7 +271,7 @@ def init(*, root: Path, branch: str, remote: str) -> None:
 
 
 def status(*, root: Path, track_branch: str, zone: datetime.tzinfo) -> RepoStatus:
-    # meiva:link base/deploy/git/docs/memory-repo.meiva.okf.md
+    # meiva:link base/deploy/git/docs/memory-repo.md
     if not is_initialized(root=root):
         raise MemoryRepoUninitialized(
             f"{root} is not yet a git repo — run `meiva memory init` first."

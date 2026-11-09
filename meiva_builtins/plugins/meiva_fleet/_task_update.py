@@ -244,7 +244,7 @@ class _LockedTask:
 # then: the change set is measured against the row this function locks, so restating the current
 # value cannot pass for progress. `updated_at` moves in the same branch, because the due clock and
 # the ladder are one fact (`base/agents/tasks/reminder_window.py`).
-# meiva:link meiva_builtins/plugins/meiva_fleet/docs/tasks/task_model/task_model_reminders.meiva.okf.md
+# meiva:link meiva_builtins/plugins/meiva_fleet/docs/tasks/task_model/task_model_reminders.md
 def write_task_update(
     cur: psycopg.Cursor,
     task_id: int,

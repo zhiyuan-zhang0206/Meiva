@@ -1,7 +1,7 @@
 # meiva:note
 # The audit itself runs on the gateway (`GET /api/notifications/audit`); this module
 # only asks for the report and renders it, as a table or as the gateway's JSON.
-# meiva:link base/events/notifications/docs/notifications.meiva.okf.md
+# meiva:link base/events/notifications/README.md
 
 from __future__ import annotations
 

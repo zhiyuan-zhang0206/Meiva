@@ -6,7 +6,7 @@
 # bool of its `MEIVA_MACHINE_SERVE_*` key (None = off). The home's `.env` is the only source:
 # identity files in the home are not read (`test_identity_files_in_the_home_are_not_read`).
 # Role injection is exercised through the public `ConfiguredMachineIdentity.set/role` contract.
-# meiva:link base/cluster/machine/docs/machine.meiva.okf.md
+# meiva:link base/cluster/machine/docs/machine.md
 
 from __future__ import annotations
 

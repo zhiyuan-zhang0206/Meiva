@@ -1,6 +1,6 @@
 # meiva:note
 # The dashboard's class counts: pure over the rows the alert-class read returns.
-# meiva:link gateway/cluster/docs/alert-classes-api.meiva.okf.md
+# meiva:link gateway/cluster/docs/alert-classes-api.md
 
 from __future__ import annotations
 

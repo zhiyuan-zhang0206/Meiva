@@ -35,7 +35,7 @@
 # gateway-hosted schedule (`schedules` row N) when
 # it spawns / wakes / resurrects an agent; the agent recovers which schedule acted
 # from N.
-# meiva:link agent/messages/docs/message-format.meiva.okf.md
+# meiva:link agent/messages/docs/message-format.md
 
 from __future__ import annotations
 
@@ -189,14 +189,14 @@ def inbound_tail(source: str) -> str:
     # meiva:note
     # The close tag `inbound_head` opens for a system source; empty for every other source,
     # whose header is one self-contained line.
-    # meiva:link agent/messages/docs/message-format.meiva.okf.md
+    # meiva:link agent/messages/docs/message-format.md
     return SYSTEM_NOTE_TRAIL if _system_source(source) else ""
 
 
 # meiva:note
 # The inbound's content behind its `inbound_head` and inside its `inbound_tail`. The body
 # begins at `len(inbound_head(...))`, which callers record as `meiva_inbound_body_start`.
-# meiva:link agent/messages/docs/message-format.meiva.okf.md
+# meiva:link agent/messages/docs/message-format.md
 def wrap_inbound(
     content: str, source: str, *, inputs: TimestampPolicy, created_at: datetime | None = None
 ) -> str:
@@ -209,5 +209,5 @@ def inbound_body(text: str, *, source: str, body_start: int) -> str:
     # meiva:note
     # An inbound's own text — what readers render: the slice from `body_start`, without the
     # close tag a system source adds after it.
-    # meiva:link agent/messages/docs/message-format.meiva.okf.md
+    # meiva:link agent/messages/docs/message-format.md
     return text[body_start:].removesuffix(inbound_tail(source))

@@ -1,0 +1,86 @@
+# Telemetry primitives
+
+`base/telemetry/` owns metrics, OTLP export, resource labels and durable event ingestion.
+Its component nodes describe the current contracts and implementation.
+
+## Documented components
+
+- [Metrics](metrics/docs/metrics.md) — Metrics.
+- [OTLP export backend & trace ship to Tempo](otlp/docs/telemetry-otlp/telemetry-otlp.md) — OTLP export backend & trace ship to Tempo.
+
+## Ordinary event delivery lifecycle
+
+`EventPipeline` owns the bounded queue, admission, one drain worker and its
+terminal result. Only that worker writes batches. `flush()` and `sync()` use
+independent FIFO receipts; the worker acknowledges each receipt after writing
+its preceding queued and held records. Every barrier has one finite deadline,
+including queue admission. Concurrent barriers cannot consume each other's ack.
+A completed receipt acknowledges worker processing; explicitly isolated sink
+failures remain independently reported rather than becoming a persistence ack.
+
+`stop(timeout=5)` closes admission before requesting exit and joining the same
+worker within its deadline. Its stop request is outside the bounded event queue,
+so saturation cannot make stop block on a sentinel. A stuck writer leaves an
+explicit `DrainResult(status=DrainStatus.UNFINISHED, phase=...)` and a degraded diagnostic;
+ordinary records may be lost at process exit or land after the caller returns.
+No rescue writer is started. A later stop can observe late completion. The exit
+hook closes downstream sinks only after the event worker has finished.
+
+An unknown worker failure is reported immediately and retained with its original
+exception. Active `sync()`/`flush()` and the owner's `stop()` re-raise it rather
+than acknowledging delivery. Later ordinary producers keep the existing shedding
+contract. Explicit best-effort sink/exporter isolation remains in its existing
+seams and does not become a business failure.
+
+These results describe the ordinary observation projection. Durable `audit_events`
+are committed in the producer's transaction before projection admission; SDK
+capture journals and participant sealing retain their independent durability
+contracts. An unfinished observation barrier is never a commit or seal receipt.
+
+A process binding rejects another live or unfinished writer. A subsequent entry
+can bind its concrete writer only after the prior owner has stopped and joined;
+its original worker error is collected before replacement. Downstream exit
+cleanup still runs through the last concrete binding.
+
+The public `EventPipeline` resource lives in `delivery/pipeline.py`; construction starts
+its worker and requires the root's writer and the stream's clock. `build_pipeline(database=..., machine=..., home=..., now=...,
+otlp_enabled=..., otlp_endpoint=..., flush_interval_s=0.5, rng=...)` binds
+ordinary sinks to that root's database factory and owns one lazy OTLP backend.
+
+`now` is the process clock the stream stamps with: the write instant and retention cutoff of every
+JSONL mirror batch, the loss alarm of a saturated queue, and the default timestamp of an event whose
+producer passed none. The root reads the clock once and hands it down, and `init_telemetry` binds it
+beside the pipeline (`process_state["now"]`), so the stream has one time source: a process that binds
+a stream but no clock raises at its first default-stamped event instead of reading the host clock a
+second time.
+The backend reads its machine eligibility only when enabled export is requested;
+no global machine identity or exporter is discovered. Its eligibility verdict is
+frozen within that backend, so independent attachment owners cannot share it. Controlled host/exec logging binds
+this actual writer through `init_telemetry(pipeline=..., machine_reader=...)`;
+All process entries supply the concrete writer. Emission in a process that binds no pipeline
+is dropped and reported once per process — rather than failing the write it observes — with
+the cause named in the line (`emission skipped: no producer`, then either "was given none" or
+"its client set holds no pipeline factory"); a client set without a factory answers through
+`NoPipelineFactoryError`, and only a producer failing for any other reason remains a sink failure
+with its traceback. Neither case constructs a database or worker. SDK ClientSet roots retain this
+constructor without invoking it until a selected event enqueues. Quiet sync and
+close never build it. Finite close retains an unfinished or failed writer for
+later observation, and an original worker failure propagates after other client
+cleanup. The exec child observes its owned writer before finalizing OTLP and
+forming a successful post-delivery outcome; attachments drain before detach.
+
+The host joins native resources before closing its constructed ClientSet writer
+and releasing settled ownership. A writer failure still permits bounded lease
+release, pool cleanup and pidfile removal. The first original native, boot or
+writer failure remains primary; later cleanup failures are attached as notes.
+Unfinished native resources retain the clients and pools until process exit.
+
+The concrete exporting pipeline exposes `defer_exports()`, `finalize_exports()`,
+`warmup_exports()` and `exports_deferred()`; writer-only test pipelines have no
+exporter. Stop joins the ordinary writer before closing its own exporter under
+the same deadline. An unfinished ordinary writer keeps its downstream resources;
+an unfinished exporter keeps the pipeline retained for later observation.
+Event producers may pass `machine_reader` to `emit()` or `prepare_event()` to
+attribute that event to their captured context without rebinding process logging.
+Missing names retain the hostname diagnostic dimension; invalid identity and
+unexpected reader defects propagate rather than selecting another identity.

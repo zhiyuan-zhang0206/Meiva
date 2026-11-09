@@ -7,7 +7,7 @@
 # process tree is killed when it outlives its bound. A claimed slot that fails is not retried:
 # the lead's message names the manual pass. `--once --dry-run` runs the scan and prints what a
 # real run would send, without a claim, an agent call, telemetry or a database.
-# meiva:link schedules/docs/debt-sweep.meiva.okf.md
+# meiva:link schedules/docs/debt-sweep.md
 
 from __future__ import annotations
 

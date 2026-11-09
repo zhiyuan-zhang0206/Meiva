@@ -4,5 +4,5 @@
 # against the checked directory's root first, so a root-level `services.py` shadows the repository's
 # `services` package for every file beside it, and the declaration imports from that package. This
 # file only re-exports the `services()` hook under the name the loader looks for.
-# meiva:link meiva_builtins/plugins/meiva_memory/docs/meiva_memory.meiva.okf.md
+# meiva:link meiva_builtins/plugins/meiva_memory/docs/meiva_memory.md
 from meiva_builtins.plugins.meiva_memory.service_declaration.declaration import services as services

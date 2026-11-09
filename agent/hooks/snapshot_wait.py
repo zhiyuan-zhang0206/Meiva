@@ -1,6 +1,6 @@
 # meiva:note
 # The decisions behind waiting for a checkpoint to hold a state's last message, as values. The shell in understanding_chunks.py reads the checkpoint table and the clock and sleeps; these functions say whether the checkpoint has caught up, whether to keep waiting, and when the last message was read.
-# meiva:link agent/hooks/docs/hooks.meiva.okf.md
+# meiva:link agent/hooks/docs/hooks.md
 from __future__ import annotations
 
 from dataclasses import dataclass

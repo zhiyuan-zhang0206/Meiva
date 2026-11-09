@@ -7,7 +7,7 @@
 # verdict. Those rows were reachable only by hand-written SQL, so a five-host restart read as
 # "nobody can say who did it". This command is the reading surface: one line per operation,
 # `--operation` to expand one window to its per-host rows.
-# meiva:link base/native_process/root_control/docs/lifecycle-caller.meiva.okf.md
+# meiva:link base/native_process/root_control/docs/lifecycle-caller.md
 
 from __future__ import annotations
 

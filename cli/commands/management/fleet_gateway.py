@@ -2,7 +2,7 @@
 # Fleet update roster query, shipped to the NEW gateway over stdin. Keep this program in one
 # source file: the updater sends this exact text, and its regression tests execute the same module
 # against current gateway APIs.
-# meiva:link cli/docs/fleet-update.meiva.okf.md
+# meiva:link cli/docs/fleet-update.md
 
 from __future__ import annotations
 

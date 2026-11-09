@@ -4,8 +4,8 @@
 > and why it is shaped this way, is
 > [`docs/decisions/runtime/processes/shutdown/2026-07-29-skill-trust-tiers-and-install-scan.md`](../../../docs/decisions/runtime/processes/shutdown/2026-07-29-skill-trust-tiers-and-install-scan.md);
 > the current-state description lives in
-> [`base/packages/extensions/docs/install_registry/install_registry.meiva.okf.md`](../../../base/packages/extensions/docs/install_registry/install_registry.meiva.okf.md)
-> and [`cli/commands/extensions/packages/docs/packages.meiva.okf.md`](../../../cli/commands/extensions/packages/docs/packages.meiva.okf.md).
+> [`base/packages/extensions/docs/install_registry/install_registry.md`](../../../base/packages/extensions/docs/install_registry/install_registry.md)
+> and [`cli/commands/extensions/packages/docs/packages.md`](../../../cli/commands/extensions/packages/docs/packages.md).
 > This doc holds only the open work.
 
 In one line: every package entering `$MEIVA_HOME/skills/` from outside the

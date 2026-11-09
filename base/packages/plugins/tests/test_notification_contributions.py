@@ -85,7 +85,7 @@ def test_a_non_list_declaration_is_rejected() -> None:
 # decides whether it may interrupt them: every declaration in the repository ships
 # switched off. A new one that ships on fails here before it reaches a manifest
 # loader.
-# meiva:link base/events/notifications/docs/notifications.meiva.okf.md
+# meiva:link base/events/notifications/README.md
 def test_every_shipped_plugin_category_ships_switched_off() -> None:
     manifests = sorted(_PLUGIN_ROOT.glob("*/meiva-plugin.json"))
     assert manifests

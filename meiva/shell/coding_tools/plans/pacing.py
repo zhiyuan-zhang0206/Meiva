@@ -1,6 +1,6 @@
 # meiva:note
 # How a launch loop paces itself: how long it keeps looking at its session, how long it waits between looks, and how long it lets a freshly rendered screen settle before trusting it. The values are the launch's tuning constants; a test hands in short ones.
-# meiva:link meiva/shell/coding_tools/docs/coding-tools.meiva.okf.md
+# meiva:link meiva/shell/coding_tools/README.md
 from __future__ import annotations
 
 from dataclasses import dataclass

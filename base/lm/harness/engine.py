@@ -18,7 +18,7 @@ TurnEventSink = Callable[[BridgeEvent], Awaitable[None] | None]
 # sees two completions. Each one keeps its own text and usage, which is what lets the
 # graph commit the handoff turn as its own message instead of folding it into the
 # reply — normally the prelude is empty.
-# meiva:link base/lm/harness/docs/harness.meiva.okf.md
+# meiva:link base/lm/harness/docs/harness.md
 @dataclass(frozen=True, slots=True)
 class HarnessTurn:
     turn_id: str
@@ -103,7 +103,7 @@ class SubmittedTurn(Protocol):
 # needs only to look like one. `submit` returns an adapter-owned ticket because
 # tickets carry their turn id and an outcome for completed-key replay. A fresh
 # session exposes its handoff ticket so the bridge can await it before user work.
-# meiva:link base/lm/harness/docs/harness.meiva.okf.md
+# meiva:link base/lm/harness/docs/harness.md
 class HarnessSession(Protocol):
     def start(
         self, *, resume: str | None = None, handoff: Handoff | None = None
@@ -133,7 +133,7 @@ class HarnessSession(Protocol):
 # What a graph run needs from a live external session: run one turn, interrupt the
 # running one, close the session. The graph never reaches into an adapter; a
 # context that carries no engine runs the built-in loop.
-# meiva:link base/lm/harness/docs/harness.meiva.okf.md
+# meiva:link base/lm/harness/docs/harness.md
 class TurnEngine(Protocol):
     @property
     def model(self) -> str | None: ...

@@ -6,7 +6,7 @@
 # drives a workspace. The pair is cluster-pinned, so the source that packs, the gateway that holds
 # the bundle and the target that extracts all read one number: a transfer never packs what its
 # receiver would refuse.
-# meiva:link base/config/docs/workspace-transfer-limits.meiva.okf.md
+# meiva:link base/config/docs/workspace-transfer-limits.md
 
 from __future__ import annotations
 

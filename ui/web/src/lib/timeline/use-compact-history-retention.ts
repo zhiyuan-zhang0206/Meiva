@@ -8,7 +8,7 @@
 // post-compact GET to settle first (`hasMoreOlder` only turns true with it),
 // so a pending request retries as the window state changes; misses are
 // budgeted, then dropped.
-// meiva:link ui/web/src/docs/frontend-state/timeline-cache.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-state/timeline-cache.md
 
 import { useCallback, useEffect, useLayoutEffect, useRef } from "react";
 
@@ -31,7 +31,7 @@ export function useCompactHistoryRetention(options: {
   // Older-page fetch; reports whether a completed page has more history.
   // Retention asks for it as a `background` origin, so the page it restores
   // above a compact never presents the loading strip.
-  // meiva:link ui/web/src/docs/frontend-components/timeline-view/history-paging.meiva.okf.md
+  // meiva:link ui/web/src/docs/frontend-components/timeline-view/history-paging.md
   loadOlderSegment: (origin: OlderLoadOrigin) => Promise<OlderSegmentLoadResult>;
   hasMoreOlder: boolean;
   loadingOlder: boolean;

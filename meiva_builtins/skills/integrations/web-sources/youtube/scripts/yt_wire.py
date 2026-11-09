@@ -5,7 +5,7 @@
 # transcription CLI prints. Nothing here starts a process or touches a file; `yt_run.py` runs the
 # argv and hands the output back. A field of the wrong type is refused rather than written into
 # the mirror.
-# meiva:link meiva_builtins/skills/integrations/web-sources/docs/web-sources.meiva.okf.md
+# meiva:link meiva_builtins/skills/integrations/web-sources/README.md
 
 from __future__ import annotations
 

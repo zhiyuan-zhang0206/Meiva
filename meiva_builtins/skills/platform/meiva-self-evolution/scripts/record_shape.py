@@ -6,7 +6,7 @@
 # else. The one check of a record read from a file happens where that file is read
 # (`mine._read_record`), so the modules that decide over an already-built record import the shape
 # alone and pay nothing for it.
-# meiva:link meiva_builtins/skills/platform/meiva-self-evolution/docs/collection.meiva.okf.md
+# meiva:link meiva_builtins/skills/platform/meiva-self-evolution/docs/collection.md
 from __future__ import annotations
 
 from typing import NotRequired, TypedDict

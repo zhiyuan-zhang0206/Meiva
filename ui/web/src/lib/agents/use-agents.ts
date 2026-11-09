@@ -25,7 +25,7 @@ const ACTIVE_ID_KEY = "meiva.active.agent_id";
 // The remembered selection is the page's local storage, read and written through the browser
 // port. `absent` (never set here) and `unavailable` (a private window, disabled site data) both
 // leave the selection working for the session; it just stops being remembered.
-// meiva:link ui/web/src/docs/frontend-state/navigation-history.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-state/navigation-history.md
 function rememberedAgent(storage: BrowserStorage): string | null {
   const stored = storage.read(ACTIVE_ID_KEY);
   return stored.state === "found" ? stored.value : null;
@@ -52,7 +52,7 @@ export function useAgents(showError: (msg: string) => void) {
   // The page's address and its local storage enter through the browser port: the hook steers
   // history, deep links and the remembered selection by the values the port returns, and a test
   // hands in `fakeBrowser()` instead of arranging a global.
-  // meiva:link ui/web/src/docs/frontend-state/navigation-history.meiva.okf.md
+  // meiva:link ui/web/src/docs/frontend-state/navigation-history.md
   const browser = useBrowser();
   const navigation = browser.navigation;
   const selectionStorage = browser.local;
@@ -98,7 +98,7 @@ export function useAgents(showError: (msg: string) => void) {
   // marks it so this effect rewrites that entry instead of adding a second one.
   // Each entry keeps its own copy of the router's state object rather than
   // sharing one (user report 2026-10-20).
-  // meiva:link ui/web/src/docs/frontend-state/navigation-history.meiva.okf.md
+  // meiva:link ui/web/src/docs/frontend-state/navigation-history.md
   useEffect(() => {
     if (!hydrated.current) return;
     const id = useStore.getState().activeId;

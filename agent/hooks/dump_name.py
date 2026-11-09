@@ -1,6 +1,6 @@
 # meiva:note
 # The file name of a pre-compact history dump, from values: `<start>__<end>.jsonl`, both UTC. Start is the earliest message read time (second precision; the write moment when no stamp parses), end is the write moment (microsecond precision, so two dumps never collide). Both stamps are fixed-width and a dump's start never decreases from one dump to the next, so name order is chronological order.
-# meiva:link agent/hooks/docs/hooks.meiva.okf.md
+# meiva:link agent/hooks/docs/hooks.md
 from __future__ import annotations
 
 from datetime import UTC, datetime

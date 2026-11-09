@@ -89,7 +89,7 @@ export function OpenNoticeDetail({
   // One answer path for a question, reached from the Submit button and from Enter
   // in the answer or choice Note field. NoticeQuestionForm builds the answer from its
   // own draft, so Enter does not wait for the round trip through structuredAnswer.
-  // meiva:link ui/web/src/docs/frontend-components/enter-to-send.meiva.okf.md
+  // meiva:link ui/web/src/docs/frontend-components/enter-to-send.md
   const submitAnswer = (answer: NoticeAnswer) =>
     void run({ action: "answer", answer }, t("noLongerAvailable"), t("submitAnswer"));
 

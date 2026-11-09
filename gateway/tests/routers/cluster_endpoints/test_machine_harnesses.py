@@ -57,7 +57,7 @@ _WIRE: dict[str, Any] = {
 # The probe runs where the agent would be born, so the gateway dials that machine's
 # runner instead of reading its own box, and the probe's own sentence comes back
 # unchanged — it is what the form shows.
-# meiva:link base/agents/docs/harness/harness.meiva.okf.md
+# meiva:link base/agents/docs/harness/harness.md
 @pytest.mark.asyncio
 async def test_a_remote_machine_answers_from_its_own_runner(
     db_conn: psycopg.Connection,
@@ -109,7 +109,7 @@ async def test_a_remote_box_without_a_runner_cannot_report(
 # A box without an agent-runner cannot birth an agent, so its install state would
 # answer a question nobody can act on: it refuses like any other unrunnable target
 # instead of offering a `launchable` harness that leads nowhere.
-# meiva:link base/agents/docs/harness/harness.meiva.okf.md
+# meiva:link base/agents/docs/harness/harness.md
 @pytest.mark.asyncio
 async def test_this_box_without_a_runner_refuses(
     set_machine_identity: MachineIdentitySetter, database: Database, db_conn: psycopg.Connection
@@ -129,7 +129,7 @@ async def test_this_box_without_a_runner_refuses(
 # meiva:note
 # A fresh cache entry answers without any probe, so the route echoes exactly what
 # was stored rather than re-reading the box.
-# meiva:link base/agents/docs/harness/harness.meiva.okf.md
+# meiva:link base/agents/docs/harness/harness.md
 def test_route_serves_the_cached_rows(set_machine_identity: MachineIdentitySetter) -> None:
     machine: MachineIdentityReader = set_machine_identity(role="gateway", name="gw-only")
     seeded = availability_rows(
@@ -185,7 +185,7 @@ def test_only_explicit_refresh_probes_the_runner(
 # meiva:note
 # The two refusals reach the client as HTTP status plus a readable detail, which the
 # form turns into `unknown` — it never renders "no such machine" as "not installed".
-# meiva:link base/agents/docs/harness/harness.meiva.okf.md
+# meiva:link base/agents/docs/harness/harness.md
 def test_route_refuses_a_machine_that_cannot_run_agents(
     set_machine_identity: MachineIdentitySetter,
 ) -> None:

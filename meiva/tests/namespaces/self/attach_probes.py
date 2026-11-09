@@ -4,7 +4,7 @@
 # `sys.path` and the marker is a file the probe reads, so the SDK is imported exactly
 # as a provider's tool call imports it — no pytest fixture has run in this process,
 # and the environment is whatever the test passed in.
-# meiva:link meiva/self/harness/docs/harness-attach.meiva.okf.md
+# meiva:link meiva/self/harness/docs/harness-attach.md
 
 import json
 import sys

@@ -1,6 +1,6 @@
 # meiva:note
 # The per-workspace ring of background-run logs: where they live, and which ones to evict, as functions of values. `background.py` reads the directory and removes what this names.
-# meiva:link meiva/shell/docs/shell.meiva.okf.md
+# meiva:link meiva/shell/docs/shell.md
 from __future__ import annotations
 
 from collections.abc import Collection, Sequence

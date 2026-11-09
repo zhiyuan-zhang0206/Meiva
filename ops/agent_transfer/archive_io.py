@@ -1,7 +1,7 @@
 # meiva:note
 # Deterministic workspace archive packing, safe symlink-aware extraction without `extractall`,
 # post-extraction disk verification, and atomic staging/activation swaps under `<home>/workspaces`.
-# meiva:link gateway/agents/docs/agent-transfer.meiva.okf.md
+# meiva:link gateway/agents/docs/agent-transfer.md
 
 from __future__ import annotations
 

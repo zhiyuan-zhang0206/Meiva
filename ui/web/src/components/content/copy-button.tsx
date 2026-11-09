@@ -24,7 +24,7 @@ interface Props {
 // contexts behind it), so a test asserts on the answer the page gave rather than stubbing
 // `navigator.clipboard`. On success the button briefly shows a Check icon and a "Copied!" tooltip
 // before resetting. It is positioned inside a `group` container that reveals it on hover.
-// meiva:link ui/web/src/docs/frontend-state/browser-port.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-state/browser-port.md
 export function CopyButton({ text, label = "code", streaming = false }: Props) {
   const t = useTranslations("common");
   const browser = useBrowser();

@@ -128,7 +128,7 @@ def test_result_fields_carry_usage_cost_and_denials() -> None:
 # input tokens beside 17391 cache reads and 6621 cache writes. Reading the remainder
 # as the prompt priced a 24020-token turn as 8 tokens and raised in `quote`, which
 # deleted the reply the turn had already produced.
-# meiva:link base/lm/harness/docs/harness.meiva.okf.md
+# meiva:link base/lm/harness/docs/harness.md
 def test_usage_reports_the_whole_prompt_not_only_the_uncached_remainder() -> None:
     fields = parse_result(
         fake.ResultMessage(
@@ -219,7 +219,7 @@ def test_a_finished_background_task_maps_to_unsolicited_output() -> None:
     # The report the CLI injects when a background command ends. It belongs to no
     # turn of ours, so it maps to unsolicited output carrying what the agent needs to
     # read — the task, its status, and where the output went.
-    # meiva:link base/lm/harness/claude/docs/claude.meiva.okf.md
+    # meiva:link base/lm/harness/claude/docs/claude.md
     message = fake.TaskNotificationMessage(
         subtype="task_notification",
         data={},
@@ -256,7 +256,7 @@ def test_a_result_carries_the_origin_the_cli_names() -> None:
     # meiva:note
     # The origin is what lets the session tell its own turn from the CLI's turn over
     # a notification; a CLI that names nothing answers None and is read as ours.
-    # meiva:link base/lm/harness/claude/docs/claude.meiva.okf.md
+    # meiva:link base/lm/harness/claude/docs/claude.md
     own = parse_result(fake.ResultMessage(subtype="success"))
     foreign = parse_result(
         fake.ResultMessage(subtype="success", origin={"kind": "task-notification"})

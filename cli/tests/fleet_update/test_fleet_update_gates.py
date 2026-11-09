@@ -2,7 +2,7 @@
 # The checks a window refuses on, and the ones it reports instead: the stored-schedule and
 # drift verifications, the preflight refusals, the stop journal a host writes, and the fact
 # that no half reads a hold.
-# meiva:link cli/docs/fleet-update-window/fleet-update-window.meiva.okf.md
+# meiva:link cli/docs/fleet-update-window/fleet-update-window.md
 
 from __future__ import annotations
 

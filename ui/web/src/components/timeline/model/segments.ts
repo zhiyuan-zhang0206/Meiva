@@ -31,7 +31,7 @@ export type RankedTimelineGroup =
 // Group the continuous display stream into maximal secondary TurnBlocks in one
 // single pass across compact boundaries and transition buffers, while retaining
 // each member's own (source, rank, index) for scroll anchors and DOM windowing.
-// meiva:link ui/web/src/docs/frontend-components/timeline-view/continuous-segments.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/timeline-view/continuous-segments.md
 export function groupTimelineSegments(
   canonicalItems: readonly BackendTimelineItem[],
   compactBuffer: CompactTransitionBuffer | null = null,

@@ -44,7 +44,7 @@ export type { ConnectionState } from "../contracts/types";
 // `lib/timeline/timeline-plan.ts` is the internal planner, so a caller outside
 // the library (components/timeline) names the origin here rather than reaching
 // into the planner.
-// meiva:link ui/web/src/docs/frontend-components/timeline-view/history-paging.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/timeline-view/history-paging.md
 export type { OlderLoadOrigin } from "./timeline-plan";
 
 const OLDER_BASE_LIMIT = 50;
@@ -102,13 +102,13 @@ export interface UseTimelineResult {
   // The reader's own older-page read — the loading strip above the messages
   // presents this, never `loadingOlder`. That flag is the concurrency guard
   // four callers hold, and two of them read history nobody pulled for.
-  // meiva:link ui/web/src/docs/frontend-components/timeline-view/history-paging.meiva.okf.md
+  // meiva:link ui/web/src/docs/frontend-components/timeline-view/history-paging.md
   readerLoadingOlder: boolean;
   // meiva:note
   // Fetch the previous window of older items and prepend them, recording who
   // asked: only a `reader` origin presents the loading strip. No-op when
   // already loading or no older items remain.
-  // meiva:link ui/web/src/docs/frontend-components/timeline-view/history-paging.meiva.okf.md
+  // meiva:link ui/web/src/docs/frontend-components/timeline-view/history-paging.md
   loadOlder: (origin: OlderLoadOrigin) => void;
   retainedItemsMax: number;
 }
@@ -133,7 +133,7 @@ export function useTimeline(
   // showed a ring for the cold fill and for compact-history retention, and each
   // such load mounted a fresh ring, so the animation restarted instead of
   // turning (user report 2026-10-29).
-  // meiva:link ui/web/src/docs/frontend-components/timeline-view/loading-ring.meiva.okf.md
+  // meiva:link ui/web/src/docs/frontend-components/timeline-view/loading-ring.md
   const [readerOrigin, setReaderOrigin] = useState(false);
   const timelineQuery = useQuery({
     queryKey: ["timeline", agentId] as const,

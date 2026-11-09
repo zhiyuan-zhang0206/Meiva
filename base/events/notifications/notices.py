@@ -33,7 +33,7 @@ def question_fingerprint(question: object) -> str:
 # The key format has one owner: the delivery path that writes it and the audit
 # that replays a window must agree, or the replay silently measures a different
 # policy than the one the spine runs.
-# meiva:link base/events/notifications/docs/notifications.meiva.okf.md
+# meiva:link base/events/notifications/README.md
 def notice_dedupe_key(notice_id: int, question: object) -> str:
     return f"notice:{notice_id}:{question_fingerprint(question)}"
 
@@ -43,7 +43,7 @@ def notice_dedupe_key(notice_id: int, question: object) -> str:
 # notice, which the inbox already accepts (`?notice=<global id>` selects the row).
 # Without it a transport can only open a generic queue, so a user who taps the
 # notification lands somewhere that does not answer "which one is this?".
-# meiva:link base/events/notifications/docs/notifications.meiva.okf.md
+# meiva:link base/events/notifications/README.md
 def notice_href(notice_id: int) -> str:
     return f"/fleet?notice={notice_id}"
 
@@ -62,7 +62,7 @@ def notice_href(notice_id: int) -> str:
 # retried post of the same content stays silent. Staging cannot fail the notice:
 # it runs in the notice's own transaction, so a database failure rolls both back
 # and the producer retries the whole post.
-# meiva:link base/events/notifications/docs/notifications.meiva.okf.md
+# meiva:link base/events/notifications/README.md
 def stage_notice_notification(
     conn: psycopg.Connection, *, agent_id: int, notice_id: int
 ) -> int | None:

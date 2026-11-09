@@ -3,7 +3,7 @@
 // values it wants through `hooksState` and watches the stand-ins `page-test-mock.tsx`
 // supplies (send asks the timeline to stay with a follower, handleSend errors
 // bubble to toast, composerMode tri-state). No module is replaced.
-// meiva:link ui/web/src/docs/frontend-state/frontend-state.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-state/frontend-state.md
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, fireEvent, screen } from "@testing-library/react";
 import {  } from "@/test-support/render";
@@ -138,7 +138,7 @@ describe("HomePage top-level render", () => {
     // meiva:note
     // The harness belongs to the inspector's Liveness section, not to the title bar:
     // naming it there was information the reader never acts on (user 2026-10-21).
-    // meiva:link ui/web/src/docs/frontend-components/home-shell-chrome/home-shell-chrome.meiva.okf.md
+    // meiva:link ui/web/src/docs/frontend-components/home-shell-chrome/home-shell-chrome.md
     expect(label).not.toContain("Meiva");
   });
   it("keeps the agent label while Inspector mode is on", () => {
@@ -146,7 +146,7 @@ describe("HomePage top-level render", () => {
     // Inspector changes what the right column shows, not which conversation the
     // reader is in: a bar titled "Inspector" made the agent behind it disappear
     // (user 2026-10-21).
-    // meiva:link ui/web/src/docs/frontend-components/home-shell-chrome/home-shell-chrome.meiva.okf.md
+    // meiva:link ui/web/src/docs/frontend-components/home-shell-chrome/home-shell-chrome.md
     hooksState.activeId = 5;
     hooksState.isLarge = true;
     hooksState.settings = { "display.timeline_width_px": 768 };
@@ -251,7 +251,7 @@ describe("HomePage top-level render", () => {
   // on desktop, session state on mobile) is `useInspectorOpen`'s, asserted in
   // lib/inspector/inspector-panel-store.test.ts ("an explicit desktop
   // preference does not force the overlay open on mobile").
-  // meiva:link ui/web/src/docs/frontend-state/shared-context/shared-context.meiva.okf.md
+  // meiva:link ui/web/src/docs/frontend-state/shared-context/shared-context.md
   it("mount renders no inspector column while the inspector is closed", () => {
     hooksState.isLarge = false;
     hooksState.inspectorOpen = false;

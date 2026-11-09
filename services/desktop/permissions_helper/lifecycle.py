@@ -269,7 +269,7 @@ def _replaces_installed(exe: Path, destination: Path | None, *, env: BuildEnv) -
 # Skips the compile + sign only when the installed bundle is valid and its recorded content hash matches every build input. Checkout mtimes therefore cannot churn the binary or its TCC identity. A stale installed bundle is rebuilt in place, only when `_replaces_installed` admits it. A rebuild is only a new code identity when the certificate changes: the designated requirement names the certificate, not the code hash, so the desktop grants survive it.
 #
 # The signature this build will carry is settled before anything is removed. A host whose recorded requirement names a certificate has nothing to fall back to, so a missing identity stops the build here rather than after the old artifact is gone.
-# meiva:link services/docs/agent_runner_side/permissions-helper/authorization.meiva.okf.md
+# meiva:link services/docs/agent_runner_side/permissions-helper/authorization.md
 def build_and_sign(*, destination: Path | None, env: BuildEnv) -> tuple[Path, bool]:
     build_dir = build_directory(destination, app_dir=env.app_dir, user_home=env.facts.user_home)
     state_path = build_dir / BUILD_STATE_NAME

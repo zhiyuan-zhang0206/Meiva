@@ -20,7 +20,7 @@ export function transportModeReport(transport: StreamTransport): { key: "shared"
 // unmerged transport, and whether the transport-mode event has been reported.
 // The composition root builds one hub; tests build their own with a double
 // StreamTransport, so no stream state lives at module level.
-// meiva:link ui/web/src/docs/frontend-data-flow/merged-stream.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-data-flow/merged-stream.md
 export class StreamHub {
   private shared: ProfileSseTransport | null = null;
   private readonly mergedTransports = new Map<string, ProfileSseTransport>();

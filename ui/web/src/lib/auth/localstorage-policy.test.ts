@@ -23,7 +23,7 @@ const SETITEM_ALLOWLIST = new Set<string>([
   "lib/agents/use-agents.ts", // meiva.active.agent_id — last-viewed agent
   // meiva:note
   // meiva.home.contextPanelOpen: shared-context panel open/closed on this device.
-  // meiva:link ui/web/src/docs/frontend-state/frontend-state.meiva.okf.md
+  // meiva:link ui/web/src/docs/frontend-state/frontend-state.md
   "lib/context/context-panel-open.ts",
 ]);
 

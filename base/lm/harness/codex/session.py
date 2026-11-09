@@ -85,7 +85,7 @@ from base.lm.harness.session import (
 # preserves control events and may drop text deltas. Cancellation is `turn/interrupt` plus an
 # assertion that the commands the turn spawned are gone, and `settled=None` when
 # the app-server pid is unobservable — never a silent pass.
-# meiva:link base/lm/harness/codex/docs/codex.meiva.okf.md
+# meiva:link base/lm/harness/codex/docs/codex.md
 CANCEL_POLL_SECONDS = 0.02
 
 
@@ -93,7 +93,7 @@ CANCEL_POLL_SECONDS = 0.02
 # The CLI this session spawns, resolved through the directories a harness installs into as well as
 # PATH: the session environment it is handed need not carry a PATH at all, and a bare name would
 # then resolve against the OS default (#5491).
-# meiva:link base/lm/harness/docs/harness.meiva.okf.md
+# meiva:link base/lm/harness/docs/harness.md
 def resolved_binary(
     config: CodexConfig, environ: Mapping[str, str], *, bin_dirs: Sequence[str] | None = None
 ) -> str:
@@ -306,7 +306,7 @@ class CodexSession(BaseHarnessSession[CodexConfig]):
         # meiva:note
         # `turn/started` can beat this response and supply the interrupt target.
         # Activity waits for the response to certify its native turn id.
-        # meiva:link base/lm/harness/docs/attribution.meiva.okf.md
+        # meiva:link base/lm/harness/docs/attribution.md
         self._starting = True
         try:
             result = await self._call(
@@ -340,7 +340,7 @@ class CodexSession(BaseHarnessSession[CodexConfig]):
             # meiva:note
             # A name that changed mid-turn is the provider replaying another turn's
             # transcript: the partial state gathered under the old name is not ours.
-            # meiva:link base/lm/harness/docs/attribution.meiva.okf.md
+            # meiva:link base/lm/harness/docs/attribution.md
             self._records.pop(ticket.turn_id, None)
         ticket.provider_turn_id = bound.name
         ticket.interrupt_ready.set()
@@ -428,7 +428,7 @@ class CodexSession(BaseHarnessSession[CodexConfig]):
     # An error the server will not retry, on a turn this session is not running, is
     # news about the provider rather than a verdict on our turn. It reaches the sink
     # instead of ending a wait it has nothing to do with (#5663).
-    # meiva:link base/lm/harness/docs/attribution.meiva.okf.md
+    # meiva:link base/lm/harness/docs/attribution.md
     def _on_error(self, params: JsonObject) -> None:
         report = error_report(params)
         if report is None:
@@ -443,7 +443,7 @@ class CodexSession(BaseHarnessSession[CodexConfig]):
     # `turn/started` names the turn the server is about to run, and it can arrive
     # before `turn/start` has answered. Only a turn this session is in the middle
     # of starting may provisionally take the name so interruption can target it.
-    # meiva:link base/lm/harness/docs/attribution.meiva.okf.md
+    # meiva:link base/lm/harness/docs/attribution.md
     def _on_turn_started(self, params: JsonObject) -> None:
         ticket = self._active
         if ticket is None:
@@ -459,7 +459,7 @@ class CodexSession(BaseHarnessSession[CodexConfig]):
             # and the served transcript replays. It is neither our boundary nor a
             # failure, and its reply is content the agent has not read — so it goes to
             # the sink the way any other inbound does (#5663).
-            # meiva:link base/lm/harness/docs/attribution.meiva.okf.md
+            # meiva:link base/lm/harness/docs/attribution.md
             self._unsolicited(
                 UnsolicitedOutput(source="turn/completed", text=unclaimed_text(message.turn))
             )

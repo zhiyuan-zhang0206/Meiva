@@ -78,7 +78,7 @@ ResultRecorder = Callable[[str, Sequence[str], Outcome, float], None]
 # whether it already recorded its end. The outcome is recorded once, from the command's
 # own return path, so a command that dies mid-flight leaves its request without a result
 # — which is exactly the shape "stopped and nothing came back" has (task #5464).
-# meiva:link base/native_process/root_control/docs/lifecycle-caller.meiva.okf.md
+# meiva:link base/native_process/root_control/docs/lifecycle-caller.md
 class CommandAudit:
     def __init__(self) -> None:
         self.started = time.monotonic()
@@ -110,7 +110,7 @@ class _Scope:
 # (task #5464). It is scoped to that command because the recorder owns the
 # command's database, and a nested command (a restart's start leg) restores what
 # it found on exit.
-# meiva:link base/native_process/root_control/docs/lifecycle-caller.meiva.okf.md
+# meiva:link base/native_process/root_control/docs/lifecycle-caller.md
 _scope = _Scope()
 
 
@@ -158,7 +158,7 @@ def record_lifecycle_result(*, outcome: Outcome, seconds: float) -> None:
 # would drop a loguru record) and the command keeps the attribution it has. The sink is
 # best-effort too: writing a row must never fail the command that repairs the host. A source
 # checkout with no readable commit is not a fault; its `head_sha` is None.
-# meiva:link base/native_process/root_control/docs/lifecycle-caller.meiva.okf.md
+# meiva:link base/native_process/root_control/docs/lifecycle-caller.md
 @contextmanager
 def operator_lifecycle_audit(
     *,

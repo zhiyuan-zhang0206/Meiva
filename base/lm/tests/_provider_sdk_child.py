@@ -2,7 +2,7 @@
 # The provider SDKs' first import, run as a cold process: `routes` proves every production path
 # enters each SDK through `base.lm.compat.provider_sdks`, `race` runs those same paths from several threads
 # at once. `test_provider_sdk_imports.py` runs it and reads the exit status.
-# meiva:link base/lm/compat/docs/compat.meiva.okf.md
+# meiva:link base/lm/compat/README.md
 
 from __future__ import annotations
 

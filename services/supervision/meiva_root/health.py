@@ -7,7 +7,7 @@
 # ladder's capped cadence and a dependency-recovery grant: one attempt on the
 # first usable database this monitor observes and one per unavailable-to-answering
 # edge (task #5315).
-# meiva:link services/supervision/meiva_root/docs/meiva_root.meiva.okf.md
+# meiva:link services/supervision/meiva_root/docs/meiva_root.md
 
 from __future__ import annotations
 

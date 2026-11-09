@@ -4,7 +4,7 @@
 # persistent-shell script does, performs the scenario and prints one JSON report on its last line.
 # The plugin under load appends a line to the counter file each time its surface module executes,
 # so "loaded once" and "never loaded" are counts of real executions, not calls to a stand-in.
-# meiva:link meiva/docs/boot-contracts.meiva.okf.md
+# meiva:link meiva/docs/boot-contracts.md
 
 from __future__ import annotations
 

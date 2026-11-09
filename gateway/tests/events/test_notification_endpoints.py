@@ -27,7 +27,7 @@ def _agent(conn: psycopg.Connection) -> int:
 # The default configuration enables the one request the user has to answer. A
 # category the core or an installed plugin adds that ships on fails here, because
 # every transport honors this merged view.
-# meiva:link base/events/notifications/docs/notifications.meiva.okf.md
+# meiva:link base/events/notifications/README.md
 def test_only_the_request_that_needs_a_reply_is_enabled(db_conn: psycopg.Connection) -> None:
     with gateway_test_client() as client:
         resp = client.get("/api/notifications/categories")
@@ -91,7 +91,7 @@ def _deliveries(conn: psycopg.Connection, agent_id: int) -> list[tuple[str, str,
 # meiva:note
 # A notice that needs an answer is staged in the notice's own transaction and
 # announced after it commits, so the row exists and is marked delivered.
-# meiva:link base/events/notifications/docs/notifications.meiva.okf.md
+# meiva:link base/events/notifications/README.md
 def test_a_response_notice_is_staged_and_announced(
     db_conn: psycopg.Connection, event_bus: EventBus
 ) -> None:
@@ -114,7 +114,7 @@ def test_a_response_notice_is_staged_and_announced(
 # The replay branch repairs the delivery instead of skipping it: a post whose
 # announce was lost (the client retried because the response never arrived) is
 # announced by the retry, and the row is not duplicated.
-# meiva:link base/events/notifications/docs/notifications.meiva.okf.md
+# meiva:link base/events/notifications/README.md
 def test_a_replayed_post_repairs_a_lost_announce(
     db_conn: psycopg.Connection, event_bus: EventBus
 ) -> None:
@@ -126,7 +126,7 @@ def test_a_replayed_post_repairs_a_lost_announce(
         assert first.status_code == 201
         # meiva:note
         # The announce never happened: the process died right after the commit.
-        # meiva:link base/events/notifications/docs/notifications.meiva.okf.md
+        # meiva:link base/events/notifications/README.md
         db_conn.execute(
             "UPDATE notification_events SET announced_at = NULL WHERE agent_id = %s",
             (agent_id,),
@@ -155,7 +155,7 @@ def _insert_delivery(conn: psycopg.Connection, agent_id: int, subject: str) -> i
 # The recovery read: a client that was offline asks for what it missed, and gets
 # the newest deliveries after its cursor plus the newest id so a first run can set
 # a cursor without replaying history.
-# meiva:link base/events/notifications/docs/notifications.meiva.okf.md
+# meiva:link base/events/notifications/README.md
 def test_the_pull_path_returns_deliveries_after_a_cursor(
     db_conn: psycopg.Connection, event_bus: EventBus
 ) -> None:
@@ -189,7 +189,7 @@ def test_the_pull_path_keeps_the_newest_rows_of_a_long_gap(
 # its dedupe window intact — so the plugin path stays exercised after the core
 # catalog dropped to one category. The manifest is a real one on disk, parsed by
 # the same loader the gateway uses.
-# meiva:link base/events/notifications/docs/notifications.meiva.okf.md
+# meiva:link base/events/notifications/README.md
 def test_a_plugin_category_joins_the_switch_list_switched_off(tmp_path: Path) -> None:
     plugin_dir = tmp_path / "sample"
     plugin_dir.mkdir()

@@ -11,7 +11,7 @@ import { FLEX } from "@/lib/layout/layout";
 // else (user ruling 2026-11-08 — no skeleton, no loading sentence). The frame
 // keeps the height the resolved chart occupies so the page does not jump when
 // the read lands.
-// meiva:link ui/web/src/docs/frontend-components/run-timeline/run-timeline.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/run-timeline/run-timeline.md
 export function RunTimelineChartLoading() {
   const t = useTranslations("runTimeline");
   return (

@@ -5,7 +5,7 @@
 # same rule. `APIError` is re-exported because `google.genai` forwards it through `__getattr__`,
 # which the type checker reads as `Any`; the submodule import here runs after the root import above
 # it completed, so it cannot race.
-# meiva:link base/lm/compat/docs/compat.meiva.okf.md
+# meiva:link base/lm/compat/README.md
 
 from google import genai
 from google.genai.errors import APIError

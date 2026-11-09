@@ -2,7 +2,7 @@
 
 **Current ownership:** this is archived source material for the implemented
 per-home isolation model. Current startup facts are in
-[data-plane startup](../../../cli/commands/data_plane/docs/data-plane-startup/data-plane-startup.meiva.okf.md).
+[data-plane startup](../../../cli/commands/data_plane/docs/data-plane-startup/data-plane-startup.md).
 Only the Redis binary-vendoring leg remains a plan, tracked in
 [vendored data-plane binaries](vendored-data-plane-binaries.md); the original
 body below is retained as evidence, not an additional implementation checklist.
@@ -79,7 +79,7 @@ clusters apart *inside one instance* is unnecessary. The bulk is in
   carried was retired 2026-09-20). Each instance
   `initdb`s its own superuser; a NOLOGIN owner role owns the db, and processes
   dial write-generation logins over SCRAM
-  ([authority](../../../base/cluster/authority/docs/authority.meiva.okf.md)).
+  ([authority](../../../base/cluster/authority/docs/authority.md)).
 - **Shared-instance foreign/neighbour probes** — `_shared_infra_running`,
   `_foreign_redis_error`, `_redis_listening`. A per-cluster instance on its own
   port with its own data dir under `$MEIVA_HOME` is unambiguously this cluster's;

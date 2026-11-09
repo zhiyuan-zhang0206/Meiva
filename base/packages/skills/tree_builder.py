@@ -18,7 +18,7 @@ _log = logging.getLogger("base.packages.skills.tree_builder")
 # caller scanned), resetting `_claimed` per root (so a later provider root can override an earlier
 # one while same-root collisions raise `SkillNameCollision`) and deduplicating
 # identical SKILL.md content across roots via `_seen_hashes`.
-# meiva:link meiva/skills/docs/skills.meiva.okf.md
+# meiva:link meiva/skills/README.md
 class SkillIndexBuilder:
     def __init__(self, base_ns: tuple[str, ...] = ()) -> None:
         self.tree: Tree = {}

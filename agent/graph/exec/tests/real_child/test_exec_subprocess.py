@@ -44,7 +44,7 @@ _SLEEP_CHILD = Path(__file__).with_name("sleep_child.py")
 # meiva:note
 # Advances monotonic time past the exec deadline only after `ready()` observes the
 # child running, so timeout tests never depend on wall-clock import speed or sleep.
-# meiva:link agent/graph/exec/docs/subprocess-tests.meiva.okf.md
+# meiva:link agent/graph/exec/docs/subprocess-tests.md
 class _ExpireAfterReadyTimers:
     def __init__(self, ready: Callable[[], bool], *, advance_s: float) -> None:
         self._ready = ready

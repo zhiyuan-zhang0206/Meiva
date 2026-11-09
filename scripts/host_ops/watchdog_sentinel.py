@@ -11,7 +11,7 @@
 # rather than broken: the first sighting of a sample is recorded and the sentinel stays quiet
 # until then. And one incident is one message: the state file also holds the last send, so a
 # fifteen-minute tick does not turn one outage into a stream.
-# meiva:link scripts/host_ops/docs/watchdog-sentinel.meiva.okf.md
+# meiva:link scripts/host_ops/docs/watchdog-sentinel.md
 from __future__ import annotations
 
 import argparse

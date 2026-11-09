@@ -25,7 +25,7 @@
 # watch's own, in `schedules/plans/watch/junit.py`, and `scripts` may not import `schedules`:
 # `schedules` already imports `scripts`, so that edge would close a cycle. `ci.yml`'s `e2e gate`
 # job runs it as `python -m schedules.jobs.watch.inherited_reds`.
-# meiva:link scripts/ci/docs/inherited-reds.meiva.okf.md
+# meiva:link scripts/ci/docs/inherited-reds.md
 
 from __future__ import annotations
 

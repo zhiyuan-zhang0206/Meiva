@@ -20,7 +20,7 @@ from meiva.self.harness.registration import (
 # The file store behind `RegistrationStore`: one JSON document per agent under
 # `$MEIVA_HOME/harness/registrations/`. The decode and the row's shape live in
 # `registration.py`; this class only reads and writes the files.
-# meiva:link meiva/self/harness/docs/harness-attach.meiva.okf.md
+# meiva:link meiva/self/harness/docs/harness-attach.md
 class FileRegistrationStore:
     def __init__(self, root: Path) -> None:
         self._root = Path(root)

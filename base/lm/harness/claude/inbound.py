@@ -20,7 +20,7 @@ from base.lm.harness.events import (
 # else arrived inside the running turn. Dispatch is by class name rather than `isinstance`
 # because the SDK is injected and a test fake carries the same class names and fields; a
 # name nobody knows is inside the turn, which is how a newer SDK stays compatible.
-# meiva:link base/lm/harness/claude/docs/claude.meiva.okf.md
+# meiva:link base/lm/harness/claude/docs/claude.md
 class MessageKind(StrEnum):
     RESULT = "result"
     TASK_NOTIFICATION = "task-notification"
@@ -50,7 +50,7 @@ def message_kind(class_name: str) -> MessageKind:
 # `human` is the origin of a turn this session started by submitting a prompt; every other
 # origin names a turn the CLI began on its own, which this session never started, so it comes
 # back as no claim at all and the result is recorded as unsolicited output (#5663).
-# meiva:link base/lm/harness/claude/docs/claude.meiva.okf.md
+# meiva:link base/lm/harness/claude/docs/claude.md
 HUMAN_ORIGIN = "human"
 
 
@@ -62,7 +62,7 @@ def claimed_origin(origin_kind: str | None) -> str | None:
 # A step is one assistant message that produced text or a tool call: the CLI reports one
 # assistant message per model step, and a turn's step count floors the `num_turns` its result
 # reports, so a turn that ran tools is never read as a single step.
-# meiva:link base/lm/harness/claude/docs/claude.meiva.okf.md
+# meiva:link base/lm/harness/claude/docs/claude.md
 def counts_as_step(class_name: str, events: Sequence[BridgeEvent]) -> bool:
     return class_name == "AssistantMessage" and any(
         isinstance(event, (AssistantText, ToolUse)) for event in events
@@ -72,7 +72,7 @@ def counts_as_step(class_name: str, events: Sequence[BridgeEvent]) -> bool:
 # meiva:note
 # What a turn's own text is: the assistant's text blocks, in the order they streamed. A
 # reasoning block is not the reply, and a tool result the CLI echoes back is not either.
-# meiva:link base/lm/harness/claude/docs/claude.meiva.okf.md
+# meiva:link base/lm/harness/claude/docs/claude.md
 def assistant_texts(events: Sequence[BridgeEvent]) -> tuple[str, ...]:
     return tuple(event.text for event in events if isinstance(event, AssistantText))
 
@@ -85,7 +85,7 @@ def assistant_texts(events: Sequence[BridgeEvent]) -> tuple[str, ...]:
 # asking the CLI to stop work that already ended. These four values are the SDK's own
 # `TERMINAL_TASK_STATUSES`, spelled out here so the adapter's fake carries the same rule the
 # real CLI follows and a bump of the SDK constant shows up as a diff in this file.
-# meiva:link base/lm/harness/claude/docs/background-tasks.meiva.okf.md
+# meiva:link base/lm/harness/claude/docs/background-tasks.md
 TERMINAL_TASK_STATUSES = frozenset({"completed", "failed", "stopped", "killed"})
 
 
@@ -119,7 +119,7 @@ class BackgroundTasks:
 # report stays in the stream; with no turn running nobody has read it, so the sink takes it
 # and dispatch is held until the CLI's own answer reports. A task notification maps to
 # exactly one report, which is why splitting the two does not reorder the stream (#5663).
-# meiva:link base/lm/harness/claude/docs/background-tasks.meiva.okf.md
+# meiva:link base/lm/harness/claude/docs/background-tasks.md
 @dataclass(frozen=True, slots=True)
 class NotificationPlan:
     stream: tuple[BridgeEvent, ...]
@@ -139,7 +139,7 @@ def notification_plan(events: Sequence[BridgeEvent], *, claimed: bool) -> Notifi
 # What the CLI's init says about the session it opened, with the fallbacks the stream and the
 # registry read: a message that names no session id or model keeps the one the session already
 # has, so a CLI that reports only part of it cannot blank the identity pair.
-# meiva:link base/lm/harness/claude/docs/claude.meiva.okf.md
+# meiva:link base/lm/harness/claude/docs/claude.md
 @dataclass(frozen=True, slots=True)
 class SessionIdentity:
     session_id: str | None

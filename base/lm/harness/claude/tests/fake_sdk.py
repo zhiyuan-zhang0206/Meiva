@@ -49,7 +49,7 @@ class SystemMessage:
 # own field names. `TaskNotificationMessage` and the other two are `SystemMessage`
 # subclasses in the real SDK too, so the adapter's dispatch — by class name, before
 # the `SystemMessage` entry — is exercised exactly as it is against the CLI.
-# meiva:link base/lm/harness/claude/docs/claude.meiva.okf.md
+# meiva:link base/lm/harness/claude/docs/claude.md
 @dataclass
 class TaskStartedMessage(SystemMessage):
     task_id: str = "task-1"
@@ -318,7 +318,7 @@ class FakeClaudeSDKClient:
     # meiva:note
     # Deliver a message the CLI emitted outside any submitted turn — the real client's
     # notification stream, which a test drives directly instead of a background command.
-    # meiva:link base/lm/harness/claude/docs/background-tasks.meiva.okf.md
+    # meiva:link base/lm/harness/claude/docs/background-tasks.md
     def push(self, message: Any) -> None:
         self._emit(message)
 
@@ -331,7 +331,7 @@ class FakeSDK:
         # The real SDK terminates its CLI before `disconnect()` returns; a fake that
         # left it alive would make every close test wait out the adapter's settle
         # window and, worse, would stop modelling the one fact the close path relies on.
-        # meiva:link base/lm/harness/docs/harness.meiva.okf.md
+        # meiva:link base/lm/harness/docs/harness.md
         self.probe: ScriptedProbe | None = None
         self.new_session_id = "session-1"
         self.clients: list[FakeClaudeSDKClient] = []

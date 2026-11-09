@@ -70,7 +70,7 @@ def _kill_harness_processes(tmp_path: Path, process: subprocess.Popen[str]) -> N
     process.communicate(timeout=5)
 
 
-# meiva:link services/backup/scheduler/docs/timing-and-exit.meiva.okf.md
+# meiva:link services/backup/scheduler/docs/timing-and-exit.md
 def _assert_sigterm_reaps_job_before_scheduler_exits(
     tmp_path: Path, mode: str, postgres_base: Path
 ) -> None:

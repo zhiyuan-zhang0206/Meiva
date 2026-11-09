@@ -19,7 +19,7 @@ function geometry(viewport: HTMLElement) {
 // nothing (user report 2026-10-30). A refresh in flight does not override it.
 // The state is the measured distance to the bottom, so appended content
 // re-decides it.
-// meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.md
 describe("scroll-to-bottom control presence", () => {
   it("is absent at the bottom, including while a refresh is in flight", () => {
     const { rerender } = render(<TimelineView items={items} />);

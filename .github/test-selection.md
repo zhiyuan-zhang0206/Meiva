@@ -1,0 +1,42 @@
+# CI test selection
+
+## What it is
+
+The CI workflow selects an owner-rule backend test subset (direct importers
+plus the owning package's tests) for real pull requests. In `enforce` mode (the default) a SELECTED pull request runs that
+subset as its backend pytest gate whenever its impact is computable; every other
+selector decision (impact unknown) keeps the full suite. In `shadow` mode no PR gates on
+the subset: the full fan-out gates and the subset plus its comparison report
+run informational beside it. The workflow-level `TEST_SELECTION_MODE` value in
+[ci.yml](workflows/ci.yml) is the single revert switch.
+
+## Job data flow
+
+1. The `classify change` job's selector step computes an owner-rule subset from
+   the merge-base diff, publishes the active mode and an audited JSON decision
+   (FULL / SKIP / SELECTED) as job outputs, and is non-fatal there
+   (`continue-on-error`): a selector or setup failure leaves the routing outputs
+   empty, which degrades to the full fan-out, and the step's outcome (the
+   `selector` output) fails the backend aggregator rather than the classify check.
+   It lives in classify so the shards wait on one job, not two.
+2. `backend-selected` runs only a SELECTED list, as a matrix of 1 to 8 shards sized from the
+   subset's estimated time (classify publishes `shards`, `groups` and the list as the
+   `selected-tests` artifact; each shard splits the list with the full fan-out's file
+   planner). It is informational in shadow. In enforce it is the gate: the native pytest result and shared JUnit
+   validator reject failed, missing, malformed or unexecuted reports, just
+   like the shards. No external quarantine service determines the verdict.
+   `backend-shard` is skipped exactly when enforce + SELECTED; it runs the
+   full suite in every other combination.
+3. The backend aggregator — the branch-protection check — requires the subset
+   result on the enforced path and the fan-out result otherwise. The 85%
+   coverage gate runs on the full fan-out only (a subset run has no shard
+   coverage artifacts).
+4. `test-selection-shadow-report` compares the subset result with the full
+   non-flaky pytest population and records FALSE GREEN — in shadow mode only:
+   under enforce a SELECTED PR has no full pytest result to compare against.
+
+## Related policy
+
+[docs/conventions/engineering/test-selection.md](../docs/conventions/engineering/test-selection.md) owns the
+selection rules, path classes, static-map limits, duration estimates, artifacts, maintenance, and
+the mode switch.

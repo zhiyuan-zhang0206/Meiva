@@ -221,4 +221,4 @@ length when changing the fake. The helper's `rounds` counter increments before
 confirming page arrival, so `rounds >= 2` alone does not prove two successful
 loads; history availability and the actual page/anchor assertions matter too.
 
-Browser fixture premises: [[tests/docs/e2e-fixture-contracts.meiva.okf.md]].
+Browser fixture premises: [E2E fixture evidence](../docs/e2e-fixture-contracts.md).

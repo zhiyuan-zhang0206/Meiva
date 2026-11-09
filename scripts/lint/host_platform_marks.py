@@ -4,7 +4,7 @@
 # Run: `.venv/bin/python scripts/lint/host_platform_marks.py [--write-baseline] [--only FILE...] [PATH ...]`;
 # also the `lint-host-platform-marks` pre-commit hook. The three rules, the exemption and the
 # baseline are owned by the linked document.
-# meiva:link scripts/lint/docs/host-platform-marks/host-platform-marks.meiva.okf.md
+# meiva:link scripts/lint/docs/host-platform-marks/host-platform-marks.md
 
 from __future__ import annotations
 
@@ -730,7 +730,7 @@ def _verdict(
     print(
         "\nHost-platform violations. A test injects the host it wants; only a subject that IS "
         "the host (launchd, TCC, codesign, swiftc) takes @pytest.mark.requires_host. The rules "
-        "are owned by scripts/lint/docs/host-platform-marks/host-platform-marks.meiva.okf.md.",
+        "are owned by scripts/lint/docs/host-platform-marks/host-platform-marks.md.",
         file=sys.stderr,
     )
     return 1

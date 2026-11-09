@@ -9,7 +9,7 @@
 # Resetting on every write is what let the daily note stream (87% of all task updates) hold the
 # ladder at zero, so no task ever passed one reminder (task #5314); the 2026-10-31 ruling brought
 # notes back on purpose (see DEFAULT_RESET_ON).
-# meiva:link meiva_builtins/plugins/meiva_fleet/docs/tasks/task_model/task_model_reminders.meiva.okf.md
+# meiva:link meiva_builtins/plugins/meiva_fleet/docs/tasks/task_model/task_model_reminders.md
 
 from __future__ import annotations
 

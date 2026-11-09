@@ -89,7 +89,7 @@ async def publish_turn_progress_heartbeat(
 # the host already writes (task #5767): "at 01:36, what did the beat see" has to be answerable
 # from the event stream, and a line that merely mentions the words must not count. `pool` names
 # the leg that failed so a future second beat (another pool, another job) is distinguishable.
-# meiva:link agent/docs/loop.meiva.okf.md
+# meiva:link agent/docs/loop.md
 def _report_database_beat_failure(
     machine: str, failures: int, error: str, *, will_exit: bool
 ) -> None:
@@ -110,7 +110,7 @@ def _report_database_beat_failure(
 # meiva:note
 # The other half of the same fact: a beat that failed and then succeeded says so, so an incident
 # review pairs the failures with the recovery instead of reading the gap as silence.
-# meiva:link agent/docs/loop.meiva.okf.md
+# meiva:link agent/docs/loop.md
 def _report_database_beat_recovery(machine: str, failures_cleared: int) -> None:
     logger.warning(
         "the agent host's database beat recovered after {failures_cleared} consecutive failure(s)",

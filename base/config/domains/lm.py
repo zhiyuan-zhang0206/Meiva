@@ -1,6 +1,6 @@
 # meiva:note
 # `LmSettings` (`base/config/domains/lm.py`) preserves the flat `.env` aliases for language-model settings. `llm_model` defaults to `deepseek-flash` with `capability="common"`, `scope="cluster-default"`, and `per_agent=True` so it serves as both the gateway spawn default and a per-agent overridable setting; `labeler_model` and `hierarchy_model` default to `deepseek-flash` with `capability="gateway"` so their provider keys survive the gateway profile pop; `meiva.understand` routes by content type, with `understand_text_model` and `understand_image_model` defaulting to `deepseek-flash` and `understand_pdf_model` / `understand_audio_model` / `understand_video_model` to `gemini-3.8-flash` (the retired `MEIVA_UNDERSTAND_MEDIA_MODEL` is no longer read; the `understand_media_*` knobs apply only to a media call a Gemini model answers); and `gemini_api_key` carries `capability="common"` for both gateway-side embeddings and agent-side Gemini calls.
-# meiva:link base/config/docs/process-profiles.meiva.okf.md
+# meiva:link base/config/docs/process-profiles.md
 from __future__ import annotations
 
 from pydantic import Field, SecretStr

@@ -123,7 +123,7 @@ def _blob_after(repo: Repository, paths: list[str], *, staged: bool) -> dict[str
 
 # meiva:note
 # Changed checks compare actual Git blobs from HEAD/index or a resolved base/HEAD range with a matching tracked checkout, unless `--worktree` explicitly compares tracked working-tree files against a base revision or HEAD for pre-stage local verification. Non-worktree runs reject mismatched snapshots, invalid targets and either-side parse failure instead of silently checking an empty or unrelated scope. Rename heuristics cannot reuse another path's legacy notes.
-# meiva:link scripts/content_lint/code_comments/docs/incremental.meiva.okf.md
+# meiva:link scripts/content_lint/code_comments/docs/incremental.md
 def snapshot(
     repo: Repository,
     base: str | None = None,
@@ -182,7 +182,7 @@ def parse_blobs(root: Path, contents: dict[str, str]) -> dict[str, Source]:
 
 # meiva:note
 # Incremental strict checks consume exact old note text once within the same path and real lexical declaration identity. New copies, rewrites and cross-owner moves remain strict; unrelated code changes and local assignment renames do not force migration of unchanged notes. Global reference integrity is never grandfathered.
-# meiva:link scripts/content_lint/code_comments/docs/incremental.meiva.okf.md
+# meiva:link scripts/content_lint/code_comments/docs/incremental.md
 def new_note_indexes(source: Source, previous: Source | None) -> frozenset[int]:
     remaining: Counter[tuple[str, str, NoteKind, str]] = (
         Counter(

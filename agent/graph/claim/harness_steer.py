@@ -17,7 +17,7 @@ from .harness_input import unconfirmed_input_items
 # A pending chat with a pickup timestamp is reserved for a provider request. It
 # remains visible in the queued strip, and an ingress retry still matches its
 # original payload. Only the head of the inbox can enter the foreground turn.
-# meiva:link agent/graph/docs/harness-turn.meiva.okf.md
+# meiva:link agent/graph/docs/harness-turn.md
 async def reserve_harness_steer(ctx: MeivaContext, agent_id: int) -> ClaimedInbound | None:
     pool = ctx.ops_pool
     if pool is None:
@@ -51,7 +51,7 @@ async def reserve_harness_steer(ctx: MeivaContext, agent_id: int) -> ClaimedInbo
 # A definite rejection releases the reservation. A positive acknowledgement
 # commits the chat and any accompanying notes in the same transaction as inbox
 # consumption. The caller publishes only after the transaction commits.
-# meiva:link agent/graph/docs/harness-turn.meiva.okf.md
+# meiva:link agent/graph/docs/harness-turn.md
 async def finish_harness_steer(
     ctx: MeivaContext,
     agent_id: int,
@@ -89,7 +89,7 @@ async def finish_harness_steer(
 # provider might have read the message, so record uncertainty without replaying
 # the chat or presenting it as acknowledged. A committed acknowledgement already
 # removed the reservation and wrote the accepted chat in one transaction.
-# meiva:link agent/graph/docs/harness-turn.meiva.okf.md
+# meiva:link agent/graph/docs/harness-turn.md
 async def recover_harness_steer(
     ctx: MeivaContext, agent_id: int, *, publish: bool = True
 ) -> list[TimelineItem]:

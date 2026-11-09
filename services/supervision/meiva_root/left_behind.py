@@ -3,7 +3,7 @@
 #
 # Root stops recorded processes from previous generations before it spawns
 # replacements, using standard pidfile and process group cleanup.
-# meiva:link services/supervision/meiva_root/docs/meiva_root.meiva.okf.md
+# meiva:link services/supervision/meiva_root/docs/meiva_root.md
 
 from __future__ import annotations
 

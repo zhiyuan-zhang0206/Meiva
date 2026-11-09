@@ -7,7 +7,7 @@ from base.lm.harness.events import Usage
 # meiva:note
 # What a finished turn is and what a session has spent so far: the two values every harness
 # adapter builds when a turn settles. Pure, so each adapter's settling decisions can be pure too.
-# meiva:link base/lm/harness/docs/harness.meiva.okf.md
+# meiva:link base/lm/harness/docs/harness.md
 
 
 def add_cost(left: float | None, right: float | None) -> float | None:

@@ -1,6 +1,6 @@
 # meiva:note
 # Compose gateway access from the startup owner's explicit configuration.
-# meiva:link base/cluster/machine/docs/machine.meiva.okf.md
+# meiva:link base/cluster/machine/docs/machine.md
 
 from base.cluster.machine import GatewayAccess
 from base.config import ConfigBoot

@@ -1,0 +1,47 @@
+# Hosted agent loop
+
+Each execution machine runs its own agent host. The shared host owns unique
+agent admission and runs serialized turns. The LLM graph claims input, calls the
+model, executes code in a local child process, then returns to claim. An idle
+agent occupies no resident turn task. Filesystem and command execution remain
+on the agent's home machine; no failure path relocates them.
+
+A fresh wake starts halted at claim, so only new inbound or explicit control
+can start work. A current healthy turn can continue ordinary graph steps until
+idle or lifecycle exit. Every admitted invocation runs once. Database phases
+have finite deadlines; failed result or checkpoint saving does not re-enter the
+graph. Claimed interrupted chat is consumed with unknown outcome rather than
+redelivered. Dangling tool calls are repaired with an `unknown` execution status.
+
+Cancellation reaches the owned task. Known resource cleanup has a finite wait;
+unresolved work retains its identity fence and requires process shutdown.
+A host that fails database ownership renewal on three consecutive beats exits. Each failed
+beat is a `host_database_beat_failed` event carrying the consecutive count and whether that
+failure ends the host; a beat that succeeds after failing reports `host_database_beat_recovered`
+with what it cleared, so the retry result is on the record rather than implied by silence.
+Crash reaping records termination and diagnostics without producing a recovery
+chat. Watchdog force/resurrect and persistent terminated-owner retries are absent.
+
+Ordinary new chat still wakes a terminated agent on its home machine. Normal
+heartbeat is new input for a runnable agent. A permanent provider error stops
+background wakes after one rejection; new chat or explicit operator action may
+try after the cause is fixed. There is no billing recovery tool or SDK outbox.
+
+Restart and terminate execute and close in one transaction at the turn boundary;
+cancel cancels the running turn Task and leaves the checkpoint for the next
+fresh-input invocation. A later generation never reconstructs an interrupted turn.
+
+## Entry points
+
+- `services/agent_runner/agent_host/daemon.py` — startup, serving and shutdown wiring.
+- `services/agent_runner/agent_host/host_beat.py` — the host beat: liveness, corpse reaping, turn-progress publication and finite DB renewal.
+- `services/agent_runner/agent_host/dispatcher.py` — wake scheduling and single-flight.
+- `services/agent_runner/agent_host/host.py` — admission, one-shot work and settlement.
+- `services/agent_runner/agent_host/invocation/__init__.py` — completed-invocation settlement and lifecycle apply.
+- `services/agent_runner/agent_host/db_recovery.py` — database-only deadline.
+
+## Related contracts
+
+- [Agent Startup](../startup/docs/startup.md)
+- [Agent Runtime Ownership](../ownership/README.md)
+- [Agent Lifecycle](lifecycle.md)

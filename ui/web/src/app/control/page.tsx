@@ -57,7 +57,7 @@ export default function ControlPage() {
     Plugins={PluginsInventory} Mcp={McpInventory} Skills={SkillsPage} Schedules={SchedulesPage} />;
 }
 
-// meiva:link ui/web/src/docs/frontend-components/control-page-load.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/control-page-load.md
 export function ControlShell({ Guide, Config, Display, Plugins, Mcp, Skills, Schedules }: ControlShellProps) {
   const t = useTranslations("control");
   const ts = useTranslations("control.sections");

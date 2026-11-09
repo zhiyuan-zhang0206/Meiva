@@ -76,7 +76,7 @@ def _assert_machine_known(target: str, pool: ConnectionPool, *, local_machine_na
 
 # meiva:note
 # Resolve the target machine's declared role set from local identity or registry rows.
-# meiva:link gateway/routers/configuration/docs/configuration.meiva.okf.md
+# meiva:link gateway/routers/configuration/README.md
 def _target_capabilities(
     target: str,
     db: Database,
@@ -417,7 +417,7 @@ async def get_config_audit(
 
 # meiva:note
 # Resolve every per-model-defaultable setting for one model via explain_setting.
-# meiva:link gateway/routers/configuration/docs/configuration.meiva.okf.md
+# meiva:link gateway/routers/configuration/README.md
 @router.get(
     "/api/config/resolved",
     description='Resolve every per-model-defaultable setting for one model — read-only.\n\nAnswers "what will an agent on this model actually run with, and which layer\ndecided that": shared default < per-model default (both code, in\n`base/lm/registry.py`) < explicit `.env` value. `explain_setting` does the\nlayering — the same function the runtime resolves through, so this view\ncannot drift from the value an agent gets.\n\nThe explicit layer is each field\'s `current_value` from the config metadata,\ni.e. read fresh from `.env` rather than the gateway\'s boot-time settings —\nmatching what the config panel shows and what the next agent process boots\nwith (every tunable here is `restart_required="agent"`).\n\nMachine-independent by construction: every tunable is cluster-scope, so\nthere is no `?machine=` here. The per-agent overlay — the one layer above\nexplicit — is per process and invisible from the cluster; `per_agent` marks\nwhich fields a spawn/restart overlay may still override.',

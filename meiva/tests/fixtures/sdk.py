@@ -1,4 +1,4 @@
-# meiva:link meiva/tests/fixtures/docs/sdk-composition.meiva.okf.md
+# meiva:link meiva/tests/fixtures/docs/sdk-composition.md
 
 import os
 from collections.abc import Iterator

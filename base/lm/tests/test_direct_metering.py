@@ -2,7 +2,7 @@
 # Direct `build_chat_model(...).invoke()` calls write one llm_usage row (task #5327). These
 # tests drive the real factory through its documented MEIVA_LLM_OVERRIDE seam and assert on
 # the emitted loguru event - the same record the event pipeline stores.
-# meiva:link base/lm/usage/docs/usage.meiva.okf.md
+# meiva:link base/lm/usage/README.md
 
 from __future__ import annotations
 

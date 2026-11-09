@@ -111,7 +111,7 @@ def _assert_second_notice_is_refused(nid: NoticeView) -> None:
 def test_notify_defaults_to_response_and_snapshot_lists_question(
     sdk_via_inprocess_gateway: None, load_activity_plugin: None, db_conn: psycopg.Connection
 ):
-    # meiva:link meiva/docs/ui.meiva.okf.md
+    # meiva:link meiva/docs/ui.md
     agent_id = seed_agent(db_conn)
     pin_agent(agent_id)
     nid = cast(
@@ -169,7 +169,7 @@ def test_notify_require_response_rides_awaiting_worklist(
     )
     # meiva:note
     # A second notice is refused while the first is open; close it, then post.
-    # meiva:link meiva_builtins/plugins/meiva_fleet/docs/notify.meiva.okf.md
+    # meiva:link meiva_builtins/plugins/meiva_fleet/docs/notify.md
     with pytest.raises(ValueError, match="already holds an open notice"):
         notice_compat.notify(
             "Name the branch?",
@@ -184,7 +184,7 @@ def test_notify_require_response_rides_awaiting_worklist(
     db_conn.rollback()
     # meiva:note
     # Only the open require_response notice rides the snapshot worklist.
-    # meiva:link meiva_builtins/plugins/meiva_fleet/docs/notify.meiva.okf.md
+    # meiva:link meiva_builtins/plugins/meiva_fleet/docs/notify.md
     snap = select_one(
         db_conn,
         agent_id,
@@ -419,7 +419,7 @@ def test_edit_notice_validation_and_guards(
         )
     # no open notice is idempotent (no-op).
     notice_compat.dismiss_notice()
-    # meiva:link meiva/docs/ui.meiva.okf.md
+    # meiva:link meiva/docs/ui.md
     notice_compat.edit_notice(title="too late")
 
 
@@ -471,7 +471,7 @@ def test_each_agent_side_resolution_publishes_notice_resolved(
     # leave the open list yet never surface in the resolved history. Posting resolves
     # nothing. Events publish from the gateway (R3 door ④ unified write API), not the
     # SDK, so the recorder subscribes to the gateway's channel.
-    # meiva:link gateway/agents/docs/notice-receipts.meiva.okf.md
+    # meiva:link gateway/agents/docs/notice-receipts.md
     agent_id = seed_agent(db_conn)
     pin_agent(agent_id)
     with recording_live_events(event_bus) as live:

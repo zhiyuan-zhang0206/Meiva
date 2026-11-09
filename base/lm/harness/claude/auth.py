@@ -45,7 +45,7 @@ class AuthConfig:
 # registration handle (`MEIVA_HARNESS_HANDLE`) and the runner's home allowlist on top of
 # the allowlist; dropping those left every shell the CLI spawned without an identity — a
 # live turn read `meiva.self.AGENT_ID` as `None` inside its own Bash tool.
-# meiva:link base/lm/harness/claude/docs/claude.meiva.okf.md
+# meiva:link base/lm/harness/claude/docs/claude.md
 def build_env(
     environ: Mapping[str, str],
     auth: AuthConfig,

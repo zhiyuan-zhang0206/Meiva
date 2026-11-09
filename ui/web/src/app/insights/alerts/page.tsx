@@ -8,7 +8,7 @@ import { redirect } from "next/navigation";
 // meiva:note
 // This route is the redirect's composition root: it hands `redirect` to the view, so a test passes
 // a spy instead of replacing `next/navigation`.
-// meiva:link ui/web/src/docs/frontend-state/frontend-state.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-state/frontend-state.md
 export default function AlertsRedirect() {
   return <AlertsRedirectView redirect={redirect} />;
 }

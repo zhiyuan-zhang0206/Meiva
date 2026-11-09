@@ -1,6 +1,6 @@
 # meiva:note
 # Explicit checkout status and real HTTP/Git pool bootstrap contracts.
-# meiva:link base/deploy/git/tests/docs/memory-repo-tests.meiva.okf.md
+# meiva:link base/deploy/git/tests/docs/memory-repo-tests.md
 
 from __future__ import annotations
 

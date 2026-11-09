@@ -40,7 +40,7 @@ class ClusterStatus(BaseModel):
     # Three orthogonal capability flags (any combination on a single host) — never a single
     # categorical "role". `serve_observability_station` defaults False so a client on
     # pre-station code still parses a station host's snapshot.
-    # meiva:link base/cluster/machine/docs/machine.meiva.okf.md
+    # meiva:link base/cluster/machine/docs/machine.md
     serve_gateway: bool
     serve_agent_runner: bool
     serve_observability_station: bool = False
