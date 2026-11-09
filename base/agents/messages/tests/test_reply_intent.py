@@ -5,7 +5,6 @@ import pytest
 from base.agents.messages.reply_intent import (
     DISPLAY_TO_USER,
     HIDE_FROM_USER,
-    NON_HUMAN_WAKE_REMINDER,
     REPLY_VISIBILITY_RULE,
     USER_REPLY_HEADER,
     USER_REPLY_PREFIX,
@@ -20,11 +19,8 @@ def test_header_constants_match_contract() -> None:
     assert USER_REPLY_HEADER == "Meiva agent to user:"
     assert USER_REPLY_PREFIX == "Meiva agent to user: "
     assert USER_REPLY_PREFIX.startswith(USER_REPLY_HEADER)
-    assert NON_HUMAN_WAKE_REMINDER == "Non-human wake."
     assert DISPLAY_TO_USER in REPLY_VISIBILITY_RULE
     assert HIDE_FROM_USER in REPLY_VISIBILITY_RULE
-    assert "no assistant text" not in NON_HUMAN_WAKE_REMINDER
-    assert "\n" not in NON_HUMAN_WAKE_REMINDER
 
 
 @pytest.mark.parametrize(
