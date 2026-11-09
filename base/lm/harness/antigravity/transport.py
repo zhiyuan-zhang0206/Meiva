@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import hashlib
 import json
 import signal
 from collections import deque
@@ -12,6 +13,12 @@ import psutil
 from base.host.boundary.json_values import is_object_dict
 from base.host.boundary.untyped import object_of
 from base.lm.harness.antigravity.config import AntigravityConfig
+from base.lm.harness.antigravity.rpc import (
+    LIVE_SUBMIT_TIMEOUT_SECONDS,
+    AntigravityServer,
+    discover_process_antigravity_server,
+    send_user_cascade_message,
+)
 from base.lm.harness.cancel import (
     CancelReport,
     Sweep,
@@ -88,6 +95,16 @@ class AgyTransport:
         self._clock = clock
         self._reap: Reaper = reap or kill_orphans
         self._environ = dict(environ) if environ else None
+        csrf_seed = (
+            (self._environ.get("MEIVA_HARNESS_HANDLE") or "") if self._environ is not None else ""
+        ) or str(config.cwd)
+        self._csrf_token = (
+            (self._environ.get("ANTIGRAVITY_SERVER_CSRF_TOKEN") or "").strip()
+            if self._environ is not None
+            else ""
+        ) or hashlib.sha256(csrf_seed.encode("utf-8")).hexdigest()[:32]
+        if self._environ is not None:
+            self._environ["ANTIGRAVITY_SERVER_CSRF_TOKEN"] = self._csrf_token
         self._probe: ChildProbe = probe or PsutilChildProbe()
         self._process: asyncio.subprocess.Process | None = None
         self._returncode: int | None = None
@@ -97,6 +114,8 @@ class AgyTransport:
         self._pumps: list[asyncio.Task[None]] = []
         self._stderr: deque[str] = deque(maxlen=STDERR_TAIL_LINES)
         self._conversation_id: str | None = None
+        self._init_ready = asyncio.Event()
+        self._rpc_server: AntigravityServer | None = None
 
     @property
     def pid(self) -> int | None:
@@ -125,6 +144,9 @@ class AgyTransport:
     async def start(self, *, resume: str | None) -> None:
         if self._process is not None:
             raise RuntimeError("transport already started")
+        if resume:
+            self._conversation_id = resume
+            self._init_ready.set()
         argv = self._config.command(resume=resume)
         process = await asyncio.create_subprocess_exec(
             *argv,
@@ -157,6 +179,55 @@ class AgyTransport:
             await process.stdin.drain()
         except (BrokenPipeError, ConnectionResetError) as exc:
             raise TransportClosedError(f"agy stdin closed: {exc}") from exc
+
+    # meiva:note
+    # `agy` printmode blocks stdin while `pollResponse` waits on `IsCascadeRunning`,
+    # so mid-turn steering cannot ride on stdin. Instead, `agy` starts its in-process
+    # Connect JSON-RPC `LanguageServerService` on localhost and reads
+    # `ANTIGRAVITY_SERVER_CSRF_TOKEN` at startup. Calling `SendUserCascadeMessage`
+    # queues a `CORTEX_STEP_TYPE_USER_INPUT` step directly into the running
+    # `AgentExecutor` loop (`messages.Hub`), which `pollResponse` streams out as part
+    # of the ongoing turn.
+    # meiva:link base/lm/harness/antigravity/docs/antigravity.md
+    async def steer(self, text: str, *, conversation_id: str | None = None) -> None:
+        process = self._require_process()
+        if process.returncode is not None:
+            raise TransportClosedError("agy is not running")
+        target_conversation = conversation_id or self._conversation_id
+        if not target_conversation:
+            try:
+                await asyncio.wait_for(self._init_ready.wait(), timeout=LIVE_SUBMIT_TIMEOUT_SECONDS)
+            except TimeoutError as exc:
+                raise TransportClosedError("agy conversation id was not initialized") from exc
+            target_conversation = conversation_id or self._conversation_id
+        if process.returncode is not None or not target_conversation:
+            raise TransportClosedError("agy is not running")
+        server = self._rpc_server
+        if server is None:
+            server = await self._discover_rpc_server(process.pid)
+            self._rpc_server = server
+        _ = await asyncio.to_thread(
+            send_user_cascade_message,
+            target_conversation,
+            text,
+            server=server,
+        )
+
+    async def _discover_rpc_server(self, pid: int) -> AntigravityServer:
+        deadline = self._clock.monotonic() + LIVE_SUBMIT_TIMEOUT_SECONDS
+        last_error: RuntimeError | None = None
+        while True:
+            try:
+                return await asyncio.to_thread(
+                    discover_process_antigravity_server,
+                    pid,
+                    self._csrf_token,
+                )
+            except RuntimeError as exc:
+                last_error = exc
+            if self._clock.monotonic() >= deadline:
+                raise last_error
+            await asyncio.sleep(CANCEL_POLL_SECONDS)
 
     async def interrupt(
         self,
@@ -224,6 +295,8 @@ class AgyTransport:
         if process is not None:
             self._returncode = process.returncode
         self._process = None
+        self._rpc_server = None
+        self._init_ready.set()
         await self._queue.put(None)
 
     async def events(self) -> AsyncIterator[dict[str, object]]:
@@ -266,10 +339,12 @@ class AgyTransport:
                     continue
                 if event.get("event") == "init":
                     session_id = event.get("conversation_id")
-                    if isinstance(session_id, str):
+                    if isinstance(session_id, str) and session_id:
                         self._conversation_id = session_id
+                        self._init_ready.set()
                 await self._queue.put(event)
         finally:
+            self._init_ready.set()
             await self._queue.put(None)
 
     async def _pump_stderr(self, stream: asyncio.StreamReader) -> None:

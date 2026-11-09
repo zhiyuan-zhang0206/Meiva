@@ -5,7 +5,7 @@ exports = ["mapping.py", "rpc.py", "session.py", "tests", "transport.py"]
 "handoff_rules.py" = []
 "mapping.py" = []
 "session.py" = ["config.py", "mapping.py", "transport.py"]
-"transport.py" = ["config.py"]
+"transport.py" = ["config.py", "rpc.py"]
 "tests" = ["config.py", "handoff_rules.py", "mapping.py", "session.py", "transport.py"]
 
 [purity]

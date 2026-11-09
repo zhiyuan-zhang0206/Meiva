@@ -79,6 +79,8 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
         # meiva:link base/lm/harness/docs/attribution.md
         self._sent_turn: str | None = None
         self._turn_steps: list[Usage] = []
+        self._pending_steers: set[tuple[str, str]] = set()
+        self._steered_keys: set[tuple[str, str]] = set()
 
     async def start(self, *, resume: str | None = None, handoff: Handoff | None = None) -> None:
         if self._transport is not None:
@@ -98,6 +100,8 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
             return
         self._closed = True
         self._sent_turn = None
+        self._pending_steers.clear()
+        self._steered_keys.clear()
         transport, self._transport = self._transport, None
         watched = watch_tree(self._probe, transport.pid if transport is not None else None)
         self._fail_pending(SessionClosedError("session closed"))
@@ -121,6 +125,47 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
     @property
     def cli_pid(self) -> int | None:
         return self._transport.pid if self._transport is not None else None
+
+    # meiva:note
+    # Foreground steering delivers mid-turn input into the running `agy` cascade via
+    # its in-process Connect JSON-RPC endpoint (`SendUserCascadeMessage`), while
+    # `pollResponse` continues streaming steps on stdout for the active turn.
+    # meiva:link base/lm/harness/antigravity/docs/antigravity.md
+    @property
+    def steering_available(self) -> bool:
+        ticket = self._active
+        return (
+            not self._closed
+            and self._transport is not None
+            and self._transport is not self._retired
+            and self._transport.alive
+            and ticket is not None
+            and not ticket.interrupt_requested
+            and ticket.interrupt_ready.is_set()
+        )
+
+    async def steer(self, text: str, *, key: str) -> bool:
+        if not text.strip() or not key:
+            raise ValueError("steering requires nonempty text and a message key")
+        if not self.steering_available:
+            return False
+        ticket = self._active
+        transport = self._transport
+        if ticket is None or transport is None or transport is self._retired:
+            return False
+        turn_id = ticket.turn_id
+        identity = (turn_id, key)
+        if identity in self._pending_steers:
+            raise RuntimeError("steer request already pending for this message key")
+        if identity in self._steered_keys or (ticket.key is not None and key == ticket.key):
+            return True
+        self._pending_steers.add(identity)
+        try:
+            await transport.steer(text, conversation_id=self._session_id)
+            self._steered_keys.add(identity)
+            return True
+        finally:
+            self._pending_steers.discard(identity)
 
     async def interrupt(self, *, turn_id: str | None = None) -> CancelReport:
         if turn_id is not None:
@@ -288,8 +333,9 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
         self._unsolicited(UnsolicitedOutput(source="result", text=fields.text.strip()))
 
     def _handle_result(self, payload: object, ticket: TurnTicket) -> None:
+        self._steered_keys = {item for item in self._steered_keys if item[0] != ticket.turn_id}
         fields = parse_result(payload if is_object_dict(payload) else {})
-        text = "".join(ticket.parts).strip() or self._flush_step_text() or fields.text.strip()
+        text = "\n".join(ticket.parts).strip() or self._flush_step_text() or fields.text.strip()
         errors = (fields.error,) if fields.error else ()
         outcome = TurnOutcome(
             turn_id=ticket.turn_id,

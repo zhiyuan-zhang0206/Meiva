@@ -17,6 +17,8 @@ from base.lm.harness import (
     TurnCompleted,
     Usage,
 )
+from base.lm.harness.antigravity import AgySession, AgyTransport
+from base.lm.harness.antigravity.tests.support import config as agy_config
 from base.lm.harness.base_session import SessionBinding
 from base.lm.harness.claude import BridgeConfig
 from base.lm.harness.claude.session import ClaudeSession
@@ -172,6 +174,56 @@ async def test_bridge_steering_with_claude_session(tmp_path: Path) -> None:
     assert bridge.steering_available
     assert await bridge.steer("steer text", key="inbound-1")
     assert sdk.clients[0].queries == ["first", "steer text"]
+
+    await bridge.close()
+    assert not bridge.steering_available
+    assert not await bridge.steer("late", key="inbound-2")
+
+
+async def test_bridge_steering_with_antigravity_session(tmp_path: Path) -> None:
+    plan = tmp_path / "plan.json"
+    plan.write_text('{"conversation_id": "conv-fake", "turns": [{"hang": true}]}')
+    received = tmp_path / "received.jsonl"
+    settings = agy_config(tmp_path)
+    environ = {
+        "FAKE_AGY_PLAN": str(plan),
+        "FAKE_AGY_RECEIVED": str(received),
+        "PATH": "/usr/bin:/bin",
+    }
+
+    def factory() -> AgyTransport:
+        return AgyTransport(settings, environ=environ, clock=system_clock())
+
+    agy = AgySession(
+        settings,
+        environ=environ,
+        binding=SessionBinding(),
+        transport_factory=factory,
+        clock=system_clock(),
+    )
+    bridge = HarnessBridge(
+        Harness.ANTIGRAVITY,
+        6984,
+        lambda _handle: agy,
+        machine="macmini",
+        registration_ttl_seconds=3600.0,
+        clock=system_clock(),
+        handle_rng=SecureRandom(random.SystemRandom()),
+        controller_pid=os.getpid(),
+    )
+    assert not bridge.steering_available
+    assert not await bridge.steer("early", key="inbound-0")
+
+    _ = await bridge.ensure()
+    _ = agy.submit("first")
+    deadline = asyncio.get_running_loop().time() + 5.0
+    while not bridge.steering_available and asyncio.get_running_loop().time() < deadline:
+        await asyncio.sleep(0.01)
+
+    assert bridge.steering_available
+    assert await bridge.steer("steer text", key="inbound-1")
+    lines = [line for line in received.read_text(encoding="utf-8").splitlines() if line.strip()]
+    assert [line.strip('"') for line in lines] == ["first", "steer text"]
 
     await bridge.close()
     assert not bridge.steering_available
