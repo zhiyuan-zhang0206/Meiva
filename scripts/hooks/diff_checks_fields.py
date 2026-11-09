@@ -99,7 +99,6 @@ FIELD_ORDER = (
     "meizel",
     "debt",
     "docs-refs",
-    "docs-okf",
 )
 
 
@@ -187,17 +186,6 @@ def _docs_refs_field(code: int, output: str, seconds: float) -> str:
     return f"{verdict}({found.group(1)}docs,{found.group(2)}dangling)({spell_seconds(seconds)})"
 
 
-def _docs_okf_field(code: int, output: str, seconds: float) -> str:
-    verdict = "ok" if code == 0 else f"failed({code})"
-    found = re.search(r"(\d+) files checked, (\d+) error\(s\), (\d+) warning\(s\)", output)
-    if found is None:
-        return f"unreadable(no-summary)({spell_seconds(seconds)})"
-    return (
-        f"{verdict}({found.group(1)}files,{found.group(2)}errors,"
-        f"{found.group(3)}warnings)({spell_seconds(seconds)})"
-    )
-
-
 # meiva:note
 # A clean tree says so in one field and stops: no closure scan, no attribution. A red tree is
 # attributed to this change only when the errors sit in files that can see it; anything the scan
@@ -276,8 +264,6 @@ def fields_for(
         return {"debt": _debt_field(code, output, seconds)}
     if run.label == "docs-refs":
         return {"docs-refs": _docs_refs_field(code, output, seconds)}
-    if run.label == "docs-okf":
-        return {"docs-okf": _docs_okf_field(code, output, seconds)}
     verdict = "ok" if code == 0 else f"failed({code})"
     return {run.label: f"{verdict}({spell_seconds(seconds)})"}
 
@@ -295,7 +281,6 @@ def not_run_fields(change: ChangeSet, *, pyright_ran: bool) -> dict[str, str]:
         "next-build": "n/a(not-the-app-router)",
         "debt": "n/a(no-manifest-changed)",
         "docs-refs": "n/a(no-doc-touched)",
-        "docs-okf": "n/a(no-doc-touched)",
     }
     if pyright_ran:
         unread["closure"] = "n/a(the-tree-was-green)"

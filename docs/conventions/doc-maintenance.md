@@ -32,7 +32,7 @@ from the path alone:
 
 | Where | Question it answers | Tense |
 |---|---|---|
-| `*.meiva.okf.md` (in the package's `docs/`) | what the system **is** — structure, responsibilities, terminology | now |
+| `<package>/README.md` or component `docs/*.md` | what the system **is** — package boundaries, responsibilities, design rationale | now |
 | `docs/decisions/` | **why** it was chosen this way — rejected alternatives, trade-offs | past, never rewritten |
 | `future/` | what we **plan** to do | future |
 | `docs/conventions/` | **how** to work — shared rules, processes and coordination | now |
@@ -53,7 +53,7 @@ checkpoints table and the observability stack.
 Do not re-create it. A question about what a run did is answered by querying
 that run — `.agents/skills/inspect-a-trace/SKILL.md` is the know-how for doing
 so across checkpoints, Loki, and Tempo. What generalizes out of a run belongs
-on an axis: a structural fact in the package's OKF node, a rule in
+on an axis: a structural fact in the package's `README.md` or `docs/`, a rule in
 `docs/conventions/`, a rejected alternative in `docs/decisions/`.
 
 ## Postmortems and defensive patterns
@@ -92,118 +92,25 @@ mark what a reader cannot open; commits and PR numbers predating the 2026-08-18
 public-repo cutover are not reachable from public `main` and are labelled
 `(pre-cutover)`.
 
-## OKF is the source of truth for structure
+## Package `README.md` and component `docs/` own structure
 
-Anything derivable from the code — modules, endpoints, schemas, wiring, data
-flow — lives in the OKF graph, never in `docs/conventions/`. Each package keeps its
-`.meiva.okf.md` files in its own `docs/` directory, beside its code and `tests/`
-(`agent/`, `meiva/`, `meiva_builtins/`, `cli/`, `ui/web/`, `gateway/`, `services/`,
-`base/`); the cross-domain index nodes live in the repository's `docs/`.
+Anything specific to a package or subsystem — its boundary, responsibilities,
+non-obvious design invariants, and cross-file contracts — lives beside the code
+in an optional `<package>/README.md` (for a single high-level package overview)
+or standard Markdown files under `<package>/docs/` (when a package has multiple
+focused design documents), never in `docs/conventions/`. Cross-domain overviews
+live under top-level `docs/`.
 
-Hierarchy is filesystem-derived (`base/packages/docs/okf_graph.py:compute_parent`)
-and runs on **logical paths**: the `docs/` layer is transparent, so the last
-`docs` directory segment is dropped from a node's path (`logical_path`) —
-`agent/graph/docs/graph.meiva.okf.md` sits at `agent/graph/graph.meiva.okf.md`. On
-logical paths, `<dir>/<dir>.meiva.okf.md` is the overview node for `<dir>/`, and
-the other files inside `<dir>/` are its children (user ruling 2026-08-12: a directory's
-overview lives *inside* the directory, not beside it at the parent level).
-`compute_parent` searches for the nearest ancestor overview, skipping the node
-itself and directories without an overview. Nested overviews therefore belong
-to their enclosing domain rather than the apex. Only nodes with no ancestor
-overview fall back to the root. It does not resolve a sibling `<dir>.meiva.okf.md`
-at the parent level; lint rule E009 fires on one, layered or not. Links are not logical:
-`[[…]]` and relative markdown links name the real path, `docs/` included.
+Write standard Markdown:
 
-Splitting an over-cap node follows the same rule: the child goes in the
-directory named after the parent's stem — inside the `docs/` layer, so
-`docs/<stem>/` — and the parent edge is derived rather than asserted. That
-directory holds only documents when the code it describes lives elsewhere
-(`meiva_builtins/plugins/meiva_fleet/docs/neighbors/`,
-`ui/web/src/docs/frontend-components/`); a child placed beside its parent in the
-layer would attach to the nearest ancestor overview (or ultimately the root),
-not to the node it was split from.
-
-That form applies only when the parent is **not already** the overview of the
-directory a child would land in. A package overview such as
-`base/lm/harness/codex/docs/codex.meiva.okf.md` already sits at that directory, so a
-sibling beside it resolves to it as the parent and no `git mv` is involved; creating
-`docs/<stem>/` there instead makes the overview itself misplaced, and lint reports
-`E009` ("this sibling must live at `docs/<stem>/<stem>.meiva.okf.md`").
-
-The **index layer** uses the same documentation placement: the apex is
-`docs/index.meiva.okf.md`, and the cross-domain plugin, skill and MCP concept
-systems live beneath `docs/`. They have no single code directory to own them.
-Chosen alternatives and their rationale belong in `docs/decisions/`;
-unimplemented proposals and plans belong in `future/`. Both use ordinary
-Markdown, so they do not appear as current-system graph nodes.
-`compute_parent` uses the root only when no ancestor overview exists — so the
-tree has exactly one root and no dangling edges.
-
-A `[[wikilink]]` is the **edge syntax of the node graph**, so its universe is the
-`.meiva.okf.md` files and nothing else. A link to any other axis — a decision
-record, a plan, a convention — cannot resolve however plainly the file exists,
-because those are not nodes and `compute_parent` has nowhere to put them. Cite
-them as a normal markdown link or a backticked path
-(`[why](../decisions/engineering/design/simplification/2026-07-29-okf-node-ceiling.md)`) and keep `[[…]]` for
-node-to-node edges. The linter recognises this mistake by name: a target that
-matches a real non-node doc reports `W008` saying so, not a bare "not found".
-
-Write a wikilink as either the bare filename or the full repo-relative path. The
-resolver's last resort is a **unique-basename** match, which silently rescues a
-target whose path is wrong — and stops rescuing it the day a second node takes
-that basename, so an untouched link starts failing on someone else's commit.
-`W011` (non-blocking) reports a target whose directory component played no part
-in its resolution, while it is still only a wrong path.
-
-Format is enforced by `scripts/content_lint/lint_meiva_okf.py`: YAML frontmatter with
-`type` / `title` / `description`, a line + character size ceiling (which forces
-hierarchy instead of long files), and `[[wikilink]]` targets that must resolve.
-Every node sits in a `docs/` layer (`E014`; `.github/` is exempt), and
-the overview-position rule (`E009`) is judged on logical paths, so a directory
-whose nodes all sit in `docs/<sub>/` still has its overview there and no sibling
-`docs/<sub>.meiva.okf.md`. The two thresholds are `MAX_LINES` / `MAX_CHARS` in that script, which is their
-only source of truth — read them there rather than trusting a number quoted in
-prose. In practice the character cap is the one that binds: no node has ever
-approached the line cap.
-
-### Why 8000 characters
-
-The ceiling is a **structure** rule, not a budget. It holds one node to one
-semantic topic, so each node stays readable on its own and the graph stays
-navigable: a node that no longer fits in 8000 characters has outgrown its topic,
-and the answer is a second node — not a shorter paragraph.
-
-Reaching the line is therefore the signal to split, never a target to fill. Do not
-spend the last few hundred characters: prose compressed to fit has deleted
-documented facts here once already, which is why the cap was raised from 6000 to
-8000 in 2026-07
-([why](../decisions/engineering/design/simplification/2026-07-29-okf-node-ceiling.md)),
-and there is deliberately no warning band before the line — a "room left" readout
-is what invites that trimming again. The line is crossed once, by the change that
-crosses it, and the author of that change does the work.
-
-Two moves are legitimate, and both keep the text intact:
-
-- **Split a section out** — give it its own node under the directory the message
-  names; the filesystem derives the parent edge.
-- **Move a section to a sibling** — put it beside the current node when it belongs
-  to a different topic than this directory's.
-
-Deleting or compressing prose to get under the line is not a third option. If a
-node genuinely is one topic above 8000 characters, say so in the PR and split it
-at its seam; the ceiling does not choose the seam for you.
-
-The failing message carries the four parts a check owes its author — the measured
-value against the line, why the line exists, the split that author now owns, and
-where the rule is written ([message convention](lint-messages.md)). The line
-ceiling (`MAX_LINES`) reports through the same words.
-
-The ceiling counts **characters of decoded UTF-8** (`len(text)`), not bytes. So
-`wc -c` reads high on any node containing multi-byte glyphs — `→`, `✓`, CJK — and
-can put a passing file over the cap by tens of characters. Run the linter; do not
-eyeball `wc -c` and trim. (Both directions of that mistake have already been made
-on `cli.meiva.okf.md`: a false alarm at `wc -c` 6036 against a real 5996,
-and a commit that trimmed it to fix a violation that did not exist.)
+- Do **not** use the retired `.meiva.okf.md` filename suffix, `type: doc` YAML
+  frontmatter, fixed `## Overview` / `## Design` / `## Behavior` boilerplate
+  headings, or exhaustive symbol/service rosters.
+- Use standard relative Markdown links (`[label](path.md)`) so readers and
+  editors can follow them directly.
+- Reference validity (CLI flags and relative links across tracked docs) is
+  checked by `scripts/content_lint/check_doc_references.py` (`check-doc-references`
+  in pre-commit and CI).
 
 ## What does NOT go in the doc axes
 

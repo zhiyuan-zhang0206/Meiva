@@ -67,7 +67,6 @@ _ENTRIES = [
     ),
     ("scripts/content_lint/lint_audit_record.py", None),
     ("scripts/content_lint/lint_core_content_manifests.py", None),
-    ("scripts/content_lint/lint_meiva_okf.py", None),
     ("scripts/content_lint/lint_no_cjk.py", None),
     ("scripts/content_lint/lint_no_tailnet.py", None),
     ("scripts/data_plane_ops/rotate_cluster_secret.py", None),

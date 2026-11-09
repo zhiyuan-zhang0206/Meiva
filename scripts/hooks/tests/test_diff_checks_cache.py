@@ -138,9 +138,6 @@ def test_doc_amend_reuses_python_checks_and_reruns_tree_checks(tmp_path: Path) -
         if "check_doc_references" in joined:
             ran_labels.append("docs-refs")
             return 0, "1 docs checked, 0 dangling references\n", 1.0
-        if "lint_meiva_okf" in joined:
-            ran_labels.append("docs-okf")
-            return 0, "1 files checked, 0 error(s), 0 warning(s)\n", 1.0
         ran_labels.append("meizel")
         return 0, "meizel: ok (5 fact edges, 1 manifests)\n", 2.0
 
@@ -153,7 +150,7 @@ def test_doc_amend_reuses_python_checks_and_reruns_tree_checks(tmp_path: Path) -
         cache=first_cache,
         python=_PYTHON,
     )
-    assert set(ran_labels) == {"meizel", "pyright", "ruff", "docs-refs", "docs-okf"}
+    assert set(ran_labels) == {"meizel", "pyright", "ruff", "docs-refs"}
 
     ran_labels.clear()
     (tmp_path / "docs/guide.md").write_text("# Guide v2\n")
@@ -171,7 +168,7 @@ def test_doc_amend_reuses_python_checks_and_reruns_tree_checks(tmp_path: Path) -
         cache=second_cache,
         python=_PYTHON,
     )
-    assert set(ran_labels) == {"meizel", "docs-refs", "docs-okf"}
+    assert set(ran_labels) == {"meizel", "docs-refs"}
 
 
 def test_failing_or_unreadable_runs_are_never_cached(tmp_path: Path) -> None:
@@ -336,7 +333,6 @@ def test_full_mode_sweeps_every_layer_even_for_a_doc_only_change(tmp_path: Path)
         "ruff",
         "debt",
         "docs-refs",
-        "docs-okf",
         "vitest-app",
         "next-build",
     ):
@@ -352,8 +348,6 @@ def test_full_mode_sweeps_every_layer_even_for_a_doc_only_change(tmp_path: Path)
             )
         if "check_doc_references" in joined_cmd:
             return 0, "1 docs checked, 0 dangling references\n", 1.0
-        if "lint_meiva_okf" in joined_cmd:
-            return 0, "1 files checked, 0 error(s), 0 warning(s)\n", 1.0
         if "vitest" in joined_cmd:
             return 0, "  Tests  5 passed (5)\n", 1.0
         return 0, "meizel: ok (10 fact edges, 2 manifests)\n0 errors, 0 warnings\n", 1.0

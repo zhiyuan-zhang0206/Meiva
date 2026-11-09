@@ -85,7 +85,7 @@ def test_a_command_naming_a_first_party_entry_runs_on_the_interpreter_the_caller
         python=_ELSEWHERE,
     )
 
-    for label in ("docs-refs", "docs-okf"):
+    for label in ("docs-refs",):
         assert commands[label][0] == _ELSEWHERE, (
             f"{label} names a first-party entry: its command runs on the interpreter the caller "
             "handed in, and its edge comes from the `Interpreter` parameter"

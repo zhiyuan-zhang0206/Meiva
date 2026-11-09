@@ -5,8 +5,7 @@ configuration, declaration or gate error reports and aborts roster evaluation;
 it never produces a partial-success roster or enables a service by failing open.
 
 `services.supervision.roster.composition.build_services()` owns the applicable service specifications. The
-sentinel table below is a readable inventory checked against that registration
-by `scripts/content_lint/lint_doc_roster.py` in both directions. Native custody
+table below is a readable inventory of that registration. Native custody
 and readiness belong to [Meiva Root](../../../../services/supervision/meiva_root/docs/meiva_root.meiva.okf.md),
 [host lifecycle](../../../../cli/commands/lifecycle/docs/lifecycle.meiva.okf.md) and
 [the service domain](../../../../services/docs/services.meiva.okf.md).

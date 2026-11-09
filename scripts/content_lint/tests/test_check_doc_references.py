@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from base.host.proc import run_bounded
+from scripts.audit.analysis.frozen import is_frozen
 from scripts.content_lint import check_doc_references
 from scripts.content_lint.check_doc_references import REPO, check_doc
 
@@ -313,3 +314,19 @@ def test_a_failure_carries_the_reason_the_repair_and_the_owner_doc(
 
     assert "dead end" in err
     assert "docs/conventions/doc-maintenance.md" in err
+
+
+@pytest.mark.parametrize("axis", ["decisions", "postmortems"])
+def test_relocated_history_is_exempt_but_live_docs_still_fail(tmp_path: Path, axis: str) -> None:
+    history = tmp_path / "docs" / axis / "record.md"
+    history.parent.mkdir(parents=True)
+    history.write_text("See [the old implementation](missing.py).\n")
+    live = tmp_path / "docs" / "conventions" / "guide.md"
+    live.parent.mkdir(parents=True)
+    live.write_text("See [the implementation](missing.py).\n")
+    run_bounded(["git", "init", "-q", str(tmp_path)], timeout=10).check_returncode()
+    run_bounded(["git", "-C", str(tmp_path), "add", "."], timeout=10).check_returncode()
+    assert check_doc_references.main(repo=tmp_path, commands={}, docs=[history]) == 0
+    assert check_doc_references.main(repo=tmp_path, commands={}, docs=[live]) == 1
+    assert is_frozen(history.relative_to(tmp_path).as_posix())
+    assert not is_frozen(live.relative_to(tmp_path).as_posix())

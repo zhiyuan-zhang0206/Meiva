@@ -1031,7 +1031,7 @@ create), and one that a per-file verdict cannot see:
 - `lint-prepush-artifact-freshness` (`scripts/provision/prepush_freshness.py`)
   re-checks, over the whole repository, the generated-artifact hooks (types and
   constants codegen, the events registry, the config-lite table, the Pyright
-  tests environments, OKF lint, doc references) whose inputs the branch
+  tests environments, doc references) whose inputs the branch
   DELETED. A `files:`-filtered hook never sees a purely deleted path on any
   range — pre-commit's own diff selection passes it only
   Added/Copied/Modified/Renamed paths — so a change that only deletes the last
@@ -1039,7 +1039,7 @@ create), and one that a per-file verdict cannot see:
   stale artifact and nothing local catching it. A whole-repository hook whose
   inputs the branch also added or changed already ran in the branch-diff run,
   which judges the deletion with it, so it is not repeated; a per-file hook
-  (`lint-meiva-okf`) sees only the files it is handed and is re-checked whenever
+  sees only the files it is handed and is re-checked whenever
   a deleted path matches. A rename counts as deleting the old path; an unknown
   range fails explicitly. `types-codegen-fresh` alone skips when
   `ui/web/node_modules` is missing, same as the frontend pre-push hooks.

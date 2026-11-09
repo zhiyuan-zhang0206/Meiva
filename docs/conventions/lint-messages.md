@@ -61,24 +61,23 @@ is not permission to add a band to a contribution gate.
 
 ## Worked example
 
-The OKF node size ceiling, `E007` in
-[`scripts/content_lint/lint_meiva_okf.py`](../../scripts/content_lint/lint_meiva_okf.py),
+The `AGENTS.md` size ceiling in
+[`scripts/lint/agents_md_size.py`](../../scripts/lint/agents_md_size.py)
 contributes all four:
 
 ```
-docs/x/overview.meiva.okf.md:1: E007: File too large: 8005 chars (max 8000).
-One node holds one semantic topic, which keeps each node readable on its own and
-the graph navigable: this line marks a node that outgrew its topic — it is not a
-budget to fill. You own the semantic split — move a whole section into its own
-node under 'docs/x/overview/' or into a sibling node; do not trim or compress
-prose to fit. See docs/conventions/doc-maintenance.md#why-8000-characters.
+AGENTS.md: 312 lines (max 300).
+AGENTS.md is loaded into every agent's context; lines spent here cost every turn
+whether the task needs them or not: this line marks a root file that outgrew its
+role as an index — it is not a budget to fill. Move detailed rules into the
+relevant document under docs/conventions/ and leave a one-line link here; do not
+trim or compress rules to fit. See docs/conventions/doc-maintenance.md.
 ```
 
-Part 1 is `File too large: 8005 chars (max 8000)` plus the printed location;
-part 2 is the one-topic reason; part 3 is the split the author now owns and the
-trim it forbids; part 4 is the anchor in
-[documentation maintenance](doc-maintenance.md#why-8000-characters), which owns
-the ceiling.
+Part 1 is `312 lines (max 300)` plus the printed location;
+part 2 is the context-budget reason; part 3 is the move into `docs/conventions/`
+and the trim it forbids; part 4 is the reference to
+[documentation maintenance](doc-maintenance.md).
 
 ## Inventory
 
