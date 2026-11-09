@@ -95,53 +95,13 @@ __description__ = "Shared memory pool: meiva.memory SDK surface (PATH + PERSONAL
 # subprocess and keep to the surface-only imports.
 
 
-from collections.abc import Callable
-from pathlib import Path
-
-from base.packages.plugins.extensions import PluginContributions, SdkNamespace, SdkWrap
+from base.packages.plugins.extensions import PluginContributions, SdkNamespace
 
 from . import sdk as _memory_sdk
-from .written_notes import record_written_note
-
-# ── meiva.memory namespace declaration ──────────────────────────────────
-# The SDK surface (PATH / PERSONAL_PATH / search) lives in `sdk.py` — a real module
-# that IS the `meiva.memory` namespace. the SDK install puts the same object
-# on the package (attribute access) and in sys.modules under `meiva.memory`
-# (`import meiva.memory`), so both spellings resolve identically.
-
-
-# ── wrap meiva.files.write / append / edit ─────────────────────────────
-# Transparent: `inner` is called exactly once with the caller's arguments, its result is returned
-# and its exception propagates untouched; the note is recorded only after a write that succeeded.
-# Recording never raises (`record_written_note`). None of the wraps carries a docstring, so the rendered
-# SDK keeps the original `files.*` contracts.
-def wrapped_write(inner: Callable[..., None], path: str | Path, content: str) -> None:
-    result = inner(path, content)
-    record_written_note(path)
-    return result
-
-
-def wrapped_append(inner: Callable[..., None], path: str | Path, content: str) -> None:
-    result = inner(path, content)
-    record_written_note(path)
-    return result
-
-
-def wrapped_edit(
-    inner: Callable[..., None], path: str | Path, old: str, new: str, *, replace_all: bool = False
-) -> None:
-    result = inner(path, old, new, replace_all=replace_all)
-    record_written_note(path)
-    return result
 
 
 def contribute() -> PluginContributions:
     """What this plugin declares for the SDK surface."""
     return PluginContributions(
         sdk_namespaces=(SdkNamespace("memory", _memory_sdk, expand=False),),
-        sdk_wraps=(
-            SdkWrap("files.write", wrapped_write),
-            SdkWrap("files.append", wrapped_append),
-            SdkWrap("files.edit", wrapped_edit),
-        ),
     )

@@ -27,7 +27,7 @@ from base.host.boundary.json_values import is_object_dict
 from base.host.boundary.untyped import object_of
 from base.paths import memory_dir
 
-RESERVED = {"MEMORY.md", "AGENTS.md", "index.md", "log.md"}
+RESERVED = {"MEMORY.md", "INHERIT.md", "AGENTS.md", "index.md", "log.md"}
 
 
 # meiva:note

@@ -15,12 +15,12 @@ from .inherited_blocks import (
     Ancestor,
     EntryBlocks,
     SizeCaps,
-    parse_inheritable_blocks,
+    extract_inherit_body,
     render_inherited,
     split_ancestors,
 )
 
-_MEMORY_INDEX_FILE = "MEMORY.md"
+_INHERIT_FILE = "INHERIT.md"
 _PER_AGENT_MEMORY_DIRNAME = "memory"
 
 
@@ -62,28 +62,25 @@ def _ancestor(row: object) -> Ancestor:
 def _read_entries(ancestors: tuple[Ancestor, ...], home: Path) -> list[EntryBlocks]:
     entries: list[EntryBlocks] = []
     for ancestor in ancestors:
-        mem_dir = workspace_path(home, ancestor.agent_id) / _PER_AGENT_MEMORY_DIRNAME
-        if not mem_dir.is_dir():
+        entry = workspace_path(home, ancestor.agent_id) / _PER_AGENT_MEMORY_DIRNAME / _INHERIT_FILE
+        if not entry.is_file():
             continue
-        for entry in sorted(mem_dir.glob("*.md")):
-            if entry.name == _MEMORY_INDEX_FILE:
-                continue
-            try:
-                text = entry.read_text(encoding="utf-8")
-            except OSError as exc:
-                logger.warning("[inherited-memory] unreadable entry {}: {}", entry, exc)
-                continue
-            parsed = parse_inheritable_blocks(text)
-            for warning in parsed.warnings:
-                logger.warning("[inherited-memory] {}", warning)
-            entries.append(
-                EntryBlocks(
-                    ancestor=ancestor,
-                    entry_name=entry.name,
-                    entry_path=str(entry),
-                    blocks=parsed.blocks,
-                )
+        try:
+            text = entry.read_text(encoding="utf-8")
+        except OSError as exc:
+            logger.warning("[inherited-memory] unreadable entry {}: {}", entry, exc)
+            continue
+        body = extract_inherit_body(text)
+        if not body:
+            continue
+        entries.append(
+            EntryBlocks(
+                ancestor=ancestor,
+                entry_name=_INHERIT_FILE,
+                entry_path=str(entry),
+                blocks=(body,),
             )
+        )
     return entries
 
 

@@ -1,6 +1,6 @@
 # meiva:note
-# The inherited-memory decisions as values: which birth-chain rows this host can read, how the
-# fenced blocks of each ancestor entry are clipped to the two size caps, and the note text that
+# The inherited-memory decisions as values: which birth-chain rows this host can read, how each
+# ancestor's `memory/INHERIT.md` body is clipped to the two size caps, and the note text that
 # results. Warnings travel back as strings for the caller to log.
 # meiva:link meiva_builtins/plugins/meiva_memory/docs/memory-inheritance.md
 from __future__ import annotations
@@ -9,9 +9,6 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 
 from base.packages.text_budget import Unit, measure
-
-INHERITABLE_OPEN = "<!-- meiva:inheritable -->"
-INHERITABLE_CLOSE = "<!-- /meiva:inheritable -->"
 
 _FRONTMATTER_OPEN = "---\n"
 
@@ -39,12 +36,6 @@ class Ancestor:
 class AncestorSplit:
     local: tuple[Ancestor, ...]
     remote: tuple[Ancestor, ...]
-
-
-@dataclass(frozen=True)
-class ParsedBlocks:
-    blocks: tuple[str, ...]
-    warnings: tuple[str, ...]
 
 
 @dataclass(frozen=True)
@@ -88,34 +79,10 @@ def _frontmatter_body(content: str) -> str:
 
 
 # meiva:note
-# The fenced blocks of one entry file's body; malformed fencing drops content with a warning.
-def parse_inheritable_blocks(text: str) -> ParsedBlocks:
-    body = _frontmatter_body(text.replace("\r\n", "\n"))
-    blocks: list[str] = []
-    warnings: list[str] = []
-    current: list[str] | None = None
-    for line in body.splitlines():
-        marker = line.strip()
-        if marker == INHERITABLE_OPEN:
-            if current is not None:
-                warnings.append("nested open fence ignored")
-                continue
-            current = []
-            continue
-        if marker == INHERITABLE_CLOSE:
-            if current is None:
-                warnings.append("close fence without an open ignored")
-                continue
-            block = "\n".join(current).strip()
-            if block:
-                blocks.append(block)
-            current = None
-            continue
-        if current is not None:
-            current.append(line)
-    if current is not None:
-        warnings.append("unclosed open fence — block dropped")
-    return ParsedBlocks(tuple(blocks), tuple(warnings))
+# The body of an ancestor's `memory/INHERIT.md`, with optional leading YAML frontmatter and
+# surrounding whitespace stripped.
+def extract_inherit_body(text: str) -> str:
+    return _frontmatter_body(text.replace("\r\n", "\n")).strip()
 
 
 def _clip_blocks(entry: EntryBlocks, cap: int) -> tuple[str, list[str]]:

@@ -62,8 +62,8 @@ def test_reconcile_embed_error_truncates_and_returns_false(
         )
 
     # meiva:note
-    # first chunk failed -> remaining chunks never ran
-    assert provider.batch_sizes == [2]
+    # first chunk failed -> remaining chunks never ran (2 files × 2 rows each = 4)
+    assert provider.batch_sizes == [4]
     assert store_backend.all_meta() == {}
     expected = (
         f"patrol embed failed: {EmbeddingAPIError('embed boom')!r}"
@@ -84,17 +84,17 @@ def test_split_note_extracts_description_and_body() -> None:
     assert "description" not in body
 
 
-def test_split_note_no_frontmatter_returns_full_body() -> None:
+def test_split_note_no_frontmatter_extracts_lead_description_and_full_body() -> None:
     content = "# Just a heading\n\nNo YAML."
     desc, body = chunking.split_note(content)
-    assert desc is None
+    assert desc == "Just a heading — No YAML."
     assert body == content
 
 
-def test_split_note_blank_description_is_none() -> None:
+def test_split_note_blank_description_falls_back_to_lead_paragraph() -> None:
     desc, body = chunking.split_note("---\ndescription: \n---\n\nbody")
-    assert desc is None
-    assert body == "\nbody"  # the shared parser keeps the blank line after the fence
+    assert desc == "body"
+    assert body == "\nbody"
 
 
 def test_chunk_body_short_text_single_chunk() -> None:
@@ -135,12 +135,16 @@ def test_file_rows_desc_plus_body_chunks() -> None:
     )
     rows = chunking.chunk_rows(content)
     assert rows[0] == ("desc", 0, "hand off to 402")
-    assert [k for k, _, _ in rows] == ["desc", "body", "body"]
+    assert [k for k, _, _ in rows] == ["desc"] + ["body"] * 6
 
 
-def test_file_rows_no_frontmatter_no_desc() -> None:
+def test_file_rows_no_frontmatter_extracts_desc_unless_section_first() -> None:
     assert chunking.chunk_rows("# heading\n\nshort body") == [
-        ("body", 0, "# heading\n\nshort body")
+        ("desc", 0, "heading — short body"),
+        ("body", 0, "# heading\n\nshort body"),
+    ]
+    assert chunking.chunk_rows("## heading\n\nshort body") == [
+        ("body", 0, "## heading\n\nshort body"),
     ]
 
 
@@ -166,7 +170,7 @@ def test_process_paths_indexes_desc_and_body_chunks(
     )
     assert str(f.resolve()) in store_backend.all_meta()
     kinds = sorted(store_backend.rows(f))
-    assert kinds == [("body", 0), ("body", 1), ("desc", 0)]
+    assert kinds == [("body", i) for i in range(6)] + [("desc", 0)]
 
 
 def test_process_paths_removes_stale_tail_when_file_shrinks(
@@ -185,7 +189,7 @@ def test_process_paths_removes_stale_tail_when_file_shrinks(
         root=watched_root,
         config=MemoryIndexerConfig(),
     )
-    assert store_backend.rows(f) == {("desc", 0), ("body", 0), ("body", 1), ("body", 2)}
+    assert store_backend.rows(f) == {("desc", 0)} | {("body", i) for i in range(12)}
 
     f.write_text(long_note(3), encoding="utf-8")
     daemon.process_paths(
@@ -196,7 +200,7 @@ def test_process_paths_removes_stale_tail_when_file_shrinks(
         root=watched_root,
         config=MemoryIndexerConfig(),
     )
-    assert store_backend.rows(f) == {("desc", 0), ("body", 0)}
+    assert store_backend.rows(f) == {("desc", 0), ("body", 0), ("body", 1), ("body", 2)}
     assert backend.all_meta()[str(f.resolve())][1] == content_hash(f.read_text())
 
 
@@ -205,7 +209,9 @@ def test_process_paths_removes_desc_row_when_description_deleted(
 ) -> None:
     """A removed description removes its row; the body stays current."""
     f = tmp_path / "note.md"
-    f.write_text("---\ndescription: old description\n---\n\nbody text", encoding="utf-8")
+    f.write_text(
+        "---\ndescription: old description\n---\n\n## Section\n\nbody text", encoding="utf-8"
+    )
     backend = store_backend
     daemon.process_paths(
         backend,
@@ -217,7 +223,7 @@ def test_process_paths_removes_desc_row_when_description_deleted(
     )
     assert store_backend.rows(f) == {("desc", 0), ("body", 0)}
 
-    f.write_text("body text", encoding="utf-8")
+    f.write_text("## Section\n\nbody text", encoding="utf-8")
     daemon.process_paths(
         backend,
         {f.resolve()},
@@ -291,7 +297,7 @@ def test_process_paths_calls_upsert_many_once_across_embed_batches(
     )
 
     assert len(backend.calls) == 1
-    assert len(backend.calls[0]) == 3
+    assert len(backend.calls[0]) == 4
     assert {row[0] for row in backend.calls[0]} == {str(first.resolve()), str(second.resolve())}
 
 

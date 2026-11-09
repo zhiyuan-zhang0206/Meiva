@@ -422,7 +422,7 @@ def test_process_paths_beats_per_embed_batch(tmp_path: Path, *, watched_root: Pa
     )
 
     assert now > liveness_timeout()
-    assert provider.embed_batch_count == 10
+    assert provider.embed_batch_count == 20
     assert liveness.is_alive()
     assert set(backend.all_meta()) == {str(path) for path in paths}
 
@@ -457,7 +457,7 @@ def test_process_paths_beats_during_commit(
                 raise EmbeddingAPIError("last batch failed")
             return super().embed_batch(texts)
 
-    indexer_config = MemoryIndexerConfig(batch_size=1)
+    indexer_config = MemoryIndexerConfig(batch_size=2)
     paths = {tmp_path / name for name in ("a.md", "b.md")}
     for path in paths:
         path.write_text("body")
@@ -567,8 +567,8 @@ def test_cold_start_reconcile_beats_liveness_across_chunks(
     elapsed = time.monotonic() - started
 
     # meiva:note
-    # Chunked by file: one embed call per chunk, every file indexed once.
-    assert provider.batch_sizes == [2, 2, 2, 1]
+    # Chunked by file: one embed call per chunk (2 rows per file), every file indexed once.
+    assert provider.batch_sizes == [4, 4, 4, 2]
     assert set(store_backend.all_meta()) == {str(note) for note in files}
     # The rebuild outlived the liveness ceiling (4 chunks ≥ 0.8s > 0.4s)...
     assert elapsed > 0.4

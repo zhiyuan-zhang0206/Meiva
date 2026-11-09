@@ -287,3 +287,24 @@ def test_search_default_k_desc(search_wire: _SearchWire) -> None:
     meiva.memory.search("q")
     [request] = search_wire.requests
     assert json.loads(request.content)["k"] == 5
+
+
+# meiva:note
+# Runs child_face_boundary.py in a clean subprocess via trusted sys.executable to verify that
+# importing the plugin's subprocess face pulls in no decision stack, agent runtime, or new httpx.
+def test_the_subprocess_face_imports_no_decision_stack_agent_runtime_or_new_http_client() -> None:
+    import subprocess
+    import sys
+
+    from . import child_face_boundary
+
+    child = subprocess.run(  # noqa: S603
+        [sys.executable, child_face_boundary.__file__],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    boundary = json.loads(child.stdout)
+    assert boundary["imported"][1:] == ["meiva_builtins.plugins.meiva_memory.plugin"]
+    assert boundary["absolute"] == []
+    assert boundary["added_httpx"] == []

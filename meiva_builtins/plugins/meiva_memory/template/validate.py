@@ -25,7 +25,7 @@ from typing import ParamSpec, TypeGuard
 
 import yaml
 
-_RESERVED = {"MEMORY.md", "index.md", "log.md", "AGENTS.md"}
+_RESERVED = {"MEMORY.md", "INHERIT.md", "index.md", "log.md", "AGENTS.md"}
 _BUNDLE = Path(__file__).resolve().parent
 
 

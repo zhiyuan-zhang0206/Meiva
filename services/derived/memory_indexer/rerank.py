@@ -41,7 +41,7 @@ from base.lm.catalog.provider_keys import ProviderKeys
 from base.lm.decision.call import decide
 from base.packages.docs.notes import parse_note
 from services.derived.memory_indexer.backends.base import ChunkHit
-from services.derived.memory_indexer.chunking import chunk_text
+from services.derived.memory_indexer.chunking import chunk_text, split_note
 from services.derived.memory_indexer.rerank_plan import (
     pair_state_text,
     top_indices,
@@ -252,7 +252,8 @@ def load_candidates(
         if chunk is None:
             continue
         note = parse_note(content, file.name)
-        description = note.description.strip() if note and note.description else ""
+        desc, _ = split_note(content)
+        description = desc or ""
         tags = list(note.tags) if note else []
         candidates.append(Candidate(rel, chunk, description, tags))
     if fresh:
