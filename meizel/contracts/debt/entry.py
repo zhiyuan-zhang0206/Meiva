@@ -31,28 +31,26 @@ __all__ = [
 UNREVIEWED = "unreviewed:"
 
 # meiva:note
-# The two shapes a stated `until` takes. They are different words on purpose: one says something will
-# arrive, the other that nothing will, and two answers to different questions must not read alike --
-# a reader who cannot tell which one a sentence is stops checking it.
-SHAPES = ("waits for ", "permanently:")
+# The shape a stated `until` takes: every recorded debt entry names the condition that ends it. A
+# permanent boundary is not debt and belongs in `[roots]` or the positive rule that licenses it.
+SHAPES = ("waits for ",)
 
 _FIELDS = ("count", "owner", "until")
 
 
 # meiva:note
-# Whether an `until` is a sentence this tool can read: one of the two stated shapes, or the marker that
-# says nobody has read it yet. The marker passes so `record` can write an entry that is visibly
-# unreviewed rather than inventing a reason; the summary counts those apart.
+# Whether an `until` is a sentence this tool can read: the waiting shape, or the marker that says
+# nobody has read it yet. The marker passes so `record` can write an entry that is visibly unreviewed
+# rather than inventing a reason; the summary counts those apart.
 def has_shape(until: str) -> bool:
     return until.startswith((*SHAPES, UNREVIEWED))
 
 
 # meiva:note
 # Whether a sentence picks the waiting shape and then says nothing will arrive. `waits for nothing
-# ...` names no condition that could arrive, so it is the other shape's answer written in this one's
-# words, and a reader cannot tell which of the two answers the entry gives. Only the head before the
-# colon is read, because the head is where a wait names what it waits for; the explanation after it
-# may argue with anything, "nothing" included.
+# ...` names no condition that could arrive, so it claims a permanent boundary under a debt entry's
+# prefix. Only the head before the colon is read, because the head is where a wait names what it
+# waits for; the explanation after it may argue with anything, "nothing" included.
 def waits_for_nothing(until: str) -> bool:
     head = until.split(":", 1)[0]
     return head.startswith(SHAPES[0]) and "nothing" in head.lower()

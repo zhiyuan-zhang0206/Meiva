@@ -126,15 +126,15 @@ def legal_read_recorded(manifests: Mapping[str, Manifest]) -> list[Diagnostic]:
 
 
 # meiva:note
-# What an `until` answers and the two shapes it takes, printed once per run on the first entry
+# What an `until` answers and the shape it takes, printed once per run on the first entry
 # that lacks one: the reader who fixes the first entry reads the whole rule, and every later
 # entry says in one line what it is missing. Full text on one entry is what keeps twenty of
 # them readable instead of a wall of repeated prose.
 _UNTIL_EXPLANATION = (
     "`until` answers one question: what has to change before this entry can be deleted.\n"
-    "Write one of two shapes, and check it against the code or the installed dependency\n"
-    "-- a sentence copied from a neighbour is worth nothing, because the next reader will\n"
-    "trust it and stop looking.\n"
+    "Write the condition in the waiting shape, and check it against the code or the installed\n"
+    "dependency -- a sentence copied from a neighbour is worth nothing, because the next reader\n"
+    "will trust it and stop looking.\n"
     "\n"
     '  until = "waits for <the condition that ends it>: <why it cannot happen yet>"\n'
     "      Something that could arrive. A symbol that becomes an injectable parameter, an\n"
@@ -144,17 +144,11 @@ _UNTIL_EXPLANATION = (
     "      source, the checker's own rule -- so the next reader re-checks it in one step\n"
     "      instead of redoing the work.\n"
     "\n"
-    '  until = "permanently: <the design boundary it is tied to>"\n'
-    "      For an entry no reachable change ends: a value only the running process can\n"
-    "      answer (its pid, its platform), a name a runtime installs, a shape the\n"
-    "      language fixes. Say which boundary, and why no caller inside the process holds\n"
-    '      that value better. "Permanently" is a claim the next reader can falsify; make\n'
-    "      it specific enough to falsify.\n"
-    "\n"
     "Do not invent an `until` to get past this line. An invented one reads like\n"
     "knowledge, and is worse than the bare count it replaces. If you cannot say what\n"
-    "would end the entry, that is a finding, not a failure: it usually means the entry is\n"
-    "not debt in this sense. Fix it in the same change when the fix is small; otherwise\n"
+    "would end the entry, that is a finding, not a failure: it means the entry is a\n"
+    "design boundary rather than debt, and belongs in `[roots]` or the positive rule\n"
+    "that licenses it. Fix it in the same change when the fix is small; otherwise\n"
     "send the evidence -- manifest path, the code it points at, what you checked, what\n"
     "you ruled out -- to the lane that owns the entry, and let it decide. One message\n"
     "beats a wrong sentence that outlives us both."
@@ -173,36 +167,32 @@ _OWNER_EXPLANATION = (
 )
 
 # meiva:note
-# Why an `until` has two shapes and no third, printed once per run on the first entry whose
-# sentence begins with neither: the two answer different questions, and a phrasing that answers
-# neither is one a reader skims as if it answered one of them.
+# Why an `until` has one reviewed shape, printed once per run on the first entry whose
+# sentence does not begin with `waits for `: debt is temporary and names the condition that
+# retires it, whereas a permanent design boundary belongs in `[roots]` or a positive rule.
 _SHAPE_EXPLANATION = (
-    "`until` has two shapes because it answers one of two different questions.\n"
+    "`until` has one reviewed shape because every debt entry names what retires it.\n"
     "\n"
     '  until = "waits for <the condition that ends it>: <why it cannot happen yet>"\n'
     "      Something will arrive, and the next reader can check whether it has.\n"
     "\n"
-    '  until = "permanently: <the design boundary it is tied to>"\n'
-    "      Nothing will arrive, and the next reader can try to falsify that.\n"
-    "\n"
-    "A sentence that begins with neither reads as a reason without saying which of the two it is, and a\n"
-    "reader who cannot tell whether to wait or to argue stops looking. Rewrite it into one of the two.\n"
-    "`unreviewed:` is the marker `debt record` writes and is not a third shape."
+    "A permanent boundary is not debt: declare a host or composition root under `[roots]`, or\n"
+    "repay the read by capability injection. `unreviewed:` is the marker `debt record` writes\n"
+    "and is not a reviewed shape."
 )
 
 # meiva:note
 # Why a waiting sentence may not say nothing will arrive, printed once per run on the first entry that
-# does: the head answers one of two questions, and the other answer's sentence written in this shape is
-# how an entry that will never be paid comes to read like one that is about to be.
+# does: the head before the colon names the condition that ends the debt, and a head saying nothing
+# will arrive claims a permanent exemption inside `[debt]`.
 _CONTRADICTION_EXPLANATION = (
-    "The head of an `until` -- everything before the colon -- answers one of the two questions\n"
-    "above, and the two answers are not interchangeable: `waits for <condition>` says something\n"
-    "will arrive and names it, so a head saying nothing can arrive has answered `permanently:` in\n"
-    "the waiting shape's words.\n"
+    "The head of an `until` -- everything before the colon -- names the condition that ends\n"
+    "the entry: `waits for <condition>` says something will arrive and names it, so a head\n"
+    "saying nothing can arrive claims a permanent exemption in the waiting shape's words.\n"
     "\n"
-    "Write the boundary as `permanently: <the design boundary it is tied to>`, or name the\n"
-    "condition the entry is really waiting for. The argument for why no condition can arrive\n"
-    "belongs after the colon, where the next reader can try to falsify it."
+    "Name the condition the entry is really waiting for, or if the site is a genuine host or\n"
+    "composition boundary, declare it positively under `[roots]` instead of recording `[debt]`.\n"
+    "The argument for why the condition has not arrived yet belongs after the colon."
 )
 
 # meiva:note
@@ -260,13 +250,13 @@ def _bare_message(code: Code, key: str, missing: tuple[str, ...]) -> str:
     if missing == ("contradiction",):
         return (
             f"{code} {key!r} waits for nothing: `until` begins `waits for ` and then says nothing "
-            "can arrive, so the entry states the boundary the other shape names -- write it "
-            "`permanently: <the design boundary it is tied to>`."
+            "can arrive -- name the condition it waits for, or declare a permanent boundary under "
+            "`[roots]` instead of `[debt]`."
         )
     if missing == ("shape",):
         return (
             f"{code} {key!r} states an exit condition in no shape this tool reads: `until` must "
-            "begin with `waits for ...:` or `permanently:`."
+            "begin with `waits for ...:`."
         )
     if set(missing) == {"owner", "until"}:
         return (
