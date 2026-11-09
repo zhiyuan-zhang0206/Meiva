@@ -38,7 +38,11 @@ from agent.turn.runloop import (
 from base.agents.context import MeivaContext
 from base.agents.context.clients import ClientSet
 from base.agents.context.identity import AgentIdentity
-from base.agents.history.delta_read_compat import recovery_reconstruction_scope
+from base.agents.history.delta_read_compat import (
+    recovery_reconstruction_scope,
+    retained_reconstruction,
+    seed_checkpoint_messages,
+)
 from base.agents.messages.timestamp_policy import TimestampSource
 from base.agents.observation.turn_progress import TurnProgress
 from base.api_contracts.agent_contract import Harness
@@ -493,6 +497,12 @@ class AgentHost:
     ) -> TurnOutcome:
         """Build this invocation's context; the driver owns its publisher lifecycle."""
         checkpoints = checkpoints or TurnCheckpoints(self._checkpointer, self._graph)
+        if runtime.last_reconstruction is not None:
+            seed_checkpoint_messages(
+                checkpoints.reconstruction,
+                runtime.last_reconstruction[0],
+                runtime.last_reconstruction[1],
+            )
         event_publisher = AgentEventPublisher(
             self._bus.async_redis(),
             self._bus.channel,
@@ -525,9 +535,15 @@ class AgentHost:
             harness=runtime.harness,
             harness_bridge=runtime.harness_bridge,
         )
-        return await drive_context(
+        outcome = await drive_context(
             agent_id, ctx, partial(self._invoke_until_done, checkpoints=checkpoints)
         )
+        runtime.last_reconstruction = (
+            retained_reconstruction(checkpoints.reconstruction)
+            if not outcome.crashed and not outcome.exited
+            else None
+        )
+        return outcome
 
     async def _invoke_native_graph(
         self,

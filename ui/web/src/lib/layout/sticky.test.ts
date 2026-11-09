@@ -1082,4 +1082,11 @@ describe("send anchor over a bottom reserve", () => {
     expect(ctl.isSticky()).toBe(true);
     expect(ctl.handleLayoutChange(view(780, 1500))).toBe(true);
   });
+
+  it("PendingStrip unmount growing clientHeight while content also grows does not unstick", () => {
+    const ctl = createStickyController(POINTER_STICKY_THRESHOLDS);
+    ctl.notifyPinnedToBottom({ scrollTop: 440, scrollHeight: 1000, clientHeight: 560 }, true);
+    expect(ctl.handleScroll({ scrollTop: 400, scrollHeight: 1080, clientHeight: 600 })).toBe("none");
+    expect(ctl.isSticky()).toBe(true);
+  });
 });

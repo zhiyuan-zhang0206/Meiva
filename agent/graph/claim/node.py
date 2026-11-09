@@ -74,7 +74,11 @@ from ._dispatch import BatchState, dispatch_batch, resolve_non_human_wake
 # keep working unchanged. New code should import from the submodule that owns them.
 from ._dispatch import by_who as by_who
 from ._dispatch import handle_heartbeat as handle_heartbeat
-from ._present import publish_end_timeline_snapshot, publish_inbound_committed
+from ._present import (
+    publish_claimed_timeline_snapshot,
+    publish_end_timeline_snapshot,
+    publish_inbound_committed,
+)
 from ._routing import ClaimGoto, resolve_routing, route_target
 from .harness_steer import recover_harness_steer
 from .harness_turn import render_messages, turn_key
@@ -216,6 +220,7 @@ async def settle_claimed_batch(
     st = BatchState()
     await dispatch_batch(ctx, state, agent_id, batch, routing, st)
     if ctx.harness is Harness.MEIVA:
+        publish_claimed_timeline_snapshot(ctx, state, agent_id, st.new_msgs)  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
         await publish_inbound_committed(ctx, agent_id, st.committed_chat_ids)
     outcome = await decide(ctx, state, agent_id, st, routing)
     if outcome.publish_end_snapshot and ctx.harness is Harness.MEIVA:

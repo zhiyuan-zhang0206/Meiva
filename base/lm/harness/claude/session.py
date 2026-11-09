@@ -36,7 +36,7 @@ from base.lm.harness.claude.inbound import (
 from base.lm.harness.claude.mapping import map_message, parse_result, task_update_status
 from base.lm.harness.claude.options import option_values
 from base.lm.harness.claude.settle import RunningTurn, result_output, settle_result
-from base.lm.harness.events import SessionFailed, SessionStarted
+from base.lm.harness.events import ForegroundAccepted, SessionFailed, SessionStarted
 from base.lm.harness.handoff import Handoff
 from base.lm.harness.process import (
     ChildProbe,
@@ -295,6 +295,7 @@ class ClaudeSession(BaseHarnessSession[BridgeConfig]):
         try:
             await client.query(ticket.text)
             ticket.interrupt_ready.set()
+            self._emit(ForegroundAccepted(turn_id=ticket.turn_id))
         except Exception as exc:
             self._fail_turn(ticket, exc)
 

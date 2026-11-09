@@ -577,6 +577,25 @@ def load_checkpoint_messages_by_trace(
     return checkpoint_id, _stored_messages(ckpt.checkpoint)
 
 
+# meiva:note
+# Read the thread's newest retained checkpoint_id without loading or reconstructing channel blobs.
+async def alatest_checkpoint_id(
+    pool: AsyncConnectionPool | None,
+    thread_id: str,
+) -> str | None:
+    if pool is None:
+        return None
+    async with pool.connection() as conn, conn.cursor() as cur:
+        await cur.execute(
+            "SELECT max(checkpoint_id) FROM checkpoints WHERE thread_id = %s",
+            (thread_id,),
+        )
+        row = await cur.fetchone()
+    if row is None or not isinstance(row[0], str):
+        return None
+    return row[0]
+
+
 async def attach_trace_to_checkpoint(
     pool: AsyncConnectionPool | None,
     thread_id: str,

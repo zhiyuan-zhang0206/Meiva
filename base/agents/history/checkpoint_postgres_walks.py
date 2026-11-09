@@ -427,13 +427,13 @@ class HistoryPostgresSaver(PostgresSaver):
         queries = _history_queries(self, config)
         rows: _Rows = []
         started = False
-        while True:
-            try:
-                sql, params = queries.send(rows) if started else next(queries)
-                started = True
-            except StopIteration as result:
-                return _HISTORIES.validate_python(held_value(result))
-            with self._cursor() as cursor:
+        with self._cursor() as cursor:
+            while True:
+                try:
+                    sql, params = queries.send(rows) if started else next(queries)
+                    started = True
+                except StopIteration as result:
+                    return _HISTORIES.validate_python(held_value(result))
                 cursor.execute(sql, params, binary=True)
                 rows = cursor.fetchall()
 
@@ -461,12 +461,12 @@ class HistoryAsyncPostgresSaver(AsyncPostgresSaver):
         queries = _history_queries(self, config)
         rows: _Rows = []
         started = False
-        while True:
-            try:
-                sql, params = queries.send(rows) if started else next(queries)
-                started = True
-            except StopIteration as result:
-                return _HISTORIES.validate_python(held_value(result))
-            async with self._cursor() as cursor:
+        async with self._cursor() as cursor:
+            while True:
+                try:
+                    sql, params = queries.send(rows) if started else next(queries)
+                    started = True
+                except StopIteration as result:
+                    return _HISTORIES.validate_python(held_value(result))
                 await cursor.execute(sql, params, binary=True)
                 rows = await cursor.fetchall()
