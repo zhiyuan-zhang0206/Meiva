@@ -33,6 +33,7 @@ from agent.state import AgentState, CapabilitiesState
 from base import paths
 from base.agents.context import MeivaContext
 from base.agents.messages.kwargs import NoteTag
+from base.api_contracts.agent_contract import Harness
 from base.clock import SYSTEM_TIMERS, Clock
 from base.clock.tests.seeded_rng import seeded_rng
 from base.config.tests.configuration import defaults
@@ -64,11 +65,13 @@ def _runtime(
     ops_pool: AsyncConnectionPool | None,
     database_gate: ProcessDbGate,
     pins: Mapping[str, Any] | None = None,
+    harness: Harness = Harness.MEIVA,
 ) -> Runtime[MeivaContext]:
     return Runtime(
         context=MeivaContext(
             meiva_home=meiva_home(),
             ops_pool=ops_pool,
+            harness=harness,
             agent=_slices(pins),
             db=Database.from_settings(gate=database_gate),
             bus=EventBus.from_settings(rng=seeded_rng(), timers=SYSTEM_TIMERS),
@@ -326,6 +329,19 @@ async def test_hook_defers_when_a_compaction_will_replace_the_window(
     )  # type: ignore[arg-type]
     assert update is not None
     assert "meiva.skills.beta" in update["messages"][0].content
+
+    ext_update = await newly_installed_skills(
+        state,
+        _runtime(
+            ops_pool=aops_pool,
+            database_gate=database_gate,
+            pins={"auto_compact_ceiling_tokens": 1},
+            harness=Harness.ANTIGRAVITY,
+        ),
+        _CONFIG,
+    )
+    assert ext_update is not None
+    assert "meiva.skills.beta" in ext_update["messages"][0].content
 
 
 async def test_container_mode_writes_nothing(

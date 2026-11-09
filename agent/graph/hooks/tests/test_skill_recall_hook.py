@@ -30,6 +30,7 @@ from agent.state import CompactState, SkillRecallState, build_agent_state
 from base import paths
 from base.agents.context import MeivaContext
 from base.agents.messages.kwargs import NoteTag, read_meiva_kwargs
+from base.api_contracts.agent_contract import Harness
 from base.clock import SYSTEM_TIMERS, Clock
 from base.clock.tests.seeded_rng import seeded_rng
 from base.config.tests.configuration import defaults
@@ -120,9 +121,11 @@ def _catalog(binding: _Scorer, *, spec: DecisionModelSpec | None = None) -> Mode
 
 
 def _runtime(database: Database, catalog: ModelCatalog, **pins: Any) -> Runtime[MeivaContext]:
+    harness = pins.pop("harness", Harness.MEIVA)
     return Runtime(
         context=MeivaContext(
             meiva_home=meiva_home(),
+            harness=harness,
             agent=AgentSlices.resolve(
                 {
                     "skills_to_inject_into_system_prompt": ["*"],
@@ -231,7 +234,7 @@ async def test_fires_on_a_person_or_a_schedule(
     assert read_meiva_kwargs(note).get("meiva_note_tag") == NoteTag.SKILL_RECALL.value
 
 
-@pytest.mark.parametrize("source", ["agent:42", "system", "system:restart", "watcher:3", "shell:9"])
+@pytest.mark.parametrize("source", ["system", "system:restart", "watcher:3", "shell:9"])
 async def test_never_fires_on_other_inbound_sources(
     three_skills: Path, source: str, database: Database
 ) -> None:
@@ -272,10 +275,17 @@ async def test_an_exec_tail_without_a_new_inbound_does_not_fire(
 async def test_defers_when_auto_compact_will_fire(three_skills: Path, database: Database) -> None:
     scorer = _Scorer({"beta": 0.9})
 
-    update = await _run(database, _state(_tail("user")), scorer, auto_compact_fraction=1e-6)
-
-    assert update is None
+    assert await _run(database, _state(_tail("user")), scorer, auto_compact_fraction=1e-6) is None
     assert scorer.calls == []
+
+    ext = await _run(
+        database,
+        _state(_tail("user")),
+        scorer,
+        harness=Harness.ANTIGRAVITY,
+        auto_compact_fraction=1e-6,
+    )
+    assert _offered(ext) == ["beta"]
 
 
 # ── what the model is asked ──
@@ -680,12 +690,8 @@ async def test_a_peer_request_is_scored_when_the_gate_passes(
     three_skills: Path, database: Database
 ) -> None:
     scorer = _Scorer({"work": 0.95, "method_given": 0.05, "beta": 0.9})
-
     update = await _run(
-        database,
-        _state(_tail("agent:402", "please review PR 1234 against the docs")),
-        scorer,
-        skill_recall_peer_messages=True,
+        database, _state(_tail("agent:402", "please review PR 1234 against the docs")), scorer
     )
 
     assert len(scorer.calls) == 2
@@ -698,12 +704,8 @@ async def test_a_peer_request_is_scored_when_the_gate_passes(
 
 async def test_a_peer_status_message_is_not_scored(three_skills: Path, database: Database) -> None:
     scorer = _Scorer({"work": 0.05, "method_given": 0.05, "beta": 0.9})
-
     update = await _run(
-        database,
-        _state(_tail("agent:402", "PR merged, nothing else to do")),
-        scorer,
-        skill_recall_peer_messages=True,
+        database, _state(_tail("agent:402", "PR merged, nothing else to do")), scorer
     )
 
     assert update is None
@@ -714,13 +716,7 @@ async def test_a_peer_brief_that_states_the_method_is_not_scored(
     three_skills: Path, database: Database
 ) -> None:
     scorer = _Scorer({"work": 0.95, "method_given": 0.95, "beta": 0.9})
-
-    update = await _run(
-        database,
-        _state(_tail("agent:402", "run these three steps: ...")),
-        scorer,
-        skill_recall_peer_messages=True,
-    )
+    update = await _run(database, _state(_tail("agent:402", "run these three steps: ...")), scorer)
 
     assert update is None
     assert len(scorer.calls) == 1
@@ -728,37 +724,47 @@ async def test_a_peer_brief_that_states_the_method_is_not_scored(
 
 async def test_an_uncertain_peer_gate_still_scores(three_skills: Path, database: Database) -> None:
     scorer = _Scorer({"work": 0.5, "method_given": 0.5, "beta": 0.9})
-
-    update = await _run(
-        database,
-        _state(_tail("agent:402", "look at the failing suite")),
-        scorer,
-        skill_recall_peer_messages=True,
-    )
+    update = await _run(database, _state(_tail("agent:402", "look at the failing suite")), scorer)
 
     assert len(scorer.calls) == 2
     assert _offered(update) == ["beta"]
 
 
-async def test_peer_messages_are_off_by_default(three_skills: Path, database: Database) -> None:
+async def test_peer_messages_are_on_by_default_and_can_be_disabled(
+    three_skills: Path, database: Database
+) -> None:
     scorer = _Scorer({"work": 0.95, "method_given": 0.05, "beta": 0.9})
-
-    update = await _run(database, _state(_tail("agent:402")), scorer)
-
-    assert update is None
+    assert (
+        await _run(database, _state(_tail("agent:402")), scorer, skill_recall_peer_messages=False)
+        is None
+    )
     assert scorer.calls == []
+    assert _offered(await _run(database, _state(_tail("agent:402")), scorer)) == ["beta"]
+
+
+async def test_first_turn_peer_dispatch_bypasses_peer_gate_and_subsequent_turns_run_it(
+    three_skills: Path, database: Database
+) -> None:
+    scorer = _Scorer({"work": 0.95, "method_given": 0.95, "beta": 0.9})
+    first_in: list[AnyMessage] = [_inbound("run these three steps: ...", "agent:402", 1)]
+    assert _offered(await _run(database, _state(first_in), scorer)) == ["beta"]
+    assert [set(q) for _s, q in scorer.calls] == [{"alpha", "beta", "gamma"}]
+
+    for state in (
+        _state(_tail("agent:402", "run these three steps: ...")),
+        _state(first_in, skill_recall=SkillRecallState(prompted={"alpha"})),
+        _state(first_in, skill_reads=["alpha"]),
+    ):
+        gate_scorer = _Scorer({"work": 0.95, "method_given": 0.95, "beta": 0.9})
+        assert await _run(database, state, gate_scorer) is None
+        assert [set(q) for _s, q in gate_scorer.calls] == [{"work", "method_given"}]
 
 
 async def test_a_failed_gate_keeps_the_behaviour_before_peer_messages(
     three_skills: Path, database: Database
 ) -> None:
     scorer = _Scorer({}, error=DecisionRequestError("provider down"))
-
-    update = await _run(
-        database, _state(_tail("agent:402")), scorer, skill_recall_peer_messages=True
-    )
-
-    assert update is None
+    assert await _run(database, _state(_tail("agent:402")), scorer) is None
     assert len(scorer.calls) == 1
 
 
@@ -766,13 +772,7 @@ async def test_the_gate_reads_only_the_first_four_thousand_characters(
     three_skills: Path, database: Database
 ) -> None:
     scorer = _Scorer({"work": 0.95, "method_given": 0.05, "beta": 0.9})
-
-    await _run(
-        database,
-        _state(_tail("agent:402", "x" * 5000)),
-        scorer,
-        skill_recall_peer_messages=True,
-    )
+    await _run(database, _state(_tail("agent:402", "x" * 5000)), scorer)
 
     assert scorer.calls[0][0] == PEER_GATE_PREAMBLE + "x" * 4000
 
@@ -781,8 +781,7 @@ async def test_a_person_message_still_skips_the_gate(
     three_skills: Path, database: Database
 ) -> None:
     scorer = _Scorer({"beta": 0.9})
-
-    await _run(database, _state(_tail("user")), scorer, skill_recall_peer_messages=True)
+    await _run(database, _state(_tail("user")), scorer)
 
     assert len(scorer.calls) == 1
     assert set(scorer.calls[0][1]) == {"alpha", "beta", "gamma"}
@@ -793,8 +792,6 @@ async def test_a_peer_turn_uses_the_peer_threshold_not_the_person_cut(
 ) -> None:
     scorer = _Scorer({"work": 0.95, "method_given": 0.05, "gamma": 0.65})
     state = _state(_tail("agent:402", "have a look at the staging alerts"))
-    assert await _run(database, state, scorer, skill_recall_peer_messages=True) is None
-    update = await _run(
-        database, state, scorer, skill_recall_peer_messages=True, skill_recall_peer_threshold=0.60
-    )
+    assert await _run(database, state, scorer) is None
+    update = await _run(database, state, scorer, skill_recall_peer_threshold=0.60)
     assert _offered(update) == ["gamma"], "0.65 clears the person cut and misses the peer cut"
