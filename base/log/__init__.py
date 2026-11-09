@@ -31,13 +31,16 @@ from base.log.sinks import (
     add_sink as add_sink,
 )
 from base.log.sinks import (
+    guard_default_logging as guard_default_logging,
+)
+from base.log.sinks import (
     install_stdlib_intercept as install_stdlib_intercept,
 )
 from base.log.sinks import (
     rotate_by_size_or_day as rotate_by_size_or_day,
 )
 
-__all__ = ["prepare_process_logging"]
+__all__ = ["guard_default_logging", "prepare_process_logging"]
 
 
 def prepare_process_logging() -> None:
@@ -53,4 +56,4 @@ def prepare_process_logging() -> None:
     # Installed at the earliest boundary as well: a fresh executable may log (and a later verb may
     # open its own sink) before any `init_*` runs, and the default stderr handler that exists until
     # this call is replaced by `logger.remove()` above.
-    install_log_redaction()
+    guard_default_logging()

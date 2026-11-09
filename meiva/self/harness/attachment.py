@@ -43,6 +43,7 @@ from base.cluster.machine import MachineIdentityReader
 from base.config import ConfigBoot
 from base.config.agent_pins import resolve_agent_config_pins
 from base.host.env.agent_slices import PluginConfigView
+from base.log import guard_default_logging
 from base.packages.plugins.config_view import resolve_agent_plugin_pins
 from base.paths.home import resolve_meiva_home
 from meiva.boot import bind_launched_context
@@ -353,6 +354,7 @@ def open_attachment(
     session_id: str | None = None,
 ) -> HarnessAttachment:
     """Build the attachment for one registration handle; the caller owns its lifetime."""
+    guard_default_logging()
     registration = resolve_registration(
         handle,
         agent_id=agent_id,

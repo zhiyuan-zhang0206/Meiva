@@ -271,6 +271,38 @@ def unreadable_external_profile() -> None:
         print(json.dumps({"rejected": False, "installed": installation.installed() is not None}))
 
 
+# meiva:note
+# A bare tool subprocess importing `meiva` without `prepare_process_logging` or `add_sink`:
+# background `sdk-call-policy` refresh against an unreachable gateway and direct loguru warning
+# both write to default stderr handler 0 with frame variables disabled and redaction active (#6594).
+def bare_import_meiva_refresh_outage() -> None:
+    import random
+    from dataclasses import replace
+
+    from loguru import logger
+
+    import meiva
+    from base.agents.sdk.call_policy import process_sampling_owner
+    from base.config import ConfigBoot
+    from base.host.env.bootstrap import BootstrapFetch
+    from base.log.diagnose import diagnosing_handler_ids
+    from meiva import boot
+
+    _ = boot.launched_context(env={"MEIVA_AGENT_ID": "7"}, config=ConfigBoot())
+    _ = getattr(meiva, "_init_complete", False)
+    owner = process_sampling_owner(random.Random(0), environ=os.environ)  # noqa: S311
+    owner.source = replace(
+        owner.source,
+        refresh_seconds=0.0,
+        tuning=BootstrapFetch(attempts=1, timeout_s=0.2, backoff_step_s=0.0),
+    )
+    owner.next_refresh = 0.0
+    _ = owner.read()
+    assert owner.close()
+    logger.warning("env check MEIVA_API_TOKEN=" + os.environ["MEIVA_API_TOKEN"])
+    print("diagnosing:", diagnosing_handler_ids())
+
+
 SCENARIOS = {
     "config_lite": config_lite,
     "no_context_for_bare_script": no_context_for_bare_script,
@@ -283,6 +315,7 @@ SCENARIOS = {
     "unestablished_identity": unestablished_identity,
     "external_profile_actor": external_profile_actor,
     "unreadable_external_profile": unreadable_external_profile,
+    "bare_import_meiva_refresh_outage": bare_import_meiva_refresh_outage,
 }
 
 SCENARIOS[sys.argv[1]](*sys.argv[2:])  # pyright: ignore[reportCallIssue]

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 
+from base.log import guard_default_logging
 from meiva import boot
 from meiva.sdk_surface import process_context, sdk_disable
 
@@ -57,6 +58,7 @@ def ensure_identity() -> object:
     raises `boot.HarnessAttachError` and records it, so a later read reports the same
     reason instead of trying the registration again.
     """
+    guard_default_logging()
     if process_context.is_host_process():
         return None
     bound = process_context.bound_context()
@@ -95,6 +97,7 @@ def attach(handle: str | None = None) -> object:
             another machine); the message carries the reason and says not to retry.
         RuntimeError: this process already has an identity of its own.
     """
+    guard_default_logging()
     if process_context.is_host_process():
         raise RuntimeError(
             "meiva.attach found no identity to borrow: this process runs the shared host"

@@ -37,6 +37,10 @@ def main(mode: str) -> None:
         from base.log.sinks import add_sink
 
         _ = add_sink(sys.stderr, format="{message}", level="INFO")
+    elif mode == "default-guard":
+        from base.log import guard_default_logging
+
+        guard_default_logging()
     elif mode == "raw-add":
         _ = logger.add(sys.stderr, format="{message}", level="INFO")
     else:
@@ -47,6 +51,7 @@ def main(mode: str) -> None:
         _raise_with_the_sentinel_on_the_frame()
     except RuntimeError:
         logger.opt(exception=True).error("caught")
+    logger.warning(f"env MEIVA_API_TOKEN={SENTINEL}")
 
 
 if __name__ == "__main__":

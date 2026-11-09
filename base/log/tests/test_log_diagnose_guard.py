@@ -21,7 +21,7 @@ from pathlib import Path
 from loguru import logger
 
 from base.log.diagnose import diagnosing_handler_ids, disable_frame_variable_rendering
-from base.log.sinks import add_sink
+from base.log.sinks import add_sink, guard_default_logging
 
 _CHILD = Path(__file__).with_name("diagnose_guard_child.py")
 _SENTINEL = "SENTINEL-PASSWORD-123"
@@ -92,3 +92,27 @@ def test_the_guard_names_what_it_changed_and_is_idempotent() -> None:
         assert handler_id not in disable_frame_variable_rendering()
     finally:
         logger.remove(handler_id)
+
+
+# meiva:note
+# Verify that `guard_default_logging` closes frame-variable rendering and installs redaction on
+# loguru's default stderr handler 0 in a fresh interpreter without `prepare_process_logging` or
+# `add_sink` (task #6594).
+def test_guard_default_logging_protects_default_stderr_handler_in_bare_subprocess() -> None:
+    done = _run("default-guard")
+    output = _plain(done.stderr)
+    motive = (
+        "guard_default_logging must disable _diagnose and install redaction on Loguru's default "
+        "stderr handler 0 in bare subprocesses that never call prepare_process_logging or add_sink: "
+        "on 2026-11-09 (task #6594) an SDK child process hit a gateway outage and handler 0 "
+        "rendered stack-frame locals (Authorization Bearer token) into stderr while keeping "
+        f"exception type and call site lines; see base/log/sinks.py and base/log/diagnose.py. output={output!r}"
+    )
+
+    assert guard_default_logging is not None, motive
+    assert done.stdout.strip() == "diagnosing handlers: []", motive
+    assert _SENTINEL not in done.stdout and _SENTINEL not in done.stderr, motive
+    assert "└ " not in output, motive
+    assert [
+        t for t in ("db_password", "boom", "RuntimeError", "MEIVA_API_TOKEN=***") if t not in output
+    ] == [], motive

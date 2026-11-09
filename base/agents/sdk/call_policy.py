@@ -29,7 +29,7 @@ from base.agents.sdk import (
 from base.agents.sdk import (
     policy_from_aliases as policy_from_aliases,
 )
-from base.log import logger
+from base.log import guard_default_logging, logger
 
 
 # meiva:note
@@ -42,6 +42,7 @@ from base.log import logger
 # so a revoked token cannot hide behind the file. The file is read again on each call so an edit
 # reaches a running process within one refresh.
 def read_policy(source: SamplingSource) -> SamplingPolicy:
+    guard_default_logging()
     from base.host.env.bootstrap import (
         config_source_is_local,
         fetch_bootstrap_config,
@@ -70,6 +71,7 @@ class _Refresh:
     """One retained refresh attempt; shutdown observes the actual worker."""
 
     def __init__(self, refresh: Callable[[], None]) -> None:
+        guard_default_logging()
         self.refresh = refresh
         self.stopping = threading.Event()
         self.completed = threading.Event()
@@ -80,6 +82,7 @@ class _Refresh:
 
     def run(self) -> None:
         try:
+            guard_default_logging()
             if not self.stopping.is_set():
                 self.refresh()
         except BaseException as exc:
@@ -111,6 +114,7 @@ class SamplingPolicyOwner:
     def __init__(
         self, *, initial: SamplingPolicy, source: SamplingSource, rng: random.Random
     ) -> None:
+        guard_default_logging()
         self.source = source
         self.rng = rng
         self.value = initial
@@ -198,6 +202,7 @@ class SamplingPolicyOwner:
                 primary.with_traceback(primary_traceback)
 
     def refresh(self) -> None:
+        guard_default_logging()
         transient_errors: tuple[type[Exception], ...] = ()
         status_error = None
         try:

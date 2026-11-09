@@ -5,15 +5,16 @@
 # same masked record -- and on the way to disk only: what the caller saw (an exec output returned to
 # an agent, a value an operator passed in) is unchanged.
 #
-# Three rules, and no guessing beyond them: a URL's userinfo password; the value of a mapping key
-# named exactly `token`, `secret` or `password` (case-insensitive, also when that mapping was
-# serialized into the message); and the value of an environment assignment whose key is upper-case
-# and ends in `_TOKEN`/`_PASSWORD`/`_SECRET` (`MEIVA_API_TOKEN=...`). A key that merely contains one
-# of those words stays visible, and so does everything else, because the evidence a later reader
-# needs is usually right next to the credential. The asymmetry decides the edges: masking one more
-# non-secret costs a little readability, missing one real password costs an irreversible leak.
+# Four rules, and no guessing beyond them: a URL's userinfo password; the value of a mapping key
+# named `token`, `secret`, `password` or `authorization` (case-insensitive, also when that mapping
+# was serialized into the message); an `Authorization: Bearer <credential>` header in text; and the
+# value of an environment assignment whose key is upper-case and ends in `_TOKEN`/`_PASSWORD`/
+# `_SECRET` (`MEIVA_API_TOKEN=...`). A key that merely contains one of those words stays visible,
+# and so does everything else, because the evidence a later reader needs is usually right next to
+# the credential. The asymmetry decides the edges: masking one more non-secret costs a little
+# readability, missing one real password costs an irreversible leak.
 # Task #5993: an exec output echoing a data-plane URL was written verbatim to agent_host.log, the
-# events JSONL and the unit's output.log.
+# events JSONL and the unit's output.log. Task #6594: a Bearer header value reached tool stderr.
 #
 # Known gaps, recorded here rather than in a pull request body, because the person who changes this
 # file is the one who needs them:
@@ -36,7 +37,7 @@ __all__ = ["REDACTED", "install_log_redaction", "redact_record", "redact_text"]
 
 REDACTED = "***"
 
-_SECRET_KEYS = frozenset({"token", "secret", "password"})
+_SECRET_KEYS = frozenset({"token", "secret", "password", "authorization"})
 
 # meiva:note
 # A password inside a URL's userinfo, matched on raw text rather than through `urlsplit` so a value
@@ -52,7 +53,14 @@ _USERINFO_PASSWORD = re.compile(r"(://[^/\s@]*:)[^/\s@]*@")
 # message or an exec output. The key list is exact, so `token_count`, `tokenizer` and
 # `token_expires_at` keep their values.
 _SECRET_IN_TEXT = re.compile(
-    r'("(?:token|secret|password)"\s*:\s*)"(?:[^"\\]|\\.)*"', re.IGNORECASE
+    r'("(?:token|secret|password|authorization)"\s*:\s*)"(?:[^"\\]|\\.)*"', re.IGNORECASE
+)
+
+# meiva:note
+# An HTTP `Authorization: Bearer <token>` header echoed into free text or a Python mapping repr
+# (`'Authorization': 'Bearer ...'`). Non-Bearer phrases such as "authorization callback" stay intact.
+_AUTHORIZATION_BEARER = re.compile(
+    r"""(?i)\b(authorization["']?\s*[:=]\s*["']?bearer\s+)([^\s"',}]+)"""
 )
 
 # meiva:note
@@ -68,14 +76,16 @@ _ENV_SECRET = re.compile(
 
 
 # meiva:note
-# `text` with URL passwords and secret-named JSON values replaced by `***`. A string that can carry
-# neither comes back unchanged and uncopied, so the common record costs one substring search per
-# rule.
+# `text` with URL passwords, secret-named JSON values, Bearer headers and secret env assignments
+# replaced by `***`. A string that can carry none of them comes back unchanged and uncopied, so the
+# common record costs one substring search per rule.
 def redact_text(text: str) -> str:
     if "://" in text:
         text = _USERINFO_PASSWORD.sub(r"\1" + REDACTED + "@", text)
     if '"' in text:
         text = _SECRET_IN_TEXT.sub(lambda match: match.group(1) + '"' + REDACTED + '"', text)
+    if "Authorization" in text or "authorization" in text:
+        text = _AUTHORIZATION_BEARER.sub(lambda match: match.group(1) + REDACTED, text)
     if "_TOKEN" in text or "_PASSWORD" in text or "_SECRET" in text:
         text = _ENV_SECRET.sub(
             lambda match: match.group(1) + match.group(2) + REDACTED + match.group(2), text

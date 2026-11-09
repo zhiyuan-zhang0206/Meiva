@@ -35,6 +35,7 @@ from base.agents.context.clients import LazyConnection as _LazyConnection
 from base.cluster.machine import MachineIdentityReader as _MachineIdentityReader
 from base.config import ConfigBoot
 from base.host.boundary.untyped import object_mapping, object_of
+from base.log import guard_default_logging as _guard_default_logging
 from base.packages.plugins.loading import StateGate
 
 from .sdk_surface import process_context
@@ -89,6 +90,7 @@ gateway API access. Unavailable when no execution context is established.
 # meiva:note
 # What `meiva.context` answers: the bound context, binding a launched process's own on first read.
 def _bound_context() -> MeivaContext:
+    _guard_default_logging()
     if process_context.bound_context() is None and not process_context.is_host_process():
         # meiva:note
         # A launched script whose environment carries the agent id builds and binds its own
@@ -237,6 +239,8 @@ def ensure_plugins_loaded(
 # settings.data_plane.db_url at runtime (test conftest, eval driver) is immediately
 # visible to `meiva.DB_URL` readers without import-order gymnastics.
 def __getattr__(name: str) -> Any:
+    if _init_complete:
+        _guard_default_logging()
     if name in ("state", "state_update"):
         # Reached only when the slot property raised (an AttributeError falls through to here).
         raise process_context.outside_exec_turn(name)
@@ -349,6 +353,7 @@ def help(*targets: object) -> None:
             plain value. Name a module or namespace (`meiva.shell`), a routine
             or class (`meiva.shell.run`), or a documented constant
             (`meiva.memory.PATH`) instead."""
+    _guard_default_logging()
     _render_help(*targets, profile=_current_help_profile())
 
 
@@ -434,4 +439,5 @@ def attach(handle: str | None = None) -> object:
     """
     from .self.harness import attach as attach_identity
 
+    _guard_default_logging()
     return attach_identity(handle)

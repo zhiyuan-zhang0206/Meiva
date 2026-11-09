@@ -6,7 +6,7 @@ from collections.abc import Callable, Mapping
 from typing import TYPE_CHECKING, Protocol
 
 from base.host.boundary.untyped import object_of
-from base.log import logger
+from base.log import guard_default_logging, logger
 
 __all__ = ["ClientSet", "DatabaseFactory", "DatabaseHandle", "LazyConnection"]
 
@@ -120,6 +120,7 @@ class ClientSet:
         also supplied explicitly; this owner never discovers process configuration.
         `factories` maps an SDK factory key to its configured zero-argument builder,
         preserving `get(factory)` identity and the existing close/rebuild lifecycle."""
+        guard_default_logging()
         self._gateway_url = gateway_url
         self._database = database
         self._redis_factory = redis

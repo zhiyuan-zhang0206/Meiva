@@ -203,10 +203,23 @@ HUMAN_FORMAT = (
 
 
 # meiva:note
-# The process-wide redaction patcher is installed here, at the one funnel every loguru sink in this
-# codebase passes through, so no process has to remember it: a unit that opens its own stderr sink
-# (`exec_host`, `pty_sessions`, the MCP daemon) gets the same masked record as one that goes through
-# `start_process_logging`. Idempotent, and skipping it is not an option any caller has.
+# Install the process-wide redaction patcher and disable frame-variable rendering on every
+# registered loguru handler, including loguru's default stderr handler 0 in a process that has
+# neither run `prepare_process_logging` nor opened a sink via `add_sink` (such as an external
+# harness tool subprocess running `python -c "import meiva; ..."`, task #6594). Idempotent:
+# existing handlers keep their sink, format, level, filter and colorize settings, and caller
+# `extra` bindings stay intact.
+def guard_default_logging() -> None:
+    install_log_redaction()
+    _ = disable_frame_variable_rendering()
+
+
+# meiva:note
+# The process-wide redaction patcher and frame-variable guard are installed here, at the one funnel
+# every loguru sink in this codebase passes through, so no process has to remember them: a unit
+# that opens its own stderr sink (`exec_host`, `pty_sessions`, the MCP daemon) gets the same masked
+# record as one that goes through `start_process_logging`. Idempotent, and skipping it is not an
+# option any caller has.
 def add_sink(
     sink: TextIO | Path | Callable[..., None] | logging.Handler | str,
     /,
@@ -232,13 +245,7 @@ def add_sink(
     Raises if a caller explicitly asks for `diagnose=True` — that request is
     never honored, so failing loud beats a silently-ignored kwarg.
     """
-    install_log_redaction()
-    # meiva:note
-    # The handlers registered before this sink opens are disabled rather than trusted: this is the
-    # one funnel our sinks pass, so it is also where a sink somebody else registered — loguru's
-    # default one when `prepare_process_logging` never ran, a library's own — stops rendering frame
-    # locals. `add_sink`'s own call passes `diagnose=False`; this covers the ones it did not create.
-    _ = disable_frame_variable_rendering()
+    guard_default_logging()
     if kwargs.pop("diagnose", False):
         raise ValueError(
             "diagnose=True is forbidden on log sinks: it renders local variable "
