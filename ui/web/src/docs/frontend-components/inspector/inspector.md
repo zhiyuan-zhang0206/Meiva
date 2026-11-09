@@ -25,14 +25,16 @@ This subscription makes no additional detail request. Its token totals and thres
 cannot represent an external CLI session. Unknown harness metadata also keeps
 this section hidden.
 
-**One spinner per pending section, never a metric card skeleton.** Persistent
+**One spinner per pending read, no premature section headers or metric card skeletons.** Persistent
 metric sections (`Liveness` and `Activity`) stay mounted at their ordered keys
 across initial loads, agent switches and window changes. While a section's read is
 pending with no matching snapshot, `Section`
 (`components/inspector/inspector-section.tsx`) sets `aria-busy` and
-`aria-label="{Title} loading"` and renders a single centered `Spinner` in the
-section body instead of empty `Metric` card shells (`Metric` only renders resolved
-string values, user ruling 2026-11-09). Conditional and sparse sections — `Page`,
+`aria-label="{Title} loading"`, omits its section header (`Liveness` / `Activity`
+and header controls) so titles do not appear before their data arrives, and
+renders a single centered `Spinner` (`hideSpinner` suppresses a duplicate second
+spinner in `Activity` while `Liveness` is also cold-loading; `Metric` only renders
+resolved string values, user rulings 2026-11-09). Conditional and sparse sections — `Page`,
 `Persistent shells`, `Configuration`, `Context` and plugin widgets — render nothing
 while pending or empty rather than reserving speculative placeholder rows that
 collapse after fetch.

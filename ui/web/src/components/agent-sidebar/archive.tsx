@@ -50,7 +50,7 @@ function ArchivePage({ query, props }: { query: string; props: InnerProps }) {
   return <section aria-label={t("archive")} className="border-t border-border py-2">
     <div className="px-3 text-xs text-muted-foreground">{t("archive")}</div>
     {page.isPending && (
-      <div className={cn("items-center gap-1.5 px-3 py-1", FLEX)}>
+      <div className={cn("items-center justify-center px-3 py-4", FLEX)}>
         <Spinner label={t("loadingAgents")} />
       </div>
     )}

@@ -126,7 +126,7 @@ export function ColdLoadSpinner({ show }: { show: boolean }) {
     <div
       role="status"
       data-testid="cold-load-spinner"
-      className={cn("pointer-events-none absolute inset-x-0 top-0 z-10 justify-center pt-3 text-muted-foreground", FLEX)}
+      className={cn("pointer-events-none absolute inset-x-0 top-11 z-10 justify-center py-12 text-muted-foreground", FLEX)}
     >
       <LoadingRing testId="cold-load-ring" arc={0.72} />
       <span className="sr-only">{t("loadingConversation")}</span>

@@ -232,6 +232,7 @@ export function HomePageView(props: HomePageProps) {
     <HomeContent
         activeId={activeId}
         activeAgent={activeAgent}
+        agentsLoading={agentsLoading}
         showError={showError}
         contextAvailable={!isLarge && activeId != null}
         openContext={() => { setMobileContextOpen(true); if (inspector.open) inspector.toggle(); }}
@@ -301,6 +302,7 @@ export function HomePageView(props: HomePageProps) {
 interface HomeContentProps {
   activeId: number | null;
   activeAgent: AgentRow | undefined;
+  agentsLoading: boolean;
   showError: (msg: string) => void;
   contextAvailable: boolean;
   openContext: () => void;
@@ -324,6 +326,7 @@ interface HomeContentProps {
 function HomeContent({
   activeId,
   activeAgent,
+  agentsLoading,
   showError,
   contextAvailable,
   openContext,
@@ -486,7 +489,7 @@ function HomeContent({
             loadingOlder={loadingOlder}
             onLoadOlder={loadOlder}
             retainedItemsMax={retainedItemsMax}
-            loading={isLoading}
+            loading={isLoading || (agentsLoading && activeId === null)}
             loadingNew={loadingNewer && items.length > 0}
             maxWidthCss={contentColumnMaxWidth}
           />

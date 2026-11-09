@@ -15,7 +15,7 @@ export default function Loading() {
       <header className="shrink-0 border-b border-border px-4 py-2">
         <h1 className="text-sm font-semibold">{t("title")}</h1>
       </header>
-      <div className={cn("items-center justify-center px-6 py-6", FLEX)}>
+      <div className={cn("items-center justify-center px-6 py-12", FLEX)}>
         <Spinner className="size-5" label={common("loading")} />
       </div>
     </div>
