@@ -1,8 +1,9 @@
 """Long-term notes as markdown files, with semantic search to find them.
 
-A note is a markdown file with a YAML frontmatter block. There is no writer function: create and
-update notes with `meiva.files.write` and `meiva.files.edit` under `PATH` (notes every agent can read)
-or `PERSONAL_PATH` (your own), following the format described on those two paths.
+A note is a markdown file (pure Markdown by default; YAML frontmatter is optional). There is no
+writer function: create and update notes with `meiva.files.write` and `meiva.files.edit` under
+`PATH` (notes every agent can read) or `PERSONAL_PATH` (your own), following the format described
+on those two paths.
 """
 
 from __future__ import annotations
@@ -21,26 +22,17 @@ from meiva.sdk_surface.validation import coerce_str, coerce_typed
 __all_for_meiva__ = ["PATH", "PERSONAL_PATH", "MemoryMatch", "search"]
 
 
-_NOTE_FORMAT = """A note is a .md file: a YAML frontmatter block, then the body.
+_NOTE_FORMAT = """A note is a .md file written directly in pure Markdown (YAML frontmatter is optional):
 
-    ---
-    type: Memory
-    meiva_agent: <your agent id>
-    meiva_machine: <your machine name>
-    timestamp: '<current time, ISO 8601 with offset, e.g. 2026-01-31T09:30:00+00:00>'
-    title: <short title>
-    description: <one line saying what the note holds; search results and indexes show it>
-    tags: [type/<kind>]
-    ---
-    <!-- agent-<your agent id> @ <your machine name>, YYYY-MM-DD HH:MM -->
+    # <Title>
 
-    The note text.
+    <A short high-level description paragraph stating the rule or fact.>
 
-Your agent id is `meiva.self.AGENT_ID` and your machine name is `meiva.self.MACHINE_SPEC.name`.
-`type`, `meiva_agent`, `description` and exactly one `type/<kind>` tag are required; the kind is one
-of user, feedback, project, reference, env, role. Put a value in double quotes when it contains
-": " or " #". Keep a note under 8000 characters and on one topic. Search for an existing note
-before writing a new one and update it in place when it already covers the ground.
+    <The note body, including Why and How to apply for rules.>
+
+Keep a note under 8000 characters and on one topic. If you include optional YAML frontmatter,
+wrap any value containing ": " or " #" in double quotes so YAML does not truncate it. Search for
+an existing note before writing a new one and update it in place when it already covers the ground.
 
 Notes you write are checked after the call that writes them; a reminder names any rule a note
 breaks, and any shared note that looks like a duplicate of it."""

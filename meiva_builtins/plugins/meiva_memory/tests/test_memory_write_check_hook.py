@@ -288,30 +288,47 @@ async def test_the_threshold_is_configurable(
     assert "other.md" in str(note.content)
 
 
+async def test_pure_markdown_note_is_valid_and_searched_by_body(
+    hook: Any, search: _MemoryGateway, stores: tuple[Path, Path], runtime: Runtime[MeivaContext]
+):
+    pool, _ = stores
+    _write(
+        pool,
+        "pure.md",
+        "# Retry rule\n\nRetries above three make the outage worse.\n\nThe service rate-limits above three retries.\n",
+    )
+
+    result = await hook(_state({"pure.md"}), runtime, RunnableConfig())
+
+    assert _is_cleared(result)
+    assert _reminders(result) == []
+    [call] = search.calls
+    assert call["purpose"] == "dedup" and call["k"] == 5
+    assert call["query"].startswith("# Retry rule")
+    assert "Retries above three make the outage worse." in call["query"]
+
+
 async def test_rule_violations_are_named_per_file(
     hook: Any, search: _MemoryGateway, stores: tuple[Path, Path], runtime: Runtime[MeivaContext]
 ):
     pool, _ = stores
-    broken = _write(
-        pool, "broken.md", "---\ntype: Memory\ndescription: d\ntags: [type/bogus]\n---\n"
-    )
+    broken = _write(pool, "broken.md", "---\ndescription: has # hash\n---\n")
 
     result = await hook(_state({"broken.md"}), runtime, RunnableConfig())
 
     [note] = _reminders(result)
     text = str(note.content)
     assert str(broken) in text
-    assert "Missing required field 'meiva_agent'" in text
-    assert "invalid type tag 'type/bogus'" in text
+    assert "Field 'description' is YAML-misread" in text
 
 
 async def test_one_reminder_covers_every_note_of_the_call(
     hook: Any, search: _MemoryGateway, stores: tuple[Path, Path], runtime: Runtime[MeivaContext]
 ):
     pool, own = stores
-    _write(pool, "a.md", "no frontmatter")
+    _write(pool, "a.md", "---\nunclosed\n")
     _write(pool, "b.md", _GOOD)
-    _write(own, "mine.md", "also none")
+    _write(own, "mine.md", "---\nunclosed\n")
     search.results = [_hit("old.md", 0.95)]
 
     result = await hook(_state({"a.md", "b.md"}, {"mine.md"}), runtime, RunnableConfig())
@@ -334,7 +351,7 @@ async def test_personal_notes_get_the_rules_but_no_duplicate_search(
 ):
     _, own = stores
     _write(own, "clean.md", _GOOD)
-    _write(own, "dirty.md", "no frontmatter")
+    _write(own, "dirty.md", "---\nunclosed\n")
 
     result = await hook(_state(set(), {"clean.md", "dirty.md"}), runtime, RunnableConfig())
 
@@ -369,7 +386,7 @@ async def test_an_unavailable_search_leaves_the_rules_findings_alone(
     failure: str,
 ):
     pool, _ = stores
-    _write(pool, "broken.md", "no frontmatter")
+    _write(pool, "broken.md", "---\nunclosed\n")
     _write(pool, "fine.md", _GOOD)
     search.failure = failure
 
@@ -390,7 +407,7 @@ async def test_a_deadline_overrun_is_logged_and_adds_nothing(
     loguru_records: LogRecords,
 ):
     pool, _ = stores
-    _write(pool, "broken.md", "no frontmatter")
+    _write(pool, "broken.md", "---\nunclosed\n")
     runtime = replace(
         runtime,
         context=replace(
@@ -430,7 +447,7 @@ async def test_the_check_never_changes_a_note(
     hook: Any, search: _MemoryGateway, stores: tuple[Path, Path], runtime: Runtime[MeivaContext]
 ):
     pool, _ = stores
-    messy = "---\ntype: Memory\n---\nbody\n"
+    messy = "---\nunclosed\n"
     path = _write(pool, "messy.md", messy)
     search.results = [_hit("other.md", 0.99)]
 
@@ -445,8 +462,8 @@ async def test_records_union_across_calls_and_reset_in_a_real_graph(
     from langgraph.graph import END, START, StateGraph
 
     pool, _ = stores
-    _write(pool, "a.md", "no frontmatter")
-    _write(pool, "b.md", "also none")
+    _write(pool, "a.md", "---\nunclosed\n")
+    _write(pool, "b.md", "---\nunclosed\n")
     state_cls = type(_state())
 
     async def exec_one(_state: Any) -> dict[str, Any]:

@@ -30,8 +30,8 @@ and remove/prune the temporary worktree immediately afterwards.
    ln -sfn "$W" "$FH/memory"
    cd "$W"
    ```
-   (`rebuild_memory_index.py` and `gen_indexes.py` resolve the pool from
-   `MEIVA_HOME` and take no arguments; the fake home points them at `$W`.)
+   (`rebuild_memory_index.py` resolves the pool from `MEIVA_HOME` and takes no
+   arguments; the fake home points it at `$W`.)
 
 2. **Phase 1 — Orientation:**
    - Scan `MEMORY.md` and directory `index.md` files in `$W` to map existing
@@ -75,9 +75,8 @@ and remove/prune the temporary worktree immediately afterwards.
    - Keep `MEMORY.md` conflict-free, self-consistent, and concise under the
      16000-char cap (preserve `## Setup`, inline only current standing rules and
      canonical pointers, remove superseded timeline entries).
-   - Rebuild indexes and validate inside the worktree:
+   - Rebuild the root index and validate inside the worktree:
      ```bash
-     MEIVA_HOME="$FH" ~/.meiva/source/.venv/bin/python ~/.meiva/source/meiva_builtins/plugins/meiva_memory/skills/scripts/gen_indexes.py
      MEIVA_HOME="$FH" ~/.meiva/source/.venv/bin/python ~/.meiva/source/meiva_builtins/plugins/meiva_memory/skills/scripts/rebuild_memory_index.py
      python3 validate.py
      ```

@@ -12,26 +12,23 @@ tags:
 
 ## Format
 
-There is no writer function: the agent writes the whole note, frontmatter included,
-with `meiva.files.write` (or `append`) under `PATH` or `PERSONAL_PATH`. Nothing is
-generated, merged or indexed for it, and `meiva.files` never rewrites the content (it
-no longer stamps `injection-risk` into memory notes).
+There is no writer function: the agent writes the whole note directly in pure
+Markdown (YAML frontmatter is optional) with `meiva.files.write` (or `append`)
+under `PATH` or `PERSONAL_PATH`. Nothing is generated, merged or indexed for it,
+and `meiva.files` never rewrites the content (it no longer stamps
+`injection-risk` into memory notes).
 
 ```markdown
----
-type: Memory
-meiva_agent: <your id>
-meiva_machine: <your machine>
-timestamp: '2026-01-31T09:30:00+00:00'
-title: <short title>
-description: <one line>
-tags: [type/feedback]
----
-<!-- agent-<your id> @ <your machine>, YYYY-MM-DD HH:MM -->
+# <Title>
+
+<One-paragraph high-level description of the rule or fact.>
+
+<Note body>
 ```
 
-Required by the pool validator (`template/validate.py`): `type`, `meiva_agent`,
-`description`, exactly one valid `type/<x>` tag; a note stays under 8000 characters.
+Checked by the pool validator (`template/validate.py::validate_note`): valid
+UTF-8, valid YAML mapping without unquoted `' #'` or `': '` truncation when
+optional YAML frontmatter is present, and a note stays under 8000 characters.
 The cap counts characters as `len()` — the measurement the shared budget names
 `Unit.CHARS` — and stays with the standalone validator (which also runs where
 `base.*` is unimportable); the write check adds no second cap and only surfaces

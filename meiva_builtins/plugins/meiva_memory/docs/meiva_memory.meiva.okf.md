@@ -74,7 +74,7 @@ There is no writer: an agent writes notes with `meiva.files.write` (see the writ
 - `memory_write_check_deadline_seconds` (5.0) / `memory_write_dedup_threshold` (0.80): the write check's budget and duplicate threshold
 - `settings.passive_memory_recall_enabled`: passive recall feature toggle (default in [[meiva_builtins/plugins/meiva_memory/docs/memory-recall.meiva.okf.md]])
 - `settings.agent.memory_inherit_depth`: ancestor hops a descendant inherits `inheritable` blocks from (per-agent, default 1; 0 disables). Size guardrails: `memory_inherit_max_block_chars` / `memory_inherit_max_total_chars` (0 disables one)
-- Memory note format: YAML frontmatter (`type: Memory`, `meiva_agent`, etc.) + markdown body
+- Memory note format: pure Markdown (`# Title` + high-level description paragraph + body; YAML frontmatter is optional)
 
 ## Notes
 

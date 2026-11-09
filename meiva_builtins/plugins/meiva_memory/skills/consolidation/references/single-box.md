@@ -19,7 +19,6 @@ indexes (agents write notes with `meiva.files`, so nothing else keeps them
 current), then run:
 
 ```bash
-python ../scripts/gen_indexes.py
 python ../scripts/rebuild_memory_index.py
 git -C <POOL> add -A
 git -C <POOL> commit -m '<date>: <short summary>'
