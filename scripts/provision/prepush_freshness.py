@@ -46,7 +46,6 @@ HOOKS = (
     "events-registry-fresh",
     "config-lite-table-fresh",
     "lint-pyright-test-environments",
-    "lint-meiva-okf",
     "check-doc-references",
 )
 

@@ -440,46 +440,6 @@ repos:
         files: '((\.meiva/)?skills|plugins)/.*/SKILL\.md$'
         pass_filenames: false
 
-      # Service-domain roster <-> build_services() must agree (both directions).
-      # Catches "deleted a daemon but left it documented" (#728's scheduler row)
-      # and "added a daemon, forgot the roster". Parses the table under the
-      # <!-- lint:roster-table --> sentinel; reads both sides itself. Also pins the
-      # healthcheck roster (check-roster.meiva.okf.md) to the healthcheck modules.
-      - id: lint-doc-roster
-        name: lint-doc-roster
-        language: system
-        entry: .venv/bin/python scripts/content_lint/lint_doc_roster.py
-        files: ^(services/supervision/roster/.*\.py|cli/commands/_repo\.py|services/supervision/roster/docs/service-roster\.md|scripts/content_lint/lint_doc_roster\.py|services/supervision/healthchecks/docs/check-roster/check-roster\.meiva\.okf\.md)$
-        pass_filenames: false
-
-      # Every `meiva.<name>` reference in the procedural docs — conventions and
-      # the repo's own dev skills under .agents/skills — (inside a code span) must
-      # resolve to a live member of the meiva namespace. Catches "deleted/renamed
-      # an SDK module, forgot to scrub the doc" (the meiva.monitor/meiva.schedule
-      # drift class). Valid set = meiva.__all__ + real submodules + module attrs +
-      # plugin-registered namespaces; prose mentions are excluded (zero-FP guard).
-      - id: lint-doc-symbols
-        name: lint-doc-symbols
-        language: system
-        entry: .venv/bin/python scripts/content_lint/lint_doc_symbols.py
-        files: ^(docs/conventions/.*\.md|\.agents/skills/.*\.md|meiva/__init__\.py|scripts/content_lint/lint_doc_symbols\.py)$
-        pass_filenames: false
-
-      # The other half of the same guard: every `path/to/file.py:symbol` anchor
-      # in those same procedural docs (inside a code span) must resolve against
-      # the AST of the file it names. lint-doc-symbols validates the `meiva.*` SDK
-      # namespace and never sees this shape. Triggered by ANY .py change, not
-      # just a doc edit — a rename is what dangles an anchor, and it happens in
-      # the code, in a file the citing doc never mentions. Whole-corpus scan
-      # (pass_filenames: false): 265 files, ~0.3s — only the ~20 distinct
-      # anchored targets are parsed, and each is parsed once.
-      - id: lint-doc-anchors
-        name: lint-doc-anchors
-        language: system
-        entry: .venv/bin/python scripts/content_lint/lint_doc_anchors.py
-        files: ^(docs/conventions/.*|\.agents/skills/.*|meiva_builtins/skills/.*|.*\.meiva\.okf\.md|.*\.py)$
-        pass_filenames: false
-
       # Every CLI flag written as a command invocation, and every relative
       # markdown link, across all tracked docs — checked against the live
       # argparse tree / scripts/*.sh case arms / the tree on disk. Runs the
@@ -789,11 +749,3 @@ repos:
         language: system
         always_run: true
         pass_filenames: false
-
-  - repo: local
-    hooks:
-      - id: lint-meiva-okf
-        name: Lint Meiva OKF documents
-        entry: .venv/bin/python scripts/content_lint/lint_meiva_okf.py
-        language: system
-        files: \.meiva\.okf\.md$

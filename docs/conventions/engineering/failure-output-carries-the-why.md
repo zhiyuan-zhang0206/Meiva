@@ -170,7 +170,7 @@ complement each other; no third mechanism.
 | **L1–L3** impact tests | `python scripts/ci/test_selector.py --changed-files <diff> --base-ref <base> --json`, then run its `tests` | 7m14s for 152 files / 3618 tests | cross-layer construction (CLI tests), integration layer, domain unit tests | types: L0; selector: the blind-spot loop in §4.5 |
 | **L3'** frontend | `vitest run --dir src/app` (any `ui/web` change; 331 tests in 6.9s) | seconds | the app router's own tests, which no selector picks whole | visual is not in the mandatory set (§2) |
 | **L4** repository gates | `python -m meizel check` (every change); `python -m meizel debt diff --against <base> --on-growth warn` (a manifest change) | 22s; 2m50s | manifest/fact drift, a mis-written ledger | — |
-| **L4'** document checks | `scripts/content_lint/check_doc_references.py`; `scripts/content_lint/lint_meiva_okf.py` (a `.md` change) | 0.2s; 3.8s for 757 documents | a doc naming a flag, file or node that no longer exists | — |
+| **L4'** document checks | `scripts/content_lint/check_doc_references.py` (a `.md` change) | 0.2s | a doc naming a flag or file that no longer exists | — |
 
 A whole run on a Python change measured **13m36s** (815.83 s) on 2026-10-31, of which the test
 segment was 7m14s; `--skip-tests` measured **5m18s**. The long poles are the test segment and
@@ -266,7 +266,7 @@ offence as a hand-written test result.**
 | gateway routes, request handling, configuration value objects | all of the above (the selector pulls `gateway/tests`) + that domain's e2e |
 | configuration fields / `meizel.toml` | + `meizel debt diff --against <base>` + the touched domain's L1 |
 | `ui/web/**` | additionally `vitest-app` (the whole `src/app` test tree), and the production build when the change can cross the RSC boundary |
-| documentation or comments only | the document checks (L4'): dangling references and OKF lint, each reporting how many documents it read |
+| documentation or comments only | the document check (L4'): dangling references (`check_doc_references.py`), reporting how many documents it read |
 
 The last row is the one that produced the all-`none` receipt 405 and 7138 rejected: documentation was
 scheduled nothing at all, so the line a reviewer trusts carried no evidence about the change it

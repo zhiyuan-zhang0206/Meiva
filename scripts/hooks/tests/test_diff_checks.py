@@ -116,7 +116,6 @@ def test_a_documentation_change_runs_the_document_checks_and_says_why_the_rest_a
     joined = "\n".join(lines)
 
     assert any("docs-refs" in line for line in lines)
-    assert any("docs-okf" in line for line in lines)
     assert any("meizel" in line for line in lines), (
         "the checker reads manifests and role lists for every change, documentation included"
     )

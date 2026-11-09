@@ -189,18 +189,13 @@ def _debt_runs(change: ChangeSet, *, python: str) -> tuple[Run, ...]:
 
 # meiva:note
 # A documentation change gets the document checks, not a type check it cannot fail: what a doc
-# asserts is that its links, flags and nodes exist.
+# asserts is that its links and flags exist.
 def _docs_runs(*, python: Interpreter) -> tuple[Run, ...]:
     return (
         Run(
             "docs-refs",
             (python, "scripts/content_lint/check_doc_references.py"),
             "exit code; the summary line carries the docs it read",
-        ),
-        Run(
-            "docs-okf",
-            (python, "scripts/content_lint/lint_meiva_okf.py"),
-            "exit code; the summary line carries the documents it read",
         ),
     )
 

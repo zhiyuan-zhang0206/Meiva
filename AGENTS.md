@@ -47,8 +47,10 @@ Follow the user's authorized scope.
 - [Import layering](docs/conventions/import-layering.md) explains the layering the
   `meizel.toml` manifests state; [technology selection](docs/conventions/technology-selection.md)
   explains dependency choices.
-- [OKF index](docs/index.meiva.okf.md) and component-local `docs/` describe the
-  current system. Update the relevant owner in the same PR as the code.
+- Package `README.md` files and component-local `docs/` (plus the
+  [architecture index](docs/index.meiva.okf.md)) describe the current system and
+  package boundaries in standard Markdown; `check_doc_references.py` checks links
+  and CLI flags. Update the relevant owner in the same PR as the code.
 - [Documentation maintenance](docs/conventions/doc-maintenance.md) owns placement:
   current cross-cutting rules in `docs/conventions/`, choices in
   `docs/decisions/`, incident analyses in `docs/postmortems/`, and plans in `future/`.

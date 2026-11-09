@@ -168,7 +168,6 @@ def test_artifact_freshness_hook_list_matches_config() -> None:
         "events-registry-fresh",
         "config-lite-table-fresh",
         "lint-pyright-test-environments",
-        "lint-meiva-okf",
         "check-doc-references",
     }
     assert len(listed) == len(expected), "duplicate id in prepush_freshness.HOOKS"
