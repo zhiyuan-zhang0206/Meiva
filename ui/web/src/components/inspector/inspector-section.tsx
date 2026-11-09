@@ -17,7 +17,7 @@ export function Section({
   badge?: string;
   action?: ReactNode;
   loading?: boolean;
-  children: ReactNode;
+  children?: ReactNode;
 }) {
   return (
     <section
@@ -39,7 +39,13 @@ export function Section({
           </span>
         )}
       </div>
-      {children}
+      {loading ? (
+        <div className={cn("justify-center py-2", FLEX)}>
+          <Spinner />
+        </div>
+      ) : (
+        children
+      )}
     </section>
   );
 }
@@ -53,22 +59,16 @@ export function Metric({
 }: {
   className?: string;
   label: string;
-  value: string | undefined;
+  value: string;
   sub?: string;
   valueTestId?: string;
 }) {
   return (
     <div className={cn("gap-0.5 rounded border border-black/[0.06] dark:border-white/[0.08] bg-sidebar-accent/40 dark:bg-[#33322C] px-2.5 py-1.5", FLEX, FLEX_COL, className)}>
       <span className="text-[10.5px] tracking-wide text-muted-foreground">{label}</span>
-      {value === undefined ? (
-        <span className={cn("h-[17px] items-center", FLEX)} aria-hidden="true">
-          <Spinner className="size-3" />
-        </span>
-      ) : (
-        <span className="font-mono text-[11.5px] leading-[17px] tabular-nums text-foreground dark:text-[#f0ede7]" data-testid={valueTestId}>
-          {value}
-        </span>
-      )}
+      <span className="font-mono text-[11.5px] leading-[17px] tabular-nums text-foreground dark:text-[#f0ede7]" data-testid={valueTestId}>
+        {value}
+      </span>
       {sub != null && (
         <span className="font-mono text-[10px] tabular-nums text-muted-foreground/85">{sub}</span>
       )}

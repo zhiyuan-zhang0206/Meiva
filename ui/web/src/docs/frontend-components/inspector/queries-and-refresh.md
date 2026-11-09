@@ -14,8 +14,8 @@ the selected agent, statistics must also echo the requested window
 (`matchesInspectWindow`). A malformed or misrouted payload is never rendered —
 not even as plain text under React Query's `keepPreviousData` — so one agent's
 inspector can never appear under another selection. A new window's pending state
-replaces the prior window's values with in-place metric breathing bars instead of
-showing the old numbers or remounting the section.
+replaces the prior window's values with the section's loading `Spinner` instead of
+showing the old numbers, rendering empty metric skeleton cards, or remounting the section.
 
 **Refresh ownership.**
 

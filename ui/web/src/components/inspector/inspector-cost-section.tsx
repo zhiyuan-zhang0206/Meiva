@@ -163,7 +163,7 @@ export function CostActivitySection({
             aria-label={t("refreshCostActivity")}
             className="rounded p-1 text-muted-foreground hover:bg-sidebar-accent hover:text-foreground disabled:opacity-50"
           >
-            <RefreshCw className={cn("size-3.5", fetching && "animate-spin")} />
+            <RefreshCw className={cn("size-3.5", Boolean(inspect) && fetching && "animate-spin")} />
           </button>
           <WindowSelect
             value={hours == null ? "all" : String(hours)}
@@ -188,55 +188,46 @@ export function CostActivitySection({
         </span>
       }
     >
-      {!inspect && (failed || !pending) ? (
-        <InspectReadError
-          message={t("windowedUnavailable")}
-          retryLabel={t("retryWindowed")}
-          pending={fetching}
-          onRetry={onRefresh}
-        />
+      {!inspect ? (
+        failed || !pending ? (
+          <InspectReadError
+            message={t("windowedUnavailable")}
+            retryLabel={t("retryWindowed")}
+            pending={fetching}
+            onRetry={onRefresh}
+          />
+        ) : null
       ) : (
         <div className="space-y-1">
-          {!inspect || cost ? (
+          {cost ? (
             <div className="grid grid-cols-2 gap-1">
-              {cost == null ? (
-                <>
-                  <Metric label={t("metricCostSubscription")} value={undefined} />
-                  <Metric label={t("metricCostApi")} value={undefined} />
-                </>
-              ) : (
-                <>
-                  {cost.cost_usd_subscription > 0 ? (
-                    <Metric
-                      label={t("metricCostSubscription")}
-                      value={usd(cost.cost_usd_subscription)}
-                      sub={unpricedLine(t, cost.unpriced_calls_subscription)}
-                      valueTestId="inspector-cost-subscription"
-                    />
-                  ) : null}
-                  {cost.cost_usd_api > 0 ? (
-                    <Metric
-                      label={t("metricCostApi")}
-                      value={usd(cost.cost_usd_api)}
-                      sub={unpricedLine(t, cost.unpriced_calls_api)}
-                      valueTestId="inspector-cost-api"
-                    />
-                  ) : null}
-                </>
-              )}
-              <Metric label={t("metricLlmCalls")} value={cost ? String(cost.llm_calls) : undefined} />
+              {cost.cost_usd_subscription > 0 ? (
+                <Metric
+                  label={t("metricCostSubscription")}
+                  value={usd(cost.cost_usd_subscription)}
+                  sub={unpricedLine(t, cost.unpriced_calls_subscription)}
+                  valueTestId="inspector-cost-subscription"
+                />
+              ) : null}
+              {cost.cost_usd_api > 0 ? (
+                <Metric
+                  label={t("metricCostApi")}
+                  value={usd(cost.cost_usd_api)}
+                  sub={unpricedLine(t, cost.unpriced_calls_api)}
+                  valueTestId="inspector-cost-api"
+                />
+              ) : null}
+              <Metric label={t("metricLlmCalls")} value={String(cost.llm_calls)} />
               <Metric
                 label={t("metricTokens")}
-                value={cost ? `${formatTokens(cost.tokens_in)} / ${formatTokens(cost.tokens_out)}` : undefined}
+                value={`${formatTokens(cost.tokens_in)} / ${formatTokens(cost.tokens_out)}`}
               />
               <Metric
                 label={t("metricCacheHit")}
                 value={
-                  cost
-                    ? cost.cache_hit_pct === null
-                      ? "N/A"
-                      : `${cost.cache_hit_pct.toFixed(2)}%`
-                    : undefined
+                  cost.cache_hit_pct === null
+                    ? "N/A"
+                    : `${cost.cache_hit_pct.toFixed(2)}%`
                 }
               />
             </div>
@@ -245,26 +236,22 @@ export function CostActivitySection({
             <div className="grid grid-cols-2 gap-1">
               <Metric
                 label={t("metricTps")}
-                value={inspect ? (tps?.lm_stage_tps != null ? formatTps(tps.lm_stage_tps) : "—") : undefined}
+                value={tps?.lm_stage_tps != null ? formatTps(tps.lm_stage_tps) : "—"}
               />
               <Metric
                 label={t("metricLlmOutput")}
                 value={
-                  inspect
-                    ? hasLife && activity.llm_seconds != null
-                      ? formatInterval(Math.round(activity.llm_seconds))
-                      : "—"
-                    : undefined
+                  hasLife && activity.llm_seconds != null
+                    ? formatInterval(Math.round(activity.llm_seconds))
+                    : "—"
                 }
               />
               <Metric
                 label={t("metricCodeExecution")}
                 value={
-                  inspect
-                    ? hasLife
-                      ? formatInterval(Math.round(activity.exec_seconds))
-                      : "—"
-                    : undefined
+                  hasLife
+                    ? formatInterval(Math.round(activity.exec_seconds))
+                    : "—"
                 }
               />
             </div>

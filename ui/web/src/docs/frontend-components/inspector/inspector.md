@@ -25,18 +25,15 @@ This subscription makes no additional detail request. Its token totals and thres
 cannot represent an external CLI session. Unknown harness metadata also keeps
 this section hidden.
 
-**In-place loading, one spinner per cell, never a placeholder.** Persistent
+**One spinner per pending section, never a metric card skeleton.** Persistent
 metric sections (`Liveness` and `Activity`) stay mounted at their ordered keys
 across initial loads, agent switches and window changes. While a section's read is
 pending with no matching snapshot, `Section`
 (`components/inspector/inspector-section.tsx`) sets `aria-busy` and
-`aria-label="{Title} loading"`, and each `Metric` cell renders the shared
-`Spinner` inside the exact `17px` value line-box of its real card chrome: resolving
-values causes zero height shift or DOM remount, and the pending state never paints
-a bar shaped like the value it stands in for (user ruling 2026-11-08 — a loading
-state shows the turning ring alone, with no loading sentence and no skeleton
-anywhere in the console). Conditional and sparse sections — `Page`, `Persistent
-shells`, `Configuration`, `Context` and plugin widgets — render nothing
+`aria-label="{Title} loading"` and renders a single centered `Spinner` in the
+section body instead of empty `Metric` card shells (`Metric` only renders resolved
+string values, user ruling 2026-11-09). Conditional and sparse sections — `Page`,
+`Persistent shells`, `Configuration`, `Context` and plugin widgets — render nothing
 while pending or empty rather than reserving speculative placeholder rows that
 collapse after fetch.
 
