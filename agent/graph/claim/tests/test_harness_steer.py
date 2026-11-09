@@ -22,12 +22,13 @@ from base.host.env.agent_slices import AgentSlices
 from .claim_support import insert_inbound_kind
 
 
+@pytest.mark.parametrize("harness", [Harness.CODEX, Harness.ANTIGRAVITY])
 async def test_steer_consumes_only_after_ack_and_commits_timeline(
-    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool
+    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool, harness: Harness
 ) -> None:
     agent = agent_row(db_conn)
     inbound_id = insert_inbound_kind(db_conn, agent, "more context", "chat", "user")
-    ctx = MeivaContext(ops_pool=aops_pool, harness=Harness.CODEX)
+    ctx = MeivaContext(ops_pool=aops_pool, harness=harness)
 
     reserved = await reserve_harness_steer(ctx, agent)
     assert reserved is not None

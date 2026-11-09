@@ -89,6 +89,9 @@ class Harness:
             await asyncio.sleep(0.005)
         raise AssertionError(f"condition not met within {timeout}s")
 
+    async def turn_started(self) -> None:
+        await self.wait_until(lambda: self.session.steering_available)
+
     def argv_seen(self) -> list[str]:
         if not self.argv.exists():
             return []

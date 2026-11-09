@@ -22,6 +22,8 @@ __all__ = [
     "antigravity_rpc",
     "antigravity_server_from_environment",
     "discover_antigravity_server",
+    "discover_process_antigravity_server",
+    "send_user_cascade_message",
 ]
 
 _ANTIGRAVITY_SERVICE_PREFIX = "/exa.language_server_pb.LanguageServerService/"
@@ -106,6 +108,56 @@ def discover_antigravity_server(
                 return candidate
     raise RuntimeError(
         "No running Antigravity language_server with an HTTP Connect endpoint was found on this machine"
+    )
+
+
+def _listening_ports_for_process_tree(pid: int) -> list[int]:
+    try:
+        root = psutil.Process(pid)
+        procs = [root, *root.children(recursive=True)]
+    except psutil.Error:
+        return []
+    ports: set[int] = set()
+    for proc in procs:
+        with contextlib.suppress(psutil.Error, OSError, ValueError):
+            for conn in proc.net_connections(kind="inet"):
+                if conn.status == psutil.CONN_LISTEN and conn.laddr:
+                    ports.add(int(conn.laddr.port))
+    return sorted(ports)
+
+
+# meiva:note
+# Resolve the in-process Connect JSON-RPC endpoint of a specific `agy` child process
+# configured via `ANTIGRAVITY_SERVER_CSRF_TOKEN`.
+def discover_process_antigravity_server(
+    pid: int,
+    csrf_token: str,
+    *,
+    timeout: float = LIVE_SUBMIT_TIMEOUT_SECONDS,
+) -> AntigravityServer:
+    probe_timeout = min(timeout, _ANTIGRAVITY_PROBE_TIMEOUT_SECONDS)
+    for port in _listening_ports_for_process_tree(pid):
+        candidate = AntigravityServer(address=f"127.0.0.1:{port}", csrf_token=csrf_token)
+        if _probe_antigravity_server(candidate, probe_timeout):
+            return candidate
+    raise RuntimeError(f"No Antigravity Connect RPC endpoint responded for process {pid}")
+
+
+def send_user_cascade_message(
+    conversation_id: str,
+    text: str,
+    *,
+    server: AntigravityServer,
+    timeout: float = LIVE_SUBMIT_TIMEOUT_SECONDS,
+) -> dict[str, object]:
+    return antigravity_rpc(
+        "SendUserCascadeMessage",
+        {
+            "cascadeId": conversation_id,
+            "items": [{"text": text}],
+        },
+        server=server,
+        timeout=timeout,
     )
 
 

@@ -18,7 +18,19 @@ agy --input-format stream-json --output-format stream-json --model <id> [--conve
 
 One process serves the whole session. stdin takes one JSON object per line,
 `{"event":"user","message":{"content":"…"}}`; stdout emits `init`, `step_update`
-and `result`. There are no request ids and no methods, so **a cancel cannot be a
+and `result`. While a turn is running, the CLI's `printmode.runStreamInput` loop
+blocks inside `pollResponse` until `IsCascadeRunning` becomes false, so stdin is
+not read again until the turn completes. Mid-turn steering (`ForegroundSteering`)
+therefore talks directly to the child process's in-process Connect JSON-RPC
+`LanguageServerService` on localhost: `AgyTransport` sets
+`ANTIGRAVITY_SERVER_CSRF_TOKEN` in the child environment, discovers the child's
+listening HTTP port via `psutil`, and invokes `SendUserCascadeMessage`
+(`{"cascadeId": <conversation_id>, "items": [{"text": "…"}]}`), which queues a
+`CORTEX_STEP_TYPE_USER_INPUT` step into the running `AgentExecutor` (`messages.Hub`)
+so `pollResponse` streams the steered continuation out on stdout within the same
+turn.
+
+There are no request ids on stdin/stdout, so **a cancel cannot be a
 request**: the adapter sends `SIGINT`, and the CLI answers with a final `result`
 (`status: ERROR`, `error: interrupted`) and exits 1. `interrupt()` therefore
 retires the process; the next turn respawns it with `--conversation`, which keeps

@@ -12,6 +12,8 @@ from base.lm.harness.antigravity.rpc import (
     antigravity_rpc,
     antigravity_server_from_environment,
     discover_antigravity_server,
+    discover_process_antigravity_server,
+    send_user_cascade_message,
 )
 from base.lm.harness.antigravity.session import (
     AgySession,
@@ -42,6 +44,8 @@ __all__ = [
     "antigravity_server_from_environment",
     "build_handoff",
     "discover_antigravity_server",
+    "discover_process_antigravity_server",
     "parse_result",
     "resolve_antigravity_cli_model",
+    "send_user_cascade_message",
 ]

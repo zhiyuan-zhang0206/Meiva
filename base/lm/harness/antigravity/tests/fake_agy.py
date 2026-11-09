@@ -2,12 +2,17 @@ from __future__ import annotations
 
 import json
 import os
+import queue
 import signal
 import subprocess
 import sys
+import threading
 import time
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, cast
+
+_RECORD_LOCK = threading.Lock()
 
 
 # meiva:note
@@ -38,11 +43,12 @@ def _emit(payload: dict[str, object]) -> None:
 def _record(path: str | None, value: object) -> None:
     if not path:
         return
-    target = Path(path)
-    pending = target.with_name(target.name + ".pending")
-    written = target.read_bytes() if target.exists() else b""
-    pending.write_bytes(written + (json.dumps(value) + "\n").encode())
-    pending.replace(target)
+    with _RECORD_LOCK:
+        target = Path(path)
+        pending = target.with_name(target.name + ".pending")
+        written = target.read_bytes() if target.exists() else b""
+        pending.write_bytes(written + (json.dumps(value) + "\n").encode())
+        pending.replace(target)
 
 
 def _result(conversation: str, **fields: object) -> dict[str, object]:
@@ -82,20 +88,71 @@ def _spawn_child(turn: dict[str, Any]) -> subprocess.Popen[bytes] | None:
     return child
 
 
-def _emit_steps(conversation: str, turn: dict[str, Any]) -> None:
-    steps = cast("list[dict[str, Any]]", turn.get("steps") or [])
-    for index, step in enumerate(steps, start=1):
+def _emit_steps(
+    conversation: str, turn: dict[str, Any], *, key: str = "steps", start_index: int = 1
+) -> int:
+    steps = cast("list[dict[str, Any]]", turn.get(key) or [])
+    next_index = start_index
+    for offset, raw_step in enumerate(steps):
+        step = dict(raw_step)
+        step_index = int(step.pop("step_index", start_index + offset))
+        next_index = max(next_index, step_index + 1)
         _emit(
             {
                 "event": "step_update",
                 "step_update": {
                     "conversation_id": conversation,
-                    "step_index": step.pop("step_index", index),
+                    "step_index": step_index,
                     **step,
                 },
             }
         )
         time.sleep(float(turn.get("pace", 0.0)))
+    return next_index
+
+
+def _start_rpc_server(
+    csrf_token: str,
+    received_path: str | None,
+    steered: queue.Queue[str],
+) -> ThreadingHTTPServer:
+    class _Handler(BaseHTTPRequestHandler):
+        def do_POST(self) -> None:
+            if csrf_token and self.headers.get("x-codeium-csrf-token") != csrf_token:
+                self.send_response(403)
+                self.end_headers()
+                self.wfile.write(b'{"message":"invalid csrf token"}')
+                return
+            length = int(self.headers.get("Content-Length") or 0)
+            raw = self.rfile.read(length).decode("utf-8") if length > 0 else "{}"
+            payload = cast("dict[str, Any]", json.loads(raw) if raw.strip() else {})
+            if self.path.endswith("/GetWorkspaceInfos"):
+                self._respond(200, {"workspaceInfos": []})
+                return
+            if self.path.endswith("/SendUserCascadeMessage"):
+                items = cast("list[dict[str, Any]]", payload.get("items") or [])
+                text = str(items[0].get("text") or "") if items else ""
+                _record(received_path, text)
+                steered.put(text)
+                self._respond(200, {})
+                return
+            self._respond(404, {"message": f"unknown path: {self.path}"})
+
+        def _respond(self, status: int, body: dict[str, object]) -> None:
+            encoded = json.dumps(body).encode("utf-8")
+            self.send_response(status)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(encoded)))
+            self.end_headers()
+            self.wfile.write(encoded)
+
+        def log_message(self, format: str, *args: object) -> None:
+            return
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), _Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    return server
 
 
 def _hang(conversation: str) -> None:
@@ -123,6 +180,9 @@ def main() -> int:
     )
     received = os.environ.get("FAKE_AGY_RECEIVED")
     cursor_path = os.environ.get("FAKE_AGY_CURSOR")
+    csrf_token = os.environ.get("ANTIGRAVITY_SERVER_CSRF_TOKEN") or ""
+    steered: queue.Queue[str] = queue.Queue()
+    rpc_server = _start_rpc_server(csrf_token, received, steered)
     _record(os.environ.get("FAKE_AGY_ARGV"), sys.argv[1:])
 
     conversation = plan.get("conversation_id") or "conv-fake"
@@ -153,7 +213,11 @@ def main() -> int:
             child = _spawn_child(turn)
             if turn.get("hang"):
                 _hang(conversation)
-            _emit_steps(conversation, turn)
+            next_index = _emit_steps(conversation, turn)
+            if turn.get("wait_for_steer"):
+                _ = steered.get(timeout=float(turn.get("steer_timeout", 5.0)))
+            if turn.get("steered_steps"):
+                _ = _emit_steps(conversation, turn, key="steered_steps", start_index=next_index)
             _emit(_result(conversation, **cast("dict[str, Any]", turn.get("result") or {})))
     except _InterruptedError:
         if child is not None and turn.get("kill_child_on_interrupt"):
@@ -161,6 +225,8 @@ def main() -> int:
             child.wait(timeout=5)
         _emit(_result(conversation, status="ERROR", error="interrupted"))
         return 1
+    finally:
+        rpc_server.shutdown()
     return 0
 
 
