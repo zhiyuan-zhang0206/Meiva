@@ -153,11 +153,6 @@ _EXPECTED = {
         "fc.md: fact-check command not whitelisted: 'rm -rf x' (allowed: ['git', 'ls', 'test'])",
     ],
     "validate_file": {
-        ".hidden/h.md": [
-            "Missing or empty 'description' — it is the only part of a "
-            "note a pointer line and a search result show",
-            "Missing required field 'meiva_agent'",
-        ],
         "bad_utf.md": ["File is not valid UTF-8"],
         "badyaml.md": [
             "Invalid YAML: while parsing a block mapping\n"
@@ -166,55 +161,17 @@ _EXPECTED = {
             "    : : :\n"
             "    ^"
         ],
-        "fc.md": ["Missing YAML frontmatter (must start with ---)"],
-        "gen.md": ["Field 'generated' must be a mapping"],
-        "gen2.md": [
-            "Field 'generated.at' does not look like ISO 8601: 'nope'",
-            "Field 'generated.by' must be a non-empty string",
-        ],
         "misread.md": [
             "Field 'description' is YAML-misread: raw text differs from the "
             "parsed value (an unquoted ' #' or ': ' truncates it) — wrap the "
             "value in double quotes"
         ],
-        "nofm.md": ["Missing YAML frontmatter (must start with ---)"],
         "notmap.md": ["Frontmatter must be a YAML mapping"],
-        "notype.md": [
-            "Missing required field 'type'",
-            "Missing type tag — add exactly one of ['type/env', 'type/feedback', "
-            "'type/project', 'type/reference', 'type/role', 'type/user']",
-            "Tag at index 1 must be a string",
-        ],
-        "nulls.md": [
-            "Field 'meiva_agent' must not be null",
-            "Field 'tags' must be a list",
-            "Field 'type' must be a non-empty string",
-            "Missing or empty 'description' — it is the only part of a note a "
-            "pointer line and a search result show",
-        ],
-        "orphan.md": ["2 type tags (type/role, type/user) — exactly one"],
-        "ts2.md": ["Field 'timestamp' does not look like ISO 8601: 'bogus'"],
         "unclosed.md": ["Unclosed YAML frontmatter"],
-        "unicode.md": ["Missing YAML frontmatter (must start with ---)"],
     },
-    "validate_indexes": [
-        ".: has 21 notes but no index.md (OKF §8)",
-        "fmindex/index.md: index files must have no frontmatter (OKF §8)",
-        "many: has 22 notes but no index.md (OKF §8)",
-        "noindex: has 1 notes but no index.md (OKF §8)",
-        "pointed/index.md: duplicate pointer a.md (2x)",
-        "pointed/index.md: orphan entry (no pointer): c.md",
-        "pointed/index.md: pointer target missing: sub/index.md",
-        "pointed/index.md: pointer target missing: zzz.md",
-        "pointed/index.md: pointer title mismatch for a.md: 'dup' != 'Real Title'",
-        "pointed/index.md: pointer title mismatch for b.md: 'Wrong' != 'b'",
-        "projects/alpha: has 1 notes but no index.md (OKF §8)",
-        "projects/beta: has 1 notes but no index.md (OKF §8)",
-    ],
     "validate_pointers": [
         "MEMORY.md: duplicate pointer dup.md (2x)",
         "MEMORY.md: pointer target missing: gone.md",
-        "MEMORY.md: pointer title mismatch for titled.md: 'Wrong title' != 'Real Title'",
         "directory without pointer: .hidden/",
         "directory without pointer: fmindex/",
         "directory without pointer: many/",
@@ -239,26 +196,10 @@ _EXPECTED = {
         "orphan note (no pointer in MEMORY.md): unclosed.md",
         "orphan note (no pointer in MEMORY.md): unicode.md",
     ],
-    "validate_project_home": [
-        "misplaced.md: tag contains project 'alpha' but the note is not under "
-        "projects/alpha/ — project-specific notes belong in the project tree "
-        "(user ruling 2026-08-30); drop the project tag for cross-project "
-        "knowledge"
-    ],
     "validate_structure": [
         "(root): 22 md files, over the 20 cap — split into topical subdirectories",
         "dirs: 21 subdirectories, over the 20 cap — merge or re-group",
         "many: 22 md files, over the 20 cap — split into topical subdirectories",
-    ],
-    "validate_type_tag": [
-        "badtype.md: invalid type tag 'type/bogus' — use one of ['type/env', "
-        "'type/feedback', 'type/project', 'type/reference', 'type/role', "
-        "'type/user']",
-        "badtype.md: junk tag 'repo' — drop it",
-        "dup.md: junk tag 'project' — drop it",
-        "notype.md: missing type/<x> tag (user ruling 2026-08-30 tag discipline)",
-        "nulls.md: missing type/<x> tag (user ruling 2026-08-30 tag discipline)",
-        "orphan.md: multiple type tags ['type/role', 'type/user'] — keep exactly one",
     ],
 }
 
@@ -273,25 +214,26 @@ def bundle(tmp_path_factory: pytest.TempPathFactory) -> Path:
 @pytest.mark.parametrize(
     "name",
     [
-        "validate_type_tag",
-        "validate_project_home",
         "validate_structure",
         "validate_factchecks",
         "validate_pointers",
-        "validate_indexes",
     ],
 )
 def test_bundle_validator_reports_its_violations(bundle: Path, name: str) -> None:
     validator = _validator()
     check: Callable[[Path], list[str]] = {
-        "validate_type_tag": validator.validate_type_tag,
-        "validate_project_home": validator.validate_project_home,
         "validate_structure": validator.validate_structure,
         "validate_factchecks": validator.validate_factchecks,
         "validate_pointers": validator.validate_pointers,
-        "validate_indexes": validator.validate_indexes,
     }[name]
     assert sorted(check(bundle)) == _EXPECTED[name]
+
+
+def test_retired_validators_are_removed() -> None:
+    validator = _validator()
+    assert not hasattr(validator, "validate_type_tag")
+    assert not hasattr(validator, "validate_project_home")
+    assert not hasattr(validator, "validate_indexes")
 
 
 def test_file_validator_reports_each_frontmatter_violation(bundle: Path) -> None:
@@ -317,34 +259,34 @@ _GOOD = (
 
 
 def test_validate_note_accepts_a_complete_note(tmp_path: Path) -> None:
-    assert _validator().validate_note(_note(tmp_path, _GOOD)) == []
+    validator = _validator()
+    assert validator.validate_note(_note(tmp_path, _GOOD)) == []
+    assert (
+        validator.validate_note(
+            _note(tmp_path, "# Pure Markdown\n\nHigh-level description.\n\nBody.\n", "pure.md")
+        )
+        == []
+    )
+    assert (
+        validator.validate_note(
+            _note(tmp_path, "---\ntitle: Optional frontmatter only\n---\n# Heading\n", "opt.md")
+        )
+        == []
+    )
 
 
 @pytest.mark.parametrize(
     ("text", "expected"),
     [
-        (_GOOD.replace("meiva_agent: 7\n", ""), ["Missing required field 'meiva_agent'"]),
+        ("---\ntype: a\n", ["Unclosed YAML frontmatter"]),
+        ("---\n- a\n- b\n---\nx\n", ["Frontmatter must be a YAML mapping"]),
         (
-            _GOOD.replace("tags: [type/feedback]\n", ""),
-            ["missing type/<x> tag (user ruling 2026-08-30 tag discipline)"],
-        ),
-        (
-            _GOOD.replace("[type/feedback]", "[type/feedback, type/user]"),
-            ["2 type tags (type/feedback, type/user) — exactly one"],
-        ),
-        (
-            _GOOD.replace("[type/feedback]", "[type/bogus]"),
+            "---\ndescription: has # hash\n---\n",
             [
-                "invalid type tag 'type/bogus' — use one of ['type/env', 'type/feedback', "
-                "'type/project', 'type/reference', 'type/role', 'type/user']"
+                "Field 'description' is YAML-misread: raw text differs from the parsed value "
+                "(an unquoted ' #' or ': ' truncates it) — wrap the value in double quotes"
             ],
         ),
-        (_GOOD.replace("[type/feedback]", "[type/feedback, repo]"), ["junk tag 'repo' — drop it"]),
-        (
-            _GOOD.replace("[type/feedback]", "[type/feedback, 1]"),
-            ["Tag at index 1 must be a string"],
-        ),
-        ("no frontmatter\n", ["Missing YAML frontmatter (must start with ---)"]),
     ],
 )
 def test_validate_note_reports_each_single_note_rule(
@@ -402,5 +344,6 @@ def test_note_helpers(tmp_path: Path) -> None:
     assert parts is not None
     frontmatter, body = parts
     assert frontmatter["description"] == "What it holds" and body == "Body.\n"
-    assert validator.note_parts("no frontmatter") is None
+    assert validator.note_parts("no frontmatter") == ({}, "no frontmatter")
+    assert validator.note_parts("---\nunclosed\n") is None
     assert validator.note_parts("---\n: : :\n  - [\n---\nx\n") is None

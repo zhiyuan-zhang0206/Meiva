@@ -95,19 +95,13 @@ def test_only_the_shared_index_is_grafted_onto_a_fork(memory_plugin: Any) -> Non
     assert "timezone_note" not in on_fork
 
 
-def test_discipline_names_every_type_in_the_vocabulary(memory_plugin: Any) -> None:
+def test_discipline_describes_pure_markdown_note_format(memory_plugin: Any) -> None:
     section = memory_plugin.memory_discipline_section(
         _slices(), catalog=build_model_catalog(home=meiva_home())
     )
-    for tag in (
-        "type/user",
-        "type/feedback",
-        "type/project",
-        "type/reference",
-        "type/env",
-        "type/role",
-    ):
-        assert tag in section
+    assert "pure Markdown" in section
+    assert "# Title" in section
+    assert "No YAML frontmatter is needed" in section
 
 
 def test_discipline_carries_the_criteria_triggers_and_source_ranking(memory_plugin: Any) -> None:

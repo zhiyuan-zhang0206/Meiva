@@ -117,14 +117,13 @@ cd "$W"
    - Keep `MEMORY.md` zero-conflict, self-consistent, and concise as a routing
      index (preserve `## Setup`, inline only current standing rules and pointers to
      canonical notes, remove superseded timeline entries and broken pointers).
-   - Rebuild indexes and validate inside the worktree:
+   - Rebuild the root index and validate inside the worktree:
      ```bash
-     MEIVA_HOME="$FH" ~/.meiva/source/.venv/bin/python ~/.meiva/source/meiva_builtins/plugins/meiva_memory/skills/scripts/gen_indexes.py
      MEIVA_HOME="$FH" ~/.meiva/source/.venv/bin/python ~/.meiva/source/meiva_builtins/plugins/meiva_memory/skills/scripts/rebuild_memory_index.py
      python3 validate.py
      ```
-     (The two index scripts resolve the pool from `MEIVA_HOME` and take no
-     arguments; the fake home points them at the worktree.)
+     (`rebuild_memory_index.py` resolves the pool from `MEIVA_HOME` and takes no
+     arguments; the fake home points it at the worktree.)
    - Commit, push the worktree branch, open a PR targeting `main`, and squash-merge
      it once the `validate` check is green.
    - Clean up the temporary worktree so the registry does not accumulate stale
@@ -151,12 +150,11 @@ For the single-box, local-only, and multi-machine procedures, see
 Trigger: built-in `memory-arbiter` schedule (`schedules/memory-steward-schedule.py`), daily at `07:00`.
 
 Check items:
-- **Lint**: Run `python3 <pool>/validate.py` (frontmatter, type tags, descriptions,
-  pointer integrity, character caps, fact-checks). Fix every finding via a worktree PR.
+- **Lint**: Run `python3 <pool>/validate.py` (UTF-8, optional YAML frontmatter syntax and truncation checks, pointer integrity, character caps, directory Locality caps, fact-checks). Fix every finding via a worktree PR.
 - **Size Limits**: files over caps (`MEMORY.md` cap = 16000 chars; notes = 8000 chars) → trim, consolidate, or move bulk material to Vault with a pointer left
 - **Deduplication & Canonical Convergence**: semantic search (`purpose="dedup"` / `meiva.memory.search`) for notes governing the same rule or subject slot → merge into a single dateless canonical note and `git rm` superseded date-suffixed fragments
 - **World-Truth Drift & Stale Content**: run World Truth Probes (repo paths/symbols, active/terminated agents, schedule triggers, `<!-- fact-check: <cmd> -->`) → update drifted notes in place or `git rm` obsolete rulings
-- **Index Consistency**: `python3 validate.py` (and the pre-commit hook) reports pointers to missing files, duplicate pointers, and orphaned notes; fix them and regenerate indexes
+- **Index Consistency**: `python3 validate.py` (and the pre-commit hook) reports pointers to missing files, duplicate pointers, and orphaned root notes / top-level directories; fix them and rebuild `MEMORY.md` pointers
 - **Directory Structure** (hard rules, from `validate.py` — never skip): every directory holds at most **20 md notes** and at most **20 subdirectories**. Depth is deliberately **unlimited**. When a directory exceeds a limit, consolidate fragments or restructure into topical subdirectories.
 - **Index Freshness**: the gateway checkout must track `origin/main` — if
   `git -C ~/.meiva/gateway/memory fetch origin main && git rev-list --count HEAD..origin/main`
@@ -170,7 +168,7 @@ When other agents complete tasks, they may generate knowledge that needs to be w
 1. Receive an agent message: "Please merge the following information into memory: <content>"
 2. Determine whether the content deserves to be written to the shared pool
 3. Search first (`meiva.memory.search`): locate any existing canonical note governing the same rule or topic slot — update it in place (including `## Setup` in `MEMORY.md` when applicable); create a new dateless canonical note only when nothing covers the topic
-4. Apply the change in an isolated git worktree, run `gen_indexes.py`, `rebuild_memory_index.py`, and `validate.py`, open and merge the PR once `validate` is green, clean up the worktree, and run `meiva memory refresh`
+4. Apply the change in an isolated git worktree, run `rebuild_memory_index.py` and `validate.py`, open and merge the PR once `validate` is green, clean up the worktree, and run `meiva memory refresh`
 5. Reply with confirmation
 
 ### 4. Query Service
@@ -193,30 +191,30 @@ Daily process:
 ```
 git -C ~/.meiva/memory worktree add -q -B mem/dream-<mmdd-hhmm> $W origin/main
     → run 4-phase Meiva Dream (Orientation → Gather Signal → Consolidation → Prune & Index)
-    → gen_indexes.py + rebuild_memory_index.py + validate.py (via fake MEIVA_HOME=$FH)
+    → rebuild_memory_index.py + validate.py (via fake MEIVA_HOME=$FH)
     → commit + push branch → open PR → squash-merge once `validate` check is green
     → git worktree remove --force $W && git worktree prune
     → `meiva memory refresh` fast-forwards the gateway checkout to main
       and the indexer re-embeds the changed notes
 ```
 
-## OKF Compliance Checklist
+## Note Format & Validator Rules
 
-Every .md file must have:
+Write notes directly as pure Markdown (`# Title` + a short high-level description paragraph + body; YAML frontmatter is optional):
 
-```yaml
----
-type: Memory          # required
-meiva_agent: <id|all> # required: agent ID or "all"
-title: ...            # recommended
-description: ...      # required by validate.py
-tags: [...]           # required: exactly one type/<x> tag
-timestamp: ...        # ISO 8601 format
-meiva_machine: ...    # recommended
----
+```markdown
+# <Title>
+
+<One-paragraph high-level description of the rule or fact.>
+
+<Body with details, Why, and How to apply...>
 ```
 
-Run `python3 validate.py` (in the pool or worktree checkout) to check all files — the same check runs in the pre-commit hook and the `validate` CI check.
+- No `type`, `meiva_agent`, `timestamp`, `tags`, `description`, or HTML attribution comments are required.
+- If optional YAML frontmatter (`--- ... ---`) is included, `validate.py` checks only that it is a valid YAML mapping without unquoted `' #'` or `': '` truncation.
+- `index.md` is an optional directory-level high-level description (not a mandatory generated file-pointer inventory).
+- Every directory holds at most **20 `.md` notes** and at most **20 subdirectories** (`validate_structure`).
+- Run `python3 validate.py` (in the pool or worktree checkout) to check all files — once `validate` is green, squash-merge the PR and run `meiva memory refresh`.
 
 ## Memory vs Vault Rule
 
@@ -244,7 +242,7 @@ As Memory Arbiter, during Phase 2 (`Gather Signal`) of each Dream run, you check
 1. Scan `~/.meiva/workspaces/*/memory/` (index + entry files; also scan old-layout remnants `~/.meiva/workspaces/*/MEMORY.md`)
 2. Read each file and determine whether the content states a reusable cross-agent rule, fact, or user ruling
 3. Fold shareable content into the corresponding dateless canonical note in the worktree (or create one if new)
-4. Rebuild indexes (`gen_indexes.py`, `rebuild_memory_index.py`) and curate `MEMORY.md`
+4. Rebuild the root index (`rebuild_memory_index.py`) and curate `MEMORY.md`
 
 ### Bidirectional References
 

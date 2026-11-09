@@ -12,8 +12,8 @@ the pool stays canonical, conflict-free, committed, pushed, and searchable.
 
 All index-rebuild / validation / refresh operations are wrapped in scripts under
 `../scripts/` and the pool root:
-- `python ../scripts/gen_indexes.py` and `python ../scripts/rebuild_memory_index.py` — rebuild every directory `index.md` and the root `MEMORY.md` pointers (resolve the pool from `MEIVA_HOME` and take no arguments)
-- `python3 validate.py` (in the pool or worktree root) — enforce frontmatter, type tag, description, character caps, directory limits, pointer integrity, and `<!-- fact-check: ... -->` probes
+- `python ../scripts/rebuild_memory_index.py` — rebuild the root `MEMORY.md` pointers (resolves the pool from `MEIVA_HOME` and takes no arguments)
+- `python3 validate.py` (in the pool or worktree root) — enforce UTF-8, optional YAML frontmatter syntax (and unquoted `' #'` / `': '` truncation checks), 8000-character note cap, 20-file / 20-subdirectory Locality limits, `MEMORY.md` pointer targets and coverage, and `<!-- fact-check: ... -->` probes
 - `python ../scripts/consolidate.py -m "..."` — remote-backed single-box wrapper: rebuild indexes, stage, commit, push, refresh
 - `python ../scripts/steward.py -m "..."` — per-machine branch wrapper: rebuild indexes, stage, commit, push, create PR
 - `python ../scripts/arbiter_merge.py` — inspect/merge open PRs whose `validate` check is green + refresh (`--apply` to merge; exit 1 = alert)
@@ -94,7 +94,7 @@ Every full consolidation executes four phases in order inside the target worktre
 - Keep `MEMORY.md` zero-conflict, self-consistent, and concise as a routing index:
   inline only current standing rules and pointers to canonical notes, and remove
   superseded timeline entries or broken pointers.
-- Run `gen_indexes.py` + `rebuild_memory_index.py` + `validate.py`, commit and
+- Run `rebuild_memory_index.py` + `validate.py`, commit and
   land via PR (or local commit on a keep-local single box), clean up any temporary
   worktree, and run `meiva memory refresh` to synchronize the gateway checkout and
   semantic search index.
@@ -149,89 +149,55 @@ The Vault is a configured archive location (e.g. `~/Google Drive/My Drive/` in
 the reference deployment). When a file is too large for the pool, move it to
 the Vault and leave a pointer note in memory:
 
-```
----
-type: Memory
-title: <topic>
-description: Pointer to Vault content
-meiva_agent: "<id>"
-authors: ["#<id>"]
-timestamp: YYYY-MM-DDTHH:MM
-meiva_machine: <machine>
----
-<!-- agent-<id> @ <machine>, YYYY-MM-DD HH:MM -->
+```markdown
 # <topic>
+
+Pointer to Vault content for <topic>.
+
 Vault: <vault-path>/<path>
 ```
 
 The pointer note carries the topic and the Vault path so semantic search can
 still find it.
 
-### Frontmatter fields
+### Note Format & Directory Structure Rules
 
-Every memory note MUST have a YAML frontmatter with at minimum `type` and
-`meiva_agent`. These fields have defined semantics:
+1. **Pure Markdown Notes (YAML frontmatter optional)**:
+   - Write notes directly as pure Markdown: start with `# Title`, followed by a
+     short high-level description paragraph stating the rule or fact, then the body:
+     ```markdown
+     # <Title>
 
-| Field | Meaning | When to set |
-|------|------|--------|
-| `type` | Note type, usually `Memory` | When created (required) |
-| `tags` | Must carry **exactly one** `type/<x>` — see below | When created (required) |
-| `meiva_agent` | The note's **owner** (who owns this record) | Set when created, does not change with edits |
-| `authors` | The note's **editor list** (all agent IDs that contributed content) | Append `"#<your-id>"` on each edit |
-| `title` | Note title | When created |
-| `description` | One-line description | When created |
-| `tags` | Free tag list | When created, can append |
-| `timestamp` | ISO 8601 timestamp | Updated when created/edited |
-| `meiva_machine` | Machine name where edited | When created/edited |
+     <One-paragraph high-level description of the rule or fact.>
 
-**`meiva_agent` vs `authors`:**
-- `meiva_agent` is the note's **owner**—who created this record. Unchanged after creation.
-- `authors` is the note's **editor list**—all agents that contributed content. Appended on each edit.
-
-**The `type/<x>` tag** says how the note is meant to be *used*, which the
-ownership fields (`meiva_agent` / `authors`) cannot say. Exactly one of:
-
-| Tag | Holds |
-|---|---|
-| `type/user` | who the user is — role, expertise, preferences |
-| `type/feedback` | how an agent should work, with the reason |
-| `type/project` | ongoing work, goals, constraints |
-| `type/reference` | pointers to external resources |
-| `type/env` | machine and cluster facts |
-| `type/role` | an agent's role and its boundaries |
-
-Other tags stay free-form and are unaffected; the graph view groups on the first
-non-`type/` tag. `python3 validate.py` enforces the "exactly one" rule.
-
-**Editing rules:** When you edit any memory note, append your agent ID (format `"#<id>"`) to the `authors` list in the frontmatter. If the file does not yet have an `authors` field, create it. Do not add the same agent twice.
-
-`authors` uses YAML array format: `authors: ["#238", "#779"]`
+     <Body with details, Why, and How to apply...>
+     ```
+   - YAML frontmatter (`--- ... ---`) is completely optional. Do not require
+     `type`, `meiva_agent`, `timestamp`, `tags`, `description`, or HTML attribution
+     comments. If optional YAML frontmatter is present, `validate.py` only checks
+     that it is a valid YAML mapping without unquoted `' #'` or `': '` truncation.
+   - Every note must be valid UTF-8 and stay within `8000` characters.
+2. **Optional Directory `index.md` (High-Level Description)**:
+   - `index.md` is an optional folder-level high-level description, not a
+     mandatory generated inventory of every file pointer and recursive count.
+   - Adding or deleting a note does not require running `gen_indexes.py` to
+     cascade-rewrite ancestor `index.md` files.
+3. **Directory Locality Limits (`MAX_FILES_PER_DIR = 20`, `MAX_SUBDIRS_PER_DIR = 20`)**:
+   - Every directory holds at most **20 `.md` notes** and at most **20 subdirectories**
+     (enforced by `validate_structure` in `validate.py`). When a directory exceeds
+     either cap, split it into topical subdirectories.
+4. **Root `MEMORY.md` Pointers**:
+   - `validate_pointers` checks that every pointer target in `MEMORY.md` exists,
+     has no duplicate pointer lines, and covers every root-level note and top-level
+     directory with notes (link text does not need to match any frontmatter `title`).
 
 #### Identity safety when reading
 
-Every agent must verify a note's ownership before acting on it:
-
-1. **Read the frontmatter.** `meiva_agent` tells you whose note it is. A number
-   like `238` means it belongs to that agent; `all` means it is a shared note
-   that every agent should read as context, not identity.
-2. **Compare with your own id.** `meiva.self.AGENT_ID` is your own agent id. If
-   the note's `meiva_agent` is a different number, this is another agent's
-   personal note — read it for context, but do not adopt its role, label, or
-   tasks as your own.
-3. **Check for HTML attribution comments.** Personal agent notes should carry
-   an HTML comment like
-   `<!-- ⚠️ This is agent #238's personal note. If you are not #238, this is someone else's identity, not yours. -->`. If you see this and the id does
-   not match yours, the note is not about you.
-4. **MEMORY.md is special.** `MEMORY.md` is injected into every agent's context
-   as the standing memory index. Its `meiva_agent` is `all` — it is a shared user
-   profile, not any single agent's identity. Its content (user facts, watchers,
-   appointments) applies to all agents, but its role labels (e.g. "Agent #238 —
-   Health Manager") describe other agents' roles, not yours.
-
-**Example of the bug this prevents:** Agent #774 read `MEMORY.md` (which at the
-time had `meiva_agent: 238`) and set its own label to "Health Manager", mistakenly
-adopting another agent's identity. A quick `meiva_self.AGENT_ID` check against the
-frontmatter would have caught this.
+Another agent's role or personal note is context, not your identity:
+- Compare any agent ID mentioned in a note against `meiva.self.AGENT_ID`. Do not
+  adopt another agent's role, label, or tasks as your own.
+- `MEMORY.md` is injected into every agent's context as the standing memory index.
+  Role labels mentioned in `MEMORY.md` describe other agents' roles, not yours.
 ### Threshold triggers
 
 To prevent the pool from drifting past the consolidation window:

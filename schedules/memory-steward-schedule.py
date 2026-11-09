@@ -38,16 +38,14 @@ TRIGGERS = (
         "e-suffixed notes, and convert relative time words into explicit `YYYY-MM-DD` dates; "
         "5) Phase 4 (Prune & Index): keep `MEMORY.md` zero-conflict and concise under the 16000-ch"
         "ar cap, then run `MEIVA_HOME=$FH ~/.meiva/source/.venv/bin/python ~/.meiva/source/meiva_b"
-        "uiltins/plugins/meiva_memory/skills/scripts/gen_indexes.py; MEIVA_HOME=$FH ~/.meiva/sourc"
-        "e/.venv/bin/python ~/.meiva/source/meiva_builtins/plugins/meiva_memory/skills/scripts/reb"
-        "uild_memory_index.py; python3 validate.py` (the two index scripts resolve the pool from M"
-        "EIVA_HOME and take no arguments; the fake home is what points them at the worktree), comm"
-        "it + push that branch + open a PR and squash-merge it once `validate` is green; finally c"
-        "lean up so the registry does not grow one entry per night: `git -C ~/.meiva/memory worktr"
-        "ee remove --force $W; git -C ~/.meiva/memory worktree prune; rm -rf $(dirname $W)`, merge"
-        " any remaining review PRs whose `validate` check is green and whose author is not the mer"
-        "ger (writing the collector snapshot — each face's HEAD + dirty count — into the PR body f"
-        "irst), and run `meiva memory refresh`",
+        "uiltins/plugins/meiva_memory/skills/scripts/rebuild_memory_index.py; python3 validate.py`"
+        " (`rebuild_memory_index.py` resolves the pool from MEIVA_HOME and takes no arguments; the"
+        " fake home points it at the worktree), commit + push that branch + open a PR and squash-m"
+        "erge it once `validate` is green; finally clean up so the registry does not grow one entr"
+        "y per night: `git -C ~/.meiva/memory worktree remove --force $W; git -C ~/.meiva/memory w"
+        "orktree prune; rm -rf $(dirname $W)`, merge any remaining review PRs whose `validate` che"
+        "ck is green and whose author is not the merger (writing the collector snapshot — each fac"
+        "e's HEAD + dirty count — into the PR body first), and run `meiva memory refresh`",
     ),
     Trigger("0 7 * * *", "Daily health check — OKF, size, dedup, stale"),
 )

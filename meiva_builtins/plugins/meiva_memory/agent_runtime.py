@@ -133,12 +133,12 @@ Correcting stale memory is an obligation, not an option:
   that already covers the ground. Update it if it exists; create only when
   nothing does. Deleting an entry that turns out to be wrong is a valid write.
 
-Every note carries exactly one type tag: type/user (who the user is),
-type/feedback (how you should work, with the reason), type/project (ongoing
-work, goals, constraints), type/reference (pointers to external resources),
-type/env (machine and cluster facts), type/role (an agent's role and its
-boundaries). Lead a type/feedback or type/project body with the rule or fact,
-then a "Why:" line and a "How to apply:" line.
+Write notes directly as pure Markdown: start with a `# Title` heading, followed
+by a concise high-level description paragraph stating the rule or fact, then
+the body (including a "Why:" line and a "How to apply:" line for rules and
+project constraints). No YAML frontmatter is needed (though optional YAML
+frontmatter is accepted if valid), and each note must stay under 8000
+characters.
 
 A memory is a claim, not a source of truth. Your sources differ in how they can
 be checked:

@@ -23,7 +23,7 @@ commit into it. The plugin as a whole — hooks, SDK surface, configuration — 
 
 ## Pool validator
 
-**`python3 validate.py`** (in the pool checkout, run by the pre-commit hook): the pool's rules in one place — frontmatter, exactly one `type/<x>` tag, a non-empty `description`, the index's pointer format (`- [Title](path.md) — description`) and targets, orphaned notes, the character caps, and the directory-structure limits. Exits non-zero on any finding and runs on every commit via `.githooks/pre-commit`.
+**`python3 validate.py`** (in the pool checkout, run by the pre-commit hook): the pool's rules in one place — UTF-8 validity, optional YAML frontmatter syntax and value-truncation backstop, the `MEMORY.md` index's pointer targets and coverage, orphaned root notes, the character caps, fact-check probes, and the directory-structure Locality limits (20 files / 20 subdirectories per directory). Exits non-zero on any finding and runs on every commit via `.githooks/pre-commit`.
 
 ## Entry Points
 

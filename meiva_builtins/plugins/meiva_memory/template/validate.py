@@ -19,7 +19,7 @@ import os
 import re
 import subprocess
 import sys
-from collections.abc import Callable, Iterator
+from collections.abc import Callable
 from pathlib import Path
 from typing import ParamSpec, TypeGuard
 
@@ -27,9 +27,6 @@ import yaml
 
 _RESERVED = {"MEMORY.md", "index.md", "log.md", "AGENTS.md"}
 _BUNDLE = Path(__file__).resolve().parent
-_DATE_ONLY_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
-_LEGACY_OFFSETLESS_DATETIME_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$")
-_OFFSET_DATETIME_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(Z|[+-]\d{2}:\d{2})$")
 
 
 _FM_KEY_LINE_RE = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*): (.*)$")
@@ -53,10 +50,6 @@ def _object_of(  # noqa: UP047
     function: Callable[_P, object], /, *args: _P.args, **kwargs: _P.kwargs
 ) -> object:
     return function(*args, **kwargs)
-
-
-def _is_object_list(value: object) -> TypeGuard[list[object]]:
-    return isinstance(value, list)
 
 
 def _misread_frontmatter_keys(fm_raw: str) -> list[str]:
@@ -84,74 +77,10 @@ def _misread_frontmatter_keys(fm_raw: str) -> list[str]:
     return bad
 
 
-def _check_type_and_agent(fm: dict[str, object], errors: list[str]) -> None:
-    if "type" not in fm:
-        errors.append("Missing required field 'type'")
-    elif not fm["type"] or not isinstance(fm["type"], str) or not fm["type"].strip():
-        errors.append("Field 'type' must be a non-empty string")
-
-    if "meiva_agent" not in fm:
-        errors.append("Missing required field 'meiva_agent'")
-    elif fm["meiva_agent"] is None:
-        errors.append("Field 'meiva_agent' must not be null")
-
-
-def _check_tags(fm: dict[str, object], errors: list[str]) -> None:
-    if "tags" not in fm:
-        return
-    tags = fm["tags"]
-    if not _is_object_list(tags):
-        errors.append("Field 'tags' must be a list")
-        return
-    for i, tag in enumerate(tags):
-        if not isinstance(tag, str):
-            errors.append(f"Tag at index {i} must be a string")
-    type_tags = [t for t in tags if isinstance(t, str) and t.startswith("type/")]
-    if not type_tags:
-        errors.append(
-            "Missing type tag — add exactly one of "
-            "['type/env', 'type/feedback', 'type/project', "
-            "'type/reference', 'type/role', 'type/user']"
-        )
-    elif len(type_tags) > 1:
-        errors.append(f"{len(type_tags)} type tags ({', '.join(type_tags)}) — exactly one")
-
-
-def _check_timestamp(fm: dict[str, object], fname: str, errors: list[str]) -> None:
-    if "timestamp" not in fm:
-        return
-    ts = fm["timestamp"]
-    if not isinstance(ts, str):
-        return
-    if _LEGACY_OFFSETLESS_DATETIME_RE.fullmatch(ts):
-        print(
-            f"WARNING: {fname}: legacy timestamp without offset — add one",
-            file=sys.stderr,
-        )
-    elif not (_DATE_ONLY_RE.fullmatch(ts) or _OFFSET_DATETIME_RE.fullmatch(ts)):
-        errors.append(f"Field 'timestamp' does not look like ISO 8601: {ts!r}")
-
-
-def _check_generated(fm: dict[str, object], errors: list[str]) -> None:
-    if "generated" not in fm:
-        return
-    generated = fm["generated"]
-    if not _is_str_dict(generated):
-        errors.append("Field 'generated' must be a mapping")
-        return
-    generated_by = generated.get("by")
-    if not isinstance(generated_by, str) or not generated_by.strip():
-        errors.append("Field 'generated.by' must be a non-empty string")
-    if "at" in generated:
-        generated_at = generated["at"]
-        if not (isinstance(generated_at, str) and _OFFSET_DATETIME_RE.fullmatch(generated_at)):
-            errors.append(f"Field 'generated.at' does not look like ISO 8601: {generated_at!r}")
-
-
 def _frontmatter_problem(content: str) -> tuple[dict[str, object] | None, str | None, str | None]:
     """`(frontmatter, raw frontmatter text, error)` of a note's text; one side is None."""
     if not content.startswith("---\n"):
-        return None, None, "Missing YAML frontmatter (must start with ---)"
+        return {}, "", None
     parts = content.split("---\n", 2)
     if len(parts) < 3:
         return None, None, "Unclosed YAML frontmatter"
@@ -185,23 +114,12 @@ def validate_file(file_path: Path) -> list[str]:
         return [problem]
     assert fm is not None and fm_raw is not None  # noqa: S101
 
-    _check_type_and_agent(fm, errors)
-    _check_tags(fm, errors)
-
-    if not fm.get("description"):
-        errors.append(
-            "Missing or empty 'description' — it is the only part of a note a "
-            "pointer line and a search result show"
-        )
-
     for key in _misread_frontmatter_keys(fm_raw):
         errors.append(
             f"Field '{key}' is YAML-misread: raw text differs from the parsed value "
             f"(an unquoted ' #' or ': ' truncates it) — wrap the value in double quotes"
         )
 
-    _check_timestamp(fm, fname, errors)
-    _check_generated(fm, errors)
     return errors
 
 
@@ -216,21 +134,6 @@ def note_char_cap() -> int:
     return int(os.environ.get("MEIVA_MEMORY_NOTE_CAP", "8000"))
 
 
-def _single_note_tag_errors(fname: str, fm: dict[str, object]) -> list[str]:
-    """Tag-discipline findings that `validate_file` does not report for the note itself."""
-    if "tags" not in fm:
-        found = _type_tag_errors(fname, [])
-    else:
-        raw_tags = fm["tags"]
-        tags: list[object] = raw_tags if _is_object_list(raw_tags) else []
-        found = [
-            e
-            for e in _type_tag_errors(fname, [str(t) for t in tags])
-            if "invalid type tag" in e or "junk tag" in e
-        ]
-    return [e.removeprefix(f"{fname}: ") for e in found]
-
-
 def is_note_name(fname: str) -> bool:
     """Whether a file name is a note: a .md file that is not an index or another reserved file."""
     return fname.endswith(".md") and fname not in _RESERVED
@@ -238,6 +141,8 @@ def is_note_name(fname: str) -> bool:
 
 def note_parts(content: str) -> tuple[dict[str, object], str] | None:
     """`(frontmatter, body)` of a note's text; None when its frontmatter is missing or invalid."""
+    if not content.startswith("---\n"):
+        return {}, content
     fm, _fm_raw, problem = _frontmatter_problem(content)
     if problem is not None or fm is None:
         return None
@@ -258,9 +163,6 @@ def validate_note(file_path: Path) -> list[str]:
     cap = note_char_cap()
     if len(content) > cap:
         errors.append(f"Note is {len(content)} characters, over the {cap} cap")
-    fm, _fm_raw, problem = _frontmatter_problem(content)
-    if problem is None and fm is not None:
-        errors.extend(_single_note_tag_errors(file_path.name, fm))
     return errors
 
 
@@ -273,121 +175,6 @@ def validate_note(file_path: Path) -> list[str]:
 
 MAX_FILES_PER_DIR = 20
 MAX_SUBDIRS_PER_DIR = 20
-
-
-def _notes_with_frontmatter(bundle: Path) -> Iterator[tuple[Path, dict[str, object]]]:
-    """Every readable, non-reserved, non-hidden note of the bundle with its frontmatter mapping."""
-    for fp in bundle.rglob("*.md"):
-        if fp.name in _RESERVED or any(
-            part.startswith(".") for part in fp.relative_to(bundle).parts
-        ):
-            continue
-        try:
-            content = fp.read_text(encoding="utf-8")
-        except (OSError, UnicodeDecodeError):
-            continue
-        if not content.startswith("---\n"):
-            continue
-        parts = content.split("---\n", 2)
-        if len(parts) < 3:
-            continue
-        try:
-            fm = _object_of(yaml.safe_load, parts[1])
-        except yaml.YAMLError:
-            continue
-        if _is_str_dict(fm):
-            yield fp, fm
-
-
-_VALID_TYPE_TAGS = {
-    "type/user",
-    "type/feedback",
-    "type/project",
-    "type/reference",
-    "type/env",
-    "type/role",
-}
-_JUNK_TAGS = {"project", "role", "status", "repo", "archived"}
-
-
-def _type_tag_errors(rel: str, tags_l: list[str]) -> list[str]:
-    errors: list[str] = []
-    types = [t for t in tags_l if t.startswith("type/")]
-    for t in types:
-        if t not in _VALID_TYPE_TAGS:
-            errors.append(f"{rel}: invalid type tag '{t}' — use one of {sorted(_VALID_TYPE_TAGS)}")
-    if not types:
-        errors.append(f"{rel}: missing type/<x> tag (user ruling 2026-08-30 tag discipline)")
-    if len(types) > 1:
-        errors.append(f"{rel}: multiple type tags {types} — keep exactly one")
-    for j in _JUNK_TAGS:
-        if j in tags_l:
-            errors.append(f"{rel}: junk tag '{j}' — drop it")
-    return errors
-
-
-def validate_type_tag(bundle: Path) -> list[str]:
-    """Tag discipline (user ruling 2026-08-30): every note must carry exactly one
-    type/<x> tag, and no free-form junk tags (project/role/status/repo/archived)."""
-    errors: list[str] = []
-    for fp, fm in _notes_with_frontmatter(bundle):
-        raw_tags = fm.get("tags")
-        if isinstance(raw_tags, str):
-            tags: list[object] = [raw_tags]
-        elif _is_object_list(raw_tags):
-            tags = raw_tags
-        else:
-            tags = []
-        errors.extend(_type_tag_errors(str(fp.relative_to(bundle)), [str(t) for t in tags]))
-    return errors
-
-
-_CROSS_PROJECT_WORDS = {"meiva", "meiva-internal", "shared-tech", "open-source"}
-
-
-def _misplaced_project_note(
-    rel: str, fm: dict[str, object], project_words: list[str]
-) -> str | None:
-    """The error for a note tagged with exactly one project word but living outside its tree."""
-    raw_tags = fm.get("tags")
-    if isinstance(raw_tags, str):
-        tags: list[object] = [raw_tags]
-    elif _is_object_list(raw_tags):
-        tags = raw_tags
-    else:
-        return None
-    tags_l = [str(t).lower() for t in tags]
-    hits = [w for w in project_words if any(w in t for t in tags_l)]
-    if not hits or rel.startswith("projects/") or len(hits) >= 2:
-        return None
-    if any(w in tags_l for w in _CROSS_PROJECT_WORDS):
-        return None
-    return (
-        f"{rel}: tag contains project '{hits[0]}' but the note is not under "
-        f"projects/{hits[0]}/ — project-specific notes belong in the project tree "
-        "(user ruling 2026-08-30); drop the project tag for cross-project knowledge"
-    )
-
-
-def validate_project_home(bundle: Path) -> list[str]:
-    """Organizational rule (user ruling 2026-08-30): notes tagged with a single
-    project word must live inside that project's tree (projects/<p>/).
-    Exempt: multi-project tags, cross-domain tags (meiva / meiva-internal /
-    shared-tech / open-source)."""
-    errors: list[str] = []
-    projects_dir = bundle / "projects"
-    project_words = (
-        sorted(d.name for d in projects_dir.iterdir() if d.is_dir() and not d.name.startswith("."))
-        if projects_dir.is_dir()
-        else []
-    )
-    if not project_words:
-        return errors
-    for fp, fm in _notes_with_frontmatter(bundle):
-        error = _misplaced_project_note(str(fp.relative_to(bundle)), fm, project_words)
-        if error is not None:
-            errors.append(error)
-    return errors
 
 
 def validate_structure(bundle: Path) -> list[str]:
@@ -481,51 +268,6 @@ def validate_factchecks(bundle: Path) -> list[str]:
 _POINTER_RE = re.compile(r"\]\(([^)#]+?\.md)\)")
 
 
-# A title may itself contain bracketed text (e.g. `md5[:12]`): the title is
-# bracket-balanced and line-local, ending at the `](` of the target link.
-_POINTER_LINE_RE = re.compile(r"\[((?:[^\[\]\n]|\[[^\]\n]*\])*?)\]\(([^)#]+?\.md)\)")
-
-
-def _pointer_lines(content: str) -> list[tuple[str, str]]:
-    """Return (title, target) pairs from markdown pointer lines."""
-    return [(m.group(1), m.group(2)) for m in _POINTER_LINE_RE.finditer(content)]
-
-
-def _note_frontmatter_title(fp: Path) -> str | None:
-    """Frontmatter `title` of a note file; None when absent/unreadable."""
-    try:
-        content = fp.read_text(encoding="utf-8")
-    except (OSError, UnicodeDecodeError):
-        return None
-    if not content.startswith("---\n"):
-        return None
-    parts = content.split("---\n", 2)
-    if len(parts) < 3:
-        return None
-    try:
-        fm = _object_of(yaml.safe_load, parts[1])
-    except yaml.YAMLError:
-        return None
-    if _is_str_dict(fm) and fm.get("title"):
-        return str(fm["title"]).strip()
-    return None
-
-
-def _expected_index_title(fp: Path) -> str | None:
-    """Title an index.md pointer must carry for this note.
-
-    gen_indexes convention: frontmatter title when present, else filename stem.
-    """
-    ft = _note_frontmatter_title(fp)
-    if ft is not None:
-        return ft
-    return fp.name[:-3] if fp.name.endswith(".md") else None
-
-
-def _norm_title(s: str) -> str:
-    return re.sub(r"\s+", "", s)
-
-
 def _pointer_target_errors(bundle: Path, seen: dict[str, int]) -> list[str]:
     errors: list[str] = []
     for t, n in seen.items():
@@ -533,25 +275,6 @@ def _pointer_target_errors(bundle: Path, seen: dict[str, int]) -> list[str]:
             errors.append(f"MEMORY.md: duplicate pointer {t} ({n}x)")
         if not (bundle / t).exists():
             errors.append(f"MEMORY.md: pointer target missing: {t}")
-    return errors
-
-
-def _pointer_title_errors(bundle: Path, content: str) -> list[str]:
-    """Title consistency: the bracketed title must equal the note's frontmatter
-    title (MEMORY.md is injected into every agent's context; a stale or
-    wrong title misleads exactly like a wrong target)."""
-    errors: list[str] = []
-    for title, tgt in _pointer_lines(content):
-        if tgt.startswith(("http", "https", "#")):
-            continue
-        target = bundle / tgt
-        if not target.is_file() or target.name in _RESERVED:
-            continue
-        ft = _note_frontmatter_title(target)
-        if ft is None:
-            continue
-        if _norm_title(title) != _norm_title(ft):
-            errors.append(f"MEMORY.md: pointer title mismatch for {tgt}: {title!r} != {ft!r}")
     return errors
 
 
@@ -607,74 +330,8 @@ def validate_pointers(bundle: Path) -> list[str]:
 
     return [
         *_pointer_target_errors(bundle, seen),
-        *_pointer_title_errors(bundle, content),
         *_pointer_coverage_errors(bundle, seen),
     ]
-
-
-def _index_entry_errors(bundle: Path, dp: Path, ic: str, mds: list[str]) -> list[str]:
-    """Index ↔ entry consistency (audit 3249 / task #1440): pointer targets
-    exist, titles follow the generator convention, no orphan entries,
-    no duplicate pointers. One wrong index line = one wrong line at
-    cold start for every agent that reads it."""
-    errors: list[str] = []
-    pointed: dict[str, int] = {}
-    for title, tgt in _pointer_lines(ic):
-        if tgt.startswith(("http", "https", "#")):
-            continue
-        target = dp / tgt
-        if not target.exists():
-            errors.append(f"{dp.relative_to(bundle)}/index.md: pointer target missing: {tgt}")
-            continue
-        if target.name in ("index.md", "log.md"):
-            continue  # directory pointer, no title check
-        pointed[target.name] = pointed.get(target.name, 0) + 1
-        expected = _expected_index_title(target)
-        if expected is None:
-            continue
-        if _norm_title(title) != _norm_title(expected):
-            errors.append(
-                f"{dp.relative_to(bundle)}/index.md: pointer title mismatch "
-                f"for {tgt}: {title!r} != {expected!r}"
-            )
-    for fname, n in pointed.items():
-        if n > 1:
-            errors.append(f"{dp.relative_to(bundle)}/index.md: duplicate pointer {fname} ({n}x)")
-    for f in mds:
-        if f not in pointed:
-            errors.append(f"{dp.relative_to(bundle)}/index.md: orphan entry (no pointer): {f}")
-    return errors
-
-
-def _index_dir_errors(bundle: Path, dp: Path, mds: list[str]) -> list[str]:
-    idx = dp / "index.md"
-    if not idx.is_file():
-        return [f"{dp.relative_to(bundle)}: has {len(mds)} notes but no index.md (OKF §8)"]
-    ic = idx.read_text(encoding="utf-8", errors="replace")
-    errors: list[str] = []
-    if ic.startswith("---"):
-        errors.append(
-            f"{dp.relative_to(bundle)}/index.md: index files must have no frontmatter (OKF §8)"
-        )
-    errors.extend(_index_entry_errors(bundle, dp, ic, mds))
-    return errors
-
-
-def validate_indexes(bundle: Path) -> list[str]:
-    """OKF §8: any directory holding notes needs an index.md (no frontmatter)."""
-    errors: list[str] = []
-    for dirpath, _dirnames, filenames in os.walk(bundle):
-        dp = Path(dirpath)
-        if any(part.startswith(".") for part in dp.relative_to(bundle).parts):
-            continue
-        mds = [
-            f
-            for f in filenames
-            if f.endswith(".md") and f not in ("index.md", "log.md", "MEMORY.md", "AGENTS.md")
-        ]
-        if mds:
-            errors.extend(_index_dir_errors(bundle, dp, mds))
-    return errors
 
 
 # meiva:note
@@ -682,9 +339,6 @@ def validate_indexes(bundle: Path) -> list[str]:
 def validate_bundle(bundle: Path) -> tuple[list[str], int]:
     errors: list[str] = []
     errors.extend(validate_structure(bundle))
-    errors.extend(validate_project_home(bundle))
-    errors.extend(validate_type_tag(bundle))
-    errors.extend(validate_indexes(bundle))
     errors.extend(validate_factchecks(bundle))
     errors.extend(validate_pointers(bundle))
     md_files = sorted(bundle.rglob("*.md"))

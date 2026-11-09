@@ -36,7 +36,7 @@ Each full consolidation runs four phases inside an isolated git worktree (`git -
 1. **Phase 1 (Orientation)**: Scan `MEMORY.md` and directory `index.md` files to map topic layout and size budgets.
 2. **Phase 2 (Gather Signal)**: Collect three incremental signals — (a) recent session transcripts (`USER_INPUT` corrections and rulings), (b) generalized World Truth Probes (multi-repo paths/symbols/contracts, cluster DB active/terminated agents and schedule states, host environment and `<!-- fact-check: ... -->`), and (c) per-agent `workspaces/*/memory/` notes.
 3. **Phase 3 (Consolidation)**: Enforce one dateless canonical file per rule/topic slot, overwrite canonical state in place when rulings or world truth change, `git rm` superseded/expired date-suffixed fragments, and convert relative time words to explicit `YYYY-MM-DD` dates.
-4. **Phase 4 (Prune & Index)**: Keep `MEMORY.md` conflict-free and concise, run `gen_indexes.py` + `rebuild_memory_index.py` + `validate.py`, land via PR, clean up the temporary worktree, and run `meiva memory refresh`.
+4. **Phase 4 (Prune & Index)**: Keep `MEMORY.md` conflict-free and concise, run `rebuild_memory_index.py` + `validate.py`, land via PR, clean up the temporary worktree, and run `meiva memory refresh`.
 
 ## Three Deployment Topologies
 
