@@ -350,9 +350,11 @@ describe("Scroll-to-bottom button + multi-item render order", () => {
 });
 
 describe("cold-load spinner", () => {
-  it("loading + no items → shows the shared ring, not its own glyph and label", () => {
+  it("loading + no items → shows the shared ring below the floating header bar, not its own glyph and label", () => {
     render(<TimelineView items={[]} loading />);
     const spinner = screen.getByTestId("cold-load-spinner");
+    expect(spinner.className).toContain("top-11");
+    expect(spinner.className).toContain("py-12");
     expect(spinner.querySelector('[data-testid="cold-load-ring"]')).not.toBeNull();
     expect(screen.getByText(/Loading conversation…/).className).toContain("sr-only");
   });

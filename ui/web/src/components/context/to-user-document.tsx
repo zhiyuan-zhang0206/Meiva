@@ -199,7 +199,7 @@ export function ToUserDocumentView({ agentId, document, failure, pending, refres
         {bodyHidden ? null : (
           <>
             {!content ? (
-              <div className={cn("items-center justify-center px-8 text-center text-[13px] text-muted-foreground", FLEX, FLEX_1)}>
+              <div className={cn("items-center justify-center px-8 py-12 text-center text-[13px] text-muted-foreground", FLEX, FLEX_1)}>
                 {loading ? <Spinner className="size-4" label={t("loading")} /> : refusal ? (
                   <div data-testid="document-failure" className="space-y-1">
                     <InlineError>{t(refusal.text)}</InlineError>

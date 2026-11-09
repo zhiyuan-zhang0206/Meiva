@@ -93,7 +93,7 @@ export function SidebarBody(props: InnerProps) {
       {/* ── Agent list ── */}
       <ScrollArea className={cn(FLEX_1, MIN_H_0)}>
         {rosterPending ? (
-          <div className={cn("items-center justify-center py-4", FLEX)}>
+          <div className={cn("items-center justify-center py-8", FLEX)}>
             <Spinner label={t("loadingAgents")} />
           </div>
         ) : isEmpty ? (

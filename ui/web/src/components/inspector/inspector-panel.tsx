@@ -178,6 +178,7 @@ export function InspectorPanel({ agentId }: { agentId: number }) {
         inspect={windowedData}
         failed={windowedQuery.error != null}
         pending={windowedQuery.isPending}
+        hideSpinner={!liveData && liveQuery.isPending}
         hours={hours}
         onHoursChange={setHours}
         fetching={windowedQuery.isFetching}

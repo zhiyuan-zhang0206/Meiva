@@ -150,7 +150,7 @@ function BreakdownQuery({
 
   if (isPending) {
     return (
-      <div data-testid="context-breakdown-loading" className="py-1">
+      <div data-testid="context-breakdown-loading" className={cn("justify-center py-4", FLEX)}>
         <Spinner label={t("loading")} />
       </div>
     );

@@ -202,6 +202,7 @@ describe("InspectorPanel", () => {
 
     const liveness = screen.getByLabelText("Liveness loading");
     expect(liveness.getAttribute("aria-busy")).toBe("true");
+    expect(screen.queryByText("Liveness")).toBeNull();
     for (const label of ["Birth", "Next heartbeat", "Last pause", "Harness", "Model", "Machine", "Status"]) {
       expect(within(liveness).queryByText(label)).toBeNull();
     }
@@ -210,11 +211,11 @@ describe("InspectorPanel", () => {
 
     const activity = screen.getByLabelText("Activity loading");
     expect(activity.getAttribute("aria-busy")).toBe("true");
-    expect(screen.getAllByText("Activity")).toHaveLength(1);
+    expect(screen.queryByText("Activity")).toBeNull();
     for (const label of ["Cost (subscription)", "Cost (API)", "LLM calls", "Tokens", "Cache hit", "TPS", "LLM output", "Code execution"]) {
       expect(within(activity).queryByText(label)).toBeNull();
     }
-    expect(activity.querySelectorAll(".animate-spin")).toHaveLength(1);
+    expect(activity.querySelectorAll(".animate-spin")).toHaveLength(0);
     expect(activity.querySelectorAll(".animate-pulse")).toHaveLength(0);
 
     expect(screen.queryByText("Page")).toBeNull();

@@ -10,6 +10,7 @@ export function Section({
   badge,
   action,
   loading,
+  hideSpinner,
   children,
 }: {
   icon: ReactNode;
@@ -17,6 +18,7 @@ export function Section({
   badge?: string;
   action?: ReactNode;
   loading?: boolean;
+  hideSpinner?: boolean;
   children?: ReactNode;
 }) {
   return (
@@ -25,26 +27,30 @@ export function Section({
       aria-label={loading ? `${title} loading` : undefined}
       aria-busy={loading ? true : undefined}
     >
-      <div className={cn("items-center gap-1.5 text-[11px] font-medium tracking-wide text-foreground/75 dark:text-[#ccc9c2]", FLEX)}>
-        {icon}
-        <span>{title}</span>
-        {badge != null && (
-          <span className="ml-auto font-mono text-[11px] tabular-nums text-foreground dark:text-[#f0ede7] normal-case">
-            {badge}
-          </span>
-        )}
-        {action != null && (
-          <span className={cn("shrink-0 items-center", FLEX, badge == null && "ml-auto")}>
-            {action}
-          </span>
-        )}
-      </div>
       {loading ? (
-        <div className={cn("justify-center py-2", FLEX)}>
-          <Spinner />
-        </div>
+        hideSpinner ? null : (
+          <div className={cn("justify-center py-9", FLEX)}>
+            <Spinner />
+          </div>
+        )
       ) : (
-        children
+        <>
+          <div className={cn("items-center gap-1.5 text-[11px] font-medium tracking-wide text-foreground/75 dark:text-[#ccc9c2]", FLEX)}>
+            {icon}
+            <span>{title}</span>
+            {badge != null && (
+              <span className="ml-auto font-mono text-[11px] tabular-nums text-foreground dark:text-[#f0ede7] normal-case">
+                {badge}
+              </span>
+            )}
+            {action != null && (
+              <span className={cn("shrink-0 items-center", FLEX, badge == null && "ml-auto")}>
+                {action}
+              </span>
+            )}
+          </div>
+          {children}
+        </>
       )}
     </section>
   );

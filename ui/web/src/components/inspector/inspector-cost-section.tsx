@@ -117,6 +117,7 @@ export function CostActivitySection({
   inspect,
   failed,
   pending,
+  hideSpinner,
   hours,
   onHoursChange,
   fetching,
@@ -126,6 +127,7 @@ export function CostActivitySection({
   inspect: AgentInspectStatistics | undefined;
   failed: boolean;
   pending: boolean;
+  hideSpinner?: boolean;
   hours: number | null;
   onHoursChange: (hours: number | null) => void;
   fetching: boolean;
@@ -154,6 +156,7 @@ export function CostActivitySection({
       icon={<Activity className="size-3" />}
       title={t("sectionCostActivity")}
       loading={!inspect && !failed && pending}
+      hideSpinner={hideSpinner}
       action={
         <span className={cn("shrink-0 items-center gap-1", FLEX)}>
           <button
