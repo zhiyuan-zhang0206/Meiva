@@ -37,7 +37,7 @@ Each full consolidation runs four phases inside an isolated git worktree (`git -
   wrapper unconditionally pushes and has no `MEIVA_MEMORY_KEEP_LOCAL` switch.
   A daily schedule is created only for authorized ongoing maintenance.
 - **Arbiter / arbiter** (multi-host, one resident machine — the Memory Arbiter agent): holds the schedule; each round spawns a per-machine Steward for each machine (or the machines run resident stewards), waits for PR readiness, `skills/scripts/arbiter_merge.py` squash-merges each one, `meiva memory refresh` updates the gateway checkout (the indexer processes changes on its next patrol), notifies stewards to rebase, re-curates `MEMORY.md` (16000 character cap ≈ 200 lines index (Claude Code auto-memory scale), enforced by pre-commit hook).
-- **per-machine Steward** (multi-host, one per machine): `skills/scripts/steward.py` one-step rebuild of the directory indexes and root `MEMORY.md` pointers (`gen_indexes.py`, `rebuild_memory_index.py`; agents write notes with `meiva.files`, so no writer maintains them) + commit + push + create PR, reports to the Arbiter then idles (or stays resident as a scheduler with the 1–5 min trigger watch), upon receiving "rebase now" rebases and terminates.
+- **per-machine Steward** (multi-host, one per machine): `skills/scripts/steward.py` one-step creation of missing directory indexes (existing introductions are preserved) and rebuild of root `MEMORY.md` pointers (`gen_indexes.py`, `rebuild_memory_index.py`; agents write notes with `meiva.files`, so no writer maintains them) + commit + push + create PR, reports to the Arbiter then idles (or stays resident as a scheduler with the 1–5 min trigger watch), upon receiving "rebase now" rebases and terminates.
 
 ## Content Discipline
 

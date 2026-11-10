@@ -91,6 +91,10 @@ def test_an_untracked_draft_is_invisible_and_a_staged_note_is_counted(tmp_path: 
         encoding="utf-8"
     )
 
+    # meiva:note
+    # Existing introductions are preserved; remove generated fixtures to test fresh output.
+    (pool / "topics" / "index.md").unlink()
+    (pool / "index.md").unlink()
     _git(pool, "add", "topics/draft.md")
     _generate(tmp_path)
 
@@ -157,6 +161,10 @@ def test_an_untracked_draft_is_named_on_stderr_and_never_indexed(tmp_path: Path)
     index = (pool / "topics" / "index.md").read_text(encoding="utf-8")
     assert "Draft rule" not in index
 
+    # meiva:note
+    # Existing introductions are preserved; remove generated fixtures to test fresh output.
+    (pool / "topics" / "index.md").unlink()
+    (pool / "index.md").unlink()
     _git(pool, "add", "topics/draft.md")
     res = _generate_result(tmp_path)
 
