@@ -27,7 +27,6 @@ CLIENTS = (
     (".codex", "codex"),
     (".claude", "claude"),
     (".gemini", "gemini"),
-    (".grok", "grok"),
     (".qwen", "qwen"),
     (".cursor", "cursor"),
     (".gemini/config", "antigravity"),
@@ -259,7 +258,7 @@ def test_second_converge_is_byte_and_timestamp_idempotent_for_new_clients(
     repo = _repo(tmp_path)
     home = _home(tmp_path)
     (home / ".gemini").mkdir()
-    (home / ".grok").mkdir()
+    (home / ".qwen").mkdir()
     context = _ctx(
         repo,
         tmp_path,
@@ -271,7 +270,7 @@ def test_second_converge_is_byte_and_timestamp_idempotent_for_new_clients(
     bridge.converge_external_agent_skill(context, host_home=home)
     targets = [
         home / name / "skills" / skill
-        for name in (".gemini", ".grok")
+        for name in (".gemini", ".qwen")
         for skill in PUBLISHED_SKILLS
     ]
     before = {target: _snapshot(target) for target in targets}
@@ -287,7 +286,7 @@ def test_second_converge_is_byte_and_timestamp_idempotent_for_new_clients(
         target: {path.relative_to(target): path.stat().st_mtime_ns for path in target.rglob("*")}
         for target in targets
     } == mtimes
-    for name in (".gemini", ".grok"):
+    for name in (".gemini", ".qwen"):
         assert list((home / name / "skills").glob(".*meiva-*")) == []
 
 

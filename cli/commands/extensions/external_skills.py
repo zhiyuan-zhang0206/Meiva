@@ -87,7 +87,6 @@ _CLIENTS: tuple[_Client, ...] = (
     _Client("Codex", "codex", ".codex", "codex", "skills"),
     _Client("Claude Code", "claude", ".claude", "claude", "skills"),
     _Client("Gemini CLI", "gemini", ".gemini", "gemini", "skills"),
-    _Client("Grok", "grok", ".grok", "grok", "skills"),
     _Client("Qwen Code", "qwen", ".qwen", "qwen", "skills"),
     _Client("Cursor Agent", "cursor", ".cursor", "cursor-agent", "skills"),
     # meiva:note

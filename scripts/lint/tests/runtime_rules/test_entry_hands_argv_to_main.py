@@ -26,7 +26,6 @@ _ENTRIES = [
     ),
     ("meiva_builtins/skills/integrations/web-sources/rss/scripts/feed.py", None),
     ("meiva_builtins/skills/integrations/web-sources/scripts/webscrape.py", None),
-    ("meiva_builtins/skills/practice/meiva-deep-research/scripts/audit_research.py", None),
     (
         "meizel/__main__.py",
         "meizel/entry.py",

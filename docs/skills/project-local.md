@@ -15,7 +15,7 @@ supported external agent clients present on the host; it is an external-client
 projection, not an Meiva runtime skill source — see
 [External-agent operator skill bridge](external-agent-operator-bridge.md).
 The four general skills mirrored alongside them — `meiva-serious-engineering`,
-`meiva-serious-research`, `meiva-deep-research`, and `meiva-corp` — are instead built-ins converged into `~/.meiva/skills/`;
+`meiva-serious-research`, and `meiva-corp` — are instead built-ins converged into `~/.meiva/skills/`;
 the mirror preserves the open-standard path while content-hash dedup keeps the
 same skill from loading twice in a checkout.
 

@@ -27,7 +27,6 @@ when a tool's major version changes.
 | Codex | `codex` | `~/.codex/skills/` | `meiva-guide/` with its `.meiva-managed.json` | `codex` binary 0.157.1: `$CODEX_HOME/skills` paths, `codex_config::skills_config`, `app-server/src/skills_watcher.rs`; also reads `~/.agents/skills` | `ls ~/.codex/skills/meiva-guide/SKILL.md`; the tool's own skill listing was not confirmed on 0.157.1 (no `codex skills` subcommand) |
 | Claude Code | `claude` | `~/.claude/skills/` | `meiva-guide/` | pre-existing integration; `SKILL.md` loader in the `claude` binary | `ls ~/.claude/skills/meiva-guide/SKILL.md`; in-session skill listing |
 | Gemini CLI | `gemini` | `~/.gemini/skills/` | `meiva-guide/` | `@google/gemini-cli` 0.28.2 and 0.64.0: `Storage.getUserSkillsDir()` = `~/.gemini/skills`; `loadSkillsFromDir` globs `SKILL.md` and `*/SKILL.md` only, so the guide's nested sub-skills stay ordinary files; also reads `~/.agents/skills` | `gemini skills list` |
-| Grok | `grok` | `~/.grok/skills/` | `meiva-guide/` | `@xai-official/grok` 1.0.62, user guide embedded in the binary: "a skill at `~/.grok/skills/commit/SKILL.md`", `[skills] paths/ignore/disabled` in `~/.grok/config.toml`, `/skills` modal; also reads `~/.claude/skills` and `~/.cursor/skills` for compatibility. **No Meiva host has `grok` installed** (checked 2026-10-18 on five machines), so this row is documentation-only so far | `/skills` inside `grok`; `ls ~/.grok/skills/meiva-guide/SKILL.md` |
 | Qwen Code | `qwen` | `~/.qwen/skills/` | `meiva-guide/` | `@qwen-code/qwen-code` 0.25.2: `Storage.getUserSkillsDir()` = `~/.qwen/skills`, scanner list `[".qwen", ".agents"]` | `ls ~/.qwen/skills/meiva-guide/SKILL.md`; `/skills` in a session |
 | Cursor Agent | `cursor-agent` | `~/.cursor/skills/` | `meiva-guide/` | `cursor.com/docs/context/skills`: "`~/.cursor/skills/` — User-level (global) on the local machine"; compatibility loads `~/.claude/skills/` and `~/.codex/skills/`. A `~/.cursor/` directory survives on two hosts without Cursor installed (it holds `argv.json`, `extensions/`, `projects/`), so this row publishes into leftover data there | `/` menu in Agent chat; `ls ~/.cursor/skills/meiva-guide/SKILL.md` |
 | Antigravity App + IDE | (none — desktop app) | `~/.gemini/config/skills/` | `meiva-guide/` | `antigravity.google/docs/skills`: "Antigravity App skill locations" and "Antigravity IDE skill locations" both name `~/.gemini/config/skills/<skill-folder>/`; the IDE also reads the legacy `~/.gemini/antigravity/skills/`. Observed on macbook-air: `~/.gemini/config/skills/` already holds hand-installed skills, `Antigravity.app` is 2.24.0 and `Antigravity IDE.app` is 2.5.5, and the legacy directory does not exist | Customizations menu in the IDE agent panel; `/<skill-name>` in the App prompt panel |
@@ -47,8 +46,7 @@ Reload behaviour belongs to each tool — a session already running may need its
 own reload (Gemini's `/skills reload`) before a new copy appears.
 
 Several tools read their neighbours' directories for compatibility (Cursor:
-`~/.agents/skills`, `~/.claude/skills`, `~/.codex/skills`; Grok: `~/.claude/skills`,
-`~/.cursor/skills`, `~/.cursor/rules`; Gemini and Qwen: `~/.agents/skills`). The
+`~/.agents/skills`, `~/.claude/skills`, `~/.codex/skills`; Gemini and Qwen: `~/.agents/skills`). The
 same skill can therefore be visible twice on one machine. That is a visibility
 fact, not an execution one:
 
@@ -67,7 +65,6 @@ fact, not an execution one:
 |---|---|---|
 | Gemini CLI | Last root wins: extensions < `~/.gemini/skills` < `~/.agents/skills` < workspace, with a "Skill conflict detected" warning when the locations differ | `SkillManager.addSkillsWithPrecedence()` |
 | DeepSeek Harness | One winning candidate per name, merged by provider rank (100/200/300/400/500) | `ctx.skills.list()` in `@deepseek-ai/dsh-skill` |
-| Grok | No merge: the name becomes ambiguous and needs a qualified form (`/local:`, `/user:`) | embedded user guide; binary strings |
 | Qwen Code | Same lineage as Gemini, with `qualifySkillName`; the exact merge was not read line by line | 0.25.2 bundle |
 | Cursor | Not documented | `cursor.com/docs/context/skills` |
 
@@ -109,8 +106,6 @@ Checked read-only on 2026-10-18 across the five hosts in the cluster. "Documente
 below means the layout is confirmed from the tool's own package or documentation
 but no session has read a published copy yet.
 
-- **Grok** — no host has `grok` or `grok-cli` installed and no `~/.grok` exists,
-  so the row is documentation-only (`@xai-official/grok` 1.0.62 embedded guide).
 - **Cursor Agent** — no host has `cursor-agent`, `cursor`, or the Cursor app; two
   hosts still carry a `~/.cursor/` data directory from a previous install, so the
   row publishes into leftover data there. Precedence between a native copy and a

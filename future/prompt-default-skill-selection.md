@@ -37,7 +37,6 @@ not be advertised by a fixed cross-machine allowlist.
 | meiva-goal | Workflow method selection | Sustained outcome pursuit, not every task. |
 | meiva-dynamic-workflow | Workflow method selection | Executable orchestration, not every parallel task. |
 | meiva-being-a-long-running-agent | Workflow continuation selection | Waiting and recovery detail, not universal standing work. |
-| meiva-deep-research | Research/capability selection | Multi-source investigation; distinguish from doing an ML research project. |
 | skill-creator | Guide package/modification routing | Skill authoring tasks. |
 | meiva-corp | Explicit organization task | Do not assign every cluster a corporate hierarchy. |
 | meiva-self-evolution | Explicit improvement task or assigned service | Do not start a standing mining job from ordinary work. |
