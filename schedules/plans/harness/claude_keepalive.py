@@ -56,7 +56,9 @@ _SECRET_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
     (re.compile(r"(?i)bearer\s+[A-Za-z0-9._\-~+/=]+"), "Bearer ***"),
     (re.compile(r"eyJ[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]*"), "***"),
     (
-        re.compile(r"""(?i)((?:access|refresh)[_\-]?token["']?\s*[:=]\s*["']?)[^\s"',}]+"""),
+        re.compile(
+            r"""(?i)((?:access|refresh)[_\-]?token(?:\\?["'])?\s*[:=]\s*(?:\\?["'])?)[^\s"'\\,}]+"""
+        ),
         r"\1***",
     ),
 )

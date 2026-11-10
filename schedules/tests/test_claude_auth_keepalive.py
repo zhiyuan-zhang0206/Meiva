@@ -114,6 +114,13 @@ def test_decide_without_run_reasons() -> None:
         assert decision.telemetry_payload == {"status": "failed", "reason": reason}
 
 
+def test_failure_log_masks_escaped_json_tokens() -> None:
+    text = r"{\"refreshToken\":\"abc123secret\",\"accessToken\": \"def456secret\"}"
+    line = decide_run(1, "", text).log_line
+    assert "abc123secret" not in line
+    assert "def456secret" not in line
+
+
 def test_decide_run_success() -> None:
     decision = decide_run(0, "ok", "")
     assert decision.status == "ok"
@@ -155,6 +162,7 @@ def test_default_runner_reports_a_timeout_as_exit_124(tmp_path: Path) -> None:
         ["/bin/sleep", "30"],
         timeout=0.5,
         env=os.environ,
+        cwd=tmp_path,
         stdin=None,
     )
     assert result.exit_code == TIMEOUT_EXIT_CODE
@@ -162,7 +170,7 @@ def test_default_runner_reports_a_timeout_as_exit_124(tmp_path: Path) -> None:
 
 def test_default_runner_reports_a_missing_program_without_raising(tmp_path: Path) -> None:
     result = default_command_runner(
-        [str(tmp_path / "nope")], timeout=5.0, env=os.environ, stdin=None
+        [str(tmp_path / "nope")], timeout=5.0, env=os.environ, cwd=tmp_path, stdin=None
     )
     assert result.exit_code == 127
     assert "cannot execute" in result.stderr
@@ -173,6 +181,8 @@ class _Calls:
         self._results = list(results)
         self.argvs: list[tuple[str, ...]] = []
         self.stdins: list[str | None] = []
+        self.envs: list[Mapping[str, str]] = []
+        self.cwds: list[Path] = []
 
     def __call__(
         self,
@@ -180,9 +190,12 @@ class _Calls:
         *,
         timeout: float,
         env: Mapping[str, str],
+        cwd: Path,
         stdin: str | None,
     ) -> CommandResult:
         self.argvs.append(tuple(argv))
+        self.envs.append(env)
+        self.cwds.append(cwd)
         self.stdins.append(stdin)
         return self._results.pop(0)
 
@@ -255,6 +268,39 @@ def test_a_healthy_round_runs_the_status_check_then_one_keepalive(
     assert "claude-auth-keepalive: ok" in capsys.readouterr().out
     (event,) = emitted_events.named("claude_auth_keepalive_round")
     assert event.attributes == {"status": "ok", "exit_code": 0}
+
+
+def test_credential_variables_never_reach_either_child_and_cwd_is_neutral(
+    database: Database,
+    machine_identity: MachineIdentityReader,
+    emitted_events: EmittedEvents,
+    tmp_path: Path,
+) -> None:
+    calls = _Calls([_LOGGED_IN, CommandResult(0, "ok", "")])
+    execute_round(
+        _SLOT,
+        None,
+        inputs=_inputs(database, machine_identity, emitted_events, tmp_path),
+        user_home=tmp_path / "user",
+        base_env={
+            "PATH": "/usr/bin:/bin",
+            "ANTHROPIC_API_KEY": "k1",
+            "ANTHROPIC_AUTH_TOKEN": "k2",
+            "CLAUDE_CODE_OAUTH_TOKEN": "k3",
+            "KEEP_ME": "yes",
+        },
+        is_production=True,
+        locate=_locate_found,
+        run_command=calls,
+    )
+
+    assert len(calls.envs) == 2
+    for env in calls.envs:
+        assert not {"ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN"} & set(
+            env
+        )
+        assert env["KEEP_ME"] == "yes"
+    assert calls.cwds == [tmp_path / "user", tmp_path / "user"]
 
 
 def test_a_missing_binary_is_recorded_and_nothing_runs(

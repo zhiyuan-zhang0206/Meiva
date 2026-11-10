@@ -120,7 +120,9 @@ greens exercise the red.
   access token expire (the `meiva_usage` Claude card then waits on it) and eventually lose the login.
   The schedule never calls the OAuth refresh endpoint and never reads or writes a credentials file:
   the refresh token is single-use and a second refresher would race a running CLI for it. It checks
-  `claude auth status --json` first and makes no model call when `loggedIn` is false. A round never
+  `claude auth status --json` first and makes no model call when `loggedIn` is false. Both child processes run in the user home's directory with
+  `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN` and `CLAUDE_CODE_OAUTH_TOKEN` removed from their environment, so the CLI
+  uses the subscription login (and bills no API key) and loads no project settings from the schedule's working directory. A round never
   raises: a missing executable (`claude_not_found`), a logged-out machine (`not_logged_in`), a
   non-zero exit (`nonzero_exit`) or a timeout (`timeout`) is printed to the schedule log with the
   exit code and the last lines of stderr (credential-shaped text masked) and emitted as

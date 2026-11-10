@@ -391,6 +391,7 @@ def run_collector_cycles(
             )
         except Exception as exc:
             _log.warning("collector {} refresh cycle failed: {}", collector_id, exc)
+            rate_limited_cycles = 0
             emitted = _emit_cycle(collector_id, "failed", type(exc).__name__, cycle=cycles)
         else:
             rate_limited_cycles, outcome, reason = judge_cycle(readings, rate_limited_cycles)

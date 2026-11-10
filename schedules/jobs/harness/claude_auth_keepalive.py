@@ -20,6 +20,7 @@ from typing import Protocol
 
 from base.daemon.schedules.inputs import ScheduleInputs
 from base.host.env.harness.convergence import CommandResult
+from base.lm.harness.claude import SECRET_ENV_NAMES
 from base.host.env.harness_binaries import locate_harness_binary, with_harness_path
 from schedules.jobs.telemetry_event import emit_system_event
 from schedules.plans.harness.claude_keepalive import (
@@ -38,6 +39,12 @@ from schedules.plans.harness.claude_keepalive import (
 _PROCESS_NAME = "claude-auth-keepalive"
 _EVENT_NAME = "claude_auth_keepalive_round"
 
+# meiva:note
+# The credential variables the claude launcher already names (`SECRET_ENV_NAMES`) plus the one it
+# does not: `ANTHROPIC_AUTH_TOKEN`. Any of them in the child environment makes the CLI use it instead
+# of the subscription login, so the keepalive would refresh nothing and bill the API.
+_CREDENTIAL_ENV_NAMES = (*SECRET_ENV_NAMES, "ANTHROPIC_AUTH_TOKEN")
+
 
 class CommandRunner(Protocol):
     def __call__(
@@ -46,6 +53,7 @@ class CommandRunner(Protocol):
         *,
         timeout: float,
         env: Mapping[str, str],
+        cwd: Path,
         stdin: str | None,
     ) -> CommandResult: ...
 
@@ -55,6 +63,7 @@ def default_command_runner(
     *,
     timeout: float,
     env: Mapping[str, str],
+    cwd: Path,
     stdin: str | None,
 ) -> CommandResult:
     try:
@@ -65,6 +74,7 @@ def default_command_runner(
             capture_output=True,
             text=True,
             env=dict(env),
+            cwd=cwd,
             check=False,
         )
     except subprocess.TimeoutExpired as exc:
@@ -96,15 +106,25 @@ def _decide(
 ) -> KeepaliveDecision:
     if not is_production:
         return decide_without_run("non_production")
-    env = with_harness_path(base_env, home=user_home)
+    env = {
+        name: value
+        for name, value in with_harness_path(base_env, home=user_home).items()
+        if name not in _CREDENTIAL_ENV_NAMES
+    }
     claude = locate(user_home, env)
     if claude is None:
         return decide_without_run("claude_not_found")
-    status = run_command(login_status_argv(claude), timeout=STATUS_TIMEOUT_S, env=env, stdin=None)
+    status = run_command(
+        login_status_argv(claude), timeout=STATUS_TIMEOUT_S, env=env, cwd=user_home, stdin=None
+    )
     if logged_in(status.stdout) is False:
         return decide_without_run("not_logged_in")
     result = run_command(
-        keepalive_argv(claude), timeout=KEEPALIVE_TIMEOUT_S, env=env, stdin=KEEPALIVE_PROMPT
+        keepalive_argv(claude),
+        timeout=KEEPALIVE_TIMEOUT_S,
+        env=env,
+        cwd=user_home,
+        stdin=KEEPALIVE_PROMPT,
     )
     return decide_run(result.exit_code, result.stdout, result.stderr)
 

@@ -245,3 +245,46 @@ def test_the_cycle_loop_backs_off_after_a_rate_limit_and_recovers(
     ]
     assert attributes[0]["reason"] == "rate_limited"
     assert attributes[2]["reason"] == ""
+
+
+def test_a_failed_refresh_after_a_rate_limit_returns_to_the_base_interval(
+    db_conn: psycopg.Connection[Any],
+    tmp_path: Path,
+    emitted_events: EmittedEvents,
+) -> None:
+    collector = _deepseek_collector("loop-fail")
+    cfg_dir = tmp_path / "configs" / "meiva_usage"
+    cfg_dir.mkdir(parents=True, exist_ok=True)
+    (cfg_dir / "config.json").write_text(UsageConfig(collectors=(collector,)).model_dump_json())
+
+    class FakeMachine:
+        def name(self) -> str:
+            return "gateway"
+
+    inputs = ScheduleInputs(
+        database=cast(Any, lambda: FakeDatabase(db_conn)),
+        producer=emitted_events.producer,
+        image=LoadedCommit(source_root=tmp_path, sha="test-sha"),
+        machine=cast(Any, FakeMachine()),
+        home=tmp_path,
+    )
+    limited = {"loop-fail": CardReading(value="-", detail="", status="warn", rate_limited=True)}
+    script: list[dict[str, CardReading] | None] = [limited, limited, None, limited]
+    sleeps: list[float] = []
+
+    def scripted_refresh(*_args: Any, **_kwargs: Any) -> dict[str, CardReading]:
+        step = script.pop(0)
+        if step is None:
+            raise RuntimeError("probe exploded")
+        return step
+
+    run_collector_cycles(
+        inputs,
+        refresh=scripted_refresh,
+        sleep=sleeps.append,
+        collector_id="loop-fail",
+        stop_after_cycles=4,
+        environ={"DEEPSEEK_API_KEY": "k"},
+    )
+
+    assert sleeps == [1200.0, 2400.0, 600.0]
