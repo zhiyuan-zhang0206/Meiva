@@ -62,7 +62,7 @@ def cold_emit() -> None:
     logger.remove()
     logger.add(sys.stderr, enqueue=False)
     prior_threads = set(threading.enumerate())
-    telemetry.emit("log", "page_ttl_expired", attributes={"cold": 1})
+    telemetry.emit("log", "shell_ttl_expired", attributes={"cold": 1})
     telemetry.emit("log", "shell_ttl_expired", attributes={"cold": 2})
     telemetry.emit("log", "log", attributes={"cold": 3})
     assert set(threading.enumerate()) == prior_threads, "emit must not construct a writer"
@@ -85,7 +85,7 @@ def emit_without_a_factory() -> None:
         raise telemetry.NoPipelineFactoryError("this context has no event pipeline factory")
 
     prior_threads = set(threading.enumerate())
-    telemetry.emit("log", "page_ttl_expired", producer=no_factory)
+    telemetry.emit("log", "shell_ttl_expired", producer=no_factory)
     telemetry.emit("log", "shell_ttl_expired", producer=no_factory)
     telemetry.emit("log", "log", producer=no_factory)
     assert set(threading.enumerate()) == prior_threads, "emit must not construct a writer"
