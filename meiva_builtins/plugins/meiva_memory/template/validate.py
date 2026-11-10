@@ -401,14 +401,16 @@ def validate_factchecks(bundle: Path) -> list[str]:
 # duplicate lines (both observed in production, 2026-08).
 
 
-def _pointer_target_errors(bundle: Path, seen: dict[str, int]) -> list[str]:
+def _pointer_target_errors(seen: dict[str, int]) -> list[str]:
     errors: list[str] = []
     for t, n in seen.items():
         if n > 1:
             errors.append(f"MEMORY.md: duplicate pointer {t} ({n}x)")
-        if not (bundle / t).exists():
-            errors.append(f"MEMORY.md: pointer target missing: {t}")
     return errors
+
+
+def _pointer_notes(bundle: Path) -> list[Path]:
+    return sorted(fp for fp in bundle.rglob("*.md") if fp.is_file() and fp.name not in _RESERVED)
 
 
 def _pointer_coverage_errors(bundle: Path, seen: dict[str, int]) -> list[str]:
@@ -416,8 +418,9 @@ def _pointer_coverage_errors(bundle: Path, seen: dict[str, int]) -> list[str]:
     errors: list[str] = []
     # Root-level notes: file-level coverage. Everything under a directory is
     # covered by that directory's pointer (progressive disclosure via index.md).
-    for fp in sorted(bundle.glob("*.md")):
-        if fp.name in _RESERVED:
+    notes = _pointer_notes(bundle)
+    for fp in notes:
+        if fp.parent != bundle:
             continue
         rel = fp.name
         if rel not in seen:
@@ -425,8 +428,8 @@ def _pointer_coverage_errors(bundle: Path, seen: dict[str, int]) -> list[str]:
 
     # Directories holding notes need a pointer line to them (or their index.md).
     dirs_with_notes: set[str] = set()
-    for fp in bundle.rglob("*.md"):
-        if fp.name in _RESERVED or fp.parent == bundle:
+    for fp in notes:
+        if fp.parent == bundle:
             continue
         rel_dir = fp.relative_to(bundle).parent.as_posix()
         dirs_with_notes.add(rel_dir)
@@ -454,17 +457,25 @@ def validate_pointers(bundle: Path) -> list[str]:
     except (OSError, UnicodeDecodeError):
         return ["MEMORY.md unreadable"]
 
+    errors: list[str] = []
     seen: dict[str, int] = {}
-    for _, t in body_links(content):
-        if not t.endswith(".md"):
+    bundle = bundle.resolve()
+    for _, target in body_links(content):
+        if not target.split("#", 1)[0].endswith(".md"):
             continue
-        if t.startswith(("http", "https", "#")):
+        try:
+            resolved, _repo = resolve_link(mem, bundle.parent, target)
+        except ValueError:
+            errors.append(f"MEMORY.md: pointer target invalid: {target}")
             continue
-        normalized = t.removeprefix("/memory/")
+        if not resolved.is_relative_to(bundle):
+            continue
+        normalized = resolved.relative_to(bundle).as_posix()
         seen[normalized] = seen.get(normalized, 0) + 1
 
     return [
-        *_pointer_target_errors(bundle, seen),
+        *errors,
+        *_pointer_target_errors(seen),
         *_pointer_coverage_errors(bundle, seen),
     ]
 
