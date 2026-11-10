@@ -5,7 +5,6 @@ from base.lm.harness.bridge import (
     HarnessClosedError,
     HarnessSetupError,
     HarnessTurnFaultedError,
-    ScopedSessionRegistry,
 )
 from base.lm.harness.engine import ForegroundSteering, HarnessSession, HarnessTurn, TurnEngine
 from base.lm.harness.events import (
@@ -65,7 +64,6 @@ __all__ = [
     "ReasoningDelta",
     "ReasoningText",
     "RegistrationStore",
-    "ScopedSessionRegistry",
     "SessionBound",
     "SessionClosed",
     "SessionFailed",

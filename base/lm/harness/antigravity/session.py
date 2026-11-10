@@ -50,6 +50,8 @@ from base.lm.harness.session import SessionTotals, TurnOutcome
 # process does not.
 # meiva:link base/lm/harness/antigravity/docs/antigravity.md
 class AgySession(BaseHarnessSession[AntigravityConfig]):
+    harness = "antigravity"
+
     def __init__(
         self,
         config: AntigravityConfig,

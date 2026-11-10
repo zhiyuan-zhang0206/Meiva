@@ -61,8 +61,8 @@ owned while the provider is quiet. It produces no timeline activity.
 closing on eviction, `drop_agent` or host shutdown. Resumed sessions reuse the id
 in `FileSessionRegistry`.
 
-- `bridge_for` builds the handoff and `ScopedSessionRegistry` (which binds every
-  load/save to `SessionRecord.harness`). The handoff is co-delivered once on the
+- `bridge_for` builds the handoff and gives each adapter the registry, which
+  keeps one record per harness. The handoff is co-delivered once on the
   first turn of a fresh session; `HarnessBridge` tracks delivery per active session
   so later `set_handoff` calls on a warm or resumed session never re-prepend the
   handoff document. `_build_grounded_handoff` also saves the document to

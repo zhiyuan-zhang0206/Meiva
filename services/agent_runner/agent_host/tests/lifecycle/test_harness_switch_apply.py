@@ -72,7 +72,7 @@ def _stored_harness(conn: psycopg.Connection, agent_id: int) -> object:
     return row[0]
 
 
-async def test_a_switch_removes_the_old_session_record_and_is_safe_to_run_twice(
+async def test_a_switch_keeps_the_old_session_record_and_is_safe_to_run_twice(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     event_bus: EventBus,
@@ -97,7 +97,10 @@ async def test_a_switch_removes_the_old_session_record_and_is_safe_to_run_twice(
     )
 
     assert kind == "restart"
-    assert registry.load(owner.agent_id) is None
+    assert registry.load(owner.agent_id, harness="claude_code") == _record(
+        owner.agent_id, "claude_code"
+    )
+    assert registry.load(owner.agent_id, harness="codex") is None
     assert _stored_harness(db_conn, owner.agent_id) == "codex"
     assert await bus_tap.agent_updated_ids() == [owner.agent_id]
 
@@ -108,40 +111,12 @@ async def test_a_switch_removes_the_old_session_record_and_is_safe_to_run_twice(
         aops_pool, owner, bus=event_bus, resume_turn=True, home=tmp_path
     )
     assert again is None
-    assert registry.load(owner.agent_id) is None
+    assert registry.load(owner.agent_id, harness="claude_code") is not None
     notes = db_conn.execute(
         "SELECT count(*) FROM inbound_messages WHERE agent_id=%s AND kind='system_note'",
         (owner.agent_id,),
     ).fetchone()
     assert notes == (1,)
-
-
-async def test_a_retry_after_the_record_was_already_removed_still_commits_the_switch(
-    db_conn: psycopg.Connection,
-    aops_pool: AsyncConnectionPool,
-    event_bus: EventBus,
-    tmp_path: Path,
-    *,
-    database_gate: ProcessDbGate,
-) -> None:
-    owner = await _claimed_self_restart(
-        db_conn,
-        aops_pool,
-        database_gate,
-        stored="meiva",
-        transition=RestartTransition("claude_code", {"llm_model": "claude-opus-5-5"}),
-    )
-    # meiva:note
-    # The first attempt removed the old record and the host died before its commit: the registry
-    # holds nothing, the command is still claimed, and the stored harness has not changed.
-    assert _stored_harness(db_conn, owner.agent_id) == "meiva"
-
-    kind = await apply_lifecycle_command(
-        aops_pool, owner, bus=event_bus, resume_turn=True, home=tmp_path
-    )
-
-    assert kind == "restart"
-    assert _stored_harness(db_conn, owner.agent_id) == "claude_code"
 
 
 async def test_a_restart_that_keeps_the_harness_keeps_the_session(
@@ -199,7 +174,7 @@ async def test_a_malformed_transition_is_refused_before_any_effect(
             aops_pool, owner, bus=event_bus, resume_turn=True, home=tmp_path
         )
 
-    assert registry.load(owner.agent_id) is not None
+    assert registry.load(owner.agent_id, harness="claude_code") is not None
     assert _stored_harness(db_conn, owner.agent_id) == "claude_code"
 
 

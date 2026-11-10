@@ -201,8 +201,8 @@ async def main() -> int:
             "Remember the number 4711. Then use the Read tool to read hello.txt in the "
             "current directory and reply with exactly the third word.",
         )
-        record = registry.load(DEMO_AGENT_ID)
-        print(f"\n[2 mapping] {registry.path(DEMO_AGENT_ID)}")
+        record = registry.load(DEMO_AGENT_ID, harness="claude_code")
+        print(f"\n[2 mapping] {registry.path(DEMO_AGENT_ID, 'claude_code')}")
         print(
             f"[2 mapping] agent {DEMO_AGENT_ID} -> session {record.session_id if record else None} "
             f"(model={record.model if record else None}, resumes={record.resumes if record else None})"

@@ -45,8 +45,9 @@ on the other side with a note carrying its message.
    already ends a native restart. The sequence of `_execute_harness_transition` (switch note, session
    record, force terminate, row update, resurrect) is not repeated: its terminate and resurrect only
    exist to move a row between two states the apply already moves. What does not live in the database
-   stays outside the commit and can run twice: the old harness's session record is removed before it,
-   and the switch note in the outgoing history is written after it.
+   stays outside the commit and can run twice: the switch note in the outgoing history is written after
+   it. (The first version also removed the old harness's session record before the commit; that is
+   superseded by [a switch keeps session records](2026-11-12-harness-switch-keeps-session-records.md).)
 5. **What the caller sees.** The native harness ends its execution as before. An external harness
    cannot be stopped from the SDK (its CLI owns the turn), so the call returns a receipt, "applied
    after the current turn ends, not now ... end the turn", and the turn goes on until it ends on its

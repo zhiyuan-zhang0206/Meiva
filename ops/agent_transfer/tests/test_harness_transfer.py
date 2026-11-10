@@ -11,6 +11,7 @@ import sqlite3
 from pathlib import Path
 
 from base import paths
+from base.lm.harness.registry import FileSessionRegistry
 from ops.agent_transfer.archive_io import pack_workspace, stage_and_activate_workspace
 from ops.agent_transfer.budget import WorkspaceTransferLimits
 from ops.agent_transfer.harness_transfer import (
@@ -46,7 +47,7 @@ def test_claude_code_transfer_collect_and_apply(tmp_path: Path) -> None:
     src_cwd = str(paths.workspace_path(src_home, agent_id))
     dst_cwd = str(paths.workspace_path(dst_home, agent_id))
 
-    session_file = paths.harness_sessions_dir(home=src_home) / f"{agent_id}.json"
+    session_file = paths.harness_sessions_dir(home=src_home) / f"{agent_id}.claude_code.json"
     session_file.parent.mkdir(parents=True, exist_ok=True)
     session_file.write_text(
         json.dumps(
@@ -84,7 +85,7 @@ def test_claude_code_transfer_collect_and_apply(tmp_path: Path) -> None:
         home=dst_home, payload=payload, to_machine="dst_runner", user_home=dst_user
     )
 
-    dst_session_file = paths.harness_sessions_dir(home=dst_home) / f"{agent_id}.json"
+    dst_session_file = paths.harness_sessions_dir(home=dst_home) / f"{agent_id}.claude_code.json"
     assert dst_session_file.is_file()
     dst_record = json.loads(dst_session_file.read_text(encoding="utf-8"))
     assert dst_record["cwd"] == dst_cwd
@@ -111,7 +112,7 @@ def test_antigravity_transfer_collect_and_apply(tmp_path: Path) -> None:
     src_cwd = str(paths.workspace_path(src_home, agent_id))
     dst_cwd = str(paths.workspace_path(dst_home, agent_id))
 
-    session_file = paths.harness_sessions_dir(home=src_home) / f"{agent_id}.json"
+    session_file = paths.harness_sessions_dir(home=src_home) / f"{agent_id}.antigravity.json"
     session_file.parent.mkdir(parents=True, exist_ok=True)
     session_file.write_text(
         json.dumps(
@@ -156,7 +157,7 @@ def test_antigravity_transfer_collect_and_apply(tmp_path: Path) -> None:
         home=dst_home, payload=payload, to_machine="dst_runner", user_home=dst_user
     )
 
-    dst_session_file = paths.harness_sessions_dir(home=dst_home) / f"{agent_id}.json"
+    dst_session_file = paths.harness_sessions_dir(home=dst_home) / f"{agent_id}.antigravity.json"
     assert dst_session_file.is_file()
     dst_record = json.loads(dst_session_file.read_text(encoding="utf-8"))
     assert dst_record["cwd"] == dst_cwd
@@ -193,7 +194,7 @@ def test_codex_transfer_collect_and_apply(tmp_path: Path) -> None:
     src_cwd = str(paths.workspace_path(src_home, agent_id))
     dst_cwd = str(paths.workspace_path(dst_home, agent_id))
 
-    session_file = paths.harness_sessions_dir(home=src_home) / f"{agent_id}.json"
+    session_file = paths.harness_sessions_dir(home=src_home) / f"{agent_id}.codex.json"
     session_file.parent.mkdir(parents=True, exist_ok=True)
     session_file.write_text(
         json.dumps(
@@ -253,7 +254,7 @@ def test_codex_transfer_collect_and_apply(tmp_path: Path) -> None:
         home=dst_home, payload=payload, to_machine="dst_runner", user_home=dst_user
     )
 
-    dst_session_file = paths.harness_sessions_dir(home=dst_home) / f"{agent_id}.json"
+    dst_session_file = paths.harness_sessions_dir(home=dst_home) / f"{agent_id}.codex.json"
     assert dst_session_file.is_file()
     dst_record = json.loads(dst_session_file.read_text(encoding="utf-8"))
     assert dst_record["cwd"] == dst_cwd
@@ -291,7 +292,7 @@ def test_bundle_pack_and_activate_with_harness_transfer(tmp_path: Path) -> None:
     src_ws.mkdir(parents=True)
     (src_ws / "code.py").write_text("print('hello')\n", encoding="utf-8")
 
-    session_file = paths.harness_sessions_dir(home=src_home) / f"{agent_id}.json"
+    session_file = paths.harness_sessions_dir(home=src_home) / f"{agent_id}.claude_code.json"
     session_file.parent.mkdir(parents=True, exist_ok=True)
     session_file.write_text(
         json.dumps(
@@ -349,7 +350,7 @@ def test_bundle_pack_and_activate_with_harness_transfer(tmp_path: Path) -> None:
     dst_ws = paths.workspace_path(dst_home, agent_id)
     assert (dst_ws / "code.py").read_text(encoding="utf-8") == "print('hello')\n"
 
-    dst_session = paths.harness_sessions_dir(home=dst_home) / f"{agent_id}.json"
+    dst_session = paths.harness_sessions_dir(home=dst_home) / f"{agent_id}.claude_code.json"
     assert dst_session.is_file()
     record = json.loads(dst_session.read_text(encoding="utf-8"))
     assert record["cwd"] == str(dst_ws)
@@ -363,4 +364,4 @@ def test_bundle_pack_and_activate_with_harness_transfer(tmp_path: Path) -> None:
         local_machine="box-a",
         home=src_home,
     )
-    assert not (paths.harness_sessions_dir(home=src_home) / f"{agent_id}.json").exists()
+    assert FileSessionRegistry(paths.harness_sessions_dir(home=src_home)).records(agent_id) == []

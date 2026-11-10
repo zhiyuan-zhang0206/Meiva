@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from base.lm.harness import ClusterFact, EntryPoint, FileSessionRegistry, Handoff
+from base.lm.harness import ClusterFact, EntryPoint, FileSessionRegistry, Handoff, SessionRecord
 from base.lm.harness.claude.config import DEFAULT_MODEL
 from base.lm.harness.claude.session import SessionClosedError
 from base.lm.harness.claude.tests import fake_sdk as fake
@@ -130,7 +130,7 @@ async def test_start_binds_the_agent_id_to_the_session(tmp_path: Path) -> None:
         assert bound.agent_id == 6984
         assert bound.session_id == "sess-a"
         assert bound.resumed is False
-        record = registry.load(6984)
+        record = registry.load(6984, harness="claude_code")
         assert record is not None
         assert record.session_id == "sess-a"
         assert record.model == DEFAULT_MODEL
@@ -157,11 +157,41 @@ async def test_second_session_resumes_from_the_registry(tmp_path: Path) -> None:
             lambda event: isinstance(event, SessionBound) and event.resumed
         )
         assert bound.session_id == "sess-first"
-        record = registry.load(7001)
+        record = registry.load(7001, harness="claude_code")
         assert record is not None
         assert record.resumes == 1
     finally:
         await second.stop()
+
+
+async def test_a_session_resumes_its_own_record_after_another_harness_used_the_agent(
+    tmp_path: Path,
+) -> None:
+    registry = FileSessionRegistry(tmp_path / "sessions")
+    first = await start(tmp_path, agent_id=7003, registry=registry, session_id="claude-old")
+    try:
+        await first.wait_for(lambda event: isinstance(event, SessionBound))
+    finally:
+        await first.stop()
+    registry.save(
+        SessionRecord(
+            agent_id=7003,
+            session_id="codex-thread",
+            cwd=str(tmp_path),
+            model="",
+            created_at="2026-11-01T00:00:00+00:00",
+            updated_at="2026-11-02T00:00:00+00:00",
+            harness="codex",
+        )
+    )
+
+    again = await start(tmp_path, agent_id=7003, registry=registry)
+    try:
+        assert again.client.options.resume == "claude-old"
+    finally:
+        await again.stop()
+    kept = registry.load(7003, harness="codex")
+    assert kept is not None and kept.session_id == "codex-thread"
 
 
 async def test_handoff_is_injected_as_the_first_turn(tmp_path: Path) -> None:

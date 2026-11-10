@@ -25,10 +25,8 @@ from base.lm.harness import (
     HarnessSetupError,
     HarnessTurnFaultedError,
     RegistrationStore,
-    ScopedSessionRegistry,
     SessionFailed,
     SessionFaulted,
-    SessionRecord,
     SessionStarted,
     TurnCompleted,
     TurnFaulted,
@@ -556,60 +554,10 @@ def test_an_antigravity_session_is_built_with_the_skip_flag_it_was_given() -> No
     assert plain.config.skip_permissions is False
 
 
-def record(harness: str = "meiva") -> SessionRecord:
-    return SessionRecord(
-        agent_id=6984,
-        session_id="session-1",
-        cwd="/w",
-        model="claude-sonnet-5-5",
-        created_at="2026-10-19T08:00:00+00:00",
-        updated_at="2026-10-19T08:00:00+00:00",
-        harness=harness,
-    )
-
-
-class RecordingRegistry:
-    def __init__(self, root: Path, saved: list[SessionRecord]) -> None:
-        self._inner = FileSessionRegistry(root)
-        self.saved = saved
-
-    def load(self, agent_id: int, *, harness: str | None = None) -> SessionRecord | None:
-        return self._inner.load(agent_id, harness=harness)
-
-    def save(self, record: SessionRecord) -> None:
-        self.saved.append(record)
-
-    def delete(self, agent_id: int) -> bool:
-        return self._inner.delete(agent_id)
-
-
-def test_the_scope_stamps_every_save() -> None:
-    saved: list[SessionRecord] = []
-    scoped = ScopedSessionRegistry(
-        inner=RecordingRegistry(Path("/nonexistent"), saved), harness=Harness.CODEX
-    )
-
-    scoped.save(record(harness="meiva"))
-
-    assert saved[0].harness == "codex", "a save through the scope always names the scope"
-
-
-def test_the_scope_binds_every_load(tmp_path: Path) -> None:
-    inner = FileSessionRegistry(tmp_path / "sessions")
-    inner.save(replace(record(), harness="claude_code"))
-    scoped = ScopedSessionRegistry(inner=inner, harness=Harness.CLAUDE_CODE)
-
-    assert scoped.load(6984) is not None
-    with pytest.raises(ValueError, match="refusing to resume across harnesses"):
-        ScopedSessionRegistry(inner=inner, harness=Harness.CODEX).load(6984)
-
-
-def test_the_scope_refuses_an_explicit_other_harness() -> None:
-    scoped = ScopedSessionRegistry(
-        inner=FileSessionRegistry(Path("/nonexistent")), harness=Harness.CLAUDE_CODE
-    )
-    with pytest.raises(ValueError, match="scoped to harness"):
-        scoped.load(6984, harness="codex")
+def test_each_adapter_names_the_harness_it_keeps_records_for() -> None:
+    assert ClaudeSession.harness == Harness.CLAUDE_CODE.value
+    assert CodexSession.harness == Harness.CODEX.value
+    assert AgySession.harness == Harness.ANTIGRAVITY.value
 
 
 def test_a_session_registers_its_handle_digest_and_retires_the_line(tmp_path: Path) -> None:

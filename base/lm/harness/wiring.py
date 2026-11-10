@@ -21,7 +21,7 @@ from base.lm.harness.antigravity import (
 )
 from base.lm.harness.antigravity import build_handoff as antigravity_handoff
 from base.lm.harness.base_session import SessionBinding, SessionClock
-from base.lm.harness.bridge import HarnessBridge, HarnessSession, ScopedSessionRegistry
+from base.lm.harness.bridge import HarnessBridge, HarnessSession
 from base.lm.harness.claude import BridgeConfig
 from base.lm.harness.claude.session import ClaudeSession
 from base.lm.harness.codex import CodexConfig
@@ -207,7 +207,6 @@ def bridge_for(
 ) -> HarnessBridge | None:
     if harness is Harness.MEIVA:
         return None
-    scoped = ScopedSessionRegistry(inner=registry, harness=harness)
     handoff = _handoff_for(
         harness,
         agent_id=agent_id,
@@ -221,7 +220,7 @@ def bridge_for(
             harness,
             agent_id=agent_id,
             cwd=workspace,
-            registry=scoped,
+            registry=registry,
             environ={**session_environ(environ), HANDLE_ENV: handle},
             clock=root.clock,
             model=model,

@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import base64
 from collections.abc import Callable
-from dataclasses import dataclass, replace
+from dataclasses import replace
 from datetime import timedelta
 
 from base.api_contracts.agent_contract import Harness
@@ -43,7 +43,6 @@ from base.lm.harness.registration import (
     SecureRandom,
     handle_digest,
 )
-from base.lm.harness.registry import SessionRecord, SessionRegistry
 from base.log import logger
 
 
@@ -65,31 +64,6 @@ class HarnessClosedError(RuntimeError):
 # meiva:link base/lm/harness/docs/harness.md
 class HarnessSetupError(RuntimeError):
     pass
-
-
-@dataclass(frozen=True)
-class ScopedSessionRegistry:
-    # meiva:note
-    # The registry as one harness sees it: every load is that harness's, every save names
-    # it. An adapter takes a registry and would otherwise have to remember which harness it
-    # is; the scope makes the answer structural, and a record written by another harness is
-    # refused at load instead of resuming a transcript the provider cannot read.
-    # meiva:link base/lm/harness/docs/harness.md
-    inner: SessionRegistry
-    harness: Harness
-
-    def load(self, agent_id: int, *, harness: str | None = None) -> SessionRecord | None:
-        if harness is not None and harness != self.harness.value:
-            raise ValueError(
-                f"this registry is scoped to harness {self.harness.value!r}, not {harness!r}"
-            )
-        return self.inner.load(agent_id, harness=self.harness.value)
-
-    def save(self, record: SessionRecord) -> None:
-        self.inner.save(replace(record, harness=self.harness.value))
-
-    def delete(self, agent_id: int) -> bool:
-        return self.inner.delete(agent_id)
 
 
 class HarnessBridge:

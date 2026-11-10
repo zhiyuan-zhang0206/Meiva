@@ -85,6 +85,7 @@ from cli.commands.converge.steps import (
     ensure_meiva_home_dirs,
     ensure_meiva_on_path,
     ensure_pg_binaries_step,
+    migrate_harness_session_records,
 )
 from cli.commands.converge.telemetry_token import ensure_telemetry_token_step
 from cli.commands.converge.walg import converge_walg
@@ -405,6 +406,11 @@ CONVERGE_STEPS: tuple[ConvergeStep, ...] = (
     # skeleton that could not be laid out (a `logs` symlink pointing out of it, a read-only
     # home) would send those writes somewhere else instead of failing.
     ConvergeStep("$MEIVA_HOME dir skeleton", ensure_meiva_home_dirs, on_failure="stop"),
+    # meiva:note
+    # Session records are host-local files, so the migration to one record per harness runs here
+    # on every host, before any runner of this converge starts.
+    # meiva:link base/lm/harness/docs/session-identity.md
+    ConvergeStep("harness session records layout", migrate_harness_session_records),
     # meiva:note
     # External agent CLIs own their global homes: this prod-only host step
     # contributes exactly Meiva's two skills, and only to the clients registered in

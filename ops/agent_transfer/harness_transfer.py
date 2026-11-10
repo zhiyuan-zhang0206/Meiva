@@ -7,16 +7,17 @@
 from __future__ import annotations
 
 import base64
-import json
 import logging
 import os
 import re
 import sqlite3
+from dataclasses import asdict
 from pathlib import Path
 
 from base import paths
 from base.host.boundary.json_values import is_object_dict, is_object_list
 from base.host.boundary.untyped import object_of
+from base.lm.harness.registry import FileSessionRegistry, record_from_payload
 from ops.rpc_schemas.transfer import HarnessTransferFile, HarnessTransferPayload
 
 _log = logging.getLogger(__name__)
@@ -242,8 +243,8 @@ def _collect_codex_files(
 
 
 # meiva:note
-# Collect an external harness session record ($MEIVA_HOME/harness/sessions/{agent_id}.json)
-# and its underlying transcript files from the user's home directory into an immutable
+# Collect the most recently used external harness session record of the agent
+# ($MEIVA_HOME/harness/sessions/{agent_id}.{harness}.json) and its underlying transcript files from the user's home directory into an immutable
 # `HarnessTransferPayload` for inclusion in the workspace transfer bundle.
 def collect_harness_transfer(
     *,
@@ -251,23 +252,18 @@ def collect_harness_transfer(
     agent_id: int,
     user_home: Path | None = None,
 ) -> HarnessTransferPayload | None:
-    session_file = paths.harness_sessions_dir(home=home) / f"{agent_id}.json"
-    if not session_file.is_file():
-        return None
-
     try:
-        raw_record = object_of(json.loads, session_file.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        _log.warning("failed to read session record at %s", session_file, exc_info=True)
+        latest = FileSessionRegistry(paths.harness_sessions_dir(home=home)).latest(agent_id)
+    except (OSError, ValueError, TypeError):
+        _log.warning("failed to read session records of agent %s", agent_id, exc_info=True)
+        return None
+    if latest is None:
         return None
 
-    if not is_object_dict(raw_record):
-        return None
-
-    session_record: dict[str, object] = dict(raw_record)
+    session_record: dict[str, object] = dict(asdict(latest))
     session_record["agent_id"] = agent_id
 
-    harness = str(session_record.get("harness") or "meiva")
+    harness = latest.harness
     session_id = str(session_record.get("session_id") or "")
     from_cwd = str(session_record.get("cwd") or str(paths.workspace_path(home, agent_id)))
 
@@ -540,6 +536,6 @@ def apply_harness_transfer(
     record = dict(payload.session_record)
     record["agent_id"] = effective_agent_id
     record["cwd"] = to_cwd
-    record_file = paths.harness_sessions_dir(home=home) / f"{effective_agent_id}.json"
-    record_file.parent.mkdir(parents=True, exist_ok=True)
-    _ = record_file.write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8")
+    FileSessionRegistry(paths.harness_sessions_dir(home=home)).save(
+        record_from_payload(record, source="the transfer bundle")
+    )

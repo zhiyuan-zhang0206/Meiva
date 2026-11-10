@@ -9,14 +9,11 @@ from agent.ownership.corpse_reap import ReapedCorpse, reap_crash_corpses
 from agent.ownership.hosted import (
     LifecycleKind,
     apply_hosted_lifecycle,
-    claimed_harness_switch_target,
 )
-from base import paths
 from base.agents.lifecycle import release_browser_pages
 from base.db.protocols import AsyncPool
 from base.events.live.announce import publish_agent_updated
 from base.events.live.bus import EventBus
-from base.lm.harness.registry import FileSessionRegistry
 from base.log import logger
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from services.agent_runner.agent_host.lifecycle.cleanup_failures import (
@@ -96,10 +93,7 @@ async def finish_termination(
 
 # meiva:note
 # Apply the claimed restart/terminate command and run what its commit owes. A terminate owes
-# `finish_termination`. A restart that stored a new harness owes the old harness's session record
-# gone before the commit (the new harness must not resume another harness's session; the record
-# stays until the apply commits, and deleting it again on a retry is harmless), and afterwards the
-# change hint and, when `history` is given, the switch note in the history the agent left.
+# `finish_termination`. A restart that stored a new harness owes, afterwards, the change hint and, when `history` is given, the switch note in the history the agent left.
 # Returns the applied kind, or None when the incarnation no longer owns the row or no command was
 # claimed.
 async def apply_lifecycle_command(
@@ -111,11 +105,6 @@ async def apply_lifecycle_command(
     home: Path,
     history: SwitchHistory | None = None,
 ) -> LifecycleKind | None:
-    if await claimed_harness_switch_target(pool, incarnation) is not None:
-        await asyncio.to_thread(
-            FileSessionRegistry(paths.harness_sessions_dir(home=home)).delete,
-            incarnation.agent_id,
-        )
     applied = await apply_hosted_lifecycle(pool, incarnation, resume_turn=resume_turn)
     if applied is None:
         return None

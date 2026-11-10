@@ -67,6 +67,7 @@ async def test_a_resumed_session_does_not_reinject(tmp_path: Path) -> None:
             model="gemini-4-argon-high",
             created_at="2026-01-01T00:00:00+00:00",
             updated_at="2026-01-01T00:00:00+00:00",
+            harness="antigravity",
         )
     )
     harness = await start(
