@@ -28,12 +28,53 @@ from base.lm.harness.cancel import (
 )
 from base.lm.harness.process import ChildProbe, PsutilChildProbe, WaitClock, snapshot, wait_gone
 
+READ_CHUNK_BYTES = 65536
+
 # meiva:note
-# A single NDJSON line can carry a whole tool result; the 64 KiB StreamReader
-# default would truncate the stream instead of the line.
-READER_LIMIT_BYTES = 8 * 1024 * 1024
+# A single NDJSON line can carry a large tool result or accumulated turn state;
+# chunked 64 KiB reads assemble lines without `StreamReader.readline()`'s 8 MiB
+# separator limit while capping one frame at 256 MiB so an unterminated stream
+# from a wedged child cannot grow memory without bound.
+# meiva:link base/lm/harness/antigravity/docs/antigravity.md
+MAX_FRAME_BYTES = 256 * 1024 * 1024
 CANCEL_POLL_SECONDS = 0.02
 STDERR_TAIL_LINES = 40
+
+
+async def _iter_lines(
+    stream: asyncio.StreamReader, *, max_frame_bytes: int
+) -> AsyncIterator[bytes]:
+    buffer = bytearray()
+    while True:
+        chunk = await stream.read(READ_CHUNK_BYTES)
+        if not chunk:
+            if buffer:
+                yield bytes(buffer)
+            return
+        if b"\n" not in chunk:
+            if len(buffer) + len(chunk) > max_frame_bytes:
+                raise ValueError(f"stream line exceeded {max_frame_bytes} bytes")
+            buffer.extend(chunk)
+            continue
+        parts = chunk.split(b"\n")
+        if len(buffer) + len(parts[0]) > max_frame_bytes:
+            raise ValueError(f"stream line exceeded {max_frame_bytes} bytes")
+        if buffer:
+            buffer.extend(parts[0])
+            first = bytes(buffer)
+            buffer = bytearray()
+        else:
+            first = parts[0]
+        yield first
+        for middle in parts[1:-1]:
+            if len(middle) > max_frame_bytes:
+                raise ValueError(f"stream line exceeded {max_frame_bytes} bytes")
+            yield middle
+        tail = parts[-1]
+        if len(tail) > max_frame_bytes:
+            raise ValueError(f"stream line exceeded {max_frame_bytes} bytes")
+        if tail:
+            buffer.extend(tail)
 
 
 class TransportClosedError(RuntimeError):
@@ -90,9 +131,11 @@ class AgyTransport:
         probe: ChildProbe | None = None,
         reap: Reaper | None = None,
         clock: WaitClock,
+        max_frame_bytes: int = MAX_FRAME_BYTES,
     ) -> None:
         self._config = config
         self._clock = clock
+        self._max_frame_bytes = max_frame_bytes
         self._reap: Reaper = reap or kill_orphans
         self._environ = dict(environ) if environ else None
         csrf_seed = (
@@ -155,7 +198,7 @@ class AgyTransport:
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
-            limit=READER_LIMIT_BYTES,
+            limit=READ_CHUNK_BYTES,
             start_new_session=True,
         )
         self._process = process
@@ -319,45 +362,36 @@ class AgyTransport:
 
     async def _pump_stdout(self, stream: asyncio.StreamReader) -> None:
         try:
-            while True:
-                try:
-                    line = await stream.readline()
-                except ValueError:
-                    self._stderr.append("stdout line exceeded the reader limit")
-                    break
-                if not line:
-                    break
-                text = line.decode("utf-8", "replace").strip()
-                if not text:
-                    continue
-                try:
-                    event = object_of(json.loads, text)
-                except json.JSONDecodeError:
-                    self._stderr.append(f"unparsed stdout: {text[:200]}")
-                    continue
-                if not is_object_dict(event):
-                    continue
-                if event.get("event") == "init":
-                    session_id = event.get("conversation_id")
-                    if isinstance(session_id, str) and session_id:
-                        self._conversation_id = session_id
-                        self._init_ready.set()
-                await self._queue.put(event)
+            try:
+                async for line in _iter_lines(stream, max_frame_bytes=self._max_frame_bytes):
+                    text = line.decode("utf-8", "replace").strip()
+                    if not text:
+                        continue
+                    try:
+                        event = object_of(json.loads, text)
+                    except json.JSONDecodeError:
+                        self._stderr.append(f"unparsed stdout: {text[:200]}")
+                        continue
+                    if not is_object_dict(event):
+                        continue
+                    if event.get("event") == "init":
+                        session_id = event.get("conversation_id")
+                        if isinstance(session_id, str) and session_id:
+                            self._conversation_id = session_id
+                            self._init_ready.set()
+                    await self._queue.put(event)
+            except ValueError:
+                self._stderr.append("stdout line exceeded the reader limit")
         finally:
             self._init_ready.set()
             await self._queue.put(None)
 
     async def _pump_stderr(self, stream: asyncio.StreamReader) -> None:
-        while True:
-            try:
-                line = await stream.readline()
-            except ValueError:
-                break
-            if not line:
-                return
-            text = line.decode("utf-8", "replace").rstrip()
-            if text:
-                self._stderr.append(text)
+        with contextlib.suppress(ValueError):
+            async for line in _iter_lines(stream, max_frame_bytes=self._max_frame_bytes):
+                text = line.decode("utf-8", "replace").rstrip()
+                if text:
+                    self._stderr.append(text)
 
     def _require_process(self) -> asyncio.subprocess.Process:
         if self._process is None:

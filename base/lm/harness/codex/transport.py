@@ -4,7 +4,7 @@ import asyncio
 import contextlib
 import inspect
 import os
-from collections.abc import Awaitable, Coroutine, Mapping, Sequence
+from collections.abc import AsyncIterator, Awaitable, Coroutine, Mapping, Sequence
 from typing import Protocol
 
 from base.lm.harness.codex.frames import (
@@ -24,12 +24,52 @@ from base.lm.harness.codex.frames import (
     request_frame,
 )
 
+READ_CHUNK_BYTES = 65536
+
 # meiva:note
-# One app-server payload can be a full command output or an item list, so the
-# reader's line limit is far above asyncio's 64 KiB default: a longer line would
-# raise ValueError inside readline() and kill the session stream.
+# `thread/resume` returns a long-lived agent's accumulated thread history on one
+# newline-delimited stdout line (39.4 MiB observed on agent #6111), which exceeds
+# an 8 MiB `StreamReader.readline()` limit. `_read_loop` reads 64 KiB chunks into a
+# `bytearray` and splits on `\n`, with a 256 MiB per-frame cap so an unterminated
+# stream from a wedged child cannot grow memory without bound.
 # meiva:link base/lm/harness/codex/docs/codex.md
-STREAM_LIMIT_BYTES = 8 * 1024 * 1024
+MAX_FRAME_BYTES = 256 * 1024 * 1024
+
+
+async def _iter_frames(
+    stream: asyncio.StreamReader, *, max_frame_bytes: int
+) -> AsyncIterator[bytes]:
+    buffer = bytearray()
+    while True:
+        chunk = await stream.read(READ_CHUNK_BYTES)
+        if not chunk:
+            if buffer:
+                yield bytes(buffer)
+            return
+        if b"\n" not in chunk:
+            if len(buffer) + len(chunk) > max_frame_bytes:
+                raise ValueError(f"stdout frame exceeded {max_frame_bytes} bytes")
+            buffer.extend(chunk)
+            continue
+        parts = chunk.split(b"\n")
+        if len(buffer) + len(parts[0]) > max_frame_bytes:
+            raise ValueError(f"stdout frame exceeded {max_frame_bytes} bytes")
+        if buffer:
+            buffer.extend(parts[0])
+            first = bytes(buffer)
+            buffer = bytearray()
+        else:
+            first = parts[0]
+        yield first
+        for middle in parts[1:-1]:
+            if len(middle) > max_frame_bytes:
+                raise ValueError(f"stdout frame exceeded {max_frame_bytes} bytes")
+            yield middle
+        tail = parts[-1]
+        if len(tail) > max_frame_bytes:
+            raise ValueError(f"stdout frame exceeded {max_frame_bytes} bytes")
+        if tail:
+            buffer.extend(tail)
 
 
 class AppServerTransport(Protocol):
@@ -76,12 +116,14 @@ class StdioAppServer:
         environ: Mapping[str, str],
         request_timeout: float = 120.0,
         stderr: int | None = None,
+        max_frame_bytes: int = MAX_FRAME_BYTES,
     ) -> None:
         self._command = tuple(command)
         self._cwd = str(cwd)
         self._environ = dict(environ)
         self._request_timeout = request_timeout
         self._stderr = stderr
+        self._max_frame_bytes = max_frame_bytes
         self._process: asyncio.subprocess.Process | None = None
         self._tasks = asyncio.TaskGroup()
         self._children: set[asyncio.Task[None]] = set()
@@ -130,7 +172,7 @@ class StdioAppServer:
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=self._stderr,
-            limit=STREAM_LIMIT_BYTES,
+            limit=READ_CHUNK_BYTES,
         )
         await self._tasks.__aenter__()
         self._tasks_entered = True
@@ -205,10 +247,7 @@ class StdioAppServer:
             raise RuntimeError("read loop started before the process")
         stdout = self._process.stdout
         try:
-            while True:
-                line = await stdout.readline()
-                if not line:
-                    break
+            async for line in _iter_frames(stdout, max_frame_bytes=self._max_frame_bytes):
                 match classify(line):
                     case ServerRequest() as request:
                         await self._serve(request)

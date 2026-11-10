@@ -17,6 +17,7 @@ from base.api_contracts.agent_contract import ShellSessionKillTiming
 from base.config import settings
 from base.db import Database, create_agent
 from base.events.live.bus import EventBus
+from base.lm.catalog import ModelCatalog
 from base.sessions.backend import PtySessionBackend
 from base.sessions.pty.client import PtyClientConfig
 from base.sessions.pty.tests.pty_reaper import PtyReaper
@@ -28,7 +29,7 @@ from base.telemetry.tests.capture.event_capture import emitted_events as emitted
 from ops.lifecycle import termination
 from ops.lifecycle.tests.loopback.agent_host import ServedAgentHost, serve_agent_host
 from ops.lifecycle.tests.termination_faults import reject_chat, reject_pair_after_insert
-from ops.rpc_schemas import TerminateAgentRequest
+from ops.rpc_schemas import RestartAgentRequest, TerminateAgentRequest
 
 
 @pytest.fixture
@@ -528,6 +529,69 @@ async def test_kill_terminates_only_the_owners_real_shell_sessions(
     assert _pid_alive(page.pid) and _pid_alive(foreign.pid)
     assert all(_pid_alive(opened.pid) for opened in late)
     assert not marker.exists()
+
+
+@pytest.mark.parametrize(
+    ("old_harness", "overlay"),
+    [
+        ("codex", None),
+        ("codex", {"harness": "codex"}),
+        ("meiva", {"harness": "codex"}),
+        ("codex", {"harness": "meiva", "llm_model": "deepseek-flash"}),
+    ],
+)
+async def test_harness_restart_preserves_shell_sessions(
+    db_conn: psycopg.Connection,
+    db_pool: ConnectionPool,
+    unit_home: Path,
+    shells: Shells,
+    agent_host: ServedAgentHost,
+    database: Database,
+    event_bus: EventBus,
+    emitted_events: EmittedEvents,
+    model_catalog: ModelCatalog,
+    old_harness: str,
+    overlay: dict[str, object] | None,
+) -> None:
+    from ops import lifecycle
+
+    agent_id = create_agent(db_conn)
+    db_conn.execute(
+        "INSERT INTO agents_meta (id,status,machine,harness,session_index) "
+        "VALUES (%s,'idling','test-machine',%s,2)",
+        (agent_id, old_harness),
+    )
+    db_conn.commit()
+    shell = shells.open(agent_id, 0)
+    watcher = shells.open(agent_id, 1, suffix="-watcher")
+
+    resp = await lifecycle.restart_agent_op(
+        database,
+        event_bus,
+        agent_id,
+        RestartAgentRequest(
+            source="user", message="restart without killing shells", config_overlay=overlay
+        ),
+        db_pool,
+        host=agent_host.host,
+        catalog=model_catalog,
+        default_model=settings.lm.llm_model,
+        home=unit_home,
+    )
+
+    assert resp.status == "enqueued"
+    assert shells.alive() == {shell.name, watcher.name}
+    assert _pid_alive(shell.pid, timeout=0.1) and _pid_alive(watcher.pid, timeout=0.1)
+    payloads = _terminate_payloads(db_conn, agent_id)
+    assert all(
+        not isinstance(payload, dict) or "kill_all_shell_sessions" not in payload
+        for payload in payloads
+    )
+    assert all(
+        "kill_all_shell_sessions" not in event.attributes
+        for event in emitted_events
+        if event.event_name == "terminate"
+    )
 
 
 def _wait_child(pid: int, timeout: float = 15.0) -> int:

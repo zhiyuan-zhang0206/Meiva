@@ -34,7 +34,7 @@ directly: the uniform surface is this adapter, not a shared wire protocol.
 | Module | Owns |
 |---|---|
 | `session.py` | `CodexSession`, the shell: start / resume / close, ordered inbound queue, one event stream, approvals, interrupt, totals |
-| `transport.py` | `StdioAppServer`, the shell of the child's pipes: spawn, write a line, read a line, correlate a reply |
+| `transport.py` | `StdioAppServer`, the shell of the child's pipes: spawn, write a line, read newline-delimited frames in 64 KiB chunks, correlate a reply |
 | `frames.py` | the JSON-RPC wire: frames, the compact one-line encoding, what an inbound line is (`classify`), the reply-to-result rule, the two errors |
 | `requests.py` | what the session sends (`initialize`, `thread/*`, `turn/start`, `turn/steer`, `turn/interrupt`) and the frame it answers a server request with |
 | `turns.py` | what a message means and what a settled turn is: `inbound`, `item`, `binding`, `error_report`, `unclaimed_text`, `TurnRecord`, `settle` |
@@ -80,6 +80,7 @@ caller opts into it.
 | `max_pending_turns` | 32 | overflow returns the message to its durable owner instead of growing memory |
 | `max_buffered_events` | 256 | text deltas are droppable past this; control events are bounded by tool-call count |
 | `dedupe_window` | 256 | a redelivery inside the window replays the recorded outcome |
+| `MAX_FRAME_BYTES` (`transport.py`) | `256 MiB` | `thread/resume` returns a long-lived agent's entire accumulated thread JSON on a single stdout line (39.4 MiB observed on agent #6111); `StdioAppServer` reads 64 KiB chunks into a `bytearray` without `StreamReader.readline()`'s separator limit while capping one frame at 256 MiB so an unterminated stream from a wedged child cannot grow memory without bound |
 
 ## Foreground input
 
