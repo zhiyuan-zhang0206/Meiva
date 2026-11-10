@@ -19,7 +19,7 @@ All index-rebuild / validation / refresh operations are wrapped in scripts under
 - `python ../scripts/consolidate.py -m "..."` — remote-backed single-box wrapper: rebuild indexes, stage, commit, push, refresh
 - `python ../scripts/steward.py -m "..."` — per-machine branch wrapper: rebuild indexes, stage, commit, push, create PR
 - `python ../scripts/arbiter_merge.py` — inspect/merge open PRs whose `validate` check is green + refresh (`--apply` to merge; exit 1 = alert)
-- `meiva memory refresh` — fast-forward the gateway checkout to `origin/main` and trigger semantic index re-embedding
+- `meiva memory refresh` — fast-forward the gateway checkout to its configured branch; semantic indexing follows on the next indexer patrol
 
 **Worktree + PR discipline (remote-backed multi-host pools):** Never commit
 directly on the shared checkout's `main` (`~/.meiva/vault` pre-commit hook refuses
@@ -119,8 +119,9 @@ Every full consolidation executes four phases in order inside the target worktre
   superseded timeline entries or broken pointers.
 - Run `rebuild_memory_index.py` + `validate.py`, commit and
   land via PR (or local commit on a keep-local single box), clean up any temporary
-  worktree, and run `meiva memory refresh` to synchronize the gateway checkout and
-  semantic search index.
+  worktree, and run `meiva memory refresh` to synchronize the gateway checkout.
+  The semantic search index catches up on the next indexer patrol; verify search
+  after that pass.
 
 Source syntax and validation follow [Vault paths and source references](../SKILL.md#vault-paths-and-source-references).
 

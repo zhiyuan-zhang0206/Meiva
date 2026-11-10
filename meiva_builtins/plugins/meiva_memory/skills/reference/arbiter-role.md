@@ -42,7 +42,7 @@ The consolidation pipeline fires on **any** of these triggers — the principle 
 trigger only costs a cheap commit**.
 
 1. **Scheduled** (daily `04:00` via built-in schedule `memory-arbiter`, `schedules/memory-steward-schedule.py`):
-   the Arbiter runs the full four-phase **Meiva Dream** consolidation inside an isolated git worktree, opens and squash-merges the PR once `validate` is green, merges qualifying review PRs, and refreshes the gateway search index.
+   the Arbiter runs the full four-phase **Meiva Dream** consolidation inside an isolated git worktree, opens and squash-merges the PR once `validate` is green, merges qualifying review PRs, and refreshes the gateway checkout for the next indexer patrol.
 2. **High-frequency watch** (per-machine Steward, resident or polled every
    1–5 minutes): if
    - more than **10 memory files** changed since the last sync, **or**
@@ -146,10 +146,11 @@ cd "$W"
    - Merge any remaining open review PRs whose `validate` check is green and whose
      author is not the merger, writing the collector snapshot (each face's HEAD +
      dirty count) into the PR body first.
-   - **Refresh the index after the merge**: `meiva memory refresh` (or via
+   - **Refresh the gateway checkout after the merge**: `meiva memory refresh` (or via
      `scripts/arbiter_merge.py --apply`, which bundles the refresh). Without this
      step the gateway checkout — and therefore semantic search — stays at the last
-     refreshed snapshot while `main` keeps moving. The CLI exits non-zero when the
+     refreshed snapshot while `main` keeps moving. Indexing follows on the next
+     indexer patrol; verify search after that pass. The CLI exits non-zero when the
      refresh fails; treat that as an alert and retry, don't move on.
 
 For the single-box, local-only, and multi-machine procedures, see
@@ -166,7 +167,7 @@ Check items:
 - **World-Truth Drift & Stale Content**: run World Truth Probes (repo paths/symbols, active/terminated agents, schedule triggers, `<!-- fact-check: <cmd> -->`) → update drifted notes in place or `git rm` obsolete rulings
 - **Index Consistency**: `python3 validate.py` (and the pre-commit hook) reports pointers to missing files, duplicate pointers, and orphaned root notes / top-level directories; fix them and rebuild `MEMORY.md` pointers
 - **Directory Structure** (hard rules, from `validate.py` — never skip): every directory holds at most **20 md notes** and at most **20 subdirectories**. Depth is deliberately **unlimited**. When a directory exceeds a limit, consolidate fragments or restructure into topical subdirectories.
-- **Index Freshness**: the gateway checkout must track `origin/main` — if
+- **Checkout Freshness**: the gateway checkout must track `origin/main` — if
   `git -C ~/.meiva/gateway/vault fetch origin main && git rev-list --count HEAD..origin/main`
   prints a non-zero count, a post-merge refresh was missed: run `meiva memory refresh`
   and report the miss

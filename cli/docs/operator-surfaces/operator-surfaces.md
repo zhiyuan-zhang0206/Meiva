@@ -32,7 +32,8 @@
 - `meiva memory init`: explicitly provisions the memory-pool checkout and
   plugin-owned templates. Branch validation runs here, never during converge or
   start.
-- `meiva memory refresh`: triggers the gateway index refresh. Pool consolidation
+- `meiva memory refresh`: refreshes the gateway Git checkout; the semantic index
+  processes changes on the next indexer patrol. Pool consolidation
   runs on the gateway schedule through `schedules/memory-steward-schedule.py`
   and `meiva_builtins/plugins/meiva_memory/skills/scripts/{steward,arbiter_merge}.py`.
 - `meiva memory search QUERY [--limit K] [--json]`: posts an authenticated search
