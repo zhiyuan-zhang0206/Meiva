@@ -14,13 +14,19 @@ ENVIRON = {"OPENAI_API_KEY": "must-not-ride", "ANTHROPIC_API_KEY": "must-not-rid
 def test_selected_effort_reaches_the_claude_sdk(tmp_path: Path) -> None:
     config = BridgeConfig(cwd=tmp_path, model="claude-opus-5-5", reasoning_effort="low")
     values = option_values(
-        config, environ={}, cli_path=None, option_fields=("thinking", "effort"), resume="previous"
+        config,
+        environ={},
+        cli_path=None,
+        option_fields=("thinking", "effort", "system_prompt"),
+        resume="previous",
     )
     assert values["model"] == "claude-opus-5-5"
     assert values["effort"] == "low"
     assert values["resume"] == "previous"
     with pytest.raises(ValueError, match="does not support the selected effort"):
-        option_values(config, environ={}, cli_path=None, option_fields=(), resume=None)
+        option_values(
+            config, environ={}, cli_path=None, option_fields=("system_prompt",), resume=None
+        )
 
 
 def test_the_values_are_the_boundary_the_cli_runs_under(tmp_path: Path) -> None:
@@ -32,7 +38,7 @@ def test_the_values_are_the_boundary_the_cli_runs_under(tmp_path: Path) -> None:
         config,
         environ=ENVIRON,
         cli_path="/opt/claude/bin/claude",
-        option_fields=("thinking", "model"),
+        option_fields=("thinking", "model", "system_prompt"),
         resume="sess-9",
     )
 
@@ -47,6 +53,8 @@ def test_the_values_are_the_boundary_the_cli_runs_under(tmp_path: Path) -> None:
     assert "strict_mcp_config" not in values
     assert values["include_partial_messages"] is True
     assert values["resume"] == "sess-9"
+    assert values["system_prompt"] == {"type": "preset", "preset": "claude_code"}
+    assert "forward_subagent_text" not in values
 
 
 def test_the_child_environment_is_the_allowlist_built_from_what_the_caller_hands_in(
@@ -56,7 +64,7 @@ def test_the_child_environment_is_the_allowlist_built_from_what_the_caller_hands
         BridgeConfig(cwd=tmp_path),
         environ=ENVIRON,
         cli_path=None,
-        option_fields=(),
+        option_fields=("system_prompt",),
         resume=None,
     )
 
@@ -71,14 +79,14 @@ def test_the_two_conditional_options_ride_only_when_they_are_supported(tmp_path:
         BridgeConfig(cwd=tmp_path),
         environ={},
         cli_path=None,
-        option_fields=("model",),
+        option_fields=("model", "system_prompt"),
         resume=None,
     )
     with_field = option_values(
         BridgeConfig(cwd=tmp_path),
         environ={},
         cli_path=None,
-        option_fields=("thinking",),
+        option_fields=("thinking", "system_prompt"),
         resume=None,
     )
 
@@ -89,13 +97,17 @@ def test_the_two_conditional_options_ride_only_when_they_are_supported(tmp_path:
 
 def test_an_unset_tool_list_stays_unset_and_a_set_one_is_a_list(tmp_path: Path) -> None:
     unset = option_values(
-        BridgeConfig(cwd=tmp_path), environ={}, cli_path=None, option_fields=(), resume=None
+        BridgeConfig(cwd=tmp_path),
+        environ={},
+        cli_path=None,
+        option_fields=("system_prompt",),
+        resume=None,
     )
     listed = option_values(
         BridgeConfig(cwd=tmp_path, tools=("Read",)),
         environ={},
         cli_path=None,
-        option_fields=(),
+        option_fields=("system_prompt",),
         resume=None,
     )
 
@@ -110,10 +122,23 @@ def test_the_api_key_mode_restores_exactly_the_variable_the_caller_named(
         BridgeConfig(cwd=tmp_path, auth=AuthConfig(mode=AuthMode.API_KEY)),
         environ={"ANTHROPIC_API_KEY": "sk-live"},
         cli_path=None,
-        option_fields=(),
+        option_fields=("system_prompt",),
         resume=None,
     )
 
     env = values["env"]
     assert isinstance(env, dict)
     assert env["ANTHROPIC_API_KEY"] == "sk-live"
+
+
+def test_an_sdk_without_the_system_prompt_option_fails_instead_of_running_on_the_stub(
+    tmp_path: Path,
+) -> None:
+    with pytest.raises(ValueError, match="does not support the system prompt preset"):
+        option_values(
+            BridgeConfig(cwd=tmp_path),
+            environ={},
+            cli_path=None,
+            option_fields=("thinking", "model"),
+            resume=None,
+        )

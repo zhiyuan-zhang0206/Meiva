@@ -122,6 +122,7 @@ class ResultMessage:
 
 @dataclass
 class ClaudeAgentOptions:
+    system_prompt: str | dict[str, object] | None = None
     model: str | None = None
     cwd: str | None = None
     tools: list[str] | None = None
