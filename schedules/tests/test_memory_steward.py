@@ -3,7 +3,9 @@
 
 from __future__ import annotations
 
+import ast
 from datetime import UTC, datetime
+from pathlib import Path
 
 import pytest
 
@@ -44,3 +46,26 @@ def test_an_unreachable_directory_is_logged_and_does_not_stop_the_schedule(
 def test_a_trigger_without_its_message_is_refused() -> None:
     with pytest.raises(ValueError, match="carries its message"):
         wake_arbiter(_SLOT, None, label="memory-arbiter")
+
+
+def test_dream_instructions_use_the_vault_layout() -> None:
+    source = Path(__file__).parents[1] / "memory-steward-schedule.py"
+    tree = ast.parse(source.read_text())
+    job = next(
+        node.value
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Constant)
+        and isinstance(node.value, str)
+        and node.value.startswith("Daily Meiva Dream consolidation")
+    )
+
+    assert "git -C ~/.meiva/vault fetch origin main" in job
+    assert "git -C ~/.meiva/vault worktree add" in job
+    assert "ln -sfn $W $FH/vault; cd $W" in job
+    assert "$W/memory/MEMORY.md" in job
+    assert "files in `$W/memory`" in job
+    assert "python3 $W/validate.py" in job
+    assert "git -C ~/.meiva/vault worktree remove --force $W" in job
+    assert "git -C ~/.meiva/vault worktree prune" in job
+    assert "~/.meiva/memory" not in job
+    assert "$FH/memory" not in job
