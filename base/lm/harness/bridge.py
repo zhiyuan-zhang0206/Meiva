@@ -19,6 +19,7 @@ from base.lm.harness.engine import (
 from base.lm.harness.events import (
     AssistantText,
     BridgeEvent,
+    ContextCompacted,
     ForegroundAccepted,
     ReasoningDelta,
     ReasoningText,
@@ -34,7 +35,7 @@ from base.lm.harness.events import (
     UnsolicitedOutput,
 )
 from base.lm.harness.faults import fault_message
-from base.lm.harness.handoff import Handoff
+from base.lm.harness.handoff import Handoff, compaction_reminder
 from base.lm.harness.registration import (
     ATTACHED,
     HarnessRegistration,
@@ -119,6 +120,8 @@ class HarnessBridge:
         self._factory = factory
         self._machine = machine
         self._handoff = handoff
+        self._instructions_file = None if handoff is None else handoff.reference_file
+        self._context_compacted = False
         self._registrations = registrations
         self._clock = clock
         self._handle_rng = handle_rng
@@ -154,6 +157,7 @@ class HarnessBridge:
 
     def set_handoff(self, handoff: Handoff) -> None:
         self._handoff = handoff
+        self._instructions_file = handoff.reference_file
 
     @property
     def session_id(self) -> str | None:
@@ -230,12 +234,7 @@ class HarnessBridge:
         except Exception as exc:
             raise HarnessSetupError(f"{self.harness.value} session could not start: {exc}") from exc
         self._register(session.session_id or "")
-        handoff, self._handoff = self._handoff, None
-        if handoff is not None and not self._handoff_delivered:
-            rendered = handoff.render().strip()
-            if not text.startswith(rendered):
-                text = f"{rendered}\n\n{text}" if text else rendered
-        self._handoff_delivered = True
+        text = self._opening_input(text)
         try:
             try:
                 ticket: SubmittedTurn = session.submit(text, key=key)
@@ -253,6 +252,25 @@ class HarnessBridge:
         except (HarnessClosedError, HarnessSetupError):
             await self._retire(session, reason="session unavailable")
             raise
+
+    # meiva:note
+    # What a turn opens with. The first turn of a fresh session carries the handoff, unless the
+    # text already starts with it. After the CLI compacted its context, the next turn instead
+    # opens with a reminder to re-read the saved instructions: the first message may be a summary
+    # by now. The reminder rides the opening input rather than a mid-turn steer, and a turn that
+    # carries the full handoff needs none.
+    # meiva:link base/lm/harness/docs/harness.md
+    def _opening_input(self, text: str) -> str:
+        handoff, self._handoff = self._handoff, None
+        if handoff is not None and not self._handoff_delivered:
+            rendered = handoff.render().strip()
+            if not text.startswith(rendered):
+                text = f"{rendered}\n\n{text}" if text else rendered
+        elif self._context_compacted and self._instructions_file is not None and text:
+            text = f"{compaction_reminder(self._instructions_file)}\n\n{text}"
+        self._context_compacted = False
+        self._handoff_delivered = True
+        return text
 
     # meiva:note
     # The renewal has the turn's lifetime. Preserve the original turn exception so
@@ -401,6 +419,9 @@ class HarnessBridge:
             if event.model:
                 self._model = event.model
             self._register(event.session_id)
+            return None
+        if isinstance(event, ContextCompacted):
+            self._context_compacted = True
             return None
         if isinstance(event, TurnCompleted):
             if event.turn_id == turn_id:

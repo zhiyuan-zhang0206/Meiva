@@ -64,7 +64,10 @@ in `FileSessionRegistry`.
   load/save to `SessionRecord.harness`). The handoff is co-delivered once on the
   first turn of a fresh session; `HarnessBridge` tracks delivery per active session
   so later `set_handoff` calls on a warm or resumed session never re-prepend the
-  handoff document.
+  handoff document. `_build_grounded_handoff` also saves the document to
+  `meiva_instructions.md` in the agent's workspace and ends the message with a pointer
+  to it (see [the handoff document](../../../base/lm/harness/docs/handoff.md)); after
+  a compaction the bridge puts a short reminder in front of the next turn's input.
 - `run_turn` starts the session, submits turn text under the newest inbound row id
   (or `window-{cursor + len(pending)}` when the batch carries only notes such as a
   heartbeat check-in), and streams `BridgeEvent`s via `on_event`. Inbound text

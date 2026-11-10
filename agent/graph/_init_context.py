@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from dataclasses import replace
 from typing import Any, TypeGuard
 
 from langchain_core.messages import BaseMessage, SystemMessage
@@ -24,7 +25,8 @@ from base.agents.messages.delivery.retry_io import retryable_database_error
 from base.agents.messages.kwargs import read_meiva_kwargs
 from base.api_contracts.agent_contract import Harness
 from base.db.transaction import async_write_transaction
-from base.lm.harness.handoff import ClusterFact, Handoff
+from base.host.atomic_io import write_text_atomic
+from base.lm.harness.handoff import ClusterFact, Handoff, instructions_path
 from base.lm.harness.wiring import HANDOFF_INSTRUCTION, handoff_for
 from base.log import logger
 from base.paths import workspace_dir
@@ -224,17 +226,31 @@ def _build_grounded_handoff(ctx: MeivaContext, *, agent_id: int) -> Handoff:
         if entry.name == "meiva"
         or not disabled_by_sdk_config(entry.name.removeprefix("meiva."), disabled)
     )
-    return Handoff(
-        agent_id=handoff.agent_id,
-        instruction=handoff.instruction,
-        machine=handoff.machine,
-        workspace=handoff.workspace,
-        label=handoff.label,
-        cluster=handoff.cluster,
-        entries=filtered_entries,
-        overlaps=handoff.overlaps,
-        discipline=handoff.discipline,
-    )
+    return _with_instructions_file(replace(handoff, entries=filtered_entries))
+
+
+# meiva:note
+# An external CLI compacts its own context, and a compaction can summarize the first message
+# away with the standing instructions in it. The same document is therefore saved in the agent's
+# workspace and the message ends by naming it. The file is written before the pointer exists, so
+# a failed write leaves the pointer out rather than send the agent to a missing file; it costs
+# the safety net, not the turn, so it logs a warning instead of failing the wake. This runs in
+# the runner process on the agent's own machine, the one that owns the workspace.
+# meiva:link agent/graph/docs/harness-turn.md
+def _with_instructions_file(handoff: Handoff) -> Handoff:
+    path = instructions_path(handoff.workspace)
+    try:
+        write_text_atomic(path, handoff.render(), mode=0o600, sync_file=False)
+    except OSError:
+        logger.opt(exception=True).warning(
+            "Could not save the handoff instructions to {path}; the first message will carry "
+            "no pointer to it",
+            path=str(path),
+            event="handoff_instructions_file_failed",
+            agent_id=handoff.agent_id,
+        )
+        return handoff
+    return handoff.with_reference_file(path)
 
 
 # meiva:link agent/graph/docs/context-notes/context-notes.md

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 from base.api_contracts.agent_contract import Harness
@@ -12,7 +12,31 @@ from base.api_contracts.agent_contract import Harness
 # agent reads them on its first turn. Changing the dataclass fields or the section
 # order means bumping `HANDOFF_VERSION`, and the field-set test fails until you do.
 # meiva:link base/lm/harness/docs/harness.md
-HANDOFF_VERSION = 1
+HANDOFF_VERSION = 2
+
+# meiva:note
+# The file a handoff's text is also saved to, directly under the agent's workspace. An
+# external CLI compacts its own context, and a compaction can summarize the first message
+# away together with these instructions; the file is what the agent re-reads then. The name
+# says Meiva owns it and matches none of the instruction files a CLI loads by itself
+# (`CLAUDE.md`, `AGENTS.md`, `GEMINI.md`), and the file sits outside every directory a CLI
+# treats as project configuration, so the CLI never injects it a second time and never
+# overwrites a repository's or a user's own file.
+# meiva:link base/lm/harness/docs/harness.md
+INSTRUCTIONS_FILENAME = "meiva_instructions.md"
+
+
+def instructions_path(workspace: Path) -> Path:
+    return workspace / INSTRUCTIONS_FILENAME
+
+
+def compaction_reminder(path: Path) -> str:
+    return (
+        "[Meiva notice] Your context was just compacted, so the Meiva instructions you were "
+        f"given at the start may now be summarized. Read `{path}` before anything else and "
+        "follow it for the rest of the session."
+    )
+
 
 DEFAULT_OVERLAPS: tuple[str, ...] = (
     "Use your native tools for files, shell commands, search, and background tasks or monitors.",
@@ -74,6 +98,11 @@ class Handoff:
     entries: tuple[EntryPoint, ...] = field(default_factory=lambda: DEFAULT_ENTRIES)
     overlaps: tuple[str, ...] = field(default_factory=lambda: DEFAULT_OVERLAPS)
     discipline: tuple[str, ...] = field(default_factory=lambda: DEFAULT_DISCIPLINE)
+    # meiva:note
+    # Where this document is saved, set only once the save succeeded: the closing pointer in
+    # `render()` names this path, so a handoff whose file could not be written must not carry
+    # one, or the agent would be sent to read a file that is not there.
+    reference_file: Path | None = None
 
     def __post_init__(self) -> None:
         if self.agent_id <= 0:
@@ -108,17 +137,15 @@ class Handoff:
             for rule in item.discipline:
                 if rule not in discipline:
                     discipline.append(rule)
-        return Handoff(
-            agent_id=self.agent_id,
-            instruction=self.instruction,
-            machine=self.machine,
-            workspace=self.workspace,
-            label=self.label,
-            cluster=self.cluster,
+        return replace(
+            self,
             entries=tuple(seen_entries.values()),
             overlaps=tuple(overlaps),
             discipline=tuple(discipline),
         )
+
+    def with_reference_file(self, path: Path) -> Handoff:
+        return replace(self, reference_file=path)
 
     def _python_example_lines(self) -> list[str]:
         names = {entry.name for entry in self.entries}
@@ -209,6 +236,18 @@ class Handoff:
             "",
             "## Standing Instructions",
             self.instruction.strip(),
+            *self._reference_lines(),
+        ]
+
+    def _reference_lines(self) -> list[str]:
+        if self.reference_file is None:
+            return []
+        return [
+            "",
+            f"These instructions are also saved at `{self.reference_file}`. Your context may be "
+            "compacted or summarized as the conversation grows. If you find you can no longer see "
+            "the instructions above in full (they appear only as a summary, or not at all), read "
+            "that file before doing anything else, and follow it for the rest of the session.",
         ]
 
 

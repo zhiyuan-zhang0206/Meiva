@@ -20,6 +20,40 @@ and in-turn background tools, so `meiva.files` is not exposed in `DEFAULT_ENTRIE
 Listing every namespace there would become a second copy of `meiva.help()` that
 drifts from the SDK; the entry point and its pointer are enough to start.
 
+## The saved copy and compaction
+
+An external CLI compacts its own context, and a compaction can summarize the first
+message, standing instructions included. So the host also saves the document it is
+about to send as `meiva_instructions.md` directly under the agent's workspace
+(`INSTRUCTIONS_FILENAME`, `instructions_path`), and the message ends with a pointer
+that names the file by absolute path and says to read it first when the instructions
+can no longer be seen in full. The pointer is tool-neutral wording and renders only
+when `Handoff.reference_file` is set.
+
+- **What the file holds:** the whole rendered document without the pointer — identity,
+  cluster, SDK entry points, boundaries, reporting and the standing instructions — since
+  every section stays true after a compaction and the first message and the file never
+  disagree. Nothing first-turn-only is in it: the inbound tail is not part of the document.
+- **Name and place:** a Meiva-named file at the workspace top level, not `CLAUDE.md`,
+  `AGENTS.md` or `GEMINI.md`, and not inside `.claude/`, `.agents/` or any directory a CLI
+  loads as project configuration, so no CLI injects it twice or shadows a repository's or
+  a user's own file.
+- **When it is written:** each time the graph builds a handoff (a fresh start, a harness
+  switch, a restart that rebuilds the session), by the runner on the agent's machine,
+  atomically, replacing the previous content. A warm session builds none, so its file keeps
+  matching what that session was told.
+- **A failed write** (`OSError`) logs a `handoff_instructions_file_failed` warning and builds
+  the handoff without `reference_file`: the message then makes no claim about the file and the
+  compaction reminder below is not sent. The file is a safety net for the agent, not input to
+  the turn, so it does not fail the wake.
+- **Observing compaction:** the Claude adapter maps the CLI's `compact_boundary` system
+  message and the Codex adapter maps a completed `contextCompaction` item to
+  `ContextCompacted`. Antigravity's stream-json output carries no compaction signal, so it
+  emits none. `HarnessBridge` remembers the event and puts `compaction_reminder(path)` in
+  front of the next `run_turn` input; it is neither a steer nor part of the mid-turn
+  delivery path, and a turn that carries the full handoff needs none. A compaction the CLI
+  runs outside a turn this session is running is not seen.
+
 Changing the field set or the section order means bumping the version.
 `tests/test_handoff.py` pins both: the field tuple is compared against
 `PINNED_HANDOFF_FIELDS` and the version against a literal, so the edit that

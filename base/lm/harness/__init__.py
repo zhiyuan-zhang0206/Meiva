@@ -11,6 +11,7 @@ from base.lm.harness.engine import ForegroundSteering, HarnessSession, HarnessTu
 from base.lm.harness.events import (
     AssistantText,
     BridgeEvent,
+    ContextCompacted,
     ForegroundAccepted,
     HandoffInjected,
     RateLimitObserved,
@@ -45,6 +46,7 @@ __all__ = [
     "AssistantText",
     "BridgeEvent",
     "ClusterFact",
+    "ContextCompacted",
     "EntryPoint",
     "FileSessionRegistry",
     "ForegroundAccepted",

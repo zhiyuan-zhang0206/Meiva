@@ -29,6 +29,17 @@ class HandoffInjected:
     size_bytes: int
 
 
+# meiva:note
+# The CLI compacted its own context: what the agent was told earlier, the host's standing
+# instructions included, may now exist only as a summary. Claude reports it as a
+# `compact_boundary` system message and Codex as a completed `contextCompaction` item;
+# Antigravity reports nothing a stream-json session can see, so it never emits this.
+# meiva:link base/lm/harness/docs/harness.md
+@dataclass(frozen=True, slots=True)
+class ContextCompacted:
+    turn_id: str | None = None
+
+
 @dataclass(frozen=True, slots=True)
 class ForegroundAccepted:
     turn_id: str
@@ -285,6 +296,7 @@ BridgeEvent = (
     SessionStarted
     | SessionBound
     | HandoffInjected
+    | ContextCompacted
     | ForegroundAccepted
     | ReasoningDelta
     | ReasoningText

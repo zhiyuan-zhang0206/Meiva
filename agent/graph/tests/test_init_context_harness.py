@@ -41,6 +41,7 @@ from base.lm.catalog import ModelCatalog
 from base.lm.harness import Usage
 from base.lm.harness.engine import HarnessTurn
 from base.lm.provider_api import Decision, DecisionResult, Question
+from base.log import logger
 from base.packages.composer_commands import CommandCatalog
 from base.packages.extensions import install_registry
 from base.packages.extensions.install_registry import InstalledPackage
@@ -189,6 +190,90 @@ async def test_external_context_reset_preserves_the_tail_behind_handoff(
     assert prompt.endswith("The real compact summary")
     assert command.update["context_reset"] == ContextReset()
     assert command.goto == "before_turn"
+
+
+async def _wake_prompt(harness: Harness, database_gate: ProcessDbGate, agent_id: int = 42) -> str:
+    command = await init_context_node(
+        AgentState(
+            context_reset=ContextReset(tail=[HumanMessage(content="Task")], resume="before_turn")
+        ),
+        _runtime(None, harness=harness, database_gate=database_gate),
+        _config(agent_id),
+    )
+    assert command.update is not None
+    return command.update["harness_pending_input"]["prompt"]
+
+
+def _instructions_file(agent_id: int = 42) -> Path:
+    return paths.workspace_dir(agent_id, home=meiva_home()) / "meiva_instructions.md"
+
+
+@pytest.mark.parametrize("harness", [Harness.CLAUDE_CODE, Harness.CODEX, Harness.ANTIGRAVITY])
+async def test_the_wake_saves_its_instructions_and_names_the_file_it_wrote(
+    harness: Harness,
+    database_gate: ProcessDbGate,
+) -> None:
+    prompt = await _wake_prompt(harness, database_gate)
+
+    path = _instructions_file()
+    saved = path.read_text(encoding="utf-8")
+    assert saved.startswith("# Role & Operating Context — Agent #42")
+    assert "## Standing Instructions" in saved and "also saved at" not in saved
+    assert prompt.startswith(saved.rstrip())
+    pointer = prompt[len(saved.rstrip()) :]
+    assert f"`{path}`" in pointer and "before doing anything else" in pointer
+    assert prompt.endswith("Task")
+    assert path.name not in {"CLAUDE.md", "AGENTS.md", "GEMINI.md"}
+
+
+async def test_the_next_wake_overwrites_the_file_with_the_current_instructions(
+    database_gate: ProcessDbGate,
+) -> None:
+    path = _instructions_file()
+    path.write_text("STALE INSTRUCTIONS", encoding="utf-8")
+
+    await _wake_prompt(Harness.CLAUDE_CODE, database_gate)
+
+    assert "STALE" not in path.read_text(encoding="utf-8")
+
+
+async def test_a_harness_switch_wakes_with_the_new_instructions_in_the_same_file(
+    database_gate: ProcessDbGate,
+) -> None:
+    claude_prompt = await _wake_prompt(Harness.CLAUDE_CODE, database_gate)
+    claude_saved = _instructions_file().read_text(encoding="utf-8")
+    codex_prompt = await _wake_prompt(Harness.CODEX, database_gate)
+    codex_saved = _instructions_file().read_text(encoding="utf-8")
+
+    assert "Codex Computer Use" not in claude_saved and "Codex Computer Use" in codex_saved
+    assert f"`{_instructions_file()}`" in claude_prompt
+    assert f"`{_instructions_file()}`" in codex_prompt
+    assert codex_prompt.startswith(codex_saved.rstrip())
+
+
+async def test_a_failed_write_leaves_the_pointer_out_and_logs_a_warning(
+    database_gate: ProcessDbGate,
+) -> None:
+    _instructions_file(4243).mkdir(parents=True)
+    warnings: list[str] = []
+    sink = logger.add(lambda m: warnings.append(str(m)), level="WARNING")
+    try:
+        prompt = await _wake_prompt(Harness.CLAUDE_CODE, database_gate, 4243)
+    finally:
+        logger.remove(sink)
+
+    assert "also saved at" not in prompt and "## Standing Instructions" in prompt
+    assert any("handoff_instructions_file_failed" in w or "Could not save" in w for w in warnings)
+
+
+async def test_the_built_in_loop_writes_no_instructions_file(
+    database_gate: ProcessDbGate,
+) -> None:
+    _ = await init_context_node(
+        AgentState(), _runtime(None, database_gate=database_gate), _config(4244)
+    )
+
+    assert not _instructions_file(4244).exists()
 
 
 @pytest.mark.parametrize("harness", [Harness.CLAUDE_CODE, Harness.CODEX])
