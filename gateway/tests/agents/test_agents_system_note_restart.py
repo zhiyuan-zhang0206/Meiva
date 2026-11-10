@@ -682,3 +682,57 @@ class TestRestart:
             )
             assert resp_bad_model.status_code == 400
             assert "not supported by harness 'claude_code'" in resp_bad_model.json()["detail"]
+
+    @pytest.mark.parametrize(
+        ("old_harness", "old_model", "restart_overlay"),
+        [
+            ("codex", "gpt-6.1-sol", None),
+            ("codex", "gpt-6.1-sol", {"harness": "codex", "llm_model": "gpt-6.1-sol"}),
+            ("meiva", None, {"harness": "codex", "llm_model": "gpt-6.1-sol"}),
+            ("codex", "gpt-6.1-sol", {"harness": "meiva", "llm_model": "deepseek-flash"}),
+        ],
+    )
+    def test_external_harness_restart_preserves_shell_sessions(
+        self,
+        db_conn: psycopg.Connection,
+        old_harness: str,
+        old_model: str | None,
+        restart_overlay: dict[str, object] | None,
+    ) -> None:
+        with gateway_test_client() as client:
+            _seed_restart_harnesses(client)
+            agent_id = spawn_via_http(client, {}).json()["id"]
+            if old_model is not None:
+                switched = client.post(
+                    f"/api/agents/{agent_id}/restart",
+                    json={
+                        "message": "prepare external harness",
+                        "config_overlay": {"harness": old_harness, "llm_model": old_model},
+                    },
+                )
+                assert switched.status_code == 200, switched.text
+                with db_conn.cursor() as cur:
+                    cur.execute(
+                        "UPDATE agents_meta SET status = 'idling' WHERE id = %s",
+                        (agent_id,),
+                    )
+                db_conn.commit()
+
+            body: dict[str, object] = {"message": "restart keeping shells"}
+            if restart_overlay is not None:
+                body["config_overlay"] = restart_overlay
+            resp = client.post(f"/api/agents/{agent_id}/restart", json=body)
+            assert resp.status_code == 200, resp.text
+            assert resp.json() == {"status": "enqueued"}
+
+        with db_conn.cursor() as cur:
+            cur.execute(
+                "SELECT payload FROM inbound_messages WHERE agent_id = %s AND kind = 'terminate'",
+                (agent_id,),
+            )
+            payloads = [row[0] for row in cur.fetchall()]
+        assert payloads
+        assert all(
+            not isinstance(payload, dict) or "kill_all_shell_sessions" not in payload
+            for payload in payloads
+        )

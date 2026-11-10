@@ -172,6 +172,34 @@ def _hang(conversation: str) -> None:
         time.sleep(0.05)
 
 
+def _emit_raw_stream(plan: dict[str, object]) -> bool:
+    raw_stream = plan.get("raw_stream")
+    if not isinstance(raw_stream, dict):
+        return False
+    stream_spec = cast("dict[str, object]", raw_stream)
+    conversation = str(plan.get("conversation_id") or "conv-fake")
+    _emit({"event": "init", "conversation_id": conversation})
+    raw_blob = stream_spec.get("blob_bytes")
+    blob_bytes = raw_blob if isinstance(raw_blob, int) else 0
+    if blob_bytes:
+        _emit({"event": "step_update", "blob": "x" * blob_bytes})
+    raw_eof = stream_spec.get("trailing_eof_bytes")
+    eof_bytes = raw_eof if isinstance(raw_eof, int) else 0
+    if eof_bytes:
+        _ = sys.stdout.write(json.dumps({"event": "result", "blob": "y" * eof_bytes}))
+        sys.stdout.flush()
+    return True
+
+
+def _serve_plan() -> int:
+    plan_path = os.environ.get("FAKE_AGY_PLAN")
+    if plan_path:
+        loaded = cast("dict[str, object]", json.loads(Path(plan_path).read_text(encoding="utf-8")))
+        if _emit_raw_stream(loaded):
+            return 0
+    return main()
+
+
 def main() -> int:
     plan_path = os.environ.get("FAKE_AGY_PLAN")
     plan = cast(
@@ -231,4 +259,4 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(_serve_plan())

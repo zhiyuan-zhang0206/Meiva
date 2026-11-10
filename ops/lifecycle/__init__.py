@@ -595,14 +595,13 @@ async def _execute_harness_transition(
     )
 
     if status != "terminated":
-        _old_status, killed_page_names, _cmd_id, cutoff = await asyncio.to_thread(
+        _old_status, killed_page_names, _cmd_id, _cutoff = await asyncio.to_thread(
             force_terminate_transaction,
             agent_id,
             db_pool,
             source=body.source,
-            kill_all_shell_sessions=True,
+            kill_all_shell_sessions=False,
         )
-        await _kill_shell_sessions_now(agent_id, cutoff=cutoff, home=home)
         for page_name in killed_page_names:
             await publish_page_closed(bus, agent_id, page_name)
         await release_browser_pages(agent_id, home=host.home)

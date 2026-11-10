@@ -8,6 +8,16 @@ from __future__ import annotations
 import json
 import os
 import sys
+from typing import cast
+
+
+def _bytes_param(message: dict[str, object]) -> int:
+    params = message.get("params")
+    if not isinstance(params, dict):
+        return 0
+    typed = cast("dict[str, object]", params)
+    value = typed.get("bytes")
+    return value if isinstance(value, int) else 0
 
 
 def main() -> None:
@@ -41,6 +51,32 @@ def main() -> None:
             send({"jsonrpc": "2.0", "id": request_id, "result": {"answer": answer.get("result")}})
         elif method == "boom":
             send({"jsonrpc": "2.0", "id": request_id, "error": {"code": -32000, "message": "boom"}})
+        elif method == "large_reply":
+            size = _bytes_param(message)
+            send(
+                {
+                    "jsonrpc": "2.0",
+                    "id": request_id,
+                    "result": {"thread": {"id": "thread-big", "blob": "x" * size}},
+                }
+            )
+        elif method == "eof_reply":
+            size = _bytes_param(message)
+            _ = out.write(
+                json.dumps(
+                    {
+                        "jsonrpc": "2.0",
+                        "id": request_id,
+                        "result": {"eof": True, "blob": "y" * size},
+                    }
+                )
+            )
+            out.flush()
+            return
+        elif method == "unterminated_flood":
+            size = _bytes_param(message)
+            _ = out.write("x" * size)
+            out.flush()
         elif method == "hang":
             continue
         elif method == "quit":
