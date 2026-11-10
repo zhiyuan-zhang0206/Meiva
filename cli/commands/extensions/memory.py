@@ -60,21 +60,22 @@ def cmd_memory_init(*, machine: MachineIdentityReader, facts: ScaffoldFacts) -> 
     return 0
 
 
-def _refresh_index(access: GatewayAccess) -> None:
+def _refresh_checkout(access: GatewayAccess) -> None:
     url = f"{gateway_api_base(access.gateway_url)}/api/memory/refresh"
     try:
         resp = dial_post(url, timeout=_TIMEOUT_S, headers=gateway_auth_headers(access))
         resp.raise_for_status()
         data = response_object(resp)
-        print(f"  index refreshed: {data.get('status', 'ok')}")
+        print(f"  gateway checkout HEAD: {data['head']}")
+        print("  semantic index updates on the next indexer patrol.")
     except httpx.HTTPError as exc:
         print(f"  ✗ refresh failed: {exc}", file=sys.stderr)
         raise SystemExit(1) from exc
 
 
 def cmd_memory_refresh(*, access: GatewayAccess) -> int:
-    print("refreshing memory index...")
-    _refresh_index(access)
+    print("refreshing gateway memory checkout...")
+    _refresh_checkout(access)
     return 0
 
 

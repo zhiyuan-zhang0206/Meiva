@@ -299,7 +299,9 @@ def add_memory_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) 
     init_p = memory_sub.add_parser("init", help="initialize memory pool resources")
     init_p.set_defaults(func=h_memory_init)
 
-    refresh_p = memory_sub.add_parser("refresh", help="trigger gateway memory index refresh")
+    refresh_p = memory_sub.add_parser(
+        "refresh", help="refresh gateway memory checkout; indexing follows on the next patrol"
+    )
     refresh_p.set_defaults(func=_h_memory_refresh)
 
     search_p = memory_sub.add_parser("search", help="search indexed memory")

@@ -96,17 +96,18 @@ def test_a_refusal_echoes_the_gateways_text_and_raises(
     assert diagnostic in capsys.readouterr().err
 
 
-def test_a_refresh_posts_to_the_gateway_and_reports_its_status(
+def test_a_refresh_reports_the_checkout_head_and_pending_indexing(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    with serving({_REFRESH: Reply(body={"status": "queued"})}) as gateway:
+    with serving({_REFRESH: Reply(body={"head": "abc123"})}) as gateway:
         rc = cmd_memory_refresh(access=access_to(gateway.url))
 
     assert rc == 0
     assert [seen.target for seen in gateway.requests] == ["/api/memory/refresh"]
     assert capsys.readouterr().out.splitlines() == [
-        "refreshing memory index...",
-        "  index refreshed: queued",
+        "refreshing gateway memory checkout...",
+        "  gateway checkout HEAD: abc123",
+        "  semantic index updates on the next indexer patrol.",
     ]
 
 
