@@ -38,8 +38,6 @@ export {
   type NoticePostedEvent,
   type NoticeResolvedEvent,
   type NotificationEvent,
-  type PageClosedEvent,
-  type PageOpenedEvent,
   type ReasoningDeltaEvent,
   type ReasoningStartEvent,
   type SystemEvent,

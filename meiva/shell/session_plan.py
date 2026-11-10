@@ -29,16 +29,12 @@ def validate_ttl(ttl: float, *, system: bool = False) -> float:
     return ttl
 
 
-# meiva:note
-# The `page-` label names `meiva.ui.serve` page sessions exactly (base/sessions/page_session.py owns the grammar, the caller asks it), which a terminate's shell kill spares, so an ordinary shell may not take it.
-def validate_name(name: str | None, *, page_label: bool) -> None:
+def validate_name(name: str | None) -> None:
     if name is not None and not _NAME_RE.fullmatch(name):
         raise ValueError(
             f"session name {name!r} invalid — use a lowercase slug like 'dev-server' "
             "([a-z][a-z0-9-]*)"
         )
-    if page_label:
-        raise ValueError(f"session name {name!r} invalid — 'page-' names are reserved for pages")
 
 
 def session_full_name(shell_prefix: str, session_id: int, name: str | None) -> str:

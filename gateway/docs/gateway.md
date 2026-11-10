@@ -1,6 +1,6 @@
 # Gateway
 
-Meiva cluster HTTP API gateway—FastAPI service running on **port 8000** (needs a cluster secret; loopback unless `MEIVA_MACHINE_HOST` is declared, which needs declared transport encryption — `gateway/cluster/server.py:main`). Pure JSON API, no HTML rendering — with a small enumerated set of exceptions: `GET /api/okf/graph` (D3 knowledge-graph page), uploads `FileResponse`, the agents' page-server reverse proxy, and the grafana reverse proxy. Frontend, CLI, agent SDK (`meiva.agents.*`) and bootstrap scripts use the same `/api/*` endpoints.
+Meiva cluster HTTP API gateway—FastAPI service running on **port 8000** (needs a cluster secret; loopback unless `MEIVA_MACHINE_HOST` is declared, which needs declared transport encryption — `gateway/cluster/server.py:main`). Pure JSON API, no HTML rendering — with a small enumerated set of exceptions: `GET /api/okf/graph` (D3 knowledge-graph page), uploads `FileResponse`, and the grafana reverse proxy. Frontend, CLI, agent SDK (`meiva.agents.*`) and bootstrap scripts use the same `/api/*` endpoints.
 
 ## Terminology
 

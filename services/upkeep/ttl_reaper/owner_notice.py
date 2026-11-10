@@ -22,7 +22,7 @@ PASS_BATCH = 200
 # meiva:note
 # The states that can act on a reclaim message right now. Any other state (today
 # only `terminated`) is queued only for a message reporting the agent's own
-# notice; a page or shell reminder would open a later life on work that is gone.
+# notice; a shell reminder would open a later life on work that is gone.
 _NOTIFIABLE_STATUSES = ("running", "idling")
 
 
@@ -37,8 +37,8 @@ class OwnerMessage:
 
 
 # meiva:note
-# A terminated owner is skipped unless `queue_when_terminated`. A page or shell
-# message tells the agent to stop a server or that a job died, so delivering it
+# A terminated owner is skipped unless `queue_when_terminated`. A shell
+# message tells the agent that a job died, so delivering it
 # to a later life would open that life on work that no longer exists; notice
 # expiry passes the flag because its message reports the owner's own notice.
 # Even then nothing wakes a dead owner, and no notification path resurrects one:

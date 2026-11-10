@@ -150,7 +150,7 @@ function isWorkTimelineItem(it: BackendTimelineItem): boolean {
 function isPrimaryTimelineItem(it: BackendTimelineItem): boolean {
   if (it.kind === "agent_chat") return it.user_facing !== false;
   if (it.kind === "inbound_chat") {
-    return it.source === "user" || Boolean(it.source?.startsWith("ui:page:"));
+    return it.source === "user";
   }
   return false;
 }

@@ -166,19 +166,6 @@ export interface ToUserChangedEvent extends BaseEvent {
   role: "to_user_changed";
 }
 
-export interface PageOpenedEvent extends BaseEvent {
-  readonly role: "page_opened";
-  readonly page_id: number;
-  readonly name: string;
-  readonly port: number;
-  readonly title: string | null;
-  readonly url: string;
-}
-export interface PageClosedEvent extends BaseEvent {
-  readonly role: "page_closed";
-  readonly name: string;
-}
-
 export interface TimelineSnapshotEvent extends BaseEvent {
   readonly role: "timeline_snapshot";
   readonly items: readonly BackendTimelineItem[];
@@ -249,8 +236,6 @@ export type SystemEvent =
   | InboundCommittedEvent
   | LabelUpdatedEvent
   | ToUserChangedEvent
-  | PageOpenedEvent
-  | PageClosedEvent
   | TokenUsageEvent
   | LLMKeepaliveEvent
   | LLMDoneEvent

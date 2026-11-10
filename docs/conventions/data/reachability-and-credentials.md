@@ -5,7 +5,7 @@ Cross-machine dialing in a split cluster has exactly two facts to get right:
 call. This document is the single written contract for both. Code that
 advertises an endpoint, dials a remote endpoint, or verifies a credential
 references this file (see `base/cluster/machines.py`, `cli/commands/observability/otel_collector.py`,
-`gateway/routers/page_serving/pages.py`, `services/wake/heartbeat/station_probe.py`).
+`services/wake/heartbeat/station_probe.py`).
 
 ## Endpoint advertisement
 
@@ -28,10 +28,7 @@ Three rules:
    `localhost`). A unit never advertises its bare
    gateway URL and never hardcodes loopback: a machine with a reachable
    identity must advertise it, or every consumer that dials the advertised
-   address dials the wrong host — the 2026-08-30 page-serve 400, where a
-   gateway unit advertising `localhost` made the page proxy refuse the
-   machine's real page servers (they bind `machine.host()`, which is not in
-   the loopback-only allowlist).
+   address dials the wrong host.
 2. **Loopback advertisement is legal only when nothing remote dials it.** A
    zero-config single box advertises `localhost` and everything is co-located.
    A pure runner or pure station whose gateway is provably remote is refused
@@ -54,16 +51,6 @@ Three rules:
    selects a remote target. Ambiguous advertisements fail rendering; discovery
    failure aborts rendering and makes the watchdog skip its probe round.
 
-
-## SSRF guard
-
-The page reverse proxy (`gateway/routers/page_serving/pages.py`) dials only loopback or
-the registering agent's home machine — its `agents_meta.machine` name plus
-the hostnames its `machine_units` rows advertise. The unit advertisement is
-therefore also the proxy's allowlist: a page server on a machine registers
-its `machine.host()` and is allowed because the unit advertises exactly
-that host. Keeping the advertisement truthful (rule 1) is what keeps the
-guard correct.
 
 ## Credentials
 

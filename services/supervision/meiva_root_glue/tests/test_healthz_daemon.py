@@ -703,9 +703,9 @@ def test_the_literal_finder_refuses_an_unproven_dependency_instance(change: str)
     [
         ("services.agent_runner.agent_ops.daemon", 'install_graceful_shutdown("ops")', "ops"),
         (
-            "services.agent_runner.page_server.daemon",
-            'install_graceful_shutdown("page_server")',
-            "page_server",
+            "services.agent_runner.agent_host.daemon",
+            'install_graceful_shutdown("agent_host")',
+            "agent_host",
         ),
     ],
 )
@@ -752,20 +752,20 @@ def test_the_literal_finder_follows_an_injected_public_pidfile_owner() -> None:
 
 def test_the_literal_finder_follows_the_public_pidfile_owner() -> None:
     source = (
-        "from services.agent_runner.page_server import resources as owned\n"
+        "from services.agent_runner.agent_ops import boot as owned\n"
         "def main():\n"
         "    owned.write_pidfile(config, runtime=runtime)\n"
         "    owned.is_running(config, runtime=runtime)\n"
     )
-    found = _daemon_literals(source, module="services.agent_runner.page_server.daemon")
+    found = _daemon_literals(source, module="services.agent_runner.agent_ops.daemon")
     assert found == {
-        "acquire_pidfile": ["services.agent_runner.page_server.daemon"],
-        "pidfile_holds_daemon": ["services.agent_runner.page_server.daemon"],
+        "acquire_pidfile": ["services.agent_runner.agent_ops.daemon"],
+        "pidfile_holds_daemon": ["services.agent_runner.agent_ops.daemon"],
     }
     delegated = "\n".join(
-        _called_function_sources(ast.parse(source), "services.agent_runner.page_server.daemon")
+        _called_function_sources(ast.parse(source), "services.agent_runner.agent_ops.daemon")
     )
-    wrong_name = delegated.replace("services.agent_runner.page_server.daemon", "wrong.daemon")
+    wrong_name = delegated.replace("services.agent_runner.agent_ops.daemon", "wrong.daemon")
     assert _daemon_literals(wrong_name) == {
         "acquire_pidfile": ["wrong.daemon"],
         "pidfile_holds_daemon": ["wrong.daemon"],
@@ -775,21 +775,21 @@ def test_the_literal_finder_follows_the_public_pidfile_owner() -> None:
 @pytest.mark.parametrize(
     "source",
     [
-        "from services.agent_runner.page_server import resources as owned\n"
+        "from services.agent_runner.agent_ops import boot as owned\n"
         "owned = other\nowned.write_pidfile(config, runtime=runtime)\n",
-        "from services.agent_runner.page_server import resources as owned\n"
+        "from services.agent_runner.agent_ops import boot as owned\n"
         "def main(owned):\n    owned.write_pidfile(config, runtime=runtime)\n",
-        "from services.agent_runner.page_server import resources as owned\n"
+        "from services.agent_runner.agent_ops import boot as owned\n"
         "def main():\n    owned = other\n    owned.write_pidfile(config, runtime=runtime)\n",
-        "from services.agent_runner.page_server import resources as owned\n"
+        "from services.agent_runner.agent_ops import boot as owned\n"
         "other.write_pidfile(config, runtime=runtime)\n",
-        "from services.agent_runner.page_server import resources as owned\n"
+        "from services.agent_runner.agent_ops import boot as owned\n"
         "from other import resources as owned\nowned.write_pidfile(config, runtime=runtime)\n",
     ],
 )
 def test_the_literal_finder_does_not_attribute_an_unknown_resource_owner(source: str) -> None:
-    assert _called_imports(ast.parse(source), "services.agent_runner.page_server.daemon") == []
-    assert _daemon_literals(source, module="services.agent_runner.page_server.daemon") == {}
+    assert _called_imports(ast.parse(source), "services.agent_runner.agent_ops.daemon") == []
+    assert _daemon_literals(source, module="services.agent_runner.agent_ops.daemon") == {}
 
 
 def test_the_public_probe_builder_is_still_the_roster_door() -> None:

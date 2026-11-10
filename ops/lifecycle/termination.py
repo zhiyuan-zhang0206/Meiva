@@ -22,7 +22,6 @@ from base.lm.harness.registration import RegistrationStore
 from base.log import logger
 from base.paths import harness_registrations_dir
 from base.telemetry.audit_events import prepare_event_log, record_audit
-from ops.lifecycle.events import publish_page_closed as publish_page_closed
 from ops.rpc_schemas.terminate import HarnessAttachment
 
 
@@ -235,7 +234,7 @@ def force_terminate_transaction(
     source: str,
     message: str | None = None,
     kill_all_shell_sessions: bool = False,
-) -> tuple[AgentStatus, list[str], int, int]:
+) -> tuple[AgentStatus, int, int]:
     with db_pool.connection() as conn, conn.cursor() as cur:
         conn.execute("SET TRANSACTION READ WRITE")
         cur.execute(
@@ -246,7 +245,6 @@ def force_terminate_transaction(
         if row is None:
             raise AgentNotFound(f"agent {agent_id} does not exist")
         old_status = AgentStatus(row[0])
-        page_names: list[str] = []
         _, terminate_inbound_id = _insert_termination_inbounds(
             conn,
             agent_id,
@@ -288,7 +286,7 @@ def force_terminate_transaction(
             kill_all_shell_sessions=kill_all_shell_sessions,
         )
     telemetry.emit_prepared(prepared_event)
-    return old_status, page_names, terminate_inbound_id, row[1]
+    return old_status, terminate_inbound_id, row[1]
 
 
 # meiva:note
@@ -300,7 +298,7 @@ def publish_force_terminate_inbound(
 
 
 # meiva:note
-# Terminate by force and return the affected page names.
+# Terminate by force.
 def force_mark_terminated(
     db: Database,
     bus: EventBus,
@@ -309,15 +307,14 @@ def force_mark_terminated(
     *,
     source: str = "user",
     message: str | None = None,
-) -> list[str]:
-    _, page_names, inbound_id, _cutoff = force_terminate_transaction(
+) -> None:
+    _, inbound_id, _cutoff = force_terminate_transaction(
         agent_id,
         db_pool,
         source=source,
         message=message,
     )
     publish_force_terminate_inbound(db, bus, agent_id, inbound_id, source)
-    return page_names
 
 
 # meiva:note

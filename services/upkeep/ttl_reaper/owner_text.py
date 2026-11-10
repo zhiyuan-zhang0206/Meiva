@@ -42,16 +42,3 @@ def notice_expired_message(local_id: int, title: str, expired_at: str) -> str:
         "without a response from the user, so it is resolved as expired. It no longer "
         "waits for an answer. Ask again with meiva.ui.ask(title, ...) if it still matters."
     )
-
-
-# meiva:note
-# What the owner reads when its page expired. A `show()` page keeps its server in the agent's own
-# process, so that owner is told to stop it and release the port; a served page is re-served.
-def page_expired_message(name: str, agent_id: int, *, shown_by_agent: bool) -> str:
-    head = f"Page {name!r} (agent {agent_id}) was reclaimed after its TTL expired."
-    if shown_by_agent:
-        return (
-            f"{head} Stop the page's HTTP server to release its port; "
-            "re-show with meiva.ui.show() to republish."
-        )
-    return f"{head} Serve it again with meiva.ui.serve() to republish."

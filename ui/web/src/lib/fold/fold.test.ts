@@ -1,7 +1,8 @@
+// meiva:note
 // R4 layer 1 — fold unit tests (Task #1024). The pure reducers + the
 // applyEvent dispatch: every snapshot×stream reconciliation rule lives here
 // and is locked at the reducer level (the hook-level behavior is covered by
-// use-agents / use-agent-pages / use-all-pages / use-notices tests, which now
+// use-agents / use-notices tests, which now
 // drive the real fold through a stubbed EventSource).
 
 import { describe, expect, it, vi } from "vitest";
@@ -9,7 +10,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { AgentRow, SystemEvent } from "../contracts/types";
 import { AGENTS_QUERY_KEY, foldAgents, AGENT_DIRECTORY_QUERY_KEY, AGENT_DETAIL_QUERY_KEY } from "./agents";
 import { foldFleetGraph } from "./graph";
-import { foldAgainstCache, applyEvent, ALL_PAGES_QUERY_KEY } from "./index";
+import { foldAgainstCache, applyEvent } from "./index";
 import { foldNotices, NOTICES_QUERY_KEY, NOTICES_RESOLVED_QUERY_KEY } from "./notices";
 import { foldTasks, TASKS_QUERY_KEY } from "./tasks";
 import { FLEET_GRAPH_KEY_PREFIX } from "./graph";
@@ -32,22 +33,6 @@ const baseAgent: AgentRow = {
   heartbeat_paused_until: null,
   liveness_state: "online",
 };
-
-function pageOpened(over: Partial<SystemEvent> & { name: string }): SystemEvent {
-  return {
-    role: "page_opened",
-    agent_id: 1,
-    page_id: 10,
-    port: 9100,
-    title: over.name,
-    url: `http://host/${over.name}`,
-    ...over,
-  } as SystemEvent;
-}
-
-function pageClosed(name: string, agentId = 1): SystemEvent {
-  return { role: "page_closed", agent_id: agentId, name };
-}
 
 describe("foldAgents", () => {
   it("treats lifecycle state as a hint for authoritative reads", () => {
@@ -106,22 +91,6 @@ describe("foldAgainstCache — the dispatch", () => {
       invalidateQueries: () => undefined,
     };
   }
-
-  it.each([pageOpened({ name: "p1" }), pageClosed("p1")])("invalidates both page keys for %s", (event) => {
-    const cache = new Map<string, unknown>();
-    const outcome = foldAgainstCache(ctxWith(cache), event);
-    expect(outcome.writes).toEqual([]);
-    expect(outcome.invalidations.map((item) => item.key)).toEqual([
-      ["agent-pages", 1], ALL_PAGES_QUERY_KEY,
-    ]);
-  });
-
-  it("never writes an un-fetched page key", () => {
-    const cache = new Map<string, unknown>();
-    const outcome = foldAgainstCache(ctxWith(cache), pageOpened({ name: "p1" }));
-    expect(outcome.writes).toEqual([]);
-    expect(cache.size).toBe(0);
-  });
 
   it("emits notices invalidations from a notice event", () => {
     const cache = new Map<string, unknown>();

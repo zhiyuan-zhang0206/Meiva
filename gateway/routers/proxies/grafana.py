@@ -3,8 +3,7 @@
 #
 # The Grafana web app (dashboard iframes, its `/api/*` calls, static assets)
 # is served through the gateway so the browser never dials Grafana directly:
-# one authenticated entry point, same posture as the agent page reverse proxy
-# (`gateway/routers/page_serving/pages.py`). Auth is the cluster middleware (session cookie /
+# one authenticated entry point. Auth is the cluster middleware (session cookie /
 # bearer) like every other API route; Grafana itself runs in anonymous-viewer
 # mode (read-only dashboards), so no Grafana-side credentials are forwarded.
 #

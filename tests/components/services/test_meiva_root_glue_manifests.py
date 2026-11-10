@@ -79,7 +79,7 @@ def test_agent_runner_subset_and_otel() -> None:
         u["id"]
         for u in gen.build_units(capabilities=["agent-runner"], repo_root=_REPO, home=meiva_home())
     }
-    assert {"agent-host", "page-server", "ops"} <= runner
+    assert {"agent-host", "ops"} <= runner
     assert "gateway" not in runner
     assert "otel-collector" in runner  # intersects on either side of the pair
     assert {
@@ -107,8 +107,8 @@ def test_key_units_exec_restart_attach() -> None:
         "-c",
         "cd /checkout/repo && exec .venv/bin/python -m services.agent_runner.agent_host.daemon",
     ]
-    assert units["page-server"]["restart"] == "always"
-    assert units["page-server"]["attach"] == "root"
+    assert units["ops"]["restart"] == "always"
+    assert units["ops"]["attach"] == "root"
     frontend_cmd = cast("list[str]", units["frontend"]["exec"])[2]
     assert "&&" in frontend_cmd  # a compound command keeps its own shape
     assert frontend_cmd.count("exec ") == 1  # only its own final exec, none prefixed
@@ -169,7 +169,6 @@ def test_session_host_attach_table_matches_the_g6b_ruling() -> None:
     assert gen.SESSION_HOST_ATTACH == {
         "agent-shell": "agent-host",
         "watcher-session": "agent-host",
-        "page-server-instance": "page-server",
         "schedule-runner": "gateway",
         "orchestration-session": "ops",
         "exec-child": "agent-host",

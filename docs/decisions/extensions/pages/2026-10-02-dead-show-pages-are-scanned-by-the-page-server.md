@@ -43,3 +43,5 @@ restart probes every open show page once, which is one cheap HTTP call each.
   covers an idle owner.
 - The agent host loses one loop and its Redis event publisher; `_background_loops` no
   longer takes a pool.
+
+Superseded by `2026-11-10-pages-removed.md`: Pages no longer exist.

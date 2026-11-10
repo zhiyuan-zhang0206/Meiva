@@ -166,13 +166,12 @@ citation-sourcing holes, not semantic truth; say so in the report's limitations.
 1. Write the report **from the state file**, never from memory.
 2. Every significant claim carries an inline numbered citation `[n]` resolving
    to the source list (format: `references/citation-discipline.md`).
-3. Deliver by rendering the report to a self-contained HTML page with the
-   Meiva Guide pages Markdown resource and serving it with `meiva.ui.serve(<directory>, name="<slug>", port=<port>)`
-   (the port is required and must be free — pick one explicitly).
+3. Deliver by rendering the report to a self-contained HTML file in your
+   workspace and publishing it with `meiva.ui.publish()`.
    **Offer format choice in the
-   delivery message**: A. the served HTML page link (default), B. the Markdown
+   delivery message**: A. the HTML file path (default), B. the Markdown
    source path, C. any other format the user names (user ruling 2026-08-09:
-   reports must offer format choice; HTML serve is the default channel). Report
+   reports must offer format choice; self-contained HTML is the default). Report
    + state file paths go in the final message; the state file is the audit
    trail a human can open.
 4. **Rendering ≠ deciding**: present the process (question → plan → waves →

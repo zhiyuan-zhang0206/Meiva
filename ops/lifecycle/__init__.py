@@ -61,9 +61,6 @@ from ops.lifecycle.events import (
 from ops.lifecycle.events import (
     publish_notice_resolved as publish_notice_resolved,
 )
-from ops.lifecycle.events import (
-    publish_page_closed as publish_page_closed,
-)
 from ops.lifecycle.foreground_cancel import enqueue_external_cancel
 from ops.lifecycle.hosted_turn import (
     LocalAgentHost,
@@ -137,13 +134,11 @@ async def terminate_agent_op(
 ) -> TerminateAgentResponse:
     attached = await asyncio.to_thread(termination.harness_attachment, agent_id, home=host.home)
     if body.force:
-        _old_status, killed_page_names, _command_id, cutoff = await asyncio.to_thread(
+        _old_status, _command_id, cutoff = await asyncio.to_thread(
             terminate_force_blocking, db, bus, agent_id, body, db_pool
         )
         await cancel_hosted_turn_best_effort(agent_id, host=host)
         await release_browser_pages(agent_id, home=host.home)
-        for page_name in killed_page_names:
-            await publish_page_closed(bus, agent_id, page_name)
         _log.info(
             "[gateway] agent %s force requested by %s",
             agent_id,
@@ -231,9 +226,9 @@ def terminate_force_blocking(
     agent_id: int,
     body: TerminateAgentRequest,
     db_pool: ConnectionPool,
-) -> tuple[AgentStatus, list[str], int, int]:
+) -> tuple[AgentStatus, int, int]:
     """Commit the force fence before publishing its wake and lifecycle hint."""
-    old_status, killed_page_names, inbound_id, cutoff = force_terminate_transaction(
+    old_status, inbound_id, cutoff = force_terminate_transaction(
         agent_id,
         db_pool,
         source=body.source,
@@ -242,7 +237,7 @@ def terminate_force_blocking(
     )
     publish_force_terminate_inbound(db, bus, agent_id, inbound_id, body.source)
     publish_agent_updated_sync(bus, agent_id)
-    return old_status, killed_page_names, inbound_id, cutoff
+    return old_status, inbound_id, cutoff
 
 
 def _terminate_graceful_blocking(
@@ -595,15 +590,13 @@ async def _execute_harness_transition(
     )
 
     if status != "terminated":
-        _old_status, killed_page_names, _cmd_id, _cutoff = await asyncio.to_thread(
+        _old_status, _cmd_id, _cutoff = await asyncio.to_thread(
             force_terminate_transaction,
             agent_id,
             db_pool,
             source=body.source,
             kill_all_shell_sessions=False,
         )
-        for page_name in killed_page_names:
-            await publish_page_closed(bus, agent_id, page_name)
         await release_browser_pages(agent_id, home=host.home)
 
     await asyncio.to_thread(

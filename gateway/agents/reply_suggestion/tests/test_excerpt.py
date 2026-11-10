@@ -33,7 +33,6 @@ def item(
     ("source", "human"),
     [
         ("user", True),
-        ("ui:page:3", True),
         ("agent:7", False),
         ("system", False),
         ("watcher:1", False),

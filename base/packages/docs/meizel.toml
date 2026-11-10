@@ -9,4 +9,3 @@ exports = ["frontmatter.py", "notes.py"]
 "__init__.py" = "strict"
 "frontmatter.py" = "strict"
 "notes.py" = "strict"
-"pages_copy.py" = "strict"

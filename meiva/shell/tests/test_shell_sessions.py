@@ -74,8 +74,6 @@ def test_a_refused_name_or_ttl_takes_no_session_id(
 ) -> None:
     with pytest.raises(ValueError, match="lowercase slug"):
         _create(live_shell, live_host, "Dev Server", cwd=tmp_path)
-    with pytest.raises(ValueError, match="reserved for pages"):
-        _create(live_shell, live_host, "page-preview", cwd=tmp_path)
     with pytest.raises(ValueError, match="ttl"):
         _create(live_shell, live_host, "late", cwd=tmp_path, ttl=86400.1)
 

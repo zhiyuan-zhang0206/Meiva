@@ -26,13 +26,12 @@ simply not useful.
 1. The agent must exist and the cluster switch must be on. Explicit publication
    candidates or an open Ask also allow drafting while the agent is working.
 2. `load_current_messages` reads the checkpoint and the shared timeline renderer turns it
-   into items. The excerpt is the newest human message (`user` or `ui:page:*`) and the
+   into items. The excerpt is the newest human message (`user`) and the
    user-facing text (`user_facing=True`) of the last turn (everything after the newest inbound), cut to
    `reply_suggestion_max_input_tokens`. The user's message has the budget's first claim:
    a long agent turn cannot evict the message the suggestion answers, and whichever part
    must be cut keeps its newest words. `excerpt.py`'s `is_human_source` mirrors
-   `inboundKind` in `ui/web/src/components/timeline/model/runs.ts` (the `user` /
-   `ui:page:*` split); keep the pair in sync.
+   `inboundKind` in `ui/web/src/components/timeline/model/runs.ts` (the `user` source); keep the pair in sync.
 3. With explicit candidates or an open Ask, draft directly. Otherwise gate: `decide(reply_suggestion_gate_model, ...)` asks one `YesNo`, "does the agent's
    last turn leave the user something to answer or decide?". Below
    `reply_suggestion_gate_threshold` the answer is `not_useful`. This judges whether the

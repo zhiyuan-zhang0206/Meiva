@@ -86,21 +86,13 @@ def test_a_shell_is_found_by_its_session_id() -> None:
 def test_a_kill_all_takes_every_shell_below_the_cutoff() -> None:
     listed = _listed(7, 0, 2, 5, 6, 8)
 
-    targets = kill_all_targets(listed, 6, frozenset())
+    targets = kill_all_targets(listed, 6)
 
     assert [t.shell.id for t in targets] == [0, 2, 5]
 
 
-def test_a_kill_all_spares_the_pages_a_page_keeps_its_own_lifecycle() -> None:
-    listed = _listed(7, 0, 3, 5)
-
-    targets = kill_all_targets(listed, 6, frozenset({3}))
-
-    assert [t.shell.id for t in targets] == [0, 5]
-
-
 def test_a_kill_all_below_the_first_shell_targets_nothing() -> None:
-    assert kill_all_targets(_listed(7, 4, 5), 4, frozenset()) == ()
+    assert kill_all_targets(_listed(7, 4, 5), 4) == ()
 
 
 def test_a_confirmed_kill_all_returns_the_ids_it_removed() -> None:

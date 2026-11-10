@@ -43,7 +43,7 @@ def _delivered_via_side_channel(rec: RecordBody) -> bool:
     return (
         tools_called.get("meiva.agents.send_message", 0) > 0
         or tools_called.get("meiva.ui.notify", 0) > 0
-        or tools_called.get("meiva.ui.serve", 0) > 0
+        or tools_called.get("meiva.ui.publish", 0) > 0
         or tools_called.get("meiva.files.write", 0) > 0
         or tools_called.get("meiva.files.append", 0) > 0
     )

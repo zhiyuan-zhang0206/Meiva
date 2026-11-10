@@ -103,10 +103,7 @@ def tail_has_recallable_inbound(messages: list[AnyMessage]) -> bool:
 
 # meiva:note
 # Whether the messages added since the last assistant turn include an inbound
-# that skill recall should fire on: a human message (`user`, `ui:page:<name>`)
+# that skill recall should fire on: a human message (`user`)
 # or a schedule trigger (`schedule:<id>`).
 def tail_has_skill_recall_inbound(messages: list[AnyMessage]) -> bool:
-    return any(
-        s == "user" or s.startswith(("ui:page:", "schedule:"))
-        for s in _tail_inbound_sources(messages)
-    )
+    return any(s == "user" or s.startswith("schedule:") for s in _tail_inbound_sources(messages))

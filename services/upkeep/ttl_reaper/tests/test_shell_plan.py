@@ -163,11 +163,3 @@ def test_the_expired_notice_never_reads_as_a_reply() -> None:
     assert text.startswith('Notice #4 "Ship the release?" reached its expiry at 09:30')
     assert "without a response from the user" in text
     assert not text.startswith("Re:")
-
-
-def test_a_shown_page_tells_its_owner_to_stop_the_server() -> None:
-    shown = owner_text.page_expired_message("report", 3, shown_by_agent=True)
-    served = owner_text.page_expired_message("report", 3, shown_by_agent=False)
-
-    assert "Stop the page's HTTP server" in shown and "meiva.ui.show()" in shown
-    assert "meiva.ui.serve()" in served and "Stop the page" not in served

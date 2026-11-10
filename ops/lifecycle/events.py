@@ -1,9 +1,9 @@
-"""Event-publish RPC ops — the InboundArrived / PageClosed / Notice event fan-out.
-
-The `ops.lifecycle` door re-exports these publishes. Each helper is best-effort: the publish goes to
-the shared events channel (`EventBus.publish_best_effort`) so a Redis blip costs a live
-UI update, never the durable op that triggered it.
-"""
+# meiva:note
+# Event-publish RPC ops — the InboundArrived / Notice event fan-out.
+#
+# The `ops.lifecycle` door re-exports these publishes. Each helper is best-effort: the publish goes to
+# the shared events channel (`EventBus.publish_best_effort`) so a Redis blip costs a live
+# UI update, never the durable op that triggered it.
 
 from __future__ import annotations
 
@@ -15,7 +15,6 @@ from base.events.live.projection import (
     InboundArrived,
     NoticePosted,
     NoticeResolved,
-    PageClosed,
 )
 
 
@@ -31,13 +30,6 @@ async def publish_inbound_arrived(
         content=content,
     )
     await bus.publish_best_effort(ev.model_dump_json(), context="inbound_arrived")
-
-
-async def publish_page_closed(bus: EventBus, agent_id: int, name: str) -> None:
-    """Publish PageClosed to the events channel — frontend popover removes the entry.
-    Best-effort, never raises."""
-    ev = PageClosed(agent_id=agent_id, name=name)
-    await bus.publish_best_effort(ev.model_dump_json(), context="page_closed")
 
 
 class NoticeResolutionFacts(TypedDict):

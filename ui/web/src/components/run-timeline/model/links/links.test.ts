@@ -112,13 +112,13 @@ describe("the Other agents row", () => {
 describe("the User group", () => {
   const human = (i0: number, source: string, from: number, to: number, inboundId: number | null): RunTimelineUnit =>
     ({ ...inbound(inboundId, from, to), i0, i1: i0, source, preview: `from ${source}` });
-  const loaded = new Map([[2, agent([human(1, "user", 20, 22, 5), human(2, "ui:page:fleet", 30, 31, null), human(3, "watcher:7", 40, 41, 9), inbound(8, 50, 51)])]]);
+  const loaded = new Map([[2, agent([human(1, "user", 20, 22, 5), human(2, "user", 30, 31, null), human(3, "watcher:7", 40, 41, 9), inbound(8, 50, 51)])]]);
 
   it("takes a person's chat message from the receiver's own block, with no audit event, and ends it on that block", () => {
     const user = groupLinks(resolveLinks([], new Set([2]), loaded)).user;
     expect(user.map((l) => [l.link.kind, l.link.sender, l.link.receiver, l.userSource])).toEqual([
       ["send_message", null, 2, "user"],
-      ["send_message", null, 2, "ui:page:fleet"],
+      ["send_message", null, 2, "user"],
     ]);
     // meiva:note
     // Its own kind, so it has its own color and legend entry and is never merged with messages between agents.

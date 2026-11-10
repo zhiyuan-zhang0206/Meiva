@@ -440,7 +440,7 @@ Write to {hf(7, f"review_{suffix}")}. Message no one.
 
     publisher_prompt = """You are the Publisher.
 
-Read both reviews, merge changes, render to self-contained HTML, and serve it with meiva.ui.serve().
+Read both reviews, merge changes, render to a self-contained HTML file, and deliver it with meiva.ui.publish().
 Title: "Meiva Codebase Sweep Report"
 Message no one — the file IS the handoff.
 """

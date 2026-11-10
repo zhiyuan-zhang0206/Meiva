@@ -107,7 +107,7 @@ to `report.assemble_status`, which decides what the snapshot says: the three cap
 the session counts and agent groups, and the `paused` verdict with its reason. `listing`
 turns what the session backends listed into session rows at one given instant;
 `shell_plans` picks an agent's shells out of a listing, picks what an owner-level kill-all
-targets (below the cutoff, page-server sessions spared) and judges a kill's outcome;
+targets (every shell below the cutoff) and judges a kill's outcome;
 `model` compares the two migration sets and words a failure to read them. These four
 modules are strict: values in, values out. `sessions` holds the effects over them: it asks
 the service backend (the native supervisor) and the shell backend (the pty-sessions service)

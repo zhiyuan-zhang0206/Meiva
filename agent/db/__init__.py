@@ -153,15 +153,14 @@ class LoggingConnectionPool(AsyncConnectionPool[_CT]):
             del self._borrow_spans[task]
 
 
+# meiva:note
+# One inbound row returned by `claim_inbound_batch`.
+#
+# `source` is the message channel ('system' / 'user' / 'agent:N' / 'watcher:N' / 'schedule:N' etc.); the
+# claim node uses it via `base/agents/messages/envelope.py:wrap_inbound` to add an envelope
+# prefix for kind='chat'; lifecycle kinds directly assemble the marker text
+# without going through wrap_inbound.
 class ClaimedInbound(NamedTuple):
-    """One inbound row returned by `claim_inbound_batch`.
-
-    `source` is the message channel ('system' / 'user' / 'agent:N' / 'ui:page:<name>' / 'watcher:N' / 'schedule:N' etc.); the
-    claim node uses it via `base/agents/messages/envelope.py:wrap_inbound` to add an envelope
-    prefix for kind='chat'; lifecycle kinds directly assemble the marker text
-    without going through wrap_inbound.
-    """
-
     id: int
     agent_id: int
     content: str

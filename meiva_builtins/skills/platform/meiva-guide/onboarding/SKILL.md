@@ -71,7 +71,7 @@ depends on the answer:
    running: irreversible, outward-facing, spending real money, reaching a
    real person.
 6. **Reporting style** — detail level, progress-update frequency, whether
-   finished work is served as a page (`meiva.ui.serve`).
+   finished work is delivered as a rendered report file.
 
 Exact wording in [Question list](#question-list).
 

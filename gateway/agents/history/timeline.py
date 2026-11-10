@@ -328,8 +328,7 @@ def _is_primary_item(item: TimelineItem) -> bool:
     if item.kind == "agent_chat":
         return item.user_facing is not False
     if item.kind == "inbound_chat":
-        source = item.source or ""
-        return source == "user" or source.startswith("ui:page:")
+        return item.source == "user"
     return False
 
 

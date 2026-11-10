@@ -442,7 +442,7 @@ Write to {hf(7, f"review_{suffix}")}. Message no one.
     # 1 publisher
     publisher_prompt = f"""You are Publisher.
 Read the two reviews ({hf(7, "review_a")} and {hf(7, "review_b")}),
-merge revision suggestions, generate final Markdown, render it to self-contained HTML, and serve it with meiva.ui.serve().
+merge revision suggestions, generate final Markdown, render it to a self-contained HTML file, and deliver it with meiva.ui.publish().
 Title: "AI Coding Agent 2026 Competitive Landscape"
 Message no one — publishing IS the handoff.
 """
@@ -466,6 +466,7 @@ if __name__ == "__main__":
     log(f"Handoff: {HANDOFF}")
     log("Strategy: workers write JSON and end silently; one checkpoint per wave")
 
+    # meiva:note
     # Wave 1 executes here. Waves 2-7 are called sequentially
     # after watcher wakes orchestrator: wave2() → wave3() → ... → wave7()
     # For demo completeness, the full call chain is shown here:
@@ -482,6 +483,6 @@ if __name__ == "__main__":
     #   ↓
     # wave6()
     #   ↓
-    # wave7()  ← render to self-contained HTML and serve with meiva.ui.serve()
+    # wave7()  ← render to a self-contained HTML file and deliver with meiva.ui.publish()
 
     log("Wave 1 spawned. Orchestrator going idle, watcher will wake me.")

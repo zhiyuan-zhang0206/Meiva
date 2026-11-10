@@ -34,8 +34,6 @@ showing the old numbers, rendering empty metric skeleton cards, or remounting th
 - Task events (`task_created` / `task_updated` for the selected agent): refresh
   the widget read only, since task movement can change the task a widget row
   points at.
-- Page events: the open-pages list (`["agent-pages", id]`) is refreshed through
-  `useAgentPages`' own coalesced read.
 - 60-second interval (while open) reconciles statistics; compact invalidation is
   commit-safe; a reconnect repairs the live and widget reads immediately
   (statistics reconcile on their next interval), and repeated reconnect storms

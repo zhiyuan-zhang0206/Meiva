@@ -1,7 +1,7 @@
 exports = ["models.py", "stats.py", "tasks.py"]
 
 [uses]
-"__init__.py" = ["errors.py", "fleet_graph.py", "frontend_telemetry.py", "host_permissions.py", "memory.py", "pages.py", "shell.py", "user_settings.py"]
+"__init__.py" = ["errors.py", "fleet_graph.py", "frontend_telemetry.py", "host_permissions.py", "memory.py", "shell.py", "user_settings.py"]
 "shell.py" = ["commands.py"]
 
 [purity]
@@ -13,7 +13,6 @@ exports = ["models.py", "stats.py", "tasks.py"]
 "frontend_telemetry.py" = "strict"
 "host_permissions.py" = "strict"
 "memory.py" = "strict"
-"pages.py" = "strict"
 "shell.py" = "strict"
 "stats.py" = "strict"
 "tasks.py" = "strict"

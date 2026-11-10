@@ -13,7 +13,6 @@ from base.config import ConfigBoot
 from base.host.proc import process_cmdline
 from services.agent_runner.agent_ops import boot as ops_boot
 from services.agent_runner.agent_ops import daemon as agent_ops_daemon
-from services.agent_runner.page_server import daemon as page_server_daemon
 from services.backup.scheduler import daemon as backup_scheduler_daemon
 from services.derived.labeler import daemon as labeler_daemon
 from services.derived.memory_indexer import daemon as memory_indexer_daemon
@@ -42,11 +41,6 @@ def _await_argv(pid: int, module: str, timeout_s: float = 10.0) -> None:
 
 def _guard(daemon: ModuleType, config: ConfigBoot, runtime: Path) -> tuple[Path, bool]:
     module_name = daemon.__name__
-    if module_name == "services.agent_runner.page_server.daemon":
-        resources = daemon.resources
-        return resources.pidfile(config, runtime=runtime), resources.is_running(
-            config, runtime=runtime
-        )
     if module_name == "services.agent_runner.agent_ops.daemon":
         return ops_boot.pidfile(config, runtime=runtime), ops_boot.is_running(
             config, runtime=runtime
@@ -60,7 +54,6 @@ def _guard(daemon: ModuleType, config: ConfigBoot, runtime: Path) -> tuple[Path,
         labeler_daemon,
         heartbeat_daemon,
         backup_scheduler_daemon,
-        page_server_daemon,
         memory_indexer_daemon,
         delivery_watchdog_daemon,
         events_maintenance_daemon,

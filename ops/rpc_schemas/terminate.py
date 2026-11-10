@@ -13,33 +13,31 @@ from base.api_contracts.caller_identity import CallerIdentity, is_caller_source
 from ops.rpc_schemas.content import UserContent
 
 
+# meiva:note
+# POST /api/agents/{id}/terminate request body — fully optional.
+#
+# `force` defaults to False for graceful termination. True directly kills the
+# detached process and force-updates status when the agent cannot reach claim.
+#
+# `kill_all_shell_sessions` also kills every shell session the agent owns on
+# its home machine (watchers included), with no per-session notice. A graceful terminate of a live
+# agent records the request on its terminate command and the home runtime
+# attempts older sessions after the termination commits and the agent's last
+# step ends. Force and already-terminated requests attempt older sessions
+# before the response; the original host also attempts one fresh cutoff after
+# force quiescence. Cleanup is best-effort: errors are visible, but crash or
+# late-session leftovers require operators. Without it, sessions are left alone.
+# A terminated agent is otherwise an ordinary terminated agent — any new
+# message may resurrect it
+# (docs/decisions/agents/lifecycle/2026-09-27-terminate-has-no-closed-state.md).
+#
+# `source` defaults to "user"; SDK paths pass f"agent:{my_id}". Claim
+# includes this source in the lifecycle marker shown to the agent.
+#
+# `message`, when present, is queued as chat immediately before the terminate
+# inbound. Lifecycle acceptance claims only the terminate row, so the chat
+# remains pending for the next resurrection without another LLM turn.
 class TerminateAgentRequest(BaseModel):
-    """POST /api/agents/{id}/terminate request body — fully optional.
-
-    `force` defaults to False for graceful termination. True directly kills the
-    detached process and force-updates status when the agent cannot reach claim.
-
-    `kill_all_shell_sessions` also kills every shell session the agent owns on
-    its home machine (watchers included; `meiva.ui.serve` page servers keep their
-    own lifecycle), with no per-session notice. A graceful terminate of a live
-    agent records the request on its terminate command and the home runtime
-    attempts older sessions after the termination commits and the agent's last
-    step ends. Force and already-terminated requests attempt older sessions
-    before the response; the original host also attempts one fresh cutoff after
-    force quiescence. Cleanup is best-effort: errors are visible, but crash or
-    late-session leftovers require operators. Without it, sessions are left alone.
-    A terminated agent is otherwise an ordinary terminated agent — any new
-    message may resurrect it
-    (docs/decisions/agents/lifecycle/2026-09-27-terminate-has-no-closed-state.md).
-
-    `source` defaults to "user"; SDK paths pass f"agent:{my_id}". Claim
-    includes this source in the lifecycle marker shown to the agent.
-
-    `message`, when present, is queued as chat immediately before the terminate
-    inbound. Lifecycle acceptance claims only the terminate row, so the chat
-    remains pending for the next resurrection without another LLM turn.
-    """
-
     force: bool = Field(default=False)
     kill_all_shell_sessions: bool = Field(default=False)
     source: str = Field(default="user", min_length=1, max_length=64)

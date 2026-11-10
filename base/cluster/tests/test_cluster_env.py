@@ -30,7 +30,6 @@ def _rec(tmp_path: Path):
             "ttl_reaper": 18025,
             "schedule_manager": 18026,
             "memory_search": 18024,
-            "page_server": 18018,
         },
         gateway_home=str(tmp_path / ".meiva-t1"),
         created_at="x",

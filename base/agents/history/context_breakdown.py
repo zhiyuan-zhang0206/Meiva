@@ -72,15 +72,16 @@ CATEGORY_ORDER: tuple[str, ...] = (
 )
 
 
+# meiva:note
+# Bucket an inbound HumanMessage by its envelope `meiva_source` (the taxonomy
+# in `base/agents/messages/envelope.py`): a peer agent (`agent:N`) or a declared external agent
+# (`external_agent:S`) -> `agent_messages`; a
+# machine- or framework-originated wakeup / notice (`watcher:N` / `shell:N` /
+# `schedule:N` / `system` / `system:<subtype>`) -> `automation`; everything else
+# — a human turn (`user`) or a legacy inbound with no recorded
+# source — -> `user_input`. Keeping `user_input` the default preserves the old
+# single-bucket behavior for any inbound whose source we can't classify.
 def _inbound_bucket(source: str) -> str:
-    """Bucket an inbound HumanMessage by its envelope `meiva_source` (the taxonomy
-    in `base/agents/messages/envelope.py`): a peer agent (`agent:N`) or a declared external agent
-    (`external_agent:S`) -> `agent_messages`; a
-    machine- or framework-originated wakeup / notice (`watcher:N` / `shell:N` /
-    `schedule:N` / `system` / `system:<subtype>`) -> `automation`; everything else
-    — a human turn (`user`, `ui:page:<name>`) or a legacy inbound with no recorded
-    source — -> `user_input`. Keeping `user_input` the default preserves the old
-    single-bucket behavior for any inbound whose source we can't classify."""
     if source.startswith(("agent:", "external_agent:")):
         return "agent_messages"
     if source == "system" or source.startswith(("system:", "watcher:", "shell:", "schedule:")):

@@ -181,8 +181,7 @@ def _assert_transferred_db_records(
     assert (
         audit[2]["from_machine"],
         audit[2]["to_machine"],
-        audit[2]["closed_pages"],
-    ) == ("runner-a", "runner-b", [])
+    ) == ("runner-a", "runner-b")
 
 
 def test_transfer_idling_agent_moves_workspace_and_resurrects_on_target(
@@ -222,8 +221,7 @@ def test_transfer_idling_agent_moves_workspace_and_resurrects_on_target(
         body["to_machine"],
         body["agent_status"],
         body["files_transferred"],
-        body["closed_pages"],
-    ) == (agent_id, "runner-a", "runner-b", "idling", 2, [])
+    ) == (agent_id, "runner-a", "runner-b", "idling", 2)
 
     ws_b = paths.workspace_path(two_runners.home_b, agent_id)
     assert (ws_b / "to_user.md").read_text(encoding="utf-8") == "# Output Owner\nAll green.\n"

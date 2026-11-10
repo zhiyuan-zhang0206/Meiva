@@ -37,7 +37,6 @@ _EXPECTED_SESSIONS = {
     "mcp-daemon",
     "pty-sessions",
     "computer-mcp",
-    "page-server",
     "pg-backup",
     "redis-bridge",
     "ttl-reaper",

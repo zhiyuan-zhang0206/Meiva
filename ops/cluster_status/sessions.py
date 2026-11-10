@@ -26,7 +26,6 @@ from pathlib import Path
 from base.api_contracts.agent_contract import ShellKillMode
 from base.cluster import session_name
 from base.sessions.backend import get_shell_backend
-from base.sessions.page_session import is_page_label
 from base.sessions.protocol import SessionBackend
 from ops.cluster_status.listing import SessionStart, session_rows
 from ops.cluster_status.model import trim_captured_lines
@@ -201,8 +200,7 @@ def kill_shell(
 # (docs/decisions/agents/lifecycle/2026-09-27-terminate-has-no-closed-state.md). The enumeration is
 # the one `…-agent-<id>-shell-<sid>[-<name>]` rule, so the agent's explicit shells and its watchers
 # go, while another agent's sessions and the agent's own process session are never touched.
-# Page-server sessions (`meiva.ui.serve`, the `page-` label owned by `base.sessions.page_session`)
-# are spared: a page keeps its own lifecycle. The backend's kill is idempotent, so a session that
+# The backend's kill is idempotent, so a session that
 # ended between the listing and its kill still counts as killed. No notice is produced here (an
 # owner-level kill is silent) and nothing is written to the database: removing `agent_shell_ttls`
 # rows is the gateway's part. IDs at or above the exclusive cutoff are never targeted.
@@ -212,8 +210,7 @@ def kill_shell(
 def kill_agent_shells(agent_id: int, *, before_session_index: int, home: Path) -> list[int]:
     backend = get_shell_backend(home=home)
     listed = _agent_shells(backend, agent_id, _EPOCH)
-    page_ids = frozenset(entry.shell.id for entry in listed if is_page_label(entry.shell.name))
-    targets = kill_all_targets(listed, before_session_index, page_ids)
+    targets = kill_all_targets(listed, before_session_index)
     if not targets:
         return []
 

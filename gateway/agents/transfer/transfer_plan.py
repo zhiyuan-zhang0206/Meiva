@@ -213,7 +213,7 @@ def verify_cutover_cas(
 # meiva:note
 # Compose the transfer wake message delivered when the agent is resurrected on `to_machine`,
 # informing it that cross-machine transfer is complete, its workspace is active, and any
-# machine-local shells or pages on `from_machine` were closed.
+# machine-local shells on `from_machine` were closed.
 def compose_transfer_wake_message(
     *,
     from_machine: str,
@@ -221,7 +221,6 @@ def compose_transfer_wake_message(
     source: str,
     message: str | None,
     killed_shell_sessions: list[int],
-    closed_pages: list[str],
 ) -> str:
     details: list[str] = [
         f"Cross-machine transfer from '{from_machine}' to '{to_machine}' initiated by {source} is complete.",
@@ -232,9 +231,6 @@ def compose_transfer_wake_message(
         details.append(
             f"Persistent shell session(s) on '{from_machine}' were closed ({joined_shells})."
         )
-    if closed_pages:
-        joined_pages = ", ".join(closed_pages)
-        details.append(f"Open UI page(s) on '{from_machine}' were closed ({joined_pages}).")
     if message:
         details.append(f"Reason: {message}")
     return " ".join(details)

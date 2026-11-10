@@ -65,13 +65,12 @@ class _NoticeContentRow(NamedTuple):
 # A transport page, not a display limit: the reader pages until the window is exhausted.
 PAGE_SIZE = 500
 _AGENT_PREFIX = "agent:"
-_HUMAN_SOURCES = ("user", "ui:page:")
 
 
 def sender_of(source: str) -> tuple[bool, int | None]:
     """`(drawn, agent)` for an audit source: an agent, or the user (agent None); any other valid source is not drawn. Unknown prefixes raise."""
     validate_source(source)
-    if source.startswith(_HUMAN_SOURCES):
+    if source == "user":
         return True, None
     if source.startswith(_AGENT_PREFIX):
         return True, int(source.removeprefix(_AGENT_PREFIX))

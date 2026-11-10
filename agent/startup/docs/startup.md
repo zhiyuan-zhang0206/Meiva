@@ -77,7 +77,6 @@ owns verification and rollback.
 - [Hosted Runtime Admission](admission.md) — runtime ownership and admission
 - [Agent Turn Loop](../../docs/loop.md) — host turn loop
 - [Agent State](../../docs/state.md) — checkpoint persistence
-- [Unavailable Pages](page-restore.md) — page reconciliation
 
 External harness agents retain the shared workspace/document and desktop-permission
 preparation in `boot_agent_scope`, then skip native chat-model construction.

@@ -130,15 +130,6 @@ class GrafanaProxy:
 
 
 # meiva:note
-# Where a delivered page is reachable (`gateway_url`, empty when none is configured) and how
-# long a page lives when its author names no lifetime.
-@dataclass(frozen=True)
-class PageSettings:
-    gateway_url: str
-    default_ttl_seconds: float
-
-
-# meiva:note
 # The memory pool checkout policy of a refresh: keep local commits, and the branch to follow.
 @dataclass(frozen=True)
 class MemoryPoolPolicy:
@@ -213,7 +204,6 @@ class GatewayConfig:
     alerts: AlertSettings
     to_user: ToUserLimits
     grafana: GrafanaProxy
-    pages: PageSettings
     memory_pool: MemoryPoolPolicy
     memory_search: MemorySearchSettings
     heartbeat: HeartbeatTiming
@@ -241,12 +231,6 @@ class GatewayConfig:
     # A read of the unified or the per-agent event history past this many milliseconds is
     # cancelled and answered as a retriable 503.
     events_read_timeout_ms: int = 10_000
-    # meiva:note
-    # How the page reverse proxy dials a page server: the connect fails fast when the server
-    # is down, and the read bound is between chunks, so a live SSE stream or a slow large
-    # download keeps flowing while a hung backend is severed.
-    page_proxy_connect_seconds: float = 5.0
-    page_proxy_read_seconds: float = 120.0
     # meiva:note
     # Connections the request handlers share. A request that holds one and asks for another
     # (a nested checkout) deadlocks a pool this small, which is what a test sets it to.
@@ -387,9 +371,6 @@ def gateway_config_from_boot(
             host=gateway.grafana_host,
             port=gateway.grafana_port,
         ),
-        pages=PageSettings(
-            gateway_url=gateway_url, default_ttl_seconds=daemon.page_default_ttl_seconds
-        ),
         memory_pool=MemoryPoolPolicy(
             keep_local=view.general.memory_keep_local, track_branch=view.general.track_branch
         ),
@@ -481,7 +462,6 @@ def placeholder_config() -> GatewayConfig:
         alerts=_placeholders(AlertSettings),
         to_user=_placeholders(ToUserLimits),
         grafana=_placeholders(GrafanaProxy),
-        pages=_placeholders(PageSettings),
         memory_pool=_placeholders(MemoryPoolPolicy),
         memory_search=_placeholders(MemorySearchSettings),
         heartbeat=_placeholders(HeartbeatTiming),

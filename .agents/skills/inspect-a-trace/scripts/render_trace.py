@@ -1,13 +1,12 @@
 #!/usr/bin/env python3
-"""Render a read trace (trace_read.json) as a self-contained HTML report.
-
-Output: `<out>/index.html` — inline CSS and JS, no CDN, no build step, so the
-served page opens offline. Serve it with
-`meiva.ui.serve(<out>, name="trace-<agent>-<short-id>")`.
-
-Sections: header, waterfall timeline (click a bar for its attributes), node
-sequence, LLM span table, event stream, and the turn content when present.
-"""
+# meiva:note
+# Render a read trace (trace_read.json) as a self-contained HTML report.
+#
+# Output: `<out>/index.html` — inline CSS and JS, no CDN, no build step, so the
+# page opens offline.
+#
+# Sections: header, waterfall timeline (click a bar for its attributes), node
+# sequence, LLM span table, event stream, and the turn content when present.
 
 from __future__ import annotations
 
@@ -240,7 +239,6 @@ def main() -> int:
     page = out_dir / "index.html"
     page.write_text(render(data), encoding="utf-8")
     print(f"wrote {page}")
-    print("serve it with: meiva.ui.serve(<out>, name='trace-<agent>-<short-id>')")
     return 0
 
 

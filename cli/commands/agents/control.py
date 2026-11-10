@@ -574,8 +574,6 @@ def cmd_agents_transfer(
             f"killed {len(ans.killed_shell_sessions)} shell session(s): "
             f"{', '.join(str(s) for s in ans.killed_shell_sessions)}"
         )
-    if ans.closed_pages:
-        extras.append(f"closed {len(ans.closed_pages)} page(s)")
     rider = f" — {'; '.join(extras)}" if extras else ""
     print(
         f"  ✓ agent {agent_id} transfer: {ans.from_machine} -> {ans.to_machine} "

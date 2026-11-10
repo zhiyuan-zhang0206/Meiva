@@ -198,7 +198,7 @@ def test_an_event_the_user_did_to_an_agent_has_no_sender(
     db_conn: psycopg.Connection, *, database_gate: ProcessDbGate
 ) -> None:
     record(db_conn, "spawn", source="user", agent=6657, hours_ago=3)
-    record(db_conn, "terminate", source="ui:page:agents", agent=6657, hours_ago=2)
+    record(db_conn, "terminate", source="user", agent=6657, hours_ago=2)
     assert [(e.kind, e.sender, e.receiver) for e in read(6657, database_gate=database_gate)] == [
         ("spawn", None, 6657),
         ("terminate", None, 6657),

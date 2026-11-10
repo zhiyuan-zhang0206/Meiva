@@ -307,17 +307,6 @@ def build_services(
     )
 
     agent_runner_services = (
-        # meiva:note
-        # One runner owns page-server processes for the agent_pages rows assigned to
-        # that host; the database, rather than a process census, is its desired state.
-        healthz_daemon(
-            "page-server",
-            home=home,
-            endpoints=endpoints,
-            module="services.agent_runner.page_server.daemon",
-            capabilities=AGENT_RUNNER,
-            requires_db=True,
-        ),
         healthz_daemon(
             "agent-host",
             home=home,

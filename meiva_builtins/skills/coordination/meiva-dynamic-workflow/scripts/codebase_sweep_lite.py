@@ -349,8 +349,8 @@ Read all results:
 
 Integrate all findings and review opinions, then generate the final Markdown report.
 
-Render the report to self-contained HTML, then serve it with
-meiva.ui.serve(page_dir, name="codebase-sweep-lite", title="Codebase Sweep Report", port=<free port>).
+Render the report to a self-contained HTML file in your workspace, then deliver it with
+meiva.ui.publish() (the summary and the file path).
 
 After completion, message no one.
 """,

@@ -26,10 +26,10 @@ function mixedQueue(): PendingInbound[] {
 }
 
 describe("userPending", () => {
-  it("keeps the rows the user caused, including a page callback and upload batches", () => {
+  it("keeps the rows the user caused, including upload batches", () => {
     const queued = userPending([
       item({ id: 1 }),
-      item({ id: 2, source: "ui:page:compare", sender: "user" }),
+      item({ id: 2, source: "user", sender: "user" }),
       item({
         id: 3,
         source: "system:upload",

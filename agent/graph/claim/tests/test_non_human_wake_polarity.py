@@ -52,10 +52,8 @@ def _inbound(
     )
 
 
-@pytest.mark.parametrize("human_source", ["user", "ui:page:board"])
-def test_human_sources_resolve_human_polarity_from_idle_or_background_run(
-    human_source: str,
-) -> None:
+def test_a_user_message_resolves_human_polarity_from_idle_or_background_run() -> None:
+    human_source = "user"
     idle_state = AgentState(halted=True, turn_active=False, non_human_wake=False)
     assert (
         resolve_non_human_wake(

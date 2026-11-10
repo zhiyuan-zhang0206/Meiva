@@ -31,7 +31,7 @@ Your task: Use config_overlay to demonstrate Meiva's multi-model switching capab
    - Style differences
    - Presence of hallucination or errors
 
-4. Render the comparison report to HTML and display it with `meiva.ui.serve()`, including:
+4. Render the comparison report to HTML and save it as a file and publish its path with `meiva.ui.publish()`, including:
    - The original question
    - The full answers from the three models
    - Your comparative analysis

@@ -993,9 +993,6 @@ root = "services/agent_runner/agent_ops/tests"
 root = "services/agent_runner/exec_host/tests"
 
 [[tool.pyright.executionEnvironments]]
-root = "services/agent_runner/page_server/tests"
-
-[[tool.pyright.executionEnvironments]]
 root = "services/agent_runner/pty_sessions/tests"
 
 [[tool.pyright.executionEnvironments]]

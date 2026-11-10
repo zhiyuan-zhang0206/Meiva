@@ -9113,8 +9113,7 @@
           "content",
           "source"
         ],
-        "title": "AgentMessageIn",
-        "description": "POST /api/agents/{id}/messages request body — for SDK send_message and\nthe `meiva agents send` CLI (which the generated background-run / watcher\ncompletion notices invoke).\n\nPure INSERT + return — the caller does not inspect status.\nAuto-resurrect on the gateway side ensures delivery to any agent,\nterminated or not.\n\n`source` is required — the SDK passes f\"agent:{my_id}\", the generated\nnotices pass shell:N / watcher:N; there is no default to prevent callers\nfrom forgetting and having inbounds silently tagged as \"user\", muddying\nenvelope labels. The valid set is in `base/agents/messages/envelope.py:validate_source`\n(system / agent:N / external_agent:<subject>[:<instance>] / user / ui:page:<name> /\nwatcher:N / shell:N / schedule:N). `user` delivers as the user; an\n`external_agent:` declaration delivers as a message from that external\nagent (self-asserted, never authenticated). An illegal source is intercepted by\n422 at the HTTP layer — otherwise it would land in inbound_messages and the agent claim node\nwould hit ValueError and kill the process."
+        "title": "AgentMessageIn"
       },
       "AgentMessagesResponse": {
         "properties": {
@@ -19671,8 +19670,7 @@
           }
         },
         "type": "object",
-        "title": "TerminateAgentRequest",
-        "description": "POST /api/agents/{id}/terminate request body — fully optional.\n\n`force` defaults to False for graceful termination. True directly kills the\ndetached process and force-updates status when the agent cannot reach claim.\n\n`kill_all_shell_sessions` also kills every shell session the agent owns on\nits home machine (watchers included; `meiva.ui.serve` page servers keep their\nown lifecycle), with no per-session notice. A graceful terminate of a live\nagent records the request on its terminate command and the home runtime\nattempts older sessions after the termination commits and the agent's last\nstep ends. Force and already-terminated requests attempt older sessions\nbefore the response; the original host also attempts one fresh cutoff after\nforce quiescence. Cleanup is best-effort: errors are visible, but crash or\nlate-session leftovers require operators. Without it, sessions are left alone.\nA terminated agent is otherwise an ordinary terminated agent — any new\nmessage may resurrect it\n(docs/decisions/agents/lifecycle/2026-09-27-terminate-has-no-closed-state.md).\n\n`source` defaults to \"user\"; SDK paths pass f\"agent:{my_id}\". Claim\nincludes this source in the lifecycle marker shown to the agent.\n\n`message`, when present, is queued as chat immediately before the terminate\ninbound. Lifecycle acceptance claims only the terminate row, so the chat\nremains pending for the next resurrection without another LLM turn."
+        "title": "TerminateAgentRequest"
       },
       "TerminateAgentResponse": {
         "properties": {
@@ -20318,13 +20316,6 @@
             },
             "type": "array",
             "title": "Killed Shell Sessions"
-          },
-          "closed_pages": {
-            "items": {
-              "type": "string"
-            },
-            "type": "array",
-            "title": "Closed Pages"
           }
         },
         "additionalProperties": false,

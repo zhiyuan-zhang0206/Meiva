@@ -180,7 +180,6 @@ def test_plugin_wraps_files_read():
         "files.delete",
         "shell.run",
         "understand",
-        "ui.serve",
     ):
         assert not meiva.extend.stack(target)
 

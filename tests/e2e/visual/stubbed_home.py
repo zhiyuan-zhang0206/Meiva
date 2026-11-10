@@ -156,7 +156,6 @@ API_STUBS: dict[str, object] = {
         "soft_compact_tokens": 0,
         "hard_compact_tokens": 0,
     },
-    "/api/agents/1/pages": [],
     "/api/system": {"cpu_percent": 0, "mem_percent": 0, "disk_percent": 0},
     "/api/auth/check": {"authenticated": True},
     "/api/status": {
@@ -235,7 +234,6 @@ API_STUBS: dict[str, object] = {
     },
     "/api/agents/1/inspect/widgets": [],
     "/api/agents/1/pending": [],
-    "/api/pages": [],
     "/api/fleet/graph": {"nodes": [], "edges": []},
 }
 

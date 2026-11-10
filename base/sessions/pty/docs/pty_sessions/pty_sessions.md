@@ -108,7 +108,7 @@ untouched for operator inspection.
 
 `base/sessions/backend.PtySessionBackend` (`get_shell_backend(home=...)` on POSIX).
 Above it: `meiva.shell.sessions`, `meiva.watcher`, the gateway ScheduleManager, the
-page-server daemon (one `list` per reconcile pass), `ops.cluster_status`
+`ops.cluster_status`
 capture/kill, the worktree-removal guard (`base/deploy/git/worktree_guard.py`,
 read-only: it never creates a home) and `meiva stop`'s shell-session closure
 (`cli/commands/lifecycle/stop/shell_sessions.py`). Every creation path crosses the same
@@ -127,8 +127,7 @@ allocation lock.
 - A session carries the generation under which it was admitted. A desired-state
   owner may rebuild a missing session only when its persisted desired generation
   is current; superseded exact sessions are reaped instead. A reboot ends every
-  session; the ScheduleManager rebuilds its own, page servers recover via
-  heartbeat, and a watcher — no desired-state record — rebuilds nothing
+  session; the ScheduleManager rebuilds its own, and a watcher — no desired-state record — rebuilds nothing
   (docs/decisions/runtime/updates/recovery/2026-09-27-watchers-are-never-restarted.md).
 
 Initial command metadata is opt-in; see [Initial PTY command provenance](initial-command.md).

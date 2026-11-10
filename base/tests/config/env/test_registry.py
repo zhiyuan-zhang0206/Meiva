@@ -232,7 +232,6 @@ class TestConsumptionMatrixDeclarations:
             "memory_indexer",
             "ops",
             "delivery_watchdog",
-            "page_server",
             "agent_host",
         }
         meta = _fields()

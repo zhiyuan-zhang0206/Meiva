@@ -20,9 +20,6 @@ import { foldTasks, TASKS_QUERY_KEY } from "./tasks";
 import type { FoldInvalidation, FoldOutcome, FoldWrite } from "./types";
 import { NO_FOLD } from "./types";
 
-export const ALL_PAGES_QUERY_KEY = ["all-pages"] as const;
-export const AGENT_PAGES_QUERY_KEY_PREFIX = ["agent-pages"] as const;
-
 /** Cache families whose snapshots are repaired by the global system stream.
  * Reconnect invalidates only these owners; unrelated server data such as
  * settings, config, and inspector aggregates did not miss global-fold events. */
@@ -30,8 +27,6 @@ export const RECONNECT_QUERY_KEYS: readonly (readonly unknown[])[] = [
   AGENTS_QUERY_KEY,
   AGENT_DIRECTORY_QUERY_KEY,
   AGENT_DETAIL_QUERY_KEY,
-  AGENT_PAGES_QUERY_KEY_PREFIX,
-  ALL_PAGES_QUERY_KEY,
   ["to-user"],
   ["user-messages"],
   NOTICES_QUERY_KEY,
@@ -87,14 +82,6 @@ export function foldAgainstCache(
   const invalidations: FoldInvalidation[] = [];
 
   invalidations.push(...foldAgents(ev).invalidations);
-
-  // Page events are hints for both authoritative lists. The repair scheduler
-  // skips absent queries, coalesces bursts, and follows an in-flight GET with
-  // another read so its older snapshot cannot strand the cache.
-  if (ev.role === "page_opened" || ev.role === "page_closed") {
-    invalidations.push({ key: ["agent-pages", ev.agent_id] });
-    invalidations.push({ key: ALL_PAGES_QUERY_KEY });
-  }
 
   if (ev.role === "agent_updated") {
     invalidations.push({ key: ["user-messages", ev.agent_id] });

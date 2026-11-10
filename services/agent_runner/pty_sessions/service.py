@@ -1,22 +1,22 @@
-"""The pty-sessions service: every agent shell on this machine, one ordinary process.
-
-It holds each session's pty master and the in-memory session table, serves a
-unix-socket JSON-line protocol (`base.sessions.pty.protocol`) to the clients in
-agent, schedule and page-server processes, and is stopped and started with the
-rest of the roster. A session therefore outlives an agent, an agent host or a
-gateway restarting; it ends with its shell, a `kill`, a `close_all`, or this
-service stopping. No database, no plugin: the allocation freeze is a file marker
-and the ledger a file (`ledger`).
-
-One event loop does the I/O: it accepts requests, reads every master and feeds
-its session's screen, ring and transcript, and ends sessions. Everything that can
-block (forking a shell, a kill, a closure, a screen render) is a request handler
-run on the executor, so `ping` is answered on the loop and never queues behind
-them: the ownership probe times out at three seconds.
-
-Requests are `{"id", "method", ...}`. Methods: `ping`, `has`, `list`, `new`,
-`send`, `capture`, `resize`, `kill`, `close_all`.
-"""
+# meiva:note
+# The pty-sessions service: every agent shell on this machine, one ordinary process.
+#
+# It holds each session's pty master and the in-memory session table, serves a
+# unix-socket JSON-line protocol (`base.sessions.pty.protocol`) to the clients in
+# agent and schedule processes, and is stopped and started with the
+# rest of the roster. A session therefore outlives an agent, an agent host or a
+# gateway restarting; it ends with its shell, a `kill`, a `close_all`, or this
+# service stopping. No database, no plugin: the allocation freeze is a file marker
+# and the ledger a file (`ledger`).
+#
+# One event loop does the I/O: it accepts requests, reads every master and feeds
+# its session's screen, ring and transcript, and ends sessions. Everything that can
+# block (forking a shell, a kill, a closure, a screen render) is a request handler
+# run on the executor, so `ping` is answered on the loop and never queues behind
+# them: the ownership probe times out at three seconds.
+#
+# Requests are `{"id", "method", ...}`. Methods: `ping`, `has`, `list`, `new`,
+# `send`, `capture`, `resize`, `kill`, `close_all`.
 
 from __future__ import annotations
 

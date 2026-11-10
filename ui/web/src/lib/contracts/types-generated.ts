@@ -4172,7 +4172,6 @@ export interface components {
             files_transferred: number;
             bytes_transferred: number;
             killed_shell_sessions?: number[];
-            closed_pages?: string[];
         };
         UiContributionsResponse: {
             themes: components["schemas"]["UiThemeContribution"][];

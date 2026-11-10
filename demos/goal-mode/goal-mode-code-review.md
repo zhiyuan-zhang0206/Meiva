@@ -35,7 +35,7 @@ Then:
    - Does it have error handling?
    - Is the code structure clear?
 4. If it doesn't meet the standards, tell the worker what's missing
-5. Once it meets the standards, render the final code to HTML and display it with meiva.ui.serve
+5. Once it meets the standards, render the final code to HTML and publish it with meiva.ui.publish
 
 The worker needs at least 2-3 iterations to reach the quality standards.
 ```
@@ -43,7 +43,7 @@ The worker needs at least 2-3 iterations to reach the quality standards.
 Expected flow: spawn worker → launch watcher → worker implements a first cut →
 watcher wakes the supervisor → "missing error handling, no docstrings" → round 2 →
 "args parsing is fragile" → round 3 → quality bar met → final code presented via
-HTML served with `meiva.ui.serve`.
+HTML published with `meiva.ui.publish`.
 
 
 ## Real runs (2026-08-13)

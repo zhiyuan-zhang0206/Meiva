@@ -48,7 +48,7 @@ class ConversationExcerpt:
 
 
 def is_human_source(source: str | None) -> bool:
-    return source is not None and (source == "user" or source.startswith("ui:page:"))
+    return source == "user"
 
 
 def build_excerpt(items: Sequence[ExcerptItem], max_tokens: int) -> ConversationExcerpt | None:

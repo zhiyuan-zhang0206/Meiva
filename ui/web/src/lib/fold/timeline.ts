@@ -565,10 +565,6 @@ export function applySystemEvent(
     case "label_updated":
       // sidebar behavior — useAgentsCacheSync merges into the agents query cache.
     case "to_user_changed":
-    case "page_opened":
-    case "page_closed":
-      // page lifecycle consumed independently by the inspector's open-pages
-      // list (useAgentPages folds it into its cache), does not enter the timeline.
     case "agent_spawned":
     case "agent_updated":
       // sidebar behavior — useAgentsCacheSync merges the snapshot into the

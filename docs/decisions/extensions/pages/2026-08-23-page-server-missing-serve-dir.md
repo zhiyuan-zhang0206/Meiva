@@ -9,3 +9,5 @@ This preserves recovery for a workspace that is briefly rebuilding without
 restarting a process that cannot ever start, while the bounded close removes an
 unusable page from both supervision and the frontend. The row is never reopened:
 the serving agent must register a fresh page when its directory is available.
+
+Superseded by `2026-11-10-pages-removed.md`: Pages no longer exist.

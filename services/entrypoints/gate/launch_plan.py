@@ -47,8 +47,7 @@ def app_port_of(configured: int | None, *, entry_port: int) -> int:
 #
 # The host must be one the user's browser can dial: the login page posts the web login password
 # to this origin, and a remote browser resolving `127.0.0.1` would hit itself. The host is the
-# machine's declared owner host (`MEIVA_MACHINE_HOST`, else `localhost`), the same operator
-# address `meiva.ui.show` hands the user for direct page URLs. The server-side auth probe
+# machine's declared owner host (`MEIVA_MACHINE_HOST`, else `localhost`). The server-side auth probe
 # follows the same base: on a gateway host the gateway binds all interfaces, so dialing the
 # host's own reachable address is equivalent to loopback and keeps one origin everywhere.
 def gateway_base(*, host: str, port: int) -> str:

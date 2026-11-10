@@ -24,7 +24,7 @@ def _inbound(source: str) -> AnyMessage:
     )
 
 
-@pytest.mark.parametrize("source", ["user", "ui:page:dashboard", "schedule:7"])
+@pytest.mark.parametrize("source", ["user", "schedule:7"])
 def test_a_person_or_a_schedule_wakes_skill_recall(source: str) -> None:
     assert tail_has_skill_recall_inbound([AIMessage(content="prev", id="a0"), _inbound(source)])
 

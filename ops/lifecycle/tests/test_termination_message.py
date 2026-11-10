@@ -125,7 +125,7 @@ def test_force_termination_retries_command_before_message(
     running_agent_id: int,
 ) -> None:
     with reject_pair_after_insert(db_conn, running_agent_id):
-        old_status, _, terminate_id, _cutoff = termination.force_terminate_transaction(
+        old_status, terminate_id, _cutoff = termination.force_terminate_transaction(
             running_agent_id,
             db_pool,
             source="user",
@@ -464,8 +464,8 @@ class TestKillAllShellSessions:
 
 
 # meiva:note
-# A force terminate kills the owner's older shells and watchers, and only those. A page session, a
-# foreign agent's shell and a shell allocated after the cutoff was taken survive. The late shell is
+# A force terminate kills the owner's older shells and watchers, and only those. A foreign
+# agent's shell and a shell allocated after the cutoff was taken survive. The late shell is
 # allocated while the agent host is cancelling the turn, after the force fence committed.
 async def test_kill_terminates_only_the_owners_real_shell_sessions(
     db_conn: psycopg.Connection,
@@ -479,7 +479,6 @@ async def test_kill_terminates_only_the_owners_real_shell_sessions(
 ) -> None:
     import shlex
 
-    from base.sessions.page_session import page_session_name
     from ops import lifecycle
     from ops.rpc_schemas.terminate import ShellSessionsKill
 
@@ -495,7 +494,6 @@ async def test_kill_terminates_only_the_owners_real_shell_sessions(
     )
     shell = shells.open(running_agent_id, 0)
     watcher = shells.open(running_agent_id, 1, command=watcher_cmd, suffix="-watcher")
-    page = shells.open_named(page_session_name(running_agent_id, "dash_board", 2), "sleep 300")
     foreign = shells.open(other_agent_id, 0)
     job_pid = _wait_child(watcher.pid)
     pty_reaper.track(psutil.Process(job_pid))
@@ -523,10 +521,10 @@ async def test_kill_terminates_only_the_owners_real_shell_sessions(
         )
 
     assert resp.shell_sessions == ShellSessionsKill(when=ShellSessionKillTiming.NOW, killed=[0, 1])
-    assert shells.alive() == {page.name, foreign.name, *(opened.name for opened in late)}
+    assert shells.alive() == {foreign.name, *(opened.name for opened in late)}
     assert not _pid_alive(shell.pid) and not _pid_alive(watcher.pid)
     assert not _pid_alive(job_pid)
-    assert _pid_alive(page.pid) and _pid_alive(foreign.pid)
+    assert _pid_alive(foreign.pid)
     assert all(_pid_alive(opened.pid) for opened in late)
     assert not marker.exists()
 

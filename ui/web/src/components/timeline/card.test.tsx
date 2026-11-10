@@ -142,13 +142,6 @@ describe("messageCardConfig", () => {
     expect(cfg!.fixedDefault).toBe(true);
   });
 
-  it("inbound_chat ui:page → Human", () => {
-    const cfg = messageCardConfig(
-      item("inbound_chat", { source: "ui:page:foo" }),
-    );
-    expect(cfg!.title).toBe("Human");
-  });
-
   it("inbound_chat unknown source → System", () => {
     const cfg = messageCardConfig(item("inbound_chat", { source: "kernel" }));
     expect(cfg!.title).toBe("System");

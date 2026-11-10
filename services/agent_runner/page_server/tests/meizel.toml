@@ -1,3 +1,0 @@
-[uses]
-"conftest.py" = ["page_pty.py"]
-"test_page_server_occupants.py" = ["page_pty.py"]

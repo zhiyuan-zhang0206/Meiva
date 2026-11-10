@@ -2,8 +2,7 @@
 # Decisions about one agent's persistent-shell sessions, from facts the shell already read.
 #
 # A shell session is named `meiva-agent-<agent_id>-shell-<session_id>[-<label>]`; the label
-# names a watcher (`watcher`), a page-server session (`page-<slug>`) or anything the agent
-# chose. The shell lists the host's sessions and calls the backend; this module parses the
+# names a watcher (`watcher`) or anything the agent chose. The shell lists the host's sessions and calls the backend; this module parses the
 # listing, picks the sessions an operation targets and judges the outcome, and does no I/O.
 
 from __future__ import annotations
@@ -63,16 +62,11 @@ def find_shell(listed: Sequence[ListedShell], session_id: int) -> ListedShell | 
 
 # meiva:note
 # The shells an owner-level kill-all targets: every listed shell below the exclusive cutoff,
-# except the page-server sessions in `page_ids` (a page keeps its own lifecycle). Ids at or above
-# the cutoff are never targeted.
+# Ids at or above the cutoff are never targeted.
 def kill_all_targets(
-    listed: Sequence[ListedShell], before_session_index: int, page_ids: frozenset[int]
+    listed: Sequence[ListedShell], before_session_index: int
 ) -> tuple[ListedShell, ...]:
-    return tuple(
-        entry
-        for entry in listed
-        if entry.shell.id < before_session_index and entry.shell.id not in page_ids
-    )
+    return tuple(entry for entry in listed if entry.shell.id < before_session_index)
 
 
 # meiva:note

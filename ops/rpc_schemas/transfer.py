@@ -67,7 +67,6 @@ class TransferAgentResponse(BaseModel):
     files_transferred: int
     bytes_transferred: int
     killed_shell_sessions: list[int] = Field(default_factory=list[int])
-    closed_pages: list[str] = Field(default_factory=list[str])
 
 
 # meiva:note

@@ -10,7 +10,6 @@
 #     | ``agent:N``             | peer agent N                   | "Agent N [ts]:\n\n..."                            |
 #     | ``external_agent:S[:I]``| an agent outside Meiva (CLI/MCP) | "External agent (S / I; asserted provenance) [ts]:\n\n..." |
 #     | ``user``                | the human user (the UI)        | "[ts]\n\n..."                                     |
-#     | ``ui:page:<name>``      | an HTML page the agent started | "[ts]\n\n..."                                     |
 #     | ``watcher:N``           | a watcher session's wake-up    | "Watcher (id N) [ts]:\n\n..."                       |
 #     | ``shell:N``             | a background shell command's completion notice | "Shell session (id N) [ts]:\n\n..."  |
 #     | ``schedule:N``          | a gateway-hosted schedule N       | "Schedule (id N) [ts]:\n\n..."                      |
@@ -23,10 +22,6 @@
 # instead (``subject`` / ``instance`` are 1-20 characters of ``[a-zA-Z0-9_.-]``).
 # The declaration is self-asserted, never authenticated: the agent reads it as
 # "an external agent says it is S", and no declared field grants authority.
-# ``ui:page:<name>`` is a callback POSTed by an HTML
-# page the agent itself started (a page registered via ``meiva.ui.show``); it wraps
-# as the same bare "[ts]" header as ``user``, and the agent recovers which page
-# posted from ``<name>``.
 # ``watcher:N`` is a wake-up delivered from inside a watcher session (a scheduled
 # fire, or the exit notice sent when the watcher stops); N is the watcher's
 # session id, so the agent recovers which watcher fired from N. ``shell:N`` is
@@ -57,7 +52,6 @@ __all__ = [
 ]
 
 _AGENT_PREFIX = "agent:"
-_PAGE_PREFIX = "ui:page:"
 _SCHEDULE_PREFIX = "schedule:"
 _SHELL_PREFIX = "shell:"
 _SYSTEM_PREFIX = "system:"
@@ -96,8 +90,6 @@ def validate_source(source: str) -> None:
         return
     if source.startswith(_AGENT_PREFIX):
         return
-    if source.startswith(_PAGE_PREFIX):
-        return
     if source.startswith(_WATCHER_PREFIX):
         _check_positive_int_id(source.removeprefix(_WATCHER_PREFIX), source)
         return
@@ -110,7 +102,7 @@ def validate_source(source: str) -> None:
     raise ValueError(
         f"Unrecognized inbound source: {source!r} — "
         "must be 'system' / 'system:<subtype>' / 'agent:N' / 'external_agent:<subject>[:<instance>]' / "
-        "'user' / 'ui:page:<name>' / 'watcher:N' / 'shell:N' / 'schedule:N'"
+        "'user' / 'watcher:N' / 'shell:N' / 'schedule:N'"
     )
 
 
@@ -120,7 +112,7 @@ InboundSender = Literal["user", "agent", "automation", "system"]
 def sender_class(source: str | None) -> InboundSender:
     if source is None:
         return "system"
-    if source == "user" or source.startswith(_PAGE_PREFIX):
+    if source == "user":
         return "user"
     if source.startswith(_AGENT_PREFIX) or is_caller_source(source):
         return "agent"
@@ -166,8 +158,9 @@ def inbound_head(
         caller = CallerIdentity.from_source(source)
         instance = f" / {caller.instance}" if caller.instance is not None else ""
         return f"External agent ({caller.subject}{instance}; asserted provenance){ts}:\n\n"
-    if source == "user" or source.startswith(_PAGE_PREFIX):
-        # Bare "[ts]" header for both human sources (user ruling 2026-09-18):
+    if source == "user":
+        # meiva:note
+        # Bare "[ts]" header for the human source (user ruling 2026-09-18):
         # no label, no colon; with timestamps off there is no header at all.
         return f"{formatted}\n\n" if formatted else ""
     if source.startswith(_AGENT_PREFIX):
@@ -181,7 +174,7 @@ def inbound_head(
     raise ValueError(
         f"Unrecognized inbound source: {source!r} — "
         "must be 'system' / 'system:<subtype>' / 'agent:N' / 'external_agent:<subject>[:<instance>]' / "
-        "'user' / 'ui:page:<name>' / 'watcher:N' / 'shell:N' / 'schedule:N'"
+        "'user' / 'watcher:N' / 'shell:N' / 'schedule:N'"
     )
 
 

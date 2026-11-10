@@ -1,14 +1,14 @@
-"""Client of the pty-sessions service: what agent, schedule and page-server processes dial.
-
-One short connection per request over the service's unix socket, so an agent or
-agent host restarting simply dials again. It stays light (sockets and the
-closure's data types): it runs inside every process that touches a shell.
-
-Queries (`has_session`, `list_sessions`, `live_sessions`) read a service that is
-not running as "no sessions", which is true: its sessions ended with it.
-Mutating requests raise `ServiceUnavailableError` instead, after a bounded wait for a
-service that is still coming up (a start races its own clients).
-"""
+# meiva:note
+# Client of the pty-sessions service: what agent and schedule processes dial.
+#
+# One short connection per request over the service's unix socket, so an agent or
+# agent host restarting simply dials again. It stays light (sockets and the
+# closure's data types): it runs inside every process that touches a shell.
+#
+# Queries (`has_session`, `list_sessions`, `live_sessions`) read a service that is
+# not running as "no sessions", which is true: its sessions ended with it.
+# Mutating requests raise `ServiceUnavailableError` instead, after a bounded wait for a
+# service that is still coming up (a start races its own clients).
 
 from __future__ import annotations
 
