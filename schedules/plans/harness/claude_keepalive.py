@@ -1,5 +1,5 @@
 # meiva:note
-# Pure decisions for the daily Claude Code login keepalive: the exact command, how to read the
+# Pure decisions for the Claude Code login keepalive: the exact command, how to read the
 # login status, and what one round reports. The round itself (locating the binary, running
 # processes, printing, emitting) lives in `schedules/jobs/harness/claude_auth_keepalive.py`.
 #

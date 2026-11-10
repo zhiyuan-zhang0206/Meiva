@@ -10,6 +10,7 @@ import os
 import subprocess
 import sys
 from collections.abc import Callable, Mapping, Sequence
+from itertools import pairwise
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -51,6 +52,20 @@ def test_manifest_declares_the_keepalive_per_machine() -> None:
     assert entry["script"] == "jobs/harness/claude-auth-keepalive-schedule.py"
     assert entry["command"] == "python jobs/harness/claude-auth-keepalive-schedule.py"
     assert (_REPO_ROOT / "schedules" / entry["script"]).is_file()
+
+
+def test_schedule_fires_every_six_hours_off_the_workday_peaks() -> None:
+    from base.daemon.schedules.watcher import next_fire
+
+    script = _REPO_ROOT / "schedules" / "jobs" / "harness" / "claude-auth-keepalive-schedule.py"
+    assert 'CRON = "10 0,6,12,18 * * *"' in script.read_text(encoding="utf-8")
+    fires: list[datetime] = []
+    after = datetime(2026, 6, 9, tzinfo=UTC)
+    for _ in range(4):
+        after = next_fire("10 0,6,12,18 * * *", after=after, timezone="UTC")
+        fires.append(after)
+    gaps = {(b - a).total_seconds() for a, b in pairwise(fires)}
+    assert gaps == {6 * 3600.0}
 
 
 def test_keepalive_command_is_one_cheap_toolless_turn() -> None:

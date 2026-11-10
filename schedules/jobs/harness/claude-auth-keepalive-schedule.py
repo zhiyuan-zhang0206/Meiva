@@ -1,5 +1,5 @@
 # meiva:note
-# Daily Claude Code login keepalive schedule.
+# Claude Code login keepalive schedule, every six hours.
 # meiva:link schedules/README.md
 
 from __future__ import annotations
@@ -21,7 +21,7 @@ from schedules.jobs.harness.claude_auth_keepalive import (
 from schedules.jobs.loop import CronSchedule, Trigger, run_loop
 from schedules.plans.schedule_identity import parse_schedule_id
 
-CRON = "10 5 * * *"
+CRON = "10 0,6,12,18 * * *"
 
 
 if __name__ == "__main__":

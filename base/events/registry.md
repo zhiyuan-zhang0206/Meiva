@@ -254,7 +254,7 @@ above (or when its name is unregistered); otherwise it stays in the JSONL mirror
 | `reply_suggestion_draft_failed` | reply suggestion draft call failed | anomaly | — | — | events | — |
 | `reply_suggestion_draft_rejected` | reply suggestion draft empty or too long | noise | — | — | events | — |
 | `harness_cli_update_round` | one external harness CLI update round — status, updated/failed counts, and outcome details | observation | status, updated_count, failed_count, reason, outcomes | — | events | — |
-| `claude_auth_keepalive_round` | one daily Claude Code login keepalive round — status, the reason it did not succeed, and the keepalive command's exit code | observation | status, reason, exit_code | — | events | — |
+| `claude_auth_keepalive_round` | one Claude Code login keepalive round — status, the reason it did not succeed, and the keepalive command's exit code | observation | status, reason, exit_code | — | events | — |
 | `agent_watch_round` | one agent-watch round — duties judged, silent, woken, and unreadable | observation | watched, silent, sent, blind | — | events | — |
 | `ci_usage_daily` | daily CI-minute reconciliation totals (C9) | observation | day, window_start, window_end, runs, attributed_runs, unattributed_runs, total_minutes, attributed_minutes, linux_minutes, macos_minutes, appended_runs, est_usd | — | events | — |
 | `main_red_watch_round` | one main-red-watch round — open fingerprints, cards opened, infra failures, stale schedules | observation | fingerprints, confirmed, infra, stale, unnamed, suspects, suspects_dropped, unreadable, stream_errors | — | events | ✓ |

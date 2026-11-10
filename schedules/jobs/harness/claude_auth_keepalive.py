@@ -1,5 +1,5 @@
 # meiva:note
-# One round of the daily Claude Code login keepalive: run the smallest possible `claude -p` so the
+# One round of the Claude Code login keepalive: run the smallest possible `claude -p` so the
 # CLI refreshes its own login and writes the rotated credentials back. This round never calls the
 # OAuth refresh endpoint and never reads or writes a credentials file: the refresh token is
 # single-use, and a second refresher would race a running CLI for it.

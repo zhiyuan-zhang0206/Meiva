@@ -288,7 +288,7 @@ EVENTS: dict[str, EventSpec] = {
     ),
     "claude_auth_keepalive_round": telemetry_event(
         "claude_auth_keepalive_round",
-        "one daily Claude Code login keepalive round — status, the reason it did not succeed, and the keepalive command's exit code",
+        "one Claude Code login keepalive round — status, the reason it did not succeed, and the keepalive command's exit code",
         payload=ClaudeAuthKeepaliveRound,
         site="schedules/jobs/harness/claude_auth_keepalive.py:execute_round (via emit_system_event)",
     ),

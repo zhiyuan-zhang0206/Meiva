@@ -74,10 +74,10 @@ The schedule script executes `run_from_schedule(MEIVA_SCHEDULE_INPUTS, collector
 - **Claude token expiry**: `probe_claude` does not call the usage API with an access token whose
   `expiresAt` has passed (an unknown expiry is still tried). It reports `Claude access token
   expired; waiting for Claude Code to refresh it`: Claude Code refreshes its own token the next
-  time it runs. The daily `claude-auth-keepalive` schedule (see `schedules/README.md`) only keeps
-  the login from lapsing through long disuse: an access token lasts hours, so on an idle machine the
-  card can still show "waiting for Claude Code to refresh it" between two CLI runs, and a missed
-  daily run is not made up. This
+  time it runs. The `claude-auth-keepalive` schedule (see `schedules/README.md`) runs the CLI once
+  every six hours so the login does not lapse through disuse. There is no official figure for how
+  long an access token lives, so on an idle machine the card can still briefly show "waiting for
+  Claude Code to refresh it" between two keepalive runs, and a missed run is not made up. This
   plugin never refreshes the token itself, because the refresh token is single-use and a second
   refresher would race the CLI for it. A real 401/403 keeps the `sign in again` message.
 - **Single writer (`stats.upsert`)**: Writes readings through `base.packages.plugins.surface.stats.upsert`,

@@ -112,7 +112,7 @@ greens exercise the red.
   Each machine independently converges its locally installed external harness CLIs (Claude Code, OpenAI Codex,
   Antigravity, Droid) to the catalog versions pinned in this checkout, writing non-disruptive update logs to
   `$MEIVA_HOME/run/harness-cli-update.log` and emitting `harness_cli_update_round` telemetry without waking agents.
-- `claude-auth-keepalive` runs at 05:10 cluster time with `placement: "per_machine"` (rows
+- `claude-auth-keepalive` runs every six hours (`10 0,6,12,18 * * *` cluster time, off the workday peaks) with `placement: "per_machine"` (rows
   `claude-auth-keepalive:<machine>` on every `agent-runner` host, like `harness-cli-update`). Each
   machine runs one minimal `claude -p` (model `haiku`, no tools, no session persistence, fixed
   prompt on stdin, 120 s timeout) so the CLI refreshes its own login and writes the rotated

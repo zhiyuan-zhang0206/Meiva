@@ -14,7 +14,7 @@ ci_runs_run is one breadcrumb per repository: the fixed window's population and
 this run's GitHub-read budget — current observations, so gauges even though
 their names are counts.
 
-claude_auth_keepalive_round is one per machine per day: status is `ok`, `failed` or
+claude_auth_keepalive_round is one per machine every six hours: status is `ok`, `failed` or
 `skipped`; reason names why a round did not succeed (`claude_not_found`, `not_logged_in`,
 `nonzero_exit`, `timeout`, `non_production`) and exit_code is the keepalive command's own. The
 command's output never enters the payload; the schedule log carries a masked stderr tail.
