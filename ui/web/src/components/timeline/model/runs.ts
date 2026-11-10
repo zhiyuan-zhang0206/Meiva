@@ -61,7 +61,8 @@ export function splitEnvelope(payload: string): { header: string; body: string }
 
 // meiva:note
 // Items that intentionally render no visible DOM: the ephemeral bookkeeping
-// markers (`compact_done`, `cancelled`, `compact_request:*`) and the companion
+// markers (`compact_done`, `cancelled`, `status:Cancellation requested.`,
+// `compact_request:*`) and the companion
 // `[files]` placeholder after `system:upload`. Skipping them during turn
 // grouping prevents invisible items from splitting adjacent TurnBlocks or
 // mounting empty vertical padding gaps. NoteTag markers are NOT here - every

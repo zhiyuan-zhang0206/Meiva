@@ -90,6 +90,11 @@ async def test_cancel_keeps_reading_until_the_foreground_ends(
         for event in events
         for item in event.get("items", [])
     )
+    assert not any(
+        item["payload"] == "status:Cancellation requested."
+        for event in events
+        for item in event.get("items", [])
+    )
     assert not engine.closed
 
 

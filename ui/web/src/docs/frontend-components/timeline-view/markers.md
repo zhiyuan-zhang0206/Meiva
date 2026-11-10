@@ -25,16 +25,17 @@ reads like machinery still renders.
 
 The payload-identified ephemeral markers render bare: `compact_done` and
 `compact_request:*` are normally filtered at the SSE layer (`applySystemEvent`),
-so their branches only catch stale rows; `cancelled` is silent (the stop button
-has no UI noise); `error:*` renders the error chip; anything else renders the
-red `UnknownMarkerChip` with the raw `source`/`payload` shown so the missing
+so their branches only catch stale rows; `cancelled` and
+`status:Cancellation requested.` are silent (the stop button has no UI noise);
+`error:*` renders the error chip; `status:*` renders a plain status line;
+anything else renders the red `UnknownMarkerChip` with the raw `source`/`payload` shown so the missing
 case is obvious. Because the vocabulary is generated, a non-null source the page
 does not know is a tag newer than the loaded bundle (a tab opened before a deploy),
 so the chip also asks the reader to reload; a null source is an untagged message,
 which a reload cannot fix, and gets no such hint. The alarm also logs to the dev console — the timeline is
 client-only `"use client"` code, so no `window` guard is needed.
 
-EphemeralSystemMarker is the bare render path: compact_done / compact_request / cancelled render nothing, error:* renders the error chip, and any other payload renders the red unrecognized alarm. Its data-testid values are stable assertion hooks: marker-unrecognized must never render for a page built from the running server's code, marker-unrecognized-reload marks the stale-page hint, and marker-error is the legit error path; absence of the alarm node in an e2e run means the #1017 alarm class did not render.
+EphemeralSystemMarker is the bare render path: compact_done / compact_request / cancelled / status:Cancellation requested. render nothing, error:* renders the error chip, status:* renders plain status text, and any other payload renders the red unrecognized alarm. Its data-testid values are stable assertion hooks: marker-unrecognized must never render for a page built from the running server's code, marker-unrecognized-reload marks the stale-page hint, and marker-error is the legit error path; absence of the alarm node in an e2e run means the #1017 alarm class did not render.
 
 ## Relationship to Other Nodes
 

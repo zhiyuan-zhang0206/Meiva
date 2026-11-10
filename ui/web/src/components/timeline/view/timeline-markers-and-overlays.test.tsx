@@ -61,6 +61,20 @@ describe("ItemView: system_marker → ephemeral by payload", () => {
     );
     expect(screen.queryByText(/cancelled/)).toBeNull();
   });
+  it("payload='status:Cancellation requested.' → silent, not rendered and does not split TurnBlocks", () => {
+    render(
+      <TimelineView
+        items={[
+          makeItem({ item_id: "1.0", kind: "agent_reasoning", payload: "step 1", reasoning_ms: 100 }),
+          makeItem({ item_id: "2.0", kind: "system_marker", payload: "status:Cancellation requested." }),
+          makeItem({ item_id: "3.0", kind: "agent_reasoning", payload: "step 2", reasoning_ms: 100 }),
+        ]}
+      />,
+    );
+    expect(screen.queryByText(/Cancellation requested/)).toBeNull();
+    expect(screen.queryByTestId("marker-unrecognized")).toBeNull();
+    expect(screen.getAllByText(/Worked for/)).toHaveLength(1);
+  });
   it("payload='compact_request:<content>' → no visible marker (internal event)", () => {
     render(
       <TimelineView
