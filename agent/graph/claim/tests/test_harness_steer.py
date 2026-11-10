@@ -1,3 +1,6 @@
+import json
+from pathlib import Path
+
 import psycopg
 import pytest
 from psycopg_pool import AsyncConnectionPool
@@ -14,6 +17,7 @@ from base.agents.context import MeivaContext
 from base.agents.history.harness_messages import load_harness_timeline_items
 from base.agents.history.timeline_item import TimelineItem
 from base.agents.inbox.rows import list_pending_inbounds
+from base.agents.tasks.delivery import supersede_task_assignments
 from base.api_contracts.agent_contract import Harness
 from base.clock import Clock
 from base.config.tests.configuration import defaults
@@ -88,20 +92,125 @@ async def test_unconfirmed_steer_retires_with_uncertainty_and_no_replay(
     assert "could not be confirmed" in item.payload
 
 
-async def test_steer_waits_behind_older_automation_and_pending_cancel(
-    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool
+async def test_steer_delivers_peer_chats_notes_and_uploads_fifo_and_stops_on_controls(
+    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool, tmp_path: Path
 ) -> None:
     agent = agent_row(db_conn)
     ctx = MeivaContext(ops_pool=aops_pool, harness=Harness.CODEX)
-    insert_inbound_kind(db_conn, agent, "earlier automation", "chat", "agent:7")
-    insert_inbound_kind(db_conn, agent, "followup", "chat", "user")
+    peer_id = insert_inbound_kind(db_conn, agent, "earlier automation", "chat", "agent:7")
+    img_path = tmp_path / "shot.png"
+    img_path.write_bytes(b"\x89PNG\r\n\x1a\n")
+    with db_conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO inbound_messages (agent_id, content, kind, source, payload) "
+            "VALUES (%s, 'task assigned', 'system_note', 'system', %s::jsonb) RETURNING id",
+            (
+                agent,
+                json.dumps(
+                    {
+                        "note_tag": "task",
+                        "task_notification": True,
+                        "delivery_resurrect": True,
+                        "task_id": 42,
+                    }
+                ),
+            ),
+        )
+        note_row = cur.fetchone()
+        assert note_row is not None
+        note_id: int = note_row[0]
+        cur.execute(
+            "INSERT INTO inbound_messages (agent_id, content, kind, source, payload) "
+            "VALUES (%s, 'check screenshot', 'chat', 'user', %s::jsonb) RETURNING id",
+            (
+                agent,
+                json.dumps(
+                    {
+                        "image_uploads": [
+                            {
+                                "name": "shot.png",
+                                "size": 8,
+                                "content_type": "image/png",
+                                "path": str(img_path),
+                                "batch_id": "a" * 32,
+                                "ordinal": 0,
+                            }
+                        ]
+                    }
+                ),
+            ),
+        )
+        user_row = cur.fetchone()
+        assert user_row is not None
+        user_id: int = user_row[0]
+    db_conn.commit()
+    hb_id = insert_inbound_kind(db_conn, agent, "check in", "heartbeat", "system")
 
-    assert await reserve_harness_steer(ctx, agent) is None
-    assert len(await claim_inbound_batch(aops_pool, agent, incarnation=None)) == 2
+    first = await reserve_harness_steer(ctx, agent)
+    assert first is not None and first.id == peer_id
+    await finish_harness_steer(
+        ctx,
+        agent,
+        peer_id,
+        accepted_items=[
+            TimelineItem(
+                item_id="h0.0",
+                kind="inbound_chat",
+                source="agent:7",
+                inbound_id=peer_id,
+                payload="earlier automation",
+            )
+        ],
+    )
+
+    second = await reserve_harness_steer(ctx, agent)
+    assert second is not None and second.id == note_id
+    with db_conn.cursor() as cur:
+        supersede_task_assignments(cur, 42)
+    db_conn.commit()
+    await finish_harness_steer(
+        ctx,
+        agent,
+        note_id,
+        accepted_items=[
+            TimelineItem(
+                item_id="h1.0", kind="system_marker", source="task", payload="task assigned"
+            )
+        ],
+    )
+
+    third = await reserve_harness_steer(ctx, agent)
+    assert third is not None and third.id == user_id
+    await finish_harness_steer(
+        ctx,
+        agent,
+        user_id,
+        accepted_items=[
+            TimelineItem(
+                item_id="h2.0",
+                kind="inbound_chat",
+                source="user",
+                inbound_id=user_id,
+                payload="check screenshot",
+            )
+        ],
+    )
+
+    fourth = await reserve_harness_steer(ctx, agent)
+    assert fourth is not None and fourth.id == hb_id
+    await finish_harness_steer(
+        ctx,
+        agent,
+        hb_id,
+        accepted_items=[
+            TimelineItem(
+                item_id="h3.0", kind="system_marker", source="heartbeat", payload="check in"
+            )
+        ],
+    )
 
     insert_inbound_kind(db_conn, agent, "before cancel", "chat", "user")
     insert_inbound_kind(db_conn, agent, "", "cancel", "user")
-
     assert await reserve_harness_steer(ctx, agent) is None
 
 

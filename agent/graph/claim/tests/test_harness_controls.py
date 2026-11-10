@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from dataclasses import replace
+from pathlib import Path
 
 import psycopg
 from psycopg_pool import AsyncConnectionPool
@@ -13,6 +15,7 @@ from agent.ownership.tests.ownership_support import agent_row
 from agent.state import AgentState
 from base.agents.history.harness_messages import aload_harness_timeline_items
 from base.events.live.tests.live_capture import LiveEvents
+from base.host.boundary.json_values import is_object_dict
 from base.lm.harness import AssistantText, ForegroundAccepted, HarnessTurn
 from base.lm.harness.engine import TurnEventSink
 from base.native_process.turn_identity import HostedTurnResources
@@ -137,3 +140,104 @@ async def test_steer_moves_from_pending_to_timeline_only_after_receipt(
         inbound_id
     ]
     assert events[-1]["role"] == "llm_done"
+
+
+class _BatchSteerEngine(_Foreground):
+    def __init__(self, expected: int) -> None:
+        super().__init__()
+        self.steered: list[tuple[str, str]] = []
+        self._expected = expected
+        self.all_steered = asyncio.Event()
+
+    async def steer(self, text: str, *, key: str) -> bool:
+        self.steered.append((text, key))
+        if len(self.steered) >= self._expected:
+            self.all_steered.set()
+        return True
+
+
+async def test_steer_delivers_peer_note_and_user_upload_in_order_and_flips_wake_polarity(
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    hosted_resources: HostedTurnResources,
+    live_events: LiveEvents,
+    tmp_path: Path,
+) -> None:
+    agent_id = agent_row(db_conn)
+    engine = _BatchSteerEngine(expected=3)
+    engine.steering_available = True
+    state = AgentState(
+        non_human_wake=True,
+        harness_pending_input={"prompt": "work", "key": "initial"},
+    )
+    rt = runtime(
+        engine,
+        ops_pool=aops_pool,
+        hosted_resources=hosted_resources,
+        publisher=live_events.publisher,
+    )
+    img_path = tmp_path / "preview.png"
+    img_path.write_bytes(b"\x89PNG\r\n\x1a\n")
+
+    async with asyncio.timeout(8), asyncio.TaskGroup() as tasks:
+        turn_task = tasks.create_task(harness_turn_node(state, rt, config(agent_id)))
+        await engine.running.wait()
+        peer_row = db_conn.execute(
+            "INSERT INTO inbound_messages (agent_id, content, kind, source) "
+            "VALUES (%s, 'peer progress report', 'chat', 'agent:7') RETURNING id",
+            (agent_id,),
+        ).fetchone()
+        note_row = db_conn.execute(
+            "INSERT INTO inbound_messages (agent_id, content, kind, source, payload) "
+            "VALUES (%s, 'subtask updated', 'system_note', 'system', %s::jsonb) RETURNING id",
+            (agent_id, json.dumps({"note_tag": "task", "task_id": 99})),
+        ).fetchone()
+        user_row = db_conn.execute(
+            "INSERT INTO inbound_messages (agent_id, content, kind, source, payload) "
+            "VALUES (%s, 'add start/stop buttons', 'chat', 'user', %s::jsonb) RETURNING id",
+            (
+                agent_id,
+                json.dumps(
+                    {
+                        "image_uploads": [
+                            {
+                                "name": "preview.png",
+                                "size": 8,
+                                "content_type": "image/png",
+                                "path": str(img_path),
+                                "batch_id": "b" * 32,
+                                "ordinal": 0,
+                            }
+                        ]
+                    }
+                ),
+            ),
+        ).fetchone()
+        db_conn.commit()
+        assert peer_row is not None and note_row is not None and user_row is not None
+        peer_id, note_id, user_id = peer_row[0], note_row[0], user_row[0]
+        await engine.all_steered.wait()
+        engine.continue_work.set()
+        engine.terminal.set()
+
+    command = turn_task.result()
+    assert is_object_dict(command.update)
+    assert command.update.get("non_human_wake") is False
+    assert [key for _, key in engine.steered] == [
+        f"inbound-{peer_id}",
+        f"inbound-{note_id}",
+        f"inbound-{user_id}",
+    ]
+    assert "peer progress report" in engine.steered[0][0]
+    assert "subtask updated" in engine.steered[1][0]
+    assert "add start/stop buttons" in engine.steered[2][0]
+    assert str(img_path) in engine.steered[2][0]
+
+    async with aops_pool.connection() as conn:
+        items = await aload_harness_timeline_items(conn, agent_id)
+    steered_kinds = [(item.kind, item.source, item.inbound_id) for item in items[:3]]
+    assert steered_kinds == [
+        ("inbound_chat", "agent:7", peer_id),
+        ("system_marker", "task", None),
+        ("inbound_chat", "user", user_id),
+    ]
