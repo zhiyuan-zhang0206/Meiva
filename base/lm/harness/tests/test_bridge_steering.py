@@ -172,7 +172,11 @@ async def test_bridge_steering_with_claude_session(tmp_path: Path) -> None:
     await asyncio.sleep(0.01)
 
     assert bridge.steering_available
-    assert await bridge.steer("steer text", key="inbound-1")
+    steer = asyncio.create_task(bridge.steer("steer text", key="inbound-1"))
+    await asyncio.sleep(0.01)
+    assert not steer.done(), "a write is not delivery: the CLI has not echoed the input yet"
+    sdk.clients[0].unblock()
+    assert await asyncio.wait_for(steer, 2)
     assert sdk.clients[0].queries == ["first", "steer text"]
 
     await bridge.close()

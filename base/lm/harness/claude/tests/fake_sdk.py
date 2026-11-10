@@ -36,6 +36,8 @@ class AssistantMessage:
 @dataclass
 class UserMessage:
     content: Any
+    uuid: str | None = None
+    origin: dict[str, Any] | None = None
 
 
 @dataclass
@@ -133,6 +135,7 @@ class ClaudeAgentOptions:
     include_partial_messages: bool = False
     env: dict[str, str] = field(default_factory=dict[str, str])
     resume: str | None = None
+    extra_args: dict[str, str | None] | None = None
 
 
 @dataclass(frozen=True)
@@ -182,6 +185,12 @@ class FakeClaudeSDKClient:
         self.interrupt_acknowledged = asyncio.Event()
         self.on_query: Callable[[str], None] | None = None
         self.query_error: Exception | None = None
+        self.sent: list[dict[str, Any]] = []
+        self.waiting: list[tuple[str | None, Any]] = []
+        # meiva:note
+        # A passive client only records what it is sent: the test replays the CLI's messages itself,
+        # frame by frame, so the order of echoes and results is the recorded one.
+        self.passive = False
         self._queue: asyncio.Queue[Any] = asyncio.Queue()
         self._turn: asyncio.Task[None] | None = None
         self._blocker = asyncio.Event()
@@ -213,21 +222,56 @@ class FakeClaudeSDKClient:
     def unblock(self) -> None:
         self._blocker.set()
 
-    async def query(self, prompt: str) -> None:
+    # meiva:note
+    # The CLI's own input queue, as observed on CLI 2.1.301 with `replay-user-messages`: an input
+    # that arrives while no turn runs starts one and is echoed first; an input that arrives while a
+    # turn runs waits, is echoed (and so absorbed) at the next tool boundary, and when the turn ends
+    # without one it is echoed after that turn's result and starts a turn of its own.
+    # meiva:link base/lm/harness/claude/docs/claude.md
+    async def query(self, prompt: Any) -> None:
         if self.query_error is not None:
             raise self.query_error
-        self.queries.append(prompt)
-        self.timeline.append(("query", prompt))
-        if self.on_query is not None:
-            self.on_query(prompt)
-        if self._turn is not None and not self._turn.done():
-            return
+        messages: list[dict[str, Any]] = [{"uuid": None, "message": {"content": prompt}}]
+        if not isinstance(prompt, str):
+            messages = [message async for message in prompt]
+        for message in messages:
+            content: Any = message["message"]["content"]
+            text = content if isinstance(content, str) else _joined_text(content)
+            self.queries.append(text)
+            self.sent.append(message)
+            self.timeline.append(("query", text))
+            if self.on_query is not None:
+                self.on_query(text)
+            if self.passive:
+                continue
+            entry: tuple[str | None, Any] = (message.get("uuid"), content)
+            if self._turn is not None and not self._turn.done():
+                self.waiting.append(entry)
+            else:
+                self._start_turn([entry])
+
+    def _start_turn(self, echoes: list[tuple[str | None, Any]]) -> None:
         self._blocker = asyncio.Event()
         script = self._sdk.scripts.pop(0) if self._sdk.scripts else []
-        self._turn = asyncio.create_task(self._run(script))
+        self._turn = asyncio.create_task(self._run(script, echoes))
 
-    async def _run(self, script: list[Any]) -> None:
+    def _echo(self, uuid: str | None, content: Any) -> None:
+        self._emit(UserMessage(content=content, uuid=uuid))
+
+    def _absorb_waiting(self) -> None:
+        waiting, self.waiting = self.waiting, []
+        for uuid, content in waiting:
+            self._echo(uuid, content)
+
+    def _revive_waiting(self) -> None:
+        if self.waiting and self._turn is not None:
+            echoes, self.waiting = self.waiting, []
+            self._start_turn(echoes)
+
+    async def _run(self, script: list[Any], echoes: list[tuple[str | None, Any]]) -> None:
         try:
+            for uuid, content in echoes:
+                self._echo(uuid, content)
             for step in script:
                 if isinstance(step, Emit):
                     self._emit(step.message)
@@ -257,6 +301,7 @@ class FakeClaudeSDKClient:
                             ]
                         )
                     )
+                    self._absorb_waiting()
                 elif isinstance(step, Block):
                     await self._blocker.wait()
                 else:
@@ -264,6 +309,7 @@ class FakeClaudeSDKClient:
         except asyncio.CancelledError:
             return
         self._finish(result=ResultMessage())
+        self._revive_waiting()
 
     def _finish(self, *, result: ResultMessage) -> None:
         self.timeline.append(("result", result.subtype))
@@ -289,6 +335,7 @@ class FakeClaudeSDKClient:
         )
         if self.interrupt_ack_gate is not None:
             await self.interrupt_ack_gate.wait()
+        self._revive_waiting()
         self.interrupt_acknowledged.set()
 
     async def _cancel_turn(self) -> None:
@@ -335,11 +382,13 @@ class FakeSDK:
         # meiva:link base/lm/harness/docs/harness.md
         self.probe: ScriptedProbe | None = None
         self.new_session_id = "session-1"
+        self.passive = False
         self.clients: list[FakeClaudeSDKClient] = []
         self.ClaudeAgentOptions = ClaudeAgentOptions
 
     def ClaudeSDKClient(self, options: ClaudeAgentOptions) -> FakeClaudeSDKClient:
         client = FakeClaudeSDKClient(options, sdk=self)
+        client.passive = self.passive
         self.clients.append(client)
         return client
 
@@ -362,6 +411,10 @@ class ScriptedProbe:
     def reap(self, *pids: int) -> None:
         for pid in pids:
             self.alive.discard(pid)
+
+
+def _joined_text(blocks: list[dict[str, Any]]) -> str:
+    return " ".join(str(block.get("text", "")) for block in blocks if block.get("type") == "text")
 
 
 def _delta(text: str) -> StreamEvent:

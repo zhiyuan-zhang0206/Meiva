@@ -4,6 +4,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from enum import StrEnum
 
+from base.host.boundary.json_values import is_object_list
 from base.lm.harness.events import (
     AssistantText,
     BridgeEvent,
@@ -47,15 +48,14 @@ def message_kind(class_name: str) -> MessageKind:
 
 
 # meiva:note
-# `human` is the origin of a turn this session started by submitting a prompt; every other
-# origin names a turn the CLI began on its own, which this session never started, so it comes
-# back as no claim at all and the result is recorded as unsolicited output (#5663).
+# A user message is either the result of a tool the model called (content of the running turn) or the
+# CLI's echo of an input that entered the conversation. Only the first has `ToolResultBlock`s.
 # meiva:link base/lm/harness/claude/docs/claude.md
-HUMAN_ORIGIN = "human"
-
-
-def claimed_origin(origin_kind: str | None) -> str | None:
-    return None if origin_kind is None or origin_kind == HUMAN_ORIGIN else origin_kind
+def is_tool_result(message: object) -> bool:
+    content: object = getattr(message, "content", None)
+    return is_object_list(content) and any(
+        type(block).__name__ == "ToolResultBlock" for block in content
+    )
 
 
 # meiva:note

@@ -1,0 +1,21 @@
+{
+  "source": "claude CLI 2.1.301, experiments claude-stream-customuuid and round 3: a user message written during a turn with no tool boundary left was not absorbed; about a second after the first Result it was echoed and ran as a turn of its own; ids removed",
+  "frames": {
+    "turn1": [
+      {"cls": "UserMessage", "uuid": "$first", "content": "Write a numbered list of 1 to 120, no tools."},
+      {"cls": "AssistantMessage", "blocks": [{"text": "1. Lions ... 120. Owls"}]},
+      {"cls": "ResultMessage", "num_turns": 1}
+    ],
+    "turn2": [
+      {"cls": "SystemMessage", "subtype": "init", "data": {"session_id": "session-1", "model": "claude-fake"}},
+      {"cls": "UserMessage", "uuid": "$steer", "content": "STEERING NOTE from the user: please include the exact word ZEBRA-7731 in your final answer."},
+      {"cls": "AssistantMessage", "blocks": [{"text": "Noted: ZEBRA-7731"}]},
+      {"cls": "ResultMessage", "num_turns": 1}
+    ],
+    "next": [
+      {"cls": "UserMessage", "uuid": "$next", "content": "next instruction"},
+      {"cls": "AssistantMessage", "blocks": [{"text": "answer to next"}]},
+      {"cls": "ResultMessage", "num_turns": 1}
+    ]
+  }
+}

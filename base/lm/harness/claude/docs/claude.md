@@ -13,8 +13,8 @@ decides differently from another provider.
 
 | Module | Owns |
 |---|---|
-| `session.py` | the effect shell of `ClaudeSession`: start / resume / close, ordered inbound queue, mid-turn foreground steering, one event stream, interrupt, totals — it awaits the SDK and holds the state, and every decision it makes comes from the modules below |
-| `inbound.py` | what one inbound message is (dispatch by class name), which result may claim the running turn, what a step and a turn's text are, the background-task set, and whether a task report goes to the sink or the stream |
+| `session.py` | the effect shell of `ClaudeSession`: start / resume / close, `deliver()`, the observed-turn model, one event stream, interrupt, totals — it awaits the SDK and holds the state, and every decision it makes comes from the modules below |
+| `inbound.py` | what one inbound message is (dispatch by class name), what an input is sent as and which echo opens a turn (`delivery.py`), what a step and a turn's text are, the background-task set, and whether a task report goes to the sink or the stream |
 | `options.py` | the keyword values handed to the SDK's option class, including the two that ride only when resolved or supported |
 | `settle.py` | how one result settles a turn: the outcome, the stream event, the new session id and the running totals |
 | `mapping.py` | pure SDK-message → `BridgeEvent` translation, dispatched by class name |
@@ -64,13 +64,24 @@ and the CLI reports its end on its own:
 
 ## Claude-specific invariants
 
-- **One turn at a time for submission; mid-turn steering via `query()`.**
-  Ordinary inbound messages submitted via `submit()` wait for the running
-  turn's `ResultMessage` boundary before starting. Foreground steering
-  (`ForegroundSteering`) relaxes the RPC-ACK requirement to transport write
-  confirmation: when a turn is active, `steer(text, key=key)` writes directly
-  to the CLI transport via `query()`, which folds the message into the ongoing
-  turn's model context while preserving turn boundaries.
+- **Inputs carry a uuid; the CLI's echo is the acknowledgement.** Every input is sent as a user
+  message with a uuid derived from its key (`delivery.key_uuid`), and the session starts the CLI with
+  `--replay-user-messages` (an SDK that cannot pass it is refused; a CLI that does not echo fails the
+  session at the first result instead of guessing). The write is a weak receipt (`InputReceived`,
+  WEAK); the echo of our uuid is `InputInContext`. Where the model gets the input depends on the CLI:
+  at the next tool boundary (the echo arrives mid-turn and joins that turn) or, when the turn has no
+  tool left to cross, about a second after that turn's result, as a turn of its own (the echo arrives
+  with no turn open and starts one: `TurnStarted(HARNESS, QUEUED_INPUT_REVIVED, keys)`). The same
+  happens to an input queued when `interrupt()` ran. Observed on CLI 2.1.301 (the SDK's pinned binary;
+  the machine's `claude --version` can be older).
+- **Turns are observed, not submitted.** A turn opens at the first echo of our uuid, at an echo that
+  names an origin (`task-notification`, a timer word), or at the first content with no turn open; a
+  `ResultMessage` ends it. Echoes that are not ours (`[Request interrupted by user]`) are ignored.
+  `submit()` still waits for the result of the turn that took its input; if its input was absorbed
+  into a turn that is not its own, it settles with that turn's outcome (an alias completion).
+  Causes of a CLI-started turn: `BACKGROUND_TASK` (a task notification preceded it or its origin is
+  `task-notification`), `SCHEDULED_WAKE` (an origin naming cron, schedule, timer, wake, loop or
+  monitor; no real sample exists yet, the shape is a guess), otherwise `UNKNOWN`.
 - **Cancellation is asserted.** `interrupt()` reports whether the tool's child
   processes were reaped, and `settled=None` when the CLI pid is unobservable. A
   result attributed to the foreground confirms cancellation when its

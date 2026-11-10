@@ -1,0 +1,13 @@
+exports = []
+
+[uses]
+"__init__.py" = []
+"judge.py" = []
+"transcript.py" = ["judge.py"]
+"tests" = ["judge.py", "transcript.py"]
+
+[purity]
+"." = "strict"
+"__init__.py" = "strict"
+"judge.py" = "strict"
+"transcript.py" = { mode = "none", why = "the read half of Claude reconciliation: it globs the session transcript under the injected Claude home and parses its lines; what the rows mean is decided in judge.py" }

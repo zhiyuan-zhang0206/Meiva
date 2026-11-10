@@ -7,9 +7,13 @@ from base.lm.harness.claude.tests import fake_sdk as fake
 from base.lm.harness.claude.tests.fake_sdk import Emit, Say
 from base.lm.harness.claude.tests.support import start
 from base.lm.harness.events import (
+    AssistantText,
+    HarnessCause,
     SessionFailed,
     TurnCompleted,
     TurnFaulted,
+    TurnOrigin,
+    TurnStarted,
     UnsolicitedOutput,
 )
 
@@ -72,18 +76,23 @@ async def test_an_idle_task_report_starts_the_dispatch_hold(tmp_path: Path) -> N
         await harness.stop()
 
 
-async def test_a_foreign_result_does_not_close_the_running_turn(tmp_path: Path) -> None:
-    harness = await start(
-        tmp_path,
-        scripts=[[Emit(_answer("not ours")), Say("ours")]],
-    )
+async def test_a_background_answer_is_an_observed_turn_with_its_cause(tmp_path: Path) -> None:
+    harness = await start(tmp_path)
     try:
-        outcome = await harness.session.submit("work").outcome()
-        assert outcome.text == "ours"
-        [completed] = harness.of(TurnCompleted)
-        assert completed.text == "ours"
-        assert [event.text for event in harness.of(UnsolicitedOutput)] == ["not ours"]
+        harness.client.push(_report())
+        harness.client.push(
+            fake.AssistantMessage(content=[fake.TextBlock(text="The command finished.")])
+        )
+        harness.client.push(_answer())
+        completed = await harness.wait_for(lambda event: isinstance(event, TurnCompleted))
+        [started] = harness.of(TurnStarted)
+        assert started.origin is TurnOrigin.HARNESS
+        assert started.cause is HarnessCause.BACKGROUND_TASK
+        assert completed.turn_id == started.turn_id
+        assert [event.turn_id for event in harness.of(AssistantText)] == [started.turn_id]
         assert harness.of(SessionFailed) == [] and harness.of(TurnFaulted) == []
+        late = harness.session.submit("ours")
+        assert (await late.outcome()).turn_id == late.turn_id
     finally:
         await harness.stop()
 
@@ -125,9 +134,9 @@ async def test_close_stops_the_tasks_the_cli_still_runs(tmp_path: Path) -> None:
 async def test_an_idle_report_is_not_replayed_into_the_next_turn(tmp_path: Path) -> None:
     # meiva:note
     # Nobody consumes the event stream between turns, so an event that arrived while
-    # the session was idle waits in the queue. The next turn must start from a clean
-    # one: left there, a report or a failure that belonged to no turn is read as that
-    # turn's own outcome (#5663).
+    # the session was idle waits in the queue. A report that belonged to no turn must not be read as
+    # the next turn's own outcome (#5663): turns are attributed by their own ids, so the report
+    # stays an event of the stream and the turn's text is only what the turn said.
     # meiva:link base/lm/harness/claude/docs/claude.md
     harness = await start(tmp_path, scripts=[[Say("its own reply")]])
     try:
@@ -138,7 +147,6 @@ async def test_an_idle_report_is_not_replayed_into_the_next_turn(tmp_path: Path)
         harness.client.push(_answer())
         outcome = await ticket.outcome()
         assert outcome.text == "its own reply"
-        assert harness.session.unconsumed_events >= 1, "the idle period's events are not replayed"
         assert "task-1" not in outcome.text
     finally:
         await harness.stop()

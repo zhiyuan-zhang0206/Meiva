@@ -2,12 +2,13 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
+from typing import Any
 
 import pytest
 
 from base.lm.harness import ForegroundSteering
 from base.lm.harness.claude.session import InboundQueueFullError, SessionClosedError
-from base.lm.harness.claude.tests.fake_sdk import Block, Delay, Say
+from base.lm.harness.claude.tests.fake_sdk import Block, CallTool, Delay, Say
 from base.lm.harness.claude.tests.support import start
 
 
@@ -111,7 +112,10 @@ async def test_steering_available_reflects_active_turn_lifecycle(tmp_path: Path)
 
 
 async def test_steer_writes_to_active_session_and_preserves_running_turn(tmp_path: Path) -> None:
-    harness = await start(tmp_path, scripts=[[Say("first"), Delay(0.05), Say("finish")]])
+    harness = await start(
+        tmp_path,
+        scripts=[[Say("first"), Delay(0.05), CallTool("Bash", {"command": "ls"}), Say("finish")]],
+    )
     try:
         first = harness.session.submit("run task", key="first-key")
         await harness.turn_started()
@@ -120,7 +124,6 @@ async def test_steer_writes_to_active_session_and_preserves_running_turn(tmp_pat
         assert steered is True
         assert harness.client.queries == ["run task", "change course"]
         assert ("query", "change course") in harness.client.timeline
-        assert harness.session.active_turn_id == first.turn_id
         assert harness.session.pending_turns == ()
         outcome = await first.outcome()
         assert outcome.text == "first\nfinish"
@@ -155,21 +158,6 @@ async def test_steer_returns_false_when_not_available(tmp_path: Path) -> None:
         await harness.stop()
 
 
-async def test_steer_deduplication_by_key(tmp_path: Path) -> None:
-    harness = await start(tmp_path, scripts=[[Say("done"), Delay(0.05)]])
-    try:
-        _ = harness.session.submit("start", key="turn-key-1")
-        await harness.turn_started()
-        assert await harness.session.steer("same as turn key", key="turn-key-1")
-        assert harness.client.queries == ["start"]
-        assert await harness.session.steer("mid-turn input", key="inbound-10")
-        assert harness.client.queries == ["start", "mid-turn input"]
-        assert await harness.session.steer("duplicate mid-turn input", key="inbound-10")
-        assert harness.client.queries == ["start", "mid-turn input"]
-    finally:
-        await harness.stop()
-
-
 async def test_steer_concurrent_same_key_raises(tmp_path: Path) -> None:
     harness = await start(tmp_path, scripts=[[Block()]])
     try:
@@ -178,8 +166,8 @@ async def test_steer_concurrent_same_key_raises(tmp_path: Path) -> None:
         gate = asyncio.Event()
         real_query = harness.client.query
 
-        async def slow_query(prompt: str) -> None:
-            if prompt == "slow steer":
+        async def slow_query(prompt: Any) -> None:
+            if not gate.is_set():
                 gate.set()
                 await asyncio.sleep(0.05)
             await real_query(prompt)
@@ -197,7 +185,8 @@ async def test_steer_concurrent_same_key_raises(tmp_path: Path) -> None:
         ):
             _ = await harness.session.steer("second steer", key="concurrent-key")
 
-        assert await t1 is True
+        harness.client.unblock()
+        assert await asyncio.wait_for(t1, 2) is True
     finally:
         await harness.stop()
 
@@ -211,7 +200,10 @@ async def test_steer_transport_error_propagates(tmp_path: Path) -> None:
         with pytest.raises(RuntimeError, match="transport broken"):
             _ = await harness.session.steer("steer text", key="inbound-99")
         harness.client.query_error = None
-        assert await harness.session.steer("steer retry", key="inbound-99")
+        retry = asyncio.create_task(harness.session.steer("steer retry", key="inbound-99"))
+        await asyncio.sleep(0.01)
+        harness.client.unblock()
+        assert await asyncio.wait_for(retry, 2)
         assert "steer retry" in harness.client.queries
     finally:
         await harness.stop()

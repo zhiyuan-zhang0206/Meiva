@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from base.lm.harness.claude.mapping import ResultFields
-from base.lm.harness.events import TurnCompleted, UnsolicitedOutput
+from base.lm.harness.events import TurnCompleted
 from base.lm.harness.session import SessionTotals, TurnOutcome
 
 # meiva:note
@@ -28,17 +28,6 @@ class ResultSettlement:
     session_id: str | None
     completed: TurnCompleted
     outcome: TurnOutcome
-
-
-# meiva:note
-# A terminal message for a turn this session did not run: the CLI's own answer to a background
-# task, or a result from a turn it began for some other reason. It is neither this session's
-# boundary nor a failure. It is recorded so the stream keeps one entry per turn the provider
-# ran, and it is not delivered as new inbound content — the agent already read the reply in the
-# provider's transcript, unlike the report that asked for it (#5663).
-# meiva:link base/lm/harness/claude/docs/claude.md
-def result_output(fields: ResultFields) -> UnsolicitedOutput:
-    return UnsolicitedOutput(source=fields.origin_kind or "result", text=fields.result_text or "")
 
 
 # meiva:note
