@@ -173,7 +173,8 @@ _EXPECTED = {
     },
     "validate_pointers": [
         "MEMORY.md: duplicate pointer dup.md (2x)",
-        "MEMORY.md: pointer target missing: gone.md",
+        "MEMORY.md: pointer target invalid: gone.md",
+        "MEMORY.md: pointer target invalid: https://x.md",
         "directory without pointer: .hidden/",
         "directory without pointer: fmindex/",
         "directory without pointer: many/",
@@ -467,3 +468,39 @@ def test_repo_mapping_prefers_explicit_then_vault_then_home(tmp_path: Path) -> N
     assert validate.source_repos(vault, {"meiva": source})["meiva"] == source
     mirror.rmdir()
     assert validate.source_repos(vault)["meiva"] == source
+
+
+@pytest.mark.parametrize(
+    "target", ["/memory/x.md", "./x.md", "nested/../x.md", "/memory/x.md#claim"]
+)
+def test_pointer_resolution_normalizes_note_paths(tmp_path: Path, target: str) -> None:
+    bundle = tmp_path / "memory"
+    w(bundle, "x.md", "# Claim\n")
+    (bundle / "nested").mkdir()
+    w(bundle, "MEMORY.md", f"[Claim]({target})\n")
+    assert validate.validate_pointers(bundle) == []
+
+
+def test_pointer_duplicates_share_the_resolved_note_identity(tmp_path: Path) -> None:
+    bundle = tmp_path / "memory"
+    w(bundle, "x.md", "# Claim\n")
+    w(bundle, "MEMORY.md", "[Relative](./x.md)\n[Absolute](/memory/x.md#claim)\n")
+    assert validate.validate_pointers(bundle) == ["MEMORY.md: duplicate pointer x.md (2x)"]
+
+
+@pytest.mark.parametrize("target", ["/memory/gone.md", "./gone.md", "/memory/directory.md"])
+def test_pointer_invalid_targets_share_the_live_validator_message(
+    tmp_path: Path, target: str
+) -> None:
+    bundle = tmp_path / "memory"
+    w(bundle, "MEMORY.md", f"[Missing]({target})\n")
+    (bundle / "directory.md").mkdir()
+    assert validate.validate_pointers(bundle) == [f"MEMORY.md: pointer target invalid: {target}"]
+
+
+def test_evidence_links_do_not_cover_notes(tmp_path: Path) -> None:
+    bundle = tmp_path / "memory"
+    w(tmp_path, "sources/x.md", "# Evidence\n")
+    w(bundle, "x.md", "# Claim\n")
+    w(bundle, "MEMORY.md", "[Evidence](/sources/x.md)\n")
+    assert validate.validate_pointers(bundle) == ["orphan note (no pointer in MEMORY.md): x.md"]
