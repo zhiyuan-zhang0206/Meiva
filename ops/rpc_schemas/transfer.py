@@ -67,6 +67,7 @@ class TransferAgentResponse(BaseModel):
     files_transferred: int
     bytes_transferred: int
     killed_shell_sessions: list[int] = Field(default_factory=list[int])
+    harnesses_not_transferred: list[str] = Field(default_factory=list[str])
 
 
 # meiva:note
@@ -134,7 +135,10 @@ class WorkspaceBundleManifest(BaseModel):
     tar_bytes: int = Field(ge=0)
     tar_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     killed_shell_sessions: list[int] = Field(default_factory=list[int])
-    harness_transfer: HarnessTransferPayload | None = None
+    harness_transfers: list[HarnessTransferPayload] = Field(
+        default_factory=list[HarnessTransferPayload]
+    )
+    harnesses_not_transferred: list[str] = Field(default_factory=list[str])
 
 
 class WorkspaceTransferPreparePayload(BaseModel):
@@ -177,6 +181,7 @@ class WorkspaceTransferFinalizePayload(BaseModel):
     agent_id: int = Field(gt=0)
     transfer_id: str = Field(pattern=r"^[0-9a-f]{32}$")
     role: Literal["source", "target"]
+    harnesses: list[str] = Field(default_factory=list[str])
 
 
 class WorkspaceTransferFinalizeResult(BaseModel):

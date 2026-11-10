@@ -4108,6 +4108,7 @@ export interface components {
             files_transferred: number;
             bytes_transferred: number;
             killed_shell_sessions?: number[];
+            harnesses_not_transferred?: string[];
         };
         UiContributionsResponse: {
             themes: components["schemas"]["UiThemeContribution"][];

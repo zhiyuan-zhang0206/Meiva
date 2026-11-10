@@ -17,7 +17,7 @@ from pathlib import Path
 from base import paths
 from base.host.boundary.json_values import is_object_dict, is_object_list
 from base.host.boundary.untyped import object_of
-from base.lm.harness.registry import FileSessionRegistry, record_from_payload
+from base.lm.harness.registry import FileSessionRegistry, SessionRecord, record_from_payload
 from ops.rpc_schemas.transfer import HarnessTransferFile, HarnessTransferPayload
 
 _log = logging.getLogger(__name__)
@@ -243,49 +243,59 @@ def _collect_codex_files(
 
 
 # meiva:note
-# Collect the most recently used external harness session record of the agent
-# ($MEIVA_HOME/harness/sessions/{agent_id}.{harness}.json) and its underlying transcript files from the user's home directory into an immutable
-# `HarnessTransferPayload` for inclusion in the workspace transfer bundle.
-def collect_harness_transfer(
+# Collect every external harness session record of the agent
+# ($MEIVA_HOME/harness/sessions/{agent_id}.{harness}.json) with the transcript files of its CLI
+# from the user's home directory, one immutable `HarnessTransferPayload` per harness, for the
+# workspace transfer bundle. A record is carried only when its transcript was found: a pointer to a
+# transcript that did not come along would resume nothing. The other harnesses, those with no
+# transcript support (`_TRANSFERABLE` names the ones with a collector) or whose transcript is
+# missing, are returned by name so the transfer can say they stayed behind, and their records stay
+# where they are.
+def collect_harness_transfers(
     *,
     home: Path,
     agent_id: int,
     user_home: Path | None = None,
-) -> HarnessTransferPayload | None:
+) -> tuple[list[HarnessTransferPayload], list[str]]:
     try:
-        latest = FileSessionRegistry(paths.harness_sessions_dir(home=home)).latest(agent_id)
+        records = FileSessionRegistry(paths.harness_sessions_dir(home=home)).records(agent_id)
     except (OSError, ValueError, TypeError):
         _log.warning("failed to read session records of agent %s", agent_id, exc_info=True)
-        return None
-    if latest is None:
-        return None
-
-    session_record: dict[str, object] = dict(asdict(latest))
-    session_record["agent_id"] = agent_id
-
-    harness = latest.harness
-    session_id = str(session_record.get("session_id") or "")
-    from_cwd = str(session_record.get("cwd") or str(paths.workspace_path(home, agent_id)))
-
-    if not session_id:
-        return HarnessTransferPayload(harness=harness, session_record=session_record)
-
+        return [], []
     u_home = user_home if user_home is not None else home.parent
+    carried: list[HarnessTransferPayload] = []
+    left_behind: list[str] = []
+    for record in records:
+        payload = _collect_one(record, home=home, u_home=u_home)
+        if payload is None:
+            left_behind.append(record.harness)
+        else:
+            carried.append(payload)
+    return carried, left_behind
+
+
+_TRANSFERABLE = ("claude_code", "antigravity", "codex")
+
+
+def _collect_one(
+    record: SessionRecord, *, home: Path, u_home: Path
+) -> HarnessTransferPayload | None:
+    if record.harness not in _TRANSFERABLE or not record.session_id:
+        return None
+    session_record: dict[str, object] = dict(asdict(record))
+    from_cwd = record.cwd or str(paths.workspace_path(home, record.agent_id))
     files: list[HarnessTransferFile] = []
     extra: dict[str, object] = {}
-
-    if harness == "claude_code":
-        _collect_claude_files(u_home, from_cwd, session_id, files, extra)
-    elif harness == "antigravity":
-        _collect_antigravity_files(u_home, session_id, files)
-    elif harness == "codex":
-        _collect_codex_files(u_home, session_id, files, extra)
-
+    if record.harness == "claude_code":
+        _collect_claude_files(u_home, from_cwd, record.session_id, files, extra)
+    elif record.harness == "antigravity":
+        _collect_antigravity_files(u_home, record.session_id, files)
+    else:
+        _collect_codex_files(u_home, record.session_id, files, extra)
+    if not files and not extra:
+        return None
     return HarnessTransferPayload(
-        harness=harness,
-        session_record=session_record,
-        files=files,
-        extra=extra,
+        harness=record.harness, session_record=session_record, files=files, extra=extra
     )
 
 

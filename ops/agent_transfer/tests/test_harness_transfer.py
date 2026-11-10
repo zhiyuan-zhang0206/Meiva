@@ -11,13 +11,13 @@ import sqlite3
 from pathlib import Path
 
 from base import paths
-from base.lm.harness.registry import FileSessionRegistry
+from base.lm.harness.registry import FileSessionRegistry, SessionRecord
 from ops.agent_transfer.archive_io import pack_workspace, stage_and_activate_workspace
 from ops.agent_transfer.budget import WorkspaceTransferLimits
 from ops.agent_transfer.harness_transfer import (
     apply_harness_transfer,
     claude_project_slug,
-    collect_harness_transfer,
+    collect_harness_transfers,
 )
 from ops.agent_transfer.operations import finalize_transfer_op
 from ops.rpc_schemas.transfer import WorkspaceTransferFinalizePayload
@@ -74,8 +74,11 @@ def test_claude_code_transfer_collect_and_apply(tmp_path: Path) -> None:
     )
     (transcript_dir / f"{session_id}.jsonl").write_text(sample_jsonl, encoding="utf-8")
 
-    payload = collect_harness_transfer(home=src_home, agent_id=agent_id, user_home=src_user)
-    assert payload is not None
+    carried, left_behind = collect_harness_transfers(
+        home=src_home, agent_id=agent_id, user_home=src_user
+    )
+    assert left_behind == []
+    (payload,) = carried
     assert payload.harness == "claude_code"
     assert payload.session_record["session_id"] == session_id
     assert len(payload.files) == 1
@@ -148,8 +151,11 @@ def test_antigravity_transfer_collect_and_apply(tmp_path: Path) -> None:
     conv_dir.mkdir(parents=True, exist_ok=True)
     (conv_dir / f"{session_id}.pb").write_bytes(b"\x08\x01\x12\x04test")
 
-    payload = collect_harness_transfer(home=src_home, agent_id=agent_id, user_home=src_user)
-    assert payload is not None
+    carried, left_behind = collect_harness_transfers(
+        home=src_home, agent_id=agent_id, user_home=src_user
+    )
+    assert left_behind == []
+    (payload,) = carried
     assert payload.harness == "antigravity"
     assert len(payload.files) >= 2
 
@@ -244,8 +250,11 @@ def test_codex_transfer_collect_and_apply(tmp_path: Path) -> None:
         )
         conn.commit()
 
-    payload = collect_harness_transfer(home=src_home, agent_id=agent_id, user_home=src_user)
-    assert payload is not None
+    carried, left_behind = collect_harness_transfers(
+        home=src_home, agent_id=agent_id, user_home=src_user
+    )
+    assert left_behind == []
+    (payload,) = carried
     assert payload.harness == "codex"
     assert "thread_row" in payload.extra
     assert "session_index_lines" in payload.extra
@@ -317,8 +326,10 @@ def test_bundle_pack_and_activate_with_harness_transfer(tmp_path: Path) -> None:
         f'{{"type":"say","cwd":"{src_ws}"}}\n', encoding="utf-8"
     )
 
-    harness_payload = collect_harness_transfer(home=src_home, agent_id=agent_id, user_home=src_user)
-    assert harness_payload is not None
+    harness_payloads, _ = collect_harness_transfers(
+        home=src_home, agent_id=agent_id, user_home=src_user
+    )
+    assert len(harness_payloads) == 1
 
     manifest, bundle = pack_workspace(
         home=src_home,
@@ -327,9 +338,9 @@ def test_bundle_pack_and_activate_with_harness_transfer(tmp_path: Path) -> None:
         source_machine="box-a",
         killed_shell_sessions=[],
         limits=_LIMITS,
-        harness_transfer=harness_payload,
+        harness_transfers=harness_payloads,
     )
-    assert manifest.harness_transfer is not None
+    assert len(manifest.harness_transfers) == 1
 
     activated = stage_and_activate_workspace(
         home=dst_home,
@@ -342,7 +353,7 @@ def test_bundle_pack_and_activate_with_harness_transfer(tmp_path: Path) -> None:
 
     apply_harness_transfer(
         home=dst_home,
-        payload=manifest.harness_transfer,
+        payload=manifest.harness_transfers[0],
         to_machine="box-b",
         user_home=dst_user,
     )
@@ -360,8 +371,62 @@ def test_bundle_pack_and_activate_with_harness_transfer(tmp_path: Path) -> None:
             agent_id=agent_id,
             transfer_id="11" * 16,
             role="source",
+            harnesses=["claude_code"],
         ),
         local_machine="box-a",
         home=src_home,
     )
     assert FileSessionRegistry(paths.harness_sessions_dir(home=src_home)).records(agent_id) == []
+
+
+def _write_record(home: Path, agent_id: int, harness: str, session_id: str, cwd: str) -> None:
+    FileSessionRegistry(paths.harness_sessions_dir(home=home)).save(
+        SessionRecord(
+            agent_id=agent_id,
+            session_id=session_id,
+            cwd=cwd,
+            model="m",
+            created_at="2026-11-01T00:00:00+00:00",
+            updated_at="2026-11-01T00:00:00+00:00",
+            harness=harness,
+        )
+    )
+
+
+# meiva:note
+# An agent with a session on several harnesses moves with every session whose transcript can be
+# carried; one that cannot (here a Codex record with no transcript on disk, and a record of a
+# harness with no collector) is named, stays on the source, and is not copied to the target.
+# meiva:link gateway/agents/docs/agent-transfer.md
+def test_every_harness_with_a_transcript_moves_and_the_rest_is_named(tmp_path: Path) -> None:
+    src_home, dst_home = tmp_path / "src_home", tmp_path / "dst_home"
+    src_user, dst_user = tmp_path / "src_user", tmp_path / "dst_user"
+    agent_id = 7300
+    src_cwd = str(paths.workspace_path(src_home, agent_id))
+
+    _write_record(src_home, agent_id, "claude_code", "claude-session", src_cwd)
+    transcripts = src_user / ".claude" / "projects" / claude_project_slug(src_cwd)
+    transcripts.mkdir(parents=True)
+    (transcripts / "claude-session.jsonl").write_text('{"type":"say"}\n', encoding="utf-8")
+    brain = src_user / ".gemini" / "antigravity-cli" / "brain" / "agy-session"
+    brain.mkdir(parents=True)
+    (brain / "transcript.jsonl").write_text("{}\n", encoding="utf-8")
+    _write_record(src_home, agent_id, "antigravity", "agy-session", src_cwd)
+    _write_record(src_home, agent_id, "codex", "codex-thread-without-transcript", src_cwd)
+    _write_record(src_home, agent_id, "meiva", "not-a-cli-session", src_cwd)
+
+    carried, left_behind = collect_harness_transfers(
+        home=src_home, agent_id=agent_id, user_home=src_user
+    )
+
+    assert sorted(p.harness for p in carried) == ["antigravity", "claude_code"]
+    assert sorted(left_behind) == ["codex", "meiva"]
+
+    for payload in carried:
+        apply_harness_transfer(home=dst_home, payload=payload, to_machine="dst", user_home=dst_user)
+    dst = FileSessionRegistry(paths.harness_sessions_dir(home=dst_home))
+    assert sorted(r.harness for r in dst.records(agent_id)) == ["antigravity", "claude_code"]
+
+    src = FileSessionRegistry(paths.harness_sessions_dir(home=src_home))
+    src.delete_harnesses(agent_id, [p.harness for p in carried])
+    assert sorted(r.harness for r in src.records(agent_id)) == ["codex", "meiva"]

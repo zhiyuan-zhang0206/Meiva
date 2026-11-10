@@ -39,7 +39,7 @@ from ops.agent_transfer.errors import (
 )
 from ops.agent_transfer.harness_transfer import (
     apply_harness_transfer,
-    collect_harness_transfer,
+    collect_harness_transfers,
 )
 from ops.cluster_status import agent_shell_sessions, kill_agent_shells, kill_shell
 from ops.rpc_schemas.transfer import (
@@ -126,7 +126,9 @@ def export_workspace_bundle(
         before_session_index=session_index,
         home=home,
     )
-    harness_transfer = collect_harness_transfer(home=home, agent_id=request.agent_id)
+    harness_transfers, not_transferred = collect_harness_transfers(
+        home=home, agent_id=request.agent_id
+    )
     _manifest, stream = pack_workspace(
         home=home,
         agent_id=request.agent_id,
@@ -134,7 +136,8 @@ def export_workspace_bundle(
         source_machine=local_machine,
         killed_shell_sessions=killed,
         limits=limits,
-        harness_transfer=harness_transfer,
+        harness_transfers=harness_transfers,
+        harnesses_not_transferred=not_transferred,
     )
     _verify_export_fence(pool, request, local_machine=local_machine)
     return stream
@@ -193,15 +196,13 @@ def import_workspace_op(
         bundle_bytes=bundle_bytes,
         limits=limits,
     )
-    if manifest.harness_transfer is not None:
+    for harness_transfer in manifest.harness_transfers:
         apply_harness_transfer(
             home=home,
-            payload=manifest.harness_transfer,
+            payload=harness_transfer,
             to_machine=local_machine,
             agent_id=payload.agent_id,
         )
-    else:
-        FileSessionRegistry(paths.harness_sessions_dir(home=home)).delete(payload.agent_id)
     return WorkspaceTransferImportResult(
         machine=local_machine,
         workspace_dir=str(paths.workspace_path(home, payload.agent_id)),
@@ -210,7 +211,9 @@ def import_workspace_op(
     )
 
 
-def _cleanup_source_sessions_best_effort(agent_id: int, *, home: Path) -> None:
+def _cleanup_source_sessions_best_effort(
+    agent_id: int, *, home: Path, carried_harnesses: list[str]
+) -> None:
     try:
         for shell in agent_shell_sessions(agent_id, now=_EPOCH, home=home):
             kill_shell(agent_id, shell.id, home=home)
@@ -225,7 +228,9 @@ def _cleanup_source_sessions_best_effort(agent_id: int, *, home: Path) -> None:
             "post-transfer browser page release failed for agent %d", agent_id, exc_info=True
         )
     try:
-        FileSessionRegistry(paths.harness_sessions_dir(home=home)).delete(agent_id)
+        FileSessionRegistry(paths.harness_sessions_dir(home=home)).delete_harnesses(
+            agent_id, carried_harnesses
+        )
     except Exception:
         _log.warning(
             "post-transfer harness session cleanup failed for agent %d", agent_id, exc_info=True
@@ -245,7 +250,9 @@ def finalize_transfer_op(
         role=payload.role,
     )
     if payload.role == "source":
-        _cleanup_source_sessions_best_effort(payload.agent_id, home=home)
+        _cleanup_source_sessions_best_effort(
+            payload.agent_id, home=home, carried_harnesses=payload.harnesses
+        )
     return WorkspaceTransferFinalizeResult(machine=local_machine, cleaned=cleaned)
 
 

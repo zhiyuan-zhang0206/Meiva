@@ -22,9 +22,11 @@ owner's ruling: a switch must not throw conversations away.
   the switch note (`[Harness switched from 'a' to 'b']` and the reason) is delivered as the first
   input, the handoff is not repeated (the saved instructions file and the compaction reminder
   already cover instructions the CLI lost), and a failed resume fails fast like any other.
-- Moving an agent to another machine still deletes the agent's records on the machine it leaves
-  (`delete(agent_id)` removes all of them): the transfer carries one session, the most recently
-  updated one.
+- Moving an agent to another machine carries every record whose CLI transcript could be collected
+  (Claude Code, Codex and Antigravity have collectors) and removes from the source only those. A
+  record whose transcript cannot be carried stays on the source and the transfer response names its
+  harness (`harnesses_not_transferred`); no pointer is created on the target for a transcript that
+  did not come along.
 - Native history lives in the database checkpoint and is untouched; no switch to or from the native
   harness removes a record.
 

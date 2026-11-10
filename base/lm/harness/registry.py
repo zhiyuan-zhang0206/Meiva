@@ -4,6 +4,7 @@ import json
 import os
 import re
 import tempfile
+from collections.abc import Collection
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Protocol
@@ -54,7 +55,8 @@ class SessionRegistry(Protocol):
 # `<agent_id>.json`; `migrate_single_slot_records` converts those once, from host
 # converge, and a file still in that layout makes every read refuse instead of
 # resuming nothing. `delete` removes every record of the agent and is for moving the
-# agent to another machine, never for a switch.
+# agent to another machine, never for a switch; `delete_harnesses` removes the records of the
+# named harnesses, which a transfer uses for the sessions it carried to the other machine.
 # meiva:link base/lm/harness/docs/harness.md
 class FileSessionRegistry:
     def __init__(self, root: Path) -> None:
@@ -134,6 +136,10 @@ class FileSessionRegistry:
         except BaseException:
             Path(temporary).unlink(missing_ok=True)
             raise
+
+    def delete_harnesses(self, agent_id: int, harnesses: Collection[str]) -> None:
+        for harness in harnesses:
+            self.path(agent_id, harness).unlink(missing_ok=True)
 
     def delete(self, agent_id: int) -> bool:
         _check_agent(agent_id)
