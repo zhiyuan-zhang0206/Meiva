@@ -64,7 +64,7 @@ def supersede_task_assignments(cur: psycopg.Cursor, task_id: int) -> None:
         "UPDATE inbound_messages SET status='done', claimed_at=now(), "
         "payload=payload||jsonb_build_object('delivery_result', "
         "jsonb_build_object('outcome','superseded','reason','task_reassigned')) "
-        "WHERE kind='system_note' AND status='pending' "
+        "WHERE kind='system_note' AND status='pending' AND claimed_at IS NULL "
         "AND payload->'task_notification'='true'::jsonb "
         "AND payload->'delivery_resurrect'='true'::jsonb "
         "AND payload->>'task_id'=%s",

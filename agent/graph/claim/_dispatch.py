@@ -118,7 +118,8 @@ def _ts_prefix(ctx: MeivaContext) -> str:
 
 
 # meiva:note
-# Ordinary claim and foreground steering share the chat envelope and security note.
+# Ordinary claim and foreground steering share inbound message construction and
+# security notes across chat, system notes, and heartbeats.
 # meiva:link agent/messages/docs/message-format.md
 def prepare_chat_inbound(ctx: MeivaContext, item: ClaimedInbound) -> list[BaseMessage]:
     now = ctx.require_clock().now()
@@ -135,6 +136,53 @@ def prepare_chat_inbound(ctx: MeivaContext, item: ClaimedInbound) -> list[BaseMe
         ),
         now=now,
     )
+
+
+def prepare_system_note_inbound(ctx: MeivaContext, item: ClaimedInbound) -> list[BaseMessage]:
+    finding = scan_inbound_content(
+        item.content,
+        source=f"inbound.system_note:{item.source}",
+        enabled=ctx.require_agent().read("agent", "security_scan_enabled"),
+    )
+    tag = _system_note_tag(item.payload)
+    task_id = _task_id_from_system_note(item.payload, tag)
+    now = ctx.require_clock().now()
+    return _scanned_messages(
+        system_note_message(
+            content=f"{_ts_prefix(ctx)}{item.content}",
+            tag=_system_note_tag(item.payload),
+            task_id=task_id,
+            picked_up_at=now,
+            created_at=item.created_at,
+        ),
+        finding,
+        now=now,
+    )
+
+
+def prepare_heartbeat_inbound(ctx: MeivaContext, item: ClaimedInbound) -> list[BaseMessage]:
+    now = ctx.require_clock().now()
+    return [
+        system_note_message(
+            content=f"{_ts_prefix(ctx)}{item.content}",
+            tag=NoteTag.HEARTBEAT,
+            picked_up_at=now,
+            created_at=now,
+        )
+    ]
+
+
+def prepare_steered_inbound(ctx: MeivaContext, item: ClaimedInbound) -> list[BaseMessage]:
+    kind = InboundKind(item.kind)
+    match kind:
+        case InboundKind.CHAT:
+            return prepare_chat_inbound(ctx, item)
+        case InboundKind.SYSTEM_NOTE:
+            return prepare_system_note_inbound(ctx, item)
+        case InboundKind.HEARTBEAT:
+            return prepare_heartbeat_inbound(ctx, item)
+        case _:
+            raise ValueError(f"Inbound kind is not steerable: {item.kind!r} (id={item.id})")
 
 
 async def _handle_chat(
@@ -188,25 +236,8 @@ async def _handle_system_note(
     summary written by another agent), so it passes through the same
     injection scan as inbound chat before entering the conversation.
     """
-    finding = scan_inbound_content(
-        item.content,
-        source=f"inbound.system_note:{item.source}",
-        enabled=ctx.require_agent().read("agent", "security_scan_enabled"),
-    )
     tag = _system_note_tag(item.payload)
-    task_id = _task_id_from_system_note(item.payload, tag)
-    now = ctx.require_clock().now()
-    st.append_scanned(
-        system_note_message(
-            content=f"{_ts_prefix(ctx)}{item.content}",
-            tag=_system_note_tag(item.payload),
-            task_id=task_id,
-            picked_up_at=now,
-            created_at=item.created_at,
-        ),
-        finding,
-        now=now,
-    )
+    st.new_msgs.extend(prepare_system_note_inbound(ctx, item))
     if tag is NoteTag.LIFECYCLE_RESTART and st.next_goto == CLAIM:
         st.next_goto = BEFORE_TURN
 
@@ -375,15 +406,7 @@ async def handle_heartbeat(
         )
         st.next_goto = CLAIM
         return
-    now = ctx.require_clock().now()
-    st.new_msgs.append(
-        system_note_message(
-            content=f"{_ts_prefix(ctx)}{item.content}",
-            tag=NoteTag.HEARTBEAT,
-            picked_up_at=now,
-            created_at=now,
-        )
-    )
+    st.new_msgs.extend(prepare_heartbeat_inbound(ctx, item))
 
 
 async def _handle_terminate(
@@ -616,7 +639,7 @@ def _is_continuation_item(item: ClaimedInbound) -> bool:
     return False
 
 
-def _is_human_wake_item(item: ClaimedInbound) -> bool:
+def is_human_wake_item(item: ClaimedInbound) -> bool:
     return item.kind in (InboundKind.CHAT, InboundKind.RESURRECT) and (
         sender_class(item.source) == "user"
     )
@@ -651,7 +674,7 @@ def resolve_non_human_wake(
         for item in batch
         if _is_dispatched_for_polarity(item, routing, has_compact=has_compact)
     ]
-    if any(_is_human_wake_item(item) for item in dispatched):
+    if any(is_human_wake_item(item) for item in dispatched):
         return False
     if dispatched and all(_is_continuation_item(item) for item in dispatched):
         return state.non_human_wake

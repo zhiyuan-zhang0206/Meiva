@@ -389,7 +389,7 @@ async def claim_inbound_batch(
             "WHERE id IN ("
             "  SELECT id FROM inbound_messages "
             "  WHERE status = 'pending' AND agent_id = %s "
-            "  AND (kind <> 'chat' OR claimed_at IS NULL) "
+            "  AND claimed_at IS NULL "
             "  AND (NOT %s OR kind NOT IN ('restart','terminate')) "
             "  ORDER BY created_at ASC, id ASC "
             "  FOR UPDATE SKIP LOCKED"

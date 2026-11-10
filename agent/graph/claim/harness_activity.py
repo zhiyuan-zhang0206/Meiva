@@ -65,6 +65,10 @@ class HarnessTurnProjector:
     def has_activity(self) -> bool:
         return self._next_idx > self._base_idx
 
+    @property
+    def non_human_wake(self) -> bool:
+        return self._non_human_wake
+
     async def on_event(self, event: BridgeEvent) -> None:
         async with self._lock:
             now = self._clock.now()
@@ -88,7 +92,10 @@ class HarnessTurnProjector:
             await self._flush()
 
     async def append_inbound(
-        self, commit: Callable[[], Awaitable[list[TimelineItem]]]
+        self,
+        commit: Callable[[], Awaitable[list[TimelineItem]]],
+        *,
+        human_input: bool = False,
     ) -> list[TimelineItem]:
         async with self._lock:
             self._last_chat_raw = ""
@@ -99,6 +106,8 @@ class HarnessTurnProjector:
                     raise RuntimeError(f"unexpected harness inbound position {item.item_id}")
                 self._next_idx += 1
             self._committed_count = self._next_idx
+            if human_input:
+                self._non_human_wake = False
             return items
 
     async def flush_text(self) -> None:

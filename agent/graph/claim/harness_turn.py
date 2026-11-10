@@ -11,7 +11,8 @@ from langgraph.runtime import Runtime
 from langgraph.types import Command
 
 from agent import state as _state
-from agent.graph.claim._dispatch import prepare_chat_inbound
+from agent.db import ClaimedInbound
+from agent.graph.claim._dispatch import is_human_wake_item, prepare_steered_inbound
 from agent.graph.claim.harness_activity import HarnessTurnProjector
 from agent.graph.claim.harness_input import commit_harness_input, retire_unconfirmed_harness_input
 from agent.graph.claim.harness_steer import (
@@ -224,6 +225,49 @@ def _resolve_turn_prompt_and_key(
     return text, key
 
 
+def _apply_wake_polarity(
+    state: _state.AgentState,
+    projector: HarnessTurnProjector,
+    updates: dict[str, Any],
+) -> None:
+    if state.non_human_wake and not projector.non_human_wake:
+        updates["non_human_wake"] = False
+
+
+async def _settle_completed_turn(
+    state: _state.AgentState,
+    ctx: MeivaContext,
+    agent_id: int,
+    event_publisher: AgentEventPublisher,
+    model: str | None,
+    projector: HarnessTurnProjector,
+    turn: HarnessTurn,
+    *,
+    key: str,
+    extra_updates: dict[str, Any],
+) -> Command[HarnessGoto]:
+    turns = (*turn.prelude, turn)
+    for completed in turns:
+        log_turn_usage(ctx, agent_id, model, completed)
+    await projector.finish(turns, interrupted=turn.interrupted)
+    _apply_wake_polarity(state, projector, extra_updates)
+    if turn.interrupted:
+        _announce_cancel(ctx, agent_id)
+    else:
+        event_publisher.emit(LLMDone(agent_id=agent_id).model_dump_json())
+        await persist_last_active(ctx, agent_id, turn.text)
+        correction = await harness_reply_correction(
+            ctx, agent_id, state, invalid=projector.invalid_reply_visibility, key=key
+        )
+        if correction is not None:
+            return Command[HarnessGoto](
+                update={**extra_updates, "harness_pending_input": correction}, goto=HARNESS_TURN
+            )
+    return Command[HarnessGoto](
+        update={**extra_updates, "halted": True, "harness_pending_input": None}, goto=CLAIM
+    )
+
+
 async def _run_harness_turn(
     state: _state.AgentState,
     ctx: MeivaContext,
@@ -280,6 +324,7 @@ async def _run_harness_turn(
         )
         _publish_inbound(ctx, agent_id, items)
         await projector.finish(interrupted=True)
+        _apply_wake_polarity(state, projector, extra_updates)
         return Command[HarnessGoto](
             update={**extra_updates, **interrupt_halt(exc.reason), "harness_pending_input": None},
             goto=CLAIM,
@@ -297,24 +342,16 @@ async def _run_harness_turn(
             )
         raise FatalLLMStreamError(f"{ctx.harness.value} harness turn aborted: {exc}") from exc
 
-    turns = (*turn.prelude, turn)
-    for completed in turns:
-        log_turn_usage(ctx, agent_id, bridge.model, completed)
-    await projector.finish(turns, interrupted=turn.interrupted)
-    if turn.interrupted:
-        _announce_cancel(ctx, agent_id)
-    else:
-        event_publisher.emit(LLMDone(agent_id=agent_id).model_dump_json())
-        await persist_last_active(ctx, agent_id, turn.text)
-        correction = await harness_reply_correction(
-            ctx, agent_id, state, invalid=projector.invalid_reply_visibility, key=key
-        )
-        if correction is not None:
-            return Command[HarnessGoto](
-                update={**extra_updates, "harness_pending_input": correction}, goto=HARNESS_TURN
-            )
-    return Command[HarnessGoto](
-        update={**extra_updates, "halted": True, "harness_pending_input": None}, goto=CLAIM
+    return await _settle_completed_turn(
+        state,
+        ctx,
+        agent_id,
+        event_publisher,
+        bridge.model,
+        projector,
+        turn,
+        key=key,
+        extra_updates=extra_updates,
     )
 
 
@@ -456,16 +493,24 @@ async def _steer_while_active(
 ) -> None:
     while not stopping.is_set():
         if input_accepted.is_set() and engine.steering_available:
-            inbound = await reserve_harness_steer(ctx, agent_id)
-            if inbound is not None:
+            batch = await reserve_harness_steer(ctx, agent_id)
+            if batch:
+                inbound_ids = [item.id for item in batch]
                 try:
-                    messages = prepare_chat_inbound(ctx, inbound)
+                    messages = [msg for item in batch for msg in prepare_steered_inbound(ctx, item)]
                     prompt = render_messages(messages)
                 except Exception:
-                    await finish_harness_steer(ctx, agent_id, inbound.id, accepted_items=None)
+                    await finish_harness_steer(ctx, agent_id, inbound_ids, accepted_items=None)
                     raise
                 if not await _send_steer(
-                    ctx, agent_id, engine, projector, stopping, inbound.id, prompt, messages
+                    ctx,
+                    agent_id,
+                    engine,
+                    projector,
+                    stopping,
+                    batch,
+                    prompt,
+                    messages,
                 ):
                     return
                 continue
@@ -479,18 +524,21 @@ async def _send_steer(
     engine: ForegroundSteering,
     projector: HarnessTurnProjector,
     stopping: asyncio.Event,
-    inbound_id: int,
+    batch: Sequence[ClaimedInbound],
     prompt: str,
     messages: list[BaseMessage],
 ) -> bool:
+    inbound_ids = [item.id for item in batch]
+    newest_id = inbound_ids[-1]
     try:
-        accepted = not stopping.is_set() and await engine.steer(prompt, key=f"inbound-{inbound_id}")
+        accepted = not stopping.is_set() and await engine.steer(prompt, key=f"inbound-{newest_id}")
     except Exception as exc:
         logger.warning(
             "could not confirm harness steer delivery",
             event="harness_steer_unconfirmed",
             agent_id=agent_id,
-            inbound_id=inbound_id,
+            inbound_id=newest_id,
+            inbound_ids=inbound_ids,
             error=str(exc),
         )
         items = await projector.append_inbound(
@@ -500,11 +548,12 @@ async def _send_steer(
         return False
 
     if not accepted:
-        await finish_harness_steer(ctx, agent_id, inbound_id, accepted_items=None)
+        await finish_harness_steer(ctx, agent_id, inbound_ids, accepted_items=None)
         return False
     timeline, _ = build_timeline_items(messages, inputs=ctx.timestamp_policy())
     items = await projector.append_inbound(
-        lambda: finish_harness_steer(ctx, agent_id, inbound_id, accepted_items=timeline)
+        lambda: finish_harness_steer(ctx, agent_id, inbound_ids, accepted_items=timeline),
+        human_input=any(is_human_wake_item(item) for item in batch),
     )
     _publish_inbound(ctx, agent_id, items)
     return True
