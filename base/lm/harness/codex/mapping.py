@@ -35,10 +35,8 @@ def _as_int(value: object) -> int | None:
 
 # meiva:note
 # Codex speaks ThreadItem, not the bridge's own vocabulary: a `commandExecution`
-# item is one tool use whose result arrives as the same item completed. A tool
-# result can be megabytes, so the event carries a preview.
+# item is one tool use whose result arrives as the same item completed.
 # meiva:link base/lm/harness/codex/docs/codex.md
-TOOL_RESULT_PREVIEW_CHARS = 2000
 
 
 def text_delta(params: RequestParams, turn_id: str) -> list[BridgeEvent]:
@@ -166,7 +164,7 @@ def _command(item: RequestParams, phase: str, turn_id: str) -> list[BridgeEvent]
             turn_id=turn_id,
             tool_use_id=identifier,
             is_error=failed,
-            content=_clip(_as_text(item.get("aggregatedOutput")) or ""),
+            content=_as_text(item.get("aggregatedOutput")) or "",
         )
     ]
 
@@ -194,7 +192,7 @@ def _file_change(item: RequestParams, phase: str, turn_id: str) -> list[BridgeEv
             turn_id=turn_id,
             tool_use_id=identifier,
             is_error=status != "completed",
-            content=_clip(json.dumps({"changes": paths, "status": status}, separators=(",", ":"))),
+            content=json.dumps({"changes": paths, "status": status}, separators=(",", ":")),
         )
     ]
 
@@ -220,7 +218,7 @@ def _mcp_call(item: RequestParams, phase: str, turn_id: str) -> list[BridgeEvent
             turn_id=turn_id,
             tool_use_id=identifier,
             is_error=status != "completed" or item.get("error") is not None,
-            content=_clip(json.dumps(payload, ensure_ascii=False)),
+            content=json.dumps(payload, ensure_ascii=False),
         )
     ]
 
@@ -241,7 +239,7 @@ def _dynamic_tool(item: RequestParams, phase: str, turn_id: str) -> list[BridgeE
             turn_id=turn_id,
             tool_use_id=identifier,
             is_error=item.get("success") is not True,
-            content=_clip(json.dumps(item.get("contentItems") or [], ensure_ascii=False)),
+            content=json.dumps(item.get("contentItems") or [], ensure_ascii=False),
         )
     ]
 
@@ -269,7 +267,7 @@ def _collab_call(item: RequestParams, phase: str, turn_id: str) -> list[BridgeEv
             turn_id=turn_id,
             tool_use_id=identifier,
             is_error=status != "completed",
-            content=_clip(json.dumps(summary, ensure_ascii=False)),
+            content=json.dumps(summary, ensure_ascii=False),
         )
     ]
 
@@ -295,7 +293,7 @@ def _web_search(item: RequestParams, phase: str, turn_id: str) -> list[BridgeEve
             turn_id=turn_id,
             tool_use_id=identifier,
             is_error=False,
-            content=_clip(json.dumps(summary, ensure_ascii=False)),
+            content=json.dumps(summary, ensure_ascii=False),
         )
     ]
 
@@ -339,9 +337,3 @@ def _arguments(value: object) -> dict[str, object]:
     if is_object_dict(value):
         return dict(value)
     return {"arguments": value}
-
-
-def _clip(text: str) -> str:
-    if len(text) <= TOOL_RESULT_PREVIEW_CHARS:
-        return text
-    return text[:TOOL_RESULT_PREVIEW_CHARS] + "..."
