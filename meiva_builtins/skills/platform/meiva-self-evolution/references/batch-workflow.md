@@ -111,7 +111,11 @@ combines a logged `skill_invoked` signal with a content scan of the trace — a
 strong suspicion, confirmed by the worker reading the real trace.
 
 Write findings to `$MEIVA_HOME/self_evolution/proposals/<window>-<skill>.md`:
-phenomenon, real run ids, root cause, concrete fix.
+phenomenon, real run ids, root cause, concrete fix. For recurring corrections
+or persistent-system friction, apply the
+[RL bias diagnosis and mitigation ladder](rl-bias-heuristics.md) before choosing
+the fix; include the suspected bias, selected level, and evidence that earlier
+levels cannot cover the need.
 
 **Optional deep dive.** The dataset's transcript is usually enough. When a
 finding hinges on something a transcript cannot show — where the time went, why

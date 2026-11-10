@@ -20,6 +20,15 @@ what actually happened.
 Read [method context](references/method-context.md) when the reflection and
 trace-mining method needs explanation; routine batch work can proceed directly.
 
+## Diagnose recurring friction and choose a fix
+
+When repeated user corrections or persistent-system friction warrant a fix,
+read [RL bias heuristics](references/rl-bias-heuristics.md). Use its four
+diagnostic hypotheses and evaluate the five mitigation levels strictly
+top-down: runtime primitives, Memory, Skill, conditional Schedule, isolated
+Plugin. Record trace evidence and why earlier levels are insufficient; keep
+case-specific primitives out of Core.
+
 ## The batch flow
 
 For collection, change detection, mining, and reporting, read
