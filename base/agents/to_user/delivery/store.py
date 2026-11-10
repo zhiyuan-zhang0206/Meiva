@@ -12,7 +12,11 @@ from base.api_contracts.user_delivery import (
     UserMessage,
 )
 
-COLUMNS = "id, agent_id, mode, source_key, content, suggestions, created_at"
+COLUMNS = (
+    "id, agent_id, mode, source_key, content, suggestions, created_at, "
+    "id <= COALESCE((SELECT seen_id FROM agent_user_seen s "
+    "WHERE s.agent_id = agent_user_messages.agent_id), 0) AS seen"
+)
 
 
 class DeliveryConflictError(ValueError):

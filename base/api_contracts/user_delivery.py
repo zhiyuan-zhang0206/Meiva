@@ -50,6 +50,7 @@ class UserMessage(BaseModel):
     mode: UserDeliveryMode
     source_key: str
     created_at: datetime
+    seen: bool
 
 
 class MarkSeen(BaseModel):

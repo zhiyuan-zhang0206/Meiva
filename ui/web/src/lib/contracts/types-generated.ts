@@ -4152,6 +4152,7 @@ export interface components {
             mode: components["schemas"]["UserDeliveryMode"];
             source_key: string;
             created_at: string;
+            seen: boolean;
         };
         UserMessageFeed: {
             mode: components["schemas"]["UserDeliveryMode"];

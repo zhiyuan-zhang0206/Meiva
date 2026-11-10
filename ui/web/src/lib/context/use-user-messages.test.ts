@@ -6,7 +6,7 @@ import { withUserMessages } from "./use-user-messages";
 const publication: UserMessage = {
   id: 1, agent_id: 7, mode: "prefix", source_key: "assistant:message-1:0.0",
   content: "Ready", suggestions: [],
-  created_at: "2026-11-06T00:00:00Z",
+  created_at: "2026-11-06T00:00:00Z", seen: false,
 };
 
 it.each(["naive", "prefix", "sdk"] as const)("keeps %s routing across start, chunks and durable publication", (mode) => {

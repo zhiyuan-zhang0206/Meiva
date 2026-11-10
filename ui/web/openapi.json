@@ -20192,6 +20192,10 @@
             "type": "string",
             "format": "date-time",
             "title": "Created At"
+          },
+          "seen": {
+            "type": "boolean",
+            "title": "Seen"
           }
         },
         "additionalProperties": false,
@@ -20203,7 +20207,8 @@
           "agent_id",
           "mode",
           "source_key",
-          "created_at"
+          "created_at",
+          "seen"
         ],
         "title": "UserMessage"
       },

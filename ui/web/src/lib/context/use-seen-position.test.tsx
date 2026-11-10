@@ -21,7 +21,7 @@ const NOW = 1_000_000;
 function record(id: number, content: string | null = `reply ${id}`): UserMessage {
   return {
     id, agent_id: 7, mode: "prefix", source_key: `assistant:m${id}:0.0`, content,
-    suggestions: [], created_at: "2026-11-10T00:00:00Z",
+    suggestions: [], created_at: "2026-11-10T00:00:00Z", seen: false,
   };
 }
 function row(id: number, withRecord = true): BackendTimelineItem {

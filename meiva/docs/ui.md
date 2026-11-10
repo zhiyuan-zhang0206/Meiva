@@ -17,7 +17,9 @@
   `note_suggestion` offers light candidate text for that field until the user
   explicitly applies it.
 - `publications(pending_only=True, after_id=0, limit=50)` reads durable messages
-  in increasing ID order without marking them read; continue after the last ID.
+  in increasing ID order; each carries `seen`, whether the user has seen it (their seen
+  position advances when they open the conversation, and `pending_only` keeps those
+  past it). Reading never marks anything seen. Continue after the last ID.
 - `questions()` reads up to 500 open questions without answering them.
 
 The runtime owns operation identity for SDK writes and deterministic replay.

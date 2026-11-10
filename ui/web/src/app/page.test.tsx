@@ -97,7 +97,7 @@ describe("HomePage reply suggestion", () => {
 describe("HomePage unseen deliveries", () => {
   const unseen = {
     id: 9, agent_id: 5, mode: "prefix" as const, source_key: "assistant:m1:0.0", content: "Done",
-    suggestions: [], created_at: "2026-11-10T00:00:00Z",
+    suggestions: [], created_at: "2026-11-10T00:00:00Z", seen: false,
   };
   const setVisibility = (state: "visible" | "hidden") => {
     Object.defineProperty(document, "visibilityState", { configurable: true, get: () => state });
