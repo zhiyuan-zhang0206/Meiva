@@ -74,24 +74,22 @@ def test_no_installed_plugins_contributes_nothing() -> None:
     assert "task-maintenance" not in names
 
 
-def test_discovery_ignores_agent_enable_state() -> None:
-    """Roster discovery keys on plugin PRESENCE, not the agent-facing enable-state:
-    even with every plugin marked disabled in plugins_config, task-maintenance is
-    still in the roster — the machine roster must not depend on the
-    agent-plugin-registration plane. Its host-owned on/off is the explicit
-    Fleet config image gate, exercised in
-    `test_plugin_gate_flows_through_annotation`."""
-    config_path = pc.local_config_path(home=meiva_home())
-    known = set(pc.installed_plugin_dirs(home=meiva_home()))
-    pc.write_local({"plugins": {n: {"enabled": False} for n in sorted(known)}}, home=meiva_home())
-    try:
-        assert not any(
-            entry.enabled for entry in pc.load(known, home=meiva_home()).plugins.values()
-        )
-        names = {s.session for s in composition.build_services(home=meiva_home())}
-        assert "task-maintenance" in names
-    finally:
-        config_path.unlink(missing_ok=True)
+@pytest.mark.parametrize("cluster_enabled", [None, False, True])
+def test_discovery_ignores_agent_enable_state(tmp_path: Path, cluster_enabled: bool | None) -> None:
+    # meiva:note
+    # Roster discovery follows installed code even when agent plugins are disabled.
+    # Cluster policy overrides local enable state. Own both files in a per-test home
+    # so prior materialization cannot change this premise or lose its local config.
+    home = tmp_path
+    known = set(pc.installed_plugin_dirs(home=home))
+    pc.write_local({"plugins": {n: {"enabled": False} for n in sorted(known)}}, home=home)
+    if cluster_enabled is not None:
+        pc.write_cluster_policy(dict.fromkeys(known, cluster_enabled), home=home)
+    configured = pc.load(known, home=home)
+    assert known
+    assert all(entry.enabled == bool(cluster_enabled) for entry in configured.plugins.values())
+    names = {s.session for s in composition.build_services(home=home)}
+    assert "task-maintenance" in names
 
 
 def test_session_collision_fails_fast() -> None:
