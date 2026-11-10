@@ -1,62 +1,103 @@
 ---
 name: external-agents
-description: "Launches and supervises external coding agents. Use when delegating coding work or resuming a session."
+description: "Spawns, switches, and diagnoses external harness agents (Claude Code, Codex, Antigravity) and client skill directories. Use when running an agent on an external harness or checking why a harness shows unavailable."
 ---
 
-# Use other agents
+# External Harness Agents
 
-Both `claude` (Anthropic) and `codex` (OpenAI) are coding-agent CLIs you can hand
-a task to and let plan + execute. Treat either as "another agent". A session
-runs as a **delegated worker** you supervise through files.
-For the session primitives themselves see `meiva.shell` (`run` for one-shot;
-`sessions` — `new` / `send` / `send_keys` / `capture` / `kill` — for a persistent one)
-and `meiva.watcher`; don't re-derive those here.
+Claude Code (`claude_code`), OpenAI Codex (`codex`), and Google Antigravity
+(`antigravity`) run as first-class Meiva agents alongside the built-in `meiva`
+runtime. Each external harness agent has its own `agent_id`, workspace
+(`$MEIVA_HOME/workspaces/<agent_id>`), timeline, inbox, and full `meiva.*` SDK
+surface (invoked from its shell via `meiva harness -c "..."`).
 
-> **Flags and models drift between releases.** Everything below is a snapshot,
-> not a contract. Confirm with `claude --help` / `codex exec --help` and `claude
-> --version` / `codex --version` on the actual machine before relying on a flag —
-> and note a machine may have only one of the two installed.
+`agent-host` owns a harness agent's turn lifecycle (`idling` / `running` /
+`terminated`), mid-turn steering, smooth drain, checkpointing, and resume
+exactly like a native loop's. Do not launch `claude`, `codex`, or `agy` inside
+`meiva.shell.sessions` PTY terminals or coordinate through task/work files and
+watcher scripts — spawn or switch a numbered Meiva agent on the target harness
+instead.
 
-## Delegated workers — file-driven collaboration (the pattern for long tasks)
+## Spawning an External Harness Agent
 
-You hand a long task to the tool and keep steering it through the file-driven
-pattern — a task file you append to, a work file the tool rewrites, a supervisor
-that wakes you. You stay the decider; the tool is a worker.
+Use `meiva-workflow` to decide whether delegation serves the task, define the
+mission and verification criteria, and name the required skills in the spawn
+prompt.
 
-Use `meiva-workflow` to decide whether delegation serves the task, define its
-scope, and set verification criteria. Check the actual tool's installed capabilities
-before choosing it.
+Check live harness availability and supported models on the host before
+spawning:
 
-Read [delegated workers](references/delegated-workers.md) for workspace setup,
-contract delivery, supervision, and handoff. Read only the chosen tool's launch
-reference.
+```python
+import meiva
 
-## After an interruption — resume
+for row in meiva.agents.harness_availability():
+    print(row.harness, row.status, row.default_model, row.models, "|", row.reason)
+```
 
-A full stop, a reboot, a crash or a TTL expiry closes the shell a coding
-session runs in, but the tool keeps its conversation. Every launch prints the
-tool's session id (`claude_session=` / `codex_session=` / `antigravity_session=`), and
-`--resume <id>` on the same spawn command reopens it. Whether to resume or
-start fresh is your call from the task's context: [Resume after an
-interruption](references/resume_after_interruption.md).
+Spawn a fresh agent on `codex`, `claude_code`, or `antigravity` via
+`config_overlay`:
 
-## CLI reference
+```python
+child_id = meiva.agents.spawn(
+    prompt="Mission, required skill(s), and milestone report-back contract...",
+    label="codex-auth-fix",
+    config_overlay={
+        "harness": "codex",          # "codex" | "claude_code" | "antigravity" | "meiva"
+        "llm_model": "gpt-5.4",      # optional; must be supported by the chosen harness
+        "reasoning_effort": "xhigh", # optional
+    },
+)
+```
 
-Flags drift — confirm with `--help` on the actual machine. The per-tool
-references carry the launch variants, auth traps and headless notes:
+From the CLI:
 
-- [Claude Code (`claude`)](references/claude_code.md)
-- [OpenAI Codex (`codex`)](references/codex.md)
-- [Google Antigravity (`agy`)](references/antigravity.md)
+```bash
+meiva agents spawn "<prompt>" --label codex-auth-fix --overlay harness=codex
+```
 
-The spawn picker prints one word — `unavailable` — for three different states.
-When someone asks why a harness they use is greyed out, the states, the
-self-check order and the false alarms are in
-[why a harness shows unavailable](references/harness-availability.md).
+## Steering, Supervising, and Switching Harnesses
 
-A host that runs `meiva start` also copies this guide
-into the global skill directory of each external agent surface it finds — CLIs and,
-where a desktop app documents one, its skill directory — so a spawned session can
-read them without the Meiva checkout. Which directories those are, and the
-evidence for each, is [client skill
-directories](references/supported-clients.md).
+- **Message and steer normally:** Call `meiva.agents.send_message(agent_id, content)`
+  from an agent, or `meiva agents send <id> "<text>" --source ...` from a shell.
+  While a harness turn is running, non-control inbound messages (`user`,
+  `agent`, `external_agent`, `system_note`) are batch-steered mid-turn into the
+  active harness session. If the agent is `idling` or `terminated`, the message
+  starts or resurrects its next turn.
+- **Inspect progress on the timeline:** Read `meiva.agents.get_last_message(agent_id)`
+  or `meiva agents timeline <id> [--limit N]`.
+- **Switch an existing agent's harness:** An `idling` or `terminated` agent can
+  switch harnesses bidirectionally (`meiva` <-> external or external <-> external)
+  via `meiva.agents.restart(agent_id, message="...", config_overlay={"harness": "claude_code"})`
+  (or `meiva agents restart <id> -m "..." --overlay harness=claude_code`). Follow
+  the preconditions and handoff file contract in
+  [agents](../agents/SKILL.md#switching-harnesses--handoff-process).
+
+## External Sessions Messaging Meiva Agents
+
+When an external coding agent session running outside Meiva (or from a shell)
+inspects or messages a numbered Meiva agent on the host, use the host's `meiva`
+CLI (`~/.local/bin/meiva`) with explicit external provenance:
+
+```bash
+meiva agents ls
+meiva agents timeline <agent_id> --limit 20
+meiva agents send <agent_id> "<message>" --source external_agent:<subject>[:<instance>]
+```
+
+where `<subject>` is `claude_code`, `codex`, or `antigravity`. Never pass
+`--source user` when acting as an external agent, and never craft raw HTTP
+requests against gateway endpoints.
+
+## Availability Diagnosis and Published Client Skills
+
+- The spawn picker prints one word — `unavailable` — for three different probe
+  states (`available`, `unavailable`, `unknown`). When a harness is greyed out
+  or `meiva.agents.harness_availability()` reports a problem, follow
+  [why a harness shows unavailable](references/harness-availability.md) for the
+  probe order, per-CLI login checks, and macOS Keychain / credential-file false
+  alarms.
+- `meiva start` converges this guide into the global skill directory of each
+  supported external client present on the host so external sessions can read
+  it without the Meiva checkout. See
+  [client skill directories](references/supported-clients.md) for the client
+  matrix and presence rules.

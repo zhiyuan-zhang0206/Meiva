@@ -80,10 +80,8 @@ skill for tools that already read their own directory.
 `@deepseek-ai/dsh` is DeepSeek's own coding-agent CLI — published under the
 official `@deepseek-ai` npm scope, repository
 `deepseek-ai/deepseek-harness` (`apps/cli`), binary `dsh`. It is not a Meiva
-wrapper: `spawn_dsh.py` in this guide only launches the installed CLI in a
-persistent shell with Meiva's relay plugin. The surrounding Meiva code likewise
-integrates the CLI rather than reimplementing one, so this single row covers both
-"the official DeepSeek CLI" and the harness Meiva drives.
+wrapper: Meiva integrates the installed CLI rather than reimplementing one, so
+this single row covers the official DeepSeek CLI skill directory.
 
 ### Where the Antigravity desktop app keeps its own data
 

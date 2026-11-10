@@ -1,10 +1,9 @@
-exports = ["background.py", "background_plan.py", "coding_tools", "log_ring.py", "session_env.py", "sessions.py", "tests", "ttl_store.py"]
+exports = ["background.py", "background_plan.py", "log_ring.py", "session_env.py", "sessions.py", "tests", "ttl_store.py"]
 
 [uses]
 "__init__.py" = ["background.py", "background_plan.py", "handle.py", "log_ring.py", "sessions.py"]
 "background.py" = ["background_plan.py", "handle.py", "log_ring.py", "session_env.py", "sessions.py"]
 "sessions.py" = ["handle.py", "session_env.py", "session_plan.py", "ttl_store.py"]
-"coding_tools" = ["session_env.py", "sessions.py", "tests"]
 "tests" = ["background.py", "background_plan.py", "handle.py", "log_ring.py", "session_env.py", "session_plan.py", "sessions.py", "ttl_store.py"]
 
 [purity]

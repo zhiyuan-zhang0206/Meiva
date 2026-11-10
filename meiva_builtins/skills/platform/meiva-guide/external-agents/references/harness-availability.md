@@ -26,11 +26,6 @@ three apart.
 `unknown` blocks the spawn exactly like `unavailable` does. The picker is right
 to; only the reason is unproven.
 
-The launcher prints a line of its own before a session starts —
-`harness: claude=2.1.290 [/usr/local/bin/claude] features=[...] decision=pty` —
-and can say `unknown` there too. That one means the binary or its version could
-not be read, and it says nothing about a login. Same word, different question.
-
 Read the row before answering anyone:
 
 ```python
@@ -61,7 +56,7 @@ command -v claude codex agy
 
 `command -v` is not the probe's answer. The probe is a different process, and a
 harness session starts from an allowlisted environment that carries no PATH at
-all — which is why the probe and the Claude/Codex/Antigravity launchers share one
+all — which is why the probe and the harness runners share one
 directory list instead of trusting PATH alone. The probe's order is its own
 PATH, then:
 
@@ -158,8 +153,9 @@ CLI first and reads a file only as a fallback.
 A row — any of the three — is a statement about an installed binary and a
 credential store. The only proof that an agent will run is a real spawn on that
 harness: spawn one, give it work that needs a tool call, read the turn, then stop
-it. That path has been walked for `claude_code`; the [Antigravity](antigravity.md)
-page says what is still unproven there.
+it. For Antigravity (`agy`), note that the CLI has no non-interactive auth-status
+subcommand (`agy auth status` does not exist): the probe runs `agy models` to read
+the live model catalogue and falls back to `~/.gemini/antigravity-cli/antigravity-oauth-token`.
 
 Never report `unknown` to a human as "not installed" or "not logged in": it means
 this machine could not read the login state. When that answer is not good enough,
