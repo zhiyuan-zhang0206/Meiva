@@ -12,7 +12,7 @@ from base.packages.plugins.flags import (
 )
 from base.packages.plugins.tests.plugin_boundary import run_boundary
 
-FLAG = "daemon.notice_ttl_limit_seconds"
+FLAG = "daemon.ttl_reaper_poll_interval_seconds"
 
 
 @pytest.mark.parametrize(
@@ -23,7 +23,7 @@ FLAG = "daemon.notice_ttl_limit_seconds"
         "",
         "bogus.x",
         "agent.bogus_field",
-        "agent.notice_ttl_limit_seconds",
+        "agent.ttl_reaper_poll_interval_seconds",
         "data_plane.db_url",
     ],
 )
@@ -46,7 +46,7 @@ def test_read_requires_the_explicit_core_dependency() -> None:
 
 def test_declared_dependency_reads_the_constructed_process_domain() -> None:
     assert validate_flag_key(FLAG) == FLAG
-    assert read_declared_flag(FLAG, (FLAG,)) == settings.daemon.notice_ttl_limit_seconds
+    assert read_declared_flag(FLAG, (FLAG,)) == settings.daemon.ttl_reaper_poll_interval_seconds
 
 
 def test_unavailable_domain_is_rejected_without_default(tmp_path: Path) -> None:

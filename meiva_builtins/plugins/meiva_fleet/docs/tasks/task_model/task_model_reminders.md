@@ -31,6 +31,6 @@ Reminders are **coalesced per owner**: while an owner has received a check-in di
 Within the same overdue window, at most one reminder per backoff period (Fleet `task_reminder_backoff_seconds`, default 3600s). A task whose `reminders_paused_until` is in the future is skipped by both passes. When a task has gone Fleet `task_escalate_n` (default 3) of its own cadence periods — `max(task_reminder_backoff_seconds, remind_interval_seconds)` — without a state change, and at least one reminder has reached its owner, escalation occurs:
 
 - If the parent has an owner → notify the parent owner.
-- If the parent has no owner (a top-level task under the unowned system root) → insert a `require_response` notice into the human queue.
+- If the parent has no owner (a top-level task under the unowned system root) → nothing is sent: no live agent can act, and the daemon does not write a user notice.
 
 Details in [Task-Maintenance](../../../task_maintenance/docs/task-maintenance/task-maintenance.md).

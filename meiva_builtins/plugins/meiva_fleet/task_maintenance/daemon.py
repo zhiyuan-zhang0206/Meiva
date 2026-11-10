@@ -4,7 +4,7 @@ import os
 import random
 import sys
 from collections import defaultdict
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -42,10 +42,9 @@ from base.packages.plugins.config_registration import (
     read_config_image,
     read_service_config,
 )
-from base.packages.plugins.flags import read_declared_flag
 from base.paths import meiva_home, run_dir
 from base.telemetry.process_logging import init_gateway_process
-from meiva_builtins.plugins.meiva_fleet.default_config import FleetConfig, contribute
+from meiva_builtins.plugins.meiva_fleet.default_config import FleetConfig
 from meiva_builtins.plugins.meiva_fleet.task_maintenance import routing, undelivered
 from services.pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
 
@@ -56,9 +55,10 @@ from services.pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfi
 # escalations insert into `inbound_messages` directly and then best-effort wake via
 # Redis, modeled on heartbeat; counter updates stay direct DB writes. They never
 # resurrect a terminated agent and never address one either: a dead owner's due
-# reminder is rerouted to its manager, or into the human queue when no live agent
-# owns an ancestor task (user ruling 2026-10-25 — a dead owner's queue had held the
-# reminders nobody read). The escalate pass fires once a task has gone
+# reminder is rerouted to its manager, and when no live agent owns an ancestor task
+# nothing is sent to anyone: the cadence advances and the sweep logs it (user ruling
+# 2026-10-25 — a dead owner's queue had held the reminders nobody read — and the
+# later removal of the human notice leg). The escalate pass fires once a task has gone
 # `task_escalate_n` of its own cadence periods without a state change and at least
 # one reminder reached its owner — counting cadence silence rather than delivered
 # reminders, because the per-owner digest window throttles delivery and would
@@ -107,9 +107,9 @@ _LIVENESS_BEAT_STEP_S = 30.0
 # A terminated owner stays eligible here: its due reminder is rerouted rather
 # than dropped, and the row lock is what stops a concurrent sweep from accepting
 # the same cadence twice. `FOR NO KEY UPDATE` (not `FOR UPDATE`) keeps that lock
-# from blocking a gateway notice insert that references the task by FK — the same
-# mode the escalate pass uses for the same reason. The join reads the owner's status without locking the
-# identity row — notices and messages take that lock themselves.
+# from blocking a writer that references the task by FK — the same mode the escalate
+# pass uses for the same reason. The join reads the owner's status without locking the
+# identity row — messages take that lock themselves.
 _REMINDER_SQL = """
     SELECT t.id, t.owner, t.title, t.remind_interval_seconds,
            EXTRACT(EPOCH FROM (now() - t.updated_at))::bigint AS elapsed,
@@ -177,21 +177,14 @@ class _DueTask:
 
 
 # meiva:note
-# One manager's digest (grouped by the terminated owner that held the tasks) and one
-# human notice, both accepted in the sweep's transaction and announced after commit.
+# One manager's digest (grouped by the terminated owner that held the tasks), accepted in the
+# sweep's transaction and announced after commit.
 @dataclass(frozen=True)
 class _Reroute:
     manager: int
     by_owner: Mapping[int, tuple[_DueTask, ...]]
     inbound_id: int
     content: str
-
-
-@dataclass(frozen=True)
-class _HumanNotice:
-    owner: int
-    tasks: Sequence[_DueTask]
-    notification_id: int | None
 
 
 # meiva:note
@@ -274,23 +267,6 @@ def _rerouted_digest_message(by_owner: dict[int, list[_DueTask]]) -> str:
     return "\n".join(lines)
 
 
-def _stranded_notice_title(owner: int, tasks: list[_DueTask]) -> str:
-    return (
-        f"Agent #{owner} is terminated — {len(tasks)} task(s) still in progress "
-        "and due for a reminder"
-    )
-
-
-def _stranded_notice_content(owner: int, tasks: list[_DueTask]) -> str:
-    lines = [
-        f"Agent #{owner} was terminated while these tasks were open, and no live agent owns "
-        "any of their ancestor tasks, so nothing else is being reminded. Reassign each task "
-        "to a live agent, cancel it, or reply with what should happen:"
-    ]
-    lines.extend(_task_line(task) for task in tasks)
-    return "\n".join(lines)
-
-
 def _accept_owner_digests(
     cur: psycopg.Cursor, live: dict[int, list[_DueTask]]
 ) -> list[tuple[int, int, str, list[_DueTask]]]:
@@ -332,47 +308,13 @@ def _accept_manager_digest(
 
 
 # meiva:note
-# The notice TTL every staging call gets: read once per pass and narrowed once here, so the
-# staging layers take an int they cannot re-read from settings themselves.
-def notice_ttl_limit_seconds() -> float:
-    value = read_declared_flag("daemon.notice_ttl_limit_seconds", contribute().flags)
-    if not isinstance(value, int | float):
-        raise TypeError("daemon.notice_ttl_limit_seconds must be a number")
-    return float(value)
-
-
-def _accept_human_notice(
-    cur: psycopg.Cursor,
-    conn: psycopg.Connection,
-    owner: int,
-    tasks: list[_DueTask],
-    *,
-    notice_ttl_limit_seconds: float,
-) -> _HumanNotice | None:
-    staged = routing.stage_human_notice(
-        cur,
-        conn,
-        agent_id=owner,
-        task_id=None,
-        title=_stranded_notice_title(owner, tasks),
-        content=_stranded_notice_content(owner, tasks),
-        priority=min(task.priority for task in tasks),
-        notice_ttl_limit_seconds=notice_ttl_limit_seconds,
-    )
-    for task in tasks:
-        advance_reminder_counters(cur, task.id)
-    if staged is None:
-        return None
-    return _HumanNotice(owner, tasks, staged[1])
-
-
+# A terminated owner's due task with no live ancestor owner has no recipient: nothing is sent, the
+# cadence still advances so the task waits its own window instead of repeating on every sweep, and
+# the sweep logs the stranded task ids.
 def _accept_reroutes(
     cur: psycopg.Cursor,
-    conn: psycopg.Connection,
     orphaned: dict[int, list[_DueTask]],
-    *,
-    notice_ttl_limit_seconds: float,
-) -> tuple[list[_Reroute], list[_HumanNotice]]:
+) -> list[_Reroute]:
     managers = routing.nearest_manager(
         cur, [task.id for tasks in orphaned.values() for task in tasks]
     )
@@ -389,24 +331,16 @@ def _accept_reroutes(
         _accept_manager_digest(cur, manager, by_owner)
         for manager, by_owner in sorted(managed.items())
     ]
-    notices: list[_HumanNotice] = []
-    # meiva:note
-    # The human leg writes `agent_notices`, whose local id is allocated per agent: the
-    # identity lock it takes here is the same physical lock the gateway's notice creator
-    # holds, in the same order (task rows, then identities), so two writers cannot pick
-    # the same local id and no notice is staged for an agent mid-termination.
-    if stranded:
-        cur.execute(
-            "SELECT id FROM agents WHERE id=ANY(%s) ORDER BY id FOR UPDATE",
-            (sorted(stranded),),
-        )
     for owner, tasks in sorted(stranded.items()):
-        notice = _accept_human_notice(
-            cur, conn, owner, tasks, notice_ttl_limit_seconds=notice_ttl_limit_seconds
+        for task in tasks:
+            advance_reminder_counters(cur, task.id)
+        _log.info(
+            "[task-maintenance] no live manager for task(s) %s of terminated agent #%d; "
+            "no reminder sent",
+            [task.id for task in tasks],
+            owner,
         )
-        if notice is not None:
-            notices.append(notice)
-    return reroutes, notices
+    return reroutes
 
 
 def _announce_owner_digests(
@@ -446,37 +380,12 @@ def _announce_reroutes(reroutes: list[_Reroute], db: Database, bus: EventBus) ->
             )
 
 
-def _announce_human_notices(
-    notices: list[_HumanNotice], pool: ConnectionPool, bus: EventBus
-) -> None:
-    from base.events.notifications.publish import announce_sync
-
-    for notice in notices:
-        if notice.notification_id is not None:
-            announce_sync(pool, bus, notice.notification_id)
-        publish_agent_updated_sync(bus, notice.owner)
-        telemetry.emit(
-            "telemetry",
-            "task_reminder_rerouted",
-            agent_id=notice.owner,
-            source="system",
-            attributes={
-                "owner_id": notice.owner,
-                "leg": "user",
-                "recipient": None,
-                "task_count": len(notice.tasks),
-                "task_ids": [task.id for task in notice.tasks],
-            },
-        )
-
-
 # meiva:note
 # Delivery follows the owner's status. A live owner receives the check-in digest. A
 # terminated owner cannot act, so each of its due tasks is rerouted to the manager
 # `routing.nearest_manager` names — one digest per manager, grouped by the dead owner
-# — or, when no ancestor has a live owner, into the human queue as one notice on the
-# dead owner. Both reroute legs advance the cadence like any other reminder, so the
-# next one waits its own window instead of repeating on every 5-minute sweep.
+# — or, when no ancestor has a live owner, nowhere. Both advance the cadence like any other
+# reminder, so the next one waits its own window instead of repeating on every 5-minute sweep.
 def run_reminders(
     pool: ConnectionPool,
     db: Database,
@@ -509,23 +418,13 @@ def run_reminders(
                 task
             )
         digests = _accept_owner_digests(cur, live)
-        reroutes, notices = _accept_reroutes(
-            cur,
-            conn,
-            orphaned,
-            notice_ttl_limit_seconds=notice_ttl_limit_seconds(),
-        )
+        reroutes = _accept_reroutes(cur, orphaned)
     undelivered.report_undelivered(pool, undelivered_grace_seconds)
     _announce_owner_digests(digests, db, bus)
     _announce_reroutes(reroutes, db, bus)
-    _announce_human_notices(notices, pool, bus)
-    if reroutes or notices:
-        _log.info(
-            "[task-maintenance] rerouted %d manager digest(s) and %d human notice(s)",
-            len(reroutes),
-            len(notices),
-        )
-    return len(digests) + len(reroutes) + len(notices)
+    if reroutes:
+        _log.info("[task-maintenance] rerouted %d manager digest(s)", len(reroutes))
+    return len(digests) + len(reroutes)
 
 
 def announce_reminder(
@@ -550,30 +449,13 @@ def run_escalate(
     escalate_n: int,
     backoff_seconds: float,
 ) -> int:
-    """Accept current escalation state atomically, then announce committed work."""
-    from base.events.notifications.publish import announce_sync
+    # meiva:note
+    # Accept current escalation state atomically, then announce committed work.
     from meiva_builtins.plugins.meiva_fleet.task_maintenance.escalation import accept_escalations
 
-    receipts = accept_escalations(
-        pool,
-        escalate_n,
-        backoff_seconds,
-        notice_ttl_limit_seconds=notice_ttl_limit_seconds(),
-    )
+    receipts = accept_escalations(pool, escalate_n, backoff_seconds)
     for receipt in receipts:
-        if receipt.notification_id is not None:
-            # meiva:note
-            # The escalation transaction staged the user leg's delivery next to
-            # the notice, so announcing it here can only mark what the commit
-            # already promised: the same category, dedupe and live event a
-            # gateway-posted notice gets. Without it, an escalation meant to
-            # reach a human reached only the console inbox.
-            # meiva:link base/events/notifications/README.md
-            announce_sync(pool, bus, receipt.notification_id)
-        if receipt.inbound_id is not None:
-            announce_reminder(db, bus, receipt.recipient, receipt.inbound_id, receipt.content)
-        else:
-            publish_agent_updated_sync(bus, receipt.recipient)
+        announce_reminder(db, bus, receipt.recipient, receipt.inbound_id, receipt.content)
         telemetry.emit(
             "telemetry",
             "task_escalation",
@@ -587,7 +469,7 @@ def run_escalate(
             },
         )
     if receipts:
-        _log.info("[task-maintenance] accepted %d escalation digests/notices", len(receipts))
+        _log.info("[task-maintenance] accepted %d escalation digests", len(receipts))
     return len(receipts)
 
 

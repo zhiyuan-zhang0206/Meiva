@@ -163,17 +163,6 @@ def _inbound_messages(db: psycopg.Connection, agent_id: int) -> list[tuple[str, 
         return cur.fetchall()
 
 
-def _seed_notice(db: psycopg.Connection, agent_id: int) -> None:
-    """Give an agent one pre-existing open FYI notice."""
-    with db.cursor() as cur:
-        cur.execute(
-            "INSERT INTO agent_notices (agent_id, local_id, title, priority, require_response, blocking, expire_at) "
-            "VALUES (%s, 0, 'pre-existing', 'P2', FALSE, FALSE, now() + interval '1 day')",
-            (agent_id,),
-        )
-    db.commit()
-
-
 class TestEscalate:
     def test_delegator_receives_one_digest_for_all_stalled_subtasks(
         self,
@@ -324,8 +313,8 @@ class TestEscalate:
         database: Database,
         event_bus: EventBus,
     ) -> None:
-        """reminder_count=5 > threshold=3 with no marker: still one digest —
-        the user leg's >= rule, not the old exact equality."""
+        # meiva:note
+        # reminder_count=5 > threshold=3 with no marker: still one digest.
         parent_owner = _make_agent(db_conn)
         parent = _make_task(db_conn, owner=parent_owner, remind_interval_seconds=None)
         owner = _make_agent(db_conn)
@@ -359,7 +348,11 @@ class TestEscalate:
         assert run_escalate(pool, database, event_bus, 3, 0.0) == 0
         assert deliver.deliveries() == []
 
-    def test_user_task_escalates_to_human_queue(
+    # meiva:note
+    # A stalled top-level task whose parent is ownerless (the system root) has no delegator to
+    # catch it, and nobody else can act: the pass writes no notice, no chat message and no
+    # telemetry for it, does not raise, and a later sweep finds it again and does the same.
+    def test_task_with_no_live_manager_is_skipped_without_effects(
         self,
         pool: ConnectionPool,
         db_conn: psycopg.Connection,
@@ -368,54 +361,6 @@ class TestEscalate:
         database: Database,
         event_bus: EventBus,
     ) -> None:
-        """A stalled top-level task whose parent is ownerless (the system root)
-        has no delegator to catch it — it escalates to the user as a
-        require_response notice on the stalled owner, grouped under the task and
-        inheriting its priority. No chat message is delivered."""
-        # Ownerless parent stands in for the system root (its owner is NULL).
-        root = _make_task(db_conn, owner=None, remind_interval_seconds=None)
-        owner = _make_agent(db_conn)
-        child = _make_task(
-            db_conn,
-            owner=owner,
-            parent_id=root,
-            remind_interval_seconds=1800,
-            updated_s_ago=7200,
-            reminder_count=3,
-            priority="P1",
-        )
-        assert run_escalate(pool, database, event_bus, 3, 0.0) == 1
-        assert deliver.deliveries() == []
-        notices = _open_notices(db_conn, owner)
-        assert len(notices) == 1
-        title, priority, require_response, task_id = notices[0]
-        assert require_response is True
-        assert task_id == child
-        assert priority == "P1"  # inherits the task's priority
-        assert "no state change for 2.0h" in title
-        assert "reassign or cancel" in title
-        assert _maintenance_events(emitted_events) == [
-            (
-                "telemetry",
-                "task_escalation",
-                "info",
-                owner,
-                "system",
-                {"owner_id": owner, "task_count": 1, "task_ids": [child], "leg": "user"},
-            )
-        ]
-
-    def test_user_escalation_skipped_when_owner_has_open_notice(
-        self,
-        pool: ConnectionPool,
-        db_conn: psycopg.Connection,
-        deliver: TaskNotes,
-        database: Database,
-        event_bus: EventBus,
-    ) -> None:
-        """When the stalled owner already has an open notice, the user
-        escalation is skipped — the human already has that agent flagged and the
-        one-open-notice-per-agent invariant holds."""
         root = _make_task(db_conn, owner=None, remind_interval_seconds=None)
         owner = _make_agent(db_conn)
         _make_task(
@@ -424,71 +369,15 @@ class TestEscalate:
             parent_id=root,
             remind_interval_seconds=1800,
             updated_s_ago=7200,
-            reminder_count=3,
+            reminder_count=5,
             priority="P1",
         )
-        _seed_notice(db_conn, owner)
         assert run_escalate(pool, database, event_bus, 3, 0.0) == 0
-        notices = _open_notices(db_conn, owner)
-        assert len(notices) == 1
-        assert notices[0][0] == "pre-existing"
-
-    def test_user_escalation_retries_past_threshold(
-        self,
-        pool: ConnectionPool,
-        db_conn: psycopg.Connection,
-        deliver: TaskNotes,
-        database: Database,
-        event_bus: EventBus,
-    ) -> None:
-        """A user task whose reminder_count has already climbed PAST the threshold
-        still escalates — the earlier skip (owner busy) must not permanently miss
-        the window. This is the >= gate, not the exact-equality one the parent
-        branch keeps."""
-        root = _make_task(db_conn, owner=None, remind_interval_seconds=None)
-        owner = _make_agent(db_conn)
-        child = _make_task(
-            db_conn,
-            owner=owner,
-            parent_id=root,
-            remind_interval_seconds=1800,
-            updated_s_ago=7200,
-            reminder_count=5,  # already past escalate_n=3
-            priority="P1",
-        )
-        assert run_escalate(pool, database, event_bus, 3, 0.0) == 1
+        assert run_escalate(pool, database, event_bus, 3, 0.0) == 0
         assert deliver.deliveries() == []
-        notices = _open_notices(db_conn, owner)
-        assert len(notices) == 1
-        assert notices[0][3] == child  # task_id on the escalation notice
-
-    def test_user_escalation_idempotent_once_posted(
-        self,
-        pool: ConnectionPool,
-        db_conn: psycopg.Connection,
-        deliver: TaskNotes,
-        database: Database,
-        event_bus: EventBus,
-    ) -> None:
-        """Once the escalation notice is posted, a later sweep (still past the
-        threshold) sees it open and does not post a second — the notice is the
-        idempotency marker."""
-        root = _make_task(db_conn, owner=None, remind_interval_seconds=None)
-        owner = _make_agent(db_conn)
-        _make_task(
-            db_conn,
-            owner=owner,
-            parent_id=root,
-            remind_interval_seconds=1800,
-            updated_s_ago=7200,
-            reminder_count=3,
-            priority="P2",
-        )
-        assert run_escalate(pool, database, event_bus, 3, 0.0) == 1  # first sweep posts
-        assert (
-            run_escalate(pool, database, event_bus, 3, 0.0) == 0
-        )  # second sweep: escalation notice still open → skip
-        assert len(_open_notices(db_conn, owner)) == 1
+        assert _open_notices(db_conn, owner) == []
+        assert _inbound_messages(db_conn, owner) == []
+        assert _maintenance_events(emitted_events) == []
 
 
 def test_service_command_module_is_importable() -> None:

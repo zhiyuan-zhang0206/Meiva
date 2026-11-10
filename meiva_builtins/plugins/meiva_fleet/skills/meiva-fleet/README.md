@@ -41,7 +41,7 @@ The task registry is the durable record of work; the spawn graph is the transien
 - **blocked** → there is no blocked status: stay `in_progress`, record the blocker in `content`, escalate to the delegator; exceptions requiring user decision reach `meiva.ui.ask(...)` directly.
 - **reassign** → `meiva.tasks.update(owner=)` automatically notifies both old and new owners (see [Task Notification](../../docs/tasks/task_notification.md)).
 - **cancelled** → clean up active child tasks, notify the working agent.
-- **remind_interval_seconds** (default 30min) overdue without update → daemon nags the owner; after 3 unanswered escalations: if there is a parent task owner, notify them; if no parent owner (top-level task whose parent is the ownerless system root), insert a require_response reminder into the human queue, hung on the stuck owner, grouped by task, inheriting its priority (#663).
+- **remind_interval_seconds** (default 30min) overdue without update → daemon nags the owner; after 3 unanswered escalations: if there is a parent task owner, notify them; if no parent owner (top-level task whose parent is the ownerless system root), nothing is sent: the daemon never writes a user notice.
 
 ## Autonomous Batch Work (Autonomy Dial Implementation)
 

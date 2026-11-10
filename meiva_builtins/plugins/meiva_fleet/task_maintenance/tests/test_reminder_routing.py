@@ -18,6 +18,7 @@ from meiva_builtins.plugins.meiva_fleet.task_maintenance.tests.test_task_mainten
     inbox_notices,
     make_agent,
     make_task,
+    notifications,
 )
 
 
@@ -144,10 +145,11 @@ def test_manager_walks_past_a_container_the_dead_agent_owns(
 
 
 # meiva:note
-# A top-level task of a dead owner has no live owner above it, so the human queue is the
-# only recipient left; the notice is a question (require_response) and carries no
-# `escalated_at`, because no manager was told.
-def test_no_live_manager_notifies_the_human_queue(
+# A top-level task of a dead owner has no live owner above it, so nobody can act on the reminder:
+# nothing is sent to an agent or written to the notice queue and no notification is staged, no
+# `escalated_at` is stamped because no manager was told, and the cadence still advances so the
+# next sweep does not take the task again inside its window.
+def test_no_live_manager_sends_nothing_and_does_not_repeat(
     pool: ConnectionPool,
     db_conn: psycopg.Connection,
     database: Database,
@@ -157,15 +159,20 @@ def test_no_live_manager_notifies_the_human_queue(
     dead = make_agent(db_conn, status="terminated")
     tid = make_task(db_conn, owner=dead, parent_id=root, updated_s_ago=3600)
 
-    assert run_reminders(pool, database, event_bus, 3600.0) == 1
+    assert run_reminders(pool, database, event_bus, 3600.0) == 0
 
     assert inbound_messages(db_conn, dead) == []
-    notices = inbox_notices(db_conn, dead)
-    assert len(notices) == 1
-    title, require_response = notices[0]
-    assert require_response is True
-    assert f"Agent #{dead} is terminated" in title
+    assert inbox_notices(db_conn, dead) == []
+    assert notifications(db_conn, dead) == []
     assert escalated_at(db_conn, tid) is None
+    assert db_conn.execute(
+        "SELECT reminder_count, last_reminded_at IS NOT NULL FROM agent_tasks WHERE id = %s",
+        (tid,),
+    ).fetchone() == (1, True)
+    assert run_reminders(pool, database, event_bus, 3600.0) == 0
+    assert db_conn.execute(
+        "SELECT reminder_count FROM agent_tasks WHERE id = %s", (tid,)
+    ).fetchone() == (1,)
 
 
 def test_rerouted_reminder_does_not_repeat_at_the_escalation_threshold(
@@ -204,7 +211,7 @@ def test_delegator_escalation_skips_a_terminated_parent_owner(
     assert len(inbound_messages(db_conn, manager)) == 1
 
 
-def test_delegator_escalation_falls_back_to_the_human_queue(
+def test_delegator_escalation_with_no_live_manager_sends_nothing(
     pool: ConnectionPool,
     db_conn: psycopg.Connection,
     database: Database,
@@ -213,12 +220,16 @@ def test_delegator_escalation_falls_back_to_the_human_queue(
     dead = make_agent(db_conn, status="terminated")
     parent = make_task(db_conn, owner=dead, remind_interval_seconds=None)
     owner = make_agent(db_conn)
-    make_task(db_conn, owner=owner, parent_id=parent, updated_s_ago=7200, reminder_count=3)
+    tid = make_task(db_conn, owner=owner, parent_id=parent, updated_s_ago=7200, reminder_count=3)
 
-    assert run_escalate(pool, database, event_bus, 3, 0.0) == 1
+    assert run_escalate(pool, database, event_bus, 3, 0.0) == 0
+    assert run_escalate(pool, database, event_bus, 3, 0.0) == 0
 
-    assert inbound_messages(db_conn, dead) == []
-    assert [title for title, _ in inbox_notices(db_conn, owner)]
+    for agent in (dead, owner):
+        assert inbound_messages(db_conn, agent) == []
+        assert inbox_notices(db_conn, agent) == []
+        assert notifications(db_conn, agent) == []
+    assert escalated_at(db_conn, tid) is None
 
 
 # meiva:note

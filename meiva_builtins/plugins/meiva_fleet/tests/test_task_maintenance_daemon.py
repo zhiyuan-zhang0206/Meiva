@@ -164,18 +164,6 @@ def _pause(db: psycopg.Connection, tid: int, *, seconds_ahead: float) -> None:
     db.commit()
 
 
-def _open_notices(db: psycopg.Connection, agent_id: int) -> list[tuple[str, str, bool, int]]:
-    """Open notices on an agent: (title, priority, require_response, task_id)."""
-    db.rollback()  # the daemon committed on its own connection; refresh our view
-    with db.cursor() as cur:
-        cur.execute(
-            "SELECT title, priority, require_response, task_id FROM agent_notices "
-            "WHERE agent_id = %s AND resolved_at IS NULL ORDER BY local_id",
-            (agent_id,),
-        )
-        return cur.fetchall()
-
-
 def _inbound_messages(db: psycopg.Connection, agent_id: int) -> list[tuple[str, str, str]]:
     """Inbound rows for an agent: (content, kind, source)."""
     db.rollback()  # the daemon committed on its own connection; refresh our view
@@ -185,17 +173,6 @@ def _inbound_messages(db: psycopg.Connection, agent_id: int) -> list[tuple[str, 
             (agent_id,),
         )
         return cur.fetchall()
-
-
-def _seed_notice(db: psycopg.Connection, agent_id: int) -> None:
-    """Give an agent one pre-existing open FYI notice."""
-    with db.cursor() as cur:
-        cur.execute(
-            "INSERT INTO agent_notices (agent_id, local_id, title, priority, require_response, blocking, expire_at) "
-            "VALUES (%s, 0, 'pre-existing', 'P2', FALSE, FALSE, now() + interval '1 day')",
-            (agent_id,),
-        )
-    db.commit()
 
 
 class TestRemind:

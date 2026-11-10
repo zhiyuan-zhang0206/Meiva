@@ -177,20 +177,6 @@ class DaemonSettings(
         },
     )
 
-    notice_ttl_limit_seconds: float = Field(
-        title="Notice maximum lifetime (seconds)",
-        default=86400.0,
-        alias="MEIVA_NOTICE_TTL_LIMIT_SECONDS",
-        description="Maximum lifetime in seconds for agent notices. Notices without an explicit expire_at use now + limit; notices requesting a longer lifetime are clamped to this limit.",
-        json_schema_extra={
-            "capability": "gateway",
-            "restart_required": "all",
-            "writable": True,
-            "sensitive": False,
-            "scope": "cluster-pinned",
-        },
-    )
-
     ttl_reaper_poll_interval_seconds: float = Field(
         title="Expired resource cleanup interval (seconds)",
         default=60.0,

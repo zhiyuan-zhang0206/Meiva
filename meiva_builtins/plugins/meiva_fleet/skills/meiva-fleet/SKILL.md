@@ -90,7 +90,7 @@ A task's `remind_interval_seconds` (seconds) triggers a reminder to its owner if
 
 The reminder is sent at most once per overdue window — updating the task resets the window, so an agent that reports progress regularly never gets pinged.
 
-Reminders fire automatically — the cluster runs a task-maintenance daemon that reminds overdue task owners. You do not launch anything. After three reminder cadences of silence the daemon escalates to the nearest live manager, or to the human queue when no live agent owns an ancestor task.
+Reminders fire automatically — the cluster runs a task-maintenance daemon that reminds overdue task owners. You do not launch anything. After three reminder cadences of silence the daemon escalates to the nearest live manager; when no live agent owns an ancestor task it sends nothing, so a top-level task that matters needs its owner (or you) to ask the user with `meiva.ui.ask`.
 ## Two Roles
 
 **Orchestrator** (coordinating delegated work) and **worker** (carrying out an accepted mission) are optional descriptions of current work, not exhaustive agent types or fixed identities. An agent may execute directly, collaborate as a peer, or combine these activities without adopting either role.
