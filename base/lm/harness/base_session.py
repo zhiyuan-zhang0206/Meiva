@@ -220,10 +220,13 @@ class BaseHarnessSession[ConfigT: SessionConfig](ExitStatus):
 
     # meiva:note
     # The steering operation the graph still uses, kept as a thin wrapper over `deliver`. Its
-    # answer is now a fact, not a write result: True only when the input entered the context of the
-    # turn that was running when it was handed over, False when the harness refused it (so it can go
-    # back to the queue), and an error when the input is lost, or became part of another turn, because
-    # then nothing can say it is safe to hand over again.
+    # answer is now a fact, not a write result: True only when the input entered the model's
+    # context, False when the harness refused it (so it can go
+    # back to the queue), and an error when the input is lost, because then nothing can say it is safe
+    # to hand over again. An input that entered a different turn than the running one (Claude Code
+    # starts a turn of its own for an input that missed the running turn's last tool boundary) was
+    # still seen by the model, so it is reported as accepted: calling it unconfirmed would make the
+    # graph show an uncertainty marker for something that did run.
     # meiva:link base/lm/harness/docs/delivery.md
     async def steer(self, text: str, *, key: str) -> bool:
         if not text.strip() or not key:
@@ -245,10 +248,8 @@ class BaseHarnessSession[ConfigT: SessionConfig](ExitStatus):
         match settled:
             case InputRejected():
                 return False
-            case InputInContext(turn_id=entered) if entered == ticket.turn_id:
+            case InputInContext():
                 return True
-            case InputInContext(turn_id=entered):
-                raise RuntimeError(f"steered input entered turn {entered}, not the running turn")
             case _:
                 raise RuntimeError("turn ended before the steer receipt arrived")
 
@@ -524,14 +525,14 @@ class BaseHarnessSession[ConfigT: SessionConfig](ExitStatus):
         await self._clock.asleep(seconds)
         self._release_dispatch()
 
-    def _release_dispatch(self) -> None:
+    def _release_dispatch(self, *, keep_events: bool = False) -> None:
         if not self._dispatch_held:
             return
         self._dispatch_held = False
         timer, self._release_timer = self._release_timer, None
         if timer is not None and timer is not asyncio.current_task():
             timer.cancel()
-        self._promote()
+        self._promote(keep_events=keep_events)
 
     # meiva:note
     # A turn sees only what happened during it. Whatever nobody consumed while the

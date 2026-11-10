@@ -1,0 +1,15 @@
+{
+  "source": "claude CLI 2.1.301 via claude-agent-sdk, experiment claude-tool-replay: a user message written during a long Bash tool was echoed at the tool boundary, after the tool result, and the turn's single Result covered both; session ids and paths removed",
+  "frames": {
+    "turn": [
+      {"cls": "UserMessage", "uuid": "$first", "content": "Run the bash command `sleep 20` and then reply with the single word DONE."},
+      {"cls": "AssistantMessage", "blocks": [{"tool": {"id": "toolu_A", "name": "Bash", "input": {"command": "sleep 20"}}}]},
+      {"cls": "TaskStartedMessage", "task_id": "task-bash-1"},
+      {"cls": "TaskNotificationMessage", "task_id": "task-bash-1", "status": "completed"},
+      {"cls": "UserMessage", "content": [{"tool_result": {"tool_use_id": "toolu_A", "content": "(Bash completed with no output)"}}]},
+      {"cls": "UserMessage", "uuid": "$steer", "content": "STEERING NOTE from the user: please include the exact word ZEBRA-7731 in your final answer."},
+      {"cls": "AssistantMessage", "blocks": [{"text": "DONE ZEBRA-7731"}]},
+      {"cls": "ResultMessage", "num_turns": 2}
+    ]
+  }
+}

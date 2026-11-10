@@ -1,12 +1,14 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 from base.lm.harness.claude.inbound import (
     BackgroundTasks,
     MessageKind,
     SessionIdentity,
     assistant_texts,
-    claimed_origin,
     counts_as_step,
+    is_tool_result,
     message_kind,
     notification_plan,
     started_identity,
@@ -35,10 +37,18 @@ def test_the_class_name_decides_which_kind_a_message_is() -> None:
     assert message_kind("AMessageAFutureSdkAdds") is MessageKind.TURN
 
 
-def test_only_an_origin_that_names_no_turn_can_claim_the_running_one() -> None:
-    assert claimed_origin("human") is None
-    assert claimed_origin(None) is None
-    assert claimed_origin("task-notification") == "task-notification"
+def test_a_user_message_is_a_tool_result_only_when_it_carries_a_tool_result_block() -> None:
+    @dataclass
+    class ToolResultBlock:
+        tool_use_id: str
+
+    @dataclass
+    class UserMessage:
+        content: object
+
+    assert is_tool_result(UserMessage([ToolResultBlock("t1")]))
+    assert not is_tool_result(UserMessage("an input echo"))
+    assert not is_tool_result(UserMessage([]))
 
 
 def test_a_step_is_an_assistant_message_that_produced_text_or_a_tool_call() -> None:

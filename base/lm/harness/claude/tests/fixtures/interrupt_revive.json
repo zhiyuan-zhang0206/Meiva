@@ -1,0 +1,19 @@
+{
+  "source": "claude CLI 2.1.301, experiment claude-interrupt: interrupt() during a tool; the CLI ended the turn with error_during_execution, echoed its own interrupted-by-user marker (a uuid we never sent), then revived the queued steer as a new turn; ids removed",
+  "frames": {
+    "interrupted": [
+      {"cls": "UserMessage", "uuid": "$first", "content": "Run the bash command `sleep 20` and then reply with the single word DONE."},
+      {"cls": "AssistantMessage", "blocks": [{"tool": {"id": "toolu_B", "name": "Bash", "input": {"command": "sleep 20"}}}]},
+      {"cls": "TaskStartedMessage", "task_id": "task-bash-2"},
+      {"cls": "UserMessage", "content": [{"tool_result": {"tool_use_id": "toolu_B", "content": "The user doesn't want to proceed with this tool use.", "is_error": true}}]},
+      {"cls": "UserMessage", "uuid": "00000000-0000-4000-8000-00000000f00d", "content": "[Request interrupted by user for tool use]"},
+      {"cls": "ResultMessage", "subtype": "error_during_execution", "is_error": true, "terminal_reason": "aborted_tools", "stop_reason": "tool_use", "num_turns": 3}
+    ],
+    "revived": [
+      {"cls": "SystemMessage", "subtype": "init", "data": {"session_id": "session-1", "model": "claude-fake"}},
+      {"cls": "UserMessage", "uuid": "$steer", "content": "STEERING NOTE from the user: please include the exact word ZEBRA-7731 in your final answer."},
+      {"cls": "AssistantMessage", "blocks": [{"text": "DONE ZEBRA-7731"}]},
+      {"cls": "ResultMessage", "num_turns": 2}
+    ]
+  }
+}

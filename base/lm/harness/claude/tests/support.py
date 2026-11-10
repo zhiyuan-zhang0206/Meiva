@@ -1,20 +1,74 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from base.clock.tests.fakes import system_clock
 from base.lm.harness import Handoff
 from base.lm.harness.base_session import SessionBinding
-from base.lm.harness.claude import BridgeConfig
+from base.lm.harness.claude.config import BridgeConfig
+from base.lm.harness.claude.delivery import key_uuid
 from base.lm.harness.claude.session import ClaudeSession
+from base.lm.harness.claude.tests import fake_sdk as fake
 from base.lm.harness.claude.tests.fake_sdk import FakeSDK, ScriptedProbe
 from base.lm.harness.events import UnsolicitedSink
 from base.lm.harness.registry import FileSessionRegistry
 
 CLI_PID = 4242
+
+
+def _blocks(raw: list[dict[str, Any]]) -> list[Any]:
+    blocks: list[Any] = []
+    for item in raw:
+        if "text" in item:
+            blocks.append(fake.TextBlock(text=item["text"]))
+        elif "tool" in item:
+            blocks.append(fake.ToolUseBlock(**item["tool"]))
+        else:
+            blocks.append(fake.ToolResultBlock(**item["tool_result"]))
+    return blocks
+
+
+# meiva:note
+# Replay recorded CLI messages into a fake client, in order. A fixture is a JSON file of named frame
+# groups; `$name` in a `uuid` stands for the uuid the session derived from the key `keys[name]`, so
+# the recording works with any key. Only the frame fields the adapter reads are kept.
+def replay(client: Any, fixture: str, group: str, **keys: str) -> None:
+    path = Path(__file__).parent / "fixtures" / f"{fixture}.json"
+    frames: list[dict[str, Any]] = json.loads(path.read_text())["frames"][group]
+    for frame in frames:
+        kind = frame["cls"]
+        uuid = frame.get("uuid")
+        if isinstance(uuid, str) and uuid.startswith("$"):
+            uuid = key_uuid(keys[uuid[1:]])
+        if kind == "UserMessage":
+            content: Any = frame["content"]
+            if isinstance(content, list):
+                content = _blocks(cast("list[dict[str, Any]]", content))
+            client.push(fake.UserMessage(content=content, uuid=uuid, origin=frame.get("origin")))
+        elif kind == "AssistantMessage":
+            client.push(fake.AssistantMessage(content=_blocks(frame["blocks"])))
+        elif kind == "SystemMessage":
+            client.push(fake.SystemMessage(subtype=frame["subtype"], data=frame["data"]))
+        else:
+            fields = {k: v for k, v in frame.items() if k != "cls"}
+            client.push(_FRAME_CLASSES[kind](**_task_defaults(kind, fields)))
+
+
+_FRAME_CLASSES: dict[str, Any] = {
+    "ResultMessage": fake.ResultMessage,
+    "TaskStartedMessage": fake.TaskStartedMessage,
+    "TaskNotificationMessage": fake.TaskNotificationMessage,
+}
+
+
+def _task_defaults(kind: str, fields: dict[str, Any]) -> dict[str, Any]:
+    if kind.startswith("Task"):
+        return {"subtype": kind, "data": {}, **fields}
+    return fields
 
 
 class Harness:
@@ -82,10 +136,12 @@ async def start(
     environ: dict[str, str] | None = None,
     session_id: str = "session-1",
     unsolicited: UnsolicitedSink | None = None,
+    passive: bool = False,
     **config_overrides: Any,
 ) -> Harness:
     sdk = FakeSDK(scripts, cli_pid=CLI_PID)
     sdk.new_session_id = session_id
+    sdk.passive = passive
     if not observe_pid:
         create_client = sdk.ClaudeSDKClient
 

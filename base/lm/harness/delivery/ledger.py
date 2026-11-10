@@ -75,6 +75,10 @@ class DeliveryLedger:
         entry = self.inputs.get(key)
         return entry.turn_id if entry is not None else None
 
+    def scope_of(self, key: str) -> str | None:
+        entry = self.inputs.get(key)
+        return entry.scope if entry is not None else None
+
     def keys_in(self, phase: InputPhase) -> tuple[str, ...]:
         return tuple(key for key, entry in self.inputs.items() if entry.phase is phase)
 

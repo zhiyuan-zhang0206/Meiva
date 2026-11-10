@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 
 from base.lm.harness import ClusterFact, EntryPoint, FileSessionRegistry, Handoff
-from base.lm.harness.claude import DEFAULT_MODEL
+from base.lm.harness.claude.config import DEFAULT_MODEL
 from base.lm.harness.claude.session import SessionClosedError
 from base.lm.harness.claude.tests import fake_sdk as fake
 from base.lm.harness.claude.tests.fake_sdk import Emit, Say

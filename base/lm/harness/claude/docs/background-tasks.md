@@ -14,16 +14,15 @@ mean different things.
   it to the sink, which the host writes as a `system:harness` inbound so the agent
   takes a turn over it
   ([attribution](../../docs/attribution.md)).
-- The CLI then answers the notification itself, in a turn this session did not
-  start, and closes it with a `ResultMessage` whose `origin.kind` is
-  `task-notification`. `_claim` gives that result no owner — the session never
-  names its turns, so no name can match — and it is recorded as
-  `UnsolicitedOutput` rather than read as our turn's boundary or as a failure.
-  `origin.kind == "human"`, and a CLI too old to report an origin at all, still
-  claim the running turn.
-- Dispatch is held for the CLI's own turn so its text cannot be collected into
-  ours; `injected_dispatch_wait_seconds` bounds the wait. The first unclaimed
-  `ResultMessage` releases it.
+- The CLI then answers the notification itself, in a turn this session did not start, and closes
+  it with a `ResultMessage` whose `origin.kind` is `task-notification`. That turn is observed like
+  any other ([delivery](../../docs/delivery.md)): `TurnStarted(origin=HARNESS,
+  cause=BACKGROUND_TASK)` when the notification preceded it, its text and tools attributed to it,
+  and one `TurnCompleted`. It is not read as our turn's boundary and not recorded as unsolicited
+  output. The report itself still goes to the sink while no turn runs, as above, because the
+  graph does not yet surface observed turns; that delivery goes when it does.
+- Dispatch is held for the CLI's own turn so a turn of ours does not start in the middle of it;
+  `injected_dispatch_wait_seconds` bounds the wait, and the end of the observed turn releases it.
 
 ## Stopping them
 

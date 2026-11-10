@@ -1,0 +1,6 @@
+{"type": "queue-operation", "operation": "enqueue", "timestamp": "2026-11-10T13:26:46.064Z", "sessionId": "session-1", "content": "Run the bash command `sleep 20` and then reply with the single word DONE."}
+{"type": "queue-operation", "operation": "dequeue", "timestamp": "2026-11-10T13:26:46.064Z", "sessionId": "session-1"}
+{"type": "user", "uuid": "004f6ee5-3f25-5e58-a9e3-03ccbe66b43e", "timestamp": "2026-11-10T13:26:46.100Z", "message": {"role": "user", "content": "Run the bash command `sleep 20` and then reply with the single word DONE."}}
+{"type": "queue-operation", "operation": "enqueue", "timestamp": "2026-11-10T13:26:52.065Z", "sessionId": "session-1", "content": "STEERING NOTE absorbed"}
+{"type": "attachment", "attachment": {"type": "queued_command", "prompt": "STEERING NOTE absorbed", "source_uuid": "5ce4073e-b5aa-53e4-81c0-9dd27891568e", "commandMode": "prompt"}}
+{"type": "queue-operation", "operation": "enqueue", "timestamp": "2026-11-10T13:27:01.000Z", "sessionId": "session-1", "content": "STEERING NOTE only enqueued before the kill"}

@@ -17,7 +17,7 @@ def test_selected_effort_reaches_the_claude_sdk(tmp_path: Path) -> None:
         config,
         environ={},
         cli_path=None,
-        option_fields=("thinking", "effort", "system_prompt"),
+        option_fields=("extra_args", "thinking", "effort", "system_prompt"),
         resume="previous",
     )
     assert values["model"] == "claude-opus-5-5"
@@ -25,7 +25,14 @@ def test_selected_effort_reaches_the_claude_sdk(tmp_path: Path) -> None:
     assert values["resume"] == "previous"
     with pytest.raises(ValueError, match="does not support the selected effort"):
         option_values(
-            config, environ={}, cli_path=None, option_fields=("system_prompt",), resume=None
+            config,
+            environ={},
+            cli_path=None,
+            option_fields=(
+                "extra_args",
+                "system_prompt",
+            ),
+            resume=None,
         )
 
 
@@ -38,7 +45,7 @@ def test_the_values_are_the_boundary_the_cli_runs_under(tmp_path: Path) -> None:
         config,
         environ=ENVIRON,
         cli_path="/opt/claude/bin/claude",
-        option_fields=("thinking", "model", "system_prompt"),
+        option_fields=("extra_args", "thinking", "model", "system_prompt"),
         resume="sess-9",
     )
 
@@ -64,7 +71,10 @@ def test_the_child_environment_is_the_allowlist_built_from_what_the_caller_hands
         BridgeConfig(cwd=tmp_path),
         environ=ENVIRON,
         cli_path=None,
-        option_fields=("system_prompt",),
+        option_fields=(
+            "extra_args",
+            "system_prompt",
+        ),
         resume=None,
     )
 
@@ -79,14 +89,14 @@ def test_the_two_conditional_options_ride_only_when_they_are_supported(tmp_path:
         BridgeConfig(cwd=tmp_path),
         environ={},
         cli_path=None,
-        option_fields=("model", "system_prompt"),
+        option_fields=("extra_args", "model", "system_prompt"),
         resume=None,
     )
     with_field = option_values(
         BridgeConfig(cwd=tmp_path),
         environ={},
         cli_path=None,
-        option_fields=("thinking", "system_prompt"),
+        option_fields=("extra_args", "thinking", "system_prompt"),
         resume=None,
     )
 
@@ -100,14 +110,20 @@ def test_an_unset_tool_list_stays_unset_and_a_set_one_is_a_list(tmp_path: Path) 
         BridgeConfig(cwd=tmp_path),
         environ={},
         cli_path=None,
-        option_fields=("system_prompt",),
+        option_fields=(
+            "extra_args",
+            "system_prompt",
+        ),
         resume=None,
     )
     listed = option_values(
         BridgeConfig(cwd=tmp_path, tools=("Read",)),
         environ={},
         cli_path=None,
-        option_fields=("system_prompt",),
+        option_fields=(
+            "extra_args",
+            "system_prompt",
+        ),
         resume=None,
     )
 
@@ -122,7 +138,10 @@ def test_the_api_key_mode_restores_exactly_the_variable_the_caller_named(
         BridgeConfig(cwd=tmp_path, auth=AuthConfig(mode=AuthMode.API_KEY)),
         environ={"ANTHROPIC_API_KEY": "sk-live"},
         cli_path=None,
-        option_fields=("system_prompt",),
+        option_fields=(
+            "extra_args",
+            "system_prompt",
+        ),
         resume=None,
     )
 
@@ -139,6 +158,28 @@ def test_an_sdk_without_the_system_prompt_option_fails_instead_of_running_on_the
             BridgeConfig(cwd=tmp_path),
             environ={},
             cli_path=None,
-            option_fields=("thinking", "model"),
+            option_fields=("extra_args", "thinking", "model"),
             resume=None,
         )
+
+
+def test_an_sdk_that_cannot_pass_replay_user_messages_is_refused(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="replay-user-messages"):
+        _ = option_values(
+            BridgeConfig(cwd=tmp_path),
+            environ={},
+            cli_path=None,
+            option_fields=("system_prompt",),
+            resume=None,
+        )
+
+
+def test_every_session_asks_the_cli_to_echo_user_messages(tmp_path: Path) -> None:
+    values = option_values(
+        BridgeConfig(cwd=tmp_path),
+        environ={},
+        cli_path=None,
+        option_fields=("extra_args", "system_prompt"),
+        resume=None,
+    )
+    assert values["extra_args"] == {"replay-user-messages": None}

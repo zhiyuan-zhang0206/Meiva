@@ -5,10 +5,9 @@ from dataclasses import replace
 from base.lm.harness.claude.mapping import ResultFields
 from base.lm.harness.claude.settle import (
     RunningTurn,
-    result_output,
     settle_result,
 )
-from base.lm.harness.events import UnsolicitedOutput, Usage
+from base.lm.harness.events import Usage
 from base.lm.harness.session import SessionTotals
 
 USAGE = Usage(
@@ -123,12 +122,3 @@ def test_the_settled_turn_keeps_the_fields_the_result_reported() -> None:
     assert settlement.outcome.permission_denials == ("Bash",)
     assert settlement.completed.duration_ms == 1200
     assert settlement.completed.usage == USAGE
-
-
-def test_a_result_outside_our_turn_is_labelled_with_its_origin() -> None:
-    assert result_output(fields(origin_kind="task-notification", result_text="read me")) == (
-        UnsolicitedOutput(source="task-notification", text="read me")
-    )
-    assert result_output(fields(origin_kind=None, result_text=None)) == UnsolicitedOutput(
-        source="result", text=""
-    )

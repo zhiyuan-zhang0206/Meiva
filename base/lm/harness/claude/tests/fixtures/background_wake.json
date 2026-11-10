@@ -1,0 +1,15 @@
+{
+  "source": "CONSTRUCTED, not recorded: the experiments have no sample of the CLI answering a finished background task or a timer on its own. The shape follows the SDK's documented origin field (ResultMessage.origin.kind) and the existing adapter behaviour for task notifications; a real capture should replace it",
+  "frames": {
+    "task_answer": [
+      {"cls": "TaskNotificationMessage", "task_id": "task-bg-1", "status": "completed", "summary": "Background command finished"},
+      {"cls": "AssistantMessage", "blocks": [{"text": "The background command finished."}]},
+      {"cls": "ResultMessage", "origin": {"kind": "task-notification"}, "num_turns": 1}
+    ],
+    "timer_wake": [
+      {"cls": "UserMessage", "uuid": "00000000-0000-4000-8000-0000000c0de1", "origin": {"kind": "cron"}, "content": "scheduled prompt"},
+      {"cls": "AssistantMessage", "blocks": [{"text": "ran the scheduled check"}]},
+      {"cls": "ResultMessage", "origin": {"kind": "cron"}, "num_turns": 1}
+    ]
+  }
+}
