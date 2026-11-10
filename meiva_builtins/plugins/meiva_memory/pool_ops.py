@@ -209,7 +209,10 @@ def _note_lines(pool: Path, dir_rel: str, mds: list[str]) -> list[str]:
     return lines or ["*(none)*"]
 
 
-def write_directory_index(pool: Path, dir_rel: str, all_files: list[str]) -> str:
+def write_directory_index(pool: Path, dir_rel: str, all_files: list[str]) -> str | None:
+    # meiva:note
+    # Existing optional directory introductions belong to authors. Exclusive creation also
+    # preserves a file created concurrently; no generated-file ownership marker exists.
     root = pool
     dpath = root / dir_rel if dir_rel else root
     prefix = dir_rel + "/" if dir_rel else ""
@@ -234,8 +237,11 @@ def write_directory_index(pool: Path, dir_rel: str, all_files: list[str]) -> str
     lines.append("")
 
     target = dpath / "index.md" if dir_rel else root / "index.md"
-    with target.open("w", encoding="utf-8") as f:
-        f.write("\n".join(lines))
+    try:
+        with target.open("x", encoding="utf-8") as f:
+            f.write("\n".join(lines))
+    except FileExistsError:
+        return None
     return str(target)
 
 
@@ -248,10 +254,11 @@ def generate_directory_indexes(pool: Path) -> list[str]:
             dirs_with_notes.add(str(parent))
             parent = parent.parent
         dirs_with_notes.add("")
-    written = [
-        write_directory_index(pool, d, files)
-        for d in sorted(dirs_with_notes, key=lambda x: (x.count("/"), x))
-    ]
+    written: list[str] = []
+    for d in sorted(dirs_with_notes, key=lambda x: (x.count("/"), x)):
+        target = write_directory_index(pool, d, files)
+        if target is not None:
+            written.append(target)
     print("index.md written:", len(written))
     return written
 
@@ -345,18 +352,18 @@ def verify_root_counts(pool: Path, memory_path: Path) -> None:
 
 
 # meiva:note
-# Rebuild `pool`'s indexes: every directory `index.md` (`skills/scripts/gen_indexes.py`)
-# and the `## Pointers` section of the root `MEMORY.md` (`skills/scripts/rebuild_memory_index.py`:
+# Create missing directory indexes, preserving existing introductions (`skills/scripts/gen_indexes.py`)
+# and rebuild the `## Pointers` section of the root `MEMORY.md` (`skills/scripts/rebuild_memory_index.py`:
 # one line per root note, one per top-level directory; the rest of the file is kept).
 #
 # Agents write notes with `meiva.files` and nothing maintains these indexes as they do, so the
-# consolidation scripts rebuild them: the pool validator's pointer checks (every note pointed at
-# once, titles matching, no missing targets) pass on what gets committed.
+# consolidation scripts create missing starter listings and refresh root pointers. Existing
+# listings remain author-owned even when they were originally generated.
 #
 # Call `stage` first (2026-11-06): the rebuild enumerates the git index, so a note that is only in
 # the working tree is not part of the pool yet and would be left out of the very commit it is
 # about to enter. `stage_and_commit` stages again after the rebuild, which is what carries the
-# rewritten indexes into the commit.
+# newly created indexes into the commit.
 def regenerate_indexes(pool: Path) -> None:
     generate_directory_indexes(pool)
     rebuild_root_memory_index(pool)

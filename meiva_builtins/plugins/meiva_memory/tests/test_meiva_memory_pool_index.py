@@ -5,6 +5,8 @@ from pathlib import Path
 from meiva_builtins.plugins.meiva_memory.pool_ops import (
     generate_directory_indexes,
     rebuild_root_memory_index,
+    regenerate_indexes,
+    write_directory_index,
 )
 
 # meiva:note
@@ -75,3 +77,21 @@ def test_root_index_states_a_directory_total_without_listing_its_children(
     assert "- [area/](area/index.md) \u2014 3 notes" in root
     assert "inner(" not in root
     assert "inner2(" not in root
+
+
+def test_existing_introductions_survive_all_generator_entry_points(tmp_path: Path) -> None:
+    pool = tmp_path / "pool"
+    _note(pool / "area" / "inner" / "note.md", "Inner note")
+    introduction = b"# Handwritten introduction\r\n\r\nKeep this context.\r\n"
+    targets = [pool / "index.md", pool / "area" / "index.md"]
+    for target in targets:
+        target.write_bytes(introduction)
+
+    assert write_directory_index(pool, "area", ["area/inner/note.md"]) is None
+    assert generate_directory_indexes(pool) == [str(pool / "area/inner/index.md")]
+    assert generate_directory_indexes(pool) == []
+    regenerate_indexes(pool)
+
+    for target in targets:
+        assert target.read_bytes() == introduction
+    assert "1 notes" in (pool / "MEMORY.md").read_text(encoding="utf-8")
