@@ -20,11 +20,8 @@ from base.lm.harness.events import (
 # meiva:note
 # Dispatch is by class name rather than `isinstance`: the SDK is injected, and a
 # test fake carries the same class names and fields. An unknown message maps to
-# nothing, which is how a newer SDK stays compatible. Tool results are the one
-# payload that can be megabytes, so the event carries a preview — the model
-# already has the full content through the SDK's own transcript.
+# nothing, which is how a newer SDK stays compatible.
 # meiva:link base/lm/harness/claude/docs/claude.md
-TOOL_RESULT_PREVIEW_CHARS = 2000
 
 
 @dataclass(frozen=True, slots=True)
@@ -278,7 +275,7 @@ def _render(content: object) -> str:
     if content is None:
         return ""
     if isinstance(content, str):
-        return _clip(content)
+        return content
     blocks = _as_list(content)
     if blocks:
         parts: list[str] = []
@@ -289,14 +286,8 @@ def _render(content: object) -> str:
                 parts.append(text if isinstance(text, str) else str(data.get("type", "")))
             else:
                 parts.append(str(block))
-        return _clip("\n".join(part for part in parts if part))
-    return _clip(str(content))
-
-
-def _clip(text: str) -> str:
-    if len(text) <= TOOL_RESULT_PREVIEW_CHARS:
-        return text
-    return text[:TOOL_RESULT_PREVIEW_CHARS] + "..."
+        return "\n".join(part for part in parts if part)
+    return str(content)
 
 
 def _dict(value: object) -> dict[str, object]:

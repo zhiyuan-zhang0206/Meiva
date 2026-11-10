@@ -195,3 +195,79 @@ def test_success_status_clears_retry_error() -> None:
     assert fields.status == "SUCCESS"
     assert fields.error is None
     assert fields.is_error is False
+
+
+def test_tool_step_prefers_untruncated_transcript_args_over_truncated_stdout_params(
+    tmp_path: Path,
+) -> None:
+    log_dir = (
+        tmp_path
+        / ".gemini"
+        / "antigravity-cli"
+        / "brain"
+        / "conv-full-args"
+        / ".system_generated"
+        / "logs"
+    )
+    log_dir.mkdir(parents=True)
+    full_cmd = 'echo "' + ("A" * 1200) + '"'
+    truncated_cmd = full_cmd[:500] + "…"
+    transcript_full = log_dir / "transcript_full.jsonl"
+    rows = [
+        {
+            "step_index": 215,
+            "type": "PLANNER_RESPONSE",
+            "status": "DONE",
+            "tool_calls": [
+                {
+                    "name": "run_command",
+                    "args": {
+                        "CommandLine": full_cmd,
+                        "WaitMsBeforeAsync": 10000,
+                        "toolSummary": "Run long command",
+                    },
+                }
+            ],
+        },
+        {
+            "step_index": 216,
+            "type": "GENERIC",
+            "status": "DONE",
+            "content": "full output " + ("B" * 1200),
+        },
+    ]
+    transcript_full.write_text("\n".join(json.dumps(r) for r in rows) + "\n", encoding="utf-8")
+
+    active = {
+        "conversation_id": "conv-full-args",
+        "step_index": 216,
+        "state": "ACTIVE",
+        "step_type": "tool",
+        "tool_name": "run_command",
+        "tool_info": {
+            "name": "run_command",
+            "parameters": {"CommandLine": truncated_cmd},
+        },
+    }
+    events = map_step_update(active, turn_id="turn-1", home=tmp_path)
+    assert len(events) == 1
+    assert isinstance(events[0], ToolUse)
+    assert events[0].tool_input["CommandLine"] == full_cmd
+    assert events[0].tool_input["WaitMsBeforeAsync"] == 10000
+
+    done = {
+        "conversation_id": "conv-full-args",
+        "step_index": 216,
+        "state": "DONE",
+        "step_type": "tool",
+        "tool_name": "run_command",
+        "tool_info": {
+            "name": "run_command",
+            "parameters": {"CommandLine": truncated_cmd},
+            "output": "short…",
+        },
+    }
+    done_events = map_step_update(done, turn_id="turn-1", home=tmp_path)
+    assert len(done_events) == 1
+    assert isinstance(done_events[0], ToolResult)
+    assert done_events[0].content == "full output " + ("B" * 1200)

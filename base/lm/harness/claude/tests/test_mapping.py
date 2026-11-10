@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from base.lm.harness.claude.mapping import TOOL_RESULT_PREVIEW_CHARS, map_message, parse_result
+from base.lm.harness.claude.mapping import map_message, parse_result
 from base.lm.harness.claude.tests import fake_sdk as fake
 from base.lm.harness.events import (
     AssistantText,
@@ -55,13 +55,14 @@ def test_tool_result_maps_with_error_flag() -> None:
     ]
 
 
-def test_tool_result_is_clipped_for_the_timeline() -> None:
+def test_tool_result_preserves_full_untruncated_content() -> None:
+    full_output = "x" * 5000
     message = fake.UserMessage(
-        content=[fake.ToolResultBlock(tool_use_id="toolu-9", content="x" * 5000)]
+        content=[fake.ToolResultBlock(tool_use_id="toolu-9", content=full_output)]
     )
     [event] = map_message(message, turn_id="t1")
     assert isinstance(event, ToolResult)
-    assert len(event.content) == TOOL_RESULT_PREVIEW_CHARS + len("...")
+    assert event.content == full_output
 
 
 def test_init_message_maps_to_session_started() -> None:

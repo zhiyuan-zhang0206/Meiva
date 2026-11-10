@@ -69,17 +69,19 @@ def map_init(payload: Mapping[str, object]) -> SessionStarted:
 
 # meiva:note
 # Translate one `step_update`; text accumulation stays with the session.
-def map_step_update(update: Mapping[str, object], *, turn_id: str) -> tuple[BridgeEvent, ...]:
+def map_step_update(
+    update: Mapping[str, object], *, turn_id: str, home: Path | None = None
+) -> tuple[BridgeEvent, ...]:
     step_type = _text(update.get("step_type"))
     if step_type == "agent_response":
-        return _map_agent_response_step(update, turn_id=turn_id)
+        return _map_agent_response_step(update, turn_id=turn_id, home=home)
     if step_type == "tool":
-        return _map_tool_step(update, turn_id=turn_id)
+        return _map_tool_step(update, turn_id=turn_id, home=home)
     return ()
 
 
 def _map_agent_response_step(
-    update: Mapping[str, object], *, turn_id: str
+    update: Mapping[str, object], *, turn_id: str, home: Path | None = None
 ) -> tuple[BridgeEvent, ...]:
     state = _text(update.get("state"))
     delta = _text(update.get("text_delta"))
@@ -88,7 +90,7 @@ def _map_agent_response_step(
     events: list[BridgeEvent] = []
     if state == "DONE":
         thinking = _text(update.get("thinking")) or (
-            _transcript_thinking(conversation_id, step_index, before_tool=False)
+            _transcript_thinking(conversation_id, step_index, before_tool=False, home=home)
             if conversation_id
             else None
         )
@@ -99,7 +101,9 @@ def _map_agent_response_step(
     return tuple(events)
 
 
-def _map_tool_step(update: Mapping[str, object], *, turn_id: str) -> tuple[BridgeEvent, ...]:
+def _map_tool_step(
+    update: Mapping[str, object], *, turn_id: str, home: Path | None = None
+) -> tuple[BridgeEvent, ...]:
     state = _text(update.get("state"))
     step_index = _int(update.get("step_index"))
     conversation_id = _text(update.get("conversation_id"))
@@ -110,11 +114,11 @@ def _map_tool_step(update: Mapping[str, object], *, turn_id: str) -> tuple[Bridg
         params = dict(_mapping(info.get("parameters")))
         if conversation_id:
             params = {
-                **_transcript_tool_args(conversation_id, step_index, name),
                 **params,
+                **_transcript_tool_args(conversation_id, step_index, name, home=home),
             }
         thinking = _text(update.get("thinking")) or (
-            _transcript_thinking(conversation_id, step_index, before_tool=True)
+            _transcript_thinking(conversation_id, step_index, before_tool=True, home=home)
             if conversation_id
             else None
         )
@@ -129,8 +133,10 @@ def _map_tool_step(update: Mapping[str, object], *, turn_id: str) -> tuple[Bridg
         return (tool_use,)
     if state == "DONE":
         content = _tool_content(info)
-        if not content and conversation_id:
-            content = _transcript_tool_output(conversation_id, step_index)
+        if conversation_id:
+            transcript_out = _transcript_tool_output(conversation_id, step_index, home=home)
+            if transcript_out and len(transcript_out) >= len(content):
+                content = transcript_out
         return (
             ToolResult(
                 turn_id=turn_id,
@@ -282,23 +288,36 @@ def _read_transcript_rows(
     return []
 
 
-def _transcript_tool_args(conversation_id: str, step_index: int, name: str) -> dict[str, object]:
-    rows = _read_transcript_rows(conversation_id)
+def _transcript_tool_args(
+    conversation_id: str, step_index: int, name: str, *, home: Path | None = None
+) -> dict[str, object]:
+    rows = _read_transcript_rows(conversation_id, home=home)
     for row in reversed(rows):
         idx = _int(row.get("step_index"))
         if step_index > 0 and idx > step_index:
             continue
         raw_calls = row.get("tool_calls")
         calls = raw_calls if is_object_list(raw_calls) else []
+        if not calls:
+            continue
+        if step_index > idx > 0:
+            call_offset = step_index - idx - 1
+            if 0 <= call_offset < len(calls):
+                tc = _mapping(calls[call_offset])
+                if _text(tc.get("name")) == name:
+                    return dict(_mapping(tc.get("args")))
         for raw_tc in calls:
             tc = _mapping(raw_tc)
             if _text(tc.get("name")) == name:
                 return dict(_mapping(tc.get("args")))
+        break
     return {}
 
 
-def _transcript_tool_output(conversation_id: str, step_index: int) -> str:
-    for row in _read_transcript_rows(conversation_id):
+def _transcript_tool_output(
+    conversation_id: str, step_index: int, *, home: Path | None = None
+) -> str:
+    for row in _read_transcript_rows(conversation_id, home=home):
         if _int(row.get("step_index")) == step_index:
             content = _text(row.get("content"))
             if content:
@@ -306,11 +325,13 @@ def _transcript_tool_output(conversation_id: str, step_index: int) -> str:
     return ""
 
 
-def _transcript_thinking(conversation_id: str, step_index: int, *, before_tool: bool) -> str | None:
+def _transcript_thinking(
+    conversation_id: str, step_index: int, *, before_tool: bool, home: Path | None = None
+) -> str | None:
     target_idx = step_index - 1 if before_tool else step_index
     if target_idx < 0:
         return None
-    for row in _read_transcript_rows(conversation_id):
+    for row in _read_transcript_rows(conversation_id, home=home):
         if _int(row.get("step_index")) != target_idx:
             continue
         if _text(row.get("type")) != "PLANNER_RESPONSE":
