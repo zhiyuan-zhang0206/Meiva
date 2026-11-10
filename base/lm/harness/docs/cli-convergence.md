@@ -54,3 +54,6 @@ pinned versions:
 4. **Daily runner schedule:** `harness-cli-update` (`schedules/harness-cli-update-schedule.py`) runs at 04:30 cluster
    time on every machine with `agent-runner` placement, ensuring long-running clusters track pinned versions
    without waking agents or opening operator tasks.
+5. **Claude login keepalive:** `claude-auth-keepalive` (`schedules/jobs/harness/claude-auth-keepalive-schedule.py`)
+   runs one minimal `claude -p` per machine every six hours so the CLI refreshes its own login; it never calls the
+   OAuth refresh endpoint or touches credentials (see `schedules/README.md`).

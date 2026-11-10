@@ -18,6 +18,7 @@ from base.native_process.loaded_commit import LoadedCommit
 from base.telemetry.tests.capture.event_capture import EmittedEvents
 from meiva_builtins.plugins.meiva_usage.default_config import CollectorConfig, UsageConfig
 from meiva_builtins.plugins.meiva_usage.runner import run_collector_cycles
+from meiva_builtins.plugins.meiva_usage.types import CardReading
 
 
 # meiva:note
@@ -51,8 +52,8 @@ def _schedule_inputs_without_database(home: Path) -> ScheduleInputs:
     )
 
 
-def _no_refresh(*_args: Any, **_kwargs: Any) -> None:
-    return None
+def _no_refresh(*_args: Any, **_kwargs: Any) -> dict[str, CardReading]:
+    return {}
 
 
 def _no_sleep(_seconds: float) -> None:

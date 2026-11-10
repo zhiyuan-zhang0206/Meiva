@@ -19,6 +19,7 @@ from meiva_builtins.plugins.meiva_usage.runner import (
     refresh_collector_once,
     run_collector_cycles,
 )
+from meiva_builtins.plugins.meiva_usage.types import CardReading
 
 
 class FakeDatabase:
@@ -676,11 +677,11 @@ def test_run_from_schedule_emits_one_cycle_event_in_both_outcomes(
     calls = {"n": 0}
     real_refresh = runner_mod.refresh_collector_once
 
-    def flaky_refresh(*args: Any, **kwargs: Any) -> None:
+    def flaky_refresh(*args: Any, **kwargs: Any) -> dict[str, CardReading]:
         calls["n"] += 1
         if calls["n"] == 2:
             raise RuntimeError("probe exploded")
-        real_refresh(*args, **kwargs)
+        return real_refresh(*args, **kwargs)
 
     def _no_sleep(_seconds: float) -> None:
         return None

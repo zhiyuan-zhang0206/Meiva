@@ -26,6 +26,15 @@ class UsageProbeError(RuntimeError):
     pass
 
 
+# meiva:note
+# The provider answered HTTP 429. A distinct class because the reaction differs from every other
+# failure: the previous reading is still the best one there is, and the collector should back off
+# instead of asking again on schedule. Raised by a probe from the status code, never inferred from
+# the message text.
+class UsageRateLimitedError(UsageProbeError):
+    pass
+
+
 @dataclass(frozen=True)
 class RateWindow:
     used_percent: float
@@ -53,6 +62,10 @@ class CardReading:
     value: str
     detail: str
     status: Literal["ok", "warn", "error"]
+    # meiva:note
+    # The probe was rate limited (`UsageRateLimitedError`). The writer keeps the card's previous value
+    # and age instead of storing this reading's placeholder value, and the cycle loop backs off.
+    rate_limited: bool = False
 
 
 @dataclass(frozen=True)
@@ -64,7 +77,9 @@ class CostBucketsPage:
 @dataclass(frozen=True)
 class ClaudeOAuthCredentials:
     access_token: str
-    expires_at: datetime
+    # meiva:note
+    # `None` when the blob carries no readable `expiresAt`: unknown is not "expired".
+    expires_at: datetime | None
 
 
 @dataclass(frozen=True)

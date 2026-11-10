@@ -21,6 +21,7 @@ from meiva_builtins.plugins.meiva_usage.types import (
     CardReading,
     ClaudeOAuthCredentials,
     UsageProbeError,
+    UsageRateLimitedError,
     resolve_user_path,
 )
 
@@ -102,7 +103,10 @@ def _discover_auto_claude_credentials(
     if not candidates:
         raise UsageProbeError("No Claude Code credentials found on this machine")
 
-    return max(candidates, key=lambda c: c.expires_at)
+    # meiva:note
+    # A credential with no readable expiry sorts below every dated one.
+    undated = datetime.min.replace(tzinfo=UTC)
+    return max(candidates, key=lambda c: c.expires_at or undated)
 
 
 def _resolve_claude_credentials(
@@ -148,13 +152,18 @@ def probe_claude(
     keychain_reader: Callable[[str], str | None] | None = None,
     display_tz: tzinfo = UTC,
 ) -> CardReading:
-    del now
     effective_keychain = (
         keychain_reader
         if keychain_reader is not None
         else (read_macos_keychain_claude_credentials if platform == "darwin" else None)
     )
     creds = _resolve_claude_credentials(collector, user_home, environ, platform, effective_keychain)
+    # meiva:note
+    # An access token past its expiry is refreshed by Claude Code itself the next time it runs, and
+    # that refresh rotates the refresh token, so nothing here may refresh it or ask the API with it:
+    # the request would answer 401 and read as "sign in again" when the login is fine.
+    if creds.expires_at is not None and creds.expires_at <= now:
+        raise UsageProbeError("Claude access token expired; waiting for Claude Code to refresh it")
     req = HttpJsonRequest(
         url="https://api.anthropic.com/api/oauth/usage",
         method="GET",
@@ -168,6 +177,8 @@ def probe_claude(
     try:
         payload = http_fetch(req)
     except HttpStatusError as exc:
+        if exc.status_code == 429:
+            raise UsageRateLimitedError("Claude usage request rate limited (HTTP 429)") from None
         if exc.status_code in (401, 403):
             raise UsageProbeError(
                 f"Claude OAuth unauthorized ({exc.status_code}); sign in again"

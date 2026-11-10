@@ -15,6 +15,7 @@ from base.log import logger
 from base.native_process.loaded_commit import LoadedCommit
 from meiva_builtins.plugins.meiva_usage.default_config import CollectorConfig, UsageConfig
 from meiva_builtins.plugins.meiva_usage.runner import run_collector_cycles
+from meiva_builtins.plugins.meiva_usage.types import CardReading
 
 COLLECTOR_ID = "scheduled-collector"
 
@@ -61,8 +62,8 @@ inputs = ScheduleInputs(
 # meiva:note
 # The loop's two effects, supplied by the caller: a no-op refresh keeps this child off the network
 # and off the database, so the only behaviour under test is the report for a cycle it cannot emit.
-def _no_refresh(*_args: Any, **_kwargs: Any) -> None:
-    return None
+def _no_refresh(*_args: Any, **_kwargs: Any) -> dict[str, CardReading]:
+    return {}
 
 
 def _no_sleep(_seconds: float) -> None:

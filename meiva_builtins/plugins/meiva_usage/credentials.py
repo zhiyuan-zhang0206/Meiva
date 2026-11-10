@@ -6,7 +6,6 @@ from __future__ import annotations
 
 import json
 from collections.abc import Mapping
-from datetime import UTC, datetime
 from typing import TypeGuard
 
 from base.host.boundary.untyped import object_of
@@ -46,10 +45,9 @@ def parse_claude_oauth_blob(data: Mapping[str, object] | str) -> ClaudeOAuthCred
         raise UsageProbeError("Claude credentials missing claudeAiOauth.accessToken")
 
     expires_raw = oauth_obj.get("expiresAt")
-    parsed_dt = parse_timestamp_opt(expires_raw)
-    dt = parsed_dt if parsed_dt is not None else datetime.fromtimestamp(0, tz=UTC)
-
-    return ClaudeOAuthCredentials(access_token=token.strip(), expires_at=dt)
+    return ClaudeOAuthCredentials(
+        access_token=token.strip(), expires_at=parse_timestamp_opt(expires_raw)
+    )
 
 
 def _load_credentials_mapping(data: Mapping[str, object] | str, name: str) -> Mapping[str, object]:

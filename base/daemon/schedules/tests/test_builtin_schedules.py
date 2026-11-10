@@ -35,6 +35,7 @@ class TestLoadManifest:
             "model-update-tracker": "product",
             "trace-ship-tempo": "product",
             "harness-cli-update": "product",
+            "claude-auth-keepalive": "product",
             "db-write-stall-watch": "operator",
             "sched-dry-import-weekly": "operator",
             "log-cred-mask-monthly": "operator",
@@ -52,6 +53,7 @@ class TestLoadManifest:
             "model-update-tracker",
             "trace-ship-tempo",
             "harness-cli-update",
+            "claude-auth-keepalive",
             "main-red-watch",
         }
 
@@ -92,6 +94,7 @@ class TestLoadManifest:
         scheds = load_manifest()
         by_name = {s.name: s for s in scheds}
         assert by_name["harness-cli-update"].placement == "per_machine"
+        assert by_name["claude-auth-keepalive"].placement == "per_machine"
         assert by_name["c9-daily-report"].placement == "gateway"
 
     def test_template_for_schedule_name(self) -> None:
@@ -101,6 +104,9 @@ class TestLoadManifest:
         harness_sched = template_for_schedule_name("harness-cli-update:runner-1", manifest)
         assert harness_sched is not None
         assert harness_sched.name == "harness-cli-update"
+        keepalive_sched = template_for_schedule_name("claude-auth-keepalive:runner-1", manifest)
+        assert keepalive_sched is not None
+        assert keepalive_sched.name == "claude-auth-keepalive"
         c9_sched = template_for_schedule_name("c9-daily-report", manifest)
         assert c9_sched is not None
         assert c9_sched.name == "c9-daily-report"

@@ -18,6 +18,7 @@ from base.native_process.loaded_commit import LoadedCommit
 from base.telemetry.delivery.pipeline import EventPipeline
 from meiva_builtins.plugins.meiva_usage.default_config import CollectorConfig, UsageConfig
 from meiva_builtins.plugins.meiva_usage.runner import run_collector_cycles
+from meiva_builtins.plugins.meiva_usage.types import CardReading
 
 COLLECTOR_ID = "scheduled-collector"
 
@@ -51,8 +52,8 @@ class _Machine:
 # meiva:note
 # The writer is where an event lands once the drain thread has taken it: a list is the whole
 # assertion surface this child needs, and `stop()` is what turns "queued" into "written".
-def _no_refresh(*_args: Any, **_kwargs: Any) -> None:
-    return None
+def _no_refresh(*_args: Any, **_kwargs: Any) -> dict[str, CardReading]:
+    return {}
 
 
 def _no_sleep(_seconds: float) -> None:

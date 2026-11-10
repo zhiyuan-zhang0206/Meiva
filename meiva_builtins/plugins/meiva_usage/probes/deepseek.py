@@ -15,7 +15,11 @@ from meiva_builtins.plugins.meiva_usage.probes.transport import (
     HttpJsonRequest,
     HttpStatusError,
 )
-from meiva_builtins.plugins.meiva_usage.types import CardReading, UsageProbeError
+from meiva_builtins.plugins.meiva_usage.types import (
+    CardReading,
+    UsageProbeError,
+    UsageRateLimitedError,
+)
 
 
 def probe_deepseek(
@@ -46,6 +50,10 @@ def probe_deepseek(
     try:
         payload = http_fetch(req)
     except HttpStatusError as exc:
+        if exc.status_code == 429:
+            raise UsageRateLimitedError(
+                "DeepSeek balance request rate limited (HTTP 429)"
+            ) from None
         if exc.status_code == 401:
             raise UsageProbeError(f"DeepSeek API key in {env_name} is invalid (401)") from None
         raise UsageProbeError(

@@ -68,6 +68,34 @@ def test_last_write_wins_on_the_card_key(stat_pool: ConnectionPool, database: Da
     ]
 
 
+# meiva:note
+# Restating a status without re-reading the value must not make the value look fresh.
+def test_refresh_stamp_false_keeps_the_age_of_the_value(
+    stat_pool: ConnectionPool, database: Database, db_conn: psycopg.Connection
+) -> None:
+    stats.upsert(database, plugin="p", id="c", value="1%", status="ok")
+    db_conn.execute("UPDATE plugin_stats SET updated_at = '2026-01-01T00:00:00Z' WHERE id = 'c'")
+    db_conn.commit()
+    stats.upsert(
+        database, plugin="p", id="c", value="1%", detail="stale", status="warn", refresh_stamp=False
+    )
+    (row,) = stats.read_all(stat_pool)
+    assert (row.value, row.detail, row.status) == ("1%", "stale", "warn")
+    assert row.updated_at == datetime(2026, 1, 1, tzinfo=UTC)
+
+    stats.upsert(database, plugin="p", id="c", value="2%", status="ok")
+    (row,) = stats.read_all(stat_pool)
+    assert abs((datetime.now(UTC) - row.updated_at).total_seconds()) < 60
+
+
+def test_refresh_stamp_false_on_a_new_row_still_stamps_it(
+    stat_pool: ConnectionPool, database: Database
+) -> None:
+    stats.upsert(database, plugin="p", id="new", value="1%", refresh_stamp=False)
+    (row,) = stats.read_all(stat_pool)
+    assert abs((datetime.now(UTC) - row.updated_at).total_seconds()) < 60
+
+
 def test_read_all_orders_by_plugin_then_id(stat_pool: ConnectionPool, database: Database) -> None:
     stats.upsert(database, plugin="b", id="z", value="1")
     stats.upsert(database, plugin="a", id="y", value="2")

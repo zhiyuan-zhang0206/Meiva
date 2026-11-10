@@ -57,6 +57,29 @@ The schedule script executes `run_from_schedule(MEIVA_SCHEDULE_INPUTS, collector
   keeps collecting.
 - **Error hysteresis (`should_write_failure`)**: Transient network or probe errors within the
   freshness window do not flap cards to error immediately, preserving previous good readings.
+- **Rate limits (`UsageRateLimitedError`)**: A probe that sees HTTP 429 raises `UsageRateLimitedError` (a
+  `UsageProbeError` subclass chosen from the status code, never from message text); the claude,
+  deepseek, openai, anthropic and antigravity probes do. `refresh_collector_once` turns it into
+  `rate_limited` readings instead of `error` ones, and the writer keeps the card's previous value:
+  the card goes to `warn`, the detail says it is rate limited and names the as-of instant, and
+  `updated_at` is left alone (`stats.upsert(refresh_stamp=False)`) so the panel's age is the age of
+  the data. A card that never held a reading gets a `—` / `warn` placeholder. Rate limits bypass
+  the error hysteresis because the reading is known to be old.
+- **Backoff (`backoff.py`)**: `run_collector_cycles` doubles the sleep after each consecutive
+  rate-limited cycle (`next_interval_s`, pure), capped at 120 minutes, and returns to
+  `interval_minutes` after the first cycle that is not rate limited. The `plugin_collector_cycle`
+  event reports such a cycle as `outcome="rate_limited"`, `reason="rate_limited"`. Other probe
+  failures are still written as error cards and the cycle event stays `ok`. A cycle whose refresh
+  raised was not rate limited either, so it also returns the next sleep to `interval_minutes`.
+- **Claude token expiry**: `probe_claude` does not call the usage API with an access token whose
+  `expiresAt` has passed (an unknown expiry is still tried). It reports `Claude access token
+  expired; waiting for Claude Code to refresh it`: Claude Code refreshes its own token the next
+  time it runs. The `claude-auth-keepalive` schedule (see `schedules/README.md`) runs the CLI once
+  every six hours so the login does not lapse through disuse. There is no official figure for how
+  long an access token lives, so on an idle machine the card can still briefly show "waiting for
+  Claude Code to refresh it" between two keepalive runs, and a missed run is not made up. This
+  plugin never refreshes the token itself, because the refresh token is single-use and a second
+  refresher would race the CLI for it. A real 401/403 keeps the `sign in again` message.
 - **Single writer (`stats.upsert`)**: Writes readings through `base.packages.plugins.surface.stats.upsert`,
   stamping `updated_by` with the machine name.
 

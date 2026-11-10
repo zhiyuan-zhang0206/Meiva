@@ -1,7 +1,9 @@
-exports = ["harness_cli_update.py", "harness-cli-update-schedule.py"]
+exports = ["harness_cli_update.py", "harness-cli-update-schedule.py", "claude_auth_keepalive.py", "claude-auth-keepalive-schedule.py"]
 
 [uses]
 "harness-cli-update-schedule.py" = ["harness_cli_update.py"]
+"claude-auth-keepalive-schedule.py" = ["claude_auth_keepalive.py"]
 
 [roots]
 "harness-cli-update-schedule.py" = { kinds = ["clock", "environ", "home", "argv"], why = "The harness CLI update entry is the composition root of its own loop: it reads the home it runs under, its scheduler identity and the start instant before the first round; it also reads its command line (argv) once, as the process entry" }
+"claude-auth-keepalive-schedule.py" = { kinds = ["clock", "environ", "home", "argv"], why = "The Claude auth keepalive entry is the composition root of its own loop: it reads the home it runs under, its scheduler identity and the start instant before the first round; it also reads its command line (argv) once, as the process entry" }

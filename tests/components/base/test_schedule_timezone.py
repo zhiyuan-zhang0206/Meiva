@@ -14,6 +14,7 @@ _SCHEDULES = Path(__file__).resolve().parents[3] / "schedules"
 _CLUSTER_CLOCK_TEMPLATES = {
     "debt-sweep-daily-schedule.py": "TZ",
     "dev-ci-metrics-schedule.py": "TZ",
+    "jobs/harness/claude-auth-keepalive-schedule.py": "TZ",
     "jobs/harness/harness-cli-update-schedule.py": "TZ",
     "memory-steward-schedule.py": "TIMEZONE",
     "model-update-tracker-schedule.py": "TZ",
@@ -89,9 +90,11 @@ def test_template_crons_fire_on_cluster_wall_clock(filename: str, tz: str) -> No
     base = datetime(2026, 6, 9, tzinfo=UTC)
     for expr in crons:
         minute, hour = expr.split()[:2]
+        hours = {int(h) for h in hour.split(",")}
         fire = next_fire(expr, after=base, timezone=tz)
         local = fire.astimezone(ZoneInfo(tz))
-        assert (local.hour, local.minute) == (int(hour), int(minute)), f"{filename}: {expr}"
+        assert local.hour in hours, f"{filename}: {expr}"
+        assert local.minute == int(minute), f"{filename}: {expr}"
 
 
 def test_same_cron_yields_different_instants_per_cluster_timezone() -> None:

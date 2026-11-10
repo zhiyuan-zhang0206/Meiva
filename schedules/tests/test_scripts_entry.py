@@ -52,7 +52,10 @@ def test_every_builtin_script_imports_from_a_materialized_copy(tmp_path: Path) -
         directory = tmp_path / "schedules" / str(index)
         directory.mkdir(parents=True)
         copies.append(Path(shutil.copy(script, directory / script.name)))
-    assert len(copies) == 16
+    manifest = json.loads((_SCHEDULES / "manifest.json").read_text())["builtin_schedules"]
+    assert {script.relative_to(_SCHEDULES).as_posix() for script in _SCRIPTS} == {
+        entry["script"] for entry in manifest
+    }
 
     child = run_bounded(
         [sys.executable, "-I", str(_CHILD), "imports", *map(str, copies)],

@@ -59,6 +59,18 @@ ON CONFLICT (plugin, id) DO UPDATE SET
     updated_by = EXCLUDED.updated_by
 """
 
+# meiva:note
+# The same write that leaves an existing row's `updated_at` alone: a new row still takes `now()`.
+_UPSERT_KEEP_STAMP = """
+INSERT INTO plugin_stats (plugin, id, value, detail, status, updated_at, updated_by)
+VALUES (%s, %s, %s, %s, %s, now(), %s)
+ON CONFLICT (plugin, id) DO UPDATE SET
+    value = EXCLUDED.value,
+    detail = EXCLUDED.detail,
+    status = EXCLUDED.status,
+    updated_by = EXCLUDED.updated_by
+"""
+
 _SELECT_ALL = (
     "SELECT plugin, id, value, detail, status, updated_at, updated_by "
     "FROM plugin_stats ORDER BY plugin, id"
@@ -92,6 +104,10 @@ def _text(value: object, what: str, *, limit: int) -> str:
     return value
 
 
+# meiva:note
+# `refresh_stamp=False` keeps an existing row's `updated_at`: the caller restates the status or
+# detail of a value it did not re-read (a rate-limited refresh that keeps the last good reading),
+# so the age the panel shows stays the age of the data.
 def upsert(
     db: Database,
     *,
@@ -102,6 +118,7 @@ def upsert(
     status: str = "ok",
     updated_by: str | None = None,
     detail_cap: int | None = None,
+    refresh_stamp: bool = True,
 ) -> None:
     """Write (or refresh) one card's value — last write wins.
 
@@ -133,7 +150,8 @@ def upsert(
         updated_by = _text(updated_by, "updated_by", limit=MAX_UPDATED_BY_CHARS)
 
     with db.write_transaction() as conn:
-        conn.execute(_UPSERT, (name, card, shown, detail, status, updated_by))
+        sql = _UPSERT if refresh_stamp else _UPSERT_KEEP_STAMP
+        conn.execute(sql, (name, card, shown, detail, status, updated_by))
 
 
 def read_all(pool: ConnectionPool[Connection[TupleRow]]) -> list[PluginStatRow]:

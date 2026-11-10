@@ -24,6 +24,10 @@ from meiva_builtins.plugins.meiva_usage.probes import (
 )
 from meiva_builtins.plugins.meiva_usage.types import UsageProbeError
 
+# meiva:note
+# Before every `expiresAt` the Claude probe tests write (the earliest is 2023-11).
+_CLAUDE_NOW = datetime(2023, 1, 1, tzinfo=UTC)
+
 
 def test_probe_deepseek_success() -> None:
     collector = CollectorConfig(
@@ -132,7 +136,7 @@ def test_probe_claude_explicit_path(tmp_path: Path) -> None:
         collector,
         user_home=tmp_path,
         environ={},
-        now=datetime.now(UTC),
+        now=_CLAUDE_NOW,
         platform="darwin",
         http_fetch=fake_http_fetch,
     )
@@ -186,7 +190,7 @@ def test_probe_claude_freshest_expiry_selection(tmp_path: Path) -> None:
         collector,
         user_home=tmp_path,
         environ={},
-        now=datetime.now(UTC),
+        now=_CLAUDE_NOW,
         platform="darwin",
         http_fetch=fake_http_fetch,
         keychain_reader=keychain_store.get,
@@ -207,7 +211,7 @@ def test_probe_claude_missing_credentials_raises(tmp_path: Path) -> None:
             collector,
             user_home=tmp_path,
             environ={},
-            now=datetime.now(UTC),
+            now=_CLAUDE_NOW,
             platform="darwin",
             http_fetch=lambda _req: {},
             keychain_reader=lambda _acct: None,
