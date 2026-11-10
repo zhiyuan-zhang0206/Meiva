@@ -81,6 +81,11 @@ completed-key replay are defined in
 The failure split, the `_claim` entry point and where unowned output goes:
 [attribution](attribution.md).
 
+## Input delivery and acknowledgements
+
+One `deliver()` operation, two acknowledgements, observed turns and reconciliation:
+[delivery](delivery.md).
+
 ## Identity
 
 Session registry persistence, attachment claims and harness matching are defined in

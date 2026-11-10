@@ -270,7 +270,7 @@ async def test_turn_started_binds_the_name_before_the_response(tmp_path: Path) -
             type(event)
             for event in harness.events
             if isinstance(event, ForegroundAccepted | TextDelta | ToolUse | TurnCompleted)
-        ] == [ForegroundAccepted, TextDelta, TextDelta, TextDelta, ToolUse, TurnCompleted]
+        ] == [ForegroundAccepted, TextDelta, ToolUse, TurnCompleted]
         assert harness.of(TextDelta)[0].text == "early "
         assert harness.of(ForegroundAccepted)[0].turn_id == turn.turn_id
     finally:

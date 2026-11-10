@@ -1,0 +1,4 @@
+{"timestamp": "2026-11-10T13:30:10.000Z", "ordinal": 3, "type": "session_meta", "payload": {"id": "thread-1"}}
+{"timestamp": "2026-11-10T13:30:12.000Z", "ordinal": 9, "type": "event_msg", "payload": {"type": "item_completed", "thread_id": "thread-1", "turn_id": "turn-a", "item": {"type": "UserMessage", "id": "u-1", "content": [{"type": "text", "text": "first prompt", "text_elements": []}]}}}
+{"timestamp": "2026-11-10T13:30:17.577Z", "ordinal": 21, "type": "event_msg", "payload": {"type": "item_completed", "thread_id": "thread-1", "turn_id": "turn-a", "item": {"type": "UserMessage", "id": "u-2", "client_id": "steer-client-id-1", "content": [{"type": "text", "text": "STEERING NOTE", "text_elements": []}]}}}
+{"timestamp": "2026-11-10T13:30:18.000Z", "ordinal": 22, "type": "response_item", "payload": {"type": "message", "role": "user"}}

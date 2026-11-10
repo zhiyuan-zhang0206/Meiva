@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import subprocess
 from collections.abc import Mapping, Sequence
+from dataclasses import replace
 from pathlib import Path
 
 from base.host.env.harness_binaries import resolve_harness_binary
@@ -14,12 +15,10 @@ from base.lm.harness.cancel import (
     spawned_since,
     unobserved_cancel,
 )
+from base.lm.harness.codex.admission import observed_turn_name, rejection_reason
 from base.lm.harness.codex.auth import build_env
 from base.lm.harness.codex.config import CodexConfig
 from base.lm.harness.codex.frames import (
-    INVALID_PARAMS,
-    INVALID_REQUEST,
-    METHOD_NOT_FOUND,
     JsonObject,
     JsonRpcError,
     RequestParams,
@@ -53,12 +52,18 @@ from base.lm.harness.codex.turns import (
     settle,
     unclaimed_text,
 )
+from base.lm.harness.delivery import HarnessInput, InputPhase, validated_batch
 from base.lm.harness.events import (
+    AckSignal,
     AssistantText,
     ForegroundAccepted,
+    HarnessCause,
+    InterruptConfirmed,
     SessionFailed,
     SessionStarted,
     TurnFaulted,
+    TurnOrigin,
+    TurnStarted,
     UnsolicitedOutput,
 )
 from base.lm.harness.handoff import Handoff
@@ -147,7 +152,8 @@ class CodexSession(BaseHarnessSession[CodexConfig]):
         self._starting = False
         self._early_notifications: list[tuple[Inbound, JsonObject]] = []
         self._records: dict[str, TurnRecord] = {}
-        self._steer_receipts: dict[tuple[str, str], asyncio.Future[bool]] = {}
+        self._delivery_lock = asyncio.Lock()
+        self._interrupting: set[str] = set()
         self._started = False
 
     async def start(self, *, resume: str | None = None, handoff: Handoff | None = None) -> None:
@@ -155,6 +161,7 @@ class CodexSession(BaseHarnessSession[CodexConfig]):
             raise RuntimeError("session already started")
         if self._closed:
             raise SessionClosedError("session is closed")
+        _ = self._begin_generation()
         self._transport.on_notification(self._on_notification)
         self._transport.on_request(self._on_request)
         self._transport.on_closed(self._on_transport_closed)
@@ -192,7 +199,6 @@ class CodexSession(BaseHarnessSession[CodexConfig]):
         if self._closed:
             return
         self._closed = True
-        self._finish_steer_receipts()
         watched = watch_tree(self._probe, self._transport.pid)
         self._fail_pending(SessionClosedError("session closed"))
         await self._close_tasks()
@@ -212,19 +218,34 @@ class CodexSession(BaseHarnessSession[CodexConfig]):
     def cli_pid(self) -> int | None:
         return self._transport.pid
 
+    # meiva:note
+    # A turn the server began on its own can be interrupted too: when no ticket of ours runs, the
+    # running observed turn is the foreground. A caller that names a turn id must name that one.
+    def _observed_interrupt(self, turn_id: str | None) -> str | None:
+        name = self._observed_name()
+        if name is None or name in self._interrupting:
+            return None
+        if turn_id is not None and self._ledger.local_turn(name) != turn_id:
+            return None
+        return name
+
     async def interrupt(self, *, turn_id: str | None = None) -> CancelReport:
         ticket = await self._interrupt_target(turn_id)
-        if ticket is None or ticket.provider_turn_id is None or self._session_id is None:
+        name = ticket.provider_turn_id if ticket is not None else self._observed_interrupt(turn_id)
+        if name is None or self._session_id is None:
             return unobserved_cancel(turn_id=turn_id)
         pid = self._transport.pid
-        turn_id = ticket.turn_id
+        turn_id = ticket.turn_id if ticket is not None else self._ledger.local_turn(name)
         observed = snapshot(self._probe, pid)
         spawned = spawned_since(observed, self._baseline)
         started = self._monotonic()
+        self._interrupting.add(name)
         try:
-            await self._call(*interrupt_request(self._session_id, ticket.provider_turn_id))
+            await self._call(*interrupt_request(self._session_id, name))
         except Exception:
-            ticket.interrupt_requested = False
+            self._interrupting.discard(name)
+            if ticket is not None:
+                ticket.interrupt_requested = False
             raise
         interrupt_ms = (self._monotonic() - started) * 1000.0
         if pid is None:
@@ -250,59 +271,93 @@ class CodexSession(BaseHarnessSession[CodexConfig]):
             ),
         )
 
+    def _observed_name(self) -> str | None:
+        for name, local in self._ledger.open_turns.items():
+            if local in self._observed:
+                return name
+        return None
+
     def _steer_target(self) -> tuple[str, str] | None:
-        ticket = self._active
         thread_id = self._session_id
-        if (
-            self._closed
-            or self._starting
-            or ticket is None
-            or ticket.interrupt_requested
-            or not thread_id
-            or not ticket.provider_turn_id
-        ):
+        if self._closed or self._starting or not thread_id:
             return None
-        return thread_id, ticket.provider_turn_id
+        ticket = self._active
+        if ticket is not None:
+            if ticket.interrupt_requested or not ticket.provider_turn_id:
+                return None
+            return thread_id, ticket.provider_turn_id
+        name = self._observed_name()
+        if name is None or name in self._interrupting:
+            return None
+        return thread_id, name
 
     @property
     def steering_available(self) -> bool:
         return self._steer_target() is not None
 
-    async def steer(self, text: str, *, key: str) -> bool:
-        if not text.strip() or not key:
-            raise ValueError("steering requires nonempty text and a message key")
-        target = self._steer_target()
-        if target is None:
-            return False
-        thread_id, turn_id = target
-        identity = (turn_id, key)
-        if identity in self._steer_receipts:
-            raise RuntimeError("steer request already pending for this message key")
-        receipt: asyncio.Future[bool] = asyncio.get_running_loop().create_future()
-        self._steer_receipts[identity] = receipt
-        try:
-            try:
-                response = await self._call(*steer_request(thread_id, turn_id, text, key=key))
-            except JsonRpcError as exc:
-                if exc.code in (INVALID_REQUEST, METHOD_NOT_FOUND, INVALID_PARAMS):
-                    return False
-                raise
-            if response.get("turnId") != turn_id:
-                raise RuntimeError("Codex steer response did not name the expected turn")
-            if not await receipt:
-                raise RuntimeError("Codex turn ended before the steer receipt arrived")
-            return True
-        finally:
-            del self._steer_receipts[identity]
+    # meiva:note
+    # Hand a batch to the foreground, in order. Each input either joins the running turn
+    # (`turn/steer`, whichever turn is running — ours or one the server began) or, when none runs,
+    # begins one (`turn/start`); both carry the input's key as `clientUserMessageId`, which the server
+    # echoes on the `userMessage` item that puts it in the model's context. The receipt of the request
+    # is the first acknowledgement, that item is the second, and a turn that ends without it has lost the
+    # input. A refusal (`no active turn to steer`) is a fact about the input, so it becomes an event, and
+    # once one input is refused the rest of the batch is refused with it, so order is never inverted.
+    # meiva:link base/lm/harness/docs/delivery.md
+    async def deliver(self, inputs: Sequence[HarnessInput]) -> None:
+        batch = validated_batch(inputs)
+        if self._closed:
+            raise SessionClosedError("session is closed")
+        for entry in batch:
+            self._ledger = self._ledger.sent(entry.key)
+        async with self._delivery_lock:
+            for index, entry in enumerate(batch):
+                if not await self._deliver_one(entry):
+                    for later in batch[index + 1 :]:
+                        self._apply(
+                            self._ledger.rejected(later.key, "an earlier input was rejected")
+                        )
+                    return
 
-    def _finish_steer_receipts(self, *, turn_id: str | None = None) -> None:
-        for (pending_turn, _), receipt in self._steer_receipts.items():
-            if (turn_id is None or pending_turn == turn_id) and not receipt.done():
-                receipt.set_result(False)
+    async def _deliver_one(self, item: HarnessInput) -> bool:
+        ticket = self._active
+        if ticket is not None:
+            await ticket.interrupt_ready.wait()
+        target = self._steer_target()
+        if target is not None:
+            return await self._steer_input(item, *target)
+        if self._idle():
+            return await self._start_input(item)
+        self._apply(self._ledger.rejected(item.key, "the foreground is not accepting input"))
+        return False
+
+    async def _start_input(self, item: HarnessInput) -> bool:
+        ticket = self.submit(item.text, input_key=item.key, images=item.images)
+        await ticket.interrupt_ready.wait()
+        return self._ledger.phase(item.key) is not InputPhase.REJECTED
+
+    async def _steer_input(self, item: HarnessInput, thread_id: str, turn_name: str) -> bool:
+        self._ledger = self._ledger.scoped(item.key, turn_name)
+        try:
+            response = await self._call(*steer_request(thread_id, turn_name, item))
+        except JsonRpcError as exc:
+            reason = rejection_reason(exc.code, exc.message)
+            if reason is None:
+                raise
+            self._apply(self._ledger.rejected(item.key, reason))
+            return False
+        if response.get("turnId") != turn_name:
+            raise RuntimeError("Codex steer response did not name the expected turn")
+        self._apply(self._ledger.received(item.key, AckSignal.STRONG))
+        return True
 
     async def _begin(self, ticket: TurnTicket) -> None:
         ticket.started_at = self._monotonic()
         self._baseline = snapshot(self._probe, self._transport.pid)
+        key = ticket.input_key
+        if self._ledger.phase(key) in (None, InputPhase.REJECTED, InputPhase.LOST):
+            self._ledger = self._ledger.sent(key)
+        item = HarnessInput(key=key, text=ticket.text, images=ticket.images)
         # meiva:note
         # `turn/started` can beat this response and supply the interrupt target.
         # Activity waits for the response to certify its native turn id.
@@ -312,13 +367,13 @@ class CodexSession(BaseHarnessSession[CodexConfig]):
             result = await self._call(
                 *turn_start_request(
                     self._session_id,
-                    ticket.text,
+                    item,
                     model=self.config.model,
                     reasoning_effort=self.config.reasoning_effort,
                 )
             )
         except Exception as exc:
-            self._fail_turn(ticket, exc)
+            self._starting_failed(ticket, key, exc)
             return
         finally:
             self._starting = False
@@ -328,9 +383,20 @@ class CodexSession(BaseHarnessSession[CodexConfig]):
         if not self._bind_turn(ticket, result, starting=True):
             self._fail_turn(ticket, RuntimeError("Codex turn/start response did not name a turn"))
             return
+        name = ticket.provider_turn_id or ""
+        self._ledger = self._ledger.bind_turn(name, ticket.turn_id).scoped(key, name)
+        self._emit(TurnStarted(ticket.turn_id, TurnOrigin.INPUT, (key,), self.generation))
+        self._apply(self._ledger.received(key, AckSignal.STRONG))
         self._emit(ForegroundAccepted(turn_id=ticket.turn_id))
         for message, params in early:
             self._dispatch_notification(message, params)
+
+    def _starting_failed(self, ticket: TurnTicket, key: str, exc: Exception) -> None:
+        if isinstance(exc, JsonRpcError):
+            reason = rejection_reason(exc.code, exc.message)
+            if reason is not None:
+                self._apply(self._ledger.rejected(key, reason))
+        self._fail_turn(ticket, exc)
 
     def _bind_turn(self, ticket: TurnTicket, announce: RequestParams, *, starting: bool) -> bool:
         bound = binding(announce, previous=ticket.provider_turn_id, starting=starting)
@@ -383,46 +449,51 @@ class CodexSession(BaseHarnessSession[CodexConfig]):
             case NotificationKind.ERROR:
                 self._on_error(params)
 
+    # meiva:note
+    # The local turn id a provider turn name belongs to: the running ticket's own turn (it may still
+    # hold the name only provisionally, see `_bind_turn`), or a turn the server began on its own that
+    # `turn/started` made known. A name that is neither is another turn's speech and belongs to no
+    # turn here, so a late frame of a turn that already ended never lands on the next one.
+    # meiva:link base/lm/harness/docs/delivery.md
+    def _attribute(self, name: str | None) -> str | None:
+        ticket = self._claim(name)
+        if ticket is not None:
+            return ticket.turn_id
+        return self._ledger.local_turn(name)
+
     def _on_text_delta(self, message: Inbound, params: JsonObject) -> None:
-        ticket = self._claim(message.turn_id)
-        if ticket is None:
+        local = self._attribute(message.turn_id)
+        if local is None:
             return
-        for event in text_delta(params, turn_id=ticket.turn_id):
+        for event in text_delta(params, turn_id=local):
             self._emit(event)
 
     def _on_reasoning_delta(self, message: Inbound, params: JsonObject) -> None:
-        ticket = self._claim(message.turn_id)
-        if ticket is None:
+        local = self._attribute(message.turn_id)
+        if local is None:
             return
-        for event in reasoning_delta(params, turn_id=ticket.turn_id):
+        for event in reasoning_delta(params, turn_id=local):
             self._emit(event)
 
     def _on_item(self, message: Inbound, params: JsonObject) -> None:
-        ticket = self._claim(message.turn_id)
-        if ticket is None:
+        local = self._attribute(message.turn_id)
+        if local is None:
             return
         step = item(message.kind, params)
-        if (
-            step.user_message_key is not None
-            and message.turn_id is not None
-            and params.get("threadId") == self._session_id
-        ):
-            receipt = self._steer_receipts.get((message.turn_id, step.user_message_key))
-            if receipt is not None and not receipt.done():
-                receipt.set_result(True)
+        if step.user_message_key is not None and params.get("threadId") == self._session_id:
+            self._apply(self._ledger.in_context(step.user_message_key, local))
         if step.text is not None:
-            record = self._turn_record(ticket.turn_id).with_text(step.text, final=step.final)
-            self._records[ticket.turn_id] = record
-            self._emit(AssistantText(turn_id=ticket.turn_id, text=step.text))
-        for event in item_event(params, phase=step.phase, turn_id=ticket.turn_id):
+            record = self._turn_record(local).with_text(step.text, final=step.final)
+            self._records[local] = record
+            self._emit(AssistantText(turn_id=local, text=step.text))
+        for event in item_event(params, phase=step.phase, turn_id=local):
             self._emit(event)
 
     def _on_usage(self, message: Inbound, params: JsonObject) -> None:
-        ticket = self._claim(message.turn_id)
-        if ticket is None:
+        local = self._attribute(message.turn_id)
+        if local is None:
             return
-        record = self._turn_record(ticket.turn_id).with_usage(usage_from(params))
-        self._records[ticket.turn_id] = record
+        self._records[local] = self._turn_record(local).with_usage(usage_from(params))
 
     # meiva:note
     # An error the server will not retry, on a turn this session is not running, is
@@ -433,63 +504,105 @@ class CodexSession(BaseHarnessSession[CodexConfig]):
         report = error_report(params)
         if report is None:
             return
-        ticket = self._claim(report.turn_id)
-        if ticket is None:
+        local = self._attribute(report.turn_id)
+        if local is None:
             self._unsolicited(UnsolicitedOutput(source="error", text=report.text))
             return
-        self._emit(TurnFaulted(turn_id=ticket.turn_id, error=report.text))
+        self._emit(TurnFaulted(turn_id=local, error=report.text))
 
     # meiva:note
     # `turn/started` names the turn the server is about to run, and it can arrive
     # before `turn/start` has answered. Only a turn this session is in the middle
-    # of starting may provisionally take the name so interruption can target it.
-    # meiva:link base/lm/harness/docs/attribution.md
+    # of starting may provisionally take the name so interruption can target it. A turn
+    # that starts while this session has none of its own running is the server's: a
+    # background wake-up, a queued message. It is observed as a turn of its own, so its
+    # text and tools are attributed to it and the next turn we submit waits for it.
+    # meiva:link base/lm/harness/docs/delivery.md
     def _on_turn_started(self, params: JsonObject) -> None:
         ticket = self._active
-        if ticket is None:
+        if ticket is not None:
+            _ = self._bind_turn(ticket, params, starting=self._starting)
             return
-        _ = self._bind_turn(ticket, params, starting=self._starting)
+        name = observed_turn_name(params)
+        if name is None or name in self._ledger.open_turns or self._closed:
+            return
+        local = self._mint_turn_id()
+        self._ledger = self._ledger.bind_turn(name, local)
+        self._observed.add(local)
+        self._emit(
+            TurnStarted(
+                local,
+                TurnOrigin.HARNESS,
+                (),
+                self.generation,
+                cause=HarnessCause.UNKNOWN,
+                detail="turn/started",
+            )
+        )
 
     def _on_turn_completed(self, message: Inbound) -> None:
-        ticket = self._claim(message.turn_id)
-        if ticket is None:
+        name = message.turn_id
+        ticket = self._claim(name)
+        local = ticket.turn_id if ticket is not None else self._ledger.local_turn(name)
+        if local is None:
             # meiva:note
-            # A completion for a turn this session did not run: the server's own work
-            # (a queued, reviewed or compacted turn), or a turn an earlier session ran
-            # and the served transcript replays. It is neither our boundary nor a
-            # failure, and its reply is content the agent has not read — so it goes to
-            # the sink the way any other inbound does (#5663).
+            # A completion for a turn this session did not run: a turn an earlier session ran and
+            # the served transcript replays, or work the server did without announcing it. It is
+            # neither our boundary nor a failure, and its reply is content the agent has not
+            # read — so it goes to the sink the way any other inbound does (#5663).
             # meiva:link base/lm/harness/docs/attribution.md
             self._unsolicited(
                 UnsolicitedOutput(source="turn/completed", text=unclaimed_text(message.turn))
             )
             return
-        if message.turn_id:
-            self._finish_steer_receipts(turn_id=message.turn_id)
+        provider_name = name or ""
+        self._apply(self._ledger.lose_unsettled(provider_name))
+        self._ledger, first = self._ledger.end_turn(provider_name)
+        if first is None:
+            return
         settlement = settle(
-            turn_id=ticket.turn_id,
+            turn_id=local,
             session_id=self._session_id,
             turn=message.turn,
-            record=self._turn_record(ticket.turn_id),
+            record=self._turn_record(local),
             totals=self._totals,
         )
-        self._records.pop(ticket.turn_id, None)
+        self._records.pop(local, None)
         self._totals = settlement.totals
-        self._emit(settlement.completed)
-        self._complete(ticket, settlement.outcome)
+        self._interrupting.discard(provider_name)
+        completed = replace(settlement.completed, generation=self.generation)
+        self._emit(completed)
+        if completed.interrupted:
+            self._emit(InterruptConfirmed(local, self.generation))
+        if ticket is not None:
+            self._complete(ticket, settlement.outcome)
+        else:
+            self._observed.discard(local)
+            self._promote(keep_events=True)
 
     def _on_request(self, method: str, params: JsonObject) -> JsonObject:
         answer = answer_request(method, params, decision=self.config.approval_decision)
-        ticket = self._active
-        if answer.denial is not None and ticket is not None:
-            record = self._turn_record(ticket.turn_id).with_denial(answer.denial)
-            self._records[ticket.turn_id] = record
+        local = self._running_turn_id()
+        if answer.denial is not None and local is not None:
+            self._records[local] = self._turn_record(local).with_denial(answer.denial)
         return answer.answer
 
+    def _running_turn_id(self) -> str | None:
+        if self._active is not None:
+            return self._active.turn_id
+        name = self._observed_name()
+        return self._ledger.local_turn(name)
+
+    # meiva:note
+    # The app-server is gone: no turn it ran can end any more and no acknowledgement can arrive. The
+    # turns it began on its own are dropped with it. An input it had received but not put in the
+    # context is not declared lost here — the process dying says nothing about whether the thread
+    # recorded it — and is left for reconciliation against the rollout.
+    # meiva:link base/lm/harness/docs/delivery.md
     def _on_transport_closed(self, reason: str) -> None:
         if self._closed:
             return
-        self._finish_steer_receipts()
+        self._observed.clear()
         self._emit(SessionFailed(error=f"app-server: {reason}"))
         self._fail_active(TransportClosedError(reason))
 

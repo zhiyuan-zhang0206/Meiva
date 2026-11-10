@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
+from enum import StrEnum
 
 
 @dataclass(frozen=True, slots=True)
@@ -131,6 +132,10 @@ class TurnCompleted:
     # 400 is named as one instead of being reported as a successful stop.
     api_error_status: int | None = None
     errors: tuple[str, ...] = ()
+    # meiva:note
+    # The process generation the turn ended under (see `InputReceived`). 0 means the adapter
+    # does not stamp generations yet.
+    generation: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -193,6 +198,86 @@ class UnsolicitedOutput:
     text: str
 
 
+# meiva:note
+# The unified delivery vocabulary: what became of each input the session was handed, and which
+# turns the harness ran. Every adapter translates its own protocol frames into exactly these events,
+# so a consumer reads one contract. Inputs are identified by the caller's own `key`; a turn is named
+# by the session's `turn_id`. Every event carries the process `generation` (1 for the first process a
+# session starts, +1 for every respawn) and an adapter drops a frame that a previous generation's
+# process emits late, so a consumer never sees a stale process speak.
+# Two acknowledgements are different facts: `InputReceived` says the harness process has the input;
+# `InputInContext` says it is a message the model can see, attributed to a turn. A turn ending is not a
+# settlement: an input is settled only by `InputInContext`, `InputRejected` or `InputLost`.
+# meiva:link base/lm/harness/docs/delivery.md
+class AckSignal(StrEnum):
+    STRONG = "strong"
+    WEAK = "weak"
+
+
+@dataclass(frozen=True, slots=True)
+class InputReceived:
+    key: str
+    signal: AckSignal
+    generation: int
+
+
+@dataclass(frozen=True, slots=True)
+class InputInContext:
+    key: str
+    turn_id: str
+    generation: int
+
+
+@dataclass(frozen=True, slots=True)
+class InputRejected:
+    key: str
+    reason: str
+    generation: int
+
+
+@dataclass(frozen=True, slots=True)
+class InputLost:
+    key: str
+    generation: int
+
+
+# meiva:note
+# INPUT: the turn began because of inputs this session delivered, `keys` names them. HARNESS: the
+# harness began it on its own (a revived queued message, a background-task wake-up, a timer).
+class TurnOrigin(StrEnum):
+    INPUT = "input"
+    HARNESS = "harness"
+
+
+# meiva:note
+# Why the harness began a turn nobody here asked for. The CLI's own background tasks, timers and
+# queued-message revival are first-class behaviour, so each such turn is observed in full and named
+# by its cause, never dropped or folded into a neighbouring turn. UNKNOWN is for a turn the
+# adapter can see but cannot explain.
+# meiva:link base/lm/harness/docs/delivery.md
+class HarnessCause(StrEnum):
+    QUEUED_INPUT_REVIVED = "queued_input_revived"
+    BACKGROUND_TASK = "background_task"
+    SCHEDULED_WAKE = "scheduled_wake"
+    UNKNOWN = "unknown"
+
+
+@dataclass(frozen=True, slots=True)
+class TurnStarted:
+    turn_id: str
+    origin: TurnOrigin
+    keys: tuple[str, ...]
+    generation: int
+    cause: HarnessCause | None = None
+    detail: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class InterruptConfirmed:
+    turn_id: str
+    generation: int
+
+
 UnsolicitedSink = Callable[[UnsolicitedOutput], None]
 
 
@@ -209,6 +294,12 @@ BridgeEvent = (
     | ToolResult
     | RateLimitObserved
     | TurnCompleted
+    | InputReceived
+    | InputInContext
+    | InputRejected
+    | InputLost
+    | TurnStarted
+    | InterruptConfirmed
     | UnsolicitedOutput
     | SessionClosed
     | TurnFaulted

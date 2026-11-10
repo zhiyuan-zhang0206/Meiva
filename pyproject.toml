@@ -771,7 +771,13 @@ root = "base/lm/harness/antigravity/tests"
 root = "base/lm/harness/claude/tests"
 
 [[tool.pyright.executionEnvironments]]
+root = "base/lm/harness/codex/reconciliation/tests"
+
+[[tool.pyright.executionEnvironments]]
 root = "base/lm/harness/codex/tests"
+
+[[tool.pyright.executionEnvironments]]
+root = "base/lm/harness/delivery/tests"
 
 [[tool.pyright.executionEnvironments]]
 root = "base/lm/harness/tests"

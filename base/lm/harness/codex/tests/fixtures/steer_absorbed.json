@@ -1,0 +1,13 @@
+{
+  "source": "codex app-server 0.166, round 3 scenario b: steer sent while a command ran, userMessage item with our clientId arrived 2.3s later; ids replaced by placeholders",
+  "frames": {
+    "ack2": [
+      {"method": "item/started", "params": {"threadId": "$thread", "turnId": "$turn", "item": {"type": "userMessage", "id": "user-2", "clientId": "cid-b"}}},
+      {"method": "item/completed", "params": {"threadId": "$thread", "turnId": "$turn", "item": {"type": "userMessage", "id": "user-2", "clientId": "cid-b"}}}
+    ],
+    "end": [
+      {"method": "item/completed", "params": {"threadId": "$thread", "turnId": "$turn", "item": {"type": "agentMessage", "id": "msg-1", "text": "DONE cid-b", "phase": "final_answer"}}},
+      {"method": "turn/completed", "params": {"threadId": "$thread", "turn": {"id": "$turn", "status": "completed", "durationMs": 9, "items": []}}}
+    ]
+  }
+}

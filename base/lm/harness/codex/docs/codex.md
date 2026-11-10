@@ -89,13 +89,24 @@ Ordinary submissions wait for the previous `turn/completed` before sending
 `expectedTurnId` set to the bound Codex turn and `clientUserMessageId` set to
 the Meiva inbound key. Codex rejects the request if that turn is no longer active.
 
-A successful RPC admits input to Codex's pending queue. The bridge acknowledges
-execution receipt after a matching `item/completed` notification names the same
-thread, turn and `userMessage.clientId`. That notification follows insertion
-into Codex's conversation history. A transport or internal failure, an invalid
-response, or completion before the receipt leaves delivery uncertain.
-`clientUserMessageId` correlates the notification. It carries no replay
-guarantee.
+`deliver()` sends `turn/steer` to the running turn (a turn the server began on its own counts) or,
+when none runs, `turn/start`; both carry the input key as `clientUserMessageId`, and images go as
+`image` data URLs (schema-supported, not yet observed against a real server). The two
+acknowledgements are separate events: the RPC response naming the expected turn is ACK 1
+(`InputReceived`, strong), and `item/completed` of a `userMessage` whose `clientId` is the key is ACK 2
+(`InputInContext`, attributed to the turn named by the notification). A turn that completes while a
+steered input has no ACK 2 declares it `InputLost` before `TurnCompleted`. `-32600 no active turn to
+steer`, a missing method and invalid params are `InputRejected` (the rest of the batch is refused with
+it); any other RPC error raises. `clientUserMessageId` carries no replay guarantee, so a lost input may
+be handed over again, and only after a rollout reconciliation says it is not there
+(`reconciliation/`, matching `item_completed.item.client_id`; the rollout format was observed on
+app-server 0.166 and is not a published interface).
+
+A `turn/started` for a turn this session did not start, with `status: inProgress`, while none of ours runs,
+is observed as a harness turn (`TurnStarted(origin=HARNESS, cause=UNKNOWN)`): its text, tools and usage are
+attributed to it, it completes once, and the next turn we submit waits for it. Frames are attributed by
+provider turn id, so a late command completion of an interrupted turn never lands on the next turn.
+Details: [delivery](../../docs/delivery.md).
 
 ## Invariants
 
@@ -110,7 +121,7 @@ Adapter invariants are pinned by tests in `tests/`:
 | 5 | a turn can finish after two quiet days | `test_cancel.py::test_default_turn_can_finish_after_two_quiet_days` |
 | 6 | usage accumulates per turn | `test_inbound_queue.py::test_usage_accumulates_across_turns` |
 | 7 | the handoff is injected once, never on resume | `test_session.py::test_resume_uses_the_registry_and_skips_the_handoff` |
-| 8 | steering waits for a correlated execution receipt | `test_inbound_queue.py::test_steer_waits_for_matching_completed_user_item` |
+| 8 | steering waits for a correlated execution receipt | `test_inbound_queue.py::test_steer_waits_for_matching_completed_user_item`, `test_delivery.py` |
 
 ## Version pinning
 
