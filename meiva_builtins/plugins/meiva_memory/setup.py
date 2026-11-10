@@ -265,6 +265,15 @@ def configure_lfs(root: Path, *, config: MemoryConfig) -> None:
     attributes.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
+def _reject_root_notes(roots: set[Path]) -> None:
+    for root in roots:
+        if (root / "MEMORY.md").exists():
+            raise RuntimeError(
+                f"{root} contains legacy root-level notes. Move shared notes into memory/ "
+                "with an operator-reviewed migration before initialization; no files were moved."
+            )
+
+
 def scaffold(*, machine: MachineIdentityReader, facts: ScaffoldFacts) -> None:
     """Bring this cluster's memory pool up during explicit initialization.
 
@@ -292,20 +301,11 @@ def scaffold(*, machine: MachineIdentityReader, facts: ScaffoldFacts) -> None:
             "before running meiva memory init. No files were moved."
         )
     consolidated = gateway_vault_dir(roles=machine.role(), home=facts.home)
-    for root in {pool, consolidated} if "gateway" in machine.role() else {pool}:
-        if (root / "MEMORY.md").exists():
-            raise RuntimeError(
-                f"{root} contains legacy root-level notes. Move shared notes into memory/ "
-                "with an operator-reviewed migration before initialization; no files were moved."
-            )
+    roots = {pool, consolidated} if "gateway" in machine.role() else {pool}
+    _reject_root_notes(roots)
     _ensure_memory_repo(machine=machine, facts=facts, target=pool)
     _ensure_gateway_memory_repo(machine=machine, facts=facts, target=consolidated)
-    for root in {pool, consolidated} if "gateway" in machine.role() else {pool}:
-        if (root / "MEMORY.md").exists():
-            raise RuntimeError(
-                f"{root} contains legacy root-level notes. Move shared notes into memory/ "
-                "with an operator-reviewed migration before initialization; no files were moved."
-            )
+    _reject_root_notes(roots)
     if not (pool / ".git").is_dir():
         # The bring-up above declined and said why (no remote, wrong branch).
         logger.debug("[memory-scaffold] {} is not a git checkout, skipping", pool)
@@ -315,7 +315,7 @@ def scaffold(*, machine: MachineIdentityReader, facts: ScaffoldFacts) -> None:
     from base.packages.plugins.config_registration import disk_image_path, read_config_image
 
     config = read_config_image(MemoryConfig, disk_image_path("meiva_memory", home=facts.home))
-    for root in {pool, consolidated} if "gateway" in machine.role() else {pool}:
+    for root in roots:
         (root / "memory").mkdir(exist_ok=True)
         configure_lfs(root, config=config)
     armed = _arm_hooks(pool)

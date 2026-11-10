@@ -15,3 +15,8 @@ standard meaning of being relative to the referring note.
 Legacy checkouts require an operator-controlled migration. Initialization must
 preserve existing dirty files, unpushed commits and repository configuration;
 production activation and index rebuilding remain separate from this code change.
+
+CI review required smaller orchestration functions. Shared root-note rejection
+and source-repository mapping were extracted into focused helpers, preserving
+the initialization and resolution behavior while staying within complexity
+budgets.

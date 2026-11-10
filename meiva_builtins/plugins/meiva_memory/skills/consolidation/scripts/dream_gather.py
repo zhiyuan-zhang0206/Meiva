@@ -303,6 +303,15 @@ def _aging_entries(
     ]
 
 
+def _source_roots(pool: Path, repos: Mapping[str, Path] | None) -> dict[str, Path]:
+    vault = pool.parent if pool.name == "memory" else pool
+    repo_map: dict[str, Path] = {
+        **(dict(repos) if repos is not None else {}),
+        "vault": vault.resolve(),
+    }
+    return {**source_repos(vault, repo_map), "vault": vault.resolve()}
+
+
 # meiva:note
 # Deterministic Phase 2 (`Gather Signal`) probe for Meiva Dream consolidation: scans every note in
 # `pool`, intersects inline Markdown file links against Vault and mapped repository file trees
@@ -319,12 +328,7 @@ def gather_signals(
     max_verified_age_days: int = 30,
 ) -> dict[str, object]:
     resolved_home = home if home is not None else resolve_meiva_home()
-    vault = pool.parent if pool.name == "memory" else pool
-    repo_map: dict[str, Path] = {
-        **(dict(repos) if repos is not None else {}),
-        "vault": vault.resolve(),
-    }
-    repo_map = {**source_repos(vault, repo_map), "vault": vault.resolve()}
+    repo_map = _source_roots(pool, repos)
     records = [
         rec for rel in _all_pool_notes(pool) if (rec := _read_note_record(pool, rel)) is not None
     ]
