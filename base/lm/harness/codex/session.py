@@ -6,6 +6,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import replace
 from pathlib import Path
 
+from base.host.boundary.json_values import is_object_dict
 from base.host.env.harness_binaries import resolve_harness_binary
 from base.lm.harness.base_session import BaseHarnessSession, SessionBinding, TurnTicket
 from base.lm.harness.cancel import (
@@ -18,6 +19,7 @@ from base.lm.harness.cancel import (
 from base.lm.harness.codex.admission import observed_turn_name, rejection_reason
 from base.lm.harness.codex.auth import build_env
 from base.lm.harness.codex.config import CodexConfig
+from base.lm.harness.codex.fork import fork_thread_request
 from base.lm.harness.codex.frames import (
     JsonObject,
     JsonRpcError,
@@ -74,6 +76,7 @@ from base.lm.harness.process import (
     wait_gone,
     watch_tree,
 )
+from base.lm.harness.registry import SessionRecord
 from base.lm.harness.session import (
     EVENT_STREAM_END,
     InboundQueueFullError,
@@ -173,6 +176,9 @@ class CodexSession(BaseHarnessSession[CodexConfig]):
         await self._call(*initialize_request())
         await self._transport.notify(INITIALIZED)
         resolved_resume = self._resolve_resume(resume)
+        origin = self._fork_origin(resolved_resume)
+        if origin is not None:
+            resolved_resume = await self._clone_thread(origin)
         result = await self._call(
             *open_thread_request(
                 resolved_resume,
@@ -194,8 +200,26 @@ class CodexSession(BaseHarnessSession[CodexConfig]):
                 session_id=opened.session_id, model=opened.model, cwd=opened.cwd, turn_id=None
             )
         )
-        self._bind()
+        if origin is None:
+            self._bind()
         self._inject_handoff(handoff)
+
+    # meiva:note
+    # The clone's id is registered the moment the app-server answers, before the thread is
+    # resumed: the only window left is a crash between that answer and the registry write, and
+    # it leaves one thread nobody uses. The next start clones again and registers the new one;
+    # an unused thread costs disk and is never resumed, and Codex offers no way to name the
+    # clone in advance that would close the window.
+    # meiva:link base/lm/harness/docs/fork.md
+    async def _clone_thread(self, origin: SessionRecord) -> str:
+        result = await self._call(*fork_thread_request(origin.session_id, cwd=str(self.config.cwd)))
+        thread = result.get("thread")
+        cloned = thread.get("id") if is_object_dict(thread) else None
+        if not isinstance(cloned, str) or not cloned:
+            raise RuntimeError("thread/fork answered without a thread id")
+        self._session_id = cloned
+        self._bind()
+        return cloned
 
     async def close(self, *, reason: str = "closed") -> None:
         if self._closed:

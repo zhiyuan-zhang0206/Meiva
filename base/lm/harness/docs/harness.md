@@ -48,7 +48,7 @@ and open questions are recorded in
 | `turn.py` | `SessionTotals`, `TurnOutcome`, `add_cost` |
 | `engine.py` | `HarnessSession` (the adapter contract), `TurnEngine` (what a graph run needs), and `HarnessTurn` (one turn's reply, usage and boundary, plus the `prelude` turns that completed before it) |
 | `handoff.py` | the six-section handoff document, `HANDOFF_VERSION`, its rendered byte size, and the workspace file it is saved to for after a compaction |
-| `registry.py` | `SessionRecord` and `FileSessionRegistry`: one JSON document per (agent id, harness), atomic replace; `migrate_single_slot_records` converts the older one-document-per-agent layout |
+| `registry.py` | `SessionRecord` and `FileSessionRegistry`: one JSON document per (agent id, harness), atomic replace; `migrate_single_slot_records` converts the older one-document-per-agent layout; the source of a fork's session to clone ([fork](fork.md)) |
 | `registration.py` | `HarnessRegistration` and `RegistrationStore`: the attachment row the bridge writes, always with an expiry, plus the crash sweep |
 | `process.py` | `ChildProbe`, the psutil implementation, tree snapshots and the bounded wait for a pid to disappear |
 

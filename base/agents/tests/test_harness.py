@@ -418,20 +418,34 @@ def test_fork_harness_mismatch_is_a_fork_error() -> None:
 
 
 class _ForkSourceCursor:
-    def __init__(self, harness: str) -> None:
+    def __init__(self, harness: str, machine: str = "macmini") -> None:
         self._harness = harness
+        self._machine = machine
 
     def execute(self, *_args: object, **_kwargs: object) -> None:
         return None
 
-    def fetchone(self) -> tuple[str]:
-        return (self._harness,)
+    def fetchone(self) -> tuple[str, str]:
+        return (self._harness, self._machine)
 
 
-def test_resolve_birth_harness_refuses_forking_an_external_harness_source() -> None:
-    cur = cast("psycopg.Cursor[Any]", _ForkSourceCursor("claude_code"))
-    with pytest.raises(ForkHarnessMismatch, match="only supported on the native 'meiva' harness"):
+@pytest.mark.parametrize("source", ["claude_code", "codex"])
+def test_resolve_birth_harness_lets_a_fork_keep_its_external_source_harness(source: str) -> None:
+    cur = cast("psycopg.Cursor[Any]", _ForkSourceCursor(source))
+    assert resolve_birth_harness(cur, None, 17) == source
+    assert resolve_birth_harness(cur, None, 17, machine="macmini") == source
+
+
+def test_resolve_birth_harness_refuses_forking_an_antigravity_source() -> None:
+    cur = cast("psycopg.Cursor[Any]", _ForkSourceCursor("antigravity"))
+    with pytest.raises(ForkHarnessMismatch, match="no supported fork entry"):
         resolve_birth_harness(cur, None, 17)
+
+
+def test_resolve_birth_harness_refuses_an_external_fork_on_another_machine() -> None:
+    cur = cast("psycopg.Cursor[Any]", _ForkSourceCursor("codex", machine="macmini"))
+    with pytest.raises(ForkHarnessMismatch, match="local file there"):
+        resolve_birth_harness(cur, None, 17, machine="ubuntu")
 
 
 def test_resolve_birth_harness_refuses_forking_onto_an_external_harness() -> None:

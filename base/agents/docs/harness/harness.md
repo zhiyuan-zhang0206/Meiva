@@ -55,11 +55,12 @@ Harness is a property of the agent initialized at birth and switchable on restar
 
 ## The fork rule
 
-Forking (`fork_from`) is supported **only on the native `meiva` harness** — external
-harnesses own their CLI session on disk and cannot be cloned. Forking a non-`meiva`
-source or requesting a non-`meiva` harness on a fork raises `ForkHarnessMismatch`
-(`fork_harness_mismatch`, HTTP 400) in prechecks and the birth transaction, rolling
-the birth back. A source with no launcher raises `HarnessNotLaunchable`.
+A fork keeps its source's harness. `meiva`, `claude_code` and `codex` sources fork (an external
+one only onto its own machine, because the CLI session it clones is a local file; see
+[forking an external harness agent](../../../lm/harness/docs/fork.md)). Naming another harness on a
+fork, forking an external source onto another machine, or forking an `antigravity` source raises
+`ForkHarnessMismatch` (`fork_harness_mismatch`, HTTP 400) in prechecks and the birth transaction,
+rolling the birth back. A source with no launcher raises `HarnessNotLaunchable`.
 
 ## No launcher, no birth
 

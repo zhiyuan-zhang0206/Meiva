@@ -43,6 +43,10 @@ from base.lm.harness.session import (
 # meiva:link base/lm/harness/docs/harness.md
 
 
+class ForkSourceUnavailableError(RuntimeError):
+    pass
+
+
 class TurnTicket:
     def __init__(
         self,
@@ -123,6 +127,7 @@ class SessionBinding:
     agent_id: int | None = None
     registry: SessionRegistry | None = None
     unsolicited: UnsolicitedSink | None = None
+    fork_source_agent_id: int | None = None
 
 
 class BaseHarnessSession[ConfigT: SessionConfig](ExitStatus):
@@ -165,6 +170,7 @@ class BaseHarnessSession[ConfigT: SessionConfig](ExitStatus):
         self._handoff_ticket: TurnTicket | None = None
         self._turn_seq = 0
         self._unsolicited_sink = binding.unsolicited
+        self._fork_source_agent_id = binding.fork_source_agent_id
         self._dispatch_held = False
         self._release_timer: asyncio.Task[None] | None = None
         self._unconsumed_events = 0
@@ -434,6 +440,30 @@ class BaseHarnessSession[ConfigT: SessionConfig](ExitStatus):
         if resolved:
             self._resumed_existing = True
         return resolved
+
+    # meiva:note
+    # A fork's first start. When this agent was born as a fork, has no session of its own on this
+    # harness, and the caller named no session to resume, the session to clone is the source agent's
+    # registered one on this harness and machine. The host passes a source only while it runs on the
+    # child's harness, so an older record the source kept on another harness is never cloned. A
+    # source with no record here (it never started a session, or it runs on another machine) is a
+    # refusal, never a quiet fresh session: a fork that silently lost its inherited conversation is
+    # the wrong agent. Cloning counts as resuming, so the handoff document is not co-delivered: the
+    # inherited conversation already holds it.
+    # meiva:link base/lm/harness/docs/fork.md
+    def _fork_origin(self, resolved: str | None) -> SessionRecord | None:
+        if resolved or self._fork_source_agent_id is None or self._registry is None:
+            return None
+        source = self._registry.load(self._fork_source_agent_id, harness=self.harness)
+        if source is None:
+            raise ForkSourceUnavailableError(
+                f"agent {self.agent_id} is a fork of agent {self._fork_source_agent_id}, but "
+                f"this machine holds no CLI session for that agent to clone (it never started "
+                f"one, or it runs on another machine); a fork cannot start without its source's "
+                f"conversation"
+            )
+        self._resumed_existing = True
+        return source
 
     def _resume_from_registry(self) -> str | None:
         if self._registry is None or self.agent_id is None:

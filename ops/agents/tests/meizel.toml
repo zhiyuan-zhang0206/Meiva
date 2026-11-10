@@ -1,3 +1,5 @@
+exports = ["test_agents_internals.py"]
+
 [uses]
 "test_agent_harness.py" = ["test_agents_internals.py"]
 "test_agent_forks.py" = ["birth_faults.py", "test_agents_internals.py"]

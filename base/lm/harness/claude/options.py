@@ -1,9 +1,21 @@
 from __future__ import annotations
 
 from collections.abc import Collection, Mapping
+from uuid import NAMESPACE_URL, uuid5
 
 from base.lm.harness.claude.auth import build_env
 from base.lm.harness.claude.config import BridgeConfig
+
+
+# meiva:note
+# The session id a fork's clone gets, fixed by the fork's own agent id. The CLI accepts a
+# caller-chosen id together with `fork_session`, and refuses to start under one that already
+# exists, so a start that crashed after the CLI wrote the clone is told apart from one that
+# never cloned by asking whether this id has a transcript: present resumes it, absent forks.
+# That makes the clone idempotent without a second record.
+# meiva:link base/lm/harness/docs/fork.md
+def fork_session_id(agent_id: int) -> str:
+    return str(uuid5(NAMESPACE_URL, f"https://meiva.local/claude-code-fork-session/{agent_id}"))
 
 
 # meiva:note
@@ -30,6 +42,7 @@ def option_values(
     cli_path: str | None,
     option_fields: Collection[str],
     resume: str | None,
+    fork_to: str | None = None,
 ) -> dict[str, object]:
     values: dict[str, object] = {}
     if cli_path is not None:
@@ -55,4 +68,10 @@ def option_values(
         env=build_env(environ, config.auth, host=environ),
         resume=resume,
     )
+    if fork_to is not None:
+        # meiva:note
+        # The clone is made by the same options every session of this agent starts with: only
+        # the two fork keys are added, so the model, system prompt, tools and environment that
+        # reach the prefix are the source's own and the clone's first request reuses its cache.
+        values.update(fork_session=True, session_id=fork_to)
     return values

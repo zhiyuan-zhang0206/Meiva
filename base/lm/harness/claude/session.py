@@ -42,7 +42,7 @@ from base.lm.harness.claude.inbound import (
     started_identity,
 )
 from base.lm.harness.claude.mapping import map_message, parse_result, task_update_status
-from base.lm.harness.claude.options import option_values
+from base.lm.harness.claude.options import fork_session_id, option_values
 from base.lm.harness.claude.settle import RunningTurn, settle_result
 from base.lm.harness.delivery import HarnessInput, InputPhase, validated_batch
 from base.lm.harness.events import (
@@ -106,6 +106,13 @@ class ClaudeSdkProtocol(Protocol):
         # Property name matches the `ClaudeSDKClient` class exported by `claude_agent_sdk`.
         ...
 
+    @property
+    def get_session_info(self) -> Callable[[str], object | None]:
+        # meiva:note
+        # The SDK's lookup of one stored session by id; it answers None for a session whose
+        # transcript does not exist or is empty.
+        ...
+
 
 async def _one_message(message: dict[str, object]) -> AsyncIterator[dict[str, object]]:
     yield message
@@ -164,7 +171,15 @@ class ClaudeSession(BaseHarnessSession[BridgeConfig]):
             raise SessionClosedError("session is closed")
         resume = self._resolve_resume(resume)
         _ = self._begin_generation()
-        client = self._sdk.ClaudeSDKClient(options=self._build_options(resume))
+        fork_to: str | None = None
+        origin = self._fork_origin(resume)
+        if origin is not None:
+            clone = fork_session_id(self._require_agent_id())
+            if self._sdk.get_session_info(clone) is not None:
+                resume = clone
+            else:
+                resume, fork_to = origin.session_id, clone
+        client = self._sdk.ClaudeSDKClient(options=self._build_options(resume, fork_to))
         await client.connect()
         self._client = client
         self._cli_pid = client_pid(client)
@@ -328,7 +343,12 @@ class ClaudeSession(BaseHarnessSession[BridgeConfig]):
         if errors:
             raise errors[0]
 
-    def _build_options(self, resume: str | None) -> object:
+    def _require_agent_id(self) -> int:
+        if self.agent_id is None:
+            raise RuntimeError("a fork session needs the agent that owns it")
+        return self.agent_id
+
+    def _build_options(self, resume: str | None, fork_to: str | None = None) -> object:
         options = self._sdk.ClaudeAgentOptions
         return options(
             **option_values(
@@ -337,6 +357,7 @@ class ClaudeSession(BaseHarnessSession[BridgeConfig]):
                 cli_path=self._cli_path,
                 option_fields=getattr(options, "__dataclass_fields__", {}),
                 resume=resume,
+                fork_to=fork_to,
             )
         )
 

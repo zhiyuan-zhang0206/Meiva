@@ -295,6 +295,7 @@ class AgentHost:
                         checkpoints=checkpoints,
                         harness=Harness(stored.harness),
                         birth_config=stored.birth_config,
+                        fork_source_agent_id=stored.fork_source_agent_id,
                     )
                     outcome = await self._drive_turns(
                         agent_id,
@@ -350,6 +351,7 @@ class AgentHost:
         checkpoints: TurnCheckpoints | None = None,
         harness: Harness = Harness.MEIVA,
         birth_config: Mapping[str, object] | None = None,
+        fork_source_agent_id: int | None = None,
     ) -> AgentRuntime:
         """Build a cold/stale model from this turn's slices, or retain its cache."""
         checkpoints = checkpoints or TurnCheckpoints(self._checkpointer, self._graph)
@@ -365,6 +367,7 @@ class AgentHost:
                 checkpoints=checkpoints,
                 harness=harness,
                 birth_config=birth_config,
+                fork_source_agent_id=fork_source_agent_id,
             ),
             self._evict,
             retire=self._sessions.retire,
@@ -385,6 +388,7 @@ class AgentHost:
         checkpoints: TurnCheckpoints | None = None,
         harness: Harness = Harness.MEIVA,
         birth_config: Mapping[str, object] | None = None,
+        fork_source_agent_id: int | None = None,
     ) -> AgentRuntime:
         """Reconcile claimed inbounds, then prepare the model."""
         checkpoints = checkpoints or TurnCheckpoints(self._checkpointer, self._graph)
@@ -402,6 +406,7 @@ class AgentHost:
             home=self._home,
             harness=harness,
             birth_config=birth_config,
+            fork_source_agent_id=fork_source_agent_id,
             registry=self._harness_registry,
             registrations=self._registrations,
             registration_ttl_seconds=self._policy.harness_registration_ttl_seconds,

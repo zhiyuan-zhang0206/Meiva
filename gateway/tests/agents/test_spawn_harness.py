@@ -317,8 +317,24 @@ class TestSpawnHarness:
         assert response.status_code == 400
         body = response.json()
         assert body["reason"] == "fork_harness_mismatch"
-        assert "only supported on the native 'meiva' harness" in body["detail"]
+        assert "no supported fork entry" in body["detail"]
         assert _agent_count(db_conn) == before
+
+    def test_fork_of_a_same_machine_external_harness_is_accepted_through_http(
+        self, db_conn: psycopg.Connection
+    ) -> None:
+        with gateway_test_client() as client:
+            _seed_harnesses(client)
+            source = _spawn(
+                client,
+                {
+                    "harness": "codex",
+                    "config": {"llm_model": "gpt-6.1-terra", "reasoning_effort": "high"},
+                },
+            )
+            _checkpoint(db_conn, source)
+            fork = _spawn(client, {"fork_from": source})
+        assert _harness(db_conn, fork) == "codex"
 
     def test_fork_naming_another_harness_is_rejected(self, db_conn: psycopg.Connection) -> None:
         with gateway_test_client() as client:

@@ -85,8 +85,11 @@ async def read_stored_config(
         row = await aquery_one(
             conn,
             StoredConfig,
-            "SELECT machine, status, harness, config_overlay, birth_config "
-            "FROM agents_meta WHERE id = %s",
+            "SELECT m.machine, m.status, m.harness, m.config_overlay, m.birth_config, "
+            "(SELECT s.id FROM agents_meta s "
+            "WHERE s.id = m.fork_source_agent_id AND s.harness = m.harness) "
+            "AS fork_source_agent_id "
+            "FROM agents_meta m WHERE m.id = %s",
             (agent_id,),
         )
     if row is None:

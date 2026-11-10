@@ -88,6 +88,34 @@ def creation_receipt(pool: ConnectionPool, key: str, request_hash: str) -> Creat
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
+# meiva:note
+# The machine a spawn lands on. A named machine is used as is. Without one a plain spawn lands on
+# the gateway's machine, and so does a fork, except that a fork of an external harness agent lands
+# on the source's machine (its CLI session is a local file there), and a fork of a native agent
+# lands on its spawner's machine when the spawner is an agent, as the SDK's own default did. A
+# source that does not exist falls through: the birth transaction reports it.
+# meiva:link base/lm/harness/docs/fork.md
+def default_spawn_target(
+    pool: ConnectionPool, body: SpawnAgentRequest, gateway_machine: str
+) -> str:
+    if body.machine is not None:
+        return body.machine
+    if body.fork_from is None:
+        return gateway_machine
+    with pool.connection() as conn, conn.cursor() as cur:
+        cur.execute("SELECT harness, machine FROM agents_meta WHERE id = %s", (body.fork_from,))
+        source = cur.fetchone()
+        if source is not None and source[0] != Harness.MEIVA.value and isinstance(source[1], str):
+            return source[1]
+        spawner = parse_spawner_agent_id(body.spawner)
+        if spawner is not None:
+            cur.execute("SELECT machine FROM agents_meta WHERE id = %s", (spawner,))
+            row = cur.fetchone()
+            if row is not None and isinstance(row[0], str):
+                return row[0]
+    return gateway_machine
+
+
 def _check_spawn_target_blocking(db: Database, target: str) -> None:
     refusal = launch_plan.spawn_target_refusal(
         target, lookup_role(db, target), paused=is_paused(db, target)
@@ -166,10 +194,22 @@ async def _resolve_external_spawn_probe(
     )
 
 
+# meiva:note
+# The harness a fork is born on: the one its source runs, because a fork keeps it (the birth
+# transaction refuses a request naming another). A source that does not exist reads as native, and
+# the birth transaction reports it.
+# meiva:link base/agents/docs/harness/harness.md
+def _fork_source_harness(pool: ConnectionPool, fork_from: int) -> Harness:
+    with pool.connection() as conn, conn.cursor() as cur:
+        cur.execute("SELECT harness FROM agents_meta WHERE id = %s", (fork_from,))
+        row = cur.fetchone()
+    return Harness.MEIVA if row is None else Harness(row[0])
+
+
 def _resolve_fork_effective_model_and_effort(
-    body: SpawnAgentRequest,
+    body: SpawnAgentRequest, source_harness: Harness
 ) -> tuple[Harness, str | None, str | None]:
-    effective_harness = body.harness or Harness.MEIVA
+    effective_harness = body.harness or source_harness
     effective_model = body.config.get("llm_model") if body.config else None
     effective_effort = body.config.get("reasoning_effort") if body.config else None
     return (
@@ -230,7 +270,8 @@ async def _resolve_spawn_effective_model_and_effort(
     body: SpawnAgentRequest,
 ) -> tuple[Harness, str | None, str | None]:
     if body.fork_from is not None:
-        return _resolve_fork_effective_model_and_effort(body)
+        source_harness = await asyncio.to_thread(_fork_source_harness, pool, body.fork_from)
+        return _resolve_fork_effective_model_and_effort(body, source_harness)
 
     parent_id = parse_spawner_agent_id(body.spawner)
     if parent_id is not None:
@@ -504,7 +545,9 @@ def spawn_preflight_blocking(
     tail_skills: list[str] | None = None
     if body.fork_from is not None:
         with pool.connection() as conn, conn.cursor() as cur:
-            resolve_birth_harness(cur, body.harness, body.fork_from, spawner=body.spawner)
+            resolve_birth_harness(
+                cur, body.harness, body.fork_from, spawner=body.spawner, machine=target
+            )
         tail_skills = _validate_fork_config(pool, body)
     # Settle a withdrawn llm_model BEFORE the overlay is stored or forwarded —
     # the row, fork copies and the launch op all carry the registered fallback,
