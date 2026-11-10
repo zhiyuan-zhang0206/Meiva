@@ -145,7 +145,7 @@ async def _backend_topk(
         "the request's `deadline_seconds` when that is shorter).\n"
         "\n"
         "Paths are relative to memory pool root (settings.services.memory_root, e.g.\n"
-        "`~/.meiva/memory/`); the SDK caller prepends `meiva.memory.PATH` to\n"
+        "`~/.meiva/vault/memory/`); the SDK caller prepends `meiva.memory.PATH` to\n"
         "reconstruct the absolute path. fs-neutral so gateway fs (e.g.\n"
         "/Users/x) and agent-runner fs (/home/y) being different still works.\n"
         "\n"
@@ -299,7 +299,7 @@ async def post_memory_refresh(request: Request) -> MemoryRefreshResponse:
     config = gateway_config(request)
     head = await asyncio.to_thread(
         memory_repo.pull_main,
-        root=config.memory_root,
+        root=config.memory_root.parent,
         keep_local=config.memory_pool.keep_local,
         branch=config.memory_pool.track_branch,
     )
@@ -372,8 +372,8 @@ def get_memory_note(request: Request, path: str) -> MemoryNoteResponse:
     ),
 )
 def get_memory_pool(request: Request) -> Response:
-    root = gateway_state(request).gateway_config.memory_root
-    if not root.is_dir():
+    root = gateway_state(request).gateway_config.memory_root.parent
+    if not (root / ".git").is_dir():
         raise HTTPException(status_code=404, detail="gateway memory pool not initialized")
     try:
         head, data = _build_pool_bundle(root, scratch=gateway_state(request).scratch)

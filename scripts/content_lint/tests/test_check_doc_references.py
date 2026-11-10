@@ -57,7 +57,9 @@ def test_a_link_after_an_indented_block_is_checked_again(tmp_path: Path) -> None
 
 
 def test_the_memory_template_is_clean() -> None:
-    template = REPO / "meiva_builtins" / "plugins" / "meiva_memory" / "template" / "MEMORY.md"
+    template = (
+        REPO / "meiva_builtins" / "plugins" / "meiva_memory" / "template" / "memory" / "MEMORY.md"
+    )
     assert check_doc(template, _NO_COMMANDS) == []
 
 

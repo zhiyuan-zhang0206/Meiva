@@ -153,6 +153,8 @@ _EXPECTED = {
         "fc.md: fact-check command not whitelisted: 'rm -rf x' (allowed: ['git', 'ls', 'test'])",
     ],
     "validate_file": {
+        "MEMORY.md": ["Line 5: missing_path: gone.md", "Line 6: malformed_source: https://x.md"],
+        "pointed/index.md": ["Line 4: missing_path: zzz.md", "Line 5: missing_path: sub/index.md"],
         "bad_utf.md": ["File is not valid UTF-8"],
         "badyaml.md": [
             "Invalid YAML: while parsing a block mapping\n"
@@ -277,7 +279,7 @@ def test_validate_note_accepts_a_complete_note(tmp_path: Path) -> None:
         validator.validate_note(
             _note(
                 tmp_path,
-                '---\ndescription: "Rule summary"\nsources:\n  - "repo:meiva:scripts/hooks/diff_checks.py"\n'
+                '---\ndescription: "Rule summary"\n'
                 'verified: "2026-11-09"\nstale_after: "2026-12-01"\n---\n# Rule\n',
                 "dream.md",
             )
@@ -300,11 +302,11 @@ def test_validate_note_accepts_a_complete_note(tmp_path: Path) -> None:
         ),
         (
             "---\nsources: not-a-list\n---\n# Heading\n",
-            ["Field 'sources' must be a list of non-empty strings"],
+            ["Frontmatter 'sources' is forbidden; use inline Markdown file links"],
         ),
         (
             '---\nsources:\n  - "repo:meiva:a.py"\n  - "  "\n---\n# Heading\n',
-            ["Field 'sources' must be a list of non-empty strings"],
+            ["Frontmatter 'sources' is forbidden; use inline Markdown file links"],
         ),
         (
             "---\nverified: 2026-11-09\n---\n# Heading\n",
@@ -392,38 +394,76 @@ def test_note_helpers(tmp_path: Path) -> None:
     assert validator.note_parts("---\n: : :\n  - [\n---\nx\n") is None
 
 
-@pytest.mark.parametrize(
-    "source",
-    [
-        "https://example.com",
-        "http://x",
-        "user:ruling",
-        "env:host",
-        "db:table",
-        "repo::a",
-        "repo:memory:",
-        "sources/",
-        "sources/#a",
-        "#a",
-        "/absolute/a",
-        "../a",
-    ],
-)
-def test_sources_reject_nonfile_syntax(tmp_path: Path, source: str) -> None:
-    w(tmp_path, "note.md", fm(sources=json.dumps([source])))
-    assert validate.validate_file(tmp_path / "note.md")
+def test_inline_sources_resolve_files_and_skip_code(tmp_path: Path) -> None:
+    vault = tmp_path / "vault"
+    note = vault / "memory" / "ops" / "note.md"
+    note.parent.mkdir(parents=True)
+    evidence = vault / "sources" / "ruling.jsonl"
+    evidence.parent.mkdir()
+    evidence.write_text("{}")
+    sibling = note.with_name("sibling.md")
+    sibling.write_text("# Evidence")
+    text = (
+        "# Rule\n[Evidence](/sources/ruling.jsonl#L1)\n"
+        "[Sibling](./sibling.md)\n`[ignored](https://example.com)`\n"
+        "```md\n[ignored](repo:bad)\n```\n"
+    )
+    note.write_text(text)
+    assert validate.body_links(text) == [(2, "/sources/ruling.jsonl#L1"), (3, "./sibling.md")]
+    assert validate.validate_file(note, vault=vault) == []
+    assert validate.resolve_link(note, vault, "/sources/ruling.jsonl") == (evidence, vault)
+    for target, reason in [
+        ("/sources", "not_a_file"),
+        ("/missing", "missing_path"),
+        ("../../../escape", "malformed_source"),
+        ("env:HOME", "malformed_source"),
+    ]:
+        with pytest.raises(ValueError, match=reason):
+            validate.resolve_link(note, vault, target)
+    repo = tmp_path / "code"
+    repo.mkdir()
+    code = repo / "mod.py"
+    code.write_text("x=1")
+    assert validate.resolve_link(note, vault, "/repos/meiva/mod.py", {"meiva": repo}) == (
+        code,
+        repo,
+    )
+    with pytest.raises(ValueError, match="malformed_source"):
+        validate.resolve_link(note, vault, "/repos/meiva/../outside", {"meiva": repo})
 
 
-@pytest.mark.parametrize(
-    "source",
-    [
-        "sources/a.pdf",
-        "sources/a.txt#item",
-        "sources/a.md",
-        "repo:memory:sources/a.jsonl",
-        "repo:meiva:base/a.py#L1",
-    ],
-)
-def test_sources_accept_file_syntax(tmp_path: Path, source: str) -> None:
-    w(tmp_path, "note.md", fm(sources=json.dumps([source])))
-    assert validate.validate_file(tmp_path / "note.md") == []
+def test_validator_scans_memory_tree_only(tmp_path: Path) -> None:
+    (tmp_path / "memory").mkdir()
+    (tmp_path / "memory" / "rule.md").write_text("# Rule")
+    (tmp_path / "README.md").write_text("[External](https://example.com)")
+    assert validate.validate_bundle(tmp_path) == ([], 1)
+
+
+@pytest.mark.parametrize("value", ["null", "[]", "[a]"])
+def test_sources_frontmatter_always_forbidden(tmp_path: Path, value: str) -> None:
+    note = _note(tmp_path, f"---\nsources: {value}\n---\n# Rule")
+    assert validate.validate_file(note) == [
+        "Frontmatter 'sources' is forbidden; use inline Markdown file links"
+    ]
+
+
+def test_markdown_link_parser_handles_nested_targets_and_tick_runs() -> None:
+    text = (
+        '[nested](/sources/a(b(c)).pdf "Title")\n'
+        "``code ` [hidden](env:HOME) `` [visible](./note.md)\n"
+        "~~~md\n[hidden](http://example.com)\n~~~\n[empty]()\n"
+    )
+    assert validate.body_links(text) == [(1, "/sources/a(b(c)).pdf"), (2, "./note.md"), (6, "")]
+
+
+def test_repo_mapping_prefers_explicit_then_vault_then_home(tmp_path: Path) -> None:
+    home = tmp_path / ".meiva"
+    vault = home / "vault"
+    mirror = vault / "repos" / "meiva"
+    mirror.mkdir(parents=True)
+    source = home / "source"
+    source.mkdir()
+    assert validate.source_repos(vault)["meiva"] == mirror
+    assert validate.source_repos(vault, {"meiva": source})["meiva"] == source
+    mirror.rmdir()
+    assert validate.source_repos(vault)["meiva"] == source

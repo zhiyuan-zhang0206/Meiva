@@ -273,7 +273,7 @@ def test_the_memory_checkout_follows_the_home_the_entry_hands_in(tmp_path: Path)
 
     memory_root = gateway_app.process_config(snapshot_process_config(), home=home).memory_root
 
-    assert memory_root in {home / "memory", home / "gateway" / "memory"}
+    assert memory_root in {home / "vault" / "memory", home / "gateway" / "vault" / "memory"}
     assert home.is_dir()
 
 

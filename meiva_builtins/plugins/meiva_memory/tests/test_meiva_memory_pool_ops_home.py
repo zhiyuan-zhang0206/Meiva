@@ -50,8 +50,8 @@ def test_the_pool_follows_the_home_variable_after_import(tmp_path: Path) -> None
 
     assert res.returncode == 0, res.stderr
     assert res.stdout.splitlines() == [
-        f"{first / 'memory'} {first / 'memory'}",
-        f"{second / 'memory'} {second / 'memory'}",
+        f"{first / 'vault' / 'memory'} {first / 'vault' / 'memory'}",
+        f"{second / 'vault' / 'memory'} {second / 'vault' / 'memory'}",
     ]
 
 
@@ -62,7 +62,7 @@ def test_pool_dir_is_under_the_default_home_when_meiva_home_is_unset(tmp_path: P
     res = _run("pool_dir", {}, home=fake_home)
 
     assert res.returncode == 0, res.stderr
-    assert res.stdout.strip() == str(fake_home / ".meiva" / "memory")
+    assert res.stdout.strip() == str(fake_home / ".meiva" / "vault" / "memory")
 
 
 def test_pool_dir_is_relative_to_the_explicit_home(tmp_path: Path) -> None:
@@ -71,7 +71,7 @@ def test_pool_dir_is_relative_to_the_explicit_home(tmp_path: Path) -> None:
     res = _run("pool_dir", {"MEIVA_HOME": str(home)})
 
     assert res.returncode == 0, res.stderr
-    assert res.stdout.strip() == str(home / "memory")
+    assert res.stdout.strip() == str(home / "vault" / "memory")
 
 
 def test_machine_name_short_circuits_on_its_own_env_var() -> None:

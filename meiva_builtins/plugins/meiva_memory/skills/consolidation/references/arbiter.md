@@ -12,7 +12,7 @@ you daily at `04:00` for full Dream consolidation and at `07:00` for the health 
 You are also woken immediately whenever the user or an agent asks you to consolidate.
 
 **Worktree + PR rule:** Never commit directly on the shared checkout's `main`
-(`~/.meiva/memory` pre-commit hook refuses direct commits on `main`, and switching
+(`~/.meiva/vault` pre-commit hook refuses direct commits on `main`, and switching
 the shared checkout onto a `machine-<name>` branch is retired). Perform all
 consolidation edits and index rebuilds inside an isolated temporary git worktree
 branched from `origin/main`, land them via a PR whose `validate` check is green,
@@ -24,17 +24,17 @@ and remove/prune the temporary worktree immediately afterwards.
    ```bash
    W=$(mktemp -d)/pool
    FH=$(dirname "$W")/fh
-   git -C ~/.meiva/memory fetch origin main
-   git -C ~/.meiva/memory worktree add -q -B "mem/dream-$(date +%m%d-%H%M)" "$W" origin/main
+   git -C ~/.meiva/vault fetch origin main
+   git -C ~/.meiva/vault worktree add -q -B "mem/dream-$(date +%m%d-%H%M)" "$W" origin/main
    mkdir -p "$FH"
-   ln -sfn "$W" "$FH/memory"
+   ln -sfn "$W" "$FH/vault"
    cd "$W"
    ```
    (`rebuild_memory_index.py` resolves the pool from `MEIVA_HOME` and takes no
    arguments; the fake home points it at `$W`.)
 
 2. **Phase 1 — Orientation:**
-   - Scan `MEMORY.md` and directory `index.md` files in `$W` to map existing
+   - Scan `memory/MEMORY.md` and directory `index.md` files in `$W/memory` to map existing
      topic directories, canonical filenames, and size/entry counts (`MEMORY.md`
      ≤ 16000 chars, note ≤ 8000 chars, ≤ 20 `.md` notes and ≤ 20 subdirectories
      per directory).
@@ -44,10 +44,10 @@ and remove/prune the temporary worktree immediately afterwards.
 3. **Phase 2 — Gather Signal (Three Incremental Sources):**
    - Run the deterministic Phase 2 probe helper first against the worktree:
      ```bash
-     ~/.meiva/source/.venv/bin/python ~/.meiva/source/meiva_builtins/plugins/meiva_memory/skills/consolidation/scripts/dream_gather.py --pool "$W"
+     ~/.meiva/source/.venv/bin/python ~/.meiva/source/meiva_builtins/plugins/meiva_memory/skills/consolidation/scripts/dream_gather.py --pool "$W/memory"
      ```
-     (`dream_gather.py` scans optional `sources` / `verified` / `stale_after` across
-     notes, intersects `repo:<alias>:<path>` anchors with repository file trees and
+     (`dream_gather.py` scans inline file links and optional `verified` / `stale_after` across
+     notes, intersects `/repos/<alias>/<path>` file links with repository file trees and
      recent `git log` commits after `verified`, flags expired `stale_after` and
      aging `verified` notes, lists pure-Markdown or legacy notes needing Dream OKF
      headers, and surfaces recent pool churn/conflict hotspots.)
@@ -61,7 +61,7 @@ and remove/prune the temporary worktree immediately afterwards.
        `dream_gather.py`, plus symbol/contract existence and retired scripts.
      - *Cluster runtime & database registries* (`agents`, `schedules`, `tasks`,
        machine topology): check active vs. terminated agents, live schedule triggers,
-       and task status (including `db:...` anchors surfaced by `dream_gather.py`).
+       and task status.
      - *Host environment & embedded probes*: check machine configuration and
        `<!-- fact-check: <cmd> -->` directives.
    - **Per-Agent Workspace Memory (`~/.meiva/workspaces/*/memory/`)**: Scan agent
@@ -80,12 +80,11 @@ and remove/prune the temporary worktree immediately afterwards.
      or append chronological patch disclaimers at the bottom of stale notes.
    - **Two-Stage OKF Maintenance (Write-Time Pure Markdown -> Dream Auto-OKF)**:
      Working agents write pure Markdown without YAML frontmatter. During Dream
-     consolidation, populate or refresh the four canonical OKF fields on canonical
+     consolidation, populate or refresh the canonical OKF fields on canonical
      notes (and strip legacy `type`, `meiva_agent`, `meiva_machine`, `tags`
      boilerplate):
      - `description`: One-line high-density summary for `MEMORY.md` pointers and previews.
-     - `sources`: List of bound external truth anchors (`"repo:meiva:<path>"`,
-       `"repo:memory:<path>"`, `"db:meiva_main:<table>"`).
+     - Inline Markdown file links in the body: bound source files for drift detection.
      - `verified`: Quoted `"YYYY-MM-DD"` date of this World Truth verification.
      - `stale_after`: Optional quoted `"YYYY-MM-DD"` expiration date for temporary rules.
    - **De-relativize time**: Convert relative time words (`"today"`, `"yesterday"`,
@@ -104,8 +103,8 @@ and remove/prune the temporary worktree immediately afterwards.
      it once the `validate` check is green.
    - Clean up the temporary worktree so the registry does not grow:
      ```bash
-     git -C ~/.meiva/memory worktree remove --force "$W"
-     git -C ~/.meiva/memory worktree prune
+     git -C ~/.meiva/vault worktree remove --force "$W"
+     git -C ~/.meiva/vault worktree prune
      rm -rf "$(dirname "$W")"
      ```
    - Merge any remaining open review PRs whose `validate` check is green and whose

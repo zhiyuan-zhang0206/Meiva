@@ -13,13 +13,13 @@ fail=0
 
 while IFS= read -r f || [ -n "$f" ]; do
     case "$f" in
-        *.md) ;;
+        memory/*.md) ;;
         *) continue ;;
     esac
     [ -f "$f" ] || continue
 
     chars=$(wc -m <"$f" | tr -d ' ')
-    if [ "$f" = "MEMORY.md" ]; then cap="$memory_cap"; else cap="$note_cap"; fi
+    if [ "$f" = "memory/MEMORY.md" ]; then cap="$memory_cap"; else cap="$note_cap"; fi
     if [ "$chars" -gt "$cap" ]; then
         echo "memory: $f is $chars chars, over the $cap cap." >&2
         fail=1
@@ -27,7 +27,7 @@ while IFS= read -r f || [ -n "$f" ]; do
 
 done < <(git diff --cached --name-only --diff-filter=ACM)
 
-# Full pool validation (OKF + type tags + descriptions + directory
+# Shared-note validation (metadata, inline file links and directory
 # structure). Fails loud if the interpreter is missing — a commit guard that
 # silently passes is worse than one that checks less.
 if ! python3 "$(dirname "$0")/../validate.py" >/dev/null 2>&1; then

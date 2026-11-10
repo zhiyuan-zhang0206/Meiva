@@ -5,6 +5,7 @@ exports = ["metrics.py"]
 "plugin.py" = ["sdk.py"]
 "service_declaration" = ["default_config.py"]
 "services.py" = ["service_declaration"]
+"setup.py" = ["default_config.py"]
 "skills" = ["pool_ops.py", "template"]
 "tests" = ["agent_runtime.py", "default_config.py", "inheritance", "notes.py", "plugin.py", "pool_ops.py", "sdk.py", "services.py", "setup.py", "skills", "template"]
 

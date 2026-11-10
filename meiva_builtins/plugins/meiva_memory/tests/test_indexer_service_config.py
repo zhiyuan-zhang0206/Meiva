@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 import pytest
@@ -42,7 +43,7 @@ def test_missing_image_runs_indexer_without_writing_home(unit_home: Path) -> Non
 def test_host_switch_disables_indexer(unit_home: Path) -> None:
     image = disk_image_path("meiva_memory", home=unit_home)
     image.parent.mkdir(parents=True)
-    image.write_text('{"indexer_enabled": false}\n')
+    image.write_text(MemoryConfig(indexer_enabled=False).model_dump_json() + "\n")
     spec = _indexer()
     assert spec.gate is not None
     assert spec.gate() == "disabled (meiva_memory.indexer_enabled off)"
@@ -54,7 +55,10 @@ def test_host_switch_disables_indexer(unit_home: Path) -> None:
         ("not json", InvalidConfigData),
         ("[]", InvalidConfigData),
         ("{}", SchemaDriftError),
-        ('{"indexer_enabled": "false"}', InvalidConfigData),
+        (
+            json.dumps({**MemoryConfig().model_dump(), "indexer_enabled": "false"}),
+            InvalidConfigData,
+        ),
     ],
 )
 def test_invalid_image_fails_composition_before_a_gate_can_fail_open(
@@ -89,7 +93,7 @@ def test_first_converge_materializes_the_declared_input(unit_home: Path) -> None
         [spec], capabilities={"gateway"}, repo_root=Path(__file__).parents[4], home=unit_home
     )
     assert len(units) == 1
-    image.write_text('{"indexer_enabled": false}\n')
+    image.write_text(MemoryConfig(indexer_enabled=False).model_dump_json() + "\n")
     disabled = services.services(home=unit_home, endpoints=_table())[0]
     assert disabled.gate is not None
     assert disabled.gate() == "disabled (meiva_memory.indexer_enabled off)"

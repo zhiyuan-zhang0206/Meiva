@@ -1,7 +1,7 @@
 # Memory-Indexer — Memory Pool Vector Index
 
 ## What is it
-Semantic indexing daemon for the memory pool — patrols `**/*.md` under `gateway_memory_dir()` (combined machine `$MEIVA_HOME/gateway/memory`) every `patrol_interval_s`, vectorizes them with the configured embedding provider (Gemini Embedding 2 by default, `MEIVA_EMBEDDING_BACKEND`) and stores them in the selected backend (numpy default; pgvector via `MEIVA_MEMORY_SEARCH_BACKEND`), backing `meiva.memory.search()`.
+Semantic indexing daemon for the memory pool — patrols `**/*.md` under `gateway_memory_dir()` (combined machine `$MEIVA_HOME/gateway/vault/memory`) every `patrol_interval_s`, vectorizes them with the configured embedding provider (Gemini Embedding 2 by default, `MEIVA_EMBEDDING_BACKEND`) and stores them in the selected backend (numpy default; pgvector via `MEIVA_MEMORY_SEARCH_BACKEND`), backing `meiva.memory.search()`.
 
 **Role attribution**: gateway side (pure agent-runner doesn't run) — `ServiceSpec.capabilities=GATEWAY` in `supervision/roster/spec.py`, roster derived by `services_for_capabilities` intersecting with the local machine's `machine_role()`.
 
@@ -30,7 +30,7 @@ Semantic indexing daemon for the memory pool — patrols `**/*.md` under `gatewa
 - `services/derived/memory_indexer/backends/pgvector.py` — `PGVectorBackend` (table `memory_embeddings` in the cluster Postgres, exact scan, no row cap)
 
 ## Notes
-- The index uses the gateway's **consolidated checkout** (`gateway_memory_dir()`, combined machine = `$MEIVA_HOME/gateway/memory`, main branch), which is **deliberately separate** from the agent-runner's **authoring checkout** (`memory_dir()` = `$MEIVA_HOME/memory`, machine-`<name>` branch); on gateway-only units the two are the same
+- The index uses the gateway's **consolidated checkout** (`gateway_memory_dir()`, combined machine = `$MEIVA_HOME/gateway/vault/memory`, main branch), which is **deliberately separate** from the agent-runner's **authoring checkout** (`memory_dir()` = `$MEIVA_HOME/vault/memory` in the authoring Vault checkout); on gateway-only units the two are the same
 - Rows are one per **chunk**: the folded `pk` (`{path}\x1f{kind}\x1f{chunk_idx}`), `path`, `kind` (`desc` = frontmatter description / `body` = body chunk), `chunk_idx`, `mtime` (stored, never compared), `content_hash` (the patrol compares it against the file's sha256), the provider fingerprint, and the vector (width = the provider's dim)
 - A file indexes as 0-or-1 `desc` row + N `body` chunks (~1800 chars each, ~200-char overlap, paragraph-boundary aware) — a separate description row keeps short entity-bearing frontmatter lines searchable, which whole-file embedding diluted
 - **Full-file replacement**: a file commits only after all its current chunks embed successfully; stale-tail deletion precedes upsert so failed writes remain dirty. See [Memory Index File Replacement](file-replacement.md) (issue #1946).

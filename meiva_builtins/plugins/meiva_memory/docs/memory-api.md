@@ -6,7 +6,7 @@
 
 ## What it is
 
-A shared markdown note folder (`~/.meiva/memory`), used by all agents. Notes are discovered via semantic search and synced across machines within approximately one day.
+A shared markdown note folder (`~/.meiva/vault/memory`), used by all agents. Notes are discovered via semantic search and synced across machines within approximately one day.
 
 Two types of memory, each serving different audiences:
 - **Shared pool** (`meiva.memory.PATH`): notes visible to all agents. Write durable facts that other agents need when taking over your role — user preferences, hard constraints, long-term decisions.
@@ -29,7 +29,7 @@ Standing guidance descendants should receive.
 
 ## Core API
 
-- `PATH: PosixPath` — shared memory pool root directory `~/.meiva/memory`; its `help()` text is the note format an agent follows
+- `PATH: PosixPath` — shared memory pool root directory `~/.meiva/vault/memory`; its `help()` text is the note format an agent follows
 - `PERSONAL_PATH: PosixPath` — the agent's own memory folder, `<workspace>/memory`, resolved from the current SDK identity (an attached external lease first, then the process identity) when read; raises when no identity is bound
 - `search(query, k=5, *, timeout=None) → list[MemoryMatch]` — semantic search; returns up to `k` `MemoryMatch(path, description, tags, score, chunk)` named tuples, most relevant first. `path` is absolute, `score` is a decision model's probability (0..1) that the matched `chunk` (the note's best passage, or its description line) is relevant to the query, and every match is returned whatever its score — the caller decides what a weak match deserves. `timeout` bounds one attempt (default = the gateway's own search deadline + 3s, 18s); when given it also travels in the request as the search's deadline, so the gateway stops ranking when it passes, and the HTTP timeout is `timeout` + 3s. A congested index answers 503 (`IndexerUnavailable`) in ~1s instead of queueing the call. A search returns at most the notes one search ranks (`memory_rerank_candidates`, 30), whatever `k` is
 - `MemoryMatch` — the result tuple above, exported in `__all_for_meiva__` so `help(meiva.memory)` renders its fields

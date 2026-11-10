@@ -15,9 +15,23 @@ def test_refresh_updates_the_checkout_read_by_the_app(
     memory_checkout: tuple[Path, Path], tmp_path: Path, gateway_data_plane: None
 ) -> None:
     source, root = memory_checkout
+    (source / "memory").mkdir()
+    run_git("mv", "note.md", "memory/note.md", cwd=source)
+    run_git(
+        "-c",
+        "user.name=Test",
+        "-c",
+        "user.email=test@local",
+        "commit",
+        "-qm",
+        "Vault layout",
+        cwd=source,
+    )
+    run_git("fetch", str(source), "main", cwd=root)
+    run_git("merge", "--ff-only", "FETCH_HEAD", cwd=root)
     before = run_git("rev-parse", "HEAD", cwd=root)
     run_git("checkout", "-b", "consolidated", cwd=source)
-    after = commit_note(source, "after refresh")
+    after = commit_note(source / "memory", "after refresh")
     run_git("push", "origin", "consolidated", cwd=source)
     other = tmp_path / "unrelated"
     init_local_repo("main", other)
@@ -26,7 +40,7 @@ def test_refresh_updates_the_checkout_read_by_the_app(
     following = {"memory_keep_local": False, "track_branch": "consolidated"}
 
     with gateway_test_client(
-        config=gateway_test_config(keeping, memory_root=root), fields=keeping
+        config=gateway_test_config(keeping, memory_root=root / "memory"), fields=keeping
     ) as client:
         initial_note = client.get("/api/memory/note", params={"path": "note.md"})
         assert initial_note.status_code == 200
@@ -35,7 +49,7 @@ def test_refresh_updates_the_checkout_read_by_the_app(
         assert kept.status_code == 200
         assert kept.json()["head"] == before
     with gateway_test_client(
-        config=gateway_test_config(following, memory_root=root), fields=following
+        config=gateway_test_config(following, memory_root=root / "memory"), fields=following
     ) as client:
         refreshed = client.post("/api/memory/refresh")
         assert refreshed.status_code == 200
@@ -52,7 +66,21 @@ def test_refresh_keeps_serving_while_git_waits(
     memory_checkout: tuple[Path, Path], tmp_path: Path, gateway_data_plane: None
 ) -> None:
     source, root = memory_checkout
-    after = commit_note(source, "after refresh")
+    (source / "memory").mkdir()
+    run_git("mv", "note.md", "memory/note.md", cwd=source)
+    run_git(
+        "-c",
+        "user.name=Test",
+        "-c",
+        "user.email=test@local",
+        "commit",
+        "-qm",
+        "Vault layout",
+        cwd=source,
+    )
+    run_git("fetch", str(source), "main", cwd=root)
+    run_git("merge", "--ff-only", "FETCH_HEAD", cwd=root)
+    after = commit_note(source / "memory", "after refresh")
     run_git("push", "origin", "main", cwd=source)
     started = tmp_path / "hook-started"
     released = tmp_path / "request-served"
@@ -72,7 +100,7 @@ def test_refresh_keeps_serving_while_git_waits(
 
     with (
         gateway_test_client(
-            config=gateway_test_config(fields, memory_root=root), fields=fields
+            config=gateway_test_config(fields, memory_root=root / "memory"), fields=fields
         ) as client,
         ThreadPoolExecutor() as executor,
     ):

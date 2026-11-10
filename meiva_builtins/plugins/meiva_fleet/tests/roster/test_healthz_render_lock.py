@@ -59,7 +59,7 @@ def plugin_config_images(unit_home: Path) -> None:
     """Materialize plugin birth inputs before rendering launch units."""
     image = unit_home / "configs" / "meiva_memory" / "config.json"
     image.parent.mkdir(parents=True)
-    image.write_text('{"indexer_enabled": true}\n')
+    image.write_text('{"indexer_enabled": true, "lfs_enabled": false, "lfs_url": ""}\n')
     fleet_image = unit_home / "configs" / "meiva_fleet" / "config.json"
     fleet_image.parent.mkdir(parents=True)
     fleet_image.write_text(FleetConfig().model_dump_json())

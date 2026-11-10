@@ -55,7 +55,7 @@ trigger only costs a cheap commit**.
 
 #### Worktree + PR Discipline (Never Commit on Shared Checkout `main`)
 
-Direct commits on the shared checkout `~/.meiva/memory`'s `main` branch are
+Direct commits on the shared checkout `~/.meiva/vault`'s `main` branch are
 refused by the pre-commit hook, and switching the shared checkout onto a
 long-lived `machine-<name>` branch is retired. All consolidation and index
 rebuilds run in a temporary git worktree created from `origin/main`:
@@ -63,23 +63,23 @@ rebuilds run in a temporary git worktree created from `origin/main`:
 ```bash
 W=$(mktemp -d)/pool
 FH=$(dirname "$W")/fh
-git -C ~/.meiva/memory fetch origin main
-git -C ~/.meiva/memory worktree add -q -B "mem/dream-$(date +%m%d-%H%M)" "$W" origin/main
+git -C ~/.meiva/vault fetch origin main
+git -C ~/.meiva/vault worktree add -q -B "mem/dream-$(date +%m%d-%H%M)" "$W" origin/main
 mkdir -p "$FH"
-ln -sfn "$W" "$FH/memory"
+ln -sfn "$W" "$FH/vault"
 cd "$W"
 ```
 
 #### The Four Phases of Meiva Dream
 
 1. **Phase 1 — Orientation**:
-   - Scan `MEMORY.md` and directory `index.md` files in `$W` to map existing
+   - Scan `memory/MEMORY.md` and directory `index.md` files in `$W/memory` to map existing
      topic directories, canonical filenames, and current size/entry counts against
      the pool budgets (`MEMORY.md` ≤ 16000 chars, note ≤ 8000 chars, ≤ 20 `.md`
      notes and ≤ 20 subdirectories per directory).
 
 2. **Phase 2 — Gather Signal (Three Incremental Signal Sources)**:
-   - Run `dream_gather.py` first (`~/.meiva/source/.venv/bin/python ~/.meiva/source/meiva_builtins/plugins/meiva_memory/skills/consolidation/scripts/dream_gather.py --pool "$W"`) to intersect note `sources:` against repository file trees and recent `git log` changes, flag expired `stale_after` and aging `verified` notes, list pure-Markdown or legacy notes needing Dream OKF enrichment, list `## Workspace Memory Candidates` (`workspaces/*/memory/*.md` and `workspaces/*/memory/inherit/*.md` modified within `--since-days`), and surface existing-file pool churn/conflict hotspots.
+   - Run `dream_gather.py` first (`~/.meiva/source/.venv/bin/python ~/.meiva/source/meiva_builtins/plugins/meiva_memory/skills/consolidation/scripts/dream_gather.py --pool "$W/memory"`) to intersect note body file links against repository file trees and recent `git log` changes, flag expired `stale_after` and aging `verified` notes, list pure-Markdown or legacy notes needing Dream OKF enrichment, list `## Workspace Memory Candidates` (`workspaces/*/memory/*.md` and `workspaces/*/memory/inherit/*.md` modified within `--since-days`), and surface existing-file pool churn/conflict hotspots.
    - **Recent Session Transcripts (`USER_INPUT`)**: Scan recent session transcripts
      for user corrections, rulings, reversals, and explicit decisions, ordered by
      timestamp so newer rulings supersede older ones.
@@ -112,15 +112,12 @@ cd "$W"
      the audit trail). Never leave conflicting old notes or stack chronological
      patch disclaimers at the bottom of stale notes.
    - **Dream-Time Auto-OKF Maintenance**: Working agents write pure Markdown without
-     frontmatter or write-time validation (`validate.py` runs only during Dream
-     consolidation). During consolidation, populate/refresh the four canonical OKF
-     fields on canonical notes (`description`, `sources`, `verified: "YYYY-MM-DD"`,
+     frontmatter or write-time validation (`validate.py` runs during Dream
+     consolidation). During consolidation, populate/refresh the canonical OKF
+     fields on canonical notes (`description`, `verified: "YYYY-MM-DD"`,
      and optional `stale_after: "YYYY-MM-DD"`) while stripping legacy `type`,
-     `meiva_agent`, `meiva_machine`, and `tags` fields. Use the explicit `sources:`
-     grammar:
-     - `repo:meiva:<file_path>` (auto-mapped to `~/.meiva/source`; global manifests `pyproject.toml`, `meizel.toml`, `meizel.policy.toml`, `.pre-commit-config.yaml` skip `git_changed` drift noise)
-     - `repo:monsora:<file_path>` (auto-mapped to `~/MonsoraV2` when present; skipped when absent on the machine)
-     - `repo:memory:<file_path>` (auto-mapped to the memory pool checkout)
+     `meiva_agent`, `meiva_machine`, and `tags` fields. Put provenance in body
+     file links, following the Vault source reference guide below.
 
    - **De-relativize time**: Convert relative time expressions (`"today"`,
      `"this morning"`, `"recently"`, `"next week"`) into explicit ISO dates
@@ -142,8 +139,8 @@ cd "$W"
    - Clean up the temporary worktree so the registry does not accumulate stale
      entries:
      ```bash
-     git -C ~/.meiva/memory worktree remove --force "$W"
-     git -C ~/.meiva/memory worktree prune
+     git -C ~/.meiva/vault worktree remove --force "$W"
+     git -C ~/.meiva/vault worktree prune
      rm -rf "$(dirname "$W")"
      ```
    - Merge any remaining open review PRs whose `validate` check is green and whose
@@ -170,7 +167,7 @@ Check items:
 - **Index Consistency**: `python3 validate.py` (and the pre-commit hook) reports pointers to missing files, duplicate pointers, and orphaned root notes / top-level directories; fix them and rebuild `MEMORY.md` pointers
 - **Directory Structure** (hard rules, from `validate.py` — never skip): every directory holds at most **20 md notes** and at most **20 subdirectories**. Depth is deliberately **unlimited**. When a directory exceeds a limit, consolidate fragments or restructure into topical subdirectories.
 - **Index Freshness**: the gateway checkout must track `origin/main` — if
-  `git -C ~/.meiva/gateway/memory fetch origin main && git rev-list --count HEAD..origin/main`
+  `git -C ~/.meiva/gateway/vault fetch origin main && git rev-list --count HEAD..origin/main`
   prints a non-zero count, a post-merge refresh was missed: run `meiva memory refresh`
   and report the miss
 
@@ -202,7 +199,7 @@ mem/dream-<mmdd-hhmm>       ← temporary worktree branch for Dream consolidatio
 
 Daily process:
 ```
-git -C ~/.meiva/memory worktree add -q -B mem/dream-<mmdd-hhmm> $W origin/main
+git -C ~/.meiva/vault worktree add -q -B mem/dream-<mmdd-hhmm> $W origin/main
     → run 4-phase Meiva Dream (Orientation → Gather Signal → Consolidation → Prune & Index)
     → rebuild_memory_index.py + validate.py (via fake MEIVA_HOME=$FH)
     → commit + push branch → open PR → squash-merge once `validate` check is green
@@ -224,20 +221,23 @@ Working agents write notes directly as pure Markdown (`# Title` + a short high-l
 ```
 
 - At write time, no `type`, `meiva_agent`, `meiva_machine`, `timestamp`, `tags`, `description`, or HTML attribution comments are required.
-- During Dream consolidation, the Memory Arbiter populates/refreshes four canonical OKF fields on canonical notes (`description`, `sources`, `verified: "YYYY-MM-DD"`, and optional `stale_after: "YYYY-MM-DD"`) and strips legacy boilerplate fields.
-- If optional YAML frontmatter (`--- ... ---`) is included, `validate.py` checks that it is a valid YAML mapping without unquoted `' #'` or `': '` truncation, and validates the types of optional `sources` (list of file paths) and `verified` / `stale_after` (quoted `YYYY-MM-DD` date strings).
+- During Dream consolidation, the Memory Arbiter populates/refreshes canonical OKF fields on canonical notes (`description`, `verified: "YYYY-MM-DD"`, and optional `stale_after: "YYYY-MM-DD"`) and strips legacy boilerplate fields.
+- If optional YAML frontmatter (`--- ... ---`) is included, `validate.py` checks that it is a valid YAML mapping without unquoted `' #'` or `': '` truncation, rejects any `sources` key, validates `verified` / `stale_after` (quoted `YYYY-MM-DD` date strings), and checks inline body file links.
 - `index.md` is an optional directory-level high-level description (not a mandatory generated file-pointer inventory).
 - Every directory holds at most **20 `.md` notes** and at most **20 subdirectories** (`validate_structure`).
 - Run `python3 validate.py` (in the pool or worktree checkout) to check all files — once `validate` is green, squash-merge the PR and run `meiva memory refresh`.
 
-## Memory vs Vault Rule
+Provenance follows [Vault paths and source references](../SKILL.md#vault-paths-and-source-references):
+body file links, with YAML `sources` forbidden.
 
-- Memory (`~/.meiva/memory/`): index, pointers, metadata, short canonical notes (≤8000 characters)
-- Vault (a configured archive location, e.g. `~/Google Drive/My Drive/`): large original files, PDFs, images, full conversation records
+## Memory and Vault Layout
+
+- Memory (`~/.meiva/vault/memory/`): index, pointers, metadata, short canonical notes (≤8000 characters)
+- Vault (`~/.meiva/vault/`): Git repository containing `memory/` and sibling `sources/`, `papers/`, and `repos/` directories for original files and evidence.
 
 Files exceeding 8000 characters → move to the Vault, leave a pointer in the original location:
 ```
-Vault path: <vault-path>/<subdirectory>/<filename>
+[Original evidence](/sources/<subdirectory>/<filename>)
 ```
 
 ## Per-Agent Memory (Workspace)
@@ -305,20 +305,14 @@ As a long-running agent:
 
 When starting as Memory Arbiter for the first time:
 
-1. Read `~/.meiva/memory/MEMORY.md` to understand current state
-2. Check git and worktree status: `git -C ~/.meiva/memory status` and `git -C ~/.meiva/memory worktree list`
-3. Run `python3 ~/.meiva/memory/validate.py`
+1. Read `~/.meiva/vault/memory/MEMORY.md` to understand current state
+2. Check git and worktree status: `git -C ~/.meiva/vault status` and `git -C ~/.meiva/vault worktree list`
+3. Run `python3 ~/.meiva/vault/validate.py`
 4. Verify the built-in `memory-arbiter` schedule (`04:00` consolidation, `07:00` health check) is enabled
 5. If uncommitted drift or stale fragments exist, run a four-phase Meiva Dream consolidation pass in a temporary worktree and land it via PR
 6. Notify AI Infra PoC and CEO that Memory Arbiter is online
 
-Every `sources` item must point to an existing file: `repo:<alias>:<file>`
-or a pool-relative file path such as `sources/user-rulings.md`, optionally
-with a `#fragment`. Any file format is supported (Markdown, PDF, HTML, TXT,
-JSONL, Python, TypeScript). Dump external content into a file, or record its
-URL and explanation or dated user ruling in a file, then cite that file.
-Pool-relative paths resolve as `repo:memory:<file>`; paths must stay relative
-and must not traverse `..`. Dream checks existence and rejects directories;
-the standalone validator checks syntax. `sources/*.md` participates in normal
-recursive note collection, indexing and validation; other formats are evidence
-attachments and do not enter the note index.
+
+Source references may cite any file format. Save external content, its URL and
+context, or dated user rulings to a Vault evidence file, then cite that file
+from the note body. Only `memory/` enters the note index.

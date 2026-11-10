@@ -27,7 +27,7 @@ from base.deploy.git.memory_repo import (
 from base.deploy.git.tests.memory_checkouts import commit_note, git_http_remote, make_bundle
 from base.deploy.git.tests.pool_server import PoolResponse, pool_server
 from base.packages.plugins.loading.scaffold import ScaffoldFacts
-from base.paths import gateway_memory_dir, meiva_home, memory_dir
+from base.paths import gateway_vault_dir, meiva_home, vault_dir
 from base.paths.tests.homes import unit_home as unit_home
 from meiva_builtins.plugins.meiva_memory.setup import scaffold
 
@@ -65,14 +65,14 @@ def test_existing_runner_mismatch_preserves_authored_work(
     machine_identity: ConfiguredMachineIdentity, roles: str
 ) -> None:
     machine_identity.set(role=roles, name="runner")
-    target = memory_dir(home=meiva_home())
+    target = vault_dir(home=meiva_home())
     init_local_repo("main", target)
     (target / "draft.md").write_text("unpublished")
     with pytest.raises(MemoryBranchMismatch, match="expected 'machine-runner'"):
         scaffold(machine=machine_identity, facts=_facts())
     assert run_git("branch", "--show-current", cwd=target) == "main"
     assert (target / "draft.md").read_text() == "unpublished"
-    assert not (target / "MEMORY.md").exists()
+    assert not (target / "memory" / "MEMORY.md").exists()
 
 
 def test_existing_authoring_checkout_does_not_bootstrap_or_need_a_remote(
@@ -80,9 +80,10 @@ def test_existing_authoring_checkout_does_not_bootstrap_or_need_a_remote(
 ) -> None:
     machine_identity.set(role="agent-runner", name="runner")
     set_field("gateway_url", "")
-    target = memory_dir(home=meiva_home())
+    target = vault_dir(home=meiva_home())
     init_local_repo("machine-runner", target)
-    curated = target / "MEMORY.md"
+    curated = target / "memory" / "MEMORY.md"
+    curated.parent.mkdir(exist_ok=True)
     curated.write_text("curated")
     before = run_git("rev-parse", "HEAD", cwd=target)
     scaffold(machine=machine_identity, facts=_facts())
@@ -100,8 +101,8 @@ def test_gateway_capable_without_remote_initializes_the_actual_checkouts(
     machine_identity.set(role=roles, name="runner")
     set_field("gateway_url", "")
     scaffold(machine=machine_identity, facts=_facts())
-    authoring = memory_dir(home=meiva_home())
-    consolidated = gateway_memory_dir(roles=machine_identity.role(), home=meiva_home())
+    authoring = vault_dir(home=meiva_home())
+    consolidated = gateway_vault_dir(roles=machine_identity.role(), home=meiva_home())
     assert run_git("branch", "--show-current", cwd=authoring) == (
         "machine-runner" if "agent-runner" in machine_identity.role() else "main"
     )
@@ -110,7 +111,7 @@ def test_gateway_capable_without_remote_initializes_the_actual_checkouts(
     assert (consolidated / ".gitignore").is_file()
     assert run_git("remote", cwd=authoring) == ""
     assert run_git("remote", cwd=consolidated) == ""
-    assert (authoring / "MEMORY.md").is_file()
+    assert (authoring / "memory" / "MEMORY.md").is_file()
 
 
 def test_gateway_only_does_not_require_a_machine_name() -> None:
@@ -121,7 +122,7 @@ def test_gateway_only_does_not_require_a_machine_name() -> None:
     with pytest.raises(MachineNameMissing):
         machine_identity.name()
     scaffold(machine=machine_identity, facts=_facts())
-    assert run_git("branch", "--show-current", cwd=memory_dir(home=meiva_home())) == "main"
+    assert run_git("branch", "--show-current", cwd=vault_dir(home=meiva_home())) == "main"
 
 
 def test_keep_local_runner_creates_without_gateway_access(
@@ -131,7 +132,7 @@ def test_keep_local_runner_creates_without_gateway_access(
     set_field("memory_keep_local", True)
     set_field("gateway_url", "")
     scaffold(machine=machine_identity, facts=_facts())
-    root = memory_dir(home=meiva_home())
+    root = vault_dir(home=meiva_home())
     assert run_git("branch", "--show-current", cwd=root) == "machine-runner"
     assert run_git("remote", cwd=root) == ""
     assert run_git("log", "-1", "--format=%s", cwd=root) == "init: local memory on machine-runner"
@@ -141,7 +142,7 @@ def test_keep_local_strips_all_remotes_and_switches_gateway_to_main(
     machine_identity: ConfiguredMachineIdentity,
 ) -> None:
     machine_identity.set(role="gateway", name="cloud")
-    target = memory_dir(home=meiva_home())
+    target = vault_dir(home=meiva_home())
     init_local_repo("main", target)
     run_git("checkout", "-b", "machine-cloud", cwd=target)
     run_git("remote", "add", "origin", "/unused-origin", cwd=target)
@@ -163,12 +164,12 @@ def test_split_runner_without_remote_bootstraps_a_real_gateway_bundle(
     with pool_server(response) as url:
         set_field("gateway_url", url)
         scaffold(machine=machine_identity, facts=_facts())
-    root = memory_dir(home=meiva_home())
+    root = vault_dir(home=meiva_home())
     assert run_git("rev-parse", "HEAD", cwd=root) == head
     assert run_git("branch", "--show-current", cwd=root) == "machine-runner"
     assert run_git("remote", cwd=root) == ""
     assert response.headers["Authorization"] == "Bearer pool-secret"
-    assert (root / "health" / "a.md").read_text() == "note"
+    assert (root / "memory" / "health" / "a.md").read_text() == "note"
     assert (root / ".githooks" / "pre-commit").is_file()
 
 
@@ -180,8 +181,8 @@ def test_split_runner_bootstrap_failure_is_not_an_empty_pool(
         set_field("gateway_url", url)
         with pytest.raises(MemoryRemoteMissing, match=r"gateway pool snapshot.*HTTP 502"):
             scaffold(machine=machine_identity, facts=_facts())
-    assert not (memory_dir(home=meiva_home()) / ".git").exists()
-    assert not (memory_dir(home=meiva_home()) / "MEMORY.md").exists()
+    assert not (vault_dir(home=meiva_home()) / ".git").exists()
+    assert not (vault_dir(home=meiva_home()) / "MEMORY.md").exists()
 
 
 # meiva:note
@@ -207,10 +208,10 @@ def test_the_checkouts_sit_under_the_home_the_facts_name(
     scaffold(machine=machine_identity, facts=_facts(explicit))
 
     role_set = machine_identity.role()
-    assert (memory_dir(home=explicit) / ".githooks" / "pre-commit").is_file()
-    assert (gateway_memory_dir(roles=role_set, home=explicit) / ".git").is_dir() == has_consolidated
-    assert not memory_dir(home=meiva_home()).exists()
-    assert not gateway_memory_dir(roles=role_set, home=meiva_home()).exists()
+    assert (vault_dir(home=explicit) / ".githooks" / "pre-commit").is_file()
+    assert (gateway_vault_dir(roles=role_set, home=explicit) / ".git").is_dir() == has_consolidated
+    assert not vault_dir(home=meiva_home()).exists()
+    assert not gateway_vault_dir(roles=role_set, home=meiva_home()).exists()
 
 
 def _two_remotes(tmp_path: Path) -> tuple[Path, str]:
@@ -231,8 +232,8 @@ def test_both_stages_of_a_combined_unit_use_the_facts_the_command_read(
     tmp_path: Path, machine_identity: ConfiguredMachineIdentity
 ) -> None:
     machine_identity.set(role="gateway,agent-runner", name="runner")
-    authoring = memory_dir(home=meiva_home())
-    consolidated = gateway_memory_dir(roles=machine_identity.role(), home=meiva_home())
+    authoring = vault_dir(home=meiva_home())
+    consolidated = gateway_vault_dir(roles=machine_identity.role(), home=meiva_home())
     remote, first_head = _two_remotes(tmp_path)
     received, release = Event(), Event()
     with git_http_remote(remote, received=received, release=release) as url:
@@ -265,8 +266,8 @@ def test_keep_local_facts_make_both_stages_of_a_combined_unit_local(
 
     scaffold(machine=machine_identity, facts=_facts())
 
-    consolidated = gateway_memory_dir(roles=machine_identity.role(), home=meiva_home())
-    assert run_git("remote", cwd=memory_dir(home=meiva_home())) == ""
+    consolidated = gateway_vault_dir(roles=machine_identity.role(), home=meiva_home())
+    assert run_git("remote", cwd=vault_dir(home=meiva_home())) == ""
     assert run_git("remote", cwd=consolidated) == ""
     assert run_git("log", "-1", "--format=%s", cwd=consolidated) == "init: local memory on main"
 
@@ -275,7 +276,7 @@ def test_existing_broken_checkout_preserves_the_git_exception(
     machine_identity: ConfiguredMachineIdentity,
 ) -> None:
     machine_identity.set(role="agent-runner", name="runner")
-    (memory_dir(home=meiva_home()) / ".git").mkdir(parents=True)
+    (vault_dir(home=meiva_home()) / ".git").mkdir(parents=True)
     with pytest.raises(subprocess.CalledProcessError):
         scaffold(machine=machine_identity, facts=_facts())
 
@@ -288,3 +289,61 @@ def test_fresh_clone_git_failure_is_classified(
     with pytest.raises(RuntimeError, match="unrecognized failure shape") as failure:
         scaffold(machine=machine_identity, facts=_facts())
     assert isinstance(failure.value.__cause__, subprocess.CalledProcessError)
+
+
+def test_legacy_checkout_requires_explicit_migration(
+    machine_identity: ConfiguredMachineIdentity,
+) -> None:
+    machine_identity.set(role="gateway", name="runner")
+    legacy = meiva_home() / "memory"
+    init_local_repo("main", legacy)
+    (legacy / "unpublished.md").write_text("keep this draft")
+    before = run_git("rev-parse", "HEAD", cwd=legacy)
+    with pytest.raises(RuntimeError, match="Legacy memory checkout found"):
+        scaffold(machine=machine_identity, facts=_facts())
+    assert (legacy / "unpublished.md").read_text() == "keep this draft"
+    assert run_git("rev-parse", "HEAD", cwd=legacy) == before
+    assert not vault_dir(home=meiva_home()).exists()
+
+
+def test_existing_vault_with_old_root_notes_requires_migration(
+    machine_identity: ConfiguredMachineIdentity,
+) -> None:
+    machine_identity.set(role="gateway", name="runner")
+    root = vault_dir(home=meiva_home())
+    init_local_repo("main", root)
+    (root / "MEMORY.md").write_text("curated old layout")
+    with pytest.raises(RuntimeError, match="legacy root-level notes"):
+        scaffold(machine=machine_identity, facts=_facts())
+    assert not (root / "memory").exists()
+    assert (root / "MEMORY.md").read_text() == "curated old layout"
+
+
+@pytest.mark.parametrize(("enabled", "url"), [(False, "https://lfs.invalid"), (True, " ")])
+def test_disabled_or_unconfigured_lfs_creates_no_files(
+    tmp_path: Path, enabled: bool, url: str
+) -> None:
+    from meiva_builtins.plugins.meiva_memory.default_config import MemoryConfig
+    from meiva_builtins.plugins.meiva_memory.setup import configure_lfs
+
+    configure_lfs(tmp_path, config=MemoryConfig(lfs_enabled=enabled, lfs_url=url))
+    assert not (tmp_path / ".lfsconfig").exists()
+    assert not (tmp_path / ".gitattributes").exists()
+
+
+def test_lfs_convergence_preserves_custom_rules_and_updates_endpoint(tmp_path: Path) -> None:
+    from meiva_builtins.plugins.meiva_memory.default_config import MemoryConfig
+    from meiva_builtins.plugins.meiva_memory.setup import configure_lfs
+
+    (tmp_path / ".gitattributes").write_text("*.txt text\n")
+    config = MemoryConfig(lfs_enabled=True, lfs_url=" https://lfs.invalid/path ")
+    configure_lfs(tmp_path, config=config)
+    configure_lfs(tmp_path, config=config)
+    assert (
+        run_git("config", "--file", str(tmp_path / ".lfsconfig"), "--get", "lfs.url", cwd=tmp_path)
+        == "https://lfs.invalid/path"
+    )
+    rules = (tmp_path / ".gitattributes").read_text().splitlines()
+    assert rules[0] == "*.txt text"
+    assert len(rules) == 7
+    assert "*.parquet filter=lfs diff=lfs merge=lfs -text" in rules

@@ -49,12 +49,9 @@ def test_path_is_absolute() -> None:
 
 
 def test_path_under_unit_home() -> None:
-    """PATH = `$MEIVA_HOME/memory/` — the memory pool lives under this unit's home."""
-    assert meiva.memory.PATH.name == "memory"
-    assert (
-        meiva.memory.PATH.parent.name in (".meiva", ".meiva_gateway")
-        or meiva.memory.PATH.parent.exists()
-    )
+    # meiva:note
+    # Shared notes are rooted beneath the unit's Vault checkout.
+    assert meiva_home() / "vault" / "memory" == meiva.memory.PATH
 
 
 def test_path_is_path_object() -> None:

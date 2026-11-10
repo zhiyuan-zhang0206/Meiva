@@ -55,14 +55,15 @@ neither path falls back to the ambient process settings.
 The snapshot's required `memory_root` supplies search, graph, note, pool and refresh
 routes. The composition boundary resolves the existing `base.paths.gateway_memory_dir`
 from the current process home and the startup config's machine roles: a combined
-gateway/runner uses `$MEIVA_HOME/gateway/memory`, while a gateway-only unit uses
-`$MEIVA_HOME/memory`. `ConfigBoot` owns the role values, not the process home.
+gateway/runner uses `$MEIVA_HOME/gateway/vault/memory`, while a gateway-only unit uses
+`$MEIVA_HOME/vault/memory`. `ConfigBoot` owns the role values, not the process home.
 These routes keep the captured path instead of resolving the ambient home
 again per request. Explicit app builders can supply different roots without
 patching the path resolver; each app also owns its graph cache. Cold OpenAPI
 assembly supplies a non-existent path without resolving the runtime home.
 
-Refresh passes that checkout to `memory_repo.pull_main`, with keep-local and
+Refresh passes that notes root to `memory_repo.pull_main`, which performs Git
+operations at the parent Vault checkout, with keep-local and
 track-branch read from the existing process ConfigBoot for each request. The
 indexer and memory checkout initialization retain their existing composition.
 See [memory route contracts](../routers/docs/memory.md).

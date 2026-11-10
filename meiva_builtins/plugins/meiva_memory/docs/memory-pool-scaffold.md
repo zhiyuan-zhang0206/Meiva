@@ -2,18 +2,18 @@
 
 ## Responsibility
 
-The pool is a git checkout the plugin does not write to at runtime. This node
+The Vault is a git checkout, with shared notes under `memory/`, which the plugin does not write to at runtime. This node
 covers the host-side step that creates it and the validator that guards every
 commit into it. The plugin as a whole — hooks, SDK surface, configuration — is
 [meiva_memory](meiva_memory.md)'s to state.
 
 ## Host-side scaffolding
 
-**Host-side scaffolding** (`meiva_builtins/plugins/meiva_memory/setup.py:scaffold(*, machine, facts)`, run by explicit `meiva memory init` for every enabled plugin): brings up this cluster's memory pool checkouts and lays the plugin's `template/` down inside the authoring one — `MEMORY.md` (the index every agent reads) and `.githooks/pre-commit` (the character-cap guard), then arms `core.hooksPath`. Idempotent and non-destructive; never overwrites existing pool files. Kept out of `plugin.py`, which imports the agent runtime absent from the `meiva` CLI process. Converge and service startup never touch the memory repository.
+**Host-side scaffolding** (`meiva_builtins/plugins/meiva_memory/setup.py:scaffold(*, machine, facts)`, run by explicit `meiva memory init` for every enabled plugin): brings up this cluster's memory pool checkouts and lays the plugin's `template/` down inside the authoring one — `memory/MEMORY.md` (the index every agent reads) and `.githooks/pre-commit` (the character-cap guard), then arms `core.hooksPath`. Idempotent and non-destructive; never overwrites existing pool files. Kept out of `plugin.py`, which imports the agent runtime absent from the `meiva` CLI process. Converge and service startup never touch the memory repository.
 
 ## Pool validator
 
-**`python3 validate.py`** (in the pool checkout, run by the pre-commit hook): the pool's rules in one place — UTF-8 validity, optional YAML frontmatter syntax, lightweight type checks for optional Dream OKF fields (`sources`, `verified`, `stale_after`), value-truncation backstop, the `MEMORY.md` index's pointer targets and coverage, orphaned root notes, the character caps, fact-check probes, and the directory-structure Locality limits (20 files / 20 subdirectories per directory). Exits non-zero on any finding and runs on every commit via `.githooks/pre-commit`.
+**`python3 validate.py`** (at the Vault root, scanning `memory/`, run by the pre-commit hook): the pool's rules in one place — UTF-8 validity, optional YAML frontmatter syntax, checks for optional `verified` and `stale_after` dates, rejection of YAML `sources`, inline file-link validation, value-truncation backstop, the `MEMORY.md` index's pointer targets and coverage, orphaned root notes, the character caps, fact-check probes, and the directory-structure Locality limits (20 files / 20 subdirectories per directory). Exits non-zero on any finding and runs on every commit via `.githooks/pre-commit`.
 
 ## Entry Points
 
@@ -42,3 +42,24 @@ Existing and local-only checkouts do not need a remote or gateway access. A fres
 `facts.memory_remote` only when needed; a split runner without it then installs a bundle from
 `facts.gateway`. Both stages (authoring and, on a gateway-capable unit, the consolidated checkout) provision
 from the same facts, so a setting changed while the first stage runs does not reach the second.
+
+## Vault and optional Git LFS
+
+Authoring clones live at `$MEIVA_HOME/vault`; the gateway clone lives at
+`$MEIVA_HOME/gateway/vault`. Git hooks, remotes, and LFS configuration belong
+at those repository roots. The SDK and vector index scan only the `memory/`
+subtree, leaving sibling `sources/`, `papers/`, and `repos/` outside recall.
+
+The `meiva_memory` plugin and `meiva.memory` SDK keep their names. Optional
+plugin configuration `lfs_enabled` defaults to `false`; `lfs_url` defaults to
+an empty string. When enabled with a nonblank URL, initialization writes a
+root `.lfsconfig` with the configured LFS URL and default `.gitattributes`
+tracking PDF, PNG, JPG, MP4, ZIP, and Parquet files. LFS is optional for Vaults
+that leave the feature disabled.
+
+Source references use Markdown file links in note bodies; YAML `sources` is
+forbidden. Absolute link paths resolve from the Vault root, code links under
+`/repos/<alias>/` resolve from the mapped checkout, and other relative paths
+resolve from the note directory while staying inside Vault. The validator
+requires files, rejects protocol targets, and skips links inside code. See
+[the memory skill](../skills/SKILL.md#vault-paths-and-source-references).

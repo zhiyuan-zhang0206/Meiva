@@ -43,8 +43,8 @@ else:
 
 
 def _repo(tmp_path: Path) -> Path:
-    pool = tmp_path / "memory"
-    pool.mkdir()
+    pool = tmp_path / "vault" / "memory"
+    pool.mkdir(parents=True)
     git = ["git", "-C", str(pool)]
     subprocess.run([*git, "init", "-q", "-b", "main"], check=True)
     subprocess.run([*git, "remote", "add", "origin", "git@github.com:owner/pool.git"], check=True)

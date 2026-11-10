@@ -31,6 +31,7 @@ from base.cluster.machine import MachineIdentityReader
 from base.host.boundary.untyped import object_of
 from base.log import logger
 from base.packages.plugins.loading.scaffold import ScaffoldFacts
+from meiva_builtins.plugins.meiva_memory.default_config import MemoryConfig
 
 _TEMPLATE_DIR = Path(__file__).parent / "template"
 
@@ -44,7 +45,7 @@ def _copy_template_into(pool: Path) -> list[str]:
     pool-relative paths actually written, for the converge log."""
     written: list[str] = []
     for src in sorted(_TEMPLATE_DIR.rglob("*")):
-        if src.is_dir():
+        if src.is_dir() or "__pycache__" in src.parts or src.suffix == ".pyc":
             continue
         rel = src.relative_to(_TEMPLATE_DIR)
         dst = pool / rel
@@ -245,6 +246,34 @@ def _classify_git_init_error(stderr: str, returncode: int) -> str:
     return f"{header}(unrecognized failure shape — paste the stderr above into the runbook 'Secondary host bring-up' troubleshooting section)"
 
 
+def configure_lfs(root: Path, *, config: MemoryConfig) -> None:
+    # meiva:note
+    # Converge the explicitly enabled LFS endpoint without requiring Git LFS locally.
+    url = config.lfs_url.strip()
+    if not config.lfs_enabled or not url:
+        return
+    subprocess.run(  # noqa: S603
+        ["git", "config", "--file", str(root / ".lfsconfig"), "lfs.url", url], check=True
+    )
+    attributes = root / ".gitattributes"
+    existing = attributes.read_text(encoding="utf-8") if attributes.exists() else ""
+    lines = existing.splitlines()
+    for suffix in ("pdf", "png", "jpg", "mp4", "zip", "parquet"):
+        rule = f"*.{suffix} filter=lfs diff=lfs merge=lfs -text"
+        if rule not in lines:
+            lines.append(rule)
+    attributes.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def _reject_root_notes(roots: set[Path]) -> None:
+    for root in roots:
+        if (root / "MEMORY.md").exists():
+            raise RuntimeError(
+                f"{root} contains legacy root-level notes. Move shared notes into memory/ "
+                "with an operator-reviewed migration before initialization; no files were moved."
+            )
+
+
 def scaffold(*, machine: MachineIdentityReader, facts: ScaffoldFacts) -> None:
     """Bring this cluster's memory pool up during explicit initialization.
 
@@ -256,18 +285,39 @@ def scaffold(*, machine: MachineIdentityReader, facts: ScaffoldFacts) -> None:
     and no checkout is created, no template is laid down, and no memory note
     reaches an agent's context.
     """
-    from base.paths import gateway_memory_dir, memory_dir
+    from base.paths import gateway_vault_dir, vault_dir
 
-    pool = memory_dir(home=facts.home)
-    consolidated = gateway_memory_dir(roles=machine.role(), home=facts.home)
+    pool = vault_dir(home=facts.home)
+    legacy = facts.home / "memory"
+    legacy_gateway = facts.home / "gateway" / "memory"
+    if (legacy.exists() and not pool.exists()) or (
+        "gateway" in machine.role()
+        and legacy_gateway.exists()
+        and not gateway_vault_dir(roles=machine.role(), home=facts.home).exists()
+    ):
+        raise RuntimeError(
+            "Legacy memory checkout found. Preserve its working tree and unpublished branches; "
+            "explicitly migrate the checkout to vault/ and move shared notes into vault/memory/ "
+            "before running meiva memory init. No files were moved."
+        )
+    consolidated = gateway_vault_dir(roles=machine.role(), home=facts.home)
+    roots = {pool, consolidated} if "gateway" in machine.role() else {pool}
+    _reject_root_notes(roots)
     _ensure_memory_repo(machine=machine, facts=facts, target=pool)
     _ensure_gateway_memory_repo(machine=machine, facts=facts, target=consolidated)
+    _reject_root_notes(roots)
     if not (pool / ".git").is_dir():
         # The bring-up above declined and said why (no remote, wrong branch).
         logger.debug("[memory-scaffold] {} is not a git checkout, skipping", pool)
         return
 
     written = _copy_template_into(pool)
+    from base.packages.plugins.config_registration import disk_image_path, read_config_image
+
+    config = read_config_image(MemoryConfig, disk_image_path("meiva_memory", home=facts.home))
+    for root in roots:
+        (root / "memory").mkdir(exist_ok=True)
+        configure_lfs(root, config=config)
     armed = _arm_hooks(pool)
     if written:
         print(f"    seeded: {', '.join(written)}")

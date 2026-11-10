@@ -48,7 +48,7 @@ def _generate_result(tmp_path: Path) -> subprocess.CompletedProcess[str]:
 def test_the_script_writes_the_directory_indexes_of_the_pool_under_its_home(
     tmp_path: Path,
 ) -> None:
-    pool = tmp_path / "memory"
+    pool = tmp_path / "vault" / "memory"
     (pool / "topics").mkdir(parents=True)
     (pool / "topics" / "retry.md").write_text(
         _note("Retry rule", "retries above three hurt"), encoding="utf-8"
@@ -59,7 +59,9 @@ def test_the_script_writes_the_directory_indexes_of_the_pool_under_its_home(
     assert "* [Retry rule](retry.md) - retries above three hurt" in (
         pool / "topics" / "index.md"
     ).read_text(encoding="utf-8")
-    assert "* [topics/](topics/) - 1 notes" in (pool / "index.md").read_text(encoding="utf-8")
+    assert "* [topics/](topics/index.md) - 1 notes" in (pool / "index.md").read_text(
+        encoding="utf-8"
+    )
 
 
 # meiva:note
@@ -69,7 +71,7 @@ def test_the_script_writes_the_directory_indexes_of_the_pool_under_its_home(
 # nothing reports. A staged note must reach both, which makes the ordinary "write, add, generate,
 # commit" flow independent of the order an author happens to use.
 def test_an_untracked_draft_is_invisible_and_a_staged_note_is_counted(tmp_path: Path) -> None:
-    pool = tmp_path / "memory"
+    pool = tmp_path / "vault" / "memory"
     (pool / "topics").mkdir(parents=True)
     (pool / "topics" / "committed.md").write_text(
         _note("Committed rule", "already in the index"), encoding="utf-8"
@@ -85,14 +87,18 @@ def test_an_untracked_draft_is_invisible_and_a_staged_note_is_counted(tmp_path: 
 
     index = (pool / "topics" / "index.md").read_text(encoding="utf-8")
     assert "draft.md" not in index
-    assert "* [topics/](topics/) - 1 notes" in (pool / "index.md").read_text(encoding="utf-8")
+    assert "* [topics/](topics/index.md) - 1 notes" in (pool / "index.md").read_text(
+        encoding="utf-8"
+    )
 
     _git(pool, "add", "topics/draft.md")
     _generate(tmp_path)
 
     index = (pool / "topics" / "index.md").read_text(encoding="utf-8")
     assert "* [Draft rule](draft.md) - not staged yet" in index
-    assert "* [topics/](topics/) - 2 notes" in (pool / "index.md").read_text(encoding="utf-8")
+    assert "* [topics/](topics/index.md) - 2 notes" in (pool / "index.md").read_text(
+        encoding="utf-8"
+    )
 
 
 # meiva:note
@@ -111,8 +117,8 @@ def test_a_pool_nested_in_another_checkout_walks_the_filesystem(tmp_path: Path) 
 
     env = {k: v for k, v in os.environ.items() if not k.startswith("MEIVA_")}
     env["MEIVA_HOME"] = str(tmp_path / "home")
-    (tmp_path / "home").mkdir()
-    (tmp_path / "home" / "memory").symlink_to(pool)
+    (tmp_path / "home" / "vault").mkdir(parents=True)
+    (tmp_path / "home" / "vault" / "memory").symlink_to(pool)
 
     res = subprocess.run(
         [sys.executable, str(SCRIPT)],
@@ -124,7 +130,9 @@ def test_a_pool_nested_in_another_checkout_walks_the_filesystem(tmp_path: Path) 
     )
 
     assert res.returncode == 0, res.stderr
-    assert "* [topics/](topics/) - 1 notes" in (pool / "index.md").read_text(encoding="utf-8")
+    assert "* [topics/](topics/index.md) - 1 notes" in (pool / "index.md").read_text(
+        encoding="utf-8"
+    )
 
 
 # meiva:note
@@ -134,7 +142,7 @@ def test_a_pool_nested_in_another_checkout_walks_the_filesystem(tmp_path: Path) 
 # skipped files on stderr. It still does not index them: an untracked draft stays invisible to the
 # validator too, so the two sides keep agreeing.
 def test_an_untracked_draft_is_named_on_stderr_and_never_indexed(tmp_path: Path) -> None:
-    pool = tmp_path / "memory"
+    pool = tmp_path / "vault" / "memory"
     (pool / "topics").mkdir(parents=True)
     (pool / "topics" / "draft.md").write_text(_note("Draft rule", "held back"), encoding="utf-8")
     (pool / "topics" / "kept.md").write_text(_note("Kept rule", "staged"), encoding="utf-8")

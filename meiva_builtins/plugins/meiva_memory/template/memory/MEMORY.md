@@ -10,7 +10,9 @@ short enough to carry in every context window.
 own file. Each pointer carries a title, the note's path (ending in .md), and a description; the
 description is what a reader judges relevance by without opening the note:
 
-    - [Title](relative/path/to/the/note) — one-line description of what the note holds
+```markdown
+- [Title](relative/path/to/the/note.md) — one-line description of what the note holds
+```
 
 Keep this file under 16000 characters; the commit hook rejects it otherwise,
 which is the signal to move detail into a pointed-to note.

@@ -5,27 +5,28 @@ description: "Consolidates Meiva's shared memory. Use for assigned single-box ma
 
 # Memory pool consolidation (Meiva Dream)
 
-The shared memory pool (`meiva.memory.PATH`) is a git repo. During the day, agents
+The shared memory pool (`meiva.memory.PATH`) is the `memory/` directory inside the Vault git repo. During the day, agents
 write notes into the working tree. Consolidation runs the four-phase **Meiva Dream**
 cycle (`Orientation` -> `Gather Signal` -> `Consolidation` -> `Prune & Index`) so
 the pool stays canonical, conflict-free, committed, pushed, and searchable.
 
 All index-rebuild / validation / refresh operations are wrapped in scripts under
-`../scripts/`, `scripts/`, and the pool root:
-- `python scripts/dream_gather.py [--pool <path>] [--repo <alias>=<path>] [--json]` — Phase 2 (`Gather Signal`) deterministic probe: scan optional `sources` / `verified` / `stale_after` frontmatter across pool notes, intersect `repo:<alias>:<path>` anchors against repository file trees and recent `git log` changes, flag expired `stale_after` and aging `verified` notes, list pure-Markdown or legacy notes needing Dream OKF enrichment, scan `~/.meiva/workspaces/*/memory/*.md` and `*/memory/inherit/*.md` for `## Workspace Memory Candidates`, and surface existing-file pool churn/conflict hotspots
+`../scripts/`, `scripts/`, and the Vault root. `--pool` accepts the notes directory
+(`$W/memory` for a Vault worktree), while Git operations use `$W`:
+- `python scripts/dream_gather.py [--pool <path>] [--repo <alias>=<path>] [--json]` — Phase 2 (`Gather Signal`) deterministic probe: scan body file links and optional `verified` / `stale_after` frontmatter across pool notes, intersect `/repos/<alias>/<path>` file links against repository file trees and recent `git log` changes, flag expired `stale_after` and aging `verified` notes, list pure-Markdown or legacy notes needing Dream OKF enrichment, scan `workspaces/*/memory/*.md` and `workspaces/*/memory/inherit/*.md` for `## Workspace Memory Candidates`, and surface existing-file pool churn/conflict hotspots
 - `python ../scripts/rebuild_memory_index.py` — rebuild the root `MEMORY.md` pointers (resolves the pool from `MEIVA_HOME` and takes no arguments)
-- `python3 validate.py` (in the pool or worktree root) — enforce UTF-8, optional YAML frontmatter syntax (plus optional type checks for `sources`, `verified`, and `stale_after`, and unquoted `' #'` / `': '` truncation checks), 8000-character note cap, 20-file / 20-subdirectory Locality limits, `MEMORY.md` pointer targets and coverage, and `<!-- fact-check: ... -->` probes
+- `python3 validate.py` (at the Vault or worktree root) — enforce UTF-8, optional YAML frontmatter syntax (plus rejection of YAML `sources`, inline file-link checks, optional date checks for `verified` and `stale_after`, and unquoted `' #'` / `': '` truncation checks), 8000-character note cap, 20-file / 20-subdirectory Locality limits, `MEMORY.md` pointer targets and coverage, and `<!-- fact-check: ... -->` probes
 - `python ../scripts/consolidate.py -m "..."` — remote-backed single-box wrapper: rebuild indexes, stage, commit, push, refresh
 - `python ../scripts/steward.py -m "..."` — per-machine branch wrapper: rebuild indexes, stage, commit, push, create PR
 - `python ../scripts/arbiter_merge.py` — inspect/merge open PRs whose `validate` check is green + refresh (`--apply` to merge; exit 1 = alert)
 - `meiva memory refresh` — fast-forward the gateway checkout to `origin/main` and trigger semantic index re-embedding
 
 **Worktree + PR discipline (remote-backed multi-host pools):** Never commit
-directly on the shared checkout's `main` (`~/.meiva/memory` pre-commit hook refuses
+directly on the shared checkout's `main` (`~/.meiva/vault` pre-commit hook refuses
 direct commits on `main`, and switching the shared checkout onto a `machine-<name>`
 branch is retired). Always create an isolated temporary git worktree from
-`origin/main` (`git -C ~/.meiva/memory worktree add -q -B <branch> $W origin/main`),
-point a temporary `MEIVA_HOME` symlink (`$FH/memory -> $W`) when running index
+`origin/main` (`git -C ~/.meiva/vault worktree add -q -B <branch> $W origin/main`),
+point a temporary `MEIVA_HOME` symlink (`$FH/vault -> $W`) when running index
 scripts against the worktree, open and squash-merge the PR once `validate` is
 green, and remove/prune the temporary worktree immediately afterwards.
 
@@ -61,14 +62,14 @@ Every full consolidation executes four phases in order inside the target worktre
    for user corrections, rulings, reversals, and explicit decisions in chronological
    order so newer rulings supersede older ones.
 2. **World Truth Probes (External Ground-Truth Verification)**: Run
-   `python scripts/dream_gather.py --pool "$W"` first to automatically intersect
-   every note's bound file `sources:` (repository or pool-relative paths) against mapped repository
-   file trees and recent `git log` commits since the note's `verified` date, flag expired `stale_after` notes,
-   list `## Workspace Memory Candidates`, and identify recent pool churn/conflict
-   hotspots among existing pool files; then verify claims in existing notes against
-   observable ground truth across multiple domains rather than assuming a single
-   codebase:
-   - *Multi-repo codebases & file trees* (e.g. `~/.meiva/source`, `~/MonsoraV2`):
+   `python scripts/dream_gather.py --pool "$W/memory"` first to automatically intersect
+   every note's inline Markdown file links against mapped repository
+   file trees and recent `git log` commits since the note's `verified` date, flag
+   expired `stale_after` notes, list `## Workspace Memory Candidates`, and identify
+   recent pool churn/conflict hotspots among existing pool files;
+   then verify claims in existing notes against observable ground truth across
+   multiple domains rather than assuming a single codebase:
+   - *Multi-repo codebases & file trees* (e.g. `~/.meiva/source`, project checkouts):
      check `git log`, file path existence, symbol/contract definitions, and deleted
      scripts/queues so notes citing removed paths or retired contracts are caught.
    - *Cluster runtime & database registries* (`agents`, `schedules`, `tasks`,
@@ -96,21 +97,15 @@ Every full consolidation executes four phases in order inside the target worktre
   audit trail). Never leave conflicting old notes in the pool or stack chronological
   patch disclaimers at the bottom of stale notes.
 - **Dream-Time Auto-OKF Maintenance**: While working agents write pure Markdown
-  without YAML frontmatter or write-time validation, the Arbiter populates and
-  refreshes four canonical OKF provenance & lifecycle fields on consolidated
-  canonical notes (and strips retired `type`, `meiva_agent`, `meiva_machine`, and
-  `tags` boilerplate):
+  without YAML frontmatter or write-time validation, the Arbiter populates and refreshes canonical
+  OKF provenance & lifecycle fields on consolidated canonical notes (and strips
+  retired `type`, `meiva_agent`, `meiva_machine`, and `tags` boilerplate):
   - `description`: One-line high-density summary for `MEMORY.md` pointers and previews.
-  - `sources`: List of external World Truth anchors bound to the note using the
-    canonical `sources:` grammar, driving `dream_gather.py` drift detection on
-    subsequent Dream runs:
-    - `repo:meiva:<file_path>` — auto-mapped to `~/.meiva/source` (global manifest
-      files `pyproject.toml`, `meizel.toml`, `meizel.policy.toml`, and
-      `.pre-commit-config.yaml` check existence without `git_changed` noise)
-    - `repo:monsora:<file_path>` — auto-mapped to `~/MonsoraV2` when present
-      (silently skipped on machines without `~/MonsoraV2`)
-    - `repo:memory:<file_path>` — auto-mapped to the memory pool checkout
-
+  - Inline Markdown file links in the body: provenance for subsequent Dream runs.
+    `/repos/meiva/<file>` maps to `~/.meiva/source`; `/repos/monsora/<file>`
+    maps to `~/MonsoraV2` when present, with Vault `repos/<alias>` as fallback.
+    Global manifests (`pyproject.toml`, `meizel.toml`, `meizel.policy.toml`,
+    `.pre-commit-config.yaml`) retain their drift-noise handling.
   - `verified`: Quoted `"YYYY-MM-DD"` date when the note was verified against World Truth.
   - `stale_after`: Optional quoted `"YYYY-MM-DD"` expiration date for temporary
     freezes or transition rules.
@@ -127,10 +122,12 @@ Every full consolidation executes four phases in order inside the target worktre
   worktree, and run `meiva memory refresh` to synchronize the gateway checkout and
   semantic search index.
 
+Source syntax and validation follow [Vault paths and source references](../SKILL.md#vault-paths-and-source-references).
+
 ## Repo layout (write and merge in the right place)
-- Topic folders at the root (`people/`, `lessons/`, `prefs/`, ...) are shared.
+- Topic folders under `memory/` (`people/`, `lessons/`, `prefs/`, ...) are shared.
 - `machines/<name>/` holds notes specific to one machine (multi-host clusters).
-- `MEMORY.md` is the pool's root. It is **injected into every agent's context
+- `memory/MEMORY.md` is the pool's root index. It is **injected into every agent's context
   each session**, so it is the one file that is always read. Keep it a small
   **curated index**: inline the most-used durable facts and short topic
   descriptions, point to the rest. A commit hook rejects it past **16000
@@ -173,16 +170,16 @@ Large or opaque content that degrades search quality and bloats the pool:
 
 ### Vault path convention
 
-The Vault is a configured archive location (e.g. `~/Google Drive/My Drive/` in
-the reference deployment). When a file is too large for the pool, move it to
-the Vault and leave a pointer note in memory:
+The Vault is the Git repository at `$MEIVA_HOME/vault`; shared notes live in
+its `memory/` subtree. Store original evidence beside that subtree, for example
+in `sources/` or `papers/`, and leave a searchable pointer note in memory:
 
 ```markdown
 # <topic>
 
 Pointer to Vault content for <topic>.
 
-Vault: <vault-path>/<path>
+[Original evidence](/sources/<filename>)
 ```
 
 The pointer note carries the topic and the Vault path so semantic search can
@@ -205,21 +202,20 @@ still find it.
      write legacy boilerplate (`type: Memory`, `meiva_agent`, `meiva_machine`,
      `timestamp`, `tags: [type/...]`) or inline HTML attribution comments.
 2. **Stage 2 — Dream Consolidation Auto-OKF (Memory Arbiter)**:
-   - During Dream Phase 3/4, the Memory Arbiter populates and refreshes four
+   - During Dream Phase 3/4, the Memory Arbiter populates and refreshes
      canonical OKF provenance and lifecycle fields on canonical notes:
      ```yaml
      ---
      description: "<One-line summary distilled from the opening paragraph>"
-     sources:
-       - "repo:meiva:scripts/hooks/diff_checks.py"
      verified: "2026-11-09"
      stale_after: "2026-12-01"   # optional: only for temporary rules
      ---
      ```
    - When optional YAML frontmatter is present, `validate.py` checks that it is a
      valid YAML mapping without unquoted `' #'` or `': '` truncation, and lightly
-     validates `sources` (list of file paths) and `verified` / `stale_after`
-     (quoted `YYYY-MM-DD` date strings) if present.
+     validates `verified` / `stale_after` (quoted `YYYY-MM-DD` date strings) if
+     present. A `sources` key is forbidden, including null or empty values. Put
+     source links in the body, for example `[verification script](/repos/meiva/scripts/hooks/diff_checks.py)`.
    - Every note must be valid UTF-8 and stay within `8000` characters.
 3. **Optional Directory `index.md` (High-Level Description)**:
    - `index.md` is an optional folder-level high-level description, not a
@@ -255,21 +251,22 @@ To prevent the pool from drifting past the consolidation window:
 
 ## First-time setup (bootstrap, idempotent)
 
-Pool setup is handled by `meiva converge` (which `meiva start` and `meiva update` both
-run): it initializes the repo, lays the template down inside it — `MEMORY.md`
-and the `.githooks/pre-commit` cap guard — and arms `core.hooksPath`. Idempotent
+Explicit `meiva memory init` initializes the Vault repo, lays down
+`memory/MEMORY.md` and the root `.githooks/pre-commit` cap guard, and arms
+`core.hooksPath`. Idempotent
 and non-destructive: it never overwrites a file the pool already has, so a
 curated index survives.
 
 The one thing it cannot do for you is the remote:
 
 - Ensure `origin` points at the private GitHub remote:
-  `gh repo create <owner>/MeivaMemory --private` then `git -C POOL remote add origin <url>`.
+  `gh repo create <owner>/MeivaVault --private` then `git -C VAULT remote add origin <url>`.
 
-Two values used below:
-- **POOL** = the local pool path, `meiva.memory.PATH` (`~/.meiva/memory`).
+Paths and remote used below:
+- **VAULT** = the Git repository root (`~/.meiva/vault`).
+- **POOL** = the notes path, `meiva.memory.PATH` (`~/.meiva/vault/memory`).
 - **REPO** = the pool's GitHub `owner/name`. Get it once:
-  `git -C POOL remote get-url origin` then take `owner/name` from the
+  `git -C VAULT remote get-url origin` then take `owner/name` from the
   `git@github.com:owner/name.git` form.
 
 ## Single box
@@ -287,13 +284,7 @@ The arbiter owns cross-machine merges and post-merge search refresh.
 Only when assigned the per-machine steward role, read [steward](references/steward.md).
 Publish the local branch and report readiness; never merge other machine PRs.
 
-Every `sources` item must point to an existing file: `repo:<alias>:<file>`
-or a pool-relative file path such as `sources/user-rulings.md`, optionally
-with a `#fragment`. Any file format is supported (Markdown, PDF, HTML, TXT,
-JSONL, Python, TypeScript). Dump external content into a file, or record its
-URL and explanation or dated user ruling in a file, then cite that file.
-Pool-relative paths resolve as `repo:memory:<file>`; paths must stay relative
-and must not traverse `..`. Dream checks existence and rejects directories;
-the standalone validator checks syntax. `sources/*.md` participates in normal
-recursive note collection, indexing and validation; other formats are evidence
-attachments and do not enter the note index.
+Source targets may use any file format, including Markdown, PDF, HTML, TXT,
+JSONL, Python, and TypeScript. Archive external content or a dated user ruling
+in a Vault evidence file, then cite that file from the note body. Only the
+`memory/` subtree enters recursive note collection, indexing, and validation.

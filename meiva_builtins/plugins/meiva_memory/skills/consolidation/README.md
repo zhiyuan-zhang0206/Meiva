@@ -2,7 +2,7 @@
 
 ## What it is
 
-`plugins/meiva_memory/skills/consolidation/SKILL.md` (loaded name `meiva.skills.meiva_memory.consolidation`, a sub-skill of [meiva_memory root skill](../README.md)): the consolidation process for the shared memory pool (`meiva.memory.PATH`, a git repo). During the day agents write notes into the working tree; on trigger they are merged to keep the pool committed / pushed / searchable. git / gh / refresh operations are all wrapped in the `meiva memory` CLI — the agent only runs one command per step.
+`plugins/meiva_memory/skills/consolidation/SKILL.md` (loaded name `meiva.skills.meiva_memory.consolidation`, a sub-skill of [meiva_memory root skill](../README.md)): the consolidation process for the shared memory notes (`meiva.memory.PATH`, inside the Vault git repo). During the day agents write notes into the working tree; on trigger they are merged to keep the pool committed / pushed / searchable. git / gh / refresh operations are all wrapped in the `meiva memory` CLI — the agent only runs one command per step.
 
 ## Role naming (2026-08-01)
 
@@ -23,10 +23,10 @@ commit — when in doubt, trigger.
 
 ## Four-Phase Meiva Dream Workflow
 
-Each full consolidation runs four phases inside an isolated git worktree (`git -C ~/.meiva/memory worktree add -q -B <branch> $W origin/main`; direct commits on `main` are refused by the pool pre-commit hook):
+Each full consolidation runs four phases inside an isolated git worktree (`git -C ~/.meiva/vault worktree add -q -B <branch> $W origin/main`; direct commits on `main` are refused by the pool pre-commit hook):
 1. **Phase 1 (Orientation)**: Scan `MEMORY.md` and directory `index.md` files to map topic layout and size budgets.
-2. **Phase 2 (Gather Signal)**: Run `skills/consolidation/scripts/dream_gather.py` to intersect optional note `sources` (`repo:<alias>:<path>`) against repository file trees and recent git commits, flag expired `stale_after` and aging `verified` dates, and identify pool churn/conflict hotspots; collect three incremental signals — (a) recent session transcripts (`USER_INPUT` corrections and rulings), (b) generalized World Truth Probes (multi-repo paths/symbols/contracts, cluster DB active/terminated agents and schedule states, host environment and `<!-- fact-check: ... -->`), and (c) per-agent `workspaces/*/memory/` notes.
-3. **Phase 3 (Consolidation)**: Enforce one dateless canonical file per rule/topic slot, overwrite canonical state in place when rulings or world truth change, `git rm` superseded/expired date-suffixed fragments, populate/refresh Dream OKF provenance and lifecycle fields (`description`, `sources`, `verified`, `stale_after`) on canonical notes, and convert relative time words to explicit `YYYY-MM-DD` dates.
+2. **Phase 2 (Gather Signal)**: Run `skills/consolidation/scripts/dream_gather.py` to intersect optional note body file links against repository file trees and recent git commits, flag expired `stale_after` and aging `verified` dates, and identify pool churn/conflict hotspots; collect three incremental signals — (a) recent session transcripts (`USER_INPUT` corrections and rulings), (b) generalized World Truth Probes (multi-repo paths/symbols/contracts, cluster DB active/terminated agents and schedule states, host environment and `<!-- fact-check: ... -->`), and (c) per-agent `workspaces/*/memory/` notes.
+3. **Phase 3 (Consolidation)**: Enforce one dateless canonical file per rule/topic slot, overwrite canonical state in place when rulings or world truth change, `git rm` superseded/expired date-suffixed fragments, populate/refresh Dream OKF provenance and lifecycle fields (`description`, `verified`, `stale_after`) on canonical notes, and convert relative time words to explicit `YYYY-MM-DD` dates.
 4. **Phase 4 (Prune & Index)**: Keep `MEMORY.md` conflict-free and concise, run `rebuild_memory_index.py` + `validate.py`, land via PR, clean up the temporary worktree, and run `meiva memory refresh`.
 
 ## Three Deployment Topologies

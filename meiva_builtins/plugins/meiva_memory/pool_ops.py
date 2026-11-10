@@ -141,10 +141,10 @@ def _tracked_notes(pool: Path) -> list[str] | None:
         text=True,
         check=False,
     )
-    if prefix.returncode != 0 or prefix.stdout.strip():
+    if prefix.returncode != 0 or prefix.stdout.strip() not in {"", "memory/"}:
         # meiva:note
-        # Not a checkout, or a subdirectory of one: `ls-files` would then print paths from the
-        # enclosing repository's root, which are not this pool's to count.
+        # Only a checkout root or its memory/ notes root is an indexed pool. Git ls-files
+        # scopes its paths to the current directory; other subdirectories retain walk behavior.
         return None
     listed = subprocess.run(  # noqa: S603
         ["git", "-C", str(pool), "ls-files", "-z", "--", "*.md"],
@@ -194,7 +194,7 @@ def _subdir_lines(dir_rel: str, dirs: list[str], all_files: list[str]) -> list[s
     for d in dirs:
         prefix = (dir_rel + "/" if dir_rel else "") + d + "/"
         n = len([f for f in all_files if f.startswith(prefix)])
-        lines.append(f"* [{d}/]({d}/) - {n} notes")
+        lines.append(f"* [{d}/]({d}/index.md) - {n} notes")
     return lines or ["*(none)*"]
 
 
