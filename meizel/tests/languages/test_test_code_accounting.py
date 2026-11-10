@@ -19,7 +19,7 @@ ROOT = Path(__file__).resolve().parents[3]
 # moves both; a ledger that drops without a line saying why is what this file refuses.
 # meiva:link meizel/docs/checker/test-code.md
 DOCUMENTED = {
-    "ui/web/src/app/page-test-mock.tsx": 94,
+    "ui/web/src/app/page-test-mock.tsx": 97,
     "ui/web/src/components/agent-sidebar/sidebar-test-mock.tsx": 140,
     "ui/web/src/components/inspector/inspector-test-mock.tsx": 4,
 }

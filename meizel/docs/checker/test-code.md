@@ -33,7 +33,7 @@ ships carry.
 | module | records | test files that write it | why it is a double |
 |---|---:|---|---|
 | `ui/web/src/components/agent-sidebar/sidebar-test-mock.tsx` | 140 | `agent-sidebar.test.tsx` (34), `sidebar-status-cards.test.tsx` (48), `sidebar-tree-and-search.test.tsx` (56) | the rail's scenario object: the props the page hands it, and the settings, stats and plugin declarations it reads |
-| `ui/web/src/app/page-test-mock.tsx` | 94 | `page.test.tsx` (58), `page-dispatch.test.tsx` (36) | the home page's `hooksState` and its provider wrapper |
+| `ui/web/src/app/page-test-mock.tsx` | 97 | `page.test.tsx` (61), `page-dispatch.test.tsx` (36) | the home page's `hooksState` and its provider wrapper |
 | `ui/web/src/components/inspector/inspector-test-mock.tsx` | 4 | `inspector-panel-chrome.test.tsx` (3), `inspector-panel-notices.test.tsx` (1) | the inspector's `inspectorMockState` |
 
 238 records, every one of them a write into a state object the double exports: no `vi.mock`, and no patch
@@ -66,3 +66,8 @@ home-page double: selected agent, agent roster and timeline items. Those inputs
 exercise per-agent question filtering and keep pending forms outside the
 visible timeline. Its documented records therefore move from 91 to 94; the
 production-import control and conditional test-only exemption are unchanged.
+
+The seen-position regression adds the same three assignments (selected agent, agent roster and
+timeline items) to the home-page double, to drive which delivery the page asks the timeline to
+reveal. Its documented records move from 94 to 97; the production-import control and
+conditional test-only exemption are unchanged.
