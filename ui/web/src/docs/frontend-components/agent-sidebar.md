@@ -92,11 +92,34 @@ shares a fixed-pixel horizontal gradient coordinate space (offset by
 `--agent-indent-px` for tree depth) and locks its CSS animation `startTime` to
 `0` so all working titles sweep in unison along the same vertical column.
 Offline agents suppress the working title shimmer on the row without rendering a
-gray row dot, and report their offline state in the hover peek card's status slot. At the right edge, an unresolved structured
-question shows a Sunset Orange (`#ED8755`) circled question mark, and an ordinary
-response-required notice shows a Sunset Orange (`#ED8755`) dot. The question
-takes precedence when both are pending, independently of the working title.
-Unread publications and FYI notices do not need a reply. Additional lifecycle
+gray row dot, and report their offline state in the hover peek card's status slot. At the right edge a row
+shows at most one indicator, decided by `agentAttention`
+(`lib/agents/agent-attention.ts`) and shared by the hover card: an unresolved
+structured question shows a Sunset Orange (`--meiva-sunset-orange`, `#ED8755`) circled
+question mark, and it outranks everything. Without a question, a response-required
+notice **or** an unread delivery (`unread_user_message_count > 0`) shows the same
+Sunset Orange solid dot, named "Awaiting a reply" or "Unread update" for the real
+reason; the two never show side by side. FYI notices do not light the row
+(restored 2026-11-10, superseding the 2026-11-07 removal; see
+[the decision](../../../../../docs/decisions/frontend/ui/2026-11-10-restore-unread-dot.md)).
+The conversation the reader is looking at never shows an unread dot: while its
+timeline rests at the latest position in a visible document, the row is excluded
+(`readingAgentId` in the UI store), so a delivery arriving under the reader's eyes
+does not light up and go out. A reply request or question still shows. A delivery
+that arrives while the reader is scrolled up, or the tab is hidden, lights the dot.
+
+The dot goes out when the reader has seen the newest delivery. `useReadingAgent`
+(`lib/context/use-reading-agent.ts`) watches the open conversation: once it is open,
+the document is visible and the timeline is at the bottom, and that has held for a
+short dwell, it sends one idempotent request
+(`POST /api/keyed/v1/agents/{id}/user-messages/read`, `up_to_id` = the highest
+record id the page has fetched) that marks that agent's unread deliveries up to the
+id read. Records the page has not received yet are never marked, deliveries
+that are folded, outside the loaded history window or that match no timeline row are
+covered because the rule keys on the agent and the id, not on a rendered row. A
+failed request is retried after 1 s, 3 s and 9 s while the conditions still hold,
+then waits for the next trigger (visible again, scrolled to the bottom, a newer
+record, the feed refetching after a reconnect). Additional lifecycle
 markers and the header's aggregate reply count remain opt-in through
 `display.show_agent_status` and `notification.awaiting_reply`, respectively.
 Rows keep timestamps in the hover card. Labels truncate with a single-line

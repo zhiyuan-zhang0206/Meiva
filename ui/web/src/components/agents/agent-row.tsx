@@ -28,6 +28,8 @@ import {
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
 import { useUserSettings } from "@/lib/state/use-user-settings";
+import type { AgentAttention } from "@/lib/agents/agent-attention";
+import { useAgentAttention } from "@/lib/agents/use-agent-attention";
 import type { AgentRow } from "@/lib/contracts/types";
 import type { PendingAction } from "@/lib/agents/use-agents";
 import { cn } from "@/lib/format/utils";
@@ -86,6 +88,12 @@ export interface AgentRowProps {
   onRename: (label: string) => void;
   onCompact: () => void;
 }
+
+const ATTENTION_LABEL = {
+  question: "statusPendingQuestion",
+  awaiting: "statusAwaitingReply",
+  unread: "statusUnread",
+} as const satisfies Record<AgentAttention, string>;
 
 /** Per-level indent (px). 14 = 1px guide line + surrounding spacing. */
 const INDENT = 14;
@@ -175,11 +183,12 @@ export function AgentRow({
     showAgentStatus && agent.status === "terminated"
       ? STATUS_DOT[agent.status]
       : null;
-  const replyLabel = agent.has_pending_question
-    ? t("statusPendingQuestion")
-    : agent.awaiting_response_count > 0
-      ? t("statusAwaitingReply")
-      : null;
+  // meiva:note
+  // One slot, one indicator: the question mark outranks the orange dot, and the dot says
+  // "unread" or "awaiting a reply" by name only.
+  // meiva:link ui/web/src/docs/frontend-components/agent-sidebar.md
+  const attention = useAgentAttention(agent);
+  const replyLabel = attention === null ? null : t(ATTENTION_LABEL[attention]);
 
   // #ID and label coexist, complementing each other: `#180 · screen-permission` or `#180` (when there's no label)
   const displayLabel = label ? `#${agent.agent_id} · ${label}` : `#${agent.agent_id}`;
@@ -360,10 +369,10 @@ export function AgentRow({
                 title={replyLabel}
                 className="grid size-4 shrink-0 place-items-center"
               >
-                {agent.has_pending_question ? (
-                  <CircleQuestionMark aria-hidden className="size-3.5 text-[#ED8755]" />
+                {attention === "question" ? (
+                  <CircleQuestionMark aria-hidden className="size-3.5 text-meiva-sunset-orange" />
                 ) : (
-                  <span aria-hidden className="size-1.5 rounded-full bg-[#ED8755]" />
+                  <span aria-hidden className="size-1.5 rounded-full bg-meiva-sunset-orange" />
                 )}
               </span>
             ) : null}

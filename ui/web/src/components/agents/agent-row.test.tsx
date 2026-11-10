@@ -16,6 +16,7 @@ import type { AgentRow as AgentRowType } from "@/lib/contracts/types";
 import { renderWithBrowser as rtlRender } from "@/test-support/render";
 import { WallClockProvider } from "@/lib/transport/transport-context";
 import { resetTransport, transport } from "@/test-support/fake-api";
+import { useStore } from "@/lib/state/store";
 beforeEach(() => {
   resetTransport();
   transport.getSystemStatus.mockRejectedValue(new Error("no network in tests"));
@@ -309,14 +310,13 @@ describe("AgentRow lifecycle markers", () => {
     return container.querySelector("li button > span.rounded-full");
   }
 
-  it("unread publications leave the response slot empty while the title shimmers", () => {
-    const { container, queryByRole } = render(
+  it("an unread delivery does not stop the title shimmer or add a lifecycle dot", () => {
+    const { container } = render(
       <AgentRow {...baseProps} agent={ag(1, { status: "running", unread_user_message_count: 3 })} depth={0} ancestorsIsLast={[]} />,
     );
     const title = container.querySelector<HTMLElement>(".agent-title-working");
     expect(title?.textContent).toBe("#1");
     expect(title?.style.getPropertyValue("--agent-indent-px")).toBe("0px");
-    expect(queryByRole("img", { name: "Awaiting a reply" })).toBeNull();
     expect(statusDot(container)).toBeNull();
   });
 
@@ -368,6 +368,106 @@ describe("AgentRow lifecycle markers", () => {
     );
     expect(statusDot(container)).toBeNull();
     expect(container.querySelector(".agent-title-working")).toBeNull();
+  });
+});
+
+// meiva:note
+// One slot, one indicator: question mark > orange dot (awaiting a reply or unread) > nothing.
+// meiva:link ui/web/src/docs/frontend-components/agent-sidebar.md
+describe("AgentRow attention indicator", () => {
+  afterEach(() => useStore.setState({ readingAgentId: null }));
+  function show(overrides: Partial<AgentRowType>) {
+    return render(<AgentRow {...baseProps} agent={ag(1, overrides)} depth={0} ancestorsIsLast={[]} />);
+  }
+
+  it("shows nothing for an agent with no question, reply request or unread delivery", () => {
+    show({});
+    expect(screen.queryByRole("img")).toBeNull();
+  });
+
+  it("shows the orange dot, named Unread, for an unread delivery", () => {
+    const { container } = show({ unread_user_message_count: 2 });
+    const mark = screen.getByRole("img", { name: "Unread update from the agent" });
+    expect(mark.title).toBe("Unread update from the agent");
+    const dot = mark.querySelector("span.rounded-full");
+    expect(dot?.className).toContain("bg-meiva-sunset-orange");
+    expect(mark.querySelector("svg")).toBeNull();
+    expect(container.querySelectorAll('[role="img"]')).toHaveLength(1);
+  });
+
+  it("shows the same dot, named Awaiting a reply, for an open reply request", () => {
+    show({ awaiting_response_count: 1 });
+    const mark = screen.getByRole("img", { name: "Awaiting a reply" });
+    expect(mark.querySelector("span.rounded-full")?.className).toContain("bg-meiva-sunset-orange");
+  });
+
+  it("shows only the question mark when a question is pending, whatever else is open", () => {
+    const { container } = show({ has_pending_question: true, awaiting_response_count: 2, unread_user_message_count: 4 });
+    const mark = screen.getByRole("img", { name: "Question awaiting an answer" });
+    expect(mark.querySelector("svg")?.getAttribute("class")).toContain("text-meiva-sunset-orange");
+    expect(mark.querySelector("span.rounded-full")).toBeNull();
+    expect(container.querySelectorAll('[role="img"]')).toHaveLength(1);
+  });
+
+  it("shows one dot, not two, when a reply request and an unread delivery coexist", () => {
+    const { container } = show({ awaiting_response_count: 1, unread_user_message_count: 4 });
+    expect(container.querySelectorAll('[role="img"]')).toHaveLength(1);
+    expect(screen.getByRole("img", { name: "Awaiting a reply" })).toBeTruthy();
+  });
+
+  it("does not light for deliveries the reader is looking at, but keeps a reply request lit", () => {
+    useStore.setState({ readingAgentId: 1 });
+    const { rerender } = show({ unread_user_message_count: 2 });
+    expect(screen.queryByRole("img")).toBeNull();
+    rerender(
+      <WallClockProvider wallNow={() => Date.now()}>
+        <QueryClientProvider client={new QueryClient()}>
+          <AgentRow {...baseProps} agent={ag(1, { awaiting_response_count: 1, unread_user_message_count: 2 })} depth={0} ancestorsIsLast={[]} />
+        </QueryClientProvider>
+      </WallClockProvider>,
+    );
+    expect(screen.getByRole("img", { name: "Awaiting a reply" })).toBeTruthy();
+  });
+
+  it("lights an unread delivery of an agent other than the one being read", () => {
+    useStore.setState({ readingAgentId: 2 });
+    show({ unread_user_message_count: 1 });
+    expect(screen.getByRole("img", { name: "Unread update from the agent" })).toBeTruthy();
+  });
+});
+
+describe("AgentRow hover card attention marks", () => {
+  afterEach(() => useStore.setState({ readingAgentId: null }));
+  async function openCard(overrides: Partial<AgentRowType>) {
+    vi.useFakeTimers();
+    const { container } = render(<AgentRow {...baseProps} agent={ag(1, overrides)} depth={0} ancestorsIsLast={[]} />);
+    fireEvent.mouseEnter(container.querySelector("li > button")!);
+    await act(() => vi.advanceTimersByTimeAsync(AGENT_HOVER_OPEN_DELAY_MS));
+    return screen.getByTestId("agent-hover-card");
+  }
+
+  it("marks a pending question with the sidebar's orange question mark, not a priority color", async () => {
+    const card = await openCard({ has_pending_question: true, awaiting_response_count: 1, highest_notice_priority: "P1" });
+    expect(card.textContent).toContain("1 awaiting reply");
+    expect(card.querySelector("svg")?.getAttribute("class")).toContain("text-meiva-sunset-orange");
+    expect(card.querySelector("span.rounded-full.bg-blue-500, span.bg-blue-500")).toBeNull();
+  });
+
+  it("marks a plain reply request with the same orange dot whatever its priority", async () => {
+    const card = await openCard({ awaiting_response_count: 1, highest_notice_priority: "P1" });
+    const dot = card.querySelector("p span.rounded-full.bg-meiva-sunset-orange");
+    expect(dot).not.toBeNull();
+    expect(card.textContent).toContain("1 awaiting reply");
+  });
+
+  it("lists unread deliveries with the orange dot, and not while they are being read", async () => {
+    const card = await openCard({ unread_user_message_count: 3 });
+    expect(card.textContent).toContain("3 unread updates");
+    expect(card.querySelector("p span.rounded-full.bg-meiva-sunset-orange")).not.toBeNull();
+    cleanup();
+    useStore.setState({ readingAgentId: 1 });
+    const reading = await openCard({ unread_user_message_count: 3 });
+    expect(reading.textContent).not.toContain("unread");
   });
 });
 

@@ -162,14 +162,24 @@ export function HeaderBarMock({ label, children, maxWidthCss }: ComponentProps<t
   );
 }
 
-export function TimelineViewMock({ turnActive, maxWidthCss, items }: ComponentProps<typeof TimelineViewComponent>) {
+// meiva:note
+// Like the real view, the stand-in reports "at the latest position" on mount and "left" on
+// unmount; its two buttons are the reader scrolling away from and back to the bottom.
+export function TimelineViewMock({ turnActive, maxWidthCss, items, onAtBottomChange }: ComponentProps<typeof TimelineViewComponent>) {
+  useEffect(() => {
+    onAtBottomChange?.(true);
+    return () => onAtBottomChange?.(false);
+  }, [onAtBottomChange]);
   return (
     <div
       data-testid="timeline"
       data-turn-active={turnActive ? "1" : "0"}
       data-item-count={items.length}
       style={maxWidthCss ? { maxWidth: maxWidthCss } : undefined}
-    />
+    >
+      <button type="button" data-testid="timeline-scroll-up" onClick={() => onAtBottomChange?.(false)} />
+      <button type="button" data-testid="timeline-scroll-down" onClick={() => onAtBottomChange?.(true)} />
+    </div>
   );
 }
 
@@ -348,6 +358,7 @@ export async function resetHomePageTestState() {
     getUploadDeliveryStatus: transport.getUploadDeliveryStatus,
     getReplySuggestion: transport.getReplySuggestion,
     getUserMessages: transport.getUserMessages,
+    readUserMessages: transport.readUserMessages,
   };
   vi.clearAllMocks();
   inspectorMockState.shouldThrow = false;

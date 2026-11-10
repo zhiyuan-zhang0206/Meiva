@@ -2653,10 +2653,10 @@
         }
       }
     },
-    "/api/keyed/v1/agents/{agent_id}/user-messages/{message_id}/resolve": {
+    "/api/keyed/v1/agents/{agent_id}/user-messages/read": {
       "post": {
-        "summary": "Resolve Message",
-        "operationId": "resolve_message_api_keyed_v1_agents__agent_id__user_messages__message_id__resolve_post",
+        "summary": "Read Messages",
+        "operationId": "read_messages_api_keyed_v1_agents__agent_id__user_messages_read_post",
         "parameters": [
           {
             "name": "agent_id",
@@ -2665,15 +2665,6 @@
             "schema": {
               "type": "integer",
               "title": "Agent Id"
-            }
-          },
-          {
-            "name": "message_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "integer",
-              "title": "Message Id"
             }
           },
           {
@@ -2702,7 +2693,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/ResolveMessage"
+                "$ref": "#/components/schemas/ReadMessages"
               }
             }
           }
@@ -2713,7 +2704,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/UserMessage"
+                  "$ref": "#/components/schemas/ReadMessagesResult"
                 }
               }
             }
@@ -15461,6 +15452,35 @@
         ],
         "title": "PublishMessage"
       },
+      "ReadMessages": {
+        "properties": {
+          "up_to_id": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Up To Id"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "up_to_id"
+        ],
+        "title": "ReadMessages"
+      },
+      "ReadMessagesResult": {
+        "properties": {
+          "read_count": {
+            "type": "integer",
+            "title": "Read Count"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "read_count"
+        ],
+        "title": "ReadMessagesResult"
+      },
       "RebuildProgressOut": {
         "properties": {
           "id": {
@@ -15631,21 +15651,6 @@
         ],
         "title": "ReplySuggestionResponse",
         "description": "Drafted replies, or the reason there are none.\n\n`suggestions` is nonempty exactly when `reason` is None. Every non-error outcome is a 200: a\nmissing suggestion is an ordinary result, never a failure of the request."
-      },
-      "ResolveMessage": {
-        "properties": {
-          "action": {
-            "type": "string",
-            "const": "read",
-            "title": "Action"
-          }
-        },
-        "additionalProperties": false,
-        "type": "object",
-        "required": [
-          "action"
-        ],
-        "title": "ResolveMessage"
       },
       "ResolveNoticeIn": {
         "properties": {

@@ -90,6 +90,47 @@ describe("HomePage reply suggestion", () => {
   });
 });
 
+// meiva:note
+// The open conversation is read when its timeline rests at the latest position in a visible
+// document; the stand-in timeline's buttons are the reader leaving and returning to the bottom.
+// meiva:link ui/web/src/docs/frontend-components/agent-sidebar.md
+describe("HomePage unread deliveries", () => {
+  const unread = {
+    id: 9, agent_id: 5, mode: "prefix" as const, source_key: "assistant:m1:0.0", content: "Done",
+    suggestions: [], created_at: "2026-11-10T00:00:00Z", read_at: null,
+  };
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    hooksState.activeId = 5;
+    hooksState.agents = [makeAgent({ agent_id: 5, status: "idling" })];
+    transport.getUserMessages
+      .mockResolvedValueOnce({ mode: "prefix", items: [unread] })
+      .mockResolvedValue({ mode: "prefix", items: [{ ...unread, read_at: "2026-11-10T00:00:05Z" }] });
+    transport.readUserMessages.mockResolvedValue({ read_count: 1 });
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+  const settle = () => act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+
+  it("marks the agent's deliveries read up to the newest fetched id once the reader is at the latest position", async () => {
+    wrap(<HomePage />);
+    await settle();
+    expect(transport.readUserMessages).toHaveBeenCalledTimes(1);
+    expect(transport.readUserMessages).toHaveBeenCalledWith(5, { up_to_id: 9 }, expect.any(String));
+  });
+
+  it("waits while the reader is scrolled up and marks them once they return to the bottom", async () => {
+    wrap(<HomePage />);
+    fireEvent.click(screen.getByTestId("timeline-scroll-up"));
+    await settle();
+    expect(transport.readUserMessages).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByTestId("timeline-scroll-down"));
+    await settle();
+    expect(transport.readUserMessages).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe("HomePage top-level render", () => {
   it("keeps a cold checkpoint failure visible with manual Retry until a successful read", () => {
     hooksState.activeId = 42;

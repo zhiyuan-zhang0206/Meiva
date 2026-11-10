@@ -1,6 +1,5 @@
 "use client";
 
-import { MessageActions } from "@/components/user-delivery/message-actions";
 
 import { memo, useCallback, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 
@@ -197,9 +196,6 @@ export const TimelineRow = memo(function TimelineRow({
           >
             {primaryFooter}
           </div>
-        ) : null}
-        {item.userDelivery?.read_at === null ? (
-          <MessageActions message={item.userDelivery} showReadButton={false} />
         ) : null}
       </div>
     );

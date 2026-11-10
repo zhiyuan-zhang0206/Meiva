@@ -7,6 +7,7 @@
 // meiva:link ui/web/src/docs/frontend-components/agent-sidebar.md
 
 import * as Popover from "@radix-ui/react-popover";
+import { CircleQuestionMark } from "lucide-react";
 import { useTranslations } from "next-intl";
 import {
   createContext,
@@ -27,7 +28,7 @@ import { cn } from "@/lib/format/utils";
 import { harnessLabel } from "@/lib/harness/harness";
 import { useCoarsePointer } from "@/lib/input/use-coarse-pointer";
 import { FLEX, MIN_W_0 } from "@/lib/layout/layout";
-import { PRIORITY_BG } from "@/lib/notifications/notices";
+import { useAgentAttention } from "@/lib/agents/use-agent-attention";
 
 export const AGENT_HOVER_OPEN_DELAY_MS = 400;
 export const AGENT_HOVER_WARMUP_MS = 300;
@@ -202,6 +203,19 @@ function parseSpawnerAgentId(spawner: string): number | null {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+// meiva:note
+// The same mark the sidebar row shows for the same state: the question mark when a question
+// awaits an answer, the orange dot otherwise. It deliberately does not follow the notice
+// priority colors, which put an Ask in blue and disagreed with the row.
+// meiva:link ui/web/src/docs/frontend-components/agent-sidebar.md
+function AttentionMark({ question }: { question: boolean }) {
+  return question ? (
+    <CircleQuestionMark aria-hidden className="size-3 shrink-0 text-meiva-sunset-orange" />
+  ) : (
+    <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-meiva-sunset-orange" />
+  );
+}
+
 export function AgentHoverCard({
   agent,
   displayLabel,
@@ -213,6 +227,7 @@ export function AgentHoverCard({
   const now = useWallDate();
   const { formatFuture } = useTimeFormat();
 
+  const attention = useAgentAttention(agent);
   const offline = agent.liveness_state === "offline";
   const launchFailed = agent.availability?.reason.startsWith("launch_") === true;
   const activeTime = formatRelativeTime(agent.last_active_at, now);
@@ -307,17 +322,17 @@ export function AgentHoverCard({
 
           {agent.awaiting_response_count > 0 ? (
             <p className={cn("items-center gap-1.5 text-[10.5px]", FLEX)}>
-              <span
-                className={cn(
-                  "size-1.5 rounded-full shrink-0",
-                  agent.highest_notice_priority
-                    ? PRIORITY_BG[agent.highest_notice_priority]
-                    : "bg-[#ED8755]",
-                )}
-              />
+              <AttentionMark question={attention === "question"} />
               <span>
                 {t("hoverAwaitingReply", { count: agent.awaiting_response_count })}
               </span>
+            </p>
+          ) : null}
+
+          {attention === "unread" ? (
+            <p className={cn("items-center gap-1.5 text-[10.5px]", FLEX)}>
+              <AttentionMark question={false} />
+              <span>{t("hoverUnread", { count: agent.unread_user_message_count })}</span>
             </p>
           ) : null}
 

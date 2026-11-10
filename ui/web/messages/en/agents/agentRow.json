@@ -28,6 +28,7 @@
   "statusWorking": "Working",
   "statusAwaitingReply": "Awaiting a reply",
   "statusPendingQuestion": "Question awaiting an answer",
+  "statusUnread": "Unread update from the agent",
   "statusRunning": "Running",
   "statusIdling": "Idling",
   "statusTerminated": "Terminated",
@@ -39,6 +40,7 @@
   "hoverSpawnedBy": "Spawned by #{id}",
   "hoverForkedFrom": "Forked from #{id}",
   "hoverAwaitingReply": "{count, plural, one {# awaiting reply} other {# awaiting reply}}",
+  "hoverUnread": "{count, plural, one {# unread update} other {# unread updates}}",
   "hoverHeartbeatPaused": "Heartbeat paused until {time}",
   "hoverModel": "Model",
   "hoverEffort": "Effort"

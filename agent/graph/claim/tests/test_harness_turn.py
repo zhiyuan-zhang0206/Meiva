@@ -83,6 +83,7 @@ class FakeEngine:
         usage: Usage | None = None,
         prelude: tuple[HarnessTurn, ...] = (),
         events: tuple[BridgeEvent, ...] = (),
+        interrupted: bool = False,
     ) -> None:
         self.harness = Harness.CLAUDE_CODE
         self.model = "claude-sonnet-5-5"
@@ -93,7 +94,7 @@ class FakeEngine:
         self._reply = reply
         self._usage = usage
         self._prelude = prelude
-        self._events = events
+        self._events, self._interrupted = events, interrupted
 
     async def run_turn(
         self,
@@ -113,7 +114,7 @@ class FakeEngine:
             cost_usd=0.01,
             subtype="success",
             is_error=False,
-            interrupted=False,
+            interrupted=self._interrupted,
             prelude=self._prelude,
         )
 

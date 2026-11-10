@@ -21,7 +21,7 @@ code-output envelope has none), and a body-level button is no longer a way to
 keeps its stamp (`justify-end`) but never Copy. A kind that offers neither Copy
 nor a stamp mounts no band at all, so there is never an empty strip under a block.
 
-Publications are marked read automatically when an invisible anchor (`showReadButton={false}` on `MessageActions`) at the bottom of their row enters the viewport while the document is visible. The anchor occupies no layout space and renders no unread dot or button inside the message footer.
+A delivered reply carries no read marker of its own: unread state is not drawn on the timeline. The conversation as a whole is marked read when the reader rests at the latest position (see [the agent sidebar](../agent-sidebar.md)).
 
 For primary messages, the band **sits symmetrically in the 20px gap below the
 block, outside the message box**, so the time reads as a clean separator between

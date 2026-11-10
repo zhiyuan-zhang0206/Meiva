@@ -70,6 +70,11 @@ interface Props {
   loading?: boolean;
   loadingNew?: boolean;
   maxWidthCss?: string;
+  // meiva:note
+  // Reports whether the viewport rests at the latest position (the same measure that shows the
+  // scroll-to-bottom control). A thread being left reports false.
+  // meiva:link ui/web/src/docs/frontend-components/agent-sidebar.md
+  onAtBottomChange?: (atBottom: boolean) => void;
 }
 
 export const TimelineView = memo(function TimelineView({
@@ -88,6 +93,7 @@ export const TimelineView = memo(function TimelineView({
   loading = false,
   loadingNew = false,
   maxWidthCss,
+  onAtBottomChange,
 }: Props) {
   const t = useTranslations("timeline");
   const bufferedItems = useMemo(
@@ -162,6 +168,10 @@ export const TimelineView = memo(function TimelineView({
   });
 
   const [atBottom, setAtBottom] = useState(true);
+  useEffect(() => {
+    onAtBottomChange?.(atBottom);
+    return () => onAtBottomChange?.(false);
+  }, [atBottom, onAtBottomChange]);
 
   const {
     turnOverrides,

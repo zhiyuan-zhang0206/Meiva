@@ -1,6 +1,5 @@
 from datetime import datetime
 from enum import StrEnum
-from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -54,9 +53,14 @@ class UserMessage(BaseModel):
     read_at: datetime | None
 
 
-class ResolveMessage(BaseModel):
+class ReadMessages(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    action: Literal["read"]
+    up_to_id: int = Field(ge=1)
+
+
+class ReadMessagesResult(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    read_count: int
 
 
 class AskMessage(BaseModel):

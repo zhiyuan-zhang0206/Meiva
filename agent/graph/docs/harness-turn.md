@@ -50,7 +50,8 @@ The IM bridge accepts completed chat blocks. Incomplete text remains visible
 in the work history and is excluded from outbound message delivery.
 
 Cancellation and failure preserve committed work. Terminal handling flushes
-pending text, marks tools whose result is unavailable, and records a failure
+pending text (a reply cut off mid-stream is sealed as it stood, so it is
+delivered and recorded like a completed one), marks tools whose result is unavailable, and records a failure
 reason when the harness faults. A host custody tick keeps the invocation
 owned while the provider is quiet. It produces no timeline activity.
 

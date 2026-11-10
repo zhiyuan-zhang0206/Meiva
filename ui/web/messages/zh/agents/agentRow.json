@@ -28,6 +28,7 @@
   "statusWorking": "正在工作",
   "statusAwaitingReply": "等待回复",
   "statusPendingQuestion": "有待回答的问题",
+  "statusUnread": "有未读消息",
   "statusRunning": "运行中",
   "statusIdling": "空闲中",
   "statusTerminated": "已终止",
@@ -41,5 +42,6 @@
   "hoverAwaitingReply": "{count} 条待回复通知",
   "hoverModel": "模型",
   "hoverEffort": "推理强度",
+  "hoverUnread": "{count} 条未读消息",
   "hoverHeartbeatPaused": "心跳暂停至 {time}"
 }

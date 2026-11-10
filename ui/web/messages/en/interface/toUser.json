@@ -22,6 +22,5 @@
   "tooLarge": "This file is too large to show here.",
   "missing": "This link is no longer available.",
   "unreadable": "This file can't be shown here.",
-  "openRaw": "Open the file itself",
-  "deliveryUnread": "Unread · mark read"
+  "openRaw": "Open the file itself"
 }

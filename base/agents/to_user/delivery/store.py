@@ -88,6 +88,16 @@ def messages(
         return [UserMessage.model_validate(row) for row in cur.fetchall()]
 
 
+def mark_read(conn: Connection, agent_id: int, up_to_id: int) -> int:
+    if conn.execute("SELECT 1 FROM agents_meta WHERE id = %s", (agent_id,)).fetchone() is None:
+        raise LookupError(f"agent {agent_id} does not exist")
+    return conn.execute(
+        "UPDATE agent_user_messages SET read_at = now() "
+        "WHERE agent_id = %s AND id <= %s AND read_at IS NULL AND content IS NOT NULL",
+        (agent_id, up_to_id),
+    ).rowcount
+
+
 def latest_decision(conn: Connection, agent_id: int) -> int:
     with conn.cursor(row_factory=scalar_row) as cur:
         cur.execute(

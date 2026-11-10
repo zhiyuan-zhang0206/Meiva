@@ -60,3 +60,22 @@ describe("guarded browser notice resolution", () => {
     expect(keys[1]).not.toBe(keys[0]);
   });
 });
+
+describe("bulk read of an agent's deliveries", () => {
+  it("posts the id bound to the agent's own path with the caller's principal-scoped key", async () => {
+    answer = { kind: "json", status: 200, body: { read_count: 2 } };
+    await expect(rig.api.readUserMessages(7, { up_to_id: 41 }, "read-intent")).resolves.toEqual({ read_count: 2 });
+    const [request] = gateway.requests;
+    expect(request.path).toBe("/api/keyed/v1/agents/7/user-messages/read");
+    expect(request.method).toBe("POST");
+    expect(request.headers["idempotency-key"]).toBe("read-intent");
+    expect(request.headers["idempotency-scope"]).toBe("principal-v1");
+    expect(JSON.parse(request.body)).toEqual({ up_to_id: 41 });
+  });
+
+  it("rejects a refusal without an automatic retry", async () => {
+    answer = { kind: "json", status: 404, body: { detail: "agent 7 does not exist" } };
+    await expect(rig.api.readUserMessages(7, { up_to_id: 41 }, "read-intent")).rejects.toMatchObject({ status: 404 });
+    expect(gateway.requests).toHaveLength(1);
+  });
+});

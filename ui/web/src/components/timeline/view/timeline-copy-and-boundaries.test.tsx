@@ -6,7 +6,6 @@ vi.mock("@/components/content/markdown", () => ({ ChatMarkdown: ChatMarkdownMock
 vi.mock("@/components/ui/scroll-area", () => ({ ScrollArea: ScrollAreaMock }));
 import { TimelineView } from "..";
 import { formatItemTime } from "../timestamp";
-import { resetTransport, transport } from "@/test-support/fake-api";
 afterEach(cleanupTimelineTest);
 describe("CopyButton feedback state machine", () => {
   beforeEach(() => {
@@ -163,45 +162,6 @@ describe("Copy is scoped to message text (per-kind whitelist)", () => {
 // offer Copy.
 // meiva:link ui/web/src/docs/frontend-components/timeline-view/card-chrome.md
 describe("block-level copy actions (hover band)", () => {
-  it("marks a visible publication read via invisible anchor while keeping hover reveal on the footer", async () => {
-    resetTransport();
-    transport.resolveUserMessage.mockResolvedValue({ status: "idling", inbound_id: null });
-    let reportIntersection: IntersectionObserverCallback | undefined;
-    const observer = { observe: vi.fn<(node: Element) => void>(), disconnect: vi.fn() };
-    vi.stubGlobal("IntersectionObserver", class {
-      constructor(callback: IntersectionObserverCallback) {
-        reportIntersection = callback;
-      }
-      observe = observer.observe;
-      disconnect = observer.disconnect;
-    });
-    const item: BackendTimelineItem = {
-      ...makeItem({ kind: "agent_chat", payload: "Published reply" }),
-      userDelivery: {
-        id: 12, agent_id: 7, mode: "prefix", source_key: "assistant:reply:0.0",
-        content: "Published reply", suggestions: [], created_at: "2026-11-06T00:00:00Z", read_at: null,
-      },
-    };
-    const { container } = render(<TimelineView items={[item]} />);
-    const row = screen.getByTestId("agent-message-prose").closest(".timeline-item");
-    const [anchor] = observer.observe.mock.calls.flat();
-    expect(row?.contains(anchor)).toBe(true);
-    expect(screen.getByTestId("card-chrome").classList.contains("opacity-100")).toBe(false);
-    expect(screen.queryByRole("button", { name: "Unread · mark read" })).toBeNull();
-    expect(transport.resolveUserMessage).not.toHaveBeenCalled();
-    expect(container.textContent).toContain("Published reply");
-
-    const report = (intersectionRatio: number) => reportIntersection?.(
-      [{ isIntersecting: true, intersectionRatio } as IntersectionObserverEntry],
-      observer as unknown as IntersectionObserver,
-    );
-    report(0);
-    expect(transport.resolveUserMessage).not.toHaveBeenCalled();
-    report(1);
-    await waitFor(() => expect(transport.resolveUserMessage).toHaveBeenCalledWith(
-      7, 12, { action: "read" }, expect.any(String),
-    ));
-  });
   it("the footer holds Copy and no other control", () => {
     render(
       <TimelineView

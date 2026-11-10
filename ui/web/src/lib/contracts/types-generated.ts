@@ -799,7 +799,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/keyed/v1/agents/{agent_id}/user-messages/{message_id}/resolve": {
+    "/api/keyed/v1/agents/{agent_id}/user-messages/read": {
         parameters: {
             query?: never;
             header?: never;
@@ -808,7 +808,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        post: operations["resolve_message_api_keyed_v1_agents__agent_id__user_messages__message_id__resolve_post"];
+        post: operations["read_messages_api_keyed_v1_agents__agent_id__user_messages_read_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -3439,6 +3439,12 @@ export interface components {
             content: string | null;
             suggestions?: string[];
         };
+        ReadMessages: {
+            up_to_id: number;
+        };
+        ReadMessagesResult: {
+            read_count: number;
+        };
         RebuildProgressOut: {
             id: number;
             status: "pending" | "running" | "done" | "failed";
@@ -3465,9 +3471,6 @@ export interface components {
             offer_id?: number | null;
             suggestions: string[];
             reason?: ("disabled" | "agent_not_idle" | "no_agent_text" | "not_useful" | "gate_failed" | "generation_failed" | "invalid_generation" | "client_disconnected") | null;
-        };
-        ResolveMessage: {
-            action: "read";
         };
         ResolveNoticeIn: {
             action: "answer" | "dismiss" | "read";
@@ -5777,7 +5780,7 @@ export interface operations {
             };
         };
     };
-    resolve_message_api_keyed_v1_agents__agent_id__user_messages__message_id__resolve_post: {
+    read_messages_api_keyed_v1_agents__agent_id__user_messages_read_post: {
         parameters: {
             query?: never;
             header: {
@@ -5786,13 +5789,12 @@ export interface operations {
             };
             path: {
                 agent_id: number;
-                message_id: number;
             };
             cookie?: never;
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["ResolveMessage"];
+                "application/json": components["schemas"]["ReadMessages"];
             };
         };
         responses: {
@@ -5801,7 +5803,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["UserMessage"];
+                    "application/json": components["schemas"]["ReadMessagesResult"];
                 };
             };
             422: {

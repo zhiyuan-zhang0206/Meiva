@@ -498,3 +498,35 @@ def test_snapshot_birth_pin_beats_the_default_and_a_missing_row_is_none(
     pinned = snapshot.select_one(db_conn, 1, catalog=model_catalog, default_model=default)
     assert pinned is not None
     assert snapshot.select_one(db_conn, 2, catalog=model_catalog, default_model=default) is None
+
+
+def test_unread_user_message_count_counts_unread_content_of_the_agent_only(
+    model_catalog: ModelCatalog, db_conn: psycopg.Connection
+) -> None:
+    seed(db_conn, [(1, "user", "idling"), (2, "user", "idling")])
+    with db_conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO agent_user_messages (agent_id,source_key,mode,content,suggestions,read_at) "
+            "VALUES (1,'a','prefix','unread','[]',NULL),"
+            "(1,'b','prefix','also unread','[]',NULL),"
+            "(1,'c','prefix','already read','[]',now()),"
+            "(1,'d','sdk',NULL,'[]',NULL),"
+            "(2,'a','prefix','other agent','[]',NULL)"
+        )
+    cards = {
+        card.agent_id: card
+        for card in select_roster(
+            db_conn, catalog=model_catalog, default_model=settings.lm.llm_model
+        ).agents
+    }
+    assert (cards[1].unread_user_message_count, cards[2].unread_user_message_count) == (2, 1)
+    snapshots = {
+        agent_id: snapshot.select_one(
+            db_conn, agent_id, catalog=model_catalog, default_model=settings.lm.llm_model
+        )
+        for agent_id in (1, 2)
+    }
+    assert [snap.unread_user_message_count for snap in snapshots.values() if snap is not None] == [
+        2,
+        1,
+    ]

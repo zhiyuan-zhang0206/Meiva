@@ -1,11 +1,13 @@
-exports = ["agent-reconcile.ts", "agent-tree.ts", "sidebar.ts", "use-agent-read-repair.ts", "use-agents.ts", "use-fleet-agents.ts", "use-pending-messages.ts"]
+exports = ["agent-attention.ts", "agent-reconcile.ts", "agent-tree.ts", "sidebar.ts", "use-agent-attention.ts", "use-agent-read-repair.ts", "use-agents.ts", "use-fleet-agents.ts", "use-pending-messages.ts"]
 
 [uses]
+"agent-attention.test.ts" = ["agent-attention.ts"]
 "agent-reconcile.test.ts" = ["agent-reconcile.ts"]
 "agent-tree.test.ts" = ["agent-tree.ts"]
 "sidebar.test.ts" = ["sidebar.ts"]
 "sidebar.ts" = ["sidebar-stats.ts"]
 "use-agent-actions.test.tsx" = ["use-agent-actions.ts"]
+"use-agent-attention.ts" = ["agent-attention.ts"]
 "use-agents.test.ts" = ["use-agents.ts"]
 "use-agents.ts" = ["use-agent-actions.ts"]
 "use-fleet-agents.test.tsx" = ["use-fleet-agents.ts"]
@@ -14,4 +16,5 @@ exports = ["agent-reconcile.ts", "agent-tree.ts", "sidebar.ts", "use-agent-read-
 "use-pending-messages.ts" = ["agent-reconcile.ts", "use-agent-read-repair.ts"]
 
 [purity]
+"agent-attention.ts" = "strict"
 "agent-tree.ts" = "strict"

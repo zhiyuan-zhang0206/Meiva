@@ -56,7 +56,10 @@ Historical messages without the field retain their existing metadata semantics.
 
 Visible native/prefix and harness messages create durable `agent_user_messages`
 records. SDK publications may carry reply suggestions for the independent
-composer service. Unread state clears on reading. Ask stores persistent questions
+composer service. Unread state clears when the reader rests at the agent's latest position
+in a visible conversation: one idempotent `POST /api/keyed/v1/agents/{id}/user-messages/read`
+marks that agent's records with id up to `up_to_id` (the highest id the page fetched) read,
+and records above it stay unread ([decision](../../../../docs/decisions/frontend/ui/2026-11-10-restore-unread-dot.md)). Ask stores persistent questions
 separately; their pending state clears only on answer or explicit close. These records live
 independently of `to_user.md`. Pending excerpts are reinjected after compaction,
 and the SDK reader retrieves complete records.

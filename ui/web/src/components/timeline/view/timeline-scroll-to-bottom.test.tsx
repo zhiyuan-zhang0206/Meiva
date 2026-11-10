@@ -66,6 +66,24 @@ describe("scroll-to-bottom control presence", () => {
     expect(screen.queryByTestId("scroll-to-bottom")).toBeNull();
   });
 
+  it("reports the same measure to its owner, and reports false when the thread is left", () => {
+    const reports: boolean[] = [];
+    const onAtBottomChange = (value: boolean) => { reports.push(value); };
+    const { unmount } = render(<TimelineView items={items} onAtBottomChange={onAtBottomChange} />);
+    expect(reports.at(-1)).toBe(true);
+    const viewport = screen.getByTestId("scroll-viewport");
+    geometry(viewport);
+    viewport.scrollTop = 700;
+    act(() => { viewport.dispatchEvent(new Event("scroll")); });
+    expect(reports.at(-1)).toBe(false);
+    expect(screen.queryByTestId("scroll-to-bottom")).not.toBeNull();
+    viewport.scrollTop = 4400;
+    act(() => { viewport.dispatchEvent(new Event("scroll")); });
+    expect(reports.at(-1)).toBe(true);
+    unmount();
+    expect(reports.at(-1)).toBe(false);
+  });
+
   it("reaches the true bottom in one click across multi-wave virtualized height shifts", () => {
     displayLimits.set("MEIVA_TIMELINE_WINDOW_ACTIVATION_ROWS", 20);
     displayLimits.set("MEIVA_TIMELINE_WINDOW_MEASURE_ROWS", 5);

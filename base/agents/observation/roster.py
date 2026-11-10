@@ -122,8 +122,9 @@ _CARD_FROM = """
         WHERE agent_id = a.id AND require_response AND resolved_at IS NULL
     ) attention ON true
     LEFT JOIN LATERAL (
-        SELECT count(*) FILTER (WHERE read_at IS NULL) AS unread_user_message_count
-        FROM agent_user_messages WHERE agent_id=a.id AND content IS NOT NULL
+        SELECT count(*) AS unread_user_message_count
+        FROM agent_user_messages
+        WHERE agent_id=a.id AND content IS NOT NULL AND read_at IS NULL
     ) deliveries ON true
     LEFT JOIN LATERAL (
         SELECT count(*) AS unread_notice_count FROM agent_notices

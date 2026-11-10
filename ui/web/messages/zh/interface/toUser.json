@@ -22,6 +22,5 @@
   "tooLarge": "这个文件太大，这里显示不下。",
   "missing": "这条链接已经失效。",
   "unreadable": "这个文件在这里显示不了。",
-  "openRaw": "直接打开这个文件",
-  "deliveryUnread": "未读 · 标为已读"
+  "openRaw": "直接打开这个文件"
 }

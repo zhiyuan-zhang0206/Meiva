@@ -2,20 +2,19 @@ import asyncio
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from psycopg import sql
-from psycopg.rows import dict_row
 from pydantic import BaseModel
 
 from base.agents.to_user.delivery.store import (
-    COLUMNS,
     DeliveryConflictError,
     delivery_mode,
+    mark_read,
     messages,
     publish,
 )
 from base.api_contracts.user_delivery import (
     PublishMessage,
-    ResolveMessage,
+    ReadMessages,
+    ReadMessagesResult,
     UserDeliveryMode,
     UserMessage,
 )
@@ -87,36 +86,28 @@ async def post_message(
     return result
 
 
-@router.post("/api/keyed/v1/agents/{agent_id}/user-messages/{message_id}/resolve")
-async def resolve_message(
+@router.post("/api/keyed/v1/agents/{agent_id}/user-messages/read")
+async def read_messages(
     agent_id: int,
-    message_id: int,
-    body: ResolveMessage,
+    body: ReadMessages,
     request: Request,
     key: Annotated[str, Depends(operation_key)],
-) -> UserMessage:
+) -> ReadMessagesResult:
     payload = body.model_dump(mode="json")
 
-    def write() -> UserMessage:
+    def write() -> ReadMessagesResult:
         with write_transaction(gateway_state(request).db_pool) as conn:
             previous = existing_receipt(conn, request.url.path, key, payload)
             if previous is not None:
-                return UserMessage.model_validate(previous)
-            with conn.cursor(row_factory=dict_row) as cur:
-                cur.execute(
-                    sql.SQL(
-                        "UPDATE agent_user_messages SET read_at=COALESCE(read_at,now()) "
-                        "WHERE agent_id=%s AND id=%s AND content IS NOT NULL RETURNING {}"
-                    ).format(sql.SQL(COLUMNS)),
-                    (agent_id, message_id),
-                )
-                raw = cur.fetchone()
-                if raw is None:
-                    raise HTTPException(404, "publication does not exist")
-                result = UserMessage.model_validate(raw)
+                return ReadMessagesResult.model_validate(previous)
+            result = ReadMessagesResult(read_count=mark_read(conn, agent_id, body.up_to_id))
             save_receipt(conn, request.url.path, key, payload, result.model_dump(mode="json"))
             return result
 
-    result = await asyncio.to_thread(write)
-    await publish_agent_updated(gateway_state(request).bus, agent_id)
+    try:
+        result = await asyncio.to_thread(write)
+    except LookupError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    if result.read_count:
+        await publish_agent_updated(gateway_state(request).bus, agent_id)
     return result
