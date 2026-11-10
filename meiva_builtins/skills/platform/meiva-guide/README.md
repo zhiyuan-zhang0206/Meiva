@@ -27,8 +27,8 @@ sub-skills carry executable procedures and their bundled resources.
 - `mcp`, `plugins` / `plugins.develop`: MCP management and native plugin development.
 - `agents`, `models`: agent concepts, configuration, and model choice.
 - `schedules`: persistent work; [meiva-guide.schedules skill — NL → Gateway-Managed Scheduled Task](schedules/README.md).
-- `external-agents`: delegated workers and identity takeover;
-  [meiva-guide.external-agents skill — Drive external coding agents](external-agents/README.md).
+- `external-agents`: external harness agents, availability diagnosis, and published client skill directories;
+  [meiva-guide.external-agents skill — External harness agents and client skills](external-agents/README.md).
 - `workspace-cleanup`, `onboarding`: workspace disposal and first use/migration.
 
 `meiva-workflow` owns work organization and general work evaluation.
@@ -43,8 +43,8 @@ package. Skill Creator owns the methodology and links to that canonical file.
 Its optional self-evolution replay path loads the separately available Meiva
 capability by name; external Guide copies do not assume it is bundled.
 
-Sub-skills load substantial conditional procedures on demand. External-agent
-Mode A reads `references/delegated-workers.md`. Onboarding separates preference questions, intent branches, and
+Sub-skills load substantial conditional procedures on demand. `external-agents`
+separates harness availability diagnosis and published client skill directories. Onboarding separates preference questions, intent branches, and
 shared-memory note formats. `ops` separates resources and sessions; `operations`
 separates diagnosis and authorized-rollout verification. Each entrypoint states
 when to read the relevant reference.

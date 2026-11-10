@@ -33,6 +33,5 @@ exports = ["agent_env.py", "agent_slices.py", "boot_actions.py", "boot_policy.py
 "dotenv_file.py#home base.paths.home.resolve_meiva_home" = { count = 1, owner = "#5816", until = "waits for a caller that holds the home: every caller of process_env_file() is a module with no home to pass (base.config, base.lm, the plugin config view), so handing one in would move the same resolve_meiva_home() into each of them instead of removing it" }
 "harness_binaries.py#home base.paths.home.user_home" = { count = 1, owner = "#5816", until = "waits for every call site to hold the user home: the antigravity transcript mapper has none in hand, so the fallback stays until it passes one" }
 
-
 [debt.impure-call]
 "config_lite_table.py#pkgutil.get_data" = { count = 1, owner = "#7240", until = "waits for a boot-order change that makes the single import-time derivation lazy: the table stays JSON, and one line — base/packages/plugins/flags.py:40 `frozenset(FIELD_DOMAINS.values())` — is the door; the other 17 import sites read the tables inside functions" }

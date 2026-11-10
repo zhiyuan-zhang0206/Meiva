@@ -66,7 +66,7 @@ def test_reading_sys_path_and_unrelated_calls_are_not_sites(source: str) -> None
 def test_only_meiva_builtins_is_in_scope() -> None:
     source = "import sys\nsys.path.insert(0, 'x')\n"
     assert _sites(source, "cli/python_install.py") == {}
-    assert _sites(source, "meiva/shell/coding_tools/claude.py") == {}
+    assert _sites(source, "meiva/shell/sessions.py") == {}
 
 
 @pytest.mark.parametrize(

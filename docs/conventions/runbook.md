@@ -198,15 +198,6 @@ For a bounded host cleanup, keep the order explicit:
 7. Resume with the exact freeze token, then restore controllers one at a time;
    restore any capacity guard last.
 
-### Canonical Codex workspace sessions
-
-The [Codex ownership reference](../../meiva_builtins/skills/platform/meiva-guide/external-agents/references/canonical_codex_owner.md)
-owns generation records, status and exact-generation cancellation. The
-[launcher guide](../../meiva_builtins/skills/platform/meiva-guide/external-agents/references/codex.md)
-and [resume reference](../../meiva_builtins/skills/platform/meiva-guide/external-agents/references/resume_after_interruption.md)
-own commands and conversation recovery. Inspect the printed generation before
-cancelling; a shared workspace can contain several live generations.
-
 ### Shared browser (`browser` service)
 
 See [component operations](../../services/desktop/browser/docs/operations.md).

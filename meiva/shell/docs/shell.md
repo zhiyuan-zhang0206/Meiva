@@ -23,7 +23,6 @@ Interface for executing shell commands. Three modes: one-shot `run()`, backgroun
 ## Key Dependencies
 - [Facade and implementation](implementation.md) — the entries above read the process once and call implementations with explicit values
 - [Agent Sessions](../../../agent/docs/sessions.md) — the session backend is the underlying implementation of sessions
-- [meiva.shell.coding_tools](../coding_tools/README.md) — launchers that start Claude Code / Codex in these sessions (not agent-facing)
 
 ## Notes
 Background commands started by a native harness shell can be reparented when
@@ -33,9 +32,9 @@ cannot attach them once they leave the controller's process tree. Call
 own agent context. SDK calls in it act as the shell's owner with
 `owns_loop=False`. See [Harness attach](../../self/harness/docs/harness-attach.md).
 
-Sessions retain cwd, environment variables, and background processes, used to drive interactive CLI tools like Claude Code, Codex. Sessions outside the spawning checkout, including paths under its `.worktrees/` or `.claude/worktrees/` sibling-worktree directories, receive the venv-prefixed PATH but omit `VIRTUAL_ENV`, preventing a bare uv command from selecting the spawning checkout's venv. The shell is a login shell (`bash -l -i`), so the user's profile may still reorder PATH; the home rides `MEIVA_HOME` (else `~/.meiva`), which a bare `meiva` (the host's link to the production CLI) reads. Sessions survive after the agent process exits (not reclaimed with the process) and across agent, agent-host, and gateway restarts — the machine's `pty-sessions` service holds them, so only its own `kill`, a terminate of its agent with `kill_all_shell_sessions` (silent), its shell exiting, its TTL expiring, `meiva stop` or `meiva restart` (which close shell sessions; so do updates), a restart or crash of that service, or a machine reboot ends it; watchers are also special sessions and appear in `sessions.list()`. TTL reclamation notifies the owner only when it interrupts a running job; an empty shell's reaping is silent.
+Sessions retain cwd, environment variables, and background processes across commands. Sessions outside the spawning checkout, including paths under its `.worktrees/` or `.claude/worktrees/` sibling-worktree directories, receive the venv-prefixed PATH but omit `VIRTUAL_ENV`, preventing a bare uv command from selecting the spawning checkout's venv. The shell is a login shell (`bash -l -i`), so the user's profile may still reorder PATH; the home rides `MEIVA_HOME` (else `~/.meiva`), which a bare `meiva` (the host's link to the production CLI) reads. Sessions survive after the agent process exits (not reclaimed with the process) and across agent, agent-host, and gateway restarts — the machine's `pty-sessions` service holds them, so only its own `kill`, a terminate of its agent with `kill_all_shell_sessions` (silent), its shell exiting, its TTL expiring, `meiva stop` or `meiva restart` (which close shell sessions; so do updates), a restart or crash of that service, or a machine reboot ends it; watchers are also special sessions and appear in `sessions.list()`. TTL reclamation notifies the owner only when it interrupts a running job; an empty shell's reaping is silent.
 
-The SDK, including Codex/Claude launchers and watchers, supplies
+The SDK and watchers supply
 `forward_env_dict(environ, activate_venv=...)`. `PtySessionBackend.new_session` builds
 the same cwd-based projection when `env` is omitted; an explicit empty dict
 stays empty. The PTY shell fork clears inherited `VIRTUAL_ENV` before applying

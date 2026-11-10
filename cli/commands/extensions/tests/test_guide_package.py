@@ -64,7 +64,7 @@ def test_converged_namespaces_load_real_task_instructions(
         (guide.packages.install, "Find candidates"),
         (guide.plugins.develop, "plugin.py"),
         (guide.schedules, "resumable"),
-        (guide.external_agents, "Delegated workers"),
+        (guide.external_agents, "External Harness Agents"),
         (meiva.skills.meiva_workflow.capability_timescale, "Gather evidence"),
     )
     for skill, instruction in expected:
@@ -160,9 +160,9 @@ def test_external_guide_preserves_legacy_copies_and_publishes_nested_resources(
         "operations/references/db-restore.md",
         "packages/install/SKILL.md",
         "schedules/SKILL.md",
-        "external-agents/scripts/spawn_codex.py",
-        "external-agents/references/collaboration_protocol.md",
-        "external-agents/scripts/spawn_antigravity.py",
+        "external-agents/SKILL.md",
+        "external-agents/references/harness-availability.md",
+        "external-agents/references/supported-clients.md",
     ):
         assert (target / relative).read_bytes() == (GUIDE / relative).read_bytes()
     _assert_portable_reading_links(target)

@@ -257,31 +257,6 @@
       "comparison": "elapsed < N"
     },
     {
-      "path": "meiva/shell/coding_tools/tests/test_waits_spend_their_timers.py",
-      "function": "test_the_app_server_wait_spends_its_window_on_the_timers_it_is_given",
-      "comparison": "time.monotonic() - started < _WALL_BUDGET_SECONDS"
-    },
-    {
-      "path": "meiva/shell/coding_tools/tests/test_waits_spend_their_timers.py",
-      "function": "test_the_claude_panel_wait_spends_its_window_on_the_timers_it_is_given",
-      "comparison": "time.monotonic() - started < _WALL_BUDGET_SECONDS"
-    },
-    {
-      "path": "meiva/shell/coding_tools/tests/test_waits_spend_their_timers.py",
-      "function": "test_the_codex_readiness_wait_spends_its_window_on_the_timers_it_is_given",
-      "comparison": "time.monotonic() - started < _WALL_BUDGET_SECONDS"
-    },
-    {
-      "path": "meiva/shell/coding_tools/tests/test_waits_spend_their_timers.py",
-      "function": "test_the_status_card_wait_spends_its_window_on_the_timers_it_is_given",
-      "comparison": "time.monotonic() - started < _WALL_BUDGET_SECONDS"
-    },
-    {
-      "path": "meiva/shell/coding_tools/tests/test_waits_spend_their_timers.py",
-      "function": "test_the_submission_check_spends_its_window_on_the_timers_it_is_given",
-      "comparison": "time.monotonic() - started < _WALL_BUDGET_SECONDS"
-    },
-    {
       "path": "meiva/tests/namespaces/web/test_web.py",
       "function": "test_fetch_batch_runs_concurrently",
       "comparison": "time.monotonic() - started < N"

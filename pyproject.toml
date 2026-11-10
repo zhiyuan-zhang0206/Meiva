@@ -264,7 +264,6 @@ check-typed-exception = true
 # base scripts/*.py entry above, not a replacement.
 "meiva_builtins/skills/coordination/meiva-dynamic-workflow/scripts/*.py" = ["DTZ005", "N806"]
 "meiva_builtins/skills/platform/meiva-self-evolution/scripts/*.py" = ["S112", "RUF059", "PLR0915", "PLW0603"]
-"meiva_builtins/skills/platform/meiva-guide/external-agents/scripts/*.py" = ["PLR0915"]
 # A skill's references/ holds genuine reference material — mostly prose, but
 # occasionally a Python snippet the agent reads and adapts rather than runs in
 # place (e.g. meiva-dynamic-workflow's orchestrator templates, string-patched
@@ -865,9 +864,6 @@ root = "gateway/tests"
 root = "meiva/mcps/tests"
 
 [[tool.pyright.executionEnvironments]]
-root = "meiva/shell/coding_tools/tests"
-
-[[tool.pyright.executionEnvironments]]
 root = "meiva/shell/tests"
 
 [[tool.pyright.executionEnvironments]]
@@ -896,9 +892,6 @@ root = "meiva_builtins/skills/coordination/meiva-being-a-long-running-agent/test
 
 [[tool.pyright.executionEnvironments]]
 root = "meiva_builtins/skills/coordination/meiva-dynamic-workflow/tests"
-
-[[tool.pyright.executionEnvironments]]
-root = "meiva_builtins/skills/platform/meiva-guide/external-agents/tests"
 
 [[tool.pyright.executionEnvironments]]
 root = "meiva_builtins/skills/platform/meiva-self-evolution/tests"

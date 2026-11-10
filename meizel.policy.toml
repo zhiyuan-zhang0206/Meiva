@@ -2,8 +2,6 @@
 "agent/execution/child.py" = "executes the agent-authored code of one execute_code call"
 "agent/graph/tests/test_agent_traceback.py" = "executes agent-style code to check how its traceback is rendered"
 "agent/tests/plugins/test_register_namespace.py" = "imports SDK namespaces that plugins install at run time; they have no module file"
-"meiva/shell/coding_tools/tests/test_claude_canonical_owner.py" = "loads a built-in skill script by path to test it; skill content is discovered, core does not depend on it"
-"meiva/shell/coding_tools/tests/test_codex_canonical_owner.py" = "loads a built-in skill script by path to test it; skill content is discovered, core does not depend on it"
 "meiva/tests/namespaces/sdk_surface/test_help_renderer.py" = "executes generated module source to render help for it"
 "meiva/tests/test_self_evolution_evaluate.py" = "loads a built-in skill script by path to test it; skill content is discovered, core does not depend on it"
 "meiva_builtins/plugins/meiva_fleet/tests/child_launched_boot.py" = "resolves the plugin namespaces (meiva.tasks, meiva.memory) the SDK installs at run time; they have no module file to import statically"
@@ -77,8 +75,6 @@
 "meiva/boot.py" = ["agent/extensions"]
 "meiva_builtins/skills/coordination/meiva-being-a-long-running-agent/tests/test_agent_usage.py" = ["meiva_builtins/skills"]
 "meiva_builtins/skills/coordination/meiva-dynamic-workflow/tests/test_minimal_dispatch.py" = ["meiva_builtins/skills"]
-"meiva_builtins/skills/platform/meiva-guide/external-agents/tests/test_coding_session_resume.py" = ["meiva_builtins/skills/platform/meiva-guide/external-agents"]
-"meiva_builtins/skills/platform/meiva-guide/external-agents/tests/test_impersonation_launch.py" = ["meiva_builtins/skills"]
 "meiva_builtins/skills/tests/skill_script.py" = ["meiva_builtins/skills"]
 "meiva_builtins/skills/tests/test_rss_feed.py" = ["meiva_builtins/skills"]
 "meiva_builtins/skills/tests/test_youtube_feed.py" = ["meiva_builtins/skills"]
@@ -355,7 +351,6 @@ family-modules = [
 
 [clock-lattice.independent-clocks]
 "meiva_builtins/plugins/lm_anthropic/provider.py::_CLAUDE_EXTENDED_THINKING_DEFAULT_BUDGET" = "LLM thinking-token budget, not a wall-clock constant"
-"meiva_builtins/skills/platform/meiva-guide/external-agents/scripts/watch_work.py::STALL_SECONDS" = "example script (skill reference), not cluster runtime — its own stall judgment, no lattice neighbour"
 "base/agents/observation/ended_with.py::BUDGET" = "the turn-end value 'budget', not a clock: the string a turn_end record carries when a budget rail (a truncated stream or an exhausted retry budget) ended the turn"
 "base/daemon/schedules/watcher.py::AT_SESSION_TTL_GRACE_SECONDS" = "independent: the at-watcher session's post-fire reclamation window (wake delivery + exit-notice latency); the TTL reaper's poll cadence only delays the kill beyond it — no lattice neighbour and no ordering safety depends on this value"
 "base/events/contract.py::DELIVERY_STALLED_KEYS" = "SQL key set for the delivery_stalled view, not a clock"

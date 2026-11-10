@@ -35,8 +35,7 @@ modules are excluded. Its reviewed allowances come from that repository's own po
 
 A script shipped with a skill or plugin gets no exemption. When one outgrows
 the budget, its logic moves into a governed package the script imports
-normally (the Claude/Codex launchers live in `meiva/shell/coding_tools/`, their
-`spawn_*.py` scripts only parse arguments). Splitting it into path-imported
+normally (so the script only parses arguments and calls the governed package). Splitting it into path-imported
 siblings is refused by Rule 6 below. Moving implementation into a governed
 package does not make it a public SDK capability; see [SDK and skill ownership](#sdk-and-skill-ownership).
 
