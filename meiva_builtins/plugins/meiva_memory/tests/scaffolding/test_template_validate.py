@@ -390,3 +390,40 @@ def test_note_helpers(tmp_path: Path) -> None:
     assert validator.note_parts("no frontmatter") == ({}, "no frontmatter")
     assert validator.note_parts("---\nunclosed\n") is None
     assert validator.note_parts("---\n: : :\n  - [\n---\nx\n") is None
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "https://example.com",
+        "http://x",
+        "user:ruling",
+        "env:host",
+        "db:table",
+        "repo::a",
+        "repo:memory:",
+        "sources/",
+        "sources/#a",
+        "#a",
+        "/absolute/a",
+        "../a",
+    ],
+)
+def test_sources_reject_nonfile_syntax(tmp_path: Path, source: str) -> None:
+    w(tmp_path, "note.md", fm(sources=json.dumps([source])))
+    assert validate.validate_file(tmp_path / "note.md")
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "sources/a.pdf",
+        "sources/a.txt#item",
+        "sources/a.md",
+        "repo:memory:sources/a.jsonl",
+        "repo:meiva:base/a.py#L1",
+    ],
+)
+def test_sources_accept_file_syntax(tmp_path: Path, source: str) -> None:
+    w(tmp_path, "note.md", fm(sources=json.dumps([source])))
+    assert validate.validate_file(tmp_path / "note.md") == []
