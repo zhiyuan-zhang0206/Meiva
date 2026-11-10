@@ -144,7 +144,7 @@ def _seed_pool_and_code_repo(tmp_path: Path) -> dict[str, object]:
     )
 
 
-def test_gather_signals_detects_source_drift_and_external_probes(tmp_path: Path) -> None:
+def test_gather_signals_detects_source_drift(tmp_path: Path) -> None:
     report = _seed_pool_and_code_repo(tmp_path)
     assert report["total_notes"] == 4
     drifts = report["source_drift"]
@@ -158,10 +158,12 @@ def test_gather_signals_detects_source_drift_and_external_probes(tmp_path: Path)
         ("canonical.md", "repo:meiva:pkg/mod.py", "git_changed"),
         ("canonical.md", "repo:meiva:pkg/missing.py", "missing_path"),
         ("canonical.md", "repo:other:foo.py", "unmapped_repo"),
+        ("canonical.md", "db:meiva_main:schedules#1", "malformed_source"),
+        ("canonical.md", "user:ruling", "malformed_source"),
+        ("canonical.md", "user:preference", "malformed_source"),
+        ("canonical.md", "env:macmini", "malformed_source"),
     ]
-    assert report["external_source_probes"] == [
-        {"note": "canonical.md", "source": "db:meiva_main:schedules#1"}
-    ]
+    assert "external_source_probes" not in report
 
 
 def test_gather_signals_detects_lifecycle_okf_gaps_and_hotspots(tmp_path: Path) -> None:
@@ -200,7 +202,7 @@ def test_gather_signals_detects_workspace_candidates_and_renders_sections(tmp_pa
         {"agent_id": "405", "path": "405/memory/inherit/domain.md", "modified": "2026-11-08"},
     ]
     rendered = dream_gather.render_report(report)
-    assert "## External Source Probes (1)" in rendered
+    assert "External Source Probes" not in rendered
     assert "- `canonical.md` -> `db:meiva_main:schedules#1`" in rendered
     assert "## Workspace Memory Candidates (2)" in rendered
     assert "- agent `405`: `405/memory/MEMORY.md` (modified: 2026-11-08)" in rendered
@@ -225,3 +227,34 @@ def test_dream_gather_cli_json_and_markdown(
     md_out = capsys.readouterr().out
     assert "# Meiva Dream Phase 2 Signal Report (2026-11-09)" in md_out
     assert "`note.md` (pure-md)" in md_out
+
+
+def test_file_sources_resolve_pool_files_and_reject_nonfiles(tmp_path: Path) -> None:
+    pool = tmp_path / "pool"
+    (pool / "sources").mkdir(parents=True)
+    for suffix in ("pdf", "txt", "md", "html", "jsonl"):
+        (pool / "sources" / f"evidence.{suffix}").write_text("evidence")
+    sources = [
+        f"sources/evidence.{suffix}#anchor" for suffix in ("pdf", "txt", "md", "html", "jsonl")
+    ]
+    sources += [
+        "repo:memory:sources/evidence.txt",
+        "sources",
+        "https://example.com",
+        "http://example.com",
+        "user:ruling",
+        "db:table",
+        "env:host",
+        "",
+        "#anchor",
+    ]
+    import yaml
+
+    (pool / "rule.md").write_text("---\n" + yaml.safe_dump({"sources": sources}) + "---\n# Rule\n")
+    report = dream_gather.gather_signals(pool=pool, today=_dt.date(2026, 11, 10))
+    drifts = report["source_drift"]
+    assert is_object_list(drifts)
+    assert [(row["source"], row["reason"]) for row in drifts if is_object_dict(row)] == [
+        ("sources", "not_a_file"),
+        *[(source, "malformed_source") for source in sources[7:]],
+    ]

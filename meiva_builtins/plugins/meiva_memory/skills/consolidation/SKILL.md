@@ -12,7 +12,7 @@ the pool stays canonical, conflict-free, committed, pushed, and searchable.
 
 All index-rebuild / validation / refresh operations are wrapped in scripts under
 `../scripts/`, `scripts/`, and the pool root:
-- `python scripts/dream_gather.py [--pool <path>] [--repo <alias>=<path>] [--json]` — Phase 2 (`Gather Signal`) deterministic probe: scan optional `sources` / `verified` / `stale_after` frontmatter across pool notes, intersect `repo:<alias>:<path>` anchors against repository file trees and recent `git log` changes, render `## External Source Probes` for `db:...` anchors, flag expired `stale_after` and aging `verified` notes, list pure-Markdown or legacy notes needing Dream OKF enrichment, scan `~/.meiva/workspaces/*/memory/*.md` and `*/memory/inherit/*.md` for `## Workspace Memory Candidates`, and surface existing-file pool churn/conflict hotspots
+- `python scripts/dream_gather.py [--pool <path>] [--repo <alias>=<path>] [--json]` — Phase 2 (`Gather Signal`) deterministic probe: scan optional `sources` / `verified` / `stale_after` frontmatter across pool notes, intersect `repo:<alias>:<path>` anchors against repository file trees and recent `git log` changes, flag expired `stale_after` and aging `verified` notes, list pure-Markdown or legacy notes needing Dream OKF enrichment, scan `~/.meiva/workspaces/*/memory/*.md` and `*/memory/inherit/*.md` for `## Workspace Memory Candidates`, and surface existing-file pool churn/conflict hotspots
 - `python ../scripts/rebuild_memory_index.py` — rebuild the root `MEMORY.md` pointers (resolves the pool from `MEIVA_HOME` and takes no arguments)
 - `python3 validate.py` (in the pool or worktree root) — enforce UTF-8, optional YAML frontmatter syntax (plus optional type checks for `sources`, `verified`, and `stale_after`, and unquoted `' #'` / `': '` truncation checks), 8000-character note cap, 20-file / 20-subdirectory Locality limits, `MEMORY.md` pointer targets and coverage, and `<!-- fact-check: ... -->` probes
 - `python ../scripts/consolidate.py -m "..."` — remote-backed single-box wrapper: rebuild indexes, stage, commit, push, refresh
@@ -62,9 +62,8 @@ Every full consolidation executes four phases in order inside the target worktre
    order so newer rulings supersede older ones.
 2. **World Truth Probes (External Ground-Truth Verification)**: Run
    `python scripts/dream_gather.py --pool "$W"` first to automatically intersect
-   every note's bound `sources:` (`repo:<alias>:<path>`) against mapped repository
-   file trees and recent `git log` commits since the note's `verified` date, render
-   `## External Source Probes` (`db:...` anchors), flag expired `stale_after` notes,
+   every note's bound file `sources:` (repository or pool-relative paths) against mapped repository
+   file trees and recent `git log` commits since the note's `verified` date, flag expired `stale_after` notes,
    list `## Workspace Memory Candidates`, and identify recent pool churn/conflict
    hotspots among existing pool files; then verify claims in existing notes against
    observable ground truth across multiple domains rather than assuming a single
@@ -74,8 +73,7 @@ Every full consolidation executes four phases in order inside the target worktre
      scripts/queues so notes citing removed paths or retired contracts are caught.
    - *Cluster runtime & database registries* (`agents`, `schedules`, `tasks`,
      machine topology): check active vs. terminated agents, live schedule triggers,
-     and task status (including `db:<db_name>:<table>` anchors surfaced in
-     `## External Source Probes`) so notes naming terminated role holders or obsolete
+     and task status so notes naming terminated role holders or obsolete
      cron times are caught.
    - *Host environment & embedded probes*: check machine configuration and execute
      `<!-- fact-check: <cmd> -->` directives.
@@ -112,12 +110,7 @@ Every full consolidation executes four phases in order inside the target worktre
     - `repo:monsora:<file_path>` — auto-mapped to `~/MonsoraV2` when present
       (silently skipped on machines without `~/MonsoraV2`)
     - `repo:memory:<file_path>` — auto-mapped to the memory pool checkout
-    - `db:meiva_main:<table>` — database registry anchor (surfaced under
-      `## External Source Probes`)
-    - `user:ruling` / `user:preference` / `user:profile` — valid semantic
-      user-dimension sources (recognized without triggering external probe warnings)
-    - `env:<machine>` — valid semantic host-environment source (recognized without
-      triggering external probe warnings)
+
   - `verified`: Quoted `"YYYY-MM-DD"` date when the note was verified against World Truth.
   - `stale_after`: Optional quoted `"YYYY-MM-DD"` expiration date for temporary
     freezes or transition rules.
@@ -225,7 +218,7 @@ still find it.
      ```
    - When optional YAML frontmatter is present, `validate.py` checks that it is a
      valid YAML mapping without unquoted `' #'` or `': '` truncation, and lightly
-     validates `sources` (list of non-empty strings) and `verified` / `stale_after`
+     validates `sources` (list of file paths) and `verified` / `stale_after`
      (quoted `YYYY-MM-DD` date strings) if present.
    - Every note must be valid UTF-8 and stay within `8000` characters.
 3. **Optional Directory `index.md` (High-Level Description)**:
@@ -293,3 +286,14 @@ The arbiter owns cross-machine merges and post-merge search refresh.
 
 Only when assigned the per-machine steward role, read [steward](references/steward.md).
 Publish the local branch and report readiness; never merge other machine PRs.
+
+Every `sources` item must point to an existing file: `repo:<alias>:<file>`
+or a pool-relative file path such as `sources/user-rulings.md`, optionally
+with a `#fragment`. Any file format is supported (Markdown, PDF, HTML, TXT,
+JSONL, Python, TypeScript). Dump external content into a file, or record its
+URL and explanation or dated user ruling in a file, then cite that file.
+Pool-relative paths resolve as `repo:memory:<file>`; paths must stay relative
+and must not traverse `..`. Dream checks existence and rejects directories;
+the standalone validator checks syntax. `sources/*.md` participates in normal
+recursive note collection, indexing and validation; other formats are evidence
+attachments and do not enter the note index.

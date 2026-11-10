@@ -51,3 +51,14 @@ locality, size, and pointer rules; large source material belongs in the
 configured Vault with a searchable pointer. A successful commit or merge does
 not prove the gateway search index was refreshed. Preserve the user's existing
 authority for writes, messages, schedules, and maintenance.
+
+Every `sources` item must point to an existing file: `repo:<alias>:<file>`
+or a pool-relative file path such as `sources/user-rulings.md`, optionally
+with a `#fragment`. Any file format is supported (Markdown, PDF, HTML, TXT,
+JSONL, Python, TypeScript). Dump external content into a file, or record its
+URL and explanation or dated user ruling in a file, then cite that file.
+Pool-relative paths resolve as `repo:memory:<file>`; paths must stay relative
+and must not traverse `..`. Dream checks existence and rejects directories;
+the standalone validator checks syntax. `sources/*.md` participates in normal
+recursive note collection, indexing and validation; other formats are evidence
+attachments and do not enter the note index.

@@ -79,7 +79,7 @@ cd "$W"
      notes and ≤ 20 subdirectories per directory).
 
 2. **Phase 2 — Gather Signal (Three Incremental Signal Sources)**:
-   - Run `dream_gather.py` first (`~/.meiva/source/.venv/bin/python ~/.meiva/source/meiva_builtins/plugins/meiva_memory/skills/consolidation/scripts/dream_gather.py --pool "$W"`) to intersect note `sources:` against repository file trees and recent `git log` changes, render `## External Source Probes` for `db:...` anchors, flag expired `stale_after` and aging `verified` notes, list pure-Markdown or legacy notes needing Dream OKF enrichment, list `## Workspace Memory Candidates` (`workspaces/*/memory/*.md` and `workspaces/*/memory/inherit/*.md` modified within `--since-days`), and surface existing-file pool churn/conflict hotspots.
+   - Run `dream_gather.py` first (`~/.meiva/source/.venv/bin/python ~/.meiva/source/meiva_builtins/plugins/meiva_memory/skills/consolidation/scripts/dream_gather.py --pool "$W"`) to intersect note `sources:` against repository file trees and recent `git log` changes, flag expired `stale_after` and aging `verified` notes, list pure-Markdown or legacy notes needing Dream OKF enrichment, list `## Workspace Memory Candidates` (`workspaces/*/memory/*.md` and `workspaces/*/memory/inherit/*.md` modified within `--since-days`), and surface existing-file pool churn/conflict hotspots.
    - **Recent Session Transcripts (`USER_INPUT`)**: Scan recent session transcripts
      for user corrections, rulings, reversals, and explicit decisions, ordered by
      timestamp so newer rulings supersede older ones.
@@ -90,8 +90,7 @@ cd "$W"
        existence, and deleted scripts or retired contracts.
      - *Cluster runtime & database registries* (`agents`, `schedules`, `tasks`,
        machine topology): check active vs. terminated agents, live schedule cron
-       times, and task status (including `db:meiva_main:<table>` items in
-       `## External Source Probes`) so notes naming terminated agents or obsolete
+       times, and task status so notes naming terminated agents or obsolete
        schedules are caught.
      - *Host environment & embedded probes*: check machine configuration and run
        `<!-- fact-check: <cmd> -->` directives.
@@ -122,9 +121,7 @@ cd "$W"
      - `repo:meiva:<file_path>` (auto-mapped to `~/.meiva/source`; global manifests `pyproject.toml`, `meizel.toml`, `meizel.policy.toml`, `.pre-commit-config.yaml` skip `git_changed` drift noise)
      - `repo:monsora:<file_path>` (auto-mapped to `~/MonsoraV2` when present; skipped when absent on the machine)
      - `repo:memory:<file_path>` (auto-mapped to the memory pool checkout)
-     - `db:meiva_main:<table>` (rendered under `## External Source Probes`)
-     - `user:ruling` / `user:preference` / `user:profile` (semantic user-dimension sources; ignored in external probe warnings)
-     - `env:<machine>` (semantic host-environment source; ignored in external probe warnings)
+
    - **De-relativize time**: Convert relative time expressions (`"today"`,
      `"this morning"`, `"recently"`, `"next week"`) into explicit ISO dates
      (`YYYY-MM-DD`).
@@ -228,7 +225,7 @@ Working agents write notes directly as pure Markdown (`# Title` + a short high-l
 
 - At write time, no `type`, `meiva_agent`, `meiva_machine`, `timestamp`, `tags`, `description`, or HTML attribution comments are required.
 - During Dream consolidation, the Memory Arbiter populates/refreshes four canonical OKF fields on canonical notes (`description`, `sources`, `verified: "YYYY-MM-DD"`, and optional `stale_after: "YYYY-MM-DD"`) and strips legacy boilerplate fields.
-- If optional YAML frontmatter (`--- ... ---`) is included, `validate.py` checks that it is a valid YAML mapping without unquoted `' #'` or `': '` truncation, and validates the types of optional `sources` (list of non-empty strings) and `verified` / `stale_after` (quoted `YYYY-MM-DD` date strings).
+- If optional YAML frontmatter (`--- ... ---`) is included, `validate.py` checks that it is a valid YAML mapping without unquoted `' #'` or `': '` truncation, and validates the types of optional `sources` (list of file paths) and `verified` / `stale_after` (quoted `YYYY-MM-DD` date strings).
 - `index.md` is an optional directory-level high-level description (not a mandatory generated file-pointer inventory).
 - Every directory holds at most **20 `.md` notes** and at most **20 subdirectories** (`validate_structure`).
 - Run `python3 validate.py` (in the pool or worktree checkout) to check all files — once `validate` is green, squash-merge the PR and run `meiva memory refresh`.
@@ -314,3 +311,14 @@ When starting as Memory Arbiter for the first time:
 4. Verify the built-in `memory-arbiter` schedule (`04:00` consolidation, `07:00` health check) is enabled
 5. If uncommitted drift or stale fragments exist, run a four-phase Meiva Dream consolidation pass in a temporary worktree and land it via PR
 6. Notify AI Infra PoC and CEO that Memory Arbiter is online
+
+Every `sources` item must point to an existing file: `repo:<alias>:<file>`
+or a pool-relative file path such as `sources/user-rulings.md`, optionally
+with a `#fragment`. Any file format is supported (Markdown, PDF, HTML, TXT,
+JSONL, Python, TypeScript). Dump external content into a file, or record its
+URL and explanation or dated user ruling in a file, then cite that file.
+Pool-relative paths resolve as `repo:memory:<file>`; paths must stay relative
+and must not traverse `..`. Dream checks existence and rejects directories;
+the standalone validator checks syntax. `sources/*.md` participates in normal
+recursive note collection, indexing and validation; other formats are evidence
+attachments and do not enter the note index.

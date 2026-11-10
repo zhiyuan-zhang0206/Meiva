@@ -27,7 +27,6 @@ _IGNORED_GIT_CHANGED_TARGETS = frozenset(
     {"pyproject.toml", "meizel.toml", "meizel.policy.toml", ".pre-commit-config.yaml"}
 )
 _OPTIONAL_REPO_ALIASES = frozenset({"monsora"})
-_SEMANTIC_SOURCE_PREFIXES = ("user:", "env:")
 
 
 @dataclass(frozen=True)
@@ -54,7 +53,7 @@ def _parse_date(value: object) -> _dt.date | None:
 def _string_list(value: object) -> list[str]:
     if not is_object_list(value):
         return []
-    return [item.strip() for item in value if isinstance(item, str) and item.strip()]
+    return [item.strip() for item in value if isinstance(item, str)]
 
 
 def _read_note_record(pool: Path, rel: str) -> NoteRecord | None:
@@ -150,18 +149,36 @@ def _matching_touch(
     return best
 
 
-def _check_repo_source(
+def _file_source_parts(source: str) -> tuple[str, str] | None:
+    parts = source.split(":", 2)
+    if source.startswith("repo:") and len(parts) == 3:
+        alias, raw_target = parts[1].strip(), parts[2].split("#", 1)[0].strip()
+    elif ":" not in source:
+        alias, raw_target = "memory", source.split("#", 1)[0].strip()
+    else:
+        alias, raw_target = "", ""
+    if (
+        not alias
+        or not raw_target
+        or ":" in raw_target
+        or Path(raw_target).is_absolute()
+        or ".." in Path(raw_target).parts
+    ):
+        return None
+    return alias, raw_target
+
+
+def _check_file_source(
     note: NoteRecord,
     source: str,
     repos: Mapping[str, Path],
     touches_by_repo: Mapping[str, Mapping[str, tuple[_dt.date, str, int]]],
     since_cutoff: _dt.date,
 ) -> dict[str, str] | None:
-    parts = source.split(":", 2)
-    if len(parts) != 3 or not parts[1].strip() or not parts[2].strip():
+    parsed = _file_source_parts(source)
+    if parsed is None:
         return {"note": note.path, "source": source, "reason": "malformed_source", "detail": source}
-    alias = parts[1].strip()
-    raw_target = parts[2].split("#", 1)[0].strip()
+    alias, raw_target = parsed
     repo_root = repos.get(alias)
     if repo_root is None or not repo_root.is_dir():
         if alias in _OPTIONAL_REPO_ALIASES:
@@ -172,6 +189,13 @@ def _check_repo_source(
             "note": note.path,
             "source": source,
             "reason": "missing_path",
+            "detail": f"{alias}:{raw_target}",
+        }
+    if not (repo_root / raw_target).is_file():
+        return {
+            "note": note.path,
+            "source": source,
+            "reason": "not_a_file",
             "detail": f"{alias}:{raw_target}",
         }
     if raw_target in _IGNORED_GIT_CHANGED_TARGETS:
@@ -280,18 +304,14 @@ def _scan_note_sources(
     repo_map: Mapping[str, Path],
     touches_by_repo: Mapping[str, Mapping[str, tuple[_dt.date, str, int]]],
     since_cutoff: _dt.date,
-) -> tuple[list[dict[str, str]], list[dict[str, str]]]:
+) -> list[dict[str, str]]:
     source_drift: list[dict[str, str]] = []
-    external_probes: list[dict[str, str]] = []
     for rec in records:
         for src in rec.sources:
-            if src.startswith("repo:"):
-                drift = _check_repo_source(rec, src, repo_map, touches_by_repo, since_cutoff)
-                if drift is not None:
-                    source_drift.append(drift)
-            elif not src.startswith(_SEMANTIC_SOURCE_PREFIXES):
-                external_probes.append({"note": rec.path, "source": src})
-    return source_drift, external_probes
+            drift = _check_file_source(rec, src, repo_map, touches_by_repo, since_cutoff)
+            if drift is not None:
+                source_drift.append(drift)
+    return source_drift
 
 
 def _expired_entries(records: Sequence[NoteRecord], today: _dt.date) -> list[dict[str, str]]:
@@ -342,9 +362,7 @@ def gather_signals(
         alias: _repo_touches(root, earliest) for alias, root in repo_map.items() if root.is_dir()
     }
     pool_window_touches = _repo_touches(pool, since_cutoff) if pool.is_dir() else {}
-    source_drift, external_probes = _scan_note_sources(
-        records, repo_map, touches_by_repo, since_cutoff
-    )
+    source_drift = _scan_note_sources(records, repo_map, touches_by_repo, since_cutoff)
     missing_okf = [gap for rec in records if (gap := _missing_okf_entry(rec)) is not None]
     conflict_notes = [rec.path for rec in records if rec.has_conflict_marker]
     return {
@@ -352,7 +370,6 @@ def gather_signals(
         "today": today.isoformat(),
         "total_notes": len(records),
         "source_drift": source_drift,
-        "external_source_probes": external_probes,
         "expired_notes": _expired_entries(records, today),
         "aging_verified_notes": _aging_entries(records, today, max_verified_age_days),
         "missing_okf_notes": missing_okf,
@@ -380,13 +397,6 @@ def _append_drift_section(lines: list[str], report: Mapping[str, object]) -> Non
         lines.append(
             f"- `{row.get('note')}` -> `{row.get('source')}` [{row.get('reason')}]: {row.get('detail')}"
         )
-
-    probes = _dict_items(report.get("external_source_probes"))
-    lines.append(f"\n## External Source Probes ({len(probes)})")
-    if not probes:
-        lines.append("- (none)")
-    for row in probes:
-        lines.append(f"- `{row.get('note')}` -> `{row.get('source')}`")
 
 
 def _append_workspace_section(lines: list[str], report: Mapping[str, object]) -> None:

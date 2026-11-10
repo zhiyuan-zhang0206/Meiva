@@ -108,7 +108,24 @@ def _frontmatter_problem(content: str) -> tuple[dict[str, object] | None, str | 
     return fm, parts[1], None
 
 
-def _optional_okf_field_errors(fm: dict[str, object]) -> list[str]:
+def is_file_source(source: str) -> bool:
+    parts = source.split(":", 2)
+    if source.startswith("repo:") and len(parts) == 3 and parts[1].strip():
+        target = parts[2].split("#", 1)[0].strip()
+    elif ":" not in source:
+        target = source.split("#", 1)[0].strip()
+    else:
+        return False
+    return bool(
+        target
+        and ":" not in target
+        and not target.endswith("/")
+        and not Path(target).is_absolute()
+        and ".." not in Path(target).parts
+    )
+
+
+def _source_field_errors(fm: dict[str, object]) -> list[str]:
     errors: list[str] = []
     if "sources" in fm and fm["sources"] is not None:
         sources = fm["sources"]
@@ -116,6 +133,16 @@ def _optional_okf_field_errors(fm: dict[str, object]) -> list[str]:
             isinstance(s, str) and s.strip() for s in sources
         ):
             errors.append("Field 'sources' must be a list of non-empty strings")
+        else:
+            for source in sources:
+                if isinstance(source, str) and not is_file_source(source):
+                    errors.append(f"Field 'sources' requires a file path: {source!r}")
+    return errors
+
+
+def _optional_okf_field_errors(fm: dict[str, object]) -> list[str]:
+    errors: list[str] = []
+    errors.extend(_source_field_errors(fm))
     for date_key in ("verified", "stale_after"):
         if date_key in fm and fm[date_key] is not None:
             val = fm[date_key]
