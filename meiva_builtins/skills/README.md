@@ -64,7 +64,7 @@ adapters, transcription.
 | web-sources | Fetch content from any source; per-platform adapter subs: generic / rss / youtube | [web-sources skill — Fetch content from any source](integrations/web-sources/README.md) |
 
 ## Not indexed here
-The remaining top-level built-ins (such as `meiva-corp`, `meiva-deep-research`,
+The remaining top-level built-ins (such as `meiva-corp`,
 `meiva-serious-engineering` and `meiva-serious-research`)
 have no OKF node; their `SKILL.md` is the reference. Capability/timescale
 calibration belongs to `meiva-workflow`; deployment, incident operations,

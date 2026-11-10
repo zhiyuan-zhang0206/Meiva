@@ -5,7 +5,7 @@ converge step. It publishes the complete skill
 `<repo>/meiva_builtins/skills/platform/meiva-guide/` into the
 user-level skill directory of every external agent surface the user has.
 `_CLIENTS` is the one owner of that set: one row per surface (Codex, Claude Code,
-Gemini CLI, Grok, Qwen Code, Cursor Agent, Antigravity App/IDE, Antigravity CLI,
+Gemini CLI, Qwen Code, Cursor Agent, Antigravity App/IDE, Antigravity CLI,
 DeepSeek Harness) carrying the surface's home directory, its program name — absent
 for a desktop app that has none — and the skills subdirectory it scans. A client
 is present when its home directory exists or its program resolves on `PATH`; a
@@ -75,7 +75,7 @@ converge; source-integrity failures remain fatal.
 
 A conflict is per client and per skill: an unmanaged or user-modified copy of one
 skill in one home is preserved and reported while every other target still
-publishes. Cursor and Grok additionally read other tools' skill directories for
+publishes. Cursor additionally reads other tools' skill directories for
 compatibility, so one skill may be visible to them through more than one path;
 the copies are identical because a single snapshot produces all of them.
 
