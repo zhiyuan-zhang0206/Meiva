@@ -218,6 +218,7 @@ above (or when its name is unregistered); otherwise it stays in the JSONL mirror
 | `launch_failures` | this start could not read the launch-failure report, so the unlaunched sessions it recorded stay unreported to the rollout aftermath block | anomaly | — | — | events | — |
 | `harness_interrupt` | an external harness turn was interrupted; the adapter's settle answer is carried as it came back | noise | agent_id, settled, turn_id | — | events | — |
 | `harness_interrupt_failed` | interrupting an external harness turn raised; the durable cancel row stays pending and claim dispatches it again on the next pass | anomaly | — | — | events | — |
+| `harness_steer_poll_pool_timeout` | a steering poll could not borrow a database connection; the foreground keeps running and the poll waits before retrying | anomaly | — | — | events | — |
 | `harness_steer_unconfirmed` | an external harness did not confirm a steer; the inbound stays pending | anomaly | — | — | events | — |
 | `harness_close_settled` | an external harness session closed and none of its observed processes survived | noise | harness, agent_id, waited_ms | — | events | — |
 | `harness_close_unobserved` | an external harness session closed without ever observing its process tree; the close answers unknown, not settled | noise | harness, agent_id | — | events | — |

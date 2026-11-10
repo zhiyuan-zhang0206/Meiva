@@ -2,11 +2,14 @@ from __future__ import annotations
 
 import asyncio
 import json
+from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager
 from dataclasses import replace
 from pathlib import Path
 
 import psycopg
-from psycopg_pool import AsyncConnectionPool
+from psycopg.rows import TupleRow
+from psycopg_pool import AsyncConnectionPool, PoolTimeout
 
 from agent.graph.claim.harness_turn import harness_turn_node
 from agent.graph.claim.tests.test_harness_turn import FakeEngine, config, deliver, runtime
@@ -14,6 +17,7 @@ from agent.graph.claim.tests.test_harness_turn import hosted_resources as hosted
 from agent.ownership.tests.ownership_support import agent_row
 from agent.state import AgentState
 from base.agents.history.harness_messages import aload_harness_timeline_items
+from base.db import PG_KEEPALIVE_KWARGS
 from base.events.live.tests.live_capture import LiveEvents
 from base.host.boundary.json_values import is_object_dict
 from base.lm.harness import AssistantText, ForegroundAccepted, HarnessTurn
@@ -249,3 +253,77 @@ async def test_steer_delivers_peer_note_and_user_upload_in_order_and_flips_wake_
         peer_id,
         user_id,
     ]
+
+
+class _SteerTimeoutPool(AsyncConnectionPool):
+    def __init__(self, delegate: AsyncConnectionPool) -> None:
+        super().__init__(open=False, kwargs={**PG_KEEPALIVE_KWARGS})
+        self.delegate = delegate
+        self.failed = asyncio.Event()
+        self.attempts = 0
+
+    @asynccontextmanager
+    async def connection(
+        self, timeout: float | None = None
+    ) -> AsyncGenerator[psycopg.AsyncConnection[TupleRow]]:
+        task = asyncio.current_task()
+        if task is not None and task.get_name().startswith("harness-steer-"):
+            self.attempts += 1
+            if self.attempts <= 2:
+                self.failed.set()
+                raise PoolTimeout("injected steer borrow timeout")
+        async with self.delegate.connection(timeout=timeout) as conn:
+            yield conn
+
+
+async def test_steer_pool_timeout_preserves_foreground_and_delivers_once_after_recovery(
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    hosted_resources: HostedTurnResources,
+    live_events: LiveEvents,
+) -> None:
+    agent_id = agent_row(db_conn)
+    pool = _SteerTimeoutPool(aops_pool)
+    engine = _BatchSteerEngine(expected=1)
+    engine.steering_available = True
+    rt = runtime(
+        engine,
+        ops_pool=pool,
+        hosted_resources=hosted_resources,
+        publisher=live_events.publisher,
+    )
+    state = AgentState(harness_pending_input={"prompt": "work", "key": "initial"})
+    row = db_conn.execute(
+        "INSERT INTO inbound_messages (agent_id, content, kind, source) "
+        "VALUES (%s, 'keep the logs', 'chat', 'user') RETURNING id",
+        (agent_id,),
+    ).fetchone()
+    db_conn.commit()
+    assert row is not None
+    inbound_id = row[0]
+    async with asyncio.timeout(10), asyncio.TaskGroup() as tasks:
+        turn = tasks.create_task(harness_turn_node(state, rt, config(agent_id)))
+        await pool.failed.wait()
+        assert not turn.done()
+        assert engine.steered == []
+        assert db_conn.execute(
+            "SELECT status, claimed_at FROM inbound_messages WHERE id=%s", (inbound_id,)
+        ).fetchone() == ("pending", None)
+        await engine.all_steered.wait()
+        assert not turn.done()
+        engine.continue_work.set()
+        engine.terminal.set()
+
+    assert pool.attempts >= 3
+    assert [key for _, key in engine.steered] == [f"inbound-{inbound_id}"]
+    assert db_conn.execute(
+        "SELECT status FROM inbound_messages WHERE id=%s", (inbound_id,)
+    ).fetchone() == ("done",)
+    async with aops_pool.connection() as conn:
+        items = await aload_harness_timeline_items(conn, agent_id)
+    assert [item.inbound_id for item in items if item.kind == "inbound_chat"] == [inbound_id]
+    events = await live_events.events()
+    assert [event["inbound_id"] for event in events if event["role"] == "inbound_committed"] == [
+        inbound_id
+    ]
+    assert events[-1]["role"] == "llm_done"

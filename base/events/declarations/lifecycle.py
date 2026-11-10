@@ -141,6 +141,12 @@ EVENTS: dict[str, EventSpec] = {
         "and claim dispatches it again on the next pass",
         tier="anomaly",
     ),
+    "harness_steer_poll_pool_timeout": telemetry_event(
+        "harness_steer_poll_pool_timeout",
+        "a steering poll could not borrow a database connection; the foreground keeps running "
+        "and the poll waits before retrying",
+        tier="anomaly",
+    ),
     "harness_steer_unconfirmed": telemetry_event(
         "harness_steer_unconfirmed",
         "an external harness did not confirm a steer; the inbound stays pending",
