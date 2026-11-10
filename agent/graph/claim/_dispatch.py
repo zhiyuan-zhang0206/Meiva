@@ -150,7 +150,7 @@ def prepare_system_note_inbound(ctx: MeivaContext, item: ClaimedInbound) -> list
     return _scanned_messages(
         system_note_message(
             content=f"{_ts_prefix(ctx)}{item.content}",
-            tag=tag,
+            tag=_system_note_tag(item.payload),
             task_id=task_id,
             picked_up_at=now,
             created_at=item.created_at,
