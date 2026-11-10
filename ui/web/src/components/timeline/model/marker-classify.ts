@@ -50,6 +50,7 @@ export function isSilentEphemeralPayload(payload: string): boolean {
   return (
     payload === "compact_done" ||
     payload === "cancelled" ||
+    payload === "status:Cancellation requested." ||
     payload.startsWith("compact_request:")
   );
 }

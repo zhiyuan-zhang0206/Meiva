@@ -31,15 +31,17 @@ describe("marker data-testid hooks (Task #1018)", () => {
     expect(screen.queryByTestId("marker-unrecognized")).toBeNull();
   });
 
-  it("shows a foreground cancellation request as a status", () => {
-    render(<EphemeralSystemMarker source={null} payload="status:Cancellation requested." />);
-    expect(screen.getByText("Cancellation requested.")).toBeTruthy();
-    expect(screen.queryByTestId("marker-error")).toBeNull();
-  });
-
-  it("filtered payloads (compact_done / compact_request / cancelled) render neither", () => {
-    for (const payload of ["compact_done", "cancelled", "compact_request:x"]) {
-      const { unmount } = render(<EphemeralSystemMarker source={null} payload={payload} />);
+  it("filtered payloads (compact_done / compact_request / cancelled / status:Cancellation requested.) render neither", () => {
+    for (const payload of [
+      "compact_done",
+      "cancelled",
+      "status:Cancellation requested.",
+      "compact_request:x",
+    ]) {
+      const { container, unmount } = render(
+        <EphemeralSystemMarker source={null} payload={payload} />,
+      );
+      expect(container.firstChild).toBeNull();
       expect(screen.queryByTestId("marker-unrecognized")).toBeNull();
       expect(screen.queryByTestId("marker-error")).toBeNull();
       unmount();
@@ -72,6 +74,7 @@ describe("isSilentMarker", () => {
   it("judges a source outside the vocabulary by its payload", () => {
     expect(isSilentMarker(null, "compact_done")).toBe(true);
     expect(isSilentMarker(null, "compact_request:abc")).toBe(true);
+    expect(isSilentMarker(null, "status:Cancellation requested.")).toBe(true);
     expect(isSilentMarker("tag_from_a_newer_server", "cancelled")).toBe(true);
     expect(isSilentMarker(null, "error:boom")).toBe(false);
   });

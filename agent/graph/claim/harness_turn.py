@@ -383,7 +383,6 @@ async def _await_foreground(
         async def request_cancel() -> None:
             await cancel.wait()
             stopping.set()
-            await projector.record_control("Cancellation requested.")
             if error := await interrupt_engine(agent_id, bridge):
                 await projector.record_control(f"Cancellation unconfirmed: {error}", error=True)
 
