@@ -131,3 +131,11 @@ Native-only context/lifecycle operations (`fork`, `compact`, `meiva.self.attach`
 versus supported external-harness `meiva.self` (including `restart`, applied at the turn
 boundary) and API restart surfaces are defined in
 [Harness turn capability boundary](harness-capability-boundary.md).
+
+
+A steering poll that cannot borrow a database connection logs
+`harness_steer_poll_pool_timeout` with the agent id, error and one-second retry
+delay. The foreground keeps running and the poll waits on the normal stoppable
+interval before trying again. Pool acquisition precedes reservation SQL, so this
+retry has no inbound or claim state to undo. Failures during provider delivery or
+acknowledgement retain the existing uncertain-delivery and recovery contract.

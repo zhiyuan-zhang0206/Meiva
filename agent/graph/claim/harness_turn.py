@@ -9,6 +9,7 @@ from langchain_core.messages import AIMessage, BaseMessage, ToolMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.runtime import Runtime
 from langgraph.types import Command
+from psycopg_pool import PoolTimeout
 
 from agent import state as _state
 from agent.db import ClaimedInbound
@@ -493,7 +494,22 @@ async def _steer_while_active(
 ) -> None:
     while not stopping.is_set():
         if input_accepted.is_set() and engine.steering_available:
-            batch = await reserve_harness_steer(ctx, agent_id)
+            try:
+                batch = await reserve_harness_steer(ctx, agent_id)
+            except PoolTimeout as exc:
+                # meiva:note
+                # PoolTimeout comes from borrowing, before reservation SQL runs.
+                # Keep the foreground alive and use the normal poll wait below;
+                # failures after reservation must retain their delivery semantics.
+                # meiva:link agent/graph/docs/harness-turn.md
+                logger.warning(
+                    "harness steer poll could not borrow a database connection",
+                    event="harness_steer_poll_pool_timeout",
+                    agent_id=agent_id,
+                    error=str(exc),
+                    retry_after_seconds=1.0,
+                )
+                batch = []
             if batch:
                 inbound_ids = [item.id for item in batch]
                 try:
