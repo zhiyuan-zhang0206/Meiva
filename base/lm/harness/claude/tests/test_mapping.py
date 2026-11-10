@@ -4,6 +4,7 @@ from base.lm.harness.claude.mapping import map_message, parse_result
 from base.lm.harness.claude.tests import fake_sdk as fake
 from base.lm.harness.events import (
     AssistantText,
+    ContextCompacted,
     RateLimitObserved,
     ReasoningDelta,
     SessionStarted,
@@ -267,3 +268,10 @@ def test_a_result_carries_the_origin_the_cli_names() -> None:
     assert own.origin_kind is None
     assert foreign.origin_kind == "task-notification"
     assert human.origin_kind == "human"
+
+
+def test_a_compact_boundary_system_message_maps_to_context_compacted() -> None:
+    message = fake.SystemMessage(subtype="compact_boundary", data={"compact_metadata": {}})
+    assert map_message(message, turn_id=None) == [ContextCompacted(turn_id=None)]
+    status = fake.SystemMessage(subtype="status", data={"status": "compacting"})
+    assert map_message(status, turn_id=None) == []

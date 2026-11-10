@@ -7,7 +7,12 @@ import pytest
 
 from base.api_contracts.agent_contract import Harness
 from base.lm.harness import ClusterFact, EntryPoint, Handoff, HarnessContribution
-from base.lm.harness.handoff import HANDOFF_VERSION
+from base.lm.harness.handoff import (
+    HANDOFF_VERSION,
+    INSTRUCTIONS_FILENAME,
+    compaction_reminder,
+    instructions_path,
+)
 
 DEFAULT_CLUSTER = (ClusterFact("macmini", "primary host"),)
 DEFAULT_ENTRIES = (EntryPoint("meiva.tasks", "read and update tasks"),)
@@ -129,6 +134,45 @@ def test_empty_cluster_and_entries_render_placeholders(tmp_path: Path) -> None:
     assert text.count("- (none)") == 2
 
 
+def test_a_handoff_without_a_saved_file_ends_with_the_instruction(tmp_path: Path) -> None:
+    text = handoff(tmp_path).render()
+    assert "also saved at" not in text
+    assert text.rstrip().endswith("Read hello.txt and reply with the third word.")
+
+
+def test_the_closing_pointer_names_the_file_and_the_compaction_rule(tmp_path: Path) -> None:
+    path = instructions_path(tmp_path)
+    doc = handoff(tmp_path)
+    text = doc.with_reference_file(path).render()
+
+    assert path.name == INSTRUCTIONS_FILENAME == "meiva_instructions.md"
+    assert path.name not in {"CLAUDE.md", "AGENTS.md", "GEMINI.md"}
+    assert text.startswith(doc.render().rstrip())
+    tail = text.split("## Standing Instructions", 1)[1]
+    assert f"`{path}`" in tail
+    assert "compacted or summarized" in tail
+    assert "before doing anything else" in tail
+    assert tail.rstrip().endswith("for the rest of the session.")
+
+
+def test_contributions_keep_the_saved_file(tmp_path: Path) -> None:
+    path = instructions_path(tmp_path)
+    merged = (
+        handoff(tmp_path)
+        .with_reference_file(path)
+        .with_contributions(
+            [HarnessContribution(frozenset({Harness.CODEX}), overlaps=("extra rule",))],
+            harness=Harness.CODEX,
+        )
+    )
+    assert merged.reference_file == path and "extra rule" in merged.overlaps
+
+
+def test_the_compaction_reminder_names_the_file(tmp_path: Path) -> None:
+    path = instructions_path(tmp_path)
+    assert f"`{path}`" in compaction_reminder(path)
+
+
 # meiva:note
 # The handoff is a wire format, not an internal dataclass: every provider adapter
 # renders the same document and a waking agent reads it as its first message. So
@@ -146,12 +190,13 @@ PINNED_HANDOFF_FIELDS = (
     "entries",
     "overlaps",
     "discipline",
+    "reference_file",
 )
 
 
 def test_field_set_is_pinned_to_the_handoff_version() -> None:
     names = tuple(entry.name for entry in fields(Handoff))
-    assert HANDOFF_VERSION == 1, (
+    assert HANDOFF_VERSION == 2, (
         "HANDOFF_VERSION moved without PINNED_HANDOFF_FIELDS following it; the "
         "version pins the field set every adapter reads"
     )

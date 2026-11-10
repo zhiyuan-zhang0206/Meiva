@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from base.host.boundary.json_values import is_object_dict, is_object_list
 from base.lm.harness.events import (
     BridgeEvent,
+    ContextCompacted,
     ReasoningDelta,
     ReasoningText,
     TextDelta,
@@ -72,6 +73,8 @@ def item_event(params: RequestParams, *, phase: str, turn_id: str) -> list[Bridg
         return _collab_call(item, phase, turn_id)
     if kind == "webSearch":
         return _web_search(item, phase, turn_id)
+    if kind == "contextCompaction" and phase == "completed":
+        return [ContextCompacted(turn_id=turn_id)]
     return []
 
 

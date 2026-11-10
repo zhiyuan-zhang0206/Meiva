@@ -6,6 +6,7 @@ from base.host.boundary.json_values import is_object_dict, is_object_list
 from base.lm.harness.events import (
     AssistantText,
     BridgeEvent,
+    ContextCompacted,
     RateLimitObserved,
     ReasoningDelta,
     ReasoningText,
@@ -95,7 +96,10 @@ def _api_error_sentence(api_error_status: int | None, result_text: str | None) -
 
 
 def _system(message: object, turn_id: str | None) -> list[BridgeEvent]:
-    if getattr(message, "subtype", None) != "init":
+    subtype = getattr(message, "subtype", None)
+    if subtype == "compact_boundary":
+        return [ContextCompacted(turn_id=turn_id)]
+    if subtype != "init":
         return []
     data = _as_dict(getattr(message, "data", None))
     return [

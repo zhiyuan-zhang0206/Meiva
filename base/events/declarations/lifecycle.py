@@ -197,6 +197,13 @@ EVENTS: dict[str, EventSpec] = {
         "a harness registration row could not be read during the sweep and is left in place",
         tier="anomaly",
     ),
+    "handoff_instructions_file_failed": telemetry_event(
+        "handoff_instructions_file_failed",
+        "the handoff instructions could not be saved to the agent's workspace; the first message "
+        "carries no pointer to the file, so the agent cannot re-read its instructions after a "
+        "compaction",
+        tier="anomaly",
+    ),
     "harness_notice_failed": telemetry_event(
         "harness_notice_failed",
         "an unsolicited provider report could not be written as an inbound; the report is lost "

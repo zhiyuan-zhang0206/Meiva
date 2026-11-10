@@ -8,7 +8,7 @@ from base.lm.harness.codex.mapping import (
     text_delta,
     usage_from,
 )
-from base.lm.harness.events import TextDelta, ToolResult, ToolUse
+from base.lm.harness.events import ContextCompacted, TextDelta, ToolResult, ToolUse
 
 
 def test_delta_maps_to_text_delta() -> None:
@@ -206,3 +206,11 @@ def test_approval_denial_names_the_command() -> None:
         approval_denial("item/commandExecution/requestApproval", {"command": "ls"}) == "command: ls"
     )
     assert approval_denial("item/fileChange/requestApproval", {}) == "file change"
+
+
+def test_a_completed_context_compaction_item_maps_to_context_compacted() -> None:
+    item = {"item": {"type": "contextCompaction", "id": "c-1"}}
+    assert item_event(item, phase="started", turn_id="turn-1") == []
+    assert item_event(item, phase="completed", turn_id="turn-1") == [
+        ContextCompacted(turn_id="turn-1")
+    ]
