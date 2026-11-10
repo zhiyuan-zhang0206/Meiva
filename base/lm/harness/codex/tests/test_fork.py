@@ -23,6 +23,7 @@ def _register(registry: FileSessionRegistry, agent_id: int, thread: str, cwd: Pa
             session_id=thread,
             cwd=str(cwd),
             model="",
+            harness="codex",
             created_at=now,
             updated_at=now,
         )
@@ -60,9 +61,9 @@ async def test_first_start_clones_the_sources_thread_then_resumes_the_clone(
         assert bound.session_id == "thread-clone"
         assert bound.resumed is True
         assert harness.of(HandoffInjected) == []
-        record = registry.load(CHILD)
+        record = registry.load(CHILD, harness="codex")
         assert record is not None and record.session_id == "thread-clone"
-        source = registry.load(SOURCE)
+        source = registry.load(SOURCE, harness="codex")
         assert source is not None and source.session_id == "thread-src"
     finally:
         await harness.stop()
@@ -76,7 +77,7 @@ async def test_the_clone_is_registered_before_the_thread_is_resumed(tmp_path: Pa
         await start(
             tmp_path, server=server, registry=registry, agent_id=CHILD, fork_source_agent_id=SOURCE
         )
-    record = registry.load(CHILD)
+    record = registry.load(CHILD, harness="codex")
     assert record is not None and record.session_id == "thread-clone"
 
 

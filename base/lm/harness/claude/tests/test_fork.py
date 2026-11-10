@@ -11,6 +11,7 @@ from base.lm.harness.claude.options import fork_session_id
 from base.lm.harness.claude.tests.fake_sdk import FakeSDK, Say
 from base.lm.harness.claude.tests.support import Harness, start
 from base.lm.harness.events import HandoffInjected, SessionBound
+from base.lm.harness.registry import SessionRecord
 
 SOURCE = 7
 CHILD = 8
@@ -41,10 +42,10 @@ async def test_first_start_forks_the_sources_session_under_a_fixed_id(tmp_path: 
         bound = await child.wait_for(lambda event: isinstance(event, SessionBound))
         assert bound.session_id == fork_session_id(CHILD)
         assert bound.resumed is True
-        record = registry.load(CHILD)
+        record = registry.load(CHILD, harness="claude_code")
         assert record is not None
         assert record.session_id == fork_session_id(CHILD)
-        source = registry.load(SOURCE)
+        source = registry.load(SOURCE, harness="claude_code")
         assert source is not None and source.session_id == "sess-src"
     finally:
         await child.stop()
@@ -120,7 +121,7 @@ async def test_a_crash_after_the_clone_but_before_the_registry_write_resumes_it(
     await _source(tmp_path, registry, sdk)
     clone = fork_session_id(CHILD)
     sdk.stored_sessions.add(clone)
-    assert registry.load(CHILD) is None
+    assert registry.load(CHILD, harness="claude_code") is None
 
     child = await start(
         tmp_path, agent_id=CHILD, registry=registry, sdk=sdk, fork_source_agent_id=SOURCE
@@ -130,7 +131,7 @@ async def test_a_crash_after_the_clone_but_before_the_registry_write_resumes_it(
         assert options.resume == fork_session_id(CHILD)
         assert options.fork_session is False
         await child.wait_for(lambda event: isinstance(event, SessionBound))
-        record = registry.load(CHILD)
+        record = registry.load(CHILD, harness="claude_code")
         assert record is not None and record.session_id == fork_session_id(CHILD)
     finally:
         await child.stop()
@@ -138,5 +139,48 @@ async def test_a_crash_after_the_clone_but_before_the_registry_write_resumes_it(
 
 async def test_a_fork_whose_source_has_no_session_here_is_refused(tmp_path: Path) -> None:
     registry = FileSessionRegistry(tmp_path / "sessions")
+    with pytest.raises(ForkSourceUnavailableError, match="holds no CLI session"):
+        await start(tmp_path, agent_id=CHILD, registry=registry, fork_source_agent_id=SOURCE)
+
+
+def _record(agent_id: int, harness: str, session: str, tmp_path: Path) -> SessionRecord:
+    return SessionRecord(
+        agent_id=agent_id,
+        session_id=session,
+        cwd=str(tmp_path),
+        model="m",
+        harness=harness,
+        created_at="2026-11-11T00:00:00+00:00",
+        updated_at="2026-11-11T00:00:00+00:00",
+    )
+
+
+async def test_a_child_coming_back_to_the_harness_resumes_its_old_record(tmp_path: Path) -> None:
+    registry = FileSessionRegistry(tmp_path / "sessions")
+    sdk = FakeSDK()
+    await _source(tmp_path, registry, sdk)
+    first = await start(
+        tmp_path, agent_id=CHILD, registry=registry, sdk=sdk, fork_source_agent_id=SOURCE
+    )
+    await first.wait_for(lambda event: isinstance(event, SessionBound))
+    await first.stop()
+    registry.save(_record(CHILD, "codex", "thread-elsewhere", tmp_path))
+
+    back = await start(
+        tmp_path, agent_id=CHILD, registry=registry, sdk=sdk, fork_source_agent_id=SOURCE
+    )
+    try:
+        options = sdk.clients[-1].options
+        assert options.resume == fork_session_id(CHILD)
+        assert options.fork_session is False
+        other = registry.load(CHILD, harness="codex")
+        assert other is not None and other.session_id == "thread-elsewhere"
+    finally:
+        await back.stop()
+
+
+async def test_a_source_session_kept_on_another_harness_is_not_cloned(tmp_path: Path) -> None:
+    registry = FileSessionRegistry(tmp_path / "sessions")
+    registry.save(_record(SOURCE, "codex", "thread-old", tmp_path))
     with pytest.raises(ForkSourceUnavailableError, match="holds no CLI session"):
         await start(tmp_path, agent_id=CHILD, registry=registry, fork_source_agent_id=SOURCE)

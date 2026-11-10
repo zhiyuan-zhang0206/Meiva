@@ -442,18 +442,19 @@ class BaseHarnessSession[ConfigT: SessionConfig](ExitStatus):
         return resolved
 
     # meiva:note
-    # A fork's first start. When this agent was born as a fork, has no session of its own
-    # in the registry, and the caller named no session to resume, the session to clone is
-    # the source agent's registered one on this machine. A source with no record here (it
-    # never started a session, or it runs on another machine) is a refusal, never a quiet
-    # fresh session: a fork that silently lost its inherited conversation is the wrong
-    # agent. Cloning counts as resuming, so the handoff document is not co-delivered: the
+    # A fork's first start. When this agent was born as a fork, has no session of its own on this
+    # harness, and the caller named no session to resume, the session to clone is the source agent's
+    # registered one on this harness and machine. The host passes a source only while it runs on the
+    # child's harness, so an older record the source kept on another harness is never cloned. A
+    # source with no record here (it never started a session, or it runs on another machine) is a
+    # refusal, never a quiet fresh session: a fork that silently lost its inherited conversation is
+    # the wrong agent. Cloning counts as resuming, so the handoff document is not co-delivered: the
     # inherited conversation already holds it.
     # meiva:link base/lm/harness/docs/fork.md
     def _fork_origin(self, resolved: str | None) -> SessionRecord | None:
         if resolved or self._fork_source_agent_id is None or self._registry is None:
             return None
-        source = self._registry.load(self._fork_source_agent_id)
+        source = self._registry.load(self._fork_source_agent_id, harness=self.harness)
         if source is None:
             raise ForkSourceUnavailableError(
                 f"agent {self.agent_id} is a fork of agent {self._fork_source_agent_id}, but "

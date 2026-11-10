@@ -90,11 +90,12 @@ as interrupted, as a native fork does.
   `CLAUDE_CONFIG_DIR`) through the SDK in the runner process, so it assumes the runner and the CLI
   session share that directory, as they do by default. A session given a different `CLAUDE_CONFIG_DIR`
   would not find an existing clone, and the retry would meet the CLI's "already in use" error.
-- **Harness switches.** The fork source is read together with the child's stored config and counts
-  only while the source runs on the child's current harness (`read_stored_config`); a child switched to
-  another harness has no source session to clone and starts fresh. A source switched to another
-  harness had its session record deleted, so its forks that never started refuse with
-  `ForkSourceUnavailableError`. A child that switches away and back has had its own record deleted and
-  would clone its source again; that return is not special-cased.
+- **Harness switches.** The registry keeps one record per (agent, harness) and a switch deletes none.
+  The fork source is read together with the child's stored config and counts only while the source
+  runs on the child's current harness (`read_stored_config`); a child switched to another harness has
+  no source session to clone and starts fresh there. A fork clones only the source's session on the
+  child's current harness, never an older record the source kept on another harness. "Has the child
+  its own session" is asked per harness, so a child that switches away and back finds its old record
+  and resumes it instead of cloning again.
 - **No unread.** The delivery records (`agent_user_messages`) are not copied, and the seen-position
   table has no row for the child, which reads as position 0.
