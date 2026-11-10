@@ -20,15 +20,24 @@ from base.log import logger
 from base.packages.plugins.config_view import disk_image_path, read_plugin_config
 from base.packages.plugins.plugin_errors import InvalidConfigData, SchemaDriftError
 from base.packages.plugins.surface import stats
+from meiva_builtins.plugins.meiva_usage.backoff import judge_cycle, next_interval_s
 from meiva_builtins.plugins.meiva_usage.default_config import CollectorConfig, UsageConfig
 from meiva_builtins.plugins.meiva_usage.probes import (
     CodexRpcRunner,
     HttpJsonFetcher,
     probe_collector,
 )
-from meiva_builtins.plugins.meiva_usage.types import CardReading, should_write_failure
+from meiva_builtins.plugins.meiva_usage.types import (
+    CardReading,
+    UsageRateLimitedError,
+    should_write_failure,
+)
 
 _log = logger
+
+# meiva:note
+# The value a card shows when it has never held a reading.
+_NO_READING = "—"
 
 
 # meiva:note
@@ -73,6 +82,37 @@ def _resolve_error_hysteresis(
     return reading, True
 
 
+# meiva:note
+# A rate-limited probe is not a failed one: the card keeps its last reading and the age of that
+# reading (`refresh_stamp=False`), and only its status and detail say the number is old. The detail
+# names the as-of instant, because a stamp alone would read as "refreshed just now" in a log line.
+# With no earlier reading there is nothing to keep, so the placeholder reading is written as is.
+def _rate_limited_reading(
+    db: Database,
+    card_id: str,
+    reading: CardReading,
+) -> tuple[CardReading, bool]:
+    with db.write_transaction() as conn:
+        cached = query_one(
+            conn,
+            _CachedCard,
+            "SELECT status, updated_at, value FROM plugin_stats WHERE plugin = %s AND id = %s",
+            ("meiva_usage", card_id),
+        )
+    if cached is None or not cached.value or cached.value == _NO_READING:
+        return reading, False
+    as_of = cached.updated_at.astimezone(UTC).strftime("%Y-%m-%d %H:%M UTC")
+    return (
+        CardReading(
+            value=cached.value,
+            detail=f"Rate limited by the provider (HTTP 429); showing the reading from {as_of}",
+            status="warn",
+            rate_limited=True,
+        ),
+        True,
+    )
+
+
 def _upsert_card_reading(
     db: Database,
     *,
@@ -81,7 +121,10 @@ def _upsert_card_reading(
     now: datetime,
     machine_name: str,
 ) -> CardReading:
-    if reading.status == "error":
+    keep_stamp = False
+    if reading.rate_limited:
+        reading, keep_stamp = _rate_limited_reading(db, card_id, reading)
+    elif reading.status == "error":
         reading, should_upsert = _resolve_error_hysteresis(db, card_id, reading, now)
         if not should_upsert:
             return reading
@@ -95,8 +138,16 @@ def _upsert_card_reading(
         status=reading.status,
         updated_by=machine_name,
         detail_cap=500,
+        refresh_stamp=not keep_stamp,
     )
     return reading
+
+
+def _error_detail(exc: Exception) -> str:
+    err_msg = str(exc).strip() or type(exc).__name__
+    if len(err_msg) > 200:
+        err_msg = err_msg[:197] + "..."
+    return err_msg
 
 
 def refresh_collector_once(
@@ -126,12 +177,16 @@ def refresh_collector_once(
             keychain_reader=keychain_reader,
             codex_rpc_runner=codex_rpc_runner,
         )
-    except Exception as exc:
-        err_msg = str(exc).strip() or type(exc).__name__
-        if len(err_msg) > 200:
-            err_msg = err_msg[:197] + "..."
+    except UsageRateLimitedError as exc:
         readings = {
-            card.id: CardReading(value="—", detail=err_msg, status="error")
+            card.id: CardReading(
+                value=_NO_READING, detail=_error_detail(exc), status="warn", rate_limited=True
+            )
+            for card in collector.stat_cards()
+        }
+    except Exception as exc:
+        readings = {
+            card.id: CardReading(value=_NO_READING, detail=_error_detail(exc), status="error")
             for card in collector.stat_cards()
         }
 
@@ -140,7 +195,7 @@ def refresh_collector_once(
         reading = readings.get(card.id)
         if reading is None:
             reading = CardReading(
-                value="—",
+                value=_NO_READING,
                 detail=f"Card '{card.id}' missing from probe results",
                 status="error",
             )
@@ -262,13 +317,25 @@ def _emit_cycle(collector_id: str, outcome: str, reason: str, *, cycle: int) -> 
 
 
 # meiva:note
+# One line per backed-off cycle, so a collector that is quiet because it is throttled says so.
+def _report_backoff(collector_id: str, rate_limited_cycles: int, interval_s: float) -> None:
+    if rate_limited_cycles:
+        _log.warning(
+            "collector {} rate limited {} cycle(s) in a row; next cycle in {:.0f}s",
+            collector_id,
+            rate_limited_cycles,
+            interval_s,
+        )
+
+
+# meiva:note
 # The loop, with its two effects handed in as required parameters. The public entry point below
 # supplies the real ones; a test supplies its own, which is why they carry no defaults — a default
 # reaching the real implementation is a seam no caller sees.
 def run_collector_cycles(
     borrowed: ScheduleInputs | None,
     *,
-    refresh: Callable[..., object],
+    refresh: Callable[..., Mapping[str, CardReading]],
     sleep: Callable[[float], None],
     collector_id: str,
     stop_after_cycles: int | None = None,
@@ -293,6 +360,7 @@ def run_collector_cycles(
     effective_tz = _resolve_display_tz(display_tz, effective_environ)
 
     cycles = 0
+    rate_limited_cycles = 0
     # meiva:note
     # A process with no bound event pipeline drops every event it is asked to emit, and until
     # 2026-11-06 it dropped them without a word: a schedule process never binds the pipeline
@@ -308,7 +376,7 @@ def run_collector_cycles(
 
         now = datetime.now(tz=UTC)
         try:
-            refresh(
+            readings = refresh(
                 collector,
                 db=db,
                 user_home=effective_home,
@@ -325,7 +393,8 @@ def run_collector_cycles(
             _log.warning("collector {} refresh cycle failed: {}", collector_id, exc)
             emitted = _emit_cycle(collector_id, "failed", type(exc).__name__, cycle=cycles)
         else:
-            emitted = _emit_cycle(collector_id, "ok", "", cycle=cycles)
+            rate_limited_cycles, outcome, reason = judge_cycle(readings, rate_limited_cycles)
+            emitted = _emit_cycle(collector_id, outcome, reason, cycle=cycles)
 
         if not emitted and not unbound_reported:
             unbound_reported = True
@@ -341,7 +410,9 @@ def run_collector_cycles(
         if stop_after_cycles is not None and cycles >= stop_after_cycles:
             return
 
-        interval_s = float(collector.interval_minutes * 60)
+        base_interval_s = float(collector.interval_minutes * 60)
+        interval_s = next_interval_s(base_interval_s, rate_limited_cycles)
+        _report_backoff(collector_id, rate_limited_cycles, interval_s)
         sleep(interval_s)
 
 

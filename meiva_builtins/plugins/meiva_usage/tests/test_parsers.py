@@ -37,6 +37,7 @@ def test_parse_claude_oauth_blob_valid() -> None:
     }
     creds = parse_claude_oauth_blob(data)
     assert creds.access_token == expected
+    assert creds.expires_at is not None
     assert creds.expires_at.year > 2025
 
     raw_json = json.dumps(data)
@@ -49,11 +50,11 @@ def test_parse_claude_oauth_blob_missing_token_raises() -> None:
         parse_claude_oauth_blob({"claudeAiOauth": {"expiresAt": 1790000000000}})
 
 
-def test_parse_claude_oauth_blob_missing_expires_at_defaults_to_epoch() -> None:
+def test_parse_claude_oauth_blob_missing_expires_at_is_unknown() -> None:
     expected = "tok-without-expiry"
     creds = parse_claude_oauth_blob({"claudeAiOauth": {"accessToken": expected}})
     assert creds.access_token == expected
-    assert creds.expires_at == datetime.fromtimestamp(0, tz=UTC)
+    assert creds.expires_at is None
 
 
 def test_parse_claude_windows_modern() -> None:

@@ -14,6 +14,14 @@ ci_runs_run is one breadcrumb per repository: the fixed window's population and
 this run's GitHub-read budget — current observations, so gauges even though
 their names are counts.
 
+claude_auth_keepalive_round is one per machine per day: status is `ok`, `failed` or
+`skipped`; reason names why a round did not succeed (`claude_not_found`, `not_logged_in`,
+`nonzero_exit`, `timeout`, `non_production`) and exit_code is the keepalive command's own. The
+command's output never enters the payload; the schedule log carries a masked stderr tail.
+
+plugin_collector_cycle reports `outcome="rate_limited"` for a cycle whose probe was answered with
+HTTP 429, so a collector that is alive but throttled is distinguishable from a healthy one.
+
 The remaining understanding events: an enqueue failure is best-effort (the next
 trigger covers the same stretch); a queued chunk skipped without a node was
 already described or had no conversation content; an upper-level grouping

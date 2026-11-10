@@ -1,4 +1,5 @@
-exports = ["update_plan.py"]
+exports = ["claude_keepalive.py", "update_plan.py"]
 
 [purity]
+"claude_keepalive.py" = "strict"
 "update_plan.py" = "strict"

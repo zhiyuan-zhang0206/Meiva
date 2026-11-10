@@ -38,6 +38,7 @@ directory. The manifest is the single expression of the built-in policy
 | `model-update-tracker` | `model-update-tracker-schedule.py` | product | **enabled** |
 | `trace-ship-tempo` | `trace-ship-tempo-schedule.py` | product | **enabled** |
 | `harness-cli-update` | `harness-cli-update-schedule.py` | product | **enabled** |
+| `claude-auth-keepalive` | `claude-auth-keepalive-schedule.py` | product | **enabled** |
 | `db-write-stall-watch` | `db-write-stall-watch-schedule.py` | operator | disabled |
 | `sched-dry-import-weekly` | `sched-dry-import-weekly-schedule.py` | operator | disabled |
 | `log-cred-mask-monthly` | `log-cred-mask-monthly-schedule.py` | operator | disabled |
@@ -111,6 +112,21 @@ greens exercise the red.
   Each machine independently converges its locally installed external harness CLIs (Claude Code, OpenAI Codex,
   Antigravity, Droid) to the catalog versions pinned in this checkout, writing non-disruptive update logs to
   `$MEIVA_HOME/run/harness-cli-update.log` and emitting `harness_cli_update_round` telemetry without waking agents.
+- `claude-auth-keepalive` runs at 05:10 cluster time with `placement: "per_machine"` (rows
+  `claude-auth-keepalive:<machine>` on every `agent-runner` host, like `harness-cli-update`). Each
+  machine runs one minimal `claude -p` (model `haiku`, no tools, no session persistence, fixed
+  prompt on stdin, 120 s timeout) so the CLI refreshes its own login and writes the rotated
+  credentials back; a machine that goes days without a Claude Code run would otherwise let the
+  access token expire (the `meiva_usage` Claude card then waits on it) and eventually lose the login.
+  The schedule never calls the OAuth refresh endpoint and never reads or writes a credentials file:
+  the refresh token is single-use and a second refresher would race a running CLI for it. It checks
+  `claude auth status --json` first and makes no model call when `loggedIn` is false. A round never
+  raises: a missing executable (`claude_not_found`), a logged-out machine (`not_logged_in`), a
+  non-zero exit (`nonzero_exit`) or a timeout (`timeout`) is printed to the schedule log with the
+  exit code and the last lines of stderr (credential-shaped text masked) and emitted as
+  `claude_auth_keepalive_round` with `status="failed"`; the loop is not asked to retry, because every
+  retry would be another model call for a condition that does not change in minutes. A non-production
+  identity skips, as `harness-cli-update` does.
 - **operator** schedules (cluster-operator tooling) ship with the product but
   start **disabled**: they exist so they are discoverable, and start only when
   the operator enables them. `db-write-stall-watch` is the first: three

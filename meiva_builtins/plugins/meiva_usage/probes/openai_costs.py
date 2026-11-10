@@ -18,7 +18,11 @@ from meiva_builtins.plugins.meiva_usage.probes.transport import (
     HttpJsonRequest,
     HttpStatusError,
 )
-from meiva_builtins.plugins.meiva_usage.types import CardReading, UsageProbeError
+from meiva_builtins.plugins.meiva_usage.types import (
+    CardReading,
+    UsageProbeError,
+    UsageRateLimitedError,
+)
 
 MAX_COST_PAGES = 20
 
@@ -40,6 +44,8 @@ def _compute_start_day(today_utc: date, balance_as_of: str | None) -> date:
 
 
 def _handle_openai_http_error(exc: HttpStatusError, env_name: str) -> UsageProbeError:
+    if exc.status_code == 429:
+        return UsageRateLimitedError("OpenAI costs request rate limited (HTTP 429)")
     if exc.status_code == 401:
         return UsageProbeError(f"OpenAI Admin key in {env_name} is invalid (401)")
     if exc.status_code == 403:

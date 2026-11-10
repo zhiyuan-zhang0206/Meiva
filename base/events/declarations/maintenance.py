@@ -257,9 +257,20 @@ class HarnessCliUpdateRound(TypedDict):
     outcomes: NotRequired[list[dict[str, object]]]
 
 
+# meiva:note
+# One Claude Code login keepalive round: status ("ok" | "failed" | "skipped"), the reason it did not
+# succeed (claude_not_found, not_logged_in, nonzero_exit, timeout, non_production), and the exit code
+# of the keepalive command when it ran. The command's output never enters the payload.
+# meiva:link base/events/docs/maintenance-payloads.md
+class ClaudeAuthKeepaliveRound(TypedDict):
+    status: str
+    reason: NotRequired[str]
+    exit_code: NotRequired[int]
+
+
 class PluginCollectorCycle(TypedDict):
     collector: str
-    outcome: Literal["ok", "failed"]
+    outcome: Literal["ok", "failed", "rate_limited"]
     reason: str
     cycle: int
     # meiva:note
@@ -274,6 +285,12 @@ EVENTS: dict[str, EventSpec] = {
         "one external harness CLI update round — status, updated/failed counts, and outcome details",
         payload=HarnessCliUpdateRound,
         site="schedules/jobs/harness/harness_cli_update.py:execute_round (via emit_system_event)",
+    ),
+    "claude_auth_keepalive_round": telemetry_event(
+        "claude_auth_keepalive_round",
+        "one daily Claude Code login keepalive round — status, the reason it did not succeed, and the keepalive command's exit code",
+        payload=ClaudeAuthKeepaliveRound,
+        site="schedules/jobs/harness/claude_auth_keepalive.py:execute_round (via emit_system_event)",
     ),
     "agent_watch_round": telemetry_event(
         "agent_watch_round",

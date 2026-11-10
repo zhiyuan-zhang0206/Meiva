@@ -92,6 +92,15 @@
       "placement": "per_machine"
     },
     {
+      "name": "claude-auth-keepalive",
+      "class": "product",
+      "default_enabled": true,
+      "description": "Per-machine daily Claude Code login keepalive at 05:10 cluster time: one minimal `claude -p` on the cheapest model so the CLI refreshes its own login. It never calls the OAuth refresh endpoint or touches credentials, and a missing CLI or logged-out machine is recorded as a failed round without retrying.",
+      "script": "jobs/harness/claude-auth-keepalive-schedule.py",
+      "command": "python jobs/harness/claude-auth-keepalive-schedule.py",
+      "placement": "per_machine"
+    },
+    {
       "name": "db-write-stall-watch",
       "class": "operator",
       "default_enabled": false,

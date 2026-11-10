@@ -25,6 +25,7 @@ from meiva_builtins.plugins.meiva_usage.types import (
     AntigravityCredentials,
     CardReading,
     UsageProbeError,
+    UsageRateLimitedError,
     WindowPair,
     resolve_user_path,
 )
@@ -196,6 +197,10 @@ def _fetch_quota_with_auth_retry(
     try:
         return _fetch_quota_raw(access_token, platform, http_fetch)
     except HttpStatusError as exc:
+        if exc.status_code == 429:
+            raise UsageRateLimitedError(
+                "Antigravity quota request rate limited (HTTP 429)"
+            ) from None
         if exc.status_code not in (401, 403):
             raise UsageProbeError(
                 f"Antigravity quota request failed with HTTP {exc.status_code}"
