@@ -1,0 +1,15 @@
+exports = []
+
+[uses]
+"__init__.py" = ["inputs.py", "ledger.py", "reconcile.py"]
+"inputs.py" = []
+"ledger.py" = []
+"reconcile.py" = []
+"tests" = ["__init__.py"]
+
+[purity]
+"." = "strict"
+"__init__.py" = "strict"
+"inputs.py" = "strict"
+"ledger.py" = "strict"
+"reconcile.py" = "strict"

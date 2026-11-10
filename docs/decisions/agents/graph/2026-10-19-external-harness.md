@@ -114,7 +114,10 @@ callable; we simply do not advertise it.
   machine or rebuild on a new one, which loses context and has to be said in the
   handoff.
 - Our inbound versus the harness's turn boundary: a message waits for the turn to
-  complete; it is never inserted mid-turn.
+  complete; it is never inserted mid-turn. *(Superseded by
+  [harness delivery](2026-11-11-harness-delivery-two-acks.md): input is delivered
+  whenever the harness can take it, and the adapter decides whether it joins the
+  running turn.)*
 
 ## 8. Open questions
 
@@ -202,7 +205,8 @@ Every adapter does five things — `connect(resume)`, `send(text)`, `interrupt()
 Seven invariants, common to all three, already pinned by tests in the Claude
 adapter:
 
-1. inbound is queued only at a turn boundary, never mid-turn;
+1. inbound is queued only at a turn boundary, never mid-turn *(superseded by
+   [harness delivery](2026-11-11-harness-delivery-two-acks.md))*;
 2. a repeated submission key returns the same ticket, and a completed key replays
    its recorded outcome;
 3. a full queue refuses; it does not buffer;
@@ -275,7 +279,9 @@ design rests on: the SDK runs on a subscription login without an API key;
 `session_id` resumes across processes; `interrupt()` returns in ~5ms and the CLI
 reaps the tool's child processes itself (~40ms observed); and a `query()` issued
 mid-turn is folded into the pending tool result, where the model treats it as
-injected content and refuses it.
+injected content and refuses it. *(Superseded: later experiments showed the
+message is absorbed at the next tool boundary or becomes a turn of its own, see
+[harness delivery](2026-11-11-harness-delivery-two-acks.md).)*
 
 ### The decision
 

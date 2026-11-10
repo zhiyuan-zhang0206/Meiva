@@ -1,0 +1,13 @@
+exports = []
+
+[uses]
+"__init__.py" = []
+"judge.py" = []
+"rollout.py" = ["judge.py"]
+"tests" = ["judge.py", "rollout.py"]
+
+[purity]
+"." = "strict"
+"__init__.py" = "strict"
+"judge.py" = "strict"
+"rollout.py" = { mode = "none", why = "the read half of Codex reconciliation: it globs the thread's rollout file under the injected Codex home and parses its lines; what the rows mean is decided in judge.py" }

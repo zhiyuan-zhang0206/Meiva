@@ -6,8 +6,10 @@ executor accepts the input. Codex reports acceptance from its correlated start
 response. For adapters without a start receipt, the first attributable
 activity or terminal result is evidence that the input reached execution.
 
-While an adapter that implements `ForegroundSteering` (Codex, Claude Code,
-Antigravity) is active, all pending steerable inbounds at the head of the inbox
+While an adapter that implements `ForegroundSteering` is active (today every
+adapter: its `steer()` is a thin wrapper over `deliver()` and answers with the
+fact that the input entered the running turn's context, not that a write
+succeeded; see [harness delivery](../../../base/lm/harness/docs/delivery.md)), all pending steerable inbounds at the head of the inbox
 — chats from any source (including attachments and peer-agent reports), system
 notes, and heartbeats — are reserved together as one FIFO batch and steered
 into the running foreground in a single request as long as no `cancel`,

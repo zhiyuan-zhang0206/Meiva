@@ -1,0 +1,54 @@
+# Harness delivery: inputs, acknowledgements, turns
+
+The adapters (Claude Code, Codex, Antigravity) share one input and event contract. An input is
+handed over with `deliver()`; everything that happens to it comes back as an event. The decision and
+its evidence are in
+[External harness delivery](../../../../docs/decisions/agents/graph/2026-11-11-harness-delivery-two-acks.md).
+
+## The input
+
+`HarnessInput(key, text, images)` (`delivery/inputs.py`). `key` is the caller's own id and names the
+input in every later event. An image is an `ImageBlock(mime_type, data_base64)`; the type and the
+base64 are validated when the value is built, and a batch must have unique keys.
+
+`deliver(inputs)` returns when the batch has been handed to the foreground, in order. It never
+returns "did it work": a refusal is an `InputRejected` event, a protocol failure raises. Whether an
+input joins the running turn or starts one is the adapter's choice. `submit()` and `steer()` remain
+for the graph as thin wrappers: `steer()` now answers with the fact (True only when the input entered
+the context of the turn that was running; False on a rejection; an error when it was lost or became
+part of another turn).
+
+## The events (`events.py`)
+
+Every event carries the process `generation` (1 for the first process a session starts, +1 per
+respawn). An adapter drops a frame from an older process.
+
+| Event | Meaning |
+|---|---|
+| `InputReceived(key, signal)` | ACK 1: the harness has it. `AckSignal.STRONG` is a protocol receipt; `WEAK` is only that the write or HTTP call succeeded. |
+| `InputInContext(key, turn_id)` | ACK 2: the model can see it, attributed to a turn. |
+| `InputRejected(key, reason)` | The harness refused it (Codex `no active turn to steer`); it can go back to the queue. |
+| `InputLost(key)` | The turn ended with no completion event for it (Codex). Safe to hand over again. |
+| `TurnStarted(turn_id, origin, keys, cause, detail)` | A turn began. `origin=INPUT` names the keys that caused it. `origin=HARNESS` is a turn the CLI began on its own; `cause` is `QUEUED_INPUT_REVIVED`, `BACKGROUND_TASK`, `SCHEDULED_WAKE` or `UNKNOWN`. |
+| `TurnCompleted(turn_id, ..., generation)` | The turn ended; exactly one per turn. |
+| `InterruptConfirmed(turn_id)` | The harness reported the turn interrupted. |
+
+A turn ending does not settle an input: only `InputInContext`, `InputRejected` or `InputLost` does.
+A harness-started turn is a first-class turn: its text, tools and end are attributed to it, never to
+a neighbouring turn, and the next turn the graph submits waits until it ends.
+
+## Shared pieces
+
+- `delivery/ledger.py` — `DeliveryLedger`, a pure value: key phases (they only move forward, and a
+  repeated fact is silent), the provider-turn-name to local-turn-id table, exactly-once turn end,
+  and the generation. Each transition returns the next ledger and the events it announces.
+- `base_session.py` — owns the ledger, applies steps, resolves the `steer()` waiters, and gates
+  turn starts on `_idle()` (no ticket, no harness-started turn, no hold).
+- Adapters only translate protocol frames to ledger calls.
+
+## Reconciliation
+
+After a crash the live acknowledgements are gone. Each adapter can answer, from the harness's own
+durable record, `Reconciliation.IN_CONTEXT`, `PERSISTED_UNDELIVERED` or `NOT_FOUND` for a key. No
+harness de-duplicates, so only `NOT_FOUND` allows a re-delivery. Reading (effect) and judging (pure)
+are separate modules per adapter; the home directory is injected.

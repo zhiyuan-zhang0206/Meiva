@@ -1,0 +1,15 @@
+{
+  "source": "codex app-server 0.166: a turn the server began on its own (queued message / background work); ids replaced by placeholders",
+  "frames": {
+    "start": [
+      {"method": "turn/started", "params": {"threadId": "$thread", "turn": {"id": "$turn", "status": "inProgress", "items": []}}}
+    ],
+    "activity": [
+      {"method": "item/started", "params": {"threadId": "$thread", "turnId": "$turn", "item": {"type": "commandExecution", "id": "exec-7", "command": "echo hi", "cwd": "workspace", "status": "inProgress"}}},
+      {"method": "item/completed", "params": {"threadId": "$thread", "turnId": "$turn", "item": {"type": "agentMessage", "id": "msg-7", "text": "background finished", "phase": "final_answer"}}}
+    ],
+    "end": [
+      {"method": "turn/completed", "params": {"threadId": "$thread", "turn": {"id": "$turn", "status": "completed", "durationMs": 5, "items": []}}}
+    ]
+  }
+}

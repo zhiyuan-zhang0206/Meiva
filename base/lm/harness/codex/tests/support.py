@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -26,6 +27,19 @@ def turn_text(params: object) -> str:
     if not is_object_list(inputs):
         return ""
     return as_text(as_object(inputs[0]).get("text")) or "" if inputs else ""
+
+
+# meiva:note
+# Replay recorded protocol frames into a fake server. A fixture is a JSON file of named frame groups;
+# `$thread` and `$turn` stand for the ids this test's fake server hands out, so one recording works
+# against any turn name.
+def replay(server: FakeAppServer, fixture: str, group: str, *, turn: str | None = None) -> None:
+    path = Path(__file__).parent / "fixtures" / f"{fixture}.json"
+    frames = json.loads(path.read_text())["frames"][group]
+    text = json.dumps(frames)
+    text = text.replace("$thread", server.thread_id).replace("$turn", turn or server.current_turn)
+    for frame in json.loads(text):
+        server.emit(frame["method"], frame["params"])
 
 
 class ScriptedProbe:

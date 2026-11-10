@@ -10,8 +10,10 @@ from base.lm.harness.codex.requests import (
     initialize_request,
     interrupt_request,
     open_thread_request,
+    steer_request,
     turn_start_request,
 )
+from base.lm.harness.delivery import HarnessInput, ImageBlock
 
 
 def test_the_handshake_names_this_client() -> None:
@@ -71,10 +73,30 @@ def test_an_unset_model_is_left_to_the_accounts_own_default() -> None:
     assert "model" not in params
 
 
-def test_a_turn_text_is_sent_as_one_text_input() -> None:
-    assert turn_start_request("thread-1", "do the thing") == (
+def test_a_turn_text_is_sent_as_one_text_input_with_the_input_key() -> None:
+    assert turn_start_request("thread-1", HarnessInput("k-1", "do the thing")) == (
         "turn/start",
-        {"threadId": "thread-1", "input": [{"type": "text", "text": "do the thing"}]},
+        {
+            "threadId": "thread-1",
+            "clientUserMessageId": "k-1",
+            "input": [{"type": "text", "text": "do the thing"}],
+        },
+    )
+
+
+def test_an_image_is_sent_as_a_data_url_after_the_text() -> None:
+    image = ImageBlock("image/png", "aGk=")
+    assert steer_request("thread-1", "turn-9", HarnessInput("k-2", "look", (image,))) == (
+        "turn/steer",
+        {
+            "threadId": "thread-1",
+            "expectedTurnId": "turn-9",
+            "clientUserMessageId": "k-2",
+            "input": [
+                {"type": "text", "text": "look"},
+                {"type": "image", "url": "data:image/png;base64,aGk="},
+            ],
+        },
     )
 
 

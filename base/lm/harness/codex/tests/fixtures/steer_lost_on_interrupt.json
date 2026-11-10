@@ -1,0 +1,11 @@
+{
+  "source": "codex app-server 0.166, round 3 scenario a/c: turn/steer returned its receipt, turn/interrupt followed before the userMessage item appeared; the turn ended interrupted and the rollout never held the input; ids replaced by placeholders",
+  "frames": {
+    "late_command": [
+      {"method": "item/completed", "params": {"threadId": "$thread", "turnId": "$turn", "item": {"type": "commandExecution", "id": "exec-9", "command": "sleep 12", "cwd": "workspace", "status": "failed", "exitCode": 130, "aggregatedOutput": ""}}}
+    ],
+    "end": [
+      {"method": "turn/completed", "params": {"threadId": "$thread", "turn": {"id": "$turn", "status": "interrupted", "durationMs": 9, "items": []}}}
+    ]
+  }
+}

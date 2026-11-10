@@ -4,6 +4,7 @@ from dataclasses import dataclass
 
 from base.lm.harness.codex.frames import JsonObject, RequestParams, as_object, as_text
 from base.lm.harness.codex.mapping import approval_denial
+from base.lm.harness.delivery import HarnessInput
 
 # meiva:note
 # What this bridge tells the app-server about itself. The version is the protocol handshake's, not a
@@ -66,14 +67,35 @@ def open_thread_request(
     return ("thread/start", params)
 
 
+# meiva:note
+# The `input` array of one delivered input: its text, then each image as a data URL. The text block
+# is omitted when the input is images only. `image` with a `url` is the app-server schema's own
+# shape for an inline image; the app-server experiments only exercised `localImage`, so inline data
+# URLs are schema-supported but not yet observed against a real server.
+# meiva:link base/lm/harness/codex/docs/codex.md
+def _input_blocks(item: HarnessInput) -> list[JsonObject]:
+    blocks: list[JsonObject] = []
+    if item.text.strip():
+        blocks.append({"type": "text", "text": item.text})
+    blocks.extend(
+        {"type": "image", "url": f"data:{image.mime_type};base64,{image.data_base64}"}
+        for image in item.images
+    )
+    return blocks
+
+
 def turn_start_request(
     thread_id: str | None,
-    text: str,
+    item: HarnessInput,
     *,
     model: str | None = None,
     reasoning_effort: str | None = None,
 ) -> tuple[str, JsonObject]:
-    params: JsonObject = {"threadId": thread_id, "input": [{"type": "text", "text": text}]}
+    params: JsonObject = {
+        "threadId": thread_id,
+        "clientUserMessageId": item.key,
+        "input": _input_blocks(item),
+    }
     if model is not None:
         params["model"] = model
     if reasoning_effort is not None:
@@ -85,14 +107,14 @@ def interrupt_request(thread_id: str, turn_id: str) -> tuple[str, JsonObject]:
     return ("turn/interrupt", {"threadId": thread_id, "turnId": turn_id})
 
 
-def steer_request(thread_id: str, turn_id: str, text: str, *, key: str) -> tuple[str, JsonObject]:
+def steer_request(thread_id: str, turn_id: str, item: HarnessInput) -> tuple[str, JsonObject]:
     return (
         "turn/steer",
         {
             "threadId": thread_id,
             "expectedTurnId": turn_id,
-            "clientUserMessageId": key,
-            "input": [{"type": "text", "text": text}],
+            "clientUserMessageId": item.key,
+            "input": _input_blocks(item),
         },
     )
 
