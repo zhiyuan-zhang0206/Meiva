@@ -1,10 +1,8 @@
 # meiva:note
-# Legacy notice compatibility functions exercise real gateway routes and stored question history.
-# The agent-facing SDK exposes Ask; these functions remain internal for older callers.
+# A question asked through the core `meiva.ui.ask` SDK lands in the gateway's stored question
+# history and reaches the agent snapshot with its option order intact.
 
 from collections.abc import Iterator
-from datetime import datetime
-from typing import cast
 
 import psycopg
 import pytest
@@ -12,20 +10,18 @@ import pytest
 from base.agents.observation.snapshot import select_one
 from base.cluster.machine import MachineIdentityReader
 from base.config import settings
-from base.events.live.bus import EventBus
 from base.packages.plugin_providers import build_model_catalog
 from base.paths import meiva_home
-from gateway.tests.support.live_events.recorder import recording_live_events
+from meiva import ui
 from meiva.tests.fixtures.pin_agent import pin_agent
-from meiva_builtins.plugins.meiva_fleet import plugin as notice_compat
 from meiva_builtins.plugins.meiva_fleet.tests.registry_support import (
     installed_fleet_surface,
 )
 
 
 def seed_agent(db: psycopg.Connection) -> int:
-    """Insert an agents + agents_meta row (log() / set_label() write against an
-    existing meta row; the real spawn path always creates it first)."""
+    # meiva:note
+    # Insert an agents + agents_meta row (the real spawn path always creates it first).
     with db.cursor() as cur:
         cur.execute("INSERT INTO agents DEFAULT VALUES RETURNING id")
         row = cur.fetchone()
@@ -45,9 +41,8 @@ def sdk_via_inprocess_gateway(
     monkeypatch: pytest.MonkeyPatch,
     machine_identity: MachineIdentityReader,
 ):
-    """The notice SDK now goes through the unified gateway write API (R3 door
-    ④): route the SDK's gateway client at the in-process app so notify /
-    edit_notice / dismiss_notice hit the real endpoints against the test DB.
+    """Route the SDK's gateway client at the in-process app so ask hits the real endpoint
+    against the test DB.
 
     The assembled Gateway reads both data stores, so the fixture declares
     `gateway_data_plane`."""
@@ -74,143 +69,16 @@ def load_activity_plugin(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
         yield
 
 
-def _notices(
-    db_conn: psycopg.Connection, agent_id: int
-) -> list[tuple[str, str, str, bool, bool, datetime | None, str | None, str | None]]:
-    with db_conn.cursor() as cur:
-        cur.execute(
-            "SELECT title, content, priority, require_response, blocking, "
-            "resolved_at, resolution, reply FROM agent_notices "
-            "WHERE agent_id = %s ORDER BY local_id",
-            (agent_id,),
-        )
-        return cur.fetchall()
-
-
-# meiva:note
-# What these tests read of the fleet plugin's `Notice`: an int carrying the still-open notices.
-class NoticeView(int):
-    pending_count: int
-    pending_notices: list[dict[str, object]]
-
-
-def _assert_first_notice_is_sole_pending_fyi(nid: NoticeView) -> None:
-    assert nid.pending_count == 1
-    assert len(nid.pending_notices) == 1
-    assert nid.pending_notices[0]["id"] == nid
-    assert nid.pending_notices[0]["title"] == "migration done"
-    assert nid.pending_notices[0]["priority"] == "P1"
-    assert "created_at" in nid.pending_notices[0]
-
-
-def _assert_second_notice_is_refused(nid: NoticeView) -> None:
-    assert nid.pending_count == 1
-    assert [n["title"] for n in nid.pending_notices] == ["migration done"]
-
-
-def test_notify_defaults_to_response_and_snapshot_lists_question(
-    sdk_via_inprocess_gateway: None, load_activity_plugin: None, db_conn: psycopg.Connection
-):
-    # meiva:link meiva/docs/ui.md
-    agent_id = seed_agent(db_conn)
-    pin_agent(agent_id)
-    nid = cast(
-        "NoticeView",
-        notice_compat.notify(
-            "migration done",
-            content="14k rows",
-            priority="P1",
-        ),
-    )
-    assert isinstance(nid, int)
-    _assert_first_notice_is_sole_pending_fyi(nid)
-
-    with pytest.raises(ValueError, match="already holds an open notice"):
-        notice_compat.notify(
-            "hit a rate limit",
-        )
-    _assert_second_notice_is_refused(nid)
-
-    notice_compat.dismiss_notice()
-    notice_compat.notify(
-        "hit a rate limit",
-    )
-
-    db_conn.rollback()
-    rows = _notices(db_conn, agent_id)
-    assert rows[0][0] == "migration done"
-    assert rows[0][5] is not None
-    assert rows[0][6] == "withdrawn"
-    assert rows[1][0] == "hit a rate limit"
-    assert rows[1][5] is None
-
-    snap = select_one(
-        db_conn,
-        agent_id,
-        catalog=build_model_catalog(home=meiva_home()),
-        default_model=settings.lm.llm_model,
-    )
-    assert snap is not None
-    assert snap.unread_notice_count == 0
-    assert len(snap.notices_awaiting_response) == 1
-
-
-def test_notify_require_response_rides_awaiting_worklist(
-    sdk_via_inprocess_gateway: None, load_activity_plugin: None, db_conn: psycopg.Connection
-):
-    agent_id = seed_agent(db_conn)
-    pin_agent(agent_id)
-    notice_compat.notify(
-        "Send the release email?",
-        content="A) yes\nB) no",
-        priority="P0",
-        require_response=True,
-        blocking=True,
-    )
-    # meiva:note
-    # A second notice is refused while the first is open; close it, then post.
-    # meiva:link meiva_builtins/plugins/meiva_fleet/docs/notify.md
-    with pytest.raises(ValueError, match="already holds an open notice"):
-        notice_compat.notify(
-            "Name the branch?",
-            require_response=True,
-        )
-    notice_compat.dismiss_notice()
-    notice_compat.notify(
-        "Name the branch?",
-        require_response=True,
-    )
-
-    db_conn.rollback()
-    # meiva:note
-    # Only the open require_response notice rides the snapshot worklist.
-    # meiva:link meiva_builtins/plugins/meiva_fleet/docs/notify.md
-    snap = select_one(
-        db_conn,
-        agent_id,
-        catalog=build_model_catalog(home=meiva_home()),
-        default_model=settings.lm.llm_model,
-    )
-    assert snap is not None
-    assert snap.unread_notice_count == 0
-    awaiting = snap.notices_awaiting_response
-    assert [n.title for n in awaiting] == ["Name the branch?"]
-    assert awaiting[0].content is None
-    assert awaiting[0].blocking is False  # blocking defaults False
-
-
 def test_sdk_question_keeps_number_order_in_snapshot(
     sdk_via_inprocess_gateway: None, load_activity_plugin: None, db_conn: psycopg.Connection
 ) -> None:
     agent_id = seed_agent(db_conn)
     pin_agent(agent_id)
-    notice_compat.notify(
+    ui.ask(
         "Choose the scope?",
-        require_response=True,
         question={
             "type": "single_select",
             "options": [{"id": "z", "label": "First"}, {"id": "a", "label": "Second"}],
-            "allow_other": False,
         },
     )
     db_conn.rollback()
@@ -227,266 +95,3 @@ def test_sdk_question_keeps_number_order_in_snapshot(
         {"id": "z", "label": "First", "description": None},
         {"id": "a", "label": "Second", "description": None},
     ]
-
-
-def _seed_task(db: psycopg.Connection, owner: int) -> int:
-    with db.cursor() as cur:
-        cur.execute(
-            "INSERT INTO agent_tasks (title, description, created_by, owner) "
-            "VALUES ('t', 'd', 'user', %s) RETURNING id",
-            (owner,),
-        )
-        row = cur.fetchone()
-    assert row is not None
-    db.commit()
-    return row[0]
-
-
-def _notice_task_id(db: psycopg.Connection, agent_id: int) -> int | None:
-    with db.cursor() as cur:
-        cur.execute(
-            "SELECT task_id FROM agent_notices WHERE agent_id = %s AND resolved_at IS NULL",
-            (agent_id,),
-        )
-        row = cur.fetchone()
-    assert row is not None
-    return row[0]
-
-
-def test_notify_records_task_id_and_rides_snapshot(
-    sdk_via_inprocess_gateway: None, load_activity_plugin: None, db_conn: psycopg.Connection
-):
-    """notify(task=...) writes the task link, and a require_response notice carries
-    it out on the snapshot's notices_awaiting_response."""
-    agent_id = seed_agent(db_conn)
-    tid = _seed_task(db_conn, agent_id)
-    pin_agent(agent_id)
-    notice_compat.notify(
-        "stalled on a decision",
-        require_response=True,
-        task=tid,
-    )
-    db_conn.rollback()  # notify committed via its own cursor; refresh our view
-    assert _notice_task_id(db_conn, agent_id) == tid
-    snap = select_one(
-        db_conn,
-        agent_id,
-        catalog=build_model_catalog(home=meiva_home()),
-        default_model=settings.lm.llm_model,
-    )
-    assert snap is not None
-    assert [n.task_id for n in snap.notices_awaiting_response] == [tid]
-
-
-def test_notify_without_task_leaves_task_id_null(
-    sdk_via_inprocess_gateway: None, load_activity_plugin: None, db_conn: psycopg.Connection
-):
-    agent_id = seed_agent(db_conn)
-    pin_agent(agent_id)
-    notice_compat.notify(
-        "fyi, no task",
-    )
-    db_conn.rollback()
-    assert _notice_task_id(db_conn, agent_id) is None
-
-
-def test_notify_nonexistent_task_raises(
-    sdk_via_inprocess_gateway: None, load_activity_plugin: None, db_conn: psycopg.Connection
-):
-    agent_id = seed_agent(db_conn)
-    pin_agent(agent_id)
-    with pytest.raises(ValueError, match="task 999999 does not exist"):
-        notice_compat.notify(
-            "names a ghost task",
-            task=999999,
-        )
-
-
-def test_edit_notice_partial_update(
-    sdk_via_inprocess_gateway: None, load_activity_plugin: None, db_conn: psycopg.Connection
-):
-    agent_id = seed_agent(db_conn)
-    pin_agent(agent_id)
-    nid = cast(
-        "NoticeView",
-        notice_compat.notify(
-            "draft title",
-            content="old body",
-            priority="P2",
-        ),
-    )
-    # change only title + priority; content is left as-is (omitted != cleared).
-    notice_compat.edit_notice(title="new title", priority="P0")
-
-    db_conn.rollback()
-    with db_conn.cursor() as cur:
-        cur.execute(
-            "SELECT title, content, priority, updated_at FROM agent_notices WHERE agent_id = %s AND local_id = %s",
-            (agent_id, nid),
-        )
-        row = cur.fetchone()
-    assert row is not None
-    assert row[0] == "new title"
-    assert row[1] == "old body"  # untouched
-    assert row[2] == "P0"
-    assert row[3] is not None  # updated_at stamped
-
-    # passing content=None explicitly clears it (the _UNSET sentinel
-    # distinguishes "leave alone" from "erase").
-    notice_compat.edit_notice(content=None)
-    db_conn.rollback()
-    with db_conn.cursor() as cur:
-        cur.execute(
-            "SELECT content FROM agent_notices WHERE agent_id = %s AND local_id = %s",
-            (agent_id, nid),
-        )
-        row = cur.fetchone()
-    assert row is not None and row[0] is None
-
-
-def test_response_notice_content_edits_publish_refreshed_snapshot(
-    sdk_via_inprocess_gateway: None,
-    load_activity_plugin: None,
-    db_conn: psycopg.Connection,
-    event_bus: EventBus,
-):
-    """Content-only edits invalidate the selected agent's authoritative read.
-
-    NoticePosted refreshes the Inbox queue; AgentUpdated requests current
-    detail so the inspector can read the edited response-required notice.
-    """
-    agent_id = seed_agent(db_conn)
-    pin_agent(agent_id)
-    # meiva:note
-    # The route must announce AgentUpdated after every durable create/edit; the recorder reads
-    # the hints back from the channel, so the assertion proves the inspector projection rather
-    # than merely the row's database state.
-    with recording_live_events(event_bus) as live:
-        notice_compat.notify(
-            "decision needed",
-            content="revision 0",
-            priority="P1",
-            require_response=True,
-            blocking=True,
-        )
-        for revision in range(1, 11):
-            content = f"revision {revision}"
-            notice_compat.edit_notice(content=content)
-        live.settle("agent_updated", 11)
-        live.quiet()
-        published_agent_ids = [event.payload["agent_id"] for event in live.events("agent_updated")]
-
-    # One AgentUpdated for creation plus one per content-only edit keeps the
-    # inspector's cached snapshot authoritative through the whole chain.
-    assert published_agent_ids == [agent_id] * 11
-    db_conn.rollback()
-    snapshot = select_one(
-        db_conn,
-        agent_id,
-        catalog=build_model_catalog(home=meiva_home()),
-        default_model=settings.lm.llm_model,
-    )
-    assert snapshot is not None
-    awaiting = snapshot.notices_awaiting_response
-    assert len(awaiting) == 1
-    notice = awaiting[0]
-    assert notice.title == "decision needed"
-    assert notice.content == "revision 10"
-    assert notice.priority == "P1"
-    assert notice.blocking is True
-
-
-def test_edit_notice_validation_and_guards(
-    sdk_via_inprocess_gateway: None, load_activity_plugin: None, db_conn: psycopg.Connection
-):
-    agent_id = seed_agent(db_conn)
-    pin_agent(agent_id)
-    notice_compat.notify(
-        "fyi notice",
-    )
-
-    # nothing passed -> nothing to change.
-    with pytest.raises(ValueError, match="at least one field"):
-        notice_compat.edit_notice()
-    # bad priority.
-    with pytest.raises(ValueError, match="priority"):
-        notice_compat.edit_notice(priority="P9")
-    notice_compat.edit_notice(blocking=True)
-    with pytest.raises(ValueError, match="require a user response"):
-        notice_compat.notify(
-            "Information",
-            require_response=False,
-        )
-    # no open notice is idempotent (no-op).
-    notice_compat.dismiss_notice()
-    # meiva:link meiva/docs/ui.md
-    notice_compat.edit_notice(title="too late")
-
-
-def test_dismiss_notice_withdraws(
-    sdk_via_inprocess_gateway: None, load_activity_plugin: None, db_conn: psycopg.Connection
-):
-    agent_id = seed_agent(db_conn)
-    pin_agent(agent_id)
-    notify = notice_compat.notify
-    assert callable(notify)
-    nid = cast("NoticeView", notify("stale fyi"))
-    notice_compat.dismiss_notice()
-
-    db_conn.rollback()
-    with db_conn.cursor() as cur:
-        cur.execute(
-            "SELECT resolved_at, resolution FROM agent_notices WHERE agent_id = %s AND local_id = %s",
-            (agent_id, nid),
-        )
-        row = cur.fetchone()
-    assert row is not None
-    assert row[0] is not None  # resolved_at set
-    assert row[1] == "withdrawn"
-
-    # the dismissed notice drops off the unread badge.
-    snap = select_one(
-        db_conn,
-        agent_id,
-        catalog=build_model_catalog(home=meiva_home()),
-        default_model=settings.lm.llm_model,
-    )
-    assert snap is not None
-    assert snap.unread_notice_count == 0
-
-    # dismissing again is idempotent (no-op).
-    notice_compat.dismiss_notice()
-
-
-def test_each_agent_side_resolution_publishes_notice_resolved(
-    sdk_via_inprocess_gateway: None,
-    load_activity_plugin: None,
-    db_conn: psycopg.Connection,
-    event_bus: EventBus,
-):
-    # meiva:note
-    # Every agent-side resolution — a dismissal through dismiss_notice — publishes
-    # notice_resolved regardless of require_response. The unified inbox refreshes its
-    # resolved history off this event alone, so a notice resolved without one would
-    # leave the open list yet never surface in the resolved history. Posting resolves
-    # nothing. Events publish from the gateway (R3 door ④ unified write API), not the
-    # SDK, so the recorder subscribes to the gateway's channel.
-    # meiva:link gateway/agents/docs/notice-receipts.md
-    agent_id = seed_agent(db_conn)
-    pin_agent(agent_id)
-    with recording_live_events(event_bus) as live:
-        notice_compat.notify(
-            "Q1?",
-            require_response=True,
-        )
-        live.settle("notice_posted", 1)
-        live.quiet()
-        assert live.events("notice_resolved") == []
-        notice_compat.dismiss_notice()
-        live.settle("notice_resolved", 1)
-        notice_compat.notify(
-            "Q2?",
-            require_response=True,
-        )
-        notice_compat.dismiss_notice()
-        assert len(live.settle("notice_resolved", 2)) == 2

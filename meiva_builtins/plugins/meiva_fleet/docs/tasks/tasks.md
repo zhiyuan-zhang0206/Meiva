@@ -44,7 +44,7 @@ The write paths of `create`/`update` publish `task_created`/`task_updated` (Redi
 ## Relationship with Other Subsystems
 
 - [Neighbors](../neighbors/neighbors.md) — notifies old and new owners through task-tagged system notes on owner change
-- [Notify](../notify.md) — can notify user when a task completes
+- [Ask](../notify.md) — durable questions for the user
 - [meiva_fleet Overview](../meiva_fleet.md) — parent fleet plugin index
 
 ## Costs are independent of task records

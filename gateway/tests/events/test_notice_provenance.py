@@ -24,14 +24,14 @@ def seed_agent(db_conn: psycopg.Connection) -> int:
 
 
 # meiva:note
-# The create path stores the fact the auth middleware verified; the test client
+# The ask path stores the fact the auth middleware verified; the test client
 # presents the human cluster secret, which the middleware records as cluster_bearer.
-def test_notice_create_records_the_verified_credential(db_conn: psycopg.Connection) -> None:
+def test_ask_records_the_verified_credential(db_conn: psycopg.Connection) -> None:
     agent = seed_agent(db_conn)
     with gateway_test_client() as client:
         created = client.post(
-            f"/api/agents/{agent}/notices",
-            json={"title": "which credential posted this", "require_response": True},
+            f"/api/agents/{agent}/asks",
+            json={"title": "which credential posted this", "question": {"type": "text"}},
             headers=keyed_headers("provenance-create"),
         )
         feed = client.get("/api/notices/open", params={"agent_id": agent}).json()

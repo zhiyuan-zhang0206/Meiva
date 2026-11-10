@@ -228,26 +228,25 @@ BEGIN
 END $$;
 
 -- ─────────────── agent_notices ───────────────
--- The agent->user queue: every notice asks for an answer (require_response is
--- always TRUE; the SDK rejects a false one), and `blocking` separates the two
+-- The agent->user question queue: every row asks for an answer (require_response
+-- is always TRUE for rows written today), and `blocking` separates the two
 -- rungs that remain: blocking=FALSE keeps the agent working while it waits,
 -- blocking=TRUE means it is stalled on the reply. The stakes axis priority
 -- P0..P3 is orthogonal. blocking is meaningful only when require_response is
--- TRUE, enforced by a CHECK and rejected at the SDK. meiva.ui.notify() INSERTs
--- one row per call, and refuses while the agent still has an open notice (one
--- open notice per agent, user ruling 2026-10-21): close or edit it first.
+-- TRUE, enforced by a CHECK. meiva.ui.ask() INSERTs one row per call; an agent
+-- may hold several open questions at once.
 --
 -- title = one-line headline (queue list); content = optional detail body shown
 -- on click. resolved_at + resolution + reply is the single close triple:
 --   answered  -- user answered a require_response notice (reply = the answer)
 --   dismissed -- user waved away a require_response notice without answering
 --   read      -- user reviewed an FYI notice (reply optional)
---   withdrawn  -- the agent dismissed its own notice (meiva.ui.dismiss_notice)
+--   withdrawn  -- historical only: the agent withdrew its own notice; no writer produces it now
 --   superseded -- historical only: a newer notice replaced this one before the
 --               one-open-notice rule (2026-10-21); no writer produces it now
 -- reply caches the user's free-text reply for history/display; the live delivery
 -- to the agent rides the chat-inbound path, not this column. updated_at tracks
--- the agent editing its own still-open notice (meiva.ui.edit_notice).
+-- the former in-place edit of a still-open notice; no writer produces it now.
 --
 -- The snapshot inlines the still-open notices (notices_awaiting_response, the
 -- bounded worklist). unread_notice_count and the FYI feed remain for the rows

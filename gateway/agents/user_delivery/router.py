@@ -22,7 +22,7 @@ from base.api_contracts.user_delivery import (
 from base.db.transaction import write_transaction
 from base.events.live.announce import publish_agent_updated
 from gateway.agents.eval_guard import deny_isolated_result_read
-from gateway.agents.notice_operations.current import operation_key
+from gateway.agents.notice_operations.keyed_operation import operation_key
 from gateway.agents.notice_operations.notices import existing_receipt, save_receipt
 from gateway.http.config import gateway_clock, gateway_config, gateway_state
 

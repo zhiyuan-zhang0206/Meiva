@@ -109,15 +109,15 @@ def test_a_broken_face_is_left_out_not_raised() -> None:
 
 def test_a_pure_face_admits_config_and_core_dependencies() -> None:
     body = _FACE.replace(
-        "config=Config)", "config=Config, flags=('daemon.notice_ttl_limit_seconds',))"
+        "config=Config)", "config=Config, flags=('daemon.ttl_reaper_poll_interval_seconds',))"
     )
     declaration = config_face.configuration_declaration("probe", _plugin("probe", body))
     assert declaration.config is not None
-    assert declaration.flags == ("daemon.notice_ttl_limit_seconds",)
+    assert declaration.flags == ("daemon.ttl_reaper_poll_interval_seconds",)
 
 
 def test_a_dependency_only_face_needs_no_config_class() -> None:
-    body = _FACE.replace("config=Config", "flags=('daemon.notice_ttl_limit_seconds',)")
+    body = _FACE.replace("config=Config", "flags=('daemon.ttl_reaper_poll_interval_seconds',)")
     plugin_dir = _plugin("probe", body)
     assert config_face.declared_config_class("probe", plugin_dir) is None
     assert config_face.configuration_declaration("probe", plugin_dir).flags

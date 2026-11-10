@@ -29,7 +29,7 @@ control plane for sessions, tools, events and channel connections.
 ## Migration steps
 
 1. **Resize the surface expectation.** Meiva reaches you in the platform dialog
-   and the notice queue (through any connected IM adapter).
+   and the question queue (through any connected IM adapter).
    WhatsApp/Slack/Discord channels do not port — say so before the user goes
    looking for the bot.
 2. **Recreate the automations.** Cron entries → `meiva schedules`; webhook
@@ -46,7 +46,7 @@ control plane for sessions, tools, events and channel connections.
 
 - **Chat-channel-first vs platform-first.** The biggest shift. There is no
   pairing, no `allowFrom` allowlists, no group-mention routing — the platform
-  handles identity, the dialog is where live work happens, and notices are
+  handles identity, the dialog is where live work happens, and questions are
   the async channel.
 - **No companion apps.** Voice, canvas, camera, and screen-sharing surfaces
   do not exist in Meiva. Published reports (`meiva.ui.publish`) are the replacement.

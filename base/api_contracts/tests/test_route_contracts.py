@@ -52,15 +52,7 @@ def test_contracts_have_no_unknown_semantics() -> None:
         assert c.idempotency in Idempotency, f"bad idempotency on {method} {_path}"
 
 
-@pytest.mark.parametrize(
-    "method,path",
-    [
-        ("PATCH", "/api/agents/7/notices/current/guarded-v1"),
-        ("POST", "/api/agents/7/notices/current/dismiss/guarded-v1"),
-        ("POST", "/api/keyed/v1/agents/7/notices/11/resolve"),
-    ],
-)
-def test_guarded_notice_routes_are_keyed(method: str, path: str) -> None:
-    contract = contracts.contract_for(method, path)
+def test_notice_resolution_route_is_keyed() -> None:
+    contract = contracts.contract_for("POST", "/api/keyed/v1/agents/7/notices/11/resolve")
     assert contract is not None
     assert contract.idempotency is Idempotency.AT_LEAST_ONCE_WITH_KEY

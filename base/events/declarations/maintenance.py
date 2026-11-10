@@ -109,7 +109,7 @@ class TaskEscalation(TypedDict):
     owner_id: int
     task_count: int
     task_ids: list[int]
-    leg: Literal["delegator", "user"]
+    leg: Literal["delegator"]
 
 
 class TaskReminderUndelivered(TypedDict):
@@ -119,8 +119,8 @@ class TaskReminderUndelivered(TypedDict):
 
 class TaskReminderRerouted(TypedDict):
     owner_id: int
-    leg: Literal["manager", "user"]
-    recipient: int | None
+    leg: Literal["manager"]
+    recipient: int
     task_count: int
     task_ids: list[int]
 
@@ -374,8 +374,7 @@ EVENTS: dict[str, EventSpec] = {
     ),
     "task_reminder_rerouted": telemetry_event(
         "task_reminder_rerouted",
-        "overdue-task reminder delivered to a terminated owner's manager, or to the "
-        "human queue when no live agent owns an ancestor task",
+        "overdue-task reminder delivered to a terminated owner's manager",
         payload=TaskReminderRerouted,
         tier="noise",
         site="task_maintenance/daemon.py:run_reminders",

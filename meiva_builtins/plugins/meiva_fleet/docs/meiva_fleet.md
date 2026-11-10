@@ -73,7 +73,7 @@ monitoring, recovery, and persistence procedures.
 
 `default_config.py` is the sole schema for the five Fleet policy fields: the host gate `task_maintenance_enabled`, cluster-pinned maintenance interval/backoff/escalation count, and cluster-pinned `reduce_context_switch`. Defaults and restart metadata remain unchanged; none accepts per-agent pins. The agent face reads its bound typed Fleet config; runners receive cluster policy via the bootstrap snapshot while host fields stay local. Gateway config images are cluster authority.
 
-The pure config face declares the non-secret Core dependency `daemon.notice_ttl_limit_seconds`; escalation validates that declaration at its read boundary. DB/Redis are existing explicit resources, not flags. This migration does not retire other plugins' global binding or guarantee that every existing Core read has been converted.
+The pure config face declares no Core flag dependency. DB/Redis are existing explicit resources, not flags. This migration does not retire other plugins' global binding or guarantee that every existing Core read has been converted.
 
 Plugin writes reject invalid candidates and mixed-owner requests with `InvalidConfigOverlay` (panel 400). Only image CAS mismatches raise `PluginConfigChangedError` (panel 409). Both reject host RPC writes. Declaration, persisted-image, default and IO failures propagate unchanged.
 

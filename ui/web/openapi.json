@@ -3284,68 +3284,6 @@
         }
       }
     },
-    "/api/agents/{agent_id}/notices": {
-      "post": {
-        "summary": "Post Notice Create",
-        "operationId": "post_notice_create_api_agents__agent_id__notices_post",
-        "parameters": [
-          {
-            "name": "agent_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "integer",
-              "title": "Agent Id"
-            }
-          },
-          {
-            "name": "Idempotency-Key",
-            "in": "header",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 128,
-              "title": "Idempotency-Key"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/NoticeCreateIn"
-              }
-            }
-          }
-        },
-        "responses": {
-          "201": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "additionalProperties": true,
-                  "title": "Response Post Notice Create Api Agents  Agent Id  Notices Post"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/api/keyed/v1/agents/{agent_id}/notices/{notice_id}/resolve": {
       "post": {
         "summary": "Resolve Observed",
@@ -3408,146 +3346,6 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/AgentMessageEnqueued"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/agents/{agent_id}/notices/current/guarded-v1": {
-      "patch": {
-        "summary": "Edit Current",
-        "description": "Return the immutable acceptance of an observed global notice edit.",
-        "operationId": "edit_current_api_agents__agent_id__notices_current_guarded_v1_patch",
-        "parameters": [
-          {
-            "name": "agent_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "integer",
-              "title": "Agent Id"
-            }
-          },
-          {
-            "name": "Idempotency-Key",
-            "in": "header",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 128,
-              "title": "Idempotency-Key"
-            }
-          },
-          {
-            "name": "Idempotency-Scope",
-            "in": "header",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Idempotency-Scope"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/GuardedNoticeEdit"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/NoticeItem"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/agents/{agent_id}/notices/current/dismiss/guarded-v1": {
-      "post": {
-        "summary": "Dismiss Current",
-        "description": "Withdraw only the observed global row and replay its original acceptance.",
-        "operationId": "dismiss_current_api_agents__agent_id__notices_current_dismiss_guarded_v1_post",
-        "parameters": [
-          {
-            "name": "agent_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "integer",
-              "title": "Agent Id"
-            }
-          },
-          {
-            "name": "Idempotency-Key",
-            "in": "header",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 128,
-              "title": "Idempotency-Key"
-            }
-          },
-          {
-            "name": "Idempotency-Scope",
-            "in": "header",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Idempotency-Scope"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ObservedNotice"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/NoticeItem"
                 }
               }
             }
@@ -12543,66 +12341,6 @@
         "title": "FleetGraphResponse",
         "description": "GET /api/fleet/graph response.\n\n`telemetry_stale` says the heartbeat guard was old or missing while this\notherwise complete graph was read. `snapshot_at` records when the graph\nsnapshot was produced; a response served from the short poll cache keeps\nthat timestamp so clients can show its age."
       },
-      "GuardedNoticeEdit": {
-        "properties": {
-          "observed_notice_id": {
-            "type": "integer",
-            "exclusiveMinimum": 0.0,
-            "title": "Observed Notice Id",
-            "description": "Global NoticeItem.id from the feed/inspector; not the SDK notify local id."
-          },
-          "title": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Title"
-          },
-          "content": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Content"
-          },
-          "priority": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/Priority"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "blocking": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Blocking"
-          }
-        },
-        "additionalProperties": false,
-        "type": "object",
-        "required": [
-          "observed_notice_id"
-        ],
-        "title": "GuardedNoticeEdit",
-        "description": "Edit explicitly supplied fields on the observed global notice row."
-      },
       "GuideDraftRequest": {
         "properties": {
           "nl": {
@@ -14557,105 +14295,6 @@
         "type": "object",
         "title": "NoticeAnswer"
       },
-      "NoticeCreateIn": {
-        "properties": {
-          "title": {
-            "type": "string",
-            "title": "Title"
-          },
-          "content": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Content"
-          },
-          "priority": {
-            "$ref": "#/components/schemas/Priority",
-            "default": "P2"
-          },
-          "require_response": {
-            "type": "boolean",
-            "title": "Require Response",
-            "default": true
-          },
-          "blocking": {
-            "type": "boolean",
-            "title": "Blocking",
-            "default": false
-          },
-          "task_id": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Task Id"
-          },
-          "schedule_id": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Schedule Id"
-          },
-          "expire_at": {
-            "anyOf": [
-              {
-                "type": "string",
-                "format": "date-time"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Expire At"
-          },
-          "question": {
-            "anyOf": [
-              {
-                "oneOf": [
-                  {
-                    "$ref": "#/components/schemas/ChoiceQuestion"
-                  },
-                  {
-                    "$ref": "#/components/schemas/TextQuestion"
-                  }
-                ],
-                "discriminator": {
-                  "propertyName": "type",
-                  "mapping": {
-                    "multi_select": "#/components/schemas/ChoiceQuestion",
-                    "single_select": "#/components/schemas/ChoiceQuestion",
-                    "text": "#/components/schemas/TextQuestion"
-                  }
-                }
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Question"
-          }
-        },
-        "additionalProperties": false,
-        "type": "object",
-        "required": [
-          "title"
-        ],
-        "title": "NoticeCreateIn"
-      },
       "NoticeItem": {
         "properties": {
           "id": {
@@ -15240,23 +14879,6 @@
         ],
         "title": "Object"
       },
-      "ObservedNotice": {
-        "properties": {
-          "observed_notice_id": {
-            "type": "integer",
-            "exclusiveMinimum": 0.0,
-            "title": "Observed Notice Id",
-            "description": "Global NoticeItem.id from the feed/inspector; not the SDK notify local id."
-          }
-        },
-        "additionalProperties": false,
-        "type": "object",
-        "required": [
-          "observed_notice_id"
-        ],
-        "title": "ObservedNotice",
-        "description": "Target the positive global feed ID, never notify()'s zero-based local ID."
-      },
       "OpenNotice": {
         "properties": {
           "id": {
@@ -15354,8 +14976,7 @@
           "blocking",
           "created_at"
         ],
-        "title": "OpenNotice",
-        "description": "One open notice from meiva.ui.notify() (migration 0053).\n\nThe agent snapshot's `notices_awaiting_response` carries only the require_response\nsubset (the \"needs response\" worklist); this model also serves the per-agent\ninspector panel where the single open notice (since #152) may be either kind.\n\n`title` is the one-line headline; `content` is the optional detail\nbody (possibly long). `priority` is P0..P3 (the stakes axis) and `blocking`\nsays whether the agent is stalled waiting on the answer (the urgency axis) —\nthe two triage axes (color + sort). `require_response` is True when the agent\nneeds a user decision, False for a one-way FYI; defaults to True for backward\ncompat with the snapshot's notices_awaiting_response subquery (which only\nselects require_response rows)."
+        "title": "OpenNotice"
       },
       "OpenTaskRow": {
         "properties": {

@@ -55,10 +55,10 @@ provider, Mixture-of-Agents presets, and fallback chains.
 - **No model mixing.** `hermes moa` (Mixture-of-Agents presets) and `hermes
   fallback` chains do not exist; each agent runs one model, chosen at spawn.
 - **No approval history.** `hermes approvals` lets you mine what was
-  approved; Meiva's gates are memory rules and `require_response` notices, with
+  approved; Meiva's gates are memory rules and `meiva.ui.ask` questions, with
   no such ledger.
 - **Channels shrink to one surface.** 20+ platforms become the platform
-  dialog + notices. Set that expectation early.
+  dialog + questions. Set that expectation early.
 - **Sessions are agent-scoped.** `hermes sessions` browse/export/prune has no
   equivalent UI; conversation state lives with each agent, and handoffs go
   through files and tasks.

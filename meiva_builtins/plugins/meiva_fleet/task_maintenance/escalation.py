@@ -1,5 +1,6 @@
 """Accept task escalation from locked current state, before any live hints."""
 
+import logging
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime
@@ -12,27 +13,18 @@ from base.agents.inbox.insert import insert_inbound_message_in_transaction
 from base.agents.tasks.status import TaskStatus
 from base.db.rows import query_all
 from base.db.transaction import write_transaction
-from meiva_builtins.plugins.meiva_fleet.task_maintenance.routing import (
-    nearest_manager,
-    stage_human_notice,
-)
+from meiva_builtins.plugins.meiva_fleet.task_maintenance.routing import nearest_manager
+
+_log = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
 class EscalationReceipt:
     recipient: int
     task_ids: list[int]
-    leg: Literal["user", "delegator"]
-    inbound_id: int | None
+    leg: Literal["delegator"]
+    inbound_id: int
     content: str
-    # meiva:note
-    # The staged `notification_events` row of the user leg, None when the spine
-    # suppressed it (the category is switched off, or the dedupe window is open)
-    # and for a delegator digest, which is an inbound note rather than an inbox
-    # notice. The daemon announces it after this transaction commits; a lost
-    # announce leaves the row unannounced and the outbox sweep retries it.
-    # meiva:link base/events/notifications/README.md
-    notification_id: int | None = None
 
 
 @dataclass(frozen=True)
@@ -87,8 +79,8 @@ def _lock_candidates(
     # meiva:note
     # Discovery never authorizes an effect. Lock the union in stable id order;
     # SKIP LOCKED avoids reversing a writer's child -> parent lock order.
-    # NO KEY UPDATE still fences mutations while allowing a gateway notice
-    # creator holding the agent identity lock to reference task_id by FK.
+    # NO KEY UPDATE still fences mutations while allowing a writer that
+    # references task_id by FK to proceed.
     # A task is a candidate once it has been silent for `threshold` of its own cadence
     # periods — the same `GREATEST(backoff, remind_interval_seconds)` the reminder pass
     # schedules by — and at least one reminder actually left, so an escalation always
@@ -157,39 +149,6 @@ def _silent_for(task: _Task) -> str:
     return f"{task.elapsed_seconds / 3600:.1f}h"
 
 
-def _user_notice(
-    cur: psycopg.Cursor,
-    conn: psycopg.Connection,
-    task: _Task,
-    *,
-    notice_ttl_limit_seconds: float,
-) -> EscalationReceipt | None:
-    if task.owner is None:
-        raise ValueError("human escalation requires a task owner")
-    title = (
-        f'Task #{task.id} "{task.title}" — no state change for {_silent_for(task)}; '
-        "reassign or cancel"
-    )
-    content = (
-        f"Agent #{task.owner} has not changed this task's state for {_silent_for(task)} "
-        f"({_STATE_CHANGE_BASIS}), and no live agent owns any ancestor task to catch it. "
-        "Reassign it to another agent, cancel it, or reply to remind the owner once more."
-    )
-    staged = stage_human_notice(
-        cur,
-        conn,
-        agent_id=task.owner,
-        task_id=task.id,
-        title=title,
-        content=content,
-        priority=task.priority,
-        notice_ttl_limit_seconds=notice_ttl_limit_seconds,
-    )
-    if staged is None:
-        return None
-    return EscalationReceipt(task.owner, [task.id], "user", None, content, staged[1])
-
-
 def _delegator_note(cur: psycopg.Cursor, owner: int, tasks: list[_Task]) -> EscalationReceipt:
     lines = [f"Subtasks still open with no state change ({_STATE_CHANGE_BASIS}):"]
     lines.extend(
@@ -215,7 +174,7 @@ def _delegator_note(cur: psycopg.Cursor, owner: int, tasks: list[_Task]) -> Esca
 # The delegator leg addresses the task's manager, not its direct parent owner:
 # an agent terminated after delegating cannot catch the stall, so the walk
 # continues to the nearest ancestor owner that is still alive. No such owner
-# leaves the human queue as the only recipient. The parent row still has to be
+# leaves no recipient: the task is skipped and nothing is sent to anyone. The parent row still has to be
 # locked (a concurrent writer's reparent defers this task) — the manager lookup
 # reads the chain behind it.
 def _eligible_groups(
@@ -224,9 +183,9 @@ def _eligible_groups(
     threshold: int,
     backoff_seconds: float,
     managers: dict[int, int | None],
-) -> tuple[dict[int, list[_Task]], list[_Task]]:
+) -> tuple[dict[int, list[_Task]], list[int]]:
     delegated: dict[int, list[_Task]] = defaultdict(list)
-    human: list[_Task] = []
+    unmanaged: list[int] = []
     for task_id in candidates:
         task = locked.get(task_id)
         if (
@@ -243,10 +202,10 @@ def _eligible_groups(
             continue
         manager = managers.get(task_id)
         if manager is None:
-            human.append(task)
+            unmanaged.append(task.id)
         elif task.escalated_at is None:
             delegated[manager].append(task)
-    return delegated, human
+    return delegated, unmanaged
 
 
 # meiva:note
@@ -258,32 +217,25 @@ def accept_escalations(
     pool: ConnectionPool,
     threshold: int,
     backoff_seconds: float,
-    *,
-    notice_ttl_limit_seconds: float,
 ) -> list[EscalationReceipt]:
-    """Commit each eligible digest/notice from current task and parent rows.
-
-    Parent changes discovered after locking are deferred if the actual parent
-    is not locked. Agent identity locks serialize notice creation with gateway
-    create's open check and local-id allocation. All live hints happen later.
-    """
+    # meiva:note
+    # Commit each eligible delegator digest from current task and parent rows. Parent changes
+    # discovered after locking are deferred if the actual parent is not locked. All live hints
+    # happen later. A task whose owner has no live ancestor owner is skipped: no agent can act on
+    # it, nothing is written for it and a later pass finds it again; it is logged at debug level.
     with write_transaction(pool) as conn, conn.cursor() as cur:
         candidates, locked = _lock_candidates(cur, threshold, backoff_seconds)
         managers = nearest_manager(cur, [task_id for task_id in candidates if task_id in locked])
-        delegated, human = _eligible_groups(
+        delegated, unmanaged = _eligible_groups(
             candidates, locked, threshold, backoff_seconds, managers
         )
-        # Same physical identity lock as gateway notice create. Ordered locks
-        # prevent two overlapping human batches from reversing agent order.
-        owners = sorted(set(delegated) | {task.owner for task in human if task.owner is not None})
-        cur.execute("SELECT id FROM agents WHERE id=ANY(%s) ORDER BY id FOR UPDATE", (owners,))
-        receipts = [
-            _delegator_note(cur, owner, tasks) for owner, tasks in sorted(delegated.items())
-        ]
-        for task in human:
-            receipt = _user_notice(
-                cur, conn, task, notice_ttl_limit_seconds=notice_ttl_limit_seconds
+        if unmanaged:
+            _log.debug(
+                "[task-maintenance] no live manager for task(s) %s; nothing escalated", unmanaged
             )
-            if receipt is not None:
-                receipts.append(receipt)
-        return receipts
+        # meiva:note
+        # Ordered identity locks keep two overlapping batches from reversing agent order.
+        cur.execute(
+            "SELECT id FROM agents WHERE id=ANY(%s) ORDER BY id FOR UPDATE", (sorted(delegated),)
+        )
+        return [_delegator_note(cur, owner, tasks) for owner, tasks in sorted(delegated.items())]

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 from itertools import count
 from typing import Any
 
@@ -11,7 +10,6 @@ from psycopg_pool import ConnectionPool
 from base.config import settings
 from base.db import Database
 from base.events.live.bus import EventBus
-from base.events.notifications.outbox import republish_pending
 from meiva_builtins.plugins.meiva_fleet.task_maintenance.daemon import run_escalate
 from meiva_builtins.plugins.meiva_fleet.task_maintenance.tests.failing_writes import inserts_failing
 
@@ -102,26 +100,6 @@ def stalled_subtask(db: psycopg.Connection, *, reminder_count: int = 3) -> tuple
     return parent_owner, owner, tid
 
 
-# meiva:note
-# A stalled top-level task: (owner, task_id, parent_id). Its parent has no owner,
-# which is the real shape of the user leg — a top-level task descends from the
-# ownerless system root, so no delegating agent exists to catch the stall and
-# the user is told instead.
-# meiva:link base/events/notifications/README.md
-def human_leg_subtask(db: psycopg.Connection, *, reminder_count: int = 3) -> tuple[int, int, int]:
-    parent = make_task(db, owner=None, remind_interval_seconds=None)
-    owner = make_agent(db)
-    tid = make_task(
-        db,
-        owner=owner,
-        parent_id=parent,
-        remind_interval_seconds=1800,
-        updated_s_ago=7200,
-        reminder_count=reminder_count,
-    )
-    return owner, tid, parent
-
-
 def inbox_notices(db: psycopg.Connection, agent_id: int) -> list[tuple[str, bool]]:
     db.rollback()
     with db.cursor() as cur:
@@ -141,16 +119,6 @@ def notifications(db: psycopg.Connection, agent_id: int) -> list[tuple[str, str]
             (agent_id,),
         )
         return cur.fetchall()
-
-
-def unannounced(db: psycopg.Connection, agent_id: int) -> int:
-    db.rollback()
-    row = db.execute(
-        "SELECT count(*) FROM notification_events WHERE agent_id = %s AND announced_at IS NULL",
-        (agent_id,),
-    ).fetchone()
-    assert row is not None
-    return int(row[0])
 
 
 def inbound_messages(db: psycopg.Connection, agent_id: int) -> list[tuple[str, str, str]]:
@@ -247,94 +215,6 @@ def test_delegator_escalation_rearms_after_owner_update(
     assert len(inbound_messages(db_conn, parent_owner)) == 2
 
 
-# meiva:note
-# An `EventBus` whose publication is observed instead of sent. `drop` is the
-# Redis outage the transport already models: `publish_best_effort_sync` reports
-# the publication as failed by returning None. The producer must neither record
-# that as delivered nor lose the notice.
-# meiva:link base/events/notifications/README.md
-class _RecordingBus:
-    def __init__(self) -> None:
-        self.events: list[dict[str, Any]] = []
-        self.drop = False
-
-    def publish_best_effort_sync(
-        self,
-        payload: str,
-        *,
-        channel: str | None = None,
-        decode_responses: bool = True,
-        context: str = "",
-    ) -> int | None:
-        del channel, decode_responses, context
-        if self.drop:
-            return None
-        self.events.append(json.loads(payload))
-        return 1
-
-    def notifications(self) -> list[dict[str, Any]]:
-        return [event for event in self.events if event.get("role") == "notification"]
-
-
-def test_user_escalation_delivers_a_needs_input_notification(
-    pool: ConnectionPool,
-    db_conn: psycopg.Connection,
-    database: Database,
-) -> None:
-    # meiva:note
-    # A stalled top-level task escalates to the user through the notification
-    # spine, not straight into the inbox: one `core.needs_input` delivery row and
-    # one live `notification` event, next to the inbox notice that was already
-    # there. The defect: the escalation wrote `agent_notices` and published only
-    # an `agent_updated` console refresh, so it never reached a phone or the Mac.
-    # meiva:link base/events/notifications/README.md
-    owner, tid, _parent = human_leg_subtask(db_conn)
-    live: Any = _RecordingBus()
-
-    assert run_escalate(pool, database, live, 3, 0.0) == 1
-
-    notices = inbox_notices(db_conn, owner)
-    assert [require_response for _title, require_response in notices] == [True]
-    title = notices[0][0]
-    assert f"#{tid}" in title
-    assert notifications(db_conn, owner) == [("core.needs_input", title)]
-    delivered = live.notifications()
-    assert len(delivered) == 1
-    assert delivered[0]["category"] == "core.needs_input"
-    assert delivered[0]["subject"] == title
-    assert delivered[0]["agent_id"] == owner
-
-
-def test_user_escalation_survives_a_lost_announce(
-    pool: ConnectionPool,
-    db_conn: psycopg.Connection,
-    database: Database,
-) -> None:
-    # meiva:note
-    # A Redis outage costs the live push, never the escalation: the inbox notice
-    # and the delivery row are committed before anything is announced, and the
-    # outbox sweep publishes that delivery once the transport is back. The stall
-    # is delayed, never dropped.
-    # meiva:link base/events/notifications/README.md
-    owner, _tid, _parent = human_leg_subtask(db_conn)
-    live: Any = _RecordingBus()
-    live.drop = True
-
-    assert run_escalate(pool, database, live, 3, 0.0) == 1
-
-    assert len(inbox_notices(db_conn, owner)) == 1
-    assert [category for category, _subject in notifications(db_conn, owner)] == [
-        "core.needs_input"
-    ]
-    assert live.notifications() == []
-    assert unannounced(db_conn, owner) == 1
-
-    live.drop = False
-    assert republish_pending(pool, live, min_age_seconds=0, limit=10) == 1
-    assert [event["category"] for event in live.notifications()] == ["core.needs_input"]
-    assert unannounced(db_conn, owner) == 0
-
-
 def test_delegator_escalation_is_not_a_user_notification(
     pool: ConnectionPool,
     db_conn: psycopg.Connection,
@@ -415,41 +295,6 @@ def test_digest_copy_serves_a_live_and_a_gone_owner_alike(
 
 
 # meiva:note
-# The human queue's notice keeps the same rule and still ends in an action: how long
-# the task has been silent, that its state did not change, and what the reader can do
-# about it. The title and body are pinned verbatim so a later edit cannot quietly
-# restore a verdict.
-def test_human_notice_copy_states_elapsed_silence_and_an_unchanged_state(
-    pool: ConnectionPool,
-    db_conn: psycopg.Connection,
-    database: Database,
-    event_bus: EventBus,
-) -> None:
-    owner, tid, _parent = human_leg_subtask(db_conn)
-
-    assert run_escalate(pool, database, event_bus, 3, 0.0) == 1
-
-    db_conn.rollback()
-    with db_conn.cursor() as cur:
-        cur.execute(
-            "SELECT title, content FROM agent_notices WHERE agent_id = %s AND resolved_at IS NULL",
-            (owner,),
-        )
-        notices = cur.fetchall()
-    assert len(notices) == 1
-    title, content = notices[0]
-    assert title.startswith(f"Task #{tid} ")
-    assert title.endswith(" — no state change for 2.0h; reassign or cancel")
-    assert content == (
-        f"Agent #{owner} has not changed this task's state for 2.0h "
-        "(a note or a change on the task would have restarted the reminders), and no live agent "
-        "owns any ancestor task to catch it. Reassign it to another agent, cancel it, or reply "
-        "to remind the owner once more."
-    )
-    assert_states_evidence_not_a_verdict(f"{title}\n{content}")
-
-
-# meiva:note
 # The threshold counts cadence periods of silence, not delivered reminders
 # (2026-11-07 ruling, task #6354). Reminder delivery is throttled per owner by the
 # digest window, so a reminder count stops measuring time as soon as the window is
@@ -457,8 +302,8 @@ def test_human_notice_copy_states_elapsed_silence_and_an_unchanged_state(
 # three tests pin the replacement: silence long enough escalates however few
 # reminders went out, recent activity holds it however many did, and a task nobody
 # was ever reminded about is not escalated on silence alone.
-def _human_leg_task(db: psycopg.Connection, *, updated_s_ago: float, reminder_count: int) -> int:
-    parent = make_task(db, owner=None, remind_interval_seconds=None)
+def _stalled_task(db: psycopg.Connection, *, updated_s_ago: float, reminder_count: int) -> int:
+    parent = make_task(db, owner=make_agent(db), remind_interval_seconds=None)
     owner = make_agent(db)
     return make_task(
         db,
@@ -476,7 +321,7 @@ def test_silence_escalates_after_one_delivered_reminder(
     database: Database,
     event_bus: EventBus,
 ) -> None:
-    _human_leg_task(db_conn, updated_s_ago=14400, reminder_count=1)
+    _stalled_task(db_conn, updated_s_ago=14400, reminder_count=1)
     assert run_escalate(pool, database, event_bus, 3, 0.0) == 1
 
 
@@ -486,7 +331,7 @@ def test_recent_activity_holds_escalation_despite_many_reminders(
     database: Database,
     event_bus: EventBus,
 ) -> None:
-    _human_leg_task(db_conn, updated_s_ago=600, reminder_count=10)
+    _stalled_task(db_conn, updated_s_ago=600, reminder_count=10)
     assert run_escalate(pool, database, event_bus, 3, 0.0) == 0
 
 
@@ -496,5 +341,5 @@ def test_silence_alone_does_not_escalate_a_task_never_reminded(
     database: Database,
     event_bus: EventBus,
 ) -> None:
-    _human_leg_task(db_conn, updated_s_ago=86400, reminder_count=0)
+    _stalled_task(db_conn, updated_s_ago=86400, reminder_count=0)
     assert run_escalate(pool, database, event_bus, 3, 0.0) == 0

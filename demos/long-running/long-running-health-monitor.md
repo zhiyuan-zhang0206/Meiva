@@ -17,8 +17,8 @@ Your tasks:
 3. Maintain your state in meiva.memory (under the health/ directory)
 4. When awakened by cron:
    - Read the last health record
-   - Send daily health reminder to the user via meiva.ui.notify
-   - If the user hasn't replied for 3 consecutive days, send a P1 priority notification
+   - Publish the daily health reminder to the user via meiva.ui.publish
+   - If the user hasn't replied for 3 consecutive days, ask the user whether they still want the reminders via meiva.ui.ask
 5. Test: immediately send the first health reminder
 
 This is a long-running agent — do not terminate, go idle after completion.
@@ -28,16 +28,16 @@ This is a long-running agent — do not terminate, go idle after completion.
 
 1. **Setup**: Agent sets its label, creates cron watcher for 9 AM daily
 2. **State**: Writes initial health tracking record to `meiva.memory`
-3. **First check**: Immediately posts a health reminder via `meiva.ui.notify`
+3. **First check**: Immediately publishes a health reminder via `meiva.ui.publish`
 4. **Idle**: Agent goes idle, waiting for next cron trigger
 5. **Day 2**: Cron wakes agent → reads memory → sends reminder
-6. **Escalation**: After 3 days without user reply → P1 notification
+6. **Escalation**: After 3 days without user reply → a `meiva.ui.ask` question
 
 ## Expected output
 
 - A `health/monitor.md` file in the shared memory pool tracking daily status
-- Daily `meiva.ui.notify` messages with health reminders
-- Escalation to P1 if user is unresponsive
+- Daily `meiva.ui.publish` messages with health reminders
+- A follow-up question if the user is unresponsive
 
 ## Why this matters
 

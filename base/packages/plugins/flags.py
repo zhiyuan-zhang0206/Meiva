@@ -1,27 +1,27 @@
-"""Plugin access to declared, non-sensitive core configuration flags.
-
-Plugins declare their Core dependencies in ``default_config.py`` ``contribute()``:
-
-    def contribute() -> PluginContributions:
-        return PluginContributions(
-            flags=("daemon.notice_ttl_limit_seconds",)
-        )
-
-Config-face admission and SDK installation validate every declared key. Services
-read from the declaration itself, without a second process-wide registry:
-
-    from base.packages.plugins.flags import read_declared_flag
-
-    ttl = read_declared_flag("daemon.notice_ttl_limit_seconds", contribute().flags)
-
-Declaration is mandatory: ``read_declared_flag`` rejects a key absent from the
-supplied declaration. Keys are fully qualified as ``<domain>.<field>``. The namespace is
-every non-sensitive core Settings field; secrets remain in their existing secret
-channels and are never flags.
-
-Reads use the process's constructed Settings domains. An unavailable domain
-fails explicitly; a read never constructs a second Settings image.
-"""
+# meiva:note
+# Plugin access to declared, non-sensitive core configuration flags.
+#
+# Plugins declare their Core dependencies in ``default_config.py`` ``contribute()``:
+#
+#     def contribute() -> PluginContributions:
+#         return PluginContributions(
+#             flags=("daemon.ttl_reaper_poll_interval_seconds",)
+#         )
+#
+# Config-face admission and SDK installation validate every declared key. Services
+# read from the declaration itself, without a second process-wide registry:
+#
+#     from base.packages.plugins.flags import read_declared_flag
+#
+#     interval = read_declared_flag("daemon.ttl_reaper_poll_interval_seconds", contribute().flags)
+#
+# Declaration is mandatory: ``read_declared_flag`` rejects a key absent from the
+# supplied declaration. Keys are fully qualified as ``<domain>.<field>``. The namespace is
+# every non-sensitive core Settings field; secrets remain in their existing secret
+# channels and are never flags.
+#
+# Reads use the process's constructed Settings domains. An unavailable domain
+# fails explicitly; a read never constructs a second Settings image.
 
 from base.host.boundary.untyped import object_of
 from base.host.env.config_lite_table import FIELD_DOMAINS, SENSITIVE_FIELDS

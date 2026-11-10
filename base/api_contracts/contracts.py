@@ -250,18 +250,6 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
         Idempotency.AT_LEAST_ONCE_WITH_KEY,
         note="required verified principal key resolves only the explicit global notice and replays its original inbound",
     ),
-    ("POST", "/api/agents/{agent_id}/notices"): RouteContract(
-        Idempotency.AT_LEAST_ONCE_WITH_KEY,
-        note="notice creation and superseding effects share one keyed transaction; replays return the original notice result",
-    ),
-    ("PATCH", "/api/agents/{agent_id}/notices/current/guarded-v1"): RouteContract(
-        Idempotency.AT_LEAST_ONCE_WITH_KEY,
-        note="observed global notice edit and immutable acceptance commit together; no client activation",
-    ),
-    ("POST", "/api/agents/{agent_id}/notices/current/dismiss/guarded-v1"): RouteContract(
-        Idempotency.AT_LEAST_ONCE_WITH_KEY,
-        note="withdraw only the observed global notice; keyed replay never selects a later notice",
-    ),
     ("POST", "/api/keyed/v1/packages/draft"): RouteContract(
         Idempotency.AT_LEAST_ONCE_WITH_KEY,
         note="raw draft identity and original immutable birth snapshot",

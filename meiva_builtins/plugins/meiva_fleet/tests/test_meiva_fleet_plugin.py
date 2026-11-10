@@ -370,18 +370,6 @@ def test_plugin_keeps_core_ask_without_legacy_notice_members(load_activity_plugi
     assert not {"notify", "edit_notice", "dismiss_notice"}.intersection(meiva.ui.__all_for_meiva__)
 
 
-@pytest.mark.parametrize("blocking", [False, True])
-def test_notify_validates_title_priority_and_blocking(load_activity_plugin: None, blocking: bool):
-    from meiva_builtins.plugins.meiva_fleet.plugin import notify
-
-    with pytest.raises(ValueError, match="title"):
-        notify("   ")
-    with pytest.raises(ValueError, match="priority"):
-        notify("ok", priority="P9")
-    with pytest.raises(ValueError, match="require a user response"):
-        notify("ok", require_response=False, blocking=blocking)
-
-
 def test_fleet_spawn_uses_internal_creation_uid(
     load_activity_plugin: None, wire: GatewayWire
 ) -> None:

@@ -74,13 +74,9 @@ registry logs the closed task
 through the settled agent row, the task board and the task's `task_updated`
 event, and neither asks the user for an answer.
 
-The task-maintenance daemon's stall escalation is the same producer on a sync
-path: its user leg commits a `require_response` notice and stages the
-`core.needs_input` delivery inside the escalation transaction, then announces it
-after the commit, so a stall that needs a human decision reaches the push
-transports as `core.needs_input` instead of stopping at the console inbox — and
-an announce lost to a crash stays owed for the sweep. Its delegator leg is an
-agent note and deliberately produces no user notification.
+The task-maintenance daemon's stall escalation is an agent note to the task's
+manager and deliberately produces no user notification; it no longer has a user
+leg.
 
 ## Plugin emission
 

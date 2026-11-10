@@ -96,7 +96,7 @@ class FleetConfig(BaseModel):
         default=3,
         description=(
             "Cadence periods a task may stay without a state change before the daemon escalates "
-            "to the nearest live manager or the human queue. One cadence period is the task's own "
+            "to the nearest live manager; a task with no live manager is not escalated. One cadence period is the task's own "
             "`max(task_reminder_backoff_seconds, remind_interval_seconds)`, so the count follows the "
             "task, not the per-owner delivery window; a task is only escalated once at least one "
             "reminder has actually reached its owner."
@@ -143,7 +143,7 @@ class FleetConfig(BaseModel):
             "Unset (None) means this home cannot pause reminders at all: a pause request fails "
             "fast and names this key, so an operator has to choose the bound and write down why. "
             "The value is a Fleet decision, not a product default — a task's reminder window is "
-            "the only thing standing between a frozen task and the human queue."
+            "the only thing standing between a frozen task and its escalation."
         ),
         json_schema_extra={
             "help_text": "Leave unset to disallow pausing task reminders.",
@@ -162,7 +162,7 @@ class FleetConfig(BaseModel):
         description=(
             "Platform-wide reduce-context-switch default (user ruling 2026-09-20): "
             "inject the 'Reduce context switch for the human' system-prompt section — "
-            "queue-never-push, one notice per manager updated in place, milestone "
+            "queue-never-push, one update per manager, milestone "
             "cadence, authorization/decision direct, out-of-band push only for a true "
             "emergency. False is the escape hatch back to the pre-platform behavior: "
             "the section is not injected and the reduce-context-switch policy keys "
@@ -198,6 +198,7 @@ class FleetConfig(BaseModel):
         return value
 
 
+# meiva:note
+# Declare Fleet's configuration schema; Fleet reads no Core flag.
 def contribute() -> PluginContributions:
-    """Declare Fleet's schema and its existing non-secret notification dependency."""
-    return PluginContributions(config=FleetConfig, flags=("daemon.notice_ttl_limit_seconds",))
+    return PluginContributions(config=FleetConfig)

@@ -44,7 +44,6 @@ Owners:
 | `POST /api/agents/{agent_id}/understanding/build` | natural | jobs and the pending rebuild merge into live ones; a repeat only records a build |
 | `POST /api/memory/refresh` | natural | re-scan — repeats are harmless |
 | `POST /api/memory/search` | natural | pure read |
-| `POST /api/agents/{agent_id}/notices` | keyed | immutable request and original notice snapshot replay before mutable expiry/task checks |
 | `POST /api/schedules` | one-shot | optional keyed creation receipt commits with resource/version; replay returns original identity after rename/delete |
 | `POST /api/schedules/{schedule_id}/start` | one-shot | optional keyed receipt commits desired state/sync; replay returns original acceptance without re-enabling later state |
 | `POST /api/schedules/{schedule_id}/stop` | one-shot | optional keyed receipt commits desired state/sync; unchanged disabled state is a no-op |

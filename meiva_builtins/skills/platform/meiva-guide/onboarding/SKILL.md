@@ -134,7 +134,7 @@ equivalent), migration steps, and the honest differences and pitfalls, with
 sources. Four facts cut across all four: skills port directly (same Agent
 Skills standard), instructions become memory (`type/feedback`), automations
 become `meiva schedules` / `meiva.watcher`, and every tool's permission system
-becomes recorded gates plus `require_response` notices. Read the page for the
+becomes recorded gates plus `meiva.ui.ask` questions. Read the page for the
 tool they name, then walk it with them.
 
 After the map, run the standard flow — intent discovery, record to memory,

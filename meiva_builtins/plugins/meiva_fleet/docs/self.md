@@ -41,6 +41,6 @@ agents (table)
 
 ## Relationship to Other Subsystems
 
-- [Ask — durable questions requiring a user response](notify.md) — notify's notices have agent_id as owner
+- [Ask — durable questions requiring a user response](notify.md) — questions have agent_id as owner
 - [Neighbors — Inter-Agent Communication and Discovery](neighbors/neighbors.md) — other agents discover this agent by label
 - [meiva_fleet — Fleet Plugin Overview](meiva_fleet.md) — overview

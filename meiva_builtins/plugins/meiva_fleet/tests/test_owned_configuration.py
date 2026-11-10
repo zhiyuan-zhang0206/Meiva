@@ -17,7 +17,6 @@ from base.packages.plugins.config_registration import (
     plugin_bootstrap_config,
     service_config_packet,
 )
-from base.packages.plugins.flags import UndeclaredFlag, read_declared_flag
 from base.paths import meiva_home, run_dir
 from meiva_builtins.plugins.meiva_fleet.default_config import FleetConfig, contribute
 from meiva_builtins.plugins.meiva_fleet.services import services
@@ -170,8 +169,5 @@ def test_gate_and_daemon_birth_share_one_captured_image() -> None:
     assert "disabled" in str(service.gate())
 
 
-def test_core_dependency_is_declared_and_validated_without_sdk_install() -> None:
-    assert contribute().flags == ("daemon.notice_ttl_limit_seconds",)
-    assert isinstance(read_declared_flag(contribute().flags[0], contribute().flags), float)
-    with pytest.raises(UndeclaredFlag):
-        read_declared_flag("daemon.notice_ttl_limit_seconds", ())
+def test_fleet_declares_no_core_flag_dependency() -> None:
+    assert contribute().flags == ()

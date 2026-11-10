@@ -1,4 +1,3 @@
 [uses]
-"test_guarded_notice_resolution.py" = ["test_current_notice_receipts.py"]
-"test_notice_legacy_receipts.py" = ["test_current_notice_receipts.py", "test_notice_questions.py"]
-"test_notice_questions.py" = ["test_current_notice_receipts.py"]
+"test_notice_legacy_receipts.py" = ["test_guarded_notice_resolution.py", "test_notice_questions.py"]
+"test_notice_questions.py" = ["test_guarded_notice_resolution.py"]

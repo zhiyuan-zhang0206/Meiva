@@ -126,34 +126,6 @@ class ResolveNoticeIn(BaseModel):
         return self
 
 
-class NoticeCreateIn(BaseModel):
-    # meiva:link meiva_builtins/plugins/meiva_fleet/docs/notify.md
-
-    model_config = ConfigDict(extra="forbid")
-    title: str
-    content: str | None = None
-    priority: Priority = Priority.P2
-    require_response: Annotated[bool, Field(strict=True)] = True
-    blocking: Annotated[bool, Field(strict=True)] = False
-    task_id: int | None = None
-    # meiva:note
-    # The schedule this notice's writer runs under, reported by the writer itself: the gateway
-    # cannot read a client's environment, and `source_verified_by` records the credential, not
-    # the schedule. Omitted by an agent's own notice and by a manual run.
-    schedule_id: int | None = None
-    expire_at: datetime | None = None
-    question: NoticeQuestion | None = None
-
-
-class NoticeEditIn(BaseModel):
-    # meiva:link meiva_builtins/plugins/meiva_fleet/docs/notify.md
-
-    title: str | None = None
-    content: str | None = None
-    priority: Priority | None = None
-    blocking: bool | None = None
-
-
 class NoticeItem(BaseModel):
     # meiva:link meiva_builtins/plugins/meiva_fleet/docs/notify.md
 

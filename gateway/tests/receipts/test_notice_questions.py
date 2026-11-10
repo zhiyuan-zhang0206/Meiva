@@ -6,7 +6,7 @@ from fastapi.testclient import TestClient
 
 from base.api_contracts.idempotency import keyed_headers
 from gateway.tests.events.test_notices_endpoint import seed_agent
-from gateway.tests.receipts.test_current_notice_receipts import client as client
+from gateway.tests.receipts.test_guarded_notice_resolution import client as client
 
 QUESTION = {
     "type": "multi_select",
@@ -20,11 +20,10 @@ QUESTION = {
 
 def post_question(client: TestClient, agent: int, question: dict[str, object] | None = None) -> int:
     response = client.post(
-        f"/api/agents/{agent}/notices",
+        f"/api/agents/{agent}/asks",
         json={
             "title": "Which surfaces?",
             "content": "Choose the scope.",
-            "require_response": True,
             "question": QUESTION if question is None else question,
         },
         headers=keyed_headers(str(uuid4())),
@@ -94,33 +93,6 @@ def test_invalid_answer_has_no_resolution_or_inbound(
     ).fetchone() == (0,)
 
 
-def test_question_context_is_frozen_but_priority_can_change(
-    client: TestClient, db_conn: psycopg.Connection
-) -> None:
-    agent = seed_agent(db_conn)
-    notice = post_question(client, agent)
-    path = f"/api/agents/{agent}/notices/current/guarded-v1"
-    for changes in (
-        {"title": "Changed?"},
-        {"content": "Different meaning"},
-        {"question": {"type": "text"}},
-    ):
-        response = client.patch(
-            path,
-            json={"observed_notice_id": notice, **changes},
-            headers=keyed_headers(str(uuid4())),
-        )
-        assert response.status_code == 422, response.text
-    assert (
-        client.patch(
-            path,
-            json={"observed_notice_id": notice, "priority": "P1"},
-            headers=keyed_headers(str(uuid4())),
-        ).status_code
-        == 200
-    )
-
-
 def test_open_question_and_dismissal_have_distinct_effects(
     client: TestClient, db_conn: psycopg.Connection
 ) -> None:
@@ -175,17 +147,11 @@ def test_invalid_question_does_not_supersede_the_current_question(
     )
     for question in invalid_questions:
         response = client.post(
-            f"/api/agents/{agent}/notices",
-            json={"title": "Invalid", "require_response": True, "question": question},
+            f"/api/agents/{agent}/asks",
+            json={"title": "Invalid", "question": question},
             headers=keyed_headers(str(uuid4())),
         )
         assert response.status_code == 422
-    response = client.post(
-        f"/api/agents/{agent}/notices",
-        json={"title": "FYI with a question", "require_response": False, "question": QUESTION},
-        headers=keyed_headers(str(uuid4())),
-    )
-    assert response.status_code == 422
     assert db_conn.execute(
         "SELECT resolved_at FROM agent_notices WHERE id=%s", (notice,)
     ).fetchone() == (None,)
@@ -201,18 +167,14 @@ def test_inspector_carries_the_same_question(
     assert response.json()["notice"]["question"] == QUESTION
 
 
-@pytest.mark.parametrize(
-    "changes", [{"require_response": False}, {"question": QUESTION | {"allow_other": True}}]
-)
-def test_creation_rejects_non_response_and_other_before_effects(
+def test_ask_rejects_other_before_effects(
     client: TestClient,
     db_conn: psycopg.Connection,
-    changes: dict[str, object],
 ) -> None:
     agent = seed_agent(db_conn)
     response = client.post(
-        f"/api/agents/{agent}/notices",
-        json={"title": "Choose scope", **changes},
+        f"/api/agents/{agent}/asks",
+        json={"title": "Choose scope", "question": QUESTION | {"allow_other": True}},
         headers=keyed_headers(str(uuid4())),
     )
     assert response.status_code == 422
@@ -221,20 +183,19 @@ def test_creation_rejects_non_response_and_other_before_effects(
     ).fetchone() == (0,)
 
 
-def test_notice_defaults_to_response_and_cannot_be_marked_read(
+def test_ask_requires_a_response_and_cannot_be_marked_read(
     client: TestClient,
     db_conn: psycopg.Connection,
 ) -> None:
     agent = seed_agent(db_conn)
     response = client.post(
-        f"/api/agents/{agent}/notices",
-        json={"title": "Which scope?", "blocking": True, "priority": "P3"},
+        f"/api/agents/{agent}/asks",
+        json={"title": "Which scope?", "question": {"type": "text"}},
         headers=keyed_headers(str(uuid4())),
     )
     assert response.status_code == 201, response.text
     notice = next(n for n in client.get("/api/notices/open").json() if n["agent_id"] == agent)
     assert notice["require_response"] is True
-    assert notice["blocking"] is True and notice["priority"] == "P3"
     rejected = client.post(
         f"/api/keyed/v1/agents/{agent}/notices/{notice['id']}/resolve",
         json={"action": "read"},
