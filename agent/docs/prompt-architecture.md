@@ -124,8 +124,10 @@ Capabilities rather than standing as its own section.
   mandatory as its first step and drops that step when this section renders
   nothing.
 - **Core communication policy** — `agent/graph/prompt/conversation.py:user_reply_section`,
-  always present: answer directly, or give a substantive reply in the same dialog
-  before investigating or calling tools. `off` and `silent` do not suppress it.
+  always present: answer directly. When `settings.prompt_opening_reply_enabled`
+  (env `MEIVA_SYSTEM_PROMPT_OPENING_REPLY`, shared floor off) resolves on, the
+  section also requires a substantive reply in the same dialog before the first
+  tool call on a human request, and `off` and `silent` styles do not suppress it.
   Ordinary assistant text follows the user's requested language, including standing
   preferences in injected memory. Each message is self-contained, substantive
   communication with the user. Execution updates default to milestones meaningful
@@ -155,11 +157,11 @@ Capabilities rather than standing as its own section.
   section does not repeat it. Auto-suppressed when both memory stores are
   switched off, so bench agents drop it without a bench-specific toggle.
 - **Core output shape** — `agent/graph/prompt/system_prompt.py:_output_conciseness_section`,
-  on by default via `settings.prompt_output_conciseness_enabled` (env
+  off by default (shared floor) via `settings.prompt_output_conciseness_enabled` (env
   `MEIVA_SYSTEM_PROMPT_CONCISENESS`): reply matched to the task, answer-first, reference
   paths/lines instead of pasting output back. General-agent behavior.
 - **Core UI delivery** — `agent/graph/prompt/system_prompt.py:ui_delivery_section`,
-  on by default via `settings.prompt_ui_delivery_enabled` (env
+  off by default (shared floor) via `settings.prompt_ui_delivery_enabled` (env
   `MEIVA_SYSTEM_PROMPT_UI_DELIVERY`): content for the user goes through the UI,
   never as a bare path to a Markdown file; files keep their role as persistence
   and cross-agent handoff. Deliberately example-free — a semantic rule, not an
@@ -337,7 +339,9 @@ Review every section with these questions:
 ## Communication style (implemented, config-selected)
 
 An unconditional communication policy lives in `conversation.user_reply_section`: a
-human request gets a direct answer or a short reply before investigation/tools.
+human request gets a direct answer. With `prompt_opening_reply_enabled` on (default
+off), a short reply is also required before investigation/tools; off drops every
+sentence stating that rule.
 It owns ordinary assistant-text reply routing, including text alongside tool calls,
 and applies to unfinished human requests resumed from handoff records. Once enough
 evidence is available, answer instead of investigating unstated response requirements.
@@ -357,8 +361,8 @@ user knows, decides or can do: a usable result, material
 direction change, actionable blocker or handoff. Routine calls, retries, file
 reads, bookkeeping and unchanged status stay in tool feedback or working notes.
 There is no fixed cadence. Updates stand alone instead of introducing a tool
-call. Direct answers, necessary questions, the substantive opening reply and
-complete final deliverables remain valid; a brief-update policy does not limit
+call. Direct answers, necessary questions, the substantive opening reply (when
+that rule is on) and complete final deliverables remain valid; a brief-update policy does not limit
 requested explanations or necessary evidence. Automated wakes and peer messages
 require neither courtesy replies nor automatic closing summaries. The optional
 style text is owned by the same `agent/graph/prompt/conversation.py` module.
@@ -370,8 +374,9 @@ A lightweight conversation section lives in the **Meiva core** prompt
 coding-specific. It is selected by an enum, `settings.agent.agent_communication_style`,
 env `MEIVA_AGENT_COMMUNICATION_STYLE`, one of `off` (**the default**) / `oriented` /
 `concise` / `silent`. These select subsequent narration volume; `off` omits only
-that optional section. Reply routing and the initial-response rule are always
-present alongside language and milestone rules, owned by
+that optional section. Reply routing is always present alongside language and
+milestone rules; the initial-response rule is present only when
+`prompt_opening_reply_enabled` resolves on. All are owned by
 `conversation.user_reply_section`.
 
 Intent: assistant text alongside `execute_code` is ordinary conversation output,
@@ -458,7 +463,7 @@ Landed so far:
 - The merged `# Invest in the future` section
   (`MEIVA_SYSTEM_PROMPT_INVEST_FUTURE`, default on), replacing the independent
   Beyond section; `agent_reflection_enabled` is retired.
-- The core output-shape section (`MEIVA_SYSTEM_PROMPT_CONCISENESS`, default on).
+- The core output-shape section (`MEIVA_SYSTEM_PROMPT_CONCISENESS`, default off).
 - A verify-before-done convention in the `meiva_code` `_coding_tools_section`
   preamble. (Editing-discipline guidance was considered and dropped — the model
   self-applies it and Meiva rarely edits a human working tree.)

@@ -1,9 +1,35 @@
 # meiva:note
-# Core reply routing, explicit visibility, language, and milestone progress rules in `user_reply_section` remain active across every `COMMUNICATION_STYLE_SECTIONS` setting (`off`, `oriented`, `concise`, `silent`). Whenever the first turn on a human request calls `execute_code`, it must include a brief substantive opening reply before the first tool call; intermediate turns call `execute_code` with no assistant text unless a milestone is reached. `COMMUNICATION_STYLE_SECTIONS` keys match the non-`off` `agent_communication_style` Literal members so an unknown style raises at render time.
+# Core reply routing, explicit visibility, language, and milestone progress rules in `user_reply_section` remain active across every `COMMUNICATION_STYLE_SECTIONS` setting (`off`, `oriented`, `concise`, `silent`). When `prompt_opening_reply_enabled` resolves on (default off), the first turn on a human request that calls `execute_code` must include a brief substantive opening reply before the first tool call, and every sentence stating that rule is rendered; off drops those sentences. Intermediate turns call `execute_code` with no assistant text unless a milestone is reached. `COMMUNICATION_STYLE_SECTIONS` keys match the non-`off` `agent_communication_style` Literal members so an unknown style raises at render time.
 from base.agents.messages.reply_intent import REPLY_VISIBILITY_RULE, SDK_DELIVERY_RULE
 from base.api_contracts.user_delivery import UserDeliveryMode
 
-from .live import SectionInputs
+from .live import SectionInputs, resolved_setting
+
+_NO_EMPTY_RECEIPT = (
+    "Do not claim checks have already happened or send an empty receipt acknowledgment "
+    "('Got it', 'On it') instead of stating what you will check. "
+)
+
+_INITIAL_RESPONSE_STYLE_NOTE = (
+    "This initial-response rule applies even when communication style is off "
+    "or silent; the style can further limit progress narration.\n\n"
+)
+
+
+def _opening_reply_rule(calls_tool_phrase: str) -> str:
+    return (
+        "Whenever your first "
+        f"turn on a human request {calls_tool_phrase} — even for a single quick "
+        "check — include a brief, substantive 1-2 sentence reply in that same first "
+        "response before the first tool call, stating what you will check or do. "
+        "Never emit a tool-only first turn with empty assistant text on a human "
+        "request, and do not defer your first reply until after a 'quick' check. "
+        "Do not leave the user waiting silently while you investigate. "
+    )
+
+
+def _intermediate_turns_sentence(clause: str, *, opening_reply: bool) -> str:
+    return f"After the opening reply, {clause}" if opening_reply else clause[0].upper() + clause[1:]
 
 
 def _build_user_reply_section(
@@ -11,7 +37,8 @@ def _build_user_reply_section(
     feedback_sentence: str,
     without_tool_phrase: str,
     calls_tool_phrase: str,
-    intermediate_turns_sentence: str,
+    intermediate_turns_clause: str,
+    opening_reply: bool,
 ) -> str:
     return (
         "# Responding to human requests\n\n"
@@ -28,24 +55,17 @@ def _build_user_reply_section(
         "`meiva.agents.send_message`).\n\n"
         "On a new question or request from the human, respond promptly in the same "
         f"conversation. If you can answer directly, give the answer {without_tool_phrase}; "
-        "no separate acknowledgment is needed. Whenever your first "
-        f"turn on a human request {calls_tool_phrase} — even for a single quick "
-        "check — include a brief, substantive 1-2 sentence reply in that same first "
-        "response before the first tool call, stating what you will check or do. "
-        "Never emit a tool-only first turn with empty assistant text on a human "
-        "request, and do not defer your first reply until after a 'quick' check. "
-        "Do not leave the user waiting silently while you investigate. "
-        "Then do the work and deliver the result in that conversation. Do not "
-        "claim checks have already happened or send an empty receipt acknowledgment "
-        "('Got it', 'On it') instead of stating what you will check. "
+        "no separate acknowledgment is needed. "
+        f"{_opening_reply_rule(calls_tool_phrase) if opening_reply else ''}"
+        f"{'Then do' if opening_reply else 'Do'} the work and deliver the result in that conversation. "
+        f"{_NO_EMPTY_RECEIPT if opening_reply else ''}"
         "When you have enough evidence to answer, deliver the answer; further "
         "investigation should address a concrete remaining question. Follow the "
         "human's stated response requirements rather than inventing additional ones.\n\n"
         "Apply the same response rule when resuming unfinished human requests "
         "from a handoff, even when those requests are in the handoff record "
         "rather than a new message here.\n\n"
-        "This initial-response rule applies even when communication style is off "
-        "or silent; the style can further limit progress narration.\n\n"
+        f"{_INITIAL_RESPONSE_STYLE_NOTE if opening_reply else ''}"
         "## Communication language\n\n"
         "Use the human's explicitly requested communication language for ordinary "
         "assistant text, including text alongside tool calls, progress updates "
@@ -71,34 +91,40 @@ def _build_user_reply_section(
         "An explicitly selected live-pairing style may add more frequent "
         "substantive updates, but every message must remain self-contained and "
         "useful to the user. Do not assume continuous attention to the session.\n\n"
-        f"{intermediate_turns_sentence} "
+        f"{_intermediate_turns_sentence(intermediate_turns_clause, opening_reply=opening_reply)} "
         "Do not narrate routine tool calls, retries, file reads, internal "
         "bookkeeping or unchanged status. Keep those details in tool feedback "
         "or working notes. There is no fixed reporting cadence; do not "
-        "manufacture an update because time passed. Apart from the required "
-        "opening reply on the first turn of a human request, each mid-task "
-        "progress update must stand alone, without a tool-call preamble or "
+        "manufacture an update because time passed. "
+        f"{'Apart from the required opening reply on the first turn of a human request, each' if opening_reply else 'Each'} "
+        "mid-task progress update must stand alone, without a tool-call preamble or "
         "trailing introduction.\n\n"
-        "Direct answers, necessary questions, the substantive opening reply to "
-        "a human request and complete final deliverables remain valid. Keep "
+        f"{'Direct answers, necessary questions, the substantive opening reply to a human request and complete final deliverables remain valid.' if opening_reply else 'Direct answers, necessary questions and complete final deliverables remain valid.'} Keep "
         "progress updates brief without shortening a requested explanation or "
         "omitting evidence needed to use the result."
     )
 
 
 def user_reply_section(_inputs: SectionInputs) -> str:
+    opening_reply = _opening_reply_enabled(_inputs)
     return delivery_prompt(
         _inputs.slices.prompt.user_delivery_mode,
         _build_user_reply_section(
             feedback_sentence="`execute_code` output is tool feedback and does not replace a reply.",
             without_tool_phrase="without calling `execute_code`",
             calls_tool_phrase="calls `execute_code`",
-            intermediate_turns_sentence=(
-                "After the opening reply, call `execute_code` with no accompanying "
+            intermediate_turns_clause=(
+                "call `execute_code` with no accompanying "
                 "assistant text on intermediate turns unless you reach a milestone."
             ),
+            opening_reply=opening_reply,
         ),
+        opening_reply=opening_reply,
     )
+
+
+def _opening_reply_enabled(inputs: SectionInputs) -> bool:
+    return bool(resolved_setting("prompt_opening_reply_enabled", inputs))
 
 
 _NOTIFICATION_GUIDANCE = (
@@ -138,17 +164,20 @@ _SILENT_BODY = (
 
 
 def harness_user_reply_section(_inputs: SectionInputs) -> str:
+    opening_reply = _opening_reply_enabled(_inputs)
     return delivery_prompt(
         _inputs.slices.prompt.user_delivery_mode,
         _build_user_reply_section(
             feedback_sentence="Tool output is feedback for you and does not replace a reply.",
             without_tool_phrase="without calling a tool",
             calls_tool_phrase="calls a tool",
-            intermediate_turns_sentence=(
-                "After the opening reply, run intermediate tool calls without accompanying "
+            intermediate_turns_clause=(
+                "run intermediate tool calls without accompanying "
                 "assistant text unless you reach a milestone."
             ),
+            opening_reply=opening_reply,
         ),
+        opening_reply=opening_reply,
     )
 
 
@@ -159,15 +188,22 @@ COMMUNICATION_STYLE_SECTIONS = {
 }
 
 
-def delivery_prompt(mode_value: str, ordinary: str) -> str:
+def delivery_prompt(mode_value: str, ordinary: str, *, opening_reply: bool) -> str:
     mode = UserDeliveryMode(mode_value)
     if mode is UserDeliveryMode.PREFIX:
         return ordinary
     if mode is UserDeliveryMode.SDK:
         return (
-            "# User delivery\n\n" + SDK_DELIVERY_RULE + "\n\n"
-            "Publish a short substantive opening when starting a human request, meaningful "
-            "milestones during execution, and the result when ready. Work between publications. "
+            "# User delivery\n\n"
+            + SDK_DELIVERY_RULE
+            + "\n\n"
+            + (
+                "Publish a short substantive opening when starting a human request, meaningful "
+                "milestones during execution, and the result when ready. "
+                if opening_reply
+                else "Publish meaningful milestones during execution, and the result when ready. "
+            )
+            + "Work between publications. "
             "Do not publish routine internal steps or unchanged status. A natural-language final "
             "may summarize your work for yourself; the user-facing result must already be published. "
             "Use the user's requested language. Each publication must stand alone and state what "
@@ -190,8 +226,13 @@ def delivery_prompt(mode_value: str, ordinary: str) -> str:
     )
 
 
-def delivery_style_prompt(mode: str, style: str) -> str:
+def delivery_style_prompt(mode: str, style: str, *, opening_reply: bool) -> str:
     section = COMMUNICATION_STYLE_SECTIONS[style]
+    if not opening_reply:
+        section = section.replace(
+            "Work without narrating after the required initial reply to a human request.",
+            "Work without narrating.",
+        )
     if UserDeliveryMode(mode) is UserDeliveryMode.SDK:
         section = section.replace(
             _NOTIFICATION_GUIDANCE,

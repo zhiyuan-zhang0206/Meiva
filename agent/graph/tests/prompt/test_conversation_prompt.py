@@ -1,9 +1,15 @@
+import json
 import os
+from pathlib import Path
 from typing import Any, cast
 
 import pytest
 
-from agent.graph.prompt.conversation import harness_user_reply_section, user_reply_section
+from agent.graph.prompt.conversation import (
+    delivery_style_prompt,
+    harness_user_reply_section,
+    user_reply_section,
+)
 from agent.graph.prompt.live import LiveSdk, SectionInputs
 from agent.graph.prompt.skill_selection import SkillView
 from agent.graph.prompt.system_prompt import build_system_prompt
@@ -29,7 +35,9 @@ def _inputs(slices: AgentSlices) -> SectionInputs:
 
 @pytest.mark.parametrize("style", ["off", "oriented", "concise", "silent"])
 def test_initial_human_response_is_present_without_plugins(style: str) -> None:
-    slices = _slices(agent__agent_communication_style=style)
+    slices = _slices(
+        agent__agent_communication_style=style, agent__prompt_opening_reply_enabled=True
+    )
 
     prompt = build_system_prompt(
         EMPTY,
@@ -92,6 +100,7 @@ def communication_prompt(request: pytest.FixtureRequest) -> tuple[str, str]:
     slices = _slices(
         agent__agent_communication_style=style,
         agent__prompt_output_conciseness_enabled=output_shape,
+        agent__prompt_opening_reply_enabled=True,
     )
 
     return style, build_system_prompt(
@@ -185,3 +194,65 @@ def test_naive_prompt_keeps_plain_assistant_delivery() -> None:
     text = user_reply_section(_inputs(_slices(agent__user_delivery_mode="naive")))
     assert "Reply in ordinary assistant text" in text
     assert DISPLAY_TO_USER not in text and HIDE_FROM_USER not in text
+
+
+_GOLDEN = json.loads((Path(__file__).parent / "opening_reply_golden.json").read_text())
+_OPENING_REPLY_PHRASES = (
+    "Whenever your first",
+    "Never emit a tool-only first turn",
+    "Do not leave the user waiting silently",
+    "empty receipt acknowledgment",
+    "initial-response rule",
+    "After the opening reply",
+    "required opening reply",
+    "the substantive opening reply",
+    "required initial reply",
+    "short substantive opening",
+)
+
+
+def _rendered(mode: str, *, opening_reply: bool) -> dict[str, str]:
+    slices = _slices(
+        agent__user_delivery_mode=mode, agent__prompt_opening_reply_enabled=opening_reply
+    )
+    inputs = _inputs(slices)
+    rendered = {
+        f"native/{mode}": user_reply_section(inputs),
+        f"harness/{mode}": harness_user_reply_section(inputs),
+    }
+    for style in ("oriented", "concise", "silent"):
+        rendered[f"style/{style}/{mode}"] = delivery_style_prompt(
+            mode, style, opening_reply=opening_reply
+        )
+    return rendered
+
+
+@pytest.mark.parametrize("mode", ["prefix", "sdk", "naive"])
+def test_opening_reply_on_renders_text_identical_to_before_the_switch(mode: str) -> None:
+    for key, text in _rendered(mode, opening_reply=True).items():
+        assert text == _GOLDEN[key], key
+
+
+@pytest.mark.parametrize("mode", ["prefix", "sdk", "naive"])
+def test_opening_reply_off_is_default_and_drops_only_that_rule(mode: str) -> None:
+    default = {
+        f"native/{mode}": user_reply_section(_inputs(_slices(agent__user_delivery_mode=mode))),
+        f"harness/{mode}": harness_user_reply_section(
+            _inputs(_slices(agent__user_delivery_mode=mode))
+        ),
+    }
+    off = _rendered(mode, opening_reply=False)
+    for key, text in default.items():
+        assert text == off[key]
+    for key, text in off.items():
+        assert not any(phrase in text for phrase in _OPENING_REPLY_PHRASES), key
+    if mode != "sdk":
+        native = off[f"native/{mode}"]
+        assert "no separate acknowledgment is needed. Do the work and deliver the result" in native
+        assert "Each mid-task progress update must stand alone" in native
+        assert "Call `execute_code` with no accompanying" in native
+        assert "Direct answers, necessary questions and complete final deliverables" in native
+        assert "respond promptly" in native
+        assert "Work without narrating. While a task" in off[f"style/silent/{mode}"]
+    else:
+        assert "Publish meaningful milestones during execution" in off["native/sdk"]
