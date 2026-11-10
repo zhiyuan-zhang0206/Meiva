@@ -126,6 +126,8 @@ async def list_models(
 
 
 class CodexSession(BaseHarnessSession[CodexConfig]):
+    harness = "codex"
+
     def __init__(
         self,
         config: CodexConfig,

@@ -5,7 +5,7 @@ from collections import OrderedDict, deque
 from collections.abc import AsyncIterator, Coroutine, Sequence
 from dataclasses import dataclass, replace
 from types import TracebackType
-from typing import Self
+from typing import ClassVar, Self
 
 from base.lm.harness.delivery import DeliveryLedger, HarnessInput, ImageBlock, LedgerStep
 from base.lm.harness.events import (
@@ -126,6 +126,12 @@ class SessionBinding:
 
 
 class BaseHarnessSession[ConfigT: SessionConfig](ExitStatus):
+    # meiva:note
+    # The harness this adapter drives: the registry keeps one record per (agent, harness), and
+    # the adapter reads and writes only its own.
+    # meiva:link base/lm/harness/docs/session-identity.md
+    harness: ClassVar[str]
+
     def __init__(
         self,
         config: ConfigT,
@@ -432,7 +438,7 @@ class BaseHarnessSession[ConfigT: SessionConfig](ExitStatus):
     def _resume_from_registry(self) -> str | None:
         if self._registry is None or self.agent_id is None:
             return None
-        record = self._registry.load(self.agent_id)
+        record = self._registry.load(self.agent_id, harness=self.harness)
         if record is None:
             return None
         self._resumed_existing = True
@@ -456,7 +462,7 @@ class BaseHarnessSession[ConfigT: SessionConfig](ExitStatus):
     def _bind(self) -> None:
         if self._registry is None or self.agent_id is None or not self._session_id:
             return
-        previous = self._registry.load(self.agent_id)
+        previous = self._registry.load(self.agent_id, harness=self.harness)
         now = self._now_iso()
         self._record = SessionRecord(
             agent_id=self.agent_id,
@@ -467,6 +473,7 @@ class BaseHarnessSession[ConfigT: SessionConfig](ExitStatus):
             updated_at=now,
             resumes=(previous.resumes if previous is not None else 0)
             + (1 if self._resumed_existing else 0),
+            harness=self.harness,
         )
         self._registry.save(self._record)
         self._emit(

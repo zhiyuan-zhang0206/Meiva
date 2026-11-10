@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import socket
 import stat
@@ -11,6 +12,7 @@ from pathlib import Path
 
 import pytest
 
+from base import paths
 from base.cluster.dataplane import runtime_binaries as rb
 from base.host.system.tests.fake_commands import fake_host
 from base.host.tests.short_tmp import short_tmp as short_tmp
@@ -204,6 +206,41 @@ def test_ensure_cli_tools_step_raises_on_script_failure(ctx: ConvergeCtx, tmp_pa
 
     with pytest.raises(RuntimeError, match="missing CLI and GNU tools: htop gawk"):
         _steps.ensure_cli_tools_step(host_ctx)
+
+
+def test_the_session_record_migration_runs_in_the_converge_table_after_the_skeleton() -> None:
+    names = [step.name for step in converge_host.CONVERGE_STEPS]
+    assert (
+        names.index("harness session records layout") == names.index("$MEIVA_HOME dir skeleton") + 1
+    )
+
+
+def test_the_session_record_migration_step_converts_the_homes_records(
+    ctx: ConvergeCtx, capsys: pytest.CaptureFixture[str]
+) -> None:
+    sessions = paths.harness_sessions_dir(home=ctx.meiva_home)
+    sessions.mkdir(parents=True)
+    (sessions / "7.json").write_text(
+        json.dumps(
+            {
+                "agent_id": 7,
+                "session_id": "s",
+                "cwd": "/w",
+                "model": "m",
+                "harness": "codex",
+                "created_at": "t",
+                "updated_at": "t",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    _steps.migrate_harness_session_records(ctx)
+    assert "migrated 1" in capsys.readouterr().out
+    assert [p.name for p in sessions.iterdir()] == ["7.codex.json"]
+
+    _steps.migrate_harness_session_records(ctx)
+    assert capsys.readouterr().out == ""
 
 
 def test_ensure_meiva_home_dirs(ctx: ConvergeCtx) -> None:

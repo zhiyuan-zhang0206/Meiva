@@ -184,6 +184,7 @@ async def test_resume_uses_the_registry_and_skips_the_handoff(tmp_path: Path) ->
             model="",
             created_at=now,
             updated_at=now,
+            harness="codex",
         )
     )
     harness = await start(tmp_path, registry=registry, agent_id=7, handoff_doc=handoff())
@@ -200,7 +201,7 @@ async def test_resume_uses_the_registry_and_skips_the_handoff(tmp_path: Path) ->
         assert harness.session.handoff_ticket is None
         assert harness.of(HandoffInjected) == []
         assert bound.resumed is True
-        record = registry.load(7)
+        record = registry.load(7, harness="codex")
         assert record is not None
         assert record.session_id == "thread-old"
         assert record.resumes == 1
@@ -221,6 +222,7 @@ async def test_resume_failure_starts_a_new_thread_and_injects_the_handoff(
             model="",
             created_at=now,
             updated_at=now,
+            harness="codex",
         )
     )
     server = FakeAppServer(resume_fails=True)
@@ -228,7 +230,7 @@ async def test_resume_failure_starts_a_new_thread_and_injects_the_handoff(
         await start(tmp_path, server=server, registry=registry, agent_id=7, handoff_doc=handoff())
     assert "thread/resume" in server.methods()
     assert "thread/start" not in server.methods()
-    record = registry.load(7)
+    record = registry.load(7, harness="codex")
     assert record is not None
     assert record.session_id == "thread-gone"
     assert record.resumes == 0
@@ -238,7 +240,7 @@ async def test_thread_id_is_written_to_the_registry(tmp_path: Path) -> None:
     registry = FileSessionRegistry(tmp_path / "registry")
     harness = await start(tmp_path, registry=registry, agent_id=11)
     try:
-        record = registry.load(11)
+        record = registry.load(11, harness="codex")
         assert record is not None
         assert record.session_id == "thread-1"
         assert record.cwd == str(tmp_path)

@@ -6,9 +6,11 @@ import subprocess
 import sys
 from pathlib import Path
 
+from base import paths
 from base.host.boundary.process import stderr_text, stdout_text
 from base.host.env.harness_binaries import with_harness_path
 from base.host.private_storage import converge_private_tree, ensure_private_file
+from base.lm.harness.registry import migrate_single_slot_records
 from cli.commands.converge.plans.checkout_warnings import hook_scan_argv, hook_scan_warnings
 from cli.commands.converge.plans.shell_rc import (
     rc_file_name,
@@ -99,6 +101,19 @@ def ensure_meiva_home_dirs(ctx: ConvergeCtx) -> None:
     marker = ctx.meiva_home / ".metadata_never_index"
     marker.touch(exist_ok=True)
     ensure_private_file(marker)
+
+
+# meiva:note
+# Bring the external-harness session records of this home to one file per (agent, harness).
+# The runner refuses to read a record still in the old single-slot layout, so this runs in the
+# same converge that starts the upgraded runner, before it. Idempotent: a converged home is a
+# no-op, and the count of migrated records is printed when there were any. A file that is not a
+# valid record fails the step naming it.
+# meiva:link base/lm/harness/docs/harness.md
+def migrate_harness_session_records(ctx: ConvergeCtx) -> None:
+    migrated = migrate_single_slot_records(paths.harness_sessions_dir(home=ctx.meiva_home))
+    if migrated:
+        print(f"harness session records: migrated {len(migrated)} to one file per harness")
 
 
 def ensure_pg_binaries_step(

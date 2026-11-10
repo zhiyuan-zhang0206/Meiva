@@ -19952,6 +19952,13 @@
             },
             "type": "array",
             "title": "Killed Shell Sessions"
+          },
+          "harnesses_not_transferred": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Harnesses Not Transferred"
           }
         },
         "additionalProperties": false,

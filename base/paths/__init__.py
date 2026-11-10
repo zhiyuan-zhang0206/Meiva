@@ -256,7 +256,7 @@ def workspace_path(home: Path, agent_id: int) -> Path:
 
 # meiva:note
 # Where an external harness session id is remembered per agent
-# (`FileSessionRegistry`'s one JSON document per agent). It outlives a process on
+# (`FileSessionRegistry`'s one JSON document per agent and harness). It outlives a process on
 # purpose: resurrect resumes the transcript by that id, so the pair has to survive
 # the restart that loses everything else. The writer creates the directory.
 # meiva:link base/lm/harness/docs/harness.md

@@ -98,7 +98,7 @@ or external <-> external) via `restart` with a config overlay:
 ### Transition Sequence
 When switching harnesses on restart:
 1. The runner calls `/prepare-harness-switch` to persist a lifecycle switch note in the timeline.
-2. The agent is dropped from active runner cache, and any prior harness CLI session files on disk (`$MEIVA_HOME/harness/sessions/{agent_id}.json`) are removed to ensure a clean start.
+2. The agent is dropped from active runner cache, and the harness session records (`$MEIVA_HOME/harness/sessions/{agent_id}.{harness}.json`) are kept, so switching back to a harness resumes the conversation it had there.
 3. If `idling`, the agent is cleanly terminated.
 4. `agents_meta.harness` is updated in the database, and the agent is resurrected on its new harness with a wake prompt referencing the restart message.
 

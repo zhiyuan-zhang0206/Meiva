@@ -285,7 +285,7 @@ def test_transfer_refuses_running_agents(
     assert not paths.workspace_path(two_runners.home_b, running_id).exists()
 
 
-def test_transfer_external_harness_agent_moves_workspace_and_session(
+def test_transfer_reports_an_external_session_whose_transcript_cannot_move(
     two_runners: TwoRunnerCluster,
     db_conn: psycopg.Connection,
 ) -> None:
@@ -296,7 +296,7 @@ def test_transfer_external_harness_agent_moves_workspace_and_session(
 
     sess_dir_a = two_runners.home_a / "harness" / "sessions"
     sess_dir_a.mkdir(parents=True, exist_ok=True)
-    sess_file_a = sess_dir_a / f"{codex_id}.json"
+    sess_file_a = sess_dir_a / f"{codex_id}.codex.json"
     sess_file_a.write_text(
         json.dumps(
             {
@@ -323,11 +323,9 @@ def test_transfer_external_harness_agent_moves_workspace_and_session(
     assert (ws_b / "solution.py").read_text(encoding="utf-8") == "print('codex transferred')"
     assert not ws_a.exists()
 
-    sess_file_b = two_runners.home_b / "harness" / "sessions" / f"{codex_id}.json"
-    assert sess_file_b.exists()
-    sess_b_data = json.loads(sess_file_b.read_text(encoding="utf-8"))
-    assert sess_b_data["cwd"] == str(ws_b)
-    assert not sess_file_a.exists()
+    assert resp.json()["harnesses_not_transferred"] == ["codex"]
+    assert not (two_runners.home_b / "harness" / "sessions" / f"{codex_id}.codex.json").exists()
+    assert sess_file_a.exists()
 
 
 def test_transfer_refuses_invalid_or_paused_targets(

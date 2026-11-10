@@ -408,6 +408,7 @@ async def _finalize_best_effort(
     role: Literal["source", "target"],
     agent_id: int,
     transfer_id: str,
+    harnesses: list[str],
 ) -> None:
     try:
         await deps.rpc.dispatch_to_machine(
@@ -415,7 +416,7 @@ async def _finalize_best_effort(
             target_machine=machine,
             kind="workspace_transfer_finalize",
             payload=WorkspaceTransferFinalizePayload(
-                agent_id=agent_id, transfer_id=transfer_id, role=role
+                agent_id=agent_id, transfer_id=transfer_id, role=role, harnesses=harnesses
             ).model_dump(mode="json"),
             timeout_s=_FINALIZE_TIMEOUT_S,
             retries=0,
@@ -640,6 +641,7 @@ async def execute_agent_transfer(
     telemetry.emit_prepared(prepared_event)
     await publish_agent_updated(deps.bus, agent_id)
 
+    carried = [carried_session.harness for carried_session in manifest.harness_transfers]
     wake_message = compose_transfer_wake_message(
         from_machine=snapshot.from_machine,
         to_machine=decision.to_machine,
@@ -680,6 +682,7 @@ async def execute_agent_transfer(
                 role="target",
                 agent_id=agent_id,
                 transfer_id=transfer_id,
+                harnesses=carried,
             ),
             _finalize_best_effort(
                 deps,
@@ -687,6 +690,7 @@ async def execute_agent_transfer(
                 role="source",
                 agent_id=agent_id,
                 transfer_id=transfer_id,
+                harnesses=carried,
             ),
         )
 
@@ -698,6 +702,7 @@ async def execute_agent_transfer(
         files_transferred=manifest.files_count,
         bytes_transferred=manifest.total_file_bytes,
         killed_shell_sessions=killed_shell_sessions,
+        harnesses_not_transferred=manifest.harnesses_not_transferred,
     )
 
 

@@ -7,7 +7,6 @@ from base.daemon.health import RouteHandler
 from base.host.boundary.fields import str_field
 from base.host.boundary.json_values import is_object_dict
 from base.host.boundary.untyped import object_of
-from base.lm.harness.registry import FileSessionRegistry
 from services.agent_runner.agent_host.dispatcher import TurnScheduler
 from services.agent_runner.agent_host.host import AgentHost
 from services.agent_runner.agent_host.lifecycle.switch_note import SwitchHistory, record_switch_note
@@ -82,9 +81,6 @@ def prepare_harness_switch_route(host: AgentHost, *, clock: Clock) -> RouteHandl
         )
 
         host.drop_agent(agent_id)
-        registry = object_of(getattr, host, "_harness_registry", None)
-        if isinstance(registry, FileSessionRegistry):
-            registry.delete(agent_id)
 
         return 200, b'{"ok":true}', "application/json"
 

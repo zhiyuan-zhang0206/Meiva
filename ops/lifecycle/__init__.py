@@ -11,7 +11,6 @@ from typing import assert_never
 
 from psycopg_pool import ConnectionPool
 
-from base import paths
 from base.agents.inbox.insert import insert_inbound_message
 from base.agents.lifecycle import release_browser_pages
 from base.agents.messages.inbound import WakeTriggerKind, validate_wake_trigger_kind
@@ -33,7 +32,6 @@ from base.db.transaction import write_transaction
 from base.events.live.announce import publish_agent_updated_sync
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
-from base.lm.harness.registry import FileSessionRegistry
 from base.lm.registry import normalize_overlay_llm_model
 from ops.agents import (
     get_agent_machine,
@@ -573,7 +571,6 @@ async def _execute_harness_transition(
     is_switch: bool,
     host: LocalAgentHost,
     catalog: ModelCatalog,
-    home: Path,
 ) -> RestartAgentResponse:
     if status not in ("idling", "terminated"):
         raise ValueError(f"Cannot restart agent in status {status!r}; must be idling or terminated")
@@ -586,10 +583,6 @@ async def _execute_harness_transition(
         message=body.message,
         host=host,
     )
-    await asyncio.to_thread(
-        FileSessionRegistry(paths.harness_sessions_dir(home=home)).delete, agent_id
-    )
-
     if status != "terminated":
         _old_status, _cmd_id, _cutoff = await asyncio.to_thread(
             force_terminate_transaction,
@@ -687,7 +680,6 @@ async def restart_agent_op(
         is_switch=is_switch,
         host=host,
         catalog=catalog,
-        home=home,
     )
 
 

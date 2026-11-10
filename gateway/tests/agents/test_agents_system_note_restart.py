@@ -516,7 +516,7 @@ class TestRestart:
 
     def test_harness_switch_codex_to_meiva(self, db_conn: psycopg.Connection) -> None:
         from base import paths
-        from base.lm.harness.registry import FileSessionRegistry
+        from base.lm.harness.registry import FileSessionRegistry, SessionRecord
 
         with gateway_test_client() as client:
             _seed_restart_harnesses(client)
@@ -533,13 +533,17 @@ class TestRestart:
 
             sessions_dir = paths.harness_sessions_dir(home=client.app.state.gateway_process.home)
             registry = FileSessionRegistry(sessions_dir)
-            registry.path(agent_id).parent.mkdir(parents=True, exist_ok=True)
-            registry.path(agent_id).write_text(
-                '{"session_id": "test", "harness": "codex", "agent_id": '
-                + str(agent_id)
-                + ', "created_at": "2026-11-01T00:00:00Z", "updated_at": "2026-11-01T00:00:00Z"}'
+            registry.save(
+                SessionRecord(
+                    agent_id=agent_id,
+                    session_id="test",
+                    cwd="/w",
+                    model="gpt-6.1-sol",
+                    created_at="2026-11-01T00:00:00Z",
+                    updated_at="2026-11-01T00:00:00Z",
+                    harness="codex",
+                )
             )
-            assert registry.path(agent_id).exists()
 
             resp2 = client.post(
                 f"/api/agents/{agent_id}/restart",
@@ -550,7 +554,7 @@ class TestRestart:
             )
             assert resp2.status_code == 200, resp2.text
             assert resp2.json() == {"status": "enqueued"}
-            assert not registry.path(agent_id).exists()
+            assert registry.load(agent_id, harness="codex") is not None
 
             with db_conn.cursor() as cur:
                 cur.execute(

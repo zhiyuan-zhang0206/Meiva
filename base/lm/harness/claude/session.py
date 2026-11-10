@@ -124,6 +124,8 @@ def _task_id(message: object) -> str:
 
 
 class ClaudeSession(BaseHarnessSession[BridgeConfig]):
+    harness = "claude_code"
+
     def __init__(
         self,
         config: BridgeConfig,

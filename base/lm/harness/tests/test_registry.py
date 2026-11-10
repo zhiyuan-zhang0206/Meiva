@@ -7,16 +7,27 @@ from pathlib import Path
 import pytest
 
 from base.lm.harness import FileSessionRegistry, SessionRecord
+from base.lm.harness.registry import migrate_single_slot_records
+
+HARNESS = "claude_code"
 
 
-def record(agent_id: int = 6984, *, session_id: str = "sess-1", resumes: int = 0) -> SessionRecord:
+def record(
+    agent_id: int = 6984,
+    *,
+    session_id: str = "sess-1",
+    resumes: int = 0,
+    harness: str = HARNESS,
+    updated_at: str = "2026-10-19T08:00:00+00:00",
+) -> SessionRecord:
     return SessionRecord(
         agent_id=agent_id,
         session_id=session_id,
         cwd="/workspace/agent",
         model="claude-sonnet-5-5",
         created_at="2026-10-19T08:00:00+00:00",
-        updated_at="2026-10-19T08:00:00+00:00",
+        updated_at=updated_at,
+        harness=harness,
         resumes=resumes,
     )
 
@@ -25,102 +36,218 @@ def test_save_and_load_roundtrip(tmp_path: Path) -> None:
     registry = FileSessionRegistry(tmp_path / "sessions")
     original = record()
     registry.save(original)
-    assert registry.load(6984) == original
+    assert registry.load(6984, harness=HARNESS) == original
 
 
 def test_save_replaces_the_previous_record_atomically(tmp_path: Path) -> None:
     registry = FileSessionRegistry(tmp_path / "sessions")
     registry.save(record())
     registry.save(record(session_id="sess-2", resumes=1))
-    assert registry.load(6984) == record(session_id="sess-2", resumes=1)
-    assert sorted(path.name for path in (tmp_path / "sessions").iterdir()) == ["6984.json"]
+    assert registry.load(6984, harness=HARNESS) == record(session_id="sess-2", resumes=1)
+    assert sorted(path.name for path in (tmp_path / "sessions").iterdir()) == [
+        "6984.claude_code.json"
+    ]
 
 
 def test_missing_record_is_none(tmp_path: Path) -> None:
-    assert FileSessionRegistry(tmp_path / "sessions").load(4242) is None
+    assert FileSessionRegistry(tmp_path / "sessions").load(4242, harness=HARNESS) is None
+
+
+def test_each_harness_keeps_its_own_record(tmp_path: Path) -> None:
+    registry = FileSessionRegistry(tmp_path / "sessions")
+    registry.save(record(session_id="claude-session", harness="claude_code"))
+    registry.save(record(session_id="codex-session", harness="codex"))
+    registry.save(record(session_id="claude-session-2", harness="claude_code"))
+
+    claude = registry.load(6984, harness="claude_code")
+    codex = registry.load(6984, harness="codex")
+    assert claude is not None and claude.session_id == "claude-session-2"
+    assert codex is not None and codex.session_id == "codex-session"
+    assert registry.load(6984, harness="antigravity") is None
+    assert registry.load(6985, harness="codex") is None
+
+
+def test_agent_ids_that_share_a_prefix_do_not_share_records(tmp_path: Path) -> None:
+    registry = FileSessionRegistry(tmp_path / "sessions")
+    registry.save(record(agent_id=1))
+    registry.save(record(agent_id=10))
+    assert [r.agent_id for r in registry.records(1)] == [1]
+    assert registry.delete(1) is True
+    assert registry.load(10, harness=HARNESS) is not None
+
+
+def test_latest_is_the_most_recently_updated_record(tmp_path: Path) -> None:
+    registry = FileSessionRegistry(tmp_path / "sessions")
+    registry.save(record(harness="codex", updated_at="2026-10-20T08:00:00+00:00"))
+    registry.save(record(harness="claude_code", updated_at="2026-10-21T08:00:00+00:00"))
+    latest = registry.latest(6984)
+    assert latest is not None and latest.harness == "claude_code"
+    assert registry.latest(1) is None
 
 
 def test_corrupt_record_is_refused(tmp_path: Path) -> None:
     registry = FileSessionRegistry(tmp_path / "sessions")
-    path = registry.path(6984)
+    path = registry.path(6984, HARNESS)
     path.parent.mkdir(parents=True)
     path.write_text("{not json", encoding="utf-8")
     with pytest.raises(ValueError, match="not valid JSON"):
-        registry.load(6984)
+        registry.load(6984, harness=HARNESS)
 
 
 def test_non_object_payload_is_refused(tmp_path: Path) -> None:
     registry = FileSessionRegistry(tmp_path / "sessions")
-    path = registry.path(6984)
+    path = registry.path(6984, HARNESS)
     path.parent.mkdir(parents=True)
     path.write_text(json.dumps([6984, "sess-1"]), encoding="utf-8")
     with pytest.raises(TypeError):
-        registry.load(6984)
+        registry.load(6984, harness=HARNESS)
 
 
-def test_unknown_field_is_refused(tmp_path: Path) -> None:
+def test_a_record_without_a_harness_is_refused(tmp_path: Path) -> None:
     registry = FileSessionRegistry(tmp_path / "sessions")
-    path = registry.path(6984)
+    path = registry.path(6984, HARNESS)
     path.parent.mkdir(parents=True)
-    path.write_text(json.dumps({"agent_id": 6984, "session_id": "x"}), encoding="utf-8")
+    document = {
+        "agent_id": 6984,
+        "session_id": "x",
+        "cwd": "/w",
+        "model": "m",
+        "created_at": "t",
+        "updated_at": "t",
+    }
+    path.write_text(json.dumps(document), encoding="utf-8")
     with pytest.raises(ValueError, match="misses"):
-        registry.load(6984)
+        registry.load(6984, harness=HARNESS)
 
 
-def test_delete_reports_whether_a_record_existed(tmp_path: Path) -> None:
+def test_delete_removes_every_harness_of_the_agent(tmp_path: Path) -> None:
     registry = FileSessionRegistry(tmp_path / "sessions")
-    registry.save(record())
+    registry.save(record(harness="claude_code"))
+    registry.save(record(harness="codex"))
     assert registry.delete(6984) is True
     assert registry.delete(6984) is False
+    assert registry.records(6984) == []
 
 
 def test_non_positive_agent_id_is_refused(tmp_path: Path) -> None:
     registry = FileSessionRegistry(tmp_path / "sessions")
     with pytest.raises(ValueError):
-        registry.path(0)
+        registry.path(0, HARNESS)
+
+
+def test_an_unusable_harness_name_is_refused(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="lowercase identifier"):
+        FileSessionRegistry(tmp_path / "sessions").path(6984, "../evil")
 
 
 # meiva:note
-# The registry outlives the field that names a harness: records written before it
-# existed must still load, and a record must never be resumed by a different
-# harness than the one that wrote it. These three tests are the contract.
+# The single-slot layout (`<agent_id>.json`) is gone from the code: one converge-time migration
+# converts it, and a file left in it makes a read refuse instead of looking like no session.
 # meiva:link base/lm/harness/docs/harness.md
-def legacy_document() -> dict[str, object]:
-    return {
-        "agent_id": 6984,
-        "session_id": "sess-legacy",
+def single_slot(root: Path, agent_id: int = 6984, **overrides: object) -> Path:
+    document: dict[str, object] = {
+        "agent_id": agent_id,
+        "session_id": "sess-old",
         "cwd": "/workspace/agent",
         "model": "claude-sonnet-5-5",
         "created_at": "2026-10-19T08:00:00+00:00",
         "updated_at": "2026-10-19T08:00:00+00:00",
-        "resumes": 0,
+        "resumes": 2,
+        "harness": "codex",
     }
+    document.update(overrides)
+    root.mkdir(parents=True, exist_ok=True)
+    path = root / f"{agent_id}.json"
+    path.write_text(json.dumps(document), encoding="utf-8")
+    return path
 
 
-def test_a_record_without_a_harness_reads_as_the_legacy_default(tmp_path: Path) -> None:
-    registry = FileSessionRegistry(tmp_path / "sessions")
-    path = registry.path(6984)
-    path.parent.mkdir(parents=True)
-    path.write_text(json.dumps(legacy_document()), encoding="utf-8")
-    loaded = registry.load(6984)
+def test_the_migration_moves_a_single_slot_record_to_its_harness(tmp_path: Path) -> None:
+    root = tmp_path / "sessions"
+    old = single_slot(root)
+
+    assert migrate_single_slot_records(root) == [old]
+
+    assert not old.exists()
+    loaded = FileSessionRegistry(root).load(6984, harness="codex")
     assert loaded is not None
-    assert loaded.harness == "meiva"
-    assert loaded.session_id == "sess-legacy"
+    assert (loaded.session_id, loaded.resumes) == ("sess-old", 2)
 
 
-def test_a_saved_record_names_its_harness(tmp_path: Path) -> None:
-    registry = FileSessionRegistry(tmp_path / "sessions")
-    registry.save(replace(record(), harness="codex"))
-    stored = json.loads(registry.path(6984).read_text(encoding="utf-8"))
-    assert stored["harness"] == "codex"
-    loaded = registry.load(6984)
-    assert loaded is not None
-    assert loaded.harness == "codex"
+def test_the_migration_is_idempotent(tmp_path: Path) -> None:
+    root = tmp_path / "sessions"
+    single_slot(root)
+    single_slot(root, agent_id=7001, harness="claude_code")
+    assert len(migrate_single_slot_records(root)) == 2
+    assert migrate_single_slot_records(root) == []
+    assert sorted(p.name for p in root.iterdir()) == ["6984.codex.json", "7001.claude_code.json"]
 
 
-def test_a_record_from_another_harness_is_refused(tmp_path: Path) -> None:
-    registry = FileSessionRegistry(tmp_path / "sessions")
-    registry.save(replace(record(), harness="codex"))
-    with pytest.raises(ValueError, match="refusing to resume across harnesses"):
-        registry.load(6984, harness="claude")
-    assert registry.load(6984, harness="codex") is not None
+def test_the_migration_names_a_record_without_a_harness_the_builtin_one(tmp_path: Path) -> None:
+    root = tmp_path / "sessions"
+    path = single_slot(root)
+    document = json.loads(path.read_text(encoding="utf-8"))
+    del document["harness"]
+    path.write_text(json.dumps(document), encoding="utf-8")
+
+    _ = migrate_single_slot_records(root)
+
+    assert FileSessionRegistry(root).load(6984, harness="meiva") is not None
+
+
+def test_a_run_cut_short_between_write_and_removal_is_finished_by_the_next(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "sessions"
+    old = single_slot(root)
+    FileSessionRegistry(root).save(replace(record(harness="codex"), session_id="sess-old"))
+    assert old.exists()
+
+    assert migrate_single_slot_records(root) == [old]
+    assert not old.exists()
+    assert len(list(root.iterdir())) == 1
+
+
+def test_the_migration_keeps_a_new_layout_record_over_an_old_one(tmp_path: Path) -> None:
+    root = tmp_path / "sessions"
+    single_slot(root)
+    FileSessionRegistry(root).save(replace(record(harness="codex"), session_id="sess-newer"))
+
+    _ = migrate_single_slot_records(root)
+
+    loaded = FileSessionRegistry(root).load(6984, harness="codex")
+    assert loaded is not None and loaded.session_id == "sess-newer"
+
+
+def test_the_migration_refuses_a_file_it_cannot_read_and_names_it(tmp_path: Path) -> None:
+    root = tmp_path / "sessions"
+    _ = single_slot(root, agent_id=1)
+    bad = root / "2.json"
+    bad.write_text("{not json", encoding="utf-8")
+
+    with pytest.raises(ValueError, match=r"2\.json"):
+        migrate_single_slot_records(root)
+
+    assert bad.exists()
+
+
+def test_the_migration_refuses_a_record_naming_another_agent(tmp_path: Path) -> None:
+    root = tmp_path / "sessions"
+    single_slot(root, agent_id=5)
+    (root / "5.json").write_text(
+        (root / "5.json").read_text(encoding="utf-8").replace('"agent_id": 5', '"agent_id": 6'),
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="names agent 6"):
+        migrate_single_slot_records(root)
+
+
+def test_the_migration_of_a_missing_directory_is_a_no_op(tmp_path: Path) -> None:
+    assert migrate_single_slot_records(tmp_path / "absent") == []
+
+
+def test_an_unmigrated_single_slot_file_makes_a_read_refuse(tmp_path: Path) -> None:
+    root = tmp_path / "sessions"
+    single_slot(root)
+    with pytest.raises(ValueError, match="meiva converge"):
+        FileSessionRegistry(root).load(6984, harness="codex")
