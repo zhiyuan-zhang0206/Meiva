@@ -235,9 +235,13 @@ def test_memory_init_returns_a_clean_error_for_the_wrong_branch_guard(
     _install_memory_plugin()
     command_runtime.machine.set(role="agent-runner", name="test-runner")
     _make_dirty_memory_repo(paths.vault_dir(home=paths.meiva_home()), "main")
-    assert (
-        memory.cmd_memory_init(machine=command_runtime.machine, facts=_facts(command_runtime)) == 1
-    )
+    facts = _facts(command_runtime)
+    # meiva:note
+    # Resolve lazy configuration before observing the command's output. Setup
+    # warnings may reach sinks owned by an earlier embedded CLI invocation.
+    # This assertion covers the branch refusal emitted by cmd_memory_init.
+    _ = capsys.readouterr()
+    assert memory.cmd_memory_init(machine=command_runtime.machine, facts=facts) == 1
 
     stderr = capsys.readouterr().err
     assert (
