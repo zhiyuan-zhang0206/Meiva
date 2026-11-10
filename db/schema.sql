@@ -267,6 +267,15 @@ CREATE TABLE IF NOT EXISTS agent_user_messages (
 );
 CREATE INDEX IF NOT EXISTS agent_user_messages_pending ON agent_user_messages (agent_id, id)
     WHERE content IS NOT NULL AND read_at IS NULL;
+CREATE INDEX IF NOT EXISTS agent_user_messages_by_agent ON agent_user_messages (agent_id, id)
+    WHERE content IS NOT NULL;
+-- read_at and agent_user_messages_pending are no longer read or written (the seen cursor below
+-- replaced per-record read state); a later migration drops them.
+CREATE TABLE IF NOT EXISTS agent_user_seen (
+    agent_id BIGINT PRIMARY KEY REFERENCES agents(id) ON DELETE CASCADE,
+    seen_id BIGINT NOT NULL CHECK (seen_id >= 0)
+);
+COMMENT ON TABLE agent_user_seen IS 'The user has seen deliveries (agent_user_messages.id) up to seen_id; no row means none.';
 
 CREATE TABLE agent_notices (
     id              BIGSERIAL PRIMARY KEY,

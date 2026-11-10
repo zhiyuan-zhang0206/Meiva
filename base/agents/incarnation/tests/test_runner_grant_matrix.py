@@ -199,6 +199,12 @@ def test_runner_appends_visible_deliveries_without_rewriting_history(runner_db: 
             )
         with pytest.raises(psycopg.errors.InsufficientPrivilege):
             conn.execute("DELETE FROM agent_user_messages WHERE agent_id=%s", (agent_id,))
+        for statement in (
+            "INSERT INTO agent_user_seen (agent_id, seen_id) VALUES (%s, 1)",
+            "UPDATE agent_user_seen SET seen_id=2 WHERE agent_id=%s",
+        ):
+            with pytest.raises(psycopg.errors.InsufficientPrivilege):
+                conn.execute(statement, (agent_id,))
 
 
 def test_runner_reads_but_cannot_write_deployment_state(runner_db: str) -> None:

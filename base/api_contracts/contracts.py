@@ -237,9 +237,9 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
         Idempotency.AT_LEAST_ONCE_WITH_KEY,
         note="immutable publication keyed by agent and authenticated principal; changed intent conflicts",
     ),
-    ("POST", "/api/keyed/v1/agents/{agent_id}/user-messages/read"): RouteContract(
+    ("POST", "/api/keyed/v1/agents/{agent_id}/user-messages/seen"): RouteContract(
         Idempotency.AT_LEAST_ONCE_WITH_KEY,
-        note="marks the agent's unread publications up to an id read; the count and its receipt commit together",
+        note="advances the agent's monotonic seen cursor; the cursor and its receipt commit together",
     ),
     ("GET", "/api/notices"): RouteContract(
         note="unified inbox feed — open + awaiting + resolved page (R4 layer 2)"

@@ -460,8 +460,8 @@ export type FleetGraph = Omit<WireFleetGraph, "nodes" | "edges"> & {
 };
 
 export type {
-  ReadUserMessages,
-  ReadUserMessagesResult,
+  MarkUserMessagesSeen,
+  UserMessagesSeen,
   UserMessage,
   UserMessageFeed,
 } from "./types-user-delivery";

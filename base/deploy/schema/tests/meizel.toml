@@ -1,6 +1,7 @@
 exports = ["migration_support.py", "schema_gate.py"]
 
 [uses]
+"test_agent_user_seen_migration.py" = ["migration_support.py"]
 "test_checkpoints_compact_boundary_index.py" = ["migration_support.py"]
 "test_impersonation_drop_upgrade.py" = ["migration_support.py"]
 "test_user_delivery_upgrade.py" = ["migration_support.py"]

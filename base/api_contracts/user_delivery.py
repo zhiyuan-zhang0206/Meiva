@@ -50,17 +50,17 @@ class UserMessage(BaseModel):
     mode: UserDeliveryMode
     source_key: str
     created_at: datetime
-    read_at: datetime | None
 
 
-class ReadMessages(BaseModel):
+class MarkSeen(BaseModel):
     model_config = ConfigDict(extra="forbid")
     up_to_id: int = Field(ge=1)
 
 
-class ReadMessagesResult(BaseModel):
+class SeenResult(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    read_count: int
+    seen_id: int
+    advanced: bool
 
 
 class AskMessage(BaseModel):

@@ -1,8 +1,8 @@
 import type {
-  ReadUserMessages,
-  ReadUserMessagesResult,
+  MarkUserMessagesSeen,
   SuggestionFeedback,
   UserMessageFeed,
+  UserMessagesSeen,
 } from "../../contracts/types";
 import type { HarnessAvailability } from "../../contracts/models";
 import type {
@@ -312,8 +312,8 @@ export function createControlApi(http: Http) {
     recordSuggestionFeedback: (agentId: number, body: SuggestionFeedback, key: string): Promise<{ saved: boolean }> =>
       f(`/api/agents/${agentId}/reply-suggestion/feedback`, keyedJson(body, key)).then(ok<{ saved: boolean }>),
 
-    readUserMessages: (agentId: number, body: ReadUserMessages, key: string): Promise<ReadUserMessagesResult> =>
-      f(`/api/keyed/v1/agents/${agentId}/user-messages/read`, keyedJson(body, key)).then(ok<ReadUserMessagesResult>),
+    markUserMessagesSeen: (agentId: number, body: MarkUserMessagesSeen, key: string): Promise<UserMessagesSeen> =>
+      f(`/api/keyed/v1/agents/${agentId}/user-messages/seen`, keyedJson(body, key)).then(ok<UserMessagesSeen>),
 
     resolveNotice: (
       agentId: number,

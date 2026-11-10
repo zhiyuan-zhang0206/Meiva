@@ -146,5 +146,5 @@ async def test_harness_reply_is_published_once_whether_or_not_the_turn_was_cut_o
     [chat] = [item for item in items if item.kind == "agent_chat"]
     assert chat.payload == "Half a reply" and chat.activity_pending is False
     assert db_conn.execute(
-        "SELECT source_key, content, read_at FROM agent_user_messages WHERE agent_id=%s", (aid,)
-    ).fetchall() == [(f"harness:{chat.item_id}", "Half a reply", None)]
+        "SELECT source_key, content FROM agent_user_messages WHERE agent_id=%s", (aid,)
+    ).fetchall() == [(f"harness:{chat.item_id}", "Half a reply")]

@@ -320,19 +320,10 @@ export function AgentHoverCard({
             </p>
           ) : null}
 
-          {agent.awaiting_response_count > 0 ? (
+          {attention !== null ? (
             <p className={cn("items-center gap-1.5 text-[10.5px]", FLEX)}>
               <AttentionMark question={attention === "question"} />
-              <span>
-                {t("hoverAwaitingReply", { count: agent.awaiting_response_count })}
-              </span>
-            </p>
-          ) : null}
-
-          {attention === "unread" ? (
-            <p className={cn("items-center gap-1.5 text-[10.5px]", FLEX)}>
-              <AttentionMark question={false} />
-              <span>{t("hoverUnread", { count: agent.unread_user_message_count })}</span>
+              <span>{t(attention === "question" ? "statusPendingQuestion" : "statusUnread")}</span>
             </p>
           ) : null}
 

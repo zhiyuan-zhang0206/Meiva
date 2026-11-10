@@ -65,7 +65,7 @@ class AgentCard(AgentLineage):
     awaiting_response_count: int
     has_pending_question: bool
     highest_notice_priority: Priority | None
-    unread_user_message_count: int = 0
+    has_unread_user_messages: bool = False
     unread_notice_count: int
     heartbeat_paused_until: datetime | None
     # meiva:note
@@ -103,7 +103,7 @@ _CARD_COLUMNS = """
     attention.awaiting_response_count, attention.has_pending_question,
     attention.highest_notice_priority,
     fyi.unread_notice_count,
-    deliveries.unread_user_message_count
+    deliveries.has_unread_user_messages
 """
 _CARD_FROM = """
     FROM selected s
@@ -122,9 +122,11 @@ _CARD_FROM = """
         WHERE agent_id = a.id AND require_response AND resolved_at IS NULL
     ) attention ON true
     LEFT JOIN LATERAL (
-        SELECT count(*) AS unread_user_message_count
-        FROM agent_user_messages
-        WHERE agent_id=a.id AND content IS NOT NULL AND read_at IS NULL
+        SELECT EXISTS (
+            SELECT 1 FROM agent_user_messages m
+            WHERE m.agent_id=a.id AND m.content IS NOT NULL
+              AND m.id > COALESCE((SELECT seen_id FROM agent_user_seen WHERE agent_id=a.id), 0)
+        ) AS has_unread_user_messages
     ) deliveries ON true
     LEFT JOIN LATERAL (
         SELECT count(*) AS unread_notice_count FROM agent_notices

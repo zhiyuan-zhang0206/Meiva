@@ -192,6 +192,7 @@ function follows(first: Element, second: Element): boolean {
 it.each([false, true])("leaves no bottom region, and no gap, when there is no question (mobile=%s)", (mobile) => {
   qc.setQueryData(["user-messages", 7], {
     mode: "sdk",
+    seen_id: 0,
     items: [
       {
         id: 1,
@@ -201,7 +202,6 @@ it.each([false, true])("leaves no bottom region, and no gap, when there is no qu
         content: "Published summary",
         suggestions: null,
         created_at: "2026-11-07T00:00:00Z",
-        read_at: null,
       },
     ],
   });

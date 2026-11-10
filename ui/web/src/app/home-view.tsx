@@ -1,6 +1,6 @@
 "use client";
 
-import { useReadingAgent } from "@/lib/context/use-reading-agent";
+import { useSeenPosition } from "@/lib/context/use-seen-position";
 import { useUserMessages, withUserMessages } from "@/lib/context/use-user-messages";
 import { useTranslations } from "next-intl";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -455,12 +455,19 @@ function HomeContent({
   const pendingQuestions = useMemo(() => questions.awaiting.filter((item) => item.agent_id === activeId)
     .sort((a, b) => PRIORITY_RANK[a.priority] - PRIORITY_RANK[b.priority] || a.created_at.localeCompare(b.created_at)), [questions.awaiting, activeId]);
   const displayedItems = useMemo(() => withUserMessages(items, publications.data?.items ?? []), [items, publications.data]);
-  const [timelineAtBottom, setTimelineAtBottom] = useState(false);
-  useReadingAgent({
+  const loadOlderForReveal = useCallback(() => loadOlder("background"), [loadOlder]);
+  const reveal = useSeenPosition({
     agentId: activeId,
-    atLatest: timelineAtBottom && !isLoading,
-    messages: publications.data?.items ?? NO_PUBLICATIONS,
-    fetchedAt: publications.dataUpdatedAt,
+    feed: {
+      seenId: publications.data?.seen_id,
+      messages: publications.data?.items ?? NO_PUBLICATIONS,
+      updatedAt: publications.dataUpdatedAt,
+    },
+    items: displayedItems,
+    timelineLoading: isLoading,
+    hasMoreOlder,
+    loadingOlder,
+    loadOlder: loadOlderForReveal,
   });
   const replySuggestion = useReplySuggestion({
     agentId: activeId,
@@ -502,7 +509,7 @@ function HomeContent({
             loading={isLoading || (agentsLoading && activeId === null)}
             loadingNew={loadingNewer && items.length > 0}
             maxWidthCss={contentColumnMaxWidth}
-            onAtBottomChange={setTimelineAtBottom}
+            reveal={reveal}
           />
           <HeaderBar
             label={activeLabel}

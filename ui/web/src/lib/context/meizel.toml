@@ -1,8 +1,8 @@
-exports = ["category-colors.ts", "context-panel-open.ts", "reference-url.ts", "use-reading-agent.ts", "use-to-user.ts", "use-user-messages.ts", "workspace-file-store.ts"]
+exports = ["category-colors.ts", "context-panel-open.ts", "reference-url.ts", "use-seen-position.ts", "use-to-user.ts", "use-user-messages.ts", "workspace-file-store.ts"]
 
 [uses]
 "context-panel-open.test.tsx" = ["context-panel-open.ts"]
-"use-reading-agent.test.tsx" = ["use-reading-agent.ts"]
+"use-seen-position.test.tsx" = ["use-seen-position.ts"]
 "use-user-messages.test.ts" = ["use-user-messages.ts"]
 "workspace-file-store.test.ts" = ["workspace-file-store.ts"]
 

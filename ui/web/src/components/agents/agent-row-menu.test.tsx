@@ -74,7 +74,7 @@ function ag(agent_id: number, overrides: Partial<AgentRowType> = {}): AgentRowTy
     liveness_state: "online",
     awaiting_response_count: 0, has_pending_question: false, highest_notice_priority: null,
     unread_notice_count: 0,
-    unread_user_message_count: 0,
+    has_unread_user_messages: false,
     heartbeat_paused_until: null,
     ...overrides,
   };
@@ -104,20 +104,20 @@ it("keeps time off the row even when an older client saved a time display mode",
 });
 
 describe("AgentRow response indicators", () => {
-  it("puts the blue reply dot at the end of the row by default", () => {
+  it("puts the orange unread dot at the end of the row by default", () => {
     const { getByRole } = render(
-      <AgentRow {...baseProps} agent={ag(1, { awaiting_response_count: 1 })} depth={0} ancestorsIsLast={[]} />,
+      <AgentRow {...baseProps} agent={ag(1, { has_unread_user_messages: true })} depth={0} ancestorsIsLast={[]} />,
     );
-    const indicator = getByRole("img", { name: "Awaiting a reply" });
+    const indicator = getByRole("img", { name: "Unread update from the agent" });
     expect(indicator.parentElement?.lastElementChild).toBe(indicator);
     expect(indicator.querySelector(".rounded-full")).toBeTruthy();
   });
 
-  it("uses the question icon ahead of a regular reply and keeps the working title", () => {
+  it("uses the question icon ahead of unread and keeps the working title", () => {
     const { container, getByRole, queryByRole } = render(
       <AgentRow
         {...baseProps}
-        agent={ag(1, { status: "running", awaiting_response_count: 2, has_pending_question: true })}
+        agent={ag(1, { status: "running", has_unread_user_messages: true, has_pending_question: true })}
         label="A long agent title that has to truncate before the response icon"
         pending="compacting"
         depth={0}
@@ -128,7 +128,7 @@ describe("AgentRow response indicators", () => {
     expect(indicator.parentElement?.lastElementChild).toBe(indicator);
     expect(indicator.classList.contains("shrink-0")).toBe(true);
     expect(indicator.querySelector("svg")).toBeTruthy();
-    expect(queryByRole("img", { name: "Awaiting a reply" })).toBeNull();
+    expect(queryByRole("img", { name: "Unread update from the agent" })).toBeNull();
     expect(container.querySelector(".agent-title-working.truncate")).toBeTruthy();
     expect(container.querySelector(".right-9 svg")).toBeTruthy();
   });

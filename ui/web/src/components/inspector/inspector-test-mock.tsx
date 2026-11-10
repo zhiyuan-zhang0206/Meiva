@@ -284,7 +284,7 @@ export function rosterFixture(overrides: Partial<WireAgentCard> = {}): AgentRost
       has_pending_question: false,
       highest_notice_priority: null,
       unread_notice_count: 0,
-      unread_user_message_count: 0,
+      has_unread_user_messages: false,
       heartbeat_paused_until: null,
       ...overrides,
     })],

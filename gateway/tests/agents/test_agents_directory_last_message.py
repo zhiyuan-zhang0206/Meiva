@@ -29,7 +29,7 @@ _DIRECTORY_CARD_KEYS = frozenset(
         "has_pending_question",
         "highest_notice_priority",
         "unread_notice_count",
-        "unread_user_message_count",
+        "has_unread_user_messages",
         "heartbeat_paused_until",
         "observation",
         "availability",

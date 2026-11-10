@@ -15,7 +15,7 @@ from agent.graph.tests.test_llm_helpers import make_runtime
 from agent.state import AgentState
 from base.agents.context import HostedTurnResources
 from base.agents.messages.kwargs import read_meiva_kwargs
-from base.agents.to_user.delivery.store import publish
+from base.agents.to_user.delivery.store import advance_seen, publish
 from base.api_contracts.user_delivery import PublishMessage, UserDeliveryMode
 from base.clock.tests.seeded_rng import seeded_rng
 from base.db import create_agent
@@ -146,3 +146,35 @@ async def test_compacted_context_restores_unread_and_unanswered_deliveries(
     assert "Approve the smaller scope?" in restored[-1].content
     assert "Open Ask" in restored[-1].content
     assert len(compacted) == 1
+
+
+async def test_only_deliveries_past_the_seen_cursor_are_restored_to_the_agent(
+    db_conn: psycopg.Connection,
+    database_gate: ProcessDbGate,
+    hosted_resources: HostedTurnResources,
+) -> None:
+    agent_id = create_agent(db_conn)
+    records = [
+        publish(
+            db_conn,
+            agent_id,
+            key,
+            PublishMessage(content=f"Update {key}", suggestions=[]),
+            mode=UserDeliveryMode.SDK,
+            created_at=datetime.now(UTC),
+        )
+        for key in ("first", "second")
+    ]
+    db_conn.commit()
+    runtime = make_runtime(
+        resources=hosted_resources, database_gate=database_gate, pins={"user_delivery_mode": "sdk"}
+    )
+    both = await with_pending_deliveries(runtime.context, agent_id, [])
+    assert "Update first" in both[-1].content and "Update second" in both[-1].content
+    advance_seen(db_conn, agent_id, records[0].id)
+    db_conn.commit()
+    rest = await with_pending_deliveries(runtime.context, agent_id, [])
+    assert "Update first" not in rest[-1].content and "Update second" in rest[-1].content
+    advance_seen(db_conn, agent_id, records[1].id)
+    db_conn.commit()
+    assert await with_pending_deliveries(runtime.context, agent_id, []) == []

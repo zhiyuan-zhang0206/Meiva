@@ -6,7 +6,7 @@ import { withUserMessages } from "./use-user-messages";
 const publication: UserMessage = {
   id: 1, agent_id: 7, mode: "prefix", source_key: "assistant:message-1:0.0",
   content: "Ready", suggestions: [],
-  created_at: "2026-11-06T00:00:00Z", read_at: null,
+  created_at: "2026-11-06T00:00:00Z",
 };
 
 it.each(["naive", "prefix", "sdk"] as const)("keeps %s routing across start, chunks and durable publication", (mode) => {
@@ -25,7 +25,6 @@ it("recovers SDK publications independently of compacted conversation history", 
   const merged = withUserMessages([], [{ ...publication, mode: "sdk", source_key: "sdk:publication-1" }]);
   expect(merged).toHaveLength(1);
   expect(merged[0].payload).toBe("Ready");
-  expect(merged[0].userDelivery?.read_at).toBeNull();
 });
 
 it.each(["naive", "prefix"] as const)("keeps %s history pagination owned by the timeline", (mode) => {
@@ -36,7 +35,6 @@ it.each(["naive", "prefix"] as const)("keeps %s history pagination owned by the 
   const loaded = withUserMessages([...older, ...recent], [record]);
   expect(loaded.map((item) => item.item_id)).toEqual(["2.0", "9.0"]);
   expect(loaded[0].userDelivery).toEqual(record);
-  expect(record.read_at).toBeNull();
 });
 
 it("uses persisted source identity after message indexes change through compaction", () => {

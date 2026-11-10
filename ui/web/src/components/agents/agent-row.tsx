@@ -91,7 +91,6 @@ export interface AgentRowProps {
 
 const ATTENTION_LABEL = {
   question: "statusPendingQuestion",
-  awaiting: "statusAwaitingReply",
   unread: "statusUnread",
 } as const satisfies Record<AgentAttention, string>;
 
@@ -184,8 +183,7 @@ export function AgentRow({
       ? STATUS_DOT[agent.status]
       : null;
   // meiva:note
-  // One slot, one indicator: the question mark outranks the orange dot, and the dot says
-  // "unread" or "awaiting a reply" by name only.
+  // One slot, one indicator: the question mark outranks the orange unread dot.
   // meiva:link ui/web/src/docs/frontend-components/agent-sidebar.md
   const attention = useAgentAttention(agent);
   const replyLabel = attention === null ? null : t(ATTENTION_LABEL[attention]);

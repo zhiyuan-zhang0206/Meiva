@@ -39,127 +39,136 @@ def publish_one(client: TestClient, aid: int, key: str) -> UserMessage:
     return UserMessage.model_validate(result.json())
 
 
-def test_read_is_separate_from_ask_and_marks_only_through_the_given_id(
+def seen_path(aid: int) -> str:
+    return f"/api/keyed/v1/agents/{aid}/user-messages/seen"
+
+
+def test_seen_moves_one_cursor_and_the_feed_reports_what_lies_past_it(
     db_conn: psycopg.Connection,
 ) -> None:
     aid = sdk_agent(db_conn)
     path = f"/api/agents/{aid}/user-messages"
-    read = f"/api/keyed/v1/agents/{aid}/user-messages/read"
     with gateway_test_client() as client:
         first, second, third = (publish_one(client, aid, key) for key in ("a", "b", "c"))
-        marked = client.post(read, json={"up_to_id": second.id}, headers=headers("read-1"))
+        assert client.get(path).json()["seen_id"] == 0
+        marked = client.post(seen_path(aid), json={"up_to_id": second.id}, headers=headers("s1"))
         assert marked.status_code == 200, marked.text
-        assert marked.json() == {"read_count": 2}
-        pending = client.get(path + "?pending=true").json()["items"]
-        assert [item["id"] for item in pending] == [third.id]
+        assert marked.json() == {"seen_id": second.id, "advanced": True}
+        feed = UserMessageFeed.model_validate(client.get(path).json())
+        assert feed.seen_id == second.id and len(feed.items) == 3
+        pending = client.get(path + "?pending=true").json()
+        assert [item["id"] for item in pending["items"]] == [third.id]
+        assert pending["seen_id"] == second.id
         assert first.id < second.id < third.id
-        assert (
-            client.post(read, json={"action": "read"}, headers=headers("old-shape")).status_code
-            == 422
-        )
-        assert len(UserMessageFeed.model_validate(client.get(path).json()).items) == 3
+        assert "read_at" not in feed.items[0].model_dump()
+        old_shape = client.post(seen_path(aid), json={"action": "read"}, headers=headers("old"))
+        assert old_shape.status_code == 422
     assert db_conn.execute("SELECT count(*) FROM notification_events").fetchone() == (0,)
     assert db_conn.execute(
         "SELECT count(*) FROM inbound_messages WHERE agent_id=%s", (aid,)
     ).fetchone() == (0,)
 
 
-def test_read_is_idempotent_keeps_first_read_time_and_replays_its_receipt(
-    db_conn: psycopg.Connection,
-) -> None:
+def test_seen_cursor_never_moves_back_and_is_idempotent(db_conn: psycopg.Connection) -> None:
     aid = sdk_agent(db_conn)
-    read = f"/api/keyed/v1/agents/{aid}/user-messages/read"
     with gateway_test_client() as client:
-        record = publish_one(client, aid, "a")
-        body = {"up_to_id": record.id}
-        first = client.post(read, json=body, headers=headers("same"))
-        stamp = db_conn.execute(
-            "SELECT read_at FROM agent_user_messages WHERE id=%s", (record.id,)
-        ).fetchone()
-        replay = client.post(read, json=body, headers=headers("same"))
-        again = client.post(read, json=body, headers=headers("different-key"))
-        assert first.json() == replay.json() == {"read_count": 1}
-        assert again.json() == {"read_count": 0}
-        assert (
-            client.post(read, json={"up_to_id": record.id + 1}, headers=headers("same")).status_code
-            == 409
-        )
-    assert (
-        db_conn.execute(
-            "SELECT read_at FROM agent_user_messages WHERE id=%s", (record.id,)
-        ).fetchone()
-        == stamp
-    )
+        first, second = publish_one(client, aid, "a"), publish_one(client, aid, "b")
+        body = {"up_to_id": second.id}
+        advanced = client.post(seen_path(aid), json=body, headers=headers("same"))
+        replay = client.post(seen_path(aid), json=body, headers=headers("same"))
+        again = client.post(seen_path(aid), json=body, headers=headers("other-key"))
+        lower = client.post(seen_path(aid), json={"up_to_id": first.id}, headers=headers("lower"))
+        assert advanced.json() == replay.json() == {"seen_id": second.id, "advanced": True}
+        assert again.json() == {"seen_id": second.id, "advanced": False}
+        assert lower.json() == {"seen_id": second.id, "advanced": False}
+        changed = client.post(seen_path(aid), json={"up_to_id": first.id}, headers=headers("same"))
+        assert changed.status_code == 409
+    assert db_conn.execute(
+        "SELECT seen_id FROM agent_user_seen WHERE agent_id=%s", (aid,)
+    ).fetchone() == (second.id,)
 
 
-def test_read_touches_only_its_own_agent_and_rejects_unknown_agents(
+def test_seen_touches_only_its_own_agent_and_is_bounded_by_its_deliveries(
     db_conn: psycopg.Connection,
 ) -> None:
     mine, other = sdk_agent(db_conn), sdk_agent(db_conn)
     with gateway_test_client() as client:
         record = publish_one(client, mine, "a")
         foreign = publish_one(client, other, "a")
-        marked = client.post(
-            f"/api/keyed/v1/agents/{mine}/user-messages/read",
-            json={"up_to_id": max(record.id, foreign.id)},
-            headers=headers("mine"),
-        )
-        assert marked.json() == {"read_count": 1}
+        top = max(record.id, foreign.id)
+        beyond = client.post(seen_path(mine), json={"up_to_id": top + 1}, headers=headers("beyond"))
+        assert beyond.status_code == 422
+        marked = client.post(seen_path(mine), json={"up_to_id": record.id}, headers=headers("mine"))
+        assert marked.json() == {"seen_id": record.id, "advanced": True}
         assert client.get(f"/api/agents/{other}/user-messages?pending=true").json()["items"] == [
             foreign.model_dump(mode="json")
         ]
         missing = client.post(
-            f"/api/keyed/v1/agents/{other + 1000}/user-messages/read",
-            json={"up_to_id": 1},
-            headers=headers("missing"),
+            seen_path(other + 1000), json={"up_to_id": 1}, headers=headers("missing")
         )
         assert missing.status_code == 404
+    assert db_conn.execute("SELECT agent_id FROM agent_user_seen").fetchall() == [(mine,)]
 
 
-def test_read_announces_agent_updated_only_when_something_changed(
+def test_seen_announces_agent_updated_only_when_the_cursor_moved(
     db_conn: psycopg.Connection, event_bus: EventBus
 ) -> None:
     aid = sdk_agent(db_conn)
-    read = f"/api/keyed/v1/agents/{aid}/user-messages/read"
     with gateway_test_client() as client:
         client.app.state.bus = event_bus
         record = publish_one(client, aid, "a")
         with recording_live_events(event_bus) as live:
-            assert (
-                client.post(read, json={"up_to_id": record.id}, headers=headers("one")).json()[
-                    "read_count"
-                ]
-                == 1
+            moved = client.post(
+                seen_path(aid), json={"up_to_id": record.id}, headers=headers("one")
             )
+            assert moved.json()["advanced"] is True
             announced = live.settle("agent_updated", 1)
             assert announced[-1].payload["agent_id"] == aid
-            assert (
-                client.post(read, json={"up_to_id": record.id}, headers=headers("two")).json()[
-                    "read_count"
-                ]
-                == 0
+            still = client.post(
+                seen_path(aid), json={"up_to_id": record.id}, headers=headers("two")
             )
+            assert still.json()["advanced"] is False
             live.quiet()
             assert len(live.events("agent_updated")) == 1
 
 
 @pytest.mark.parametrize("body", [{"up_to_id": 0}, {"up_to_id": -3}, {}, {"up_to_id": "x"}])
-def test_read_rejects_invalid_bodies(db_conn: psycopg.Connection, body: dict[str, object]) -> None:
+def test_seen_rejects_invalid_bodies(db_conn: psycopg.Connection, body: dict[str, object]) -> None:
     aid = sdk_agent(db_conn)
     with gateway_test_client() as client:
-        response = client.post(
-            f"/api/keyed/v1/agents/{aid}/user-messages/read", json=body, headers=headers("bad")
-        )
+        response = client.post(seen_path(aid), json=body, headers=headers("bad"))
         assert response.status_code == 422
 
 
-def test_read_requires_an_idempotency_key(db_conn: psycopg.Connection) -> None:
+def test_seen_requires_an_idempotency_key(db_conn: psycopg.Connection) -> None:
     aid = sdk_agent(db_conn)
     with gateway_test_client() as client:
-        response = client.post(
-            f"/api/keyed/v1/agents/{aid}/user-messages/read", json={"up_to_id": 1}
+        assert client.post(seen_path(aid), json={"up_to_id": 1}).status_code == 422
+
+
+def test_roster_flags_unread_only_for_deliveries_past_the_cursor(
+    db_conn: psycopg.Connection,
+) -> None:
+    aid = sdk_agent(db_conn)
+    with gateway_test_client() as client:
+        silent = client.post(
+            f"/api/agents/{aid}/user-messages", json={"content": None}, headers=headers("silent")
         )
-        assert response.status_code == 422
+        assert silent.status_code == 201
+
+        def unread() -> bool:
+            card = next(
+                row for row in client.get("/api/agents").json()["agents"] if row["agent_id"] == aid
+            )
+            return bool(card["has_unread_user_messages"])
+
+        assert unread() is False
+        record = publish_one(client, aid, "a")
+        assert unread() is True
+        client.post(seen_path(aid), json={"up_to_id": record.id}, headers=headers("seen"))
+        assert unread() is False
+        publish_one(client, aid, "b")
+        assert unread() is True
 
 
 def test_publish_retry_is_atomic_and_rejects_changed_content(db_conn: psycopg.Connection) -> None:
