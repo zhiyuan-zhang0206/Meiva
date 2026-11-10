@@ -68,8 +68,9 @@ Two distinct clocks govern the loop:
    ledger *before* `restart` ensures the resumed turn sees entry is complete and
    proceeds directly without repeating the announcement.
    - **Attached harnesses**: In an attached provider harness (Claude Code,
-     Codex, Antigravity) where `meiva.self.restart` is unavailable or refused,
-     skip `restart` on both entry and exit, record the harness boundary in the
+     Codex, Antigravity) the exec ceiling does not govern the loop, and
+     `meiva.self.restart` there applies only after the current turn ends. Skip
+     `restart` on both entry and exit, record the harness boundary in the
      ledger, and enforce the same hot/cold split by discipline alone.
 4. **Establish the live feedback rig first**: When the primary surface is
    non-text, your first operational move is a minimal tracer bullet that stands

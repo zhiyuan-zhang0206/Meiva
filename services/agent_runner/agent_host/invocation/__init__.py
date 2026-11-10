@@ -31,6 +31,7 @@ from services.agent_runner.agent_host.invocation.completion_decisions import (
     plan_completion,
 )
 from services.agent_runner.agent_host.lifecycle.shells import apply_lifecycle_command
+from services.agent_runner.agent_host.lifecycle.switch_note import SwitchHistory
 
 
 # meiva:note
@@ -131,6 +132,7 @@ async def finish_completed_invocation(
                     bus=bus,
                     resume_turn=resume_turn,
                     home=hooks.home,
+                    history=SwitchHistory(checkpoints.graph, pool, ctx.require_clock()),
                 )
             logger.info(
                 "hosted lifecycle return settled",

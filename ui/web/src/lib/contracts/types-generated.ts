@@ -3584,6 +3584,7 @@ export interface components {
             config_overlay?: {
                 [key: string]: unknown;
             } | null;
+            at_turn_end: boolean;
         };
         RestartAgentResponse: {
             status: components["schemas"]["RestartResult"];

@@ -231,14 +231,28 @@ def _resolve_restart_target_harness(
     return target_harness
 
 
+# meiva:note
+# The status a restart needs. The agent's own restart (`at_turn_end`) waits for its turn to end,
+# so a live agent is its only caller; any other restart of a harness switch or an external harness
+# needs the agent idling or terminated, because it acts at once.
 def _verify_restart_preconditions(
     conn: psycopg.Connection,
     agent_id: int,
     status: str,
     current_harness: Harness,
     target_harness: Harness,
+    *,
+    at_turn_end: bool,
 ) -> None:
     _ = (conn, agent_id)
+    if at_turn_end:
+        if status not in ("running", "idling"):
+            raise HTTPException(
+                status_code=409,
+                detail=f"Cannot queue a restart for agent in status '{status}'; "
+                "it must be running or idling",
+            )
+        return
     if (
         target_harness != current_harness or current_harness is not Harness.MEIVA
     ) and status not in ("idling", "terminated"):
@@ -276,7 +290,14 @@ def _prepare_restart_validation_blocking(
                 status_code=422,
                 detail="llm_model must be explicitly provided in config_overlay when switching harnesses",
             )
-        _verify_restart_preconditions(conn, agent_id, status, current_harness, target_harness)
+        _verify_restart_preconditions(
+            conn,
+            agent_id,
+            status,
+            current_harness,
+            target_harness,
+            at_turn_end=body.at_turn_end,
+        )
 
     overlay_without_harness = (
         {k: v for k, v in body.config_overlay.items() if k != "harness"}
@@ -351,6 +372,11 @@ def _validate_restart_model_blocking(
             ),
         )
     payload: dict[str, object] = body.model_dump()
+    if not body.at_turn_end:
+        # meiva:note
+        # Only the agent's own restart names the flag; every other body reaches the runner as it
+        # always did, so a runner that predates the flag sees nothing new.
+        del payload["at_turn_end"]
     if resolved is not None and target_harness != current_harness:
         overlay_copy = dict(body.config_overlay or {})
         overlay_copy["llm_model"] = resolved[0]
@@ -361,7 +387,7 @@ def _validate_restart_model_blocking(
 
 @router.post(
     "/api/agents/{agent_id}/restart",
-    description="Enqueue restart or harness switch on the agent's home runner.\n\nRestart requires a non-empty message. For native meiva agents while alive,\nthe current turn reaches claim, returns normally and flushes its checkpoint.\nFor harness switching, external harnesses, or terminated agents, an exact\n4-step transition sequence settles, drops, updates harness, and resurrects.",
+    description="Enqueue restart or harness switch on the agent's home runner.\n\nRestart requires a non-empty message. For native meiva agents while alive,\nthe current turn reaches claim, returns normally and flushes its checkpoint.\nFor harness switching, external harnesses, or terminated agents, an exact\n4-step transition sequence settles, drops, updates harness, and resurrects.\n\nWith `at_turn_end` (the agent's own restart, `source` must be `agent:<id>`), the\nsame validation runs and the restart is recorded as a pending command that the\nhost applies when the running turn ends, on any harness, so a running agent is\naccepted.",
 )
 async def post_agent_restart(
     agent_id: int,
@@ -370,6 +396,12 @@ async def post_agent_restart(
 ) -> RestartAgentResponse:
     if not body.message or not body.message.strip():
         raise HTTPException(status_code=422, detail="Restart requires a non-empty message")
+    if body.at_turn_end and body.source != f"agent:{agent_id}":
+        raise HTTPException(
+            status_code=422,
+            detail="at_turn_end is the agent's own restart: source must be "
+            f"'agent:{agent_id}', got {body.source!r}",
+        )
 
     catalog = require_model_catalog(request)
     state = gateway_state(request)

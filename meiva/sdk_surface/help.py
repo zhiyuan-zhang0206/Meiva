@@ -73,7 +73,9 @@ class _Render:
 
 _DEFAULT_RENDER = _Render()
 
-_HARNESS_SELF_SUMMARY = "Your own runtime: AGENT_ID, MACHINE_SPEC, pause_heartbeat, terminate."
+_HARNESS_SELF_SUMMARY = (
+    "Your own runtime: AGENT_ID, MACHINE_SPEC, pause_heartbeat, restart, terminate."
+)
 
 # meiva:note
 # What a model reads of the SDK — which members and in which words — is declared on its

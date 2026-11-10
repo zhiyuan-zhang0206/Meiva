@@ -459,7 +459,8 @@ def restart(
 
     `message` is a mandatory, non-blank explanation shown to the agent.
     `config_overlay` carries persistent configuration changes such as `llm_model`.
-    Set its `harness` field to switch the runtime loop of an idling or terminated agent.
+    Set its `harness` field to switch the runtime loop of an idling or terminated agent;
+    a running agent switches itself with `meiva.self.restart`.
     An agent staying on "meiva" can restart and continue a turn in progress."""
     agent_id = coerce_typed(agent_id, "agent_id", int)
     schedule_capability.assert_schedule_capability("agents.restart", target_agent_id=agent_id)

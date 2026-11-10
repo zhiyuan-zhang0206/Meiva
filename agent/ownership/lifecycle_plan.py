@@ -6,26 +6,40 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Literal, NamedTuple
+from typing import Literal, LiteralString, NamedTuple
 
+from base.agents.incarnation.restart_transition import RestartTransition
 from base.agents.messages.kwargs import NoteTag
-from base.agents.messages.lifecycle_text import restart_resume_note
+from base.agents.messages.lifecycle_text import restart_resume_note, restart_transition_note
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 
 LifecycleKind = Literal["restart", "terminate"]
 
 
 # meiva:note
+# A harness change a committed restart stored: the harness the agent left, the one it now runs
+# on, who asked and the message that went with it, which the history note of the switch repeats.
+@dataclass(frozen=True)
+class HarnessSwitch:
+    old: str
+    new: str
+    source: str
+    message: str
+
+
+# meiva:note
 # What a committed lifecycle command leaves to do after the commit. `shell_cutoff` is the
 # exclusive shell-ID bound of the terminate's requested shell cleanup, or None when no
-# closed terminate asked for it.
+# closed terminate asked for it. `switch` is set when a restart stored a new harness.
 @dataclass(frozen=True)
 class AppliedLifecycle:
     kind: LifecycleKind
     agent_id: int
     shell_cutoff: int | None
+    switch: HarnessSwitch | None = None
 
 
 # meiva:note
@@ -96,6 +110,65 @@ def resume_note(
         source=source,
         note_tag=NoteTag.LIFECYCLE_RESTART.value,
     )
+
+
+# meiva:note
+# What applying a restart command writes beyond releasing the incarnation: the statements that
+# store the transition's overlay and harness, and the one note the agent reads on waking. A command
+# without a transition keeps the native shape (`resume_note`: only an unfinished turn gets one); a
+# command with one always leaves a note, because the agent has to learn that its harness or
+# settings changed whether or not a turn was cut short.
+@dataclass(frozen=True)
+class RestartApply:
+    statements: tuple[tuple[LiteralString, tuple[object, ...]], ...]
+    note: ResumeNote | None
+    switches_harness: bool
+
+
+_MERGE_OVERLAY: LiteralString = (
+    "UPDATE agents_meta SET config_overlay = COALESCE(config_overlay, '{}'::jsonb) || %s::jsonb "
+    "WHERE id = %s"
+)
+_STORE_HARNESS: LiteralString = (
+    "UPDATE agents_meta SET harness = %s, harness_configured_at = clock_timestamp() WHERE id = %s"
+)
+_MARK_HARNESS_MODEL_SELECTION: LiteralString = (
+    "UPDATE agents_meta SET birth_config = COALESCE(birth_config, '{}'::jsonb) "
+    "|| '{\"harness_model_selection\": 1}'::jsonb WHERE id = %s"
+)
+
+
+def restart_apply(
+    agent_id: int,
+    *,
+    source: str,
+    message: str | None,
+    resume_turn: bool,
+    transition: RestartTransition | None,
+    stored_harness: str,
+) -> RestartApply:
+    if transition is None:
+        return RestartApply(
+            (),
+            resume_note(source, resume_turn=resume_turn, message=message),
+            switches_harness=False,
+        )
+    statements: list[tuple[LiteralString, tuple[object, ...]]] = []
+    if transition.config_overlay:
+        statements.append((_MERGE_OVERLAY, (json.dumps(dict(transition.config_overlay)), agent_id)))
+    switches = transition.target_harness != stored_harness
+    if switches:
+        statements.append((_STORE_HARNESS, (transition.target_harness, agent_id)))
+        if transition.target_harness != "meiva":
+            statements.append((_MARK_HARNESS_MODEL_SELECTION, (agent_id,)))
+    note = ResumeNote(
+        content=restart_transition_note(
+            source, message, from_harness=stored_harness, to_harness=transition.target_harness
+        ),
+        source=source,
+        note_tag=NoteTag.LIFECYCLE_RESTART.value,
+    )
+    return RestartApply(tuple(statements), note, switches_harness=switches)
 
 
 # meiva:note

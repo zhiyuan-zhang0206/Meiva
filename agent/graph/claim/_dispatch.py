@@ -438,21 +438,17 @@ async def _handle_terminate(
 # An agent that was idle stays idle (`restart_preserves_idle`) and reads the acceptance
 # marker. An agent whose turn was unfinished resumes: the host's apply queues the one note
 # that continues it (`restart_resume_note`), so no marker is added here. The two cases are
-# told apart by `_turn_was_idle`.
+# told apart by `_turn_was_idle`. A restart is taken the same way on every harness: dropping one
+# would leave the command claimed for the next incarnation to claim again, forever. The
+# external harness's own restart (the agent's, `source='self'`, or the host's) reaches here only at
+# a turn boundary, because the claim takes a lifecycle command first and the harness turn that
+# was running has returned.
 async def handle_restart(
     ctx: MeivaContext,
     state: _state.AgentState,
     item: ClaimedInbound,
     st: BatchState,
 ) -> None:
-    if ctx.harness is not Harness.MEIVA and item.source != "system:restart":
-        logger.bind(agent_id=item.agent_id, harness=ctx.harness.value).warning(
-            "dropping restart from {source!r} for external harness {harness!r}: "
-            "restart is only supported on the native meiva harness",
-            source=item.source,
-            harness=ctx.harness.value,
-        )
-        return
     st.next_goto = END
     st.restart_requested = True
     st.restart_preserves_idle = _turn_was_idle(state, item)

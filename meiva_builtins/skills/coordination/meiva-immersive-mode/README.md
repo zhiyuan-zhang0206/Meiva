@@ -49,8 +49,9 @@ cadence, foreground execution bounds, and when signals reach the human.
   `exec_timeout_seconds` on the native harness, and resumes default batch
   reporting.
 - **Harness boundary**: An attached provider harness (Claude Code, Codex,
-  Antigravity) where `meiva.self.restart` is refused skips `config_overlay`
-  timeout changes and relies on hot/cold execution discipline.
+  Antigravity) skips `config_overlay` timeout changes (the exec ceiling does not
+  govern its loop, and a restart there waits for the turn to end) and relies on
+  hot/cold execution discipline.
 - **Wake-storm mitigation**: Platform routing has no per-session do-not-disturb
   primitive yet; the foreground agent shields the loop via two-tier
   sub-orchestration (>2 concurrent tasks) and local batching of non-urgent fleet

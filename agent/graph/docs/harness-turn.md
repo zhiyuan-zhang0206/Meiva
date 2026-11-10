@@ -123,7 +123,7 @@ Execution model/effort resolve through the registry binding described in
 
 ## Capability boundary
 
-Native-only context/lifecycle operations (`fork`, `compact`, `meiva.self.attach`,
-`meiva.self.restart`) versus supported external-harness `meiva.self` and API restart
-surfaces are defined in
+Native-only context/lifecycle operations (`fork`, `compact`, `meiva.self.attach`)
+versus supported external-harness `meiva.self` (including `restart`, applied at the turn
+boundary) and API restart surfaces are defined in
 [Harness turn capability boundary](harness-capability-boundary.md).

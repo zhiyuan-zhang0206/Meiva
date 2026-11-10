@@ -177,18 +177,17 @@ def test_lifecycle_self_actions_refuse_from_launched_script(db_url: str, action:
         invoke()
 
 
-@pytest.mark.parametrize("action", ["attach", "compact", "restart"])
+@pytest.mark.parametrize("action", ["attach", "compact"])
 def test_native_only_self_actions_refuse_on_external_harness(action: str) -> None:
     from base.api_contracts.agent_contract import Harness
 
     pin_agent(1, owns_loop=True, harness=Harness.CLAUDE_CODE)
     fn = {
         "compact": meiva.self.compact,
-        "restart": meiva.self.restart,
         "attach": meiva.self.attach,
     }[action]
     with pytest.raises(RuntimeError, match="only supported on the native 'meiva' harness"):
-        if action in {"compact", "restart"}:
+        if action == "compact":
             fn("summary")
         else:
             fn("some/file.png")

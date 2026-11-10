@@ -19,6 +19,9 @@ from agent.ownership.lifecycle_plan import (
     AppliedLifecycle as AppliedLifecycle,
 )
 from agent.ownership.lifecycle_plan import (
+    HarnessSwitch as HarnessSwitch,
+)
+from agent.ownership.lifecycle_plan import (
     LifecycleKind as LifecycleKind,
 )
 from agent.ownership.lifecycle_plan import (
@@ -29,9 +32,13 @@ from agent.ownership.lifecycle_plan import (
 )
 from agent.ownership.lifecycle_plan import (
     lifecycle_kind,
-    resume_note,
+    restart_apply,
     shell_cutoff,
     turn_close,
+)
+from base.agents.incarnation.restart_transition import (
+    RestartTransition,
+    restart_transition_of,
 )
 from base.db.protocols import AsyncPool, DatabaseLike
 from base.db.rows import IdRow
@@ -49,10 +56,22 @@ from base.telemetry.audit_events import prepare_event_log, record_audit_async
 # computed from an unchecked value.
 def _session_index(row: tuple[object, ...]) -> int:
     match row:
-        case (int() as index,):
+        case (int() as index, _):
             return index
         case _:
             raise TypeError("a locked agents_meta row carried no integer session index")
+
+
+# meiva:note
+# The harness stored on the row this incarnation just locked: its second column, a string. A row
+# of another shape means the query and this reader disagree, and the switch would be judged on an
+# unchecked value.
+def _stored_harness(row: tuple[object, ...]) -> str:
+    match row:
+        case (_, str() as harness):
+            return harness
+        case _:
+            raise TypeError("a locked agents_meta row carried no harness name")
 
 
 # meiva:note
@@ -77,12 +96,13 @@ class _LifecycleCommand:
     kind: str
     source: str
     content: str
+    transition: RestartTransition | None
 
     @classmethod
     def from_row(cls, row: tuple[object, ...]) -> "_LifecycleCommand":
         match row:
-            case (int() as id_, str() as kind, str() as source, str() as content):
-                return cls(id_, kind, source, content)
+            case (int() as id_, str() as kind, str() as source, str() as content, payload):
+                return cls(id_, kind, source, content, restart_transition_of(payload))
             case _:
                 raise TypeError("a claimed lifecycle command row has columns of unexpected types")
 
@@ -120,9 +140,10 @@ async def apply_hosted_lifecycle(
     resume_turn: bool,
 ) -> AppliedLifecycle | None:
     cutoff: int | None = None
+    switch: HarnessSwitch | None = None
     async with async_write_transaction(pool) as conn:
         cursor = await conn.execute(
-            "SELECT session_index FROM agents_meta WHERE id=%s "
+            "SELECT session_index, harness FROM agents_meta WHERE id=%s "
             "AND runtime_generation=%s AND runtime_owner=%s "
             "AND status IN ('running','idling') FOR UPDATE",
             (incarnation.agent_id, incarnation.generation, incarnation.owner),
@@ -131,8 +152,9 @@ async def apply_hosted_lifecycle(
         if row is None:
             return None
         session_index = _session_index(row)
+        stored_harness = _stored_harness(row)
         cursor = await conn.execute(
-            "SELECT id,kind,source,content FROM inbound_messages WHERE agent_id=%s "
+            "SELECT id,kind,source,content,payload FROM inbound_messages WHERE agent_id=%s "
             "AND kind IN ('restart','terminate') AND status='claimed' "
             "ORDER BY id LIMIT 1 FOR UPDATE",
             (incarnation.agent_id,),
@@ -144,6 +166,16 @@ async def apply_hosted_lifecycle(
         kind = lifecycle_kind(command.kind)
         match kind:
             case "restart":
+                plan = restart_apply(
+                    incarnation.agent_id,
+                    source=command.source,
+                    message=command.content or None,
+                    resume_turn=resume_turn,
+                    transition=command.transition,
+                    stored_harness=stored_harness,
+                )
+                for sql, params in plan.statements:
+                    await conn.execute(sql, params)
                 await conn.execute(
                     "UPDATE agents_meta SET status='idling',runtime_generation=NULL,"
                     "runtime_owner=NULL WHERE id=%s",
@@ -158,11 +190,7 @@ async def apply_hosted_lifecycle(
                     "WHERE id=%s",
                     (command.id,),
                 )
-                note = resume_note(
-                    command.source,
-                    resume_turn=resume_turn,
-                    message=command.content or None,
-                )
+                note = plan.note
                 if note is not None:
                     await conn.execute(
                         "INSERT INTO inbound_messages(agent_id,content,kind,source,payload) "
@@ -173,6 +201,13 @@ async def apply_hosted_lifecycle(
                             note.source,
                             note.note_tag,
                         ),
+                    )
+                if plan.switches_harness and command.transition is not None:
+                    switch = HarnessSwitch(
+                        stored_harness,
+                        command.transition.target_harness,
+                        command.source,
+                        command.content,
                     )
             case "terminate":
                 closed = await conn.execute(
@@ -191,7 +226,35 @@ async def apply_hosted_lifecycle(
                 )
             case _:
                 assert_never(kind)
-    return AppliedLifecycle(kind=kind, agent_id=incarnation.agent_id, shell_cutoff=cutoff)
+    return AppliedLifecycle(
+        kind=kind, agent_id=incarnation.agent_id, shell_cutoff=cutoff, switch=switch
+    )
+
+
+# meiva:note
+# The harness the claimed restart of this incarnation is about to store, or None when no restart
+# is claimed, it carries no transition or the transition keeps the stored harness. The host reads
+# it before the apply so the effects the switch owes that sit outside the database (the old
+# harness's session record) run first and can be repeated: the command stays claimed until the
+# apply commits, and a successor claims it again.
+async def claimed_harness_switch_target(
+    pool: AsyncPool, incarnation: RuntimeIncarnation
+) -> str | None:
+    async with pool.connection() as conn:
+        cursor = await conn.execute(
+            "SELECT m.harness, c.payload FROM agents_meta m JOIN inbound_messages c "
+            "ON c.agent_id = m.id WHERE m.id=%s AND m.runtime_generation=%s "
+            "AND m.runtime_owner=%s AND c.kind='restart' AND c.status='claimed' "
+            "ORDER BY c.id LIMIT 1",
+            (incarnation.agent_id, incarnation.generation, incarnation.owner),
+        )
+        row = await cursor.fetchone()
+    if row is None:
+        return None
+    transition = restart_transition_of(row[1])
+    if transition is None or transition.target_harness == _stored_harness((0, row[0])):
+        return None
+    return transition.target_harness
 
 
 # meiva:note

@@ -40,10 +40,13 @@ def restart_request(
     *,
     message: str,
     config_overlay: Mapping[str, object] | None = None,
+    at_turn_end: bool = False,
 ) -> Request:
     body: dict[str, object] = {"source": source, "message": message}
     if config_overlay:
         body["config_overlay"] = dict(config_overlay)
+    if at_turn_end:
+        body["at_turn_end"] = True
     return Request("POST", f"/api/agents/{agent_id}/restart", body=body)
 
 

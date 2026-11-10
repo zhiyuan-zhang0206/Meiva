@@ -1,9 +1,6 @@
 """Loopback health routes expose the actual hosted owner and cancellation boundary."""
 
 from pathlib import Path
-from typing import TypeGuard
-
-from psycopg_pool import AsyncConnectionPool
 
 from base.clock import Clock
 from base.daemon.health import RouteHandler
@@ -13,6 +10,7 @@ from base.host.boundary.untyped import object_of
 from base.lm.harness.registry import FileSessionRegistry
 from services.agent_runner.agent_host.dispatcher import TurnScheduler
 from services.agent_runner.agent_host.host import AgentHost
+from services.agent_runner.agent_host.lifecycle.switch_note import SwitchHistory, record_switch_note
 
 
 def _json_object(body: bytes) -> dict[str, object] | None:
@@ -23,10 +21,6 @@ def _json_object(body: bytes) -> dict[str, object] | None:
     except ValueError:
         return None
     return value if is_object_dict(value) else None
-
-
-def _is_pool(value: object) -> TypeGuard[AsyncConnectionPool]:
-    return isinstance(value, AsyncConnectionPool)
 
 
 # meiva:note
@@ -62,9 +56,6 @@ def prepare_harness_switch_route(host: AgentHost, *, clock: Clock) -> RouteHandl
 
     async def handler(body: bytes) -> tuple[int, bytes, str]:
 
-        from agent.messages import NoteTag, system_note_message
-        from base.agents.messages.lifecycle_text import by_who
-
         payload = _json_object(body)
         if payload is None:
             return 400, b'{"error":"invalid prepare-harness-switch payload"}', "application/json"
@@ -79,66 +70,16 @@ def prepare_harness_switch_route(host: AgentHost, *, clock: Clock) -> RouteHandl
         if type(agent_id) is not int or agent_id <= 0:
             return 400, b'{"error":"positive agent_id required"}', "application/json"
 
-        if old_harness != new_harness:
-            from agent.graph.node_log import SNAPSHOT_CURSOR
-
-            SNAPSHOT_CURSOR.pop(agent_id, None)
-
-            now = clock.now()
-            ts_prefix = f"[{now.strftime('%Y-%m-%d %H:%M:%S UTC')}] "
-            note_content = f"{ts_prefix}Harness switched from '{old_harness}' to '{new_harness}' by {by_who(source)}: {message}"
-            if old_harness == "meiva":
-                note = system_note_message(
-                    content=note_content,
-                    tag=NoteTag.LIFECYCLE_RESTART,
-                    picked_up_at=now,
-                    created_at=now,
-                )
-                try:
-                    await host._graph.aupdate_state(
-                        {"configurable": {"thread_id": str(agent_id)}},
-                        {"messages": [note]},
-                    )
-                except Exception as exc:
-                    import logging
-
-                    logging.getLogger(__name__).warning(
-                        "[health] failed to record harness switch note in meiva state for agent %s: %s",
-                        agent_id,
-                        exc,
-                    )
-            elif new_harness == "meiva":
-                from base.agents.history.harness_messages import aappend_harness_timeline_items
-                from base.agents.history.timeline_item import TimelineItem
-                from base.db.transaction import async_write_transaction
-
-                note_item = TimelineItem(
-                    item_id="0.0",
-                    kind="system_marker",
-                    source="lifecycle_restart",
-                    payload=note_content,
-                    created_at=now.isoformat(),
-                )
-                control_pool = object_of(getattr, host, "_control_pool", None)
-                pool = (
-                    control_pool
-                    if control_pool is not None
-                    else object_of(getattr, host, "_pool", None)
-                )
-                if _is_pool(pool):
-                    try:
-                        async with async_write_transaction(pool) as conn:
-                            await aappend_harness_timeline_items(
-                                conn, agent_id, old_harness, [note_item]
-                            )
-                    except Exception as exc:
-                        import logging
-
-                        logging.getLogger(__name__).warning(
-                            "[health] failed to record harness switch note in harness_messages for agent %s: %s",
-                            agent_id,
-                            exc,
-                        )
+        control_pool = object_of(getattr, host, "_control_pool", None)
+        pool = control_pool if control_pool is not None else object_of(getattr, host, "_pool", None)
+        await record_switch_note(
+            SwitchHistory(object_of(getattr, host, "_graph", None), pool, clock),
+            agent_id,
+            old_harness=old_harness,
+            new_harness=new_harness,
+            source=source,
+            message=message,
+        )
 
         host.drop_agent(agent_id)
         registry = object_of(getattr, host, "_harness_registry", None)

@@ -3,7 +3,7 @@ exports = ["daemon.py", "host.py", "host_beat.py", "invocation", "lifecycle", "r
 [uses]
 "daemon.py" = ["dispatcher.py", "exec_memory_guard.py", "health_routes.py", "host.py", "host_beat.py", "lifecycle", "pooled_checkpoint.py", "pools.py", "stdout_log.py"]
 "dispatcher.py" = ["scheduling", "stall_guard.py"]
-"health_routes.py" = ["dispatcher.py", "host.py"]
+"health_routes.py" = ["dispatcher.py", "host.py", "lifecycle"]
 "host.py" = ["invocation", "lifecycle", "runtime.py", "scheduling", "settlement.py", "stall_guard.py"]
 "host_beat.py" = ["dispatcher.py", "host.py"]
 "invocation" = ["__init__.py", "db_recovery.py", "lifecycle"]

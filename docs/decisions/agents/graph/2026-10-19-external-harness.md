@@ -509,3 +509,5 @@ sidecar bridge adds a service, an auth scheme and its own version surface. The
 kernel gives the harness the same `meiva.*` calls the native agent makes, with
 the same gate and the same telemetry, which is the point of having one logic with
 two entry points.
+
+<!-- Superseded in part by 2026-11-11-self-restart-at-turn-end.md (`meiva.self.restart` on an external harness; compact and attach stay native only) -->

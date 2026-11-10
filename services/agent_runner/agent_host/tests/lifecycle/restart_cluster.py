@@ -122,13 +122,22 @@ class Cluster:
         )
         return agent_id, script
 
-    def send(self, agent_id: int, content: str, *, kind: str = "chat", source: str = "user") -> int:
+    def send(
+        self,
+        agent_id: int,
+        content: str,
+        *,
+        kind: str = "chat",
+        source: str = "user",
+        payload: dict[str, object] | None = None,
+    ) -> int:
         return insert_inbound_message(
             self.conn,
             agent_id,
             content,
             source=source,
             kind=kind,
+            payload=payload,
             database=self.database,
             bus=self.bus,
         )

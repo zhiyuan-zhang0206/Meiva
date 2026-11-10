@@ -14,13 +14,14 @@ from meiva.sdk_surface.pure.render.hidden import (
     HARNESS_HIDDEN_SELF_MEMBERS as HARNESS_HIDDEN_SELF_MEMBERS,
 )
 from meiva.sdk_surface.validation import coerce_str, coerce_typed
-from meiva.self import lifecycle_plans, plans
+from meiva.self import lifecycle_plans, plans, restart_plans
 
 HARNESS_SELF_MEMBERS: tuple[str, ...] = (
     "AGENT_ID",
     "MACHINE_SPEC",
     "MachineSpec",
     "pause_heartbeat",
+    "restart",
     "terminate",
 )
 
@@ -181,25 +182,32 @@ def _run(cur: _Cursor, statements: tuple[plans.SqlStatement, ...]) -> None:
         cur.execute(statement.sql, statement.params)
 
 
-def restart(message: str, *, config_overlay: dict[str, object] | None = None) -> NoReturn:
+def restart(message: str, *, config_overlay: dict[str, object] | None = None) -> str:
     """Restart yourself under the same identity, preserving your conversation.
 
-    This call ends the current execution; finish required work before calling it.
     `message` is a mandatory, non-blank natural language explanation of why you restarted.
     `config_overlay` is a flat `{field_name: value}` mapping merged into your
-    persistent per-agent settings."""
+    persistent per-agent settings. Its `harness` key switches the runtime that runs you
+    ("meiva", "claude_code", "codex" or "antigravity"); a switch also needs an explicit
+    `llm_model` for the new runtime. Invalid input raises before anything is recorded.
+
+    On the native runtime this call ends the current execution; finish required work
+    before calling it. On an external runtime the restart is recorded and applied after
+    your current turn ends, never during it: the call returns a receipt (print it), you
+    finish your work and end the turn, and your next turn starts with a note carrying
+    your message. A second restart while one is waiting raises."""
     message = coerce_str(message, "message")
     if not message.strip():
         raise ValueError("message must not be blank")
     config_overlay = coerce_typed(config_overlay, "config_overlay", dict, allow_none=True)
-    if config_overlay and "harness" in config_overlay:
-        raise ValueError(
-            "harness cannot be changed via meiva.self.restart(); harness switching "
-            "requires the agent to be idling or terminated via external or peer restart"
-        )
     from meiva.sdk_surface import agent_identity
 
-    _assert_native_self_action("restart")
+    route = restart_plans.restart_route(
+        current_harness=agent_identity.process_harness_name(), overlay=config_overlay
+    )
+    config_overlay = route.overlay
+    if route.deferred:
+        return _restart_at_turn_end(message, route)
     agent_identity.assert_self_action("restart")
     stored: Mapping[str, object] | None = None
     if config_overlay:
@@ -231,7 +239,10 @@ def restart(message: str, *, config_overlay: dict[str, object] | None = None) ->
     agent_id = agent_identity.require_agent_id()
     with process_context.current_context().sql.cursor() as cur, cur.connection.transaction():
         cur.execute("SET TRANSACTION READ WRITE")
-        _assert_native_self_action("restart", cur)
+        cur.execute("SELECT harness FROM agents_meta WHERE id = %s", (agent_id,))
+        refused = restart_plans.stored_native_restart_refusal(cur.fetchone())
+        if refused is not None:
+            raise RuntimeError(refused)
         if stored:
             from base.agents.model.restart_config import validate_restart_model_config
 
@@ -245,6 +256,44 @@ def restart(message: str, *, config_overlay: dict[str, object] | None = None) ->
         _run(cur, plans.restart_statements(agent_id, message, stored))
     _publish_self_inbound_wake()
     raise AgentRestart
+
+
+# meiva:note
+# The restart that waits for the turn boundary: the gateway validates it as it validates any
+# restart and the agent's home records it as a pending command (`ops/lifecycle/deferred_restart.py`),
+# so a refusal reaches the caller here. A native agent then ends its execution (the claim takes
+# the command at once); an agent on an external harness gets the receipt as the call's result and
+# ends its turn itself, because the harness CLI owns that turn and nothing here may stop it.
+# An attached controller skips the identity check the way `terminate` does: its identity is the
+# borrowed one. A plain refusal of the gateway (an unknown or unlaunchable harness, a missing
+# model) carries its reason only in the response body, so it is read out of it for the caller.
+def _restart_at_turn_end(message: str, route: restart_plans.RestartRoute) -> str:
+    import httpx
+
+    from meiva import gateway_client
+    from meiva.sdk_surface import agent_identity
+
+    ctx = process_context.ambient_context()
+    if not lifecycle_plans.is_attached_controller(None if ctx is None else ctx.identity):
+        agent_identity.assert_self_action("restart")
+    agent_id = agent_identity.require_agent_id()
+    try:
+        status = gateway_client.restart(
+            agent_id,
+            message=message,
+            config_overlay=route.overlay,
+            source=f"agent:{agent_id}",
+            at_turn_end=True,
+        )
+    except httpx.HTTPStatusError as exc:
+        raise RuntimeError(
+            restart_plans.restart_refusal(exc.response.status_code, exc.response.text)
+        ) from exc
+    if status != "enqueued":
+        raise RuntimeError(f"the restart was not recorded: the gateway answered {status!r}")
+    if agent_identity.process_harness_name() == "meiva":
+        raise AgentRestart
+    return restart_plans.deferred_restart_receipt(route)
 
 
 def terminate() -> NoReturn:

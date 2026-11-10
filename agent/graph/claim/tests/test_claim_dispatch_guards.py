@@ -153,7 +153,7 @@ async def test_claim_same_batch_newer_chat_vetoes_the_terminate(
     assert cmd.goto != END
 
 
-async def test_claim_drops_compact_and_user_restart_for_external_harness(
+async def test_claim_drops_compact_but_takes_a_restart_for_external_harness(
     redis_url: str,
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
@@ -190,11 +190,18 @@ async def test_claim_drops_compact_and_user_restart_for_external_harness(
     cmd_compact = await settle_claimed_batch(ext_ctx, initial_state, tid, compact_batch)
     assert "harness_cursor" not in (cmd_compact.update or {})
 
-    restart_batch = [
-        ClaimedInbound(id=103, agent_id=tid, content="", kind="restart", source="user"),
-    ]
-    cmd_restart = await settle_claimed_batch(ext_ctx, initial_state, tid, restart_batch)
-    assert cmd_restart.goto != END
-    update = cmd_restart.update
-    assert update is not None
-    assert update.get("restart_requested") is False
+    # meiva:note
+    # A restart is taken on every harness: the agent's own (`self`, queued by
+    # `meiva.self.restart` and claimed only once the harness turn returned) and the host's end
+    # the invocation for the host to apply; the turn they find is unfinished, so no idle marker.
+    for source in ("self", "system:restart"):
+        restart_batch = [
+            ClaimedInbound(id=103, agent_id=tid, content="", kind="restart", source=source),
+        ]
+        cmd_restart = await settle_claimed_batch(ext_ctx, initial_state, tid, restart_batch)
+        assert cmd_restart.goto == END
+        update = cmd_restart.update
+        assert update is not None
+        assert update.get("restart_requested") is True
+        assert update.get("exit_requested") is False
+        assert update.get("halted") is False

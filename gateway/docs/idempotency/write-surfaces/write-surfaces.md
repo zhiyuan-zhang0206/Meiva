@@ -40,7 +40,7 @@ Owners:
 | `POST /api/agents/{agent_id}/impersonation/force-expire` | natural | observed-session CAS close — repeated or stale requests leave the lease unchanged |
 | `POST /api/agents/{agent_id}/terminate` | one-shot | termination is not bound to the observed incarnation |
 | `POST /api/agents/{agent_id}/resurrect` | one-shot | resurrection is not bound to the observed incarnation |
-| `POST /api/agents/{agent_id}/restart` | one-shot | a repeat dispatches another restart; HTTP intent has no durable receipt |
+| `POST /api/agents/{agent_id}/restart` | one-shot | a repeat dispatches another restart; HTTP intent has no durable receipt; with `at_turn_end` (the agent's own) a repeat while one waits is refused |
 | `POST /api/agents/{agent_id}/understanding/build` | natural | jobs and the pending rebuild merge into live ones; a repeat only records a build |
 | `POST /api/memory/refresh` | natural | re-scan — repeats are harmless |
 | `POST /api/memory/search` | natural | pure read |

@@ -40,7 +40,7 @@ def test_the_native_harness_may_take_every_action(action: str) -> None:
     assert harness_refusal(action, _NATIVE) is None
 
 
-@pytest.mark.parametrize("action", ["attach", "compact", "restart"])
+@pytest.mark.parametrize("action", ["attach", "compact"])
 def test_an_external_harness_context_is_refused_the_actions_the_native_loop_owns(
     action: str,
 ) -> None:
@@ -51,14 +51,14 @@ def test_an_external_harness_context_is_refused_the_actions_the_native_loop_owns
     assert "'claude-code'" in refused
 
 
-@pytest.mark.parametrize("action", ["terminate", "pause_heartbeat"])
-def test_an_external_harness_may_still_terminate_and_pause(action: str) -> None:
+@pytest.mark.parametrize("action", ["restart", "terminate", "pause_heartbeat"])
+def test_an_external_harness_may_still_restart_terminate_and_pause(action: str) -> None:
     assert harness_refusal(action, replace(_NATIVE, context_harness="claude-code")) is None
 
 
 def test_an_attached_capture_is_judged_on_the_harness_it_registered() -> None:
     facts = replace(_NATIVE, capture_attached=True, capture_registered_harness="codex")
-    refused = harness_refusal("restart", facts)
+    refused = harness_refusal("compact", facts)
     assert refused is not None
     assert "'codex'" in refused
 
@@ -72,31 +72,31 @@ def test_an_attached_capture_that_registered_no_harness_is_external() -> None:
 
 def test_a_capture_that_is_not_attached_is_not_judged() -> None:
     facts = replace(_NATIVE, capture_attached=False, capture_registered_harness="codex")
-    assert harness_refusal("restart", facts) is None
+    assert harness_refusal("compact", facts) is None
 
 
 def test_the_context_is_judged_before_the_capture() -> None:
     facts = HarnessFacts("claude-code", capture_attached=True, capture_registered_harness="codex")
-    refused = harness_refusal("restart", facts)
+    refused = harness_refusal("compact", facts)
     assert refused is not None
     assert "'claude-code'" in refused
     assert "'codex'" not in refused
 
 
 def test_a_missing_row_refuses_nothing() -> None:
-    assert stored_harness_refusal("restart", None) is None
+    assert stored_harness_refusal("compact", None) is None
 
 
 def test_the_stored_harness_is_judged_like_the_others() -> None:
-    assert stored_harness_refusal("restart", ("meiva",)) is None
-    refused = stored_harness_refusal("restart", ("codex",))
+    assert stored_harness_refusal("compact", ("meiva",)) is None
+    refused = stored_harness_refusal("compact", ("codex",))
     assert refused is not None
     assert "'codex'" in refused
     assert stored_harness_refusal("terminate", ("codex",)) is None
 
 
 def test_a_row_with_no_harness_is_judged_by_its_text() -> None:
-    refused = stored_harness_refusal("restart", (None,))
+    refused = stored_harness_refusal("compact", (None,))
     assert refused is not None
     assert "'None'" in refused
 

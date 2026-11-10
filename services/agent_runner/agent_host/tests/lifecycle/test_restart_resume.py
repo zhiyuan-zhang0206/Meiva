@@ -9,10 +9,14 @@
 import asyncio
 import pathlib
 from collections.abc import Callable
+from uuid import uuid4
 
 import psutil
 from langchain_core.messages import BaseMessage, ToolMessage
 
+from agent.db import claim_inbound_batch
+from agent.ownership.hosted import admit_hosted_runtime
+from base.agents.incarnation.restart_transition import RestartTransition
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.log.tests.log_records import LogRecords
 from base.native_process.stop_timing import INTERRUPT_POLL_S
@@ -297,3 +301,74 @@ async def test_a_restart_the_agent_asks_for_itself_resumes_the_turn_too(
     await host.close()
 
     await _next_host_continues(cluster, agent_id, script)
+
+
+def _stored_harness(cluster: Cluster, agent_id: int) -> object:
+    cluster.conn.commit()
+    row = cluster.conn.execute(
+        "SELECT harness FROM agents_meta WHERE id=%s", (agent_id,)
+    ).fetchone()
+    assert row is not None
+    return row[0]
+
+
+# meiva:note
+# The next incarnation claims what waited behind the request in the order it arrived; the note
+# that explains the switch comes with them.
+async def _the_next_incarnation_claims_in_order(
+    cluster: Cluster, agent_id: int, behind: list[int]
+) -> None:
+    owner = await admit_hosted_runtime(
+        cluster.pool, agent_id, cluster.machine.name(), uuid4(), db=cluster.database
+    )
+    assert owner is not None
+    batch = await claim_inbound_batch(cluster.pool, agent_id, incarnation=owner)
+    assert [item.id for item in batch if item.kind == "chat"] == behind
+    assert [item.kind for item in batch][-1] == "system_note"
+
+
+# meiva:note
+# The agent's own harness switch (the pending `self` restart the home runner records, carrying a
+# `restart_transition`) is applied only when the turn ends: it is not an interrupt however long it
+# has waited, the messages that arrived behind it stay pending in the order they arrived, and the
+# switch is one commit that leaves the note the agent wakes to.
+async def test_a_harness_switch_the_agent_asks_for_waits_for_its_turn_to_end(
+    cluster: Cluster, tmp_path: pathlib.Path
+) -> None:
+    started, go, code = _waiting_code(tmp_path)
+    agent_id, script = cluster.spawn(chat="go", steps=[Step(code=code), Step(text="not asked")])
+    host = await cluster.host()
+    turn = host.start_turn(agent_id)
+    await _until(started.exists)
+
+    restart = cluster.send(
+        agent_id,
+        "I need a real shell",
+        kind="restart",
+        source="self",
+        payload=RestartTransition("codex", {"llm_model": "gpt-6.1-sol"}).payload(),
+    )
+    cluster.let_grace_pass(restart)
+    behind = [
+        cluster.send(agent_id, "first after the request"),
+        cluster.send(agent_id, "second after the request"),
+    ]
+    await asyncio.sleep(INTERRUPT_POLL_S + 0.5)
+    assert not turn.done()
+    assert _stored_harness(cluster, agent_id) == "meiva"
+    assert [r.status for r in cluster.inbound(agent_id, "restart")] == ["pending"]
+
+    go.write_text("go")
+    await asyncio.wait_for(turn, 60)
+    await host.close()
+
+    [result] = _tool_results(await host.messages(agent_id))
+    assert "working" in result and "ending" in result and "interrupted" not in result
+    assert script.calls == 1
+    assert [r.status for r in cluster.inbound(agent_id, "restart")] == ["done"]
+    assert cluster.row(agent_id) == ("idling", None)
+    assert _stored_harness(cluster, agent_id) == "codex"
+    [note] = [n for n in cluster.inbound(agent_id, "system_note") if n.status == "pending"]
+    assert note.content == "[Harness switched from 'meiva' to 'codex']\nI need a real shell"
+    assert note.source == "self"
+    await _the_next_incarnation_claims_in_order(cluster, agent_id, behind)

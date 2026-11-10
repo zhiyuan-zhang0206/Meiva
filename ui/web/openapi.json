@@ -947,7 +947,7 @@
     "/api/agents/{agent_id}/restart": {
       "post": {
         "summary": "Post Agent Restart",
-        "description": "Enqueue restart or harness switch on the agent's home runner.\n\nRestart requires a non-empty message. For native meiva agents while alive,\nthe current turn reaches claim, returns normally and flushes its checkpoint.\nFor harness switching, external harnesses, or terminated agents, an exact\n4-step transition sequence settles, drops, updates harness, and resurrects.",
+        "description": "Enqueue restart or harness switch on the agent's home runner.\n\nRestart requires a non-empty message. For native meiva agents while alive,\nthe current turn reaches claim, returns normally and flushes its checkpoint.\nFor harness switching, external harnesses, or terminated agents, an exact\n4-step transition sequence settles, drops, updates harness, and resurrects.\n\nWith `at_turn_end` (the agent's own restart, `source` must be `agent:<id>`), the\nsame validation runs and the restart is recorded as a pending command that the\nhost applies when the running turn ends, on any harness, so a running agent is\naccepted.",
         "operationId": "post_agent_restart_api_agents__agent_id__restart_post",
         "parameters": [
           {
@@ -16307,6 +16307,11 @@
               }
             ],
             "title": "Config Overlay"
+          },
+          "at_turn_end": {
+            "type": "boolean",
+            "title": "At Turn End",
+            "default": false
           }
         },
         "type": "object",
