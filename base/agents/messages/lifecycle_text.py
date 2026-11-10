@@ -43,3 +43,16 @@ def restart_resume_note(source: str, message: str | None = None) -> str:
             f"{message}\n{tail}"
         )
     return f"Restart was accepted from {by_who(source)} while your turn was unfinished. {tail}"
+
+
+# meiva:note
+# The note that starts the first turn after a restart that carried a transition. A switch says
+# which harness the agent left and which it now runs on (the format every harness switch uses, so
+# the agent reads one shape whoever asked); a restart that kept its harness is the plain acceptance
+# text, because nothing was terminated mid-turn: the turn that asked for it ended first.
+def restart_transition_note(
+    source: str, message: str | None, *, from_harness: str, to_harness: str
+) -> str:
+    if from_harness != to_harness:
+        return f"[Harness switched from '{from_harness}' to '{to_harness}']\n{message or ''}"
+    return restart_accepted_text(source, message)

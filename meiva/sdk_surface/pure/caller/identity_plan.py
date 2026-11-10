@@ -12,7 +12,7 @@ from dataclasses import dataclass
 
 from base.agents.context.identity import AgentIdentity
 
-HARNESS_FORBIDDEN_SELF_ACTIONS: frozenset[str] = frozenset({"attach", "compact", "restart"})
+HARNESS_FORBIDDEN_SELF_ACTIONS: frozenset[str] = frozenset({"attach", "compact"})
 
 
 @dataclass(frozen=True, slots=True)

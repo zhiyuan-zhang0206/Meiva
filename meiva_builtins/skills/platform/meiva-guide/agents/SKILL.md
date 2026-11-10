@@ -69,10 +69,17 @@ or external <-> external) via `restart` with a config overlay:
 - **SDK**: `meiva.agents.restart(agent_id, message="Switching to Codex", config_overlay={"harness": "codex"})`
 - **CLI**: `meiva agents restart <agent_id> -m "Switching to Codex" --overlay harness=codex`
 - **Gateway REST API**: `POST /api/agents/{agent_id}/restart` with body `{"message": "...", "config_overlay": {"harness": "..."}}`
+- **From the agent itself** (on any harness): `print(meiva.self.restart("Switching to Codex", config_overlay={"harness": "codex", "llm_model": "<model>"}))`.
+  It is the only road that works while the agent is running: the request is validated
+  like any restart (a refusal raises at once), recorded, and applied when the current turn
+  ends, never during it. On the native harness the call ends your execution; on an external
+  harness it returns a receipt and you end the turn yourself. Your message arrives as the
+  first note on the new harness.
 
 ### Preconditions, Invariants & Handoff Process
 1. **Agent State**: The agent must be in `idling` or `terminated` status. A running
-   agent will be rejected with `409 Conflict`.
+   agent will be rejected with `409 Conflict` (the agent's own `meiva.self.restart`
+   waits for its turn to end instead).
 2. **Mandatory Message**: `message` is mandatory across all restart calls (minimum
    1 non-whitespace character).
 3. **Model Compatibility**: If changing harness, ensure the target harness supports

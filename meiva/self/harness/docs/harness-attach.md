@@ -116,10 +116,13 @@ the agent's durable state and two writers would race.
 
 **There is no capability gate.** A stored declaration is a record, not a check
 (user ruling, 2026-10-19), so an attached harness agent has the same rights as a
-native one. Native-loop self-calls (`compact`, `restart`) are refused by
-`assert_self_action`, while `meiva.self.pause_heartbeat` and `meiva.self.terminate`
+native one. Native-loop self-calls (`compact`, `attach`) are refused for an
+external harness, while `meiva.self.pause_heartbeat` and `meiva.self.terminate`
 operate on the attached identity so the agent can pause its heartbeat or end its
-process when its role is complete.
+process when its role is complete. `meiva.self.restart` also operates on the
+attached identity, like `terminate`: it is recorded through the gateway and applied
+by the host when the turn ends, and returns a receipt instead of ending the process
+([decision](../../../../docs/decisions/agents/graph/2026-11-11-self-restart-at-turn-end.md)).
 
 ## Why not MCP, and why not a sidecar
 

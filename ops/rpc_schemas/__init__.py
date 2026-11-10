@@ -236,10 +236,17 @@ class ResurrectAgentRequest(BaseModel):
 # `config_overlay`, when nonempty, is validated by the restart operation (which holds the home
 # its plugin config classes come from) before it reaches either gateway or runner writes,
 # merged into the persistent agent overlay, and carried in the restart inbound payload.
+#
+# `at_turn_end` is the agent's own restart (`meiva.self.restart` on an external harness, or one
+# that changes harness): the request passes the same validation as any restart, then the home
+# runner records it as a pending `restart` command (source `self`) instead of acting at once, and
+# the host applies it when the running turn ends. It requires `source == "agent:<id>"` for the
+# agent it targets, so one agent cannot queue another's restart as its own.
 class RestartAgentRequest(BaseModel):
     source: str = Field(default="user", min_length=1, max_length=64)
     message: UserContent
     config_overlay: dict[str, object] | None = None
+    at_turn_end: bool = False
 
     @field_validator("source")
     @classmethod

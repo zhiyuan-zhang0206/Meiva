@@ -44,6 +44,7 @@ from ops.agents.wake import ResurrectTriggerStaleError, resurrect_agent
 from ops.cluster import rpc as cluster_rpc
 from ops.cluster_status import kill_agent_shells
 from ops.lifecycle import resurrect_plan, termination
+from ops.lifecycle.deferred_restart import defer_restart_blocking
 
 # Re-exported from `events`; callers keep module-qualified sites.
 from ops.lifecycle.events import (
@@ -620,7 +621,9 @@ async def _execute_harness_transition(
 
 
 # meiva:note
-# Local-target restart or harness switch.
+# Local-target restart or harness switch. A restart with `at_turn_end` (the agent's own) is
+# only recorded here, as a pending command the host applies when the turn ends
+# (`ops/lifecycle/deferred_restart.py`); every other restart acts now.
 async def restart_agent_op(
     db: Database,
     bus: EventBus,
@@ -633,6 +636,13 @@ async def restart_agent_op(
     default_model: str,
     home: Path,
 ) -> RestartAgentResponse:
+    if body.at_turn_end:
+        iid = await asyncio.to_thread(
+            defer_restart_blocking, db, bus, agent_id, body, db_pool, catalog=catalog
+        )
+        await publish_inbound_arrived(bus, agent_id, iid, "restart", "self", body.message)
+        return RestartAgentResponse(status=RestartResult.ENQUEUED)
+
     status, old_harness = await asyncio.to_thread(
         read_restart_status_and_harness_blocking, db_pool, agent_id
     )

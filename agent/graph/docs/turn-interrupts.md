@@ -82,3 +82,23 @@ checkpoint's turn abandoned, since each turn's first invocation starts halted.
 
 An accepted native cancel remains bound to its original work across action
 boundaries; a later chat or work UUID cannot consume that command.
+
+## The agent's own restart waits for the turn to end, on any harness
+
+`meiva.self.restart` on an external harness, or from any harness with a `harness` in the overlay,
+is recorded as a pending `restart` command (`source='self'`) carrying a `restart_transition`
+(`base/agents/incarnation/restart_transition.py`): the target harness and the overlay to merge.
+The home runner writes it after the gateway's usual validation
+(`ops/lifecycle/deferred_restart.py`); nothing about the agent changes while its turn runs. The
+command is never an interrupt (the watcher excludes `source='self'`, however long it waited), and
+steering of messages that arrive meanwhile stops at it, so they stay pending. When the harness turn
+or native execution returns, the claim takes the command first and alone and `handle_restart` ends the
+invocation on every harness; the agent's own source is never idle, so the apply queues the note.
+`apply_hosted_lifecycle` then stores the overlay and the harness, releases the incarnation, closes
+the command and queues the note, in one transaction, and the host removes the old harness's session
+record just before it (a retry may run that twice) and writes the switch note in the outgoing
+history just after it. The note is `[Harness switched from 'a' to 'b']` plus the agent's message for a
+switch, and the restart-accepted text for a restart that kept its harness (the session resumes).
+A command still claimed when its host died is claimed again by the next incarnation and applied then;
+a command still pending when the agent crashes is superseded by the resurrection.
+See [the decision](../../../docs/decisions/agents/graph/2026-11-11-self-restart-at-turn-end.md).

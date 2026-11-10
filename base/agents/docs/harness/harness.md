@@ -48,7 +48,10 @@ Harness is a property of the agent initialized at birth and switchable on restar
 - On restart, an agent in `idling` or `terminated` status may switch harness via
   `POST /api/agents/{id}/restart` with `config_overlay={"harness": "..."}` and a
   mandatory `message`. The prior immutable update trigger was retired to enable
-  controlled operator and agent transitions.
+  controlled operator and agent transitions. A running agent switches itself with
+  `meiva.self.restart(message, config_overlay={"harness": ..., "llm_model": ...})`: the
+  same validation, then a pending command the host applies when the turn ends
+  ([decision](../../../../docs/decisions/agents/graph/2026-11-11-self-restart-at-turn-end.md)).
 
 ## The fork rule
 

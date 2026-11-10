@@ -1,7 +1,7 @@
-exports = ["harness", "lifecycle_plans.py", "plans.py", "wake.py"]
+exports = ["harness", "lifecycle_plans.py", "plans.py", "restart_plans.py", "wake.py"]
 
 [uses]
-"__init__.py" = ["harness", "lifecycle_plans.py", "plans.py", "wake.py"]
+"__init__.py" = ["harness", "lifecycle_plans.py", "plans.py", "restart_plans.py", "wake.py"]
 "harness" = []
 
 [dynamic-attrs]
@@ -9,7 +9,8 @@ exports = ["harness", "lifecycle_plans.py", "plans.py", "wake.py"]
 "wake.py" = "_LazyRedis is the structural type of a proxy that forwards any attribute to the redis client it builds on first use; a declaration with no body"
 
 [purity]
-"__init__.py" = { mode = "none", why = "the meiva.self facade: attach, restart, terminate, compact and pause_heartbeat read the bound context, the installation and the database row, run the SQL plans.py returns in a transaction, emit the audit and telemetry events and publish the wake; whether the harness may take the action, the overlay a restart stores, whether the caller is an attached controller and the texts of a compaction are decided by the pure lifecycle_plans.py, the statements by plans.py and the wake channel by wake.py" }
+"__init__.py" = { mode = "none", why = "the meiva.self facade: attach, restart, terminate, compact and pause_heartbeat read the bound context, the installation and the database row, run the SQL plans.py returns in a transaction, emit the audit and telemetry events and publish the wake; whether the harness may take the action, the overlay a restart stores, whether the caller is an attached controller and the texts of a compaction are decided by the pure lifecycle_plans.py, where a restart goes (now, or at the turn boundary) and what it tells the caller by the pure restart_plans.py, the statements by plans.py and the wake channel by wake.py" }
 "lifecycle_plans.py" = "strict"
 "plans.py" = "strict"
+"restart_plans.py" = "strict"
 "wake.py" = "strict"

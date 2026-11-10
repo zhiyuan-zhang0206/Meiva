@@ -1,6 +1,8 @@
-exports = ["lifecycle_commands.py", "tests"]
+exports = ["lifecycle_commands.py", "restart_transition.py", "tests"]
 
 [uses]
+"tests" = ["restart_transition.py"]
 
 [purity]
 "__init__.py" = "strict"
+"restart_transition.py" = "strict"

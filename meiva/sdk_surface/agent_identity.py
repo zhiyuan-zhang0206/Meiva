@@ -47,7 +47,7 @@ def is_launched_child() -> bool:
 # meiva:note
 # The harness this process runs under: read here, decided by `identity_plan.harness_name`, so the
 # rule stays under purity analysis while the read does not.
-def _harness_name() -> str:
+def process_harness_name() -> str:
     resolved = process_context.ambient_context()
     if resolved is None:
         return Harness.MEIVA.value
@@ -183,7 +183,7 @@ def require_actor(context: MeivaContext | None = None) -> str:
 # meiva:note
 # Refuse a native-only `meiva.self` action when running on an external harness.
 def _assert_native_harness(action: str) -> None:
-    refused = native_harness_refusal(_harness_name(), action)
+    refused = native_harness_refusal(process_harness_name(), action)
     if refused is not None:
         raise RuntimeError(refused)
 
@@ -201,6 +201,6 @@ def assert_self_action(action: str) -> None:
             background script), or has no established identity.
     """
     _assert_native_harness(action)
-    refused = self_action_refusal(caller_facts(_bound(), harness=_harness_name()), action)
+    refused = self_action_refusal(caller_facts(_bound(), harness=process_harness_name()), action)
     if refused is not None:
         raise RuntimeError(refused)

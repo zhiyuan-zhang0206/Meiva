@@ -131,7 +131,7 @@ def test_a_process_that_names_no_model_gets_the_empty_profile() -> None:
     assert profile == ModelHelpProfile()
 
 
-def test_external_harness_profile_hides_attach_compact_and_restart_in_self(
+def test_external_harness_profile_hides_attach_and_compact_but_not_restart_in_self(
     model_catalog: Any,
 ) -> None:
     import meiva
@@ -149,12 +149,15 @@ def test_external_harness_profile_hides_attach_compact_and_restart_in_self(
     assert "def pause_heartbeat(" in self_help
     assert "AGENT_ID" in self_help
     assert "MACHINE_SPEC" in self_help
+    assert "def restart(" in self_help
     assert "def compact(" not in self_help
-    assert "def restart(" not in self_help
     assert "def attach(" not in self_help
 
     overview_help = _render_text(meiva, profile=profile)
-    assert "Your own runtime: AGENT_ID, MACHINE_SPEC, pause_heartbeat, terminate." in overview_help
+    assert (
+        "Your own runtime: AGENT_ID, MACHINE_SPEC, pause_heartbeat, restart, terminate."
+        in overview_help
+    )
 
 
 def _declared_styles(repo_root: Path) -> set[str]:
