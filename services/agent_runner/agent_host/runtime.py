@@ -417,6 +417,7 @@ async def build_runtime(
     home: Path,
     harness: Harness = Harness.MEIVA,
     birth_config: Mapping[str, object] | None = None,
+    fork_source_agent_id: int | None = None,
     registry: SessionRegistry | None = None,
     registrations: RegistrationStore | None = None,
     registration_ttl_seconds: float,
@@ -461,6 +462,7 @@ async def build_runtime(
             contributions=contributions,
             unsolicited=unsolicited,
             home=home,
+            fork_source_agent_id=fork_source_agent_id,
         ),
     )
 
@@ -481,6 +483,7 @@ def harness_bridge_for(
     contributions: Iterable[HarnessContribution] = (),
     unsolicited: UnsolicitedSink | None = None,
     home: Path,
+    fork_source_agent_id: int | None = None,
 ) -> HarnessBridge | None:
     if harness is Harness.MEIVA:
         return None
@@ -503,6 +506,7 @@ def harness_bridge_for(
         skip_permissions=skip_permissions,
         contributions=contributions,
         unsolicited=unsolicited,
+        fork_source_agent_id=fork_source_agent_id,
     )
 
 

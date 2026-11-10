@@ -85,7 +85,7 @@ async def read_stored_config(
         row = await aquery_one(
             conn,
             StoredConfig,
-            "SELECT machine, status, harness, config_overlay, birth_config "
+            "SELECT machine, status, harness, config_overlay, birth_config, fork_source_agent_id "
             "FROM agents_meta WHERE id = %s",
             (agent_id,),
         )

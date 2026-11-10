@@ -136,6 +136,8 @@ class ClaudeAgentOptions:
     env: dict[str, str] = field(default_factory=dict[str, str])
     resume: str | None = None
     extra_args: dict[str, str | None] | None = None
+    fork_session: bool = False
+    session_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -200,11 +202,19 @@ class FakeClaudeSDKClient:
 
     async def connect(self) -> None:
         self.connected = True
+        if self.options.fork_session and self.options.session_id in self._sdk.stored_sessions:
+            raise RuntimeError(f"Session ID {self.options.session_id} is already in use.")
+        reported = (
+            self.options.session_id
+            if self.options.fork_session and self.options.session_id
+            else self.options.resume or self._sdk.new_session_id
+        )
+        self._sdk.stored_sessions.add(reported)
         self._emit(
             SystemMessage(
                 subtype="init",
                 data={
-                    "session_id": self.options.resume or self._sdk.new_session_id,
+                    "session_id": reported,
                     "model": self.options.model,
                     "cwd": self.options.cwd,
                     "apiKeySource": "none",
@@ -385,6 +395,13 @@ class FakeSDK:
         self.passive = False
         self.clients: list[FakeClaudeSDKClient] = []
         self.ClaudeAgentOptions = ClaudeAgentOptions
+        # meiva:note
+        # The sessions whose transcript exists. A session is stored once its init was reported, and the
+        # real CLI refuses a fork under an id that is already stored, which this models.
+        self.stored_sessions: set[str] = set()
+
+    def get_session_info(self, session_id: str) -> object | None:
+        return object() if session_id in self.stored_sessions else None
 
     def ClaudeSDKClient(self, options: ClaudeAgentOptions) -> FakeClaudeSDKClient:
         client = FakeClaudeSDKClient(options, sdk=self)

@@ -82,8 +82,9 @@ def open_session(
     reasoning_effort: str | None = None,
     skip_permissions: bool = True,
     unsolicited: UnsolicitedSink | None = None,
+    fork_source_agent_id: int | None = None,
 ) -> HarnessSession:
-    binding = SessionBinding(agent_id, registry, unsolicited)
+    binding = SessionBinding(agent_id, registry, unsolicited, fork_source_agent_id)
     if harness is Harness.CLAUDE_CODE:
         claude_env = session_environ(environ)
         claude_config = BridgeConfig(
@@ -204,6 +205,7 @@ def bridge_for(
     skip_permissions: bool = True,
     contributions: Iterable[HarnessContribution] = (),
     unsolicited: UnsolicitedSink | None = None,
+    fork_source_agent_id: int | None = None,
 ) -> HarnessBridge | None:
     if harness is Harness.MEIVA:
         return None
@@ -227,6 +229,7 @@ def bridge_for(
             reasoning_effort=reasoning_effort,
             skip_permissions=skip_permissions,
             unsolicited=unsolicited,
+            fork_source_agent_id=fork_source_agent_id,
         )
 
     return HarnessBridge(

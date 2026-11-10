@@ -30,12 +30,14 @@ class FakeAppServer:
         self,
         *,
         thread_id: str = "thread-1",
+        fork_thread_id: str = "thread-fork",
         pid: int | None = CODEX_PID,
         resume_fails: bool = False,
         resume_cwd: str = "workspace",
         returncode: int | None = None,
     ) -> None:
         self.thread_id = thread_id
+        self.fork_thread_id = fork_thread_id
         self._pid = pid
         # meiva:note
         # The exit status the session records on close (task #5616). A fake server has
@@ -92,6 +94,8 @@ class FakeAppServer:
                 "thread": {"id": self.thread_id, "cwd": params.get("cwd")},
                 "model": "gpt-fake",
             }
+        if method == "thread/fork":
+            return {"thread": {"id": self.fork_thread_id, "forkedFromId": params["threadId"]}}
         if method == "thread/resume":
             if self.resume_fails:
                 raise JsonRpcError(-32603, "thread not found")

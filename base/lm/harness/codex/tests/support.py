@@ -127,6 +127,7 @@ async def start(
     unsolicited: UnsolicitedSink | None = None,
     observe_pid: bool = True,
     clock: SessionClock | None = None,
+    fork_source_agent_id: int | None = None,
     **config_overrides: Any,
 ) -> Harness:
     fake = server if server is not None else FakeAppServer(pid=CODEX_PID if observe_pid else None)
@@ -137,7 +138,7 @@ async def start(
     session = CodexSession(
         config(tmp_path, **config_overrides),
         environ={},
-        binding=SessionBinding(agent_id, registry, unsolicited),
+        binding=SessionBinding(agent_id, registry, unsolicited, fork_source_agent_id),
         transport=fake,
         probe=scripted_probe,
         clock=clock if clock is not None else system_clock(),

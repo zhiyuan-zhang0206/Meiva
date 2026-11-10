@@ -286,9 +286,10 @@ def spawn(
 
     `harness` selects the initial runtime loop. It defaults to "meiva" and also
     accepts "claude_code", "codex" or "antigravity". Unknown names are refused.
-    Use `restart` to switch harnesses later. Forking (`fork_from`) is only
-    supported for native "meiva" agents, and asking a fork for an external harness or forking an
-    external harness agent fails with `ForkHarnessMismatch`.
+    Use `restart` to switch harnesses later. A fork keeps its source's harness: naming another one
+    fails with `ForkHarnessMismatch`. Forking works for "meiva", "claude_code" and "codex"
+    agents; a "claude_code" or "codex" source can only be forked onto its own machine (its CLI
+    session is a local file), and an "antigravity" source cannot be forked at all (spawn instead).
     `harness_availability()` reports which ones this machine can run. A harness no launcher
     can start yet is refused with `HarnessNotLaunchable` before any row is written, and so is
     a fork of an agent born on one.
@@ -306,7 +307,14 @@ def spawn(
     new agent sees it as already interrupted, not as work still running, so it checks whether the
     call already took effect instead of repeating it.
     The copy is the whole conversation: the child carries it and pays its size on every call, and
-    the parent's own history is unchanged.
+    the parent's own history is unchanged. What the first call costs depends on the harness. On
+    "meiva" and "claude_code" it reuses the source's provider cache, so the first call pays only the
+    new tokens and a fork is cheaper than a spawn that rereads the same context. On "codex" only the
+    static prefix is cached on the first call, so the first call is billed close to full price for
+    the whole history; later calls hit the cache. A fork of an external agent starts from the source's
+    conversation as it stands when the child first starts, not at the instant of the call: turns the
+    source finishes in between are included. The fork's first message tells it the new agent id
+    and workspace, and that the identity and memory notes in the history belong to the source.
     `{"eval_isolation": True, "eval_network_allowlist": ["web"]}` isolates the agent, allowing
     only the listed `web` / `understand`; `mcps` and `ui` are off.
     """
@@ -381,15 +389,6 @@ def spawn_impl(
     from base.agents.birth.harness import coerce_harness
 
     coerced_harness = None if harness is None else coerce_harness(harness)
-    if (
-        fork_from is not None
-        and coerced_harness is not None
-        and coerced_harness is not Harness.MEIVA
-    ):
-        raise ForkHarnessMismatch(
-            f"cannot fork agent {fork_from} onto harness {coerced_harness.value!r}: "
-            f"forking is only supported on the native 'meiva' harness."
-        )
     harness = None if coerced_harness is None else coerced_harness.value
     spawner = meiva.sdk_surface.agent_identity.require_actor()
     _check_spawn_model_required(fork_from, spawner, config)

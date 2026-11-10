@@ -103,15 +103,13 @@ def test_spawn_refuses_an_unknown_harness_before_the_request(no_gateway_http: No
         )
 
 
-def test_fork_refuses_an_external_harness_before_the_request(no_gateway_http: None) -> None:
-    with pytest.raises(
-        agents.ForkHarnessMismatch, match="only supported on the native 'meiva' harness"
-    ):
-        agents.spawn(
-            fork_from=7,
-            harness="claude_code",
-            machine="test-machine",
-        )
+def test_fork_naming_an_external_harness_is_left_to_the_gateway(
+    gateway_requests: list[httpx.Request],
+) -> None:
+    assert agents.spawn(fork_from=7, harness="claude_code", machine="test-machine") == 42
+    [request] = gateway_requests
+    assert _body(request)["fork_from"] == 7
+    assert _body(request)["harness"] == "claude_code"
 
 
 @pytest.mark.usefixtures("sdk_model_owner")

@@ -99,6 +99,10 @@ callable; we simply do not advertise it.
 
 ## 6. Fork
 
+> Superseded in part by [forking Claude Code and Codex agents](2026-11-11-external-harness-fork.md):
+> a Claude Code or Codex session can be cloned, so those two harnesses fork; the "copies the parent's
+> message history" ruling now holds through the CLI session and a copy of the display timeline.
+
 - A fork **creates a new cluster agent**: new id, its own workspace, lineage
   pointing at the parent.
 - A harness-internal sub-agent is **not** a cluster agent: no id, no lineage.

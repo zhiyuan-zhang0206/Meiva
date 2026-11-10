@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from uuid import UUID
 
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage, ToolMessage
-from psycopg import AsyncConnection, Connection
+from psycopg import AsyncConnection, Connection, Cursor
 
 from base.agents.history.closing_request import FullHistory, single_segment_history
 from base.agents.history.timeline_item import TimelineItem
@@ -39,6 +39,26 @@ def _int_from_row(row: tuple[object, ...] | None) -> int:
         return 0
     val = row[0]
     return int(val) if isinstance(val, (int, str)) else 0
+
+
+# meiva:note
+# Copy one agent's display timeline as another's first rows; returns the row count. The sequence
+# numbers and revisions carry over unchanged, so item ids stay stable and the new agent's own rows
+# continue after them. `inbound_id` is cleared: it names a row of the source's inbound queue, which
+# the new agent does not own. The delivery records of what the source sent to the user
+# (`agent_user_messages`) are deliberately not copied, so the copy raises no unread for the new
+# agent.
+# meiva:link base/lm/harness/docs/fork.md
+def copy_harness_timeline(
+    cur: Cursor[tuple[object, ...]], source_agent_id: int, new_agent_id: int
+) -> int:
+    cur.execute(
+        "INSERT INTO agent_harness_messages (agent_id, seq, harness, item, inbound_id, created_at) "
+        "SELECT %s, seq, harness, item, NULL, created_at FROM agent_harness_messages "
+        "WHERE agent_id = %s",
+        (new_agent_id, source_agent_id),
+    )
+    return cur.rowcount
 
 
 def get_next_harness_message_seq(conn: Connection, agent_id: int) -> int:

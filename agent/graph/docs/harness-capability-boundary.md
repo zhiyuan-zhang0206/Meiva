@@ -5,8 +5,8 @@ Part of [Harness turn](harness-turn.md).
 Because an external harness CLI owns its context window and turn loop, native
 context/lifecycle mutations are native (`Harness.MEIVA`) only:
 
-- **`fork`, `compact`, and `meiva.self.attach` are native-only**:
-  - `fork` (`fork_from`) and `POST /api/agents/{id}/compact` reject external harnesses with HTTP 400 (`ForkHarnessMismatch` on fork; guarded in `claim` dispatch); the web UI hides `Fork` and `Compact` (and omits `/compact` from slash autocomplete) for external harnesses.
+- **`compact` and `meiva.self.attach` are native-only**; `fork` works on `meiva`, `claude_code` and `codex` ([how](../../../base/lm/harness/docs/fork.md)):
+  - `POST /api/agents/{id}/compact` rejects external harnesses with HTTP 400 (guarded in `claim` dispatch); the web UI hides `Compact` (and omits `/compact` from slash autocomplete) for external harnesses. `fork` (`fork_from`) of an `antigravity` source, across harnesses, or across machines is refused with `ForkHarnessMismatch`.
   - `POST /api/agents/{id}/restart` and the Web UI `Restart` action are supported on `idling` external-harness agents and for bidirectional harness switching on `idling`/`terminated` agents (requiring a non-empty `message`); a running agent is answered 409.
   - `meiva.self.restart()` works on every harness and is the one road for a running agent: the request is validated by the same gateway route (`at_turn_end`, the agent's own source only), recorded as a pending `restart` command and applied by the host when the turn ends, never during it
     ([decision](../../../docs/decisions/agents/graph/2026-11-11-self-restart-at-turn-end.md)). On an external harness the call returns a receipt and the agent ends its own turn; the harness CLI owns the turn, so nothing interrupts it.

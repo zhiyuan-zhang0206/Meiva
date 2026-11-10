@@ -42,6 +42,7 @@ from base.events.live.projection import Cancelled, CompactionMode, CompactionSta
 from base.host.env.agent_slices import AgentSlices
 from base.log import logger
 from base.packages.plugins.extensions import ExtensionRegistry
+from base.paths import workspace_dir
 
 from ._routing import ROUTING_KINDS, ClaimGoto, Routing
 
@@ -522,6 +523,16 @@ async def _handle_fork(
     ctx: MeivaContext,
 ) -> None:
     now = ctx.require_clock().now()
+    # meiva:note
+    # An external harness fork resumes a CLI session whose working directory was the source's.
+    # The CLI is told the new one by its own environment note, and the marker repeats it so the
+    # fact does not depend on that note: the workspace is the one thing a cloned session got wrong.
+    # meiva:link base/lm/harness/docs/fork.md
+    workspace = (
+        ""
+        if ctx.harness is Harness.MEIVA
+        else f" Your working directory is now {workspace_dir(agent_id, home=ctx.require_meiva_home())}."
+    )
     st.new_msgs.append(
         system_note_message(
             content=(
@@ -530,7 +541,7 @@ async def _handle_fork(
                 f"conversation above is inherited from {item.source}, not your own "
                 f"history. Identity, memory and skill notes in that history belong "
                 f"to {item.source}; the notes below this marker are yours. "
-                f"Continue as agent {agent_id}."
+                f"Continue as agent {agent_id}.{workspace}"
             ),
             tag=NoteTag.LIFECYCLE_FORK,
             picked_up_at=now,

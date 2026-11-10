@@ -35,6 +35,7 @@ class StoredConfig:
     harness: str
     config_overlay: dict[str, object] | None
     birth_config: dict[str, object] | None
+    fork_source_agent_id: int | None = None
 
     @property
     def fingerprint(self) -> str:

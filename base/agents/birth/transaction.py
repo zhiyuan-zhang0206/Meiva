@@ -14,6 +14,7 @@ from base import telemetry
 from base.agents.birth.creation_identity import record_creation_snapshot, recover_birth
 from base.agents.birth.harness import resolve_birth_harness
 from base.agents.history.checkpoint_copy import copy_checkpoint_chain
+from base.agents.history.harness_messages import copy_harness_timeline
 from base.agents.inbox.insert import insert_spawn_prompt_in_transaction
 from base.agents.labels import spawn_prompt_with_label
 from base.agents.model.birth_config import (
@@ -337,10 +338,21 @@ def _insert_fork_history(
     fork_from: int | None,
     fork_checkpoint: str | None,
     fork_tail_skills: list[str] | None,
+    harness: Harness,
 ) -> None:
     if fork_from is not None and fork_checkpoint is not None:
-        # ForkCheckpointNotFound causes the whole transaction to roll back (the with block does not commit)
-        copy_checkpoint_chain(cur, fork_from, fork_checkpoint, new_id)
+        if harness is Harness.MEIVA:
+            # ForkCheckpointNotFound causes the whole transaction to roll back (the with block does not commit)
+            copy_checkpoint_chain(cur, fork_from, fork_checkpoint, new_id)
+        else:
+            # meiva:note
+            # An external harness agent's conversation is its CLI session, which the new
+            # agent clones on its first start. The graph checkpoints of the source hold no
+            # conversation (and may sit mid-turn, with a pending input), so they are not
+            # copied: the fork starts a fresh graph and the display rows below are what the
+            # UI shows as its inherited history.
+            # meiva:link base/lm/harness/docs/fork.md
+            copy_harness_timeline(cur, fork_from, new_id)
         # The copied history reads as the source agent's identity to the new
         # process. INSERT a kind='fork' lifecycle inbound in THIS transaction
         # (committed before launch) so the new agent's first claim appends an
@@ -409,7 +421,7 @@ def insert_agent_birth(
     # source is refused here, so a caller that skipped request validation cannot
     # bypass the rule.
     # meiva:link base/agents/docs/harness/harness.md
-    born_harness = resolve_birth_harness(cur, harness, fork_from, spawner=spawner)
+    born_harness = resolve_birth_harness(cur, harness, fork_from, spawner=spawner, machine=machine)
     new_id = _insert_agent_identity(conn, label)
     config, birth_config = _resolve_birth_overlay(
         cur,
@@ -449,7 +461,9 @@ def insert_agent_birth(
     if launch_row is None:
         raise RuntimeError("expected exactly one row: spawn: insert agent meta")
     launch_attempt_id = launch_row.last_launch_attempt_id
-    _insert_fork_history(cur, new_id, fork_from, fork_checkpoint, fork_tail_skills)
+    _insert_fork_history(
+        cur, new_id, fork_from, fork_checkpoint, fork_tail_skills, Harness(born_harness)
+    )
     if prompt is not None:
         assert prompt_source is not None, "prompt requires prompt_source (validated above)"  # noqa: S101
         prompt_content = spawn_prompt_with_label(prompt, label)

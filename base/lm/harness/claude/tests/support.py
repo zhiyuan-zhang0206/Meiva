@@ -137,9 +137,13 @@ async def start(
     session_id: str = "session-1",
     unsolicited: UnsolicitedSink | None = None,
     passive: bool = False,
+    fork_source_agent_id: int | None = None,
+    sdk: FakeSDK | None = None,
     **config_overrides: Any,
 ) -> Harness:
-    sdk = FakeSDK(scripts, cli_pid=CLI_PID)
+    sdk = sdk if sdk is not None else FakeSDK(scripts, cli_pid=CLI_PID)
+    if scripts is not None:
+        sdk.scripts = list(scripts)
     sdk.new_session_id = session_id
     sdk.passive = passive
     if not observe_pid:
@@ -158,7 +162,7 @@ async def start(
     session = ClaudeSession(
         config(tmp_path, **config_overrides),
         environ=environ if environ is not None else {},
-        binding=SessionBinding(agent_id, registry, unsolicited),
+        binding=SessionBinding(agent_id, registry, unsolicited, fork_source_agent_id),
         sdk=sdk,
         probe=scripted_probe,
         clock=system_clock(),

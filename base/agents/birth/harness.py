@@ -83,12 +83,37 @@ def _require_launchable(
     )
 
 
+def _refuse_unforkable_source(
+    source: Harness, fork_from: int, *, source_machine: object, target_machine: str | None
+) -> None:
+    if source is Harness.ANTIGRAVITY:
+        raise ForkHarnessMismatch(
+            f"cannot fork agent {fork_from}: it runs on 'antigravity', and agy has no supported "
+            f"fork entry (the in-process RPC `ForkConversation` is not a public interface, and a "
+            f"fork made through it gets no cache hit). Spawn a new agent with "
+            f"harness='antigravity' instead."
+        )
+    if (
+        source is not Harness.MEIVA
+        and target_machine is not None
+        and source_machine != target_machine
+    ):
+        raise ForkHarnessMismatch(
+            f"cannot fork agent {fork_from} onto machine {target_machine!r}: it runs on external "
+            f"harness {source.value!r} on machine {source_machine!r}, and the CLI session a fork "
+            f"clones is a local file there. Fork it on its own machine ({source_machine!r}), or "
+            f"spawn a new agent with harness={source.value!r} on {target_machine!r}."
+        )
+
+
 # meiva:note
-# A fork copies a native meiva agent's checkpointed conversation and continues
-# on the native meiva harness. External harnesses own their CLI session on disk
-# and cannot be forked, nor can a native agent be forked onto an external
-# harness. This check runs inside the birth transaction (and prechecks) so any
-# caller that skipped client-side validation still fails fast.
+# A fork keeps its source's harness. A native meiva fork copies the checkpointed
+# conversation; a Claude Code or Codex fork clones the CLI session on the machine
+# the source runs on (`base/lm/harness/docs/fork.md`), so it needs the target on
+# that same machine, because the CLI keeps its transcript in a local directory. A
+# fork across harnesses is refused: the transcripts are different formats. Antigravity
+# has no supported fork entry. This check runs inside the birth transaction (and
+# prechecks) so any caller that skipped client-side validation still fails fast.
 # meiva:link base/agents/docs/harness/harness.md
 def resolve_birth_harness(
     cur: psycopg.Cursor[tuple[object, ...]],
@@ -97,6 +122,7 @@ def resolve_birth_harness(
     *,
     launchable: Collection[Harness] = LAUNCHABLE_HARNESSES,
     spawner: str | None = None,
+    machine: str | None = None,
 ) -> str:
     if fork_from is None:
         if (
@@ -109,7 +135,7 @@ def resolve_birth_harness(
             if p_row is not None and isinstance(p_row[0], str):
                 requested = p_row[0]
         return _require_launchable(coerce_harness(requested), fork_from, launchable).value
-    cur.execute("SELECT harness FROM agents_meta WHERE id = %s", (fork_from,))
+    cur.execute("SELECT harness, machine FROM agents_meta WHERE id = %s", (fork_from,))
     row = cur.fetchone()
     if row is None:
         raise AgentNotFound(f"fork source agent {fork_from} does not exist")
@@ -120,18 +146,14 @@ def resolve_birth_harness(
             raise ForkHarnessMismatch(
                 f"cannot fork agent {fork_from} onto harness {requested_harness.value!r}: the "
                 f"source runs on {source.value!r}, and harness is an immutable property of an "
-                f"agent. Spawn a new agent with harness={requested_harness.value!r} instead of "
-                f"forking onto it."
+                f"agent. A fork inherits the source's conversation, which only its own harness "
+                f"can read. Spawn a new agent with harness={requested_harness.value!r} instead of "
+                f"forking onto it, or restart the source onto that harness first and fork it "
+                f"there."
             )
     if source not in launchable:
         _require_launchable(source, fork_from, launchable)
-    if source is not Harness.MEIVA:
-        raise ForkHarnessMismatch(
-            f"cannot fork agent {fork_from}: source agent runs on external harness "
-            f"{source.value!r}, and forking is only supported on the native 'meiva' harness "
-            f"(external harness CLI sessions cannot be cloned). Spawn a new agent with "
-            f"harness={source.value!r} instead."
-        )
+    _refuse_unforkable_source(source, fork_from, source_machine=row[1], target_machine=machine)
     return _require_launchable(source, fork_from, launchable).value
 
 
