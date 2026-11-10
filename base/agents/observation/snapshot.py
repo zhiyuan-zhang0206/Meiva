@@ -97,22 +97,15 @@ _FROM = (
 _GROUP = ""
 
 
+# meiva:note
+# One open notice (a `meiva.ui.ask` question; migration 0053). The agent snapshot's
+# `notices_awaiting_response` carries only the require_response subset (the "needs response"
+# worklist); this model also serves the per-agent inspector panel. `title` is the one-line
+# headline; `content` is the optional detail body. `priority` is P0..P3 (the stakes axis) and
+# `blocking` says whether the agent is stalled waiting on the answer (the urgency axis).
+# `require_response` is False only for legacy FYI rows; it defaults to True for backward
+# compatibility with the snapshot subquery, which selects only require_response rows.
 class OpenNotice(BaseModel):
-    """One open notice from meiva.ui.notify() (migration 0053).
-
-    The agent snapshot's `notices_awaiting_response` carries only the require_response
-    subset (the "needs response" worklist); this model also serves the per-agent
-    inspector panel where the single open notice (since #152) may be either kind.
-
-    `title` is the one-line headline; `content` is the optional detail
-    body (possibly long). `priority` is P0..P3 (the stakes axis) and `blocking`
-    says whether the agent is stalled waiting on the answer (the urgency axis) —
-    the two triage axes (color + sort). `require_response` is True when the agent
-    needs a user decision, False for a one-way FYI; defaults to True for backward
-    compat with the snapshot's notices_awaiting_response subquery (which only
-    selects require_response rows).
-    """
-
     id: int
     title: str
     content: str | None

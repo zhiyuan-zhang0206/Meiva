@@ -1007,22 +1007,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/agents/{agent_id}/notices": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post: operations["post_notice_create_api_agents__agent_id__notices_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/keyed/v1/agents/{agent_id}/notices/{notice_id}/resolve": {
         parameters: {
             query?: never;
@@ -1033,38 +1017,6 @@ export interface paths {
         get?: never;
         put?: never;
         post: operations["resolve_observed_api_keyed_v1_agents__agent_id__notices__notice_id__resolve_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/agents/{agent_id}/notices/current/guarded-v1": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch: operations["edit_current_api_agents__agent_id__notices_current_guarded_v1_patch"];
-        trace?: never;
-    };
-    "/api/agents/{agent_id}/notices/current/dismiss/guarded-v1": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post: operations["dismiss_current_api_agents__agent_id__notices_current_dismiss_guarded_v1_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2991,13 +2943,6 @@ export interface components {
             telemetry_stale: boolean;
             snapshot_at?: string | null;
         };
-        GuardedNoticeEdit: {
-            observed_notice_id: number;
-            title?: string | null;
-            content?: string | null;
-            priority?: components["schemas"]["Priority"] | null;
-            blocking?: boolean | null;
-        };
         GuideDraftRequest: {
             nl: string;
         };
@@ -3315,17 +3260,6 @@ export interface components {
             text?: string | null;
             comment?: string | null;
         };
-        NoticeCreateIn: {
-            title: string;
-            content?: string | null;
-            priority: components["schemas"]["Priority"];
-            require_response: boolean;
-            blocking: boolean;
-            task_id?: number | null;
-            schedule_id?: number | null;
-            expire_at?: string | null;
-            question?: (components["schemas"]["ChoiceQuestion"] | components["schemas"]["TextQuestion"]) | null;
-        };
         NoticeItem: {
             id: number;
             agent_id: number;
@@ -3413,9 +3347,6 @@ export interface components {
             size: number;
             sha256: string;
             content_type: string;
-        };
-        ObservedNotice: {
-            observed_notice_id: number;
         };
         OpenNotice: {
             id: number;
@@ -6204,43 +6135,6 @@ export interface operations {
             };
         };
     };
-    post_notice_create_api_agents__agent_id__notices_post: {
-        parameters: {
-            query?: never;
-            header: {
-                "Idempotency-Key": string;
-            };
-            path: {
-                agent_id: number;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["NoticeCreateIn"];
-            };
-        };
-        responses: {
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
     resolve_observed_api_keyed_v1_agents__agent_id__notices__notice_id__resolve_post: {
         parameters: {
             query?: never;
@@ -6266,78 +6160,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AgentMessageEnqueued"];
-                };
-            };
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    edit_current_api_agents__agent_id__notices_current_guarded_v1_patch: {
-        parameters: {
-            query?: never;
-            header: {
-                "Idempotency-Key": string;
-                "Idempotency-Scope": string;
-            };
-            path: {
-                agent_id: number;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["GuardedNoticeEdit"];
-            };
-        };
-        responses: {
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["NoticeItem"];
-                };
-            };
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    dismiss_current_api_agents__agent_id__notices_current_dismiss_guarded_v1_post: {
-        parameters: {
-            query?: never;
-            header: {
-                "Idempotency-Key": string;
-                "Idempotency-Scope": string;
-            };
-            path: {
-                agent_id: number;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["ObservedNotice"];
-            };
-        };
-        responses: {
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["NoticeItem"];
                 };
             };
             422: {

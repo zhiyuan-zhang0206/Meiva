@@ -208,7 +208,6 @@ class GatewayConfig:
     memory_search: MemorySearchSettings
     heartbeat: HeartbeatTiming
     status_probe_timeout_seconds: float
-    notice_ttl_limit_seconds: float
     timeline_compact_history: int
     message_timestamps: bool
     clock: ClockConfig
@@ -404,7 +403,6 @@ def gateway_config_from_boot(
             backoff_max_interval_seconds=daemon.heartbeat_backoff_max_interval_seconds,
         ),
         status_probe_timeout_seconds=gateway.status_probe_timeout_seconds,
-        notice_ttl_limit_seconds=daemon.notice_ttl_limit_seconds,
         timeline_compact_history=gateway.timeline_compact_history,
         message_timestamps=view.general.message_timestamps,
         clock=clock_config_from_boot(config),
@@ -466,7 +464,6 @@ def placeholder_config() -> GatewayConfig:
         memory_search=_placeholders(MemorySearchSettings),
         heartbeat=_placeholders(HeartbeatTiming),
         status_probe_timeout_seconds=0.0,
-        notice_ttl_limit_seconds=0.0,
         timeline_compact_history=0,
         message_timestamps=False,
         clock=_placeholders(ClockConfig),

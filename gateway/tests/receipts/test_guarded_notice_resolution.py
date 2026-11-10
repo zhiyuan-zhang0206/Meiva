@@ -1,3 +1,4 @@
+from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
 
 import psycopg
@@ -5,12 +6,25 @@ import pytest
 from fastapi.testclient import TestClient
 
 from base.events.live.bus import EventBus
-from gateway.tests.auth.gateway_config import GatewayTestClient
+from gateway.tests.auth.gateway_config import GatewayTestClient, gateway_test_client
 from gateway.tests.events.test_notices_endpoint import insert_notice, seed_agent
-from gateway.tests.receipts.test_current_notice_receipts import HEADERS
-from gateway.tests.receipts.test_current_notice_receipts import client as client
 from gateway.tests.support.live_events.faults import unpublishable_bus
 from gateway.tests.support.openapi_document.document import openapi_document
+
+# meiva:note
+# An isolated credential for the keyed notice-resolution tests.
+SECRET = "guarded-notice-test-secret"  # noqa: S105
+HEADERS = {"Idempotency-Key": "intent", "Idempotency-Scope": "principal-v1"}
+
+
+@pytest.fixture
+def client() -> Iterator[GatewayTestClient]:
+    with gateway_test_client(
+        cluster_secret=SECRET,
+        headers={"Authorization": f"Bearer {SECRET}"},
+        raise_server_exceptions=False,
+    ) as value:
+        yield value
 
 
 def _path(agent: int, notice: int) -> str:

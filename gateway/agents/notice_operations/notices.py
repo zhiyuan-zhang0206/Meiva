@@ -1,15 +1,14 @@
 # meiva:note
-# The agent-facing notice surface: post, resolve or withdraw, and the inbox feeds.
+# The notice surface: resolve a question and the inbox feeds.
 # meiva:link gateway/routers/docs/frontend-ui-data.md
 
 from __future__ import annotations
 
 import asyncio
-import logging
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Annotated, TypeGuard
+from typing import Annotated
 
 import psycopg
 from fastapi import APIRouter, Header, HTTPException, Query, Request
@@ -21,24 +20,15 @@ from base.agents.inbox.insert import insert_inbound_message_in_transaction
 from base.agents.inbox.wake import publish_inbound_wake
 from base.agents.messages.inbound import InboundKind
 from base.agents.messages.inbound_provenance import InboundProvenance
-from base.api_contracts.notice_question import ChoiceQuestion
 from base.db.transaction import write_transaction
-from base.events.live.announce import publish_agent_updated_sync
-from base.events.live.bus import EventBus
-from base.events.notifications.notices import stage_notice_notification
-from base.events.notifications.publish import announce_sync
 from base.host.boundary.json_values import is_object_dict
 from gateway.agents.inbound_provenance import request_inbound_provenance
 from gateway.agents.notice_operations.notice_answers import resolution_answer, resolution_inbound
 from gateway.agents.notice_operations.notice_plan import (
-    creation_problem,
-    notice_expiry,
-    past_expiry_problem,
     question_expired,
 )
 from gateway.agents.schemas import (
     AgentMessageEnqueued,
-    NoticeCreateIn,
     NoticeItem,
     NoticesCursor,
     NoticesFeed,
@@ -50,7 +40,6 @@ from ops import lifecycle as _ops
 from ops.agents import get_agent_status
 
 router = APIRouter()
-_log = logging.getLogger(__name__)
 
 
 # meiva:note
@@ -64,32 +53,6 @@ class _ResolveTarget:
     question: object
     expire_at: datetime | None
     created_at: datetime
-
-
-# meiva:note
-# The oldest open notice's local id and title, for the refusal that names it.
-@dataclass(frozen=True)
-class _OpenNotice:
-    local_id: int
-    title: str
-
-
-# meiva:note
-# The ids a notice insert returns.
-@dataclass(frozen=True)
-class _NoticeIds:
-    id: int
-    local_id: int
-
-
-# meiva:note
-# One entry of the pending-notices list a creation receipt carries.
-@dataclass(frozen=True)
-class _PendingNotice:
-    id: int
-    title: str
-    created_at: datetime
-    priority: str
 
 
 # meiva:note
@@ -116,20 +79,6 @@ _SELECT = (
 _ACTION_RESOLUTION = {"answer": "answered", "dismiss": "dismissed"}
 _OPEN_FEED_MAX_LIMIT = 500
 _RESOLVED_PAGE_MAX_LIMIT = 100
-
-
-# meiva:note
-# Refresh the inspector's response-required notice projection after commit.
-def publish_response_required_hint(bus: EventBus, agent_id: int) -> None:
-    try:
-        publish_agent_updated_sync(bus, agent_id)
-    except Exception:
-        # meiva:note
-        # The row is durable; a failed projection refresh must not fail the write.
-        # meiva:link gateway/routers/docs/frontend-ui-data.md
-        _log.exception(
-            "unable to publish response-required notice hint", extra={"agent_id": agent_id}
-        )
 
 
 def _open_notices_blocking(
@@ -393,249 +342,7 @@ async def post_notice_resolve(
 
 
 # meiva:note
-# ── unified notice write API (R3 door ④) ─────────────────────────────────
-# meiva:note
-# The agent->user queue has ONE write path: the agent SDK calls these endpoints
-# (meiva.ui.notify here; edit_notice / dismiss_notice through the guarded routes
-# in `notice_operations`), which perform the whole lifecycle atomically in one
-# transaction — a one-open-notice check plus insert for notify, an observed-row
-# update for edit/dismiss — plus the event publishes. The agent_notices table is
-# the single truth source and every writer goes through the same code.
-# meiva:link meiva_builtins/plugins/meiva_fleet/docs/notify.md
-# meiva:note
-#
-# Pause semantics: data-plane like every other agent write — the quiesce has
-# drained the agents before the migration window, so nothing legitimately
-# writes notices during pause.
-
-
-@router.post("/api/agents/{agent_id}/notices", status_code=201)
-async def post_notice_create(
-    agent_id: int,
-    body: NoticeCreateIn,
-    request: Request,
-    idempotency_key: str = Header(alias="Idempotency-Key", min_length=1, max_length=128),
-) -> dict[str, object]:
-    # meiva:link meiva_builtins/plugins/meiva_fleet/docs/notify.md
-    idempotency_key = notice_key(request, idempotency_key)
-    request_body: dict[str, object] = body.model_dump(
-        mode="json", exclude={"question"} if body.question is None else set()
-    )
-    # meiva:note
-    # The server's own record of the credential it verified, never the caller's claim:
-    # the path's agent_id says who the caller claims to be, this says what proved it.
-    source_verified_by = request_inbound_provenance(request).source_verified_by
-    from base.agents.to_user.delivery.store import delivery_mode
-    from base.api_contracts.user_delivery import UserDeliveryMode
-
-    def check_mode() -> None:
-        with gateway_state(request).db_pool.connection() as conn:
-            if (
-                delivery_mode(conn, agent_id, gateway_config(request).user_delivery_mode)
-                is UserDeliveryMode.SDK
-            ):
-                raise HTTPException(
-                    409, "notify is disabled in SDK delivery mode; use meiva.ui.publish"
-                )
-
-    await asyncio.to_thread(check_mode)
-
-    def _create(
-        pool: ConnectionPool,
-    ) -> tuple[
-        int,
-        int,
-        list[dict[str, object]],
-        bool,
-        int | None,
-    ]:
-        with write_transaction(pool) as conn, conn.cursor(row_factory=class_row(_NoticeIds)) as cur:
-            previous = existing_receipt(
-                conn,
-                request.url.path,
-                idempotency_key,
-                request_body,
-                legacy_body=(request_body | {"require_response": False})
-                if "require_response" not in body.model_fields_set
-                else None,
-            )
-            if previous is not None:
-                return _replayed_create_receipt(previous)
-            validate_creation(body)
-            validate_creation_state(conn, body, now=gateway_clock(request).now())
-            # meiva:note
-            # Serialize all creations for an agent, including different keys:
-            # no-open-notice races must not allocate the same local id.
-            cur.execute("SELECT id FROM agents WHERE id = %s FOR UPDATE", (agent_id,))
-            # meiva:note
-            # One open notice per agent, and no silent replacement: a second
-            # notify() is refused with the open notice's id and the two ways
-            # out, instead of resolving the first one on the writer's behalf.
-            # Legacy FYI rows (require_response false, unwritable since
-            # 2026-10-19) are not notices and never block a poster.
-            # meiva:link meiva_builtins/plugins/meiva_fleet/docs/notify.md
-            with conn.cursor(row_factory=class_row(_OpenNotice)) as open_cur:
-                open_cur.execute(
-                    "SELECT local_id, title FROM agent_notices "
-                    "WHERE agent_id = %s AND resolved_at IS NULL AND require_response "
-                    "ORDER BY created_at DESC, local_id DESC LIMIT 1",
-                    (agent_id,),
-                )
-                open_notice = open_cur.fetchone()
-            if open_notice is not None:
-                raise HTTPException(
-                    status_code=409,
-                    detail=(
-                        f"agent {agent_id} already holds an open notice "
-                        f"#{open_notice.local_id} ({open_notice.title!r}); an agent holds one "
-                        f"notice at a time. Close it first with meiva.ui.dismiss_notice() "
-                        f"(or answer it in the console), or rewrite it in place with "
-                        f'meiva.ui.edit_notice(content="..."), then post the new one.'
-                    ),
-                )
-            final_expire_at = notice_expiry(
-                body.expire_at,
-                now=gateway_clock(request).now(),
-                ttl_limit_seconds=gateway_config(request).notice_ttl_limit_seconds,
-            )
-
-            # meiva:note
-            # Insert the new notice with the agent's next local id.
-            cur.execute(
-                "INSERT INTO agent_notices "
-                "(agent_id, local_id, title, content, priority, require_response, blocking, "
-                "task_id, expire_at, question, source_verified_by, schedule_id) "
-                "VALUES (%s, COALESCE((SELECT MAX(local_id) FROM agent_notices "
-                "WHERE agent_id = %s), -1) + 1, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) "
-                "RETURNING id, local_id",
-                (
-                    agent_id,
-                    agent_id,
-                    body.title,
-                    body.content,
-                    body.priority,
-                    body.require_response,
-                    body.blocking,
-                    body.task_id,
-                    final_expire_at,
-                    Jsonb(body.question.model_dump(mode="json"))
-                    if body.question is not None
-                    else None,
-                    source_verified_by,
-                    body.schedule_id,
-                ),
-            )
-            row = cur.fetchone()
-            # meiva:note
-            # RETURNING always yields a row; the branch only guards the driver contract.
-            if row is None:
-                raise RuntimeError("notice insert returned no row")
-            notice_global_id, notice_local_id = row.id, row.local_id
-            notification_id = stage_notice_notification(
-                conn, agent_id=agent_id, notice_id=notice_global_id
-            )
-            with conn.cursor(row_factory=class_row(_PendingNotice)) as pending_cur:
-                pending_cur.execute(
-                    "SELECT local_id AS id, title, created_at, priority "
-                    "FROM agent_notices WHERE agent_id = %s AND resolved_at IS NULL "
-                    "ORDER BY created_at DESC, local_id DESC",
-                    (agent_id,),
-                )
-                pending: list[dict[str, object]] = [
-                    {
-                        "id": r.id,
-                        "title": r.title,
-                        "created_at": r.created_at.isoformat(),
-                        "priority": r.priority,
-                    }
-                    for r in pending_cur.fetchall()
-                ]
-            save_receipt(
-                conn,
-                request.url.path,
-                idempotency_key,
-                request_body,
-                {
-                    "global_id": notice_global_id,
-                    "id": notice_local_id,
-                    "pending_notices": pending,
-                    "notification_id": notification_id,
-                },
-            )
-            # meiva:note
-            # Publish only after the durable rows are visible to the snapshot
-            # query; a pre-commit AgentUpdated would preserve the stale view.
-            conn.commit()
-            if body.require_response:
-                publish_response_required_hint(gateway_state(request).bus, agent_id)
-            return (
-                notice_global_id,
-                notice_local_id,
-                pending,
-                False,
-                notification_id,
-            )
-
-    pool = gateway_state(request).db_pool
-    (
-        notice_global_id,
-        notice_local_id,
-        pending,
-        replayed,
-        notification_id,
-    ) = await asyncio.to_thread(_create, pool)
-    # meiva:note
-    # The posted event publishes after the commit, by GLOBAL id; the SDK's return
-    # value carries LOCAL ids. Best-effort, never raises.
-    # meiva:link gateway/agents/docs/notice-receipts.md
-    if not replayed:
-        await _ops.publish_notice_posted(
-            gateway_state(request).bus,
-            agent_id,
-            notice_global_id,
-            body.priority,
-            body.title,
-            body.task_id,
-        )
-    else:
-        await asyncio.to_thread(
-            publish_response_required_hint, gateway_state(request).bus, agent_id
-        )
-    await announce_notice_delivery(request, notification_id)
-    return {
-        "id": int(notice_local_id),
-        "pending_count": len(pending),
-        "pending_notices": pending,
-    }
-
-
-# meiva:note
 # ── keyed notice-operation receipts (owned by the notice transaction, never a response cache) ──
-
-
-def _is_object_list(value: object) -> TypeGuard[list[object]]:
-    return isinstance(value, list)
-
-
-def _is_dict_list(value: object) -> TypeGuard[list[dict[str, object]]]:
-    return _is_object_list(value) and all(isinstance(item, dict) for item in value)
-
-
-def _replayed_create_receipt(
-    previous: dict[str, object],
-) -> tuple[int, int, list[dict[str, object]], bool, int | None]:
-    global_id = previous.get("global_id")
-    local_id = previous.get("id")
-    pending = previous.get("pending_notices")
-    notification_id = previous.get("notification_id")
-    if (
-        not isinstance(global_id, int)
-        or not isinstance(local_id, int)
-        or not _is_dict_list(pending)
-        or (notification_id is not None and not isinstance(notification_id, int))
-    ):
-        raise TypeError("stored notice creation receipt has invalid shape")
-    return global_id, local_id, pending, True, notification_id
 
 
 # meiva:note
@@ -648,26 +355,12 @@ def notice_key(request: Request, key: str) -> str:
 
 
 # meiva:note
-# `announce_sync` publishes only an unannounced row, so a replay repairs a lost
-# announce without pushing one that already landed.
-# meiva:link base/events/notifications/README.md
-async def announce_notice_delivery(request: Request, notification_id: int | None) -> None:
-    if notification_id is None:
-        return
-    await asyncio.to_thread(
-        announce_sync, gateway_state(request).db_pool, gateway_state(request).bus, notification_id
-    )
-
-
-# meiva:note
 # Serialize a notice operation and reject reuse with changed inputs.
 def existing_receipt(
     conn: psycopg.Connection,
     path: str,
     key: str,
     body: dict[str, object],
-    *,
-    legacy_body: dict[str, object] | None = None,
 ) -> dict[str, object] | None:
     with conn.cursor(row_factory=class_row(_StoredReceipt)) as cur:
         cur.execute("SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))", (path + ":" + key,))
@@ -679,7 +372,7 @@ def existing_receipt(
         row = cur.fetchone()
     if row is None:
         return None
-    if row.request not in (body, legacy_body):
+    if row.request != body:
         raise HTTPException(
             status_code=409, detail="idempotency key identifies a different notice operation"
         )
@@ -734,42 +427,3 @@ def resolve_once(
         receipt: dict[str, object] = {"inbound_id": inbound_id, "content": content}
         save_receipt(conn, path, key, body, receipt)
     return receipt
-
-
-# meiva:note
-# Reject invalid notice obligations before allocating a receipt.
-def validate_creation(body: NoticeCreateIn) -> None:
-    problem = creation_problem(
-        title=body.title,
-        require_response=body.require_response,
-        allows_other=isinstance(body.question, ChoiceQuestion) and body.question.allow_other,
-    )
-    if problem is not None:
-        raise HTTPException(status_code=422, detail=problem)
-
-
-# meiva:note
-# Validate mutable creation preconditions only for a fresh operation.
-def validate_creation_state(
-    conn: psycopg.Connection, body: NoticeCreateIn, *, now: datetime
-) -> None:
-    if body.task_id is not None:
-        with conn.cursor() as cur:
-            cur.execute("SELECT 1 FROM agent_tasks WHERE id = %s", (body.task_id,))
-            if cur.fetchone() is None:
-                raise HTTPException(status_code=422, detail=f"task {body.task_id} does not exist")
-    # meiva:note
-    # The writer reports the schedule; the server refuses one that names no schedule row, so a
-    # notice cannot claim a schedule that never existed (the column itself carries no FK).
-    if body.schedule_id is not None:
-        if body.schedule_id <= 0:
-            raise HTTPException(status_code=422, detail="schedule_id must be positive")
-        with conn.cursor() as cur:
-            cur.execute("SELECT 1 FROM schedules WHERE id = %s", (body.schedule_id,))
-            if cur.fetchone() is None:
-                raise HTTPException(
-                    status_code=422, detail=f"schedule {body.schedule_id} does not exist"
-                )
-    problem = past_expiry_problem(body.expire_at, now=now)
-    if problem is not None:
-        raise HTTPException(status_code=422, detail=problem)

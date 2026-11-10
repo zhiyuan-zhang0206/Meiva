@@ -30,19 +30,17 @@ def _rule_label(rec: RecordBody) -> str:
     return "ok"
 
 
+# meiva:note
+# True when the agent delivered results through send_message, ask, publish, or a result file
+# (files.write / files.append) — even though final_output may be empty. File delivery is the
+# standard meiva-fleet worker pattern: the worker writes its result JSON and terminates without a
+# report string. Without it, completed workers are mislabeled `failed` (2026-08-03 weekly run:
+# 9 of 25 failed runs were file-delivering workers).
 def _delivered_via_side_channel(rec: RecordBody) -> bool:
-    """True when the agent delivered results through send_message, notify,
-    serve, or a result file (files.write / files.append) — even though
-    final_output may be empty.
-
-    File delivery is the standard meiva-fleet worker pattern: the worker
-    writes its result JSON and terminates without a report string. Without
-    it, completed workers are mislabeled `failed` (2026-08-03 weekly run:
-    9 of 25 failed runs were file-delivering workers)."""
     tools_called = rec["tools_called"]
     return (
         tools_called.get("meiva.agents.send_message", 0) > 0
-        or tools_called.get("meiva.ui.notify", 0) > 0
+        or tools_called.get("meiva.ui.ask", 0) > 0
         or tools_called.get("meiva.ui.publish", 0) > 0
         or tools_called.get("meiva.files.write", 0) > 0
         or tools_called.get("meiva.files.append", 0) > 0

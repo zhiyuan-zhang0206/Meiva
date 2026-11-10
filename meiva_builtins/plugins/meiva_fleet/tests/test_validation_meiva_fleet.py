@@ -1,14 +1,13 @@
-"""Argument validation of the fleet plugin's task and notice entry points."""
+# meiva:note
+# Argument validation of the fleet plugin's task entry points.
 
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import psycopg
 import pytest
 
-from meiva.tests.fixtures.gateway_wire import GatewayWire
 from meiva.tests.fixtures.gateway_wire import gateway_stub as gateway_stub
 from meiva.tests.fixtures.gateway_wire import wire as wire
 from meiva.tests.fixtures.pin_agent import pin_agent
@@ -110,108 +109,3 @@ class TestTasksEntries:
                 7,
                 owner=(5,),  # pyright: ignore[reportArgumentType]
             )
-
-
-class TestNoticeEntries:
-    def test_notify_title_unwraps(self, wire: GatewayWire) -> None:
-        from meiva_builtins.plugins.meiva_fleet import plugin as fleet_plugin
-
-        wire.stub.reply(
-            "POST",
-            "/api/agents/900001/notices",
-            {"id": 1, "pending_count": 0, "superseded": [], "pending_notices": []},
-            status=201,
-        )
-        pin_agent(900001, clients=wire.context.clients)
-        inputs: dict[str, Any] = {
-            "title": ("Hi",),
-            "content": ("detail",),
-            "priority": ("P2",),
-        }
-        notice = fleet_plugin.notify(**inputs)
-        [sent] = wire.sent
-        assert (sent.method, sent.path) == ("POST", "/api/agents/900001/notices")
-        assert sent.body["title"] == "Hi"
-        assert sent.body["content"] == "detail"
-        assert sent.body["priority"] == "P2"
-        assert sent.headers["idempotency-key"]
-        assert notice == 1
-
-    def test_notify_multi_element_title_type_errors(self) -> None:
-        from meiva_builtins.plugins.meiva_fleet import plugin as fleet_plugin
-
-        with pytest.raises(TypeError, match="title must be a string"):
-            fleet_plugin.notify(
-                ("a", "b"),  # pyright: ignore[reportArgumentType]
-            )
-
-    def test_notify_task_never_unwraps(self) -> None:
-        from meiva_builtins.plugins.meiva_fleet import plugin as fleet_plugin
-
-        with pytest.raises(TypeError, match="task must be int"):
-            fleet_plugin.notify(
-                "hi",
-                task=("5",),  # pyright: ignore[reportArgumentType]
-            )
-
-
-# meiva:note
-# The SDK still sends the real gateway request. Its relative expiration is encoded as one
-# absolute UTC deadline; a negative interval is rejected before the listener sees anything.
-def test_relative_notice_expiration_reaches_the_gateway(wire: GatewayWire) -> None:
-    from meiva_builtins.plugins.meiva_fleet import plugin as fleet_plugin
-
-    wire.stub.reply(
-        "POST",
-        "/api/agents/900001/notices",
-        {"id": 1, "pending_count": 0, "superseded": [], "pending_notices": []},
-        status=201,
-    )
-    pin_agent(900001, clients=wire.context.clients)
-    interval = timedelta(minutes=5)
-    before = datetime.now(UTC)
-    assert (
-        fleet_plugin.notify(
-            "expires",
-            expire_at=interval,
-        )
-        == 1
-    )
-    after = datetime.now(UTC)
-    [received] = wire.stub.received
-    due = datetime.fromisoformat(received.body["expire_at"])
-    assert before + interval <= due <= after + interval
-    assert received.headers["idempotency-key"]
-
-
-def test_past_notice_expiration_is_rejected_without_http(wire: GatewayWire) -> None:
-    from meiva_builtins.plugins.meiva_fleet import plugin as fleet_plugin
-
-    pin_agent(900001, clients=wire.context.clients)
-    with pytest.raises(ValueError, match="expire_at is in the past"):
-        fleet_plugin.notify(
-            "expired",
-            expire_at=timedelta(seconds=-1),
-        )
-    assert wire.stub.received == []
-
-
-# meiva:note
-# Equality passes the client's existing past-time comparison, but the server evaluates
-# expiration at arrival. A real HTTP refusal remains an SDK ValueError, not success.
-def test_zero_notice_expiration_preserves_a_gateway_refusal(wire: GatewayWire) -> None:
-    from meiva_builtins.plugins.meiva_fleet import plugin as fleet_plugin
-
-    wire.stub.reply(
-        "POST", "/api/agents/900001/notices", {"detail": "expire_at is in the past"}, status=422
-    )
-    pin_agent(900001, clients=wire.context.clients)
-    before = datetime.now(UTC)
-    with pytest.raises(ValueError, match="expire_at is in the past"):
-        fleet_plugin.notify(
-            "immediate expiry",
-            expire_at=timedelta(0),
-        )
-    [received] = wire.stub.received
-    due = datetime.fromisoformat(received.body["expire_at"])
-    assert before <= due <= datetime.now(UTC)

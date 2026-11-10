@@ -103,12 +103,6 @@ def test_bad_publication_is_rejected(db_conn: psycopg.Connection, body: dict[str
 def test_sdk_has_one_delivery_entry_and_explicit_silence(db_conn: psycopg.Connection) -> None:
     aid = sdk_agent(db_conn)
     with gateway_test_client() as client:
-        assert (
-            client.post(
-                f"/api/agents/{aid}/notices", json={"title": "Duplicate"}, headers=headers("notice")
-            ).status_code
-            == 409
-        )
         response = client.post(f"/api/agents/{aid}/reply-suggestion")
         assert response.status_code == 200 and response.json()["reason"] == "no_agent_text", (
             response.text

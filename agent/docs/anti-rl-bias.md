@@ -29,7 +29,7 @@ continue to supervise outstanding work.
    reminders cannot be disabled (capped at 24 h), so a task that goes dark is a
    visible fact.
 4. **Delivery semantics** — a bare text turn delivers nothing:
-   `meiva.agents.send_message` (peers) and `meiva.ui.notify` (the user) are the only
+   `meiva.agents.send_message` (peers) and a reply that carries the user-display prefix (the user) are the only
    delivery verbs, so "not done yet" must be said out loud and silence reads as
    busy ([why](../../docs/decisions/agents/messages/2026-08-01-one-send-is-one-inbound.md)).
 5. **Standing memory injection** — the memory index (`MEMORY.md`) is injected at

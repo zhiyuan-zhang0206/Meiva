@@ -121,7 +121,5 @@ SDK_DELIVERY_RULE = (
 
 def delivery_disabled_entries(mode: str) -> tuple[str, ...]:
     return (
-        ("ui.notify", "ui.edit_notice", "ui.dismiss_notice")
-        if UserDeliveryMode(mode) is UserDeliveryMode.SDK
-        else ("ui.publish", "ui.publications")
+        () if UserDeliveryMode(mode) is UserDeliveryMode.SDK else ("ui.publish", "ui.publications")
     )

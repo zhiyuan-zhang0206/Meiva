@@ -4,7 +4,6 @@
 # The test root owns a private configuration, context, HTTP client and held-response release.
 from collections.abc import Iterator, Sequence
 from threading import Event
-from urllib.parse import parse_qs
 
 import httpx
 import pytest
@@ -199,54 +198,13 @@ def test_task_patch_rejects_invalid_caller_key_before_network(
     assert retry_gateway.received == []
 
 
-@pytest.mark.parametrize("operation", ["edit", "dismiss"])
-@pytest.mark.parametrize("failure", ["timeout", "server_error"])
-def test_fleet_current_notice_call_retries_its_observed_intent_under_one_key(
-    retry_gateway: GatewayStub, lost_response: Event, operation: str, failure: str
-) -> None:
-    from meiva_builtins.plugins.meiva_fleet.plugin import dismiss_notice, edit_notice
-
-    retry_gateway.reply("GET", "/api/notices/open", [{"id": 11}])
-    method = "PATCH" if operation == "edit" else "POST"
-    path = "/api/agents/7/notices/current" + (
-        "/guarded-v1" if operation == "edit" else "/dismiss/guarded-v1"
-    )
-    _ambiguous_response(retry_gateway, method, path, failure, lost_response)
-    error = GatewayUnavailable if failure == "timeout" else httpx.HTTPStatusError
-    with pytest.raises(error):
-        if operation == "edit":
-            edit_notice(title="Original edit")
-        else:
-            dismiss_notice()
-    writes = [request for request in retry_gateway.received if request.method != "GET"]
-    _assert_one_logical_key(writes)
-    assert {write.method for write in writes} == {method}
-    assert {write.path for write in writes} == {path}
-    assert {write.body["observed_notice_id"] for write in writes} == {11}
-
-
-@pytest.mark.parametrize("operation", ["edit", "dismiss"])
-def test_fleet_current_notice_call_without_an_open_notice_sends_no_write(
-    retry_gateway: GatewayStub, operation: str
-) -> None:
-    from meiva_builtins.plugins.meiva_fleet.plugin import dismiss_notice, edit_notice
-
-    retry_gateway.reply("GET", "/api/notices/open", [])
-    if operation == "edit":
-        edit_notice(title="Nothing open")
-    else:
-        dismiss_notice()
-    assert [request.method for request in retry_gateway.received] == ["GET"]
-    assert parse_qs(retry_gateway.received[0].query)["agent_id"] == ["7"]
-
-
 def test_keyed_patch_sends_the_principal_scope_with_the_caller_key(
     retry_gateway: GatewayStub,
 ) -> None:
-    retry_gateway.reply("PATCH", "/api/agents/7/notices/current/guarded-v1", {})
+    retry_gateway.reply("PATCH", "/api/tasks/3", {})
     transport.patch(
-        "/api/agents/7/notices/current/guarded-v1",
-        {"observed_notice_id": 3, "title": "x"},
+        "/api/tasks/3",
+        {"title": "x"},
         idempotency_key="intent-1",
         context=process_context.current_context(),
     )

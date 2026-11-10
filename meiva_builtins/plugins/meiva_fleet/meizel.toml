@@ -12,6 +12,3 @@ exports = ["default_config.py", "inspector.py", "metrics.py", "plugin.py", "task
 "_task_publication.py" = "strict"
 "__init__.py" = "strict"
 "_task_requests.py" = "strict"
-
-[roots]
-"plugin.py" = { kinds = ["random"], why = "Notice edit and dismiss generate keys for transport retries" }

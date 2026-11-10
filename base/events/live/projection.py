@@ -453,13 +453,12 @@ class LabelUpdated(_Base):
     label: str | None
 
 
+# meiva:note
+# Published when the agent asks a question via `meiva.ui.ask`. Carries only the lightweight header
+# (not the body), so the unified Inbox refetches its queue. A notice that needs a response also
+# publishes AgentUpdated, which invalidates the selected agent's authoritative detail read for
+# inspector consumers.
 class NoticePosted(_Base):
-    """Published when the agent posts or edits any open notice via
-    `meiva.ui.notify` / `meiva.ui.edit_notice`. Carries only the lightweight header
-    (not the body), so the unified Inbox refetches its queue. A notice that needs
-    a response also publishes AgentUpdated, which invalidates the selected
-    agent's authoritative detail read for inspector consumers."""
-
     role: Literal["notice_posted"] = "notice_posted"
     notice_id: int
     priority: str

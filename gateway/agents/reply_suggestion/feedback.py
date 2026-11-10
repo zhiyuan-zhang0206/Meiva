@@ -12,7 +12,7 @@ from psycopg.types.json import Jsonb
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, model_validator
 
 from base.db.transaction import write_transaction
-from gateway.agents.notice_operations.current import operation_key
+from gateway.agents.notice_operations.keyed_operation import operation_key
 from gateway.agents.notice_operations.notices import existing_receipt, save_receipt
 from gateway.http.config import gateway_state
 

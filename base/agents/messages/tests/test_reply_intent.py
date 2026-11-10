@@ -8,6 +8,7 @@ from base.agents.messages.reply_intent import (
     REPLY_VISIBILITY_RULE,
     USER_REPLY_HEADER,
     USER_REPLY_PREFIX,
+    delivery_disabled_entries,
     normalize_last_message_text,
     parse_reply_visibility,
     resolve_agent_reply,
@@ -152,3 +153,11 @@ def test_incomplete_visibility_marker_is_still_invalid(text: str) -> None:
     assert parse_reply_visibility(text) is None
     assert resolve_agent_reply(text, non_human_wake=False, delivery_mode="prefix") == ("", False)
     assert resolve_agent_reply(text, non_human_wake=False) == (text, True)
+
+
+def test_sdk_delivery_disables_no_entry_and_the_other_modes_disable_publishing() -> None:
+    assert delivery_disabled_entries("sdk") == ()
+    for mode in ("naive", "prefix"):
+        assert delivery_disabled_entries(mode) == ("ui.publish", "ui.publications")
+    with pytest.raises(ValueError):
+        delivery_disabled_entries("unknown")

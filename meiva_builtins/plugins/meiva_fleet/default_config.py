@@ -162,7 +162,7 @@ class FleetConfig(BaseModel):
         description=(
             "Platform-wide reduce-context-switch default (user ruling 2026-09-20): "
             "inject the 'Reduce context switch for the human' system-prompt section — "
-            "queue-never-push, one notice per manager updated in place, milestone "
+            "queue-never-push, one update per manager, milestone "
             "cadence, authorization/decision direct, out-of-band push only for a true "
             "emergency. False is the escape hatch back to the pre-platform behavior: "
             "the section is not injected and the reduce-context-switch policy keys "

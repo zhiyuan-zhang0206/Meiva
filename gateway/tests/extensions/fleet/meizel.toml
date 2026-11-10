@@ -1,2 +1,0 @@
-[uses]
-"test_dismissing_response_notice_refreshes_inspector_snapshot.py" = ["test_fleet_notices_via_gateway.py"]
