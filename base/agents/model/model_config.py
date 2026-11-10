@@ -141,6 +141,36 @@ def _resolve_spawn_parent_inheritance(
     return inherited or None
 
 
+def _check_launch(
+    config: dict[str, object] | None,
+    inherited: dict[str, object] | None,
+    *,
+    harness: Harness,
+    probed_models: Sequence[ProbedHarnessModel] | None,
+    catalog: ModelCatalog,
+    keys: ProviderKeys,
+    llm_override: str,
+    authority: ConfigAuthority,
+) -> str:
+    if harness is not Harness.MEIVA and probed_models is not None:
+        effective_cfg = {**(inherited or {}), **(config or {})}
+        cleaned, h_inherited = _resolve_probed_spawn_defaults(harness, effective_cfg, probed_models)
+        inherited = {**(inherited or {}), **h_inherited}
+        if config is not None and cleaned is not None:
+            config = {k: v for k, v in cleaned.items() if k in config}
+    try:
+        birth = resolve_birth_config(config, inherited=inherited, authority=authority)
+        return factory.validate_model_launch(
+            config=resolve_agent_config_pins(config, birth),
+            catalog=catalog,
+            keys=keys,
+            llm_override=llm_override,
+            harness=harness,
+        )
+    except ValueError as exc:
+        raise InvalidModelConfig(str(exc)) from exc
+
+
 # meiva:note
 # Check the model, effort and provider key a plain birth or inherited fork will run.
 def validate_spawn_model_config(
@@ -159,23 +189,25 @@ def validate_spawn_model_config(
     inherited: dict[str, object] | None = None
     if fork_from is not None:
         config, inherited = _resolve_spawn_fork_source(cur, fork_from, config)
+        if harness is not Harness.MEIVA:
+            # meiva:note
+            # A fork cannot change the model or effort it inherits (the overlay may only add skills),
+            # and an external source's pair was validated at its own birth against the models its
+            # CLI reported. This precheck has no probe for a fork, so the static catalog would refuse
+            # an effort the CLI offers; the pair is not re-judged here.
+            # meiva:link base/lm/harness/docs/fork.md
+            pinned = {**(inherited or {}), **(config or {})}.get("llm_model")
+            return str(pinned or "")
     elif spawner and (parent_id := parse_spawner_agent_id(spawner)) is not None:
         inherited = _resolve_spawn_parent_inheritance(cur, parent_id, config, harness)
 
-    if harness is not Harness.MEIVA and probed_models is not None:
-        effective_cfg = {**(inherited or {}), **(config or {})}
-        cleaned, h_inherited = _resolve_probed_spawn_defaults(harness, effective_cfg, probed_models)
-        inherited = {**(inherited or {}), **h_inherited}
-        if config is not None and cleaned is not None:
-            config = {k: v for k, v in cleaned.items() if k in config}
-    try:
-        birth = resolve_birth_config(config, inherited=inherited, authority=authority)
-        return factory.validate_model_launch(
-            config=resolve_agent_config_pins(config, birth),
-            catalog=catalog,
-            keys=keys,
-            llm_override=llm_override,
-            harness=harness,
-        )
-    except ValueError as exc:
-        raise InvalidModelConfig(str(exc)) from exc
+    return _check_launch(
+        config,
+        inherited,
+        harness=harness,
+        probed_models=probed_models,
+        catalog=catalog,
+        keys=keys,
+        llm_override=llm_override,
+        authority=authority,
+    )

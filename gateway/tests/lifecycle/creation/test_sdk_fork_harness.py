@@ -50,7 +50,7 @@ def test_sdk_fork_without_a_harness_keeps_the_source_harness(
 
 
 @pytest.mark.usefixtures("sdk_model_owner")
-def test_sdk_fork_of_an_external_harness_raises_fork_harness_mismatch(
+def test_sdk_fork_of_an_external_harness_keeps_the_source_harness_and_config(
     wire: AppTransport,
     runner: object,
     db_conn: psycopg.Connection,
@@ -67,11 +67,10 @@ def test_sdk_fork_of_an_external_harness_raises_fork_harness_mismatch(
     )
     assert len(runner.calls_of("harness_probe")) == 1
     _checkpoint(db_conn, source)
-    with pytest.raises(ForkHarnessMismatch, match="only supported on the native 'meiva' harness"):
-        meiva.agents.spawn(
-            fork_from=source,
-            machine="local-test",
-        )
+    child = meiva.agents.spawn(fork_from=source, machine="local-test")
+    assert _harness(db_conn, child) == "codex"
+    with pytest.raises(ForkHarnessMismatch, match="onto harness 'meiva'"):
+        meiva.agents.spawn(fork_from=source, machine="local-test", harness="meiva")
     assert _harness(db_conn, source) == "codex"
     stored = db_conn.execute(
         "SELECT config_overlay FROM agents_meta WHERE id=%s", (source,)
@@ -79,4 +78,4 @@ def test_sdk_fork_of_an_external_harness_raises_fork_harness_mismatch(
     assert stored is not None
     assert stored[0]["llm_model"] == "gpt-6-astra"
     assert stored[0]["reasoning_effort"] == "ultra"
-    assert len(wire.requests) == 2
+    assert len(wire.requests) == 3

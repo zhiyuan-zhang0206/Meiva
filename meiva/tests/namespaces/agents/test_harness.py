@@ -139,23 +139,14 @@ def test_harness_availability_reports_every_harness() -> None:
     assert rows[0].models == ()
 
 
-def test_fork_of_an_external_agent_defaults_to_the_sources_machine(
-    sdk_environment: MeivaContext,
+def test_fork_without_a_machine_names_none_and_leaves_the_default_to_the_gateway(
+    gateway_requests: list[httpx.Request],
 ) -> None:
-    requests: list[httpx.Request] = []
-
-    def answer(request: httpx.Request) -> httpx.Response:
-        requests.append(request)
-        if request.method == "GET":
-            return httpx.Response(200, json={"harness": "codex", "machine": "macmini"})
-        return httpx.Response(200, json={"id": 42})
-
-    with (
-        httpx.Client(base_url="http://gateway", transport=httpx.MockTransport(answer)) as client,
-        use_client(client),
-    ):
-        assert agents.spawn(fork_from=7) == 42
-        assert agents.spawn(fork_from=7, machine="ubuntu") == 42
-    posts = [_body(request) for request in requests if request.method == "POST"]
-    assert [body["machine"] for body in posts] == ["macmini", "ubuntu"]
-    assert sum(request.method == "GET" for request in requests) == 1
+    assert agents.spawn(fork_from=7) == 42
+    assert agents.spawn(fork_from=7, machine="ubuntu") == 42
+    assert agents.spawn() == 42
+    bodies = [_body(request) for request in gateway_requests]
+    assert [request.method for request in gateway_requests] == ["POST", "POST", "POST"]
+    assert "machine" not in bodies[0]
+    assert bodies[1]["machine"] == "ubuntu"
+    assert bodies[2]["machine"]

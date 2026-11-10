@@ -139,7 +139,8 @@ def resolve_birth_harness(
     row = cur.fetchone()
     if row is None:
         raise AgentNotFound(f"fork source agent {fork_from} does not exist")
-    source = Harness(row[0])
+    source_value, source_machine = row
+    source = Harness(source_value)
     if requested is not None:
         requested_harness = coerce_harness(requested)
         if requested_harness is not source:
@@ -153,7 +154,9 @@ def resolve_birth_harness(
             )
     if source not in launchable:
         _require_launchable(source, fork_from, launchable)
-    _refuse_unforkable_source(source, fork_from, source_machine=row[1], target_machine=machine)
+    _refuse_unforkable_source(
+        source, fork_from, source_machine=source_machine, target_machine=machine
+    )
     return _require_launchable(source, fork_from, launchable).value
 
 

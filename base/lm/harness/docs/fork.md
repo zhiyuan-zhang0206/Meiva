@@ -79,10 +79,13 @@ as interrupted, as a native fork does.
 
 ## Defaults and assumptions
 
-- **Default machine.** `spawn(fork_from=...)` without `machine` lands on the caller's machine, except
-  that a fork of a `claude_code` or `codex` agent defaults to the **source's** machine, the only one it
-  can be born on (`meiva.agents._spawn_machine`). Naming another machine still gets the cross-machine
-  refusal.
+- **Default machine.** The SDK sends no machine for a fork that names none, and the gateway decides
+  (`default_spawn_target`): a fork of a `claude_code` or `codex` agent lands on the **source's**
+  machine, the only one it can be born on; a fork of a native agent lands on its spawner's machine
+  when the spawner is an agent, else the gateway's, as before. Naming another machine for an external
+  source still gets the cross-machine refusal. The gateway also reads the source's harness for a fork
+  (`_fork_source_harness`), so an external fork is validated and born on the source's harness even
+  when the request names none.
 - **Claude home.** The "does the clone already exist" check reads `~/.claude` (or the runner's
   `CLAUDE_CONFIG_DIR`) through the SDK in the runner process, so it assumes the runner and the CLI
   session share that directory, as they do by default. A session given a different `CLAUDE_CONFIG_DIR`

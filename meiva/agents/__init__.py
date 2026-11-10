@@ -373,17 +373,13 @@ def _validate_spawn_config_overlay(
 
 
 # meiva:note
-# The machine a spawn lands on when the caller names none: its own, except that a fork of an
-# external harness agent can only be born where the source's CLI session lives, so that agent's
-# machine is the default there. Naming another machine still goes to the birth rule, which refuses it.
+# The machine the request names. A fork without one names none: the gateway decides, because the
+# default depends on the source (a fork of an external harness agent can only be born where the
+# source's CLI session lives) and the gateway reads the source anyway.
 # meiva:link base/lm/harness/docs/fork.md
-def _spawn_machine(machine: str | None, fork_from: int | None) -> str:
-    if machine is not None:
+def _spawn_machine(machine: str | None, fork_from: int | None) -> str | None:
+    if machine is not None or fork_from is not None:
         return machine
-    if fork_from is not None:
-        source = gateway_client.get_agent(fork_from)
-        if source["harness"] != Harness.MEIVA.value:
-            return str(source["machine"])
     return process_context.current_context().require_machine().name()
 
 

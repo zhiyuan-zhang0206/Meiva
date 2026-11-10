@@ -14,7 +14,11 @@ from base.agents.observation import snapshot as snapshot_module
 from base.api_contracts.agent_contract import AgentNotFound
 from base.db.transaction import write_transaction
 from base.telemetry.audit_events import prepare_event_log, record_audit
-from gateway.agents.creation import create_and_launch_agent, scoped_creation_key
+from gateway.agents.creation import (
+    create_and_launch_agent,
+    default_spawn_target,
+    scoped_creation_key,
+)
 from gateway.agents.schemas import AgentRow, LabelPatchRequest
 from gateway.http.auth.request_principal import PRINCIPAL_SCOPE, SCOPE_HEADER
 from gateway.http.config import gateway_clock, gateway_ensure_harnesses, gateway_rpc, gateway_state
@@ -178,7 +182,12 @@ async def post_guarded_agents(
     if idempotency_scope is not None and idempotency_scope != PRINCIPAL_SCOPE:
         raise HTTPException(status_code=422, detail="guarded creation requires principal-v1 scope")
     key = scoped_creation_key(request, idempotency_key, operation_path="/api/keyed/v1/agents")
-    target = body.machine if body.machine is not None else gateway_state(request).machine.name()
+    target = await asyncio.to_thread(
+        default_spawn_target,
+        gateway_state(request).db_pool,
+        body,
+        gateway_state(request).machine.name(),
+    )
     try:
         return await create_and_launch_agent(
             body,
