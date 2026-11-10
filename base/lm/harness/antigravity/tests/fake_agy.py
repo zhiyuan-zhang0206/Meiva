@@ -16,6 +16,49 @@ _RECORD_LOCK = threading.Lock()
 
 
 # meiva:note
+# The conversation state the in-process RPC reports, as agy 1.5.5 does: `status` is RUNNING while a
+# turn runs and IDLE otherwise, `steps` is the trajectory (user-input steps carry the
+# `clientMessageId` of a message sent through RPC), and `replay` holds the step frames of a phantom turn
+# (an input sent while IDLE: agy runs it, prints nothing, and prints its steps at the next stdin input).
+class _State:
+    def __init__(self) -> None:
+        self.lock = threading.Lock()
+        self.status = "CASCADE_RUN_STATUS_IDLE"
+        self.steps: list[dict[str, Any]] = []
+        self.replay: list[dict[str, Any]] = []
+        # meiva:note
+        # How many `GetCascadeTrajectory` answers still say RUNNING although the turn ended: the
+        # moment between agy finishing a turn and a caller reading it, in which an input sent through
+        # RPC starts a phantom turn.
+        self.turns_done = 0
+        self.stale_calls = int(os.environ.get("FAKE_AGY_STALE_CALLS") or 0)
+
+    def add_step(self, kind: str, client_id: str | None = None) -> int:
+        with self.lock:
+            step: dict[str, Any] = {"type": kind, "status": "CORTEX_STEP_STATUS_DONE"}
+            if client_id is not None:
+                step["userInput"] = {"clientMessageId": client_id}
+            self.steps.append(step)
+            return len(self.steps) - 1
+
+    def note_index(self, index: int) -> None:
+        with self.lock:
+            while len(self.steps) <= index:
+                self.steps.append({"type": "CORTEX_STEP_TYPE_PLANNER_RESPONSE"})
+
+    def snapshot(self) -> dict[str, Any]:
+        with self.lock:
+            return {
+                "trajectory": {"steps": list(self.steps)},
+                "status": self.status,
+                "numTotalSteps": len(self.steps),
+            }
+
+
+_STATE = _State()
+
+
+# meiva:note
 # A stand-in for the `agy` CLI, speaking its NDJSON stream on stdin/stdout. The
 # adapter is tested against the real framing, not against a Python object: this
 # script is spawned exactly like `agy`, reads `{"event":"user",...}` lines and
@@ -107,8 +150,70 @@ def _emit_steps(
                 },
             }
         )
+        _STATE.note_index(step_index)
         time.sleep(float(turn.get("pace", 0.0)))
     return next_index
+
+
+def _run_phantom(user_index: int, text: str) -> None:
+    _STATE.status = "CASCADE_RUN_STATUS_RUNNING"
+    pause = float(os.environ.get("FAKE_AGY_PHANTOM_SECONDS") or 0.2)
+
+    def finish() -> None:
+        time.sleep(pause)
+        answer = f"phantom answer to {text}"
+        reply_index = _STATE.add_step("CORTEX_STEP_TYPE_PLANNER_RESPONSE")
+        transcript = os.environ.get("FAKE_AGY_TRANSCRIPT")
+        if transcript:
+            _record(
+                transcript,
+                {
+                    "step_index": reply_index,
+                    "type": "PLANNER_RESPONSE",
+                    "status": "DONE",
+                    "content": answer,
+                },
+            )
+        with _STATE.lock:
+            _STATE.replay = [
+                {"step_index": user_index, "state": "DONE", "step_type": "user_input"},
+                {
+                    "step_index": reply_index,
+                    "state": "DONE",
+                    "step_type": "agent_response",
+                    "text_delta": answer,
+                },
+            ]
+            _STATE.status = "CASCADE_RUN_STATUS_IDLE"
+
+    threading.Thread(target=finish, daemon=True).start()
+
+
+def _message_text(payload: dict[str, Any]) -> str:
+    items = cast("list[dict[str, Any]]", payload.get("items") or [])
+    return str(items[0].get("text") or "") if items else ""
+
+
+def _trajectory_reply() -> dict[str, Any]:
+    if os.environ.get("FAKE_AGY_BAD_TRAJECTORY"):
+        return {"unexpected": True}
+    snap = _STATE.snapshot()
+    if _STATE.turns_done > 0 and _STATE.stale_calls > 0:
+        _STATE.stale_calls -= 1
+        snap["status"] = "CASCADE_RUN_STATUS_RUNNING"
+    return snap
+
+
+def _accept_message(payload: dict[str, Any], received_path: str | None) -> None:
+    text = _message_text(payload)
+    _record(received_path, text)
+    _record(os.environ.get("FAKE_AGY_RPC"), payload)
+    client_id = payload.get("clientMessageId")
+    index = _STATE.add_step(
+        "CORTEX_STEP_TYPE_USER_INPUT", client_id if isinstance(client_id, str) else None
+    )
+    if _STATE.status == "CASCADE_RUN_STATUS_IDLE":
+        _run_phantom(index, text)
 
 
 def _start_rpc_server(
@@ -129,12 +234,13 @@ def _start_rpc_server(
             if self.path.endswith("/GetWorkspaceInfos"):
                 self._respond(200, {"workspaceInfos": []})
                 return
+            if self.path.endswith("/GetCascadeTrajectory"):
+                self._respond(200, _trajectory_reply())
+                return
             if self.path.endswith("/SendUserCascadeMessage"):
-                items = cast("list[dict[str, Any]]", payload.get("items") or [])
-                text = str(items[0].get("text") or "") if items else ""
-                _record(received_path, text)
+                _accept_message(payload, received_path)
                 self._respond(200, {})
-                steered.put(text)
+                steered.put(_message_text(payload))
                 return
             self._respond(404, {"message": f"unknown path: {self.path}"})
 
@@ -153,6 +259,17 @@ def _start_rpc_server(
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     return server
+
+
+def _emit_replay(conversation: str) -> None:
+    for frame in _take_replay():
+        _emit({"event": "step_update", "step_update": {"conversation_id": conversation, **frame}})
+
+
+def _take_replay() -> list[dict[str, Any]]:
+    with _STATE.lock:
+        frames, _STATE.replay = _STATE.replay, []
+    return frames
 
 
 def _hang(conversation: str) -> None:
@@ -237,6 +354,9 @@ def main() -> int:
                 continue
             content = json.loads(text).get("message", {}).get("content", "")
             _record(received, content)
+            _emit_replay(conversation)
+            _STATE.status = "CASCADE_RUN_STATUS_RUNNING"
+            _ = _STATE.add_step("CORTEX_STEP_TYPE_USER_INPUT")
             turn = _turn_at(turns, cursor_path)
             child = _spawn_child(turn)
             if turn.get("hang"):
@@ -246,6 +366,9 @@ def main() -> int:
                 _ = steered.get(timeout=float(turn.get("steer_timeout", 5.0)))
             if turn.get("steered_steps"):
                 _ = _emit_steps(conversation, turn, key="steered_steps", start_index=next_index)
+            _STATE.status = "CASCADE_RUN_STATUS_IDLE"
+            _STATE.turns_done += 1
+            time.sleep(float(turn.get("idle_before_result", 0.0)))
             _emit(_result(conversation, **cast("dict[str, Any]", turn.get("result") or {})))
     except _InterruptedError:
         if child is not None and turn.get("kill_child_on_interrupt"):

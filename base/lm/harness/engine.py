@@ -1,9 +1,10 @@
 from __future__ import annotations
 
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
 from dataclasses import dataclass
 from typing import Protocol, runtime_checkable
 
+from base.lm.harness.delivery import HarnessInput
 from base.lm.harness.events import BridgeEvent, Usage
 from base.lm.harness.handoff import Handoff
 
@@ -109,6 +110,7 @@ class HarnessSession(Protocol):
         self, *, resume: str | None = None, handoff: Handoff | None = None
     ) -> Awaitable[None]: ...
     def submit(self, text: str, *, key: str | None = None) -> SubmittedTurn: ...
+    def deliver(self, inputs: Sequence[HarnessInput]) -> Awaitable[None]: ...
     def events(self) -> AsyncIterator[BridgeEvent]: ...
     def interrupt(self, *, turn_id: str | None = None) -> Awaitable[object]: ...
     def close(self, *, reason: str = "closed") -> Awaitable[None]: ...

@@ -1,0 +1,27 @@
+{
+  "source": "agy 1.5.5 experiments, steer-ack round 2 (a-race_c-3) and round 3 (agp-idle, agp-next probes): an input sent through SendUserCascadeMessage after the turn ended answers HTTP 200 and the conversation runs a turn that stdout never shows",
+  "poll_after_late_input": [
+    {"note": "agp-idle: idle before the send", "status": "CASCADE_RUN_STATUS_IDLE", "numTotalSteps": 2},
+    {"note": "agp-idle: 0.0s after the send", "status": "CASCADE_RUN_STATUS_RUNNING", "numTotalSteps": 2},
+    {"note": "agp-idle: 0.5s", "status": "CASCADE_RUN_STATUS_RUNNING", "numTotalSteps": 3},
+    {"note": "agp-idle: 2.0s, the phantom turn ended", "status": "CASCADE_RUN_STATUS_IDLE", "numTotalSteps": 4}
+  ],
+  "stdout_at_next_input": [
+    {"note": "a-race_c-3 at +130s: the next stdin input replays the phantom turn's steps", "step_index": 2, "state": "DONE", "step_type": "user_input"},
+    {"step_index": 3, "state": "DONE", "step_type": "agent_response"},
+    {"note": "then the new turn's own steps", "step_index": 4, "state": "DONE", "step_type": "user_input"},
+    {"step_index": 5, "state": "DONE", "step_type": "agent_response"}
+  ],
+  "trajectory_reply": {
+    "note": "GetCascadeTrajectory top level and step type/clientMessageId fields as recorded in probe-post-steer (steps abbreviated)",
+    "status": "CASCADE_RUN_STATUS_RUNNING",
+    "numTotalSteps": 3,
+    "trajectory": {
+      "steps": [
+        {"type": "CORTEX_STEP_TYPE_USER_INPUT", "status": "CORTEX_STEP_STATUS_DONE", "userInput": {"items": [{"text": "first request"}]}},
+        {"type": "CORTEX_STEP_TYPE_PLANNER_RESPONSE", "status": "CORTEX_STEP_STATUS_DONE"},
+        {"type": "CORTEX_STEP_TYPE_USER_INPUT", "status": "CORTEX_STEP_STATUS_DONE", "userInput": {"clientMessageId": "cmid-a"}}
+      ]
+    }
+  }
+}

@@ -1,0 +1,15 @@
+exports = []
+
+[uses]
+"__init__.py" = []
+"judge.py" = []
+"payload.py" = []
+"queue_files.py" = ["judge.py", "payload.py"]
+"tests" = ["judge.py", "payload.py", "queue_files.py"]
+
+[purity]
+"." = "strict"
+"__init__.py" = "strict"
+"judge.py" = "strict"
+"payload.py" = "strict"
+"queue_files.py" = { mode = "none", why = "the read half of Antigravity reconciliation: it lists the conversation's message queue under the injected home and parses each message file; what the files mean is decided in judge.py and payload.py" }

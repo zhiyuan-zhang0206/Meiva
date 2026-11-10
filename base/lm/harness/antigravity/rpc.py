@@ -4,7 +4,7 @@ import contextlib
 import json
 import urllib.error
 import urllib.request
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from functools import partial
@@ -17,12 +17,14 @@ from base.host.boundary.json_values import is_object_dict, is_object_list
 from base.host.boundary.untyped import object_of
 
 __all__ = [
+    "AGY_VERSION_PREMISE",
     "LIVE_SUBMIT_TIMEOUT_SECONDS",
     "AntigravityServer",
     "antigravity_rpc",
     "antigravity_server_from_environment",
     "discover_antigravity_server",
     "discover_process_antigravity_server",
+    "get_cascade_trajectory",
     "send_user_cascade_message",
 ]
 
@@ -143,21 +145,45 @@ def discover_process_antigravity_server(
     raise RuntimeError(f"No Antigravity Connect RPC endpoint responded for process {pid}")
 
 
+# meiva:note
+# `SendUserCascadeMessage` and `GetCascadeTrajectory` are not public interfaces: the method names, the
+# `clientMessageId` and top-level `media` fields and the trajectory shape come from the `agy` binary's
+# own proto descriptors and from experiments on agy 1.5.5 (`AGY_VERSION_PREMISE`). The server answers
+# `200 {}` for a misspelt or unknown field and for a message sent when no turn runs, so an HTTP 200
+# is only a weak receipt; a field it silently ignores is invisible, which is why the field names here
+# are exactly the observed ones (`media` carries images; `images`, `items[].image` and snake_case
+# spellings were accepted and ignored).
+# meiva:link base/lm/harness/antigravity/docs/antigravity.md
+AGY_VERSION_PREMISE = "1.5.5"
+
+
 def send_user_cascade_message(
     conversation_id: str,
     text: str,
+    *,
+    client_message_id: str,
+    media: Sequence[Mapping[str, str]] = (),
+    server: AntigravityServer,
+    timeout: float = LIVE_SUBMIT_TIMEOUT_SECONDS,
+) -> dict[str, object]:
+    payload: dict[str, object] = {
+        "cascadeId": conversation_id,
+        "items": [{"text": text}] if text.strip() else [],
+        "clientMessageId": client_message_id,
+    }
+    if media:
+        payload["media"] = [dict(entry) for entry in media]
+    return antigravity_rpc("SendUserCascadeMessage", payload, server=server, timeout=timeout)
+
+
+def get_cascade_trajectory(
+    conversation_id: str,
     *,
     server: AntigravityServer,
     timeout: float = LIVE_SUBMIT_TIMEOUT_SECONDS,
 ) -> dict[str, object]:
     return antigravity_rpc(
-        "SendUserCascadeMessage",
-        {
-            "cascadeId": conversation_id,
-            "items": [{"text": text}],
-        },
-        server=server,
-        timeout=timeout,
+        "GetCascadeTrajectory", {"cascadeId": conversation_id}, server=server, timeout=timeout
     )
 
 

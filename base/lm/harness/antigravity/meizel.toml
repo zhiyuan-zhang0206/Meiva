@@ -4,9 +4,12 @@ exports = ["mapping.py", "rpc.py", "session.py", "tests", "transport.py"]
 "__init__.py" = ["config.py", "handoff_rules.py", "mapping.py", "rpc.py", "session.py", "transport.py"]
 "handoff_rules.py" = []
 "mapping.py" = []
-"session.py" = ["config.py", "mapping.py", "transport.py"]
-"transport.py" = ["config.py", "rpc.py"]
-"tests" = ["config.py", "handoff_rules.py", "mapping.py", "session.py", "transport.py"]
+"reconciliation" = ["trajectory.py"]
+"session.py" = ["config.py", "mapping.py", "trajectory.py", "transport.py"]
+"trajectory.py" = []
+"transport.py" = ["config.py", "rpc.py", "trajectory.py"]
+"tests" = ["config.py", "handoff_rules.py", "mapping.py", "session.py", "trajectory.py", "transport.py"]
 
 [purity]
 "config.py" = "strict"
+"trajectory.py" = "strict"

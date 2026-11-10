@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import os
 import random
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Sequence
 from pathlib import Path
 
 from base.api_contracts.agent_contract import Harness
@@ -23,6 +23,7 @@ from base.lm.harness.base_session import SessionBinding
 from base.lm.harness.claude import BridgeConfig
 from base.lm.harness.claude.session import ClaudeSession
 from base.lm.harness.claude.tests.fake_sdk import Block, FakeSDK, ScriptedProbe
+from base.lm.harness.delivery import HarnessInput
 from base.lm.harness.registration import RegistrationStore, SecureRandom
 
 
@@ -67,6 +68,11 @@ class FakeSession:
         self.started += 1
         self.handoff = handoff
         self.session_id = "session-1"
+
+    async def deliver(self, inputs: Sequence[HarnessInput]) -> None:
+        raise NotImplementedError(
+            "the bridge still submits turns; deliver arrives with the graph change"
+        )
 
     def submit(self, text: str, *, key: str | None = None) -> FakeTicket:
         self._n += 1
@@ -223,9 +229,12 @@ async def test_bridge_steering_with_antigravity_session(tmp_path: Path) -> None:
     deadline = asyncio.get_running_loop().time() + 5.0
     while not bridge.steering_available and asyncio.get_running_loop().time() < deadline:
         await asyncio.sleep(0.01)
+    while agy.session_id is None and asyncio.get_running_loop().time() < deadline:
+        await asyncio.sleep(0.01)
+    await asyncio.sleep(0.1)
 
     assert bridge.steering_available
-    assert await bridge.steer("steer text", key="inbound-1")
+    assert await asyncio.wait_for(bridge.steer("steer text", key="inbound-1"), 5)
     lines = [line for line in received.read_text(encoding="utf-8").splitlines() if line.strip()]
     assert [line.strip('"') for line in lines] == ["first", "steer text"]
 

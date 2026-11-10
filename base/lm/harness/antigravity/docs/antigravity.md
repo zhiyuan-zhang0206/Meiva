@@ -25,10 +25,48 @@ therefore talks directly to the child process's in-process Connect JSON-RPC
 `LanguageServerService` on localhost: `AgyTransport` sets
 `ANTIGRAVITY_SERVER_CSRF_TOKEN` in the child environment, discovers the child's
 listening HTTP port via `psutil`, and invokes `SendUserCascadeMessage`
-(`{"cascadeId": <conversation_id>, "items": [{"text": "…"}]}`), which queues a
+(`{"cascadeId": <conversation_id>, "items": [{"text": "…"}], "clientMessageId": <our key>,
+"media": [{"mimeType": …, "inlineData": <base64>}]}`), which queues a
 `CORTEX_STEP_TYPE_USER_INPUT` step into the running `AgentExecutor` (`messages.Hub`)
 so `pollResponse` streams the steered continuation out on stdout within the same
 turn.
+
+## Delivery, acknowledgements and the phantom turn
+
+Non-public interfaces, agy 1.5.5 (`rpc.AGY_VERSION_PREMISE`). `SendUserCascadeMessage`,
+`GetCascadeTrajectory`, the `clientMessageId` / `media` fields and the message-queue files come from
+the binary's proto descriptors and from experiments, not from a published API. The server answers 200
+for an unknown or misspelt field (`images`, `items[].image` and snake_case names were accepted and
+ignored) and for a message sent when no turn runs, so an HTTP 200 is only a weak receipt. A reply of
+an unexpected shape or an unknown run status raises `AgyInterfaceError`; it is never read as "idle".
+
+`deliver()` asks `GetCascadeTrajectory` (`status` RUNNING / IDLE, `numTotalSteps`, `trajectory.steps`)
+before each input (`trajectory.route`): RUNNING is steered with our id; IDLE with no turn of ours
+starts a turn on stdin; IDLE while our own turn's result is unread is refused (`InputRejected`) so the
+input is handed over again. An input sent through RPC to an idle conversation would run a **phantom
+turn**: agy runs it, stdout shows nothing (130 s observed), and at the next stdin input its steps are
+printed again and its answer is folded into that turn's `result`.
+
+Acknowledgements. ACK 1 is weak (stdin write, HTTP 200). ACK 2 is the trajectory step whose
+`userInput.clientMessageId` is our key (polled every 0.5 s while an input is unsettled), or, for a turn
+started on stdin, the first user-input step on stdout (no id is echoed there, so it is matched by
+order; a CLI that prints none is acknowledged by the turn's first activity). A phantom turn that
+still happens (the conversation was running when asked and idle when written to) is observed from the
+trajectory: a running conversation with no turn of ours opens `TurnStarted(HARNESS,
+QUEUED_INPUT_REVIVED)`, an idle one closes it with the answers read from the transcript, and the steps
+already attributed are ignored when stdout replays them, so the next turn's text is its own (its
+`result` still carries the combined usage). Frames of an earlier process generation are dropped.
+
+Known limits. An image can only ride on a running turn (`media`); starting a turn with an image is
+refused, because the stdin protocol has no image field. The trajectory reply of a text-only step was
+not observed to carry the text, so the phantom turn's answer comes from the transcript file.
+`deliveryStrategy=WHEN_IDLE` was tried once, never against an idle conversation, so nothing here relies on it.
+
+Reconciliation (`reconciliation/`): the durable queue is
+`brain/<conversation>/.system_generated/messages/` (not the transcript). A message listed in
+`read.json` is delivered (IN_CONTEXT); a stored one, listed in `undelivered/` or not, will be delivered
+by the CLI before the next stdin input and must not be sent again (PERSISTED_UNDELIVERED); no file with
+the id means NOT_FOUND. Only the two protobuf levels that hold the id are parsed.
 
 There are no request ids on stdin/stdout, so **a cancel cannot be a
 request**: the adapter sends `SIGINT`, and the CLI answers with a final `result`
