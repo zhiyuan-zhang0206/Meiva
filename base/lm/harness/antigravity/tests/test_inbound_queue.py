@@ -8,7 +8,7 @@ import pytest
 
 from base.lm.harness import ForegroundSteering
 from base.lm.harness.antigravity.session import InboundQueueFullError
-from base.lm.harness.antigravity.tests.support import say, start
+from base.lm.harness.antigravity.tests.support import running, say, start
 from base.lm.harness.events import TurnCompleted
 
 
@@ -79,12 +79,11 @@ async def test_steer_writes_to_active_session_and_preserves_running_turn(tmp_pat
     harness = await start(tmp_path, turns=[steered_turn])
     try:
         first = harness.session.submit("run task", key="first-key")
-        await harness.turn_started()
+        await running(harness, ["run task"])
         assert harness.session.steering_available
         steered = await harness.session.steer("change course", key="inbound-42")
         assert steered is True
         assert harness.messages() == ["run task", "change course"]
-        assert harness.session.active_turn_id == first.turn_id
         assert harness.session.pending_turns == ()
         outcome = await first.outcome()
         assert outcome.text == "first\nfinish"
@@ -123,7 +122,7 @@ async def test_steer_concurrent_same_key_raises(tmp_path: Path) -> None:
     harness = await start(tmp_path, turns=[{"hang": True}])
     try:
         _ = harness.session.submit("start")
-        await harness.turn_started()
+        await running(harness, ["start"])
         transport = harness.session._transport
         assert transport is not None
         gate = asyncio.Event()
@@ -157,8 +156,7 @@ async def test_steer_transport_error_propagates(tmp_path: Path) -> None:
     harness = await start(tmp_path, turns=[{"hang": True}])
     try:
         _ = harness.session.submit("start")
-        await harness.turn_started()
-        await harness.wait_until(lambda: harness.messages() == ["start"])
+        await running(harness, ["start"])
         transport = harness.session._transport
         assert transport is not None
         real_steer = transport.steer

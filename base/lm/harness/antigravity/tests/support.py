@@ -187,6 +187,16 @@ async def start(
 
 
 # meiva:note
+# The turn is running inside the fake CLI: it has the message and has reported its conversation id.
+# `turn_started()` only says our ticket was sent, and a delivery that lands before the CLI picked the
+# input up correctly waits behind the ticket instead of steering.
+async def running(harness: Harness, sent: list[str]) -> None:
+    await harness.wait_until(lambda: harness.messages() == sent)
+    await harness.wait_until(lambda: harness.session.session_id is not None)
+    await asyncio.sleep(0.1)
+
+
+# meiva:note
 # One assistant text step, as `agy` frames it.
 def say(text: str, *, step_index: int = 1) -> dict[str, Any]:
     return {

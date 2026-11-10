@@ -7,7 +7,7 @@ from typing import Any
 
 import pytest
 
-from base.lm.harness.antigravity.tests.support import Harness, say, start
+from base.lm.harness.antigravity.tests.support import Harness, running, say, start
 from base.lm.harness.antigravity.trajectory import (
     AgyInterfaceError,
     PhantomAction,
@@ -29,16 +29,6 @@ from base.lm.harness.events import (
 )
 
 FIXTURE = json.loads((Path(__file__).parent / "fixtures" / "phantom_turn.json").read_text())
-
-
-# meiva:note
-# The turn is running inside the fake CLI: it has the message and has reported its conversation id.
-# `turn_started()` only says our ticket was sent, and a delivery that lands before the CLI picked the
-# input up correctly waits behind the ticket instead of steering.
-async def running(harness: Harness, sent: list[str]) -> None:
-    await harness.wait_until(lambda: harness.messages() == sent)
-    await harness.wait_until(lambda: harness.session.session_id is not None)
-    await asyncio.sleep(0.1)
 
 
 async def seen(harness: Harness, kind: type, *, wait: float = 0.05) -> list[Any]:
@@ -204,3 +194,33 @@ async def test_an_image_cannot_start_a_turn_on_stdin(tmp_path: Path) -> None:
         assert [e.key for e in await seen(harness, InputRejected)] == ["img"]
     finally:
         await harness.stop()
+
+
+def _watchers() -> list[asyncio.Task[Any]]:
+    return [task for task in asyncio.all_tasks() if "_watch" in repr(task.get_coro())]
+
+
+async def test_closing_with_a_phantom_turn_open_stops_the_trajectory_poll(tmp_path: Path) -> None:
+    harness = await start(
+        tmp_path,
+        turns=[say("one")],
+        extra_environ={"FAKE_AGY_STALE_CALLS": "1", "FAKE_AGY_PHANTOM_SECONDS": "30"},
+    )
+    first = harness.session.submit("one", key="first")
+    _ = await first.outcome()
+    await harness.session.deliver([HarnessInput("late", "late input")])
+    await harness.wait_for(lambda e: isinstance(e, TurnStarted) and e.origin is TurnOrigin.HARNESS)
+    assert _watchers(), "the poll runs while the phantom turn is open"
+    await asyncio.wait_for(harness.stop(), 10)
+    assert _watchers() == []
+
+
+async def test_closing_with_an_unsettled_input_stops_the_trajectory_poll(tmp_path: Path) -> None:
+    harness = await start(
+        tmp_path, turns=[{"hang": True}], extra_environ={"FAKE_AGY_BAD_TRAJECTORY": "1"}
+    )
+    _ = harness.session.submit("work")
+    await harness.wait_until(lambda: harness.messages() == ["work"])
+    assert _watchers()
+    await asyncio.wait_for(harness.stop(), 10)
+    assert _watchers() == []
