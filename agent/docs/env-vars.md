@@ -34,7 +34,7 @@ Cluster identity is **path-only** (`base/cluster/`, #629/#633): there is no `MEI
 |------|--------|------|
 | `MEIVA_SDK_DISABLE` | environment variable | Comma-separated list of SDK module names to disable |
 | `MEIVA_LLM_OVERRIDE` | environment variable | Inject custom LLM factory (testing/multi-instance) |
-| `MEIVA_SYSTEM_PROMPT_*` | environment variable | Control toggles for system prompt sections |
+| `MEIVA_SYSTEM_PROMPT_*` | environment variable | Control toggles for system prompt sections. `MEIVA_SYSTEM_PROMPT_CONCISENESS`, `MEIVA_SYSTEM_PROMPT_UI_DELIVERY` and `MEIVA_SYSTEM_PROMPT_OPENING_REPLY` default off (shared floor in `DEFAULT_TUNING`); an explicit value, per agent overlay or per-model tuning turns them on |
 | `MEIVA_AGENT_COMMUNICATION_STYLE` | environment variable | How verbose the agent is when working: `off` (default) / `oriented` / `concise` / `silent`; `off` omits the section entirely |
 
 ### DB

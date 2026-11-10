@@ -51,6 +51,17 @@ class SectionInputs:
     live: LiveSdk
 
 
+def resolved_setting(setting: str, inputs: SectionInputs) -> object:
+    from base.lm.registry import resolve_setting
+
+    return resolve_setting(
+        setting,
+        model=inputs.slices.brain.llm_model,
+        models=inputs.catalog.models,
+        explicit=inputs.slices.read("agent", setting),
+    )
+
+
 def effective_sdk_disable(configured: Sequence[str]) -> tuple[str, ...]:
     from meiva.sdk_surface import sdk_disable
 

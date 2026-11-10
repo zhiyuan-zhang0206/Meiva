@@ -30,18 +30,9 @@ from .live import (
     read_live_sdk,
     render_expanded_reference,
 )
-
-
-def _resolved(setting: str, inputs: SectionInputs) -> object:
-
-    from base.lm.registry import resolve_setting
-
-    return resolve_setting(
-        setting,
-        model=inputs.slices.brain.llm_model,
-        models=inputs.catalog.models,
-        explicit=inputs.slices.read("agent", setting),
-    )
+from .live import (
+    resolved_setting as _resolved,
+)
 
 
 def sdk_expand_section(inputs: SectionInputs) -> str:
@@ -94,7 +85,11 @@ def communication_style_section(inputs: SectionInputs) -> str:
     style = str(_resolved("agent_communication_style", inputs))
     if style == "off":
         return ""
-    return delivery_style_prompt(inputs.slices.prompt.user_delivery_mode, style)
+    return delivery_style_prompt(
+        inputs.slices.prompt.user_delivery_mode,
+        style,
+        opening_reply=bool(_resolved("prompt_opening_reply_enabled", inputs)),
+    )
 
 
 _STRONG_USER_TONE = "You are a trusted peer to the user, not a cheerleader. Never open with empty praise or reassurance — answer the question, do not validate it. Assess the user's ideas on your own before responding; when you hold a real reservation or disagreement, say it and the reasoning behind it before carrying out the adopted course. Honest judgment is more useful than agreement, and unsupported approval is not helpful even when it feels polite. Keep the tone direct and equal — be the partner who keeps the user honest, not the echo that repeats them."

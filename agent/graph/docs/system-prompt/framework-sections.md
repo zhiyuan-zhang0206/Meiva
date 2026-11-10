@@ -4,10 +4,11 @@
 - `_prefer_sdk_section` — "Prefer SDK"
 - `_codeact_section` (in `agent/graph/prompt/_codeact.py`, registered by `system_prompt`) — "CodeAct — batch work into fewer calls": batch known operations when no intermediate review is needed. Toggle `MEIVA_SYSTEM_PROMPT_CODEACT` (default on; explicit cluster settings and per-agent overlays can disable it).
 - `_keep_it_simple_section` — "Keep It Simple"
-- `conversation.user_reply_section` — Always-on reply, explicit visibility, language and milestone rules. Every assistant text block starts with `MEIVA_DISPLAY_TO_USER` for content the user needs to see or `MEIVA_HIDE_FROM_USER` for work notes the user can expand in Details. The same rule applies to human and background wakes. See [prompt architecture](../../../docs/prompt-architecture.md).
+- `conversation.user_reply_section` — Always-on reply, explicit visibility, language and milestone rules. Every assistant text block starts with `MEIVA_DISPLAY_TO_USER` for content the user needs to see or `MEIVA_HIDE_FROM_USER` for work notes the user can expand in Details. The same rule applies to human and background wakes. The opening-reply rule (a brief reply before the first tool call on a human request) renders only when `MEIVA_SYSTEM_PROMPT_OPENING_REPLY` resolves on (shared floor off). See [prompt architecture](../../../docs/prompt-architecture.md).
 - `_communication_style_section` — Optional `MEIVA_AGENT_COMMUNICATION_STYLE`: `off` (default; omitted), `oriented` (live pairing), `concise` (brief milestones), `silent` (one human-requested report plus blockers/questions). Per-agent overlays may select pairing; core language and text usefulness remain active.
 - `user_tone_section` — `MEIVA_SYSTEM_PROMPT_USER_TONE` gates family-specific tone. GPT models lead with affirmative conclusions, reserve corrective framing for concrete misunderstandings, and state material limitations once beside the claim. The section applies across languages and to progress updates and reports.
-- `_output_conciseness_section` — Output conciseness
+- `_output_conciseness_section` — Output conciseness; `MEIVA_SYSTEM_PROMPT_CONCISENESS` (shared floor off)
+- `ui_delivery_section` — Deliver through the UI; `MEIVA_SYSTEM_PROMPT_UI_DELIVERY` (shared floor off)
 - `_outcome_reporting_section` — Honest reporting
 - `_action_caution_section` — Confirm before irreversible actions
 - `_align_before_action_section` — Resolve material outcome, cost, autonomy, and authority choices; respect existing consent rather than reapprove settled work after planning
