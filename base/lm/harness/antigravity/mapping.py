@@ -325,6 +325,23 @@ def _transcript_tool_output(
     return ""
 
 
+# meiva:note
+# The assistant's answers from step `first_step` on, read from the conversation transcript: the text of
+# each `PLANNER_RESPONSE` row that made no tool call. It is how a turn seen only through the trajectory
+# gets its text, because the trajectory reply of a text-only step was not observed to carry one.
+def answer_texts(
+    conversation_id: str, first_step: int, *, home: Path | None = None
+) -> tuple[str, ...]:
+    texts: list[str] = []
+    for row in _read_transcript_rows(conversation_id, home=home):
+        if _int(row.get("step_index")) < first_step or _text(row.get("type")) != "PLANNER_RESPONSE":
+            continue
+        content = _text(row.get("content"))
+        if content and not row.get("tool_calls"):
+            texts.append(content.strip())
+    return tuple(texts)
+
+
 def _transcript_thinking(
     conversation_id: str, step_index: int, *, before_tool: bool, home: Path | None = None
 ) -> str | None:

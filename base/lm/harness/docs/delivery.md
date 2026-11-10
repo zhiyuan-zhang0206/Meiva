@@ -52,3 +52,13 @@ After a crash the live acknowledgements are gone. Each adapter can answer, from 
 durable record, `Reconciliation.IN_CONTEXT`, `PERSISTED_UNDELIVERED` or `NOT_FOUND` for a key. No
 harness de-duplicates, so only `NOT_FOUND` allows a re-delivery. Reading (effect) and judging (pure)
 are separate modules per adapter; the home directory is injected.
+
+## Per-adapter signals
+
+| | ACK 1 | ACK 2 | Notes |
+|---|---|---|---|
+| Codex | `turn/steer` or `turn/start` response (strong) | `item/completed(userMessage, clientId)` | refusal and loss are events |
+| Claude Code | the write (weak) | echo of our uuid (`replay-user-messages`) | an input that misses the turn becomes a turn of its own |
+| Antigravity | stdin write or HTTP 200 (weak) | trajectory step with our `clientMessageId`, or the first stdout user-input step | an input for an idle conversation starts a turn on stdin; a late one is refused; phantom turns are observed from the trajectory |
+
+`HarnessSession` has `deliver()` once all three implement it.

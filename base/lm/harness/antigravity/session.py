@@ -1,18 +1,28 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import replace
+from pathlib import Path
 
 from base.host.boundary.json_values import is_object_dict
 from base.host.env.harness_binaries import resolve_harness_binary
 from base.lm.harness.antigravity.config import AntigravityConfig
 from base.lm.harness.antigravity.mapping import (
+    answer_texts,
     assistant_text,
     map_init,
     map_step_update,
     parse_result,
     parse_usage,
+)
+from base.lm.harness.antigravity.trajectory import (
+    PhantomAction,
+    PhantomTurn,
+    Route,
+    Trajectory,
+    phantom_action,
+    route,
 )
 from base.lm.harness.antigravity.transport import AgyTransport, TransportClosedError
 from base.lm.harness.base_session import (
@@ -25,10 +35,17 @@ from base.lm.harness.base_session import (
     TurnTicket,
 )
 from base.lm.harness.cancel import CancelReport, unobserved_cancel
+from base.lm.harness.delivery import HarnessInput, InputPhase, validated_batch
 from base.lm.harness.events import (
+    AckSignal,
+    AssistantText,
     ForegroundAccepted,
+    HarnessCause,
+    InterruptConfirmed,
     SessionFailed,
     TurnCompleted,
+    TurnOrigin,
+    TurnStarted,
     UnsolicitedOutput,
     Usage,
 )
@@ -40,6 +57,8 @@ from base.lm.harness.process import (
     watch_tree,
 )
 from base.lm.harness.session import SessionTotals, TurnOutcome
+
+TRAJECTORY_POLL_SECONDS = 0.5
 
 
 # meiva:note
@@ -61,6 +80,7 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
         probe: ChildProbe | None = None,
         transport_factory: Callable[[], AgyTransport] | None = None,
         clock: SessionClock,
+        home: Path | None = None,
     ) -> None:
         super().__init__(
             config,
@@ -70,6 +90,9 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
             clock=clock,
         )
         self._environ = dict(environ) if environ else None
+        # meiva:note
+        # The user home the conversation transcript is read from; None is the real one.
+        self._home = home
         self._factory = transport_factory or self._default_transport
         self._transport: AgyTransport | None = None
         self._retired: AgyTransport | None = None
@@ -82,8 +105,11 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
         # meiva:link base/lm/harness/docs/attribution.md
         self._sent_turn: str | None = None
         self._turn_steps: list[Usage] = []
-        self._pending_steers: set[tuple[str, str]] = set()
-        self._steered_keys: set[tuple[str, str]] = set()
+        self._consumed = 0
+        self._floor = 0
+        self._phantom: PhantomTurn | None = None
+        self._acked_start = False
+        self._last_turn: str | None = None
 
     async def start(self, *, resume: str | None = None, handoff: Handoff | None = None) -> None:
         if self._transport is not None:
@@ -91,11 +117,12 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
         if self._closed:
             raise SessionClosedError("session is closed")
         resume = self._resolve_resume(resume)
+        _ = self._begin_generation()
         transport = self._factory()
         await transport.start(resume=resume)
         self._transport = transport
         await self._enter_tasks()
-        self._reader = self._spawn(self._read_loop(transport))
+        self._launch(transport)
         self._inject_handoff(handoff)
 
     async def close(self, *, reason: str = "closed") -> None:
@@ -103,8 +130,8 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
             return
         self._closed = True
         self._sent_turn = None
-        self._pending_steers.clear()
-        self._steered_keys.clear()
+        self._phantom = None
+        self._observed.clear()
         transport, self._transport = self._transport, None
         watched = watch_tree(self._probe, transport.pid if transport is not None else None)
         self._fail_pending(SessionClosedError("session closed"))
@@ -130,9 +157,9 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
         return self._transport.pid if self._transport is not None else None
 
     # meiva:note
-    # Foreground steering delivers mid-turn input into the running `agy` cascade via
-    # its in-process Connect JSON-RPC endpoint (`SendUserCascadeMessage`), while
-    # `pollResponse` continues streaming steps on stdout for the active turn.
+    # Whether a turn of ours is running and still accepts steering through the compatibility wrapper
+    # (`steer()` in the base session, a thin layer over `deliver()`). `deliver()` itself decides per
+    # input, from the live trajectory, whether to steer, start or queue.
     # meiva:link base/lm/harness/antigravity/docs/antigravity.md
     @property
     def steering_available(self) -> bool:
@@ -147,28 +174,63 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
             and ticket.interrupt_ready.is_set()
         )
 
-    async def steer(self, text: str, *, key: str) -> bool:
-        if not text.strip() or not key:
-            raise ValueError("steering requires nonempty text and a message key")
-        if not self.steering_available:
-            return False
-        ticket = self._active
-        transport = self._transport
-        if ticket is None or transport is None or transport is self._retired:
-            return False
-        turn_id = ticket.turn_id
-        identity = (turn_id, key)
-        if identity in self._pending_steers:
-            raise RuntimeError("steer request already pending for this message key")
-        if identity in self._steered_keys or (ticket.key is not None and key == ticket.key):
-            return True
-        self._pending_steers.add(identity)
+    # meiva:note
+    # Hand a batch to agy, in order. Before each input the conversation is asked what it is doing
+    # (`GetCascadeTrajectory`): a running one takes the input through `SendUserCascadeMessage`
+    # carrying our `clientMessageId`; an idle one must not be sent to that way, because agy answers 200
+    # and runs a turn that stdout never reports, so the input starts a turn on stdin instead, or waits
+    # (a rejection, so the caller hands it over again) when our own turn has finished but its result is
+    # not yet read. HTTP 200 and a stdin write are weak receipts;
+    # the second acknowledgement is the user-input step: the trajectory step that carries our
+    # `clientMessageId`, or for a turn started on stdin the first user-input frame on stdout. The
+    # trajectory is the one live signal, so a reply of an unexpected shape fails the delivery.
+    # meiva:link base/lm/harness/docs/delivery.md
+    async def deliver(self, inputs: Sequence[HarnessInput]) -> None:
+        batch = validated_batch(inputs)
+        if self._closed:
+            raise SessionClosedError("session is closed")
+        for entry in batch:
+            self._ledger = self._ledger.sent(entry.key)
+        for entry in batch:
+            await self._deliver_one(entry)
+
+    async def _deliver_one(self, entry: HarnessInput) -> None:
+        transport = await self._ensure_transport()
+        snapshot_ = await transport.trajectory() if self._session_id else None
+        decided = route(
+            snapshot_.status if snapshot_ is not None else None,
+            ticket_active=self._active is not None,
+        )
+        if decided is Route.STEER:
+            await self._steer_input(transport, entry)
+            return
+        if decided is Route.QUEUE:
+            self._apply(
+                self._ledger.rejected(
+                    entry.key, "the running turn has finished; hand the input over again"
+                )
+            )
+            return
+        if entry.images:
+            self._apply(self._ledger.rejected(entry.key, "agy cannot start a turn with an image"))
+            raise ValueError("Antigravity can carry an image only on a running turn")
+        _ = self.submit(entry.text, input_key=entry.key)
+
+    async def _steer_input(self, transport: AgyTransport, entry: HarnessInput) -> None:
+        media = [
+            {"mimeType": image.mime_type, "inlineData": image.data_base64} for image in entry.images
+        ]
         try:
-            await transport.steer(text, conversation_id=self._session_id)
-            self._steered_keys.add(identity)
-            return True
-        finally:
-            self._pending_steers.discard(identity)
+            await transport.steer(
+                entry.text,
+                client_message_id=entry.key,
+                media=media,
+                conversation_id=self._session_id,
+            )
+        except Exception:
+            self._apply(self._ledger.rejected(entry.key, "the SendUserCascadeMessage call failed"))
+            raise
+        self._apply(self._ledger.received(entry.key, AckSignal.WEAK))
 
     async def interrupt(self, *, turn_id: str | None = None) -> CancelReport:
         if turn_id is not None:
@@ -182,6 +244,7 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
                 turn_id=turn_id, cli_pid=transport.pid, cli_alive=transport.alive
             )
         self._retired = transport
+        self._close_phantom(None)
         return await transport.interrupt(turn_id=ticket.turn_id, baseline=self._baseline)
 
     def _default_transport(self) -> AgyTransport:
@@ -209,32 +272,48 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
         if current is not None:
             self._transport = None
             await current.close()
+        self._close_phantom(None)
+        _ = self._begin_generation()
         transport = self._factory()
         await transport.start(resume=self._session_id)
         self._transport = transport
         self._retired = None
-        self._reader = self._spawn(self._read_loop(transport))
+        self._launch(transport)
         return transport
+
+    def _launch(self, transport: AgyTransport) -> None:
+        generation = self.generation
+        self._reader = self._spawn(self._read_loop(transport, generation))
+        _ = self._spawn(self._watch(transport, generation))
 
     async def _begin(self, ticket: TurnTicket) -> None:
         ticket.started_at = self._monotonic()
         self._step_text = {}
         self._turn_steps = []
+        self._acked_start = False
+        self._last_turn = ticket.turn_id
+        key = ticket.input_key
+        if self._ledger.phase(key) in (None, InputPhase.REJECTED, InputPhase.LOST):
+            self._ledger = self._ledger.sent(key)
         try:
             transport = await self._ensure_transport()
             self._baseline = snapshot(self._probe, transport.pid)
             self._sent_turn = ticket.turn_id
             await transport.send(ticket.text)
             ticket.interrupt_ready.set()
+            self._emit(TurnStarted(ticket.turn_id, TurnOrigin.INPUT, (key,), self.generation))
+            self._apply(self._ledger.received(key, AckSignal.WEAK))
             self._emit(ForegroundAccepted(turn_id=ticket.turn_id))
         except (TransportClosedError, OSError, RuntimeError) as exc:
             self._sent_turn = None
+            self._apply(self._ledger.rejected(key, f"the write to agy failed: {exc}"))
             self._fail_turn(ticket, exc)
 
-    async def _read_loop(self, transport: AgyTransport) -> None:
+    async def _read_loop(self, transport: AgyTransport, generation: int) -> None:
         try:
             async for payload in transport.events():
-                self._handle(payload)
+                if self._ledger.accepts(generation):
+                    self._handle(payload)
         except asyncio.CancelledError:
             raise
         except Exception as exc:
@@ -242,6 +321,107 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
             self._fail_active(exc)
         finally:
             await self._on_stream_end(transport)
+
+    # meiva:note
+    # A turn we can only see here. agy runs a turn for an input sent while the conversation was idle
+    # and prints nothing on stdout until the next stdin input, then emits that turn's steps again and
+    # folds its answer into the next `result`. The trajectory is polled while an input is
+    # unsettled or such a turn is open: a running conversation with no turn of ours opens an observed
+    # turn (`TurnStarted(HARNESS, QUEUED_INPUT_REVIVED)`), an idle one closes it with the answer
+    # read from the transcript, and `_consumed` marks the steps already attributed so the replay
+    # on stdout is ignored and the next turn's text is only its own.
+    # meiva:link base/lm/harness/antigravity/docs/antigravity.md
+    async def _watch(self, transport: AgyTransport, generation: int) -> None:
+        while (
+            self._ledger.accepts(generation) and self._transport is transport and not self._closed
+        ):
+            await self._clock.asleep(TRAJECTORY_POLL_SECONDS)
+            if not self._session_id or not self._needs_poll():
+                continue
+            self._observe(await transport.trajectory())
+
+    def _needs_poll(self) -> bool:
+        unsettled = self._ledger.keys_in(InputPhase.SENT) + self._ledger.keys_in(
+            InputPhase.RECEIVED
+        )
+        return bool(unsettled) or self._phantom is not None
+
+    def _observe(self, snap: Trajectory) -> None:
+        action = phantom_action(
+            snap.status,
+            ticket_active=self._active is not None,
+            phantom_open=self._phantom is not None,
+        )
+        if action is PhantomAction.OPEN:
+            self._open_phantom(snap)
+        turn = self._active.turn_id if self._active is not None else self._phantom_id()
+        turn = turn or self._last_turn
+        if turn is not None:
+            for client_id in snap.client_message_ids():
+                if self._ledger.phase(client_id) in (InputPhase.SENT, InputPhase.RECEIVED):
+                    self._apply(self._ledger.in_context(client_id, turn))
+        if action is PhantomAction.CLOSE:
+            self._close_phantom(snap)
+
+    def _phantom_id(self) -> str | None:
+        return self._phantom.turn_id if self._phantom is not None else None
+
+    def _open_phantom(self, snap: Trajectory) -> None:
+        keys = tuple(
+            client_id
+            for client_id in snap.client_message_ids()
+            if self._ledger.phase(client_id) in (InputPhase.SENT, InputPhase.RECEIVED)
+        )
+        turn_id = self._mint_turn_id()
+        self._phantom = PhantomTurn(turn_id=turn_id, first_step=self._consumed)
+        self._observed.add(turn_id)
+        self._emit(
+            TurnStarted(
+                turn_id,
+                TurnOrigin.HARNESS,
+                keys,
+                self.generation,
+                cause=HarnessCause.QUEUED_INPUT_REVIVED if keys else HarnessCause.UNKNOWN,
+                detail="trajectory",
+            )
+        )
+
+    def _close_phantom(self, snap: Trajectory | None) -> None:
+        phantom, self._phantom = self._phantom, None
+        if phantom is None:
+            return
+        self._last_turn = phantom.turn_id
+        texts = (
+            answer_texts(self._session_id, phantom.first_step, home=self._home)
+            if self._session_id
+            else ()
+        )
+        for text in texts:
+            self._emit(AssistantText(turn_id=phantom.turn_id, text=text))
+        if snap is not None:
+            self._consumed = max(self._consumed, snap.num_steps)
+            self._floor = self._consumed
+        interrupted = snap is None
+        self._emit(
+            TurnCompleted(
+                turn_id=phantom.turn_id,
+                session_id=self._session_id,
+                text="\n".join(texts),
+                subtype="interrupted" if interrupted else "success",
+                is_error=interrupted,
+                interrupted=interrupted,
+                stop_reason=None,
+                num_turns=max(len(texts), 1),
+                duration_ms=0,
+                usage=Usage(),
+                cost_usd=None,
+                cumulative_cost_usd=self._totals.cost_usd,
+                permission_denials=(),
+                generation=self.generation,
+            )
+        )
+        self._observed.discard(phantom.turn_id)
+        self._promote(keep_events=True)
 
     async def _on_stream_end(self, transport: AgyTransport) -> None:
         if transport is not self._transport:
@@ -271,27 +451,49 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
             self._handle_result_event(payload)
             return
         ticket = self._active
-        if ticket is None:
+        if ticket is None or name != "step_update":
             return
-        if name == "step_update":
-            update = payload.get("step_update")
-            if not is_object_dict(update):
-                return
-            self._accumulate(update)
-            for event in map_step_update(update, turn_id=ticket.turn_id):
-                self._emit(event)
-            if update.get("state") == "DONE":
-                if update.get("step_type") == "agent_response" and isinstance(
-                    update.get("usage"), dict
-                ):
-                    self._turn_steps.append(parse_usage(update.get("usage")))
-                done = assistant_text(
-                    update, turn_id=ticket.turn_id, text=self._take_step_text(update)
-                )
-                if done is not None and done.text:
-                    ticket.parts.append(done.text)
-                    self._emit(done)
+        update = payload.get("step_update")
+        if is_object_dict(update) and not self._replayed(update):
+            self._handle_step(ticket, update)
+
+    def _handle_step(self, ticket: TurnTicket, update: dict[str, object]) -> None:
+        self._ack_start(ticket)
+        self._accumulate(update)
+        for event in map_step_update(update, turn_id=ticket.turn_id, home=self._home):
+            self._emit(event)
+        if update.get("state") != "DONE":
             return
+        if update.get("step_type") == "agent_response" and isinstance(update.get("usage"), dict):
+            self._turn_steps.append(parse_usage(update.get("usage")))
+        done = assistant_text(update, turn_id=ticket.turn_id, text=self._take_step_text(update))
+        if done is not None and done.text:
+            ticket.parts.append(done.text)
+            self._emit(done)
+
+    # meiva:note
+    # A step with an index below `_floor` was already attributed (a phantom turn closed from the
+    # trajectory); agy prints it again on stdout at the next stdin input, and it must not be read as
+    # part of the turn that input starts. Any other step advances the mark.
+    def _replayed(self, update: dict[str, object]) -> bool:
+        index = update.get("step_index")
+        if not isinstance(index, int):
+            return False
+        if index < self._floor:
+            return True
+        self._consumed = max(self._consumed, index + 1)
+        return False
+
+    # meiva:note
+    # The second acknowledgement of a turn started on stdin: its `user_input` step reaches stdout when the
+    # input became a message of the conversation. No frame carries our id there, so the first one after
+    # the write is ours; a CLI that prints no user-input frame is acknowledged by the first activity of
+    # the turn instead.
+    def _ack_start(self, ticket: TurnTicket) -> None:
+        if self._acked_start:
+            return
+        self._acked_start = True
+        self._apply(self._ledger.in_context(ticket.input_key, ticket.turn_id))
 
     def _accumulate(self, update: dict[str, object]) -> None:
         if update.get("step_type") != "agent_response":
@@ -333,12 +535,14 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
             return
         self._sent_turn = None
         raw = payload.get("result")
-        fields = parse_result(raw if is_object_dict(raw) else {})
+        fields = parse_result(raw if is_object_dict(raw) else {}, home=self._home)
         self._unsolicited(UnsolicitedOutput(source="result", text=fields.text.strip()))
 
     def _handle_result(self, payload: object, ticket: TurnTicket) -> None:
-        self._steered_keys = {item for item in self._steered_keys if item[0] != ticket.turn_id}
-        fields = parse_result(payload if is_object_dict(payload) else {})
+        if not self._acked_start:
+            self._acked_start = True
+            self._apply(self._ledger.in_context(ticket.input_key, ticket.turn_id))
+        fields = parse_result(payload if is_object_dict(payload) else {}, home=self._home)
         text = "\n".join(ticket.parts).strip() or self._flush_step_text() or fields.text.strip()
         errors = (fields.error,) if fields.error else ()
         outcome = TurnOutcome(
@@ -375,8 +579,11 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
                 permission_denials=fields.denied_actions,
                 steps=steps,
                 errors=errors,
+                generation=self.generation,
             )
         )
+        if fields.interrupted:
+            self._emit(InterruptConfirmed(ticket.turn_id, self.generation))
         self._complete(ticket, outcome)
 
 

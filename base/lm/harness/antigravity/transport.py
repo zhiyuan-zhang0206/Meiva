@@ -6,7 +6,7 @@ import hashlib
 import json
 import signal
 from collections import deque
-from collections.abc import AsyncIterator, Callable, Iterable, Mapping
+from collections.abc import AsyncIterator, Callable, Iterable, Mapping, Sequence
 
 import psutil
 
@@ -17,8 +17,10 @@ from base.lm.harness.antigravity.rpc import (
     LIVE_SUBMIT_TIMEOUT_SECONDS,
     AntigravityServer,
     discover_process_antigravity_server,
+    get_cascade_trajectory,
     send_user_cascade_message,
 )
+from base.lm.harness.antigravity.trajectory import Trajectory, parse_trajectory
 from base.lm.harness.cancel import (
     CancelReport,
     Sweep,
@@ -224,15 +226,43 @@ class AgyTransport:
             raise TransportClosedError(f"agy stdin closed: {exc}") from exc
 
     # meiva:note
-    # `agy` printmode blocks stdin while `pollResponse` waits on `IsCascadeRunning`,
-    # so mid-turn steering cannot ride on stdin. Instead, `agy` starts its in-process
-    # Connect JSON-RPC `LanguageServerService` on localhost and reads
-    # `ANTIGRAVITY_SERVER_CSRF_TOKEN` at startup. Calling `SendUserCascadeMessage`
-    # queues a `CORTEX_STEP_TYPE_USER_INPUT` step directly into the running
-    # `AgentExecutor` loop (`messages.Hub`), which `pollResponse` streams out as part
-    # of the ongoing turn.
+    # `agy` printmode blocks stdin while `pollResponse` waits on `IsCascadeRunning`, so input for a
+    # running turn cannot ride on stdin. `agy` starts its in-process Connect JSON-RPC
+    # `LanguageServerService` on localhost and reads `ANTIGRAVITY_SERVER_CSRF_TOKEN` at startup;
+    # `SendUserCascadeMessage` queues a `CORTEX_STEP_TYPE_USER_INPUT` step into the running executor
+    # loop. The call carries our `clientMessageId` (and `media` for images); its HTTP 200 is only a
+    # weak receipt and is also returned for a conversation that is idle (see `trajectory`). The RPC
+    # interface is not public; premise: agy 1.5.5.
     # meiva:link base/lm/harness/antigravity/docs/antigravity.md
-    async def steer(self, text: str, *, conversation_id: str | None = None) -> None:
+    async def steer(
+        self,
+        text: str,
+        *,
+        client_message_id: str,
+        media: Sequence[Mapping[str, str]] = (),
+        conversation_id: str | None = None,
+    ) -> None:
+        server, target_conversation = await self._rpc_target(conversation_id)
+        _ = await asyncio.to_thread(
+            send_user_cascade_message,
+            target_conversation,
+            text,
+            client_message_id=client_message_id,
+            media=media,
+            server=server,
+        )
+
+    # meiva:note
+    # The live state of the conversation: `GetCascadeTrajectory`, the only signal that says whether a
+    # turn runs when stdout is silent. An answer of an unexpected shape raises `AgyInterfaceError`.
+    async def trajectory(self, *, conversation_id: str | None = None) -> Trajectory:
+        server, target_conversation = await self._rpc_target(conversation_id)
+        payload = await asyncio.to_thread(
+            get_cascade_trajectory, target_conversation, server=server
+        )
+        return parse_trajectory(payload)
+
+    async def _rpc_target(self, conversation_id: str | None) -> tuple[AntigravityServer, str]:
         process = self._require_process()
         if process.returncode is not None:
             raise TransportClosedError("agy is not running")
@@ -249,12 +279,7 @@ class AgyTransport:
         if server is None:
             server = await self._discover_rpc_server(process.pid)
             self._rpc_server = server
-        _ = await asyncio.to_thread(
-            send_user_cascade_message,
-            target_conversation,
-            text,
-            server=server,
-        )
+        return server, target_conversation
 
     async def _discover_rpc_server(self, pid: int) -> AntigravityServer:
         deadline = self._clock.monotonic() + LIVE_SUBMIT_TIMEOUT_SECONDS

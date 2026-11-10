@@ -42,9 +42,12 @@ class ScriptedProbe(ChildProbe):
 
 
 class Harness:
-    def __init__(self, session: AgySession, received: Path, argv: Path, child: Path) -> None:
+    def __init__(
+        self, session: AgySession, received: Path, argv: Path, child: Path, rpc: Path | None = None
+    ) -> None:
         self.session = session
         self.received = received
+        self.rpc = rpc or child.with_name("rpc.jsonl")
         self.argv = argv
         self.child = child
         self.events: list[Any] = []
@@ -74,6 +77,11 @@ class Harness:
             for line in self.received.read_text(encoding="utf-8").splitlines()
             if line.strip()
         ]
+
+    def rpc_payloads(self) -> list[dict[str, Any]]:
+        if not self.rpc.exists():
+            return []
+        return [json.loads(line) for line in self.rpc.read_text().splitlines() if line.strip()]
 
     def child_pid(self) -> int | None:
         if not self.child.exists():
@@ -129,6 +137,7 @@ async def start(
     unsolicited: UnsolicitedSink | None = None,
     conversation_id: str = "conv-fake",
     reap: Reaper | None = None,
+    extra_environ: dict[str, str] | None = None,
     **config_overrides: Any,
 ) -> Harness:
     plan = tmp_path / "plan.json"
@@ -137,13 +146,28 @@ async def start(
     argv = tmp_path / "argv.jsonl"
     child = tmp_path / "child.jsonl"
     settings = config(tmp_path, **config_overrides)
+    home = tmp_path / "home"
+    logs = (
+        home
+        / ".gemini"
+        / "antigravity-cli"
+        / "brain"
+        / conversation_id
+        / ".system_generated"
+        / "logs"
+    )
+    logs.mkdir(parents=True)
+    rpc = tmp_path / "rpc.jsonl"
     environ = {
         "FAKE_AGY_PLAN": str(plan),
         "FAKE_AGY_RECEIVED": str(received),
         "FAKE_AGY_ARGV": str(argv),
         "FAKE_AGY_CHILD": str(child),
         "FAKE_AGY_CURSOR": str(tmp_path / "cursor.txt"),
+        "FAKE_AGY_RPC": str(rpc),
+        "FAKE_AGY_TRANSCRIPT": str(logs / "transcript.jsonl"),
         "PATH": "/usr/bin:/bin",
+        **(extra_environ or {}),
     }
 
     def factory() -> AgyTransport:
@@ -156,9 +180,10 @@ async def start(
         probe=probe,
         transport_factory=factory,
         clock=system_clock(),
+        home=home,
     )
     await session.start(resume=resume, handoff=handoff)
-    return Harness(session, received, argv, child)
+    return Harness(session, received, argv, child, rpc)
 
 
 # meiva:note

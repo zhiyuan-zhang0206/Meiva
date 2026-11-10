@@ -37,6 +37,7 @@ from base.lm.harness import (
 from base.lm.harness.antigravity import AgySession
 from base.lm.harness.claude.session import ClaudeSession
 from base.lm.harness.codex.session import CodexSession
+from base.lm.harness.delivery import HarnessInput
 from base.lm.harness.registration import SecureRandom
 from base.lm.harness.tests.roots import bridge_root_values
 from base.lm.harness.wiring import HANDOFF_INSTRUCTION, bridge_for, open_session
@@ -117,6 +118,11 @@ class FakeSession:
         )
         if handoff is not None and self._opening is not None:
             self.handoff_ticket = self.submit(handoff.render(), key="handoff")
+
+    async def deliver(self, inputs: Sequence[HarnessInput]) -> None:
+        raise NotImplementedError(
+            "the bridge still submits turns; deliver arrives with the graph change"
+        )
 
     def submit(self, text: str, *, key: str | None = None) -> FakeTicket:
         self._n += 1
