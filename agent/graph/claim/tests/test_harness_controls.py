@@ -164,7 +164,7 @@ async def test_steer_delivers_peer_note_and_user_upload_in_order_and_flips_wake_
     tmp_path: Path,
 ) -> None:
     agent_id = agent_row(db_conn)
-    engine = _BatchSteerEngine(expected=3)
+    engine = _BatchSteerEngine(expected=1)
     engine.steering_available = True
     state = AgentState(
         non_human_wake=True,
@@ -215,7 +215,7 @@ async def test_steer_delivers_peer_note_and_user_upload_in_order_and_flips_wake_
         ).fetchone()
         db_conn.commit()
         assert peer_row is not None and note_row is not None and user_row is not None
-        peer_id, note_id, user_id = peer_row[0], note_row[0], user_row[0]
+        peer_id, user_id = peer_row[0], user_row[0]
         await engine.all_steered.wait()
         engine.continue_work.set()
         engine.terminal.set()
@@ -223,15 +223,13 @@ async def test_steer_delivers_peer_note_and_user_upload_in_order_and_flips_wake_
     command = turn_task.result()
     assert is_object_dict(command.update)
     assert command.update.get("non_human_wake") is False
-    assert [key for _, key in engine.steered] == [
-        f"inbound-{peer_id}",
-        f"inbound-{note_id}",
-        f"inbound-{user_id}",
-    ]
-    assert "peer progress report" in engine.steered[0][0]
-    assert "subtask updated" in engine.steered[1][0]
-    assert "add start/stop buttons" in engine.steered[2][0]
-    assert str(img_path) in engine.steered[2][0]
+    assert [key for _, key in engine.steered] == [f"inbound-{user_id}"]
+    steered_prompt = engine.steered[0][0]
+    peer_pos = steered_prompt.index("peer progress report")
+    note_pos = steered_prompt.index("subtask updated")
+    user_pos = steered_prompt.index("add start/stop buttons")
+    assert peer_pos < note_pos < user_pos
+    assert str(img_path) in steered_prompt
 
     async with aops_pool.connection() as conn:
         items = await aload_harness_timeline_items(conn, agent_id)
@@ -240,4 +238,9 @@ async def test_steer_delivers_peer_note_and_user_upload_in_order_and_flips_wake_
         ("inbound_chat", "agent:7", peer_id),
         ("system_marker", "task", None),
         ("inbound_chat", "user", user_id),
+    ]
+    events = await live_events.events()
+    assert [event["inbound_id"] for event in events if event["role"] == "inbound_committed"] == [
+        peer_id,
+        user_id,
     ]

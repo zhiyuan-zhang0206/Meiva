@@ -494,13 +494,14 @@ async def _steer_while_active(
 ) -> None:
     while not stopping.is_set():
         if input_accepted.is_set() and engine.steering_available:
-            inbound = await reserve_harness_steer(ctx, agent_id)
-            if inbound is not None:
+            batch = await reserve_harness_steer(ctx, agent_id)
+            if batch:
+                inbound_ids = [item.id for item in batch]
                 try:
-                    messages = prepare_steered_inbound(ctx, inbound)
+                    messages = [msg for item in batch for msg in prepare_steered_inbound(ctx, item)]
                     prompt = render_messages(messages)
                 except Exception:
-                    await finish_harness_steer(ctx, agent_id, inbound.id, accepted_items=None)
+                    await finish_harness_steer(ctx, agent_id, inbound_ids, accepted_items=None)
                     raise
                 if not await _send_steer(
                     ctx,
@@ -508,7 +509,7 @@ async def _steer_while_active(
                     engine,
                     projector,
                     stopping,
-                    inbound,
+                    batch,
                     prompt,
                     messages,
                 ):
@@ -524,19 +525,21 @@ async def _send_steer(
     engine: ForegroundSteering,
     projector: HarnessTurnProjector,
     stopping: asyncio.Event,
-    inbound: ClaimedInbound,
+    batch: Sequence[ClaimedInbound],
     prompt: str,
     messages: list[BaseMessage],
 ) -> bool:
-    inbound_id = inbound.id
+    inbound_ids = [item.id for item in batch]
+    newest_id = inbound_ids[-1]
     try:
-        accepted = not stopping.is_set() and await engine.steer(prompt, key=f"inbound-{inbound_id}")
+        accepted = not stopping.is_set() and await engine.steer(prompt, key=f"inbound-{newest_id}")
     except Exception as exc:
         logger.warning(
             "could not confirm harness steer delivery",
             event="harness_steer_unconfirmed",
             agent_id=agent_id,
-            inbound_id=inbound_id,
+            inbound_id=newest_id,
+            inbound_ids=inbound_ids,
             error=str(exc),
         )
         items = await projector.append_inbound(
@@ -546,12 +549,12 @@ async def _send_steer(
         return False
 
     if not accepted:
-        await finish_harness_steer(ctx, agent_id, inbound_id, accepted_items=None)
+        await finish_harness_steer(ctx, agent_id, inbound_ids, accepted_items=None)
         return False
     timeline, _ = build_timeline_items(messages, inputs=ctx.timestamp_policy())
     items = await projector.append_inbound(
-        lambda: finish_harness_steer(ctx, agent_id, inbound_id, accepted_items=timeline),
-        human_input=is_human_wake_item(inbound),
+        lambda: finish_harness_steer(ctx, agent_id, inbound_ids, accepted_items=timeline),
+        human_input=any(is_human_wake_item(item) for item in batch),
     )
     _publish_inbound(ctx, agent_id, items)
     return True
