@@ -12,6 +12,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
+from pathlib import Path
 from typing import TypeGuard
 
 from langchain_core.messages import BaseMessage
@@ -512,6 +513,24 @@ async def _handle_resurrect(
 
 
 # meiva:note
+# The marker a fork appends after its inherited history. An external harness fork resumes a CLI
+# session whose working directory was the source's: the CLI is told the new one by its own
+# environment note, and the marker repeats it so the fact does not depend on that note. `workspace`
+# is None for a native fork, whose conversation holds no directory.
+# meiva:link base/lm/harness/docs/fork.md
+def fork_marker_text(prefix: str, source: str, agent_id: int, workspace: Path | None) -> str:
+    where = "" if workspace is None else f" Your working directory is now {workspace}."
+    return (
+        f"{prefix}You have been forked from {source}. "
+        f"You are now a new, independent agent with id {agent_id} — the "
+        f"conversation above is inherited from {source}, not your own "
+        f"history. Identity, memory and skill notes in that history belong "
+        f"to {source}; the notes below this marker are yours. "
+        f"Continue as agent {agent_id}.{where}"
+    )
+
+
+# meiva:note
 # A fork appends its lifecycle marker and its own context notes after the inherited history and never rewrites that history: the inherited messages stay byte-identical so the first fork of a checkpoint reuses the provider prefix cache its source warmed. The marker states that the identity, memory and skill notes above it belong to the source; the shared memory index is not re-grafted.
 # meiva:link agent/graph/docs/context-notes/context-notes.md
 async def _handle_fork(
@@ -523,26 +542,14 @@ async def _handle_fork(
     ctx: MeivaContext,
 ) -> None:
     now = ctx.require_clock().now()
-    # meiva:note
-    # An external harness fork resumes a CLI session whose working directory was the source's.
-    # The CLI is told the new one by its own environment note, and the marker repeats it so the
-    # fact does not depend on that note: the workspace is the one thing a cloned session got wrong.
-    # meiva:link base/lm/harness/docs/fork.md
     workspace = (
-        ""
+        None
         if ctx.harness is Harness.MEIVA
-        else f" Your working directory is now {workspace_dir(agent_id, home=ctx.require_meiva_home())}."
+        else workspace_dir(agent_id, home=ctx.require_meiva_home())
     )
     st.new_msgs.append(
         system_note_message(
-            content=(
-                f"{_ts_prefix(ctx)}You have been forked from {item.source}. "
-                f"You are now a new, independent agent with id {agent_id} — the "
-                f"conversation above is inherited from {item.source}, not your own "
-                f"history. Identity, memory and skill notes in that history belong "
-                f"to {item.source}; the notes below this marker are yours. "
-                f"Continue as agent {agent_id}.{workspace}"
-            ),
+            content=fork_marker_text(_ts_prefix(ctx), item.source, agent_id, workspace),
             tag=NoteTag.LIFECYCLE_FORK,
             picked_up_at=now,
             created_at=now,

@@ -1,4 +1,4 @@
-exports = ["launch_retry.py", "resurrection_retry.py", "wake.py"]
+exports = ["launch_retry.py", "resurrection_retry.py", "tests", "wake.py"]
 
 [uses]
 "__init__.py" = ["wake.py"]

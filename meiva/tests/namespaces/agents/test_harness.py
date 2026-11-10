@@ -137,3 +137,25 @@ def test_harness_availability_reports_every_harness() -> None:
     assert rows[0].status == "available"
     assert rows[0].harness is agents.Harness.MEIVA
     assert rows[0].models == ()
+
+
+def test_fork_of_an_external_agent_defaults_to_the_sources_machine(
+    sdk_environment: MeivaContext,
+) -> None:
+    requests: list[httpx.Request] = []
+
+    def answer(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if request.method == "GET":
+            return httpx.Response(200, json={"harness": "codex", "machine": "macmini"})
+        return httpx.Response(200, json={"id": 42})
+
+    with (
+        httpx.Client(base_url="http://gateway", transport=httpx.MockTransport(answer)) as client,
+        use_client(client),
+    ):
+        assert agents.spawn(fork_from=7) == 42
+        assert agents.spawn(fork_from=7, machine="ubuntu") == 42
+    posts = [_body(request) for request in requests if request.method == "POST"]
+    assert [body["machine"] for body in posts] == ["macmini", "ubuntu"]
+    assert sum(request.method == "GET" for request in requests) == 1

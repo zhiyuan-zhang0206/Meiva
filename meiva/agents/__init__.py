@@ -296,7 +296,7 @@ def spawn(
 
     `prompt` is the first message — make it self-contained; omit it to leave the agent idling.
     `label` names the new agent's role, which peers and the fleet view show; omit it to let the
-    system name the agent. `machine` defaults to yours. `config_overlay` carries per-agent config
+    system name the agent. `machine` defaults to yours (for a fork of a "claude_code" or "codex" agent, to the source's machine, the only one it can be born on). `config_overlay` carries per-agent config
     fields; keys it does not name follow the shared default. Identity config you do not name
     (model, reasoning effort, the inject/expand lists, prompt shaping) is frozen at spawn;
     operational knobs follow the shared default. `fork_from` copies another agent's conversation
@@ -372,6 +372,21 @@ def _validate_spawn_config_overlay(
     )
 
 
+# meiva:note
+# The machine a spawn lands on when the caller names none: its own, except that a fork of an
+# external harness agent can only be born where the source's CLI session lives, so that agent's
+# machine is the default there. Naming another machine still goes to the birth rule, which refuses it.
+# meiva:link base/lm/harness/docs/fork.md
+def _spawn_machine(machine: str | None, fork_from: int | None) -> str:
+    if machine is not None:
+        return machine
+    if fork_from is not None:
+        source = gateway_client.get_agent(fork_from)
+        if source["harness"] != Harness.MEIVA.value:
+            return str(source["machine"])
+    return process_context.current_context().require_machine().name()
+
+
 def spawn_impl(
     *,
     prompt: str | None,
@@ -399,9 +414,7 @@ def spawn_impl(
         prompt=prompt,
         fork_from=fork_from,
         prompt_source=spawner,
-        machine=machine
-        if machine is not None
-        else process_context.current_context().require_machine().name(),
+        machine=_spawn_machine(machine, fork_from),
         config=config,
         label=label,
         harness=harness,

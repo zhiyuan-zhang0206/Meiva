@@ -76,3 +76,22 @@ as interrupted, as a native fork does.
 | External source on another machine | `ForkHarnessMismatch`: the session is a local file; fork on the source's machine |
 | Antigravity source | `ForkHarnessMismatch`: agy has no supported fork entry (the in-process RPC `ForkConversation` is not public and a fork made with it gets no cache hit) |
 | Source never started a session here | `ForkSourceUnavailableError` at the child's first start |
+
+## Defaults and assumptions
+
+- **Default machine.** `spawn(fork_from=...)` without `machine` lands on the caller's machine, except
+  that a fork of a `claude_code` or `codex` agent defaults to the **source's** machine, the only one it
+  can be born on (`meiva.agents._spawn_machine`). Naming another machine still gets the cross-machine
+  refusal.
+- **Claude home.** The "does the clone already exist" check reads `~/.claude` (or the runner's
+  `CLAUDE_CONFIG_DIR`) through the SDK in the runner process, so it assumes the runner and the CLI
+  session share that directory, as they do by default. A session given a different `CLAUDE_CONFIG_DIR`
+  would not find an existing clone, and the retry would meet the CLI's "already in use" error.
+- **Harness switches.** The fork source is read together with the child's stored config and counts
+  only while the source runs on the child's current harness (`read_stored_config`); a child switched to
+  another harness has no source session to clone and starts fresh. A source switched to another
+  harness had its session record deleted, so its forks that never started refuse with
+  `ForkSourceUnavailableError`. A child that switches away and back has had its own record deleted and
+  would clone its source again; that return is not special-cased.
+- **No unread.** The delivery records (`agent_user_messages`) are not copied, and the seen-position
+  table has no row for the child, which reads as position 0.
