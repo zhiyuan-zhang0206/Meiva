@@ -10,7 +10,7 @@
 # worker with no bound at all (measured: a ``shutdown(wait=False)`` worker is
 # still joined at exit). The exit lost that race by ~2 s and the unit stood
 # half-stopped until the watchdog respawned it. Task #4222's sweep-A migrated
-# this daemon family — watchdog, memory_indexer, heartbeat, page_server,
+# this daemon family — watchdog, memory_indexer, heartbeat,
 # events_maintenance, memory_search — to the sibling daemons' established shape
 # (``asyncio.Runner`` + an explicit cancellation drain + a hard exit that skips
 # teardown; see ``services/agent_runner/agent_ops/daemon.py``, ``services/backup/scheduler/daemon.py``),
@@ -80,10 +80,6 @@ _CASES: dict[str, _DaemonCase] = {
         module="services.wake.heartbeat.daemon",
         interrupt_line="[heartbeat] interrupted, shutting down",
     ),
-    "page_server": _DaemonCase(
-        module="services.agent_runner.page_server.daemon",
-        interrupt_line="[page-server] interrupted, shutting down",
-    ),
     "events_maintenance": _DaemonCase(
         module="services.upkeep.events_maintenance.daemon",
         interrupt_line="[events-maintenance] interrupted, shutting down",
@@ -123,10 +119,6 @@ def _daemon_module(slug: str) -> ModuleType:
         from services.wake.heartbeat import daemon as heartbeat
 
         return heartbeat
-    if slug == "page_server":
-        from services.agent_runner.page_server import daemon as page_server
-
-        return page_server
     if slug == "events_maintenance":
         from services.upkeep.events_maintenance import daemon as events_maintenance
 

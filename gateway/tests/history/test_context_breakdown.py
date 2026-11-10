@@ -182,23 +182,17 @@ def test_bucket_ignores_image_base64_in_multimodal_inbound() -> None:
     assert estimate_message_tokens(msg) < 50
 
 
+# meiva:note
+# Inbound messages are bucketed by their envelope `meiva_source`: a peer agent
+# (`agent:N`) or a declared external agent (`external_agent:S`) -> agent_messages; machine/framework wakeups & notices
+# (`watcher:` / `shell:` / `schedule:` / `system[:*]`) -> automation; a human
+# turn (`user`) and a legacy inbound with no source -> user_input.
 def test_inbound_split_by_source() -> None:
-    """Inbound messages are bucketed by their envelope `meiva_source`: a peer agent
-    (`agent:N`) or a declared external agent (`external_agent:S`) -> agent_messages; machine/framework wakeups & notices
-    (`watcher:` / `shell:` / `schedule:` / `system[:*]`) -> automation; a human
-    turn (`user` / `ui:page:*`) and a legacy inbound with no source -> user_input."""
     msgs = [
         inbound_message(
             content="human",
             source="user",
             inbound_id=1,
-            body_start=0,
-            times=InboundTimes(arrived_at=None, picked_up_at=_PICKED_UP_AT),
-        ),
-        inbound_message(
-            content="page",
-            source="ui:page:dash",
-            inbound_id=2,
             body_start=0,
             times=InboundTimes(arrived_at=None, picked_up_at=_PICKED_UP_AT),
         ),
@@ -255,7 +249,7 @@ def test_inbound_split_by_source() -> None:
         HumanMessage(content="legacy", additional_kwargs={"meiva_msg_type": "inbound"}),
     ]
     buckets = bucket_messages(msgs, _records(msgs))
-    assert len(buckets["user_input"]) == 3
+    assert len(buckets["user_input"]) == 2
     assert len(buckets["agent_messages"]) == 2
     assert len(buckets["automation"]) == 5
 

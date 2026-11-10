@@ -74,7 +74,7 @@ Emit sites and consumers: see the comments at each emit point.
 | `restart` | agent restart initiated | business | — | events |
 | `cancel` | in-flight turn cancelled | business | — | events |
 | `resurrect` | terminated agent woken | business | — | events |
-| `transfer` | agent transferred to another machine | business | from_machine, to_machine, files_transferred, bytes_transferred, killed_shell_sessions, closed_pages | events |
+| `transfer` | agent transferred to another machine | business | from_machine, to_machine, files_transferred, bytes_transferred, killed_shell_sessions | events |
 | `compact` | agent context compacted | business | — | events |
 | `circuit_breaker` | heartbeat circuit breaker opened — a permanent provider rejection stopped background model re-fires until the cause is corrected | business | — | events |
 | `exit` | agent process exited | business | — | events |
@@ -340,10 +340,6 @@ above (or when its name is unregistered); otherwise it stays in the JSONL mirror
 
 | event_name | meaning | tier | key payload fields | destination |
 |------|------|------|-----------------|------|
-| `page_ttl_expired` | the TTL reaper terminalized a page row whose expires_at passed; attributes carry agent_id, name, page_id | observation | — | events |
-| `page_language_lookup_failed` | the gateway could not read the page copy language from user_settings (DB failure) and fell back to the default; attributes carry exc_type, exc_message | anomaly | — | events |
-| `page_proxy_502` | the gateway reverse proxy could not reach a registered page server; attributes carry trace_id, agent_id, page, host, port, exc_type, exc_message | anomaly | — | events |
-| `page_proxy_504` | the gateway reverse proxy timed out dialing a registered page server; attributes carry trace_id, agent_id, page, host, port, exc_type, exc_message | anomaly | — | events |
 | `shell_ttl_expired` | the TTL reaper killed a persistent shell whose declared TTL passed; attributes carry agent_id, session_id, mode | observation | — | events |
 | `shell_ttl_stale_dropped` | the TTL reaper dropped the tracking row of a persistent shell session its home machine no longer lists; attributes carry agent_id, session_id, machine, created_at, expires_at and evidence (session_gone | machine_absent) | observation | — | events |
 | `chrome_page_ttl_expired` | the browser-mcp TTL sweep closed a Chrome page whose hard deadline passed; attributes carry page_id, url, agent_id (None when no affinity slot still named the page) | observation | — | events |
@@ -382,8 +378,6 @@ same origin as persistent events but uses an independent schema.
 | `notice_posted` | ✓ |
 | `notice_resolved` | ✓ |
 | `notification` | ✓ |
-| `page_closed` | ✓ |
-| `page_opened` | ✓ |
 | `reasoning_delta` | — |
 | `reasoning_start` | — |
 | `task_created` | ✓ |

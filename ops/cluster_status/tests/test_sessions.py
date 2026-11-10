@@ -174,11 +174,7 @@ def test_a_backend_without_kill_verdicts_is_assumed_to_have_cut_work_short(
 def test_a_kill_all_takes_the_owners_shells_below_the_cutoff_and_nothing_else(
     unit_home: Path,
 ) -> None:
-    from base.sessions.page_session import page_session_name
-
-    page = page_session_name(7, "dash_board", 3)
     survivors = (
-        page,
         "meiva-agent-7",
         "meiva-agent-7-shell-6-new-generation",
         "meiva-agent-7-shell-8-later",

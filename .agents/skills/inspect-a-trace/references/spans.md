@@ -132,13 +132,8 @@ on pre-#1964 traces; on newer traces the root no longer carries it — pass
 
 Writes a self-contained `report/index.html` — inline CSS/JS, no CDN, no build
 step, opens offline. Header, waterfall timeline, node sequence, LLM span table,
-events, message content when present, and a Grafana Explore link. Serve it the one
-supported way:
-
-```python
-import meiva
-meiva.ui.serve("report", name="trace-<agent>-<short-id>", title="Trace <hex>")
-```
+events, message content when present, and a Grafana Explore link. Hand over the
+`report/index.html` path.
 
 The report and Grafana are complements: Grafana is the interactive browser, the
 report is the sharable annotated artifact. Prefer just handing over the Grafana

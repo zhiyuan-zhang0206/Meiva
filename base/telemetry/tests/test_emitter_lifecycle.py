@@ -59,7 +59,7 @@ def test_emit_before_init_drops_the_event_and_says_so_once() -> None:
     child = _run_scenario("cold_emit")
     assert child.returncode == 0, child.stderr
     assert child.stderr.count("emission skipped: no producer") == 1
-    assert "page_ttl_expired" in child.stderr, "the report names the first event it lost"
+    assert "shell_ttl_expired" in child.stderr, "the report names the first event it lost"
     assert "requires an initialized process pipeline or producer" not in child.stderr
     assert "emit must not construct a writer" not in child.stderr
 

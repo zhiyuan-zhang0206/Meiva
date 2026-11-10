@@ -213,7 +213,6 @@ EVENTS: dict[str, EventSpec] = {
         tier="noise",
         site='gateway/alerts/router.py:ingest_alerts telemetry.emit("telemetry", "alerts", ...)',
     ),
-    # meiva.ui.serve page-restore
     # gateway endpoint latency metering (Task #1091): 60s aggregates emitted
     # by gateway/http/middleware/latency.py — one event per (route, bucket), never per request
     "gateway_latency": telemetry_event(
@@ -299,30 +298,6 @@ EVENTS: dict[str, EventSpec] = {
         "gate auth probe failed — carries the classification (auth/timeout/network/application) and exception shape",
         payload=GateAuthProbeFailed,
         tier="anomaly",
-    ),
-    "page_ttl_expired": EventSpec(
-        name="page_ttl_expired",
-        category="log",
-        tier="observation",
-        doc="the TTL reaper terminalized a page row whose expires_at passed; attributes carry agent_id, name, page_id",
-    ),
-    "page_language_lookup_failed": EventSpec(
-        name="page_language_lookup_failed",
-        category="log",
-        tier="anomaly",
-        doc="the gateway could not read the page copy language from user_settings (DB failure) and fell back to the default; attributes carry exc_type, exc_message",
-    ),
-    "page_proxy_502": EventSpec(
-        name="page_proxy_502",
-        category="log",
-        tier="anomaly",
-        doc="the gateway reverse proxy could not reach a registered page server; attributes carry trace_id, agent_id, page, host, port, exc_type, exc_message",
-    ),
-    "page_proxy_504": EventSpec(
-        name="page_proxy_504",
-        category="log",
-        tier="anomaly",
-        doc="the gateway reverse proxy timed out dialing a registered page server; attributes carry trace_id, agent_id, page, host, port, exc_type, exc_message",
     ),
     "shell_ttl_expired": EventSpec(
         name="shell_ttl_expired",

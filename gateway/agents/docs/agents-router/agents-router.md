@@ -79,9 +79,7 @@ standard gateway authentication, returns `expired` or `not_open`, and returns
 - `/api/agents/{id}/pending` lists the queued `status='pending'` chat inbounds
   and stamps each row with `sender`, the closed category of its `source` tag
   (`user` / `agent` / `automation` / `system`, computed by
-  `base/agents/messages/envelope.py:sender_class`). `ui:page:<name>` counts as
-  the user — the envelope renders it with the same bare timestamp as `user`,
-  and it is a user interaction with a page the agent served. An absent or
+  `base/agents/messages/envelope.py:sender_class`). An absent or
   unrecognized tag is `system`, never the user. Read surfaces select the
   category instead of parsing tags.
 - `/api/agents/{id}/token-usage` exposes per-model soft and hard compact

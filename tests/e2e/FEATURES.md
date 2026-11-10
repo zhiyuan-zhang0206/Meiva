@@ -12,7 +12,7 @@ the meiva_code after_exec bug broke: every test passed because none asserted the
 
 **Harness.** `tests/e2e/conftest.py` starts gateway, agent-ops, agent-host, pty-sessions, the Next.js
 frontend and Playwright, with a scripted fake model (`MEIVA_LLM_OVERRIDE`) and gateway auth off, on one
-machine. Not in the stack: heartbeat, delivery-watchdog, schedule-manager, insights, im-bridge, page-server,
+machine. Not in the stack: heartbeat, delivery-watchdog, schedule-manager, insights, im-bridge,
 memory-search/indexer, ttl-reaper, mcp-daemon, browser-mcp. Browser-free tests use the
 `spawned_agent` fixture and `tests/e2e/_db.py` helpers; the recording model in
 `fakes/scenarios/meiva_code.py` shows what the model was handed.
@@ -26,7 +26,7 @@ peripheral or needs external credentials or hardware.
 |---|---|---|---|---|---|
 | A1 | `meiva.cwd.set` queues a cwd-change note and a project-skills note that reach the next model input once, after the tool result, and are consumed | `meiva_builtins/plugins/meiva_code/agent_runtime.py` (after_exec hook) | `plugins/test_meiva_code_effects.py::test_cwd_switch_puts_cwd_note_and_project_skills_in_the_next_model_input` | P0 | Failed on main before the after_exec hook fix (#4249) |
 | A2 | Reading a file injects the AGENTS.md / CLAUDE.md found up to the repo root once (path and content-hash dedup, direct read exempt, oversize head+tail with archive) | `meiva_builtins/plugins/meiva_code/plugin.py` (`files.read` wrap) | `plugins/test_meiva_code_effects.py::test_reading_a_file_injects_agents_and_claude_md_once` | P0 | |
-| A3 | Relative paths in `meiva.files.*` and `meiva.shell.run` follow the logical cwd; `meiva.cwd.set` rejects missing paths and files | `meiva_builtins/plugins/meiva_code/plugin.py` (wraps), `_code_namespace.py` | `plugins/test_meiva_code_effects.py::test_sdk_calls_resolve_relative_paths_against_the_logical_cwd` | P0 | `meiva.understand` and `meiva.ui.serve` wraps not covered |
+| A3 | Relative paths in `meiva.files.*` and `meiva.shell.run` follow the logical cwd; `meiva.cwd.set` rejects missing paths and files | `meiva_builtins/plugins/meiva_code/plugin.py` (wraps), `_code_namespace.py` | `plugins/test_meiva_code_effects.py::test_sdk_calls_resolve_relative_paths_against_the_logical_cwd` | P0 | the `meiva.understand` wrap not covered |
 | A4 | The logical cwd survives restart; a vanished cwd falls back to the workspace | `meiva_builtins/plugins/meiva_code/agent_runtime.py` (after_init hook) | `plugins/test_meiva_code_effects.py::test_cwd_survives_a_restart`, `::test_a_vanished_cwd_falls_back_to_the_workspace_after_restart` | P0 | |
 | A5 | The system prompt carries the coding conventions (worktree and PR workflow, AGENTS.md first, `meiva.cwd`) | `meiva_builtins/plugins/meiva_code/agent_runtime.py` (`_coding_tools_section`) | `plugins/test_meiva_code_effects.py::test_system_prompt_carries_the_coding_conventions` | P1 | The opt-in `meiva_code_workflow` section is not covered |
 | A6 | After compaction the project-skills note and context files resurface | `meiva_builtins/plugins/meiva_code/` | `plugins/test_meiva_code_effects.py::test_compaction_resurfaces_context_files`, `::test_compaction_resurfaces_project_skills` | P1 | |
@@ -69,7 +69,7 @@ peripheral or needs external credentials or hardware.
 | E8 | User file delivery to an agent (`POST /api/keyed/v1/agents/{id}/uploads`) becomes a chat inbound once the copy is confirmed | `gateway/upload_delivery/router.py` | `flow/test_sdk_effects.py::test_uploaded_file_is_announced_to_the_agent_and_readable` | P1 | Silent save and GET download (`/api/agents/{id}/uploads`) are not asserted. Unit: `gateway/tests/routers/upload/test_upload_endpoint.py` |
 | E9 | Composer commands: `/name text` expands in the agent claim node (chain in one message), `GET /api/commands`, `meiva.agents.commands()` | `meiva/composer_commands.py`, `gateway/routers/commands.py`, `agent/graph/claim/node.py` | `flow/test_sdk_effects.py::test_slash_command_expands_into_the_model_input` | P1 | Chained commands and REST list route are not asserted. Unit: `meiva/tests/test_composer_commands.py`, `gateway/tests/routers/test_commands.py` |
 
-## 3. Shell sessions, watchers, pages
+## 3. Shell sessions and watchers
 
 | ID | Feature | Source | Existing e2e | Pri | Notes |
 |---|---|---|---|---|---|
@@ -80,7 +80,6 @@ peripheral or needs external credentials or hardware.
 | S5 | Session TTL reaping and owner notification only when a running job is interrupted | `services/upkeep/ttl_reaper/`, `meiva/shell/sessions.py` | none | P1 | Unit: `meiva/tests/namespaces/shell/test_shell_ttl.py` |
 | S6 | Shell monitor API and page: `GET /api/agents/{id}/shell/{sid}`, `/shell/N/S` | `gateway/routers/shell.py`, `ui/web/` | partial: `tests/e2e/state/test_shell_history_state.py` (scroll and history state only) | P1 | Unit: `gateway/tests/agents/test_agent_shell.py` |
 | S7 | Watchers: `meiva.watcher.at/cron/launch` wake the owner as `watcher:N` source, timeout exit 124, orphan guard, owner auto-resurrect; resurrection wake and completion both processed before idle | `meiva/watcher.py`, `meiva/shell/background.py` | `flow/test_shell_effects.py::test_launch_at_and_cron_watchers_wake_owner_with_their_sources`, `::test_watcher_timeout_notice_carries_the_log_tail`, `::test_at_watcher_revives_a_terminated_owner`, `::test_watcher_child_exits_when_its_session_shell_is_killed` | P0 | Unit with real pty service: `meiva/tests/namespaces/watcher/test_watcher.py`, `meiva/tests/namespaces/watcher/test_watcher_commands.py` |
-| S8 | Serve a page: `meiva.ui.serve/show/close`, page-server daemon, gateway reverse proxy `/pages/{key}/...`, `GET /api/pages` | `meiva/ui.py`, `services/agent_runner/page_server/server.py`, `gateway/routers/page_serving/pages.py` | none | P1 | Unit: `services/agent_runner/page_server/tests/test_page_server_daemon.py`, `gateway/tests/routers/proxies/test_pages_proxy.py`, `gateway/tests/extensions/test_pages.py` |
 
 ## 4. Schedules
 

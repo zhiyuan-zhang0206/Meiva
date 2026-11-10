@@ -7,11 +7,9 @@
 # vocabulary therefore never has to grow a widget type for every unforeseen need
 # (a task board, a balance panel, a pet).
 #
-# This is the sibling mount of `gateway/routers/page_serving/pages.py`, with the same path-
-# segment validation, the same auth (the cluster middleware, like every other
-# `/api` route), and the same 404-when-not-available semantics. What differs is
-# the backend: an `meiva.ui` page is a live page server owned by an agent, while a
-# plugin page is **static files inside the plugin package** — `<plugin>/ui/`,
+# The mount validates every path segment, authenticates with the cluster middleware (like
+# every other `/api` route), and answers 404 when the page is not available. The backend
+# is **static files inside the plugin package** — `<plugin>/ui/`,
 # which converge already materializes along with the rest of the plugin image.
 # Static is the preferred backend precisely because it needs no process: nothing
 # to supervise, nothing to restart, nothing to leak.

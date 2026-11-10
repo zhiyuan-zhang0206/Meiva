@@ -126,9 +126,7 @@ any server data (TanStack Query). No per-plugin frontend code, no build step.
 ### Plugin-served pages — the universal escape hatch
 
 Custom visuals come from a page the plugin serves itself, reached through the
-gateway exactly like `meiva.ui` pages are today (`gateway/routers/page_serving/pages.py`
-reverse-proxies `/pages/<agent_id>-<name>/…` to a supervised local page
-server, behind the gateway's normal auth). Plugin pages get the sibling mount:
+gateway behind its normal auth:
 
 - `/api/plugin-ui/<plugin>/<path>` → the plugin's page backend: a
   **converge-synced static dir** (preferred — converge already materializes
@@ -136,8 +134,8 @@ server, behind the gateway's normal auth). Plugin pages get the sibling mount:
   the plugin's **ops service** (`contributions.opsServices` — the existing
   surface; needed only for dynamic pages), which U3 deliberately left
   unimplemented for want of a declared address (see the U3 slice below).
-- Same path-segment validation and the same 404-when-disabled semantics as
-  `pages.py`. The forwarded-header allowlist is a proxy concern and does not
+- Path-segment validation and 404-when-disabled semantics. The
+  forwarded-header allowlist is a proxy concern and does not
   apply to the static backend, which has no upstream response to forward; the
   served file carries `X-Content-Type-Options: nosniff` instead.
 - The frontend embeds it in a **sandboxed iframe**. The sandbox is **breakage

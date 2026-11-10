@@ -131,7 +131,7 @@ def run_background(
     """You get a message when it finishes — no polling.
 
     `cmd` is a single line (join steps with `;` / `&&`, or run a script file); `name` is a
-    lowercase slug like `"build"` (`page-*` is reserved for `meiva.ui.serve`); `cwd` defaults to
+    lowercase slug like `"build"`; `cwd` defaults to
     your workspace. It runs in a fresh persistent session; output streams to `output_path`
     (`.shell_logs/<session_id>_<name>.log` in your workspace) and the capture. The completion
     message carries the log path and the last 3 output lines, then the session closes unless

@@ -52,7 +52,6 @@ _AGENT_RUNNER_SESSIONS = {
     "loki",
     "prometheus",
     "grafana",
-    "page-server",
     "ops",
     "agent-host",
     "exec-host",
@@ -349,5 +348,5 @@ def test_gateway_daemons_keep_the_gateway_marker() -> None:
 
 def test_runner_daemons_keep_the_runner_marker() -> None:
     by_session = {s.session: s for s in composition.build_services(home=meiva_home())}
-    for sess in ("ops", "page-server"):
+    for sess in ("ops",):
         assert service_spec.profile_marker(by_session[sess]) == "runner", sess

@@ -21,8 +21,8 @@ control plane for sessions, tools, events and channel connections.
 | Skills / tools / plugins (ClawHub) | `meiva skill install` (Agent Skills standard), `meiva plugins`, MCP via `meiva mcp` | Skills already in SKILL.md form install directly; anything else needs porting to SKILL.md or an MCP server covering the same tool. |
 | Cron / webhooks | `meiva schedules` (gateway-supervised) + `meiva.watcher` | |
 | Config `~/.openclaw/openclaw.json` (JSON5: channels, messages, providers, security) | `meiva config get/set/unset` | |
-| Control UI (`openclaw dashboard`, :18789) | Platform fleet view; per-report pages via `meiva.ui.serve` | |
-| Companion apps (voice, canvas, camera, screen sharing) | No equivalent — Meiva delivers pages (`meiva.ui.serve`) and text | |
+| Control UI (`openclaw dashboard`, :18789) | Platform fleet view; per-report files via `meiva.ui.publish` | |
+| Companion apps (voice, canvas, camera, screen sharing) | No equivalent — Meiva delivers reports and text (`meiva.ui.publish`) | |
 | Memory | Shared memory pool (`~/.meiva/memory`) + per-agent memory | |
 | Self-hosted, single operator | Multi-machine cluster; agents can be spawned on any enrolled machine | |
 
@@ -49,8 +49,7 @@ control plane for sessions, tools, events and channel connections.
   handles identity, the dialog is where live work happens, and notices are
   the async channel.
 - **No companion apps.** Voice, canvas, camera, and screen-sharing surfaces
-  do not exist in Meiva. Reports and interactive pages are the replacement
-  (`meiva.ui.serve`).
+  do not exist in Meiva. Published reports (`meiva.ui.publish`) are the replacement.
 - **The security model moves.** OpenClaw treats inbound channel messages as
   untrusted and sandboxes what tools can do; Meiva's inbound surface is the
   platform itself, and an agent's shell actions run with the process's own

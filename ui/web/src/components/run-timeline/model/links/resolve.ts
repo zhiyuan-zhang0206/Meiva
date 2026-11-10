@@ -54,7 +54,7 @@ export interface ResolvedLink {
   // The receiver's block the event ends on, when it ends on one: its message is what the details show, as for a selected block.
   block: RunTimelineUnit | null;
   // meiva:note
-  // The user's source (`user`, `ui:page:...`), when the user is an end.
+  // The user's source (`user`), when the user is an end.
   userSource: string | null;
   // meiva:note
   // The event names an inbound row of the receiver in view but no block carries it: the arrow ends at the event's time, not on a block.
@@ -65,7 +65,7 @@ const middle = (unit: Pick<RunTimelineUnit, "start" | "end">) => (Date.parse(uni
 
 // meiva:note
 // Whether an inbound source is a person (the user's own message), not an agent, a watcher, a shell or the system.
-export const isHumanSource = (source: string | null) => source !== null && (source === "user" || source.startsWith("ui:page:"));
+export const isHumanSource = (source: string | null) => source === "user";
 
 const inboundIndex = new WeakMap<RunTimelineResponse, Map<number, RunTimelineUnit>>();
 

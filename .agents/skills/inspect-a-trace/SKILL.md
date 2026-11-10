@@ -108,7 +108,7 @@ worktree it is `.agents/skills/inspect-a-trace/scripts/`, abbreviated
 `<scripts>/` below.
 
 ```
-fetch_trace.py ─▶ trace_raw.json ─▶ read_trace.py ─▶ trace_read.json ─▶ render_trace.py ─▶ report/ ─▶ meiva.ui.serve
+fetch_trace.py ─▶ trace_raw.json ─▶ read_trace.py ─▶ trace_read.json ─▶ render_trace.py ─▶ report/
 ```
 
 They encode the conversions you would otherwise re-derive every time (base64 vs

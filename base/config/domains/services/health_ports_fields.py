@@ -97,6 +97,3 @@ class ServiceHealthPortFields:
     agent_host_health_port: int | None = health_port_field(
         "agent_host", capability="agent-runner", writable=True, title="Agent host health port"
     )
-    page_server_health_port: int | None = health_port_field(
-        "page_server", capability="agent-runner", title="Page server health port"
-    )

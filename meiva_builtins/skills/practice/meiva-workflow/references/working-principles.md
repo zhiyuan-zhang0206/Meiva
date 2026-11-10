@@ -133,9 +133,8 @@ project's contributing guidance; maintainers choose its merge process.
 
 ## Presenting a question to the human
 
-Use a page when an artifact comparison or structured input is clearer than chat.
+Use `meiva.ui.ask` when structured input is clearer than chat.
 State the decision, its consequences, and the action each choice authorizes.
-Use a general frontend skill for design and `meiva.skills.meiva_guide.pages` for Meiva
-publishing and reply resources. Record the awaited input, end the turn, and
+Record the awaited input, end the turn, and
 continue when it arrives. Interpret the response within the existing task scope;
 a confirmation label does not grant authority for unrelated actions.

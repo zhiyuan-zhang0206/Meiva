@@ -16,8 +16,6 @@ from meiva_builtins.plugins.meiva_fleet.task_maintenance import daemon as task_m
 from services.agent_runner.agent_host import daemon as agent_host
 from services.agent_runner.agent_ops import boot as ops_boot
 from services.agent_runner.agent_ops import daemon as agent_ops
-from services.agent_runner.page_server import daemon as page_server
-from services.agent_runner.page_server import resources as page_resources
 from services.backup.scheduler import daemon as backup_scheduler
 from services.derived.labeler import daemon as labeler
 from services.derived.memory_indexer import daemon as memory_indexer
@@ -39,7 +37,6 @@ _DAEMON_MODULES: dict[str, ModuleType] = {
         ttl_reaper,
         schedule_manager,
         backup_scheduler,
-        page_server,
         agent_host,
         agent_ops,
         task_maintenance,
@@ -90,9 +87,7 @@ def test_every_standard_daemon_records_the_pidfile_its_probe_reads(
     for spec in _standard_daemons():
         module = _DAEMON_MODULES[spec.cmd.rsplit(" ", 1)[1]]
         operation: Callable[..., Path]
-        if module is page_server:
-            operation = page_resources.pidfile
-        elif module is agent_ops:
+        if module is agent_ops:
             operation = ops_boot.pidfile
         elif module is task_maintenance:
             operation = _task_maintenance_pidfile

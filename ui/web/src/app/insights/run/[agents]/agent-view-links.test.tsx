@@ -324,7 +324,7 @@ describe("arrows between agents", () => {
     getRunTimeline.mockImplementation((agent) =>
       Promise.resolve(
         agent === 7
-          ? { ...BY_AGENT[7], units: [...BY_AGENT[7].units, human(5, "user", 2), human(6, "ui:page:fleet", 3), { ...human(7, "watcher:3", 4) }] }
+          ? { ...BY_AGENT[7], units: [...BY_AGENT[7].units, human(5, "user", 2), human(6, "user", 3), { ...human(7, "watcher:3", 4) }] }
           : (BY_AGENT[agent] ?? response(agent, [10, 20], false)),
       ),
     );

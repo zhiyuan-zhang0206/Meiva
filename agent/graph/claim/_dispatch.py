@@ -654,7 +654,7 @@ def _is_dispatched_for_polarity(
 
 
 # meiva:note
-# Any human-sourced chat or manual resurrect (`user` or `ui:page:*`) flips `non_human_wake`
+# Any human-sourced chat or manual resurrect (`user`) flips `non_human_wake`
 # to `False` for the remainder of the run. Mid-run continuation/control mechanics
 # (`COMPACT_SUMMARY`, `COMPACT_REQUEST`, `CANCEL`, interrupted-turn restart resume) and
 # mid-run secondary arrivals preserve the active run's polarity; waking from idle on purely

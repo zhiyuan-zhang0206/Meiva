@@ -7,7 +7,6 @@
 # - `system` / `system:<subtype>` → the system-note envelope, no timestamp
 # - `agent:N` → "Agent N [timestamp]:" prefix
 # - `user` → bare "[timestamp]" header (no label)
-# - `ui:page:<name>` → same bare "[timestamp]" header as `user`
 # - `watcher:N` → "Watcher (id N) [ts]:" prefix
 # - unrecognized → ValueError (fail-fast)
 #
@@ -79,28 +78,14 @@ class TestUserSource:
     def test_user_empty_content(self) -> None:
         assert wrap_inbound("", "user", inputs=_ENVELOPE_INPUTS) == f"{_TS}\n\n"
 
+    # meiva:note
+    # The old `ui:X` channel namespace is gone — `user` is the only plain
+    # human source now. Old forms fail-fast rather than silently wrap as
+    # a user message.
     def test_legacy_ui_prefix_now_rejected(self) -> None:
-        """The old `ui:X` channel namespace is gone — `user` is the only plain
-        human source now. Old forms fail-fast rather than silently wrap as
-        a user message. The one surviving `ui:` form is `ui:page:<name>` (page callback)."""
-        for bad in ("ui:web", "ui:telegram", "ui:cli", "ui:slack"):
+        for bad in ("ui:web", "ui:telegram", "ui:cli", "ui:slack", "ui:page:compare"):
             with pytest.raises(ValueError, match="Unrecognized inbound source"):
                 wrap_inbound("hi", bad, inputs=_ENVELOPE_INPUTS)
-
-
-class TestPageCallback:
-    """`source='ui:page:<name>'` — an HTML page the agent started posts back. It
-    wraps as the same bare "[ts]" header as `user`; the agent recovers which
-    page from <name>."""
-
-    def test_page_callback_wraps_same_as_user(self) -> None:
-        assert (
-            wrap_inbound("chose B", "ui:page:compare", inputs=_ENVELOPE_INPUTS)
-            == f"{_TS}\n\nchose B"
-        )
-
-    def test_page_callback_validates(self) -> None:
-        validate_source("ui:page:compare")  # no raise
 
 
 class TestSystemSource:
@@ -264,7 +249,6 @@ class TestUnknownSource:
         assert "'system:<subtype>'" in msg
         assert "'agent:N'" in msg
         assert "'user'" in msg
-        assert "'ui:page:<name>'" in msg
         assert "'watcher:N'" in msg
 
 
@@ -275,9 +259,6 @@ class TestMessageTimestampsOff:
 
     def test_user_no_timestamp(self) -> None:
         assert wrap_inbound("hi", "user", inputs=_NO_TIMESTAMPS_INPUTS) == "hi"
-
-    def test_page_no_timestamp(self) -> None:
-        assert wrap_inbound("hi", "ui:page:compare", inputs=_NO_TIMESTAMPS_INPUTS) == "hi"
 
     def test_agent_no_timestamp(self) -> None:
         assert wrap_inbound("hi", "agent:5", inputs=_NO_TIMESTAMPS_INPUTS) == "Agent 5:\n\nhi"
@@ -441,7 +422,7 @@ class TestWeekdayFlag:
 
 @pytest.mark.parametrize(
     "source",
-    ["user", "ui:page:dash", "agent:5", "watcher:3", "shell:9", "schedule:4", "system", "system:x"],
+    ["user", "agent:5", "watcher:3", "shell:9", "schedule:4", "system", "system:x"],
 )
 def test_inbound_head_and_tail_bracket_the_content(source: str) -> None:
     # meiva:note
@@ -460,7 +441,6 @@ def test_inbound_head_and_tail_bracket_the_content(source: str) -> None:
     ("source", "expected"),
     [
         ("user", "user"),
-        ("ui:page:dashboard", "user"),
         ("agent:5", "agent"),
         ("external_agent:codex", "agent"),
         ("external_agent:codex:laptop-2", "agent"),
@@ -482,7 +462,6 @@ def test_sender_class_maps_every_source_tag(source: str | None, expected: str) -
     "source",
     [
         "user",
-        "ui:page:dash",
         "agent:5",
         "external_agent:codex:laptop-2",
         "watcher:3",
@@ -494,7 +473,7 @@ def test_sender_class_maps_every_source_tag(source: str | None, expected: str) -
 )
 def test_every_writable_source_has_a_real_category(source: str) -> None:
     validate_source(source)
-    if source.startswith("ui:page:") or source == "user":
+    if source == "user":
         assert sender_class(source) == "user"
     else:
         assert sender_class(source) in {"agent", "automation", "system"}

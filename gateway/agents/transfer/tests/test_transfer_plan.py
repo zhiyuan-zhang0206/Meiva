@@ -187,11 +187,9 @@ def test_compose_transfer_wake_message_and_bundle_store_cleanup() -> None:
         source="user",
         message="Rebalancing workload",
         killed_shell_sessions=[1, 3],
-        closed_pages=["dashboard"],
     )
     assert "Cross-machine transfer from 'macmini' to 'company-mini' initiated by user" in note
     assert "1, 3" in note
-    assert "dashboard" in note
     assert "Reason: Rebalancing workload" in note
 
     store = TransferBundleStore()

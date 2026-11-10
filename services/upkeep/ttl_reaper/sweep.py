@@ -1,17 +1,11 @@
 # meiva:note
-# The reaper's database-only sweep: expired pages, browser sessions and notices,
+# The reaper's database-only sweep: expired browser sessions and notices,
 # plus the slow maintenance phases on durable cadences.
 #
 # One resident loop (`sweep_loop`) runs `sweep_round` every
 # `MEIVA_TTL_REAPER_POLL_INTERVAL_SECONDS`. A round runs its phases in order; each
 # phase is a bounded batch, and a backlog drains over successive rounds:
 #
-# - **Pages** — the row is terminalized with ``expired_at`` (the reverse proxy
-#   then answers the page's link with the friendly "page expired" notice), a
-#   ``PageClosed`` event is published so the frontend drops the entry, and the
-#   page-server daemon stops the page session when its reconcile sees the row
-#   leave the open set (the daemon's existing two-layer teardown). Pages have a
-#   hard lifetime (user ruling 2026-08-25; default 24h, ``MEIVA_PAGE_DEFAULT_TTL_SECONDS``).
 # - **Browser sessions** — expired ``web_sessions`` rows are deleted here, so
 #   cleanup does not depend on the next login.
 # - **Notices** — ``agent_notices`` past ``expire_at`` auto-resolve.
@@ -20,7 +14,7 @@
 #
 # The slow phases are claimed in ``maintenance_state`` (``cadence``), so a restart
 # resumes their cadence. Owners are notified (inbound, source ``"system"``) only
-# when the agent is running or idling — a terminated agent's page expiring is
+# when the agent is running or idling — a terminated agent's shell expiring is
 # exactly the cleanup the TTL exists for, and must not resurrect it. The one
 # exception is notice expiry: that message reports the owner's own notice, so it
 # is queued for a terminated owner too while still publishing no wake — read if
@@ -31,7 +25,7 @@
 #
 # Every reclaim is a CAS that loses cleanly to ``close()`` / termination. The sweep
 # has no remote calls; shell kills and work-failure redelivery live in the
-# ``remote`` loop so a slow machine never delays a page expiry.
+# ``remote`` loop so a slow machine never delays a notice expiry.
 
 from __future__ import annotations
 

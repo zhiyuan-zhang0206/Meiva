@@ -43,14 +43,13 @@ def test_a_system_session_is_exempt_from_the_user_cap() -> None:
 @pytest.mark.parametrize("name", ["Dev Server", "1abc", "-x", "a_b", ""])
 def test_a_name_must_be_a_lowercase_slug(name: str) -> None:
     with pytest.raises(ValueError, match="lowercase slug"):
-        validate_name(name, page_label=False)
+        validate_name(name)
 
 
-def test_page_names_are_reserved_for_pages() -> None:
-    validate_name("dev-server", page_label=False)
-    validate_name(None, page_label=False)
-    with pytest.raises(ValueError, match="reserved for pages"):
-        validate_name("page-preview", page_label=True)
+def test_a_lowercase_slug_or_no_name_is_accepted() -> None:
+    validate_name("dev-server")
+    validate_name("page-preview")
+    validate_name(None)
 
 
 def test_full_name_carries_the_id_and_the_optional_label() -> None:

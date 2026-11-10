@@ -454,7 +454,6 @@ def test_agents_transfer_posts_and_renders_summary(
             "files_transferred": 14,
             "bytes_transferred": 4096,
             "killed_shell_sessions": [0, 2],
-            "closed_pages": ["dashboard"],
         },
     )
     assert (
@@ -480,7 +479,6 @@ def test_agents_transfer_posts_and_renders_summary(
     out = capsys.readouterr().out
     assert "agent 2697 transfer: macmini -> company-mini (idling, 14 file(s), 4096 B)" in out
     assert "killed 2 shell session(s): 0, 2" in out
-    assert "closed 1 page(s)" in out
 
 
 def test_agents_transfer_no_message_and_error_body(
@@ -496,7 +494,6 @@ def test_agents_transfer_no_message_and_error_body(
             "files_transferred": 0,
             "bytes_transferred": 0,
             "killed_shell_sessions": [],
-            "closed_pages": [],
         },
     )
     assert wire.run("agents", "transfer", "2697", "--to", "company-mini", "--no-message") == 0

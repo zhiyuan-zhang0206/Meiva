@@ -4,7 +4,7 @@
 # TTL-expired persistent shell sessions are killed on their home machines (`shells`), and the
 # tracking rows of sessions a machine no longer lists are dropped (`shells` again). This loop dials
 # other machines, so it runs apart from the database-only sweep (`sweep`): a slow or unreachable
-# machine holds up this loop's next round, never a page expiry.
+# machine holds up this loop's next round, never a notice expiry.
 
 from __future__ import annotations
 

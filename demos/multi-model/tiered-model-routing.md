@@ -72,7 +72,7 @@ reflector_id = meiva.agents.spawn(
 ```
 
 Final output:
-Render the final output to HTML and use `meiva.ui.serve()` to present:
+Render the final output to HTML and save it as a file and use `meiva.ui.publish()` to present:
 - The task and plan
 - The code produced
 - Review and check results
@@ -92,7 +92,7 @@ Requirements:
 3. **Phase 2**: Spawns 2-3 deepseek-flash workers in parallel → each implements one file
 4. **Phase 3**: Spawns claude-sonnet-5 reviewer + deepseek-flash checker in parallel
 5. **Phase 4**: Spawns claude-opus-5 reflector → architecture-level reflection
-6. Renders the full pipeline output to HTML and serves it with `meiva.ui.serve`
+6. Renders the full pipeline output to HTML and publishes it with `meiva.ui.publish`
 
 ## Expected output
 

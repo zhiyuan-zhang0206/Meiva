@@ -60,7 +60,6 @@ def test_clean_or_binary_file_passes(
         "frontend/locales/zh/app.json",
         "frontend/zh.po",
         "base/telemetry/alerts/copy.py",
-        "base/packages/docs/pages_copy.py",
     ],
 )
 def test_documented_locale_copy_is_exempt(

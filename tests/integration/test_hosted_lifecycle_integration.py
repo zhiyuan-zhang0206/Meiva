@@ -35,7 +35,7 @@ async def test_hosted_force_cannot_be_undone_by_prior_restart(
     with ConnectionPool[psycopg.Connection](
         settings.data_plane.db_url, min_size=1, max_size=1, kwargs={**PG_KEEPALIVE_KWARGS}
     ) as pool:
-        _, _, force, _cutoff = await asyncio.to_thread(
+        _, force, _cutoff = await asyncio.to_thread(
             force_terminate_transaction, agent_id, pool, source="user"
         )
     later = insert_lifecycle_command(db_conn, agent_id, "restart")

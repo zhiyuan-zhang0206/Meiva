@@ -39,7 +39,6 @@ describe("inboundKind", () => {
     expect(inboundKind("external_agent:claude_code")).toBe("external_agent");
     expect(inboundKind("external_agent:codex:run-42")).toBe("external_agent");
     expect(inboundKind("user")).toBe("human");
-    expect(inboundKind("ui:page:board")).toBe("human");
     expect(inboundKind("system")).toBe("system");
     expect(inboundKind("system:restart")).toBe("system");
     expect(inboundKind("watcher:7")).toBe("system");
@@ -68,7 +67,6 @@ describe("classifyItem", () => {
     expect(classifyItem(item("agent_chat", null, undefined, { user_facing: true }))).toBe("primary");
     expect(classifyItem(item("agent_chat", null, undefined, { user_facing: false }))).toBe("secondary");
     expect(classifyItem(item("inbound_chat", "user"))).toBe("primary");
-    expect(classifyItem(item("inbound_chat", "ui:page:board"))).toBe("primary");
   });
 
   it("agent + system inbound are secondary", () => {

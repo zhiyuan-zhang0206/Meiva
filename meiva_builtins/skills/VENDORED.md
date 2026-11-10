@@ -33,14 +33,3 @@ about the copied files. Both skills were removed from this repo on 2026-08-14.
 Content extracted from a closed-source distribution does not become
 redistributable by resembling something that is. Vendor from a source whose
 license you can point at.
-
-## Vendored frontend libraries (`meiva-guide/pages/widgets/markdown/vendor/`)
-
-`meiva-guide/pages/widgets/markdown` ships a zero-build HTML renderer whose dependencies
-are vendored under `vendor/` (no CDN pulling): KaTeX **0.16.21** (`katex.min.js`
-+ `katex.min.css` + fonts, MIT), marked **14.1.3** (`marked.min.js`, MIT),
-highlight.js **11.10.0** (`highlight.min.js`, BSD-3-Clause), DOMPurify **3.2.3**
-(`purify.min.js`, Apache-2.0/MPL-2.0), and the GitHub-markdown CSS pair
-(`github.min.css` / `github-dark.min.css`). These are single-file minified
-releases copied unmodified; refresh by re-downloading the listed versions (no
-build step), and record any version bump here.

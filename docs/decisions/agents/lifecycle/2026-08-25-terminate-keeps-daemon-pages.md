@@ -8,3 +8,5 @@ The termination trigger and the pre-termination PageClosed-event query share
 the same `serve_dir IS NULL` ownership boundary. The existing resurrect trigger
 is unchanged: it reopens only show() rows that termination closed; daemon rows
 never need reopening.
+
+Superseded by `../../extensions/pages/2026-11-10-pages-removed.md`: Pages no longer exist.

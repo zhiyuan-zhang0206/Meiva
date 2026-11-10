@@ -9,7 +9,6 @@ from gateway.schemas.memory import (
     MemorySearchResponse,
     MemorySearchResultItem,
 )
-from gateway.schemas.pages import PageCloseRequest, PageRegisterRequest
 from gateway.schemas.shell import CommandItem, ShellCaptureResponse
 from gateway.schemas.user_settings import (
     UserSettingListResponse,
@@ -31,8 +30,6 @@ __all__ = [
     "MemorySearchRequest",
     "MemorySearchResponse",
     "MemorySearchResultItem",
-    "PageCloseRequest",
-    "PageRegisterRequest",
     "PermissionItemRow",
     "ShellCaptureResponse",
     "UserSettingListResponse",

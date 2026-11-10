@@ -6,7 +6,7 @@ The service that enforces every deadline the cluster hands out. It runs once per
 ## Loops
 Two resident sequential loops under one `TaskGroup` (`services/upkeep/ttl_reaper/daemon.py`), each running a round every `MEIVA_TTL_REAPER_POLL_INTERVAL_SECONDS` (default 60s). A loop that raises cancels its sibling and ends the process; the supervisor restarts it. An unreachable database skips a round. Each loop reports its own progress to `/healthz`.
 
-- **`sweep`** (`sweep.py`) — database only: expired `agent_pages` (terminalized with `expired_at`, `PageClosed` published), `web_sessions`, `agent_notices`, impersonation leases (reminded, then reaped), plus three slow phases claimed in `maintenance_state` (`cadence.py`): the `schedule_fire_log` retention prune (daily), the torn lifecycle-pointer scan and the absent-machine fence settle (hourly, `lifecycle_fences.py`).
+- **`sweep`** (`sweep.py`) — database only: expired `web_sessions`, `agent_notices`, impersonation leases (reminded, then reaped), plus three slow phases claimed in `maintenance_state` (`cadence.py`): the `schedule_fire_log` retention prune (daily), the torn lifecycle-pointer scan and the absent-machine fence settle (hourly, `lifecycle_fences.py`).
 - **`remote`** (`remote.py`) — calls out, in two phases per round: TTL-expired persistent shell sessions are killed on their home machines (`shells.py`; machines concurrently, one machine's rows in order, each dispatch under a deadline sized from the RPC client's budget), then a stale sweep drops the tracking rows of sessions their home machine no longer lists (one `shell_probe` per (machine, agent), one batch of rows per sweep, and one sweep every ten rounds — every candidate is a session older than six hours, so the table changes far slower than the round). Which rows go to which machine, how a runner's answer settles a row and what the owner is told are decided by the strict `shell_plan.py` and `owner_text.py` from values; the daemon reads `TtlReaperConfig` (poll interval, fire-log cadence and retention, shell-kill deadline, notice timezone) once from the boot owner and hands it to every loop.
 
 ## Semantics that matter
@@ -18,7 +18,7 @@ Two resident sequential loops under one `TaskGroup` (`services/upkeep/ttl_reaper
 - Known gap, unchanged: a kill dispatched but cut off before its row is deleted loses the "interrupted" notice (the next round's kill answers `absent`, silent).
 
 ## Key Dependencies
-- `agent_shell_ttls`, `agent_pages`, `web_sessions`, `agent_notices`, `maintenance_state` — the tables it reads and settles.
+- `agent_shell_ttls`, `web_sessions`, `agent_notices`, `maintenance_state` — the tables it reads and settles.
 - `ops.cluster.rpc` — the `shell_kill` and `shell_probe` ops to runners' ops servers.
 - `base/daemon/round_loop.py` — the round runner and bounded fan-out the resident service loops share (also the delivery watchdog).
 

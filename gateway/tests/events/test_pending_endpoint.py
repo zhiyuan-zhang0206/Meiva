@@ -65,7 +65,6 @@ def test_pending_carries_the_sender_category_of_each_queue_entry(
     tid = _seed_agent(db_conn)
     sources = [
         "user",
-        "ui:page:compare",
         "agent:3",
         "external_agent:codex",
         "schedule:7",
@@ -83,7 +82,6 @@ def test_pending_carries_the_sender_category_of_each_queue_entry(
 
     assert resp.status_code == 200
     assert [it["sender"] for it in resp.json()] == [
-        "user",
         "user",
         "agent",
         "agent",

@@ -169,7 +169,6 @@ _HEALTH_PORT_SERVICES: tuple[str, ...] = (
     "memory_indexer",
     "ops",
     "delivery_watchdog",
-    "page_server",
     "agent_host",
     "ttl_reaper",
     "schedule_manager",

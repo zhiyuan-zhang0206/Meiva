@@ -97,7 +97,6 @@ class AgentTransfer(TypedDict):
     files_transferred: int
     bytes_transferred: int
     killed_shell_sessions: list[int]
-    closed_pages: list[str]
 
 
 EVENTS: dict[str, EventSpec] = {

@@ -16,3 +16,5 @@ Page server processes remain protected from normal agent-session cleanup, but
 the daemon owns their lifecycle: a closed row, a changed port or directory, or
 a stale server proven to be ours ends the corresponding page session. Foreign
 port occupants are left untouched and retry through the existing backoff path.
+
+Superseded by `../../../extensions/pages/2026-11-10-pages-removed.md`: Pages no longer exist.

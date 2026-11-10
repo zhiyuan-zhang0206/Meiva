@@ -418,47 +418,6 @@ class ToUserChanged(_Base):
     role: Literal["to_user_changed"] = "to_user_changed"
 
 
-class PageOpened(_Base):
-    """Published when the agent calls `meiva.ui.show(name)` to
-    register / update an HTML page — the frontend Pages popover adds
-    or in-place replaces an entry.
-
-    `name` is a stable identifier within (agent_id); same-name
-    re-register triggers another PageOpened (host/port may change, the
-    frontend replaces the row in place).
-
-    `url`: absolute gateway reverse-proxy URL
-    (`http://<gateway>/pages/<id>-<name>/`) — the popover
-    `<a href={url}>` opens it in a new tab; the gateway serves the content.
-    """
-
-    role: Literal["page_opened"] = "page_opened"
-    page_id: int
-    name: str
-    port: int
-    title: str | None
-    url: str
-
-
-class PageClosed(_Base):
-    """Published when the agent calls `meiva.ui.close(name)`, the terminate
-    cascade closes an agent-owned show() page, or the page-server daemon closes
-    a row whose serve_dir remains unavailable — the frontend Pages popover
-    removes the entry.
-
-    Terminate path: SQL trigger `cascade_close_agent_pages` silently
-    marks only serve_dir-NULL show() rows closed on
-    `UPDATE agents_meta.status='terminated'`; all
-    three terminate entries (gateway `mark_agent_exited_op` self-exit /
-    `force_mark_terminated` zombie cleanup / gateway force=true)
-    SELECT page names before the UPDATE and publish each after
-    UPDATE so the popover removes entries in real time instead of
-    waiting for the user to switch agents."""
-
-    role: Literal["page_closed"] = "page_closed"
-    name: str
-
-
 class AgentSpawned(_Base):
     """A committed agent creation invalidates the live roster.
 
@@ -580,9 +539,7 @@ Event = Annotated[
     | InboundArrived
     | InboundCommitted
     | LabelUpdated
-    | PageOpened
     | ToUserChanged
-    | PageClosed
     | TokenUsage
     | LLMKeepalive
     | LLMDone
@@ -621,9 +578,7 @@ ROLE_CLASSES: tuple[tuple[type[Event], bool], ...] = (
     (InboundArrived, False),
     (InboundCommitted, False),
     (LabelUpdated, True),
-    (PageOpened, True),
     (ToUserChanged, True),
-    (PageClosed, True),
     (TokenUsage, False),
     (LLMKeepalive, False),
     (LLMDone, False),
@@ -667,10 +622,11 @@ def _role_of(cls: type[Event]) -> str:
 # registry — each class's `role` literal is the single declaration.
 SYSTEM_ROLES: frozenset[str] = frozenset(_role_of(cls) for cls, _ in ROLE_CLASSES)
 
+# meiva:note
 # Cross-agent, low-frequency subset forwarded on the global /api/system
 # broadcast — every connected client sees these for *all* agents. Only the
 # fleet-wide views consume them: the sidebar agent list (spawned / updated /
-# label), the pages popover (page open / close), the FYI notice feed (notice
+# label), the FYI notice feed (notice
 # posted / resolved), and cluster-update takeover. The high-frequency
 # per-turn roles (chat_delta / code_delta / reasoning_delta /
 # exec_output_chunk / timeline_snapshot / token_usage / ...) are deliberately

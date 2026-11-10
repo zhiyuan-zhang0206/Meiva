@@ -136,9 +136,7 @@ def _audit_rows(
 def test_a_force_terminate_records_its_audit_fact_in_the_same_transaction(
     db_conn: psycopg.Connection, db_pool: ConnectionPool, agent_id: int
 ) -> None:
-    _, _, fence, _cutoff = termination.force_terminate_transaction(
-        agent_id, db_pool, source="system"
-    )
+    _, fence, _cutoff = termination.force_terminate_transaction(agent_id, db_pool, source="system")
 
     assert _audit_rows(db_conn, agent_id, "terminate") == [("system", {"inbound_id": fence})]
 

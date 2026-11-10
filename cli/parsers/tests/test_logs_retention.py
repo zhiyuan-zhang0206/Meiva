@@ -491,7 +491,6 @@ def test_service_stdout_names_are_managed_and_follow_service_family_rules(
     ("name", "family"),
     [
         ("agent_host.2026-10-20_00-33-19_718373.log", "agent"),
-        ("page_server.2026-10-23_13-10-31_174359.log", "agent"),
         ("meiva-root.2026-10-19_08-00-05_763203.log", "ops"),
         ("browser-mcp.2026-10-23_12-10-19_089545.log", "ops"),
         ("computer-mcp.2026-10-23_13-10-34_139253.log", "ops"),

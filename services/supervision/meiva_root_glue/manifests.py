@@ -89,7 +89,6 @@ _STOP_ORDER_TIER: dict[str, int] = {
 SESSION_HOST_ATTACH: dict[str, str] = {
     "agent-shell": "agent-host",
     "watcher-session": "agent-host",
-    "page-server-instance": "page-server",
     "schedule-runner": "gateway",
     "orchestration-session": "ops",
     "exec-child": "agent-host",

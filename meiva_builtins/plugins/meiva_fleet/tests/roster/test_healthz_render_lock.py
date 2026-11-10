@@ -117,7 +117,6 @@ _LEGACY = (
         True,
         db_access="runner",
     ),
-    _Legacy("page-server", "services.agent_runner.page_server.daemon", _RUNNER, True),
     _Legacy(
         "agent-host",
         "services.agent_runner.agent_host.daemon",

@@ -672,9 +672,6 @@ def test_read_wrap_target_missing_still_injects(tmp_path: Path, default_home: Pa
         process_context.unbind_exec_turn()
 
 
-# ── meiva.ui.serve wrap ─────────────────────────────────────────────────────
-
-
 # ── project-local skill source (set_cwd surfaces + records) ────────────────
 
 

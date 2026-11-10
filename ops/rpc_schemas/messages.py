@@ -17,27 +17,26 @@ from base.agents.messages.envelope import validate_source
 _MessageContent = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
 
 
+# meiva:note
+# POST /api/agents/{id}/messages request body — for SDK send_message and
+# the `meiva agents send` CLI (which the generated background-run / watcher
+# completion notices invoke).
+#
+# Pure INSERT + return — the caller does not inspect status.
+# Auto-resurrect on the gateway side ensures delivery to any agent,
+# terminated or not.
+#
+# `source` is required — the SDK passes f"agent:{my_id}", the generated
+# notices pass shell:N / watcher:N; there is no default to prevent callers
+# from forgetting and having inbounds silently tagged as "user", muddying
+# envelope labels. The valid set is in `base/agents/messages/envelope.py:validate_source`
+# (system / agent:N / external_agent:<subject>[:<instance>] / user /
+# watcher:N / shell:N / schedule:N). `user` delivers as the user; an
+# `external_agent:` declaration delivers as a message from that external
+# agent (self-asserted, never authenticated). An illegal source is intercepted by
+# 422 at the HTTP layer — otherwise it would land in inbound_messages and the agent claim node
+# would hit ValueError and kill the process.
 class AgentMessageIn(BaseModel):
-    """POST /api/agents/{id}/messages request body — for SDK send_message and
-    the `meiva agents send` CLI (which the generated background-run / watcher
-    completion notices invoke).
-
-    Pure INSERT + return — the caller does not inspect status.
-    Auto-resurrect on the gateway side ensures delivery to any agent,
-    terminated or not.
-
-    `source` is required — the SDK passes f"agent:{my_id}", the generated
-    notices pass shell:N / watcher:N; there is no default to prevent callers
-    from forgetting and having inbounds silently tagged as "user", muddying
-    envelope labels. The valid set is in `base/agents/messages/envelope.py:validate_source`
-    (system / agent:N / external_agent:<subject>[:<instance>] / user / ui:page:<name> /
-    watcher:N / shell:N / schedule:N). `user` delivers as the user; an
-    `external_agent:` declaration delivers as a message from that external
-    agent (self-asserted, never authenticated). An illegal source is intercepted by
-    422 at the HTTP layer — otherwise it would land in inbound_messages and the agent claim node
-    would hit ValueError and kill the process.
-    """
-
     content: _MessageContent
     source: str = Field(min_length=1, max_length=64)
     completion_notice: bool = False

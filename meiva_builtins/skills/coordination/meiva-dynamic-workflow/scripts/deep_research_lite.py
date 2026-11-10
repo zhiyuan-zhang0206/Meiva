@@ -291,8 +291,8 @@ Read all result files:
 
 Generate the final Markdown report, integrating all findings and review comments.
 
-Render the report to self-contained HTML, then serve it with
-meiva.ui.serve(page_dir, name="deep-research-lite", title="AI Coding Agent 2026 Competitive Landscape", port=<free port>).
+Render the report to a self-contained HTML file in your workspace, then deliver it with
+meiva.ui.publish() (the summary and the file path).
 
 After completion, message no one.
 """,

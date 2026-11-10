@@ -4,8 +4,7 @@ Two pieces, cwd and context-file injection:
 - cwd: `meiva_code__cwd` state field (default: the agent's workspace dir; $HOME
   when no process identity is bound); the agent reads/writes via
   `meiva.cwd.get` / `set`; the wraps use it to resolve relative paths in
-  `meiva.files.*` / `meiva.shell.run` / each `meiva.understand` target's `paths` /
-  `meiva.ui.serve`'s `dir`.
+  `meiva.files.*` / `meiva.shell.run` / each `meiva.understand` target's `paths`.
 - context-file auto-injection: wraps `meiva.files.read`, walks up the resolved
   path to git root or `$HOME` (whichever is farther), and surfaces any AGENTS.md
   / CLAUDE.md files along the way as a system note (tag=CONTEXT) so the agent

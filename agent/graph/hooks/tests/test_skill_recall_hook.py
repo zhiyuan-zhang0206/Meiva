@@ -219,7 +219,7 @@ def test_the_hook_is_a_framework_before_llm_hook_and_drift_stays_last() -> None:
 # ── what triggers a pass ──
 
 
-@pytest.mark.parametrize("source", ["user", "ui:page:dashboard", "schedule:7"])
+@pytest.mark.parametrize("source", ["user", "schedule:7"])
 async def test_fires_on_a_person_or_a_schedule(
     three_skills: Path, source: str, database: Database
 ) -> None:

@@ -14,7 +14,6 @@ from base.log import logger
 from base.paths import repo_root
 from base.sessions.backend import PtySessionBackend, get_shell_backend
 from base.sessions.env_forwarding import cwd_is_inside_checkout, forward_env_dict
-from base.sessions.page_session import is_page_label
 from base.telemetry.delivery.pipeline import EventPipeline
 from meiva.files import agent_workspace
 from meiva.sdk_surface.validation import coerce_str, coerce_typed
@@ -74,7 +73,7 @@ class ShellSessions:
     ) -> tuple[int, str]:
         from meiva.shell import ttl_store
 
-        session_plan.validate_name(name, page_label=is_page_label(name))
+        session_plan.validate_name(name)
         ttl = validate_ttl(ttl, system=system)
         session_id = ttl_store.next_session_index(self._database, self._agent_id)
         full = session_plan.session_full_name(self.shell_prefix(), session_id, name)
@@ -242,8 +241,7 @@ def create_session(
 
 def new(name: str, *, ttl: float) -> int:
     """`name` is only a display label — a lowercase slug like `"dev-server"`;
-    every operation takes the id. Names starting with `page-` are reserved for
-    pages opened with `meiva.ui.serve`.
+    every operation takes the id.
 
     Args:
         ttl: same semantics as `run_background` — required hard lifetime in
@@ -345,9 +343,5 @@ def renew(id: int | SessionHandle, *, ttl: float) -> datetime:
 
 
 def list() -> dict[int, str | None]:
-    """Your sessions: id -> display name (None for unnamed).
-
-    Entries named `page-<name>` are live page servers for pages this agent
-    opened via `meiva.ui.serve`, not leftovers; see `meiva.ui` for their lifecycle.
-    """
+    """Your sessions: id -> display name (None for unnamed)."""
     return shell_sessions().list()

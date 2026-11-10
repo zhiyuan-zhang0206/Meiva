@@ -66,8 +66,6 @@ segments stay globally distinct.
 | `notice_resolved` | notice dismissed | `notice_id` |
 | `impersonation_changed` | committed impersonation status or reply | `agent_id`; invalidates the unified timeline |
 | `task_created` / `task_updated` | task registry write | `task_id` |
-| `page_opened` | `meiva.ui.show` registered a page | `page_id`, `name`, `port`, `title`, `url` |
-| `page_closed` | `meiva.ui.close` | `name` |
 
 ## Notes
 

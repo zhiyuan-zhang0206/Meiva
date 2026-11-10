@@ -36,3 +36,5 @@ knowledge one owner, with small composition guides where resources need them.
 The source cleanup does not alter a running deployment or stored presets.
 Repo-native package copies follow the explicit skill-update procedure. External
 clients receive page resources as part of the complete managed Meiva Guide package.
+
+Superseded in part by `2026-11-10-pages-removed.md`: the Pages parts (the `meiva-guide/pages` guide and its reply templates); the waiting and model-speed decisions stand.

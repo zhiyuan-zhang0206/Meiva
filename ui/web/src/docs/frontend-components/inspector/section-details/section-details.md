@@ -31,9 +31,6 @@ renders nothing before the first LLM call (all zeros). Context occupancy lives
 exclusively in the Inspector and on `/insights/run/{agentId}` — the composer
 carries no context meter (user ruling 2026-11-01).
 
-**Page** lists the agent's open pages as external links (title or name plus the
-URL), hidden entirely when none is open; the read is `useAgentPages`.
-
 **Persistent shells.** The badge shows the shell count, or `?` when observation
 is unavailable — an unavailable observation must not render as an empty set. A
 row links to its full-screen monitor page `/shell/{agentId}/{shellId}` and shows

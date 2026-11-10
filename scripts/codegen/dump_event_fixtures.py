@@ -127,20 +127,6 @@ def _samples() -> dict[str, dict[str, object]]:
             "inbound_id": 42,
         },
         "to_user_changed": {"role": "to_user_changed", "agent_id": agent_id},
-        "page_opened": {
-            "role": "page_opened",
-            "agent_id": agent_id,
-            "page_id": 3,
-            "name": "cleanup",
-            "port": 8765,
-            "title": "Cleanup picker",
-            "url": f"http://localhost:8000/pages/{agent_id}-cleanup/",
-        },
-        "page_closed": {
-            "role": "page_closed",
-            "agent_id": agent_id,
-            "name": "cleanup",
-        },
         "token_usage": {
             "role": "token_usage",
             "agent_id": agent_id,

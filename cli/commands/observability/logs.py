@@ -122,11 +122,6 @@ class RetentionScan:
 # `meiva-root`, while `meiva-root.out.log` is stripped to `root`, so all three names
 # must answer the same question.
 #
-# `page_server` joins the agent family for a different reason: one process per page,
-# 1-4 MB per file in the observed logs, so 30 days would double the largest bucket.
-# The family answers "how long do I need to look back at one session", not "is this
-# infrastructure".
-#
 # `browser-mcp` and `computer-mcp` go the other way: one long-lived daemon per machine, a handful of
 # dated files of 4-140 KB each, so 30 days stays under a megabyte. They are the per-machine piece of
 # the MCP plane -- same role as the gateway, which is also 30 days -- and nothing about them is
@@ -143,7 +138,7 @@ def _service_family(service: str) -> str:
         return "watchdog"
     if _AGENT_SHELL_SERVICE.match(service):
         return "shell"
-    if service in {"agent_host", "page_server"} or service.startswith("agent-"):
+    if service == "agent_host" or service.startswith("agent-"):
         return "agent"
     return "other"
 

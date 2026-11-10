@@ -1,21 +1,21 @@
 #!/usr/bin/env python3
-"""Aggregate self_evolution pipeline outputs into the JSON consumed by `render_report.py`.
-
-Reads:
-  - A changes manifest (hand-written or tool-generated): [{skill, summary, pr, pr_url}, ...]
-  - evaluate.py `gather` output (one JSON file per skill)
-
-Produces:
-  - A single JSON file ready for `render_report.py` → `meiva.ui.serve()`
-
-Usage:
-    .venv/bin/python skills/meiva-self-evolution/scripts/aggregate.py \
-        --changes changes.json \
-        --eval-dir ~/.meiva/self_evolution/eval/ \
-        --failure-md failure-clusters.md \
-        --week 2025-06-30 \
-        --out report.json
-"""
+# meiva:note
+# Aggregate self_evolution pipeline outputs into the JSON consumed by `render_report.py`.
+#
+# Reads:
+# - A changes manifest (hand-written or tool-generated): [{skill, summary, pr, pr_url}, ...]
+# - evaluate.py `gather` output (one JSON file per skill)
+#
+# Produces:
+# - A single JSON file ready for `render_report.py`
+#
+# Usage:
+# .venv/bin/python skills/meiva-self-evolution/scripts/aggregate.py \
+# --changes changes.json \
+# --eval-dir ~/.meiva/self_evolution/eval/ \
+# --failure-md failure-clusters.md \
+# --week 2025-06-30 \
+# --out report.json
 
 from __future__ import annotations
 

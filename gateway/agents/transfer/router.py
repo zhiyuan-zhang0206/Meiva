@@ -65,7 +65,6 @@ from ops.agent_transfer import (
 )
 from ops.agent_transfer.limits import workspace_transfer_limits_from_read_model
 from ops.cluster.rpc import ClusterOpFailed, ClusterOpUnreachable, RpcClient
-from ops.lifecycle.events import publish_page_closed
 from ops.rpc_schemas import (
     ResurrectAgentRequest,
     TerminateAgentRequest,
@@ -210,7 +209,7 @@ def _precheck_blocking(
 
 def _guard_idling_pre_termination_blocking(
     pool: ConnectionPool, agent_id: int, from_machine: str
-) -> list[str]:
+) -> None:
     with write_transaction(pool) as conn:
         agent = _query_agent_facts(conn, agent_id, for_update=True)
         if agent is None:
@@ -237,13 +236,11 @@ def _guard_idling_pre_termination_blocking(
         if activity_refusal is not None:
             raise HTTPException(activity_refusal.status_code, activity_refusal.detail)
 
-        open_pages: list[str] = []
         conn.execute(
             "UPDATE agents_meta SET status = 'terminated', termination_source = 'user', "
             "heartbeat_paused_until = NULL WHERE id = %s",
             (agent_id,),
         )
-        return open_pages
 
 
 def _drop_killed_shell_ttls(pool: ConnectionPool, agent_id: int, killed: list[int]) -> None:
@@ -317,10 +314,8 @@ def commit_cutover_blocking(
     snapshot: AgentTransferSnapshot,
     body: TransferAgentRequest,
     manifest: WorkspaceBundleManifest,
-    step1_closed_pages: list[str] | None = None,
     step1_killed_shells: list[int] | None = None,
-) -> tuple[list[str], list[int], telemetry.Event]:
-    s1_closed = step1_closed_pages or []
+) -> tuple[list[int], telemetry.Event]:
     s1_shells = step1_killed_shells or []
     with write_transaction(pool) as conn:
         target_row = query_one(
@@ -355,7 +350,6 @@ def commit_cutover_blocking(
                 f"agent {snapshot.agent_id} started an upload delivery batch during transfer"
             )
 
-        closed_pages = list(dict.fromkeys(s1_closed))
         killed_shell_sessions = sorted(set(s1_shells + manifest.killed_shell_sessions))
 
         conn.execute("DELETE FROM agent_shell_ttls WHERE agent_id = %s", (snapshot.agent_id,))
@@ -378,11 +372,10 @@ def commit_cutover_blocking(
                     "files_transferred": manifest.files_count,
                     "bytes_transferred": manifest.total_file_bytes,
                     "killed_shell_sessions": killed_shell_sessions,
-                    "closed_pages": closed_pages,
                 },
             ),
         )
-    return closed_pages, killed_shell_sessions, prepared_event
+    return killed_shell_sessions, prepared_event
 
 
 async def _abort_target_best_effort(
@@ -499,10 +492,10 @@ async def _terminate_source_if_idling(
     agent_id: int,
     snapshot: AgentTransferSnapshot,
     source: str,
-) -> tuple[list[int], list[str]]:
+) -> list[int]:
     if snapshot.status != "idling":
-        return [], []
-    step1_closed_pages = await asyncio.to_thread(
+        return []
+    await asyncio.to_thread(
         _guard_idling_pre_termination_blocking,
         deps.db_pool,
         agent_id,
@@ -539,7 +532,7 @@ async def _terminate_source_if_idling(
         await asyncio.to_thread(
             _drop_killed_shell_ttls, deps.db_pool, agent_id, step1_killed_shells
         )
-    return step1_killed_shells, step1_closed_pages
+    return step1_killed_shells
 
 
 # meiva:note
@@ -562,7 +555,7 @@ async def execute_agent_transfer(
     snapshot = decision.snapshot
     transfer_id = new_uuid(deps.rng).hex
 
-    step1_killed_shells, step1_closed_pages = await _terminate_source_if_idling(
+    step1_killed_shells = await _terminate_source_if_idling(
         deps,
         agent_id=agent_id,
         snapshot=snapshot,
@@ -625,13 +618,12 @@ async def execute_agent_transfer(
     )
 
     try:
-        closed_pages, killed_shell_sessions, prepared_event = await asyncio.to_thread(
+        killed_shell_sessions, prepared_event = await asyncio.to_thread(
             commit_cutover_blocking,
             deps.db_pool,
             snapshot=snapshot,
             body=body,
             manifest=manifest,
-            step1_closed_pages=step1_closed_pages,
             step1_killed_shells=step1_killed_shells,
         )
     except CutoverConflictError as exc:
@@ -647,8 +639,6 @@ async def execute_agent_transfer(
 
     telemetry.emit_prepared(prepared_event)
     await publish_agent_updated(deps.bus, agent_id)
-    for page_name in closed_pages:
-        await publish_page_closed(deps.bus, agent_id, page_name)
 
     wake_message = compose_transfer_wake_message(
         from_machine=snapshot.from_machine,
@@ -656,7 +646,6 @@ async def execute_agent_transfer(
         source=body.source,
         message=body.message,
         killed_shell_sessions=killed_shell_sessions,
-        closed_pages=closed_pages,
     )
 
     try:
@@ -709,7 +698,6 @@ async def execute_agent_transfer(
         files_transferred=manifest.files_count,
         bytes_transferred=manifest.total_file_bytes,
         killed_shell_sessions=killed_shell_sessions,
-        closed_pages=closed_pages,
     )
 
 

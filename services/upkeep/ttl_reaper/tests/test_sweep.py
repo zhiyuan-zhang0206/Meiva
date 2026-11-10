@@ -1,7 +1,6 @@
 # meiva:note
-# The reaper's database-only sweep against the real Postgres fixture: page rows
-# are terminalized (expired_at, never closed_at), unexpired/closed rows are left
-# alone, page and shell owners are notified only when running/idling, expired
+# The reaper's database-only sweep against the real Postgres fixture: shell
+# owners are notified only when running/idling, expired
 # browser sessions and notices are reclaimed in bounded batches, an expired
 # notice reaches its owner's inbox even after termination (without a wake) and
 # stays silent for the user, and the fire-log prune deletes every claim past the

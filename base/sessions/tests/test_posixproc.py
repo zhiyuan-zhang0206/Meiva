@@ -713,13 +713,13 @@ def test_kill_session_group_kill_reaps_sigterm_ignoring_wrapper(
         posixproc.kill_session(name, graceful=False, timers=SYSTEM_TIMERS, home=unit_home)
 
 
+# meiva:note
+# The TTL path's final executor (posixproc.kill_session) signals the session's process GROUP,
+# not just the recorded pid — the regression guard for the group-kill fix
+# (task #2249).
 def test_kill_session_signals_the_process_group(
     unit_home: Path,
 ) -> None:
-    """The TTL path's final executor (posixproc.kill_session, reached from the
-    page-server daemon's TTL reconcile) signals the session's process GROUP,
-    not just the recorded pid — the regression guard for the group-kill fix
-    (task #2249)."""
     name = "meiva-test-agent-grp"
     _new(name, list(_SLEEP), unit_home)
     pid = _pid(name, unit_home)

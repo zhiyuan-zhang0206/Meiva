@@ -179,8 +179,6 @@ def test_global_roles_is_low_frequency_subset_of_system_roles():
         "agent_updated",
         "label_updated",
         "to_user_changed",
-        "page_opened",
-        "page_closed",
         "notice_posted",
         "notice_resolved",
         "task_created",

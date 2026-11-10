@@ -34,13 +34,13 @@ const EN_TURN: TurnTranslator = (key, values) => {
 
 // meiva:note
 // Mirrors base/agents/messages/envelope.py sender classes: agent:*, external_agent:*,
-// human (user / ui:page:*), and system wake-ups/notices.
+// human (user), and system wake-ups/notices.
 // meiva:link ui/web/src/docs/frontend-components/timeline-view/deep-collapse.md
 export function inboundKind(source: string | null): "human" | "agent" | "external_agent" | "system" {
   const s = source ?? "";
   if (s.startsWith("agent:")) return "agent";
   if (s.startsWith(EXTERNAL_AGENT_PREFIX)) return "external_agent";
-  if (s === "user" || s.startsWith("ui:page:")) return "human";
+  if (s === "user") return "human";
   return "system";
 }
 
