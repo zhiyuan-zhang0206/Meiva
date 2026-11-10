@@ -42,6 +42,15 @@ interface UISlice {
   composerFocusToken: number;
   focusComposer: () => void;
 
+  // meiva:note
+  // The agent whose newest delivery the reader is looking at right now: its conversation is open,
+  // the document is visible and the timeline rests at the latest position. Sidebar rows hide that
+  // agent's unread dot, so a delivery arriving under the reader's eyes never lights it up just
+  // to put it out.
+  // meiva:link ui/web/src/docs/frontend-components/agent-sidebar.md
+  readingAgentId: number | null;
+  setReadingAgentId: (id: number | null) => void;
+
   /** Mobile sidebar drawer toggle */
   mobileSidebarOpen: boolean;
   setMobileSidebarOpen: (open: boolean) => void;
@@ -114,6 +123,9 @@ export const useStore = create<Store>()((set) => ({
 
   composerFocusToken: 0,
   focusComposer: () => set((s) => ({ composerFocusToken: s.composerFocusToken + 1 })),
+
+  readingAgentId: null,
+  setReadingAgentId: (id) => set({ readingAgentId: id }),
 
   mobileSidebarOpen: false,
   setMobileSidebarOpen: (open) => set({ mobileSidebarOpen: open }),

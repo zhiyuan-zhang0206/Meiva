@@ -1,5 +1,6 @@
 "use client";
 
+import { useSeenPosition } from "@/lib/context/use-seen-position";
 import { useUserMessages, withUserMessages } from "@/lib/context/use-user-messages";
 import { useTranslations } from "next-intl";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -24,7 +25,7 @@ import type { useSidebarCollapsed } from "@/lib/agents/sidebar";
 import { useReplySuggestion } from "@/lib/composer/use-reply-suggestion";
 import { useToUser } from "@/lib/context/use-to-user";
 import { useWorkspaceFileStore } from "@/lib/context/workspace-file-store";
-import type { AgentRow, DeliveredUploadStatus } from "@/lib/contracts/types";
+import type { AgentRow, DeliveredUploadStatus, UserMessage } from "@/lib/contracts/types";
 import { errMsg } from "@/lib/contracts/errors";
 import { cn } from "@/lib/format/utils";
 import type { Harness } from "@/lib/harness/harness";
@@ -133,6 +134,8 @@ export interface HomePageProps {
   Composer: ComposerSlot;
   UploadButton: UploadButtonSlot;
 }
+
+const NO_PUBLICATIONS: readonly UserMessage[] = [];
 
 export function HomePageView(props: HomePageProps) {
   const {
@@ -452,6 +455,20 @@ function HomeContent({
   const pendingQuestions = useMemo(() => questions.awaiting.filter((item) => item.agent_id === activeId)
     .sort((a, b) => PRIORITY_RANK[a.priority] - PRIORITY_RANK[b.priority] || a.created_at.localeCompare(b.created_at)), [questions.awaiting, activeId]);
   const displayedItems = useMemo(() => withUserMessages(items, publications.data?.items ?? []), [items, publications.data]);
+  const loadOlderForReveal = useCallback(() => loadOlder("background"), [loadOlder]);
+  const reveal = useSeenPosition({
+    agentId: activeId,
+    feed: {
+      seenId: publications.data?.seen_id,
+      messages: publications.data?.items ?? NO_PUBLICATIONS,
+      updatedAt: publications.dataUpdatedAt,
+    },
+    items: displayedItems,
+    timelineLoading: isLoading,
+    hasMoreOlder,
+    loadingOlder,
+    loadOlder: loadOlderForReveal,
+  });
   const replySuggestion = useReplySuggestion({
     agentId: activeId,
     status: activeAgent?.status,
@@ -492,6 +509,7 @@ function HomeContent({
             loading={isLoading || (agentsLoading && activeId === null)}
             loadingNew={loadingNewer && items.length > 0}
             maxWidthCss={contentColumnMaxWidth}
+            reveal={reveal}
           />
           <HeaderBar
             label={activeLabel}

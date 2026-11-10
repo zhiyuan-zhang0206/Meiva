@@ -11,11 +11,15 @@ from agent.graph.llm_errors import FatalLLMStreamError
 from agent.state import AgentState
 from base.agents.context import HostedTurnResources
 from base.agents.history.harness_messages import aload_harness_timeline_items
+from base.clock import SYSTEM_TIMERS
+from base.clock.tests.seeded_rng import seeded_rng
 from base.config.tests.configuration import defaults
 from base.db import Database, create_agent
 from base.db.code_version_gate import ProcessDbGate
+from base.events.live.bus import EventBus
 from base.events.live.tests.live_capture import LiveEvents
 from base.host.env.agent_slices import AgentSlices
+from base.lm.harness import AssistantText, TextDelta
 from meiva.tests.fixtures.pin_agent import hosted_resources as hosted_resources
 
 
@@ -88,3 +92,59 @@ async def test_harness_turn_does_not_inject_visibility_rule_and_triggers_correct
     assert update.harness_pending_input["visibility_correction"] is True
     assert update.harness_pending_input["key"] == "inbound-10:visibility-correction"
     assert "visibility prefix" in str(update.harness_pending_input["prompt"])
+
+
+# meiva:note
+# A turn cut off mid-reply (interrupt) still leaves the text the reader was shown: it is sealed
+# as it stood and published once, under the key of its timeline item, like a completed reply.
+# meiva:link agent/graph/docs/harness-turn.md
+@pytest.mark.parametrize("interrupted", [True, False])
+async def test_harness_reply_is_published_once_whether_or_not_the_turn_was_cut_off(
+    interrupted: bool,
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    database_gate: ProcessDbGate,
+    hosted_resources: HostedTurnResources,
+    live_events: LiveEvents,
+) -> None:
+    aid = create_agent(db_conn)
+    db_conn.execute(
+        "INSERT INTO agents_meta (id, status, harness) VALUES (%s, 'running', 'claude_code')",
+        (aid,),
+    )
+    db_conn.commit()
+    deltas = (
+        TextDelta(turn_id="t1", text="Half a "),
+        TextDelta(turn_id="t1", text="reply"),
+    )
+    engine = FakeEngine(
+        reply="" if interrupted else "Half a reply",
+        events=deltas
+        if interrupted
+        else (*deltas, AssistantText(turn_id="t1", text="Half a reply")),
+        interrupted=interrupted,
+    )
+    base = runtime(
+        engine,
+        ops_pool=aops_pool,
+        hosted_resources=hosted_resources,
+        publisher=live_events.publisher,
+    )
+    naive = Runtime(
+        context=replace(
+            base.context,
+            db=Database.from_settings(gate=database_gate),
+            bus=EventBus.from_settings(rng=seeded_rng(), timers=SYSTEM_TIMERS),
+            agent=AgentSlices.resolve({"user_delivery_mode": "naive"}, default_reader=defaults()),
+        )
+    )
+    state = AgentState(harness_pending_input={"prompt": "Work", "key": "human-request"})
+    await harness_turn_node(state, naive, config(aid))
+
+    async with aops_pool.connection() as conn:
+        items = await aload_harness_timeline_items(conn, aid)
+    [chat] = [item for item in items if item.kind == "agent_chat"]
+    assert chat.payload == "Half a reply" and chat.activity_pending is False
+    assert db_conn.execute(
+        "SELECT source_key, content FROM agent_user_messages WHERE agent_id=%s", (aid,)
+    ).fetchall() == [(f"harness:{chat.item_id}", "Half a reply")]

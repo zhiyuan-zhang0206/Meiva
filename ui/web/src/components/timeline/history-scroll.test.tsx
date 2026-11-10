@@ -9,6 +9,7 @@ import { useTimeline } from "@/lib/timeline/use-timeline";
 import { useTimelineStore } from "@/lib/timeline/timeline-store";
 import { resetTransport, transport } from "@/test-support/fake-api";
 import { ApiProvider, WallClockProvider } from "@/lib/transport/transport-context";
+import { BAR_HEIGHT_PX } from "@/lib/layout/layout";
 import { TimelineView } from ".";
 import { TestStreamProvider } from "@/test-support/fake-stream";
 
@@ -46,17 +47,18 @@ let resizeCallbacks: Set<() => void>;
 // must stay unanswered so an accidental read fails loudly.
 const gateway = transport;
 
-function Conversation({ agentId, entry }: { agentId: number | null; entry: string }) {
+type Reveal = { itemId: string; token: number } | null;
+function Conversation({ agentId, entry, reveal = null }: { agentId: number | null; entry: string; reveal?: Reveal }) {
   const timeline = useTimeline(agentId, () => undefined);
-  return <TimelineView items={timeline.items} threadKey={agentId === null ? undefined : String(agentId)} scrollMemoryKey={entry} />;
+  return <TimelineView items={timeline.items} threadKey={agentId === null ? undefined : String(agentId)} scrollMemoryKey={entry} reveal={reveal} />;
 }
 const wallNow = () => Date.now();
-function conversation(agentId: number | null, entry: string) {
+function conversation(agentId: number | null, entry: string, reveal: Reveal = null) {
   return (
     <QueryClientProvider client={client}>
       <WallClockProvider wallNow={wallNow}>
         <ApiProvider api={gateway}>
-          <TestStreamProvider><Conversation agentId={agentId} entry={entry} key={entry} /></TestStreamProvider>
+          <TestStreamProvider><Conversation agentId={agentId} entry={entry} reveal={reveal} key={entry} /></TestStreamProvider>
         </ApiProvider>
       </WallClockProvider>
     </QueryClientProvider>
@@ -529,3 +531,39 @@ it("rests on the loading ring while new messages arrive, and the click takes it 
     expect(readingOffset("4.0")).toBe(0);
     expect(viewport().scrollTop).toBe(1020);
   });
+
+// meiva:note
+// A reveal request rides the bookmark restore: the item lands in the upper part of the viewport, a
+// new token is a new request, and a request naming no loaded item changes nothing.
+// meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.md
+describe("revealing an item", () => {
+  const upperPart = BAR_HEIGHT_PX + 12;
+  it("brings the item to the upper part of the viewport instead of the bottom", () => {
+    useTimelineStore.getState().switchThread(42, items, false);
+    const { rerender } = renderWithBrowser(conversation(42, "reveal-entry"));
+    resize();
+    expect(viewport().scrollTop).toBe(4400);
+    rerender(conversation(42, "reveal-entry", { itemId: "8.0", token: 1 }));
+    resize();
+    expect(readingOffset("8.0")).toBe(upperPart);
+    expect(viewport().scrollTop).toBe(7 * 300 - upperPart);
+  });
+  it("treats each token as a new request, so a reader who scrolled away is brought back", () => {
+    useTimelineStore.getState().switchThread(42, items, false);
+    const { rerender } = renderWithBrowser(conversation(42, "reveal-again"));
+    rerender(conversation(42, "reveal-again", { itemId: "8.0", token: 1 }));
+    resize();
+    act(() => { viewport().scrollTop = 4400; fireEvent.scroll(viewport()); });
+    rerender(conversation(42, "reveal-again", { itemId: "8.0", token: 2 }));
+    resize();
+    expect(readingOffset("8.0")).toBe(upperPart);
+  });
+  it("leaves the reader where they are when the item is not loaded", () => {
+    useTimelineStore.getState().switchThread(42, items, false);
+    const { rerender } = renderWithBrowser(conversation(42, "reveal-missing"));
+    resize();
+    rerender(conversation(42, "reveal-missing", { itemId: "99.0", token: 1 }));
+    resize();
+    expect(viewport().scrollTop).toBe(4400);
+  });
+});

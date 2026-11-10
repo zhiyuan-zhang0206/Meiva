@@ -1,6 +1,5 @@
 from datetime import datetime
 from enum import StrEnum
-from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -51,12 +50,18 @@ class UserMessage(BaseModel):
     mode: UserDeliveryMode
     source_key: str
     created_at: datetime
-    read_at: datetime | None
+    seen: bool
 
 
-class ResolveMessage(BaseModel):
+class MarkSeen(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    action: Literal["read"]
+    up_to_id: int = Field(ge=1)
+
+
+class SeenResult(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    seen_id: int
+    advanced: bool
 
 
 class AskMessage(BaseModel):

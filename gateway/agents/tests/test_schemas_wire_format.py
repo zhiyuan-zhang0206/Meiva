@@ -39,7 +39,7 @@ def test_agent_row_wire_shape() -> None:
         last_probe_at=None,
         notices_awaiting_response=[],
         unread_notice_count=0,
-        unread_user_message_count=0,
+        has_unread_user_messages=False,
         heartbeat_paused_until=None,
     )
     d = _wire(m)

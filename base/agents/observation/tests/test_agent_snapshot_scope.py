@@ -498,3 +498,45 @@ def test_snapshot_birth_pin_beats_the_default_and_a_missing_row_is_none(
     pinned = snapshot.select_one(db_conn, 1, catalog=model_catalog, default_model=default)
     assert pinned is not None
     assert snapshot.select_one(db_conn, 2, catalog=model_catalog, default_model=default) is None
+
+
+def test_has_unread_user_messages_means_a_delivery_past_the_agents_seen_cursor(
+    model_catalog: ModelCatalog, db_conn: psycopg.Connection
+) -> None:
+    seed(db_conn, [(1, "user", "idling"), (2, "user", "idling"), (3, "user", "idling")])
+    with db_conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO agent_user_messages (agent_id,source_key,mode,content,suggestions) "
+            "VALUES (1,'a','prefix','seen','[]'),(1,'b','prefix','unseen','[]'),"
+            "(1,'silent','sdk',NULL,'[]'),(2,'a','prefix','other agent','[]'),"
+            "(3,'a','prefix','seen','[]'),(3,'silent','sdk',NULL,'[]')"
+        )
+        cur.execute(
+            "INSERT INTO agent_user_seen (agent_id, seen_id) "
+            "SELECT agent_id, id FROM agent_user_messages WHERE source_key='a' AND agent_id IN (1,3)"
+        )
+
+    def unread() -> dict[int, bool]:
+        cards = select_roster(
+            db_conn, catalog=model_catalog, default_model=settings.lm.llm_model
+        ).agents
+        return {card.agent_id: card.has_unread_user_messages for card in cards}
+
+    assert unread() == {1: True, 2: True, 3: False}
+    snapshots = {
+        agent_id: snapshot.select_one(
+            db_conn, agent_id, catalog=model_catalog, default_model=settings.lm.llm_model
+        )
+        for agent_id in (1, 2, 3)
+    }
+    assert {
+        agent_id: snap.has_unread_user_messages
+        for agent_id, snap in snapshots.items()
+        if snap is not None
+    } == {1: True, 2: True, 3: False}
+    db_conn.execute("UPDATE agent_user_seen SET seen_id = seen_id + 1 WHERE agent_id = 1")
+    db_conn.execute(
+        "INSERT INTO agent_user_seen (agent_id, seen_id) "
+        "SELECT 2, MAX(id) FROM agent_user_messages WHERE agent_id = 2"
+    )
+    assert unread() == {1: False, 2: False, 3: False}

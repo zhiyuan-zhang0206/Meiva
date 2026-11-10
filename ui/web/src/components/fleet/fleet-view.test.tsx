@@ -156,7 +156,7 @@ function makeAgent(over: Partial<AgentRow> & { agent_id: number }): AgentRow {
     machine: "test",
     supports_vision: true,
     llm_model: null, reasoning_effort: null,
-    awaiting_response_count: 0, has_pending_question: false, highest_notice_priority: null, unread_notice_count: 0, unread_user_message_count: 0,
+    awaiting_response_count: 0, has_pending_question: false, highest_notice_priority: null, unread_notice_count: 0, has_unread_user_messages: false,
     heartbeat_paused_until: null,
     liveness_state: "online",
     ...over,
@@ -364,7 +364,7 @@ describe("FleetView (mobile)", () => {
         awaiting_response_count: 1,
         highest_notice_priority: "P3",
         unread_notice_count: 3,
-        unread_user_message_count: 0,
+        has_unread_user_messages: false,
       }),
     ];
     const notices: FeedRows = {

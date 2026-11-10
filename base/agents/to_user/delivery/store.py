@@ -12,7 +12,11 @@ from base.api_contracts.user_delivery import (
     UserMessage,
 )
 
-COLUMNS = "id, agent_id, mode, source_key, content, suggestions, created_at, read_at"
+COLUMNS = (
+    "id, agent_id, mode, source_key, content, suggestions, created_at, "
+    "id <= COALESCE((SELECT seen_id FROM agent_user_seen s "
+    "WHERE s.agent_id = agent_user_messages.agent_id), 0) AS seen"
+)
 
 
 class DeliveryConflictError(ValueError):
@@ -69,6 +73,17 @@ def publish(
     return message
 
 
+def seen_id(conn: Connection, agent_id: int) -> int:
+    with conn.cursor(row_factory=scalar_row) as cur:
+        cur.execute("SELECT seen_id FROM agent_user_seen WHERE agent_id = %s", (agent_id,))
+        value: object = cur.fetchone()
+    if value is None:
+        return 0
+    if not isinstance(value, int):
+        raise TypeError("seen cursor must be an integer")
+    return value
+
+
 def messages(
     conn: Connection,
     agent_id: int,
@@ -77,15 +92,43 @@ def messages(
     after_id: int = 0,
     limit: int | None = None,
 ) -> list[UserMessage]:
-    pending = " AND read_at IS NULL" if pending_only else ""
+    floor = max(after_id, seen_id(conn, agent_id)) if pending_only else after_id
     with conn.cursor(row_factory=dict_row) as cur:
         cur.execute(
             sql.SQL(
-                "SELECT {} FROM agent_user_messages WHERE agent_id=%s AND id>%s AND content IS NOT NULL{} ORDER BY id LIMIT %s"
-            ).format(sql.SQL(COLUMNS), sql.SQL(pending)),
-            (agent_id, after_id, limit),
+                "SELECT {} FROM agent_user_messages WHERE agent_id=%s AND id>%s AND content IS NOT NULL ORDER BY id LIMIT %s"
+            ).format(sql.SQL(COLUMNS)),
+            (agent_id, floor, limit),
         )
         return [UserMessage.model_validate(row) for row in cur.fetchall()]
+
+
+def has_unseen(conn: Connection, agent_id: int) -> bool:
+    return conn.execute(
+        "SELECT EXISTS (SELECT 1 FROM agent_user_messages WHERE agent_id = %s "
+        "AND content IS NOT NULL AND id > COALESCE("
+        "(SELECT seen_id FROM agent_user_seen WHERE agent_id = %s), 0))",
+        (agent_id, agent_id),
+    ).fetchone() == (True,)
+
+
+def advance_seen(conn: Connection, agent_id: int, up_to_id: int) -> tuple[int, bool]:
+    newest = conn.execute(
+        "SELECT (SELECT COALESCE(MAX(id), 0) FROM agent_user_messages WHERE agent_id = %s), "
+        "EXISTS (SELECT 1 FROM agents WHERE id = %s)",
+        (agent_id, agent_id),
+    ).fetchone()
+    if newest is None or not newest[1]:
+        raise LookupError(f"agent {agent_id} does not exist")
+    if up_to_id > newest[0]:
+        raise ValueError(f"up_to_id {up_to_id} is beyond the agent's newest delivery {newest[0]}")
+    moved = conn.execute(
+        "INSERT INTO agent_user_seen AS s (agent_id, seen_id) VALUES (%s, %s) "
+        "ON CONFLICT (agent_id) DO UPDATE SET seen_id = EXCLUDED.seen_id "
+        "WHERE s.seen_id < EXCLUDED.seen_id RETURNING seen_id",
+        (agent_id, up_to_id),
+    ).fetchone()
+    return (up_to_id, True) if moved is not None else (seen_id(conn, agent_id), False)
 
 
 def latest_decision(conn: Connection, agent_id: int) -> int:

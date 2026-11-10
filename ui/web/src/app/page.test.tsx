@@ -59,7 +59,7 @@ describe("HomePage reply suggestion", () => {
     expect(screen.getByTestId("composer").getAttribute("data-suggestion")).toBe("Yes, go ahead.|Not yet.");
   });
   it("uses the independent suggestion service in SDK mode", async () => {
-    transport.getUserMessages.mockResolvedValue({ mode: "sdk", items: [] });
+    transport.getUserMessages.mockResolvedValue({ mode: "sdk", seen_id: 0, items: [] });
     wrap(<HomePage />);
     await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
     expect(transport.getReplySuggestion).toHaveBeenCalled();
@@ -87,6 +87,58 @@ describe("HomePage reply suggestion", () => {
       await vi.advanceTimersByTimeAsync(5000);
     });
     expect(transport.getReplySuggestion).not.toHaveBeenCalled();
+  });
+});
+
+// meiva:note
+// Opening an agent in a visible page marks its deliveries seen and asks the timeline to bring the first
+// delivery past the position it held on entry into view; a hidden page does neither.
+// meiva:link ui/web/src/docs/frontend-components/agent-sidebar.md
+describe("HomePage unseen deliveries", () => {
+  const unseen = {
+    id: 9, agent_id: 5, mode: "prefix" as const, source_key: "assistant:m1:0.0", content: "Done",
+    suggestions: [], created_at: "2026-11-10T00:00:00Z", seen: false,
+  };
+  const setVisibility = (state: "visible" | "hidden") => {
+    Object.defineProperty(document, "visibilityState", { configurable: true, get: () => state });
+    document.dispatchEvent(new Event("visibilitychange"));
+  };
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    hooksState.activeId = 5;
+    hooksState.agents = [makeAgent({ agent_id: 5, status: "idling" })];
+    hooksState.timelineItems = [makeItem({ item_id: "2.0", kind: "agent_chat", payload: "Done", source_message_id: "m1" })];
+    transport.getUserMessages
+      .mockResolvedValueOnce({ mode: "prefix", seen_id: 4, items: [unseen] })
+      .mockResolvedValue({ mode: "prefix", seen_id: 9, items: [unseen] });
+    transport.markUserMessagesSeen.mockResolvedValue({ seen_id: 9, advanced: true });
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+    setVisibility("visible");
+  });
+  const settle = () => act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+
+  it("reveals the first unseen delivery and marks everything seen up to the newest fetched id", async () => {
+    wrap(<HomePage />);
+    await settle();
+    expect(screen.getByTestId("timeline").getAttribute("data-reveal")).toBe("2.0");
+    expect(transport.markUserMessagesSeen).toHaveBeenCalledTimes(1);
+    expect(transport.markUserMessagesSeen).toHaveBeenCalledWith(5, { up_to_id: 9 }, expect.any(String));
+  });
+
+  it("does nothing while the page is hidden and acts when it returns", async () => {
+    transport.getUserMessages.mockReset();
+    transport.getUserMessages.mockResolvedValue({ mode: "prefix", seen_id: 4, items: [unseen] });
+    setVisibility("hidden");
+    wrap(<HomePage />);
+    await settle();
+    expect(transport.markUserMessagesSeen).not.toHaveBeenCalled();
+    expect(screen.getByTestId("timeline").getAttribute("data-reveal")).toBe("");
+    act(() => setVisibility("visible"));
+    await settle();
+    expect(transport.markUserMessagesSeen).toHaveBeenCalledWith(5, { up_to_id: 9 }, expect.any(String));
+    expect(screen.getByTestId("timeline").getAttribute("data-reveal")).toBe("2.0");
   });
 });
 

@@ -30,7 +30,14 @@ def test_sdk_publication_and_reader_share_the_gateway_contract(db_conn: psycopg.
         records = ui.publications(limit=1)
         assert [record.id for record in records] == [first]
         assert [record.id for record in ui.publications(after_id=first)] == [second]
-        assert all(record.read_at is None for record in ui.publications())
+        assert [record.seen for record in ui.publications()] == [False, False]
+        assert [record.seen for record in ui.publications(pending_only=False)] == [False, False]
+        db_conn.execute(
+            "INSERT INTO agent_user_seen (agent_id, seen_id) VALUES (%s, %s)", (agent_id, first)
+        )
+        db_conn.commit()
+        assert [record.id for record in ui.publications()] == [second]
+        assert [record.seen for record in ui.publications(pending_only=False)] == [True, False]
         ui.publish(None, suggestions=[])
         assert len(ui.publications(pending_only=False)) == 2
 

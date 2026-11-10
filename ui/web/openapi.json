@@ -2653,10 +2653,10 @@
         }
       }
     },
-    "/api/keyed/v1/agents/{agent_id}/user-messages/{message_id}/resolve": {
+    "/api/keyed/v1/agents/{agent_id}/user-messages/seen": {
       "post": {
-        "summary": "Resolve Message",
-        "operationId": "resolve_message_api_keyed_v1_agents__agent_id__user_messages__message_id__resolve_post",
+        "summary": "Mark Seen",
+        "operationId": "mark_seen_api_keyed_v1_agents__agent_id__user_messages_seen_post",
         "parameters": [
           {
             "name": "agent_id",
@@ -2665,15 +2665,6 @@
             "schema": {
               "type": "integer",
               "title": "Agent Id"
-            }
-          },
-          {
-            "name": "message_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "integer",
-              "title": "Message Id"
             }
           },
           {
@@ -2702,7 +2693,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/ResolveMessage"
+                "$ref": "#/components/schemas/MarkSeen"
               }
             }
           }
@@ -2713,7 +2704,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/UserMessage"
+                  "$ref": "#/components/schemas/SeenResult"
                 }
               }
             }
@@ -8351,10 +8342,10 @@
               }
             ]
           },
-          "unread_user_message_count": {
-            "type": "integer",
-            "title": "Unread User Message Count",
-            "default": 0
+          "has_unread_user_messages": {
+            "type": "boolean",
+            "title": "Has Unread User Messages",
+            "default": false
           },
           "unread_notice_count": {
             "type": "integer",
@@ -9261,9 +9252,9 @@
             "type": "array",
             "title": "Notices Awaiting Response"
           },
-          "unread_user_message_count": {
-            "type": "integer",
-            "title": "Unread User Message Count"
+          "has_unread_user_messages": {
+            "type": "boolean",
+            "title": "Has Unread User Messages"
           },
           "unread_notice_count": {
             "type": "integer",
@@ -9322,7 +9313,7 @@
           "liveness_state",
           "last_probe_at",
           "notices_awaiting_response",
-          "unread_user_message_count",
+          "has_unread_user_messages",
           "unread_notice_count",
           "heartbeat_paused_until"
         ],
@@ -13642,6 +13633,21 @@
         "title": "MachineStatus",
         "description": "A machines-table row state — augmented with live probe results.\n\n`online` / `paused` come from each machine's ops `status_probe`: the last one\nthe heartbeat liveness pass made (the default read, see `observed_at`), or a\ndial within the configured roster deadline (a fresh read):\n- online=True + paused has a value: probe succeeded\n- online=False + paused=None: probe failed (network unreachable /\n  gateway down)\n- online=True + paused=None: ops server responded, but the operation failed\n  or its response did not match ClusterStatus (abnormal)"
       },
+      "MarkSeen": {
+        "properties": {
+          "up_to_id": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Up To Id"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "up_to_id"
+        ],
+        "title": "MarkSeen"
+      },
       "MemoryNoteResponse": {
         "properties": {
           "path": {
@@ -15632,21 +15638,6 @@
         "title": "ReplySuggestionResponse",
         "description": "Drafted replies, or the reason there are none.\n\n`suggestions` is nonempty exactly when `reason` is None. Every non-error outcome is a 200: a\nmissing suggestion is an ordinary result, never a failure of the request."
       },
-      "ResolveMessage": {
-        "properties": {
-          "action": {
-            "type": "string",
-            "const": "read",
-            "title": "Action"
-          }
-        },
-        "additionalProperties": false,
-        "type": "object",
-        "required": [
-          "action"
-        ],
-        "title": "ResolveMessage"
-      },
       "ResolveNoticeIn": {
         "properties": {
           "action": {
@@ -17459,6 +17450,25 @@
           "count"
         ],
         "title": "SdkCall"
+      },
+      "SeenResult": {
+        "properties": {
+          "seen_id": {
+            "type": "integer",
+            "title": "Seen Id"
+          },
+          "advanced": {
+            "type": "boolean",
+            "title": "Advanced"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "seen_id",
+          "advanced"
+        ],
+        "title": "SeenResult"
       },
       "ServiceItem": {
         "properties": {
@@ -20188,17 +20198,9 @@
             "format": "date-time",
             "title": "Created At"
           },
-          "read_at": {
-            "anyOf": [
-              {
-                "type": "string",
-                "format": "date-time"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Read At"
+          "seen": {
+            "type": "boolean",
+            "title": "Seen"
           }
         },
         "additionalProperties": false,
@@ -20211,7 +20213,7 @@
           "mode",
           "source_key",
           "created_at",
-          "read_at"
+          "seen"
         ],
         "title": "UserMessage"
       },
@@ -20219,6 +20221,10 @@
         "properties": {
           "mode": {
             "$ref": "#/components/schemas/UserDeliveryMode"
+          },
+          "seen_id": {
+            "type": "integer",
+            "title": "Seen Id"
           },
           "items": {
             "items": {
@@ -20231,6 +20237,7 @@
         "type": "object",
         "required": [
           "mode",
+          "seen_id",
           "items"
         ],
         "title": "UserMessageFeed"

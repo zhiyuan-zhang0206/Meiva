@@ -104,7 +104,7 @@ function agent(over: {
     llm_model: null, reasoning_effort: null,
     awaiting_response_count: (over.notices_awaiting_response ?? []).length, has_pending_question: false, highest_notice_priority: (over.notices_awaiting_response ?? [])[0]?.priority ?? null,
     unread_notice_count: 0,
-    unread_user_message_count: 0,
+    has_unread_user_messages: false,
     heartbeat_paused_until: null,
     liveness_state: "online",
   };

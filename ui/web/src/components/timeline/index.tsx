@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from "react";
 import { useTranslations } from "next-intl";
 
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -15,7 +15,7 @@ import type { BackendTimelineItem } from "@/lib/contracts/types";
 import { readScrollMemory, type SavedScroll } from "@/lib/layout/scroll-memory";
 import { useTimelineStore } from "@/lib/timeline/timeline-store";
 import type { CompactTransitionBuffer } from "@/lib/layout/compact-transition";
-import { BAR_CLEAR_TOP_PADDING_CLASS, FLEX_1, MIN_H_0, OVERFLOW_HIDDEN } from "@/lib/layout/layout";
+import { BAR_CLEAR_TOP_PADDING_CLASS, BAR_HEIGHT_PX, FLEX_1, MIN_H_0, OVERFLOW_HIDDEN } from "@/lib/layout/layout";
 import { cn } from "@/lib/format/utils";
 
 import { ConnectionNotice } from "@/components/notifications/connection-notice";
@@ -37,6 +37,8 @@ import {
 import { useReanchorOnWidthChange } from "./model/width-change-anchor";
 import { useStickyThresholds } from "./model/sticky-thresholds";
 import { LoadOlderSpinner, LoadOlderKeyboardButton, ColdLoadSpinner, ScrollToBottomButton } from "./overlays";
+
+const REVEAL_TOP_GAP_PX = 12;
 
 interface Props {
   items: BackendTimelineItem[];
@@ -70,6 +72,12 @@ interface Props {
   loading?: boolean;
   loadingNew?: boolean;
   maxWidthCss?: string;
+  // meiva:note
+  // A request to bring one item to the upper part of the viewport, as the reader's own bookmark would: it
+  // rides the bookmark restore (hold, settle, window materialization) instead of a second scroll path,
+  // and a new `token` is a new request.
+  // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.md
+  reveal?: { itemId: string; token: number } | null;
 }
 
 export const TimelineView = memo(function TimelineView({
@@ -88,6 +96,7 @@ export const TimelineView = memo(function TimelineView({
   loading = false,
   loadingNew = false,
   maxWidthCss,
+  reveal = null,
 }: Props) {
   const t = useTranslations("timeline");
   const bufferedItems = useMemo(
@@ -453,6 +462,27 @@ export const TimelineView = memo(function TimelineView({
     settleRestoredPosition,
     maintainSendAnchor,
   });
+
+  const [, applyReveal] = useReducer((count: number) => count + 1, 0);
+  useLayoutEffect(() => {
+    if (reveal === null || threadKey === undefined) return;
+    const item = canonicalItemsRef.current.find((candidate) => candidate.item_id === reveal.itemId);
+    if (item === undefined) return;
+    cancelBookmark();
+    pendingRestoreRef.current = {
+      contentKey: threadKey,
+      scrollTop: 0,
+      followBottom: false,
+      anchor: {
+        itemId: item.item_id,
+        rank: parseItemIdParts(item.item_id)?.rank ?? 0,
+        viewportTop: BAR_HEIGHT_PX + REVEAL_TOP_GAP_PX,
+      },
+    };
+    holdRestoredPositionRef.current = true;
+    restoreProbeRef.current = { height: -1, passes: 0 };
+    applyReveal();
+  }, [reveal, threadKey, cancelBookmark, restoreProbeRef]);
 
   useThreadPin({
     threadKey,

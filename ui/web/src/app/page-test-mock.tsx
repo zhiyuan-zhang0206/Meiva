@@ -128,7 +128,7 @@ export function makeAgent(overrides: Partial<AgentRow>): AgentRow {
     has_pending_question: false,
     highest_notice_priority: null,
     unread_notice_count: 0,
-    unread_user_message_count: 0,
+    has_unread_user_messages: false,
     heartbeat_paused_until: null,
     liveness_state: "online",
     ...overrides,
@@ -162,12 +162,15 @@ export function HeaderBarMock({ label, children, maxWidthCss }: ComponentProps<t
   );
 }
 
-export function TimelineViewMock({ turnActive, maxWidthCss, items }: ComponentProps<typeof TimelineViewComponent>) {
+// meiva:note
+// The stand-in shows the item the page asked the timeline to bring into view.
+export function TimelineViewMock({ turnActive, maxWidthCss, items, reveal }: ComponentProps<typeof TimelineViewComponent>) {
   return (
     <div
       data-testid="timeline"
       data-turn-active={turnActive ? "1" : "0"}
       data-item-count={items.length}
+      data-reveal={reveal?.itemId ?? ""}
       style={maxWidthCss ? { maxWidth: maxWidthCss } : undefined}
     />
   );
@@ -324,7 +327,7 @@ export async function resetHomePageTestState() {
   });
   homePageRig = gatewayRig(homePageGateway);
   resetTransport();
-  transport.getUserMessages.mockResolvedValue({ mode: "prefix", items: [] });
+  transport.getUserMessages.mockResolvedValue({ mode: "prefix", seen_id: 0, items: [] });
   transport.getReplySuggestion.mockImplementation(() => Promise.resolve(replySuggestions));
   resetStreamHandlers();
   transport.sendMessage.mockResolvedValue({ status: "running", inbound_id: 11, duplicate: false });
@@ -348,6 +351,7 @@ export async function resetHomePageTestState() {
     getUploadDeliveryStatus: transport.getUploadDeliveryStatus,
     getReplySuggestion: transport.getReplySuggestion,
     getUserMessages: transport.getUserMessages,
+    markUserMessagesSeen: transport.markUserMessagesSeen,
   };
   vi.clearAllMocks();
   inspectorMockState.shouldThrow = false;

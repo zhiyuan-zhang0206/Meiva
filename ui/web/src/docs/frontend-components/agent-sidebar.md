@@ -92,11 +92,40 @@ shares a fixed-pixel horizontal gradient coordinate space (offset by
 `--agent-indent-px` for tree depth) and locks its CSS animation `startTime` to
 `0` so all working titles sweep in unison along the same vertical column.
 Offline agents suppress the working title shimmer on the row without rendering a
-gray row dot, and report their offline state in the hover peek card's status slot. At the right edge, an unresolved structured
-question shows a Sunset Orange (`#ED8755`) circled question mark, and an ordinary
-response-required notice shows a Sunset Orange (`#ED8755`) dot. The question
-takes precedence when both are pending, independently of the working title.
-Unread publications and FYI notices do not need a reply. Additional lifecycle
+gray row dot, and report their offline state in the hover peek card's status slot. At the right edge a row
+shows at most one indicator, decided by `agentAttention`
+(`lib/agents/agent-attention.ts`) and shared by the hover card: an unresolved
+structured question shows a Sunset Orange (`--meiva-sunset-orange`, `#ED8755`) circled
+question mark and outranks everything; otherwise `has_unread_user_messages` shows a
+Sunset Orange solid dot. There is no count, and no state for an open reply request:
+`awaiting_response_count` and the notice counters take no part in the row or the card
+(restored 2026-11-10, superseding the 2026-11-07 removal; see
+[the decision](../../../../../docs/decisions/frontend/ui/2026-11-10-restore-unread-dot.md)).
+The hover card names the same state with the same mark.
+
+What the dot means is one number per agent: the **seen position**, the newest delivery
+id (`agent_user_messages.id`) the reader has seen, stored on the server
+(`agent_user_seen`, monotonic, never per record). Unread is "a delivery lies past it".
+Opening an agent's conversation in a visible page counts everything delivered as seen,
+wherever the timeline is scrolled, and deliveries arriving while it stays open and
+visible are seen on arrival. A hidden page sees nothing, and its return starts a new
+look. The open, visible agent is `readingAgentId` in the UI store, so its row shows no
+dot at all and a delivery arriving under the reader's eyes never lights it up.
+A question still shows.
+
+`useSeenPosition` (`lib/context/use-seen-position.ts`) runs each look: it waits for a
+user-messages feed fetched since the look began, keeps the cursor that feed carried
+(`seen_id`, the position on entry), and asks the timeline to reveal the first delivery
+past it (`TimelineView` `reveal`, which rides the bookmark restore: the item lands in the
+upper part of the viewport, and the reader's scrolling takes over afterwards). With
+nothing past the position nothing moves, including on a return to the foreground. When
+that delivery's item is not loaded it loads older pages, at most five, and otherwise
+lands on the oldest unseen item it has (a PREFIX/NAIVE delivery matching no row has none).
+Only then does it advance the cursor, through one idempotent
+`POST /api/keyed/v1/agents/{id}/user-messages/seen` with the highest id the page has
+fetched; records the page has not received are never claimed. A failed advance is
+retried after 1 s, 3 s and 9 s, then waits for the next trigger (a newer record or a
+refetched feed). Additional lifecycle
 markers and the header's aggregate reply count remain opt-in through
 `display.show_agent_status` and `notification.awaiting_reply`, respectively.
 Rows keep timestamps in the hover card. Labels truncate with a single-line

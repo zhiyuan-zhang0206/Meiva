@@ -373,7 +373,7 @@ describe("useReplySuggestion", () => {
 it("offers a reply for a publication with suggestions during work and removes it when suggestions clear", async () => {
   const publication = { id: 4, agent_id: 7, mode: "sdk" as const, source_key: "sdk:pub:4",
     content: "Choose scope", suggestions: ["Small scope"],
-    created_at: "2026-11-06T00:00:00Z", read_at: null };
+    created_at: "2026-11-06T00:00:00Z", seen: false };
   const working: Props = { ...idle, busy: true, status: "running",
     items: [item("agent_chat", "publication:4", { userDelivery: publication })] };
   const { result, rerender } = renderHook((props: Props) => useReplySuggestion(props), { wrapper, initialProps: working });

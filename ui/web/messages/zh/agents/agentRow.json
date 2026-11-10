@@ -26,8 +26,8 @@
   "agentId": "#{id} · {label}",
   "forceKillConfirm": "强制结束 Agent #{id}？这将立即 SIGKILL 进程——任何进行中的回合都会丢失。仅在 Terminate 无效时使用。",
   "statusWorking": "正在工作",
-  "statusAwaitingReply": "等待回复",
   "statusPendingQuestion": "有待回答的问题",
+  "statusUnread": "有未读消息",
   "statusRunning": "运行中",
   "statusIdling": "空闲中",
   "statusTerminated": "已终止",
@@ -38,7 +38,6 @@
   "hoverSpawned": "创建于 {time}",
   "hoverSpawnedBy": "由 #{id} 创建",
   "hoverForkedFrom": "分叉自 #{id}",
-  "hoverAwaitingReply": "{count} 条待回复通知",
   "hoverModel": "模型",
   "hoverEffort": "推理强度",
   "hoverHeartbeatPaused": "心跳暂停至 {time}"

@@ -126,7 +126,7 @@ class HarnessTurnProjector:
     ) -> None:
         async with self._lock:
             now = self._clock.now()
-            self._close_text(now, seal_chat=not interrupted and error is None)
+            self._close_text(now, complete=not interrupted and error is None)
             for code_item, output_item, code_ms, _ in self._tools.values():
                 self._revise(
                     code_item,
@@ -217,17 +217,24 @@ class HarnessTurnProjector:
         if started or complete:
             await self._flush()
 
-    def _close_text(self, now: datetime, *, seal_chat: bool = True) -> None:
+    # meiva:note
+    # A chat item is sealed whenever its text closes, complete or not: a half-written reply cut off by
+    # an interrupt or an error is still on the timeline, and an item left pending is dropped from the
+    # live merge and never reaches the delivery capture. An incomplete text skips the visibility
+    # check and the duplicate-text guard, which judge a whole reply.
+    def _close_text(self, now: datetime, *, complete: bool = True) -> None:
         if self._text_item is not None and self._text_item.kind == "agent_reasoning":
             self._revise(
                 self._text_item, self._text, reasoning_ms=_elapsed(self._text_started, now)
             )
             self._reasoning_ended = now
-        elif self._text_item is not None and seal_chat:
-            self._check_visibility(self._text)
+        elif self._text_item is not None:
+            if complete:
+                self._check_visibility(self._text)
             if self._text_item.activity_pending:
                 self._revise(self._text_item, self._text_item.payload, activity_pending=False)
-            self._last_chat_raw = self._text
+            if complete:
+                self._last_chat_raw = self._text
         self._text_item = None
         self._text = ""
 

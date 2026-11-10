@@ -799,7 +799,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/keyed/v1/agents/{agent_id}/user-messages/{message_id}/resolve": {
+    "/api/keyed/v1/agents/{agent_id}/user-messages/seen": {
         parameters: {
             query?: never;
             header?: never;
@@ -808,7 +808,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        post: operations["resolve_message_api_keyed_v1_agents__agent_id__user_messages__message_id__resolve_post"];
+        post: operations["mark_seen_api_keyed_v1_agents__agent_id__user_messages_seen_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2298,7 +2298,7 @@ export interface components {
             awaiting_response_count: number;
             has_pending_question: boolean;
             highest_notice_priority: components["schemas"]["Priority"] | null;
-            unread_user_message_count: number;
+            has_unread_user_messages: boolean;
             unread_notice_count: number;
             heartbeat_paused_until: string | null;
             harness_exit_code?: number | null;
@@ -2438,7 +2438,7 @@ export interface components {
             availability?: components["schemas"]["AgentAvailability"] | null;
             observation?: components["schemas"]["AgentObservation"] | null;
             notices_awaiting_response: components["schemas"]["OpenNotice"][];
-            unread_user_message_count: number;
+            has_unread_user_messages: boolean;
             unread_notice_count: number;
             heartbeat_paused_until: string | null;
             harness_exit_code?: number | null;
@@ -3162,6 +3162,9 @@ export interface components {
             }[];
             resource?: components["schemas"]["ResourceSample"] | null;
         };
+        MarkSeen: {
+            up_to_id: number;
+        };
         MemoryNoteResponse: {
             path: string;
             title: string;
@@ -3466,9 +3469,6 @@ export interface components {
             suggestions: string[];
             reason?: ("disabled" | "agent_not_idle" | "no_agent_text" | "not_useful" | "gate_failed" | "generation_failed" | "invalid_generation" | "client_disconnected") | null;
         };
-        ResolveMessage: {
-            action: "read";
-        };
         ResolveNoticeIn: {
             action: "answer" | "dismiss" | "read";
             reply?: string | null;
@@ -3741,6 +3741,10 @@ export interface components {
         SdkCall: {
             method: string;
             count: number;
+        };
+        SeenResult: {
+            seen_id: number;
+            advanced: boolean;
         };
         ServiceItem: {
             name: string;
@@ -4149,10 +4153,11 @@ export interface components {
             mode: components["schemas"]["UserDeliveryMode"];
             source_key: string;
             created_at: string;
-            read_at: string | null;
+            seen: boolean;
         };
         UserMessageFeed: {
             mode: components["schemas"]["UserDeliveryMode"];
+            seen_id: number;
             items: components["schemas"]["UserMessage"][];
         };
         UserSettingListResponse: {
@@ -5778,7 +5783,7 @@ export interface operations {
             };
         };
     };
-    resolve_message_api_keyed_v1_agents__agent_id__user_messages__message_id__resolve_post: {
+    mark_seen_api_keyed_v1_agents__agent_id__user_messages_seen_post: {
         parameters: {
             query?: never;
             header: {
@@ -5787,13 +5792,12 @@ export interface operations {
             };
             path: {
                 agent_id: number;
-                message_id: number;
             };
             cookie?: never;
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["ResolveMessage"];
+                "application/json": components["schemas"]["MarkSeen"];
             };
         };
         responses: {
@@ -5802,7 +5806,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["UserMessage"];
+                    "application/json": components["schemas"]["SeenResult"];
                 };
             };
             422: {

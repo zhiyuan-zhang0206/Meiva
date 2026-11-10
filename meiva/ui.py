@@ -96,8 +96,10 @@ def publications(
 
     Retrieve pending context after compaction or after rewriting to_user.md.
     Returns at most limit messages (1-100), in increasing id order. Continue with
-    after_id set to the last returned id. pending_only includes unread messages
-    and unanswered required replies; False also returns resolved history.
+    after_id set to the last returned id. Each message has seen: whether the user has
+    seen it. The user's seen position advances when they open your conversation,
+    and pending_only keeps only the messages past it; False also returns the seen
+    history.
     """
     from pydantic import TypeAdapter
 
