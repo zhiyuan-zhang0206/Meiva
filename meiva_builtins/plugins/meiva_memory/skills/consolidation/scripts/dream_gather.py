@@ -18,7 +18,12 @@ from meiva_builtins.plugins.meiva_memory.pool_ops import (
     pool_dir,
     untracked_notes,
 )
-from meiva_builtins.plugins.meiva_memory.template.validate import note_parts
+from meiva_builtins.plugins.meiva_memory.template.validate import (
+    body_links,
+    note_parts,
+    resolve_link,
+    source_repos,
+)
 
 _LEGACY_FIELDS = ("type", "meiva_agent", "meiva_machine", "tags", "timestamp", "generated")
 _CONFLICT_MARKER = "<<<<<<< "
@@ -26,7 +31,6 @@ _COMMIT_PREFIX = "__COMMIT__"
 _IGNORED_GIT_CHANGED_TARGETS = frozenset(
     {"pyproject.toml", "meizel.toml", "meizel.policy.toml", ".pre-commit-config.yaml"}
 )
-_OPTIONAL_REPO_ALIASES = frozenset({"monsora"})
 
 
 @dataclass(frozen=True)
@@ -65,6 +69,8 @@ def _read_note_record(pool: Path, rel: str) -> NoteRecord | None:
     pure_md = not text.startswith("---\n")
     parts = note_parts(text)
     fm = parts[0] if parts is not None else {}
+    if "sources" in fm:
+        raise ValueError(f"{path}: frontmatter sources is forbidden; use inline Markdown links")
     desc_val = fm.get("description")
     desc = desc_val.strip() if isinstance(desc_val, str) else ""
     legacy = tuple(k for k in _LEGACY_FIELDS if k in fm)
@@ -72,7 +78,7 @@ def _read_note_record(pool: Path, rel: str) -> NoteRecord | None:
         path=rel,
         pure_markdown=pure_md,
         description=desc,
-        sources=tuple(_string_list(fm.get("sources"))),
+        sources=tuple(target for _, target in body_links(text)),
         verified=_parse_date(fm.get("verified")),
         stale_after=_parse_date(fm.get("stale_after")),
         legacy_fields=legacy,
@@ -149,25 +155,6 @@ def _matching_touch(
     return best
 
 
-def _file_source_parts(source: str) -> tuple[str, str] | None:
-    parts = source.split(":", 2)
-    if source.startswith("repo:") and len(parts) == 3:
-        alias, raw_target = parts[1].strip(), parts[2].split("#", 1)[0].strip()
-    elif ":" not in source:
-        alias, raw_target = "memory", source.split("#", 1)[0].strip()
-    else:
-        alias, raw_target = "", ""
-    if (
-        not alias
-        or not raw_target
-        or ":" in raw_target
-        or Path(raw_target).is_absolute()
-        or ".." in Path(raw_target).parts
-    ):
-        return None
-    return alias, raw_target
-
-
 def _check_file_source(
     note: NoteRecord,
     source: str,
@@ -175,39 +162,19 @@ def _check_file_source(
     touches_by_repo: Mapping[str, Mapping[str, tuple[_dt.date, str, int]]],
     since_cutoff: _dt.date,
 ) -> dict[str, str] | None:
-    parsed = _file_source_parts(source)
-    if parsed is None:
-        return {"note": note.path, "source": source, "reason": "malformed_source", "detail": source}
-    alias, raw_target = parsed
-    repo_root = repos.get(alias)
-    if repo_root is None or not repo_root.is_dir():
-        if alias in _OPTIONAL_REPO_ALIASES:
-            return None
-        return {"note": note.path, "source": source, "reason": "unmapped_repo", "detail": alias}
-    if not (repo_root / raw_target).exists():
-        return {
-            "note": note.path,
-            "source": source,
-            "reason": "missing_path",
-            "detail": f"{alias}:{raw_target}",
-        }
-    if not (repo_root / raw_target).is_file():
-        return {
-            "note": note.path,
-            "source": source,
-            "reason": "not_a_file",
-            "detail": f"{alias}:{raw_target}",
-        }
-    if raw_target in _IGNORED_GIT_CHANGED_TARGETS:
+    vault = repos["vault"]
+    try:
+        target, repo = resolve_link(vault / "memory" / note.path, vault, source, repos)
+    except ValueError as exc:
+        return {"note": note.path, "source": source, "reason": str(exc), "detail": source}
+    rel_target = target.relative_to(repo).as_posix()
+    if rel_target in _IGNORED_GIT_CHANGED_TARGETS:
         return None
-    touch = _matching_touch(touches_by_repo.get(alias, {}), raw_target)
+    touch = _matching_touch(touches_by_repo.get(str(repo), {}), rel_target)
     if touch is None:
         return None
     latest_date, latest_sha = touch
-    drifted = (
-        latest_date > note.verified if note.verified is not None else latest_date >= since_cutoff
-    )
-    if not drifted:
+    if latest_date <= note.verified if note.verified is not None else latest_date < since_cutoff:
         return None
     return {
         "note": note.path,
@@ -223,7 +190,7 @@ def _missing_okf_entry(note: NoteRecord) -> dict[str, object] | None:
         missing.append("description")
     if note.verified is None:
         missing.append("verified")
-    if not note.sources:
+    if not note.sources and Path(note.path).name not in {"MEMORY.md", "INHERIT.md", "index.md"}:
         missing.append("sources")
     if not missing and not note.legacy_fields:
         return None
@@ -338,7 +305,7 @@ def _aging_entries(
 
 # meiva:note
 # Deterministic Phase 2 (`Gather Signal`) probe for Meiva Dream consolidation: scans every note in
-# `pool`, intersects optional `sources` (`repo:<alias>:<path>`) against mapped repository file trees
+# `pool`, intersects inline Markdown file links against Vault and mapped repository file trees
 # and recent git history, and surfaces expired `stale_after` notes, aging `verified` dates, notes
 # lacking Dream OKF fields (including newly written pure-Markdown notes), and pool churn/conflict
 # hotspots.
@@ -352,14 +319,21 @@ def gather_signals(
     max_verified_age_days: int = 30,
 ) -> dict[str, object]:
     resolved_home = home if home is not None else resolve_meiva_home()
-    repo_map: dict[str, Path] = {"memory": pool, **(dict(repos) if repos is not None else {})}
+    vault = pool.parent if pool.name == "memory" else pool
+    repo_map: dict[str, Path] = {
+        **(dict(repos) if repos is not None else {}),
+        "vault": vault.resolve(),
+    }
+    repo_map = {**source_repos(vault, repo_map), "vault": vault.resolve()}
     records = [
         rec for rel in _all_pool_notes(pool) if (rec := _read_note_record(pool, rel)) is not None
     ]
     since_cutoff = today - _dt.timedelta(days=max(since_days, 1))
     earliest = min([since_cutoff, *(rec.verified for rec in records if rec.verified is not None)])
     touches_by_repo = {
-        alias: _repo_touches(root, earliest) for alias, root in repo_map.items() if root.is_dir()
+        str(root.resolve()): _repo_touches(root, earliest)
+        for root in repo_map.values()
+        if root.is_dir()
     }
     pool_window_touches = _repo_touches(pool, since_cutoff) if pool.is_dir() else {}
     source_drift = _scan_note_sources(records, repo_map, touches_by_repo, since_cutoff)
@@ -477,14 +451,8 @@ def render_report(report: Mapping[str, object]) -> str:
     return "\n".join(lines) + "\n"
 
 
-def _parse_repo_specs(specs: Sequence[str], home: Path) -> dict[str, Path]:
+def _parse_repo_specs(specs: Sequence[str]) -> dict[str, Path]:
     repos: dict[str, Path] = {}
-    default_meiva = home / "source"
-    if default_meiva.is_dir():
-        repos["meiva"] = default_meiva
-    default_monsora = Path("~/MonsoraV2").expanduser()
-    if default_monsora.is_dir():
-        repos["monsora"] = default_monsora.resolve()
     for spec in specs:
         alias, sep, raw_path = spec.partition("=")
         if not sep or not alias.strip() or not raw_path.strip():
@@ -512,7 +480,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         "--repo",
         action="append",
         default=[],
-        help="Repeatable alias=/path mapping for repo:<alias>:<path> sources",
+        help="Repeatable alias=/path mapping for /repos/<alias>/<path> sources",
     )
     _ = ap.add_argument("--today", default=None, help="Override today's ISO date (YYYY-MM-DD)")
     _ = ap.add_argument(
@@ -539,7 +507,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     today = _parse_date(args.today) if args.today else _dt.datetime.now(_dt.UTC).date()
     if today is None:
         raise SystemExit(f"Invalid --today date (expected YYYY-MM-DD): {args.today!r}")
-    repos = _parse_repo_specs(args.repo, home)
+    repos = _parse_repo_specs(args.repo)
     report = gather_signals(
         pool,
         home=home,

@@ -19,6 +19,10 @@ and `meiva.files` never rewrites the content (it no longer stamps
 Checked by the pool validator (`template/validate.py::validate_note`): valid
 UTF-8, valid YAML mapping without unquoted `' #'` or `': '` truncation when
 optional YAML frontmatter is present, and a note stays under 8000 characters.
+YAML `sources` is forbidden; provenance uses inline body file links whose targets
+resolve to files inside Vault or a mapped code repository. Code examples are
+excluded from source extraction.
+
 The cap counts characters as `len()` — the measurement the shared budget names
 `Unit.CHARS` — and stays with the standalone validator (which also runs where
 `base.*` is unimportable); the write check adds no second cap and only surfaces

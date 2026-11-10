@@ -1,17 +1,7 @@
 #!/usr/bin/env python3
-"""OKF v0.2-core validator for the MeivaMemory bundle (Meiva extensions documented in AGENTS.md).
-
-Validates every .md concept file against the OKF spec.
-Usage: python validate.py [--strict]
-
-Template seed copy: kept in sync with the live pool validator so a fresh pool
-never passes locally while the pool's pre-commit hook would block. Last sync:
-2026-09-10 (live copy: the pool checkout's validate.py). Re-sync this seed
-whenever the pool validator gains rules.
-
-The plugin's write check imports `validate_note`, `is_note_name` and `note_parts` from this seed
-copy (it is the one place the single-note rules live); they only read, and `main()` is untouched.
-"""
+# meiva:note
+# Validate shared notes in the Vault memory tree. The standalone seed owns the
+# single-note rules imported by the plugin write check; its CLI scans memory/.
 
 from __future__ import annotations
 
@@ -19,7 +9,7 @@ import os
 import re
 import subprocess
 import sys
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import ParamSpec, TypeGuard
 
@@ -46,10 +36,6 @@ _MISREAD_STRING_KEYS = (
 
 def _is_str_dict(value: object) -> TypeGuard[dict[str, object]]:
     return isinstance(value, dict)
-
-
-def _is_object_list(value: object) -> TypeGuard[list[object]]:
-    return isinstance(value, list)
 
 
 _P = ParamSpec("_P")
@@ -108,41 +94,10 @@ def _frontmatter_problem(content: str) -> tuple[dict[str, object] | None, str | 
     return fm, parts[1], None
 
 
-def is_file_source(source: str) -> bool:
-    parts = source.split(":", 2)
-    if source.startswith("repo:") and len(parts) == 3 and parts[1].strip():
-        target = parts[2].split("#", 1)[0].strip()
-    elif ":" not in source:
-        target = source.split("#", 1)[0].strip()
-    else:
-        return False
-    return bool(
-        target
-        and ":" not in target
-        and not target.endswith("/")
-        and not Path(target).is_absolute()
-        and ".." not in Path(target).parts
-    )
-
-
-def _source_field_errors(fm: dict[str, object]) -> list[str]:
-    errors: list[str] = []
-    if "sources" in fm and fm["sources"] is not None:
-        sources = fm["sources"]
-        if not _is_object_list(sources) or not all(
-            isinstance(s, str) and s.strip() for s in sources
-        ):
-            errors.append("Field 'sources' must be a list of non-empty strings")
-        else:
-            for source in sources:
-                if isinstance(source, str) and not is_file_source(source):
-                    errors.append(f"Field 'sources' requires a file path: {source!r}")
-    return errors
-
-
 def _optional_okf_field_errors(fm: dict[str, object]) -> list[str]:
     errors: list[str] = []
-    errors.extend(_source_field_errors(fm))
+    if "sources" in fm:
+        errors.append("Frontmatter 'sources' is forbidden; use inline Markdown file links")
     for date_key in ("verified", "stale_after"):
         if date_key in fm and fm[date_key] is not None:
             val = fm[date_key]
@@ -156,10 +111,123 @@ def _optional_okf_field_errors(fm: dict[str, object]) -> list[str]:
     return errors
 
 
-def validate_file(file_path: Path) -> list[str]:
+def source_repos(vault: Path, repos: Mapping[str, Path] | None = None) -> dict[str, Path]:
+    # meiva:note
+    # Resolve explicit mappings before conventional home checkouts and Vault repo mirrors.
+    mapped = (
+        {alias.name: alias.resolve() for alias in (vault / "repos").iterdir()}
+        if (vault / "repos").is_dir()
+        else {}
+    )
+    for alias, candidate in {
+        "meiva": vault.parent / "source",
+        "monsora": vault.parent.parent / "MonsoraV2",
+    }.items():
+        if candidate.is_dir():
+            mapped.setdefault(alias, candidate.resolve())
+    fallback = vault.parent.parent / "Meiva"
+    if fallback.is_dir():
+        mapped.setdefault("meiva", fallback.resolve())
+    mapped.update(repos or {})
+    return mapped
+
+
+def _link_target(text: str, start: int) -> str | None:
+    depth = 1
+    escaped = False
+    for end in range(start, len(text)):
+        char = text[end]
+        if escaped:
+            escaped = False
+            continue
+        if char == "\\":
+            escaped = True
+        elif char == "(":
+            depth += 1
+        elif char == ")":
+            depth -= 1
+            if depth == 0:
+                raw = text[start:end].strip()
+                if raw.startswith("<") and ">" in raw:
+                    return raw[1 : raw.index(">")]
+                return raw.split()[0] if raw else ""
+    return None
+
+
+def body_links(content: str) -> list[tuple[int, str]]:
+    # meiva:note
+    # Extract inline Markdown links outside fenced and inline code, retaining line numbers.
+    parts = note_parts(content)
+    body = parts[1] if parts is not None else content
+    offset = content.count("\n") - body.count("\n")
+    lines: list[str] = []
+    fence = ""
+    for line in body.splitlines(keepends=True):
+        match = re.match(r"^ {0,3}(`{3,}|~{3,})", line)
+        if match:
+            marker = match.group(1)
+            if not fence:
+                fence = marker
+            elif (
+                marker[0] == fence[0]
+                and len(marker) >= len(fence)
+                and not line[match.end() :].strip()
+            ):
+                fence = ""
+            lines.append("\n" if line.endswith("\n") else "")
+        else:
+            lines.append("\n" if fence and line.endswith("\n") else "" if fence else line)
+    text = "".join(lines)
+    text = re.sub(
+        r"(?<!`)(`+)(?!`)(.*?)\1(?!`)", lambda m: "\n" * m.group(0).count("\n"), text, flags=re.S
+    )
+    links: list[tuple[int, str]] = []
+    for match in re.finditer(r"(?<!!)\[(?:[^\]\\]|\\.)*\]\(", text):
+        target = _link_target(text, match.end())
+        if target is not None:
+            links.append((offset + text.count("\n", 0, match.start()) + 1, target))
+    return links
+
+
+def resolve_link(
+    note: Path, vault: Path, target: str, repos: Mapping[str, Path] | None = None
+) -> tuple[Path, Path]:
+    # meiva:note
+    # Return (file, Git repository root); reject protocols, escapes, and non-files.
+    raw = target.split("#", 1)[0]
+    if not raw or ":" in raw or raw.startswith("//"):
+        raise ValueError("malformed_source")
+    vault = vault.resolve()
+    repo = vault
+    if raw.startswith("/repos/"):
+        parts = raw.lstrip("/").split("/", 2)
+        if len(parts) != 3 or not parts[1] or not parts[2]:
+            raise ValueError("malformed_source")
+        alias, rel = parts[1:]
+        repo = source_repos(vault, repos).get(alias, vault / "repos" / alias).resolve()
+        resolved = (repo / rel).resolve()
+    else:
+        resolved = (
+            (vault / raw.lstrip("/")) if raw.startswith("/") else note.parent / raw
+        ).resolve()
+    if not resolved.is_relative_to(repo):
+        raise ValueError("malformed_source")
+    if not resolved.exists():
+        raise ValueError("missing_path")
+    if not resolved.is_file():
+        raise ValueError("not_a_file")
+    return resolved, repo
+
+
+def _note_vault(note: Path) -> Path:
+    return next((parent.parent for parent in note.parents if parent.name == "memory"), note.parent)
+
+
+def validate_file(
+    file_path: Path, *, vault: Path | None = None, repos: Mapping[str, Path] | None = None
+) -> list[str]:
     """Validate a single OKF concept file. Returns list of error messages."""
     errors: list[str] = []
-    fname = file_path.name
 
     if not file_path.is_file():
         return [f"File not found: {file_path}"]
@@ -169,15 +237,17 @@ def validate_file(file_path: Path) -> list[str]:
     except UnicodeDecodeError:
         return ["File is not valid UTF-8"]
 
-    if fname in _RESERVED:
-        return []
-
     fm, fm_raw, problem = _frontmatter_problem(content)
     if problem is not None:
         return [problem]
     assert fm is not None and fm_raw is not None  # noqa: S101
 
     errors.extend(_optional_okf_field_errors(fm))
+    for line, target in body_links(content):
+        try:
+            resolve_link(file_path, vault or _note_vault(file_path), target, repos)
+        except ValueError as exc:
+            errors.append(f"Line {line}: {exc}: {target}")
 
     for key in _misread_frontmatter_keys(fm_raw):
         errors.append(
@@ -330,8 +400,6 @@ def validate_factchecks(bundle: Path) -> list[str]:
 # must exist. Catches hand-edited pointers to renamed/missing files and
 # duplicate lines (both observed in production, 2026-08).
 
-_POINTER_RE = re.compile(r"\]\(([^)#]+?\.md)\)")
-
 
 def _pointer_target_errors(bundle: Path, seen: dict[str, int]) -> list[str]:
     errors: list[str] = []
@@ -387,11 +455,13 @@ def validate_pointers(bundle: Path) -> list[str]:
         return ["MEMORY.md unreadable"]
 
     seen: dict[str, int] = {}
-    for m in _POINTER_RE.finditer(content):
-        t = m.group(1)
+    for _, t in body_links(content):
+        if not t.endswith(".md"):
+            continue
         if t.startswith(("http", "https", "#")):
             continue
-        seen[t] = seen.get(t, 0) + 1
+        normalized = t.removeprefix("/memory/")
+        seen[normalized] = seen.get(normalized, 0) + 1
 
     return [
         *_pointer_target_errors(bundle, seen),
@@ -403,13 +473,15 @@ def validate_pointers(bundle: Path) -> list[str]:
 # Every finding for the pool at `bundle`, and how many `.md` files were checked.
 def validate_bundle(bundle: Path) -> tuple[list[str], int]:
     errors: list[str] = []
+    vault = bundle
+    bundle = bundle / "memory"
     errors.extend(validate_structure(bundle))
     errors.extend(validate_factchecks(bundle))
     errors.extend(validate_pointers(bundle))
     md_files = sorted(bundle.rglob("*.md"))
 
     for fp in md_files:
-        file_errors = validate_file(fp)
+        file_errors = validate_file(fp, vault=vault)
         for e in file_errors:
             errors.append(f"{fp.name}: {e}")
     return errors, len(md_files)

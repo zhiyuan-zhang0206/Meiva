@@ -66,7 +66,7 @@ def test_gateway_memory_dir_combined_uses_subdirectory(
     machine_identity.set(role="gateway,agent-runner", name="test-host")
     gmd = gateway_memory_dir(roles=machine_identity.role(), home=meiva_home())
     home = meiva_home()
-    assert gmd == home / "gateway" / "memory"
+    assert gmd == home / "gateway" / "vault" / "memory"
 
     from base.paths import memory_dir
 
@@ -81,7 +81,7 @@ def test_gateway_memory_dir_gateway_only_equals_memory_dir(
     machine_identity.set(role="gateway", name="cloud")
     gmd = gateway_memory_dir(roles=machine_identity.role(), home=meiva_home())
     assert gmd == memory_dir(home=meiva_home())
-    assert gmd == meiva_home() / "memory"
+    assert gmd == meiva_home() / "vault" / "memory"
 
 
 def test_pull_main_keep_local_is_noop(tmp_path: Path) -> None:

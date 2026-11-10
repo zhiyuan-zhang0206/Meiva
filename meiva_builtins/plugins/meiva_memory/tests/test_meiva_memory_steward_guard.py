@@ -34,7 +34,7 @@ def _git(repo: Path, *args: str) -> str:
 
 
 def _make_pool(tmp_path: Path) -> Path:
-    pool = tmp_path / ".meiva" / "memory"
+    pool = tmp_path / ".meiva" / "vault" / "memory"
     pool.mkdir(parents=True)
     _git(pool, "init", "-q", "-b", "main")
     _git(pool, "config", "user.email", "steward-test@example.invalid")
@@ -47,7 +47,7 @@ def _make_pool(tmp_path: Path) -> Path:
 
 def _run_steward(pool: Path, path_extra: str | None = None) -> subprocess.CompletedProcess[str]:
     env = os.environ.copy()
-    env["MEIVA_HOME"] = str(pool.parent)
+    env["MEIVA_HOME"] = str(pool.parent.parent)
     env["MEIVA_MACHINE_NAME"] = "testbox"
     if path_extra:
         env["PATH"] = path_extra + os.pathsep + env["PATH"]
@@ -133,21 +133,21 @@ def test_directory_indexes_are_rebuilt_before_the_commit(tmp_path: Path) -> None
     assert "* [Retry rule](retry.md) - Retries above three hurt" in _git(
         pool, "show", "HEAD:topics/index.md"
     )
-    assert "* [topics/](topics/) - 1 notes" in _git(pool, "show", "HEAD:index.md")
+    assert "* [topics/](topics/index.md) - 1 notes" in _git(pool, "show", "HEAD:index.md")
     assert _git(pool, "status", "--porcelain").strip() == ""
 
 
 def test_regenerate_indexes_writes_every_directory_index(unit_home: Path) -> None:
     from meiva_builtins.plugins.meiva_memory import pool_ops
 
-    pool = unit_home / "memory"
+    pool = unit_home / "vault" / "memory"
     (pool / "a" / "b").mkdir(parents=True)
     (pool / "a" / "b" / "deep.md").write_text(_NOTE)
 
     pool_ops.regenerate_indexes(pool)
 
     assert "* [Retry rule](deep.md)" in (pool / "a" / "b" / "index.md").read_text()
-    assert "* [b/](b/) - 1 notes" in (pool / "a" / "index.md").read_text()
+    assert "* [b/](b/index.md) - 1 notes" in (pool / "a" / "index.md").read_text()
     assert (pool / "index.md").is_file()
 
 
@@ -158,19 +158,19 @@ def test_a_new_root_note_passes_the_pool_validator_after_the_steward(tmp_path: P
     import shutil
 
     template = _REPO_ROOT / "meiva_builtins" / "plugins" / "meiva_memory" / "template"
-    pool = tmp_path / ".meiva" / "memory"
+    pool = tmp_path / ".meiva" / "vault" / "memory"
     pool.mkdir(parents=True)
     _git(pool, "init", "-q", "-b", "main")
     _git(pool, "config", "user.email", "steward-test@example.invalid")
     _git(pool, "config", "user.name", "Steward Test")
-    shutil.copy(template / "MEMORY.md", pool / "MEMORY.md")
+    shutil.copy(template / "memory" / "MEMORY.md", pool / "MEMORY.md")
     _git(pool, "add", "-A")
     _git(pool, "commit", "-qm", "seed")
     _git(pool, "checkout", "-qb", "machine-testbox")
     (pool / "rule.md").write_text(_NOTE)
     (pool / "topics").mkdir()
     (pool / "topics" / "retry.md").write_text(_NOTE.replace("Retry rule", "Topic rule"))
-    assert validate.validate_bundle(pool)[0] != []  # the new notes are orphans until indexed
+    assert validate.validate_bundle(pool.parent)[0] != []  # the new notes are orphans until indexed
 
     remote = tmp_path / "remote.git"
     subprocess.run(  # noqa: S603 — fixed argv, test-local fixture repo
@@ -190,7 +190,7 @@ def test_a_new_root_note_passes_the_pool_validator_after_the_steward(tmp_path: P
     assert "## Setup (keep current, do not drop)" in memory_index
     assert "- [Retry rule](rule.md) — Retries above three hurt" in memory_index
     assert "- [topics/](topics/index.md) — 1 notes" in memory_index
-    findings, checked = validate.validate_bundle(pool)
+    findings, checked = validate.validate_bundle(pool.parent)
     assert findings == []
     assert checked > 0
     assert _git(pool, "status", "--porcelain").strip() == ""

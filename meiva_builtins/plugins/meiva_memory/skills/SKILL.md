@@ -21,8 +21,8 @@ arbiter or steward role. Follow the role and scope supplied by the current task.
   paragraph + body, ≤ 8000 chars) with **zero write-time validation or YAML
   frontmatter burden** (legacy `type`, `meiva_agent`, `meiva_machine`,
   `timestamp`, `tags`, or HTML attribution comments are retired — `validate.py`,
-  canonical OKF frontmatter (`description`, `sources`, `verified`, and optional
-  `stale_after`), and `MEMORY.md` index rebuilds run **only during the Meiva
+  canonical OKF frontmatter (`description`, `verified`, and optional
+  `stale_after`), inline body source references, and `MEMORY.md` index rebuilds run **only during the Meiva
   Dream consolidation stage**). Maintain **one canonical dateless file per rule
   or topic slot**: when a ruling or fact changes, overwrite the existing
   canonical note in place (and `git rm` superseded date-suffixed fragments
@@ -45,20 +45,37 @@ arbiter or steward role. Follow the role and scope supplied by the current task.
   health checks, workspace-note curation, schedules, and collaboration
   responsibilities.
 
-During the Meiva Dream consolidation stage (and only then), `validate.py`, OKF
-frontmatter enrichment, and index rebuilds enforce the pool's metadata,
-locality, size, and pointer rules; large source material belongs in the
-configured Vault with a searchable pointer. A successful commit or merge does
-not prove the gateway search index was refreshed. Preserve the user's existing
-authority for writes, messages, schedules, and maintenance.
+During Meiva Dream consolidation, run `validate.py`, enrich OKF metadata, and
+rebuild indexes. Working agents write pure Markdown with zero write-time
+validation or frontmatter burden. Large source material belongs in the Vault
+with a searchable pointer. A successful commit or merge does not prove
+the gateway search index was refreshed. Preserve the user's existing authority
+for writes, messages, schedules, and maintenance.
 
-Every `sources` item must point to an existing file: `repo:<alias>:<file>`
-or a pool-relative file path such as `sources/user-rulings.md`, optionally
-with a `#fragment`. Any file format is supported (Markdown, PDF, HTML, TXT,
-JSONL, Python, TypeScript). Dump external content into a file, or record its
-URL and explanation or dated user ruling in a file, then cite that file.
-Pool-relative paths resolve as `repo:memory:<file>`; paths must stay relative
-and must not traverse `..`. Dream checks existence and rejects directories;
-the standalone validator checks syntax. `sources/*.md` participates in normal
-recursive note collection, indexing and validation; other formats are evidence
-attachments and do not enter the note index.
+## Vault paths and source references
+
+The Vault Git repository is `$MEIVA_HOME/vault` (`$MEIVA_HOME/gateway/vault`
+for the gateway checkout). `meiva.memory.PATH` names its `memory/` subtree;
+Git operations and repository configuration belong at the Vault root. Store
+original evidence in sibling `sources/` or `papers/` directories.
+
+Cite evidence with inline Markdown file links in the note body:
+
+```markdown
+See [ruling](/sources/rulings.jsonl), [paper](/papers/example.pdf),
+[related note](../other/note.md), or [code](/repos/meiva/base/paths/__init__.py).
+```
+
+A leading `/` resolves from the Vault root. `/repos/<alias>/<path>` resolves
+against the mapped code checkout (`--repo alias=/path` for Dream probes);
+other relative links resolve from the note's directory and must stay inside
+Vault. Targets must be files. Fragments are ignored for source verification.
+Links inside fenced or inline code are ignored; protocol targets containing
+`:` (including HTTP, mail, and legacy `repo:`/`db:` anchors) are rejected.
+Archive external evidence as a Vault file before citing it.
+
+Dream checks each source file's Git history against `verified`, recording
+`git_changed`, `missing_path`, `not_a_file`, or `malformed_source` findings.
+Notes without inline file links appear in `missing_okf_notes` with
+`missing_fields: ["sources"]`; `MEMORY.md`, `INHERIT.md`, and `index.md` are
+exempt from that provenance reminder. YAML `sources` is always an error.

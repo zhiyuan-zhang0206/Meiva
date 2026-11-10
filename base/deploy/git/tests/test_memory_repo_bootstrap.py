@@ -76,8 +76,8 @@ def test_bootstrap_from_gateway_clones_bundle_as_machine_branch(tmp_path: Path) 
         )
     assert response.path == "/api/memory/pool"
     assert response.headers["Authorization"] == f"Bearer {_POOL_CREDENTIAL}"
-    assert (target / "MEMORY.md").read_text() == "# shared index\n"
-    assert (target / "health" / "a.md").read_text() == "note"
+    assert (target / "memory" / "MEMORY.md").read_text() == "# shared index\n"
+    assert (target / "memory" / "health" / "a.md").read_text() == "note"
     assert (target / ".git").is_dir()
     assert not (target / "pre-init-leftover").exists()
     assert memory_repo.run_git("branch", "--show-current", cwd=target) == "machine-test-host-2"

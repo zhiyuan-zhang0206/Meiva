@@ -19,8 +19,8 @@ and the `otel_collector_*` paths) derives a path from the home it is handed: it 
 environment and creates nothing, so a test hands in `tmp_path` and the process that binds a
 socket, takes a lock or writes a file creates the directory.
 
-The ten helpers that make a directory or sit on the home itself (`plugins_dir`, `logs_dir`,
-`permissions_helper_app_dir`, `memory_dir`, `gateway_memory_dir`, `workspaces_root`,
+The helpers that make a directory or sit on the home itself (`plugins_dir`, `logs_dir`,
+`permissions_helper_app_dir`, `vault_dir`, `gateway_vault_dir`, `memory_dir`, `gateway_memory_dir`, `workspaces_root`,
 `workspace_dir`, `uploads_dir`, `harness_sessions_dir`, `harness_registrations_dir`) take a
 required **keyword form** `H(*, home)`: the absolute home is created owner-only (0700, as `meiva_home()` creates the
 ambient one) and the helper derives from it, reading no environment; a relative home is refused,
@@ -53,7 +53,10 @@ $MEIVA_HOME/
 ├── otel-collector/             # otelcol-contrib binary + config.yaml + queue/ (sidecar, task #1266)
 ├── backups/db/                 # daily pg_dump --format=custom, UTC-stamped, newest 7 kept
 ├── backups/env/                # .env snapshot taken before each config write
-├── memory/                     # the memory pool git repo
+├── vault/                      # authoring Git repository (machine branch)
+│   ├── memory/                 # shared Markdown notes, meiva.memory.PATH
+│   └── sources/, papers/, repos/ # evidence and repository mappings
+├── gateway/vault/memory/       # combined gateway/runner: consolidated main notes
 ├── workspaces/<agent_id>/      # per-agent working dir (delivered uploads land here)
 ├── uploads/<agent_id>/         # gateway staging of received upload bytes (never the agent's copy)
 ├── chrome-profile/             # the shared headed Chrome's dedicated profile

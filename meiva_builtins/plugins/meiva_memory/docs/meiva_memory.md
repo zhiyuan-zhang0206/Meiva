@@ -29,14 +29,14 @@ this plugin only provides the before_turn wiring + trigger gate. It also bundles
 (Memory Steward maintenance manual — daily merge, health check, note consolidation, query service) +
 `meiva.skills.meiva_memory.consolidation` sub-skill (`meiva memory` CLI daily merge — commit / push / rebuild index).
 
-**Host-side scaffolding and validator**: explicit `meiva memory init` brings up this cluster's memory pool checkouts and lays the plugin's `template/` down inside the authoring one (the `MEMORY.md` index and the pre-commit character-cap guard); the pool's own `validate.py` runs on every commit. Idempotent, non-destructive, and converge and service startup never touch the memory repository: [Memory Pool Scaffold and Validator](memory-pool-scaffold.md).
+**Host-side scaffolding and validator**: explicit `meiva memory init` brings up this cluster's memory pool checkouts and lays the plugin's `template/` down inside the authoring one (the `memory/MEMORY.md` index and the pre-commit character-cap guard); the pool's own `validate.py` runs on every commit. Idempotent, non-destructive, and converge and service startup never touch the memory repository: [Memory Pool Scaffold and Validator](memory-pool-scaffold.md).
 Skill nodes see [Meiva Memory Skills](../skills/README.md).
 
 ## Provided SDK surface
 
 This plugin **owns** the `meiva.memory` namespace — `plugin.py` assembles it and declares it as `SdkNamespace("memory", ...)`. There is no core `meiva/memory.py`; disabling the plugin removes the surface entirely.
 
-- `meiva.memory.PATH` — memory pool root path (`$MEIVA_HOME/memory`, from the bound context's Meiva home each time it is read, so reading it outside a bound context raises), shared by all agents
+- `meiva.memory.PATH` — memory pool root path (`$MEIVA_HOME/vault/memory`, from the bound context's Meiva home each time it is read, so reading it outside a bound context raises), shared by all agents
 - `meiva.memory.search(query, k=5)` — semantic search, returns `list[MemoryMatch]` (`path`, `description`, `tags`, `score`, `chunk`), most relevant first
   (description empty string when absent; tags include the note's `type/<x>` tag so a caller can weigh a hit by its kind)
 - `meiva.memory.PERSONAL_PATH` — the agent's own memory folder (`<workspace>/memory`), resolved from the SDK identity when read
@@ -60,7 +60,10 @@ There is no writer: an agent writes notes with `meiva.files.write` (see the writ
   indexing. Agent overlays cannot change it. Read-only roster/status evaluation
   uses defaults for an absent image without writing; invalid existing data reports
   a plugin load failure and skips the service. The image is sealed at service birth.
-- Pool path: `$MEIVA_HOME/memory`, resolved per access; no `MEIVA_MEMORY_POOL` variable.
+- Optional `lfs_enabled` (false) and `lfs_url` (empty) configure Git LFS at the
+  Vault root when both enabled and given a nonblank URL; see
+  [Vault and optional Git LFS](memory-pool-scaffold.md#vault-and-optional-git-lfs).
+- Pool path: `$MEIVA_HOME/vault/memory`, resolved per access; no `MEIVA_MEMORY_POOL` variable.
 - `memory_write_check_deadline_seconds` (5.0) / `memory_write_dedup_threshold` (0.80): the write check's budget and duplicate threshold
 - `settings.passive_memory_recall_enabled`: passive recall feature toggle (default in [Memory Recall — Passive Memory Recall](memory-recall.md))
 - `settings.agent.memory_inherit_depth`: ancestor hops a descendant inherits `inheritable` blocks from (per-agent, default 1; 0 disables). Size guardrails: `memory_inherit_max_block_chars` / `memory_inherit_max_total_chars` (0 disables one)

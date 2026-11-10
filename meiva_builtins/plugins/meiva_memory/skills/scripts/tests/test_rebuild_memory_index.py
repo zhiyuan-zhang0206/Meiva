@@ -35,8 +35,8 @@ def _note(pool: Path, rel: str, text: str) -> None:
 
 
 def test_the_rebuild_writes_one_pointer_line_per_note_and_directory(tmp_path: Path) -> None:
-    pool = tmp_path / "memory"
-    pool.mkdir()
+    pool = tmp_path / "vault" / "memory"
+    pool.mkdir(parents=True)
     (pool / "MEMORY.md").write_text(
         "Preamble text.\n\n`## Pointers` is only quoted in prose.\n\n## Pointers\n\n- [stale](stale.md) \u2014 old\n",
         encoding="utf-8",
@@ -63,8 +63,8 @@ def test_the_rebuild_writes_one_pointer_line_per_note_and_directory(tmp_path: Pa
 
 
 def test_a_pool_without_an_index_file_gets_one(tmp_path: Path) -> None:
-    pool = tmp_path / "memory"
-    pool.mkdir()
+    pool = tmp_path / "vault" / "memory"
+    pool.mkdir(parents=True)
     _note(pool, "solo.md", "---\ntitle: Solo\ndescription: only note\n---\n")
 
     res = _run(tmp_path)
@@ -76,8 +76,8 @@ def test_a_pool_without_an_index_file_gets_one(tmp_path: Path) -> None:
 
 
 def test_a_missing_heading_appends_after_the_existing_preamble(tmp_path: Path) -> None:
-    pool = tmp_path / "memory"
-    pool.mkdir()
+    pool = tmp_path / "vault" / "memory"
+    pool.mkdir(parents=True)
     (pool / "MEMORY.md").write_text("Setup prose only.\n", encoding="utf-8")
     _note(pool, "solo.md", "---\ntitle: Solo\n---\n")
 
@@ -97,7 +97,7 @@ def test_a_missing_heading_appends_after_the_existing_preamble(tmp_path: Path) -
 def test_a_root_count_that_disagrees_with_the_notes_is_refused(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    pool = tmp_path / "memory"
+    pool = tmp_path / "vault" / "memory"
     (pool / "topics").mkdir(parents=True)
     _note(pool, "topics/a.md", "---\ntitle: A\ndescription: a\n---\n")
     _note(pool, "topics/b.md", "---\ntitle: B\ndescription: b\n---\n")
@@ -112,7 +112,7 @@ def test_a_root_count_that_disagrees_with_the_notes_is_refused(
 
 
 def test_matching_root_counts_pass_without_an_error(tmp_path: Path) -> None:
-    pool = tmp_path / "memory"
+    pool = tmp_path / "vault" / "memory"
     (pool / "topics").mkdir(parents=True)
     _note(pool, "topics/a.md", "---\ntitle: A\ndescription: a\n---\n")
     _note(pool, "MEMORY.md", "## Pointers\n\n\n- [topics/](topics/index.md) \u2014 1 notes\n")

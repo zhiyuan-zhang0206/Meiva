@@ -36,9 +36,10 @@ def make_bundle(source: Path) -> tuple[str, bytes]:
     # Create the actual Git wire artifact served by the gateway pool route.
     # meiva:link base/deploy/git/tests/docs/memory-repo-tests.md
     init_local_repo("main", source)
-    (source / "MEMORY.md").write_text("# shared index\n")
-    (source / "health").mkdir()
-    (source / "health" / "a.md").write_text("note")
+    (source / "memory").mkdir()
+    (source / "memory" / "MEMORY.md").write_text("# shared index\n")
+    (source / "memory" / "health").mkdir()
+    (source / "memory" / "health" / "a.md").write_text("note")
     run_git("add", "-A", cwd=source)
     run_git("commit", "-qm", "shared pool", cwd=source)
     head = run_git("rev-parse", "HEAD", cwd=source)

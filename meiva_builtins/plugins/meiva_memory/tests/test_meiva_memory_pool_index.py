@@ -34,7 +34,7 @@ def test_a_subdirectory_holding_no_note_is_not_listed(tmp_path: Path) -> None:
 
     root = (pool / "index.md").read_text(encoding="utf-8")
     area = (pool / "area" / "index.md").read_text(encoding="utf-8")
-    assert "* [area/](area/) - 1 notes" in root
+    assert "* [area/](area/index.md) - 1 notes" in root
     assert "__pycache__" not in area
     assert "* [Area note](note.md) - Area note" in area
 
@@ -47,8 +47,8 @@ def test_a_subdirectory_whose_notes_are_only_deeper_is_still_listed(tmp_path: Pa
 
     root = (pool / "index.md").read_text(encoding="utf-8")
     area = (pool / "area" / "index.md").read_text(encoding="utf-8")
-    assert "* [area/](area/) - 1 notes" in root
-    assert "* [inner/](inner/) - 1 notes" in area
+    assert "* [area/](area/index.md) - 1 notes" in root
+    assert "* [inner/](inner/index.md) - 1 notes" in area
 
 
 # meiva:note

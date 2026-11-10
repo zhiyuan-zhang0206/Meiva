@@ -12,9 +12,12 @@ from gateway.tests.routers.memory_search.search_support import memory_config
 
 def _init_repo(root: Path) -> str:
     """Real git repo with a note tree; returns its HEAD sha."""
-    (root / "MEMORY.md").write_text("# index")
-    (root / "notes").mkdir()
-    (root / "notes" / "a.md").write_text("a")
+    (root / "memory").mkdir()
+    (root / "memory" / "MEMORY.md").write_text("# index")
+    (root / "memory" / "notes").mkdir()
+    (root / "memory" / "notes" / "a.md").write_text("a")
+    (root / "sources").mkdir()
+    (root / "sources" / "evidence.txt").write_text("evidence")
     for cmd in (
         ["git", "init", "-q", "-b", "main"],
         ["git", "-c", "user.email=a@b", "-c", "user.name=t", "add", "-A"],
@@ -42,7 +45,7 @@ def test_pool_serves_bundle_of_consolidated_checkout(tmp_path: Path) -> None:
     (root / "__pycache__" / "c.pyc").write_bytes(b"x")
     (root / ".DS_Store").write_text("x")
 
-    with gateway_test_client(config=memory_config(root)) as client:
+    with gateway_test_client(config=memory_config(root / "memory")) as client:
         resp = client.get("/api/memory/pool")
 
     assert resp.status_code == 200
@@ -58,8 +61,9 @@ def test_pool_serves_bundle_of_consolidated_checkout(tmp_path: Path) -> None:
         check=True,
         capture_output=True,
     )
-    assert (clone / "MEMORY.md").read_text() == "# index"
-    assert (clone / "notes" / "a.md").read_text() == "a"
+    assert (clone / "memory" / "MEMORY.md").read_text() == "# index"
+    assert (clone / "memory" / "notes" / "a.md").read_text() == "a"
+    assert (clone / "sources" / "evidence.txt").read_text() == "evidence"
     assert not (clone / ".cache").exists()
     assert not (clone / ".githooks").exists()
     assert not (clone / "__pycache__").exists()

@@ -101,7 +101,7 @@ def _dirty(pool: Path) -> str:
 # The operator's optional face list: `<pool>/../memory-faces.txt`, one `name<TAB>ssh-target`
 # row per remote checkout.
 def _faces(pool: Path) -> list[tuple[str, str]]:
-    listing = pool.parent / FACES_FILE
+    listing = pool.parent.parent / FACES_FILE
     if not listing.is_file():
         return []
     rows: list[tuple[str, str]] = []
@@ -136,7 +136,7 @@ def participation_snapshot(pool: Path) -> str:
         lines.append(f"| (other faces) | not configured | — | see {FACES_FILE} |")
     for name, target in faces:
         probe = (
-            "cd ~/.meiva/memory && git rev-parse --short HEAD && "
+            "cd ~/.meiva/vault && git rev-parse --short HEAD && "
             "git status --porcelain | wc -l && git rev-list --count HEAD..origin/main"
         )
         r = subprocess.run(

@@ -208,7 +208,7 @@ def test_converge_ignores_a_dirty_wrong_branch_memory_pool(
     """Converge must not invoke Git in runtime memory paths, even when poisoned."""
     _install_memory_plugin()
     command_runtime.machine.set(role="agent-runner", name="test-runner")
-    memory_pool = paths.memory_dir(home=paths.meiva_home())
+    memory_pool = paths.vault_dir(home=paths.meiva_home())
     _make_dirty_memory_repo(memory_pool, "main")
 
     converge_host.converge_host(
@@ -223,7 +223,7 @@ def test_converge_ignores_a_dirty_wrong_branch_memory_pool(
 
     assert (memory_pool / "tracked.md").read_text(encoding="utf-8") == "dirty\n"
     assert (memory_pool / "untracked.md").read_text(encoding="utf-8") == "untracked\n"
-    assert not (memory_pool / "MEMORY.md").exists()
+    assert not (memory_pool / "memory" / "MEMORY.md").exists()
     assert not (memory_pool / ".githooks").exists()
 
 
@@ -234,14 +234,14 @@ def test_memory_init_returns_a_clean_error_for_the_wrong_branch_guard(
 ) -> None:
     _install_memory_plugin()
     command_runtime.machine.set(role="agent-runner", name="test-runner")
-    _make_dirty_memory_repo(paths.memory_dir(home=paths.meiva_home()), "main")
+    _make_dirty_memory_repo(paths.vault_dir(home=paths.meiva_home()), "main")
     assert (
         memory.cmd_memory_init(machine=command_runtime.machine, facts=_facts(command_runtime)) == 1
     )
 
     stderr = capsys.readouterr().err
     assert (
-        f"✗ {paths.memory_dir(home=paths.meiva_home())} is already a git repo but on branch 'main', "
+        f"✗ {paths.vault_dir(home=paths.meiva_home())} is already a git repo but on branch 'main', "
         "expected 'machine-test-runner'."
     ) in stderr
     assert "Manually switch:" in stderr
@@ -253,14 +253,14 @@ def test_memory_init_seeds_a_dirty_correct_branch_pool(
 ) -> None:
     _install_memory_plugin()
     command_runtime.machine.set(role="agent-runner", name="test-runner")
-    pool = paths.memory_dir(home=paths.meiva_home())
+    pool = paths.vault_dir(home=paths.meiva_home())
     _make_dirty_memory_repo(pool, "machine-test-runner")
 
     assert (
         memory.cmd_memory_init(machine=command_runtime.machine, facts=_facts(command_runtime)) == 0
     )
 
-    assert (pool / "MEMORY.md").is_file()
+    assert (pool / "memory" / "MEMORY.md").is_file()
     assert (pool / ".githooks" / "pre-commit").is_file()
     assert (
         subprocess.run(  # noqa: S603

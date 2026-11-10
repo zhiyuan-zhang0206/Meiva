@@ -66,7 +66,7 @@ Write a note with `meiva.files.write(meiva.memory.PERSONAL_PATH / "name.md", tex
 @functools.cache
 def _documented_pool(home: Path) -> Path:
     """The pool root for `home`, wrapped once so every read of one home is one object."""
-    return _meiva.const(home / "memory", doc=_PATH_DOC)
+    return _meiva.const(base.paths.memory_dir(home=home), doc=_PATH_DOC)
 
 
 def __getattr__(name: str) -> Path:

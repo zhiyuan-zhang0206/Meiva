@@ -6,6 +6,9 @@ another working directory.
 
 ## Steward (multi-host only)
 
+`<VAULT>` is the repository root (`~/.meiva/vault`); shared notes live in
+its `memory/` subtree.
+
 You publish one machine's day of notes. Your prompt carries the arbiter's id.
 
 1. Run `python ../scripts/steward.py -m "<machine> <date>: <short summary>"`.
@@ -19,4 +22,4 @@ You publish one machine's day of notes. Your prompt carries the arbiter's id.
 2. Tell the arbiter your request is ready:
    `meiva.agents.send_message(arbiter_id, "PR ready: branch <your branch>")`.
 3. When the arbiter messages you "rebase now":
-   `git -C <POOL> pull --rebase origin main`.
+   `git -C <VAULT> pull --rebase origin main`.

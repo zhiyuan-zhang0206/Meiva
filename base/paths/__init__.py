@@ -154,26 +154,30 @@ def otel_collector_config(home: Path) -> Path:
     return otel_collector_dir(home) / "config.yaml"
 
 
-def memory_dir(*, home: Path) -> Path:
-    """Per-unit memory git repo root ($MEIVA_HOME/memory). Returns the path only;
-    the caller (memory_repo) runs git init / clone.
+def vault_dir(*, home: Path) -> Path:
+    # meiva:note
+    # Authoring Vault Git checkout, containing notes and their source files.
+    return _root(home) / "vault"
 
-    On a unit that also carries 'gateway' capability, this is the agent-runner's
-    authoring checkout (machine-<name> branch); the gateway indexes from a
-    separate consolidated checkout returned by gateway_memory_dir()."""
-    return _root(home) / "memory"
+
+def memory_dir(*, home: Path) -> Path:
+    # meiva:note
+    # Shared Markdown notes inside the authoring Vault checkout.
+    return vault_dir(home=home) / "memory"
+
+
+def gateway_vault_dir(*, roles: frozenset[str], home: Path) -> Path:
+    # meiva:note
+    # Consolidated Vault checkout, separate from a combined unit's authoring branch.
+    if "agent-runner" in roles:
+        return _root(home) / "gateway" / "vault"
+    return vault_dir(home=home)
 
 
 def gateway_memory_dir(*, roles: frozenset[str], home: Path) -> Path:
-    """Gateway's consolidated memory checkout path. On a combined unit
-    (gateway+agent-runner on one host) this is $MEIVA_HOME/gateway/memory to
-    keep the gateway's index source (main branch) separate from the
-    agent-runner's authoring checkout (machine-<name> branch at memory_dir()).
-    On a gateway-only unit it is the same as memory_dir(). Returns the path
-    only."""
-    if "agent-runner" in roles:
-        return _root(home) / "gateway" / "memory"
-    return memory_dir(home=home)
+    # meiva:note
+    # Shared notes in the gateway's consolidated Vault checkout.
+    return gateway_vault_dir(roles=roles, home=home) / "memory"
 
 
 def skills_dir(home: Path) -> Path:

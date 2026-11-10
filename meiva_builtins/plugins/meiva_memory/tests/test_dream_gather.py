@@ -76,8 +76,8 @@ def _seed_pool_and_code_repo(tmp_path: Path) -> dict[str, object]:
     _git_commit(
         pool,
         "expired.md",
-        '---\ndescription: "Temporary freeze"\nsources:\n  - "repo:meiva:pkg/stable.py"\n'
-        'verified: "2026-09-01"\nstale_after: "2026-11-09"\n---\n# Freeze\n',
+        '---\ndescription: "Temporary freeze"\n'
+        'verified: "2026-09-01"\nstale_after: "2026-11-09"\n---\n# Freeze\n[stable](/repos/meiva/pkg/stable.py)\n',
         "2026-11-03",
         "add expired note",
     )
@@ -89,18 +89,13 @@ def _seed_pool_and_code_repo(tmp_path: Path) -> dict[str, object]:
         "add legacy note",
     )
     canonical_body = (
-        '---\ndescription: "Canonical rule"\nsources:\n'
-        '  - "repo:meiva:pkg/mod.py"\n'
-        '  - "repo:meiva:pkg/stable.py"\n'
-        '  - "repo:meiva:pyproject.toml"\n'
-        '  - "repo:meiva:pkg/missing.py"\n'
-        '  - "repo:monsora:app/main.py"\n'
-        '  - "repo:other:foo.py"\n'
-        '  - "db:meiva_main:schedules#1"\n'
-        '  - "user:ruling"\n'
-        '  - "user:preference"\n'
-        '  - "env:macmini"\n'
-        'verified: "2026-11-01"\n---\n'
+        '---\ndescription: "Canonical rule"\nverified: "2026-11-01"\n---\n'
+        "[mod](/repos/meiva/pkg/mod.py)\n"
+        "[stable](/repos/meiva/pkg/stable.py)\n"
+        "[manifest](/repos/meiva/pyproject.toml)\n"
+        "[missing](/repos/meiva/pkg/missing.py)\n"
+        "[other](/repos/other/foo.py)\n"
+        "[db](db:meiva_main:schedules#1)\n"
     )
     _git_commit(pool, "canonical.md", canonical_body + "# Canonical\n", "2026-11-04", "v1")
     _git_commit(pool, "canonical.md", canonical_body + "# Canonical v2\n", "2026-11-06", "v2")
@@ -155,13 +150,10 @@ def test_gather_signals_detects_source_drift(tmp_path: Path) -> None:
         if is_object_dict(row)
     ]
     assert drift_triples == [
-        ("canonical.md", "repo:meiva:pkg/mod.py", "git_changed"),
-        ("canonical.md", "repo:meiva:pkg/missing.py", "missing_path"),
-        ("canonical.md", "repo:other:foo.py", "unmapped_repo"),
+        ("canonical.md", "/repos/meiva/pkg/mod.py", "git_changed"),
+        ("canonical.md", "/repos/meiva/pkg/missing.py", "missing_path"),
+        ("canonical.md", "/repos/other/foo.py", "missing_path"),
         ("canonical.md", "db:meiva_main:schedules#1", "malformed_source"),
-        ("canonical.md", "user:ruling", "malformed_source"),
-        ("canonical.md", "user:preference", "malformed_source"),
-        ("canonical.md", "env:macmini", "malformed_source"),
     ]
     assert "external_source_probes" not in report
 
@@ -229,32 +221,36 @@ def test_dream_gather_cli_json_and_markdown(
     assert "`note.md` (pure-md)" in md_out
 
 
-def test_file_sources_resolve_pool_files_and_reject_nonfiles(tmp_path: Path) -> None:
-    pool = tmp_path / "pool"
-    (pool / "sources").mkdir(parents=True)
-    for suffix in ("pdf", "txt", "md", "html", "jsonl"):
-        (pool / "sources" / f"evidence.{suffix}").write_text("evidence")
-    sources = [
-        f"sources/evidence.{suffix}#anchor" for suffix in ("pdf", "txt", "md", "html", "jsonl")
-    ]
-    sources += [
-        "repo:memory:sources/evidence.txt",
-        "sources",
-        "https://example.com",
-        "http://example.com",
-        "user:ruling",
-        "db:table",
-        "env:host",
-        "",
-        "#anchor",
-    ]
-    import yaml
+def test_gather_rejects_frontmatter_sources(tmp_path: Path) -> None:
+    (tmp_path / "note.md").write_text("---\nsources: null\n---\n# Rule")
+    with pytest.raises(ValueError, match="frontmatter sources is forbidden"):
+        dream_gather.gather_signals(tmp_path, today=_dt.date(2026, 11, 9))
 
-    (pool / "rule.md").write_text("---\n" + yaml.safe_dump({"sources": sources}) + "---\n# Rule\n")
-    report = dream_gather.gather_signals(pool=pool, today=_dt.date(2026, 11, 10))
-    drifts = report["source_drift"]
-    assert is_object_list(drifts)
-    assert [(row["source"], row["reason"]) for row in drifts if is_object_dict(row)] == [
-        ("sources", "not_a_file"),
-        *[(source, "malformed_source") for source in sources[7:]],
+
+def test_vault_file_history_drives_source_drift(tmp_path: Path) -> None:
+    vault = _init_git_repo(tmp_path / "vault")
+    pool = vault / "memory"
+    pool.mkdir()
+    _git_commit(vault, "sources/ruling.jsonl", "{}\n", "2026-11-05", "evidence")
+    (pool / "rule.md").write_text(
+        '---\nverified: "2026-11-01"\n---\n[Evidence](/sources/ruling.jsonl)'
+    )
+    report = dream_gather.gather_signals(pool, today=_dt.date(2026, 11, 9))
+    assert report["source_drift"] == [
+        {
+            "note": "rule.md",
+            "source": "/sources/ruling.jsonl",
+            "reason": "git_changed",
+            "detail": f"{_repo_head(vault)} on 2026-11-05",
+        }
     ]
+
+
+def _repo_head(repo: Path) -> str:
+    result = run_bounded(
+        ["git", "-C", str(repo), "rev-parse", "--short", "HEAD"],
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    return result.stdout.strip()
