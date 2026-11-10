@@ -87,8 +87,26 @@ and the CLI reports its end on its own:
   one the caller names; the adapter never reads, stores or forwards a secret. The
   registration handle and the runner's home ride because they are on the allowlist —
   a tool the CLI spawns needs the handle to attach as the agent it belongs to.
-- **No system-prompt override.** `system_prompt` is not set; the CLI's own preset
-  stands. The handoff is a message, not a prompt edit.
+- **The CLI's own system prompt, chosen explicitly.** `option_values` passes
+  `system_prompt={"type": "preset", "preset": "claude_code"}` with no `append`. The
+  SDK treats an unset `system_prompt` as `--system-prompt ""`, so omitting the option
+  does not leave "the CLI's preset" in place: the model would get a ~485-character
+  stub ("You are a Claude agent, built on Anthropic's Claude Agent SDK.") instead of
+  Claude Code's default prompt (~29k characters). The bridge does not override the
+  harness's system prompt; selecting the preset explicitly is how it keeps that
+  promise. A preset without `append` adds no CLI flag, and Meiva's own instructions
+  still travel as the handoff message, never as a prompt edit. An SDK whose options
+  lack `system_prompt` fails the session with a `ValueError` rather than falling back
+  to the stub. Every session now carries the default prompt as a prefix. After
+  deployment, new sessions use the default prompt; whether a resumed session switches
+  depends on the CLI's `--system-prompt-snapshot` (default `on`: the prompt "is
+  rendered on the conversation's first request ... and recorded; every later request
+  and resume sends the record as-is"), which has not been measured here.
+- **Subagent text is not forwarded.** `forward_subagent_text` stays off. Turned on,
+  subagent text blocks arrive as `AssistantMessage`s with `parent_tool_use_id`, which
+  `mapping.py` would emit as `AssistantText` and the projector would present as the
+  main agent's reply (visibility parsing, reply fallback). A correct presentation
+  needs a sub-activity event and timeline item kind that do not exist yet.
 - **A killed host leaves the CLI behind.** If the host is SIGKILLed, the bundled
   CLI reparents to init and keeps the session; a supervisor must sweep it by the
   session id in the registry.

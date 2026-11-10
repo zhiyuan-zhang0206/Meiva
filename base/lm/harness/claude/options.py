@@ -15,6 +15,11 @@ from base.lm.harness.claude.config import BridgeConfig
 # it. Everything else is the boundary this adapter promises the CLI: the model's full id, the
 # workspace as the CLI's cwd, the capability list, no approval layer, no MCP servers of ours,
 # partial messages on, and the allowlisted child environment.
+#
+# `system_prompt` is the CLI's own `claude_code` preset, named explicitly. Left unset, the SDK
+# sends `--system-prompt ""` and the model gets a ~485-character stub instead of the harness's
+# default prompt; the preset without `append` sends no flag, so the CLI's prompt stands untouched.
+# An SDK that cannot take the option fails the session rather than quietly running on the stub.
 # meiva:link base/lm/harness/claude/docs/claude.md
 def option_values(
     config: BridgeConfig,
@@ -33,7 +38,10 @@ def option_values(
         if "effort" not in option_fields:
             raise ValueError("the installed Claude SDK does not support the selected effort")
         values["effort"] = config.reasoning_effort
+    if "system_prompt" not in option_fields:
+        raise ValueError("the installed Claude SDK does not support the system prompt preset")
     values.update(
+        system_prompt={"type": "preset", "preset": "claude_code"},
         model=config.model,
         cwd=str(config.cwd),
         tools=None if config.tools is None else list(config.tools),
