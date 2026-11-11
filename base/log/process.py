@@ -20,6 +20,7 @@ __all__ = [
     "buffer_startup_records",
     "flush_startup_records",
     "init_subprocess_logger",
+    "release_process_logging",
     "start_process_logging",
 ]
 
@@ -35,6 +36,11 @@ __all__ = [
 # repeated calls silent-skip, matching their docstring "called once
 # at startup" contract.
 init_done = False
+
+# meiva:note
+# The release of the sinks `start_process_logging` opened in this process, until they are released;
+# `release_process_logging` runs it.
+_release_sinks: Callable[[], None] | None = None
 
 
 # meiva:note
@@ -130,7 +136,7 @@ def start_process_logging(
     announce: Callable[[], None] | None = None,
     home: Path,
 ) -> Callable[[], None] | None:
-    global init_done  # noqa: PLW0603
+    global init_done, _release_sinks  # noqa: PLW0603
     if init_done:
         return None
     logger.configure(extra={"agent_id": "-"})
@@ -142,13 +148,14 @@ def start_process_logging(
     def close() -> None:
         # meiva:note
         # Releasing the owned sinks also releases the process initialization guard.
-        global init_done  # noqa: PLW0603
+        global init_done, _release_sinks  # noqa: PLW0603
         if not sinks:
             return
         for sink in sinks:
             logger.remove(sink)
         sinks.clear()
         init_done = False
+        _release_sinks = None
 
     try:
         sinks.append(_add_stderr_sink_before_settings())
@@ -163,7 +170,18 @@ def start_process_logging(
         if announce is not None:
             announce()
         init_done = True
+        _release_sinks = close
     except BaseException:
         close()
         raise
     return close
+
+
+# meiva:note
+# Release the sinks this process's `start_process_logging` opened and allow it to run again; a no-op
+# when none are open. A process that opened them keeps them until it exits and has no use for this;
+# an embedded caller that cannot hold the release `start_process_logging` returned (a test that
+# runs a schedule round, whose log sinks come from `init_gateway_process`) calls it instead.
+def release_process_logging() -> None:
+    if _release_sinks is not None:
+        _release_sinks()
