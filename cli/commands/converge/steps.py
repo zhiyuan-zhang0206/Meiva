@@ -118,7 +118,9 @@ def migrate_harness_session_records(ctx: ConvergeCtx) -> None:
         print(f"harness session records: migrated {len(migrated)} to one file per harness")
     completed = backfill_record_fields(root)
     if completed:
-        print(f"harness session records: completed the generation or background field of {len(completed)}")
+        print(
+            f"harness session records: completed the generation or background field of {len(completed)}"
+        )
 
 
 def ensure_pg_binaries_step(
