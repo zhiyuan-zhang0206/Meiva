@@ -17,13 +17,11 @@ from base.lm.harness.antigravity.rpc import (
 )
 from base.lm.harness.antigravity.session import (
     AgySession,
-    InboundQueueFullError,
     SessionClosedError,
-    TurnTicket,
 )
 from base.lm.harness.antigravity.transport import AgyTransport, TransportClosedError
 from base.lm.harness.cancel import CancelReport
-from base.lm.harness.session import SessionTotals, TurnOutcome
+from base.lm.harness.session import SessionTotals
 
 __all__ = [
     "DEFAULT_MODEL",
@@ -33,13 +31,10 @@ __all__ = [
     "AntigravityConfig",
     "AntigravityServer",
     "CancelReport",
-    "InboundQueueFullError",
     "ResultFields",
     "SessionClosedError",
     "SessionTotals",
     "TransportClosedError",
-    "TurnOutcome",
-    "TurnTicket",
     "antigravity_rpc",
     "antigravity_server_from_environment",
     "build_handoff",

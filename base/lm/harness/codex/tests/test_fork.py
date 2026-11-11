@@ -7,8 +7,8 @@ import pytest
 
 from base.lm.harness.base_session import ForkSourceUnavailableError
 from base.lm.harness.codex.tests.fake_app_server import FakeAppServer
-from base.lm.harness.codex.tests.support import handoff, start
-from base.lm.harness.events import HandoffInjected, SessionBound
+from base.lm.harness.codex.tests.support import start
+from base.lm.harness.events import SessionBound
 from base.lm.harness.registry import FileSessionRegistry, SessionRecord
 
 SOURCE = 7
@@ -42,7 +42,6 @@ async def test_first_start_clones_the_sources_thread_then_resumes_the_clone(
         registry=registry,
         agent_id=CHILD,
         fork_source_agent_id=SOURCE,
-        handoff_doc=handoff(CHILD),
     )
     try:
         assert server.methods().index("thread/fork") < server.methods().index("thread/resume")
@@ -60,7 +59,6 @@ async def test_first_start_clones_the_sources_thread_then_resumes_the_clone(
         bound = await harness.wait_for(lambda event: isinstance(event, SessionBound))
         assert bound.session_id == "thread-clone"
         assert bound.resumed is True
-        assert harness.of(HandoffInjected) == []
         record = registry.load(CHILD, harness="codex")
         assert record is not None and record.session_id == "thread-clone"
         source = registry.load(SOURCE, harness="codex")

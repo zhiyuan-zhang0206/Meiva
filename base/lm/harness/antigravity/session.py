@@ -27,12 +27,10 @@ from base.lm.harness.antigravity.trajectory import (
 from base.lm.harness.antigravity.transport import AgyTransport, TransportClosedError
 from base.lm.harness.base_session import (
     EVENT_STREAM_END,
+    ActiveTurn,
     BaseHarnessSession,
-    InboundQueueFullError,
     SessionBinding,
     SessionClock,
-    SessionClosedError,
-    TurnTicket,
 )
 from base.lm.harness.cancel import CancelReport, unobserved_cancel
 from base.lm.harness.delivery import HarnessInput, InputPhase, validated_batch
@@ -48,14 +46,13 @@ from base.lm.harness.events import (
     UnsolicitedOutput,
     Usage,
 )
-from base.lm.harness.handoff import Handoff
 from base.lm.harness.process import (
     ChildProbe,
     settle_close,
     snapshot,
     watch_tree,
 )
-from base.lm.harness.session import SessionTotals, TurnOutcome
+from base.lm.harness.session import SessionClosedError, SessionTotals
 
 TRAJECTORY_POLL_SECONDS = 0.5
 
@@ -110,7 +107,7 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
         self._acked_start = False
         self._last_turn: str | None = None
 
-    async def start(self, *, resume: str | None = None, handoff: Handoff | None = None) -> None:
+    async def start(self, *, resume: str | None = None) -> None:
         if self._transport is not None:
             raise RuntimeError("session already started")
         if self._closed:
@@ -122,7 +119,6 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
         self._transport = transport
         await self._enter_tasks()
         self._launch(transport)
-        self._inject_handoff(handoff)
 
     async def close(self, *, reason: str = "closed") -> None:
         if self._closed:
@@ -133,7 +129,6 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
         self._observed.clear()
         transport, self._transport = self._transport, None
         watched = watch_tree(self._probe, transport.pid if transport is not None else None)
-        self._fail_pending(SessionClosedError("session closed"))
         await self._close_tasks()
         if transport is not None:
             await transport.close()
@@ -195,7 +190,7 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
         if entry.images:
             self._apply(self._ledger.rejected(entry.key, "agy cannot start a turn with an image"))
             raise ValueError("Antigravity can carry an image only on a running turn")
-        _ = self.submit(entry.text, input_key=entry.key)
+        _ = self._start_input_turn(entry)
 
     async def _steer_input(self, transport: AgyTransport, entry: HarnessInput) -> None:
         media = [
@@ -267,7 +262,7 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
         self._reader = self._spawn(self._read_loop(transport, generation))
         _ = self._spawn(self._watch(transport, generation))
 
-    async def _begin(self, ticket: TurnTicket) -> None:
+    async def _begin(self, ticket: ActiveTurn) -> None:
         ticket.started_at = self._monotonic()
         self._step_text = {}
         self._turn_steps = []
@@ -401,7 +396,6 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
             )
         )
         self._observed.discard(phantom.turn_id)
-        self._promote(keep_events=True)
 
     async def _on_stream_end(self, transport: AgyTransport) -> None:
         if transport is not self._transport:
@@ -437,7 +431,7 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
         if is_object_dict(update) and not self._replayed(update):
             self._handle_step(ticket, update)
 
-    def _handle_step(self, ticket: TurnTicket, update: dict[str, object]) -> None:
+    def _handle_step(self, ticket: ActiveTurn, update: dict[str, object]) -> None:
         self._ack_start(ticket)
         self._accumulate(update)
         for event in map_step_update(update, turn_id=ticket.turn_id, home=self._home):
@@ -469,7 +463,7 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
     # input became a message of the conversation. No frame carries our id there, so the first one after
     # the write is ours; a CLI that prints no user-input frame is acknowledged by the first activity of
     # the turn instead.
-    def _ack_start(self, ticket: TurnTicket) -> None:
+    def _ack_start(self, ticket: ActiveTurn) -> None:
         if self._acked_start:
             return
         self._acked_start = True
@@ -518,25 +512,13 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
         fields = parse_result(raw if is_object_dict(raw) else {}, home=self._home)
         self._unsolicited(UnsolicitedOutput(source="result", text=fields.text.strip()))
 
-    def _handle_result(self, payload: object, ticket: TurnTicket) -> None:
+    def _handle_result(self, payload: object, ticket: ActiveTurn) -> None:
         if not self._acked_start:
             self._acked_start = True
             self._apply(self._ledger.in_context(ticket.input_key, ticket.turn_id))
         fields = parse_result(payload if is_object_dict(payload) else {}, home=self._home)
         text = "\n".join(ticket.parts).strip() or self._flush_step_text() or fields.text.strip()
         errors = (fields.error,) if fields.error else ()
-        outcome = TurnOutcome(
-            turn_id=ticket.turn_id,
-            text=text,
-            subtype=fields.subtype,
-            is_error=fields.is_error,
-            interrupted=fields.interrupted,
-            stop_reason=fields.status,
-            usage=fields.usage,
-            cost_usd=None,
-            permission_denials=fields.denied_actions,
-            errors=errors,
-        )
         self._totals = self._totals.with_turn(fields.usage, None)
         if fields.session_id:
             self._session_id = fields.session_id
@@ -564,14 +546,13 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
         )
         if fields.interrupted:
             self._emit(InterruptConfirmed(ticket.turn_id, self.generation))
-        self._complete(ticket, outcome)
+        self._complete(ticket)
 
 
 __all__ = [
     "EVENT_STREAM_END",
+    "ActiveTurn",
     "AgySession",
     "CancelReport",
-    "InboundQueueFullError",
     "SessionClosedError",
-    "TurnTicket",
 ]

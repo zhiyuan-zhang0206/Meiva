@@ -16,7 +16,7 @@ from base.lm.harness.codex.turns import (
     unclaimed_text,
 )
 from base.lm.harness.events import TurnCompleted, Usage
-from base.lm.harness.session import SessionTotals, TurnOutcome
+from base.lm.harness.session import SessionTotals
 
 
 def test_every_read_notification_is_classified_by_its_method() -> None:
@@ -208,19 +208,6 @@ def test_a_completed_turn_settles_its_outcome_event_and_totals() -> None:
         record=record,
         totals=SessionTotals(input_tokens=5, turns=2),
     )
-    assert settlement.outcome == TurnOutcome(
-        turn_id="turn-1",
-        text="All clear.",
-        subtype="completed",
-        is_error=False,
-        interrupted=False,
-        stop_reason=None,
-        usage=usage,
-        cost_usd=None,
-        permission_denials=("file change",),
-        num_turns=1,
-        steps=(usage,),
-    )
     assert settlement.completed == TurnCompleted(
         turn_id="turn-1",
         session_id="thread-1",
@@ -250,10 +237,10 @@ def test_a_failed_turn_settles_as_an_error_naming_the_servers_reason() -> None:
         record=TurnRecord(),
         totals=SessionTotals(),
     )
-    assert (settlement.outcome.is_error, settlement.outcome.subtype) == (True, "failed")
-    assert settlement.outcome.stop_reason == "usage limit reached"
+    assert (settlement.completed.is_error, settlement.completed.subtype) == (True, "failed")
+    assert settlement.completed.stop_reason == "usage limit reached"
     assert settlement.completed.session_id is None
-    assert settlement.outcome.usage == Usage()
+    assert settlement.completed.usage == Usage()
 
 
 def test_only_the_server_status_marks_a_turn_interrupted() -> None:
@@ -264,7 +251,7 @@ def test_only_the_server_status_marks_a_turn_interrupted() -> None:
         record=TurnRecord(),
         totals=SessionTotals(),
     )
-    assert (settlement.outcome.interrupted, settlement.outcome.is_error) == (True, True)
+    assert (settlement.completed.interrupted, settlement.completed.is_error) == (True, True)
 
 
 def test_a_step_per_report_names_the_number_of_steps() -> None:
@@ -276,5 +263,5 @@ def test_a_step_per_report_names_the_number_of_steps() -> None:
         record=record,
         totals=SessionTotals(),
     )
-    assert (settlement.outcome.num_turns, settlement.completed.num_turns) == (2, 2)
-    assert len(settlement.outcome.steps) == 2
+    assert (settlement.completed.num_turns, settlement.completed.num_turns) == (2, 2)
+    assert len(settlement.completed.steps) == 2

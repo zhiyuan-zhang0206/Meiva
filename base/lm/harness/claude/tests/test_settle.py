@@ -49,9 +49,9 @@ def test_the_settled_text_is_what_the_turn_streamed() -> None:
         fields(), turn=running(), session_id="sess-init", totals=SessionTotals()
     )
 
-    assert settlement.outcome.text == "one\ntwo"
     assert settlement.completed.text == "one\ntwo"
-    assert settlement.outcome.turn_id == settlement.completed.turn_id == "turn-7"
+    assert settlement.completed.text == "one\ntwo"
+    assert settlement.completed.turn_id == settlement.completed.turn_id == "turn-7"
 
 
 def test_a_turn_that_streamed_nothing_settles_on_the_results_text() -> None:
@@ -59,7 +59,7 @@ def test_a_turn_that_streamed_nothing_settles_on_the_results_text() -> None:
         fields(), turn=running(("  ", " ")), session_id="sess-init", totals=SessionTotals()
     )
 
-    assert settlement.outcome.text == "the result's own text"
+    assert settlement.completed.text == "the result's own text"
 
 
 def test_the_step_count_is_the_larger_of_the_cli_count_and_what_the_session_saw() -> None:
@@ -114,11 +114,11 @@ def test_the_settled_turn_keeps_the_fields_the_result_reported() -> None:
         totals=SessionTotals(),
     )
 
-    assert settlement.outcome.interrupted is True
     assert settlement.completed.interrupted is True
-    assert settlement.outcome.is_error is True
-    assert settlement.outcome.subtype == "error_during_execution"
+    assert settlement.completed.interrupted is True
+    assert settlement.completed.is_error is True
+    assert settlement.completed.subtype == "error_during_execution"
     assert settlement.completed.stop_reason is None
-    assert settlement.outcome.permission_denials == ("Bash",)
+    assert settlement.completed.permission_denials == ("Bash",)
     assert settlement.completed.duration_ms == 1200
     assert settlement.completed.usage == USAGE

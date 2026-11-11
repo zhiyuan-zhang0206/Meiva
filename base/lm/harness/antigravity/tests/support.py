@@ -131,7 +131,6 @@ async def start(
     turns: Sequence[dict[str, Any]] | None = None,
     probe: ScriptedProbe | None = None,
     resume: str | None = None,
-    handoff: Any | None = None,
     agent_id: int | None = None,
     registry: Any | None = None,
     unsolicited: UnsolicitedSink | None = None,
@@ -182,7 +181,7 @@ async def start(
         clock=system_clock(),
         home=home,
     )
-    await session.start(resume=resume, handoff=handoff)
+    await session.start(resume=resume)
     return Harness(session, received, argv, child, rpc)
 
 

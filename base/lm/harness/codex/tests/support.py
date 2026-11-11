@@ -14,7 +14,6 @@ from base.lm.harness.codex.frames import as_object, as_text
 from base.lm.harness.codex.session import CodexSession
 from base.lm.harness.codex.tests.fake_app_server import CODEX_PID, FakeAppServer
 from base.lm.harness.events import UnsolicitedSink
-from base.lm.harness.handoff import Handoff
 from base.lm.harness.registry import FileSessionRegistry
 
 
@@ -77,6 +76,11 @@ class Harness:
     def of(self, kind: type) -> list[Any]:
         return [event for event in self.events if isinstance(event, kind)]
 
+    async def wait_until(self, predicate: Callable[[], bool], *, timeout: float = 2.0) -> None:
+        async with asyncio.timeout(timeout):
+            while not predicate():
+                await asyncio.sleep(0.002)
+
     async def wait_for(self, predicate: Callable[[Any], bool], *, timeout: float = 2.0) -> Any:
         deadline = asyncio.get_running_loop().time() + timeout
         while asyncio.get_running_loop().time() < deadline:
@@ -106,22 +110,12 @@ def config(tmp_path: Path, **overrides: Any) -> CodexConfig:
     return CodexConfig(**values)
 
 
-def handoff(agent_id: int = 7, *, instruction: str = "Reply with one word.") -> Handoff:
-    return Handoff(
-        agent_id=agent_id,
-        instruction=instruction,
-        machine="ubuntu",
-        workspace=Path("workspace"),
-    )
-
-
 async def start(
     tmp_path: Path,
     *,
     server: FakeAppServer | None = None,
     probe: ScriptedProbe | None = None,
     resume: str | None = None,
-    handoff_doc: Handoff | None = None,
     agent_id: int | None = None,
     registry: FileSessionRegistry | None = None,
     unsolicited: UnsolicitedSink | None = None,
@@ -143,5 +137,5 @@ async def start(
         probe=scripted_probe,
         clock=clock if clock is not None else system_clock(),
     )
-    await session.start(resume=resume, handoff=handoff_doc)
+    await session.start(resume=resume)
     return Harness(session, fake, scripted_probe)

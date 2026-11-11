@@ -7,7 +7,6 @@ from pathlib import Path
 from typing import Any, cast
 
 from base.clock.tests.fakes import system_clock
-from base.lm.harness import Handoff
 from base.lm.harness.base_session import SessionBinding
 from base.lm.harness.claude.config import BridgeConfig
 from base.lm.harness.claude.delivery import key_uuid
@@ -129,7 +128,6 @@ async def start(
     scripts: list[list[Any]] | None = None,
     probe: ScriptedProbe | None = None,
     resume: str | None = None,
-    handoff: Handoff | None = None,
     agent_id: int | None = None,
     registry: FileSessionRegistry | None = None,
     observe_pid: bool = True,
@@ -167,5 +165,5 @@ async def start(
         probe=scripted_probe,
         clock=system_clock(),
     )
-    await session.start(resume=resume, handoff=handoff)
+    await session.start(resume=resume)
     return Harness(session, sdk, scripted_probe)

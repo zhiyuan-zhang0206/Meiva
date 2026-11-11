@@ -38,7 +38,7 @@ respawn). An adapter drops a frame from an older process.
 
 A turn ending does not settle an input: only `InputInContext`, `InputRejected` or `InputLost` does.
 A harness-started turn is a first-class turn: its text, tools and end are attributed to it, never to
-a neighbouring turn, and the next turn the graph submits waits until it ends.
+a neighbouring turn, and an input delivered meanwhile is handed to that turn or refused, never started beside it.
 
 ## Shared pieces
 
@@ -46,7 +46,7 @@ a neighbouring turn, and the next turn the graph submits waits until it ends.
   repeated fact is silent), the provider-turn-name to local-turn-id table, exactly-once turn end,
   and the generation. Each transition returns the next ledger and the events it announces.
 - `base_session.py` — owns the ledger, applies steps, and gates
-  turn starts on `_idle()` (no ticket, no harness-started turn, no hold).
+  the start of a turn of ours on `_idle()` (no running turn of ours, no harness-started turn, no hold).
 - Adapters only translate protocol frames to ledger calls.
 
 ## The bridge's event pump

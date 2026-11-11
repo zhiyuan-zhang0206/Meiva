@@ -48,20 +48,3 @@ class SessionTotals:
             per_turn_usage=self.per_turn_usage and measured,
             cost_known=self.cost_known and turn_cost is not None,
         )
-
-
-@dataclass(frozen=True, slots=True)
-class TurnOutcome:
-    turn_id: str
-    text: str
-    subtype: str
-    is_error: bool
-    interrupted: bool
-    stop_reason: str | None
-    usage: Usage
-    cost_usd: float | None
-    permission_denials: tuple[str, ...]
-    num_turns: int = 1
-    steps: tuple[Usage, ...] = ()
-    per_turn_usage: bool = True
-    errors: tuple[str, ...] = ()

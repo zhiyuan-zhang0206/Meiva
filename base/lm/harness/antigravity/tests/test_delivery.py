@@ -16,6 +16,7 @@ from base.lm.harness.antigravity.trajectory import (
     phantom_action,
 )
 from base.lm.harness.delivery import HarnessInput, ImageBlock
+from base.lm.harness.delivery.tests.sent import send
 from base.lm.harness.events import (
     AckSignal,
     AssistantText,
@@ -83,7 +84,7 @@ async def test_an_input_for_a_running_turn_carries_its_id_and_enters_the_context
 ) -> None:
     harness = await start(tmp_path, turns=[{"hang": True}])
     try:
-        ticket = harness.session.submit("work", key="first")
+        ticket = await send(harness, "work", key="first")
         await running(harness, ["work"])
         await harness.session.deliver([HarnessInput("steer-1", "also this")])
         [sent] = harness.rpc_payloads()
@@ -103,7 +104,7 @@ async def test_an_input_for_a_running_turn_carries_its_id_and_enters_the_context
 async def test_images_ride_in_the_media_field(tmp_path: Path) -> None:
     harness = await start(tmp_path, turns=[{"hang": True}])
     try:
-        _ = harness.session.submit("work")
+        _ = await send(harness, "work")
         await running(harness, ["work"])
         image = ImageBlock("image/png", "aGk=")
         await harness.session.deliver([HarnessInput("img-1", "look", (image,))])
@@ -118,7 +119,7 @@ async def test_an_input_for_an_idle_conversation_starts_a_turn_on_stdin_not_a_ph
 ) -> None:
     harness = await start(tmp_path, turns=[say("one"), say("two")])
     try:
-        first = harness.session.submit("one", key="first")
+        first = await send(harness, "one", key="first")
         _ = await first.outcome()
         await harness.session.deliver([HarnessInput("late", "next input")])
         await harness.wait_until(lambda: harness.messages() == ["one", "next input"])
@@ -134,7 +135,7 @@ async def test_an_input_that_finds_our_turn_just_finished_is_refused_not_sent_in
 ) -> None:
     harness = await start(tmp_path, turns=[{**say("one"), "idle_before_result": 0.4}, say("two")])
     try:
-        first = harness.session.submit("one", key="first")
+        first = await send(harness, "one", key="first")
         await harness.wait_until(lambda: harness.messages() == ["one"])
         await asyncio.sleep(0.2)
         await harness.session.deliver([HarnessInput("late", "next input")])
@@ -155,7 +156,7 @@ async def test_a_phantom_turn_is_observed_and_its_answer_does_not_leak_into_the_
         extra_environ={"FAKE_AGY_STALE_CALLS": "1", "FAKE_AGY_PHANTOM_SECONDS": "1.3"},
     )
     try:
-        first = harness.session.submit("one", key="first")
+        first = await send(harness, "one", key="first")
         _ = await first.outcome()
         await harness.session.deliver([HarnessInput("late", "late input")])
         assert [p["clientMessageId"] for p in harness.rpc_payloads()] == ["late"]
@@ -170,7 +171,7 @@ async def test_a_phantom_turn_is_observed_and_its_answer_does_not_leak_into_the_
         assert [e.text for e in harness.of(AssistantText) if e.turn_id == phantom.turn_id] == [
             "phantom answer to late input"
         ]
-        second = harness.session.submit("two", key="second")
+        second = await send(harness, "two", key="second")
         outcome = await second.outcome()
         assert outcome.text == "two", "the phantom turn's replayed steps are not this turn's"
         completed = await seen(harness, TurnCompleted)
@@ -186,7 +187,7 @@ async def test_a_trajectory_of_an_unexpected_shape_fails_the_delivery(tmp_path: 
         extra_environ={"FAKE_AGY_BAD_TRAJECTORY": "1"},
     )
     try:
-        _ = harness.session.submit("work")
+        _ = await send(harness, "work")
         await running(harness, ["work"])
         with pytest.raises(AgyInterfaceError):
             await harness.session.deliver([HarnessInput("k", "x")])
@@ -215,7 +216,7 @@ async def test_closing_with_a_phantom_turn_open_stops_the_trajectory_poll(tmp_pa
         turns=[say("one")],
         extra_environ={"FAKE_AGY_STALE_CALLS": "1", "FAKE_AGY_PHANTOM_SECONDS": "30"},
     )
-    first = harness.session.submit("one", key="first")
+    first = await send(harness, "one", key="first")
     _ = await first.outcome()
     await harness.session.deliver([HarnessInput("late", "late input")])
     await harness.wait_for(lambda e: isinstance(e, TurnStarted) and e.origin is TurnOrigin.HARNESS)
@@ -228,7 +229,7 @@ async def test_closing_with_an_unsettled_input_stops_the_trajectory_poll(tmp_pat
     harness = await start(
         tmp_path, turns=[{"hang": True}], extra_environ={"FAKE_AGY_BAD_TRAJECTORY": "1"}
     )
-    _ = harness.session.submit("work")
+    _ = await send(harness, "work")
     await harness.wait_until(lambda: harness.messages() == ["work"])
     assert _watchers()
     await asyncio.wait_for(harness.stop(), 10)

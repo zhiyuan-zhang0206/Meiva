@@ -236,7 +236,6 @@ check-typed-exception = true
 "**/tests/*" = ["S101", "PLR2004", "SLF001", "ARG001", "ARG002", "ANN", "FBT", "RUF001", "RUF002", "RUF003"]
 "demos/*" = ["RUF001", "RUF002", "RUF003", "ARG001", "S108"]
 # This demo's deliverable is its terminal report; a log sink would bury it.
-"demos/claude-sdk-bridge/bridge_demo.py" = ["T201"]
 # The fake SDK must expose the SDK's own constructor name, which is a class name
 # used as a method.
 "base/lm/harness/claude/tests/fake_sdk.py" = ["N802"]

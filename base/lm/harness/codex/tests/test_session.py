@@ -9,9 +9,9 @@ import pytest
 
 from base.lm.harness.codex.frames import JsonRpcError
 from base.lm.harness.codex.tests.fake_app_server import FakeAppServer
-from base.lm.harness.codex.tests.support import handoff, start
+from base.lm.harness.codex.tests.support import start
+from base.lm.harness.delivery.tests.sent import send
 from base.lm.harness.events import (
-    HandoffInjected,
     SessionBound,
     SessionStarted,
     ToolResult,
@@ -34,7 +34,7 @@ async def test_selected_model_and_effort_reach_every_codex_turn(
     )
     try:
         for index in range(2):
-            ticket = harness.session.submit(f"turn {index}")
+            ticket = await send(harness, f"turn {index}")
             await harness.turn_started(index + 1)
             params = [
                 params for method, params in harness.server.requests if method == "turn/start"
@@ -67,7 +67,7 @@ async def test_start_binds_the_thread_and_handshakes(tmp_path: Path) -> None:
 async def test_turn_streams_text_and_reports_usage(tmp_path: Path) -> None:
     harness = await start(tmp_path)
     try:
-        ticket = harness.session.submit("do the thing")
+        ticket = await send(harness, "do the thing")
         await harness.turn_started()
         harness.server.delta("PO")
         harness.server.delta("NG")
@@ -94,7 +94,7 @@ async def test_turn_streams_text_and_reports_usage(tmp_path: Path) -> None:
 async def test_completion_text_prefers_the_final_answer(tmp_path: Path) -> None:
     harness = await start(tmp_path)
     try:
-        ticket = harness.session.submit("explain")
+        ticket = await send(harness, "explain")
         await harness.turn_started()
         harness.server.message("I will look at the file.", phase="commentary")
         harness.server.message("The file defines one function.", phase="final_answer")
@@ -111,7 +111,7 @@ async def test_collaboration_tool_reports_both_items_during_the_turn(
 ) -> None:
     harness = await start(tmp_path)
     try:
-        ticket = harness.session.submit("Delegate the work")
+        ticket = await send(harness, "Delegate the work")
         await harness.turn_started()
         item: dict[str, object] = {
             "type": "collabAgentToolCall",
@@ -162,7 +162,7 @@ async def test_collaboration_tool_reports_both_items_during_the_turn(
 async def test_failed_turn_reports_the_server_error(tmp_path: Path) -> None:
     harness = await start(tmp_path)
     try:
-        ticket = harness.session.submit("do the thing")
+        ticket = await send(harness, "do the thing")
         await harness.turn_started()
         harness.server.complete(status="failed", error="usage limit reached")
         outcome = await asyncio.wait_for(ticket.outcome(), 2)
@@ -173,7 +173,7 @@ async def test_failed_turn_reports_the_server_error(tmp_path: Path) -> None:
         await harness.stop()
 
 
-async def test_resume_uses_the_registry_and_skips_the_handoff(tmp_path: Path) -> None:
+async def test_resume_uses_the_registry(tmp_path: Path) -> None:
     registry = FileSessionRegistry(tmp_path / "registry")
     now = datetime.now(UTC).isoformat(timespec="seconds")
     registry.save(
@@ -187,7 +187,7 @@ async def test_resume_uses_the_registry_and_skips_the_handoff(tmp_path: Path) ->
             harness="codex",
         )
     )
-    harness = await start(tmp_path, registry=registry, agent_id=7, handoff_doc=handoff())
+    harness = await start(tmp_path, registry=registry, agent_id=7)
     try:
         bound = await harness.wait_for(lambda event: isinstance(event, SessionBound))
         assert harness.session.resumed is True
@@ -198,8 +198,6 @@ async def test_resume_uses_the_registry_and_skips_the_handoff(tmp_path: Path) ->
         assert resume_params["sandbox"] == "danger-full-access"
         assert resume_params["config"] == {"shell_environment_policy": {"inherit": "all"}}
         assert "thread/start" not in harness.server.methods()
-        assert harness.session.handoff_ticket is None
-        assert harness.of(HandoffInjected) == []
         assert bound.resumed is True
         record = registry.load(7, harness="codex")
         assert record is not None
@@ -209,7 +207,7 @@ async def test_resume_uses_the_registry_and_skips_the_handoff(tmp_path: Path) ->
         await harness.stop()
 
 
-async def test_resume_failure_starts_a_new_thread_and_injects_the_handoff(
+async def test_a_resume_failure_is_raised_and_the_record_kept(
     tmp_path: Path,
 ) -> None:
     registry = FileSessionRegistry(tmp_path / "registry")
@@ -227,7 +225,7 @@ async def test_resume_failure_starts_a_new_thread_and_injects_the_handoff(
     )
     server = FakeAppServer(resume_fails=True)
     with pytest.raises(JsonRpcError, match="thread not found"):
-        await start(tmp_path, server=server, registry=registry, agent_id=7, handoff_doc=handoff())
+        await start(tmp_path, server=server, registry=registry, agent_id=7)
     assert "thread/resume" in server.methods()
     assert "thread/start" not in server.methods()
     record = registry.load(7, harness="codex")
@@ -253,7 +251,7 @@ async def test_stale_resumed_turn_notification_is_replaced_by_authoritative_turn
 ) -> None:
     harness = await start(tmp_path)
     try:
-        ticket = harness.session.submit("heartbeat check-in")
+        ticket = await send(harness, "heartbeat check-in")
         harness.server.usage(
             input_tokens=999,
             output_tokens=99,
@@ -276,5 +274,41 @@ async def test_stale_resumed_turn_notification_is_replaced_by_authoritative_turn
         assert outcome.usage.input_tokens == 120
         assert outcome.usage.output_tokens == 15
         assert outcome.usage.cache_read_input_tokens == 80
+    finally:
+        await harness.stop()
+
+
+async def test_usage_accumulates_across_turns(tmp_path: Path) -> None:
+    harness = await start(tmp_path)
+    try:
+        first = await send(harness, "one")
+        await harness.turn_started(1)
+        harness.server.usage(input_tokens=10, output_tokens=2, cached_input_tokens=4)
+        harness.server.message("a")
+        harness.server.complete()
+        await first.outcome()
+        second = await send(harness, "two")
+        await harness.turn_started(2)
+        harness.server.usage(input_tokens=20, output_tokens=3, cached_input_tokens=6)
+        harness.server.message("b")
+        harness.server.complete()
+        await second.outcome()
+        totals = harness.session.totals
+        assert totals.turns == 2
+        assert totals.input_tokens == 30
+        assert totals.output_tokens == 5
+        assert totals.cache_read_input_tokens == 10
+    finally:
+        await harness.stop()
+
+
+async def test_droppable_deltas_are_dropped_under_backpressure(tmp_path: Path) -> None:
+    harness = await start(tmp_path, max_buffered_events=1)
+    try:
+        await send(harness, "one")
+        await harness.turn_started()
+        for index in range(5):
+            harness.server.delta(str(index))
+        assert harness.session.dropped_deltas > 0
     finally:
         await harness.stop()

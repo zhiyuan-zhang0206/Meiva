@@ -69,7 +69,7 @@ is the frontend.
 ## Consequences
 
 - Every adapter must produce the unified events; the graph (PR 2) consumes events, not return values.
-- Revision (graph change): `steer()`, `ForegroundSteering`, `ForegroundAccepted` and `InputLostError` are gone. The graph reads events from `HarnessBridge.subscribe()` and delivers with `deliver()`; inbox rows share one in-flight state (`claimed`) and are settled by ACK 2, a refusal or a loss. Adapters keep tickets internally for the handoff and the idle start; removing them is a later cleanup.
+- Revision (graph change): `steer()`, `ForegroundSteering`, `ForegroundAccepted` and `InputLostError` are gone. The graph reads events from `HarnessBridge.subscribe()` and delivers with `deliver()`; inbox rows share one in-flight state (`claimed`) and are settled by ACK 2, a refusal or a loss. The adapters no longer have tickets: `submit()`, the turn queue, completed-key replay, `HandoffInjected` and Claude's turn alias are gone. An input delivered to an idle Codex or Antigravity session starts a turn through the same `deliver()` (an internal `ActiveTurn` record holds the turn's provider name for interrupts); Claude keeps no per-turn record of its own. A turn is reported only by its events.
 - The Antigravity trajectory and message-queue interfaces and the Codex rollout format are not public
   contracts; the adapters fail explicitly when a shape differs.
 - CLI processes with unfinished background tasks or timers must not be idle-reaped; that gap is handled

@@ -44,17 +44,6 @@ from base.lm.harness.tests.roots import bridge_root_values
 from base.lm.harness.wiring import HANDOFF_INSTRUCTION, bridge_for, open_session
 
 
-class FakeTicket:
-    deduplicated: bool = False
-    settled: bool = False
-
-    def __init__(self, turn_id: str) -> None:
-        self.turn_id = turn_id
-
-    async def outcome(self) -> TurnCompleted:
-        return completion(self.turn_id, "")
-
-
 def completion(turn_id: str, text: str, usage: Usage | None = None) -> TurnCompleted:
     return TurnCompleted(
         turn_id=turn_id,
@@ -74,7 +63,7 @@ def completion(turn_id: str, text: str, usage: Usage | None = None) -> TurnCompl
 
 
 # meiva:note
-# The adapter contract without a provider: start records what it was handed, submit
+# The adapter contract without a provider: start records what it was handed, accept
 # queues that turn's completion in order, and the event stream is the queue. That is
 # enough to check the bridge's half — which turn it waits for, what it shows, and
 # what it counts.
@@ -92,7 +81,6 @@ class FakeSession:
         self.closed = False
         self.close_reason: str | None = None
         self.handoff: Handoff | None = None
-        self.handoff_ticket: FakeTicket | None = None
         self.submitted: list[tuple[str, str | None, str]] = []
         self.session_id = None
         self.resumed = resumed
@@ -110,21 +98,18 @@ class FakeSession:
         # meiva:link agent/graph/docs/harness-turn.md
         self._during = tuple(during)
 
-    async def start(self, *, resume: str | None = None, handoff: Handoff | None = None) -> None:
+    async def start(self, *, resume: str | None = None) -> None:
         self.started += 1
-        self.handoff = handoff
         self.session_id = "session-1"
         self._queue.append(
             SessionStarted(session_id="session-1", model="claude-sonnet-5-5", cwd="/w")
         )
-        if handoff is not None and self._opening is not None:
-            self.handoff_ticket = self.submit(handoff.render(), key="handoff")
 
     async def deliver(self, inputs: Sequence[HarnessInput]) -> None:
         for item in inputs:
-            _ = self.submit(item.text, key=item.key)
+            _ = self.accept(item.text, key=item.key)
 
-    def submit(self, text: str, *, key: str | None = None) -> FakeTicket:
+    def accept(self, text: str, *, key: str | None = None) -> None:
         self._n += 1
         turn_id = f"t{self._n}"
         self.submitted.append((text, key, turn_id))
@@ -140,7 +125,6 @@ class FakeSession:
             self._queue.append(completion(turn_id, f"reply-{turn_id}"))
         else:
             self._queue.append(SessionFaulted(turn_id=turn_id, error=self._fault))
-        return FakeTicket(turn_id)
 
     def events(self) -> AsyncIterator[BridgeEvent]:
         async def stream() -> AsyncIterator[BridgeEvent]:
@@ -161,7 +145,7 @@ class FakeSession:
 
 
 class RefusingSession(FakeSession):
-    def submit(self, text: str, *, key: str | None = None) -> FakeTicket:
+    def accept(self, text: str, *, key: str | None = None) -> None:
         raise RuntimeError("queue is full")
 
 
@@ -664,11 +648,11 @@ async def test_session_model_and_error_detail_surface_through_bridge() -> None:
     class ModelOnStartSession(FakeSession):
         model: str | None = "gpt-6.1-sol"
 
-        async def start(self, *, resume: str | None = None, handoff: Handoff | None = None) -> None:
+        async def start(self, *, resume: str | None = None) -> None:
             self.started += 1
             self.session_id = "session-1"
 
-        def submit(self, text: str, *, key: str | None = None) -> FakeTicket:
+        def accept(self, text: str, *, key: str | None = None) -> None:
             self._n += 1
             turn_id = f"t{self._n}"
             if self._n == 2:
@@ -692,7 +676,6 @@ async def test_session_model_and_error_detail_surface_through_bridge() -> None:
                 )
             else:
                 self._queue.append(completion(turn_id, "ok"))
-            return FakeTicket(turn_id)
 
     session = ModelOnStartSession()
     bridge = make_bridge(session)

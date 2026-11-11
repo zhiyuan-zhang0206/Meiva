@@ -6,10 +6,9 @@
 # settles.
 from __future__ import annotations
 
-from base.lm.harness.session.turn import SessionTotals, TurnOutcome
+from base.lm.harness.session.turn import SessionTotals
 from base.lm.harness.session.vocabulary import (
     EVENT_STREAM_END,
-    InboundQueueFullError,
     SessionClock,
     SessionClosedError,
     SessionConfig,
@@ -17,10 +16,8 @@ from base.lm.harness.session.vocabulary import (
 
 __all__ = [
     "EVENT_STREAM_END",
-    "InboundQueueFullError",
     "SessionClock",
     "SessionClosedError",
     "SessionConfig",
     "SessionTotals",
-    "TurnOutcome",
 ]

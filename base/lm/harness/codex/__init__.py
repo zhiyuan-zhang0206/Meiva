@@ -4,20 +4,16 @@ from base.lm.harness.cancel import CancelReport
 from base.lm.harness.codex.config import DEFAULT_BINARY, CodexConfig
 from base.lm.harness.codex.frames import JsonRpcError, TransportClosedError
 from base.lm.harness.session import (
-    InboundQueueFullError,
     SessionClosedError,
     SessionTotals,
-    TurnOutcome,
 )
 
 __all__ = [
     "DEFAULT_BINARY",
     "CancelReport",
     "CodexConfig",
-    "InboundQueueFullError",
     "JsonRpcError",
     "SessionClosedError",
     "SessionTotals",
     "TransportClosedError",
-    "TurnOutcome",
 ]

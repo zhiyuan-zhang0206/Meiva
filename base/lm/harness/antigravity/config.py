@@ -36,9 +36,7 @@ class AntigravityConfig:
     skip_permissions: bool = False
     extra_args: tuple[str, ...] = ()
     cancel_settle_seconds: float = 5.0
-    max_pending_turns: int = 32
     max_buffered_events: int = 256
-    dedupe_window: int = 256
 
     def command(self, *, resume: str | None) -> tuple[str, ...]:
         argv = [

@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from base.lm.harness.antigravity.tests.support import say, start
+from base.lm.harness.delivery.tests.sent import send
 from base.lm.harness.events import (
     AssistantText,
     SessionBound,
@@ -19,7 +20,7 @@ async def test_a_turn_streams_text_and_completes(tmp_path: Path) -> None:
         tmp_path, turns=[say("hello")], agent_id=7, registry=FileSessionRegistry(tmp_path / "reg")
     )
     try:
-        ticket = harness.session.submit("hi")
+        ticket = await send(harness, "hi")
         outcome = await ticket.outcome()
         assert outcome.text == "hello"
         assert outcome.is_error is False
@@ -47,8 +48,8 @@ async def test_close_ends_the_event_stream(tmp_path: Path) -> None:
 async def test_two_turns_reuse_one_process(tmp_path: Path) -> None:
     harness = await start(tmp_path, turns=[say("one"), say("two")])
     try:
-        first = await harness.session.submit("a").outcome()
-        second = await harness.session.submit("b").outcome()
+        first = await (await send(harness, "a")).outcome()
+        second = await (await send(harness, "b")).outcome()
         assert (first.text, second.text) == ("one", "two")
         assert len(harness.argv_seen()) > 0
         assert "--conversation" not in harness.argv_seen()
@@ -68,7 +69,7 @@ async def test_turn_failure_populates_errors(tmp_path: Path) -> None:
     }
     harness = await start(tmp_path, turns=[turn_spec])
     try:
-        ticket = harness.session.submit("fail please")
+        ticket = await send(harness, "fail please")
         outcome = await ticket.outcome()
         assert outcome.is_error is True
         assert outcome.errors == ("API error (attempt 1): 500 Internal Server Error",)

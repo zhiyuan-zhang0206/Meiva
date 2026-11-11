@@ -17,16 +17,16 @@ directly: the uniform surface is this adapter, not a shared wire protocol.
    stdio://`, performs `initialize` + `initialized`, then `thread/start` — or
    `thread/resume` with the recorded thread id. A rejected `thread/resume` fails
    fast instead of silently starting a fresh thread.
-2. **Inject the handoff as the first message.** `Handoff` renders the
-   six-section document; a fresh thread submits it as its first turn. A resumed
-   thread is not re-injected. The handoff directs macOS Codex Computer Use to
+2. **The handoff rides the first input.** The bridge puts the rendered
+   six-section document in front of the first input of a fresh thread; a resumed
+   thread gets none. The handoff directs macOS Codex Computer Use to
    paste non-ASCII text and verify the field value. Native `typeText` dropped
    the Chinese characters in a mixed-script Chrome input while plain-text
    paste preserved the full input.
 3. **Map notifications back and persist the identity pair.** `events()` is the
    single outbound stream, and the registry writes `agent_id ↔ thread_id`. When
    `turn/start` returns the authoritative Codex `turn.id`, `CodexSession` binds
-   the active ticket to that id and discards any stale notification state from an
+   the running turn to that id and discards any stale notification state from an
    earlier turn replayed during `thread/resume`.
 
 ## Modules
@@ -77,9 +77,7 @@ caller opts into it.
 | `api_key_mode` | `False` | off means the child gets no credential variables; on is the explicit choice of per-token billing |
 | `startup_timeout_seconds` | 120 | `initialize`/`thread/*` are local round trips; a wedged server is a fault |
 | `cancel_settle_seconds` | 5 | reaping is milliseconds; 5s tolerates load without hiding a leak |
-| `max_pending_turns` | 32 | overflow returns the message to its durable owner instead of growing memory |
 | `max_buffered_events` | 256 | text deltas are droppable past this; control events are bounded by tool-call count |
-| `dedupe_window` | 256 | a redelivery inside the window replays the recorded outcome |
 | `MAX_FRAME_BYTES` (`transport.py`) | `256 MiB` | `thread/resume` returns a long-lived agent's entire accumulated thread JSON on a single stdout line (39.4 MiB observed on agent #6111); `StdioAppServer` reads 64 KiB chunks into a `bytearray` without `StreamReader.readline()`'s separator limit while capping one frame at 256 MiB so an unterminated stream from a wedged child cannot grow memory without bound |
 
 ## Foreground input
@@ -104,7 +102,7 @@ app-server 0.166 and is not a published interface).
 
 A `turn/started` for a turn this session did not start, with `status: inProgress`, while none of ours runs,
 is observed as a harness turn (`TurnStarted(origin=HARNESS, cause=UNKNOWN)`): its text, tools and usage are
-attributed to it, it completes once, and the next turn we submit waits for it. Frames are attributed by
+attributed to it, it completes once, and an input delivered meanwhile is steered into it. Frames are attributed by
 provider turn id, so a late command completion of an interrupted turn never lands on the next turn.
 Details: [delivery](../../docs/delivery.md).
 
@@ -114,14 +112,11 @@ Adapter invariants are pinned by tests in `tests/`:
 
 | # | Invariant | Test |
 |---|---|---|
-| 1 | ordinary submissions start only at a turn boundary | `test_inbound_queue.py::test_messages_wait_for_the_turn_boundary` |
-| 2 | same key → same ticket; completed key replays | `test_inbound_queue.py::test_same_key_returns_the_same_ticket`, `::test_completed_key_replays_the_recorded_outcome` |
-| 3 | a full queue refuses rather than buffers | `test_inbound_queue.py::test_queue_overflow_is_refused` |
 | 4 | interrupt asserts the tool children are reaped | `test_cancel.py::test_interrupt_asserts_the_tool_children_are_reaped` |
 | 5 | a turn can finish after two quiet days | `test_cancel.py::test_default_turn_can_finish_after_two_quiet_days` |
-| 6 | usage accumulates per turn | `test_inbound_queue.py::test_usage_accumulates_across_turns` |
-| 7 | the handoff is injected once, never on resume | `test_session.py::test_resume_uses_the_registry_and_skips_the_handoff` |
-| 8 | steering waits for a correlated execution receipt | `test_inbound_queue.py::test_steer_waits_for_matching_completed_user_item`, `test_delivery.py` |
+| 6 | usage accumulates per turn | `test_session.py::test_usage_accumulates_across_turns` |
+| 7 | a resume names the recorded thread and a rejected resume fails fast | `test_session.py::test_resume_uses_the_registry` |
+| 8 | steering waits for a correlated execution receipt | `test_delivery.py` |
 
 ## Version pinning
 

@@ -6,7 +6,6 @@ from typing import Protocol
 
 from base.lm.harness.delivery import HarnessInput
 from base.lm.harness.events import BridgeEvent, TurnCompleted, Usage
-from base.lm.harness.handoff import Handoff
 
 
 # meiva:note
@@ -61,9 +60,7 @@ def completed_turn(event: TurnCompleted, streamed: str) -> HarnessTurn:
 # are handed over; everything that happens to them comes back on `events()`.
 # meiva:link base/lm/harness/docs/harness.md
 class HarnessSession(Protocol):
-    def start(
-        self, *, resume: str | None = None, handoff: Handoff | None = None
-    ) -> Awaitable[None]: ...
+    def start(self, *, resume: str | None = None) -> Awaitable[None]: ...
     def deliver(self, inputs: Sequence[HarnessInput]) -> Awaitable[None]: ...
     def events(self) -> AsyncIterator[BridgeEvent]: ...
     def interrupt(self, *, turn_id: str | None = None) -> Awaitable[object]: ...

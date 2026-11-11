@@ -5,12 +5,13 @@ from pathlib import Path
 
 import pytest
 
-from base.lm.harness import FileSessionRegistry, Handoff
+from base.lm.harness import FileSessionRegistry
 from base.lm.harness.base_session import ForkSourceUnavailableError
 from base.lm.harness.claude.options import fork_session_id
 from base.lm.harness.claude.tests.fake_sdk import FakeSDK, Say
 from base.lm.harness.claude.tests.support import Harness, start
-from base.lm.harness.events import HandoffInjected, SessionBound
+from base.lm.harness.delivery.tests.sent import send
+from base.lm.harness.events import SessionBound
 from base.lm.harness.registry import SessionRecord
 
 SOURCE = 7
@@ -67,24 +68,21 @@ async def test_a_fork_starts_with_the_sources_options_plus_the_fork_keys(tmp_pat
         await child.stop()
 
 
-async def test_a_fork_does_not_resend_the_handoff(tmp_path: Path) -> None:
+async def test_a_fork_sends_only_the_input_it_is_given(tmp_path: Path) -> None:
     registry = FileSessionRegistry(tmp_path / "sessions")
     sdk = FakeSDK()
     await _source(tmp_path, registry, sdk)
-    handoff = Handoff(agent_id=CHILD, instruction="Say OK.", machine="m", workspace=tmp_path)
     child = await start(
         tmp_path,
         agent_id=CHILD,
         registry=registry,
         sdk=sdk,
         fork_source_agent_id=SOURCE,
-        handoff=handoff,
         scripts=[[Say("ok")]],
     )
     try:
         assert child.session.resumed is True
-        assert child.of(HandoffInjected) == []
-        outcome = await child.session.submit("fork note").outcome()
+        outcome = await (await send(child, "fork note")).outcome()
         assert outcome.text == "ok"
         assert sdk.clients[-1].queries == ["fork note"]
     finally:

@@ -4,6 +4,7 @@ import asyncio
 from pathlib import Path
 
 from base.lm.harness.antigravity.tests.support import say, start
+from base.lm.harness.delivery.tests.sent import send
 from base.lm.harness.events import (
     SessionFailed,
     TextDelta,
@@ -52,7 +53,7 @@ async def test_a_result_with_no_turn_in_flight_is_not_a_fault(tmp_path: Path) ->
         assert harness.of(TurnFaulted) == []
         assert harness.of(SessionFailed) == []
 
-        ticket = harness.session.submit("hi")
+        ticket = await send(harness, "hi")
         assert (await asyncio.wait_for(ticket.outcome(), 5)).text == "mine"
     finally:
         await harness.stop()
@@ -64,7 +65,7 @@ async def test_a_late_result_does_not_reopen_a_completed_turn(tmp_path: Path) ->
         tmp_path, turns=[say("first"), say("second")], unsolicited=delivered.append
     )
     try:
-        first = harness.session.submit("one")
+        first = await send(harness, "one")
         assert (await asyncio.wait_for(first.outcome(), 5)).text == "first"
 
         harness.session._handle(result_frame("LATE"))
@@ -73,7 +74,7 @@ async def test_a_late_result_does_not_reopen_a_completed_turn(tmp_path: Path) ->
         assert [event.text for event in delivered] == ["LATE"]
         assert [event.turn_id for event in harness.of(TurnCompleted)] == [first.turn_id]
 
-        second = harness.session.submit("two")
+        second = await send(harness, "two")
         assert (await asyncio.wait_for(second.outcome(), 5)).text == "second"
     finally:
         await harness.stop()
@@ -87,7 +88,7 @@ async def test_a_late_result_does_not_reopen_a_completed_turn(tmp_path: Path) ->
 async def test_a_foreign_result_does_not_replace_the_reply_text(tmp_path: Path) -> None:
     harness = await start(tmp_path, turns=[{**say("partial"), "pace": 0.4}])
     try:
-        ticket = harness.session.submit("slow")
+        ticket = await send(harness, "slow")
         for _ in range(500):
             if harness.of(TextDelta):
                 break
