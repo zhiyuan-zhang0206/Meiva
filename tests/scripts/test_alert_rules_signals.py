@@ -41,10 +41,9 @@ SIGNALS: dict[str, Signal] = {
     "meiva-ops-schedule-process-lost": Signal(
         "schedule_process_lost", "meiva-ops", "0m", "warning"
     ),
-    # meiva:note
-    # The interval collectors have no rule: `plugin_collector_cycle` cannot leave a schedule's
-    # process, so a rule reading its absence described the emit path, not the collectors
-    # (2026-11-06, removed the same day; the reason sits where the rule was in rules.yml).
+    "meiva-ops-plugin-collector-silent": Signal(
+        "plugin_collector_cycle", "meiva-ops", "5m", "warning"
+    ),
     "meiva-ops-schedule-stalled": Signal("schedule_stalled", "meiva-ops-slow", "0m", "warning"),
     "meiva-ops-schedule-convergence-abandoned": Signal(
         "schedule_convergence_abandoned", "meiva-ops-slow", "0m", "warning"
@@ -207,3 +206,13 @@ def test_root_diagnostics_keep_the_machine_identity(diagnostic: str) -> None:
     rule = _rules()["meiva-ops-root-diagnostic-" + diagnostic][1]
     assert "sum by (machine)" in _query(rule)
     assert "{{ $labels.machine }}" in rule["annotations"]["summary"]
+
+
+def test_collector_silence_reads_all_service_identities_and_both_cycle_outcomes() -> None:
+    rule = _rules()["meiva-ops-plugin-collector-silent"][1]
+    query = _query(rule)
+    assert "absent_over_time(" in query
+    assert "[35m]" in query
+    assert "service_name=" not in query
+    assert "attributes_outcome" not in query
+    assert "isPaused" not in rule
