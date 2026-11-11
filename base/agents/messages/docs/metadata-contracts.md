@@ -61,8 +61,7 @@ seen (`agent_user_seen`, monotonic); unread means a delivery past it. Opening th
 visible page advances it (`POST /api/keyed/v1/agents/{id}/user-messages/seen`, `up_to_id` bounded by
 the agent's newest delivery) and the user-messages feed returns it as `seen_id`
 ([decision](../../../../docs/decisions/frontend/ui/2026-11-10-restore-unread-dot.md)). A delivery
-carries no per-record read state; `agent_user_messages.read_at` and the pending index are unused
-and await a later drop. Ask stores persistent questions
+carries no per-record read state. Ask stores persistent questions
 separately; their pending state clears only on answer or explicit close. These records live
 independently of `to_user.md`. Pending excerpts are reinjected after compaction,
 and the SDK reader retrieves complete records.

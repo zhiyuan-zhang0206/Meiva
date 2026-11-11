@@ -111,8 +111,7 @@ _CARD_FROM = """
     LEFT JOIN LATERAL (
         SELECT EXISTS (
             SELECT 1 FROM agent_notices
-            WHERE agent_id = a.id AND require_response AND question IS NOT NULL
-              AND resolved_at IS NULL
+            WHERE agent_id = a.id AND question IS NOT NULL AND resolved_at IS NULL
         ) AS has_pending_question
     ) attention ON true
     LEFT JOIN LATERAL (

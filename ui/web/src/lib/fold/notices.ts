@@ -1,8 +1,8 @@
 // meiva:note
 // R4 layer 1 — notices-domain reducer (Task #1024).
 //
-// notice_posted / notice_resolved do NOT carry a full NoticeItem (no body, no
-// timestamps), so the unresolved-question list cannot be folded from events —
+// notice_posted carries only the question id and title, and notice_resolved only the id, so the
+// unresolved-question list cannot be folded from events —
 // the correct reconciliation is invalidation (refetch the notices query). This
 // reducer centralizes that policy; use-notices.ts no longer subscribes.
 

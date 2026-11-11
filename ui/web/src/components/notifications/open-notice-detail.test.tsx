@@ -45,9 +45,6 @@ function ntc(overrides: Partial<OpenNotice> = {}): OpenNotice {
     id: 11,
     title: "Approve deploy?",
     content: "push to prod?",
-    priority: "P2",
-    require_response: true,
-    blocking: false,
     created_at: "2026-06-14T12:00:00Z",
     ...overrides,
   };
@@ -67,7 +64,7 @@ function field(): HTMLTextAreaElement {
   return screen.getAllByRole<HTMLTextAreaElement>("textbox")[0];
 }
 
-describe("OpenNoticeDetail — require_response", () => {
+describe("OpenNoticeDetail", () => {
   it("uses the same monospace input typography as the page composer", () => {
     renderNotice(<OpenNoticeDetail agentId={7} notice={ntc()} />);
 

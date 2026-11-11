@@ -233,21 +233,17 @@ def test_roster_attention_skips_resolved_and_unrelated_notices(db_conn: psycopg.
     seed(db_conn, [(i, "user", "terminated") for i in range(90002, 90102)])
     with db_conn.cursor() as cur:
         cur.execute("""
-            INSERT INTO agent_notices
-                (agent_id,local_id,title,priority,require_response,resolved_at,resolution,expire_at)
-            SELECT 90001,i,'old','P3',false,now(),'read',now()+interval '1 day'
+            INSERT INTO agent_notices (agent_id,local_id,title,resolved_at,resolution)
+            SELECT 90001,i,'old',now(),'dismissed'
             FROM generate_series(1,20000)i
         """)
         cur.execute("""
-            INSERT INTO agent_notices
-                (agent_id,local_id,title,priority,require_response,expire_at)
-            VALUES (90001,20001,'new','P3',false,now()+interval '1 day'),
-                   (90001,20002,'reply','P1',true,now()+interval '1 day')
+            INSERT INTO agent_notices (agent_id,local_id,title,question)
+            VALUES (90001,20001,'reply','{"type":"text"}')
         """)
         cur.execute("""
-            INSERT INTO agent_notices
-                (agent_id,local_id,title,priority,require_response,expire_at)
-            SELECT 90002+i%100,i,'other','P3',false,now()+interval '1 day'
+            INSERT INTO agent_notices (agent_id,local_id,title,resolved_at,resolution)
+            SELECT 90002+i%100,i,'other',now(),'dismissed'
             FROM generate_series(1,20000)i
         """)
         cur.execute("ANALYZE agent_notices")

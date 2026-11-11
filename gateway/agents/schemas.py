@@ -22,7 +22,6 @@ from base.agents.messages.envelope import InboundSender, validate_source
 from base.agents.messages.inbound_images import TimelineUploadFile
 from base.agents.messages.kwargs import NoteTag
 from base.agents.observation.snapshot import AgentSnapshot
-from base.agents.tasks.priority import Priority
 from base.api_contracts.agent_contract import AgentStatus
 from base.api_contracts.notice_question import NoticeAnswer, NoticeQuestion
 from ops.rpc_schemas.content import UserContent
@@ -134,25 +133,18 @@ class NoticeItem(BaseModel):
     agent_label: str | None
     title: str
     content: str | None
-    priority: Priority
-    require_response: bool
-    blocking: bool
     created_at: datetime
-    updated_at: datetime | None = None
     resolved_at: datetime | None = None
     resolution: str | None = None
     reply: str | None = None
     question: NoticeQuestion | None = None
     answer: NoticeAnswer | None = None
-    # The task this notice belongs to, or None — lets the feed group by task.
-    task_id: int | None = None
     # meiva:note
     # The credential fact the server verified for the request that wrote this row:
     # cluster_bearer / machine_token:<class> / user_session / internal. None on rows
     # written before the column existed — never a caller's own claim.
     # meiva:link gateway/agents/docs/notice-receipts.md
     source_verified_by: str | None = None
-    expire_at: datetime | None
 
 
 class NoticesFeed(BaseModel):

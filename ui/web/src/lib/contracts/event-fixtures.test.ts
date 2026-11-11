@@ -63,7 +63,7 @@ const REQUIRED_FIELDS: Record<SystemEvent["role"], readonly string[]> = {
   timeline_snapshot: ["agent_id", "role", "items", "msg_count"],
   agent_spawned: ["agent_id", "role"],
   agent_updated: ["agent_id", "role"],
-  notice_posted: ["agent_id", "role", "notice_id", "priority", "title", "task_id"],
+  notice_posted: ["agent_id", "role", "notice_id", "title"],
   notice_resolved: ["agent_id", "role", "notice_id"],
   task_created: ["agent_id", "role", "task_id"],
   task_updated: ["agent_id", "role", "task_id"],

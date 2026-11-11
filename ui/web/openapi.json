@@ -13825,33 +13825,10 @@
             ],
             "title": "Content"
           },
-          "priority": {
-            "$ref": "#/components/schemas/Priority"
-          },
-          "require_response": {
-            "type": "boolean",
-            "title": "Require Response"
-          },
-          "blocking": {
-            "type": "boolean",
-            "title": "Blocking"
-          },
           "created_at": {
             "type": "string",
             "format": "date-time",
             "title": "Created At"
-          },
-          "updated_at": {
-            "anyOf": [
-              {
-                "type": "string",
-                "format": "date-time"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Updated At"
           },
           "resolved_at": {
             "anyOf": [
@@ -13923,17 +13900,6 @@
               }
             ]
           },
-          "task_id": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Task Id"
-          },
           "source_verified_by": {
             "anyOf": [
               {
@@ -13944,18 +13910,6 @@
               }
             ],
             "title": "Source Verified By"
-          },
-          "expire_at": {
-            "anyOf": [
-              {
-                "type": "string",
-                "format": "date-time"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Expire At"
           }
         },
         "type": "object",
@@ -13965,11 +13919,7 @@
           "agent_label",
           "title",
           "content",
-          "priority",
-          "require_response",
-          "blocking",
-          "created_at",
-          "expire_at"
+          "created_at"
         ],
         "title": "NoticeItem"
       },
@@ -14236,34 +14186,10 @@
             ],
             "title": "Content"
           },
-          "priority": {
-            "$ref": "#/components/schemas/Priority"
-          },
-          "require_response": {
-            "type": "boolean",
-            "title": "Require Response",
-            "default": true
-          },
-          "blocking": {
-            "type": "boolean",
-            "title": "Blocking"
-          },
           "created_at": {
             "type": "string",
             "format": "date-time",
             "title": "Created At"
-          },
-          "expire_at": {
-            "anyOf": [
-              {
-                "type": "string",
-                "format": "date-time"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Expire At"
           },
           "question": {
             "anyOf": [
@@ -14290,17 +14216,6 @@
               }
             ],
             "title": "Question"
-          },
-          "task_id": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Task Id"
           }
         },
         "type": "object",
@@ -14308,8 +14223,6 @@
           "id",
           "title",
           "content",
-          "priority",
-          "blocking",
           "created_at"
         ],
         "title": "OpenNotice"

@@ -38,7 +38,7 @@ translated. `href` is the agent's page (`/?agent_id=<id>`).
 
 `notification_events` is a delivery log: one row per push, never answered or resolved. Columns of
 note: `category`, `action`, `tag`, `subject`, `body`, `href`, `importance`, `agent_id`,
-`announced_at` (`dedupe_key` is retired and unused). The hosted runtime writes the same table, so
+`announced_at`. The hosted runtime writes the same table, so
 the runner role has `SELECT, INSERT` on it plus `UPDATE (announced_at)`, and only `SELECT` on
 `agents`, `user_settings` and `agent_user_seen`, which is all staging reads.
 

@@ -184,7 +184,7 @@ def pending_questions(conn: Connection, agent_id: int) -> str:
     with conn.cursor(row_factory=dict_row) as cur:
         cur.execute(
             "SELECT id,title,content,question FROM agent_notices WHERE agent_id=%s "
-            "AND require_response AND resolved_at IS NULL ORDER BY id LIMIT 21",
+            "AND resolved_at IS NULL ORDER BY id LIMIT 21",
             (agent_id,),
         )
         rows = [PendingQuestion.model_validate(row) for row in cur.fetchall()]

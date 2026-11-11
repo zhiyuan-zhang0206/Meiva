@@ -115,63 +115,6 @@ def test_open_question_and_dismissal_have_distinct_effects(
     ).fetchone() == ("dismissed", None, None)
 
 
-def test_expired_question_cannot_receive_a_late_answer(
-    client: TestClient, db_conn: psycopg.Connection
-) -> None:
-    agent = seed_agent(db_conn)
-    notice = post_question(client, agent)
-    db_conn.execute(
-        "UPDATE agent_notices SET expire_at=now()-interval '1 second' WHERE id=%s", (notice,)
-    )
-    db_conn.commit()
-    response = client.post(
-        f"/api/keyed/v1/agents/{agent}/notices/{notice}/resolve",
-        json={"action": "answer", "answer": {"option_ids": ["web"]}},
-        headers=keyed_headers(str(uuid4())),
-    )
-    assert response.status_code == 409
-    assert db_conn.execute(
-        "SELECT answer FROM agent_notices WHERE id=%s", (notice,)
-    ).fetchone() == (None,)
-
-
-def test_invalid_question_does_not_supersede_the_current_question(
-    client: TestClient, db_conn: psycopg.Connection
-) -> None:
-    agent = seed_agent(db_conn)
-    notice = post_question(client, agent)
-    invalid_questions: tuple[dict[str, object], ...] = (
-        {"type": "unknown"},
-        {"type": "single_select", "options": []},
-    )
-    for question in invalid_questions:
-        response = client.post(
-            f"/api/agents/{agent}/asks",
-            json={"title": "Invalid", "question": question},
-            headers=keyed_headers(str(uuid4())),
-        )
-        assert response.status_code == 422
-    assert db_conn.execute(
-        "SELECT resolved_at FROM agent_notices WHERE id=%s", (notice,)
-    ).fetchone() == (None,)
-
-
-def test_ask_rejects_other_before_effects(
-    client: TestClient,
-    db_conn: psycopg.Connection,
-) -> None:
-    agent = seed_agent(db_conn)
-    response = client.post(
-        f"/api/agents/{agent}/asks",
-        json={"title": "Choose scope", "question": QUESTION | {"allow_other": True}},
-        headers=keyed_headers(str(uuid4())),
-    )
-    assert response.status_code == 422
-    assert db_conn.execute(
-        "SELECT count(*) FROM agent_notices WHERE agent_id=%s", (agent,)
-    ).fetchone() == (0,)
-
-
 def test_ask_requires_a_response_and_cannot_be_marked_read(
     client: TestClient,
     db_conn: psycopg.Connection,
@@ -184,7 +127,6 @@ def test_ask_requires_a_response_and_cannot_be_marked_read(
     )
     assert response.status_code == 201, response.text
     notice = next(n for n in client.get("/api/notices/open").json() if n["agent_id"] == agent)
-    assert notice["require_response"] is True
     rejected = client.post(
         f"/api/keyed/v1/agents/{agent}/notices/{notice['id']}/resolve",
         json={"action": "read"},

@@ -3,7 +3,7 @@
 `PendingQuestions` owns the selected agent's entire awaiting-response queue,
 including legacy unstructured questions. When questions are waiting, the queue
 opens expanded by default showing independently answerable questions ordered by
-priority and age; the header bar shows the count and toggles collapse. When
+age; the header bar shows the count and toggles collapse. When
 collapsed, the bar occupies one stable row above the composer so it
 cannot obscure the last message or the scroll-to-bottom control. Answers expand
 upward over the conversation without changing the timeline viewport height. The inner `ScrollArea`

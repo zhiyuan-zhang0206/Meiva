@@ -247,7 +247,7 @@ def test_ask_retries_note_and_answer_share_one_receipt(db_conn: psycopg.Connecti
         assert created.status_code == 201, created.text
         question_id = created.json()["id"]
         row = client.get(f"/api/notices/open?agent_id={aid}").json()[0]
-        assert row["answer"] is None and row["expire_at"] is None
+        assert row["answer"] is None
         assert row["question"]["note_suggestion"] == "Validate first"
         resolve = f"/api/keyed/v1/agents/{aid}/notices/{question_id}/resolve"
         body = {

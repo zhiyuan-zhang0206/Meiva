@@ -69,7 +69,6 @@ def test_sdk_ask_keeps_multiple_questions_and_agent_note_drafts(
         second = ui.ask("When?", note_suggestion="Tomorrow")
         rows = ui.questions()
         assert {row["id"] for row in rows} == {first, second}
-        assert all(row["expire_at"] is None for row in rows)
         assert rows[0]["answer"] is None
     assert db_conn.execute(
         "SELECT action, subject FROM notification_events WHERE category = 'core.question' "

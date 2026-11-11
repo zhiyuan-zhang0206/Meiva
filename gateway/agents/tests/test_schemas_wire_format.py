@@ -1,8 +1,7 @@
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 
 from pydantic import BaseModel, TypeAdapter
 
-from base.agents.tasks.priority import Priority
 from gateway.agents.schemas import (
     AgentRow,
     NoticeItem,
@@ -58,15 +57,10 @@ def test_notice_item_wire_shape() -> None:
         agent_label="agent-3",
         title="deploy?",
         content="A) yes\nB) no",
-        priority=Priority.P0,
-        require_response=True,
-        blocking=True,
         created_at=t,
-        updated_at=None,
         resolved_at=None,
         resolution=None,
         reply=None,
-        expire_at=t + timedelta(days=1),
     )
     d = _wire(m)
     assert set(d.keys()) == {
@@ -75,25 +69,16 @@ def test_notice_item_wire_shape() -> None:
         "agent_label",
         "title",
         "content",
-        "priority",
-        "require_response",
-        "blocking",
         "created_at",
-        "updated_at",
         "resolved_at",
         "resolution",
         "reply",
         "question",
         "answer",
-        "task_id",
         "source_verified_by",
-        "expire_at",
     }
     assert d["id"] == 5
     assert d["agent_label"] == "agent-3"
-    assert d["priority"] == "P0"
-    assert d["require_response"] is True
-    assert d["blocking"] is True
     assert d["resolved_at"] is None
     assert d["resolution"] is None
     assert d["reply"] is None

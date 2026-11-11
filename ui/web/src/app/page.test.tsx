@@ -446,8 +446,7 @@ it("places only the active agent's pending questions above the composer, outside
   hooksState.timelineItems = [makeItem({ item_id: "2.0", kind: "agent_chat", payload: "Read this update" })];
   setPendingQuestions([7, 8].map((agent_id) => ({
     id: agent_id, agent_id, agent_label: null, title: `Question for ${agent_id}`, content: null,
-    priority: "P1", require_response: true, blocking: false,
-    created_at: "2026-11-07T00:00:00Z", expire_at: null, resolved_at: null,
+    created_at: "2026-11-07T00:00:00Z", resolved_at: null,
     question: { type: "text", note_suggestion: "Suggested answer" },
   })));
   wrap(<HomePage />);

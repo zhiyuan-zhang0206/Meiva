@@ -30,7 +30,7 @@ def read_context(conn: Connection, agent_id: int) -> SuggestionContext:
         publications = cur.fetchall()
         cur.execute(
             "SELECT id,title,content,question FROM agent_notices WHERE agent_id=%s "
-            "AND require_response AND resolved_at IS NULL ORDER BY id DESC LIMIT 5",
+            "AND resolved_at IS NULL ORDER BY id DESC LIMIT 5",
             (agent_id,),
         )
         questions = cur.fetchall()

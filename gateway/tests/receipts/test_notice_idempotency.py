@@ -10,7 +10,7 @@ from gateway.tests.support.live_events.faults import unpublishable_bus
 
 def test_concurrent_resolution_replays_one_reply(db_conn: psycopg.Connection) -> None:
     agent = seed_agent(db_conn)
-    notice = insert_notice(db_conn, agent, "question", require_response=True)
+    notice = insert_notice(db_conn, agent, "question")
     path = f"/api/keyed/v1/agents/{agent}/notices/{notice}/resolve"
     with gateway_test_client() as client, ThreadPoolExecutor(max_workers=4) as executor:
 
@@ -38,7 +38,7 @@ def test_concurrent_resolution_replays_one_reply(db_conn: psycopg.Connection) ->
 
 def test_later_answer_requires_a_new_open_question(db_conn: psycopg.Connection) -> None:
     agent = seed_agent(db_conn)
-    notice = insert_notice(db_conn, agent, "Question", require_response=True)
+    notice = insert_notice(db_conn, agent, "Question")
     path = f"/api/keyed/v1/agents/{agent}/notices/{notice}/resolve"
     with gateway_test_client() as client:
         body = {"action": "answer", "reply": "yes"}
@@ -69,7 +69,7 @@ def test_resolution_recovers_after_committed_wake_failure(
     db_conn: psycopg.Connection, event_bus: EventBus
 ) -> None:
     agent = seed_agent(db_conn)
-    notice = insert_notice(db_conn, agent, "question", require_response=True)
+    notice = insert_notice(db_conn, agent, "question")
     path = f"/api/keyed/v1/agents/{agent}/notices/{notice}/resolve"
 
     with gateway_test_client(raise_server_exceptions=False) as client:
@@ -94,7 +94,7 @@ def test_resolution_recovers_after_committed_wake_failure(
 
 def test_missing_key_cannot_mutate_notice(db_conn: psycopg.Connection) -> None:
     agent = seed_agent(db_conn)
-    notice = insert_notice(db_conn, agent, "original", require_response=True)
+    notice = insert_notice(db_conn, agent, "original")
     path = f"/api/keyed/v1/agents/{agent}/notices/{notice}/resolve"
     with gateway_test_client() as client:
         assert client.post(path, json={"action": "answer", "reply": "yes"}).status_code == 422

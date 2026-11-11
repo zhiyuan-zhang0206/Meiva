@@ -6,7 +6,6 @@ exports = ["birth", "context", "history", "inbox", "incarnation", "labels.py", "
 "history" = ["incarnation", "messages", "model", "sdk"]
 "inbox" = ["messages"]
 "lifecycle.py" = ["lifecycle_signals.py"]
-"observation" = ["tasks"]
 "sdk" = ["messages"]
 "tasks" = ["inbox", "messages"]
 "incarnation" = ["to_user"]

@@ -7,9 +7,6 @@
 
 from __future__ import annotations
 
-from datetime import datetime
-from typing import TypedDict
-
 from base.events.live.bus import EventBus
 from base.events.live.projection import (
     InboundArrived,
@@ -32,66 +29,19 @@ async def publish_inbound_arrived(
     await bus.publish_best_effort(ev.model_dump_json(), context="inbound_arrived")
 
 
-class NoticeResolutionFacts(TypedDict):
-    resolution: str
-    require_response: bool
-    age_seconds: int
-    had_reply: bool
-
-
-def notice_resolution_facts(
-    resolution: str,
-    *,
-    require_response: bool,
-    created_at: datetime,
-    now: datetime,
-    replied: bool,
-) -> NoticeResolutionFacts:
-    return NoticeResolutionFacts(
-        resolution=resolution,
-        require_response=require_response,
-        age_seconds=max(0, int((now - created_at).total_seconds())),
-        had_reply=replied,
-    )
-
-
-async def publish_notice_resolved(
-    bus: EventBus,
-    agent_id: int,
-    notice_id: int,
-    *,
-    facts: NoticeResolutionFacts | None = None,
-) -> None:
-    """Publish NoticeResolved to refresh the open and resolved Inbox views.
-    Best-effort, never raises."""
-    ev = NoticeResolved(
-        agent_id=agent_id,
-        notice_id=notice_id,
-        resolution=None if facts is None else facts["resolution"],
-        require_response=None if facts is None else facts["require_response"],
-        age_seconds=None if facts is None else facts["age_seconds"],
-        had_reply=None if facts is None else facts["had_reply"],
-    )
+# meiva:note
+# Publish NoticeResolved so the frontend refetches the open questions. Best-effort, never raises.
+async def publish_notice_resolved(bus: EventBus, agent_id: int, notice_id: int) -> None:
+    ev = NoticeResolved(agent_id=agent_id, notice_id=notice_id)
     await bus.publish_best_effort(ev.model_dump_json(), context="notice_resolved")
 
 
 # meiva:note
-# This is the inbox hint only. The delivery decision for a notice that needs an
-# answer is staged in the notice's own transaction and announced by the producer
-# after it commits, so the hint and the user-facing event cannot disagree.
+# Publish NoticePosted so the frontend refetches the open questions. Best-effort, never raises.
+# This is the refetch hint only. The delivery decision for a question is staged in its own
+# transaction and announced by the producer after it commits, so the hint and the user-facing
+# event cannot disagree.
 # meiva:link base/events/notifications/README.md
-async def publish_notice_posted(
-    bus: EventBus,
-    agent_id: int,
-    notice_id: int,
-    priority: str,
-    title: str,
-    task_id: int | None = None,
-) -> None:
-    """Publish NoticePosted so the frontend refreshes the open Inbox queue.
-    Best-effort, never raises. `task_id` groups the feed by task without a
-    refetch."""
-    ev = NoticePosted(
-        agent_id=agent_id, notice_id=notice_id, priority=priority, title=title, task_id=task_id
-    )
+async def publish_notice_posted(bus: EventBus, agent_id: int, notice_id: int, title: str) -> None:
+    ev = NoticePosted(agent_id=agent_id, notice_id=notice_id, title=title)
     await bus.publish_best_effort(ev.model_dump_json(), context="notice_posted")
