@@ -488,7 +488,10 @@ except the steps that declare `skipped_while_root_runs`: `one DB URL + pgbouncer
 rewrites `MEIVA_DB_URL` in `.env` onto a port the running data plane does not serve) and
 `permissions helper build + sign + load` (a loaded helper is only observed, and a changed one
 refuses until it is retired from outside; a full stop and start applies it). It does not prepare
-storage or apply migrations. Advisory failures are reported and do not fail the start; a blocking
+storage. A gateway whose database is behind the code applies the pending migrations first (the
+cold path's own step, then the pooler grants), provided the root hosts no running service that uses
+the database; the `down` of an update stops them, and a start that finds one still running refuses
+by name. A runner never applies migrations. Advisory failures are reported and do not fail the start; a blocking
 failure fails it. `meiva update up` additionally runs `meiva harness verify-sessions` on every
 host and fails while a session record is in a layout the code cannot read.
 

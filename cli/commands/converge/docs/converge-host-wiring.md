@@ -2,7 +2,9 @@
 
 A start that finds the application root running (`--keep-shell-sessions` across an update)
 runs the converge table too, minus the steps that declare `skipped_while_root_runs`
-(`live_root_steps()`); it skips storage preparation and migrations, which need a stopped writer.
+(`live_root_steps()`); it skips storage preparation. A gateway whose database is behind the code
+then applies the pending migrations, provided no running unit uses the database
+([migration guide](../../../../db/docs/migrations.md#applying-migrations)).
 Converge is the host's correctness guarantee, so a step runs there unless it names a concrete harm
 in the declaration. Today two do: `one DB URL + pgbouncer binary` and `permissions helper build +
 sign + load`; a full stop and start applies what they would. A migration step (for example the

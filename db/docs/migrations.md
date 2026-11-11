@@ -11,9 +11,15 @@ There is no standalone migrate command. Pending migrations are applied as a step
 `meiva start` (early in boot, after Postgres is up and before the schema-current assertion), so
 any restart that crosses a schema change catches the DB up automatically.
 
+A start that finds the application root already running (an update that kept the shell sessions)
+does the same on a gateway whose database is behind the code, once the root hosts no service that
+uses the database; if one still runs, the start refuses by name and applies nothing. A runner never
+applies migrations: a runner whose database is behind its code is refused.
+
 Production upgrades run `meiva update run` (attended, with
 user approval; see the runbook's "Updating a networked cluster in source mode"):
-the gateway's cold `meiva start` in the `up` half applies the pending migrations.
+the gateway's `meiva start` in the `up` half applies the pending migrations, whether its root
+was stopped (cold start) or kept (live start).
 Separate `down` and `up` commands allow intermediate manual release work.
 For a manual catch-up, run `meiva start` directly, which applies pending
 migrations on the way up.

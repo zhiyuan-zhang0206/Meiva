@@ -28,9 +28,12 @@ from cli.commands.converge.steps import ensure_meiva_home_dirs
 from cli.commands.lifecycle.converge_host import live_root_steps
 from cli.commands.lifecycle.start.cold_start import (
     ColdStart,
+    live_schema_behind,
     prepare_cold_start,
+    prepare_live_migrations,
     prepare_live_start,
 )
+from cli.commands.lifecycle.start.cold_start_plan import ColdStep
 from cli.commands.lifecycle.start.start_config import read_start_config
 from cli.commands.lifecycle.tests.startup.start_harness import StartRun
 
@@ -265,3 +268,76 @@ def test_a_gateways_data_plane_step_that_fails_ends_the_preparation_with_its_cod
     assert _phases_after(spans, seen) == ["converge host", "data plane (pg + redis)"]
     assert not (run.home / "pg").exists() and not (run.home / "redis").exists()
     assert "migration" not in capsys.readouterr().out
+
+
+def _forget_newest_migration(db_conn: psycopg.Connection) -> str:
+    newest = db_conn.execute(
+        "SELECT name FROM schema_migrations ORDER BY name DESC LIMIT 1"
+    ).fetchone()
+    assert newest is not None
+    db_conn.execute("DELETE FROM schema_migrations WHERE name = %s", newest)
+    db_conn.commit()
+    return str(newest[0])
+
+
+# meiva:note
+# 2026-11-11: a gateway whose root survived the update (`--keep-shell-sessions`) found a live root
+# and refused the migrations the new code carries, so the whole production update stopped. With no
+# database-using service running (the stop took them down), the live start applies the pending
+# migrations through the cold path's own step. The pooler completion that follows has its own tests.
+def test_a_live_root_start_applies_the_pending_migrations_when_no_database_service_runs(
+    start_run: StartRun,
+    db_conn: psycopg.Connection,
+    db_url: str,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    run = start_run
+    cold, _spans = _cold(run)
+    forgotten = _forget_newest_migration(db_conn)
+    try:
+        assert live_schema_behind(db_url), "the database lacks a migration the checkout carries"
+
+        rc = prepare_live_migrations(
+            cold,
+            run.roster(RUNNER, only=("pty-sessions",)),
+            steps=(ColdStep.MIGRATIONS,),
+            running=(),
+            retained_children=run.children,
+        )
+
+        assert rc == 0
+        assert f"applied 1 migration(s): ['{forgotten}']" in capsys.readouterr().out
+        assert not live_schema_behind(db_url)
+    finally:
+        db_conn.execute(
+            "INSERT INTO schema_migrations (name) VALUES (%s) ON CONFLICT DO NOTHING", (forgotten,)
+        )
+        db_conn.commit()
+
+
+def test_a_live_root_start_applies_nothing_while_a_database_service_runs(
+    start_run: StartRun,
+    db_conn: psycopg.Connection,
+    db_url: str,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    run = start_run
+    cold, _spans = _cold(run)
+    forgotten = _forget_newest_migration(db_conn)
+    try:
+        rc = prepare_live_migrations(
+            cold,
+            run.roster(RUNNER, only=("pty-sessions",)),
+            steps=(ColdStep.MIGRATIONS,),
+            running=("agent-host",),
+            retained_children=run.children,
+        )
+
+        assert rc == 1
+        assert "still hosts services that use it: agent-host" in capsys.readouterr().err
+        assert live_schema_behind(db_url), "nothing was applied"
+    finally:
+        db_conn.execute(
+            "INSERT INTO schema_migrations (name) VALUES (%s) ON CONFLICT DO NOTHING", (forgotten,)
+        )
+        db_conn.commit()
