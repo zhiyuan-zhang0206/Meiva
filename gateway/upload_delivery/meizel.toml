@@ -1,10 +1,12 @@
 exports = ["router.py", "worker.py"]
 
 [uses]
-"router.py" = ["worker.py"]
-"tests" = ["failure_plan.py"]
+"receipt.py" = ["ingress.py"]
+"router.py" = ["receipt.py", "worker.py"]
+"tests" = ["failure_plan.py", "ingress.py"]
 "worker.py" = ["failure_plan.py"]
 
 [purity]
 "__init__.py" = "strict"
 "failure_plan.py" = "strict"
+"ingress.py" = "strict"

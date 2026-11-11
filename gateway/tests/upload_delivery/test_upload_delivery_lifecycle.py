@@ -46,6 +46,62 @@ from gateway.tests.upload_delivery.test_upload_delivery_recovery import (
 from gateway.upload_delivery.worker import UploadRecovery
 
 
+# meiva:note
+# A staged upload leaves one event saying how much arrived, how long the body took and which entry
+# it used; the batch send and the discard leave none.
+def test_a_staged_upload_reports_its_body_and_entry(
+    uploaded_agent: tuple[GatewayTestClient, int],
+):
+    client, agent = uploaded_agent
+    with capturing_events() as emitted:
+        staged = client.post(
+            f"/api/keyed/v1/agents/{agent}/uploads/staged",
+            headers={
+                "Idempotency-Key": "k1",
+                "Idempotency-Scope": "principal-v1",
+                "CF-Ray": "8a1b2c3d4e5f6a7b-LAX",
+                "CF-Connecting-IP": "203.0.113.9",
+            },
+            files={"file": ("secret-name.png", b"x" * 5000, "image/png")},
+        )
+        assert staged.status_code == 201
+        post(client, agent, file_ids=[staged.json()["file_id"]])
+    events = [event for event in emitted if event.event_name == "staged_upload_received"]
+    assert len(events) == 1
+    attributes = dict(events[0].attributes)
+    assert attributes.pop("receive_ms") is not None
+    assert attributes.pop("after_ms") is not None
+    assert isinstance(attributes.pop("total_ms"), float)
+    content_length = attributes.pop("content_length")
+    assert isinstance(content_length, int) and content_length > 5000
+    assert attributes.pop("host") == "testserver"
+    assert attributes.pop("body_bytes") == content_length
+    assert attributes == {
+        "route": "/api/keyed/v1/agents/{agent_id}/uploads/staged",
+        "status": 201,
+        "via_cloudflare": True,
+        "cf_colo": "LAX",
+        "cf_connecting_ip": True,
+    }
+    assert "secret-name" not in repr(events[0].attributes)
+    assert "203.0.113.9" not in repr(events[0].attributes)
+
+
+def test_a_refused_staged_upload_is_reported_with_its_status(
+    uploaded_agent: tuple[GatewayTestClient, int],
+):
+    client, agent = uploaded_agent
+    with capturing_events() as emitted:
+        refused_upload = client.post(
+            f"/api/keyed/v1/agents/{agent}/uploads/staged",
+            headers={"Idempotency-Key": "k2"},
+            files={"file": ("a.png", b"x", "image/png")},
+        )
+    reported = [e.attributes["status"] for e in emitted if e.event_name == "staged_upload_received"]
+    assert refused_upload.status_code == 422
+    assert reported == [422]
+
+
 @pytest.mark.parametrize("crash_stage", ["before-link", "after-link"])
 def test_hard_death_native_temp_not_double_charged_or_cleaned(
     uploaded_agent: tuple[GatewayTestClient, int],
