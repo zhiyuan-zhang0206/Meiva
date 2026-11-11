@@ -36,10 +36,10 @@ the rows: `restart_statements`, `terminate_statement`, `compact_statement`,
 publishes the wake on the agent's inbound channel from the redis handle, the agent id and the
 configured events channel it is given.
 
-## meiva_fleet Plugin Injections
+## Role label
 
-The following members are mounted onto the `meiva.self` namespace by the `meiva_fleet` plugin (non-core), allowing agents to report status to the fleet monitoring view. See plugin-side OKF for details.
-- `set_label(text)` — Set role label (stable role name, not task summary); peers discover you via this label using `get_neighbors`, and your responsibility chain via `get_ancestors`. The label is also stated in your own agent-ID context note at every window establishment.
+- `set_label(text)` — Set role label (stable role name, not task summary, not a status line; a task name is a fair label for an ephemeral worker); peers discover you via this label using `get_neighbors`, and your responsibility chain via `get_ancestors`. The label is also stated in your own agent-ID context note at every window establishment. An empty string clears it. A label set here is never replaced automatically.
+- It calls `meiva.gateway_client.patch_label` (`PATCH /api/agents/{id}`, source `self`), so the gateway must be reachable. The gateway writes the label and the sticky `label_user_set` bit (the labeler does not overwrite it), records the `label_change` audit fact in the same transaction (attributed to `agent:<id>`, so a label set while a lease borrows the agent also lands in the lease's event log), and publishes `label_updated` so the fleet monitoring view refreshes. It does not depend on the Fleet plugin.
 
 ## Borrowed harness identity
 An external harness process acts as this agent through `meiva.attach()`: the bridge writes one registration row, exports the handle, and the SDK borrows that identity on the process's first read that needs one. See [harness attach](harness/docs/harness-attach.md).

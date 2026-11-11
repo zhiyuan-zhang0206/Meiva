@@ -60,6 +60,7 @@ _SURFACE: dict[str, list[str]] = {
         "compact",
         "pause_heartbeat",
         "restart",
+        "set_label",
         "terminate",
     ],
     "ui": ["ask", "publications", "publish", "questions"],

@@ -2,13 +2,12 @@
 
 ## What it is
 
-`meiva_fleet` provides labels, task tracking and collaboration guidance. Core
+`meiva_fleet` provides task tracking and collaboration guidance. Core
 `meiva.ui` owns publish and Ask, independently of this plugin. Disabling Fleet
 therefore leaves user communication available.
 
 ## Overall Architecture
 
-- **Self** injects `set_label`; other core self members are unchanged.
 - **Tasks** is implemented by `task_registry.py`, with update validation and database-write helpers in `_task_update.py`; the public registry remains the sub-module registered by the plugin
 - **Neighbors** and **Spawn** are `meiva.agents` SDK core; the fleet plugin uses system prompts to let agents understand their usage conventions — the plugin itself does not register or wrap these methods
 - **Task Maintenance** is a gateway-side daemon registered by this plugin into the ops service roster (overdue task reminders + escalation) — declared via `services()` in `plugins/meiva_fleet/services.py` with `ServiceSpec`, discovered by `services/supervision/roster/plugin_services.py:plugin_services()` based on plugin code "existence" and folded into single-source `build_services()`. Note it is a machine-level daemon, **its life/death is not determined by agent-side plugin enable/disable** (that is the agent surface aspect); the host-owned gate is `FleetConfig.task_maintenance_enabled` in the plugin config image. See [Task Maintenance](../task_maintenance/docs/task_maintenance.md) for details
@@ -16,7 +15,7 @@ therefore leaves user communication available.
 
 ## Two-layer Relationship
 
-1. **Agent ↔ User**: via Self (activity trail, role labels) and core publish/Ask — agents present themselves and request decisions. Communication is **bifurcated**: authorization/decisions go directly to the user from any depth; progress/conclusions roll up along the delegation tree to the delegator for aggregation before entering the user queue
+1. **Agent ↔ User**: via core publish/Ask (and the core `meiva.self.set_label` role label) — agents present themselves and request decisions. Communication is **bifurcated**: authorization/decisions go directly to the user from any depth; progress/conclusions roll up along the delegation tree to the delegator for aggregation before entering the user queue
 2. **Agent ↔ Agent**: via Neighbors (discovery, messages) and Spawn (creation, termination) — agents coordinate division of labor, no fixed hierarchy
 
 ## Dependencies
@@ -31,7 +30,7 @@ Cold imports: [Boot contracts](../../../../meiva/docs/boot-contracts.md).
 ## Configuration
 
 - Enable/disable uses per-machine `~/.meiva/plugins_config.json` (`base/packages/plugins/enable_config.py:set_local_enabled` is the only writer), CLI `meiva plugins enable/disable <name>` — no `MEIVA_FLEET_ENABLED` or similar env switch
-- After disabling: `meiva.ui` falls back to pure page mode (no notices), `meiva.self`'s log/label methods disappear, `meiva.tasks` namespace disappears; `meiva.agents.spawn` keeps working unchanged, `label` included
+- After disabling: `meiva.ui` falls back to pure page mode (no notices), `meiva.tasks` namespace disappears; `meiva.agents.spawn` keeps working unchanged, `label` included
 
 ## Workflow boundary
 

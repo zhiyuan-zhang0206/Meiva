@@ -38,6 +38,7 @@ __all_for_meiva__ = [
     "compact",
     "pause_heartbeat",
     "restart",
+    "set_label",
     "terminate",
 ]
 
@@ -87,10 +88,10 @@ def __getattr__(name: str) -> object:
         from base.packages.plugins.plugin_errors import InvalidConfigOverlay
 
         return InvalidConfigOverlay
-    # Plugin members land on meiva.self via a declared `SdkMember` (meiva_fleet
-    # adds set_label). In an agent-launched persistent-shell
-    # child they are absent until plugins load, and this module already exists so
-    # meiva.__getattr__ never fires — trigger the shared lazy load here, then retry.
+    # meiva:note
+    # Plugin members land on meiva.self via a declared `SdkMember`. In an agent-launched
+    # persistent-shell child they are absent until plugins load, and this module already exists
+    # so meiva.__getattr__ never fires; trigger the shared lazy load here, then retry.
     import sys as _sys
 
     if maybe_load_plugins_for_missing(name):
@@ -162,6 +163,23 @@ def attach(path: str | Path, *, label: str | None = None) -> None:
         base=workspace_base_for(context),
         user_home=context.require_user_home(),
     )
+
+
+def set_label(text: str) -> None:
+    """Set your role label: a stable name for what you own, not a task summary.
+
+    Peers find you by this label through `meiva.agents.get_neighbors`, and the
+    label is stated in your own agent-ID context note whenever a context window
+    is established. Keep it stable (a role such as "health steward"; a task name
+    is a fair label for an ephemeral worker) and put current status in your
+    replies. A label you set is never replaced automatically; call again to
+    change it, or pass an empty string to clear it.
+    """
+    text = coerce_str(text, "text", allow_none=True)
+    from meiva import gateway_client
+    from meiva.sdk_surface import agent_identity
+
+    gateway_client.patch_label(agent_identity.require_agent_id(), text or "", source="self")
 
 
 def _publish_self_inbound_wake() -> None:

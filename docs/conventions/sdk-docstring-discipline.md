@@ -21,7 +21,7 @@ Specific coverage (**all mandatory**):
 - module / function / class docstrings in namespaces declared by plugins as `SdkNamespace(name, module)`
   (plugin `_*.py` private modules count too — as long as the namespace exports them to the agent, they're covered)
 - docstrings of callables hung on an existing namespace via `SdkMember(namespace, name, fn)`
-  (e.g. `meiva.self.set_label`) — equally agent-facing, rendered under `help(meiva.<namespace>)`
+  (plugin-hung members) — equally agent-facing, rendered under `help(meiva.<namespace>)`
 - strings returned by the section functions a plugin declares in `contribute()` (including stdout captured from
   `meiva.help(...)` calls inside `fn` — if upstream docstrings are sloppy, they bring violations into the prompt)
 - docstrings of wraps / overrides (`meiva.files.read = _wrapped_read` style replacements of original SDK

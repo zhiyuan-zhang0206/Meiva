@@ -37,7 +37,7 @@ def fleet_self_section(_slices: AgentSlices, *, catalog: ModelCatalog) -> str:
         return "## Fleet\n\nUse meiva.tasks for task tracking and meiva.agents.send_message for peers. Publish information with meiva.ui.publish and questions with meiva.ui.ask."
     return (
         "## Fleet\n\n"
-        "Fleet provides optional labels (`meiva.self.set_label`), user questions "
+        "Fleet provides user questions "
         "(`meiva.ui.ask`), task tracking (`meiva.tasks`), and peer collaboration. "
         "Workflow selection belongs to `meiva-workflow`; enabling Fleet does not "
         "require a registry task or a management tree. Agents are "
