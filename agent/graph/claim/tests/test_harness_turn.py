@@ -12,11 +12,11 @@ from langchain_core.runnables import RunnableConfig
 from langgraph.runtime import Runtime
 from psycopg_pool import AsyncConnectionPool
 
-from agent.graph.claim.harness_activity import HarnessTurnProjector
+from agent.graph.claim.harness_activity import HarnessTurnProjector, log_turn_usage
+from agent.graph.claim.harness_cancel import interrupt_engine
 from agent.graph.claim.harness_render import pending_messages, render_messages
 from agent.graph.claim.harness_tool_format import format_tool_use
-from agent.graph.claim.harness_turn import harness_turn_node, interrupt_engine
-from agent.graph.claim.harness_usage import log_turn_usage
+from agent.graph.claim.harness_turn import harness_turn_node
 from agent.graph.claim.lost_turn import lost_turn_note, report_lost_turn
 from agent.graph.claim.tests.harness_support import FakeEngine
 from agent.graph.llm_errors import FatalLLMStreamError

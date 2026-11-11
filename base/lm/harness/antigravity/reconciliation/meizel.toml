@@ -1,4 +1,4 @@
-exports = []
+exports = ["queue_files.py"]
 
 [uses]
 "__init__.py" = []

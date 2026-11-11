@@ -150,6 +150,7 @@ def _record(agent_id: int, harness: str, session: str, tmp_path: Path) -> Sessio
         harness=harness,
         created_at="2026-11-11T00:00:00+00:00",
         updated_at="2026-11-11T00:00:00+00:00",
+        generation=0,
     )
 
 

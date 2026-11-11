@@ -1,12 +1,11 @@
 from __future__ import annotations
 
-import json
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 
-from base.host.boundary.json_values import is_object_dict
-from base.host.boundary.untyped import object_of
+from base.host.boundary.jsonl import read_jsonl_rows
 from base.lm.harness.codex.reconciliation.judge import judge
-from base.lm.harness.delivery import Reconciliation
+from base.lm.harness.delivery import Reconciliation, home_in
 
 
 # meiva:note
@@ -17,21 +16,21 @@ from base.lm.harness.delivery import Reconciliation
 # caller learns there is no record to ask, and a malformed line is an error rather than a skipped row,
 # because skipping it could turn a recorded input into a re-delivery.
 # meiva:link base/lm/harness/codex/docs/codex.md
+def codex_home(environ: Mapping[str, str]) -> Path:
+    configured = environ.get("CODEX_HOME")
+    return Path(configured) if configured else Path(home_in(environ)) / ".codex"
+
+
 def rollout_path(codex_home: Path, thread_id: str) -> Path | None:
     matches = sorted((codex_home / "sessions").glob(f"*/*/*/rollout-*{thread_id}.jsonl"))
     return matches[-1] if matches else None
 
 
-def reconcile_input(codex_home: Path, thread_id: str, key: str) -> Reconciliation | None:
+def reconcile_inputs(
+    codex_home: Path, thread_id: str, keys: Sequence[str]
+) -> dict[str, Reconciliation] | None:
     path = rollout_path(codex_home, thread_id)
     if path is None:
         return None
-    rows: list[dict[str, object]] = []
-    for number, line in enumerate(path.read_text().splitlines(), start=1):
-        if not line.strip():
-            continue
-        parsed = object_of(json.loads, line)
-        if not is_object_dict(parsed):
-            raise ValueError(f"{path}:{number}: a rollout row is not an object")
-        rows.append(parsed)
-    return judge(rows, key)
+    rows = read_jsonl_rows(path)
+    return {key: judge(rows, key) for key in keys}

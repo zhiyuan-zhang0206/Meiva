@@ -7,10 +7,15 @@ from pathlib import Path
 import pytest
 
 from base.lm.harness.codex.reconciliation.judge import judge
-from base.lm.harness.codex.reconciliation.rollout import reconcile_input, rollout_path
+from base.lm.harness.codex.reconciliation.rollout import reconcile_inputs, rollout_path
 from base.lm.harness.delivery import Reconciliation
 
 FIXTURE = Path(__file__).parent / "fixtures" / "rollout-2026-11-10T13-30-00-thread-1.jsonl"
+
+
+def reconcile_input(home: Path, session: str, key: str) -> Reconciliation | None:
+    answers = reconcile_inputs(home, session, [key])
+    return None if answers is None else answers[key]
 
 
 def home_with_rollout(tmp_path: Path) -> Path:

@@ -16,6 +16,7 @@ from base.lm.harness.antigravity.mapping import (
     parse_result,
     parse_usage,
 )
+from base.lm.harness.antigravity.reconciliation.queue_files import agy_home, reconcile_inputs
 from base.lm.harness.antigravity.trajectory import (
     PhantomAction,
     PhantomTurn,
@@ -33,7 +34,7 @@ from base.lm.harness.base_session import (
     SessionClock,
 )
 from base.lm.harness.cancel import CancelReport, unobserved_cancel
-from base.lm.harness.delivery import HarnessInput, InputPhase, validated_batch
+from base.lm.harness.delivery import HarnessInput, InputPhase, Reconciliation, validated_batch
 from base.lm.harness.events import (
     AckSignal,
     AssistantText,
@@ -106,6 +107,11 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
         self._phantom: PhantomTurn | None = None
         self._acked_start = False
         self._last_turn: str | None = None
+
+    def _read_records(
+        self, session_id: str, keys: Sequence[str]
+    ) -> dict[str, Reconciliation] | None:
+        return reconcile_inputs(agy_home(self._home, self._environ), session_id, keys)
 
     async def start(self, *, resume: str | None = None) -> None:
         if self._transport is not None:

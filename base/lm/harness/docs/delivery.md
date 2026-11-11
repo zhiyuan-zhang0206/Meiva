@@ -23,8 +23,11 @@ counts as delivered only when that input is in the context, and is attached agai
 
 ## The events (`events.py`)
 
-Every event carries the process `generation` (1 for the first process a session starts, +1 per
-respawn). An adapter drops a frame from an older process.
+Every event carries the process `generation`: one above the last generation the session's registry record
+names (1 for the first process of an agent, +1 per respawn, resume or host restart; the record keeps it as a
+required field and converge completes older records with 0, so the count grows across sessions, not only inside
+one object). An adapter drops a frame from an older process,
+and the graph's `Foreground` drops one that arrives after a later generation began.
 
 | Event | Meaning |
 |---|---|
@@ -68,7 +71,22 @@ subscription. The graph's `harness_turn` is the one consumer: it settles each in
 After a crash the live acknowledgements are gone. Each adapter can answer, from the harness's own
 durable record, `Reconciliation.IN_CONTEXT`, `PERSISTED_UNDELIVERED` or `NOT_FOUND` for a key. No
 harness de-duplicates, so only `NOT_FOUND` allows a re-delivery. Reading (effect) and judging (pure)
-are separate modules per adapter; the home directory is injected.
+are separate modules per adapter; the home directory is injected: the session derives it from its own
+environment (`CLAUDE_CONFIG_DIR` through the auth config or `HOME/.claude`, `CODEX_HOME` or `HOME/.codex`,
+`HOME` for Antigravity's `.gemini` tree) and an environment without `HOME` cannot answer. A batch of keys
+is judged with one read of the record (`reconcile_inputs`); a JSONL record's half-written last line (no trailing
+newline, a process killed mid-write) is skipped, a bad line anywhere else is an error. `Reconciliation.UNKNOWN`
+is Antigravity's answer for an input absent from its message queue: only steered inputs are queued, an input that
+started a turn on stdin leaves no file whether or not it ran.
+
+The session answers for the session its registry record names, so no CLI has to run:
+`session.reconcile(keys)` (and `HarnessBridge.reconcile`, which also answers for the session it just retired)
+returns one answer per key. A session with no record, or whose record file is gone, raises
+`ReconciliationUnavailableError`: only a record that exists and lacks the key may say `NOT_FOUND`, so the
+caller falls back to its own explicit outcome instead of guessing. `session.adopt(keys)` (bridge `adopt`) puts
+keys the harness will deliver by itself (`PERSISTED_UNDELIVERED`, Antigravity's queue) into the ledger as
+received without handing them to the CLI, so the trajectory facts that follow settle them. What the graph does
+with the answers is in [foreground input and cancellation](../../../../agent/graph/docs/harness-foreground.md).
 
 ## Per-adapter signals
 

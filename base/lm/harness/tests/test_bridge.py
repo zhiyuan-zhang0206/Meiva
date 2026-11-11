@@ -4,7 +4,7 @@ import asyncio
 import base64
 import os
 import random
-from collections.abc import AsyncIterator, Sequence
+from collections.abc import AsyncIterator, Mapping, Sequence
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -37,7 +37,7 @@ from base.lm.harness import (
 from base.lm.harness.antigravity import AgySession
 from base.lm.harness.claude.session import ClaudeSession
 from base.lm.harness.codex.session import CodexSession
-from base.lm.harness.delivery import HarnessInput
+from base.lm.harness.delivery import HarnessInput, Reconciliation
 from base.lm.harness.registration import SecureRandom
 from base.lm.harness.tests.bridge_support import run_turn
 from base.lm.harness.tests.roots import bridge_root_values
@@ -83,6 +83,8 @@ class FakeSession:
         self.handoff: Handoff | None = None
         self.submitted: list[tuple[str, str | None, str]] = []
         self.session_id = None
+        self.generation = 1
+        self.adopted: list[str] = []
         self.resumed = resumed
         # meiva:note
         # The adapter contract's third state holder (task #5616): a fake has no child
@@ -108,6 +110,12 @@ class FakeSession:
     async def deliver(self, inputs: Sequence[HarnessInput]) -> None:
         for item in inputs:
             _ = self.accept(item.text, key=item.key)
+
+    async def reconcile(self, keys: Sequence[str]) -> Mapping[str, Reconciliation]:
+        return dict.fromkeys(keys, Reconciliation.NOT_FOUND)
+
+    def adopt(self, keys: Sequence[str]) -> None:
+        self.adopted.extend(keys)
 
     def accept(self, text: str, *, key: str | None = None) -> None:
         self._n += 1

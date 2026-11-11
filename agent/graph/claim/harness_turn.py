@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Awaitable, Callable, Coroutine, Sequence
+from collections.abc import Sequence
 from contextlib import suppress
+from dataclasses import replace
 from typing import Any, Literal
 
 from langchain_core.runnables import RunnableConfig
@@ -14,16 +15,31 @@ from pydantic import TypeAdapter
 from agent import state as _state
 from agent.db import ClaimedInbound
 from agent.graph.claim._dispatch import is_human_wake_item, prepare_steered_inbound
-from agent.graph.claim.harness_activity import HarnessTurnProjector
-from agent.graph.claim.harness_foreground import Commit, Foreground, Handed, Requeue, Settlement
+from agent.graph.claim.harness_activity import HarnessTurnProjector, log_turn_usage
+from agent.graph.claim.harness_cancel import announce_cancel, await_foreground
+from agent.graph.claim.harness_foreground import (
+    Commit,
+    Foreground,
+    Handed,
+    Reconciled,
+    Requeue,
+    Settlement,
+    event_generation,
+)
 from agent.graph.claim.harness_inbox import (
+    apply_reconciled,
+    claimed_deliverable,
     commit_handed,
+    defer_reconciliation,
+    is_deferred,
+    mark_unconfirmed,
+    publish_inbound,
+    reconcile_handed,
+    recovery_notes_first,
     requeue_handed,
     reserve_head_batch,
-    retire_unconfirmed,
 )
 from agent.graph.claim.harness_render import render_message, render_messages
-from agent.graph.claim.harness_usage import log_turn_usage
 from agent.graph.claim.lost_turn import report_lost_turn
 from agent.graph.claim.timeline import append_turn_timeline
 from agent.graph.claim.turn_stamp import persist_last_active
@@ -31,8 +47,6 @@ from agent.graph.hooks.user_delivery import capture_items, delivery_end_reminder
 from agent.graph.interrupt import (
     ModelInterruptedError,
     interrupt_halt,
-    interruptible_model,
-    subscribe_interrupt,
 )
 from agent.graph.llm_errors import FatalLLMStreamError
 from agent.graph.node_log import StallConfig, node_lifecycle
@@ -45,9 +59,8 @@ from base.agents.history.harness_messages import (
 )
 from base.agents.history.timeline import build_timeline_items
 from base.agents.history.timeline_item import TimelineItem
-from base.agents.messages.inbound import InterruptScope
 from base.db.transaction import async_write_transaction
-from base.events.live.projection import Cancelled, InboundCommitted, LLMDone, TimelineSnapshot
+from base.events.live.projection import LLMDone, TimelineSnapshot
 from base.events.live.publisher import AgentEventPublisher
 from base.lm.harness import (
     AssistantText,
@@ -74,12 +87,6 @@ HarnessGoto = Literal["claim"]
 _TIMELINE_ITEMS = TypeAdapter(list[TimelineItem])
 
 # meiva:note
-# This tick keeps host custody alive while a harness owns the invocation. Provider
-# activity is recorded separately by the timeline projector.
-# meiva:link agent/graph/docs/harness-turn.md
-PROGRESS_TICK_SECONDS = 60.0
-
-# meiva:note
 # Delivery is woken by the host's inbound wake, so the queue is not polled while a turn runs. The
 # fallback only bounds the cost of a lost wake. After a refusal (Antigravity refuses an input for a
 # conversation that is just starting or just ending) the same input is not sent again before the
@@ -88,6 +95,16 @@ PROGRESS_TICK_SECONDS = 60.0
 DELIVERY_FALLBACK_SECONDS = 15.0
 REDELIVER_BACKOFF_SECONDS = 2.0
 POOL_RETRY_SECONDS = 1.0
+
+
+# meiva:note
+# The recovery input after a crash: a statement of fact, the agent decides what to do. It is sent only when no
+# other recovery input (a restart note, a context reset) is already on its way.
+# meiva:link agent/graph/docs/harness-foreground.md
+RESUME_AFTER_RESTART = (
+    "The process running you was restarted while you were handling the messages above, so the "
+    "turn you were in was interrupted. Continue from where you stopped."
+)
 
 
 # meiva:note
@@ -163,7 +180,7 @@ async def _run_harness_turn(
     run = ForegroundRun(ctx, agent_id, bridge, projector, state, event_publisher)
 
     try:
-        await _await_foreground(ctx, agent_id, bridge, projector, run)
+        await await_foreground(ctx, agent_id, bridge, projector, run.execute)
     except ModelInterruptedError as exc:
         await run.retire_unconfirmed()
         await projector.finish(interrupted=True)
@@ -176,13 +193,13 @@ async def _run_harness_turn(
             log_turn_usage(ctx, agent_id, bridge.model, exc.outcome)
         if not isinstance(exc, HarnessTurnFaultedError) or exc.outcome is None:
             await bridge.retire(reason="session unavailable")
-        inbound_ids = run.unsettled_inbound_ids()
-        await run.retire_unconfirmed()
-        if projector.has_activity:
+        produced_output = projector.has_activity
+        marked = await run.retire_unconfirmed()
+        if produced_output:
             await projector.finish(error=str(exc))
-        else:
+        elif marked:
             await report_lost_turn(
-                ctx, agent_id, inbound_ids, run.last_key, exc, append=append_turn_timeline
+                ctx, agent_id, marked, run.last_key, exc, append=append_turn_timeline
             )
         raise FatalLLMStreamError(f"{ctx.harness.value} harness turn aborted: {exc}") from exc
     except Exception:
@@ -205,7 +222,7 @@ async def _run_harness_turn(
     await projector.finish(interrupted=run.interrupted)
     _apply_wake_polarity(state, projector, extra_updates)
     if run.interrupted:
-        _announce_cancel(ctx, agent_id)
+        announce_cancel(ctx, agent_id)
     return Command[HarnessGoto](update={**extra_updates, "halted": True, **_CLEARED}, goto=CLAIM)
 
 
@@ -252,21 +269,118 @@ class ForegroundRun:
         # write be forgotten) while one is in flight.
         # meiva:link agent/graph/docs/harness-foreground.md
         self._settling: list[Handed] = []
-
-    def unsettled_inbound_ids(self) -> list[int]:
-        return [h.inbound_id for h in self._unsettled() if h.inbound_id is not None]
+        self._kept: set[str] = set()
+        self._resumed = False
 
     def _unsettled(self) -> tuple[Handed, ...]:
         return (*self.fg.handed, *self._settling)
 
-    async def retire_unconfirmed(self) -> None:
-        items = await self._projector.append_inbound(
-            lambda: retire_unconfirmed(self._ctx, self._agent_id, self._unsettled())
+    # meiva:note
+    # The invocation failed or was interrupted with inputs handed over and unsettled. The session is
+    # retired first, so a CLI that still held an input in a queue of its own can no longer take it
+    # later; then the harness's durable record decides each input: in the context (settled like an
+    # acknowledgement), absent (back to the queue, delivered again in its original order), stored and
+    # still to be delivered by the harness itself or beyond the record's knowledge. When the record
+    # does not exist, or the session cannot be retired, nothing is guessed and the inputs are consumed
+    # with the uncertainty marker. A failure to read an existing record (I/O, an interface change)
+    # leaves the rows claimed: the next wake reconciles them again. Returns the inbox rows consumed
+    # with the marker, the only ones a lost-turn note may name.
+    # meiva:link agent/graph/docs/harness-foreground.md
+    async def retire_unconfirmed(self) -> list[int]:
+        unsettled = self._unsettled()
+        if not unsettled:
+            return []
+        try:
+            plan = await self._reconcile_after_failure(unsettled)
+        except Exception:
+            logger.opt(exception=True).warning(
+                "could not read the harness's record; the inputs stay claimed to be reconciled "
+                "at the next wake",
+                event="harness_reconcile_failed",
+                agent_id=self._agent_id,
+                keys=[h.key for h in unsettled],
+                where="after_failure",
+            )
+            return []
+        if plan is None:
+            return await mark_unconfirmed(self._ctx, self._agent_id, self._projector, unsettled)
+        return await self._apply(plan)
+
+    async def _reconcile_after_failure(self, unsettled: Sequence[Handed]) -> Reconciled | None:
+        try:
+            await self._bridge.retire(reason="inputs handed to a failed run need reconciling")
+        except Exception:
+            logger.opt(exception=True).warning(
+                "could not retire the harness session before reconciling its inputs",
+                event="harness_reconcile_failed",
+                agent_id=self._agent_id,
+                keys=[h.key for h in unsettled],
+                where="retire",
+            )
+            return None
+        return await reconcile_handed(
+            self._bridge, self._agent_id, unsettled, where="after_failure"
         )
-        _publish_inbound(self._ctx, self._agent_id, items)
+
+    async def _apply(self, plan: Reconciled) -> list[int]:
+        marked = await apply_reconciled(self._ctx, self._agent_id, self._projector, plan)
+        if plan.requeue:
+            self._changed.set()
+        return marked
+
+    # meiva:note
+    # The first thing a run does after the session is up: inputs an earlier process handed to the
+    # harness and left claimed (a crash, an abort, a restart) are reconciled before anything new is
+    # delivered. Absent ones return to the queue at their original position and are sent in order
+    # behind the recovery input. Ones the record shows in the context are settled, and because the
+    # turn they were in died with the process, a note says so (unless another recovery input is
+    # already on its way): without it the agent would have a message, no reply and nothing to prompt
+    # one. Ones the harness stored itself are adopted and the same note makes the CLI deliver its
+    # queue; if one has still not appeared when that turn is done, it is reconciled once more and, if
+    # the record still has it undelivered, left claimed and marked so it does not wake the agent again.
+    # Without a record, they are consumed with the uncertainty marker. An unreadable record leaves
+    # them claimed and fails the run, to be retried at the next wake.
+    # meiva:link agent/graph/docs/harness-foreground.md
+    async def _adopt_claimed(self) -> None:
+        rows = await claimed_deliverable(self._ctx, self._agent_id, include_deferred=True)
+        if not rows:
+            return
+        handed = [self._handed_of(item)[0] for item in rows]
+        plan = await reconcile_handed(self._bridge, self._agent_id, handed, where="session_start")
+        if plan is None:
+            _ = await mark_unconfirmed(self._ctx, self._agent_id, self._projector, handed)
+            return
+        deferred = {r.id for r in rows if is_deferred(r)}
+        keep = tuple(h for h in plan.keep if h.inbound_id not in deferred)
+        _ = await self._apply(plan)
+        self._queue_resume_note((*plan.commit, *keep))
+        if keep:
+            self.fg = self.fg.hand(keep)
+            self._kept = {h.key for h in keep}
+            self._bridge.adopt([h.key for h in keep])
+
+    def _queue_resume_note(self, settled: Sequence[Handed]) -> None:
+        if not settled or self._synthetic:
+            return
+        newest = max(h.inbound_id or 0 for h in settled)
+        self._synthetic.append(
+            (Handed(f"reconciled-resume-{newest}", None, ()), RESUME_AFTER_RESTART)
+        )
+
+    async def _recheck_kept(self) -> None:
+        kept = tuple(h for h in self.fg.handed if h.key in self._kept)
+        self._kept = set()
+        self.fg = self.fg.withdraw(frozenset(h.key for h in kept))
+        plan = await reconcile_handed(self._bridge, self._agent_id, kept, where="after_resume")
+        if plan is None:
+            _ = await mark_unconfirmed(self._ctx, self._agent_id, self._projector, kept)
+            return
+        _ = await self._apply(plan)
+        await defer_reconciliation(self._ctx, self._agent_id, plan.keep)
 
     async def execute(self) -> None:
         subscription = await self._bridge.subscribe()
+        self.fg = replace(self.fg, generation=self._bridge.generation)
         outcome: BaseException | None = None
         try:
             async with asyncio.TaskGroup() as tasks:
@@ -275,6 +389,7 @@ class ForegroundRun:
                 )
                 waker = tasks.create_task(self._wake(), name=f"harness-wake-{self._agent_id}")
                 try:
+                    await self._adopt_claimed()
                     await self._deliver_until_quiet()
                 except BaseException as error:
                     outcome = error
@@ -305,6 +420,16 @@ class ForegroundRun:
             self._changed.set()
 
     async def _on_event(self, event: BridgeEvent) -> None:
+        if self.fg.is_stale(event):
+            logger.info(
+                "dropped a frame of an earlier harness process",
+                event="harness_event_stale",
+                agent_id=self._agent_id,
+                event_kind=type(event).__name__,
+                event_generation=event_generation(event),
+                generation=self.fg.generation,
+            )
+            return
         if (fault := fault_of_event(self._ctx.harness, event)) is not None:
             raise fault
         match event:
@@ -342,7 +467,7 @@ class ForegroundRun:
                     lambda: commit_handed(self._ctx, self._agent_id, [handed]),
                     human_input=handed.human,
                 )
-                _publish_inbound(self._ctx, self._agent_id, items)
+                publish_inbound(self._ctx, self._agent_id, items)
             case Requeue(handed=handed, reason=reason):
                 logger.info(
                     "harness input returned to the queue",
@@ -377,6 +502,10 @@ class ForegroundRun:
                 self._backoff_until = asyncio.get_running_loop().time() + POOL_RETRY_SECONDS
                 continue
             if delivered:
+                self._resumed = self._resumed or bool(self._kept)
+                continue
+            if self._ready_to_recheck():
+                await self._recheck_kept()
                 continue
             backoff = self._backoff_until - asyncio.get_running_loop().time()
             if self.fg.quiet and not self._settling and not self._synthetic and backoff <= 0:
@@ -413,26 +542,24 @@ class ForegroundRun:
             self._ctx, self._agent_id, [Handed(f"inbound-{r.id}", r.id, ()) for r in rows]
         )
 
+    def _handed_of(self, item: ClaimedInbound) -> tuple[Handed, str]:
+        messages = prepare_steered_inbound(self._ctx, item)
+        text = render_messages(messages)
+        items, _ = build_timeline_items(messages, inputs=self._ctx.timestamp_policy())
+        entry = Handed(f"inbound-{item.id}", item.id, tuple(items), human=is_human_wake_item(item))
+        return entry, text
+
     async def _render(self, rows: Sequence[ClaimedInbound]) -> list[tuple[Handed, str]]:
-        rendered: list[tuple[Handed, str]] = []
-        for item in rows:
-            try:
-                messages = prepare_steered_inbound(self._ctx, item)
-                text = render_messages(messages)
-                items, _ = build_timeline_items(messages, inputs=self._ctx.timestamp_policy())
-            except Exception:
-                await self._give_back(rows)
-                raise
-            entry = Handed(
-                f"inbound-{item.id}", item.id, tuple(items), human=is_human_wake_item(item)
-            )
-            rendered.append((entry, text))
-        return rendered
+        try:
+            return [self._handed_of(item) for item in rows]
+        except Exception:
+            await self._give_back(rows)
+            raise
 
     async def _deliver_ready(self) -> bool:
         if asyncio.get_running_loop().time() < self._backoff_until:
             return False
-        rows = await self._reserve()
+        rows = recovery_notes_first(await self._reserve())
         synthetic, self._synthetic = self._synthetic, []
         handed: list[Handed] = []
         inputs: list[HarnessInput] = []
@@ -453,7 +580,7 @@ class ForegroundRun:
             items = await self._projector.append_inbound(
                 lambda: commit_handed(self._ctx, self._agent_id, settled_now)
             )
-            _publish_inbound(self._ctx, self._agent_id, items)
+            publish_inbound(self._ctx, self._agent_id, items)
         if not handed:
             return True
         self.last_key = handed[-1].key
@@ -470,6 +597,20 @@ class ForegroundRun:
                 f"{self._ctx.harness.value} could not take the input: {exc}"
             ) from exc
         return True
+
+    # meiva:note
+    # What the harness stored itself is waited for only while there is something that makes it deliver:
+    # once the recovery turn is over and every other input is settled, what is still missing is asked
+    # about once more instead of waited for.
+    def _ready_to_recheck(self) -> bool:
+        return (
+            any(h.key in self._kept for h in self.fg.handed)
+            and self._resumed
+            and not self._synthetic
+            and not self._settling
+            and not self.fg.turns
+            and all(h.key in self._kept for h in self.fg.handed)
+        )
 
     async def _queue_correction(self) -> bool:
         if not self._turn_ended or self.interrupted:
@@ -520,79 +661,6 @@ async def harness_reply_correction(
     return entry, render_message(note)
 
 
-async def _await_foreground(
-    ctx: MeivaContext,
-    agent_id: int,
-    bridge: TurnEngine,
-    projector: HarnessTurnProjector,
-    run: ForegroundRun,
-) -> None:
-    resources = ctx.hosted_resources
-    async with (
-        subscribe_interrupt(
-            ctx.ops_pool, agent_id, resources=resources, scope=InterruptScope.LIFECYCLE
-        ) as lifecycle,
-        subscribe_interrupt(
-            ctx.ops_pool, agent_id, resources=resources, scope=InterruptScope.FOREGROUND
-        ) as cancel,
-    ):
-
-        async def request_cancel() -> None:
-            await cancel.wait()
-            if error := await interrupt_engine(agent_id, bridge):
-                await projector.record_control(f"Cancellation unconfirmed: {error}", error=True)
-
-        async def go() -> None:
-            await _with_cancel(run.execute, request_cancel, agent_id)
-
-        await interruptible_model(
-            _ticking(ctx.turn_progress.mark, agent_id, go(), projector), lifecycle
-        )
-
-
-# meiva:note
-# A foreground cancel sends a control request while the event reader remains alive. Only the harness's
-# own terminal event ends a turn, so a cancel changes nothing about when the invocation ends: it ends
-# when everything handed over is settled and no turn runs. Inputs not yet in the context at that moment
-# are still delivered and settled; they are delivered as a new turn, as in the built-in runtime.
-# meiva:link agent/graph/docs/harness-turn.md
-async def _with_cancel(
-    execute: Callable[[], Awaitable[None]],
-    request_cancel: Callable[[], Coroutine[Any, Any, None]],
-    agent_id: int,
-) -> None:
-    outcome: BaseException | None = None
-    async with asyncio.TaskGroup() as tasks:
-        cancel_task = tasks.create_task(request_cancel(), name=f"harness-cancel-{agent_id}")
-        try:
-            await execute()
-        except BaseException as error:
-            outcome = error
-        finally:
-            cancel_task.cancel()
-        if isinstance(outcome, asyncio.CancelledError):
-            raise outcome
-    if outcome is not None:
-        raise outcome
-
-
-def _publish_inbound(ctx: MeivaContext, agent_id: int, items: list[TimelineItem]) -> None:
-    publisher = ctx.event_publisher
-    if publisher is None or not items:
-        return
-    count = int(items[-1].item_id.split(".")[0].removeprefix("h")) + 1
-    publisher.emit(
-        TimelineSnapshot(
-            agent_id=agent_id, items=[item.model_dump() for item in items], msg_count=count
-        ).model_dump_json()
-    )
-    for item in items:
-        if item.kind == "inbound_chat" and item.inbound_id is not None:
-            publisher.emit(
-                InboundCommitted(agent_id=agent_id, inbound_id=item.inbound_id).model_dump_json()
-            )
-
-
 async def _checkpoint_activity(
     ctx: MeivaContext,
     agent_id: int,
@@ -614,79 +682,3 @@ async def _checkpoint_activity(
             agent_id=agent_id, items=[item.model_dump()], msg_count=msg_count
         ).model_dump_json()
     )
-
-
-# meiva:note
-# The waited work is captured and raised after the group closes, the way `interruptible_model` does
-# it: a TaskGroup wraps a lone body error in an ExceptionGroup, and the node matches a faulted session on
-# the error's own type, so the identity has to survive this scope. A cancelled wait keeps its
-# CancelledError for the same reason.
-# meiva:link agent/graph/docs/harness-turn.md
-async def _ticking(
-    mark: Callable[[int], None],
-    agent_id: int,
-    work: Awaitable[None],
-    projector: HarnessTurnProjector,
-) -> None:
-    async def settle() -> BaseException | None:
-        try:
-            await work
-        except BaseException as error:
-            return error
-        return None
-
-    async def tick() -> None:
-        while True:
-            await asyncio.sleep(PROGRESS_TICK_SECONDS)
-            mark(agent_id)
-
-    async with asyncio.TaskGroup() as tasks:
-        ticker = tasks.create_task(tick(), name=f"harness-progress-{agent_id}")
-        checkpoints = tasks.create_task(projector.flush_text(), name=f"harness-timeline-{agent_id}")
-        outcome = await settle()
-        ticker.cancel()
-        checkpoints.cancel()
-        with suppress(asyncio.CancelledError):
-            await ticker
-        with suppress(asyncio.CancelledError):
-            await checkpoints
-    if outcome is not None:
-        raise outcome
-
-
-# meiva:note
-# Tell the live view the turn ended. Its committed activities remain visible and
-# the durable cancel stays pending for the next claim pass.
-# meiva:link agent/graph/docs/harness-turn.md
-def _announce_cancel(ctx: MeivaContext, agent_id: int) -> None:
-    assert ctx.event_publisher is not None, "a cancelled harness turn requires ctx.event_publisher"  # noqa: S101
-    ctx.event_publisher.emit(Cancelled(agent_id=agent_id).model_dump_json())
-
-
-# meiva:note
-# An interrupt that cannot be delivered is reported, never raised: the durable cancel row is still
-# pending and claim dispatches it on the next pass, while a raise here would turn the user's stop into
-# a failed turn. Process observations are diagnostics. The foreground ends only when the executor
-# reports a terminal outcome.
-# meiva:link agent/graph/docs/harness-turn.md
-async def interrupt_engine(agent_id: int, bridge: TurnEngine) -> str | None:
-    try:
-        report = await bridge.interrupt()
-    except Exception as exc:
-        logger.warning(
-            "[{label}] {body}",
-            label="harness",
-            event="harness_interrupt_failed",
-            body=f"interrupting agent {agent_id}'s harness turn raised: {exc!r}",
-        )
-        return str(exc) or type(exc).__name__
-    logger.info(
-        "[{label}] {body}",
-        label="harness",
-        event="harness_interrupt",
-        body=f"requested interruption for agent {agent_id}'s harness turn",
-        agent_id=agent_id,
-        settled=getattr(report, "settled", None),
-        turn_id=getattr(report, "turn_id", None),
-    )
-    return None

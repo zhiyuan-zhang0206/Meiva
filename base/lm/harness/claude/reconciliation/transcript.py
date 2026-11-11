@@ -1,12 +1,11 @@
 from __future__ import annotations
 
-import json
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 
-from base.host.boundary.json_values import is_object_dict
-from base.host.boundary.untyped import object_of
+from base.host.boundary.jsonl import read_jsonl_rows
 from base.lm.harness.claude.reconciliation.judge import judge
-from base.lm.harness.delivery import Reconciliation
+from base.lm.harness.delivery import Reconciliation, home_in
 
 
 # meiva:note
@@ -16,21 +15,22 @@ from base.lm.harness.delivery import Reconciliation
 # (there is no record to ask) and a malformed line is an error, because skipping it could turn a
 # recorded input into a re-delivery.
 # meiva:link base/lm/harness/claude/docs/claude.md
+def claude_home(config_dir: Path | None, environ: Mapping[str, str]) -> Path:
+    if config_dir is not None:
+        return config_dir
+    return Path(home_in(environ)) / ".claude"
+
+
 def transcript_path(claude_home: Path, session_id: str) -> Path | None:
     matches = sorted((claude_home / "projects").glob(f"*/{session_id}.jsonl"))
     return matches[-1] if matches else None
 
 
-def reconcile_input(claude_home: Path, session_id: str, key: str) -> Reconciliation | None:
+def reconcile_inputs(
+    claude_home: Path, session_id: str, keys: Sequence[str]
+) -> dict[str, Reconciliation] | None:
     path = transcript_path(claude_home, session_id)
     if path is None:
         return None
-    rows: list[dict[str, object]] = []
-    for number, line in enumerate(path.read_text().splitlines(), start=1):
-        if not line.strip():
-            continue
-        parsed = object_of(json.loads, line)
-        if not is_object_dict(parsed):
-            raise ValueError(f"{path}:{number}: a transcript row is not an object")
-        rows.append(parsed)
-    return judge(rows, key)
+    rows = read_jsonl_rows(path)
+    return {key: judge(rows, key) for key in keys}

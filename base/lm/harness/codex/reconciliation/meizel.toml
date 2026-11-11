@@ -1,4 +1,4 @@
-exports = []
+exports = ["rollout.py"]
 
 [uses]
 "__init__.py" = []

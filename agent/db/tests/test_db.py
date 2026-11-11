@@ -287,6 +287,40 @@ class TestFinalizeClaimedInbounds:
         assert payload is not None
         assert payload[0]["consumed_without_execution"] is True
 
+    async def test_an_external_harness_claim_is_left_for_reconciliation_even_after_an_abort(
+        self,
+        redis_url: str,
+        db_conn: psycopg.Connection,
+        aops_pool: AsyncConnectionPool,
+        *,
+        model_catalog: ModelCatalog,
+        config_authority: ConfigAuthority,
+        database_gate: ProcessDbGate,
+        machine_identity: MachineIdentityReader,
+    ) -> None:
+        tid = spawn_agent(
+            catalog=model_catalog,
+            authority=config_authority,
+            database_gate=database_gate,
+            machine=machine_identity,
+        )
+        db_conn.execute("UPDATE agents_meta SET harness='claude_code' WHERE id=%s", (tid,))
+        db_conn.commit()
+        handed = self._insert_claimed(db_conn, tid, "handed to the harness", "1 minute")
+
+        consumed = await finalize_claimed_inbounds(
+            aops_pool, tid, incarnation=None, unknown_execution=True
+        )
+
+        assert consumed == 0
+        row = db_conn.execute(
+            "SELECT status FROM inbound_messages WHERE id=%s", (handed,)
+        ).fetchone()
+        assert row is not None
+        assert row[0] == "claimed", (
+            "the next harness turn reconciles it against the harness's record"
+        )
+
     async def test_no_claimed_rows_is_noop(
         self,
         redis_url: str,

@@ -6,8 +6,16 @@ from dataclasses import dataclass, replace
 from types import TracebackType
 from typing import ClassVar, Self
 
-from base.lm.harness.delivery import DeliveryLedger, HarnessInput, ImageBlock, LedgerStep
+from base.lm.harness.delivery import (
+    DeliveryLedger,
+    HarnessInput,
+    ImageBlock,
+    LedgerStep,
+    Reconciliation,
+    ReconciliationUnavailableError,
+)
 from base.lm.harness.events import (
+    AckSignal,
     BridgeEvent,
     SessionBound,
     SessionClosed,
@@ -144,13 +152,79 @@ class BaseHarnessSession[ConfigT: SessionConfig](ExitStatus):
     def generation(self) -> int:
         return self._ledger.generation
 
+    # meiva:note
+    # What the harness's own durable record says about each input, for inputs handed to an earlier
+    # process of this session. The record is the one the registry names for this session, so it
+    # needs no running CLI. A session with no record, or a record file that is gone, raises
+    # `ReconciliationUnavailableError` rather than answering NOT_FOUND for everything: only a record
+    # that exists and lacks the key may let an input be delivered again.
+    # meiva:link base/lm/harness/docs/delivery.md
+    async def reconcile(self, keys: Sequence[str]) -> dict[str, Reconciliation]:
+        record = self._record
+        session_id = record.session_id if record is not None else self._session_id
+        if not session_id:
+            raise ReconciliationUnavailableError(
+                f"agent {self.agent_id} has no {self.harness} session record to reconcile against"
+            )
+        return await asyncio.to_thread(self._reconcile_keys, session_id, tuple(keys))
+
+    def _reconcile_keys(self, session_id: str, keys: tuple[str, ...]) -> dict[str, Reconciliation]:
+        answers = self._read_records(session_id, keys)
+        if answers is None:
+            raise ReconciliationUnavailableError(
+                f"{self.harness} has no durable record of session {session_id}"
+            )
+        return answers
+
+    def _read_records(
+        self, session_id: str, keys: Sequence[str]
+    ) -> dict[str, Reconciliation] | None:
+        raise NotImplementedError
+
+    # meiva:note
+    # Inputs a previous process handed to the harness that its durable record shows the harness
+    # will deliver by itself (`PERSISTED_UNDELIVERED`). They are not sent again: this process only
+    # learns of them, so the facts that follow (in the context, lost) settle them like any input.
+    # meiva:link base/lm/harness/docs/delivery.md
+    def adopt(self, keys: Sequence[str]) -> None:
+        for key in keys:
+            if self._ledger.phase(key) is None:
+                self._ledger = self._ledger.sent(key)
+                self._apply(self._ledger.received(key, AckSignal.WEAK))
+
     def _mint_turn_id(self) -> str:
         self._turn_seq += 1
         return f"turn-{self._turn_seq}"
 
+    # meiva:note
+    # A process starts one generation above the last one this session's record names, so the count
+    # keeps growing across sessions and across restarts of the host, not only across respawns of one
+    # object. The new number is written to an existing record at once: a session that dies before
+    # it binds still leaves the next one a higher number to start from.
+    # meiva:link base/lm/harness/docs/delivery.md
     def _begin_generation(self) -> int:
-        self._ledger = self._ledger.next_generation()
+        stored = self._stored_generation()
+        ledger = self._ledger
+        if stored > ledger.generation:
+            ledger = replace(ledger, generation=stored)
+        self._ledger = ledger.next_generation()
+        self._persist_generation()
         return self._ledger.generation
+
+    def _stored_generation(self) -> int:
+        if self._registry is None or self.agent_id is None:
+            return 0
+        record = self._registry.load(self.agent_id, harness=self.harness)
+        return 0 if record is None else record.generation
+
+    def _persist_generation(self) -> None:
+        if self._registry is None or self.agent_id is None:
+            return
+        record = self._registry.load(self.agent_id, harness=self.harness)
+        if record is not None:
+            self._registry.save(replace(record, generation=self._ledger.generation))
+        if self._record is not None:
+            self._record = replace(self._record, generation=self._ledger.generation)
 
     def _apply(self, step: LedgerStep) -> None:
         self._ledger = step.ledger
@@ -345,6 +419,7 @@ class BaseHarnessSession[ConfigT: SessionConfig](ExitStatus):
             resumes=(previous.resumes if previous is not None else 0)
             + (1 if self._resumed_existing else 0),
             harness=self.harness,
+            generation=self._ledger.generation,
         )
         self._registry.save(self._record)
         self._emit(

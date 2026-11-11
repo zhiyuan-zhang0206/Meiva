@@ -183,6 +183,7 @@ async def test_a_session_resumes_its_own_record_after_another_harness_used_the_a
             created_at="2026-11-01T00:00:00+00:00",
             updated_at="2026-11-02T00:00:00+00:00",
             harness="codex",
+            generation=0,
         )
     )
 

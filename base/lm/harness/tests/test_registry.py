@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from base.lm.harness import FileSessionRegistry, SessionRecord
-from base.lm.harness.registry import migrate_single_slot_records
+from base.lm.harness.registry import backfill_generation, migrate_single_slot_records
 
 HARNESS = "claude_code"
 
@@ -29,6 +29,7 @@ def record(
         updated_at=updated_at,
         harness=harness,
         resumes=resumes,
+        generation=0,
     )
 
 
@@ -251,3 +252,33 @@ def test_an_unmigrated_single_slot_file_makes_a_read_refuse(tmp_path: Path) -> N
     single_slot(root)
     with pytest.raises(ValueError, match="meiva converge"):
         FileSessionRegistry(root).load(6984, harness="codex")
+
+
+def test_the_generation_survives_a_roundtrip_and_a_record_without_it_is_refused(
+    tmp_path: Path,
+) -> None:
+    registry = FileSessionRegistry(tmp_path / "sessions")
+    registry.save(replace(record(), generation=5))
+    assert registry.load(6984, harness=HARNESS) == replace(record(), generation=5)
+
+    path = registry.path(6984, HARNESS)
+    payload = json.loads(path.read_text())
+    del payload["generation"]
+    path.write_text(json.dumps(payload))
+
+    with pytest.raises(ValueError, match="generation"):
+        _ = registry.load(6984, harness=HARNESS)
+
+
+def test_converge_gives_an_older_record_generation_zero_once(tmp_path: Path) -> None:
+    registry = FileSessionRegistry(tmp_path / "sessions")
+    registry.save(record())
+    path = registry.path(6984, HARNESS)
+    payload = json.loads(path.read_text())
+    del payload["generation"]
+    path.write_text(json.dumps(payload))
+
+    assert backfill_generation(tmp_path / "sessions") == [path]
+    assert backfill_generation(tmp_path / "sessions") == []
+    loaded = registry.load(6984, harness=HARNESS)
+    assert loaded is not None and loaded.generation == 0

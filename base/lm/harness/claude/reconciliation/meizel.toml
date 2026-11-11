@@ -1,4 +1,4 @@
-exports = []
+exports = ["transcript.py"]
 
 [uses]
 "__init__.py" = []

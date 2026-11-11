@@ -85,7 +85,7 @@ from ._present import (
     publish_inbound_committed,
 )
 from ._routing import ClaimGoto, resolve_routing, route_target
-from .harness_inbox import peek_head_batch
+from .harness_inbox import claimed_deliverable, peek_head_batch
 from .harness_render import render_messages
 from .turn_end import settle_turn_end
 
@@ -177,14 +177,20 @@ async def claim_node_impl(
 # read-only view, and the turn that follows reserves and delivers it. The wake polarity follows the
 # same rule as a claimed batch: a human message makes the run human-facing, otherwise a run already in
 # flight keeps its polarity and a fresh wake from automation is non-human.
+#
+# Rows an earlier process handed to the harness and left claimed also enter the turn: the turn
+# reconciles them against the harness's record before it delivers anything, so a message is never
+# stranded between a crash and the next message.
+# meiva:link agent/graph/docs/harness-foreground.md
 async def _harness_delivery_entry(
     ctx: MeivaContext, state: _state.AgentState, agent_id: int
 ) -> Command[ClaimGoto] | None:
     head = await peek_head_batch(ctx, agent_id)
-    if not head:
+    claimed = await claimed_deliverable(ctx, agent_id, include_deferred=False)
+    if not head and not claimed:
         return None
     view = [msg for item in head for msg in prepare_steered_inbound(ctx, item)]
-    if any(is_human_wake_item(item) for item in head):
+    if any(is_human_wake_item(item) for item in (*claimed, *head)):
         non_human = False
     else:
         non_human = state.non_human_wake if (state.turn_active and not state.halted) else True

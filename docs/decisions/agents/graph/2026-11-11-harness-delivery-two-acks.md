@@ -70,6 +70,16 @@ is the frontend.
 
 - Every adapter must produce the unified events; the graph (PR 2) consumes events, not return values.
 - Revision (graph change): `steer()`, `ForegroundSteering`, `ForegroundAccepted` and `InputLostError` are gone. The graph reads events from `HarnessBridge.subscribe()` and delivers with `deliver()`; inbox rows share one in-flight state (`claimed`) and are settled by ACK 2, a refusal or a loss. The adapters no longer have tickets: `submit()`, the turn queue, completed-key replay, `HandoffInjected` and Claude's turn alias are gone. An input delivered to an idle Codex or Antigravity session starts a turn through the same `deliver()` (an internal `ActiveTurn` record holds the turn's provider name for interrupts); Claude keeps no per-turn record of its own. A turn is reported only by its events.
+- Revision (reconciliation, PR 2c): the re-delivery of point 6 and the restart of point 7 are implemented in the graph. After
+  an abort, a crash or a host restart, every input claimed and never acknowledged is judged against the harness's durable record
+  (`bridge.reconcile`): `IN_CONTEXT` settles it like ACK 2, `NOT_FOUND` returns it to `pending` at its original position,
+  `PERSISTED_UNDELIVERED` leaves it claimed and adopted by the session, `UNKNOWN` (Antigravity inputs that started a turn on
+  stdin leave no queue file) and a missing record get the uncertainty marker as before, and a record that exists but cannot
+  be read leaves the row claimed for the next wake. An input settled as in the context gets a recovery input, since the turn
+  it was in died with the process. A run that failed retires its session before it asks, so "not found" is final. The host no
+  longer consumes an external harness's claimed rows when it rebuilds a runtime or after an abort; the next harness turn
+  reconciles them, and a pending scan wakes an idling external agent that holds one. The generation is persisted in the session
+  record so it grows across sessions, and the graph drops frames of an earlier generation.
 - The Antigravity trajectory and message-queue interfaces and the Codex rollout format are not public
   contracts; the adapters fail explicitly when a shape differs.
 - CLI processes with unfinished background tasks or timers must not be idle-reaped; that gap is handled

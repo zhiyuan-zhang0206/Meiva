@@ -71,6 +71,39 @@ class TestPendingInboundBackstop:
         assert sorted(await host.pending_inbound_wakes()) == [17, 23]
 
     # meiva:note
+    # An idling agent on an external harness whose inbox still holds a row claimed for the harness
+    # has nothing running to settle it, so the scan wakes it; a running one, a built-in one and a row
+    # of another kind are left alone.
+    async def test_an_orphaned_harness_claim_wakes_only_an_idling_external_agent(
+        self, wired: Build, db_conn: psycopg.Connection
+    ) -> None:
+        host, _, _ = wired(
+            {
+                17: Row(status="idling", harness="claude_code"),
+                23: Row(status="running", harness="claude_code"),
+                30: Row(status="idling", harness="meiva"),
+                31: Row(status="idling", harness="claude_code"),
+                32: Row(status="idling", harness="claude_code"),
+            }
+        )
+        for agent_id, kind in ((17, "chat"), (23, "chat"), (30, "chat"), (31, "cancel")):
+            db_conn.execute(
+                "INSERT INTO inbound_messages (agent_id, content, kind, source, status, claimed_at) "
+                "VALUES (%s, 'handed over', %s, 'user', 'claimed', now())",
+                (agent_id, kind),
+            )
+        db_conn.execute(
+            "INSERT INTO inbound_messages (agent_id, content, kind, source, status, claimed_at, payload) "
+            "VALUES (32, 'still stored by the CLI', 'chat', 'user', 'claimed', now(), "
+            "jsonb_build_object('harness_reconcile_deferred', true))"
+        )
+        db_conn.commit()
+
+        assert await host.pending_inbound_wakes() == [17], (
+            "a row the harness still holds undelivered was already asked about"
+        )
+
+    # meiva:note
     # A turn pool that cannot be borrowed from leaves the scan unaffected.
     async def test_scan_uses_the_reserved_control_pool(
         self,

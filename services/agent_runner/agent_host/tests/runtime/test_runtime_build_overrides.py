@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import time
 from collections import OrderedDict
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
@@ -22,7 +22,7 @@ from base.db import Database
 from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
 from base.lm.catalog.provider_keys import ProviderKeys
-from base.lm.harness import EventSubscription, FileSessionRegistry, HarnessInput
+from base.lm.harness import EventSubscription, FileSessionRegistry, HarnessInput, Reconciliation
 from base.lm.harness.bridge import HarnessBridge
 from base.lm.harness.tests.roots import bridge_root_values
 from base.native_process.runtime_incarnation import RuntimeIncarnation
@@ -173,6 +173,16 @@ class FakeEngine:
 
     async def deliver(self, inputs: Sequence[HarnessInput]) -> None:
         raise AssertionError("these tests never deliver")
+
+    @property
+    def generation(self) -> int:
+        return 0
+
+    async def reconcile(self, keys: Sequence[str]) -> Mapping[str, Reconciliation]:
+        raise AssertionError("these tests never reconcile")
+
+    def adopt(self, keys: Sequence[str]) -> None:
+        raise AssertionError("these tests never adopt")
 
     async def retire(self, reason: str) -> None:
         raise AssertionError("these tests never retire")

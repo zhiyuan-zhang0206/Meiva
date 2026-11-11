@@ -5,7 +5,7 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from contextlib import suppress
 
 from base.api_contracts.agent_contract import Harness
@@ -14,6 +14,8 @@ from base.lm.harness import (
     HarnessInput,
     InputInContext,
     InputRejected,
+    Reconciliation,
+    ReconciliationUnavailableError,
     TurnCompleted,
     TurnOrigin,
     TurnStarted,
@@ -99,6 +101,13 @@ class FakeEngine:
         self.interrupts = 0
         self.retired: list[str] = []
         self.closed = False
+        self.generation = 1
+        # meiva:note
+        # The harness's durable record as `reconcile` answers it: a key it holds maps to its answer and
+        # a key it lacks is NOT_FOUND. None is a record that cannot be read at all.
+        self.records: Mapping[str, Reconciliation] | None = None
+        self.reconciled: list[list[str]] = []
+        self.adopted: list[str] = []
         self.subscriptions: set[FakeSubscription] = set()
         self._inbound = asyncio.Event()
 
@@ -130,6 +139,15 @@ class FakeEngine:
     async def deliver(self, inputs: Sequence[HarnessInput]) -> None:
         self.delivered.append(list(inputs))
         self.emit(*self._script(inputs))
+
+    async def reconcile(self, keys: Sequence[str]) -> Mapping[str, Reconciliation]:
+        self.reconciled.append(list(keys))
+        if self.records is None:
+            raise ReconciliationUnavailableError("the fake harness has no readable record")
+        return {key: self.records.get(key, Reconciliation.NOT_FOUND) for key in keys}
+
+    def adopt(self, keys: Sequence[str]) -> None:
+        self.adopted.extend(keys)
 
     async def interrupt(self) -> object:
         self.interrupts += 1

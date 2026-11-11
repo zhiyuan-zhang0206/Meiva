@@ -14,7 +14,7 @@ from base.host.boundary.json_values import is_object_dict
 from base.host.boundary.untyped import object_of
 
 _REQUIRED_FIELDS = frozenset(
-    {"agent_id", "session_id", "cwd", "model", "created_at", "updated_at", "harness"}
+    {"agent_id", "session_id", "cwd", "model", "created_at", "updated_at", "harness", "generation"}
 )
 _FIELDS = _REQUIRED_FIELDS | {"resumes"}
 _PRE_FIELD_HARNESS = "meiva"
@@ -31,6 +31,14 @@ class SessionRecord:
     created_at: str
     updated_at: str
     harness: str
+    # meiva:note
+    # The process generation the session last ran under. Every event carries the generation of the
+    # process that produced it, and a respawn or a resume is one more, so a record that outlives the
+    # process keeps the count monotonic across sessions: a frame from an earlier process can never be
+    # mistaken for one from the current process. Required: a record written before the field existed
+    # is completed by `backfill_generation` in converge, never read leniently.
+    # meiva:link base/lm/harness/docs/delivery.md
+    generation: int
     resumes: int = 0
 
 
@@ -180,7 +188,9 @@ def migrate_single_slot_records(root: Path) -> list[Path]:
             raise ValueError(f"session record at {entry} is not valid JSON") from exc
         if not is_object_dict(raw):
             raise TypeError(f"session record at {entry} is not an object")
-        record = record_from_payload({"harness": _PRE_FIELD_HARNESS, **raw}, source=str(entry))
+        record = record_from_payload(
+            {"harness": _PRE_FIELD_HARNESS, "generation": 0, **raw}, source=str(entry)
+        )
         if record.agent_id != int(entry.stem):
             raise ValueError(f"session record at {entry} names agent {record.agent_id}")
         if not registry.path(record.agent_id, record.harness).exists():
@@ -188,6 +198,32 @@ def migrate_single_slot_records(root: Path) -> list[Path]:
         entry.unlink()
         migrated.append(entry)
     return migrated
+
+
+# meiva:note
+# Complete the records written before `generation` existed: each gets generation 0 (the first process
+# that runs under it is generation 1), written atomically in place. Idempotent; returns the files
+# changed. A file that is not a record fails naming it.
+# meiva:link base/lm/harness/docs/harness.md
+def backfill_generation(root: Path) -> list[Path]:
+    if not root.is_dir():
+        return []
+    changed: list[Path] = []
+    for entry in sorted(root.iterdir()):
+        if re.fullmatch(r"\d+\.[a-z][a-z0-9_]*\.json", entry.name) is None:
+            continue
+        try:
+            raw = object_of(json.loads, entry.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"session record at {entry} is not valid JSON") from exc
+        if not is_object_dict(raw):
+            raise TypeError(f"session record at {entry} is not an object")
+        if "generation" in raw:
+            continue
+        record = record_from_payload({**raw, "generation": 0}, source=str(entry))
+        FileSessionRegistry(root).save(record)
+        changed.append(entry)
+    return changed
 
 
 def _check_agent(agent_id: int) -> None:
@@ -209,6 +245,7 @@ def record_from_payload(payload: dict[str, object], *, source: str) -> SessionRe
             updated_at=str_field(payload, "updated_at"),
             harness=str_field(payload, "harness"),
             resumes=int_field(payload, "resumes") if "resumes" in payload else 0,
+            generation=int_field(payload, "generation"),
         )
     except (TypeError, ValueError) as exc:
         raise ValueError(f"session record at {source} has invalid values: {exc}") from exc
