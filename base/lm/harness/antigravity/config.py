@@ -36,6 +36,9 @@ class AntigravityConfig:
     skip_permissions: bool = False
     extra_args: tuple[str, ...] = ()
     cancel_settle_seconds: float = 5.0
+    # meiva:note
+    # How long an image waits for its turn to be running before it is given up on (see the session).
+    image_follow_seconds: float = 30.0
     max_buffered_events: int = 256
 
     def command(self, *, resume: str | None) -> tuple[str, ...]:

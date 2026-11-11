@@ -434,3 +434,64 @@ def test_user_image_uploads_inbound_renders_multimodal_message_and_harness_promp
     assert items[0].source == "user"
     assert items[0].images == [f"/api/agents/7/uploads/{batch_id}/0"]
     assert items[0].files is None
+
+
+def _image_message(*sizes: int) -> HumanMessage:
+    import base64
+
+    return HumanMessage(
+        content=[
+            {"type": "text", "text": "look"},
+            *(
+                {
+                    "type": "image_url",
+                    "image_url": {
+                        "url": "data:image/png;base64,"
+                        + base64.b64encode(b"x" * size).decode("ascii")
+                    },
+                }
+                for size in sizes
+            ),
+        ]
+    )
+
+
+def test_native_images_reads_the_inlined_blocks_in_order() -> None:
+    from agent.graph.claim.harness_render import native_images
+
+    images, skipped = native_images([_image_message(10, 20)])
+
+    assert [len(i.data_base64) for i in images] == [16, 28] and skipped == 0
+    assert {i.mime_type for i in images} == {"image/png"}
+
+
+def test_native_images_leaves_out_an_image_over_the_per_image_bound_and_counts_it() -> None:
+    from agent.graph.claim.harness_render import MAX_IMAGE_BYTES, native_images, skipped_images_note
+
+    images, skipped = native_images([_image_message(5, MAX_IMAGE_BYTES + 1, 6)])
+
+    assert len(images) == 2 and skipped == 1
+    assert "1 attached image was not sent inline because of its size" in skipped_images_note(1)
+
+
+def test_native_images_bounds_the_total_of_one_input() -> None:
+    from agent.graph.claim.harness_render import (
+        MAX_IMAGE_BYTES,
+        MAX_INPUT_IMAGE_BYTES,
+        native_images,
+    )
+
+    count = MAX_INPUT_IMAGE_BYTES // MAX_IMAGE_BYTES + 1
+    images, skipped = native_images([_image_message(*([MAX_IMAGE_BYTES] * count))])
+
+    assert len(images) == count - 1 and skipped == 1
+
+
+def test_native_images_refuses_a_block_that_is_not_a_base64_data_url() -> None:
+    from agent.graph.claim.harness_render import native_images
+
+    message = HumanMessage(
+        content=[{"type": "image_url", "image_url": {"url": "https://example.test/a.png"}}]
+    )
+    with pytest.raises(ValueError, match="data URL"):
+        native_images([message])

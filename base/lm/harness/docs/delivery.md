@@ -11,6 +11,14 @@ its evidence are in
 input in every later event. An image is an `ImageBlock(mime_type, data_base64)`; the type and the
 base64 are validated when the value is built, and a batch must have unique keys.
 
+Images reach all three CLIs as images: Claude as an `image` content block, Codex as an `image` input with a data URL,
+Antigravity as `media` through `SendUserCascadeMessage` (an idle conversation takes the text first and the image
+as a second input, see the [Antigravity notes](../antigravity/docs/antigravity.md)). The graph builds `images` from
+the inlined `image_url` blocks of the message and keeps the path listing in the text. The graph bounds them: 5 MB
+per image (the Anthropic API's per-image limit, the smallest of the three providers) and 15 MB of raw bytes per
+input (base64 makes that about 20 MB, Gemini's inline request limit); an image over a bound is not sent inline,
+and the text says so.
+
 `deliver(inputs)` returns when the batch has been handed to the foreground, in order. It never
 returns "did it work": a refusal is an `InputRejected` event, a protocol failure raises. Whether an
 input joins the running turn or starts one is the adapter's choice. The graph delivers with `deliver()`

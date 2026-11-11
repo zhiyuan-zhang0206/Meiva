@@ -21,6 +21,12 @@ invariants the host relies on:
    control leave the turn running and report that cancellation is unavailable;
 5. turns can run for as long as the provider needs, including while it is quiet.
    Setup, transport, cancellation and shutdown keep their own bounds;
+   `CancelReport.settled` is a diagnostic only: its sole consumer is the `harness_interrupt` log line, and nothing
+   (restart, reclaim, retry) reads it. The sweep counts descendants of the CLI that appeared after the turn
+   began, so a Claude MCP server the CLI starts mid-turn is counted as a leftover tool process and makes
+   `settled=False` after the full `cancel_settle_seconds` wait, and Codex's interrupt does not end
+   `unified_exec` commands, which keep running and report `settled=False` as well. Telling a turn's own tool
+   processes from the CLI's own helpers needs an attribution the adapters do not have, so neither is changed;
 6. usage and cost accumulate per turn, and `Usage.input_tokens` is the whole
    prompt — cache reads and cache writes included, with those two fields as
    subsets — whatever shape the provider reports them in;
