@@ -26,6 +26,7 @@ def _reminder_text(count: int, limit: int) -> str:
     return (
         f"Your `{DOCUMENT_FILENAME}` panel is at {count} words; its soft limit is {limit}. "
         "Nothing was blocked or rewritten — this is a nudge to keep the panel easy to scan. "
+        "In all user-visible surfaces, including conversation messages and `to_user.md`, normal Markdown links (`[label](path-or-url)`) are directly clickable by the user. Only Markdown, images, and videos are rendered. HTML files are not rendered; do not use HTML files to interact with or present reports to the user. "
         "Links and images in the panel are shown to the user like in a normal Markdown "
         "editor (clickable, images render), so detail can live in the files you link "
         "instead of on the page. A small task can carry its whole story on the page; as it "

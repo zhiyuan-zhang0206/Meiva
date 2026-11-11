@@ -710,6 +710,10 @@ def test_workspace_section_names_the_history_dump() -> None:
     off = _slices(agent__workspace_in_system_prompt=True, agent__history_dump_enabled=False)
 
     rendered = agent_workspace_pointer(on, agent_id=1)
+    assert "[label](path-or-url)" in rendered
+    assert "conversation messages and `to_user.md`" in rendered
+    assert "Only Markdown, images, and videos are rendered" in rendered
+    assert "do not use HTML files" in rendered
     assert "message-history/" in rendered
     assert "grep -rn 'keyword' message-history/" in rendered
     assert "message-history" not in agent_workspace_pointer(off, agent_id=1)

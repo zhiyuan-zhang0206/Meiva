@@ -5,13 +5,13 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { ArrowLeft, Code, Download, ExternalLink, Eye, FileCode, FileText, Film, Globe, House, ImageIcon, Music, PanelRight, RefreshCw, ScanSearch } from "lucide-react";
+import { ArrowLeft, Download, FileCode, FileText, Film, House, ImageIcon, PanelRight, RefreshCw, ScanSearch } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { Highlight, type PrismTheme } from "prism-react-renderer";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef } from "react";
 
 import { CopyButton } from "@/components/content/copy-button";
-import { isAudioExtension, isImageExtension, isVideoExtension, parseLineRange } from "@/components/content/file-path-utils";
+import { isImageExtension, isVideoExtension, parseLineRange } from "@/components/content/file-path-utils";
 import { ChatMarkdown } from "@/components/content/markdown";
 import { ZoomableImage } from "@/components/content/zoomable-image";
 import { InlineError } from "@/components/ui/inline-error";
@@ -64,6 +64,7 @@ const EXTENSION_LANGUAGE_MAP: Record<string, string> = {
   ".css": "css",
   ".scss": "scss",
   ".html": "markup",
+  ".htm": "markup",
   ".xml": "markup",
   ".svg": "markup",
   ".diff": "diff",
@@ -110,12 +111,8 @@ export function WorkspaceFileView({
 
   const ext = data?.extension ?? target.path.slice(target.path.lastIndexOf(".")).toLowerCase();
   const isMarkdown = ext === ".md" || ext === ".markdown";
-  const isHtml = ext === ".html" || ext === ".htm";
   const isImage = isImageExtension(ext);
   const isVideo = isVideoExtension(ext);
-  const isAudio = isAudioExtension(ext);
-  const [showSource, setShowSource] = useState(() => Boolean(target.lineRange));
-  const showHtmlPreview = isHtml && !showSource && !isLoading && !error && Boolean(data) && !data?.binary;
   const rawUrl = `${API_BASE}/api/agents/${agentId}/files/raw?path=${encodeURIComponent(data?.path ?? target.path)}`;
 
   const language = EXTENSION_LANGUAGE_MAP[ext] || "text";
@@ -158,12 +155,8 @@ export function WorkspaceFileView({
             <ImageIcon className="size-3.5 opacity-70" />
           ) : isVideo ? (
             <Film className="size-3.5 opacity-70" />
-          ) : isAudio ? (
-            <Music className="size-3.5 opacity-70" />
           ) : isMarkdown ? (
             <FileText className="size-3.5 opacity-70" />
-          ) : isHtml ? (
-            <Globe className="size-3.5 opacity-70" />
           ) : (
             <FileCode className="size-3.5 opacity-70" />
           )}
@@ -183,31 +176,6 @@ export function WorkspaceFileView({
         <div className={cn("shrink-0 items-center gap-1.5 ml-1", FLEX)}>
           {data?.size !== undefined && (
             <span className="text-[10px] text-muted-foreground">({formatFileSize(data.size)})</span>
-          )}
-          {isHtml && data && !data.binary && (
-            <>
-              <button
-                type="button"
-                data-testid="workspace-html-mode-toggle"
-                title={showSource ? "Preview HTML" : "View source"}
-                aria-label={showSource ? "Preview HTML" : "View source"}
-                onClick={() => setShowSource((prev) => !prev)}
-                className="rounded p-1 hover:bg-accent"
-              >
-                {showSource ? <Eye className="size-3.5" /> : <Code className="size-3.5" />}
-              </button>
-              <a
-                href={rawUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                data-testid="workspace-html-open-raw"
-                title="Open in new tab"
-                aria-label="Open in new tab"
-                className="rounded p-1 hover:bg-accent"
-              >
-                <ExternalLink className="size-3.5" />
-              </a>
-            </>
           )}
           <button
             title={t("refresh")}
@@ -249,15 +217,6 @@ export function WorkspaceFileView({
         </div>
       </div>
 
-      {showHtmlPreview && data ? (
-        <iframe
-          data-testid="workspace-html-preview"
-          title={data.name}
-          srcDoc={data.content}
-          sandbox="allow-scripts allow-popups allow-popups-to-escape-sandbox"
-          className={cn("w-full border-0 bg-white", FLEX_1, MIN_H_0)}
-        />
-      ) : (
       <ScrollArea className={cn(MIN_H_0, FLEX_1)}>
         {isLoading ? (
           <div className={cn("items-center justify-center px-8 py-20", FLEX, FLEX_1)}>
@@ -307,21 +266,6 @@ export function WorkspaceFileView({
             >
               <track kind="captions" />
             </video>
-            <span className="text-xs text-muted-foreground">
-              {data.name} ({formatFileSize(data.size)})
-            </span>
-          </div>
-        ) : isAudio ? (
-          <div className={cn("items-center justify-center p-6 gap-3", FLEX, FLEX_COL)}>
-            <audio
-              controls
-              preload="metadata"
-              src={rawUrl}
-              data-testid="workspace-audio-player"
-              className="w-full max-w-md"
-            >
-              <track kind="captions" />
-            </audio>
             <span className="text-xs text-muted-foreground">
               {data.name} ({formatFileSize(data.size)})
             </span>
@@ -391,7 +335,6 @@ export function WorkspaceFileView({
           </div>
         )}
       </ScrollArea>
-      )}
     </section>
   );
 }

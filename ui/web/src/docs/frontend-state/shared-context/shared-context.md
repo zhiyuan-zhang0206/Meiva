@@ -62,12 +62,10 @@ the owner machine. Both ends enforce the configured per-resource bound
 buffers a bounded resource; it does not support ranges or large media streaming.
 Markdown stays capped by the configured `settings.to_user` limits — 1 MiB per
 document, 1024 local references and 16 linked-document hops by default. The
-response that serves those files renders HTML inline in a script-only sandbox
-that keeps an opaque origin, media, PDFs and inert text inline under the plain
-sandbox, and archives, office documents, executables and unknown types as
-attachments; [to user resources](../../../../../../gateway/agents/docs/to-user-resources.md)
-owns that boundary and its contract. Every resource response carries nosniff and
-is never publicly cached.
+response that serves those files returns HTML as an attachment under the passive
+CSP without script permission. The workspace viewer renders only Markdown, images
+and videos; HTML and HTM open as source code, and other binary files offer download.
+Normal Markdown links are directly clickable in conversation messages and `to_user.md`.
 
 One shallow scanner per ops process polls numeric workspace roots and only their
 immediate `to_user.md` targets, on a worker thread. Creation, atomic replacement

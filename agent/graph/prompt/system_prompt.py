@@ -364,6 +364,7 @@ def agent_workspace_pointer(slices: AgentSlices, *, agent_id: int | None) -> str
         "waiting for a reply. File edits appear automatically; there is no publish step. "
         "Its current contents are included again after compaction. Choose the document's "
         "structure freely using Markdown; raw HTML, CSS and scripts are not rendered. "
+        "In all user-visible surfaces, including conversation messages and `to_user.md`, normal Markdown links (`[label](path-or-url)`) are directly clickable by the user. Only Markdown, images, and videos are rendered. HTML files are not rendered; do not use HTML files to interact with or present reports to the user. "
         "Link local files and images directly: relative paths resolve from this document's "
         "directory, absolute paths and ~/ paths refer to files on your machine. Meiva "
         "serves referenced files to the user; no copying, registration or server is needed. "

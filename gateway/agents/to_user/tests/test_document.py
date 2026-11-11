@@ -15,16 +15,16 @@ from gateway.agents.to_user.document import (
 )
 
 
-def test_html_renders_inline_in_a_script_only_sandbox() -> None:
+def test_html_downloads_without_scripts() -> None:
     html = resource_response(b"<script>alert(1)</script>", 'test".html')
     assert html.headers["content-type"].startswith("text/html")
-    assert html.headers["content-disposition"].startswith("inline;")
+    assert html.headers["content-disposition"].startswith("attachment;")
     assert "%22" in html.headers["content-disposition"]
     policy = html.headers["content-security-policy"]
-    assert policy.startswith("sandbox allow-scripts;")
+    assert policy.startswith("sandbox;")
     assert "allow-same-origin" not in policy
     assert "default-src 'none'" in policy
-    assert "img-src data: https:" in policy
+    assert "allow-scripts" not in policy
     assert html.headers["cache-control"] == "no-store"
     assert html.headers["x-content-type-options"] == "nosniff"
 

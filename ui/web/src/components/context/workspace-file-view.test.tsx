@@ -147,44 +147,18 @@ describe("WorkspaceFileView", () => {
     });
   });
 
-  it("renders audio files using audio player with raw media url", async () => {
-    transport.getWorkspaceFile.mockResolvedValue({
-      path: "media/sound.mp3",
-      name: "sound.mp3",
-      extension: ".mp3",
-      content: "",
-      size: 4096,
-      binary: true,
-      modified_at: "2026-11-07T12:00:00Z",
-    });
-
-    renderWithBrowser(
-      <WorkspaceFileView
-        agentId={1}
-        target={{ agentId: 1, path: "media/sound.mp3" }}
-        mobile={false}
-      />,
-      { wrapper: TestWrapper },
-    );
-
-    await waitFor(() => {
-      const audio = screen.getByTestId("workspace-audio-player");
-      expect(audio.getAttribute("src")).toContain("/api/agents/1/files/raw?path=media%2Fsound.mp3");
-    });
-  });
-
-  it("renders html files in a sandboxed preview iframe by default and toggles to source view", async () => {
+  it.each([".html", ".htm"])("renders %s files as source code", async (extension) => {
     transport.getWorkspaceFile.mockResolvedValue({
       path: "research/learning-library.html",
       name: "learning-library.html",
-      extension: ".html",
+      extension,
       content: "<!doctype html><html><body><h1>Interactive Report</h1></body></html>",
       size: 68,
       binary: false,
       modified_at: "2026-11-09T12:00:00Z",
     });
 
-    renderWithBrowser(
+    const { container } = renderWithBrowser(
       <WorkspaceFileView
         agentId={1}
         target={{ agentId: 1, path: "research/learning-library.html" }}
@@ -193,15 +167,9 @@ describe("WorkspaceFileView", () => {
       { wrapper: TestWrapper },
     );
 
-    const iframe = await screen.findByTestId("workspace-html-preview");
-    expect(iframe.getAttribute("srcdoc")).toContain("<h1>Interactive Report</h1>");
-    expect(iframe.getAttribute("sandbox")).toContain("allow-scripts");
-
-    fireEvent.click(screen.getByTestId("workspace-html-mode-toggle"));
-    expect(await screen.findByTestId("workspace-code-content")).toBeTruthy();
-
-    fireEvent.click(screen.getByTestId("workspace-html-mode-toggle"));
-    expect(await screen.findByTestId("workspace-html-preview")).toBeTruthy();
+    const code = await screen.findByTestId("workspace-code-content");
+    expect(code.textContent).toContain("<h1>Interactive Report</h1>");
+    expect(container.querySelector("iframe")).toBeNull();
   });
 
   it("allows returning to to_user.md or going back in history", () => {

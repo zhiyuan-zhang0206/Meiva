@@ -119,6 +119,10 @@ async def test_an_over_limit_panel_gets_one_reminder_with_both_figures(
     assert "6 words" in text
     assert "soft limit is 5" in text
     assert "Links and images" in text
+    assert "[label](path-or-url)" in text
+    assert "conversation messages and `to_user.md`" in text
+    assert "Only Markdown, images, and videos are rendered" in text
+    assert "do not use HTML files" in text
     assert result[_WRITTEN] is False
     assert result[_REMINDED] == {OVER_LIMIT}
 

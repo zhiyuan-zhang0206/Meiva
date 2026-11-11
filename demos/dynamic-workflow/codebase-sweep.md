@@ -17,7 +17,7 @@ Directly execute with script:
 - Wave 4: 3 adversarial agents try to overturn findings
 - Wave 5: Feed feedback back to Wave 2 original verify agents for revision
 - Wave 6: Final report
-- Wave 7: 2 review + 1 publish by rendering to HTML and publishing with meiva.ui.publish
+- Wave 7: 2 review + 1 publish by writing a Markdown (.md) report in the workspace and sharing a normal Markdown link
 
 Use the terminate signal: a worker writes its JSON file and calls meiva.self.terminate() —
 it never messages the orchestrator. Each wave's checkpoint watches the workers' agent
@@ -32,7 +32,7 @@ W1 Scout (4) ──→ W2 Verify (8) ──→ W3 Reduce (1)
     ↓                                    ↓
 W4 Adversarial (3) ──→ W5 Feedback (8) ──→ W6 Reduce (1)
     ↓
-W7 Publish (3) ──→ render HTML → meiva.ui.publish()
+W7 Publish (3) ──→ write workspace report.md → normal Markdown link
 ```
 
 ## Checkpoint signal: agent lifecycle
