@@ -152,10 +152,12 @@ export function ColdLoadSpinner({ show }: { show: boolean }) {
 export function ScrollToBottomButton({
   atBottom,
   refreshing = false,
+  working = false,
   onClick,
 }: {
   atBottom: boolean;
   refreshing?: boolean;
+  working?: boolean;
   onClick: () => void;
 }) {
   const t = useTranslations("timeline");
@@ -164,11 +166,12 @@ export function ScrollToBottomButton({
     <button
       type="button"
       onClick={onClick}
-      aria-label={t("scrollToBottom")}
+      aria-label={working ? t("jumpToLatestWorking") : t("scrollToBottom")}
       aria-busy={refreshing}
       data-testid="scroll-to-bottom"
+      data-working={working ? "true" : undefined}
       className={cn(
-        "absolute bottom-4 left-1/2 -translate-x-1/2 z-30",
+        "absolute bottom-4 right-4 z-30",
         "size-9 rounded-full",
         // Solid bg, no backdrop-blur: backdrop-filter over the scroll
         // area forces iOS WebKit to re-sample the content behind it,
@@ -191,6 +194,13 @@ export function ScrollToBottomButton({
       ) : (
         <ArrowDown data-testid="scroll-to-bottom-arrow" className="size-4" />
       )}
+      {working ? (
+        <span
+          aria-hidden="true"
+          data-testid="scroll-to-bottom-working"
+          className="absolute -right-0.5 -top-0.5 size-2.5 animate-pulse rounded-full border border-background bg-emerald-500"
+        />
+      ) : null}
     </button>
   );
 }

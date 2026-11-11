@@ -2,9 +2,13 @@
 
 A send is its own arrival, not a pin. The page hands the timeline the inbound
 its delivery receipt named (`sendAnchor` in the timeline store), and
-`useSendAnchor` waits for that row to mount, parks it `SEND_ANCHOR_TOP_SHARE`
-(20%) down the viewport and reports `notifyAnchored`: following stops there, so
-every later chunk paints below the reader's place instead of moving it. A reader
+`useSendAnchor` waits for that row to mount, parks it at the top of the viewport
+(`READING_TOP_PX`: the 44 px header bar plus a 12 px gap, the same place a reveal
+of the first unseen message lands) and reports `notifyAnchored`: following stops
+there, so every later chunk paints below the reader's place instead of moving it.
+The numbers are pure functions (`model/send-park.ts`); the hook only measures and
+writes. The jump-to-latest control sits at the bottom right of the conversation and
+carries a pulsing dot while the agent is still responding. A reader
 parked mid-history is parked there too — they just wrote the message — and a
 send whose row never mounts moves nothing.
 

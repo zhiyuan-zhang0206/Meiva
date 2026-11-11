@@ -39,6 +39,11 @@ import { useStickyThresholds } from "./model/sticky-thresholds";
 import { LoadOlderSpinner, LoadOlderKeyboardButton, ColdLoadSpinner, ScrollToBottomButton } from "./overlays";
 
 const REVEAL_TOP_GAP_PX = 12;
+// meiva:note
+// Where a row the reader is meant to start reading from sits: below the fixed
+// header bar. A reveal (first unseen message) and a send anchor share it.
+// meiva:link ui/web/src/docs/frontend-components/timeline-view/send-anchor.md
+const READING_TOP_PX = BAR_HEIGHT_PX + REVEAL_TOP_GAP_PX;
 
 interface Props {
   items: BackendTimelineItem[];
@@ -334,6 +339,7 @@ export const TimelineView = memo(function TimelineView({
     wrapperRef,
     reserveRef: sendReserveRef,
     controller,
+    topOffset: READING_TOP_PX,
     measureAtBottom,
     cancelBookmark,
   });
@@ -476,7 +482,7 @@ export const TimelineView = memo(function TimelineView({
       anchor: {
         itemId: item.item_id,
         rank: parseItemIdParts(item.item_id)?.rank ?? 0,
-        viewportTop: BAR_HEIGHT_PX + REVEAL_TOP_GAP_PX,
+        viewportTop: READING_TOP_PX,
       },
     };
     holdRestoredPositionRef.current = true;
@@ -674,7 +680,7 @@ export const TimelineView = memo(function TimelineView({
         </div>
         <div ref={sendReserveRef} data-send-reserve aria-hidden="true" />
       </ScrollArea>
-      <ScrollToBottomButton atBottom={atBottom} refreshing={loadingNew && !loadingOlder} onClick={handleScrollToBottom} />
+      <ScrollToBottomButton atBottom={atBottom} working={turnActive} refreshing={loadingNew && !loadingOlder} onClick={handleScrollToBottom} />
     </div>
   );
 });

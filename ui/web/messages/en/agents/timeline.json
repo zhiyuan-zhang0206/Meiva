@@ -36,6 +36,7 @@
   "refreshFailed": "Could not refresh this conversation. Previously loaded messages are still shown.",
   "retryLoad": "Retry",
   "scrollToBottom": "Scroll to bottom",
+  "jumpToLatestWorking": "Jump to latest (agent is still responding)",
   "streamingSuffix": " (streaming…)",
   "subagent": "Sub-agent",
   "subagentNamed": "Sub-agent · {name}",
