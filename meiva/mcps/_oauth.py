@@ -28,7 +28,7 @@ import functools
 import json
 import os
 import webbrowser
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from contextlib import suppress
 from pathlib import Path
 
@@ -214,13 +214,31 @@ async def _open_browser(auth_url: str) -> None:
 # meiva:note
 # Google's protected-resource path reaches the SDK's strict issuer validator instead of its
 # root-origin tolerance. Keep the two bound copies patched, but use the SDK's own issuers_match:
-# only an origin with and without one trailing slash may differ; path issuers stay exact.
-def _install_issuer_normalization() -> None:
+# only an origin with and without one trailing slash may differ; path issuers stay exact. No
+# SDK seam reaches this check (the flow calls the module-level validator it bound at import, and
+# the provider's `_expected_issuer` cannot know the form the metadata will declare), so the patch
+# stays. Installing twice does not stack a second wrapper; the SDK's own function stays reachable
+# as `__wrapped__`, which is how the test guard puts the SDK back between tests.
+def install_issuer_normalization() -> None:
     import mcp.client.auth.oauth2 as _oauth2
     import mcp.client.auth.utils as _utils
 
-    _utils.validate_metadata_issuer = normalized_validate_issuer  # type: ignore[attr-defined]
-    _oauth2.validate_metadata_issuer = normalized_validate_issuer  # type: ignore[attr-defined]
+    original_utils = _utils.validate_metadata_issuer
+    if not hasattr(original_utils, "__wrapped__"):
+        _utils.validate_metadata_issuer = _tolerant_validator(original_utils)  # pyright: ignore[reportAttributeAccessIssue]
+    original_oauth2 = _oauth2.validate_metadata_issuer  # pyright: ignore[reportPrivateImportUsage]
+    if not hasattr(original_oauth2, "__wrapped__"):
+        _oauth2.validate_metadata_issuer = _tolerant_validator(original_oauth2)  # pyright: ignore[reportAttributeAccessIssue, reportPrivateImportUsage]
+
+
+def _tolerant_validator(
+    original: Callable[[OAuthMetadata, str], None],
+) -> Callable[[OAuthMetadata, str], None]:
+    @functools.wraps(original)
+    def _patched(oauth_metadata: OAuthMetadata, expected_issuer: str) -> None:
+        normalized_validate_issuer(oauth_metadata, expected_issuer)
+
+    return _patched
 
 
 def normalized_validate_issuer(oauth_metadata: OAuthMetadata, expected_issuer: str) -> None:
@@ -247,7 +265,7 @@ def normalized_validate_issuer(oauth_metadata: OAuthMetadata, expected_issuer: s
 # every Meiva->Notion flow reaches this path. Tracked upstream:
 # modelcontextprotocol/python-sdk (2026-08-30, prepare_token_auth — still
 # unfixed on main as of 2026-08-30). Round-2 of the same class of fix as
-# ``_install_issuer_normalization``. Installing twice does not stack a second
+# ``install_issuer_normalization``. Installing twice does not stack a second
 # wrapper; the SDK's own function stays reachable as ``__wrapped__``, which is
 # how the test guard puts the SDK back between tests.
 def install_token_auth_basic_shim() -> None:
@@ -271,7 +289,7 @@ def install_token_auth_basic_shim() -> None:
             data.pop("client_id", None)
         return data, headers
 
-    _oauth2.OAuthContext.prepare_token_auth = _patched  # type: ignore[attr-defined]
+    _oauth2.OAuthContext.prepare_token_auth = _patched
 
 
 async def oauth_http_client(
@@ -295,7 +313,7 @@ async def oauth_http_client(
     )
     from mcp.shared.auth import OAuthClientMetadata
 
-    _install_issuer_normalization()
+    install_issuer_normalization()
     install_token_auth_basic_shim()
     lock = locks.setdefault(server, asyncio.Lock())
     async with lock:
