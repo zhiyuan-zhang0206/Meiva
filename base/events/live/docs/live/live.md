@@ -62,8 +62,8 @@ segments stay globally distinct.
 | `agent_spawned` | committed creation invalidates the live roster; consumers read authoritative cards and ancestry | none |
 | `agent_updated` | committed lifecycle or display-state change invalidates agent reads; no snapshot state is applied from the event | none |
 | `label_updated` | `agents.label` written (spawn-time generation / rename / reset) | `label` (nullable) |
-| `notice_posted` | `meiva.ui.ask()` question created | `notice_id`, `title` |
-| `notice_resolved` | notice dismissed | `notice_id` |
+| `question_asked` | `meiva.ui.ask()` question created | `question_id`, `title` |
+| `question_resolved` | question resolved | `question_id` |
 | `impersonation_changed` | committed impersonation status or reply | `agent_id`; invalidates the unified timeline |
 | `task_created` / `task_updated` | task registry write | `task_id` |
 

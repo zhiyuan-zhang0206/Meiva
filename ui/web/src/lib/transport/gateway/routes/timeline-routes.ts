@@ -33,7 +33,7 @@ export function runTimelineLinksPath(
   return `/api/insights/run-timeline/links?${params.toString()}`;
 }
 
-export function runTimelineLinkContentPath(ref: { inbound_id: number } | { notice_id: number }): string {
+export function runTimelineLinkContentPath(ref: { inbound_id: number } | { question_id: number }): string {
   const params = new URLSearchParams(Object.entries(ref).map(([k, v]) => [k, String(v)]));
   return `/api/insights/run-timeline/link-content?${params.toString()}`;
 }

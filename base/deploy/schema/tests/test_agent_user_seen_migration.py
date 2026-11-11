@@ -7,7 +7,11 @@ import psycopg
 from base.cluster.machine import MachineIdentityReader
 from base.deploy.schema.migration_layout import MIGRATIONS_DIR
 from base.deploy.schema.migrations import apply_pending_migrations
-from base.deploy.schema.tests.migration_support import SCHEMA_SQL, throwaway_database
+from base.deploy.schema.tests.migration_support import (
+    SCHEMA_SQL,
+    restore_pre_split_names,
+    throwaway_database,
+)
 from base.paths.home import resolve_meiva_home
 
 _SEEN_MIGRATION = "20261110T153500_agent-user-seen"
@@ -24,6 +28,7 @@ def _apply(url: str, machine_identity: MachineIdentityReader) -> list[str]:
 
 
 def _restore_previous_schema(conn: psycopg.Connection) -> None:
+    restore_pre_split_names(conn)
     conn.execute("ALTER TABLE agent_user_messages ADD COLUMN read_at TIMESTAMPTZ")
     conn.execute("DROP TABLE agent_user_seen")
     conn.execute("DROP INDEX agent_user_messages_by_agent")

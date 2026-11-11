@@ -23,13 +23,13 @@ class SuggestionContext:
 def read_context(conn: Connection, agent_id: int) -> SuggestionContext:
     with conn.cursor(row_factory=dict_row) as cur:
         cur.execute(
-            "SELECT id,content,suggestions FROM agent_user_messages WHERE agent_id=%s "
+            "SELECT id,content,suggestions FROM agent_publications WHERE agent_id=%s "
             "AND content IS NOT NULL ORDER BY id DESC LIMIT 5",
             (agent_id,),
         )
         publications = cur.fetchall()
         cur.execute(
-            "SELECT id,title,content,question FROM agent_notices WHERE agent_id=%s "
+            "SELECT id,title,content,question FROM agent_questions WHERE agent_id=%s "
             "AND resolved_at IS NULL ORDER BY id DESC LIMIT 5",
             (agent_id,),
         )

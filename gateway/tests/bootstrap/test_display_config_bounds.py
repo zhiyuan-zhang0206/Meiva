@@ -8,14 +8,14 @@ from base.config.domains.display import DisplaySettings
 from base.config.domains.tests.test_display_config import DISPLAY_RANGES
 from base.host.env.tests.env_files import unit_env_aliases
 from gateway.tests.auth.gateway_config import gateway_test_client
-from gateway.tests.events.test_notices_endpoint import seed_agent
+from gateway.tests.events.test_questions_endpoint import seed_agent
 
 
 @pytest.mark.parametrize(("name", "minimum", "maximum"), DISPLAY_RANGES)
 def test_config_write_rejects_invalid_default_without_changing_file(
     unit_home: Path, name: str, minimum: int, maximum: int
 ) -> None:
-    runtime_config.write_fields({"notices_open_default_limit": 200}, set())
+    runtime_config.write_fields({"questions_open_default_limit": 200}, set())
     env_path = unit_home / ".env"
     before = env_path.read_bytes()
 
@@ -45,26 +45,26 @@ def test_implicit_notice_reads_use_validated_boundary_defaults(
     db_conn: psycopg.Connection,
     open_limit: int,
 ) -> None:
-    configured = DisplaySettings.model_validate({"notices_open_default_limit": open_limit})
+    configured = DisplaySettings.model_validate({"questions_open_default_limit": open_limit})
     agent_id = seed_agent(db_conn)
     with db_conn.cursor() as cur:
         cur.execute(
-            """INSERT INTO agent_notices
-                (agent_id, title)
-            SELECT %s, 'open'
+            """INSERT INTO agent_questions
+                (agent_id, title, question)
+            SELECT %s, 'open', '{"type": "text"}'::jsonb
             FROM generate_series(1, 601) i""",
             (agent_id,),
         )
     db_conn.commit()
 
     with gateway_test_client(
-        fields={"notices_open_default_limit": configured.notices_open_default_limit}
+        fields={"questions_open_default_limit": configured.questions_open_default_limit}
     ) as client:
-        implicit = client.get("/api/notices/open")
-        explicit = client.get("/api/notices/open", params={"limit": open_limit})
+        implicit = client.get("/api/questions/open")
+        explicit = client.get("/api/questions/open", params={"limit": open_limit})
         assert implicit.status_code == explicit.status_code == 200
         assert len(implicit.json()) == open_limit
         assert implicit.json() == explicit.json()
-        feed = client.get("/api/notices")
+        feed = client.get("/api/questions")
         assert feed.status_code == 200
         assert len(feed.json()["awaiting"]) == open_limit

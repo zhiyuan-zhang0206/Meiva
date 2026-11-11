@@ -16,7 +16,7 @@ const link = (partial: Partial<RunTimelineLink>): RunTimelineLink => ({
   receiver: 2,
   inbound_id: null,
   fork_from: null,
-  notice_id: null,
+  question_id: null,
   ...partial,
 });
 
@@ -139,17 +139,17 @@ describe("the User group", () => {
     expect(groupLinks(resolveLinks([], new Set([2]), loaded)).user).toHaveLength(2);
   });
 
-  it("draws the user's lifecycle events (no sender) and an agent's notice to the user (no receiver)", () => {
-    const [spawn, notice] = resolveLinks(
-      [link({ kind: "spawn", sender: null, receiver: 2 }), link({ kind: "notice", sender: 2, receiver: null, ts: iso(15) })],
+  it("draws the user's lifecycle events (no sender) and an agent's question to the user (no receiver)", () => {
+    const [spawn, question] = resolveLinks(
+      [link({ kind: "spawn", sender: null, receiver: 2 }), link({ kind: "question", sender: 2, receiver: null, ts: iso(15) })],
       new Set([2]),
       new Map([[2, agent([])]]),
     );
     expect(spawn.from.row).toBe("user");
     expect(spawn.to).toEqual({ row: "units", agent: 2, ms: Date.parse(iso(10)) });
-    expect(notice.from).toEqual({ row: "units", agent: 2, ms: Date.parse(iso(15)) });
-    expect(notice.to).toEqual({ row: "user", agent: 0, ms: Date.parse(iso(15)) });
-    expect([spawn.external, notice.external]).toEqual([null, null]);
+    expect(question.from).toEqual({ row: "units", agent: 2, ms: Date.parse(iso(15)) });
+    expect(question.to).toEqual({ row: "user", agent: 0, ms: Date.parse(iso(15)) });
+    expect([spawn.external, question.external]).toEqual([null, null]);
   });
 
   it("leaves out the user's event to an agent that is not in the view", () => {

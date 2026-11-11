@@ -50,10 +50,10 @@ from ops.lifecycle.events import (
     publish_inbound_arrived as publish_inbound_arrived,
 )
 from ops.lifecycle.events import (
-    publish_notice_posted as publish_notice_posted,
+    publish_question_asked as publish_question_asked,
 )
 from ops.lifecycle.events import (
-    publish_notice_resolved as publish_notice_resolved,
+    publish_question_resolved as publish_question_resolved,
 )
 from ops.lifecycle.hosted_turn import (
     LocalAgentHost,

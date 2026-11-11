@@ -3,8 +3,8 @@
 ## What it is
 
 `cli/commands/` holds the `meiva` command domains. `cli.parsers.build_parser`
-composes settings-free domain builders. Agents/notices are owned by
-`agents/parsers.py` beside `control.py`, `notices.py` and `timeline.py`.
+composes settings-free domain builders. Agents/questions are owned by
+`agents/parsers.py` beside `control.py`, `questions.py` and `timeline.py`.
 `agents/impersonation_parsers.py` owns external-session and relay arguments beside
 `impersonation.py` and `impersonation_relay.py`; other builders remain in
 `cli/parsers/`. Each builder binds its own `_h_*` adapter,
@@ -17,9 +17,9 @@ Each command module is its own door; parser adapters lazy-import
 `cmd_*` from the module that defines it, and test seams patch there. Eight
 subpackages hold the domains, each an independent package door:
 
-- `agents/` — lifecycle control, notices, timelines, external-agent
+- `agents/` — lifecycle control, questions, timelines, external-agent
   impersonation, the pty allocation freeze and the computer-use daemons. The gateway
-  verbs (`control.py`, `notices.py`, `notices_audit.py`, `timeline.py`) take the
+  verbs (`control.py`, `questions.py`, `questions_audit.py`, `timeline.py`) take the
   `GatewayAccess` their parser handler built from the command's configuration; the
   commands that read the shell's environment take it as a value the handler read once
   (`ImpersonationEnv`) and `pty` and `computer` take the invocation's home. The impersonation

@@ -16,7 +16,7 @@ one notification per tag, so the tag is the whole replace/retract contract.
 
 | Trigger | Category | Tag | Alert | Silent replace | Retract |
 |---|---|---|---|---|---|
-| A question is asked | `core.question` | `question:<notice id>` | when asked | never | when answered or closed |
+| A question is asked | `core.question` | `question:<question id>` | when asked | never | when answered or closed |
 | An agent delivers output the user has not read | `core.unread` | `unread:<agent id>` | first delivery after everything was read | each later delivery (newest content) | the seen cursor reaches the newest delivery |
 
 Unread is the seen cursor, not stored state. `publish()` in
@@ -26,8 +26,8 @@ after the cursor moves and stages the `retract` only when the move cleared the l
 delivery. A replayed publication key and a "no update" (`content` null) stage nothing. The three
 paths that deliver to the user (the native turn hook, the external harness callback, the SDK
 `POST /api/agents/{id}/user-messages`) all go through `publish()`, so none stages on its own.
-The Ask insert (`gateway/agents/user_delivery/asks.py`) stages the question alert and the notice
-resolution (`gateway/agents/notice_operations/notices.py`) stages its retract.
+The Ask insert (`gateway/agents/questions/asks.py`) stages the question alert and the question
+resolution (`gateway/agents/questions/resolve.py`) stages its retract.
 
 The title of an unread push is the agent's label (`#<id>` when it has none) and its body is the
 opening of the newest delivery with the visibility prefix and Markdown markers removed
@@ -40,7 +40,7 @@ translated. `href` is the agent's page (`/?agent_id=<id>`).
 note: `category`, `action`, `tag`, `subject`, `body`, `href`, `importance`, `agent_id`,
 `announced_at`. The hosted runtime writes the same table, so
 the runner role has `SELECT, INSERT` on it plus `UPDATE (announced_at)`, and only `SELECT` on
-`agents`, `user_settings` and `agent_user_seen`, which is all staging reads.
+`agents`, `user_settings` and `agent_publication_seen`, which is all staging reads.
 
 The table is also the outbox. `announced_at` is when the live event was published; NULL means the
 push is still owed. Producers only stage the row inside their transaction; they never announce.

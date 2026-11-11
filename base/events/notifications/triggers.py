@@ -32,8 +32,8 @@ def _unread_tag(agent_id: int) -> str:
     return f"unread:{agent_id}"
 
 
-def _question_tag(notice_id: int) -> str:
-    return f"question:{notice_id}"
+def _question_tag(question_id: int) -> str:
+    return f"question:{question_id}"
 
 
 # meiva:note
@@ -73,21 +73,21 @@ def plan_unread_seen(
     )
 
 
-def plan_question_asked(*, notice_id: int, title: str, agent_label: str) -> PushPlan:
+def plan_question_asked(*, question_id: int, title: str, agent_label: str) -> PushPlan:
     return PushPlan(
         category=QUESTION_CATEGORY,
         action=NotificationAction.ALERT,
-        tag=_question_tag(notice_id),
+        tag=_question_tag(question_id),
         subject=title,
         body=agent_label,
     )
 
 
-def plan_question_resolved(*, notice_id: int, title: str, agent_label: str) -> PushPlan:
+def plan_question_resolved(*, question_id: int, title: str, agent_label: str) -> PushPlan:
     return PushPlan(
         category=QUESTION_CATEGORY,
         action=NotificationAction.RETRACT,
-        tag=_question_tag(notice_id),
+        tag=_question_tag(question_id),
         subject=title,
         body=agent_label,
     )

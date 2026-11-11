@@ -457,7 +457,7 @@ def test_actual_gateway_lifespan_recovers_one_chat_through_its_receiver(
 ):
     import time
 
-    from gateway.tests.events.test_notices_endpoint import seed_agent
+    from gateway.tests.events.test_questions_endpoint import seed_agent
     from gateway.tests.upload_delivery.support import receiver_op, serving_gateway
     from gateway.tests.upload_delivery.test_upload_delivery_recovery import SECRET, receiver_for
 

@@ -62,7 +62,7 @@ class DisplayDefaults:
     neighbors_default_depth: int
     neighbors_default_limit: int
     messages_default_limit: int
-    notices_open_default_limit: int
+    questions_open_default_limit: int
     schedules_runs_default_limit: int
     alerts_default_limit: int
     metrics_default_window_days: int
@@ -333,7 +333,7 @@ def gateway_config_from_boot(
             neighbors_default_depth=view.display.neighbors_default_depth,
             neighbors_default_limit=view.display.neighbors_default_limit,
             messages_default_limit=view.display.messages_default_limit,
-            notices_open_default_limit=view.display.notices_open_default_limit,
+            questions_open_default_limit=view.display.questions_open_default_limit,
             schedules_runs_default_limit=view.display.schedules_runs_default_limit,
             alerts_default_limit=view.display.alerts_default_limit,
             metrics_default_window_days=view.display.metrics_default_window_days,

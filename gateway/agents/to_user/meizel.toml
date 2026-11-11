@@ -1,4 +1,4 @@
-exports = ["document.py"]
+exports = ["document.py", "publications.py"]
 
 [uses]
 "tests" = ["document.py"]

@@ -12,6 +12,7 @@ from base.deploy.schema.tests.migration_support import (
     LEGACY_NOTICE_COLUMNS,
     SCHEMA_SQL,
     restore_legacy_notice_columns,
+    restore_pre_split_names,
     throwaway_database,
 )
 from base.paths.home import resolve_meiva_home
@@ -37,6 +38,7 @@ def _apply(url: str, machine_identity: MachineIdentityReader) -> list[str]:
 
 
 def _restore_previous_schema(conn: psycopg.Connection) -> None:
+    restore_pre_split_names(conn)
     restore_legacy_notice_columns(conn)
     conn.execute("DELETE FROM schema_migrations WHERE name=%s", (_MIGRATION,))
     conn.execute(
@@ -73,20 +75,17 @@ def _restore_previous_schema(conn: psycopg.Connection) -> None:
 # The contract step removes the seven columns the expand step stopped using, with the constraints
 # that existed for them, and keeps every row. The resolution values old rows carry stay legal, and
 # the question payload shape check that lived in a require_response constraint survives on its own.
-# The baseline no longer has the columns, so an upgrade is a baseline with them put back; on a
-# fresh baseline the migration replays as a no-op. Every migration replayed over the baseline lands
-# on the baseline's column set; schedule_id, which 20261108T211435 re-adds on a fresh database, is
-# part of what this migration removes.
-@pytest.mark.parametrize("upgrade", [False, True])
+# The baseline no longer has the columns, so an upgrade is a baseline with them put back, under the
+# table's old name (the split migration is stamped, so a fresh baseline never replays this one).
+# schedule_id, which 20261108T211435 adds, is part of what this migration removes.
 def test_legacy_notice_columns_are_dropped_and_rows_survive(
-    db_url: str, machine_identity: MachineIdentityReader, upgrade: bool
+    db_url: str, machine_identity: MachineIdentityReader
 ) -> None:
     _ = db_url
     with throwaway_database("drop_notice_legacy_columns") as url:
         with psycopg.connect(url, autocommit=True) as conn:
             conn.execute(cast(LiteralString, SCHEMA_SQL.read_text()))
-            if upgrade:
-                _restore_previous_schema(conn)
+            _restore_previous_schema(conn)
 
         applied = _apply(url, machine_identity)
         assert _MIGRATION in applied
@@ -130,10 +129,9 @@ def test_legacy_notice_columns_are_dropped_and_rows_survive(
                 "SELECT count(*) FROM pg_constraint WHERE conrelid='agent_notices'::regclass "
                 "AND conname='agent_notices_question_is_object'"
             ).fetchone() == (1,)
-            if upgrade:
-                assert conn.execute(
-                    "SELECT title, resolution FROM agent_notices ORDER BY id"
-                ).fetchall() == [("open", None), ("read", "read"), ("expired", "expired")]
+            assert conn.execute(
+                "SELECT title, resolution FROM agent_notices ORDER BY id"
+            ).fetchall() == [("open", None), ("read", "read"), ("expired", "expired")]
             conn.execute("INSERT INTO agents (id) VALUES (2)")
             with pytest.raises(psycopg.errors.CheckViolation):
                 conn.execute(

@@ -142,7 +142,7 @@ it("swaps the body under a bar that stays, instead of laying a sheet over it", a
   expect(screen.getByTestId("document-bar")).toBeTruthy();
   expect(screen.getByTestId("shared-inspector")).toBeTruthy();
   expect(screen.queryByText("No content")).toBeNull();
-  expect(screen.queryByTestId("notice-bar")).toBeNull();
+  expect(screen.queryByTestId("question-bar")).toBeNull();
 });
 
 it("keeps questions out of the right panel and restores reading position across Inspector mode", async () => {
@@ -154,13 +154,13 @@ it("keeps questions out of the right panel and restores reading position across 
   snapshot.inspectorOpen = true;
   rerender(<SharedContextPanel {...props} />);
   expect(await screen.findByTestId("shared-inspector")).toBeTruthy();
-  expect(screen.queryByTestId("notice-region")).toBeNull();
+  expect(screen.queryByTestId("question-region")).toBeNull();
   expect(screen.queryByRole("textbox")).toBeNull();
   body.scrollTop = 0;
   snapshot.inspectorOpen = false;
   rerender(<SharedContextPanel {...props} />);
   expect(body.scrollTop).toBe(420);
-  expect(screen.queryByTestId("notice-region")).toBeNull();
+  expect(screen.queryByTestId("question-region")).toBeNull();
 });
 
 function readingArea(): HTMLDivElement {
@@ -206,7 +206,7 @@ it.each([false, true])("leaves no bottom region, and no gap, when there is no qu
     ],
   });
   renderPanelView({ mobile });
-  expect(screen.queryByTestId("notice-region")).toBeNull();
+  expect(screen.queryByTestId("question-region")).toBeNull();
   expect(screen.queryByRole("region", { name: "Ask" })).toBeNull();
   expect(screen.queryByText("Published summary")).toBeNull();
 });

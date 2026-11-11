@@ -18,6 +18,6 @@ Out-of-band pushes are only allowed for truly urgent matters: irreversible risk 
 
 ## Key Dependencies
 
-- [Ask](../../docs/notify.md) — the question channel itself (`meiva.ui.ask`)
+- [Ask](../../docs/ask.md) — the question channel itself (`meiva.ui.ask`)
 - [meiva-fleet skill](../meiva-fleet/README.md) — fleet general outline of the same communication dichotomy
 - [Skills index](../../../../skills/README.md) — available communication skills

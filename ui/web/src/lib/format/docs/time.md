@@ -73,7 +73,7 @@ emits a plain space, so asserting it through a rendered clock would pass with th
 normalization deleted.
 
 Consumers: timeline card stamps (`formatItemTime`), the Inspector's birth cell,
-notice details, run-timeline detail panes and axis labels, sidebar absolute
+question details, run-timeline detail panes and axis labels, sidebar absolute
 times, and alert hover titles. The Inspector's
 Liveness cells are the first `formatUpcoming` consumer; see
 [Inspector section details](../../../docs/frontend-components/inspector/section-details/section-details.md).

@@ -124,7 +124,7 @@ describe("read endpoints reach their gateway route", () => {
     ["getRunTimelineContext", "/api/agents/405/run-timeline/context?at=10&snapshot=v1", (a) => a.getRunTimelineContext(405, 10, "v1")],
     ["getRunTimelineMessages", "/api/agents/405/run-timeline/messages?start=10&end=11&snapshot=v1", (a) => a.getRunTimelineMessages(405, { start: 10, end: 11, snapshot: "v1" })],
     ["getRunTimelineLinks", "/api/insights/run-timeline/links?agents=405%2C6657&from=a&to=b", (a) => a.getRunTimelineLinks([405, 6657], { from: "a", to: "b" })],
-    ["getRunTimelineLinkContent", "/api/insights/run-timeline/link-content?notice_id=4", (a) => a.getRunTimelineLinkContent({ notice_id: 4 })],
+    ["getRunTimelineLinkContent", "/api/insights/run-timeline/link-content?question_id=4", (a) => a.getRunTimelineLinkContent({ question_id: 4 })],
     ["listAgents defaults to the live roster", "/api/agents?scope=live&limit=100", (a) => a.listAgents()],
     ["listAgents requests terminated history only when explicit", "/api/agents?scope=terminated&limit=100", (a) => a.listAgents({ scope: "terminated" })],
     ["getTimeline with no params", "/api/agents/22/timeline", (a) => a.getTimeline(22)],

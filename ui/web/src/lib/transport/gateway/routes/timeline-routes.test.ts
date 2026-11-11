@@ -48,9 +48,9 @@ describe("timeline routes", () => {
       .toBe("/api/insights/run-timeline/links?agents=405%2C6657&from=2026-10-03T00%3A00%3A00.000Z&to=2026-10-05T00%3A00%3A00.000Z");
   });
 
-  it("link content addresses one message or notice by its reference", () => {
+  it("link content addresses one message or question by its reference", () => {
     expect(runTimelineLinkContentPath({ inbound_id: 31 })).toBe("/api/insights/run-timeline/link-content?inbound_id=31");
-    expect(runTimelineLinkContentPath({ notice_id: 4 })).toBe("/api/insights/run-timeline/link-content?notice_id=4");
+    expect(runTimelineLinkContentPath({ question_id: 4 })).toBe("/api/insights/run-timeline/link-content?question_id=4");
   });
 
   it("messages are an index range, uncut only when asked", () => {

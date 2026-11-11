@@ -975,14 +975,14 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/notices/open": {
+    "/api/questions/open": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        get: operations["get_open_notices_api_notices_open_get"];
+        get: operations["get_open_questions_api_questions_open_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -991,14 +991,14 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/notices": {
+    "/api/questions": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        get: operations["get_notices_feed_api_notices_get"];
+        get: operations["get_questions_feed_api_questions_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1007,7 +1007,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/keyed/v1/agents/{agent_id}/notices/{notice_id}/resolve": {
+    "/api/keyed/v1/agents/{agent_id}/questions/{question_id}/resolve": {
         parameters: {
             query?: never;
             header?: never;
@@ -1016,7 +1016,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        post: operations["resolve_observed_api_keyed_v1_agents__agent_id__notices__notice_id__resolve_post"];
+        post: operations["resolve_observed_api_keyed_v1_agents__agent_id__questions__question_id__resolve_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2433,7 +2433,7 @@ export interface components {
             last_launch_attempt_id?: string | null;
             availability?: components["schemas"]["AgentAvailability"] | null;
             observation?: components["schemas"]["AgentObservation"] | null;
-            notices_awaiting_response: components["schemas"]["OpenNotice"][];
+            questions_awaiting_response: components["schemas"]["OpenQuestion"][];
             has_unread_user_messages: boolean;
             heartbeat_paused_until: string | null;
             harness_exit_code?: number | null;
@@ -2642,7 +2642,7 @@ export interface components {
         ChoiceQuestion: {
             note_suggestion?: string | null;
             type: "multi_select" | "single_select";
-            options: components["schemas"]["NoticeOption"][];
+            options: components["schemas"]["QuestionOption"][];
             allow_other: boolean;
         };
         ClusterPanel: {
@@ -3253,34 +3253,6 @@ export interface components {
             neighbors: components["schemas"]["NeighborRow"][];
             ancestors: components["schemas"]["NeighborRow"][];
         };
-        NoticeAnswer: {
-            option_ids?: string[];
-            other_text?: string | null;
-            text?: string | null;
-            comment?: string | null;
-        };
-        NoticeItem: {
-            id: number;
-            agent_id: number;
-            agent_label: string | null;
-            title: string;
-            content: string | null;
-            created_at: string;
-            resolved_at?: string | null;
-            resolution?: string | null;
-            reply?: string | null;
-            question?: (components["schemas"]["ChoiceQuestion"] | components["schemas"]["TextQuestion"]) | null;
-            answer?: components["schemas"]["NoticeAnswer"] | null;
-            source_verified_by?: string | null;
-        };
-        NoticeOption: {
-            id: string;
-            label: string;
-            description?: string | null;
-        };
-        NoticesFeed: {
-            awaiting: components["schemas"]["NoticeItem"][];
-        };
         NotificationCategoriesResponse: {
             categories: components["schemas"]["NotificationCategoryItem"][];
         };
@@ -3315,7 +3287,7 @@ export interface components {
             sha256: string;
             content_type: string;
         };
-        OpenNotice: {
+        OpenQuestion: {
             id: number;
             title: string;
             content: string | null;
@@ -3401,6 +3373,34 @@ export interface components {
             content: string | null;
             suggestions?: string[];
         };
+        QuestionAnswer: {
+            option_ids?: string[];
+            other_text?: string | null;
+            text?: string | null;
+            comment?: string | null;
+        };
+        QuestionItem: {
+            id: number;
+            agent_id: number;
+            agent_label: string | null;
+            title: string;
+            content: string | null;
+            created_at: string;
+            resolved_at?: string | null;
+            resolution?: string | null;
+            reply?: string | null;
+            question?: (components["schemas"]["ChoiceQuestion"] | components["schemas"]["TextQuestion"]) | null;
+            answer?: components["schemas"]["QuestionAnswer"] | null;
+            source_verified_by?: string | null;
+        };
+        QuestionOption: {
+            id: string;
+            label: string;
+            description?: string | null;
+        };
+        QuestionsFeed: {
+            awaiting: components["schemas"]["QuestionItem"][];
+        };
         RebuildProgressOut: {
             id: number;
             status: "pending" | "running" | "done" | "failed";
@@ -3428,10 +3428,10 @@ export interface components {
             suggestions: string[];
             reason?: ("disabled" | "agent_not_idle" | "no_agent_text" | "not_useful" | "gate_failed" | "generation_failed" | "invalid_generation" | "client_disconnected") | null;
         };
-        ResolveNoticeIn: {
+        ResolveQuestionIn: {
             action: "answer" | "dismiss" | "read";
             reply?: string | null;
-            answer?: components["schemas"]["NoticeAnswer"] | null;
+            answer?: components["schemas"]["QuestionAnswer"] | null;
         };
         ResolvedConfigView: {
             model: string;
@@ -3538,13 +3538,13 @@ export interface components {
             seconds: number;
         };
         RunTimelineLink: {
-            kind: "send_message" | "spawn" | "fork" | "terminate" | "restart" | "resurrect" | "notice";
+            kind: "send_message" | "spawn" | "fork" | "terminate" | "restart" | "resurrect" | "question";
             ts: string;
             sender: number | null;
             receiver: number | null;
             inbound_id: number | null;
             fork_from: number | null;
-            notice_id: number | null;
+            question_id: number | null;
         };
         RunTimelineLinkContent: {
             title: string | null;
@@ -6048,7 +6048,7 @@ export interface operations {
             };
         };
     };
-    get_open_notices_api_notices_open_get: {
+    get_open_questions_api_questions_open_get: {
         parameters: {
             query?: {
                 limit?: number | null;
@@ -6065,7 +6065,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["NoticeItem"][];
+                    "application/json": components["schemas"]["QuestionItem"][];
                 };
             };
             422: {
@@ -6078,7 +6078,7 @@ export interface operations {
             };
         };
     };
-    get_notices_feed_api_notices_get: {
+    get_questions_feed_api_questions_get: {
         parameters: {
             query?: {
                 limit?: number | null;
@@ -6094,7 +6094,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["NoticesFeed"];
+                    "application/json": components["schemas"]["QuestionsFeed"];
                 };
             };
             422: {
@@ -6107,7 +6107,7 @@ export interface operations {
             };
         };
     };
-    resolve_observed_api_keyed_v1_agents__agent_id__notices__notice_id__resolve_post: {
+    resolve_observed_api_keyed_v1_agents__agent_id__questions__question_id__resolve_post: {
         parameters: {
             query?: never;
             header: {
@@ -6116,13 +6116,13 @@ export interface operations {
             };
             path: {
                 agent_id: number;
-                notice_id: number;
+                question_id: number;
             };
             cookie?: never;
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["ResolveNoticeIn"];
+                "application/json": components["schemas"]["ResolveQuestionIn"];
             };
         };
         responses: {
@@ -7722,7 +7722,7 @@ export interface operations {
         parameters: {
             query?: {
                 inbound_id?: number | null;
-                notice_id?: number | null;
+                question_id?: number | null;
             };
             header?: never;
             path?: never;

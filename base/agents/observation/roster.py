@@ -41,9 +41,9 @@ class AgentLineage(BaseModel):
     fork_source_agent_id: int | None
 
 
+# meiva:note
+# Scalar list state; selected-agent details and question bodies are separate reads.
 class AgentCard(AgentLineage):
-    """Scalar list state; selected-agent details and notice bodies are separate reads."""
-
     status: AgentStatus
     harness: Harness
     spawned_at: datetime
@@ -110,15 +110,15 @@ _CARD_FROM = """
     ) im ON true
     LEFT JOIN LATERAL (
         SELECT EXISTS (
-            SELECT 1 FROM agent_notices
+            SELECT 1 FROM agent_questions
             WHERE agent_id = a.id AND question IS NOT NULL AND resolved_at IS NULL
         ) AS has_pending_question
     ) attention ON true
     LEFT JOIN LATERAL (
         SELECT EXISTS (
-            SELECT 1 FROM agent_user_messages m
+            SELECT 1 FROM agent_publications m
             WHERE m.agent_id=a.id AND m.content IS NOT NULL
-              AND m.id > COALESCE((SELECT seen_id FROM agent_user_seen WHERE agent_id=a.id), 0)
+              AND m.id > COALESCE((SELECT seen_id FROM agent_publication_seen WHERE agent_id=a.id), 0)
         ) AS has_unread_user_messages
     ) deliveries ON true
 """

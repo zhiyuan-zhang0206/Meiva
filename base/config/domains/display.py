@@ -88,15 +88,15 @@ class DisplaySettings(EnvSettings):
         },
     )
 
-    notices_open_default_limit: int = Field(
-        title="Default open notices limit",
+    questions_open_default_limit: int = Field(
+        title="Default open questions limit",
         default=200,
         ge=1,
         le=500,
-        alias="MEIVA_NOTICES_OPEN_DEFAULT_LIMIT",
+        alias="MEIVA_QUESTIONS_OPEN_DEFAULT_LIMIT",
         description=(
-            "Default cap on one unresolved-questions read (GET /api/notices/open and the "
-            "awaiting slice of GET /api/notices) when the caller passes no limit. "
+            "Default cap on one unresolved-questions read (GET /api/questions/open and the "
+            "awaiting slice of GET /api/questions) when the caller passes no limit. "
             "200 covers a large fleet backlog in one request while bounding the CLI's "
             "fleet-wide listing; the protective ceiling (500) stays a constant."
         ),

@@ -27,14 +27,14 @@ Uniform, because they are all "type a message, send it":
   (`components/conversation/composer-helpers.tsx`) — the conversation composer.
   Inside an open slash-command dropdown the same rule decides whether Enter
   selects the command or sends the draft.
-- `components/notifications/open-notice-detail.tsx` — the notice reply box and,
-  through `components/notifications/notice-question-form.tsx`, a question's
+- `components/notifications/open-question-detail.tsx` — the question reply box and,
+  through `components/notifications/question-form.tsx`, a question's
   single text answer box or a choice question's optional Note box.
 - `components/agents/agent-prompt-dialog.tsx` — the fork / resurrect prompt: a
   prompt is a message to an agent.
 
 `components/ui/auto-expand-textarea.tsx` applies the rule for every
-`AutoExpandTextarea`, which is how the notice fields and the prompt dialog share
+`AutoExpandTextarea`, which is how the question fields and the prompt dialog share
 it, and takes the pointer as an optional prop so a caller (or a test) that
 already knows it does not re-read it; the composer keeps its own handler
 (`handleComposerKeyDown`) because its dropdown and reply-suggestion keys
@@ -58,4 +58,4 @@ on Enter without a reload.
 ## Relationship to Other Nodes
 
 - [Frontend Components](frontend-components.md) — the catalog this node hangs from; the Composer bullet describes its states, drafts and submissions.
-- [Fleet View](fleet-view.md) — the composer question queue renders `OpenNoticeDetail`, whose question form is one of these fields.
+- [Fleet View](fleet-view.md) — the composer question queue renders `OpenQuestionDetail`, whose question form is one of these fields.

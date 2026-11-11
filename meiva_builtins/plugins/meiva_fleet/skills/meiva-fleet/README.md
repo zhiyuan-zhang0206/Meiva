@@ -60,4 +60,4 @@ The Autonomy axis of the Two Dials (who consumes evidence to make decisions) con
 ## Key Dependencies
 
 - [interruption discipline skill](../reduce-context-switch-for-human/README.md) — the same bisection on the notification queue side
-- [Ask](../../docs/notify.md) / [Tasks](../../docs/tasks/tasks.md) / [Spawn](../../docs/spawn.md) / [Neighbors](../../docs/neighbors/neighbors.md) — the SDK primitives orchestrated by the skill
+- [Ask](../../docs/ask.md) / [Tasks](../../docs/tasks/tasks.md) / [Spawn](../../docs/spawn.md) / [Neighbors](../../docs/neighbors/neighbors.md) — the SDK primitives orchestrated by the skill

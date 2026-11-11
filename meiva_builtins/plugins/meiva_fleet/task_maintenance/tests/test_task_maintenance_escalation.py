@@ -104,7 +104,7 @@ def inbox_notices(db: psycopg.Connection, agent_id: int) -> list[tuple[str]]:
     db.rollback()
     with db.cursor() as cur:
         cur.execute(
-            "SELECT title FROM agent_notices "
+            "SELECT title FROM agent_questions "
             "WHERE agent_id = %s AND resolved_at IS NULL ORDER BY id",
             (agent_id,),
         )

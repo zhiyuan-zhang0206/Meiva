@@ -55,7 +55,7 @@ _AGENT = {
     "heartbeat_paused_until": None,
 }
 
-_AWAITING_NOTICES = [
+_AWAITING_QUESTIONS = [
     {
         "id": 1,
         "agent_id": 2,
@@ -100,11 +100,11 @@ API_STUBS: dict[str, object] = {
     "/api/agents/roster": {"agents": [_AGENT], "ancestors": []},
     "/api/agents/1": {
         **_AGENT,
-        "notices_awaiting_response": [],
+        "questions_awaiting_response": [],
         "fork_source_checkpoint_id": None,
         "last_probe_at": None,
     },
-    "/api/notices": {"awaiting": _AWAITING_NOTICES},
+    "/api/questions": {"awaiting": _AWAITING_QUESTIONS},
     "/api/tasks": _TASKS,
     "/api/agents/1/timeline": {"items": [], "msg_count": 0, "has_more": False},
     "/api/agents/1/token-usage": {
@@ -140,7 +140,6 @@ API_STUBS: dict[str, object] = {
             "heartbeat_pending": False,
             "last_pause": None,
         },
-        "notice": None,
         "spawned_at": "2026-09-17T00:00:00Z",
     },
     "/api/agents/1/inspect/statistics": {

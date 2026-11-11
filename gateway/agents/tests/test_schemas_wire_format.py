@@ -4,8 +4,8 @@ from pydantic import BaseModel, TypeAdapter
 
 from gateway.agents.schemas import (
     AgentRow,
-    NoticeItem,
-    ResolveNoticeIn,
+    QuestionItem,
+    ResolveQuestionIn,
 )
 
 _WIRE = TypeAdapter(dict[str, object])
@@ -36,7 +36,7 @@ def test_agent_row_wire_shape() -> None:
         supports_vision=True,
         liveness_state=LivenessState.ONLINE,
         last_probe_at=None,
-        notices_awaiting_response=[],
+        questions_awaiting_response=[],
         has_unread_user_messages=False,
         heartbeat_paused_until=None,
     )
@@ -46,12 +46,12 @@ def test_agent_row_wire_shape() -> None:
     assert d["spawner"] == "user"
     assert d["harness"] == "meiva"
     assert d["supports_vision"] is True
-    assert d["notices_awaiting_response"] == []
+    assert d["questions_awaiting_response"] == []
 
 
-def test_notice_item_wire_shape() -> None:
+def test_question_item_wire_shape() -> None:
     t = datetime(2025, 1, 1, 0, 0, 0, tzinfo=UTC)
-    m = NoticeItem(
+    m = QuestionItem(
         id=5,
         agent_id=3,
         agent_label="agent-3",
@@ -86,27 +86,27 @@ def test_notice_item_wire_shape() -> None:
     assert d["answer"] is None
 
 
-def test_resolve_notice_in_wire_shape() -> None:
-    m = ResolveNoticeIn(action="answer", reply="yes, send it")
+def test_resolve_question_in_wire_shape() -> None:
+    m = ResolveQuestionIn(action="answer", reply="yes, send it")
     assert m.action == "answer"
     assert m.reply == "yes, send it"
-    m2 = ResolveNoticeIn(action="read")
+    m2 = ResolveQuestionIn(action="read")
     assert m2.action == "read"
     assert m2.reply is None
 
 
-def test_resolve_notice_in_rejects_bad_action() -> None:
+def test_resolve_question_in_rejects_bad_action() -> None:
     import pytest
     from pydantic import ValidationError
 
     with pytest.raises(ValidationError):
-        ResolveNoticeIn.model_validate({"action": "bogus"})
+        ResolveQuestionIn.model_validate({"action": "bogus"})
 
 
-def test_resolve_notice_in_strips_and_rejects_empty_reply() -> None:
+def test_resolve_question_in_strips_and_rejects_empty_reply() -> None:
     import pytest
     from pydantic import ValidationError
 
-    assert ResolveNoticeIn(action="answer", reply="  hi  ").reply == "hi"
+    assert ResolveQuestionIn(action="answer", reply="  hi  ").reply == "hi"
     with pytest.raises(ValidationError):
-        ResolveNoticeIn(action="answer", reply="   ")
+        ResolveQuestionIn(action="answer", reply="   ")

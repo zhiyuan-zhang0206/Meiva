@@ -46,7 +46,7 @@ def _int_from_row(row: tuple[object, ...] | None) -> int:
 # numbers and revisions carry over unchanged, so item ids stay stable and the new agent's own rows
 # continue after them. `inbound_id` is cleared: it names a row of the source's inbound queue, which
 # the new agent does not own. The delivery records of what the source sent to the user
-# (`agent_user_messages`) are deliberately not copied, so the copy raises no unread for the new
+# (`agent_publications`) are deliberately not copied, so the copy raises no unread for the new
 # agent.
 # meiva:link base/lm/harness/docs/fork.md
 def copy_harness_timeline(

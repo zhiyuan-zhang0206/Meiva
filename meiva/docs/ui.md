@@ -53,15 +53,7 @@ visibility markers, the compatibility default). Ask is available in every mode;
 publish is available in SDK mode. Mode is frozen per agent and follows the
 ordinary config/restart lifecycle.
 
-## Compatibility
-
-The agent-facing `notify`, `edit_notice` and `dismiss_notice` entries are removed.
-Ask uses the existing question store and answer receipts, preserving historical
-question IDs and answers. Pending legacy questions are migrated without expiry.
-Internal legacy routes remain for existing producers; SDK mode refuses new
-legacy notice creation. System-alert delivery remains a separate capability.
-
 ## Key Dependencies
 
 - [Frontend UI](../../ui/web/src/docs/frontend.md) — Timeline, publications and questions.
-- [Numbered Notice Questions](../../meiva_builtins/plugins/meiva_fleet/docs/notice-questions.md) — question answers.
+- [Numbered questions](../../meiva_builtins/plugins/meiva_fleet/docs/questions.md) — question answers.

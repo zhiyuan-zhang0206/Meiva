@@ -32,7 +32,7 @@ showing the old numbers, rendering empty metric skeleton cards, or remounting th
   `WindowSelect` keeps a compact visible label separate from its transparent
   native select: touch devices retain a 16px native control to prevent iOS focus
   zoom without enlarging the section header's time range.
-- Notice events: the global notices fold invalidates only the live query without
+- Question events: the global questions fold invalidates only the live query without
   re-reading statistics.
 - Task events (`task_created` / `task_updated` for the selected agent): refresh
   the widget read only, since task movement can change the task a widget row
@@ -47,7 +47,7 @@ shared aggregate work keeps its own bounded admission and deadline — a cancell
 HTTP waiter does not shorten it.
 
 **Failure rendering.** A failed refresh that still has data quietly keeps every section
-without amber stale dots or notices (transient refresh failures remain silent while
+without amber stale dots or questions (transient refresh failures remain silent while
 TanStack Query retries in the background); a cold failure with no data replaces
 the section body with an `InlineError` + retry (`Liveness` for the live read,
 `Activity` for the windowed read, and an error block below `Page` when the widget

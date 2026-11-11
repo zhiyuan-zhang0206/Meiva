@@ -157,16 +157,16 @@ def _samples() -> dict[str, dict[str, object]]:
         },
         "agent_spawned": {"role": "agent_spawned", "agent_id": agent_id},
         "agent_updated": {"role": "agent_updated", "agent_id": agent_id},
-        "notice_posted": {
-            "role": "notice_posted",
+        "question_asked": {
+            "role": "question_asked",
             "agent_id": agent_id,
-            "notice_id": 7,
+            "question_id": 7,
             "title": "deploy finished",
         },
-        "notice_resolved": {
-            "role": "notice_resolved",
+        "question_resolved": {
+            "role": "question_resolved",
             "agent_id": agent_id,
-            "notice_id": 7,
+            "question_id": 7,
         },
         "task_created": {
             "role": "task_created",

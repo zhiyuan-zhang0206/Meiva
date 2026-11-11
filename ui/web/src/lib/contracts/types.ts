@@ -35,8 +35,8 @@ export {
   type InboundCommittedEvent,
   type LLMDoneEvent,
   type LabelUpdatedEvent,
-  type NoticePostedEvent,
-  type NoticeResolvedEvent,
+  type QuestionAskedEvent,
+  type QuestionResolvedEvent,
   type NotificationEvent,
   type ReasoningDeltaEvent,
   type ReasoningStartEvent,
@@ -125,13 +125,13 @@ export function projectAgentStatusValue(status: WireAgentStatus): PublicAgentSta
 // Project one gateway card or selected detail before it enters frontend state.
 export function projectAgentStatus(row: WireAgentCard | WireAgentRow): AgentRow {
   const status: PublicAgentStatus = projectAgentStatusValue(row.status);
-  if (!("notices_awaiting_response" in row)) {
+  if (!("questions_awaiting_response" in row)) {
     return status === row.status ? row : { ...row, status };
   }
   // Keep future wire fields by default; selected-detail bodies and lineage/probe
   // evidence are deliberately excluded from the operator-facing card.
   const {
-    notices_awaiting_response,
+    questions_awaiting_response,
     fork_source_checkpoint_id: _forkSourceCheckpointId,
     last_probe_at: _lastProbeAt,
     ...cardFields
@@ -145,21 +145,21 @@ export function projectAgentStatus(row: WireAgentCard | WireAgentRow): AgentRow 
     // meiva:link ui/web/src/docs/frontend-components/agent-sidebar.md
     llm_model: null,
     reasoning_effort: null,
-    has_pending_question: notices_awaiting_response.some((notice) => notice.question != null),
+    has_pending_question: questions_awaiting_response.some((question) => question.question != null),
   };
 }
 // meiva:note
-// OpenNotice rides the agent snapshot (notices_awaiting_response — the agent's
-// unresolved questions). NoticeItem is the standalone feed element.
-// ResolveNoticeIn is the resolve request body.
-export type OpenNotice = Schemas["OpenNotice"];
-export type NoticeItem = Schemas["NoticeItem"];
+// OpenQuestion rides the agent snapshot (questions_awaiting_response — the agent's
+// unresolved questions). QuestionItem is the standalone feed element.
+// ResolveQuestionIn is the resolve request body.
+export type OpenQuestion = Schemas["OpenQuestion"];
+export type QuestionItem = Schemas["QuestionItem"];
 // meiva:note
-// The unresolved-questions feed (GET /api/notices).
-export type NoticesFeed = Schemas["NoticesFeed"];
-export type ResolveNoticeIn = Schemas["ResolveNoticeIn"];
-export type NoticeQuestion = NonNullable<OpenNotice["question"]>;
-export type NoticeAnswer = Schemas["NoticeAnswer"];
+// The unresolved-questions feed (GET /api/questions).
+export type QuestionsFeed = Schemas["QuestionsFeed"];
+export type ResolveQuestionIn = Schemas["ResolveQuestionIn"];
+export type QuestionSpec = NonNullable<OpenQuestion["question"]>;
+export type QuestionAnswer = Schemas["QuestionAnswer"];
 export type AgentMessageEnqueued = Schemas["AgentMessageEnqueued"];
 export type PendingInbound = Schemas["PendingInbound"];
 
@@ -186,12 +186,13 @@ export type EventResolutionRow = Schemas["EventResolutionRow"];
 // change beyond a new key access.
 export type AlertsWindow = "1h" | "6h" | "24h" | "7d";
 
+// meiva:note
 // --- Alerts (the system→human alert store, Task #1224) ---
 //
 // Generated re-exports of the gateway's Pydantic models (AlertRow /
 // AlertsListMeta / AlertsListResponse) — the pre-commit types-codegen-fresh
 // gate fails on any drift, so the alert types can never silently diverge
-// from the backend. Alert is fully separate from Notice.
+// from the backend. Alert is fully separate from Question.
 export type Alert = Schemas["AlertRow"];
 export type AlertsResponse = Schemas["AlertsListResponse"];
 export type AlertSeverity = Alert["severity"];

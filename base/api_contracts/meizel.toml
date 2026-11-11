@@ -1,4 +1,4 @@
-exports = ["agent_contract.py", "caller_identity.py", "config.py", "contracts.py", "idempotency.py", "launch_retry.py", "mcp_tool_contract.py", "memory_search.py", "metric_spec.py", "notice_question.py", "op_envelope.py", "status.py", "user_delivery.py"]
+exports = ["agent_contract.py", "caller_identity.py", "config.py", "contracts.py", "idempotency.py", "launch_retry.py", "mcp_tool_contract.py", "memory_search.py", "metric_spec.py", "question.py", "op_envelope.py", "status.py", "user_delivery.py"]
 
 [purity]
 "." = "strict-to-be"
@@ -11,13 +11,13 @@ exports = ["agent_contract.py", "caller_identity.py", "config.py", "contracts.py
 "mcp_tool_contract.py" = "strict"
 "memory_search.py" = "strict"
 "metric_spec.py" = "strict"
-"notice_question.py" = "strict"
+"question.py" = "strict"
 "op_envelope.py" = "strict"
 "status.py" = "strict"
 
 [uses]
-"tests" = ["contracts.py", "idempotency.py", "notice_question.py"]
-"user_delivery.py" = ["notice_question.py"]
+"tests" = ["contracts.py", "idempotency.py", "question.py"]
+"user_delivery.py" = ["question.py"]
 
 [debt.wide-exports]
 "meizel.toml#exports" = { count = 1, owner = "#6018", until = "waits for the contracts door to be split by topic (agent, op, memory): every child is a shared wire type other packages import by name, so shortening the exports list deletes public contracts instead of narrowing a dependency, and the split moves its consumers with it" }

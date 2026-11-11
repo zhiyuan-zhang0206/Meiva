@@ -1,9 +1,11 @@
-"""`meiva agents` + `meiva notices` — agent lifecycle and the notification queue.
+# meiva:note
+# `meiva agents` + `meiva questions` — agent lifecycle and the notification queue.
+#
+# Thin clients over the gateway's /api/agents + /api/questions surfaces: builders
+# plus their `_h_*` handlers. Handlers lazy-import their `cmd_*` implementation
+# from ``cli.commands.agents.control`` / ``cli.commands.agents.questions`` so parser building
+# never loads Settings (see ``cli.main`` module docstring).
 
-Thin clients over the gateway's /api/agents + /api/notices surfaces: builders
-plus their `_h_*` handlers. Handlers lazy-import their `cmd_*` implementation
-from ``cli.commands.agents.control`` / ``cli.commands.agents.notices`` so parser building
-never loads Settings (see ``cli.main`` module docstring)."""
 
 from __future__ import annotations
 
@@ -148,21 +150,21 @@ class _TransferOptions:
 
 
 @dataclass(frozen=True)
-class _NoticesListOptions:
+class _QuestionsListOptions:
     agent: int | None
     stale: bool
 
 
 @dataclass(frozen=True)
-class _NoticesResolveOptions:
-    notice_id: int
+class _QuestionsResolveOptions:
+    question_id: int
     agent: int
     action: Literal["answer", "dismiss"]
     reply: str | None
 
 
 @dataclass(frozen=True)
-class _NoticesClearOptions:
+class _QuestionsClearOptions:
     agent: int
     force: bool
     stale: bool
@@ -373,29 +375,29 @@ def _h_agents_transfer(args: argparse.Namespace) -> int:
         return 2
 
 
-def _h_notices_list(args: argparse.Namespace) -> int:
+def _h_questions_list(args: argparse.Namespace) -> int:
     from base.cluster.machine.boot import gateway_access_from_boot
-    from cli.commands.agents.notices import cmd_notices_list
+    from cli.commands.agents.questions import cmd_questions_list
     from cli.database.runtime import runtime_of
 
-    opts = options(args, _NoticesListOptions)
-    return cmd_notices_list(
+    opts = options(args, _QuestionsListOptions)
+    return cmd_questions_list(
         gateway_access_from_boot(runtime_of(args).config),
         agent_id=opts.agent,
         stale=opts.stale,
     )
 
 
-def _h_notices_resolve(args: argparse.Namespace) -> int:
+def _h_questions_resolve(args: argparse.Namespace) -> int:
     from base.cluster.machine.boot import gateway_access_from_boot
-    from cli.commands.agents.notices import cmd_notices_resolve
+    from cli.commands.agents.questions import cmd_questions_resolve
     from cli.database.runtime import runtime_of
 
-    opts = options(args, _NoticesResolveOptions)
+    opts = options(args, _QuestionsResolveOptions)
     runtime = runtime_of(args)
-    return cmd_notices_resolve(
+    return cmd_questions_resolve(
         gateway_access_from_boot(runtime.config),
-        notice_id=opts.notice_id,
+        question_id=opts.question_id,
         agent_id=opts.agent,
         action=opts.action,
         reply=opts.reply,
@@ -403,14 +405,14 @@ def _h_notices_resolve(args: argparse.Namespace) -> int:
     )
 
 
-def _h_notices_clear(args: argparse.Namespace) -> int:
+def _h_questions_clear(args: argparse.Namespace) -> int:
     from base.cluster.machine.boot import gateway_access_from_boot
-    from cli.commands.agents.notices import cmd_notices_clear
+    from cli.commands.agents.questions import cmd_questions_clear
     from cli.database.runtime import runtime_of
 
-    opts = options(args, _NoticesClearOptions)
+    opts = options(args, _QuestionsClearOptions)
     runtime = runtime_of(args)
-    return cmd_notices_clear(
+    return cmd_questions_clear(
         gateway_access_from_boot(runtime.config),
         agent_id=opts.agent,
         force=opts.force,
@@ -667,45 +669,45 @@ def add_agents_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) 
         agents_kill_p,
         agents_transfer_p,
     )
-    _add_notices_parsers(sub)
+    _add_questions_parsers(sub)
 
 
-def _add_notices_parsers(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
-    notices_p = sub.add_parser(
-        "notices",
+def _add_questions_parsers(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
+    questions_p = sub.add_parser(
+        "questions",
         help="list, answer and clear the questions agents ask (meiva.ui.ask)",
     )
-    notices_sub = notices_p.add_subparsers(dest="notices_cmd", required=True)
+    questions_sub = questions_p.add_subparsers(dest="questions_cmd", required=True)
 
-    notices_list_p = notices_sub.add_parser(
+    questions_list_p = questions_sub.add_parser(
         "list",
         help="list unresolved questions; filter with --agent",
     )
-    notices_list_p.add_argument("--agent", type=int, default=None, help="agent id")
-    notices_list_p.add_argument(
+    questions_list_p.add_argument("--agent", type=int, default=None, help="agent id")
+    questions_list_p.add_argument(
         "--stale", action="store_true", help="only questions of terminated agents"
     )
-    notices_list_p.set_defaults(func=_h_notices_list)
+    questions_list_p.set_defaults(func=_h_questions_list)
 
-    notices_resolve_p = notices_sub.add_parser(
+    questions_resolve_p = questions_sub.add_parser(
         "resolve",
         help="resolve one question (answer|dismiss)",
     )
-    notices_resolve_p.add_argument("notice_id", type=int)
-    notices_resolve_p.add_argument("--agent", type=int, required=True)
-    notices_resolve_p.add_argument("--action", choices=("answer", "dismiss"), required=True)
-    notices_resolve_p.add_argument("--reply", default=None)
-    notices_resolve_p.set_defaults(func=_h_notices_resolve)
+    questions_resolve_p.add_argument("question_id", type=int)
+    questions_resolve_p.add_argument("--agent", type=int, required=True)
+    questions_resolve_p.add_argument("--action", choices=("answer", "dismiss"), required=True)
+    questions_resolve_p.add_argument("--reply", default=None)
+    questions_resolve_p.set_defaults(func=_h_questions_resolve)
 
-    notices_clear_p = notices_sub.add_parser(
+    questions_clear_p = questions_sub.add_parser(
         "clear",
         help="resolve every open question of one agent (dismiss without answering)",
     )
-    notices_clear_p.add_argument("--agent", type=int, required=True)
-    notices_clear_p.add_argument("--force", action="store_true")
-    notices_clear_p.add_argument(
+    questions_clear_p.add_argument("--agent", type=int, required=True)
+    questions_clear_p.add_argument("--force", action="store_true")
+    questions_clear_p.add_argument(
         "--stale",
         action="store_true",
         help="clear open questions of terminated agents (not --agent)",
     )
-    notices_clear_p.set_defaults(func=_h_notices_clear)
+    questions_clear_p.set_defaults(func=_h_questions_clear)

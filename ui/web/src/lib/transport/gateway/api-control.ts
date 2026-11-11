@@ -29,7 +29,7 @@ import type {
   PackageDraftResponse,
   PackageKind,
   ResolvedConfigView,
-  ResolveNoticeIn,
+  ResolveQuestionIn,
   RestartAgentResponse,
   ResurrectAgentResponse,
   RetryLaunchAccepted,
@@ -315,14 +315,14 @@ export function createControlApi(http: Http) {
     markUserMessagesSeen: (agentId: number, body: MarkUserMessagesSeen, key: string): Promise<UserMessagesSeen> =>
       f(`/api/keyed/v1/agents/${agentId}/user-messages/seen`, keyedJson(body, key)).then(ok<UserMessagesSeen>),
 
-    resolveNotice: (
+    resolveQuestion: (
       agentId: number,
-      noticeId: number,
-      body: ResolveNoticeIn,
+      questionId: number,
+      body: ResolveQuestionIn,
       idempotencyKey: string = newOperationKey(),
     ): Promise<{ status: string }> => {
       return f(
-        `/api/keyed/v1/agents/${agentId}/notices/${noticeId}/resolve`,
+        `/api/keyed/v1/agents/${agentId}/questions/${questionId}/resolve`,
         keyedJson(body, idempotencyKey),
       ).then(ok<{ status: string }>);
     },

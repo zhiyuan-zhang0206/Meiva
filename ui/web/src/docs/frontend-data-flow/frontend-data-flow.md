@@ -53,7 +53,7 @@ per origin: [Merged realtime stream](merged-stream.md).
 
 | Provider / hook | Endpoint | Content | Subscribers |
 |---|---|---|---|
-| `EventStreamProvider` / `useEventStream` | `/api/system` | **Global broadcast**: cross-agent low-frequency lifecycle (spawn/update/label, page open/close, notice/task changes) | **Fold owner** reconciles `["agents","live"]` + `["agents","terminated"]` (both always seeded — terminated rows are the spawn-tree lineage joints), notices, pages, tasks, and fleet graph; reconnect repair is scoped, coalesced, and guaranteed after each gap |
+| `EventStreamProvider` / `useEventStream` | `/api/system` | **Global broadcast**: cross-agent low-frequency lifecycle (spawn/update/label, page open/close, question/task changes) | **Fold owner** reconciles `["agents","live"]` + `["agents","terminated"]` (both always seeded — terminated rows are the spawn-tree lineage joints), questions, pages, tasks, and fleet graph; reconnect repair is scoped, coalesced, and guaranteed after each gap |
 | `AgentEventStreamProvider` / `useAgentEventStream` | `/api/system/all?agents=<active>` | **Active-agent throttled stream**: only the selected agent plus `agent_id=0` system events, batched (`data: [{...}]`), throttled ≤10 push/s | `useTimeline`, `useTokenUsage`, `usePendingMessages` |
 
 The detail stream exists only while at least one authenticated, visible page has

@@ -27,7 +27,7 @@ def _defer_logging() -> None:
         name in sys.modules
         for name in (
             "cli.commands.agents.control",
-            "cli.commands.agents.notices",
+            "cli.commands.agents.questions",
             "cli.commands.agents.timeline",
             "cli.commands.agents.impersonation",
             "cli.commands.agents.impersonation_relay",
@@ -59,7 +59,7 @@ class _AgentRestart:
 
 
 @dataclass(frozen=True)
-class _NoticesList:
+class _QuestionsList:
     agent: int
 
 
@@ -92,8 +92,8 @@ def _parse_real_subcommands() -> None:
     )
     assert restart.agent_id == 7
     assert restart.config == "{}"
-    notices = options(parser.parse_args(["notices", "list", "--agent", "7"]), _NoticesList)
-    assert notices.agent == 7
+    questions = options(parser.parse_args(["questions", "list", "--agent", "7"]), _QuestionsList)
+    assert questions.agent == 7
     loaded = {name for name in sys.modules if name.startswith("cli.commands.")}
     assert loaded == {
         "cli.commands.agents",

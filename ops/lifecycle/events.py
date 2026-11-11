@@ -10,8 +10,8 @@ from __future__ import annotations
 from base.events.live.bus import EventBus
 from base.events.live.projection import (
     InboundArrived,
-    NoticePosted,
-    NoticeResolved,
+    QuestionAsked,
+    QuestionResolved,
 )
 
 
@@ -30,18 +30,20 @@ async def publish_inbound_arrived(
 
 
 # meiva:note
-# Publish NoticeResolved so the frontend refetches the open questions. Best-effort, never raises.
-async def publish_notice_resolved(bus: EventBus, agent_id: int, notice_id: int) -> None:
-    ev = NoticeResolved(agent_id=agent_id, notice_id=notice_id)
-    await bus.publish_best_effort(ev.model_dump_json(), context="notice_resolved")
+# Publish QuestionResolved so the frontend refetches the open questions. Best-effort, never raises.
+async def publish_question_resolved(bus: EventBus, agent_id: int, question_id: int) -> None:
+    ev = QuestionResolved(agent_id=agent_id, question_id=question_id)
+    await bus.publish_best_effort(ev.model_dump_json(), context="question_resolved")
 
 
 # meiva:note
-# Publish NoticePosted so the frontend refetches the open questions. Best-effort, never raises.
+# Publish QuestionAsked so the frontend refetches the open questions. Best-effort, never raises.
 # This is the refetch hint only. The delivery decision for a question is staged in its own
 # transaction and announced by the producer after it commits, so the hint and the user-facing
 # event cannot disagree.
 # meiva:link base/events/notifications/README.md
-async def publish_notice_posted(bus: EventBus, agent_id: int, notice_id: int, title: str) -> None:
-    ev = NoticePosted(agent_id=agent_id, notice_id=notice_id, title=title)
-    await bus.publish_best_effort(ev.model_dump_json(), context="notice_posted")
+async def publish_question_asked(
+    bus: EventBus, agent_id: int, question_id: int, title: str
+) -> None:
+    ev = QuestionAsked(agent_id=agent_id, question_id=question_id, title=title)
+    await bus.publish_best_effort(ev.model_dump_json(), context="question_asked")

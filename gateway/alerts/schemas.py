@@ -1,15 +1,16 @@
-"""Schemas for /api/alerts — the system→human alert store (Task #1224).
+# meiva:note
+# Schemas for /api/alerts — the system→human alert store (Task #1224).
+#
+# The ingest side models the Alertmanager standard webhook payload (as Grafana's
+# embedded Alertmanager delivers it to a webhook contact point): one POST
+# carries ``status`` + ``alerts[]``, each alert an instance of a rule
+# (labels/annotations/startsAt/endsAt/fingerprint/values/generatorURL). The
+# query side is the alert section's
+# history list (unresolved-first); the SSE stream publishes the same row shape
+# the list returns.
+#
+# Alert is fully separate from Question — nothing here touches agent_questions.
 
-The ingest side models the Alertmanager standard webhook payload (as Grafana's
-embedded Alertmanager delivers it to a webhook contact point): one POST
-carries ``status`` + ``alerts[]``, each alert an instance of a rule
-(labels/annotations/startsAt/endsAt/fingerprint/values/generatorURL). The
-query side is the alert section's
-history list (unresolved-first); the SSE stream publishes the same row shape
-the list returns.
-
-Alert is fully separate from Notice — nothing here touches agent_notices.
-"""
 
 from __future__ import annotations
 

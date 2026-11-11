@@ -10,13 +10,14 @@ export const AGENT_DIRECTORY_QUERY_KEY = ["agent-directory"] as const;
 export const AGENT_DETAIL_QUERY_KEY = ["agent-detail"] as const;
 
 export function foldAgents(ev: SystemEvent): FoldOutcome {
-  // FYI notice changes do not publish agent_updated, but change card counts.
+  // meiva:note
+  // question changes do not publish agent_updated, but change card counts.
   switch (ev.role) {
     case "agent_spawned":
     case "agent_updated":
     case "label_updated":
-    case "notice_posted":
-    case "notice_resolved":
+    case "question_asked":
+    case "question_resolved":
       break;
     default:
       return NO_FOLD;

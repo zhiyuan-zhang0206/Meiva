@@ -98,14 +98,14 @@ class RunTimelineUnit(BaseModel):
     request: RunTimelineUsage | None
 
 
-LinkKind = Literal["send_message", "spawn", "fork", "terminate", "restart", "resurrect", "notice"]
+LinkKind = Literal["send_message", "spawn", "fork", "terminate", "restart", "resurrect", "question"]
 
 
 class RunTimelineLink(BaseModel):
     model_config = ConfigDict(
         frozen=True,
         json_schema_extra={
-            "description": "One event between two agents, or between an agent and the user. `sender` did it to `receiver`; None is the user.\n\nA `notice` is an agent posting a notice to the user (`agent_notices`, the structured\nagent-to-user channel): its receiver is None and `notice_id` its row. The text of a message or\nnotice is not in the list; `/run-timeline/link-content` serves it for the one that is selected.\n\n`inbound_id` names the receiver's inbound row, when the event was delivered as one (a message, terminate, restart, resurrect, fork); `fork_from` is the agent\na fork was copied from (fork only; the sender is the agent that executed the fork)."
+            "description": "One event between two agents, or between an agent and the user. `sender` did it to `receiver`; None is the user.\n\nA `question` is an agent posting a question to the user (`agent_questions`, the structured\nagent-to-user channel): its receiver is None and `question_id` its row. The text of a message or\nquestion is not in the list; `/run-timeline/link-content` serves it for the one that is selected.\n\n`inbound_id` names the receiver's inbound row, when the event was delivered as one (a message, terminate, restart, resurrect, fork); `fork_from` is the agent\na fork was copied from (fork only; the sender is the agent that executed the fork)."
         },
     )
 
@@ -115,14 +115,14 @@ class RunTimelineLink(BaseModel):
     receiver: int | None
     inbound_id: int | None
     fork_from: int | None
-    notice_id: int | None
+    question_id: int | None
 
 
 class RunTimelineLinkContent(BaseModel):
     model_config = ConfigDict(
         frozen=True,
         json_schema_extra={
-            "description": "GET /api/insights/run-timeline/link-content: the full text of one chat message, or the title and text of one notice."
+            "description": "GET /api/insights/run-timeline/link-content: the full text of one chat message, or the title and text of one question."
         },
     )
 

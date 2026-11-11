@@ -1,9 +1,10 @@
 "use client";
 
+// meiva:note
 // The alert section (/insights#alerts) — the system→human alert history list
 // (Task #1224, user design: the badge jumps here). Unresolved alerts are
 // listed first (the backend owns ordering; SSE invalidates snapshots). Alert is fully
-// separate from Notice.
+// separate from Question.
 
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { useTranslations } from "next-intl";

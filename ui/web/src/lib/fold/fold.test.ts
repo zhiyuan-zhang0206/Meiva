@@ -2,7 +2,7 @@
 // R4 layer 1 — fold unit tests (Task #1024). The pure reducers + the
 // applyEvent dispatch: every snapshot×stream reconciliation rule lives here
 // and is locked at the reducer level (the hook-level behavior is covered by
-// use-agents / use-notices tests, which now
+// use-agents / use-questions tests, which now
 // drive the real fold through a stubbed EventSource).
 
 import { describe, expect, it, vi } from "vitest";
@@ -11,7 +11,7 @@ import type { AgentRow, SystemEvent } from "../contracts/types";
 import { AGENTS_QUERY_KEY, foldAgents, AGENT_DIRECTORY_QUERY_KEY, AGENT_DETAIL_QUERY_KEY } from "./agents";
 import { foldFleetGraph } from "./graph";
 import { foldAgainstCache, applyEvent } from "./index";
-import { foldNotices, NOTICES_QUERY_KEY } from "./notices";
+import { foldQuestions, QUESTIONS_QUERY_KEY } from "./questions";
 import { foldTasks, TASKS_QUERY_KEY } from "./tasks";
 import { FLEET_GRAPH_KEY_PREFIX } from "./graph";
 
@@ -40,8 +40,8 @@ describe("foldAgents", () => {
       { key: AGENTS_QUERY_KEY }, { key: AGENT_DIRECTORY_QUERY_KEY }, { key: [...AGENT_DETAIL_QUERY_KEY, 1] },
     ] });
   });
-  it.each(["notice_posted", "notice_resolved"] as const)("%s repairs scalar attention without a lifecycle hint", (role) => {
-    const event = { role, agent_id: 1, notice_id: 7, title: "FYI" } as SystemEvent;
+  it.each(["question_asked", "question_resolved"] as const)("%s repairs scalar attention without a lifecycle hint", (role) => {
+    const event = { role, agent_id: 1, question_id: 7, title: "FYI" } as SystemEvent;
     const ctx = { getQueryData: () => undefined, setQueryData: vi.fn(), invalidateQueries: vi.fn() };
     applyEvent(ctx, event);
     expect(ctx.invalidateQueries).toHaveBeenCalledWith(AGENTS_QUERY_KEY);
@@ -61,14 +61,14 @@ describe("foldAgents", () => {
 });
 
 describe("invalidation policies", () => {
-  it("notice_posted invalidates only the questions query", () => {
-    const o = foldNotices({ role: "notice_posted", notice_id: 1, title: "t" } as unknown as SystemEvent);
-    expect(o.invalidations).toEqual([{ key: NOTICES_QUERY_KEY }]);
+  it("question_asked invalidates only the questions query", () => {
+    const o = foldQuestions({ role: "question_asked", question_id: 1, title: "t" } as unknown as SystemEvent);
+    expect(o.invalidations).toEqual([{ key: QUESTIONS_QUERY_KEY }]);
   });
 
-  it("notice_resolved invalidates the questions query", () => {
-    const o = foldNotices({ role: "notice_resolved", agent_id: 1, notice_id: 1 } as unknown as SystemEvent);
-    expect(o.invalidations).toEqual([{ key: NOTICES_QUERY_KEY }]);
+  it("question_resolved invalidates the questions query", () => {
+    const o = foldQuestions({ role: "question_resolved", agent_id: 1, question_id: 1 } as unknown as SystemEvent);
+    expect(o.invalidations).toEqual([{ key: QUESTIONS_QUERY_KEY }]);
   });
 
   it("fleet-graph invalidates on spawn/update; tasks on create/update", () => {
@@ -91,16 +91,16 @@ describe("foldAgainstCache — the dispatch", () => {
     };
   }
 
-  it("emits notices invalidations from a notice event", () => {
+  it("emits questions invalidations from a question event", () => {
     const cache = new Map<string, unknown>();
     cache.set(JSON.stringify(AGENTS_QUERY_KEY), [baseAgent]);
     const outcome = foldAgainstCache(ctxWith(cache), {
-      role: "notice_resolved",
+      role: "question_resolved",
       agent_id: 1,
-      notice_id: 1,
+      question_id: 1,
     } as unknown as SystemEvent);
     expect(outcome.invalidations.map((i) => JSON.stringify(i.key))).toContain(
-      JSON.stringify(NOTICES_QUERY_KEY),
+      JSON.stringify(QUESTIONS_QUERY_KEY),
     );
   });
 

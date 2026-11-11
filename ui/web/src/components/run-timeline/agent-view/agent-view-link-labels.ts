@@ -14,7 +14,7 @@ export function useLinkKindLabels(): Record<LinkKind, string> {
     terminate: t("linkTerminate"),
     restart: t("linkRestart"),
     resurrect: t("linkResurrect"),
-    notice: t("linkNotice"),
+    question: t("linkQuestion"),
   };
 }
 

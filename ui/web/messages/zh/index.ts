@@ -18,7 +18,7 @@ import inventory from "./operations/inventory.json";
 import login from "./interface/login.json";
 import markers from "./agents/markers.json";
 import nav from "./interface/nav.json";
-import noticeDetail from "./interface/noticeDetail.json";
+import questionDetail from "./interface/questionDetail.json";
 import openTasksNotice from "./interface/openTasksNotice.json";
 import pendingStrip from "./agents/pendingStrip.json";
 import runTimeline from "./agents/runTimeline.json";
@@ -46,7 +46,7 @@ const messages = {
   login,
   markers,
   nav,
-  noticeDetail,
+  questionDetail,
   openTasksNotice,
   pendingStrip,
   runTimeline,

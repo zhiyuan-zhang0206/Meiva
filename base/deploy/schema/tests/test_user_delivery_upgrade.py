@@ -12,11 +12,16 @@ from base.deploy.schema.tests.migration_support import (
     LEGACY_NOTICE_COLUMNS,
     SCHEMA_SQL,
     restore_legacy_notice_columns,
+    restore_pre_split_names,
     throwaway_database,
 )
 from base.paths.home import resolve_meiva_home
 
 _DELIVERY_MIGRATION = "20261106T032125_user-delivery-messages"
+_NOTICE_COLUMN_MIGRATIONS = (
+    "20261108T211435_add-notice-schedule-id",
+    "20261111T144830_drop-agent-notices-legacy-columns",
+)
 
 
 def _apply(url: str, machine_identity: MachineIdentityReader) -> list[str]:
@@ -30,12 +35,16 @@ def _apply(url: str, machine_identity: MachineIdentityReader) -> list[str]:
 
 
 def _restore_previous_schema(conn: psycopg.Connection) -> None:
+    restore_pre_split_names(conn)
     conn.execute(
         "DROP TABLE reply_suggestion_feedback, reply_suggestion_offers, agent_user_messages"
     )
     restore_legacy_notice_columns(conn)
     conn.execute("ALTER TABLE agent_notices ALTER COLUMN expire_at SET NOT NULL")
-    conn.execute("DELETE FROM schema_migrations WHERE name=%s", (_DELIVERY_MIGRATION,))
+    conn.execute(
+        "DELETE FROM schema_migrations WHERE name = ANY(%s)",
+        ([_DELIVERY_MIGRATION, *_NOTICE_COLUMN_MIGRATIONS],),
+    )
     conn.execute("INSERT INTO agents (id) VALUES (42)")
     conn.execute(
         "INSERT INTO agent_notices (agent_id, local_id, title, priority, require_response, "
@@ -65,19 +74,23 @@ def test_user_delivery_migrates_existing_databases_and_skips_fresh_baselines(
         assert (_DELIVERY_MIGRATION in applied) is upgrade
         with psycopg.connect(url) as conn:
             assert conn.execute(
-                "SELECT to_regclass('agent_user_messages')::text, "
+                "SELECT to_regclass(%s)::text, "
                 "to_regclass('reply_suggestion_offers')::text, "
-                "to_regclass('reply_suggestion_feedback')::text"
+                "to_regclass('reply_suggestion_feedback')::text",
+                ("agent_user_messages" if upgrade else "agent_publications",),
             ).fetchone() == (
-                "agent_user_messages",
+                "agent_user_messages" if upgrade else "agent_publications",
                 "reply_suggestion_offers",
                 "reply_suggestion_feedback",
             )
             assert (
                 conn.execute(
                     "SELECT column_name FROM information_schema.columns "
-                    "WHERE table_name='agent_notices' AND column_name = ANY(%s)",
-                    (list(LEGACY_NOTICE_COLUMNS),),
+                    "WHERE table_name=%s AND column_name = ANY(%s)",
+                    (
+                        "agent_notices" if upgrade else "agent_questions",
+                        list(LEGACY_NOTICE_COLUMNS),
+                    ),
                 ).fetchall()
                 == []
             )

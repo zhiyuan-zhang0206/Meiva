@@ -49,7 +49,7 @@ const KINDS = [
   "terminate",
   "restart",
   "resurrect",
-  "notice",
+  "question",
 ];
 
 describe.each([

@@ -62,8 +62,8 @@ what a pause or a queued wake renders, are in
 share one header and card primitive; the widget section itself renders only the
 closed-set kinds the console knows (`InspectWidgetSection`), renders nothing
 while pending or empty, and a widgets fetch failure leaves the rest of the panel
-intact. Open notices are rendered once in `SharedContextPanel`'s pinned bottom
-`notice-region` ([shared user context](../../../frontend-state/shared-context/shared-context.md)),
+intact. Open questions are rendered once in `SharedContextPanel`'s pinned bottom
+`question-region` ([shared user context](../../../frontend-state/shared-context/shared-context.md)),
 never duplicated inside the Inspector scroll body.
 
 **No fabrication.** The panel renders the metrics, or nothing: coverage

@@ -1,12 +1,13 @@
-"""Agent-to-agent events — ``GET /api/insights/run-timeline/links?agents=405,6657&from=&to=``.
+# meiva:note
+# Agent-to-agent events — ``GET /api/insights/run-timeline/links?agents=405,6657&from=&to=``.
+#
+# Every audit event of the kinds below that one agent (or the user) did to another, where either end is among the
+# asked agents, plus the questions the agents posted to the user. Who did it is the audit row's `source` (`agent:N`); the agent it was done to is the
+# row's `agent_id`. `target_agent_id` is not used: its direction differs per event (for a
+# send_message it is the sender, for a spawn the spawner, for a fork the agent copied from).
+# Events whose source is not an agent or the user (system, schedule...) are left out; a send_message counts only when its `inbound_id` names a `kind='chat'` inbound row (a task
+# assignment is a system note) -- read per page against `inbound_messages`; a source with an unknown prefix is an error.
 
-Every audit event of the kinds below that one agent (or the user) did to another, where either end is among the
-asked agents, plus the notices the agents posted to the user. Who did it is the audit row's `source` (`agent:N`); the agent it was done to is the
-row's `agent_id`. `target_agent_id` is not used: its direction differs per event (for a
-send_message it is the sender, for a spawn the spawner, for a fork the agent copied from).
-Events whose source is not an agent or the user (system, schedule...) are left out; a send_message counts only when its `inbound_id` names a `kind='chat'` inbound row (a task
-assignment is a system note) -- read per page against `inbound_messages`; a source with an unknown prefix is an error.
-"""
 
 from __future__ import annotations
 
@@ -29,13 +30,13 @@ from services.derived.insights.run_timeline.schemas import (
 
 
 # meiva:note
-# The kinds read from `audit_events`; a notice comes from `agent_notices`.
+# The kinds read from `audit_events`; a question comes from `agent_questions`.
 def _audit_kinds() -> list[str]:
     kinds = object_of(get_args, LinkKind)
     return [
         kind
         for kind in (kinds if _is_tuple(kinds) else ())
-        if isinstance(kind, str) and kind != "notice"
+        if isinstance(kind, str) and kind != "question"
     ]
 
 
@@ -47,7 +48,7 @@ class _IdRow(NamedTuple):
     id: int
 
 
-class _NoticeRow(NamedTuple):
+class _QuestionRow(NamedTuple):
     id: int
     agent_id: int
     created_at: datetime
@@ -57,7 +58,7 @@ class _MessageRow(NamedTuple):
     content: str
 
 
-class _NoticeContentRow(NamedTuple):
+class _QuestionContentRow(NamedTuple):
     title: str
     content: str | None
 
@@ -123,18 +124,19 @@ def _link(row: EventRecord) -> RunTimelineLink | None:
             "receiver": receiver,
             "inbound_id": _message_inbound(row),
             "fork_from": _int(row["target_agent_id"]) if kind == "fork" else None,
-            "notice_id": None,
+            "question_id": None,
         }
     )
 
 
-def _notices(
+# meiva:note
+# Questions the agents posted to the user in the window: the one structured agent-to-user channel.
+def _questions(
     conn: SyncConnection, agents: list[int], start: datetime, end: datetime
 ) -> list[RunTimelineLink]:
-    """Notices the agents posted to the user in the window: the one structured agent-to-user channel."""
-    with conn.cursor(row_factory=rows_as(_NoticeRow)) as cur:
+    with conn.cursor(row_factory=rows_as(_QuestionRow)) as cur:
         cur.execute(
-            "SELECT id, agent_id, created_at FROM agent_notices "
+            "SELECT id, agent_id, created_at FROM agent_questions "
             "WHERE agent_id = ANY(%s) AND created_at >= %s AND created_at <= %s "
             "ORDER BY created_at, id",
             [agents, start, end],
@@ -142,13 +144,13 @@ def _notices(
         rows = cur.fetchall()
     return [
         RunTimelineLink(
-            kind="notice",
+            kind="question",
             ts=row.created_at,
             sender=row.agent_id,
             receiver=None,
             inbound_id=None,
             fork_from=None,
-            notice_id=row.id,
+            question_id=row.id,
         )
         for row in rows
     ]
@@ -187,18 +189,18 @@ def read(
                 and (link := _link(row)) is not None
             )
             if not has_more:
-                links.extend(_notices(conn, agents, start, end))
+                links.extend(_questions(conn, agents, start, end))
                 return sorted(links, key=lambda link: link.ts)
             offset += page_size
 
 
 # meiva:note
-# The full text of one chat message (`inbound_id`) or the title and text of one notice (`notice_id`).
+# The full text of one chat message (`inbound_id`) or the title and text of one question (`question_id`).
 def read_content(
     db: Database,
     *,
     inbound_id: int | None = None,
-    notice_id: int | None = None,
+    question_id: int | None = None,
 ) -> RunTimelineLinkContent | None:
     with db.connect(autocommit=True) as conn:
         if inbound_id is not None:
@@ -213,13 +215,13 @@ def read_content(
                 if message is None
                 else RunTimelineLinkContent(title=None, content=message.content)
             )
-        with conn.cursor(row_factory=rows_as(_NoticeContentRow)) as cur:
-            cur.execute("SELECT title, content FROM agent_notices WHERE id = %s", [notice_id])
-            notice = cur.fetchone()
+        with conn.cursor(row_factory=rows_as(_QuestionContentRow)) as cur:
+            cur.execute("SELECT title, content FROM agent_questions WHERE id = %s", [question_id])
+            question = cur.fetchone()
         return (
             None
-            if notice is None
-            else RunTimelineLinkContent(title=notice.title, content=notice.content or "")
+            if question is None
+            else RunTimelineLinkContent(title=question.title, content=question.content or "")
         )
 
 
@@ -239,6 +241,6 @@ def check_link_window(from_: datetime, to: datetime) -> None:
         raise TimelineRequestError(422, "from must be earlier than to")
 
 
-def check_link_content_selector(inbound_id: int | None, notice_id: int | None) -> None:
-    if (inbound_id is None) == (notice_id is None):
-        raise TimelineRequestError(422, "give exactly one of inbound_id and notice_id")
+def check_link_content_selector(inbound_id: int | None, question_id: int | None) -> None:
+    if (inbound_id is None) == (question_id is None):
+        raise TimelineRequestError(422, "give exactly one of inbound_id and question_id")

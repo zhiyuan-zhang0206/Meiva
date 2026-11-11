@@ -205,7 +205,7 @@ function parseSpawnerAgentId(spawner: string): number | null {
 
 // meiva:note
 // The same mark the sidebar row shows for the same state: the question mark when a question
-// awaits an answer, the orange dot otherwise. It deliberately does not follow the notice
+// awaits an answer, the orange dot otherwise. It deliberately does not follow the question
 // priority colors, which put an Ask in blue and disagreed with the row.
 // meiva:link ui/web/src/docs/frontend-components/agent-sidebar.md
 function AttentionMark({ question }: { question: boolean }) {

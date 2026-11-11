@@ -114,7 +114,7 @@ describe("arrows between agents", () => {
     receiver: 8,
     inbound_id: null,
     fork_from: null,
-    notice_id: null,
+    question_id: null,
     ...partial,
   });
   const LINKS = [
@@ -331,7 +331,7 @@ describe("arrows between agents", () => {
     getRunTimelineLinks.mockResolvedValue({
       links: [
         link({ kind: "terminate", ts: at(50), sender: null, receiver: 8 }),
-        link({ kind: "notice", ts: at(55), sender: 7, receiver: null, notice_id: 11 }),
+        link({ kind: "question", ts: at(55), sender: 7, receiver: null, question_id: 11 }),
       ],
     });
     renderAgentView("7,8");
@@ -342,12 +342,12 @@ describe("arrows between agents", () => {
     const detail = await screen.findByTestId("run-timeline-link-detail");
     expect(detail.textContent).toContain("User");
     await waitFor(() => expect(detail.textContent).toContain("need a decision"));
-    expect(getRunTimelineLinkContent).toHaveBeenCalledWith({ notice_id: 11 });
+    expect(getRunTimelineLinkContent).toHaveBeenCalledWith({ question_id: 11 });
     expect(screen.queryByTestId("run-timeline-link-add-agent")).toBeNull();
 
     expect(screen.getByTestId("run-timeline-link-legend-user_message").textContent).toBe("User message 2");
     expect(screen.getByTestId("run-timeline-link-legend-send_message").textContent).toBe("Message 0");
-    expect(screen.getByTestId("run-timeline-link-legend-notice").textContent).toBe("Notice 1");
+    expect(screen.getByTestId("run-timeline-link-legend-question").textContent).toBe("Question 1");
   });
 
   it("hides the User group or the Other agents group, with the arrows that end in it, by its own switch; arrows between agents in view stay", async () => {

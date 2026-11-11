@@ -55,11 +55,11 @@ def _announced_at(conn: psycopg.Connection, notification_id: int) -> Any:
 
 
 def _stage(
-    pool: ConnectionPool[psycopg.Connection[TupleRow]], agent_id: int, notice_id: int
+    pool: ConnectionPool[psycopg.Connection[TupleRow]], agent_id: int, question_id: int
 ) -> int:
     with write_transaction(pool) as conn:
         stage_question_asked(
-            conn, agent_id=agent_id, notice_id=notice_id, title=f"Question {notice_id}?"
+            conn, agent_id=agent_id, question_id=question_id, title=f"Question {question_id}?"
         )
         row = conn.execute("SELECT max(id) FROM notification_events").fetchone()
     assert row is not None

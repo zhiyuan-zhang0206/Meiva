@@ -56,4 +56,4 @@ deadline resumes the reminders, which pick up where they stood.
 
 ## `priority`
 
-One of `"P0"` (highest) through `"P3"` (lowest), default `"P2"` (`CHECK` constraint, same four levels as notice). `create()`/`update()` validate and raise `ValueError` for illegal values; `update(priority=None)` means "no change". The task board sorts by priority within the same status column (display only, the frontend doesn't write it). When a task escalates to the human queue due to being overdue, the `agent_notices` entry inherits the task's `priority` (see [Reminders](task_model_reminders.md)).
+One of `"P0"` (highest) through `"P3"` (lowest), default `"P2"` (`CHECK` constraint, same four levels as notice). `create()`/`update()` validate and raise `ValueError` for illegal values; `update(priority=None)` means "no change". The task board sorts by priority within the same status column (display only, the frontend doesn't write it). When a task escalates to the human queue due to being overdue, the `agent_questions` entry inherits the task's `priority` (see [Reminders](task_model_reminders.md)).

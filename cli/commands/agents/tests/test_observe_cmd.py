@@ -35,7 +35,7 @@ def _agent() -> dict[str, JsonValue]:
         "last_inbound_at": "2026-11-12T00:50:00+00:00",
         "heartbeat_paused_until": None,
         "harness_exit_code": None,
-        "notices_awaiting_response": [{"id": 1}],
+        "questions_awaiting_response": [{"id": 1}],
         "observation": None,
     }
 

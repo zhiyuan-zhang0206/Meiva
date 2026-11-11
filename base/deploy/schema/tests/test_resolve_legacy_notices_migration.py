@@ -10,6 +10,7 @@ from base.deploy.schema.migrations import apply_pending_migrations
 from base.deploy.schema.tests.migration_support import (
     SCHEMA_SQL,
     restore_legacy_notice_columns,
+    restore_pre_split_names,
     throwaway_database,
 )
 from base.paths.home import resolve_meiva_home
@@ -50,6 +51,7 @@ def test_open_legacy_notices_are_resolved_and_open_questions_are_kept(
         with psycopg.connect(url, autocommit=True) as conn:
             conn.execute(cast(LiteralString, SCHEMA_SQL.read_text()))
             conn.execute("DELETE FROM schema_migrations WHERE name=%s", (_MIGRATION,))
+            restore_pre_split_names(conn)
             restore_legacy_notice_columns(conn)
             conn.execute("INSERT INTO agents (id) VALUES (1)")
             _notice(conn, "n1", question=_QUESTION)

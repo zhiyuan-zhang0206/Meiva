@@ -3,7 +3,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from gateway.tests.auth.gateway_config import gateway_test_client
-from gateway.tests.events.test_notices_endpoint import seed_agent
+from gateway.tests.events.test_questions_endpoint import seed_agent
 from gateway.tests.receipts.test_user_delivery import headers, sdk_agent
 
 pytestmark = pytest.mark.usefixtures("gateway_data_plane")
@@ -39,7 +39,7 @@ def test_closing_an_open_question_withdraws_it_and_its_push(db_conn: psycopg.Con
         closed = client.post(f"/api/agents/{aid}/asks/{first}/close", headers=headers("close"))
         assert closed.status_code == 200, closed.text
         assert closed.json() == {"id": first}
-        assert [row["id"] for row in client.get(f"/api/notices/open?agent_id={aid}").json()] == [
+        assert [row["id"] for row in client.get(f"/api/questions/open?agent_id={aid}").json()] == [
             second
         ]
         assert client.post(
@@ -52,7 +52,7 @@ def test_closing_an_open_question_withdraws_it_and_its_push(db_conn: psycopg.Con
             == 200
         )
     assert db_conn.execute(
-        "SELECT resolution, reply, answer FROM agent_notices WHERE id=%s", (first,)
+        "SELECT resolution, reply, answer FROM agent_questions WHERE id=%s", (first,)
     ).fetchone() == ("withdrawn", None, None)
     assert pushes(db_conn, aid) == [
         ("alert", "First?"),
@@ -78,7 +78,7 @@ def test_closing_refuses_a_missing_foreign_or_already_resolved_question(
             (dismissed, {"action": "dismiss"}),
         ):
             resolved = client.post(
-                f"/api/keyed/v1/agents/{aid}/notices/{qid}/resolve",
+                f"/api/keyed/v1/agents/{aid}/questions/{qid}/resolve",
                 json=body,
                 headers=headers(f"r{qid}"),
             )
@@ -93,9 +93,9 @@ def test_closing_refuses_a_missing_foreign_or_already_resolved_question(
         assert close(other, mine, "k2") == 404
         assert close(aid, answered, "k3") == 409
         assert close(aid, dismissed, "k4") == 409
-        assert [row["id"] for row in client.get(f"/api/notices/open?agent_id={aid}").json()] == [
+        assert [row["id"] for row in client.get(f"/api/questions/open?agent_id={aid}").json()] == [
             mine
         ]
     assert db_conn.execute(
-        "SELECT id, resolution FROM agent_notices WHERE agent_id=%s ORDER BY id", (aid,)
+        "SELECT id, resolution FROM agent_questions WHERE agent_id=%s ORDER BY id", (aid,)
     ).fetchall() == [(mine, None), (answered, "answered"), (dismissed, "dismissed")]

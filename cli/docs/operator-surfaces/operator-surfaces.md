@@ -20,11 +20,11 @@
   `--message TEXT` (and `--source`) and `compact` takes neither. `transfer` relocates an `idling` or `terminated`
   native agent and its workspace across machines and refuses running agents with
   409 ([agent transfer](../../../gateway/agents/docs/agent-transfer.md)).
-- `meiva notices list/resolve/clear`: `resolve` reports success only when the
+- `meiva questions list/resolve/clear`: `resolve` reports success only when the
   gateway accepts the action. A 409 conflict is an error, including an absent
-  notice, an action-kind mismatch, or an already-resolved answer/dismissal.
-  Every notice requires a response; fresh mark-read operations are rejected.
-  `clear --agent` explicitly dismisses each open notice after confirmation
+  question, an action-kind mismatch, or an already-resolved answer/dismissal.
+  Every question requires a response; fresh mark-read operations are rejected.
+  `clear --agent` explicitly dismisses each open question after confirmation
   (`--force` skips confirmation). `clear --stale` targets only terminated agents.
   Resolution is one keyed attempt (`principal-v1`) with a fresh key per invocation.
 - `meiva memory init`: explicitly provisions the memory-pool checkout and

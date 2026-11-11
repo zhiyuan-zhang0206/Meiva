@@ -28,7 +28,7 @@ def test_the_trigger_gate_reads_the_rows_kind_source_and_payload(
         db_conn, aid, "notice", source="system", bus=event_bus, database=database
     )
     var_iid = insert_inbound_message(
-        db_conn, aid, "variant", source="system:notice-reply", bus=event_bus, database=database
+        db_conn, aid, "variant", source="system:question-reply", bus=event_bus, database=database
     )
     user_iid = insert_inbound_message(
         db_conn, aid, "hi", source="user", bus=event_bus, database=database
@@ -53,7 +53,7 @@ def test_the_trigger_gate_reads_the_rows_kind_source_and_payload(
 
     assert lifecycle.system_notice_source_of_trigger(database, aid, sys_iid) == "system"
     assert (
-        lifecycle.system_notice_source_of_trigger(database, aid, var_iid) == "system:notice-reply"
+        lifecycle.system_notice_source_of_trigger(database, aid, var_iid) == "system:question-reply"
     )
     assert lifecycle.system_notice_source_of_trigger(database, aid, user_iid) is None
     assert lifecycle.system_notice_source_of_trigger(database, aid, note_iid) is None

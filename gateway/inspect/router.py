@@ -194,15 +194,15 @@ async def _inspect_rows_cached_async(
         raise HTTPException(status_code=503, detail="inspect query queue is full") from exc
 
 
+# meiva:note
+# Cheap current-state half of the inspector panel.
+#
+# Reads the current projection and recent committed heartbeat pause
+# from Postgres and probes shells on the owning runner. It performs no log
+# queries. Unknown agents return 404; shell probe failures report
+# shells_available=False. No part of this response is cached.
 @router.get("/api/agents/{agent_id}/inspect/live", response_model=AgentInspectLive)
 async def get_agent_inspect_live(agent_id: int, request: Request) -> AgentInspectLive:
-    """Cheap current-state half of the inspector panel.
-
-    Reads the current projection, notice, and recent committed heartbeat pause
-    from Postgres and probes shells on the owning runner. It performs no log
-    queries. Unknown agents return 404; shell probe failures report
-    shells_available=False. No part of this response is cached.
-    """
     pool = gateway_state(request).db_pool
     heartbeat = gateway_config(request).heartbeat
     db = await asyncio.to_thread(db_rows_blocking, pool, agent_id)
@@ -244,19 +244,19 @@ async def get_agent_inspect_live(agent_id: int, request: Request) -> AgentInspec
     )
 
 
+# meiva:note
+# Read only the selected agent's window-dependent statistics.
+#
+# Current state, runner shells, and heartbeat history are owned by
+# ``/inspect/live`` and are never fetched here. Persisted reads share only
+# in-flight work and have database and admission deadlines. The requested
+# window is preserved; unavailable historical coverage is explicit.
 @router.get("/api/agents/{agent_id}/inspect/statistics", response_model=AgentInspectStatistics)
 async def get_agent_inspect_statistics(
     agent_id: int,
     request: Request,
     hours: Annotated[StatsWindowHours | None, Query()] = None,
 ) -> AgentInspectStatistics:
-    """Read only the selected agent's window-dependent statistics.
-
-    Current state, notices, runner shells, and heartbeat history are owned by
-    ``/inspect/live`` and are never fetched here. Persisted reads share only
-    in-flight work and have database and admission deadlines. The requested
-    window is preserved; unavailable historical coverage is explicit.
-    """
     pool = gateway_state(request).db_pool
     applied_window_hours = None if hours is None else int(hours)
     try:
@@ -437,21 +437,21 @@ async def get_agent_plugin_metrics(agent_id: int, request: Request) -> list[Plug
     )
 
 
+# meiva:note
+# The agent's plugin widgets for the inspector panel — the extension
+# surface where enabled plugins embed widgets (see `base/packages/plugins/surface/inspector.py`;
+# registration mirrors the plugin-metric system).
+#
+# Builds the widget registry in process (shipped builtin plugins'
+# ``inspector.py`` modules imported under their plugin context, restricted
+# to the plugins currently enabled), resolves the closed target vocabulary
+# for this agent — the open question and the queue's task-ownership rule —
+# and projects each widget, dropping a button whose target did not resolve
+# and a widget left without buttons. Unknown agents return 404 like the
+# rest of the /inspect family. Implementation in
+# ``gateway/inspect/_plugin_widgets.py``.
 @router.get("/api/agents/{agent_id}/inspect/widgets")
 async def get_agent_inspect_widgets(agent_id: int, request: Request) -> list[InspectWidgetResult]:
-    """The agent's plugin widgets for the inspector panel — the extension
-    surface where enabled plugins embed widgets (see `base/packages/plugins/surface/inspector.py`;
-    registration mirrors the plugin-metric system).
-
-    Builds the widget registry in process (shipped builtin plugins'
-    ``inspector.py`` modules imported under their plugin context, restricted
-    to the plugins currently enabled), resolves the closed target vocabulary
-    for this agent — the open notice and the queue's task-ownership rule —
-    and projects each widget, dropping a button whose target did not resolve
-    and a widget left without buttons. Unknown agents return 404 like the
-    rest of the /inspect family. Implementation in
-    ``gateway/inspect/_plugin_widgets.py``.
-    """
     specs = await asyncio.to_thread(
         _plugin_widgets.load_inspect_widgets,
         SHIPPED_PLUGINS_DIR,

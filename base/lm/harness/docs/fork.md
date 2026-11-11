@@ -17,7 +17,7 @@ start**, in the runner that hosts it:
 1. Birth (gateway, one transaction) writes the child's `agents_meta` row with
    `fork_source_agent_id`, inserts the `kind='fork'` inbound (as for a native fork), and copies the
    source's `agent_harness_messages` rows to the child (`copy_harness_timeline`): same `seq`, same
-   items, `inbound_id` cleared, no `agent_user_messages` (so no unread), and no graph checkpoints
+   items, `inbound_id` cleared, no `agent_publications` (so no unread), and no graph checkpoints
    (the source's graph state holds no conversation and may sit mid-turn).
 2. The host reads `fork_source_agent_id` with the stored config and hands it to the bridge through
    `SessionBinding`.
@@ -97,5 +97,5 @@ as interrupted, as a native fork does.
   child's current harness, never an older record the source kept on another harness. "Has the child
   its own session" is asked per harness, so a child that switches away and back finds its old record
   and resumes it instead of cloning again.
-- **No unread.** The delivery records (`agent_user_messages`) are not copied, and the seen-position
+- **No unread.** The delivery records (`agent_publications`) are not copied, and the seen-position
   table has no row for the child, which reads as position 0.

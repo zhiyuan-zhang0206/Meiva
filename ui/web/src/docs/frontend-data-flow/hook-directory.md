@@ -22,7 +22,7 @@ the editable composer with a receipt warning. Sending the unchanged draft reuses
 its key; changed content or attachments receive a new key.
 | `useClusterHealth` | cluster paused polling + SSE reconnect coordination |
 | `useHarnessAvailability*` / `useRefreshHarnessAvailability` (`lib/harness/use-harness-availability.ts`) | GET reads only the last per-machine snapshot, cached in Query with `staleTime: Infinity`; there is no sidebar warm-up. The explicit Refresh action above Spawn POSTs to `/harnesses/refresh` for all ready runner machines at once, replacing each machine’s query data as it resolves. The gateway retains the last success and coalesces concurrent refresh probes; reads and reloads never probe. |
-| `useNotices` | the fleet's unresolved questions (`GET /api/notices`, `awaiting`), read by the question bar above the composer; notice_* events invalidate-refetch |
+| `useQuestions` | the fleet's unresolved questions (`GET /api/questions`, `awaiting`), read by the question bar above the composer; question_* events invalidate-refetch |
 | ~~`usePrefetchTimelines`~~ | removed (Aw-Snap fix) — the fleet-wide full-timeline prefetch retained one ~128KB system prompt + history per agent for gcTime=30min, the dominant renderer-heap source; timelines now fetch on demand when an agent is opened |
 | `useThrottledStreaming` | streaming increment throttled batching |
 | `useUserSettings` | server-side user preferences (`user_settings` table) |

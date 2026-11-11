@@ -227,8 +227,8 @@ BEGIN
     END IF;
 END $$;
 
--- ─────────────── agent_user_messages ───────────────
-CREATE TABLE IF NOT EXISTS agent_user_messages (
+-- ─────────────── agent_publications ───────────────
+CREATE TABLE IF NOT EXISTS agent_publications (
     id BIGSERIAL PRIMARY KEY,
     agent_id BIGINT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
     source_key TEXT NOT NULL,
@@ -240,57 +240,58 @@ CREATE TABLE IF NOT EXISTS agent_user_messages (
     CHECK (content IS NULL OR length(btrim(content)) > 0),
     CHECK (content IS NOT NULL OR suggestions = '[]'::jsonb)
 );
-CREATE INDEX IF NOT EXISTS agent_user_messages_by_agent ON agent_user_messages (agent_id, id)
+CREATE INDEX IF NOT EXISTS agent_publications_by_agent ON agent_publications (agent_id, id)
     WHERE content IS NOT NULL;
 -- Unread is the seen cursor below; deliveries carry no per-record read state.
-CREATE TABLE IF NOT EXISTS agent_user_seen (
+CREATE TABLE IF NOT EXISTS agent_publication_seen (
     agent_id BIGINT PRIMARY KEY REFERENCES agents(id) ON DELETE CASCADE,
     seen_id BIGINT NOT NULL CHECK (seen_id >= 0)
 );
-COMMENT ON TABLE agent_user_seen IS 'The user has seen deliveries (agent_user_messages.id) up to seen_id; no row means none.';
+COMMENT ON TABLE agent_publication_seen IS 'The user has seen publications (agent_publications.id) up to seen_id; no row means none.';
 
--- ─────────────── agent_notices ───────────────
--- The agent->user question queue: meiva.ui.ask() INSERTs one row per call and an agent may
+-- ─────────────── agent_questions ───────────────
+-- The agent->user question queue: meiva.ui.ask() INSERTs one row per question and an agent may
 -- hold several open questions at once. title = one-line headline; content = optional detail
 -- body; question = the structured question payload. An unresolved row is an open question.
 -- resolved_at + resolution + reply (+ answer) is the single close triple:
 --   answered  -- the user answered (reply = the answer)
 --   dismissed -- the user waved the question away without answering
---   expired   -- resolved by the legacy-notice cleanup
---   read, withdrawn, superseded -- historical only; no writer produces them now
+--   withdrawn -- the agent closed its own question (meiva.ui.close_question)
 -- reply caches the user's free-text reply for history/display; the live delivery to the agent
 -- rides the chat-inbound path, not this column.
-CREATE TABLE agent_notices (
+CREATE TABLE agent_questions (
     id              BIGSERIAL PRIMARY KEY,
     agent_id        BIGINT NOT NULL REFERENCES agents(id),
     title           TEXT NOT NULL,
     content         TEXT,
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
     resolved_at     TIMESTAMPTZ,
-    resolution      TEXT CHECK (resolution IN ('answered', 'dismissed', 'read', 'withdrawn', 'superseded', 'expired')),
+    resolution      TEXT,
     reply           TEXT,
-    question        JSONB,
+    question        JSONB NOT NULL,
     answer          JSONB,
     -- The credential fact the server verified for the request that wrote this
     -- row (see the 2026-11-02 migration of the same name): never a caller's
     -- claim, and `internal` for the in-process writers that present none.
     -- NULL = written before the column existed.
     source_verified_by TEXT,
-    CONSTRAINT agent_notices_question_is_object
-        CHECK (question IS NULL OR jsonb_typeof(question) = 'object'),
-    CONSTRAINT agent_notices_answer_requires_question
-        CHECK (answer IS NULL OR (jsonb_typeof(answer) = 'object' AND question IS NOT NULL
+    CONSTRAINT agent_questions_resolution_legal
+        CHECK (resolution IN ('answered', 'dismissed', 'withdrawn')),
+    CONSTRAINT agent_questions_question_is_object
+        CHECK (jsonb_typeof(question) = 'object'),
+    CONSTRAINT agent_questions_answer_is_answered
+        CHECK (answer IS NULL OR (jsonb_typeof(answer) = 'object'
                                   AND resolution IS NOT DISTINCT FROM 'answered')),
-    CONSTRAINT agent_notices_resolution_pair
+    CONSTRAINT agent_questions_resolution_pair
         CHECK ((resolved_at IS NULL) = (resolution IS NULL)),
-    CONSTRAINT agent_notices_answered_has_reply
+    CONSTRAINT agent_questions_answered_has_reply
         CHECK (resolution IS DISTINCT FROM 'answered' OR reply IS NOT NULL)
 );
 
--- Open questions: serves the snapshot's notices_awaiting_response inline array and the
+-- Open questions: serves the snapshot's questions_awaiting_response inline array and the
 -- open-question feed. Every unresolved row is an open question.
-CREATE INDEX agent_notices_open_idx
-    ON agent_notices (agent_id, created_at)
+CREATE INDEX agent_questions_open_idx
+    ON agent_questions (agent_id, created_at)
     WHERE resolved_at IS NULL;
 
 -- ─────────────── inbound_messages ───────────────
@@ -1932,18 +1933,26 @@ INSERT INTO schema_migrations (name) VALUES ('20261107T103500_drop-agent-imperso
 -- The cost split's columns are already in this file's table definitions above, so a
 -- fresh database never replays the migration that adds them to an older one.
 INSERT INTO schema_migrations (name) VALUES ('20261108T122000_split-llm-cost-by-billing-mode');
--- The seen-cursor migration backfills from agent_user_messages.read_at, which this file no
+-- The seen-cursor migration backfills from the publications' read_at, which this file no
 -- longer has, so a fresh database must not replay it.
 INSERT INTO schema_migrations (name) VALUES ('20261110T153500_agent-user-seen');
--- The legacy-notice resolution reads agent_notices.expire_at, which this file no longer has;
+-- The legacy-notice resolution reads the questions table's expire_at, which this file no longer has;
 -- a fresh database has no legacy rows to resolve, so it must not replay it either.
 INSERT INTO schema_migrations (name) VALUES ('20261111T023500_resolve-legacy-notices');
--- The expand step of the notice storage rework alters agent_notices.local_id, which this file no
+-- The expand step of the notice storage rework alters the questions table's local_id, which this file no
 -- longer has; everything else it did is already in the table above.
 INSERT INTO schema_migrations (name) VALUES ('20261111T080521_drop-dead-notice-storage');
+-- These two migrations add and then remove columns of the question table under its old name;
+-- a fresh database has neither the old name nor the columns, so it must not replay them.
+INSERT INTO schema_migrations (name) VALUES ('20261108T211435_add-notice-schedule-id');
+INSERT INTO schema_migrations (name) VALUES ('20261111T144830_drop-agent-notices-legacy-columns');
+-- The rename and tightening of the question and publication tables is already in the definitions
+-- above (new names, narrowed constraints); a fresh database has nothing to rename.
+INSERT INTO schema_migrations (name) VALUES ('20261111T193000_split-questions-and-publications');
 
--- Domain receipts never expire into fresh notice effects.
-CREATE TABLE notice_operation_receipts (
+-- Keyed-operation receipts never expire into fresh effects (questions, publications' seen cursor,
+-- reply-suggestion feedback).
+CREATE TABLE keyed_operation_receipts (
     path TEXT NOT NULL,
     operation_key TEXT NOT NULL CHECK (char_length(operation_key) BETWEEN 1 AND 128),
     request JSONB NOT NULL,

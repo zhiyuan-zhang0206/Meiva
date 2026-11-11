@@ -54,10 +54,10 @@ and `source_message_id` travel on chat SSE. Source identity keeps the durable
 attention record attached to the same bubble across streaming and compaction.
 Historical messages without the field retain their existing metadata semantics.
 
-Visible native/prefix and harness messages create durable `agent_user_messages`
+Visible native/prefix and harness messages create durable `agent_publications`
 records. SDK publications may carry reply suggestions for the independent
 composer service. Each agent has one seen position, the newest delivery id the user has
-seen (`agent_user_seen`, monotonic); unread means a delivery past it. Opening the agent in a
+seen (`agent_publication_seen`, monotonic); unread means a delivery past it. Opening the agent in a
 visible page advances it (`POST /api/keyed/v1/agents/{id}/user-messages/seen`, `up_to_id` bounded by
 the agent's newest delivery) and the user-messages feed returns it as `seen_id`
 ([decision](../../../../docs/decisions/frontend/ui/2026-11-10-restore-unread-dot.md)). A delivery

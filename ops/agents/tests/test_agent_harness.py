@@ -217,7 +217,7 @@ def test_fork_of_a_same_machine_external_source_keeps_its_harness_and_copies_its
             (fork,),
         )
         assert cur.fetchall() == [(seq, external_harness, f"{seq}.0", None) for seq in range(3)]
-        cur.execute("SELECT count(*) FROM agent_user_messages WHERE agent_id = %s", (fork,))
+        cur.execute("SELECT count(*) FROM agent_publications WHERE agent_id = %s", (fork,))
         assert cur.fetchone() == (0,)
         cur.execute("SELECT count(*) FROM checkpoints WHERE thread_id = %s", (str(fork),))
         assert cur.fetchone() == (0,)

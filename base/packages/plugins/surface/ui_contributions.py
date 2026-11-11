@@ -142,7 +142,7 @@ THEME_TOKENS = (
     "--link-terminate",
     "--link-restart",
     "--link-resurrect",
-    "--link-notice",
+    "--link-question",
     "--sidebar",
     "--sidebar-foreground",
     "--sidebar-primary",

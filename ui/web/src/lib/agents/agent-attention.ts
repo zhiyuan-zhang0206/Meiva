@@ -5,7 +5,7 @@ import type { AgentRow } from "../contracts/types";
 // there are only two: a pending question shows the question mark and outranks everything; otherwise
 // deliveries past the reader's seen position show the orange dot. The conversation the reader has
 // open in a visible page counts as seen, so `reading` hides its dot at once. Open reply requests
-// and the notice counters do not take part.
+// and the question counters do not take part.
 // meiva:link ui/web/src/docs/frontend-components/agent-sidebar.md
 export type AgentAttention = "question" | "unread";
 

@@ -7,7 +7,7 @@ the delivery log are server-side). See
 [the notification spine](../../../base/events/notifications/README.md).
 
 Each event carries an `action` (`alert`, `replace`, `retract`) and a stable `tag`
-(`unread:<agent id>`, `question:<notice id>`). The bridge keeps one notification per tag.
+(`unread:<agent id>`, `question:<question id>`). The bridge keeps one notification per tag.
 
 ## What the bridge decides
 

@@ -11,7 +11,7 @@ import type { UploadButton as UploadButtonComponent } from "@/components/convers
 import type { SharedContextPanel as ContextPanelComponent } from "@/components/context/shared-context-panel";
 import type { HeaderBar as HeaderBarComponent } from "@/components/shell/header-bar";
 import type { TimelineView as TimelineViewComponent } from "@/components/timeline";
-import type { AgentRow, BackendTimelineItem, NoticeItem, ReplySuggestionResponse } from "@/lib/contracts/types";
+import type { AgentRow, BackendTimelineItem, QuestionItem, ReplySuggestionResponse } from "@/lib/contracts/types";
 import type { ConnectionState } from "@/lib/timeline/use-timeline";
 import { HomePageView } from "./home-view";
 import type { HomePageProps } from "./home-view";
@@ -268,8 +268,8 @@ export let homePageGateway: TestGateway;
 export let homePageRig: HttpRig;
 let homePageApi: Api;
 const { hub } = fakeStreamHub();
-let pendingQuestions: NoticeItem[] = [];
-export function setPendingQuestions(questions: NoticeItem[]) { pendingQuestions = questions; }
+let pendingQuestions: QuestionItem[] = [];
+export function setPendingQuestions(questions: QuestionItem[]) { pendingQuestions = questions; }
 
 export let replySuggestions: ReplySuggestionResponse;
 
@@ -318,7 +318,7 @@ export async function resetHomePageTestState() {
   homePageGateway = await startGateway(realNetwork.createServer, (request) => {
     if (/^\/api\/agents\/\d+\/reply-suggestion$/.test(request.path)) return { kind: "json", body: replySuggestions };
     if (/^\/api\/agents\/\d+\/pending$/.test(request.path)) return { kind: "json", body: [] };
-    if (request.path === "/api/notices") return { kind: "json", body: { awaiting: pendingQuestions } };
+    if (request.path === "/api/questions") return { kind: "json", body: { awaiting: pendingQuestions } };
     if (request.path === "/api/alerts") return { kind: "json", body: { alerts: [], meta: { window: "24h", total: 0, unresolved_count: 0 } } };
     return { kind: "text", status: 404, body: "unexpected route" };
   });
