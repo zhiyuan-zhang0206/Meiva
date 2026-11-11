@@ -32,8 +32,6 @@ from gateway.agents.schemas import AgentMessageEnqueued
 from gateway.http.config import gateway_rpc, gateway_state
 from ops import lifecycle as _ops
 
-_OPEN_SET_LIMIT = 500
-
 
 class OpenQuestionsChangedError(Exception):
     pass
@@ -107,9 +105,7 @@ async def post_answers(
             request_inbound_provenance(request),
         )
     except OpenQuestionsChangedError:
-        latest = await asyncio.to_thread(
-            open_questions, state.db_pool, _OPEN_SET_LIMIT, agent_id=agent_id
-        )
+        latest = await asyncio.to_thread(open_questions, state.db_pool, None, agent_id=agent_id)
         return JSONResponse(
             status_code=409,
             content={

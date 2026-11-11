@@ -8,6 +8,7 @@ from httpx2 import Response
 from psycopg.types.json import Jsonb
 
 from base.api_contracts.idempotency import keyed_headers
+from gateway.tests.auth.gateway_config import gateway_test_client
 from gateway.tests.events.test_questions_endpoint import answers_path, seed_agent
 from gateway.tests.receipts.test_guarded_question_resolution import client as client
 
@@ -329,3 +330,20 @@ def test_a_single_question_alerts_with_its_own_title_and_a_rejected_answer_keeps
     )
     assert rejected.status_code == 422
     assert [action for action, *_ in pushes(db_conn, agent)] == ["alert"]
+
+
+def test_one_agents_open_set_is_not_cut_by_the_fleet_wide_cap(
+    db_conn: psycopg.Connection,
+) -> None:
+    agent, other = seed_agent(db_conn), seed_agent(db_conn)
+    with gateway_test_client(fields={"questions_open_default_limit": 2}) as client:
+        ids = ask(client, agent, *(("Q?", TEXT) for _ in range(5)))
+        ask(client, other, ("Other?", TEXT))
+        assert len(client.get("/api/questions/open").json()) == 2
+        assert [
+            row["id"] for row in client.get(f"/api/questions/open?agent_id={agent}").json()
+        ] == ids
+        assert len(client.get(f"/api/questions/open?agent_id={agent}&limit=3").json()) == 3
+        stale = submit(client, agent, ids[:2], [{"id": i, "skip": True} for i in ids[:2]])
+        assert stale.status_code == 409
+        assert [row["id"] for row in stale.json()["open"]] == ids

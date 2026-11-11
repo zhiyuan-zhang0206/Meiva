@@ -65,6 +65,13 @@ import { keyedJson, keyedPost, patchJson, postInit, postJson, putJson } from "./
 import { confirmDraftReceipt } from "./plans";
 import { STATS_REQUEST_TIMEOUT_MS } from "./plans";
 
+// meiva:note
+// The body of the answer route's 409 that means "the open set changed": it carries the latest set. A
+// 409 without one (a key reused with different content) is an error.
+function hasOpenSet(body: unknown): body is { open: QuestionItem[] } {
+  return typeof body === "object" && body !== null && "open" in body && Array.isArray(body.open);
+}
+
 export function createControlApi(http: Http) {
   const { send: f, ok, okOrConflict, jsonTimed: jsonWithTimeout, newOperationKey } = http;
 
@@ -326,7 +333,7 @@ export function createControlApi(http: Http) {
       idempotencyKey: string = newOperationKey(),
     ): Promise<AnswerQuestionsResult> =>
       f(`/api/keyed/v1/agents/${agentId}/questions/answers`, keyedJson(body, idempotencyKey))
-        .then((res) => okOrConflict<{ status: string }, { open: QuestionItem[] }>(res))
+        .then((res) => okOrConflict<{ status: string }, { open: QuestionItem[] }>(res, hasOpenSet))
         .then((outcome) => (outcome.kind === "conflict" ? { kind: "changed", open: outcome.body.open } : { kind: "settled" })),
 
     compact: (agentId: number): Promise<CompactAgentResponse> =>

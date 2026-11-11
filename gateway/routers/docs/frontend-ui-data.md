@@ -18,7 +18,9 @@ assertion alone does not establish that a particular resolver ran.
 
 ## Question feed
 
-Both feeds sort by oldest creation time; `agent_id` narrows `/api/questions/open`
-before its limit. `limit` defaults to `settings.display.questions_open_default_limit`.
+Both feeds sort by question id; `agent_id` narrows `/api/questions/open`
+before its limit. Fleet-wide, `limit` defaults to `settings.display.questions_open_default_limit`; for one
+agent the whole open set is returned unless `limit` is given, because an answer must name exactly that set
+(the 409 of the answer route carries it whole too).
 Resolved questions are not listed: a resolution removes the row from both feeds
 and the frontend learns of it through `question_resolved`.

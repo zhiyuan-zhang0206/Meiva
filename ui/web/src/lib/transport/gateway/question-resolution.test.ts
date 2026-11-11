@@ -51,6 +51,12 @@ describe("guarded browser question submission", () => {
     expect(gateway.requests).toHaveLength(1);
   });
 
+  it("treats a 409 without an open set (a key reused with different content) as an error", async () => {
+    answer = { kind: "json", status: 409, body: { detail: "idempotency key identifies a different keyed operation" } };
+    await expect(rig.api.answerQuestions(7, body, "intent")).rejects.toMatchObject({ status: 409 });
+    expect(gateway.requests).toHaveLength(1);
+  });
+
   it.each([404, 422, 500])("rejects HTTP %i without fallback or an automatic retry", async (status) => {
     answer = { kind: "json", status, body: { detail: "refused" } };
     await expect(rig.api.answerQuestions(7, body, "intent")).rejects.toMatchObject({ status });

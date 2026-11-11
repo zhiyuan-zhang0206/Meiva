@@ -318,7 +318,11 @@ export async function resetHomePageTestState() {
   homePageGateway = await startGateway(realNetwork.createServer, (request) => {
     if (/^\/api\/agents\/\d+\/reply-suggestion$/.test(request.path)) return { kind: "json", body: replySuggestions };
     if (/^\/api\/agents\/\d+\/pending$/.test(request.path)) return { kind: "json", body: [] };
-    if (request.path === "/api/questions") return { kind: "json", body: { awaiting: pendingQuestions } };
+    const url = new URL(request.path, "http://gateway");
+    if (url.pathname === "/api/questions/open") {
+      const agentId = Number(url.searchParams.get("agent_id"));
+      return { kind: "json", body: pendingQuestions.filter((q) => q.agent_id === agentId) };
+    }
     if (request.path === "/api/alerts") return { kind: "json", body: { alerts: [], meta: { window: "24h", total: 0, unresolved_count: 0 } } };
     return { kind: "text", status: 404, body: "unexpected route" };
   });

@@ -74,6 +74,20 @@ describe("QuestionsForm", () => {
     });
   });
 
+  it("is usable again after a successful submission while the form stays mounted (a new question arrived)", async () => {
+    transport.answerQuestions.mockResolvedValue({ kind: "settled" });
+    const onSettled = vi.fn();
+    const { rerender } = renderForm([q(1)], { onSettled });
+    fireEvent.change(article(1).getByRole("textbox"), { target: { value: "x" } });
+    fireEvent.click(submit());
+    await waitFor(() => expect(onSettled).toHaveBeenCalledWith([1]));
+    rerender(<QuestionsForm agentId={7} questions={[q(1), q(2)]} onSettled={onSettled} onChanged={vi.fn()} />);
+    expect(article(2).getByRole<HTMLTextAreaElement>("textbox").disabled).toBe(false);
+    expect(article(1).getByRole<HTMLTextAreaElement>("textbox").disabled).toBe(false);
+    fireEvent.change(article(2).getByRole("textbox"), { target: { value: "y" } });
+    expect(submit().disabled).toBe(false);
+  });
+
   it("keeps a skipped question's draft when the skip is undone", () => {
     renderForm([q(1)]);
     fireEvent.change(article(1).getByRole("textbox"), { target: { value: "draft" } });

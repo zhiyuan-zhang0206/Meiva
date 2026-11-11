@@ -96,6 +96,7 @@ export function QuestionsForm({
         return;
       }
       onSettled(body.expected_ids);
+      setPending(false);
     } catch (e: unknown) {
       setError(t("failed", { verb: t("submitAnswers"), msg: errMsg(e) }));
       setPending(false);
