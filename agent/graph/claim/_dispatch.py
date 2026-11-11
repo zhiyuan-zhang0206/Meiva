@@ -285,7 +285,7 @@ async def _handle_compact_summary(
 
 
 # meiva:note
-# COMPACT_REQUEST: run the compaction LLM to generate the summary. A request that cannot be satisfied ends in a failure note, not an exception (see `_record_compact_request_failure`). Dropped under an exit winner (the guard is in dispatch_batch via Routing.is_winner). An empty conversation is a normal state for a user-issued /compact (fresh agent), not a fault: consumed as a logged no-op. Past the no-op check the handler always ends by overwriting the payload slot or recording a failure; a run already sitting in the slot can never be applied, so its live block closes as `replaced` before this run starts. The compaction call can fail (provider error, empty output, a stalled stream): only what the auto path retries (an empty summary, a transient provider error) is asked again, since a stall or protocol failure repeats on the same request. When the request cannot be satisfied the batch carries on: the history stays as it is, a system note says why, and the chats claimed beside the request are still delivered. The request row is already consumed ('done'), so the requester asks again after reading the note.
+# COMPACT_REQUEST: run the compaction LLM to generate the summary. A request that cannot be satisfied ends in a failure note, not an exception (see `_record_compact_request_failure`). Dropped under an exit winner (the guard is in dispatch_batch via Routing.is_winner). An empty conversation is a normal state for a user-issued /compact (fresh agent), not a fault: consumed as a logged no-op. Past the no-op check the handler ends by overwriting the payload slot or recording a failure. A run already sitting in the slot can never be applied once a newer summary wins the batch, so its live block closes as `replaced` only after the new summary exists; a failed request supersedes nothing, and the earlier run is still applied. The compaction call can fail (provider error, empty output, a stalled or truncated stream); an exception that is none of those is a programming error and propagates after the live run is closed as a failure. Only what the auto path retries (an empty summary, a transient provider error) is asked again, since a stall or protocol failure repeats on the same request. When the request cannot be satisfied the batch carries on: the history stays as it is, a system note says why, and the chats claimed beside the request are still delivered. The request row is already consumed ('done'), so the requester asks again after reading the note.
 async def _handle_compact_request(
     ctx: MeivaContext,
     agent_id: int,
@@ -309,7 +309,6 @@ async def _handle_compact_request(
             event="compact_request",
         )
         return
-    _close_superseded_compact(ctx, agent_id, st)
     compact_run_id = emit_compact_started(
         ctx.event_publisher,
         agent_id,
@@ -330,6 +329,9 @@ async def _handle_compact_request(
                 now=ctx.require_clock().now,
             )
         except Exception as e:
+            if not compact.compaction_failure(e):
+                _close_failed_compact_run(ctx, agent_id, compact_run_id)
+                raise
             failure = e
             if not compact.compaction_retryable(e):
                 break
@@ -351,7 +353,18 @@ async def _handle_compact_request(
         body=f"request summary {len(summary)} chars",
         event="compact_request",
     )
+    _close_superseded_compact(ctx, agent_id, st)
     st.compact_payload = (summary, MeivaMsgType.COMPACT_REQUEST.value, compact_run_id)
+
+
+def _close_failed_compact_run(ctx: MeivaContext, agent_id: int, compact_run_id: str | None) -> None:
+    emit_compact_finished(
+        ctx.event_publisher,
+        agent_id,
+        compact_run_id,
+        finished_at=ctx.require_clock().now(),
+        status=CompactionStatus.FAILURE,
+    )
 
 
 # meiva:note
@@ -365,14 +378,7 @@ def _record_compact_request_failure(
     failure: Exception,
     st: BatchState,
 ) -> None:
-    now = ctx.require_clock().now()
-    emit_compact_finished(
-        ctx.event_publisher,
-        agent_id,
-        compact_run_id,
-        finished_at=now,
-        status=CompactionStatus.FAILURE,
-    )
+    _close_failed_compact_run(ctx, agent_id, compact_run_id)
     reason = compact.describe_failure(failure)
     logger.warning(
         "[{label}] {body}",
@@ -380,17 +386,7 @@ def _record_compact_request_failure(
         event="compact_request",
         body=f"request not applied: {reason}",
     )
-    st.new_msgs.append(
-        system_note_message(
-            content=(
-                f"{_ts_prefix(ctx)}Compaction request failed ({reason}). The history was not "
-                "changed. Request compaction again after the cause is resolved."
-            ),
-            tag=NoteTag.COMPACT_FAILED,
-            picked_up_at=now,
-            created_at=now,
-        )
-    )
+    st.new_msgs.append(compact.compact_failure_note(ctx, reason))
     st.failure_notes += 1
 
 

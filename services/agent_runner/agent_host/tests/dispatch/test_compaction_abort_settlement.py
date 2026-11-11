@@ -17,6 +17,7 @@ from agent.ownership.hosted import admit_hosted_runtime
 from agent.state import BaseAgentState
 from agent.turn.runloop import PendingTurnFailure
 from base.agents.context import MeivaContext
+from base.agents.messages.kwargs import NoteTag, read_meiva_kwargs
 from base.agents.tests.units import spawn_agent
 from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
@@ -103,6 +104,11 @@ async def test_compaction_abort_leaves_no_corpse_marker_and_still_reports(
             outcome = await finish_pending_failure(graph, saver, agent_id, ctx, config, pending)
             assert outcome.aborted and not outcome.crashed
             assert len(pending.errors) == 1
+            persisted = (await graph.aget_state(config)).values
+            [note] = persisted["messages"]
+            assert read_meiva_kwargs(note).get("meiva_note_tag") == NoteTag.COMPACT_FAILED.value
+            assert "no usable summary" in note.content
+            assert persisted["halted"] is True
             await settlement.close_hosted_turn(
                 aops_pool, aops_pool, event_bus, incarnation, outcome
             )

@@ -8,7 +8,11 @@ from datetime import datetime
 from langchain_core.runnables import RunnableConfig
 from langgraph.graph.state import CompiledStateGraph
 
-from agent.graph.hooks.compact import CompactionFailedError
+from agent.graph.hooks.compact import (
+    CompactionFailedError,
+    compact_failure_note,
+    describe_failure,
+)
 from agent.graph.llm_errors import (
     FatalLLMStreamError,
     FatalProviderError,
@@ -464,7 +468,10 @@ async def settle_turn_failure(
                 "after resolving the cause.",
                 deferred=pending.errors,
             )
-            pending.prepared_update = {"halted": True}
+            pending.prepared_update = {
+                "halted": True,
+                "messages": [compact_failure_note(ctx, describe_failure(exc))],
+            }
         else:
             pending.prepared_update = await handle_fatal_llm_error(
                 exc,

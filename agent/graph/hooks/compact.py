@@ -45,7 +45,7 @@ from base.events.live.projection import Cancelled, CompactDone, CompactionMode, 
 from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
 from base.lm.context_budget import latest_input_tokens, resolve_context_budget
-from base.lm.errors import is_retryable_provider_error
+from base.lm.errors import ErrorClass, classify_error, is_retryable_provider_error
 from base.lm.system_note import wrap_system_note
 from base.log import logger
 from base.packages.plugins import activation
@@ -81,6 +81,36 @@ def compaction_retryable(exc: Exception) -> bool:
     if isinstance(exc, (FatalLLMStreamError, FatalProviderError, CompactionFailedError)):
         return False
     return isinstance(exc, EmptyCompactionSummaryError) or is_retryable_provider_error(exc)
+
+
+# meiva:note
+# The failures of a summary call that belong to the model call: an empty summary, a fatal stream or provider failure, or an error the provider classifier recognizes (transient or permanent). Anything else is a programming error and is not turned into a failed compaction, as the llm node does not either.
+# meiva:link agent/graph/docs/context-window/replacement.md
+def compaction_failure(exc: Exception) -> bool:
+    if isinstance(exc, (FatalLLMStreamError, FatalProviderError, EmptyCompactionSummaryError)):
+        return True
+    return classify_error(exc).error_class is not ErrorClass.UNKNOWN
+
+
+# meiva:note
+# The system note that tells an agent its compaction did not happen and why, so the failure is part of the history and the timeline rather than a live event only. The history is untouched.
+def compact_failure_note(ctx: MeivaContext, reason: str) -> HumanMessage:
+    clock = ctx.require_clock()
+    prefix = (
+        f"{clock.now_timestamp()} "
+        if ctx.require_agent().read("general", "message_timestamps")
+        else ""
+    )
+    now = clock.now()
+    return system_note_message(
+        content=(
+            f"{prefix}Compaction failed ({reason}). The history was not changed. "
+            "Request compaction again after the cause is resolved."
+        ),
+        tag=NoteTag.COMPACT_FAILED,
+        picked_up_at=now,
+        created_at=now,
+    )
 
 
 # meiva:note

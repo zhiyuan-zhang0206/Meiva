@@ -5,14 +5,15 @@ from typing import cast
 
 import httpx
 import psycopg
-from langchain_core.messages import AnyMessage, HumanMessage, SystemMessage
+import pytest
+from langchain_core.messages import AIMessage, AnyMessage, HumanMessage, SystemMessage
 from psycopg_pool import AsyncConnectionPool
 
 from agent.graph import claim_node
 from agent.graph.claim.tests.claim_support import insert_inbound_kind, make_runtime, thread_config
 from agent.graph.hooks.compact import COMPACT_MAX_ATTEMPTS
 from agent.state import AgentState
-from agent.tests.claim.claim_status_support import pair_compact_cycles
+from agent.tests.claim.claim_status_support import compact_tail, pair_compact_cycles
 from agent.tests.scripted_model import ScriptedChatModel
 from base.agents.inbox.insert import insert_inbound_message
 from base.agents.messages.kwargs import NoteTag, read_meiva_kwargs
@@ -26,12 +27,12 @@ from base.events.live.tests.live_capture import LiveEvents
 from base.lm.catalog import ModelCatalog
 
 
-def _history() -> AgentState:
+def _history(*, halted: bool = True) -> AgentState:
     messages: list[AnyMessage] = [
         SystemMessage(content="<test sys prompt>"),
         *(HumanMessage(content=f"history-{i}") for i in range(10)),
     ]
-    return AgentState(messages=messages)
+    return AgentState(messages=messages, halted=halted)
 
 
 def _failure_notes(update: dict[str, object]) -> list[AnyMessage]:
@@ -90,8 +91,8 @@ async def test_compact_request_failing_on_every_attempt_idles_with_a_note(
 
 
 # meiva:note
-# A failure the model would repeat on the same request (here a code fault) is not asked three times; the note carries its type even when its message is empty.
-async def test_compact_request_failing_without_a_retry_is_asked_once(
+# A summary cut off by the output limit is a failed compaction, not an accepted summary: it is asked once (the same request would be cut again), the history is not replaced, and the note names the truncation.
+async def test_compact_request_with_a_truncated_summary_fails_without_replacing_history(
     redis_url: str,
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
@@ -108,7 +109,8 @@ async def test_compact_request_failing_without_a_retry_is_asked_once(
         machine=machine_identity,
     )
     insert_inbound_kind(db_conn, tid, "", "compact_request")
-    llm = ScriptedChatModel(replies=[TypeError()])
+    cut_off = AIMessage(content="half a summ", response_metadata={"stop_reason": "max_tokens"})
+    llm = ScriptedChatModel(replies=[cut_off])
 
     cmd = await claim_node(
         _history(),
@@ -119,13 +121,54 @@ async def test_compact_request_failing_without_a_retry_is_asked_once(
     assert len(llm.requests) == 1
     assert cmd.update is not None
     [note] = _failure_notes(cmd.update)
-    assert "TypeError" in str(note.content)
+    assert "LLMStreamTruncatedError" in str(note.content)
+    assert "context_reset" not in cmd.update
     assert cmd.goto == "claim"
+
+
+# meiva:note
+# An exception that is not a model-call failure (a programming error) is not turned into a note: it propagates as before, and the live run is still closed as a failure.
+async def test_compact_request_programming_error_propagates(
+    redis_url: str,
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    live_events: LiveEvents,
+    *,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
+    machine_identity: MachineIdentityReader,
+):
+    tid = spawn_agent(
+        catalog=model_catalog,
+        authority=config_authority,
+        database_gate=database_gate,
+        machine=machine_identity,
+    )
+    insert_inbound_kind(db_conn, tid, "", "compact_request")
+    llm = ScriptedChatModel(replies=[TypeError("model code failed")])
+
+    with pytest.raises(TypeError, match="model code failed"):
+        await claim_node(
+            _history(),
+            make_runtime(
+                ops_pool=aops_pool,
+                llm=llm,
+                event_publisher=live_events.publisher,
+                database_gate=database_gate,
+            ),
+            thread_config(tid),
+        )
+
+    assert len(llm.requests) == 1
+    [(_, finished)] = await pair_compact_cycles(live_events)
+    assert finished["status"] == "failure"
 
 
 # meiva:note
 # A chat claimed in the same batch as the failing request is not dropped with it: it is delivered to the model as usual, behind the failure note.
 async def test_compact_request_failure_still_delivers_the_chat_claimed_beside_it(
+    redis_url: str,
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     database: Database,
@@ -146,7 +189,7 @@ async def test_compact_request_failure_still_delivers_the_chat_claimed_beside_it
     insert_inbound_message(
         db_conn, tid, "answer me anyway", source="user", bus=event_bus, database=database
     )
-    llm = ScriptedChatModel(replies=[TypeError("no answer")])
+    llm = ScriptedChatModel(replies=[httpx.ConnectError("no answer")])
 
     cmd = await claim_node(
         _history(),
@@ -160,3 +203,79 @@ async def test_compact_request_failure_still_delivers_the_chat_claimed_beside_it
     assert any("answer me anyway" in str(message.content) for message in messages)
     assert cmd.goto == "before_turn"
     assert cmd.update["halted"] is False
+
+
+# meiva:note
+# A request that fails while the agent is in the middle of a turn (the agent asked for it from its own code) must not stop that turn: the agent goes on to read the note and decide. An idle agent, as in the first test, stays idle.
+async def test_compact_request_failure_in_a_running_turn_wakes_the_agent_to_read_it(
+    redis_url: str,
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    *,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
+    machine_identity: MachineIdentityReader,
+):
+    tid = spawn_agent(
+        catalog=model_catalog,
+        authority=config_authority,
+        database_gate=database_gate,
+        machine=machine_identity,
+    )
+    insert_inbound_kind(db_conn, tid, "", "compact_request")
+    llm = ScriptedChatModel(replies=[httpx.ConnectError("wire lost")])
+
+    cmd = await claim_node(
+        _history(halted=False),
+        make_runtime(ops_pool=aops_pool, llm=llm, database_gate=database_gate),
+        thread_config(tid),
+    )
+
+    assert cmd.update is not None
+    assert len(_failure_notes(cmd.update)) == 1
+    assert cmd.goto == "before_turn"
+    assert cmd.update["halted"] is False
+
+
+# meiva:note
+# A request that fails supersedes nothing: when an earlier request of the same batch produced a summary, that summary is still applied, its live run ends once as a success, and only the failed run ends as a failure. The failure note rides behind the summary.
+async def test_compact_request_failing_after_a_successful_one_keeps_the_earlier_summary(
+    redis_url: str,
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    live_events: LiveEvents,
+    *,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
+    machine_identity: MachineIdentityReader,
+):
+    tid = spawn_agent(
+        catalog=model_catalog,
+        authority=config_authority,
+        database_gate=database_gate,
+        machine=machine_identity,
+    )
+    insert_inbound_kind(db_conn, tid, "", "compact_request")
+    insert_inbound_kind(db_conn, tid, "", "compact_request")
+    llm = ScriptedChatModel(
+        replies=[AIMessage(content="first summary"), httpx.ConnectError("wire lost")]
+    )
+
+    cmd = await claim_node(
+        _history(),
+        make_runtime(
+            ops_pool=aops_pool,
+            llm=llm,
+            event_publisher=live_events.publisher,
+            database_gate=database_gate,
+        ),
+        thread_config(tid),
+    )
+
+    assert cmd.goto == "init_context"
+    tail = compact_tail(cmd.update)
+    assert "first summary" in str(tail[0].content)
+    statuses = sorted(finished["status"] for _, finished in await pair_compact_cycles(live_events))
+    assert statuses == ["failure", "success"]
