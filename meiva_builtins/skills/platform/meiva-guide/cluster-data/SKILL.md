@@ -18,6 +18,7 @@ to a read-only query only when none fits.
 | Which agents exist, their status and machine | `meiva.agents` (`meiva.help(meiva.agents)`), or `meiva agents ls [--scope live\|terminated\|all] [--query Q] [--limit N]` |
 | What an agent has been doing | `meiva agents timeline <agent_id> [--limit N] [--before ITEM_ID]` |
 | Tasks: read, create, update, log progress | `meiva.tasks` (`get`, `list`, `create`, `update`, `log`; `meiva.help(meiva.tasks)`) |
+| Tasks from a shell: which tasks an agent owns, which are open or stale, one task in full with its reminder state | `meiva tasks ls [--owner ID] [--status in_progress\|done\|cancelled] [--window 24h\|7d\|30d\|all]` (at least one filter), `meiva tasks get <id>`; `--json` for scripts |
 | Audit, telemetry and log events: what happened, when, on which machine | `meiva events ls [--agent ID] [--name EVENT] [--category audit\|telemetry\|log] [--level L] [--machine M] [--hours H] [--limit N]` (newest first; default window: the last 24 hours; `--json` for scripts) |
 | How many events of each kind, machine, level or agent | `meiva events count --by event_name\|machine\|level\|agent_id\|category` with the same filters |
 | What each agent costs (calls, tokens, cost, turn outcomes) | `meiva metrics agents [--days N] [--json]` (costliest first) |
@@ -95,16 +96,6 @@ SELECT id, kind, source, created_at
 FROM inbound_messages
 WHERE agent_id = 123 AND status = 'pending'
 ORDER BY id
-LIMIT 50;
-```
-
-Open tasks of one owner:
-
-```sql
-SELECT id, priority, title, updated_at
-FROM agent_tasks
-WHERE owner = 123 AND status = 'in_progress'
-ORDER BY priority, updated_at DESC
 LIMIT 50;
 ```
 

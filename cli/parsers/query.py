@@ -1,5 +1,5 @@
 # meiva:note
-# `meiva events`, `meiva metrics` and `meiva stats` — read-only queries over the cluster's records, as
+# `meiva events`, `meiva metrics`, `meiva stats` and `meiva tasks` — read-only queries over the cluster's records, as
 # thin clients of the gateway's read routes. Handlers lazy-import their `cmd_*` implementation so building the
 # parser never loads Settings.
 
@@ -203,3 +203,61 @@ def add_stats_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -
     )
     stats_p.add_argument("--json", action="store_true", help="print the gateway response as JSON")
     stats_p.set_defaults(func=_h_stats)
+
+
+@dataclass(frozen=True)
+class _TasksLsOptions:
+    owner: int | None
+    status: str | None
+    window: str | None
+    json: bool
+
+
+@dataclass(frozen=True)
+class _TasksGetOptions:
+    task_id: int
+    json: bool
+
+
+def _h_tasks_ls(args: argparse.Namespace) -> int:
+    from base.cluster.machine.boot import gateway_access_from_boot
+    from cli.commands.management.query.tasks import TasksFilter, cmd_tasks_ls
+    from cli.database.runtime import runtime_of
+
+    opts = options(args, _TasksLsOptions)
+    flt = TasksFilter(owner=opts.owner, status=opts.status, window=opts.window)
+    return cmd_tasks_ls(gateway_access_from_boot(runtime_of(args).config), flt, as_json=opts.json)
+
+
+def _h_tasks_get(args: argparse.Namespace) -> int:
+    from base.cluster.machine.boot import gateway_access_from_boot
+    from cli.commands.management.query.tasks import cmd_tasks_get
+    from cli.database.runtime import runtime_of
+
+    opts = options(args, _TasksGetOptions)
+    return cmd_tasks_get(
+        gateway_access_from_boot(runtime_of(args).config), opts.task_id, as_json=opts.json
+    )
+
+
+def add_tasks_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
+    # meiva:note
+    # `meiva tasks ls|get` reads the task registry through the gateway.
+    tasks_p = sub.add_parser("tasks", help="read the task registry")
+    tasks_sub = tasks_p.add_subparsers(dest="tasks_cmd", required=True)
+    ls_p = tasks_sub.add_parser(
+        "ls", help="tasks matching a filter (at least one of --owner, --status, --window)"
+    )
+    ls_p.add_argument("--owner", type=int, help="tasks owned by this agent id")
+    ls_p.add_argument("--status", choices=("in_progress", "done", "cancelled"))
+    ls_p.add_argument(
+        "--window",
+        choices=("24h", "7d", "30d", "all"),
+        help="tasks active in the window (in-progress tasks always count); 'all' is everything",
+    )
+    ls_p.add_argument("--json", action="store_true", help="print the gateway response as JSON")
+    ls_p.set_defaults(func=_h_tasks_ls)
+    get_p = tasks_sub.add_parser("get", help="one task in full: fields, reminder state, results")
+    get_p.add_argument("task_id", type=int)
+    get_p.add_argument("--json", action="store_true", help="print the gateway response as JSON")
+    get_p.set_defaults(func=_h_tasks_get)

@@ -10,7 +10,7 @@
   and its exact `context` alias.
 
 - `management/query/` holds the read-only verbs over cluster data (`meiva events`, `meiva metrics`,
-  `meiva stats`; their parsers are `cli/parsers/query.py`): each forwards its filters to one gateway read route
+  `meiva stats`, `meiva tasks`; their parsers are `cli/parsers/query.py`): each forwards its filters to one gateway read route
   through `cli/boundary/gateway_read.py` and renders the answer. They carry no defaults for
   windows or page sizes (the gateway's apply) and open no database connection.
 
