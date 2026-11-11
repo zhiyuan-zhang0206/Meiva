@@ -449,7 +449,12 @@ CONVERGE_STEPS: tuple[ConvergeStep, ...] = (
     # meiva:note
     # Retire what WAL-G archiving left on a deployed host (daily job, state, binary), before
     # Postgres starts. A no-op on a host that never ran it.
-    ConvergeStep("retire WAL-G archiving", retire_walg, roles=frozenset({"gateway"})),
+    ConvergeStep(
+        "retire WAL-G archiving",
+        retire_walg,
+        roles=frozenset({"gateway"}),
+        requires_unit_config=True,
+    ),
     # Reconcile the one DB URL (MEIVA_DB_URL) with the pooler toggle + preflight the
     # PgBouncer binary when the pooler is enabled (gateway box's data plane).
     ConvergeStep(
