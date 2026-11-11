@@ -5,7 +5,21 @@ vi.mock("@/components/content/markdown", () => ({ ChatMarkdown: ChatMarkdownMock
 vi.mock("@/components/ui/scroll-area", () => ({ ScrollArea: ScrollAreaMock }));
 import { useTimelineStore } from "@/lib/timeline/timeline-store";
 import { TimelineView } from "..";
+import { parkReserve, parkScrollTop } from "../model/use-viewport-arrivals";
 afterEach(cleanupTimelineTest);
+
+describe("send park decisions", () => {
+  it("places the sent row at the reading offset and never above the document start", () => {
+    expect(parkScrollTop(1300, 56)).toBe(1244);
+    expect(parkScrollTop(20, 56)).toBe(0);
+  });
+
+  it("reserves the height the reply has not written yet and gives it back as it grows", () => {
+    expect(parkReserve(1244, 600, 1400)).toBe(444);
+    expect(parkReserve(1244, 600, 1700)).toBe(144);
+    expect(parkReserve(1244, 600, 2600)).toBe(0);
+  });
+});
 
 // meiva:note
 // The send anchor end to end: the page hands the timeline the inbound its
@@ -60,7 +74,7 @@ const earlier = makeItem({ item_id: "1.0", kind: "inbound_chat", payload: "envel
 const sent = makeItem({ item_id: "2.0", kind: "inbound_chat", payload: "envelope:mine", inbound_id: 7, source: "user" });
 
 describe("send anchor", () => {
-  it("pins the sent message to the bottom and keeps following while the reply streams", () => {
+  it("parks the sent message below the header and holds it while the reply streams", () => {
     const view = render(<TimelineView items={[earlier]} />);
     content = 1000;
     expect(top).toBe(400);
@@ -71,35 +85,84 @@ describe("send anchor", () => {
 
     content = 1400;
     view.rerender(<TimelineView items={[earlier, sent]} />);
-    expect(top).toBe(800);
-    expect(reservePx()).toBe(0);
-    expect(screen.queryByTestId("scroll-to-bottom")).toBeNull();
+    // meiva:note
+    // The row sits at document 1300 and the reading position is the 44px bar
+    // plus a 12px gap, so the anchored position is 1244 - reachable only
+    // because the reserve adds the 444px the reply has not written yet.
+    // meiva:link ui/web/src/docs/frontend-components/timeline-view/send-anchor.md
+    expect(top).toBe(1244);
+    expect(reservePx()).toBe(444);
+    // meiva:note
+    // The viewport is at the bottom of a padded document here, so the control is
+    // the reader's only way back into following and stays shown.
+    // meiva:link ui/web/src/docs/frontend-components/timeline-view/send-anchor.md
+    expect(screen.getByTestId("scroll-to-bottom")).toBeTruthy();
 
     content = 1700;
     resize();
-    expect(top).toBe(1100);
-    expect(reservePx()).toBe(0);
+    expect(top).toBe(1244);
+    expect(reservePx()).toBe(144);
 
     content = 1900;
     resize();
-    expect(top).toBe(1300);
+    expect(top).toBe(1244);
     expect(reservePx()).toBe(0);
-    expect(screen.queryByTestId("scroll-to-bottom")).toBeNull();
-  });
-
-  it("re-sticks to the bottom on send even if the reader had scrolled up earlier", () => {
-    const view = render(<TimelineView items={[earlier]} />);
-    act(() => { top = 100; viewport().dispatchEvent(new Event("scroll")); });
     expect(screen.getByTestId("scroll-to-bottom")).toBeTruthy();
 
+    content = 2600;
+    resize();
+    expect(top).toBe(1244);
+  });
+
+  it("parks the message even when the reader had scrolled up before sending", () => {
+    const view = render(<TimelineView items={[earlier]} />);
+    act(() => { top = 100; viewport().dispatchEvent(new Event("scroll")); });
     act(() => { useTimelineStore.getState().requestSendAnchor(7); });
     content = 1400;
     view.rerender(<TimelineView items={[earlier, sent]} />);
-    expect(top).toBe(800);
-    expect(screen.queryByTestId("scroll-to-bottom")).toBeNull();
+    // meiva:note
+    // The stub keeps the row 900px under the viewport top, so at scrollTop 100 it
+    // sits at document 1000: the park is relative to the row, not to the old place.
+    // meiva:link ui/web/src/docs/frontend-components/timeline-view/send-anchor.md
+    expect(top).toBe(944);
+  });
 
+  it("follows again once the reader scrolls to the bottom", () => {
+    const view = render(<TimelineView items={[earlier]} />);
+    act(() => { useTimelineStore.getState().requestSendAnchor(7); });
+    content = 1400;
+    view.rerender(<TimelineView items={[earlier, sent]} />);
+    content = 1900;
+    resize();
+    expect(top).toBe(1244);
+
+    act(() => { top = 1300; viewport().dispatchEvent(new Event("scroll")); });
     content = 2400;
     resize();
     expect(top).toBe(1800);
+  });
+
+  it("follows again when the jump-to-latest control is clicked", () => {
+    const view = render(<TimelineView items={[earlier]} />);
+    act(() => { useTimelineStore.getState().requestSendAnchor(7); });
+    content = 1400;
+    view.rerender(<TimelineView items={[earlier, sent]} />);
+    expect(top).toBe(1244);
+    act(() => { screen.getByTestId("scroll-to-bottom").click(); });
+    content = 2400;
+    resize();
+    expect(top).toBe(1800);
+  });
+
+  it("marks the jump control while the agent is still responding", () => {
+    const view = render(<TimelineView items={[earlier]} turnActive />);
+    act(() => { useTimelineStore.getState().requestSendAnchor(7); });
+    content = 1400;
+    view.rerender(<TimelineView items={[earlier, sent]} turnActive />);
+    expect(screen.getByTestId("scroll-to-bottom").dataset.working).toBe("true");
+    expect(screen.getByTestId("scroll-to-bottom-working")).toBeTruthy();
+    view.rerender(<TimelineView items={[earlier, sent]} turnActive={false} />);
+    expect(screen.getByTestId("scroll-to-bottom").dataset.working).toBeUndefined();
+    expect(screen.queryByTestId("scroll-to-bottom-working")).toBeNull();
   });
 });

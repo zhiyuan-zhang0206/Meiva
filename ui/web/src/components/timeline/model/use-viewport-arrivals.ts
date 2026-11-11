@@ -7,8 +7,8 @@ import { useTimelineStore } from "@/lib/timeline/timeline-store";
 
 // meiva:note
 // Where the viewport goes when the READER asks for something, rather than when
-// the stream grows: a thread change pins to the bottom, a send pins to the
-// bottom and re-enables following so the reply keeps streaming into view. Both
+// the stream grows: a thread change pins to the bottom, a send parks the
+// message that was just written at the top of the viewport. Both
 // are placements the follow flag has to learn about, and both release a
 // bookmark that was still settling - the reader picked a position, so the saved
 // one no longer owns the viewport.
@@ -54,17 +54,22 @@ export function useThreadPin({
 }
 
 // meiva:note
-// The send anchor: when the reader sends a message, pin the viewport to the
-// bottom and re-enable sticky following, and re-pin once the committed row
-// mounts so the timeline stays glued to the bottom instead of releasing the
-// scroll-to-bottom state (user request 2026-11-09).
-// meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.md
+// The send anchor: once the reader's own message is committed and mounted, park
+// that row at the top of the viewport (below the header) and let following go,
+// so the reply streams into the space below it instead of dragging the reader
+// down chunk by chunk. A bottom reserve makes the parking position reachable
+// while the reply is still shorter than the viewport: it fills exactly the
+// missing height and gives it back as the reply grows, so scrollHeight - and
+// with it the reader's viewport - stays where it is. The controller owns the
+// follow flag; this hook only writes positions and reports them.
+// meiva:link ui/web/src/docs/frontend-components/timeline-view/send-anchor.md
 export interface SendAnchorArgs {
   items: readonly BackendTimelineItem[];
   viewportRef: RefObject<HTMLElement | null>;
   wrapperRef: RefObject<HTMLDivElement | null>;
   reserveRef: RefObject<HTMLDivElement | null>;
   controller: StickyController;
+  topOffset: number;
   measureAtBottom: () => void;
   cancelBookmark: () => void;
 }
@@ -75,6 +80,21 @@ function snapshotOf(viewport: HTMLElement) {
     scrollHeight: viewport.scrollHeight,
     clientHeight: viewport.clientHeight,
   };
+}
+
+// meiva:note
+// The numbers behind a send anchor, as pure decisions: the scrollTop that puts a
+// row `topOffset` px below the viewport's top edge, and the empty height that
+// must stand below the natural content for that position to be reachable while
+// the reply is still short (zero once the reply has grown past the viewport).
+// The hook only measures and writes.
+// meiva:link ui/web/src/docs/frontend-components/timeline-view/send-anchor.md
+export function parkScrollTop(rowDocTop: number, topOffset: number): number {
+  return Math.max(0, Math.round(rowDocTop - topOffset));
+}
+
+export function parkReserve(top: number, clientHeight: number, naturalHeight: number): number {
+  return Math.max(0, top + clientHeight - naturalHeight);
 }
 
 function reserveHeight(element: HTMLElement): number {
@@ -110,12 +130,21 @@ export function useSendAnchor({
   wrapperRef,
   reserveRef,
   controller,
+  topOffset,
   measureAtBottom,
   cancelBookmark,
 }: SendAnchorArgs): { maintain: () => void } {
   const request = useTimelineStore((state) => state.sendAnchor);
+  // meiva:note
+  // One anchor is three pieces of state: the sequence already consumed (a
+  // request recorded before this view mounted belongs to a thread it never
+  // showed, so it is not owed here), the inbound still waiting for its row
+  // (`undefined` = nothing owed, `null` = the newest user message stands in),
+  // and the position being held (null while no reserve is outstanding).
+  // meiva:link ui/web/src/docs/frontend-components/timeline-view/send-anchor.md
   const consumedSeq = useRef(request.seq);
   const pending = useRef<number | null | undefined>(undefined);
+  const anchoredTop = useRef<number | null>(null);
 
   const writeReserve = useCallback((height: number) => {
     const element = reserveRef.current;
@@ -126,16 +155,44 @@ export function useSendAnchor({
   }, [reserveRef]);
 
   const maintain = useCallback(() => {
-    writeReserve(0);
-  }, [writeReserve]);
+    const viewport = viewportRef.current;
+    const element = reserveRef.current;
+    const top = anchoredTop.current;
+    if (!viewport || !element || top === null) return;
+    if (controller.isSticky()) {
+      // meiva:note
+      // Following again: the reserve no longer holds the reader, and keeping it
+      // would park blank space between them and the tail.
+      // meiva:link ui/web/src/docs/frontend-components/timeline-view/send-anchor.md
+      anchoredTop.current = null;
+      writeReserve(0);
+      return;
+    }
+    writeReserve(parkReserve(top, viewport.clientHeight, viewport.scrollHeight - reserveHeight(element)));
+  }, [controller, reserveRef, viewportRef, writeReserve]);
 
-  const pinSentToBottom = useCallback((viewport: HTMLElement) => {
+  const anchorRow = useCallback((viewport: HTMLElement, node: HTMLElement) => {
+    // meiva:note
+    // The reader asked for the message they just wrote, so a bookmark still
+    // settling no longer owns the viewport. Released here rather than when the
+    // request arrives: until the row mounts there is nothing to park.
+    // meiva:link ui/web/src/docs/frontend-components/timeline-view/send-anchor.md
     cancelBookmark();
-    writeReserve(0);
-    viewport.scrollTop = viewport.scrollHeight;
-    controller.notifyPinnedToBottom(snapshotOf(viewport), true);
+    const reserve = reserveRef.current;
+    const rowTop = node.getBoundingClientRect().top - viewport.getBoundingClientRect().top + viewport.scrollTop;
+    const top = parkScrollTop(rowTop, topOffset);
+    const natural = viewport.scrollHeight - (reserve ? reserveHeight(reserve) : 0);
+    writeReserve(parkReserve(top, viewport.clientHeight, natural));
+    viewport.scrollTop = top;
+    pending.current = undefined;
+    // meiva:note
+    // The reserved height makes `top` reachable, so the browser keeps it; a
+    // clamp would become the held position instead of a fight with the layout.
+    // meiva:link ui/web/src/docs/frontend-components/timeline-view/send-anchor.md
+    anchoredTop.current = viewport.scrollTop;
+    controller.notifyAnchored(snapshotOf(viewport));
     measureAtBottom();
-  }, [cancelBookmark, controller, measureAtBottom, writeReserve]);
+  }, [cancelBookmark, controller, measureAtBottom, reserveRef, topOffset, writeReserve]);
 
   useLayoutEffect(() => {
     const viewport = viewportRef.current
@@ -146,16 +203,14 @@ export function useSendAnchor({
     if (request.seq !== consumedSeq.current) {
       consumedSeq.current = request.seq;
       pending.current = request.inboundId;
+      anchoredTop.current = null;
       writeReserve(0);
     }
 
-    if (pending.current !== undefined) {
+    if (pending.current !== undefined && anchoredTop.current === null) {
       const itemId = targetItemId(items, pending.current);
       const node = itemId === null ? null : findRow(viewport, itemId);
-      if (node) {
-        pending.current = undefined;
-        pinSentToBottom(viewport);
-      }
+      if (node) anchorRow(viewport, node);
     }
     maintain();
   });

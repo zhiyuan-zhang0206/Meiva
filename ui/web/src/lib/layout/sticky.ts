@@ -83,14 +83,6 @@ export const POINTER_STICKY_THRESHOLDS: StickyThresholds = {
 // not pass thresholds.
 const DEFAULT_STICKY_THRESHOLDS = TOUCH_STICKY_THRESHOLDS;
 
-// meiva:note
-// Share of the viewport a send leaves above the reader's own message. The send
-// anchor puts that message here and holds it, so the reply streams into the
-// space below it instead of dragging the reader's place down chunk by chunk
-// (user request 2026-11-09).
-// meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.md
-export const SEND_ANCHOR_TOP_SHARE = 0.2;
-
 export interface ScrollSnapshot {
   scrollTop: number;
   scrollHeight: number;

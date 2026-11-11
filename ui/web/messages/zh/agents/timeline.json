@@ -36,6 +36,7 @@
   "refreshFailed": "无法刷新此对话。已加载的消息仍然保留。",
   "retryLoad": "重试",
   "scrollToBottom": "滚动到底部",
+  "jumpToLatestWorking": "跳到最新（Agent 仍在输出）",
   "streamingSuffix": "（流式中…）",
   "compactSummary": "压缩摘要",
   "subagent": "子代理",

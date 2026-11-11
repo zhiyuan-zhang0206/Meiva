@@ -65,8 +65,8 @@ area, so the echo arrives as ordinary growth and a following reader stays on the
 tail either way. Only a following reader releases the oldest rows (the 250-row
 retention rule in the paging doc).
 
-A send is its own arrival, not a pin: it parks the reader's own message a fixed
-share down the viewport over a reserve the reply consumes, and stops following
+A send is its own arrival, not a pin: it parks the reader's own message at the top
+of the viewport, below the header, over a reserve the reply consumes, and stops following
 there. [The send anchor](send-anchor.md)
 owns that park, the reserve, and the controller state the reserve needs.
 
