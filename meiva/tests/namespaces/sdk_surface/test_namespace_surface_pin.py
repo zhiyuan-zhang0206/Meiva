@@ -78,7 +78,6 @@ _SURFACE: dict[str, list[str]] = {
 _TOP_LEVEL = [
     "agents",
     "attach",
-    "context",
     "cwd",
     "files",
     "help",
@@ -112,6 +111,23 @@ def test_the_agent_visible_names_of_a_core_namespace_are_pinned(namespace: str) 
 
 def test_the_top_level_namespaces_are_pinned() -> None:
     assert agent_visible_names(meiva) == _TOP_LEVEL
+
+
+# meiva:note
+# `meiva.context` stays importable for framework and plugin code, but neither `help(meiva)`
+# nor `dir(meiva)` lists it or the connections it carries.
+def test_the_connection_and_context_names_are_not_shown_to_the_agent() -> None:
+    import contextlib
+    import io
+
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        meiva.help()
+    shown = buf.getvalue()
+    for name in ("context", "DB", "REDIS"):
+        assert name not in dir(meiva)
+        assert f"meiva.{name}" not in shown
+    assert "context.sql" not in shown
 
 
 @pytest.mark.parametrize(

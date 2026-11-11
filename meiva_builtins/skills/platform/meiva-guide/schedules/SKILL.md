@@ -104,7 +104,8 @@ def ensure_agent(label: str, prompt: str) -> int:
 ```
 
 **Actor caveat.** A schedule runs as `schedule:<id>`, not an agent. So
-`meiva.agents.*`, `meiva.context.sql`, `meiva.shell`, and `meiva.memory` all work, but the calls
+`meiva.agents.*`, `meiva.shell`, and `meiva.memory` all work (for cluster data, see
+[cluster-data](../cluster-data/SKILL.md)), but the calls
 that need an agent identity — `meiva.self.*`, `meiva.watcher.*`, `meiva.ui.*` — do
 not. To surface something to the user, either let the schedule raise (recorded to
 `last_error`) or hand the work to an agent via `ensure_agent(...)` and let *it*

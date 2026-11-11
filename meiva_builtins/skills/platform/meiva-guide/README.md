@@ -26,6 +26,8 @@ sub-skills carry executable procedures and their bundled resources.
   publishers, MCP directories and providers, and prompt sources.
 - `mcp`, `plugins` / `plugins.develop`: MCP management and native plugin development.
 - `agents`, `models`: agent concepts, configuration, and model choice.
+- `cluster-data`: reading audit, telemetry, inbox, task, schedule and cost data through
+  the supported entries, and read-only queries through `MEIVA_DB_URL` where none exists.
 - `memory`: how an external agent finds and reads Meiva's shared Memory, and why
   it writes there only with the user's approval; design detail in
   `memory/references/design.md`.

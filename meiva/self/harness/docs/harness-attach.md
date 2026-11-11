@@ -66,7 +66,7 @@ document cannot do it either, so the SDK makes the attachment itself — on the
 
 | Read | Path it passes through |
 |---|---|
-| `meiva.context`, `meiva.DB`, `meiva.REDIS` | the context slot |
+| `meiva.context` (framework and plugin code), `meiva.DB`, `meiva.REDIS` | the context slot |
 | `meiva.self.AGENT_ID`, every `meiva.agents` call | `agent_identity._bound()` |
 | a plugin namespace (`meiva.tasks`, …) | `boot.maybe_load_plugins_for_missing` |
 
