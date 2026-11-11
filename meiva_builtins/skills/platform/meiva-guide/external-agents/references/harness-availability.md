@@ -10,7 +10,7 @@ check it in, and the two cases where a machine looks signed out and is not.
 
 `GET /api/cluster/machines/<name>/harnesses` answers with one row per harness: a
 `status` (`available` / `unavailable` / `unknown`), a readable `reason`, the
-resolved `binary`, `on_path`, and the live `models` / `default_model` probed from
+resolved `binary`, `on_path`, and the live `models` probed from
 that CLI. The picker keeps only `launchable` — a launcher for that harness exists
 in this build **and** the machine reports `available` with at least one probed
 model (the built-in `meiva` runtime needs neither) — and prints the same word for
