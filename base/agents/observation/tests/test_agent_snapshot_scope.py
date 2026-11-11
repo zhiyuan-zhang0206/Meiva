@@ -139,7 +139,7 @@ def test_notice_body_cannot_expand_roster_card(
     seed(db_conn, [(1, "user", "idling")])
     with db_conn.cursor() as cur:
         cur.execute(
-            "INSERT INTO agent_notices (agent_id,local_id,title,content,priority,require_response,question) VALUES (1,1,'question',%s,'P2',true,'{\"type\":\"text\"}')",
+            "INSERT INTO agent_notices (agent_id,title,content,question) VALUES (1,'question',%s,'{\"type\":\"text\"}')",
             ("x" * 1_000_000,),
         )
     card = select_roster(
@@ -156,12 +156,12 @@ def test_roster_distinguishes_pending_questions_from_resolved_questions_and_regu
     seed(db_conn, [(1, "user", "running"), (2, "user", "idling")])
     db_conn.execute(
         """
-        INSERT INTO agent_notices (agent_id,local_id,title,priority,require_response,question,resolved_at,resolution)
+        INSERT INTO agent_notices (agent_id,title,question,resolved_at,resolution)
         VALUES
-            (1,1,'Question','P2',true,'{"type":"text"}',NULL,NULL),
-            (1,2,'Regular reply','P2',true,NULL,NULL,NULL),
-            (2,1,'Resolved question','P2',true,'{"type":"text"}',now(),'dismissed'),
-            (2,2,'Regular reply','P2',true,NULL,NULL,NULL)
+            (1,'Question','{"type":"text"}',NULL,NULL),
+            (1,'Regular reply',NULL,NULL,NULL),
+            (2,'Resolved question','{"type":"text"}',now(),'dismissed'),
+            (2,'Regular reply',NULL,NULL,NULL)
         """
     )
     cards = {
@@ -233,17 +233,17 @@ def test_roster_attention_skips_resolved_and_unrelated_notices(db_conn: psycopg.
     seed(db_conn, [(i, "user", "terminated") for i in range(90002, 90102)])
     with db_conn.cursor() as cur:
         cur.execute("""
-            INSERT INTO agent_notices (agent_id,local_id,title,resolved_at,resolution)
-            SELECT 90001,i,'old',now(),'dismissed'
+            INSERT INTO agent_notices (agent_id,title,resolved_at,resolution)
+            SELECT 90001,'old',now(),'dismissed'
             FROM generate_series(1,20000)i
         """)
         cur.execute("""
-            INSERT INTO agent_notices (agent_id,local_id,title,question)
-            VALUES (90001,20001,'reply','{"type":"text"}')
+            INSERT INTO agent_notices (agent_id,title,question)
+            VALUES (90001,'reply','{"type":"text"}')
         """)
         cur.execute("""
-            INSERT INTO agent_notices (agent_id,local_id,title,resolved_at,resolution)
-            SELECT 90002+i%100,i,'other',now(),'dismissed'
+            INSERT INTO agent_notices (agent_id,title,resolved_at,resolution)
+            SELECT 90002+i%100,'other',now(),'dismissed'
             FROM generate_series(1,20000)i
         """)
         cur.execute("ANALYZE agent_notices")

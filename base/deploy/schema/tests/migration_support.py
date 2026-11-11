@@ -147,3 +147,31 @@ def try_lock_from_other_conn() -> bool:
         if got:
             cur.execute("SELECT pg_advisory_unlock(%s)", (MIGRATION_LOCK_KEY,))
         return bool(got)
+
+
+LEGACY_NOTICE_COLUMNS = (
+    "local_id",
+    "priority",
+    "require_response",
+    "blocking",
+    "updated_at",
+    "task_id",
+    "expire_at",
+)
+
+
+# meiva:note
+# The baseline no longer carries these columns (the contract migration drops them), so a test of an
+# older migration over agent_notices rebuilds them, as the schema that migration upgrades had them,
+# before it inserts rows that use them.
+def restore_legacy_notice_columns(conn: psycopg.Connection) -> None:
+    conn.execute(
+        "ALTER TABLE agent_notices "
+        "ADD COLUMN local_id INTEGER, "
+        "ADD COLUMN priority TEXT NOT NULL DEFAULT 'P2', "
+        "ADD COLUMN require_response BOOLEAN NOT NULL DEFAULT TRUE, "
+        "ADD COLUMN blocking BOOLEAN NOT NULL DEFAULT FALSE, "
+        "ADD COLUMN updated_at TIMESTAMPTZ, "
+        "ADD COLUMN task_id BIGINT, "
+        "ADD COLUMN expire_at TIMESTAMPTZ"
+    )

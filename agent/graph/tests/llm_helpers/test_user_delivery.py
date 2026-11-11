@@ -110,8 +110,8 @@ async def test_natural_end_requires_publication_and_reminds_once(
 
     if delivery == "ask":
         db_conn.execute(
-            "INSERT INTO agent_notices(agent_id,local_id,title,priority,require_response,expire_at,question) "
-            "VALUES (%s,0,'Choose scope','P2',true,NULL,'{\"type\":\"text\"}')",
+            "INSERT INTO agent_notices(agent_id,title,question) "
+            "VALUES (%s,'Choose scope','{\"type\":\"text\"}')",
             (agent_id,),
         )
     else:
@@ -136,8 +136,8 @@ async def test_compacted_context_restores_unread_and_unanswered_deliveries(
 ) -> None:
     agent_id = create_agent(db_conn)
     db_conn.execute(
-        "INSERT INTO agent_notices(agent_id,local_id,title,priority,require_response,expire_at,question) "
-        "VALUES (%s,0,'Approve the smaller scope?','P2',true,NULL,'{\"type\":\"text\"}')",
+        "INSERT INTO agent_notices(agent_id,title,question) "
+        "VALUES (%s,'Approve the smaller scope?','{\"type\":\"text\"}')",
         (agent_id,),
     )
     db_conn.commit()

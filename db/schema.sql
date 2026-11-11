@@ -260,51 +260,29 @@ COMMENT ON TABLE agent_user_seen IS 'The user has seen deliveries (agent_user_me
 --   read, withdrawn, superseded -- historical only; no writer produces them now
 -- reply caches the user's free-text reply for history/display; the live delivery to the agent
 -- rides the chat-inbound path, not this column.
---
--- local_id, priority, require_response, blocking, updated_at, task_id and expire_at are no longer
--- read or written; a later migration drops them.
 CREATE TABLE agent_notices (
     id              BIGSERIAL PRIMARY KEY,
-    local_id        INTEGER,
     agent_id        BIGINT NOT NULL REFERENCES agents(id),
     title           TEXT NOT NULL,
     content         TEXT,
-    priority        TEXT NOT NULL DEFAULT 'P2' CHECK (priority IN ('P0', 'P1', 'P2', 'P3')),
-    require_response BOOLEAN NOT NULL DEFAULT TRUE,
-    blocking        BOOLEAN NOT NULL DEFAULT FALSE,
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
-    updated_at      TIMESTAMPTZ,
     resolved_at     TIMESTAMPTZ,
     resolution      TEXT CHECK (resolution IN ('answered', 'dismissed', 'read', 'withdrawn', 'superseded', 'expired')),
     reply           TEXT,
     question        JSONB,
     answer          JSONB,
-    -- Optional task this notice belongs to: the agent reports the task it was
-    -- working when it posted, so the human queue groups notices by task rather
-    -- than only by owner agent. NULL is the norm (a notice need not name one).
-    -- The FK to agent_tasks is added by ALTER after that table is defined below
-    -- (agent_notices is declared first, so an inline REFERENCES would forward-ref).
-    task_id         BIGINT,
     -- The credential fact the server verified for the request that wrote this
     -- row (see the 2026-11-02 migration of the same name): never a caller's
     -- claim, and `internal` for the in-process writers that present none.
     -- NULL = written before the column existed.
     source_verified_by TEXT,
-    expire_at       TIMESTAMPTZ,
-    CONSTRAINT agent_notices_question_requires_response
-        CHECK (question IS NULL OR (jsonb_typeof(question) = 'object' AND require_response)),
+    CONSTRAINT agent_notices_question_is_object
+        CHECK (question IS NULL OR jsonb_typeof(question) = 'object'),
     CONSTRAINT agent_notices_answer_requires_question
         CHECK (answer IS NULL OR (jsonb_typeof(answer) = 'object' AND question IS NOT NULL
                                   AND resolution IS NOT DISTINCT FROM 'answered')),
-    CONSTRAINT agent_notices_agent_local_id_unique UNIQUE (agent_id, local_id),
-    CONSTRAINT agent_notices_blocking_requires_response
-        CHECK (NOT blocking OR require_response),
     CONSTRAINT agent_notices_resolution_pair
         CHECK ((resolved_at IS NULL) = (resolution IS NULL)),
-    CONSTRAINT agent_notices_resolution_legal
-        CHECK (resolution IS NULL
-               OR (require_response AND resolution IN ('answered', 'dismissed', 'withdrawn', 'superseded', 'expired'))
-               OR (NOT require_response AND resolution IN ('answered', 'read', 'withdrawn', 'superseded', 'expired'))),
     CONSTRAINT agent_notices_answered_has_reply
         CHECK (resolution IS DISTINCT FROM 'answered' OR reply IS NOT NULL)
 );
@@ -977,15 +955,6 @@ CREATE UNIQUE INDEX agent_tasks_title_unique_in_progress ON agent_tasks (title) 
 INSERT INTO agent_tasks (title, description, results, status, created_by, is_root)
 SELECT 'Root', 'System root task -- all tasks descend from here.', 'Root task for the task registry tree.', 'in_progress', 'system', TRUE
 WHERE NOT EXISTS (SELECT 1 FROM agent_tasks WHERE is_root = TRUE);
-
--- Deferred FK: agent_notices.task_id -> agent_tasks(id). Declared here, not
--- inline in the agent_notices CREATE TABLE, because agent_notices is defined
--- above agent_tasks and an inline REFERENCES would forward-reference a table
--- that does not exist yet. Matches migration
--- 20260721T082401_agent-notices-task-id (which ALTERs an existing DB where both
--- tables already exist).
-ALTER TABLE agent_notices
-    ADD CONSTRAINT agent_notices_task_id_fkey FOREIGN KEY (task_id) REFERENCES agent_tasks(id);
 
 -- ─────────────── user_settings ───────────────
 -- Key-value store for frontend preferences (force-graph layout, view state).
@@ -2042,6 +2011,12 @@ INSERT INTO schema_migrations (name) VALUES ('20261108T122000_split-llm-cost-by-
 -- The seen-cursor migration backfills from agent_user_messages.read_at, which this file no
 -- longer has, so a fresh database must not replay it.
 INSERT INTO schema_migrations (name) VALUES ('20261110T153500_agent-user-seen');
+-- The legacy-notice resolution reads agent_notices.expire_at, which this file no longer has;
+-- a fresh database has no legacy rows to resolve, so it must not replay it either.
+INSERT INTO schema_migrations (name) VALUES ('20261111T023500_resolve-legacy-notices');
+-- The expand step of the notice storage rework alters agent_notices.local_id, which this file no
+-- longer has; everything else it did is already in the table above.
+INSERT INTO schema_migrations (name) VALUES ('20261111T080521_drop-dead-notice-storage');
 
 -- Domain receipts never expire into fresh notice effects.
 CREATE TABLE notice_operation_receipts (

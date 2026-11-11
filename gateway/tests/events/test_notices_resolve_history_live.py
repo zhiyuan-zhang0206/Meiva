@@ -161,9 +161,9 @@ def test_check_constraints_reject_illegal_states(db_conn: psycopg.Connection) ->
 
     _expect_violation(lambda: _raw_insert(resolved_at=ts))
     _expect_violation(lambda: _raw_insert(resolution="answered", reply="x"))
-    _expect_violation(lambda: _raw_insert(resolved_at=ts, resolution="read"))
     _expect_violation(lambda: _raw_insert(resolved_at=ts, resolution="answered"))
 
+    _raw_insert(resolved_at=ts, resolution="read")
     _raw_insert(resolved_at=ts, resolution="superseded")
     _raw_insert(resolved_at=ts, resolution="expired")
     _raw_insert(resolved_at=ts, resolution="dismissed")

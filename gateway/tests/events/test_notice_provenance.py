@@ -50,9 +50,7 @@ def test_a_row_without_a_credential_reads_as_null(db_conn: psycopg.Connection) -
     agent = seed_agent(db_conn)
     with db_conn.cursor() as cur:
         cur.execute(
-            "INSERT INTO agent_notices "
-            "(agent_id, local_id, title, priority, require_response, blocking, expire_at) "
-            "VALUES (%s, 0, 'legacy row', 'P2', TRUE, FALSE, now() + interval '1 day')",
+            "INSERT INTO agent_notices (agent_id, title) VALUES (%s, 'legacy row')",
             (agent,),
         )
     db_conn.commit()
