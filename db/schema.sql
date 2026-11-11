@@ -2426,19 +2426,20 @@ END $$;
 
 
 -- ─────────────── notification_events ───────────────
--- The notification spine's delivery log: one row per delivered user
--- notification, written by whichever process decides it (the runner for a
--- settled turn, the gateway for a notice). Not an inbox — rows are never
--- answered, resolved or superseded; `agent_notices` stays the inbox. Every
--- transport (Android, macOS, console, Telegram) renders from these rows and the
--- matching live `notification` event, so no client derives its own trigger.
+-- The notification spine's delivery log: one row per system push, staged in the
+-- transaction of the write that caused it (an Ask, a delivery to the user, a
+-- cursor move). A push is an `alert`, a silent `replace` or a `retract` of the
+-- on-screen notification named by `tag`. Rows are never answered or resolved;
+-- the delivery log is the history, the client keeps one notification per tag.
+-- Every transport renders from these rows and the matching live `notification`
+-- event, so no client derives its own trigger.
 CREATE TABLE IF NOT EXISTS notification_events (
     id              BIGSERIAL PRIMARY KEY,
     category        TEXT NOT NULL,
     subject         TEXT NOT NULL,
     body            TEXT,
     href            TEXT,
-    -- Deduplication identity. NULL opts the category out of deduplication.
+    -- Retired: no writer since the push became question + unread; dropped by a later contract migration.
     dedupe_key      TEXT,
     importance      TEXT NOT NULL CHECK (importance IN ('low', 'normal', 'high')),
     -- Producing agent, or 0 for a system-level notification.
@@ -2446,16 +2447,23 @@ CREATE TABLE IF NOT EXISTS notification_events (
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
     -- When the live notification event was published; NULL means the delivery
     -- is still owed and the outbox sweep retries it.
-    announced_at    TIMESTAMPTZ
+    announced_at    TIMESTAMPTZ,
+    action          TEXT NOT NULL DEFAULT 'alert'
+        CHECK (action IN ('alert', 'replace', 'retract')),
+    tag             TEXT NOT NULL DEFAULT ''
 );
 
 COMMENT ON COLUMN notification_events.announced_at IS
     'When the live notification event was published; NULL means the delivery is still owed and the outbox sweep retries it.';
+COMMENT ON COLUMN notification_events.action IS
+    'What a client does with the delivery: alert (raise it), replace (swap the content of the shown notification without a sound) or retract (take it away).';
+COMMENT ON COLUMN notification_events.tag IS
+    'Stable identity of the on-screen notification this delivery concerns: unread:<agent id> or question:<notice id>. Empty on rows written before tags existed.';
 
 CREATE INDEX IF NOT EXISTS notification_events_created_idx
     ON notification_events (created_at DESC);
 
--- The dedupe lookup: the newest delivery for one (category, dedupe_key).
+-- Retired with dedupe_key; dropped by a later contract migration.
 CREATE INDEX IF NOT EXISTS notification_events_dedupe_idx
     ON notification_events (category, dedupe_key, created_at DESC)
     WHERE dedupe_key IS NOT NULL;

@@ -1,8 +1,9 @@
 // meiva:note
 // Renders the gateway's delivered `notification` events on Android and macOS. The
-// delivery decision, the category switches and deduplication live in the
-// notification spine; this bridge only deduplicates by `notification_id` inside
-// one webview session and turns a native tap into the Inbox deep link.
+// delivery decision and the category switches live in the notification spine; this bridge
+// deduplicates by `notification_id` inside one webview session, folds a catch-up gap down to
+// the final state of each notification `tag`, keeps an agent the user is looking at quiet, and
+// turns a native tap into a deep link to the agent.
 // meiva:link ui/app/docs/app.md
 (function () {
   if (window.top !== window) return;
@@ -12,7 +13,8 @@
   var SEEN_LIMIT = 200;
   var CURSOR_KEY = "meiva.notify.cursor";
   var TARGET_KEY = "meiva.notify.target";
-  var CATCHUP_LIMIT = 10;
+  var CATCHUP_LIMIT = 100;
+  var UNREAD_CATEGORY = "core.unread";
   var CATCHUP_DEBOUNCE_MS = 400;
 
   function start() {
@@ -23,6 +25,7 @@
     var sseOpen = false;
     var seen = [];
     var seenSet = Object.create(null);
+    var raised = Object.create(null);
     var catchUpTimer = null;
 
     function invoke(command, args) {
@@ -30,15 +33,75 @@
       return target.invoke(command, args);
     }
 
-    function notify(title, body) {
-      invoke("app_notify", { title: title, body: body }).catch(function (error) {
+    function notify(mode, tag, title, body) {
+      invoke("app_notify", { mode: mode, tag: tag, title: title, body: body }).catch(function (error) {
         console.error("[meiva-app] notification failed", error);
       });
     }
 
     // meiva:note
+    // The user is looking at an agent when the window is visible and focused and the console has
+    // that agent open (`?agent_id=` on the console route, the state the sidebar's reading marker
+    // follows). The server cannot know this, so the unread notification for that agent is
+    // dropped here; the cursor advance the console sends while it is open retracts it anyway.
+    // meiva:link ui/app/docs/notifications.md
+    function isViewing(agentId) {
+      if (document.visibilityState !== "visible" || !document.hasFocus()) return false;
+      var open = new URLSearchParams(window.location.search).get("agent_id");
+      return open !== null && open === String(agentId);
+    }
+
+    // meiva:note
+    // One batch of new events (one live event, or the whole catch-up gap) folded to the final
+    // state of each `tag`, as the operations to run, in the order the tags last changed. Only the
+    // final event of a tag matters: a gap of alert, replace, replace is one alert carrying the
+    // newest content, and alert, retract shows nothing but still sends the retract, so a
+    // notification raised before the webview restarted is taken down. A replace is silent only
+    // when this session already raised the tag; otherwise it alerts once, because the user has
+    // never been told about it.
+    // meiva:link ui/app/docs/notifications.md
+    function foldEvents(events) {
+      var finalByTag = Object.create(null);
+      var order = [];
+      events.forEach(function (event) {
+        order = order.filter(function (tag) {
+          return tag !== event.tag;
+        });
+        order.push(event.tag);
+        finalByTag[event.tag] = event;
+      });
+      var ops = [];
+      order.forEach(function (tag) {
+        var event = finalByTag[tag];
+        if (event.action === "retract") {
+          ops.push({ mode: "retract", tag: tag, event: event });
+          return;
+        }
+        if (event.category === UNREAD_CATEGORY && isViewing(event.agent_id)) return;
+        var silent = event.action === "replace" && raised[tag] === true;
+        ops.push({ mode: silent ? "replace" : "alert", tag: tag, event: event });
+      });
+      return ops;
+    }
+
+    function present(events) {
+      foldEvents(events).forEach(function (op) {
+        var event = op.event;
+        if (op.mode === "retract") {
+          delete raised[op.tag];
+          notify("retract", op.tag, "", "");
+          return;
+        }
+        if (typeof event.subject !== "string" || !event.subject) return;
+        raised[op.tag] = true;
+        notify(op.mode, op.tag, event.subject, typeof event.body === "string" ? event.body : "");
+        rememberTarget(event.href);
+      });
+    }
+
+    // meiva:note
     // A legal tap target is one same-origin PATH the delivery named (`href`, e.g.
-    // `/fleet?notice=3103`). Everything else — a scheme, a protocol-relative
+    // `/?agent_id=7`). Everything else — a scheme, a protocol-relative
     // `//host`, a backslash the URL parser folds into a slash — would take the
     // webview off the console, and the value comes off the wire.
     // meiva:link ui/app/docs/notifications.md
@@ -76,10 +139,10 @@
       var target;
       try {
         // meiva:note
-        // The delivery's own notice when the bridge saw one; the inbox otherwise, so
-        // an install whose first tap precedes any delivery still lands there.
+        // The agent page the newest delivery named; the console root otherwise, so an
+        // install whose first tap precedes any delivery still lands on the console.
         // meiva:link ui/app/docs/notifications.md
-        target = new URL(loadTarget() || "fleet#inbox", cfg.entryUrl);
+        target = new URL(loadTarget() || "/", cfg.entryUrl);
         if (target.origin !== new URL(cfg.entryUrl).origin) return;
       } catch (error) {
         console.error("[meiva-app] could not resolve the notification deep link", error);
@@ -130,16 +193,12 @@
     // cursor, so a live event asks for a catch-up and that read moves it.
     // meiva:link ui/app/docs/notifications.md
     function onNotification(event) {
-      if (typeof event.notification_id !== "number") return;
-      if (remember(event.notification_id)) {
-        var body = typeof event.subject === "string" ? event.subject : "";
-        if (body) notify("Meiva", body);
-        // meiva:note
-        // Remember where this delivery points BEFORE the user can tap it: the tap is
-        // consumed by the native side, which then only asks the bridge for a target.
-        // meiva:link ui/app/docs/notifications.md
-        rememberTarget(event.href);
-      }
+      if (typeof event.notification_id !== "number" || !event.tag) return;
+      // meiva:note
+      // `present` remembers where a delivery points BEFORE the user can tap it: the tap is
+      // consumed by the native side, which then only asks the bridge for a target.
+      // meiva:link ui/app/docs/notifications.md
+      if (remember(event.notification_id)) present([event]);
       scheduleCatchUp();
     }
 
@@ -181,12 +240,12 @@
             return;
           }
           var rows = payload.notifications || [];
+          var fresh = [];
           rows.forEach(function (item) {
-            if (typeof item.id !== "number" || !remember(item.id)) return;
-            if (typeof item.subject !== "string" || !item.subject) return;
-            notify("Meiva", item.subject);
-            rememberTarget(item.href);
+            if (typeof item.id !== "number" || !item.tag || !remember(item.id)) return;
+            fresh.push(item);
           });
+          present(fresh);
           if (rows.length) saveCursor(rows[rows.length - 1].id);
         })
         .catch(function (error) {

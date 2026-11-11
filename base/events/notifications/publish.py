@@ -1,23 +1,29 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Mapping
 from dataclasses import dataclass
-from datetime import datetime
 from typing import Protocol
 
 import psycopg
 from psycopg_pool import ConnectionPool
 
-from base.db.transaction import write_transaction
 from base.events.live.projection import NotificationEmitted
-from base.events.notifications.catalog import NotificationCategory, core_catalog
-from base.events.notifications.policy import decide
+from base.events.notifications.catalog import category
+from base.events.notifications.policy import enabled_for
 from base.events.notifications.store import (
+    agent_label,
     insert,
     mark_announced_sync,
-    read_inputs,
+    read_overrides,
     unannounced_sync,
+)
+from base.events.notifications.triggers import (
+    NotificationAction,
+    PushPlan,
+    plan_question_asked,
+    plan_question_resolved,
+    plan_unread_delivery,
+    plan_unread_seen,
 )
 
 _log = logging.getLogger("base.events.notifications")
@@ -27,144 +33,101 @@ _log = logging.getLogger("base.events.notifications")
 class NotificationRecord:
     id: int
     category: str
-    subject: str
-    body: str | None
-    href: str | None
-    importance: str
-    agent_id: int
-
-
-def category(
-    category_id: str, catalog: Mapping[str, NotificationCategory] | None = None
-) -> NotificationCategory:
-    declared = (catalog if catalog is not None else core_catalog()).get(category_id)
-    if declared is None:
-        raise ValueError(f"unknown notification category: {category_id}")
-    return declared
-
-
-def _record(
-    category_id: str,
-    *,
-    subject: str,
-    body: str | None,
-    href: str | None,
-    dedupe_key: str | None,
-    agent_id: int,
-    overrides: dict[str, bool] | None,
-    inputs: tuple[dict[str, bool], datetime | None, datetime],
-    catalog: Mapping[str, NotificationCategory] | None = None,
-) -> tuple[NotificationCategory, tuple[object, ...]] | None:
-    declared = category(category_id, catalog)
-    if not subject.strip():
-        raise ValueError(f"notification {declared.id} needs a subject")
-    stored_overrides, last, now = inputs
-    switches = stored_overrides if overrides is None else overrides
-    decision = decide(declared, overrides=switches, last_same_key_at=last, now=now)
-    if not decision.deliver:
-        _log.debug("notification %s suppressed: %s", declared.id, decision.reason)
-        return None
-    params = (
-        declared.id,
-        subject,
-        body,
-        href,
-        dedupe_key,
-        declared.importance,
-        agent_id,
-    )
-    return declared, params
+    action: str
+    tag: str
 
 
 # meiva:note
-# The producing transaction stages its own delivery: a notice that needs an answer
-# commits its `notification_events` row with the notice, so the debt exists before
-# any process could die. `announced_at` stays NULL until the transport accepts the
-# publication, which is why the dedupe lookup counts an unannounced row too -- the
-# outbox sweep converges it to delivered rather than a second delivery row.
+# The producing transaction stages its own push: the question row or the delivery row commits with
+# its `notification_events` row, so the debt exists before any process could die and a rollback of
+# the business write leaves no push behind. `announced_at` stays NULL until the transport accepts
+# the publication; the gateway outbox sweep converges it. An alert or a replace follows the user's
+# category switch; a retract is always staged, because switching a category off must not strand a
+# notification that is already on someone's screen.
 # meiva:link base/events/notifications/README.md
-def deliver_in_transaction(
-    conn: psycopg.Connection,
-    *,
-    category_id: str,
-    subject: str,
-    body: str | None = None,
-    href: str | None = None,
-    dedupe_key: str | None = None,
-    agent_id: int = 0,
-    overrides: dict[str, bool] | None = None,
-    catalog: Mapping[str, NotificationCategory] | None = None,
+# meiva:note
+# A tap target is the agent's own page: both kinds of push are about one agent's conversation, and
+# the console opens an agent through the `agent_id` query on its root route.
+# meiva:link base/events/notifications/README.md
+def _agent_href(agent_id: int) -> str:
+    return f"/?agent_id={agent_id}"
+
+
+def stage_in_transaction(
+    conn: psycopg.Connection, plan: PushPlan, *, agent_id: int
 ) -> NotificationRecord | None:
-    declared = category(category_id, catalog)
-    inputs = read_inputs(conn, category=declared.id, dedupe_key=dedupe_key)
-    prepared = _record(
-        category_id,
-        subject=subject,
-        body=body,
-        href=href,
-        dedupe_key=dedupe_key,
-        agent_id=agent_id,
-        overrides=overrides,
-        inputs=inputs,
-        catalog=catalog,
-    )
-    if prepared is None:
+    declared = category(plan.category)
+    if not plan.subject.strip():
+        raise ValueError(f"notification {declared.id} needs a subject")
+    if plan.action is not NotificationAction.RETRACT and not enabled_for(
+        declared, read_overrides(conn)
+    ):
+        _log.debug("notification %s suppressed: category switched off", declared.id)
         return None
-    declared, params = prepared
+    row_id = insert(
+        conn,
+        (
+            declared.id,
+            plan.action.value,
+            plan.tag,
+            plan.subject,
+            plan.body,
+            _agent_href(agent_id),
+            declared.importance,
+            agent_id,
+        ),
+    )
     return NotificationRecord(
-        id=insert(conn, params),
-        category=declared.id,
-        subject=subject,
-        body=body,
-        href=href,
-        importance=declared.importance,
+        id=row_id, category=declared.id, action=plan.action.value, tag=plan.tag
+    )
+
+
+def stage_unread_delivery(
+    conn: psycopg.Connection, agent_id: int, content: str, *, had_unread: bool
+) -> None:
+    plan = plan_unread_delivery(
+        agent_label=agent_label(conn, agent_id),
+        content=content,
+        agent_id=agent_id,
+        had_unread=had_unread,
+    )
+    stage_in_transaction(conn, plan, agent_id=agent_id)
+
+
+def stage_unread_seen(
+    conn: psycopg.Connection, agent_id: int, *, had_unread: bool, has_unread: bool
+) -> None:
+    plan = plan_unread_seen(
+        agent_label=agent_label(conn, agent_id),
+        agent_id=agent_id,
+        had_unread=had_unread,
+        has_unread=has_unread,
+    )
+    if plan is not None:
+        stage_in_transaction(conn, plan, agent_id=agent_id)
+
+
+def stage_question_asked(
+    conn: psycopg.Connection, *, agent_id: int, notice_id: int, title: str
+) -> None:
+    stage_in_transaction(
+        conn,
+        plan_question_asked(
+            notice_id=notice_id, title=title, agent_label=agent_label(conn, agent_id)
+        ),
         agent_id=agent_id,
     )
 
 
-def deliver_sync(
-    pool: ConnectionPool,
-    *,
-    category_id: str,
-    subject: str,
-    body: str | None = None,
-    href: str | None = None,
-    dedupe_key: str | None = None,
-    agent_id: int = 0,
-    overrides: dict[str, bool] | None = None,
-    catalog: Mapping[str, NotificationCategory] | None = None,
-) -> NotificationRecord | None:
-    with write_transaction(pool) as conn:
-        return deliver_in_transaction(
-            conn,
-            category_id=category_id,
-            subject=subject,
-            body=body,
-            href=href,
-            dedupe_key=dedupe_key,
-            agent_id=agent_id,
-            overrides=overrides,
-            catalog=catalog,
-        )
-
-
-def _emitted(
-    notification_id: int,
-    category: str,
-    subject: str,
-    body: str | None,
-    href: str | None,
-    importance: str,
-    agent_id: int,
-) -> NotificationEmitted:
-    return NotificationEmitted(
+def stage_question_resolved(
+    conn: psycopg.Connection, *, agent_id: int, notice_id: int, title: str
+) -> None:
+    stage_in_transaction(
+        conn,
+        plan_question_resolved(
+            notice_id=notice_id, title=title, agent_label=agent_label(conn, agent_id)
+        ),
         agent_id=agent_id,
-        notification_id=notification_id,
-        category=category,
-        subject=subject,
-        body=body,
-        href=href,
-        importance=importance,
     )
 
 
@@ -194,8 +157,18 @@ def announce_sync(pool: ConnectionPool, bus: SyncPublisher | None, notification_
     if row is None:
         return False
     published = bus.publish_best_effort_sync(
-        _emitted(
-            row.id, row.category, row.subject, row.body, row.href, row.importance, row.agent_id
+        NotificationEmitted.model_validate(
+            {
+                "agent_id": row.agent_id,
+                "notification_id": row.id,
+                "category": row.category,
+                "action": row.action,
+                "tag": row.tag,
+                "subject": row.subject,
+                "body": row.body,
+                "href": row.href,
+                "importance": row.importance,
+            }
         ).model_dump_json(),
         context="notification_emitted",
     )

@@ -504,15 +504,18 @@ class TaskUpdated(_Base):
 
 
 # meiva:note
-# Published when the notification spine delivers one event; every transport
-# renders from this role instead of deriving its own trigger from agent state. The
-# payload is the row just written to `notification_events`, so a reconnecting
-# client deduplicates on `notification_id`.
+# Published when the notification spine stages one push; every transport renders from this role
+# instead of deriving its own trigger from agent state. The payload is the row just written to
+# `notification_events`: `tag` names the one on-screen notification it concerns and `action` says
+# whether to raise it, silently replace its content or take it away. A reconnecting client
+# deduplicates on `notification_id`.
 # meiva:link base/events/notifications/README.md
 class NotificationEmitted(_Base):
     role: Literal["notification"] = "notification"
     notification_id: int
     category: str
+    action: Literal["alert", "replace", "retract"]
+    tag: str
     subject: str
     body: str | None = None
     href: str | None = None

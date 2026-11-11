@@ -8,6 +8,7 @@ use tauri::menu::{CheckMenuItem, Menu, MenuEvent, MenuItem, PredefinedMenuItem};
 use tauri::tray::{TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Manager, WebviewWindow};
 
+use crate::notify::NotifyMode;
 use crate::window::{self, MAIN_WINDOW};
 
 const MENU_OPEN: &str = "open";
@@ -178,8 +179,18 @@ pub fn request_notification_permission(app: &AppHandle) {
 /// The console window stays the full view; this renders the same delivered
 /// notification event Android renders, so both platforms agree on what is worth
 /// interrupting for.
-pub fn show_notification(app: &AppHandle, title: String, body: String) {
+///
+/// The desktop notification plugin can only post: it has no notification id, no silent update
+/// and no way to withdraw one that is shown. A replace would pop a second banner and a retract
+/// cannot be honored, so both do nothing here; the one alert per unread round stays in the
+/// notification centre until the user clears it.
+pub fn show_notification(app: &AppHandle, mode: NotifyMode, title: String, body: String) {
     use tauri_plugin_notification::NotificationExt;
+
+    if mode != NotifyMode::Alert {
+        log::debug!("desktop notifications cannot {mode:?} a shown notification");
+        return;
+    }
 
     if let Err(err) = app
         .notification()

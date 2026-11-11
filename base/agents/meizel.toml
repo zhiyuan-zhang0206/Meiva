@@ -9,6 +9,8 @@ exports = ["birth", "context", "history", "inbox", "incarnation", "labels.py", "
 "observation" = ["tasks"]
 "sdk" = ["messages"]
 "tasks" = ["inbox", "messages"]
+"incarnation" = ["to_user"]
+"to_user" = ["messages"]
 "tests" = ["birth", "context", "history", "inbox", "lifecycle.py", "messages", "model", "observation", "to_user", "upload_delivery"]
 "upload_delivery" = ["inbox", "messages"]
 

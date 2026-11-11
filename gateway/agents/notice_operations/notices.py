@@ -21,6 +21,7 @@ from base.agents.inbox.wake import publish_inbound_wake
 from base.agents.messages.inbound import InboundKind
 from base.agents.messages.inbound_provenance import InboundProvenance
 from base.db.transaction import write_transaction
+from base.events.notifications.publish import stage_question_resolved
 from base.host.boundary.json_values import is_object_dict
 from gateway.agents.inbound_provenance import request_inbound_provenance
 from gateway.agents.notice_operations.notice_answers import resolution_answer, resolution_inbound
@@ -195,6 +196,9 @@ async def post_notice_resolve(
                     else None,
                     notice_id,
                 ),
+            )
+            stage_question_resolved(
+                conn, agent_id=agent_id, notice_id=notice_id, title=target.title
             )
         return resolution_inbound(target.title, action, resolved_answer.reply)
 

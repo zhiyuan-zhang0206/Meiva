@@ -2,9 +2,11 @@
   "agent_id": 7,
   "role": "notification",
   "notification_id": 11,
-  "category": "core.needs_input",
-  "subject": "Agent #7 is waiting on your answer",
-  "body": null,
-  "href": null,
-  "importance": "high"
+  "category": "core.unread",
+  "action": "alert",
+  "tag": "unread:7",
+  "subject": "Builder",
+  "body": "The report is ready",
+  "href": "/?agent_id=7",
+  "importance": "normal"
 }

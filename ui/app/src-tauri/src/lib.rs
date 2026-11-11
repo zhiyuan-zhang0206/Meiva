@@ -14,6 +14,7 @@ mod commands;
 #[cfg(desktop)]
 mod desktop;
 mod external;
+mod notify;
 mod settings;
 mod state;
 #[cfg(any(target_os = "android", test))]

@@ -7,6 +7,8 @@
 use tauri::plugin::{Builder as PluginBuilder, PluginHandle, TauriPlugin};
 use tauri::{AppHandle, Manager, Runtime};
 
+use crate::notify::{notification_id, NotifyMode};
+
 /// Java package the overlay installs the plugin class into. Must match
 /// `identifier` in `tauri.conf.json`, which is what the Android project's
 /// package name is derived from.
@@ -215,18 +217,69 @@ pub async fn request_notification_permission_async<R: Runtime>(app: AppHandle<R>
     }
 }
 
-/// Show an Android notification without synchronously invoking its plugin.
-pub async fn show_notification<R: Runtime>(app: AppHandle<R>, title: String, body: String) {
+/// Channel for a silent content update: low importance, so a replacement posts with no sound and
+/// no heads-up banner. The plugin's default channel is the one that sounds.
+const QUIET_CHANNEL: &str = "meiva_updates";
+
+fn ensure_quiet_channel<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
+    use tauri_plugin_notification::{Channel, Importance, NotificationExt};
+
+    app.notification()
+        .create_channel(
+            Channel::builder(QUIET_CHANNEL, "Updates")
+                .description("Newer output from an agent you were already told about")
+                .importance(Importance::Low)
+                .build(),
+        )
+        .map_err(|err| err.to_string())
+}
+
+/// Render one notification on Android without synchronously invoking its plugin.
+///
+/// The notification id is derived from the tag, so the plugin (which cancels and re-posts a
+/// visible notification of the same id) replaces the shown one. Re-posting alone would sound
+/// again, so a replace goes through the quiet channel, and only when that notification is still
+/// on screen: one the user swiped away is not brought back. A retract removes it by id.
+pub async fn show_notification<R: Runtime>(
+    app: AppHandle<R>,
+    mode: NotifyMode,
+    tag: &str,
+    title: String,
+    body: String,
+) {
+    let id = notification_id(tag);
     let result = tauri::async_runtime::spawn_blocking(move || {
         use tauri_plugin_notification::NotificationExt;
 
-        // NotificationBuilder::show also uses run_mobile_plugin internally.
-        app.notification()
-            .builder()
-            .title(&title)
-            .body(&body)
-            .show()
-            .map_err(|err| err.to_string())
+        // The notification plugin's calls all use run_mobile_plugin internally.
+        let notifier = app.notification();
+        match mode {
+            NotifyMode::Retract => notifier
+                .remove_active(vec![id])
+                .map_err(|err| err.to_string()),
+            NotifyMode::Alert => notifier
+                .builder()
+                .id(id)
+                .title(&title)
+                .body(&body)
+                .show()
+                .map_err(|err| err.to_string()),
+            NotifyMode::Replace => {
+                let shown = notifier.active().map_err(|err| err.to_string())?;
+                if !shown.iter().any(|item| item.id() == id) {
+                    return Ok(());
+                }
+                ensure_quiet_channel(&app)?;
+                notifier
+                    .builder()
+                    .id(id)
+                    .channel_id(QUIET_CHANNEL)
+                    .title(&title)
+                    .body(&body)
+                    .show()
+                    .map_err(|err| err.to_string())
+            }
+        }
     })
     .await;
     match result {

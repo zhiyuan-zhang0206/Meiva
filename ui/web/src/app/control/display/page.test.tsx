@@ -158,11 +158,18 @@ describe("DisplaySettingsPage", () => {
     transport.getNotificationCategories.mockResolvedValue({
       categories: [
         {
-          id: "core.needs_input",
-          label: "Agent is waiting on your answer",
-          description: "An agent posted a notice that needs a response.",
+          id: "core.question",
+          label: "Agent asked a question",
+          description: "An agent asked you a question and is waiting on your answer.",
           importance: "high",
           enabled: false,
+        },
+        {
+          id: "core.unread",
+          label: "Agent has unread output",
+          description: "An agent delivered output you have not read yet.",
+          importance: "normal",
+          enabled: true,
         },
       ],
     });
@@ -171,7 +178,7 @@ describe("DisplaySettingsPage", () => {
     });
     renderPage();
 
-    const label = await screen.findByText("Agent is waiting on your answer");
+    const label = await screen.findByText("Agent asked a question");
     const toggle = label.parentElement?.parentElement?.parentElement?.querySelector<HTMLButtonElement>(
       '[role="switch"]',
     );
@@ -181,7 +188,7 @@ describe("DisplaySettingsPage", () => {
     fireEvent.click(toggle);
     await waitFor(() =>
       expect(transport.putSetting).toHaveBeenCalledWith("notifications.categories", {
-        "core.needs_input": true,
+        "core.question": true,
       }),
     );
   });

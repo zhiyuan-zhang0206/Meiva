@@ -684,6 +684,9 @@ root = "base/agents/tasks/tests"
 root = "base/agents/tests"
 
 [[tool.pyright.executionEnvironments]]
+root = "base/agents/to_user/delivery/tests"
+
+[[tool.pyright.executionEnvironments]]
 root = "base/agents/upload_delivery/tests"
 
 [[tool.pyright.executionEnvironments]]

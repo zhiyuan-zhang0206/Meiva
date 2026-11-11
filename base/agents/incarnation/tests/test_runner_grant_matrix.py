@@ -349,3 +349,43 @@ def test_runner_marks_a_delivery_but_cannot_rewrite_it(runner_db: str) -> None:
             )
         with pytest.raises(psycopg.errors.InsufficientPrivilege):
             conn.execute("DELETE FROM notification_events WHERE id = %s", (notification_id,))
+
+
+# meiva:note
+# The hosted runtime writes a delivery to the user and stages its notification in one transaction:
+# it must read the agent's label, the category switches and the seen cursor, and insert the
+# notification row, with no grant beyond the existing runner surface.
+# meiva:link base/events/notifications/README.md
+def test_runner_stages_the_unread_notification_with_its_delivery(runner_db: str) -> None:
+    from datetime import UTC, datetime
+
+    from base.agents.to_user.delivery.store import publish
+    from base.api_contracts.user_delivery import PublishMessage, UserDeliveryMode
+
+    grant_runner(runner_db)
+    with psycopg.connect(runner_db, autocommit=True) as conn:
+        agent = conn.execute(
+            "INSERT INTO agents (label) VALUES ('Builder') RETURNING id"
+        ).fetchone()
+        assert agent is not None
+        agent_id = int(agent[0])
+    with psycopg.connect(runner_url(runner_db)) as conn:
+        for key, content in (("a", "first"), ("b", "second")):
+            publish(
+                conn,
+                agent_id,
+                key,
+                PublishMessage(content=content, suggestions=[]),
+                mode=UserDeliveryMode.SDK,
+                created_at=datetime(2026, 11, 11, tzinfo=UTC),
+            )
+        conn.commit()
+        rows = conn.execute(
+            "SELECT action, tag, subject, body FROM notification_events "
+            "WHERE agent_id = %s ORDER BY id",
+            (agent_id,),
+        ).fetchall()
+    assert rows == [
+        ("alert", f"unread:{agent_id}", "Builder", "first"),
+        ("replace", f"unread:{agent_id}", "Builder", "second"),
+    ]

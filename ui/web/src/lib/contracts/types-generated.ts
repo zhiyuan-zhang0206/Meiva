@@ -1311,22 +1311,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/agents/{agent_id}/notifications": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post: operations["post_notification_api_agents__agent_id__notifications_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/notifications": {
         parameters: {
             query?: never;
@@ -1335,22 +1319,6 @@ export interface paths {
             cookie?: never;
         };
         get: operations["get_notifications_api_notifications_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/notifications/audit": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get: operations["get_notification_audit_api_notifications_audit_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -2544,47 +2512,6 @@ export interface components {
             priority: components["schemas"]["Priority"];
             remind_interval_seconds?: number | null;
         };
-        AuditCandidates: {
-            category: string;
-            candidates: number;
-            delivered: number;
-            suppressed: number;
-            repeat_deliveries: number;
-        };
-        AuditDay: {
-            day: string;
-            by_category: {
-                [key: string]: number;
-            };
-            total: number;
-        };
-        AuditDelivered: {
-            total: number;
-            per_day: components["schemas"]["AuditDay"][];
-            per_category: {
-                [key: string]: number;
-            };
-            per_hour: number[];
-        };
-        AuditExplained: {
-            at: string;
-            category: string;
-            agent_id: number;
-            dedupe_key: string | null;
-            outcome: string;
-        };
-        AuditSimulation: {
-            variant: string;
-            delivered: number;
-            delta: number;
-            per_day: number;
-        };
-        AuditWindow: {
-            start: string;
-            end: string;
-            days: number;
-            timezone: string;
-        };
         AvailabilityReason: "unknown" | "host_unavailable" | "awaiting_admission" | "admitted" | "launch_unreachable" | "launch_rejected" | "launch_unknown";
         Body_stage_upload_api_keyed_v1_agents__agent_id__uploads_staged_post: {
             file: string;
@@ -3270,20 +3197,6 @@ export interface components {
         NoticesFeed: {
             awaiting: components["schemas"]["NoticeItem"][];
         };
-        NotificationAuditResponse: {
-            window: components["schemas"]["AuditWindow"];
-            switches: {
-                [key: string]: boolean;
-            };
-            categories: string[];
-            sources: {
-                [key: string]: string;
-            };
-            delivered: components["schemas"]["AuditDelivered"];
-            candidates: components["schemas"]["AuditCandidates"][];
-            simulations: components["schemas"]["AuditSimulation"][];
-            explain?: components["schemas"]["AuditExplained"][] | null;
-        };
         NotificationCategoriesResponse: {
             categories: components["schemas"]["NotificationCategoryItem"][];
         };
@@ -3294,13 +3207,6 @@ export interface components {
             importance: string;
             enabled: boolean;
         };
-        NotificationCreateIn: {
-            category: string;
-            subject: string;
-            body?: string | null;
-            href?: string | null;
-            dedupe_key?: string | null;
-        };
         NotificationDeliveriesResponse: {
             notifications: components["schemas"]["NotificationDeliveryItem"][];
             latest_id: number;
@@ -3308,6 +3214,8 @@ export interface components {
         NotificationDeliveryItem: {
             id: number;
             category: string;
+            action: string;
+            tag: string;
             subject: string;
             body: string | null;
             href: string | null;
@@ -6697,41 +6605,6 @@ export interface operations {
             };
         };
     };
-    post_notification_api_agents__agent_id__notifications_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                agent_id: number;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["NotificationCreateIn"];
-            };
-        };
-        responses: {
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
     get_notifications_api_notifications_get: {
         parameters: {
             query?: {
@@ -6750,40 +6623,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["NotificationDeliveriesResponse"];
-                };
-            };
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    get_notification_audit_api_notifications_audit_get: {
-        parameters: {
-            query?: {
-                days?: number;
-                category?: string | null;
-                tz?: string | null;
-                now?: string | null;
-                simulate?: string[] | null;
-                explain?: boolean;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["NotificationAuditResponse"];
                 };
             };
             422: {

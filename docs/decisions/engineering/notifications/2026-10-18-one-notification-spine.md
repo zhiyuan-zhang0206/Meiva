@@ -8,6 +8,15 @@ Date: 2026-10-18
 > log line each, and the task board already shows the close. `core.needs_input`
 > is the only category, and a plugin category always ships switched off.
 
+> **Superseded in part 2026-11-11**: see
+> [2026-11-11-notifications-are-questions-and-unread](2026-11-11-notifications-are-questions-and-unread.md).
+> The delivery spine itself (the delivery log, the outbox, the one live event, the
+> per-category switches) stands. Superseded: `core.needs_input` and notices as a
+> trigger (the two categories are now `core.question` and `core.unread`); plugin
+> categories, `contributions.notifications` and `POST /api/agents/{id}/notifications`;
+> the dedupe window and `dedupe_key`; and `meiva notices audit` with
+> `GET /api/notifications/audit`.
+
 ## Context
 
 Four surfaces tell the user something happened: the console inbox, the Android

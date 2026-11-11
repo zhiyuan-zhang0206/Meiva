@@ -1,14 +1,15 @@
-exports = ["audit.py", "catalog.py", "notices.py", "outbox.py", "publish.py", "store.py"]
+exports = ["catalog.py", "outbox.py", "publish.py", "store.py"]
 
 [uses]
-"audit.py" = ["catalog.py", "notices.py", "policy.py", "store.py"]
-"__init__.py" = ["catalog.py", "policy.py", "publish.py"]
-"notices.py" = ["publish.py"]
+"__init__.py" = ["catalog.py", "publish.py", "triggers.py"]
 "outbox.py" = ["publish.py", "store.py"]
 "policy.py" = ["catalog.py"]
-"publish.py" = ["catalog.py", "policy.py", "store.py"]
-"tests" = ["audit.py", "catalog.py", "notices.py", "outbox.py", "policy.py", "publish.py"]
+"publish.py" = ["catalog.py", "policy.py", "store.py", "triggers.py"]
+"triggers.py" = ["catalog.py", "preview.py"]
+"tests" = ["catalog.py", "outbox.py", "policy.py", "preview.py", "publish.py", "triggers.py"]
 
 [purity]
 "catalog.py" = "strict"
 "policy.py" = "strict"
+"preview.py" = "strict"
+"triggers.py" = "strict"
