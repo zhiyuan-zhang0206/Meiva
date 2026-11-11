@@ -98,13 +98,12 @@ def prepare_chat_inbound(ctx: MeivaContext, item: ClaimedInbound) -> list[BaseMe
 
 
 def prepare_system_note_inbound(ctx: MeivaContext, item: ClaimedInbound) -> list[BaseMessage]:
-    tag = _system_note_tag(item.payload)
-    task_id = _task_id_from_system_note(item.payload, tag)
+    task_id = _task_id_from_system_note(item.payload, _system_note_tag(item.payload))
     now = ctx.require_clock().now()
     return [
         system_note_message(
             content=f"{_ts_prefix(ctx)}{item.content}",
-            tag=tag,
+            tag=_system_note_tag(item.payload),
             task_id=task_id,
             picked_up_at=now,
             created_at=item.created_at,
