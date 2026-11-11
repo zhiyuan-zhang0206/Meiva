@@ -619,6 +619,7 @@ async def run(
             config_fingerprint=host.turn_fingerprints.get,
             clock=stamping.clock,
             timers=stamping.clock,
+            on_active_wake=host.notify_inbound,
         )
         host.bind_wake(scheduler.wake)
         wait_s = float(config.view.agent.db_notify_wait_timeout_seconds)

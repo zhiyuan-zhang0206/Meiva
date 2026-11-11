@@ -61,13 +61,18 @@ from base.agents.history.harness_messages import (
     aload_harness_message_count,
 )
 from base.agents.history.timeline import build_timeline_items
-from base.agents.messages.kwargs import read_meiva_kwargs
 from base.api_contracts.agent_contract import Harness
 from base.db.transaction import async_write_transaction
 from base.events.live.projection import TimelineSnapshot
 
 from ._decide import decide
-from ._dispatch import BatchState, dispatch_batch, resolve_non_human_wake
+from ._dispatch import (
+    BatchState,
+    dispatch_batch,
+    is_human_wake_item,
+    prepare_steered_inbound,
+    resolve_non_human_wake,
+)
 
 # Names moved to co-located submodules during the Task #1006 split, re-exported
 # here so existing `from agent.graph.claim.node import ...` call sites (tests)
@@ -80,8 +85,8 @@ from ._present import (
     publish_inbound_committed,
 )
 from ._routing import ClaimGoto, resolve_routing, route_target
-from .harness_steer import recover_harness_steer
-from .harness_turn import render_messages, turn_key
+from .harness_inbox import peek_head_batch
+from .harness_render import render_messages
 from .turn_end import settle_turn_end
 
 
@@ -97,7 +102,7 @@ def claim_will_idle(state: _state.AgentState, *, harness: Harness = Harness.MEIV
     cannot drift.
     """
     if harness is not Harness.MEIVA:
-        return not bool(state.harness_pending_input)
+        return not (state.harness_inputs or state.harness_view)
     return state.halted or not has_conversation(state.messages) or state.circuit.parks_idle
 
 
@@ -123,10 +128,11 @@ async def claim_node_impl(
 
     # ── First SELECT: try uncontended claim before pub/sub wait ──
     try:
-        if ctx.harness is not Harness.MEIVA:
-            _ = await recover_harness_steer(ctx, agent_id)
         batch = await claim_inbound_batch(
-            ctx.ops_pool, agent_id, incarnation=ctx.original_incarnation
+            ctx.ops_pool,
+            agent_id,
+            deliverable_by_harness=ctx.harness is not Harness.MEIVA,
+            incarnation=ctx.original_incarnation,
         )
     except RuntimeOwnershipLostError:
         return Command[ClaimGoto](update={"exit_requested": True}, goto=END)
@@ -134,6 +140,10 @@ async def claim_node_impl(
         # Every permanent rejection parks without fresh input. A healthy new
         # chat can try again after the cause is corrected.
         if claim_will_idle(state, harness=ctx.harness):
+            if ctx.harness is not Harness.MEIVA and (
+                entry := await _harness_delivery_entry(ctx, state, agent_id)
+            ):
+                return entry
             drain = build_attach_drain(state, ctx)
             if drain is not None:
                 return Command[ClaimGoto](update=drain, goto=CLAIM)
@@ -161,34 +171,61 @@ async def claim_node_impl(
     return await settle_claimed_batch(ctx, state, agent_id, batch)
 
 
+# meiva:note
+# An external harness owns delivery of chat, system notes and heartbeats: the claim leaves them in the
+# inbox and only notices that the head of the queue holds some. The pre-turn hooks get the head as a
+# read-only view, and the turn that follows reserves and delivers it. The wake polarity follows the
+# same rule as a claimed batch: a human message makes the run human-facing, otherwise a run already in
+# flight keeps its polarity and a fresh wake from automation is non-human.
+async def _harness_delivery_entry(
+    ctx: MeivaContext, state: _state.AgentState, agent_id: int
+) -> Command[ClaimGoto] | None:
+    head = await peek_head_batch(ctx, agent_id)
+    if not head:
+        return None
+    view = [msg for item in head for msg in prepare_steered_inbound(ctx, item)]
+    if any(is_human_wake_item(item) for item in head):
+        non_human = False
+    else:
+        non_human = state.non_human_wake if (state.turn_active and not state.halted) else True
+    return Command[ClaimGoto](
+        update={
+            "halted": False,
+            "turn_active": True,
+            "non_human_wake": non_human,
+            "harness_view": view,
+        },
+        goto=route_target(ctx, BEFORE_TURN),
+    )
+
+
+# meiva:note
+# What the control rows of a batch hand to an external harness (a restart or resurrect note, a fork
+# marker) has no inbox row of its own: it becomes one synthetic input with a stable key, delivered like
+# any row, and its timeline entries are written when the harness reports it in context. Messages that do
+# not enter a harness turn are written to the timeline directly.
 async def _settle_external_harness_batch(
     ctx: MeivaContext,
     agent_id: int,
     st: BatchState,
+    batch: list[ClaimedInbound],
     *,
-    claimed_chat_ids: list[int],
     enters_harness_turn: bool,
     update: dict[str, object],
 ) -> None:
     update.pop("messages", None)
     items, _ = build_timeline_items(st.new_msgs, inputs=ctx.timestamp_policy())
-    if enters_harness_turn:
-        pending = [m for m in st.new_msgs if not isinstance(m, (AIMessage, ToolMessage))]
-        text = render_messages(pending)
-        key = turn_key(pending)
-        inbound_ids = [
-            id
-            for m in st.new_msgs
-            if isinstance(id := read_meiva_kwargs(m).get("meiva_inbound_id"), int)
+    pending = [m for m in st.new_msgs if not isinstance(m, (AIMessage, ToolMessage))]
+    prompt = render_messages(pending)
+    if enters_harness_turn and prompt:
+        update["harness_inputs"] = [
+            {
+                "key": f"control-{max(item.id for item in batch)}",
+                "prompt": prompt,
+                "timeline_items": [item.model_dump(mode="json") for item in items],
+            }
         ]
-        update["harness_pending_input"] = {
-            "prompt": text,
-            "key": key,
-            "inbound_ids": inbound_ids,
-            "claimed_chat_ids": claimed_chat_ids,
-            "timeline_items": [item.model_dump(mode="json") for item in items],
-            "messages": pending,
-        }
+        update["harness_view"] = pending
     elif items and ctx.ops_pool is not None:
         async with async_write_transaction(ctx.ops_pool) as pool_conn:
             persisted = await aappend_harness_timeline_items(
@@ -252,11 +289,7 @@ async def settle_claimed_batch(
             ctx,
             agent_id,
             st,
-            claimed_chat_ids=[
-                item.id
-                for item in batch
-                if item.kind == "chat" and item.id in st.committed_chat_ids
-            ],
+            batch,
             enters_harness_turn=outcome.command.goto == BEFORE_TURN,  # pyright: ignore[reportUnknownMemberType]
             update=update,
         )

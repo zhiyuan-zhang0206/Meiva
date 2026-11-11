@@ -41,7 +41,7 @@ def dead_letter_stale_claimed(
             "UPDATE inbound_messages m SET status = 'done' "
             "FROM agents_meta am "
             "WHERE m.agent_id = am.id "
-            "  AND m.status = 'claimed' AND m.kind = 'chat' "
+            "  AND m.status = 'claimed' AND m.kind IN ('chat', 'system_note', 'heartbeat') "
             "  AND ((am.status = 'terminated' "
             "        AND m.claimed_at < now() - make_interval(secs => %s)) "
             "       OR (am.status = 'idling' "

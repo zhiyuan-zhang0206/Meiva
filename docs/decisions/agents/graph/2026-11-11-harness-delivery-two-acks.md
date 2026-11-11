@@ -69,7 +69,7 @@ is the frontend.
 ## Consequences
 
 - Every adapter must produce the unified events; the graph (PR 2) consumes events, not return values.
-- `steer()` stays as a compatibility wrapper and now means "entered the running turn's context".
+- Revision (graph change): `steer()`, `ForegroundSteering`, `ForegroundAccepted` and `InputLostError` are gone. The graph reads events from `HarnessBridge.subscribe()` and delivers with `deliver()`; inbox rows share one in-flight state (`claimed`) and are settled by ACK 2, a refusal or a loss. Adapters keep tickets internally for the handoff and the idle start; removing them is a later cleanup.
 - The Antigravity trajectory and message-queue interfaces and the Codex rollout format are not public
   contracts; the adapters fail explicitly when a shape differs.
 - CLI processes with unfinished background tasks or timers must not be idle-reaped; that gap is handled

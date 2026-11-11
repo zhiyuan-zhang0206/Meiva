@@ -4,7 +4,7 @@ The app server runs work this session did not start — a queued message, a revi
 a compaction, and, across `thread/resume`, the tail of a turn an earlier session
 ran. The response to `turn/start` names the authoritative turn. An early
 `turn/started` can supply an interrupt target. Early activity waits for the
-response and is then dispatched after `ForegroundAccepted`. Only activity
+response and is then dispatched. Only activity
 naming the authoritative turn contributes to the running foreground. Each
 connection serves one thread.
 
@@ -16,7 +16,7 @@ discards the buffer.
 | Notification | Becomes |
 |---|---|
 | `turn/started` while this session is starting a turn | provisional interrupt target |
-| `turn/start` response naming a turn | authoritative turn binding and `ForegroundAccepted` |
+| `turn/start` response naming a turn | authoritative turn binding |
 | `turn/completed` naming our turn | `TurnCompleted` |
 | `turn/completed` naming any other turn | `UnsolicitedOutput(source="turn/completed")` carrying that turn's reply |
 | `error` with `willRetry=false` naming our turn | `TurnFaulted` |

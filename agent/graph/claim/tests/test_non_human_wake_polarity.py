@@ -270,7 +270,7 @@ async def test_settle_claimed_batch_appends_recency_reminder_only_on_fresh_non_h
     assert read_meiva_kwargs(human_msgs[0]).get("meiva_note_tag") is None
 
 
-async def test_external_harness_non_human_wake_includes_recency_reminder_and_keeps_turn_key(
+async def test_external_harness_non_human_wake_names_its_synthetic_input_after_the_newest_row(
     redis_url: str,
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
@@ -303,8 +303,8 @@ async def test_external_harness_non_human_wake_includes_recency_reminder_and_kee
     )
     update = cast(dict[str, object], cmd.update)
     assert update.get("non_human_wake") is True
-    pending = cast(dict[str, str], update["harness_pending_input"])
-    assert pending["key"] == "inbound-601"
+    [pending] = cast(list[dict[str, str]], update["harness_inputs"])
+    assert pending["key"] == "control-601"
     assert "Non-human wake." not in pending["prompt"]
     assert "MEIVA_DISPLAY_TO_USER" not in pending["prompt"]
 
@@ -324,7 +324,7 @@ async def test_external_harness_non_human_wake_includes_recency_reminder_and_kee
         ],
     )
     restart_update = cast(dict[str, object], restart.update)
-    restart_pending = cast(dict[str, str], restart_update["harness_pending_input"])
+    [restart_pending] = cast(list[dict[str, str]], restart_update["harness_inputs"])
     assert restart_pending["prompt"].startswith("<system_note>\n")
     assert restart_pending["prompt"].endswith("Continue after restart.\n</system_note>")
 

@@ -344,11 +344,17 @@ async def _refuse_unadmitted_lifecycle[RowT: tuple[object, ...]](
 #
 #     The lifecycle-only path leaves cancellation for the external decision
 #     owner, or the ordinary native claim if that owner returns without ACK.
+#
+#     An external harness owns delivery of chat, system notes and heartbeats
+#     (`deliverable_by_harness`): the claim takes only the control rows in front
+#     of the first deliverable row, so control never overtakes queued input and
+#     queued input never overtakes control.
 async def claim_inbound_batch(
     pool: AsyncConnectionPool,
     agent_id: int,
     *,
     lifecycle_only: bool = False,
+    deliverable_by_harness: bool = False,
     incarnation: RuntimeIncarnation | None,
 ) -> list[ClaimedInbound]:
     acquire_timeout_s = min(CLAIM_ACQUIRE_TIMEOUT_CAP_S, pool.timeout)
@@ -390,10 +396,15 @@ async def claim_inbound_batch(
             "  WHERE status = 'pending' AND agent_id = %s "
             "  AND claimed_at IS NULL "
             "  AND (NOT %s OR kind NOT IN ('restart','terminate')) "
+            "  AND (NOT %s OR (kind NOT IN ('chat','system_note','heartbeat') AND NOT EXISTS ("
+            "    SELECT 1 FROM inbound_messages d WHERE d.agent_id = %s AND d.status = 'pending' "
+            "    AND d.kind IN ('chat','system_note','heartbeat') "
+            "    AND (d.created_at, d.id) < (inbound_messages.created_at, inbound_messages.id)"
+            "  ))) "
             "  ORDER BY created_at ASC, id ASC "
             "  FOR UPDATE SKIP LOCKED"
             ") RETURNING id, agent_id, content, kind, source, payload, created_at, claimed_at",
-            (agent_id, runtime_owned),
+            (agent_id, runtime_owned, deliverable_by_harness, agent_id),
         )
         rows = await cur.fetchall()
         if rows:
@@ -429,6 +440,18 @@ class _ConsumedRow:
     age_s: float
 
 
+# meiva:note
+# Consume the claimed rows of this agent under the owner lock.
+#
+# The queue's done status means consumed, not successfully executed: a claim
+# whose execution was interrupted has an unknown result and is never
+# redelivered. Used at the compaction boundary and when a turn ends, aborts or
+# a runtime is rebuilt. A row claimed for an external harness is handed over and
+# not settled: only the harness's own facts settle it (`agent/graph/claim/harness_inbox.py`),
+# so the turn-end and compaction passes leave it alone, and only an abort or a rebuilt
+# runtime (`unknown_execution`) consumes it, whatever its deliverable kind. Co-batched chats deferred before any execution remain
+# pending for the fresh context. The caller must hold the admitted identity. A
+# missing pool in container/eval mode is a no-op.
 async def finalize_claimed_inbounds(
     pool: AsyncConnectionPool | None,
     agent_id: int,
@@ -436,15 +459,6 @@ async def finalize_claimed_inbounds(
     incarnation: RuntimeIncarnation | None,
     unknown_execution: bool = False,
 ) -> int:
-    """Consume every claimed chat of this agent under the owner lock.
-
-    The queue's done status means consumed, not successfully executed: a claim
-    whose execution was interrupted has an unknown result and is never
-    redelivered. Used at the compaction boundary and when a turn ends, aborts or
-    a runtime is rebuilt. Co-batched chats deferred before any execution remain
-    pending for the fresh context. The caller must hold the admitted identity. A
-    missing pool in container/eval mode is a no-op.
-    """
     if pool is None:
         return 0
     lifecycle_kind: str | None = None
@@ -478,10 +492,13 @@ async def finalize_claimed_inbounds(
                 "UPDATE inbound_messages SET status = 'done', "
                 "payload = CASE WHEN %s THEN COALESCE(payload, '{}'::jsonb) "
                 "|| jsonb_build_object('consumed_without_execution', true) ELSE payload END "
-                "WHERE status = 'claimed' AND kind = 'chat' AND agent_id = %s "
+                "WHERE status = 'claimed' AND agent_id = %s "
+                "AND ((kind = 'chat' AND NOT EXISTS (SELECT 1 FROM agents_meta am "
+                "      WHERE am.id = %s AND am.harness <> 'meiva')) "
+                "     OR (%s AND kind IN ('chat', 'system_note', 'heartbeat'))) "
                 "RETURNING id, kind, content, "
                 "EXTRACT(EPOCH FROM (now() - created_at))::float8 AS age_s",
-                (unknown_execution, agent_id),
+                (unknown_execution, agent_id, agent_id, unknown_execution),
             )
             rows = await cur.fetchall()
     for consumed in rows if unknown_execution else ():

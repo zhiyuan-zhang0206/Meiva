@@ -58,7 +58,6 @@ from base.lm.harness.delivery import HarnessInput, InputPhase, validated_batch
 from base.lm.harness.events import (
     AckSignal,
     AssistantText,
-    ForegroundAccepted,
     HarnessCause,
     InterruptConfirmed,
     SessionFailed,
@@ -317,10 +316,6 @@ class CodexSession(BaseHarnessSession[CodexConfig]):
             return None
         return thread_id, name
 
-    @property
-    def steering_available(self) -> bool:
-        return self._steer_target() is not None
-
     # meiva:note
     # Hand a batch to the foreground, in order. Each input either joins the running turn
     # (`turn/steer`, whichever turn is running — ours or one the server began) or, when none runs,
@@ -413,7 +408,6 @@ class CodexSession(BaseHarnessSession[CodexConfig]):
         self._ledger = self._ledger.bind_turn(name, ticket.turn_id).scoped(key, name)
         self._emit(TurnStarted(ticket.turn_id, TurnOrigin.INPUT, (key,), self.generation))
         self._apply(self._ledger.received(key, AckSignal.STRONG))
-        self._emit(ForegroundAccepted(turn_id=ticket.turn_id))
         for message, params in early:
             self._dispatch_notification(message, params)
 

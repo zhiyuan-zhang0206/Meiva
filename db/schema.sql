@@ -427,7 +427,7 @@ CREATE TABLE inbound_messages (
 );
 
 COMMENT ON COLUMN inbound_messages.claimed_at IS
-    'When the claim node grabbed this row (pending -> claimed for chat, pending -> done for lifecycle kinds). NULL = never claimed. Pickup latency = claimed_at - created_at.';
+    'When the claim node grabbed this row (pending -> claimed for chat on the built-in harness, pending -> done for lifecycle kinds), or when an external harness was handed it (pending -> claimed for chat, system_note and heartbeat; it leaves claimed only when the harness reports it in context, or back to pending with this column NULL when it refused or lost it). NULL = never claimed. Pickup latency = claimed_at - created_at.';
 
 COMMENT ON COLUMN inbound_messages.client_message_id IS
     'Caller-generated id for one logical chat delivery. Non-NULL values are cluster-wide unique; same-id retries must match the original agent, content, source, kind, and payload.';

@@ -41,7 +41,12 @@ def message_kind(class_name: str) -> MessageKind:
             return MessageKind.TASK_STARTED
         case "TaskUpdatedMessage":
             return MessageKind.TASK_UPDATED
-        case "RateLimitEvent" | "SystemMessage":
+        # meiva:note
+        # A hook report (a SessionStart hook in the user's settings runs before the CLI echoes the first
+        # input) is about the session, never content of a turn: read as turn content it opened a turn
+        # that no input and no CLI behaviour had begun, and the real turn then joined it.
+        # meiva:link base/lm/harness/claude/docs/claude.md
+        case "RateLimitEvent" | "SystemMessage" | "HookEventMessage":
             return MessageKind.SESSION
         case _:
             return MessageKind.TURN

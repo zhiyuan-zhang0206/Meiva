@@ -204,18 +204,12 @@ async def test_a_cli_that_does_not_echo_fails_the_session_instead_of_guessing(
         await harness.stop()
 
 
-async def test_the_steer_wrapper_reports_an_input_that_became_its_own_turn_as_accepted(
-    tmp_path: Path,
-) -> None:
-    harness = await start(tmp_path, passive=True)
-    try:
-        ticket = await first_turn(harness)
-        steer = asyncio.create_task(harness.session.steer("late", key="steer"))
-        await asyncio.sleep(0.01)
-        assert not steer.done(), "a write is not delivery"
-        replay(harness.client, "deferred_new_turn", "turn1", first="first", steer="steer")
-        await asyncio.wait_for(ticket.outcome(), 2)
-        replay(harness.client, "deferred_new_turn", "turn2", first="first", steer="steer")
-        assert await asyncio.wait_for(steer, 2) is True
-    finally:
-        await harness.stop()
+# meiva:note
+# Found against the real CLI: a SessionStart hook in the user's settings reports before the CLI echoes the
+# first input, and read as turn content it opened a harness turn that nothing had begun, so the input's own
+# turn joined it and was reported as the CLI's doing.
+# meiva:link base/lm/harness/claude/docs/claude.md
+def test_a_hook_report_is_about_the_session_not_content_of_a_turn() -> None:
+    from base.lm.harness.claude.inbound import MessageKind, message_kind
+
+    assert message_kind("HookEventMessage") is MessageKind.SESSION

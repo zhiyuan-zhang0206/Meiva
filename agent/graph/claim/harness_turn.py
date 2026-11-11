@@ -1,34 +1,32 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Awaitable, Callable, Mapping, Sequence
+from collections.abc import Awaitable, Callable, Coroutine, Sequence
 from contextlib import suppress
 from typing import Any, Literal
 
-from langchain_core.messages import AIMessage, BaseMessage, ToolMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.runtime import Runtime
 from langgraph.types import Command
-from psycopg_pool import PoolTimeout
+from pydantic import TypeAdapter
 
 from agent import state as _state
 from agent.db import ClaimedInbound
 from agent.graph.claim._dispatch import is_human_wake_item, prepare_steered_inbound
 from agent.graph.claim.harness_activity import HarnessTurnProjector
-from agent.graph.claim.harness_input import commit_harness_input, retire_unconfirmed_harness_input
-from agent.graph.claim.harness_steer import (
-    finish_harness_steer,
-    recover_harness_steer,
-    reserve_harness_steer,
+from agent.graph.claim.harness_foreground import Commit, Foreground, Handed, Requeue, Settlement
+from agent.graph.claim.harness_inbox import (
+    commit_handed,
+    requeue_handed,
+    reserve_head_batch,
+    retire_unconfirmed,
 )
+from agent.graph.claim.harness_render import render_message, render_messages
+from agent.graph.claim.harness_usage import log_turn_usage
 from agent.graph.claim.lost_turn import report_lost_turn
 from agent.graph.claim.timeline import append_turn_timeline
 from agent.graph.claim.turn_stamp import persist_last_active
-from agent.graph.hooks.user_delivery import (
-    capture_items,
-    delivery_end_reminder,
-    with_pending_deliveries,
-)
+from agent.graph.hooks.user_delivery import capture_items, delivery_end_reminder
 from agent.graph.interrupt import (
     ModelInterruptedError,
     interrupt_halt,
@@ -47,26 +45,31 @@ from base.agents.history.harness_messages import (
 from base.agents.history.timeline import build_timeline_items
 from base.agents.history.timeline_item import TimelineItem
 from base.agents.messages.inbound import InterruptScope
-from base.agents.messages.kwargs import read_meiva_kwargs
 from base.db.transaction import async_write_transaction
 from base.events.live.projection import Cancelled, InboundCommitted, LLMDone, TimelineSnapshot
 from base.events.live.publisher import AgentEventPublisher
-from base.host.boundary.json_values import is_object_dict, is_object_list
-from base.lm.catalog import ModelCatalog
-from base.lm.content import message_content
 from base.lm.harness import (
+    AssistantText,
     BridgeEvent,
-    ForegroundAccepted,
+    EventSubscription,
     HarnessClosedError,
+    HarnessInput,
     HarnessSetupError,
     HarnessTurnFaultedError,
-    InputLostError,
+    ReasoningDelta,
+    ReasoningText,
+    TextDelta,
+    ToolResult,
+    ToolUse,
+    TurnCompleted,
+    completed_turn,
+    fault_of_event,
 )
-from base.lm.harness.engine import ForegroundSteering, HarnessTurn, TurnEngine
-from base.lm.usage import UsageFields, log_usage_fields
+from base.lm.harness.engine import TurnEngine
 from base.log import logger
 
-HarnessGoto = Literal["claim", "harness_turn"]
+HarnessGoto = Literal["claim"]
+_TIMELINE_ITEMS = TypeAdapter(list[TimelineItem])
 
 # meiva:note
 # This tick keeps host custody alive while a harness owns the invocation. Provider
@@ -74,116 +77,23 @@ HarnessGoto = Literal["claim", "harness_turn"]
 # meiva:link agent/graph/docs/harness-turn.md
 PROGRESS_TICK_SECONDS = 60.0
 
-
 # meiva:note
-# Filter out agent replies from a sequence of messages.
+# Delivery is woken by the host's inbound wake, so the queue is not polled while a turn runs. The
+# fallback only bounds the cost of a lost wake. After a refusal (Antigravity refuses an input for a
+# conversation that is just starting or just ending) the same input is not sent again before the
+# backoff has passed: the next wake or fallback tick retries, never a loop.
 # meiva:link agent/graph/docs/harness-turn.md
-def pending_messages(
-    messages_or_state: _state.AgentState | Sequence[BaseMessage],
-) -> list[BaseMessage]:
-    messages = (
-        messages_or_state.messages
-        if isinstance(messages_or_state, _state.AgentState)
-        else messages_or_state
-    )
-    return [message for message in messages if not isinstance(message, (AIMessage, ToolMessage))]
-
-
-def render_messages(messages: Sequence[BaseMessage]) -> str:
-    return "\n\n".join(render_message(message) for message in messages).strip()
-
-
-def _format_bytes(size: int) -> str:
-    if size < 1024:
-        return f"{size} B"
-    if size < 1024 * 1024:
-        return f"{size / 1024:.1f} KB"
-    return f"{size / (1024 * 1024):.1f} MB"
-
-
-def _format_image_uploads_note(raw: object) -> str | None:
-    if not is_object_list(raw) or not raw:
-        return None
-    lines = ["Attached images:"]
-    for item in raw:
-        if not is_object_dict(item):
-            continue
-        name = item.get("name")
-        content_type = item.get("content_type")
-        size = item.get("size")
-        target = item.get("path") or item.get("url")
-        if (
-            isinstance(name, str)
-            and isinstance(content_type, str)
-            and isinstance(size, int)
-            and not isinstance(size, bool)
-            and isinstance(target, str)
-        ):
-            lines.append(f"- {name} ({content_type}, {_format_bytes(size)}): {target}")
-    return "\n".join(lines) if len(lines) > 1 else None
-
-
-def _strip_image_placeholder(text: str, *, body_start: int | None) -> str:
-    if isinstance(body_start, int) and 0 <= body_start <= len(text):
-        head = text[:body_start]
-        body = text[body_start:]
-        if body in {"[image]", "[files]"}:
-            return head.rstrip()
-    if text in {"[image]", "[files]"}:
-        return ""
-    return text
-
-
-def render_message(message: BaseMessage) -> str:
-    content = message_content(message)
-    kwargs = read_meiva_kwargs(message)
-    image_note = _format_image_uploads_note(kwargs.get("meiva_image_uploads"))
-    body_start = kwargs.get("meiva_inbound_body_start")
-    if isinstance(content, str):
-        if image_note is None:
-            return content
-        cleaned = _strip_image_placeholder(
-            content, body_start=body_start if isinstance(body_start, int) else None
-        )
-        return f"{cleaned}\n\n{image_note}" if cleaned.strip() else image_note
-    parts: list[str] = []
-    for block in content:
-        if isinstance(block, str):
-            parts.append(block)
-        elif block.get("type") == "text" and isinstance(block.get("text"), str):
-            parts.append(str(block["text"]))
-        elif block.get("type") == "image_url" and image_note is not None:
-            continue
-        else:
-            parts.append(f"[{block.get('type', 'attachment')}]")
-    text = "\n".join(parts)
-    if image_note is None:
-        return text
-    cleaned = _strip_image_placeholder(
-        text, body_start=body_start if isinstance(body_start, int) else None
-    )
-    return f"{cleaned}\n\n{image_note}" if cleaned.strip() else image_note
+DELIVERY_FALLBACK_SECONDS = 15.0
+REDELIVER_BACKOFF_SECONDS = 2.0
 
 
 # meiva:note
-# The adapter's idempotency key: the newest inbound row in the batch, which is unique
-# per claim and stable when the same window is submitted twice (a crashed turn, a
-# retry within the session). A window that carries only notes has no row to name, so
-# the cursor plus its length stands in; retrying the same window at the same cursor
-# reuses the key, while a later note-only turn (such as a second heartbeat) gets a
-# distinct key instead of replaying the first.
-# meiva:link agent/graph/docs/harness-turn.md
-def turn_key(messages: Sequence[BaseMessage], *, cursor: int = 0) -> str:
-    for message in reversed(messages):
-        inbound_id = read_meiva_kwargs(message).get("meiva_inbound_id")
-        if isinstance(inbound_id, int):
-            return f"inbound-{inbound_id}"
-    return f"window-{cursor + len(messages)}"
-
-
-# meiva:note
-# The graph waits for one big turn. Observable activities are committed by the
-# projector while the harness works, independently of the terminal outcome.
+# The graph invocation stays until nothing is left to settle: every input handed to the harness has
+# entered its context (or gone back to the queue) and no turn is running. A turn ending settles
+# nothing, and Claude Code reports an input that missed the last tool boundary about a second after
+# the original turn, as a turn of its own. The invocation is also where that settlement is written, so it
+# must still be here when the report arrives. Inputs are delivered one path: the head of the inbox,
+# rendered, handed to `deliver()` after subscribing; idle or mid-turn is the harness's business.
 # meiva:link agent/graph/docs/harness-turn.md
 async def harness_turn_node(
     state: _state.AgentState,
@@ -205,26 +115,7 @@ async def harness_turn_node(
         timeline_limit=ctx.require_agent().read("display", "timeline_default_limit"),
         publish_timeline=False,
     ):
-        return await _run_harness_turn(
-            state,
-            ctx,
-            agent_id,
-            event_publisher,
-        )
-
-
-def _resolve_turn_prompt_and_key(
-    state: _state.AgentState,
-    pre_messages: Sequence[BaseMessage],
-    agent_id: int,
-) -> tuple[str, str]:
-    pending_input = state.harness_pending_input or {}
-    text = str(pending_input.get("prompt") or "")
-    if pre_messages:
-        pre_text = render_messages(pre_messages)
-        text = f"{pre_text}\n\n{text}".strip() if text else pre_text
-    key = str(pending_input.get("key") or "") or f"inbound-turn-{agent_id}"
-    return text, key
+        return await _run_harness_turn(state, ctx, agent_id, event_publisher)
 
 
 def _apply_wake_polarity(
@@ -236,38 +127,7 @@ def _apply_wake_polarity(
         updates["non_human_wake"] = False
 
 
-async def _settle_completed_turn(
-    state: _state.AgentState,
-    ctx: MeivaContext,
-    agent_id: int,
-    event_publisher: AgentEventPublisher,
-    model: str | None,
-    projector: HarnessTurnProjector,
-    turn: HarnessTurn,
-    *,
-    key: str,
-    extra_updates: dict[str, Any],
-) -> Command[HarnessGoto]:
-    turns = (*turn.prelude, turn)
-    for completed in turns:
-        log_turn_usage(ctx, agent_id, model, completed)
-    await projector.finish(turns, interrupted=turn.interrupted)
-    _apply_wake_polarity(state, projector, extra_updates)
-    if turn.interrupted:
-        _announce_cancel(ctx, agent_id)
-    else:
-        event_publisher.emit(LLMDone(agent_id=agent_id).model_dump_json())
-        await persist_last_active(ctx, agent_id, turn.text)
-        correction = await harness_reply_correction(
-            ctx, agent_id, state, invalid=projector.invalid_reply_visibility, key=key
-        )
-        if correction is not None:
-            return Command[HarnessGoto](
-                update={**extra_updates, "harness_pending_input": correction}, goto=HARNESS_TURN
-            )
-    return Command[HarnessGoto](
-        update={**extra_updates, "halted": True, "harness_pending_input": None}, goto=CLAIM
-    )
+_CLEARED: dict[str, Any] = {"harness_inputs": [], "harness_view": []}
 
 
 async def _run_harness_turn(
@@ -275,19 +135,10 @@ async def _run_harness_turn(
     ctx: MeivaContext,
     agent_id: int,
     event_publisher: AgentEventPublisher,
-    *,
-    pre_messages: Sequence[BaseMessage] = (),
-    hook_updates: Mapping[str, Any] | None = None,
 ) -> Command[HarnessGoto]:
     bridge = ctx.require_harness_bridge()
     ctx.turn_progress.mark(agent_id)
-    extra_updates = dict(hook_updates) if hook_updates else {}
-    pre_messages = await with_pending_deliveries(ctx, agent_id, list(pre_messages))
-    text, key = _resolve_turn_prompt_and_key(state, pre_messages, agent_id)
-    if not text:
-        return Command[HarnessGoto](
-            update={**extra_updates, "halted": True, "harness_pending_input": None}, goto=CLAIM
-        )
+    extra_updates: dict[str, Any] = {}
 
     base_idx = 0
     if ctx.ops_pool is not None:
@@ -306,80 +157,309 @@ async def _run_harness_turn(
         explicit_visibility=ctx.require_agent().prompt.user_delivery_mode == "prefix",
         delivery_mode=ctx.require_agent().prompt.user_delivery_mode,
     )
-    input_accepted = asyncio.Event()
-
-    async def retire_unconfirmed() -> None:
-        if not input_accepted.is_set():
-            items = await projector.append_inbound(
-                lambda: retire_unconfirmed_harness_input(ctx, agent_id, state.harness_pending_input)
-            )
-            _publish_inbound(ctx, agent_id, items)
+    run = ForegroundRun(ctx, agent_id, bridge, projector, state, event_publisher)
 
     try:
-        turn = await _await_foreground(
-            ctx, agent_id, bridge, projector, text, key, state.harness_pending_input, input_accepted
-        )
+        await _await_foreground(ctx, agent_id, bridge, projector, run)
     except ModelInterruptedError as exc:
-        await retire_unconfirmed()
-        items = await projector.append_inbound(
-            lambda: recover_harness_steer(ctx, agent_id, publish=False)
-        )
-        _publish_inbound(ctx, agent_id, items)
+        await run.retire_unconfirmed()
         await projector.finish(interrupted=True)
         _apply_wake_polarity(state, projector, extra_updates)
         return Command[HarnessGoto](
-            update={**extra_updates, **interrupt_halt(exc.reason), "harness_pending_input": None},
-            goto=CLAIM,
+            update={**extra_updates, **interrupt_halt(exc.reason), **_CLEARED}, goto=CLAIM
         )
     except (HarnessTurnFaultedError, HarnessClosedError, HarnessSetupError) as exc:
-        await retire_unconfirmed()
-        outcome = exc.outcome if isinstance(exc, HarnessTurnFaultedError) else None
-        if outcome is not None:
-            log_turn_usage(ctx, agent_id, bridge.model, outcome)
+        if isinstance(exc, HarnessTurnFaultedError) and exc.outcome is not None:
+            log_turn_usage(ctx, agent_id, bridge.model, exc.outcome)
+        if not isinstance(exc, HarnessTurnFaultedError) or exc.outcome is None:
+            await bridge.retire(reason="session unavailable")
+        inbound_ids = run.unsettled_inbound_ids()
+        await run.retire_unconfirmed()
         if projector.has_activity:
             await projector.finish(error=str(exc))
         else:
             await report_lost_turn(
-                ctx, agent_id, state.harness_pending_input, key, exc, append=append_turn_timeline
+                ctx, agent_id, inbound_ids, run.last_key, exc, append=append_turn_timeline
             )
         raise FatalLLMStreamError(f"{ctx.harness.value} harness turn aborted: {exc}") from exc
 
-    return await _settle_completed_turn(
-        state,
-        ctx,
-        agent_id,
-        event_publisher,
-        bridge.model,
-        projector,
-        turn,
-        key=key,
-        extra_updates=extra_updates,
-    )
+    await projector.finish(interrupted=run.interrupted)
+    _apply_wake_polarity(state, projector, extra_updates)
+    if run.interrupted:
+        _announce_cancel(ctx, agent_id)
+    return Command[HarnessGoto](update={**extra_updates, "halted": True, **_CLEARED}, goto=CLAIM)
 
 
+# meiva:note
+# One invocation's foreground: deliver the inbox, settle what the harness reports.
+#
+# Two tasks share it, both on one event loop and both yielding only at awaits: the event reader folds
+# each event into the pure `Foreground` and writes its settlements, and the delivery loop hands the head
+# of the inbox over when it can and decides when the invocation may end.
+class ForegroundRun:
+    def __init__(
+        self,
+        ctx: MeivaContext,
+        agent_id: int,
+        bridge: TurnEngine,
+        projector: HarnessTurnProjector,
+        state: _state.AgentState,
+        publisher: AgentEventPublisher,
+    ) -> None:
+        self._ctx = ctx
+        self._agent_id = agent_id
+        self._bridge = bridge
+        self._projector = projector
+        self._publisher = publisher
+        self._baseline = state.user_delivery_baseline
+        self.fg = Foreground()
+        self._synthetic: list[tuple[Handed, str]] = []
+        self._prompts: dict[str, str] = {}
+        for raw in state.harness_inputs:
+            key, prompt = str(raw["key"]), str(raw["prompt"])
+            items = _TIMELINE_ITEMS.validate_python(raw.get("timeline_items", []))
+            self._synthetic.append((Handed(key, None, tuple(items)), prompt))
+        self.last_key = f"inbound-turn-{agent_id}"
+        self.interrupted = False
+        self._correcting = False
+        self._turn_ended = False
+        self._streamed: dict[str, list[str]] = {}
+        self._changed = asyncio.Event()
+        self._backoff_until = 0.0
+        self._failure: Exception | None = None
+
+    def unsettled_inbound_ids(self) -> list[int]:
+        return [h.inbound_id for h in self.fg.handed if h.inbound_id is not None]
+
+    async def retire_unconfirmed(self) -> None:
+        items = await self._projector.append_inbound(
+            lambda: retire_unconfirmed(self._ctx, self._agent_id, self.fg.handed)
+        )
+        _publish_inbound(self._ctx, self._agent_id, items)
+
+    async def execute(self) -> None:
+        subscription = await self._bridge.subscribe()
+        outcome: BaseException | None = None
+        try:
+            async with asyncio.TaskGroup() as tasks:
+                reader = tasks.create_task(
+                    self._read(subscription), name=f"harness-read-{self._agent_id}"
+                )
+                waker = tasks.create_task(self._wake(), name=f"harness-wake-{self._agent_id}")
+                try:
+                    await self._deliver_until_quiet()
+                except BaseException as error:
+                    outcome = error
+                finally:
+                    _ = reader.cancel()
+                    _ = waker.cancel()
+        finally:
+            subscription.close()
+        if outcome is not None:
+            raise outcome
+        if self._failure is not None:
+            raise self._failure
+
+    async def _read(self, subscription: EventSubscription) -> None:
+        try:
+            while (event := await subscription.get()) is not None:
+                await self._on_event(event)
+            self._failure = HarnessClosedError(
+                "harness event stream ended while inputs were in flight"
+            )
+        except Exception as exc:
+            self._failure = exc
+        self._changed.set()
+
+    async def _wake(self) -> None:
+        while True:
+            await self._bridge.wait_inbound(DELIVERY_FALLBACK_SECONDS)
+            self._changed.set()
+
+    async def _on_event(self, event: BridgeEvent) -> None:
+        if (fault := fault_of_event(self._ctx.harness, event)) is not None:
+            raise fault
+        match event:
+            case AssistantText(turn_id=turn_id, text=text):
+                self._streamed.setdefault(turn_id, []).append(text)
+                await self._projector.on_event(event)
+            case ReasoningDelta() | ReasoningText() | TextDelta() | ToolUse() | ToolResult():
+                await self._projector.on_event(event)
+            case TurnCompleted():
+                await self._on_turn_completed(event)
+            case _:
+                pass
+        self.fg, settlements = self.fg.on_event(event)
+        for settlement in settlements:
+            await self._settle(settlement)
+        self._changed.set()
+
+    async def _on_turn_completed(self, event: TurnCompleted) -> None:
+        turn = completed_turn(event, "".join(self._streamed.pop(event.turn_id, [])))
+        log_turn_usage(self._ctx, self._agent_id, self._bridge.model, turn)
+        await self._projector.finish((turn,), interrupted=turn.interrupted)
+        self._turn_ended = True
+        if turn.interrupted:
+            self.interrupted = True
+            return
+        self._publisher.emit(LLMDone(agent_id=self._agent_id).model_dump_json())
+        await persist_last_active(self._ctx, self._agent_id, turn.text)
+
+    async def _settle(self, settlement: Settlement) -> None:
+        match settlement:
+            case Commit(handed=handed):
+                items = await self._projector.append_inbound(
+                    lambda: commit_handed(self._ctx, self._agent_id, [handed]),
+                    human_input=handed.human,
+                )
+                _publish_inbound(self._ctx, self._agent_id, items)
+            case Requeue(handed=handed, reason=reason):
+                logger.info(
+                    "harness input returned to the queue",
+                    event="harness_input_requeued",
+                    agent_id=self._agent_id,
+                    key=handed.key,
+                    reason=reason,
+                )
+                self._backoff_until = asyncio.get_running_loop().time() + REDELIVER_BACKOFF_SECONDS
+                if handed.inbound_id is None:
+                    self._synthetic.insert(0, (handed, self._prompts[handed.key]))
+                else:
+                    await requeue_handed(self._ctx, self._agent_id, [handed])
+
+    async def _deliver_until_quiet(self) -> None:
+        while self._failure is None:
+            self._changed.clear()
+            if await self._deliver_ready():
+                continue
+            backoff = self._backoff_until - asyncio.get_running_loop().time()
+            if self.fg.quiet and not self._synthetic and backoff <= 0:
+                if not await self._queue_correction():
+                    return
+                continue
+            timeout = backoff if backoff > 0 else DELIVERY_FALLBACK_SECONDS
+            with suppress(TimeoutError):
+                await asyncio.wait_for(self._changed.wait(), timeout)
+
+    # meiva:note
+    # Reserve the head of the inbox, unless a refusal is still backing off. A refusal can be folded in
+    # while the reservation runs; what was just reserved is then handed back unsent, so the refused
+    # inputs keep their place ahead of anything newer.
+    # meiva:link agent/graph/docs/harness-turn.md
+    async def _reserve(self) -> list[ClaimedInbound]:
+        rows = await reserve_head_batch(self._ctx, self._agent_id)
+        if rows and asyncio.get_running_loop().time() < self._backoff_until:
+            await self._give_back(rows)
+            return []
+        return rows
+
+    async def _give_back(self, rows: Sequence[ClaimedInbound]) -> None:
+        await requeue_handed(
+            self._ctx, self._agent_id, [Handed(f"inbound-{r.id}", r.id, ()) for r in rows]
+        )
+
+    async def _render(self, rows: Sequence[ClaimedInbound]) -> list[tuple[Handed, str]]:
+        rendered: list[tuple[Handed, str]] = []
+        for item in rows:
+            try:
+                messages = prepare_steered_inbound(self._ctx, item)
+                text = render_messages(messages)
+                items, _ = build_timeline_items(messages, inputs=self._ctx.timestamp_policy())
+            except Exception:
+                await self._give_back(rows)
+                raise
+            entry = Handed(
+                f"inbound-{item.id}", item.id, tuple(items), human=is_human_wake_item(item)
+            )
+            rendered.append((entry, text))
+        return rendered
+
+    async def _deliver_ready(self) -> bool:
+        if asyncio.get_running_loop().time() < self._backoff_until:
+            return False
+        rows = await self._reserve()
+        synthetic, self._synthetic = self._synthetic, []
+        handed: list[Handed] = []
+        inputs: list[HarnessInput] = []
+        for entry, prompt in synthetic:
+            self._prompts[entry.key] = prompt
+            handed.append(entry)
+            inputs.append(HarnessInput(key=entry.key, text=prompt))
+        settled_now: list[Handed] = []
+        for entry, text in await self._render(rows):
+            if text.strip():
+                handed.append(entry)
+                inputs.append(HarnessInput(key=entry.key, text=text))
+            else:
+                settled_now.append(entry)
+        if not handed and not settled_now:
+            return False
+        if settled_now:
+            items = await self._projector.append_inbound(
+                lambda: commit_handed(self._ctx, self._agent_id, settled_now)
+            )
+            _publish_inbound(self._ctx, self._agent_id, items)
+        if not handed:
+            return True
+        self.last_key = handed[-1].key
+        self.fg = self.fg.hand(tuple(handed))
+        try:
+            await self._bridge.deliver(inputs)
+        except (HarnessClosedError, HarnessSetupError, ModelInterruptedError):
+            raise
+        except Exception as exc:
+            raise HarnessSetupError(
+                f"{self._ctx.harness.value} could not take the input: {exc}"
+            ) from exc
+        return True
+
+    async def _queue_correction(self) -> bool:
+        if not self._turn_ended or self.interrupted:
+            return False
+        self._turn_ended = False
+        invalid, self._projector.invalid_reply_visibility = (
+            self._projector.invalid_reply_visibility,
+            False,
+        )
+        correction = await harness_reply_correction(
+            self._ctx,
+            self._agent_id,
+            self._baseline,
+            invalid=invalid,
+            key=self.last_key,
+            correcting=self._correcting,
+        )
+        if correction is None:
+            return False
+        self._correcting = True
+        self._synthetic.append(correction)
+        return True
+
+
+# meiva:note
+# The correction input for a reply that broke the delivery contract, or None.
+#
+# The correction is a synthetic input like any other: its note reaches the timeline when the harness
+# reports it in context. Asking twice would loop, so a second violation is only recorded.
 async def harness_reply_correction(
     ctx: MeivaContext,
     agent_id: int,
-    state: _state.AgentState,
+    baseline: int | None,
     *,
     invalid: bool,
     key: str,
-) -> dict[str, object] | None:
-    correcting = bool((state.harness_pending_input or {}).get("visibility_correction"))
-    note = await delivery_end_reminder(
-        ctx, agent_id, state.user_delivery_baseline, correcting=correcting
-    )
+    correcting: bool,
+) -> tuple[Handed, str] | None:
+    note = await delivery_end_reminder(ctx, agent_id, baseline, correcting=correcting)
     if not invalid and note is None:
         return None
     note = note or reply_visibility_note(ctx.require_clock().now())
-    await append_turn_timeline(ctx, agent_id, [note])
     if correcting:
+        await append_turn_timeline(ctx, agent_id, [note])
         return None
-    return {
-        "prompt": render_message(note),
-        "key": f"{key}:visibility-correction",
-        "visibility_correction": True,
-    }
+    items, _ = build_timeline_items([note], inputs=ctx.timestamp_policy())
+    entry = Handed(f"{key}:visibility-correction", None, tuple(items))
+    return entry, render_message(note)
 
 
 async def _await_foreground(
@@ -387,11 +467,8 @@ async def _await_foreground(
     agent_id: int,
     bridge: TurnEngine,
     projector: HarnessTurnProjector,
-    text: str,
-    key: str,
-    pending_input: Mapping[str, object] | None,
-    input_accepted: asyncio.Event,
-) -> HarnessTurn:
+    run: ForegroundRun,
+) -> None:
     resources = ctx.hosted_resources
     async with (
         subscribe_interrupt(
@@ -401,191 +478,44 @@ async def _await_foreground(
             ctx.ops_pool, agent_id, resources=resources, scope=InterruptScope.FOREGROUND
         ) as cancel,
     ):
-        stopping = asyncio.Event()
-
-        async def accept_input() -> None:
-            if input_accepted.is_set():
-                return
-            items = await projector.append_inbound(
-                lambda: commit_harness_input(ctx, agent_id, pending_input)
-            )
-            _publish_inbound(ctx, agent_id, items)
-            input_accepted.set()
-
-        async def observe(event: BridgeEvent) -> None:
-            if isinstance(event, ForegroundAccepted):
-                await accept_input()
-                return
-            await accept_input()
-            await projector.on_event(event)
 
         async def request_cancel() -> None:
             await cancel.wait()
-            stopping.set()
             if error := await interrupt_engine(agent_id, bridge):
                 await projector.record_control(f"Cancellation unconfirmed: {error}", error=True)
 
-        async def execute() -> HarnessTurn:
-            try:
-                turn = await bridge.run_turn(text, key=key, on_event=observe)
-            except HarnessTurnFaultedError as exc:
-                if exc.outcome is not None:
-                    await accept_input()
-                raise
-            await accept_input()
-            return turn
+        async def go() -> None:
+            await _with_cancel(run.execute, request_cancel, agent_id)
 
-        async def run() -> HarnessTurn:
-            return await _with_foreground_controls(
-                execute, request_cancel, stopping, input_accepted, ctx, agent_id, bridge, projector
-            )
-
-        return await interruptible_model(
-            _ticking(ctx.turn_progress.mark, agent_id, run(), projector), lifecycle
+        await interruptible_model(
+            _ticking(ctx.turn_progress.mark, agent_id, go(), projector), lifecycle
         )
 
 
 # meiva:note
-# A foreground cancel sends a control request while the event reader remains
-# alive. Only its observed terminal outcome can end the foreground. Stop
-# admitting steering at handback, and settle any receipt already in flight.
+# A foreground cancel sends a control request while the event reader remains alive. Only the harness's
+# own terminal event ends a turn, so a cancel changes nothing about when the invocation ends: it ends
+# when everything handed over is settled and no turn runs. Inputs not yet in the context at that moment
+# are still delivered and settled; they are delivered as a new turn, as in the built-in runtime.
 # meiva:link agent/graph/docs/harness-turn.md
-async def _with_foreground_controls(
-    execute: Callable[[], Awaitable[HarnessTurn]],
-    request_cancel: Callable[[], Awaitable[None]],
-    stopping: asyncio.Event,
-    input_accepted: asyncio.Event,
-    ctx: MeivaContext,
+async def _with_cancel(
+    execute: Callable[[], Awaitable[None]],
+    request_cancel: Callable[[], Coroutine[Any, Any, None]],
     agent_id: int,
-    bridge: TurnEngine,
-    projector: HarnessTurnProjector,
-) -> HarnessTurn:
-    async def request() -> None:
-        await request_cancel()
-
-    outcome: HarnessTurn | BaseException
+) -> None:
+    outcome: BaseException | None = None
     async with asyncio.TaskGroup() as tasks:
-        cancel_task = tasks.create_task(request(), name=f"harness-cancel-{agent_id}")
-        if ctx.ops_pool is not None and isinstance(bridge, ForegroundSteering):
-            tasks.create_task(
-                _steer_while_active(ctx, agent_id, bridge, projector, stopping, input_accepted),
-                name=f"harness-steer-{agent_id}",
-            )
+        cancel_task = tasks.create_task(request_cancel(), name=f"harness-cancel-{agent_id}")
         try:
-            outcome = await execute()
+            await execute()
         except BaseException as error:
             outcome = error
         finally:
-            stopping.set()
             cancel_task.cancel()
         if isinstance(outcome, asyncio.CancelledError):
             raise outcome
-    if isinstance(outcome, BaseException):
+    if outcome is not None:
         raise outcome
-    return outcome
-
-
-async def _steer_while_active(
-    ctx: MeivaContext,
-    agent_id: int,
-    engine: ForegroundSteering,
-    projector: HarnessTurnProjector,
-    stopping: asyncio.Event,
-    input_accepted: asyncio.Event,
-) -> None:
-    while not stopping.is_set():
-        if input_accepted.is_set() and engine.steering_available:
-            try:
-                batch = await reserve_harness_steer(ctx, agent_id)
-            except PoolTimeout as exc:
-                # meiva:note
-                # PoolTimeout comes from borrowing, before reservation SQL runs.
-                # Keep the foreground alive and use the normal poll wait below;
-                # failures after reservation must retain their delivery semantics.
-                # meiva:link agent/graph/docs/harness-turn.md
-                logger.warning(
-                    "harness steer poll could not borrow a database connection",
-                    event="harness_steer_poll_pool_timeout",
-                    agent_id=agent_id,
-                    error=str(exc),
-                    retry_after_seconds=1.0,
-                )
-                batch = []
-            if batch:
-                inbound_ids = [item.id for item in batch]
-                try:
-                    messages = [msg for item in batch for msg in prepare_steered_inbound(ctx, item)]
-                    prompt = render_messages(messages)
-                except Exception:
-                    await finish_harness_steer(ctx, agent_id, inbound_ids, accepted_items=None)
-                    raise
-                if not await _send_steer(
-                    ctx,
-                    agent_id,
-                    engine,
-                    projector,
-                    stopping,
-                    batch,
-                    prompt,
-                    messages,
-                ):
-                    return
-                continue
-        with suppress(TimeoutError):
-            await asyncio.wait_for(stopping.wait(), timeout=1.0)
-
-
-async def _send_steer(
-    ctx: MeivaContext,
-    agent_id: int,
-    engine: ForegroundSteering,
-    projector: HarnessTurnProjector,
-    stopping: asyncio.Event,
-    batch: Sequence[ClaimedInbound],
-    prompt: str,
-    messages: list[BaseMessage],
-) -> bool:
-    inbound_ids = [item.id for item in batch]
-    newest_id = inbound_ids[-1]
-    try:
-        accepted = not stopping.is_set() and await engine.steer(prompt, key=f"inbound-{newest_id}")
-    except InputLostError:
-        # meiva:note
-        # The harness declared the input lost: it never reached the model's context, so it goes
-        # back to the queue in its original position and the next claim hands it over again.
-        # meiva:link agent/graph/docs/harness-turn.md
-        logger.info(
-            "harness steer input lost; returned to the queue",
-            agent_id=agent_id,
-            inbound_ids=inbound_ids,
-        )
-        await finish_harness_steer(ctx, agent_id, inbound_ids, accepted_items=None)
-        return False
-    except Exception as exc:
-        logger.warning(
-            "could not confirm harness steer delivery",
-            event="harness_steer_unconfirmed",
-            agent_id=agent_id,
-            inbound_id=newest_id,
-            inbound_ids=inbound_ids,
-            error=str(exc),
-        )
-        items = await projector.append_inbound(
-            lambda: recover_harness_steer(ctx, agent_id, publish=False)
-        )
-        _publish_inbound(ctx, agent_id, items)
-        return False
-
-    if not accepted:
-        await finish_harness_steer(ctx, agent_id, inbound_ids, accepted_items=None)
-        return False
-    timeline, _ = build_timeline_items(messages, inputs=ctx.timestamp_policy())
-    items = await projector.append_inbound(
-        lambda: finish_harness_steer(ctx, agent_id, inbound_ids, accepted_items=timeline),
-        human_input=any(is_human_wake_item(item) for item in batch),
-    )
-    _publish_inbound(ctx, agent_id, items)
-    return True
 
 
 def _publish_inbound(ctx: MeivaContext, agent_id: int, items: list[TimelineItem]) -> None:
@@ -629,23 +559,23 @@ async def _checkpoint_activity(
 
 
 # meiva:note
-# The waited turn is captured and raised after the group closes, the way
-# `interruptible_model` does it: a TaskGroup wraps a lone body error in an
-# ExceptionGroup, and the node matches a faulted session on the error's own type, so
-# the identity has to survive this scope. A cancelled turn keeps its CancelledError
-# for the same reason.
+# The waited work is captured and raised after the group closes, the way `interruptible_model` does
+# it: a TaskGroup wraps a lone body error in an ExceptionGroup, and the node matches a faulted session on
+# the error's own type, so the identity has to survive this scope. A cancelled wait keeps its
+# CancelledError for the same reason.
 # meiva:link agent/graph/docs/harness-turn.md
 async def _ticking(
     mark: Callable[[int], None],
     agent_id: int,
-    turn: Awaitable[HarnessTurn],
+    work: Awaitable[None],
     projector: HarnessTurnProjector,
-) -> HarnessTurn:
-    async def settle() -> HarnessTurn | BaseException:
+) -> None:
+    async def settle() -> BaseException | None:
         try:
-            return await turn
+            await work
         except BaseException as error:
             return error
+        return None
 
     async def tick() -> None:
         while True:
@@ -662,9 +592,8 @@ async def _ticking(
             await ticker
         with suppress(asyncio.CancelledError):
             await checkpoints
-    if isinstance(outcome, BaseException):
+    if outcome is not None:
         raise outcome
-    return outcome
 
 
 # meiva:note
@@ -677,10 +606,10 @@ def _announce_cancel(ctx: MeivaContext, agent_id: int) -> None:
 
 
 # meiva:note
-# An interrupt that cannot be delivered is reported, never raised: the durable cancel
-# row is still pending and claim dispatches it on the next pass, while a raise here
-# would turn the user's stop into a failed turn. Process observations are diagnostics.
-# The foreground ends only when the executor reports a terminal outcome.
+# An interrupt that cannot be delivered is reported, never raised: the durable cancel row is still
+# pending and claim dispatches it on the next pass, while a raise here would turn the user's stop into
+# a failed turn. Process observations are diagnostics. The foreground ends only when the executor
+# reports a terminal outcome.
 # meiva:link agent/graph/docs/harness-turn.md
 async def interrupt_engine(agent_id: int, bridge: TurnEngine) -> str | None:
     try:
@@ -703,70 +632,3 @@ async def interrupt_engine(agent_id: int, bridge: TurnEngine) -> str | None:
         turn_id=getattr(report, "turn_id", None),
     )
     return None
-
-
-# meiva:note
-# Usage is logged where every other agent turn logs it, with the harness name as the
-# `source` so the two runtimes stay comparable. A turn whose provider reported no
-# tokens is not logged at all: an all-zero row would read as a free call rather than
-# as a provider that said nothing.
-# meiva:link agent/graph/docs/harness-turn.md
-def _resolve_pricing_model(raw_model: str, catalog: ModelCatalog) -> str:
-    candidate = raw_model.removesuffix("[1m]")
-    for suffix in ("", "-high", "-medium", "-low", "-minimal"):
-        if candidate.endswith(suffix) and (s := candidate.removesuffix(suffix)) in catalog.prices:
-            return raw_model if not suffix and raw_model in catalog.prices else s
-    return raw_model
-
-
-def log_turn_usage(ctx: MeivaContext, agent_id: int, model: str | None, turn: HarnessTurn) -> None:
-    usage = turn.usage
-    if turn.replayed or (usage.input_tokens == 0 and usage.output_tokens == 0):
-        return
-    catalog = ctx.require_catalog()
-    pricing_model = _resolve_pricing_model(model or ctx.require_agent().brain.llm_model, catalog)
-    entries = (
-        [(step, 1) for step in turn.steps if step.input_tokens > 0 or step.output_tokens > 0]
-        if turn.steps
-        else [(usage, max(turn.num_turns, 1))]
-    )
-    try:
-        for step_usage, calls in entries:
-            fields = UsageFields(
-                tok_in=step_usage.input_tokens,
-                tok_out=step_usage.output_tokens,
-                tok_cached=step_usage.cache_read_input_tokens or None,
-                cache_write_5m=step_usage.cache_creation_input_tokens,
-                source=ctx.harness.value,
-                for_agent_id=agent_id,
-                calls=calls,
-            )
-            log_usage_fields(
-                pricing_model,
-                fields,
-                usage_kind="agent",
-                catalog=catalog,
-                now=ctx.require_clock().now(),
-            )
-    except Exception as error:
-        # meiva:note
-        # A bill that cannot be priced is a hole in an accounting row; the reply it
-        # describes is real either way. The turn has already finished by the time it
-        # is logged, so a raise here deletes a reply the user paid for — a provider
-        # that reports token counts in a shape the price book rejects must not cost
-        # the answer, and the recorded warning keeps the gap visible.
-        # meiva:link agent/graph/docs/harness-turn.md
-        logger.warning(
-            "[{label}] {body}",
-            label="harness",
-            event="harness_usage_log_failed",
-            body=(
-                f"agent {agent_id}'s {ctx.harness.value} turn finished but its usage could not be "
-                f"priced: {error!r}"
-            ),
-            agent_id=agent_id,
-            tok_in=usage.input_tokens,
-            tok_out=usage.output_tokens,
-            tok_cached=usage.cache_read_input_tokens,
-            cache_write=usage.cache_creation_input_tokens,
-        )

@@ -8,7 +8,7 @@ claim → before_turn ──(native)───→ llm ↔ exec ──→ claim
           └───────────(harness)──→ harness_turn ─→ claim
 ```
 
-The rewrite from `llm` to `harness_turn` lives in `route_target`, while `before_turn` is shared by both runtimes. On an external harness, `claim` stores the newly claimed inbound `BaseMessage`s in `harness_pending_input["messages"]`; `before_turn` populates a temporary `hook_state.messages` view so pre-turn hooks (`SkillRecallHook`, `newly_installed_skills`, and plugin `before_turn` hooks) inspect the real inbound messages and prepend any emitted notes onto `harness_pending_input["prompt"]` while keeping `state.messages` empty (`[]`) in the checkpoint. A compaction parks its destination in `ContextReset.resume` (`before_turn`) and `init_context` routes there so the post-reset turn also runs `before_turn` before entering `harness_turn`.
+The rewrite from `llm` to `harness_turn` lives in `route_target`, while `before_turn` is shared by both runtimes. On an external harness the claim takes only control rows (and leaves chat, system notes and heartbeats in the inbox); when it finds none but the head of the inbox holds deliverable rows, it routes to `before_turn` with that head as a read-only view in `harness_view`. Pre-turn hooks (`SkillRecallHook`, `newly_installed_skills`, and plugin `before_turn` hooks) inspect those messages and turn any note they emit into a synthetic input in `harness_inputs`; `state.messages` stays empty (`[]`) in the checkpoint. Control kinds that hand text to the harness (restart or resurrect notes, a fork marker) and a context reset's continuation are synthetic inputs too, keyed `control-<newest row id>` and `context-reset-...`. A compaction parks its destination in `ContextReset.resume` (`before_turn`) and `init_context` routes there so the post-reset turn also runs `before_turn` before entering `harness_turn`.
 
 ## Turn boundaries
 
@@ -34,8 +34,9 @@ See [foreground input and cancellation](harness-foreground.md) for the execution
 
 ## External timeline
 
-The provider session owns execution state and continuation. The Meiva claim
-node stages inbound timeline entries and commits them on provider acceptance. Native Meiva keeps its timeline in LangGraph
+The provider session owns execution state and continuation. Inbound timeline entries are
+written when the harness reports the input in the model's context (ACK 2), in the transaction that completes its
+inbox row (see [foreground input and cancellation](harness-foreground.md)). Native Meiva keeps its timeline in LangGraph
 checkpoints. The external activity projector writes to
 `agent_harness_messages` as events arrive.
 
@@ -69,19 +70,18 @@ in `FileSessionRegistry`.
   `meiva_instructions.md` in the agent's workspace and ends the message with a pointer
   to it (see [the handoff document](../../../base/lm/harness/docs/handoff.md)); after
   a compaction the bridge puts a short reminder in front of the next turn's input.
-- `run_turn` starts the session, submits turn text under the newest inbound row id
-  (or `window-{cursor + len(pending)}` when the batch carries only notes such as a
-  heartbeat check-in), and streams `BridgeEvent`s via `on_event`. Inbound text
-  omits per-turn visibility injection; invalid replies trigger a correction turn.
-  Completed keys within the same session replay the ticket outcome without emitting a second
-  completion event.
+- `deliver(inputs)` ensures the session, puts the handoff (first input of a fresh session) or the
+  compaction reminder (first input after the CLI compacted) in front of the first input, and hands the
+  batch over; `subscribe()` returns the session's events from now on, so a caller subscribes first. The
+  bridge never waits for a turn: the graph reads events and decides. Inbound text omits per-turn visibility
+  injection; a reply that breaks the contract triggers a correction input inside the same invocation.
 - A session that faults or closes mid-turn retires itself and raises a fatal stream
   abort; the next inbound opens a fresh resumed session from the registry. Only a
   failure that names this turn ends it, and a session failure ends it as a closed
   session rather than as this turn's verdict
   ([attribution](../../../base/lm/harness/docs/attribution.md)). Settled turn aborts
-  clear `harness_pending_input` alongside setting `halted=True`, so an aborted harness
-  turn leaves no stale claim in the checkpoint.
+  clear `harness_inputs` alongside setting `halted=True`, so an aborted harness
+  turn leaves no stale synthetic input in the checkpoint.
 - A non-empty notice a harness reports after its turn becomes a
   `system:harness` inbound (`base/agents/inbox/harness_notice.py`), so
   the agent wakes on it through this same path.
@@ -131,11 +131,3 @@ Native-only context/lifecycle operations (`fork`, `compact`, `meiva.self.attach`
 versus supported external-harness `meiva.self` (including `restart`, applied at the turn
 boundary) and API restart surfaces are defined in
 [Harness turn capability boundary](harness-capability-boundary.md).
-
-
-A steering poll that cannot borrow a database connection logs
-`harness_steer_poll_pool_timeout` with the agent id, error and one-second retry
-delay. The foreground keeps running and the poll waits on the normal stoppable
-interval before trying again. Pool acquisition precedes reservation SQL, so this
-retry has no inbound or claim state to undo. Failures during provider delivery or
-acknowledgement retain the existing uncertain-delivery and recovery contract.

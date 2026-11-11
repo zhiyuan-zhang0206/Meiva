@@ -10,7 +10,6 @@ from base.lm.harness.codex.frames import INVALID_REQUEST, JsonRpcError
 from base.lm.harness.codex.tests.support import start
 from base.lm.harness.events import (
     AssistantText,
-    ForegroundAccepted,
     SessionFailed,
     TextDelta,
     ToolUse,
@@ -223,7 +222,7 @@ async def test_a_notification_from_another_thread_is_ignored(tmp_path: Path) -> 
 # the authoritative response. The receipt leads even when completion arrived first.
 # meiva:link base/lm/harness/docs/attribution.md
 async def test_turn_started_binds_the_name_before_the_response(tmp_path: Path) -> None:
-    harness = await start(tmp_path, max_buffered_events=4)
+    harness = await start(tmp_path, max_buffered_events=3)
     try:
         harness.server.turn_start_gate = asyncio.get_running_loop().create_future()
         harness.server.turn_start_id = "codex-turn-early"
@@ -256,8 +255,7 @@ async def test_turn_started_binds_the_name_before_the_response(tmp_path: Path) -
         await asyncio.sleep(0.01)
         assert harness.of(TextDelta) == []
         assert harness.of(ToolUse) == []
-        assert harness.of(ForegroundAccepted) == []
-        assert harness.session.dropped_deltas == 2
+        assert harness.session.dropped_deltas == 3
 
         harness.server.message("done", turn_id="codex-turn-early")
         harness.server.complete(turn_id="codex-turn-early")
@@ -269,10 +267,9 @@ async def test_turn_started_binds_the_name_before_the_response(tmp_path: Path) -
         assert [
             type(event)
             for event in harness.events
-            if isinstance(event, ForegroundAccepted | TextDelta | ToolUse | TurnCompleted)
-        ] == [ForegroundAccepted, TextDelta, ToolUse, TurnCompleted]
+            if isinstance(event, TextDelta | ToolUse | TurnCompleted)
+        ] == [TextDelta, ToolUse, TurnCompleted]
         assert harness.of(TextDelta)[0].text == "early "
-        assert harness.of(ForegroundAccepted)[0].turn_id == turn.turn_id
     finally:
         await harness.stop()
 
@@ -298,7 +295,6 @@ async def test_rejected_start_never_accepts_a_provisionally_bound_turn(tmp_path:
         gate.set_exception(JsonRpcError(INVALID_REQUEST, "start rejected"))
         with pytest.raises(SessionClosedError, match="start rejected"):
             _ = await asyncio.wait_for(turn.outcome(), 2)
-        assert harness.of(ForegroundAccepted) == []
         assert harness.of(ToolUse) == []
         assert harness.of(AssistantText) == []
         assert harness.of(TurnCompleted) == []
@@ -347,6 +343,5 @@ async def test_early_activity_follows_the_authoritative_turn_id(tmp_path: Path) 
         assert harness.of(TurnFaulted) == []
         assert [event.tool_use_id for event in harness.of(ToolUse)] == ["actual-command"]
         assert [event.text for event in harness.of(TextDelta)] == ["mine"]
-        assert len(harness.of(ForegroundAccepted)) == 1
     finally:
         await harness.stop()

@@ -24,7 +24,7 @@ into.
 
 Plan, image, standalone sub-agent lifecycle, queue and rate-limit notifications have no timeline activity mapping.
 
-The authoritative `turn/start` response emits `ForegroundAccepted` before
+The authoritative `turn/start` response binds the turn before
 buffered notifications are dispatched.
 
 Parent: [the Codex app-server session bridge](codex.md).

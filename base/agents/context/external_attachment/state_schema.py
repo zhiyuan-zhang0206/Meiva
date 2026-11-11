@@ -73,7 +73,14 @@ class BaseAgentState(BaseModel):
     ended_with: str | None = None
     ended_with_reason: str | None = None
     turn_end_held_seconds: float | None = None
-    harness_pending_input: dict[str, object] | None = None
+    # meiva:note
+    # Inputs for an external harness that have no inbox row: a restart or resurrect note, a fork marker, a
+    # continuation after a context reset, hook notes. Each is `{"key", "prompt", "timeline_items"}`, is
+    # delivered like a row, and writes its timeline items when the harness reports it in context. The
+    # inbox rows themselves never pass through state; `harness_view` is the head of the queue as the
+    # pre-turn hooks see it.
+    harness_inputs: list[dict[str, object]] = Field(default_factory=list)
+    harness_view: list[AnyMessage] = Field(default_factory=_new_any_messages)
     user_delivery_baseline: int | None = None
     turn_active: bool = False
     non_human_wake: bool = False

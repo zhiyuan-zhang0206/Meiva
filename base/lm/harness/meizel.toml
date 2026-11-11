@@ -1,8 +1,8 @@
 exports = ["antigravity", "base_session.py", "bridge.py", "claude", "codex", "engine.py", "handoff.py", "process.py", "registration.py", "registry.py", "tests", "wiring.py"]
 
 [uses]
-"__init__.py" = ["base_session.py", "bridge.py", "engine.py", "events.py", "handoff.py", "registration.py", "registry.py"]
-"antigravity" = ["__init__.py", "base_session.py", "cancel.py", "delivery", "events.py", "handoff.py", "process.py", "registry.py", "session"]
+"__init__.py" = ["bridge.py", "delivery", "engine.py", "events.py", "handoff.py", "registration.py", "registry.py"]
+"antigravity" = ["base_session.py", "cancel.py", "delivery", "events.py", "handoff.py", "process.py", "registry.py", "session"]
 "base_session.py" = ["delivery", "events.py", "handoff.py", "process.py", "registry.py", "session"]
 "bridge.py" = ["base_session.py", "delivery", "engine.py", "events.py", "faults.py", "handoff.py", "pump.py", "registration.py"]
 "claude" = ["__init__.py", "base_session.py", "cancel.py", "delivery", "events.py", "handoff.py", "process.py", "registry.py", "session"]

@@ -41,11 +41,6 @@ class ContextCompacted:
 
 
 @dataclass(frozen=True, slots=True)
-class ForegroundAccepted:
-    turn_id: str
-
-
-@dataclass(frozen=True, slots=True)
 class ReasoningDelta:
     turn_id: str
     text: str
@@ -297,7 +292,6 @@ BridgeEvent = (
     | SessionBound
     | HandoffInjected
     | ContextCompacted
-    | ForegroundAccepted
     | ReasoningDelta
     | ReasoningText
     | TextDelta

@@ -1,9 +1,10 @@
 exports = ["roots.py"]
 
 [uses]
-"test_bridge.py" = ["roots.py"]
-"test_bridge_compaction.py" = ["test_bridge.py"]
-"test_codex_environment.py" = ["roots.py"]
+"test_bridge.py" = ["bridge_support.py", "roots.py"]
+"test_bridge_compaction.py" = ["bridge_support.py", "test_bridge.py"]
+"test_bridge_lifecycle.py" = ["bridge_support.py"]
+"test_codex_environment.py" = ["bridge_support.py", "roots.py"]
 "test_handoff.py" = []
 "test_pump.py" = ["test_bridge.py"]
 "test_registry.py" = []

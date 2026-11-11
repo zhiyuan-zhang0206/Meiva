@@ -50,7 +50,7 @@ when `Handoff.reference_file` is set.
   message and the Codex adapter maps a completed `contextCompaction` item to
   `ContextCompacted`. Antigravity's stream-json output carries no compaction signal, so it
   emits none. `HarnessBridge` remembers the event and puts `compaction_reminder(path)` in
-  front of the next `run_turn` input; it is neither a steer nor part of the mid-turn
+  front of the next batch's first input; it is not part of the mid-turn
   delivery path, and a turn that carries the full handoff needs none. A compaction the CLI
   runs outside a turn this session is running is not seen.
 

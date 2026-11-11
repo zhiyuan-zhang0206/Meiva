@@ -47,7 +47,6 @@ from base.lm.harness.claude.settle import RunningTurn, settle_result
 from base.lm.harness.delivery import HarnessInput, InputPhase, validated_batch
 from base.lm.harness.events import (
     AckSignal,
-    ForegroundAccepted,
     HarnessCause,
     InterruptConfirmed,
     SessionFailed,
@@ -233,22 +232,6 @@ class ClaudeSession(BaseHarnessSession[BridgeConfig]):
         return self._cli_pid
 
     # meiva:note
-    # Whether a turn of ours is running and still accepts steering through the compatibility
-    # wrapper (`steer()` in the base session, a thin layer over `deliver()`). `deliver()` itself
-    # is always available: the CLI queues what it is handed, whatever it is doing.
-    # meiva:link base/lm/harness/claude/docs/claude.md
-    @property
-    def steering_available(self) -> bool:
-        ticket = self._active
-        return (
-            not self._closed
-            and self._client is not None
-            and ticket is not None
-            and not ticket.interrupt_requested
-            and ticket.interrupt_ready.is_set()
-        )
-
-    # meiva:note
     # Hand a batch to the CLI, in order, each with its own uuid. A successful write is a weak receipt
     # (`InputReceived`, WEAK): the CLI may still hold the message in its queue, and it reaches the model
     # at the next tool boundary or, when the turn has no tool left to cross, as a turn of its own after
@@ -368,7 +351,6 @@ class ClaudeSession(BaseHarnessSession[BridgeConfig]):
         try:
             await self._send(entry)
             ticket.interrupt_ready.set()
-            self._emit(ForegroundAccepted(turn_id=ticket.turn_id))
         except Exception as exc:
             self._fail_turn(ticket, exc)
 
