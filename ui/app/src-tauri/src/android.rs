@@ -254,7 +254,9 @@ pub async fn show_notification<R: Runtime>(
         // The notification plugin's calls all use run_mobile_plugin internally.
         let notifier = app.notification();
         match mode {
-            NotifyMode::Retract => notifier.remove_active(vec![id]).map_err(|err| err.to_string()),
+            NotifyMode::Retract => notifier
+                .remove_active(vec![id])
+                .map_err(|err| err.to_string()),
             NotifyMode::Alert => notifier
                 .builder()
                 .id(id)

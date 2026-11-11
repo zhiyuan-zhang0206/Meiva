@@ -4,7 +4,7 @@ import json
 import subprocess
 from pathlib import Path
 
-_REPO_ROOT = Path(__file__).resolve().parents[3]
+_REPO_ROOT = Path(__file__).resolve().parents[4]
 _SCRIPT = _REPO_ROOT / "ui" / "app" / "src-tauri" / "scripts" / "notify-bridge.js"
 
 # meiva:note

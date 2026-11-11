@@ -69,7 +69,7 @@ notifying: the bridge carries no trigger of its own.
 
 ## Verification
 
-`ui/app/tests/test_notify_bridge.py` runs the checked-in bridge against a fake gateway under node
+`base/events/notifications/tests/test_notify_bridge.py` runs the checked-in bridge against a fake gateway under node
 (alert, silent replace, retract, foreground suppression, catch-up folding, deduplication). The
 Rust crate is checked by CI (`cargo check` and clippy on the desktop hosts, the Android APK build);
 the Android code path and the real notification surfaces can only be confirmed on a device:

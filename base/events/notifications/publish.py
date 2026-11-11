@@ -157,16 +157,18 @@ def announce_sync(pool: ConnectionPool, bus: SyncPublisher | None, notification_
     if row is None:
         return False
     published = bus.publish_best_effort_sync(
-        NotificationEmitted(
-            agent_id=row.agent_id,
-            notification_id=row.id,
-            category=row.category,
-            action=row.action,
-            tag=row.tag,
-            subject=row.subject,
-            body=row.body,
-            href=row.href,
-            importance=row.importance,
+        NotificationEmitted.model_validate(
+            {
+                "agent_id": row.agent_id,
+                "notification_id": row.id,
+                "category": row.category,
+                "action": row.action,
+                "tag": row.tag,
+                "subject": row.subject,
+                "body": row.body,
+                "href": row.href,
+                "importance": row.importance,
+            }
         ).model_dump_json(),
         context="notification_emitted",
     )
