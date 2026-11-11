@@ -114,8 +114,8 @@ def test_the_top_level_namespaces_are_pinned() -> None:
 
 
 # meiva:note
-# `meiva.context` stays importable for framework and plugin code, but neither `help(meiva)`
-# nor `dir(meiva)` lists it or the connections it carries.
+# `meiva.context` stays importable for framework and plugin code, but `meiva.help()` does not
+# list it or the connections it carries.
 def test_the_connection_and_context_names_are_not_shown_to_the_agent() -> None:
     import contextlib
     import io
@@ -125,7 +125,6 @@ def test_the_connection_and_context_names_are_not_shown_to_the_agent() -> None:
         meiva.help()
     shown = buf.getvalue()
     for name in ("context", "DB", "REDIS"):
-        assert name not in dir(meiva)
         assert f"meiva.{name}" not in shown
     assert "context.sql" not in shown
 

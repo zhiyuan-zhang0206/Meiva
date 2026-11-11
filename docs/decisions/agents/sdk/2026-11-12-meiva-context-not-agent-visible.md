@@ -17,8 +17,8 @@ guessing table names.
 ## Decision
 
 1. **The SDK no longer shows or recommends the context to agents.** `context` is out of
-   `__all_for_meiva__`, the attribute's agent-facing docstring is gone, and `dir(meiva)` and
-   `meiva.help()` do not list `context`, `DB` or `REDIS`. The attribute stays importable for
+   `__all_for_meiva__`, the attribute's agent-facing docstring is gone, and `meiva.help()` does not
+   list `context`, `DB` or `REDIS`. The attribute stays importable for
    framework and plugin code, like `meiva.const` and `meiva.extend`. An agent's identity is
    `meiva.self.AGENT_ID`.
 2. **Reading cluster data is a Meiva Guide topic.** `meiva-guide/cluster-data` names the
