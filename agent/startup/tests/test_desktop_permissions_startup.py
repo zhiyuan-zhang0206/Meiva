@@ -52,13 +52,13 @@ class _FakeUI:
     def __init__(self) -> None:
         self.calls: list[dict[str, object]] = []
 
-    def ask(self, **kwargs: object) -> int:
-        self.calls.append(kwargs)
-        return 1
+    def ask(self, questions: list[dict[str, object]]) -> list[int]:
+        self.calls.extend(questions)
+        return [1]
 
 
 class _FailingUI:
-    def ask(self, **kwargs: object) -> int:
+    def ask(self, questions: list[dict[str, object]]) -> list[int]:
         raise RuntimeError("gateway unreachable")
 
 

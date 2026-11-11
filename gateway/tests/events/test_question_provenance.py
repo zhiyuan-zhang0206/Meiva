@@ -31,7 +31,11 @@ def test_ask_records_the_verified_credential(db_conn: psycopg.Connection) -> Non
     with gateway_test_client() as client:
         created = client.post(
             f"/api/agents/{agent}/asks",
-            json={"title": "which credential posted this", "question": {"type": "text"}},
+            json={
+                "questions": [
+                    {"title": "which credential posted this", "question": {"type": "text"}}
+                ]
+            },
             headers=keyed_headers("provenance-create"),
         )
         feed = client.get("/api/questions/open", params={"agent_id": agent}).json()

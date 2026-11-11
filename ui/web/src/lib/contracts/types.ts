@@ -145,19 +145,24 @@ export function projectAgentStatus(row: WireAgentCard | WireAgentRow): AgentRow 
     // meiva:link ui/web/src/docs/frontend-components/agent-sidebar.md
     llm_model: null,
     reasoning_effort: null,
-    has_pending_question: questions_awaiting_response.some((question) => question.question != null),
+    has_pending_question: questions_awaiting_response.length > 0,
   };
 }
 // meiva:note
 // OpenQuestion rides the agent snapshot (questions_awaiting_response — the agent's
 // unresolved questions). QuestionItem is the standalone feed element.
-// ResolveQuestionIn is the resolve request body.
+// AnswerQuestions is the one-shot submission body.
 export type OpenQuestion = Schemas["OpenQuestion"];
 export type QuestionItem = Schemas["QuestionItem"];
 // meiva:note
 // The unresolved-questions feed (GET /api/questions).
 export type QuestionsFeed = Schemas["QuestionsFeed"];
-export type ResolveQuestionIn = Schemas["ResolveQuestionIn"];
+export type AnswerQuestions = Schemas["AnswerQuestions"];
+export type QuestionResult = Schemas["QuestionResult"];
+// meiva:note
+// What one submission came to: every open question settled, or the open set changed meanwhile and
+// nothing was settled (the latest set comes back).
+export type AnswerQuestionsResult = { kind: "settled" } | { kind: "changed"; open: QuestionItem[] };
 export type QuestionSpec = NonNullable<OpenQuestion["question"]>;
 export type QuestionAnswer = Schemas["QuestionAnswer"];
 export type AgentMessageEnqueued = Schemas["AgentMessageEnqueued"];

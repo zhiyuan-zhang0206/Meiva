@@ -1,20 +1,22 @@
 # Numbered questions and answers
 
-Each Ask carries one question; several questions may remain open independently.
-The shared contract lives in `base.api_contracts.question`.
+Each question is its own row with its own ID; one `ask` call may carry several, and the user answers
+all open questions of an agent together. The shared contracts live in
+`base.api_contracts.question` and `base.api_contracts.ask`.
 
 ```python
-meiva.ui.ask(
-    "Which surfaces should change?",
-    content="Choose the scope for this iteration.",
-    question={
+meiva.ui.ask([
+    {
+        "title": "Which surfaces should change?",
+        "content": "Choose the scope for this iteration.",
         "type": "multi_select",
         "options": [
             {"id": "web", "label": "Web notification center"},
             {"id": "inspector", "label": "Agent inspector"},
         ],
     },
-)
+    {"title": "Anything else to keep out of scope?"},
+])
 ```
 
 Options are numbered **1, 2, ... in their declared order**, not sorted by ID,
@@ -40,6 +42,16 @@ applies it to the draft, which the user can edit or clear. Suggestions are never
 submitted implicitly. Selecting options preserves a choice question's Note.
 There is no Other option or Add note button. A single choice is cleared by
 choosing it again. Nothing is preselected and selecting an option never submits.
+The Web shows all of an agent's open questions in one form in question ID order, each
+with its controls and a Skip; one Submit settles them all and is enabled only when every
+question is answered or skipped.
+
+`POST /api/keyed/v1/agents/{agent_id}/questions/answers` takes `expected_ids` (the open set the
+user saw) and one result per id: `answer`, a numbered text `reply`, or `skip`. It is one keyed
+operation: it settles every open question in one transaction and delivers one inbound. A result
+set that does not match `expected_ids` is a 422; when the agent's open set differs from
+`expected_ids` (a question was asked or closed meanwhile) nothing is settled and the response is a
+409 carrying the latest open set. A skip is stored as `resolution='dismissed'`.
 
 Web choice answers send `answer.option_ids` and optional `answer.comment`;
 text answers send `answer.text`. Existing stored answers and other callers'
@@ -53,7 +65,7 @@ comment below it — the same comment-only answer the Web form submits, so no
 channel is narrower than another. Mixing `0` with option numbers is refused, and
 `0` alone carries nothing, so it is refused too.
 Invalid, duplicate or unknown selections leave the question unanswered.
-Closing without answering delivers an explicit dismissal, never authorization.
+A skip delivers `Skipped by the user.`, never authorization.
 
 Legacy `allow_other` and `other_text` fields remain readable so historical answers
 retain their original meaning. New questions cannot enable Other and new answers

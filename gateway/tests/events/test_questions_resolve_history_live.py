@@ -5,65 +5,27 @@ import psycopg
 import pytest
 
 from base.agents.observation.snapshot import select_one
-from base.api_contracts.idempotency import keyed_headers
 from base.config import settings
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
 from gateway.tests.auth.gateway_config import gateway_test_client
-from gateway.tests.events.test_questions_endpoint import insert_question, pending_rows, seed_agent
+from gateway.tests.events.test_questions_endpoint import (
+    answer_body,
+    answers_path,
+    insert_question,
+    pending_rows,
+    seed_agent,
+    skip_body,
+)
 from gateway.tests.support.live_events.recorder import recording_live_events
-
-
-@pytest.mark.parametrize("reply", [None, "Acknowledged"])
-def test_new_read_operations_are_rejected_without_effects(
-    db_conn: psycopg.Connection,
-    reply: str | None,
-) -> None:
-    agent = seed_agent(db_conn)
-    question = insert_question(db_conn, agent, "Question")
-    with gateway_test_client() as client:
-        result = client.post(
-            f"/api/keyed/v1/agents/{agent}/questions/{question}/resolve",
-            json={"action": "read", "reply": reply},
-            headers=keyed_headers(str(uuid4())),
-        )
-    assert result.status_code == 422
-    assert db_conn.execute(
-        "SELECT resolved_at, reply FROM agent_questions WHERE id=%s", (question,)
-    ).fetchone() == (None, None)
-    assert pending_rows(db_conn, agent) == []
-    assert db_conn.execute("SELECT count(*) FROM keyed_operation_receipts").fetchone() == (0,)
-
-
-def test_read_keeps_question_in_snapshot(
-    db_conn: psycopg.Connection, *, model_catalog: ModelCatalog
-) -> None:
-    a = seed_agent(db_conn)
-    nid = insert_question(db_conn, a, "needs answer")
-    with gateway_test_client() as client:
-        resp = client.post(
-            f"/api/keyed/v1/agents/{a}/questions/{nid}/resolve",
-            json={"action": "read"},
-            headers={"Idempotency-Key": str(uuid4()), "Idempotency-Scope": "principal-v1"},
-        )
-    assert resp.status_code == 422
-    snap = select_one(
-        db_conn,
-        a,
-        catalog=model_catalog,
-        default_model=settings.lm.llm_model,
-    )
-    assert snap is not None
-    assert [n.id for n in snap.questions_awaiting_response] == [nid]
-    assert pending_rows(db_conn, a) == []
 
 
 def test_resolve_nonexistent_409(db_conn: psycopg.Connection) -> None:
     a = seed_agent(db_conn)
     with gateway_test_client() as client:
         resp = client.post(
-            f"/api/keyed/v1/agents/{a}/questions/999999/resolve",
-            json={"action": "dismiss"},
+            answers_path(a),
+            json=skip_body(999999),
             headers={"Idempotency-Key": str(uuid4()), "Idempotency-Scope": "principal-v1"},
         )
     assert resp.status_code == 409
@@ -75,13 +37,13 @@ def test_resolve_twice_second_is_409_and_delivers_once(db_conn: psycopg.Connecti
     nid = insert_question(db_conn, a, "q?")
     with gateway_test_client() as client:
         first = client.post(
-            f"/api/keyed/v1/agents/{a}/questions/{nid}/resolve",
-            json={"action": "answer", "reply": "one"},
+            answers_path(a),
+            json=answer_body(nid, "one"),
             headers={"Idempotency-Key": str(uuid4()), "Idempotency-Scope": "principal-v1"},
         )
         second = client.post(
-            f"/api/keyed/v1/agents/{a}/questions/{nid}/resolve",
-            json={"action": "answer", "reply": "two"},
+            answers_path(a),
+            json=answer_body(nid, "two"),
             headers={"Idempotency-Key": str(uuid4()), "Idempotency-Scope": "principal-v1"},
         )
     assert first.status_code == 201
@@ -97,8 +59,8 @@ def test_resolve_cross_agent_path_409(
     nid = insert_question(db_conn, a, "for a")
     with gateway_test_client() as client:
         resp = client.post(
-            f"/api/keyed/v1/agents/{b}/questions/{nid}/resolve",
-            json={"action": "answer", "reply": "x"},
+            answers_path(b),
+            json=answer_body(nid, "x"),
             headers={"Idempotency-Key": str(uuid4()), "Idempotency-Scope": "principal-v1"},
         )
     assert resp.status_code == 409
@@ -181,8 +143,8 @@ def test_resolution_publishes_question_id(db_conn: psycopg.Connection, event_bus
 
     with recording_live_events(event_bus) as live, gateway_test_client() as client:
         resp = client.post(
-            f"/api/keyed/v1/agents/{agent_id}/questions/{open_id}/resolve",
-            json={"action": "dismiss"},
+            answers_path(agent_id),
+            json=skip_body(open_id),
             headers={"Idempotency-Key": str(uuid4()), "Idempotency-Scope": "principal-v1"},
         )
         published = [event.payload["question_id"] for event in live.settle("question_resolved", 1)]

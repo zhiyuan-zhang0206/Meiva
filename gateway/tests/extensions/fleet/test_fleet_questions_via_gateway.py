@@ -75,11 +75,13 @@ def test_sdk_question_keeps_number_order_in_snapshot(
     agent_id = seed_agent(db_conn)
     pin_agent(agent_id)
     ui.ask(
-        "Choose the scope?",
-        question={
-            "type": "single_select",
-            "options": [{"id": "z", "label": "First"}, {"id": "a", "label": "Second"}],
-        },
+        [
+            {
+                "title": "Choose the scope?",
+                "type": "single_select",
+                "options": [{"id": "z", "label": "First"}, {"id": "a", "label": "Second"}],
+            }
+        ]
     )
     db_conn.rollback()
     snapshot = select_one(

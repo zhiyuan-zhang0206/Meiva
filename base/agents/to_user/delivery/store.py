@@ -174,7 +174,7 @@ class PendingQuestion(BaseModel):
     id: int
     title: str
     content: str | None
-    question: QuestionSpec | None
+    question: QuestionSpec
 
 
 def pending_questions(conn: Connection, agent_id: int) -> str:
@@ -189,7 +189,7 @@ def pending_questions(conn: Connection, agent_id: int) -> str:
         return ""
     entries = [
         f"Open Ask #{row.id}: {row.title[:1000]}\n{(row.content or '')[:800]}\nQuestion: "
-        + (row.question.model_dump_json()[:1600] if row.question else "text")
+        + row.question.model_dump_json()[:1600]
         for row in rows[:20]
     ]
     if len(rows) > 20:

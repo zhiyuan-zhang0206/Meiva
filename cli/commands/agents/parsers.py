@@ -156,16 +156,15 @@ class _QuestionsListOptions:
 
 
 @dataclass(frozen=True)
-class _QuestionsResolveOptions:
-    question_id: int
+class _QuestionsAnswerOptions:
     agent: int
-    action: Literal["answer", "dismiss"]
-    reply: str | None
+    answer: list[str] | None
+    skip: list[int] | None
 
 
 @dataclass(frozen=True)
-class _QuestionsClearOptions:
-    agent: int
+class _QuestionsSkipOptions:
+    agent: int | None
     force: bool
     stale: bool
 
@@ -388,31 +387,35 @@ def _h_questions_list(args: argparse.Namespace) -> int:
     )
 
 
-def _h_questions_resolve(args: argparse.Namespace) -> int:
+def _h_questions_answer(args: argparse.Namespace) -> int:
     from base.cluster.machine.boot import gateway_access_from_boot
-    from cli.commands.agents.questions import cmd_questions_resolve
+    from cli.commands.agents.questions import cmd_questions_answer
     from cli.database.runtime import runtime_of
 
-    opts = options(args, _QuestionsResolveOptions)
+    opts = options(args, _QuestionsAnswerOptions)
     runtime = runtime_of(args)
-    return cmd_questions_resolve(
+    try:
+        answers = [_id_and_text(value) for value in opts.answer or []]
+    except ValueError as exc:
+        print(f"meiva: --answer {exc}", file=sys.stderr)
+        return 2
+    return cmd_questions_answer(
         gateway_access_from_boot(runtime.config),
-        question_id=opts.question_id,
         agent_id=opts.agent,
-        action=opts.action,
-        reply=opts.reply,
+        answers=answers,
+        skips=opts.skip or [],
         idempotency_key=runtime.new_id(),
     )
 
 
-def _h_questions_clear(args: argparse.Namespace) -> int:
+def _h_questions_skip(args: argparse.Namespace) -> int:
     from base.cluster.machine.boot import gateway_access_from_boot
-    from cli.commands.agents.questions import cmd_questions_clear
+    from cli.commands.agents.questions import cmd_questions_skip
     from cli.database.runtime import runtime_of
 
-    opts = options(args, _QuestionsClearOptions)
+    opts = options(args, _QuestionsSkipOptions)
     runtime = runtime_of(args)
-    return cmd_questions_clear(
+    return cmd_questions_skip(
         gateway_access_from_boot(runtime.config),
         agent_id=opts.agent,
         force=opts.force,
@@ -420,6 +423,13 @@ def _h_questions_clear(args: argparse.Namespace) -> int:
         stdin=runtime.terminal.stdin,
         rng=runtime.rng,
     )
+
+
+def _id_and_text(value: str) -> tuple[int, str]:
+    number, separator, text = value.partition("=")
+    if not separator or not number.isdigit() or not text:
+        raise ValueError("expects ID=TEXT")
+    return int(number), text
 
 
 def _add_timeline_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
@@ -675,7 +685,7 @@ def add_agents_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) 
 def _add_questions_parsers(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     questions_p = sub.add_parser(
         "questions",
-        help="list, answer and clear the questions agents ask (meiva.ui.ask)",
+        help="list, answer and skip the questions agents ask (meiva.ui.ask)",
     )
     questions_sub = questions_p.add_subparsers(dest="questions_cmd", required=True)
 
@@ -689,25 +699,31 @@ def _add_questions_parsers(sub: argparse._SubParsersAction[argparse.ArgumentPars
     )
     questions_list_p.set_defaults(func=_h_questions_list)
 
-    questions_resolve_p = questions_sub.add_parser(
-        "resolve",
-        help="resolve one question (answer|dismiss)",
+    questions_answer_p = questions_sub.add_parser(
+        "answer",
+        help="settle every open question of one agent: answer or skip each",
     )
-    questions_resolve_p.add_argument("question_id", type=int)
-    questions_resolve_p.add_argument("--agent", type=int, required=True)
-    questions_resolve_p.add_argument("--action", choices=("answer", "dismiss"), required=True)
-    questions_resolve_p.add_argument("--reply", default=None)
-    questions_resolve_p.set_defaults(func=_h_questions_resolve)
+    questions_answer_p.add_argument("--agent", type=int, required=True)
+    questions_answer_p.add_argument(
+        "--answer",
+        action="append",
+        metavar="ID=TEXT",
+        help="answer one question with a numbered reply (repeatable)",
+    )
+    questions_answer_p.add_argument(
+        "--skip", type=int, action="append", metavar="ID", help="skip one question (repeatable)"
+    )
+    questions_answer_p.set_defaults(func=_h_questions_answer)
 
-    questions_clear_p = questions_sub.add_parser(
-        "clear",
-        help="resolve every open question of one agent (dismiss without answering)",
+    questions_skip_p = questions_sub.add_parser(
+        "skip",
+        help="skip every open question of one agent, or of terminated agents (--stale)",
     )
-    questions_clear_p.add_argument("--agent", type=int, required=True)
-    questions_clear_p.add_argument("--force", action="store_true")
-    questions_clear_p.add_argument(
+    questions_skip_p.add_argument("--agent", type=int, default=None)
+    questions_skip_p.add_argument("--force", action="store_true")
+    questions_skip_p.add_argument(
         "--stale",
         action="store_true",
-        help="clear open questions of terminated agents (not --agent)",
+        help="skip open questions of terminated agents (not --agent)",
     )
-    questions_clear_p.set_defaults(func=_h_questions_clear)
+    questions_skip_p.set_defaults(func=_h_questions_skip)

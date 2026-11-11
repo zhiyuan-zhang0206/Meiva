@@ -1,62 +1,24 @@
 # Question Operation Receipts
 
-Question creation (`POST /api/agents/{id}/asks`) and question resolution require `Idempotency-Key` and
-`Idempotency-Scope: principal-v1` headers.
-`keyed_operation_receipts` owns each normalized request and its immutable
-result, scoped by concrete HTTP path and the credential-aware key. The receipt
-and all question/reply mutations commit together. Concurrent retries serialize
-in Postgres; changed inputs conflict (409). Missing keys fail before mutation. Replay of the same key returns its original inbound. A fresh read operation is rejected.
+Asking (`POST /api/agents/{id}/asks`), closing (`POST /api/agents/{id}/asks/{question_id}/close`) and
+answering (`POST /api/keyed/v1/agents/{id}/questions/answers`) require `Idempotency-Key` and
+`Idempotency-Scope: principal-v1` headers. `keyed_operation_receipts` owns each normalized request
+and its immutable result, scoped by concrete HTTP path and the credential-aware key. The receipt and
+all question and reply mutations commit together. Concurrent retries serialize in Postgres; changed
+inputs conflict (409). Missing keys fail before mutation. Replay of the same key returns its
+original result.
 
-A resolution receipt holds its original optional inbound id. Retry repairs
-its wake tail, with the exact pending-row resurrection guard preventing revival
-of completed work. An answer or dismissal which originally succeeded replays
-instead of returning an already-resolved conflict. Historical read receipts still replay; they do not admit a new read operation.
+An ask receipt keeps the original ids, in order; a replay returns them and never inserts a second
+row. An absent Note suggestion stays absent from serialized questions, so adding the optional field
+never changes request equality or accepted retries. Every ask, close and answer locks the agent row,
+so they serialize per agent.
 
-An ask receipt keeps the original question id; a replay returns it and never
-inserts a second row. Receipts written by the removed question-creation route stay
-in the table as inert history. An absent Note suggestion stays absent from
-serialized questions, so adding the optional field never changes historical
-request equality or accepted retries. Every ask locks the agent row to serialize
-local id allocation.
+An answer receipt holds its inbound id. Retry repairs its wake tail, with the exact pending-row
+resurrection guard preventing revival of completed work. A submission that originally succeeded
+replays instead of returning the open-set conflict. A submission whose `expected_ids` differ from the
+agent's open set writes no receipt (nothing was settled); the 409 carries the latest open set and the
+caller submits again under a new key.
 
-Receipts have no TTL pruning: expiration cannot turn a known operation into a
-new side effect. Any future retention design needs explicit expired-key
-semantics. The transport uses a runtime-owned operation identity and retries an
-ambiguous outcome under the same key.
-
-Browser resolution uses the fixed required-key/principal route
-`POST /api/keyed/v1/agents/{id}/questions/{question_id}/resolve`. It reuses this same
-transaction owner, scoped to its own concrete path; keys are not
-interchangeable across paths. The API accepts a caller operation
-id or allocates one per invocation. The mounted reply component retains the
-same key for a manual retry of an unchanged action/reply/target after failure;
-changed input starts a new intent. It does not persist or automatically retry
-requests, and an unsupported server is refused without fallback.
-CLI resolution uses the same route, sending one fresh key and the
-`principal-v1` scope per invocation; they remain single attempts.
-
-## Structured question resolutions
-
-Question rows carry immutable question JSON.
-Answer resolution validates the submitted selection against the locked question,
-canonicalizes selected IDs into its original number order, commits answer JSON
-(an empty selection with a comment is a complete answer; one with neither is
-refused),
-readable reply, question state, inbound and operation receipt together. Text-only
-clients use the same validator after parsing the numbered first line. Numbers inside the optional comment never select an option. Replay keeps the original inbound and
-answer without validating against later state.
-Legacy operation normalization omits absent question/answer fields so old accepted
-receipt requests retain their equality across this additive schema upgrade.
-
-## Provenance of a question write
-
-`agent_questions.source_verified_by` records the credential the auth middleware
-verified for the request that wrote the row — the same fact vocabulary inbound
-messages already store (`cluster_bearer`, `machine_token:<class>`,
-`user_session`, `machine_session:runner`, `trusted_network`). The path's
-`agent_id` is the caller's own claim and is deliberately not copied there; the
-row therefore answers "which credential posted this" rather than "which agent
-the caller said it was". In-process writers that present no credential at all
-(task maintenance) write the literal `internal`, and rows written before the
-column existed keep `NULL`. The value rides the question feed
-(`GET /api/questions` and `/open`) and `meiva questions list`.
+Receipts have no TTL pruning: expiration cannot turn a known operation into a new side effect. The
+transport uses a runtime-owned operation identity and retries an ambiguous outcome under the same
+key. The same table serves the publications' seen cursor and the reply-suggestion feedback.

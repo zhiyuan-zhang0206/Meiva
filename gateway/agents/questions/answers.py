@@ -1,58 +1,47 @@
 # meiva:note
-# Bind a submitted answer to the locked question's immutable question.
+# Bind a submitted outcome to the locked question's immutable spec and render what the agent receives.
 
 from typing import NamedTuple
 
 from fastapi import HTTPException
 
+from base.api_contracts.ask import QuestionResult
 from base.api_contracts.question import (
     QuestionAnswer,
-    QuestionSpec,
     answer_reply,
     parse_numbered_answer,
     parse_question,
     validate_answer,
 )
-from gateway.agents.schemas import ResolveQuestionIn
 
 
 class ResolutionAnswer(NamedTuple):
-    reply: str | None
-    answer: QuestionAnswer | None
+    reply: str
+    answer: QuestionAnswer
 
 
 # meiva:note
-# Adapt text-only clients and validate against the authoritative stored options.
-def resolution_answer(body: ResolveQuestionIn, raw_question: object) -> ResolutionAnswer:
-    if raw_question is None:
-        if body.answer is not None:
-            raise HTTPException(status_code=422, detail="this question has no structured question")
-        return ResolutionAnswer(body.reply, None)
+# Adapt text-only clients and validate against the authoritative stored options. A skip never
+# reaches this function.
+def result_answer(result: QuestionResult, raw_question: object) -> ResolutionAnswer:
     question = parse_question(raw_question)
-    if body.action != "answer":
-        return ResolutionAnswer(body.reply, None)
+    if result.answer is None and result.reply is None:
+        raise TypeError("a skipped result has no answer to settle")
     try:
-        answer = _submitted_answer(question, body)
+        if result.answer is not None:
+            answer = validate_answer(question, result.answer)
+        else:
+            answer = parse_numbered_answer(question, result.reply or "")
     except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
+        raise HTTPException(status_code=422, detail=f"question {result.id}: {exc}") from exc
     return ResolutionAnswer(answer_reply(question, answer), answer)
 
 
-def _submitted_answer(question: QuestionSpec, body: ResolveQuestionIn) -> QuestionAnswer:
-    if body.answer is not None:
-        return validate_answer(question, body.answer)
-    if body.reply is not None:
-        return parse_numbered_answer(question, body.reply)
-    raise ValueError("answer requires a structured answer or a numbered text reply")
+SKIPPED = "Skipped by the user."
 
 
 # meiva:note
-# Render the resolution as question-system content, never an implicit approval.
-def resolution_inbound(title: str, action: str, reply: str | None) -> str | None:
-    if reply is not None:
-        return f'Re: "{title}"\n\n{reply}'
-    if action == "dismiss":
-        return (
-            f'Re: "{title}"\n\n[This question was dismissed by the user — no answer will arrive.]'
-        )
-    return None
+# One block of the agent's inbound per question, in question id order, each opening with the
+# recognisable `Re: question #id "title"` header. A skip is stated as a fact, never as approval.
+def reply_block(question_id: int, title: str, reply: str | None) -> str:
+    return f'Re: question #{question_id} "{title}"\n\n{SKIPPED if reply is None else reply}'

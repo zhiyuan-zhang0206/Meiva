@@ -5,8 +5,8 @@ import pytest
 from base.events.notifications.catalog import QUESTION_CATEGORY, UNREAD_CATEGORY
 from base.events.notifications.triggers import (
     NotificationAction,
-    plan_question_asked,
-    plan_question_resolved,
+    plan_questions_cleared,
+    plan_questions_open,
     plan_unread_delivery,
     plan_unread_seen,
 )
@@ -67,19 +67,33 @@ def test_a_cursor_move_that_clears_nothing_retracts_nothing(
     )
 
 
-def test_a_question_alerts_when_asked_and_retracts_when_resolved() -> None:
-    asked = plan_question_asked(question_id=31, title="Deploy now?", agent_label="Builder")
-    resolved = plan_question_resolved(question_id=31, title="Deploy now?", agent_label="Builder")
-    assert (asked.category, asked.action, asked.tag) == (
+def test_the_first_open_question_alerts_later_ones_replace_silently_and_the_end_retracts() -> None:
+    first = plan_questions_open(
+        agent_id=7, agent_label="Builder", open_count=1, first_title="Deploy now?", had_open=False
+    )
+    more = plan_questions_open(
+        agent_id=7, agent_label="Builder", open_count=3, first_title="Deploy now?", had_open=True
+    )
+    cleared = plan_questions_cleared(agent_id=7, agent_label="Builder")
+    assert (first.category, first.action, first.tag) == (
         QUESTION_CATEGORY,
         NotificationAction.ALERT,
-        "question:31",
+        "question:agent:7",
     )
-    assert (resolved.action, resolved.tag) == (NotificationAction.RETRACT, "question:31")
-    assert asked.subject == "Deploy now?"
+    assert first.subject == "Deploy now?"
+    assert (more.action, more.tag, more.subject) == (
+        NotificationAction.REPLACE,
+        "question:agent:7",
+        "3 questions awaiting an answer",
+    )
+    assert (cleared.action, cleared.tag) == (NotificationAction.RETRACT, "question:agent:7")
 
 
-def test_each_question_has_its_own_identity() -> None:
-    first = plan_question_asked(question_id=1, title="A?", agent_label="x")
-    second = plan_question_asked(question_id=2, title="B?", agent_label="x")
-    assert first.tag != second.tag
+def test_each_agent_has_its_own_question_push() -> None:
+    one = plan_questions_open(
+        agent_id=1, agent_label="x", open_count=1, first_title="A?", had_open=False
+    )
+    two = plan_questions_open(
+        agent_id=2, agent_label="x", open_count=1, first_title="A?", had_open=False
+    )
+    assert one.tag != two.tag

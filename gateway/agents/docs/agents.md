@@ -33,7 +33,7 @@ propagate. Configured compact-history depth still bounds accessible segments.
 - [Guarded launch retry acceptance](launch-retry.md) — explicit native launch retry.
 - [System Note Acceptance](system-note.md) — system-note writes.
 - [Reply Suggestion](reply-suggestion/reply-suggestion.md) — gated, drafted reply shown in the empty composer.
-- [Notice Operation Receipts](operation-receipts.md) — notice operation receipts.
+- [Question Operation Receipts](operation-receipts.md) — keyed question operation receipts.
 - [Completion notice digest](completion-notice-digest.md) — completion notice reads and digest ownership.
 - [Agent Cross-Machine Transfer](agent-transfer.md) — cross-machine workspace and ownership transfer for quiescent native agents.
 - [Guarded compound task assignment](../task_assignment/README.md) — compound task and agent acceptance with independent launch recovery.

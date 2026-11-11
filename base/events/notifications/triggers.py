@@ -32,10 +32,6 @@ def _unread_tag(agent_id: int) -> str:
     return f"unread:{agent_id}"
 
 
-def _question_tag(question_id: int) -> str:
-    return f"question:{question_id}"
-
-
 # meiva:note
 # The unread state is the seen cursor, nothing stored beside it. A delivery written while the user
 # had nothing unread starts a new round and alerts once; a delivery written while an unread push is
@@ -73,21 +69,36 @@ def plan_unread_seen(
     )
 
 
-def plan_question_asked(*, question_id: int, title: str, agent_label: str) -> PushPlan:
+def _questions_tag(agent_id: int) -> str:
+    return f"question:agent:{agent_id}"
+
+
+def _questions_subject(open_count: int, first_title: str) -> str:
+    return first_title if open_count == 1 else f"{open_count} questions awaiting an answer"
+
+
+# meiva:note
+# One push per agent, not per question: the first open question alerts, every later one only swaps
+# the content of the push already showing (silent), and the push is retracted when the agent has
+# no open question left. A batch of questions in one ask is one event of this kind.
+# meiva:link base/events/notifications/README.md
+def plan_questions_open(
+    *, agent_id: int, agent_label: str, open_count: int, first_title: str, had_open: bool
+) -> PushPlan:
     return PushPlan(
         category=QUESTION_CATEGORY,
-        action=NotificationAction.ALERT,
-        tag=_question_tag(question_id),
-        subject=title,
+        action=NotificationAction.REPLACE if had_open else NotificationAction.ALERT,
+        tag=_questions_tag(agent_id),
+        subject=_questions_subject(open_count, first_title),
         body=agent_label,
     )
 
 
-def plan_question_resolved(*, question_id: int, title: str, agent_label: str) -> PushPlan:
+def plan_questions_cleared(*, agent_id: int, agent_label: str) -> PushPlan:
     return PushPlan(
         category=QUESTION_CATEGORY,
         action=NotificationAction.RETRACT,
-        tag=_question_tag(question_id),
-        subject=title,
+        tag=_questions_tag(agent_id),
+        subject="Questions answered",
         body=agent_label,
     )

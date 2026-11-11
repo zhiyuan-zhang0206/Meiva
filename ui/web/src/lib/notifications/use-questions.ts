@@ -120,6 +120,17 @@ export function dropOpenQuestions(queryClient: QueryClient, questionIds: number[
   });
 }
 
+// meiva:note
+// Take the server's latest open set of one agent after a submission found the set changed:
+// replaces that agent's rows in the shared feed and lets the next refetch reconcile the rest.
+export function replaceAgentQuestions(queryClient: QueryClient, agentId: number, open: QuestionItem[]): void {
+  queryClient.setQueryData<QuestionsFeedWire>(QUESTIONS_QUERY_KEY, (old) => {
+    if (!old) return old;
+    return { ...old, awaiting: [...old.awaiting.filter((n) => n.agent_id !== agentId), ...open] };
+  });
+  void queryClient.invalidateQueries({ queryKey: QUESTIONS_QUERY_KEY });
+}
+
 export function dropTombstonesResetForTest(): void {
   for (const timer of tombstoneState.timers.values()) clearTimeout(timer);
   tombstoneState.timers.clear();

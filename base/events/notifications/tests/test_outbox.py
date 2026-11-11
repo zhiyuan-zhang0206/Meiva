@@ -9,7 +9,11 @@ from psycopg_pool import ConnectionPool
 from base.db import create_agent
 from base.db.transaction import write_transaction
 from base.events.notifications.outbox import republish_pending
-from base.events.notifications.publish import announce_sync, stage_question_asked
+from base.events.notifications.publish import (
+    announce_sync,
+    open_question_count,
+    stage_open_questions,
+)
 
 
 def _pool(db_url: str) -> ConnectionPool[psycopg.Connection[TupleRow]]:
@@ -58,9 +62,12 @@ def _stage(
     pool: ConnectionPool[psycopg.Connection[TupleRow]], agent_id: int, question_id: int
 ) -> int:
     with write_transaction(pool) as conn:
-        stage_question_asked(
-            conn, agent_id=agent_id, question_id=question_id, title=f"Question {question_id}?"
+        before = open_question_count(conn, agent_id)
+        conn.execute(
+            'INSERT INTO agent_questions (agent_id, title, question) VALUES (%s, %s, \'{"type": "text"}\')',
+            (agent_id, f"Question {question_id}?"),
         )
+        stage_open_questions(conn, agent_id, open_before=before)
         row = conn.execute("SELECT max(id) FROM notification_events").fetchone()
     assert row is not None
     return int(row[0])
@@ -104,7 +111,7 @@ def test_the_sweep_announces_a_committed_push_once(
     assert event["notification_id"] == notification_id
     assert (event["action"], event["tag"], event["subject"]) == (
         "alert",
-        "question:5",
+        f"question:agent:{agent_id}",
         "Question 5?",
     )
 
@@ -140,10 +147,10 @@ class ExplodingBus(RecordingBus):
 def test_one_failing_row_does_not_hold_the_rest_of_the_sweep(
     db_conn: psycopg.Connection, db_url: str
 ) -> None:
-    agent_id = create_agent(db_conn)
+    agents = [create_agent(db_conn) for _ in range(3)]
     db_conn.commit()
     with _pool(db_url) as pool:
-        ids = [_stage(pool, agent_id, index) for index in range(3)]
+        ids = [_stage(pool, agent, index) for index, agent in enumerate(agents)]
         broken = ids[1]
         assert republish_pending(pool, ExplodingBus("Question 1?"), limit=10) == 2
         assert _announced_at(db_conn, ids[0]) is not None

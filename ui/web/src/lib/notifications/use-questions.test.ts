@@ -33,6 +33,7 @@ function question(id: number, title: string): QuestionItem {
     agent_label: null,
     title,
     content: null,
+    question: { type: "text" },
     created_at: "2026-06-14T00:00:00Z",
   };
 }

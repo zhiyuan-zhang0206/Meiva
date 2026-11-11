@@ -29,7 +29,9 @@ import type {
   PackageDraftResponse,
   PackageKind,
   ResolvedConfigView,
-  ResolveQuestionIn,
+  AnswerQuestions,
+  AnswerQuestionsResult,
+  QuestionItem,
   RestartAgentResponse,
   ResurrectAgentResponse,
   RetryLaunchAccepted,
@@ -315,17 +317,22 @@ export function createControlApi(http: Http) {
     markUserMessagesSeen: (agentId: number, body: MarkUserMessagesSeen, key: string): Promise<UserMessagesSeen> =>
       f(`/api/keyed/v1/agents/${agentId}/user-messages/seen`, keyedJson(body, key)).then(ok<UserMessagesSeen>),
 
-    resolveQuestion: (
+    // meiva:note
+    // One submission settles every open question of the agent. A 409 is not an error: the open set
+    // changed since the form was built, nothing was settled, and the body carries the latest set.
+    answerQuestions: (
       agentId: number,
-      questionId: number,
-      body: ResolveQuestionIn,
+      body: AnswerQuestions,
       idempotencyKey: string = newOperationKey(),
-    ): Promise<{ status: string }> => {
-      return f(
-        `/api/keyed/v1/agents/${agentId}/questions/${questionId}/resolve`,
-        keyedJson(body, idempotencyKey),
-      ).then(ok<{ status: string }>);
-    },
+    ): Promise<AnswerQuestionsResult> =>
+      f(`/api/keyed/v1/agents/${agentId}/questions/answers`, keyedJson(body, idempotencyKey)).then(async (res) => {
+        if (res.status === 409) {
+          const changed = (await res.json()) as { open: QuestionItem[] };
+          return { kind: "changed", open: changed.open };
+        }
+        await ok<{ status: string }>(res);
+        return { kind: "settled" };
+      }),
 
     compact: (agentId: number): Promise<CompactAgentResponse> =>
       f(`/api/agents/${agentId}/compact`, postInit).then(ok<CompactAgentResponse>),

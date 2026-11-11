@@ -20,13 +20,13 @@
   `--message TEXT` (and `--source`) and `compact` takes neither. `transfer` relocates an `idling` or `terminated`
   native agent and its workspace across machines and refuses running agents with
   409 ([agent transfer](../../../gateway/agents/docs/agent-transfer.md)).
-- `meiva questions list/resolve/clear`: `resolve` reports success only when the
-  gateway accepts the action. A 409 conflict is an error, including an absent
-  question, an action-kind mismatch, or an already-resolved answer/dismissal.
-  Every question requires a response; fresh mark-read operations are rejected.
-  `clear --agent` explicitly dismisses each open question after confirmation
-  (`--force` skips confirmation). `clear --stale` targets only terminated agents.
-  Resolution is one keyed attempt (`principal-v1`) with a fresh key per invocation.
+- `meiva questions list/answer/skip`: the gateway settles all of an agent's open questions in one
+  submission, so `answer --agent N` takes one `--answer ID=TEXT` (a numbered reply) or `--skip ID`
+  for every open question of that agent and posts them with the open set it just read; a partial
+  cover exits 2 without posting, and a changed set (409) prints the latest ids and exits 1 with
+  nothing settled. `skip --agent N` skips every open question of that agent after confirmation
+  (`--force` skips confirmation); `skip --stale` targets only terminated agents. A submission is one
+  keyed attempt (`principal-v1`) with a fresh key per invocation.
 - `meiva memory init`: explicitly provisions the memory-pool checkout and
   plugin-owned templates. Branch validation runs here, never during converge or
   start.

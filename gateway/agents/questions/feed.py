@@ -25,7 +25,7 @@ _SELECT = (
 _OPEN_FEED_MAX_LIMIT = 500
 
 
-def _open_questions_blocking(
+def open_questions(
     pool: ConnectionPool, limit: int, *, agent_id: int | None = None
 ) -> list[QuestionItem]:
     # meiva:link gateway/routers/docs/frontend-ui-data.md
@@ -33,10 +33,7 @@ def _open_questions_blocking(
         agent_clause = "" if agent_id is None else "AND n.agent_id = %s "
         params = (limit,) if agent_id is None else (agent_id, limit)
         cur.execute(
-            _SELECT
-            + "WHERE n.resolved_at IS NULL "
-            + agent_clause
-            + "ORDER BY n.created_at ASC, n.id ASC LIMIT %s",
+            _SELECT + "WHERE n.resolved_at IS NULL " + agent_clause + "ORDER BY n.id ASC LIMIT %s",
             params,
         )
         return cur.fetchall()
@@ -52,7 +49,7 @@ async def get_open_questions(
     if limit is None:
         limit = gateway_config(request).display.questions_open_default_limit
     return await asyncio.to_thread(
-        _open_questions_blocking,
+        open_questions,
         gateway_state(request).db_pool,
         limit,
         agent_id=agent_id,
@@ -67,7 +64,5 @@ async def get_questions_feed(
     # meiva:link gateway/routers/docs/frontend-ui-data.md
     if limit is None:
         limit = gateway_config(request).display.questions_open_default_limit
-    awaiting = await asyncio.to_thread(
-        _open_questions_blocking, gateway_state(request).db_pool, limit
-    )
+    awaiting = await asyncio.to_thread(open_questions, gateway_state(request).db_pool, limit)
     return QuestionsFeed(awaiting=awaiting)

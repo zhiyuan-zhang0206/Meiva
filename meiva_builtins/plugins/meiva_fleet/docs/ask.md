@@ -1,26 +1,29 @@
 # Ask contract
 
-`meiva.ui.ask(title, content=None, *, question=None, note_suggestion=None)` creates a durable question in the composer's pending-question queue. Resolved questions stay in timeline history.
-The title names the decision and content supplies context. Omitted `question`
-means text with one answer field; choice questions use `single_select` or
-`multi_select` and keep an optional Note. `note_suggestion` offers candidate
-text for the answer or Note until the user explicitly applies it.
+`meiva.ui.ask(questions)` creates durable questions in the composer's pending-question queue and
+returns one question ID per item, in the order given. `questions` is a non-empty list; each item is
+`{"title", "content"?, "type"?, "options"?, "note_suggestion"?}`. The title names the decision and
+content supplies context. `type` is `text` (the default, one answer field), `single_select` or
+`multi_select` (ordered `options`, each with an optional Note). `note_suggestion` offers candidate
+text for the answer or Note until the user explicitly applies it. An invalid item rejects the whole
+call; one call is one idempotent operation (the gateway replays its accepted IDs and refuses changed
+content under the same identity). Each question is its own `agent_questions` row with its own ID;
+nothing records which call created it.
 
-An agent can have several open questions. New questions have no expiration and
-never overwrite an unanswered question. The runtime preserves operation identity across retries; the gateway replays
-its accepted ID and refuses changed content under that identity. The runtime does not end the turn
-when a question is posted. `ask` returns the question's ID; `meiva.ui.close_question(id)` closes
-one of the agent's own unanswered questions (`resolution='withdrawn'`), and a question cannot be edited.
+An agent can have any number of open questions. They do not expire and never overwrite each other.
+The runtime does not end the turn when questions are asked. `meiva.ui.close_question(id)` closes one
+of the agent's own unanswered questions (`resolution='withdrawn'`); a question cannot be edited.
 
-Answers and Notes commit with one agent inbound.
-The user closing without answering records a dismissal and grants no authorization.
-Reading a publication does not answer any question. Each Ask creates a system
-notification that is retracted when the question is answered, dismissed or closed by the agent.
+The user answers all of an agent's open questions in one reply: each is answered or skipped, in
+question ID order. The reply is one inbound to the agent with a `Re: question #<id> "<title>"` block
+per question; a skipped question reads `Skipped by the user.` and grants nothing. Reading a
+publication does not answer any question.
 
-The old agent-facing notify/edit/dismiss SDK entries and the Inbox page are removed.
-`agent_questions` rows, canonical answers and keyed answer receipts remain the storage owner
-of questions, and a question is the only kind of open item: a migration resolved every
-still-open row that was not a question, or that carried an expiry, as `expired`. A pending
-question appears in its agent's question bar above the composer and as a question mark on
-the agent's sidebar row ([decision](../../../../docs/decisions/frontend/ui/2026-11-11-remove-inbox-and-counts.md)). See [meiva.ui — User Interface](../../../../meiva/docs/ui.md) for the
-mode and publication contract, and [Numbered Question Questions](questions.md) for answers.
+The user gets one system notification per agent: the first open question alerts, later ones update
+it silently ("N questions awaiting an answer"), and it is retracted when the agent has no open
+question left.
+
+A pending question appears in its agent's question bar above the composer and as a question mark on
+the agent's sidebar row ([decision](../../../../docs/decisions/frontend/ui/2026-11-11-remove-inbox-and-counts.md)).
+See [meiva.ui](../../../../meiva/docs/ui.md) for the mode and publication contract and
+[Numbered questions](questions.md) for the answer types.

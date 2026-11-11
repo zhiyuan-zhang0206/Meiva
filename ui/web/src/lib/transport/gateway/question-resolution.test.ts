@@ -25,36 +25,50 @@ afterEach(async () => {
   await gateway.close();
 });
 
-describe("guarded browser question resolution", () => {
-  it("uses the fixed path, exact global row and explicit principal-scoped key", async () => {
-    await rig.api.resolveQuestion(7, 11, { action: "answer", reply: "yes" }, "intent");
+const body = {
+  expected_ids: [11, 12],
+  results: [
+    { id: 11, answer: { text: "yes" }, skip: false },
+    { id: 12, skip: true },
+  ],
+};
+
+describe("guarded browser question submission", () => {
+  it("uses the fixed path, the agent's whole open set and an explicit principal-scoped key", async () => {
+    await expect(rig.api.answerQuestions(7, body, "intent")).resolves.toEqual({ kind: "settled" });
     const [request] = gateway.requests;
-    expect(request.path).toBe("/api/keyed/v1/agents/7/questions/11/resolve");
+    expect(request.path).toBe("/api/keyed/v1/agents/7/questions/answers");
     expect(request.method).toBe("POST");
     expect(request.headers["idempotency-key"]).toBe("intent");
     expect(request.headers["idempotency-scope"]).toBe("principal-v1");
-    expect(JSON.parse(request.body)).toEqual({ action: "answer", reply: "yes" });
+    expect(JSON.parse(request.body)).toEqual(body);
   });
 
-  it.each([404, 409, 500])("rejects HTTP %i without fallback or an automatic retry", async (status) => {
+  it("returns the latest open set of a changed submission instead of an error", async () => {
+    const open = [{ id: 11, agent_id: 7, title: "A?" }];
+    answer = { kind: "json", status: 409, body: { detail: "changed", open } };
+    await expect(rig.api.answerQuestions(7, body, "intent")).resolves.toEqual({ kind: "changed", open });
+    expect(gateway.requests).toHaveLength(1);
+  });
+
+  it.each([404, 422, 500])("rejects HTTP %i without fallback or an automatic retry", async (status) => {
     answer = { kind: "json", status, body: { detail: "refused" } };
-    await expect(rig.api.resolveQuestion(7, 11, { action: "read" }, "intent")).rejects.toMatchObject({ status });
+    await expect(rig.api.answerQuestions(7, body, "intent")).rejects.toMatchObject({ status });
     expect(gateway.requests).toHaveLength(1);
   });
 
   it("preserves the same key/body/path when a caller explicitly retries a lost response", async () => {
-    const body = { action: "read" as const, reply: "yes" };
     answer = { kind: "drop" };
-    await expect(rig.api.resolveQuestion(7, 11, body, "intent")).rejects.toBeInstanceOf(TypeError);
+    await expect(rig.api.answerQuestions(7, body, "intent")).rejects.toBeInstanceOf(TypeError);
     expect(gateway.requests).toHaveLength(1);
     answer = { kind: "json", status: 201, body: { status: "idling", inbound_id: 3 } };
-    await rig.api.resolveQuestion(7, 11, body, "intent");
+    await rig.api.answerQuestions(7, body, "intent");
     expect(gateway.requests[1]).toEqual(gateway.requests[0]);
   });
 
   it("allocates a different key for separate default-key invocations", async () => {
-    await rig.api.resolveQuestion(7, 11, { action: "read" });
-    await rig.api.resolveQuestion(7, 11, { action: "read" });
+    await rig.api.answerQuestions(7, body);
+    await rig.api.answerQuestions(7, body);
     const keys = gateway.requests.map((request) => request.headers["idempotency-key"]);
     expect(keys[0]).toBeTruthy();
     expect(keys[1]).not.toBe(keys[0]);

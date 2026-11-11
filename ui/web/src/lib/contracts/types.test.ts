@@ -44,7 +44,7 @@ it("keeps optional detail extensions while dropping detail-only fields and deriv
     (index) => ({
       id: index, title: `question ${index}`, content: "selected-detail-only body",
       created_at: "2026-09-01T00:00:00Z",
-      question: index === 1 ? { type: "text" } : null,
+      question: { type: "text" },
     }),
   );
   const input: Required<WireAgentRow> & { future_optional?: string } = {

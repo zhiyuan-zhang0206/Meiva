@@ -53,6 +53,6 @@ def test_contracts_have_no_unknown_semantics() -> None:
 
 
 def test_notice_resolution_route_is_keyed() -> None:
-    contract = contracts.contract_for("POST", "/api/keyed/v1/agents/7/questions/11/resolve")
+    contract = contracts.contract_for("POST", "/api/keyed/v1/agents/7/questions/answers")
     assert contract is not None
     assert contract.idempotency is Idempotency.AT_LEAST_ONCE_WITH_KEY

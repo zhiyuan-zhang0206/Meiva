@@ -5,7 +5,6 @@ from pydantic import BaseModel, TypeAdapter
 from gateway.agents.schemas import (
     AgentRow,
     QuestionItem,
-    ResolveQuestionIn,
 )
 
 _WIRE = TypeAdapter(dict[str, object])
@@ -84,29 +83,3 @@ def test_question_item_wire_shape() -> None:
     assert d["reply"] is None
     assert d["question"] is None
     assert d["answer"] is None
-
-
-def test_resolve_question_in_wire_shape() -> None:
-    m = ResolveQuestionIn(action="answer", reply="yes, send it")
-    assert m.action == "answer"
-    assert m.reply == "yes, send it"
-    m2 = ResolveQuestionIn(action="read")
-    assert m2.action == "read"
-    assert m2.reply is None
-
-
-def test_resolve_question_in_rejects_bad_action() -> None:
-    import pytest
-    from pydantic import ValidationError
-
-    with pytest.raises(ValidationError):
-        ResolveQuestionIn.model_validate({"action": "bogus"})
-
-
-def test_resolve_question_in_strips_and_rejects_empty_reply() -> None:
-    import pytest
-    from pydantic import ValidationError
-
-    assert ResolveQuestionIn(action="answer", reply="  hi  ").reply == "hi"
-    with pytest.raises(ValidationError):
-        ResolveQuestionIn(action="answer", reply="   ")

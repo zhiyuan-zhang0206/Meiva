@@ -16,7 +16,7 @@ one notification per tag, so the tag is the whole replace/retract contract.
 
 | Trigger | Category | Tag | Alert | Silent replace | Retract |
 |---|---|---|---|---|---|
-| A question is asked | `core.question` | `question:<question id>` | when asked | never | when answered or closed |
+| An agent has open questions | `core.question` | `question:agent:<agent id>` | the first open question | each later change of the open set while one is showing ("N questions awaiting an answer") | the agent has no open question left |
 | An agent delivers output the user has not read | `core.unread` | `unread:<agent id>` | first delivery after everything was read | each later delivery (newest content) | the seen cursor reaches the newest delivery |
 
 Unread is the seen cursor, not stored state. `publish()` in
@@ -26,12 +26,15 @@ after the cursor moves and stages the `retract` only when the move cleared the l
 delivery. A replayed publication key and a "no update" (`content` null) stage nothing. The three
 paths that deliver to the user (the native turn hook, the external harness callback, the SDK
 `POST /api/agents/{id}/user-messages`) all go through `publish()`, so none stages on its own.
-The Ask insert (`gateway/agents/questions/asks.py`) stages the question alert and the question
-resolution (`gateway/agents/questions/resolve.py`) stages its retract.
+One push per agent, not per question: the ask (`gateway/agents/questions/asks.py`, one call may carry
+several questions), the agent's close (same module) and the user's one-shot submission
+(`gateway/agents/questions/resolve.py`) each read the agent's open count before their writes and call
+`stage_open_questions`, which alerts when the first question opens, replaces silently when the set
+changes while one is showing, and retracts when it empties.
 
 The title of an unread push is the agent's label (`#<id>` when it has none) and its body is the
 opening of the newest delivery with the visibility prefix and Markdown markers removed
-(`preview.py`); a question's title is the question title and its body the agent's label. Text is not
+(`preview.py`); a question push's title is the question title when one is open and "N questions awaiting an answer" otherwise, and its body the agent's label. Text is not
 translated. `href` is the agent's page (`/?agent_id=<id>`).
 
 ## Store
