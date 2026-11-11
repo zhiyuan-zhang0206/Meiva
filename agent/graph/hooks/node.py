@@ -43,19 +43,15 @@ def _render_messages(messages: Sequence[BaseMessage]) -> str:
 
 
 def _hook_input_state(state: _state.AgentState, *, is_external: bool) -> _state.AgentState:
-    if not is_external or state.messages:
+    if not is_external or state.messages or not state.harness_view:
         return state
-    pending_input: object = state.harness_pending_input
-    if not is_object_dict(pending_input):
-        return state
-    raw_msgs = pending_input.get("messages")
-    if not is_object_list(raw_msgs) or not raw_msgs:
-        return state
-    return state.model_copy(
-        update={"messages": [m for m in raw_msgs if isinstance(m, BaseMessage)]}
-    )
+    return state.model_copy(update={"messages": list(state.harness_view)})
 
 
+# meiva:note
+# What the pre-turn hooks emit for an external harness becomes an input of its own, ahead of the rows
+# the turn delivers: it has no inbox row, a stable key named after the first row it accompanies, and
+# no timeline entry (hook notes were never shown there).
 def _fold_external_hook_messages(
     state: _state.AgentState,
     cmd_update: dict[str, object],
@@ -67,18 +63,22 @@ def _fold_external_hook_messages(
         else []
     )
     pre_text = _render_messages(pre_messages)
-    pending_input: object = state.harness_pending_input
-    if is_object_dict(pending_input):
-        if pre_text or "messages" in pending_input:
-            updated_pending: dict[str, object] = {
-                k: v for k, v in pending_input.items() if k != "messages"
-            }
-            if pre_text:
-                prompt = str(updated_pending.get("prompt") or "")
-                updated_pending["prompt"] = f"{pre_text}\n\n{prompt}" if prompt else pre_text
-            cmd_update["harness_pending_input"] = updated_pending
-    elif pre_text:
-        cmd_update["harness_pending_input"] = {"prompt": pre_text}
+    if not pre_text:
+        return
+    first = next(
+        (
+            iid
+            for m in state.harness_view
+            if isinstance(iid := m.additional_kwargs.get("meiva_inbound_id"), int)
+        ),
+        None,
+    )
+    note: dict[str, object] = {
+        "key": f"hook-notes-{first}" if first is not None else "hook-notes",
+        "prompt": pre_text,
+        "timeline_items": [],
+    }
+    cmd_update["harness_inputs"] = [note, *state.harness_inputs]
 
 
 def hook_node(

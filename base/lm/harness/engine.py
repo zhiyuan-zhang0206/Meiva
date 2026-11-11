@@ -1,24 +1,18 @@
 from __future__ import annotations
 
-from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
+from collections.abc import AsyncIterator, Awaitable, Sequence
 from dataclasses import dataclass
-from typing import Protocol, runtime_checkable
+from typing import Protocol
 
 from base.lm.harness.delivery import HarnessInput
-from base.lm.harness.events import BridgeEvent, Usage
+from base.lm.harness.events import BridgeEvent, TurnCompleted, Usage
 from base.lm.harness.handoff import Handoff
-
-TurnEventSink = Callable[[BridgeEvent], Awaitable[None] | None]
 
 
 # meiva:note
 # What one harness turn produced, in the terms the graph already accounts for: the
 # reply text, the provider usage the turn reported, and the turn boundary that
-# closed it. `prelude` holds the turns that completed earlier in the same wait: a
-# session started with a handoff runs that document as its first turn, so the waiter
-# sees two completions. Each one keeps its own text and usage, which is what lets the
-# graph commit the handoff turn as its own message instead of folding it into the
-# reply — normally the prelude is empty.
+# closed it. It is built from the turn's `TurnCompleted` and the text streamed during it.
 # meiva:link base/lm/harness/docs/harness.md
 @dataclass(frozen=True, slots=True)
 class HarnessTurn:
@@ -41,75 +35,35 @@ class HarnessTurn:
     # succeeded carries neither.
     api_error_status: int | None = None
     errors: tuple[str, ...] = ()
-    prelude: tuple[HarnessTurn, ...] = ()
-    replayed: bool = False
 
 
-class CompletedTurnEvent(Protocol):
-    @property
-    def turn_id(self) -> str: ...
-
-    @property
-    def text(self) -> str: ...
-
-    @property
-    def usage(self) -> Usage: ...
-
-    @property
-    def cost_usd(self) -> float | None: ...
-
-    @property
-    def subtype(self) -> str: ...
-
-    @property
-    def is_error(self) -> bool: ...
-
-    @property
-    def interrupted(self) -> bool: ...
-
-    @property
-    def stop_reason(self) -> str | None: ...
-
-    @property
-    def num_turns(self) -> int: ...
-
-    @property
-    def steps(self) -> tuple[Usage, ...]: ...
-
-
-@runtime_checkable
-class ForegroundSteering(Protocol):
-    @property
-    def steering_available(self) -> bool: ...
-
-    def steer(self, text: str, *, key: str) -> Awaitable[bool]: ...
-
-
-class SubmittedTurn(Protocol):
-    @property
-    def turn_id(self) -> str: ...
-
-    @property
-    def deduplicated(self) -> bool: ...
-
-    @property
-    def settled(self) -> bool: ...
-
-    def outcome(self) -> Awaitable[CompletedTurnEvent]: ...
+def completed_turn(event: TurnCompleted, streamed: str) -> HarnessTurn:
+    return HarnessTurn(
+        turn_id=event.turn_id,
+        text=event.text or streamed,
+        usage=event.usage,
+        cost_usd=event.cost_usd,
+        subtype=event.subtype,
+        is_error=event.is_error,
+        interrupted=event.interrupted,
+        stop_reason=event.stop_reason,
+        num_turns=max(event.num_turns, 1),
+        steps=event.steps,
+        api_error_status=event.api_error_status,
+        errors=event.errors,
+    )
 
 
 # meiva:note
 # The adapter contract the bridge consumes, stated structurally: the three
 # adapters share these member shapes without sharing a base class, and a test fake
-# needs only to look like one. `submit` returns an adapter-owned ticket because
-# tickets carry their turn id and an outcome for completed-key replay. A fresh
-# session exposes its handoff ticket so the bridge can await it before user work.
+# needs only to look like one. `deliver` hands inputs to the foreground and returns when they
+# are handed over; everything that happens to them comes back on `events()`.
 # meiva:link base/lm/harness/docs/harness.md
 class HarnessSession(Protocol):
     def start(
         self, *, resume: str | None = None, handoff: Handoff | None = None
     ) -> Awaitable[None]: ...
-    def submit(self, text: str, *, key: str | None = None) -> SubmittedTurn: ...
     def deliver(self, inputs: Sequence[HarnessInput]) -> Awaitable[None]: ...
     def events(self) -> AsyncIterator[BridgeEvent]: ...
     def interrupt(self, *, turn_id: str | None = None) -> Awaitable[object]: ...
@@ -117,9 +71,6 @@ class HarnessSession(Protocol):
 
     @property
     def session_id(self) -> str | None: ...
-
-    @property
-    def handoff_ticket(self) -> SubmittedTurn | None: ...
 
     # meiva:note
     # The three states are the whole contract: None while the CLI child is still
@@ -132,23 +83,32 @@ class HarnessSession(Protocol):
 
 
 # meiva:note
-# What a graph run needs from a live external session: run one turn, interrupt the
-# running one, close the session. The graph never reaches into an adapter; a
-# context that carries no engine runs the built-in loop.
-# meiva:link base/lm/harness/docs/harness.md
+# What the graph reads of a subscription: the next event, or None once the stream has ended, and a way
+# to stop watching. `pump.Subscription` is the implementation.
+# meiva:link base/lm/harness/docs/delivery.md
+class EventSubscription(Protocol):
+    def get(self) -> Awaitable[BridgeEvent | None]: ...
+    def close(self) -> None: ...
+
+
+# meiva:note
+# What a graph run needs from a live external session: watch its events, hand it inputs, interrupt the
+# foreground, retire or close the session. The graph never reaches into an adapter, and it never asks
+# "did that input arrive": every outcome of an input comes back as an event on a subscription, so a
+# caller subscribes first and delivers second. `notify_inbound` / `wait_inbound` carry the host's
+# "new inbound for this agent" wake to a graph invocation that is already running.
+# meiva:link base/lm/harness/docs/delivery.md
 class TurnEngine(Protocol):
     @property
     def model(self) -> str | None: ...
 
-    def run_turn(
-        self,
-        text: str,
-        *,
-        key: str,
-        on_event: TurnEventSink | None = None,
-    ) -> Awaitable[HarnessTurn]: ...
+    def subscribe(self) -> Awaitable[EventSubscription]: ...
+    def deliver(self, inputs: Sequence[HarnessInput]) -> Awaitable[None]: ...
     def interrupt(self) -> Awaitable[object]: ...
+    def retire(self, reason: str) -> Awaitable[None]: ...
     def close(self, *, reason: str = "closed") -> Awaitable[None]: ...
+    def notify_inbound(self) -> None: ...
+    def wait_inbound(self, timeout: float) -> Awaitable[None]: ...
 
     # meiva:note
     # The same three states as the adapter's `exit_code`, asked of the engine the

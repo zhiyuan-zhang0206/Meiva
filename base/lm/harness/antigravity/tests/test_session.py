@@ -5,7 +5,6 @@ from pathlib import Path
 from base.lm.harness.antigravity.tests.support import say, start
 from base.lm.harness.events import (
     AssistantText,
-    ForegroundAccepted,
     SessionBound,
     SessionClosed,
     SessionStarted,
@@ -28,7 +27,6 @@ async def test_a_turn_streams_text_and_completes(tmp_path: Path) -> None:
         started = harness.of(SessionStarted)[0]
         assert started.session_id == "conv-fake"
         assert harness.of(SessionBound)[0].agent_id == 7
-        assert harness.of(ForegroundAccepted)[0].turn_id == ticket.turn_id
         assert harness.of(TextDelta)[0].text == "hello"
         assert harness.of(AssistantText)[0].text == "hello"
         completed = harness.of(TurnCompleted)[0]

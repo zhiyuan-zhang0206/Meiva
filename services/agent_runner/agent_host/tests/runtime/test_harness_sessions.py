@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Sequence
 from pathlib import Path
 from unittest.mock import Mock
 
@@ -8,7 +9,7 @@ import pytest
 
 from base.api_contracts.agent_contract import Harness
 from base.clock.tests.fakes import system_clock
-from base.lm.harness import HarnessTurn, RegistrationStore
+from base.lm.harness import EventSubscription, HarnessInput, RegistrationStore
 from base.lm.harness.antigravity import AgyTransport, AntigravityConfig
 from base.log.tests.log_records import LogRecords
 from services.agent_runner.agent_host.runtime import AgentRuntime, HarnessSessions
@@ -27,8 +28,20 @@ class ClosingEngine:
         self.cancelled = False
         self.closed = False
 
-    async def run_turn(self, text: str, *, key: str, on_event: object = None) -> HarnessTurn:
-        raise AssertionError("retirement must not run another turn")
+    async def subscribe(self) -> EventSubscription:
+        raise AssertionError("these tests never watch events")
+
+    async def deliver(self, inputs: Sequence[HarnessInput]) -> None:
+        raise AssertionError("these tests never deliver")
+
+    async def retire(self, reason: str) -> None:
+        raise AssertionError("these tests never retire")
+
+    def notify_inbound(self) -> None:
+        raise AssertionError("these tests never wake")
+
+    async def wait_inbound(self, timeout: float) -> None:
+        raise AssertionError("these tests never wait")
 
     async def interrupt(self) -> object:
         raise AssertionError("retirement must close the session")
@@ -222,8 +235,20 @@ class TransportBackedEngine:
         self.model = None
         self._transport = transport
 
-    async def run_turn(self, text: str, *, key: str, on_event: object = None) -> HarnessTurn:
-        raise AssertionError("this engine is never asked for a turn")
+    async def subscribe(self) -> EventSubscription:
+        raise AssertionError("these tests never watch events")
+
+    async def deliver(self, inputs: Sequence[HarnessInput]) -> None:
+        raise AssertionError("these tests never deliver")
+
+    async def retire(self, reason: str) -> None:
+        raise AssertionError("these tests never retire")
+
+    def notify_inbound(self) -> None:
+        raise AssertionError("these tests never wake")
+
+    async def wait_inbound(self, timeout: float) -> None:
+        raise AssertionError("these tests never wait")
 
     async def interrupt(self) -> object:
         raise AssertionError("this engine is never interrupted")

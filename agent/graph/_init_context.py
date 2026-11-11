@@ -32,7 +32,7 @@ from base.log import logger
 from base.paths import workspace_dir
 
 from .claim import route_target
-from .claim.harness_turn import pending_messages, render_messages, turn_key
+from .claim.harness_render import pending_messages, render_messages
 from .hooks.cwd import ValidateCwdAfterInitHook
 from .node_log import StallConfig, node_lifecycle
 from .prompt.context_notes import (
@@ -123,26 +123,28 @@ async def _seed_harness_timeline(
         return handoff, notes
 
 
-def _pending_input_payload(
+# meiva:note
+# The input that carries a context reset into the harness, and the tail as the hooks see it.
+#
+# The reset has no inbox row: it is one input of its own whose key names the newest inbound it
+# carries. Its timeline entries were written when the context was seeded.
+def _reset_inputs(
     handoff: Handoff,
     notes: Sequence[BaseMessage],
     tail: Sequence[BaseMessage],
-) -> dict[str, Any]:
+) -> tuple[list[dict[str, object]], list[BaseMessage]]:
     tail_msgs = pending_messages(tail)
-    pending: list[BaseMessage] = [
-        SystemMessage(content=handoff.render()),
-        *notes,
-        *tail_msgs,
-    ]
-    inbound_ids = [
-        iid for m in pending if isinstance(iid := read_meiva_kwargs(m).get("meiva_inbound_id"), int)
-    ]
-    return {
-        "prompt": render_messages(pending),
-        "key": turn_key(pending),
-        "inbound_ids": inbound_ids,
-        "messages": tail_msgs,
-    }
+    pending: list[BaseMessage] = [SystemMessage(content=handoff.render()), *notes, *tail_msgs]
+    newest = max(
+        (
+            iid
+            for m in pending
+            if isinstance(iid := read_meiva_kwargs(m).get("meiva_inbound_id"), int)
+        ),
+        default=None,
+    )
+    key = "context-reset" if newest is None else f"context-reset-{newest}"
+    return [{"key": key, "prompt": render_messages(pending), "timeline_items": []}], tail_msgs
 
 
 async def _establish_external_harness_context(
@@ -183,7 +185,9 @@ async def _establish_external_harness_context(
     }
     if target in ("before_turn", "harness_turn") and reset.tail:
         grounded = handoff or _build_grounded_handoff(ctx, agent_id=agent_id)
-        ext_update["harness_pending_input"] = _pending_input_payload(grounded, notes, reset.tail)
+        inputs, view = _reset_inputs(grounded, notes, reset.tail)
+        ext_update["harness_inputs"] = inputs
+        ext_update["harness_view"] = view
     return Command[NodeName](update=ext_update, goto=target)
 
 

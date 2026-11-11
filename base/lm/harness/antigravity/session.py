@@ -39,7 +39,6 @@ from base.lm.harness.delivery import HarnessInput, InputPhase, validated_batch
 from base.lm.harness.events import (
     AckSignal,
     AssistantText,
-    ForegroundAccepted,
     HarnessCause,
     InterruptConfirmed,
     SessionFailed,
@@ -155,24 +154,6 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
     @property
     def cli_pid(self) -> int | None:
         return self._transport.pid if self._transport is not None else None
-
-    # meiva:note
-    # Whether a turn of ours is running and still accepts steering through the compatibility wrapper
-    # (`steer()` in the base session, a thin layer over `deliver()`). `deliver()` itself decides per
-    # input, from the live trajectory, whether to steer, start or queue.
-    # meiva:link base/lm/harness/antigravity/docs/antigravity.md
-    @property
-    def steering_available(self) -> bool:
-        ticket = self._active
-        return (
-            not self._closed
-            and self._transport is not None
-            and self._transport is not self._retired
-            and self._transport.alive
-            and ticket is not None
-            and not ticket.interrupt_requested
-            and ticket.interrupt_ready.is_set()
-        )
 
     # meiva:note
     # Hand a batch to agy, in order. Before each input the conversation is asked what it is doing
@@ -303,7 +284,6 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
             ticket.interrupt_ready.set()
             self._emit(TurnStarted(ticket.turn_id, TurnOrigin.INPUT, (key,), self.generation))
             self._apply(self._ledger.received(key, AckSignal.WEAK))
-            self._emit(ForegroundAccepted(turn_id=ticket.turn_id))
         except (TransportClosedError, OSError, RuntimeError) as exc:
             self._sent_turn = None
             self._apply(self._ledger.rejected(key, f"the write to agy failed: {exc}"))

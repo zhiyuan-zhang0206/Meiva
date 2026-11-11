@@ -24,7 +24,7 @@ or a blocked graph invocation.
   timestamps. Recovery retires unresolved reservations with timeline notes
   reporting uncertainty.
 - **Checkpoint reconciliation**: startup, compaction and co-batch deferral use
-  the same owner lock. Interrupted claimed chats are consumed, never requeued;
+  the same owner lock. Interrupted claimed chats are consumed, never requeued (a row claimed for an external harness is the exception: a settlement pass leaves it, and only the harness's own events, an abort or a rebuilt runtime settle it);
   successful completion is distinguished from unknown execution. Reconciliation
   never acknowledges a lifecycle command using missing checkpoint evidence.
 - **Interrupt peek**: `pending_interrupt_reason` reads pending external cancel,

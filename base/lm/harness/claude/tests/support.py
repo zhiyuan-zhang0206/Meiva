@@ -102,7 +102,7 @@ class Harness:
     async def turn_started(self, *, timeout: float = 2.0) -> None:
         deadline = asyncio.get_running_loop().time() + timeout
         while asyncio.get_running_loop().time() < deadline:
-            if self.session.steering_available:
+            if self.session.active_turn_id is not None:
                 return
             await asyncio.sleep(0.002)
         raise AssertionError("turn did not start within timeout")

@@ -11,26 +11,16 @@
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable, Mapping, Sequence
+from collections.abc import Awaitable, Callable, Sequence
 from datetime import datetime
 
 from langchain_core.messages import BaseMessage
 
 from agent.messages import NoteTag, system_note_message
 from base.agents.context import MeivaContext
-from base.host.boundary.json_values import is_object_list
 from base.log import logger
 
-__all__ = ["lost_turn_note", "pending_inbound_ids", "report_lost_turn"]
-
-
-# meiva:note
-# The ids the claim recorded for this turn: the note names them so a reader can point at the row.
-def pending_inbound_ids(pending_input: Mapping[str, object] | None) -> list[int]:
-    raw = (pending_input or {}).get("inbound_ids")
-    if not is_object_list(raw):
-        return []
-    return [value for value in raw if isinstance(value, int) and not isinstance(value, bool)]
+__all__ = ["lost_turn_note", "report_lost_turn"]
 
 
 # meiva:note
@@ -57,13 +47,12 @@ def lost_turn_note(
 async def report_lost_turn(
     ctx: MeivaContext,
     agent_id: int,
-    pending_input: Mapping[str, object] | None,
+    inbound_ids: Sequence[int],
     turn_key: str,
     error: BaseException,
     *,
     append: Callable[[MeivaContext, int, Sequence[BaseMessage]], Awaitable[None]],
 ) -> None:
-    inbound_ids = pending_inbound_ids(pending_input)
     reason = f"{type(error).__name__}: {error}"
     now = ctx.require_clock().now()
     try:

@@ -40,13 +40,14 @@ _RECURSION_LIMIT_INF = 2**31 - 1
 
 # meiva:note
 # A turn aborted by a fatal error ends without a turn_end value; dropping the fields here
-# keeps a declaration from the aborted turn out of the next one. Clearing harness_pending_input
-# ensures an aborted harness turn leaves no stale claim in the checkpoint (#8634).
+# keeps a declaration from the aborted turn out of the next one. Clearing the harness inputs
+# ensures an aborted harness turn leaves no stale synthetic input in the checkpoint (#8634).
 _NO_TURN_END: dict[str, object] = {
     "ended_with": None,
     "ended_with_reason": None,
     "turn_end_held_seconds": None,
-    "harness_pending_input": None,
+    "harness_inputs": [],
+    "harness_view": [],
 }
 
 

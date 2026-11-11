@@ -19,6 +19,7 @@ from pydantic import BaseModel
 import agent.state as agent_state
 from agent.graph import build_graph
 from agent.graph.claim.node import route_target
+from agent.graph.claim.tests.harness_support import FakeEngine
 from agent.graph.exec.tests.process_inputs import live_parent_facts
 from agent.state import AgentState, ContextReset
 from base.agents.context import MeivaContext
@@ -26,7 +27,6 @@ from base.api_contracts.agent_contract import Harness
 from base.clock import Clock
 from base.config.tests.configuration import defaults
 from base.host.env.agent_slices import AgentSlices
-from base.lm.harness import HarnessTurn, Usage
 from base.packages.plugin_providers import build_model_catalog
 from base.packages.plugins.extensions import EMPTY, ExtensionRegistry, PluginContributions
 from base.paths import meiva_home, resolve_meiva_home
@@ -57,38 +57,6 @@ def test_every_node_receives_the_plugins_state_channels() -> None:
 
 
 NATIVE_NODES = frozenset({"llm", "exec"})
-
-
-class FakeEngine:
-    # meiva:note
-    # A turn engine that answers at once. The graph test drives the real compiled
-    # graph — real claim, real init_context, real routing — and swaps only the
-    # provider session, which is the one thing a test cannot run.
-    # meiva:link agent/graph/docs/harness-turn.md
-    def __init__(self, reply: str = "MEIVA_DISPLAY_TO_USER\nthe harness answered") -> None:
-        self.reply = reply
-        self.harness = Harness.CLAUDE_CODE
-        self.model = "claude-sonnet-5-5"
-        self.exit_code: int | None = None
-        self.submitted: list[str] = []
-
-    async def run_turn(self, text: str, *, key: str, on_event: Any = None) -> HarnessTurn:
-        self.submitted.append(text)
-        return HarnessTurn(
-            turn_id="t1",
-            text=self.reply,
-            usage=Usage(input_tokens=1, output_tokens=1),
-            cost_usd=0.0,
-            subtype="success",
-            is_error=False,
-            interrupted=False,
-        )
-
-    async def interrupt(self) -> object:
-        return object()
-
-    async def close(self, *, reason: str = "closed") -> None:
-        return None
 
 
 async def _empty_stream(*_a: object, **_kw: object) -> AsyncIterator[Any]:
@@ -126,10 +94,10 @@ async def executed_nodes(
                 additional_kwargs={"meiva_msg_type": "inbound", "meiva_inbound_id": 7},
             ),
         ],
-        harness_pending_input=(
-            {"prompt": "do it", "key": "k1", "inbound_ids": [7]}
+        harness_inputs=(
+            [{"key": "k1", "prompt": "do it", "timeline_items": []}]
             if harness is not Harness.MEIVA
-            else None
+            else []
         ),
     )
     seen: list[str] = []
@@ -159,10 +127,10 @@ async def test_unmarked_harness_reply_gets_one_correction_turn() -> None:
 
     seen = await executed_nodes(Harness.CLAUDE_CODE, engine)
 
-    [original, correction] = engine.submitted
+    [(original, _), (correction, _)] = engine.submitted
     assert original == "do it"
     assert "That text was folded into Details" in correction
-    assert seen.count("harness_turn") == 2
+    assert seen.count("harness_turn") == 1, "the correction is delivered inside the same invocation"
 
 
 async def test_an_external_harness_never_enters_the_native_turn_nodes() -> None:
@@ -172,7 +140,7 @@ async def test_an_external_harness_never_enters_the_native_turn_nodes() -> None:
 
     assert "harness_turn" in seen, "the harness node is the turn"
     assert not NATIVE_NODES.intersection(seen), f"native turn nodes ran: {seen}"
-    [prompt] = engine.submitted
+    [(prompt, _)] = engine.submitted
     assert prompt == "do it"
 
 
@@ -215,8 +183,8 @@ async def test_a_context_reset_keeps_an_external_harness_off_the_native_nodes() 
     assert "before_turn" in seen
     assert "harness_turn" in seen, "the reset resumes into the harness node"
     assert len(engine.submitted) == 1
-    assert "# Role & Operating Context — Agent #6984" in engine.submitted[0]
-    assert engine.submitted[0].endswith("\n\nthe compacted summary")
+    assert "# Role & Operating Context — Agent #6984" in engine.submitted[0][0]
+    assert engine.submitted[0][0].endswith("\n\nthe compacted summary")
     assert not NATIVE_NODES.intersection(seen), f"native turn nodes ran: {seen}"
 
 

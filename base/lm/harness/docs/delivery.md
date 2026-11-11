@@ -13,10 +13,13 @@ base64 are validated when the value is built, and a batch must have unique keys.
 
 `deliver(inputs)` returns when the batch has been handed to the foreground, in order. It never
 returns "did it work": a refusal is an `InputRejected` event, a protocol failure raises. Whether an
-input joins the running turn or starts one is the adapter's choice. `submit()` and `steer()` remain
-for the graph as thin wrappers: `steer()` now answers with the fact: True when the input entered the model's context (also when
-it became a turn of its own, which Claude does for an input that missed the last tool boundary),
-False on a rejection, `InputLostError` when the harness declared it lost (both can go back to the queue); any other error means the session failed and the outcome is unknown.
+input joins the running turn or starts one is the adapter's choice. The graph delivers with `deliver()`
+and reads `subscribe()`; there is no per-input call that answers "arrived".
+
+A batch can settle in part: the inputs the harness refused or lost go back to the queue and are handed over again, so the
+timeline shows them after any later input of the same batch that did enter the context; which order the model sees
+is the harness's decision and is not repaired. The handoff or compaction reminder that rides a batch's first input
+counts as delivered only when that input is in the context, and is attached again to a refused or lost one.
 
 ## The events (`events.py`)
 
@@ -42,7 +45,7 @@ a neighbouring turn, and the next turn the graph submits waits until it ends.
 - `delivery/ledger.py` — `DeliveryLedger`, a pure value: key phases (they only move forward, and a
   repeated fact is silent), the provider-turn-name to local-turn-id table, exactly-once turn end,
   and the generation. Each transition returns the next ledger and the events it announces.
-- `base_session.py` — owns the ledger, applies steps, resolves the `steer()` waiters, and gates
+- `base_session.py` — owns the ledger, applies steps, and gates
   turn starts on `_idle()` (no ticket, no harness-started turn, no hold).
 - Adapters only translate protocol frames to ledger calls.
 
@@ -56,7 +59,9 @@ waiter subscribes before it hands anything to the session, and an event nobody w
 dropped instead of queueing inside the session. `HarnessBridge.subscribe()` and
 `HarnessBridge.deliver(inputs)` are the engine's delivery interface: `deliver` ensures the session and puts the
 handoff or compaction reminder on the batch's first input; results come back as events on a
-subscription. `run_turn()` is built on the same pump (it still submits through the adapter).
+subscription. The graph's `harness_turn` is the one consumer: it settles each input from `InputInContext`,
+`InputRejected` or `InputLost` and stays until nothing is unsettled and no turn runs
+([foreground input and cancellation](../../../../agent/graph/docs/harness-foreground.md)).
 
 ## Reconciliation
 

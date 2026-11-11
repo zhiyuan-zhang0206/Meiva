@@ -160,8 +160,10 @@ class TurnScheduler:
         timers: Timers,
         cancel_unwind_timeout_s: float = CANCEL_UNWIND_TIMEOUT_S,
         clock_read_timeout_s: float = CLOCK_READ_TIMEOUT_S,
+        on_active_wake: Callable[[int], object] | None = None,
     ) -> None:
         self._run_turn = run_turn
+        self._on_active_wake = on_active_wake
         self._timers = timers
         self._activity_clock = activity_clock
         self._config_fingerprint = config_fingerprint
@@ -213,6 +215,13 @@ class TurnScheduler:
         self._pending.add(agent_id)
         if agent_id not in self._tasks:
             self._start(agent_id)
+        elif self._on_active_wake is not None:
+            # meiva:note
+            # A wake for an agent whose invocation is already running cannot start another one; it
+            # is handed to that invocation, which may be waiting to deliver the new inbound to its
+            # harness. The pending flag above still makes the turn loop once the invocation ends.
+            # meiva:link agent/graph/docs/harness-turn.md
+            _ = self._on_active_wake(agent_id)
         return self._tasks.get(agent_id)
 
     def _start(self, agent_id: int) -> None:

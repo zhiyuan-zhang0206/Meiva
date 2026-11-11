@@ -11,9 +11,6 @@ from base.lm.harness.delivery import DeliveryLedger, HarnessInput, ImageBlock, L
 from base.lm.harness.events import (
     BridgeEvent,
     HandoffInjected,
-    InputInContext,
-    InputLost,
-    InputRejected,
     SessionBound,
     SessionClosed,
     SessionFailed,
@@ -44,15 +41,6 @@ from base.lm.harness.session import (
 
 
 class ForkSourceUnavailableError(RuntimeError):
-    pass
-
-
-# meiva:note
-# The harness declared a steered input lost: its turn ended with no completion event for it, so it never
-# reached the model's context. It is the one steer failure that is safe to hand over again, and the
-# caller can tell it apart from a session failure, where nothing says whether the input arrived.
-# meiva:link base/lm/harness/docs/delivery.md
-class InputLostError(RuntimeError):
     pass
 
 
@@ -185,7 +173,6 @@ class BaseHarnessSession[ConfigT: SessionConfig](ExitStatus):
         self._unconsumed_events = 0
         self._ledger = DeliveryLedger()
         self._observed: set[str] = set()
-        self._waiters: dict[str, asyncio.Future[BridgeEvent]] = {}
 
     async def start(self, *, resume: str | None = None, handoff: Handoff | None = None) -> None:
         raise NotImplementedError
@@ -206,10 +193,6 @@ class BaseHarnessSession[ConfigT: SessionConfig](ExitStatus):
         raise NotImplementedError
 
     @property
-    def steering_available(self) -> bool:
-        raise NotImplementedError
-
-    @property
     def generation(self) -> int:
         return self._ledger.generation
 
@@ -225,54 +208,6 @@ class BaseHarnessSession[ConfigT: SessionConfig](ExitStatus):
         self._ledger = step.ledger
         for event in step.events:
             self._emit(event)
-            self._settle_waiter(event)
-
-    def _settle_waiter(self, event: BridgeEvent) -> None:
-        if isinstance(event, (InputInContext, InputRejected, InputLost)):
-            waiter = self._waiters.get(event.key)
-            if waiter is not None and not waiter.done():
-                waiter.set_result(event)
-
-    def _fail_waiters(self, exc: BaseException) -> None:
-        for waiter in self._waiters.values():
-            if not waiter.done():
-                waiter.set_exception(exc)
-                _ = waiter.exception()
-
-    # meiva:note
-    # The steering operation the graph still uses, kept as a thin wrapper over `deliver`. Its
-    # answer is now a fact, not a write result: True only when the input entered the model's
-    # context, False when the harness refused it, and `InputLostError` when the harness declared it
-    # lost; a refused or lost input can go back to the queue. Any other error means the session failed
-    # and nothing says whether the input arrived. An input that entered a different turn than the running one (Claude Code
-    # starts a turn of its own for an input that missed the running turn's last tool boundary) was
-    # still seen by the model, so it is reported as accepted: calling it unconfirmed would make the
-    # graph show an uncertainty marker for something that did run.
-    # meiva:link base/lm/harness/docs/delivery.md
-    async def steer(self, text: str, *, key: str) -> bool:
-        if not text.strip() or not key:
-            raise ValueError("steering requires nonempty text and a message key")
-        if not self.steering_available:
-            return False
-        ticket = self._active
-        if ticket is None:
-            return False
-        if key in self._waiters:
-            raise RuntimeError("steer request already pending for this message key")
-        waiter: asyncio.Future[BridgeEvent] = asyncio.get_running_loop().create_future()
-        self._waiters[key] = waiter
-        try:
-            await self.deliver([HarnessInput(key=key, text=text)])
-            settled = await waiter
-        finally:
-            del self._waiters[key]
-        match settled:
-            case InputRejected():
-                return False
-            case InputInContext():
-                return True
-            case _:
-                raise InputLostError("turn ended before the steer receipt arrived")
 
     # meiva:note
     # Startup and completion can both race a cancel. Wait on the captured ticket
@@ -613,7 +548,6 @@ class BaseHarnessSession[ConfigT: SessionConfig](ExitStatus):
         self._fail_pending(SessionClosedError(f"session stream failed: {exc}"))
 
     def _fail_pending(self, exc: BaseException) -> None:
-        self._fail_waiters(exc)
         queued = list(self._pending)
         self._pending.clear()
         for ticket in queued:

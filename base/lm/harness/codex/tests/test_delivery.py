@@ -205,19 +205,3 @@ async def test_a_turn_the_server_began_is_observed_attributed_and_completed_once
         assert waiting.turn_id != started.turn_id
     finally:
         await harness.stop()
-
-
-async def test_the_deprecated_steer_wrapper_reports_the_fact_not_the_write(
-    tmp_path: Path,
-) -> None:
-    harness = await start(tmp_path)
-    try:
-        turn_id = await running_turn(harness)
-        steer = asyncio.create_task(harness.session.steer("x", key="cid-b"))
-        await asyncio.sleep(0.01)
-        assert not steer.done(), "the receipt alone is not delivery"
-        replay(harness.server, "steer_absorbed", "ack2")
-        assert await asyncio.wait_for(steer, 2) is True
-        assert (await seen(harness, InputInContext))[0].turn_id == turn_id
-    finally:
-        await harness.stop()

@@ -7,9 +7,10 @@ idles until its next input. See
 
 For a running external harness, the same route records a durable `cancel`
 inbound and answers `enqueued`. The foreground watcher asks the adapter to
-interrupt while it keeps reading the session. The adapter's terminal result
-settles the foreground and claim consumes the inbound before admitting new
-work. Session shutdown remains a separate operation.
+interrupt while it keeps reading the session. The harness's terminal event ends the turn, and the
+invocation ends once everything it handed over is settled; an input that was not in the context when the
+turn was interrupted is still delivered and becomes a new turn, as in the built-in runtime. Claim consumes
+the cancel before admitting anything behind it. Session shutdown remains a separate operation.
 
 Terminate remains a durable inbound. The two-second DB poll in
 `agent/graph/interrupt/` (`watch_for_interrupt`, cadence `INTERRUPT_POLL_S`) observes a pending cancel/terminate row during

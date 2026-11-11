@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import os
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
@@ -21,6 +21,7 @@ from psycopg_pool import AsyncConnectionPool
 from agent.graph._init_context import init_context_node
 from agent.graph.claim.harness_turn import harness_turn_node
 from agent.graph.claim.node import claim_node
+from agent.graph.claim.tests.harness_support import FakeEngine
 from agent.graph.hooks.framework import hooks_at
 from agent.graph.hooks.node import hook_node
 from agent.messages import NoteTag, system_note_message
@@ -38,10 +39,10 @@ from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
-from base.lm.harness import Usage
-from base.lm.harness.engine import HarnessTurn
+from base.lm.harness import HarnessInput
 from base.lm.provider_api import Decision, DecisionResult, Question
 from base.log import logger
+from base.native_process.turn_identity import HostedServiceResources
 from base.packages.composer_commands import CommandCatalog
 from base.packages.extensions import install_registry
 from base.packages.extensions.install_registry import InstalledPackage
@@ -185,7 +186,7 @@ async def test_external_context_reset_preserves_the_tail_behind_handoff(
 
     assert command.update is not None
     assert "messages" not in command.update
-    prompt = command.update["harness_pending_input"]["prompt"]
+    prompt = command.update["harness_inputs"][0]["prompt"]
     assert "# Role & Operating Context — Agent #42" in prompt
     assert prompt.endswith("The real compact summary")
     assert command.update["context_reset"] == ContextReset()
@@ -201,7 +202,7 @@ async def _wake_prompt(harness: Harness, database_gate: ProcessDbGate, agent_id:
         _config(agent_id),
     )
     assert command.update is not None
-    return command.update["harness_pending_input"]["prompt"]
+    return command.update["harness_inputs"][0]["prompt"]
 
 
 def _instructions_file(agent_id: int = 42) -> Path:
@@ -304,7 +305,7 @@ async def test_the_built_in_loop_writes_no_cursor(
 
     assert command.update is not None
     assert "messages" in command.update
-    assert "harness_pending_input" not in command.update
+    assert "harness_inputs" not in command.update
 
 
 def _make_antigravity_recall_runtime(
@@ -348,23 +349,12 @@ def _make_antigravity_recall_runtime(
         },
     )
 
-    class _Bridge:
-        model = "claude-sonnet-5"
+    class _Bridge(FakeEngine):
+        async def deliver(self, inputs: Sequence[HarnessInput]) -> None:
+            recorded_prompts.extend(item.text for item in inputs)
+            await super().deliver(inputs)
 
-        async def run_turn(self, prompt: str, *, key: str, on_event: Any = None) -> HarnessTurn:
-            del key, on_event
-            recorded_prompts.append(prompt)
-            return HarnessTurn(
-                turn_id="t1",
-                text="MEIVA_DISPLAY_TO_USER\nRelease notes drafted.",
-                usage=Usage(0, 0),
-                cost_usd=None,
-                subtype="success",
-                is_error=False,
-                interrupted=False,
-            )
-
-    bridge: Any = _Bridge()
+    bridge: Any = _Bridge(reply="MEIVA_DISPLAY_TO_USER\nRelease notes drafted.")
     return Runtime(
         context=MeivaContext(
             meiva_home=unit_home,
@@ -445,8 +435,7 @@ async def test_antigravity_claim_before_turn_harness_turn_recalls_skill_and_prep
     claim_cmd = await claim_node(AgentState(), runtime, cfg)
     assert claim_cmd.goto == "before_turn"
     assert claim_cmd.update is not None
-    pending: dict[str, Any] = claim_cmd.update["harness_pending_input"]
-    assert len(pending["messages"]) == 1
+    assert len(claim_cmd.update["harness_view"]) == 1
 
     state_after_claim = AgentState(**claim_cmd.update)
     before_turn_fn = hook_node(
@@ -457,19 +446,21 @@ async def test_antigravity_claim_before_turn_harness_turn_recalls_skill_and_prep
     assert bt_cmd.update is not None
     assert "please use beta to draft the release notes" in scorer_calls[0]
     assert bt_cmd.update["skill_recall"] == SkillRecallState(prompted={"beta"}, window=0)
-    updated_pending: dict[str, Any] = bt_cmd.update["harness_pending_input"]
-    updated_prompt: str = updated_pending["prompt"]
-    assert updated_prompt.index("meiva.skills.beta") < updated_prompt.index(
-        "please use beta to draft the release notes"
-    )
+    notes: list[dict[str, Any]] = bt_cmd.update["harness_inputs"]
+    assert "meiva.skills.beta" in notes[0]["prompt"]
 
     state_after_bt = state_after_claim.model_copy(update=bt_cmd.update)
     assert state_after_bt.messages == []
-    ht_cmd = await harness_turn_node(
-        state_after_bt,
-        Runtime(context=replace(runtime.context, ops_pool=None)),
-        cfg,
-    )
+    service = HostedServiceResources()
+    try:
+        resources = await service.turn()
+        ht_cmd = await harness_turn_node(
+            state_after_bt,
+            Runtime(context=replace(runtime.context, hosted_resources=resources)),
+            cfg,
+        )
+    finally:
+        await service.aclose()
     assert ht_cmd.goto == "claim"
-    assert "meiva.skills.beta" in recorded_prompts[0]
-    assert "please use beta to draft the release notes" in recorded_prompts[0]
+    assert "meiva.skills.beta" in recorded_prompts[0], "the hook note is delivered ahead of the row"
+    assert "please use beta to draft the release notes" in recorded_prompts[1]

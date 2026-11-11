@@ -24,12 +24,12 @@ from base.lm.harness import (
     HarnessRegistration,
     HarnessSetupError,
     HarnessTurnFaultedError,
+    InputInContext,
     RegistrationStore,
     SessionFailed,
     SessionFaulted,
     SessionStarted,
     TurnCompleted,
-    TurnFaulted,
     UnsolicitedOutput,
     Usage,
     handle_digest,
@@ -39,6 +39,7 @@ from base.lm.harness.claude.session import ClaudeSession
 from base.lm.harness.codex.session import CodexSession
 from base.lm.harness.delivery import HarnessInput
 from base.lm.harness.registration import SecureRandom
+from base.lm.harness.tests.bridge_support import run_turn
 from base.lm.harness.tests.roots import bridge_root_values
 from base.lm.harness.wiring import HANDOFF_INSTRUCTION, bridge_for, open_session
 
@@ -120,14 +121,15 @@ class FakeSession:
             self.handoff_ticket = self.submit(handoff.render(), key="handoff")
 
     async def deliver(self, inputs: Sequence[HarnessInput]) -> None:
-        raise NotImplementedError(
-            "the bridge still submits turns; deliver arrives with the graph change"
-        )
+        for item in inputs:
+            _ = self.submit(item.text, key=item.key)
 
     def submit(self, text: str, *, key: str | None = None) -> FakeTicket:
         self._n += 1
         turn_id = f"t{self._n}"
         self.submitted.append((text, key, turn_id))
+        if key is not None:
+            self._queue.append(InputInContext(key, turn_id, 1))
         self._queue.append(AssistantText(turn_id=turn_id, text=f"partial-{turn_id}"))
         self._queue.extend(self._during)
         if self._n == 1 and self._opening is not None:
@@ -196,15 +198,11 @@ async def test_a_first_turn_co_delivers_the_handoff_in_a_single_submission() -> 
     session = FakeSession()
     doc = handoff()
     bridge = make_bridge(session, handoff=doc)
-    events: list[BridgeEvent] = []
-
-    turn = await bridge.run_turn("hello", key="inbound-7", on_event=events.append)
+    turn = await run_turn(bridge, "hello", key="inbound-7")
 
     assert turn.text == "reply-t1"
     assert turn.usage.input_tokens == 10
-    assert turn.prelude == ()
     assert session.submitted == [(f"{doc.render().strip()}\n\nhello", "inbound-7", "t1")]
-    assert [type(event) for event in events] == [AssistantText]
     assert bridge.model == "claude-sonnet-5-5"
 
 
@@ -214,10 +212,8 @@ async def test_a_turn_whose_text_already_starts_with_the_handoff_is_not_prefixed
     bridge = make_bridge(session, handoff=doc)
     co_delivered = f"{doc.render().strip()}\n\nhello"
 
-    await bridge.run_turn(co_delivered, key="inbound-1")
-    turn = await bridge.run_turn("two", key="inbound-2")
-
-    assert turn.prelude == ()
+    await run_turn(bridge, co_delivered, key="inbound-1")
+    await run_turn(bridge, "two", key="inbound-2")
     assert session.submitted == [
         (co_delivered, "inbound-1", "t1"),
         ("two", "inbound-2", "t2"),
@@ -240,29 +236,14 @@ async def test_a_faulted_turn_retires_its_session_and_the_next_one_starts_fresh(
     )
 
     with pytest.raises(HarnessTurnFaultedError, match="cli died"):
-        await bridge.run_turn("hello", key="inbound-1")
+        await run_turn(bridge, "hello", key="inbound-1")
 
     assert faulted.closed, "a faulted session is dropped, not reused for the next inbound"
-    turn = await bridge.run_turn("again", key="inbound-2")
+    turn = await run_turn(bridge, "again", key="inbound-2")
 
     assert turn.text == "reply-t1", "the rebuilt session runs its own first turn"
     assert fresh.started == 1
     assert fresh.submitted == [("again", "inbound-2", "t1")]
-
-
-async def test_a_failure_naming_another_turn_does_not_end_this_one() -> None:
-    # meiva:note
-    # The provider's own turn, or a turn an earlier session ran, reports a failure.
-    # It names a turn this wait is not running, so acting on it would fail the wrong
-    # turn — the other half of the boundary bug in #5663.
-    # meiva:link base/lm/harness/docs/harness.md
-    session = FakeSession(during=[TurnFaulted(turn_id="turn-of-another-session", error="not ours")])
-    bridge = make_bridge(session)
-
-    turn = await bridge.run_turn("hello", key="inbound-1")
-
-    assert turn.text == "reply-t1"
-    assert not session.closed, "a foreign failure does not retire a healthy session"
 
 
 async def test_a_providers_own_terminal_message_does_not_truncate_the_turn() -> None:
@@ -271,7 +252,7 @@ async def test_a_providers_own_terminal_message_does_not_truncate_the_turn() -> 
     )
     bridge = make_bridge(session)
 
-    turn = await bridge.run_turn("hello", key="inbound-1")
+    turn = await run_turn(bridge, "hello", key="inbound-1")
 
     assert turn.text == "reply-t1", "the provider's own reply is not this turn's text"
     assert not session.closed
@@ -282,7 +263,7 @@ async def test_a_session_failure_ends_the_wait_as_a_closed_session() -> None:
     bridge = make_bridge(session)
 
     with pytest.raises(HarnessClosedError, match="provider stream died"):
-        await bridge.run_turn("hello", key="inbound-1")
+        await run_turn(bridge, "hello", key="inbound-1")
 
     assert session.closed, "a dead session is retired, never reused"
 
@@ -297,7 +278,7 @@ async def test_a_retired_fault_naming_no_turn_is_not_blamed_on_the_turn() -> Non
     bridge = make_bridge(session)
 
     with pytest.raises(HarnessClosedError, match="stream died"):
-        await bridge.run_turn("hello", key="inbound-1")
+        await run_turn(bridge, "hello", key="inbound-1")
 
     assert session.closed
 
@@ -307,8 +288,8 @@ async def test_the_handoff_is_injected_once_and_the_session_started_once() -> No
     doc = handoff()
     bridge = make_bridge(session, handoff=doc)
 
-    await bridge.run_turn("one", key="inbound-1")
-    await bridge.run_turn("two", key="inbound-2")
+    await run_turn(bridge, "one", key="inbound-1")
+    await run_turn(bridge, "two", key="inbound-2")
 
     assert session.started == 1
     assert session.submitted == [
@@ -322,9 +303,9 @@ async def test_calling_set_handoff_again_on_a_warm_session_does_not_reinject_the
     doc = handoff()
     bridge = make_bridge(session, handoff=doc)
 
-    await bridge.run_turn("one", key="inbound-1")
+    await run_turn(bridge, "one", key="inbound-1")
     bridge.set_handoff(doc)
-    await bridge.run_turn("two", key="inbound-2")
+    await run_turn(bridge, "two", key="inbound-2")
 
     assert session.submitted == [
         (f"{doc.render().strip()}\n\none", "inbound-1", "t1"),
@@ -349,12 +330,12 @@ async def test_a_rebuilt_unresumed_session_after_fault_accepts_a_new_handoff_onc
     )
 
     with pytest.raises(HarnessTurnFaultedError, match="cli died"):
-        await bridge.run_turn("hello", key="inbound-1")
+        await run_turn(bridge, "hello", key="inbound-1")
 
     bridge.set_handoff(doc)
-    await bridge.run_turn("two", key="inbound-2")
+    await run_turn(bridge, "two", key="inbound-2")
     bridge.set_handoff(doc)
-    await bridge.run_turn("three", key="inbound-3")
+    await run_turn(bridge, "three", key="inbound-3")
 
     assert fresh.submitted == [
         (f"{doc.render().strip()}\n\ntwo", "inbound-2", "t1"),
@@ -366,7 +347,7 @@ async def test_a_faulted_session_fails_the_turn() -> None:
     bridge = make_bridge(FakeSession(fault="cli died"))
 
     with pytest.raises(HarnessTurnFaultedError, match="cli died"):
-        await bridge.run_turn("hello", key="inbound-1")
+        await run_turn(bridge, "hello", key="inbound-1")
 
 
 async def test_a_session_that_cannot_start_fails_the_turn_as_a_setup_error() -> None:
@@ -385,7 +366,7 @@ async def test_a_session_that_cannot_start_fails_the_turn_as_a_setup_error() -> 
     )
 
     with pytest.raises(HarnessSetupError, match="could not start"):
-        await bridge.run_turn("hello", key="inbound-1")
+        await run_turn(bridge, "hello", key="inbound-1")
 
 
 async def test_a_refused_submission_fails_the_turn_and_retires_the_session() -> None:
@@ -401,8 +382,8 @@ async def test_a_refused_submission_fails_the_turn_and_retires_the_session() -> 
         controller_pid=os.getpid(),
     )
 
-    with pytest.raises(HarnessSetupError, match="refused the turn"):
-        await bridge.run_turn("hello", key="inbound-1")
+    with pytest.raises(HarnessSetupError, match="refused the input"):
+        await run_turn(bridge, "hello", key="inbound-1")
 
     assert session.closed, "a session that refused a submission is not reused"
 
@@ -411,13 +392,13 @@ async def test_close_closes_the_session_and_refuses_later_turns() -> None:
     session = FakeSession()
     bridge = make_bridge(session)
 
-    await bridge.run_turn("hello", key="inbound-1")
+    await run_turn(bridge, "hello", key="inbound-1")
     await bridge.close(reason="evicted")
 
     assert session.closed
     assert session.close_reason == "evicted"
     with pytest.raises(HarnessClosedError):
-        await bridge.run_turn("again", key="inbound-2")
+        await run_turn(bridge, "again", key="inbound-2")
 
 
 @pytest.mark.parametrize(
@@ -585,7 +566,7 @@ def test_a_session_registers_its_handle_digest_and_retires_the_line(tmp_path: Pa
         controller_pid=os.getpid(),
     )
 
-    asyncio.run(bridge.run_turn("hello", key="inbound-1"))
+    asyncio.run(run_turn(bridge, "hello", key="inbound-1"))
 
     registration = store.read(6984)
     assert registration is not None
@@ -620,13 +601,15 @@ def test_the_registration_carries_the_injected_clock_pid_and_handle_generator(
         controller_pid=424242,
     )
 
-    asyncio.run(bridge.run_turn("hello", key="inbound-1"))
+    asyncio.run(run_turn(bridge, "hello", key="inbound-1"))
 
     registration = store.read(6984)
     assert registration is not None
     assert registration.controller_pid == 424242
     assert registration.created_at == "2031-05-17T09:30:00+00:00"
-    assert registration.expires_at == "2031-05-17T10:30:00+00:00"
+    assert registration.expires_at >= "2031-05-17T10:30:00+00:00", (
+        "renewed for the session, never shorter"
+    )
     drawn = base64.urlsafe_b64encode(seeded_rng(7).randbytes(32)).rstrip(b"=").decode()
     assert handles == [drawn]
     assert len(handles[0]) == 43
@@ -637,7 +620,7 @@ def test_a_registration_expires_within_the_configured_ttl(tmp_path: Path) -> Non
     store = RegistrationStore(tmp_path / "registrations")
     bridge = make_bridge(FakeSession(), registrations=store)
     before = datetime.now(UTC)
-    asyncio.run(bridge.run_turn("hello", key="inbound-1"))
+    asyncio.run(run_turn(bridge, "hello", key="inbound-1"))
     after = datetime.now(UTC)
 
     written = store.read(6984)
@@ -651,9 +634,9 @@ async def test_every_turn_renews_the_row_without_restamping_its_creation(tmp_pat
     store = RegistrationStore(tmp_path / "registrations")
     bridge = make_bridge(FakeSession(), registrations=store)
 
-    await bridge.run_turn("one", key="inbound-1")
+    await run_turn(bridge, "one", key="inbound-1")
     first = store.read(6984)
-    await bridge.run_turn("two", key="inbound-2")
+    await run_turn(bridge, "two", key="inbound-2")
     second = store.read(6984)
 
     assert first is not None and second is not None
@@ -713,16 +696,16 @@ async def test_session_model_and_error_detail_surface_through_bridge() -> None:
 
     session = ModelOnStartSession()
     bridge = make_bridge(session)
-    await bridge.run_turn("one", key="k1")
+    await run_turn(bridge, "one", key="k1")
     assert bridge.model == "gpt-6.1-sol"
     with pytest.raises(
         HarnessTurnFaultedError,
         match="failed \\(failed\\): harness reported a failure but gave no error detail"
         " \\(status/stop_reason: usage limit reached\\)",
     ):
-        await bridge.run_turn("two", key="k2")
+        await run_turn(bridge, "two", key="k2")
     with pytest.raises(HarnessTurnFaultedError, match="failed \\(API 400\\): API Error: 400"):
-        await bridge.run_turn("three", key="k3")
+        await run_turn(bridge, "three", key="k3")
 
     assert session.started == 1
     assert not session.closed

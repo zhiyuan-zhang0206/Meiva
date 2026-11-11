@@ -20,7 +20,7 @@ One process serves the whole session. stdin takes one JSON object per line,
 `{"event":"user","message":{"content":"…"}}`; stdout emits `init`, `step_update`
 and `result`. While a turn is running, the CLI's `printmode.runStreamInput` loop
 blocks inside `pollResponse` until `IsCascadeRunning` becomes false, so stdin is
-not read again until the turn completes. Mid-turn steering (`ForegroundSteering`)
+not read again until the turn completes. Mid-turn input
 therefore talks directly to the child process's in-process Connect JSON-RPC
 `LanguageServerService` on localhost: `AgyTransport` sets
 `ANTIGRAVITY_SERVER_CSRF_TOKEN` in the child environment, discovers the child's

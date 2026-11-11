@@ -455,6 +455,15 @@ class AgentHost:
             raise RuntimeError("this host already has a wake bound")
         self._wake = wake
 
+    # meiva:note
+    # An inbound wake for an agent whose invocation is running reaches its external harness engine, so
+    # the graph delivers the new input without polling the queue.
+    # meiva:link agent/graph/docs/harness-turn.md
+    def notify_inbound(self, agent_id: int) -> None:
+        runtime = self._runtimes.get(agent_id)
+        if runtime is not None and runtime.harness_bridge is not None:
+            runtime.harness_bridge.notify_inbound()
+
     def _wake_resumed(self, agent_id: int) -> None:
         if self._wake is not None:
             self._wake(agent_id)

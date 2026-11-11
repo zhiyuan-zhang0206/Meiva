@@ -4,37 +4,24 @@ import asyncio
 import base64
 from collections.abc import Callable, Sequence
 from contextlib import suppress
-from dataclasses import replace
 from datetime import timedelta
 
 from base.api_contracts.agent_contract import Harness
 from base.lm.harness.base_session import SessionClock
 from base.lm.harness.delivery import HarnessInput
-from base.lm.harness.engine import (
-    CompletedTurnEvent,
-    ForegroundSteering,
-    HarnessSession,
-    HarnessTurn,
-    SubmittedTurn,
-    TurnEventSink,
-)
+from base.lm.harness.engine import HarnessSession, HarnessTurn, completed_turn
 from base.lm.harness.events import (
-    AssistantText,
     BridgeEvent,
     ContextCompacted,
-    ForegroundAccepted,
-    ReasoningDelta,
-    ReasoningText,
+    InputInContext,
+    InputLost,
+    InputRejected,
     SessionClosed,
     SessionFailed,
     SessionFaulted,
     SessionStarted,
-    TextDelta,
-    ToolResult,
-    ToolUse,
     TurnCompleted,
     TurnFaulted,
-    UnsolicitedOutput,
 )
 from base.lm.harness.faults import fault_message
 from base.lm.harness.handoff import Handoff, compaction_reminder
@@ -66,6 +53,14 @@ class HarnessClosedError(RuntimeError):
 # thing, and both settle the turn as a reported abort rather than a host crash.
 # meiva:link base/lm/harness/docs/harness.md
 class HarnessSetupError(RuntimeError):
+    pass
+
+
+# meiva:note
+# The session could not take the batch: nothing was handed to the harness, so the inputs can go back to the
+# queue and be delivered again, unlike a failure after the hand-over, where whether they arrived is unknown.
+# meiva:link base/lm/harness/docs/delivery.md
+class HarnessNotDeliveredError(HarnessSetupError):
     pass
 
 
@@ -111,8 +106,10 @@ class HarnessBridge:
         self._pump: EventPump | None = None
         self._pump_task: asyncio.Task[None] | None = None
         self._pump_group: asyncio.TaskGroup | None = None
-        self._foreground: asyncio.Future[tuple[HarnessSession, str] | None] | None = None
+        self._renew_task: asyncio.Task[None] | None = None
+        self._inbound = asyncio.Event()
         self._handoff_delivered = False
+        self._opening_key: str | None = None
         self._model: str | None = None
         self._digest: str | None = None
         self._closed = False
@@ -183,15 +180,24 @@ class HarnessBridge:
         self._pump = pump
         self._pump_group = group
         self._pump_task = group.create_task(pump.run(), name=f"harness-pump-{self._agent_id}")
+        if self._registrations is not None:
+            self._renew_task = group.create_task(
+                self._renew_registration(session), name=f"harness-registration-{self._agent_id}"
+            )
 
     async def _stop_pump(self) -> None:
-        task, group = self._pump_task, self._pump_group
-        self._pump_task = self._pump_group = self._pump = None
+        task, group, renew = self._pump_task, self._pump_group, self._renew_task
+        self._pump_task = self._pump_group = self._pump = self._renew_task = None
         if task is None or group is None:
             return
         _ = task.cancel()
+        if renew is not None:
+            _ = renew.cancel()
         with suppress(asyncio.CancelledError):
             await task
+        if renew is not None:
+            with suppress(asyncio.CancelledError):
+                await renew
         await group.__aexit__(None, None, None)
 
     def _observe(self, event: BridgeEvent) -> None:
@@ -208,12 +214,30 @@ class HarnessBridge:
                 )
         elif isinstance(event, ContextCompacted):
             self._context_compacted = True
+        elif isinstance(event, InputInContext) and event.key == self._opening_key:
+            self._handoff = None
+            self._handoff_delivered = True
+            self._context_compacted = False
+            self._opening_key = None
+        elif isinstance(event, (InputRejected, InputLost)) and event.key == self._opening_key:
+            self._opening_key = None
+
+    # meiva:note
+    # A session that cannot start is a setup failure, not a crash: the graph settles it as a reported
+    # abort, the same way it settles a session that died mid-turn.
+    async def _ensure_for_delivery(self) -> HarnessSession:
+        try:
+            return await self.ensure()
+        except HarnessClosedError:
+            raise
+        except Exception as exc:
+            raise HarnessSetupError(f"{self.harness.value} session could not start: {exc}") from exc
 
     # meiva:note
     # Watch the session's events from now on. Subscribe before handing anything to the session: the
     # subscription sees only what the pump reads after it exists.
     async def subscribe(self) -> Subscription:
-        _ = await self.ensure()
+        await self._ensure_for_delivery()
         pump = self._pump
         if pump is None:
             raise HarnessClosedError("this harness bridge is closed")
@@ -229,144 +253,75 @@ class HarnessBridge:
         if not batch:
             raise ValueError("deliver requires at least one input")
         try:
-            session = await self.ensure()
-        except HarnessClosedError:
+            session = await self._ensure_for_delivery()
+        except HarnessNotDeliveredError:
             raise
-        except Exception as exc:
-            raise HarnessSetupError(f"{self.harness.value} session could not start: {exc}") from exc
+        except (HarnessClosedError, HarnessSetupError) as exc:
+            raise HarnessNotDeliveredError(str(exc)) from exc
         self._register(session.session_id or "")
         batch[0] = HarnessInput(
-            key=batch[0].key, text=self._opening_input(batch[0].text), images=batch[0].images
+            key=batch[0].key,
+            text=self._opening_input(batch[0].key, batch[0].text),
+            images=batch[0].images,
         )
         await session.deliver(batch)
-
-    @property
-    def steering_available(self) -> bool:
-        session = self._session
-        return isinstance(session, ForegroundSteering) and session.steering_available
-
-    async def steer(self, text: str, *, key: str) -> bool:
-        session = self._session
-        if not isinstance(session, ForegroundSteering):
-            return False
-        return await session.steer(text, key=key)
-
-    async def run_turn(
-        self,
-        text: str,
-        *,
-        key: str,
-        on_event: TurnEventSink | None = None,
-    ) -> HarnessTurn:
-        if self._foreground is not None:
-            raise HarnessSetupError("a harness turn is already running")
-        foreground: asyncio.Future[tuple[HarnessSession, str] | None] = (
-            asyncio.get_running_loop().create_future()
-        )
-        self._foreground = foreground
-        try:
-            return await self._run_turn(text, key, on_event, foreground)
-        finally:
-            if not foreground.done():
-                foreground.set_result(None)
-            self._foreground = None
-
-    async def _run_turn(
-        self,
-        text: str,
-        key: str,
-        on_event: TurnEventSink | None,
-        foreground: asyncio.Future[tuple[HarnessSession, str] | None],
-    ) -> HarnessTurn:
-        try:
-            session = await self.ensure()
-        except HarnessClosedError:
-            raise
-        except Exception as exc:
-            raise HarnessSetupError(f"{self.harness.value} session could not start: {exc}") from exc
-        self._register(session.session_id or "")
-        text = self._opening_input(text)
-        pump = self._pump
-        if pump is None:
-            raise HarnessClosedError("this harness bridge is closed")
-        subscription = pump.subscribe()
-        try:
-            try:
-                ticket: SubmittedTurn = session.submit(text, key=key)
-            except Exception as exc:
-                raise HarnessSetupError(f"{self.harness.value} refused the turn: {exc}") from exc
-            if ticket.deduplicated and ticket.settled:
-                return replace(_completed(await ticket.outcome(), ""), replayed=True)
-            turn_id = str(ticket.turn_id)
-            foreground.set_result((session, turn_id))
-            return await self._wait_with_registration(session, subscription, turn_id, on_event)
-        except HarnessTurnFaultedError as exc:
-            if exc.outcome is None:
-                await self._retire(session, reason="unsettled turn fault")
-            raise
-        except (HarnessClosedError, HarnessSetupError):
-            await self._retire(session, reason="session unavailable")
-            raise
-        finally:
-            subscription.close()
 
     # meiva:note
     # What a turn opens with. The first turn of a fresh session carries the handoff, unless the
     # text already starts with it. After the CLI compacted its context, the next turn instead
     # opens with a reminder to re-read the saved instructions: the first message may be a summary
     # by now. The reminder rides the opening input rather than a mid-turn steer, and a turn that
-    # carries the full handoff needs none.
+    # carries the full handoff needs none. Whatever rode the opening input counts as delivered only when
+    # that input is in the model's context: a refused or lost input is handed over again with it.
     # meiva:link base/lm/harness/docs/harness.md
-    def _opening_input(self, text: str) -> str:
-        handoff, self._handoff = self._handoff, None
-        if handoff is not None and not self._handoff_delivered:
-            rendered = handoff.render().strip()
+    def _opening_input(self, key: str, text: str) -> str:
+        if self._opening_key not in (None, key):
+            return text
+        if self._handoff is not None and self._handoff_delivered:
+            self._handoff = None
+        if self._handoff is not None:
+            rendered = self._handoff.render().strip()
+            self._opening_key = key
             if not text.startswith(rendered):
                 text = f"{rendered}\n\n{text}" if text else rendered
         elif self._context_compacted and self._instructions_file is not None and text:
+            self._opening_key = key
             text = f"{compaction_reminder(self._instructions_file)}\n\n{text}"
-        self._context_compacted = False
-        self._handoff_delivered = True
         return text
 
     # meiva:note
-    # The renewal has the turn's lifetime. Preserve the original turn exception so
-    # callers can distinguish cancellation, an adapter fault, and a session closure.
-    # meiva:link base/lm/harness/docs/harness.md
-    async def _wait_with_registration(
-        self,
-        session: HarnessSession,
-        subscription: Subscription,
-        turn_id: str,
-        on_event: TurnEventSink | None,
-    ) -> HarnessTurn:
-        if self._registrations is None:
-            return await self._await_turn(subscription, turn_id, on_event=on_event)
-
-        outcome: HarnessTurn | BaseException
-        async with asyncio.TaskGroup() as tasks:
-            renewal = tasks.create_task(
-                self._renew_registration(session), name=f"harness-registration-{self._agent_id}"
-            )
-            try:
-                outcome = await self._await_turn(subscription, turn_id, on_event=on_event)
-            except BaseException as error:
-                outcome = error
-            finally:
-                _ = renewal.cancel()
-        if isinstance(outcome, BaseException):
-            raise outcome
-        return outcome
-
+    # Interrupt whatever the foreground is running. The target is the session's own running turn,
+    # named or not: a turn the CLI began on its own is as interruptible as one an input started.
+    # Nothing is interrupted when there is no session.
     async def interrupt(self) -> object:
-        foreground = self._foreground
-        if foreground is None:
+        session = self._session
+        if session is None:
             return None
-        target = await asyncio.shield(foreground)
-        if target is None or self._foreground is not foreground:
-            return None
-        session, turn_id = target
-        return await session.interrupt(turn_id=turn_id)
+        return await session.interrupt(turn_id=None)
+
+    # meiva:note
+    # The host's "there is new inbound for this agent" wake, carried to a graph invocation that is
+    # already running (it never reaches the idle claim loop). The graph waits on it with a low
+    # frequency fallback, so a wake that is lost costs one fallback interval, never a stuck message.
+    def notify_inbound(self) -> None:
+        self._inbound.set()
+
+    async def wait_inbound(self, timeout: float) -> None:
+        try:
+            await asyncio.wait_for(self._inbound.wait(), timeout)
+        except TimeoutError:
+            return
+        finally:
+            self._inbound.clear()
+
+    # meiva:note
+    # A session that faults or closes is dropped rather than reused, and the next inbound rebuilds
+    # one from the registry. `retire` is that operation for a caller that saw the fault on its
+    # subscription; retiring twice, or with no session, does nothing.
+    async def retire(self, reason: str) -> None:
+        session = self._session
+        if session is not None:
+            await self._retire(session, reason)
 
     async def close(self, *, reason: str = "closed") -> None:
         if self._close_error is not None:
@@ -391,6 +346,7 @@ class HarnessBridge:
         if self._session is session:
             self._session = None
             self._handoff_delivered = False
+            self._opening_key = None
             self._created_at = None
             await self._stop_pump()
         self._retire_registration()
@@ -451,123 +407,33 @@ class HarnessBridge:
         if self._registrations is not None:
             self._registrations.delete(self._agent_id)
 
-    async def _await_turn(
-        self,
-        subscription: Subscription,
-        turn_id: str,
-        *,
-        on_event: TurnEventSink | None = None,
-    ) -> HarnessTurn:
-        streamed: dict[str, list[str]] = {}
-        async for event in subscription:
-            done = await self._consume_event(event, turn_id, streamed, on_event=on_event)
-            if done is not None:
-                if done.is_error and not done.interrupted:
-                    raise HarnessTurnFaultedError(
-                        fault_message(self.harness.value, done), outcome=done
-                    )
-                return done
-        raise HarnessClosedError(f"harness event stream ended before turn {turn_id} completed")
-
-    async def _consume_event(
-        self,
-        event: BridgeEvent,
-        turn_id: str,
-        streamed: dict[str, list[str]],
-        *,
-        on_event: TurnEventSink | None = None,
-    ) -> HarnessTurn | None:
-        if isinstance(event, TurnCompleted):
-            if event.turn_id == turn_id:
-                return _completed(event, "".join(streamed.get(event.turn_id, [])))
-            return None
-        if isinstance(event, AssistantText):
-            streamed.setdefault(event.turn_id, []).append(event.text)
-        if await self._forward(event, turn_id, on_event):
-            return None
-        _raise_if_faulted(event, turn_id)
-        return None
-
-    async def _forward(
-        self,
-        event: BridgeEvent,
-        turn_id: str,
-        on_event: TurnEventSink | None,
-    ) -> bool:
-        # meiva:note
-        # Streaming payload reaches the caller as it arrives, but only when the caller
-        # asked to watch and the payload names the turn being run. Anything else is
-        # another turn's speech: this turn neither delivers it nor is blamed for it
-        # (#5663).
-        # meiva:link base/lm/harness/docs/attribution.md
-        if on_event is None:
-            return False
-        if not isinstance(
-            event,
-            (
-                ForegroundAccepted,
-                AssistantText,
-                ReasoningDelta,
-                ReasoningText,
-                TextDelta,
-                ToolUse,
-                ToolResult,
-            ),
-        ):
-            return False
-        if event.turn_id != turn_id:
-            return False
-        if (pending := on_event(event)) is not None:
-            await pending
-        return True
-
 
 # meiva:note
-# Only a failure that names this turn can end it. A session-level failure ends
-# the turn too, but as what it is — the session is gone — and never as this
-# turn's own verdict; a failure or a report that names another turn is not
-# ours to act on, and neither is output the provider produced for a turn we
-# never ran (#5663).
-# meiva:link base/lm/harness/docs/harness.md
-def _raise_if_faulted(event: BridgeEvent, turn_id: str) -> None:
+# What an event means for whoever is waiting on the session, as the error it raises there, or None when
+# it is no failure. A turn that ended in error (and was not interrupted) or a failure that names a turn is
+# that turn's fault; a failure of the session itself or its closing is the session's, never a turn's
+# verdict, and no reader may infer a turn from it (#5663). `outcome` carries what a faulted turn
+# produced so its usage is still accounted.
+# meiva:link base/lm/harness/docs/attribution.md
+def fault_of_event(harness: Harness, event: BridgeEvent) -> Exception | None:
+    if isinstance(event, TurnCompleted):
+        if event.is_error and not event.interrupted:
+            outcome = completed_turn(event, "")
+            return HarnessTurnFaultedError(fault_message(harness.value, outcome), outcome=outcome)
+        return None
     if isinstance(event, TurnFaulted):
-        if event.turn_id == turn_id:
-            raise HarnessTurnFaultedError(event.error)
-        return
+        return HarnessTurnFaultedError(event.error)
     if isinstance(event, SessionFailed):
-        raise HarnessClosedError(f"harness session failed: {event.error}")
-    if isinstance(event, UnsolicitedOutput):
-        return
+        return HarnessClosedError(f"harness session failed: {event.error}")
+    if isinstance(event, SessionClosed):
+        return HarnessClosedError(f"harness session closed: {event.reason}")
     if isinstance(event, SessionFaulted):
         # meiva:note
-        # The retired shape, emitted by an adapter that has not migrated yet. It
-        # splits the same way: naming a turn is turn-scoped, naming none is the
-        # session's own failure. It is checked last because the two events above
-        # are also instances of it.
+        # The retired shape, emitted by an adapter that has not migrated yet. It splits the same way:
+        # naming a turn is turn-scoped, naming none is the session's own failure. It is checked last
+        # because the two events above are also instances of it.
         # meiva:link base/lm/harness/docs/harness.md
         if event.turn_id is None:
-            raise HarnessClosedError(f"harness session failed: {event.error}")
-        if event.turn_id == turn_id:
-            raise HarnessTurnFaultedError(event.error)
-        return
-    if isinstance(event, SessionClosed):
-        raise HarnessClosedError(
-            f"harness session closed before turn {turn_id} completed: {event.reason}"
-        )
-
-
-def _completed(event: CompletedTurnEvent, streamed: str) -> HarnessTurn:
-    return HarnessTurn(
-        turn_id=event.turn_id,
-        text=event.text or streamed,
-        usage=event.usage,
-        cost_usd=event.cost_usd,
-        subtype=event.subtype,
-        is_error=event.is_error,
-        interrupted=event.interrupted,
-        stop_reason=getattr(event, "stop_reason", None),
-        num_turns=max(int(getattr(event, "num_turns", 1) or 1), 1),
-        steps=tuple(getattr(event, "steps", ()) or ()),
-        api_error_status=getattr(event, "api_error_status", None),
-        errors=tuple(getattr(event, "errors", ()) or ()),
-    )
+            return HarnessClosedError(f"harness session failed: {event.error}")
+        return HarnessTurnFaultedError(event.error)
+    return None

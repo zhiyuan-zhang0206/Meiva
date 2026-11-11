@@ -138,11 +138,13 @@ class HarnessTurnProjector:
             self._tools.clear()
             if not self._has_assistant_text and not interrupted:
                 for turn in turns:
-                    if turn.text and not turn.replayed:
+                    if turn.text:
                         self._new_chat(turn.text, now)
                         self._check_visibility(turn.text)
             if error is not None:
                 self._new_item("system_marker", f"error:Harness execution stopped: {error}", now)
+            self._has_assistant_text = False
+            self._last_chat_raw = ""
             await self._flush()
 
     async def _on_late_reasoning(
