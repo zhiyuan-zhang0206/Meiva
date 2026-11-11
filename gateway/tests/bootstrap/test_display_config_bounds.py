@@ -50,8 +50,8 @@ def test_implicit_notice_reads_use_validated_boundary_defaults(
     with db_conn.cursor() as cur:
         cur.execute(
             """INSERT INTO agent_notices
-                (agent_id, local_id, title, priority, require_response, expire_at)
-            SELECT %s, i, 'open', 'P3', true, now() + interval '1 day'
+                (agent_id, title)
+            SELECT %s, 'open'
             FROM generate_series(1, 601) i""",
             (agent_id,),
         )

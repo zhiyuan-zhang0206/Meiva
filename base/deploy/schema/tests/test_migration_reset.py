@@ -17,6 +17,7 @@ from base.deploy.schema.tests.migration_support import (
     SYN_ORPHAN,
     db_url,
     init_repo,
+    restore_legacy_notice_columns,
 )
 from base.deploy.schema.tests.migration_support import (
     reset_schema_migrations_state as reset_schema_migrations_state,
@@ -331,6 +332,7 @@ def test_current_reset_converges_when_the_missing_names_still_have_files(
             c.execute(
                 "DROP TABLE reply_suggestion_feedback, reply_suggestion_offers, agent_user_messages"
             )
+            restore_legacy_notice_columns(c)
             c.execute(
                 "CREATE TABLE IF NOT EXISTS agent_impersonations "
                 "(id bigint, capabilities jsonb, capability_declared_by text)"
@@ -371,6 +373,7 @@ def _live_reset_shape(url: str) -> set[str]:
         c.execute(
             "DROP TABLE reply_suggestion_feedback, reply_suggestion_offers, agent_user_messages"
         )
+        restore_legacy_notice_columns(c)
         c.execute("DROP TABLE IF EXISTS upload_staged_files CASCADE")
         c.execute("DROP TABLE IF EXISTS agent_harness_messages CASCADE")
         c.execute(

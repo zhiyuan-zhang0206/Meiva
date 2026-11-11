@@ -209,8 +209,7 @@ def test_a_notice_is_an_agent_posting_to_the_user(
     redis_url: str, db_conn: psycopg.Connection, receiver: int, *, database_gate: ProcessDbGate
 ) -> None:
     db_conn.execute(
-        "INSERT INTO agent_notices (local_id, agent_id, title, priority, require_response, expire_at) "
-        "VALUES (1, %s, 'need   a decision', 'P1', false, now() + interval '1 day')",
+        "INSERT INTO agent_notices (agent_id, title) VALUES (%s, 'need   a decision')",
         (receiver,),
     )
     db_conn.commit()
@@ -269,8 +268,8 @@ def test_a_notice_is_served_with_title_and_text(
     redis_url: str, db_conn: psycopg.Connection, receiver: int, *, database_gate: ProcessDbGate
 ) -> None:
     row = db_conn.execute(
-        "INSERT INTO agent_notices (local_id, agent_id, title, content, priority, require_response, expire_at) "
-        "VALUES (1, %s, 'a title', '## body', 'P1', false, now() + interval '1 day') RETURNING id",
+        "INSERT INTO agent_notices (agent_id, title, content) "
+        "VALUES (%s, 'a title', '## body') RETURNING id",
         (receiver,),
     ).fetchone()
     assert row is not None

@@ -44,7 +44,8 @@ def _record(
 # An upgrade keeps each agent's unread state: the cursor stops just before its oldest unread
 # delivery, sits at its newest delivery when everything was read, and is absent when it has none.
 # The baseline no longer has `read_at` (it stamps this migration as folded), so the test rebuilds
-# the schema this migration upgrades, and the later drop migration then removes the column.
+# the schema this migration upgrades. The drop migration is stamped as folded for the same reason,
+# so the column the test put back stays.
 def test_seen_cursor_is_backfilled_from_per_record_read_state(
     db_url: str, machine_identity: MachineIdentityReader
 ) -> None:
@@ -76,11 +77,6 @@ def test_seen_cursor_is_backfilled_from_per_record_read_state(
             index = conn.execute(
                 "SELECT to_regclass('agent_user_messages_by_agent')::text"
             ).fetchone()
-            columns = conn.execute(
-                "SELECT column_name FROM information_schema.columns "
-                "WHERE table_name='agent_user_messages' AND column_name='read_at'"
-            ).fetchall()
-        assert columns == []
         assert index == ("agent_user_messages_by_agent",)
         assert seen == {
             1: ids[(1, "c")] - 1,

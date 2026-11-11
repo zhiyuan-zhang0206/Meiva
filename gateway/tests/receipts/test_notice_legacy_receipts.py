@@ -25,7 +25,7 @@ def test_accepted_read_replays_without_reopening_old_action(
         (path,),
     )
     db_conn.execute(
-        "UPDATE agent_notices SET require_response=false, resolution='read', question=NULL, answer=NULL WHERE id=%s",
+        "UPDATE agent_notices SET resolution='read', question=NULL, answer=NULL WHERE id=%s",
         (notice,),
     )
     db_conn.commit()

@@ -8,7 +8,12 @@ import pytest
 from base.cluster.machine import MachineIdentityReader
 from base.deploy.schema.migration_layout import MIGRATIONS_DIR
 from base.deploy.schema.migrations import apply_pending_migrations
-from base.deploy.schema.tests.migration_support import SCHEMA_SQL, throwaway_database
+from base.deploy.schema.tests.migration_support import (
+    LEGACY_NOTICE_COLUMNS,
+    SCHEMA_SQL,
+    restore_legacy_notice_columns,
+    throwaway_database,
+)
 from base.paths.home import resolve_meiva_home
 
 _DELIVERY_MIGRATION = "20261106T032125_user-delivery-messages"
@@ -28,6 +33,7 @@ def _restore_previous_schema(conn: psycopg.Connection) -> None:
     conn.execute(
         "DROP TABLE reply_suggestion_feedback, reply_suggestion_offers, agent_user_messages"
     )
+    restore_legacy_notice_columns(conn)
     conn.execute("ALTER TABLE agent_notices ALTER COLUMN expire_at SET NOT NULL")
     conn.execute("DELETE FROM schema_migrations WHERE name=%s", (_DELIVERY_MIGRATION,))
     conn.execute("INSERT INTO agents (id) VALUES (42)")
@@ -67,13 +73,20 @@ def test_user_delivery_migrates_existing_databases_and_skips_fresh_baselines(
                 "reply_suggestion_offers",
                 "reply_suggestion_feedback",
             )
-            assert conn.execute(
-                "SELECT is_nullable FROM information_schema.columns "
-                "WHERE table_name='agent_notices' AND column_name='expire_at'"
-            ).fetchone() == ("YES",)
+            assert (
+                conn.execute(
+                    "SELECT column_name FROM information_schema.columns "
+                    "WHERE table_name='agent_notices' AND column_name = ANY(%s)",
+                    (list(LEGACY_NOTICE_COLUMNS),),
+                ).fetchall()
+                == []
+            )
             if upgrade:
                 assert conn.execute(
-                    "SELECT local_id, expire_at IS NULL, question, reply FROM agent_notices "
-                    "WHERE agent_id=42 ORDER BY local_id"
-                ).fetchall() == [(1, True, {"type": "text"}, None), (2, False, None, "Keep it")]
+                    "SELECT title, question, reply FROM agent_notices "
+                    "WHERE agent_id=42 ORDER BY title"
+                ).fetchall() == [
+                    ("Answered question", None, "Keep it"),
+                    ("Pending question", {"type": "text"}, None),
+                ]
         assert _apply(url, machine_identity) == []
