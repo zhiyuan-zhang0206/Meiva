@@ -6,15 +6,12 @@ from pathlib import Path
 
 from base.host.boundary.untyped import object_of
 from base.host.env.harness_binaries import resolve_user_home
-from base.lm.harness.antigravity.mapping import (
-    transcript_rows,
-    transcript_tool_args,
-    transcript_tool_output,
-)
+from base.lm.harness.antigravity.mapping import transcript_rows
 from base.lm.harness.antigravity.subagents import (
     Child,
     ChildCursor,
     advance,
+    find_spawn,
     parse_child,
     spawn_events,
 )
@@ -27,8 +24,8 @@ from base.log import logger
 # written since the last poll. A poll reads the parent's `subagents/` descriptors and, for each child, its
 # transcript, and returns the events the new rows make (see `subagents.py` for the file shapes). It is
 # display only, so a descriptor or transcript that cannot be read is logged once and left out: it never
-# fails a turn. How soon a child's rows are visible is up to agy's own flushing of that transcript, which
-# is not observed; a poll sees whatever is on disk, and a final poll at the end of a turn shows the rest.
+# fails a turn. agy appends a child's rows to its transcript while the child runs (observed on 1.5.5), so
+# a poll shows them within one poll interval; the final poll at the end of a turn shows the rest.
 # meiva:link base/lm/harness/docs/subagent-text.md
 @dataclass(slots=True)
 class SubagentReader:
@@ -63,12 +60,10 @@ class SubagentReader:
     def _announce(
         self, conversation_id: str, child: Child, turn_id: str
     ) -> tuple[BridgeEvent, ...] | None:
-        output = transcript_tool_output(conversation_id, child.spawn_step, home=self.home)
-        if not output:
+        spawn = find_spawn(transcript_rows(conversation_id, home=self.home), child)
+        if spawn is None:
             return None
-        arguments = transcript_tool_args(
-            conversation_id, child.spawn_step, "invoke_subagent", home=self.home
-        )
+        arguments, output = spawn
         return spawn_events(child, turn_id=turn_id, arguments=arguments, output=output)
 
     def _children(self, conversation_id: str) -> list[Child]:

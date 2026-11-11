@@ -16,32 +16,29 @@ from base.lm.harness.events import (
 # in the same shape as the parent's. The stream-json frames show nothing of it (no step for the call,
 # none for the child), so everything here is read from files. The parent's
 # `.system_generated/subagents/<child>.json` names each child (`conversationId`, `subagentDescriptor`
-# with `typeName` and `role`, `spawnStepIndex`: the parent step that holds the call's output), and the
-# child's transcript rows are read like the parent's: a `PLANNER_RESPONSE` row's `content` is what it
+# with `typeName` and `role`; `spawnStepIndex` is the output row of the LAST call of the planner row
+# that started it, the same for every call of a parallel batch, so it is not used) and the call's
+# own output row is found by the child's id; the child's transcript rows are read like the parent's: a `PLANNER_RESPONSE` row's `content` is what it
 # said and its `tool_calls` are what it ran, the call at `tool_calls[k]` of the row at step `i` having
 # its output in the `GENERIC` row at step `i + 1 + k`. Observed on agy 1.5.5; none of it is a published
 # interface, so a file that is not this shape is skipped rather than guessed at.
 # meiva:link base/lm/harness/docs/subagent-text.md
 
 
+INVOKE_SUBAGENT = "invoke_subagent"
+
+
 @dataclass(frozen=True, slots=True)
 class Child:
     conversation_id: str
     label: str | None
-    spawn_step: int
 
 
 def parse_child(raw: object) -> Child | None:
     if not is_object_dict(raw):
         return None
     conversation_id = raw.get("conversationId")
-    spawn_step = raw.get("spawnStepIndex")
-    if (
-        not isinstance(conversation_id, str)
-        or not conversation_id
-        or isinstance(spawn_step, bool)
-        or not isinstance(spawn_step, int)
-    ):
+    if not isinstance(conversation_id, str) or not conversation_id:
         return None
     descriptor = raw.get("subagentDescriptor")
     named = descriptor if is_object_dict(descriptor) else {}
@@ -53,7 +50,44 @@ def parse_child(raw: object) -> Child | None:
         ),
         None,
     )
-    return Child(conversation_id=conversation_id, label=label, spawn_step=spawn_step)
+    return Child(conversation_id=conversation_id, label=label)
+
+
+# meiva:note
+# Where the parent's `invoke_subagent` call that created `child` is. Its output row is the `GENERIC` row
+# that names the child's id, and the call is `tool_calls[k]` of the nearest earlier `PLANNER_RESPONSE`
+# row at step `i` with the output at step `i + 1 + k`, the same pairing as for any call. None until the
+# output row is written.
+def find_spawn(
+    rows: Sequence[Mapping[str, object]], child: Child
+) -> tuple[dict[str, object], str] | None:
+    planner: Mapping[str, object] | None = None
+    for row in rows:
+        if row.get("type") == "PLANNER_RESPONSE" and is_object_list(row.get("tool_calls")):
+            planner = row
+        elif (content := _spawn_output(row, child)) is not None:
+            return _spawn_arguments(planner, _step_index(row)), content
+    return None
+
+
+def _spawn_output(row: Mapping[str, object], child: Child) -> str | None:
+    content = row.get("content")
+    if row.get("type") != "GENERIC" or not isinstance(content, str):
+        return None
+    named = child.conversation_id in content and "Created the following subagent" in content
+    return content if named else None
+
+
+def _spawn_arguments(planner: Mapping[str, object] | None, output_step: int) -> dict[str, object]:
+    calls = planner.get("tool_calls") if planner is not None else None
+    if planner is None or not is_object_list(calls):
+        return {}
+    offset = output_step - _step_index(planner) - 1
+    call = calls[offset] if 0 <= offset < len(calls) else None
+    if not is_object_dict(call) or call.get("name") != INVOKE_SUBAGENT:
+        return {}
+    args = call.get("args")
+    return dict(args) if is_object_dict(args) else {}
 
 
 # meiva:note
@@ -76,7 +110,7 @@ def spawn_events(
         ToolUse(
             turn_id=turn_id,
             tool_use_id=child.conversation_id,
-            name="invoke_subagent",
+            name=INVOKE_SUBAGENT,
             tool_input=dict(arguments),
         ),
         ToolResult(
