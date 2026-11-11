@@ -36,25 +36,57 @@ from base.log import logger
 from .goto import LlmGoto
 
 
+# meiva:note
+# Race the streaming task against the durable-interrupt cancel event.
+#
+#     Returns the cancelled Command (halted=True → after_exec, so claim
+#     dispatches the inbound) when the cancel event fires first; returns None
+#     once the stream completed cleanly (stream exceptions propagate, with the
+#     provider-error classification applied).
+#
+#     subscribe_interrupt is RAII: on node entry it watches for a durable
+#     interrupt inbound (kind interrupt/terminate) by polling the durable queue,
+#     with an initial SELECT. On context
+#     exit the watcher is cancelled. A missed signal is not lost — it stays a
+#     pending row the claim node dispatches next pass.
+# Notify frontend the turn was aborted — the SSE Cancelled event
+# resets turn-active state and drops the still-streaming partial
+# bubble. emit() is non-blocking (best-effort live view).
+# Clean discard: an interrupted generation is dropped whole, never
+# committed to history. Generating text has no side effects — the
+# honest record is "the user interrupted before I said anything",
+# so there is nothing to preserve. And because no complete
+# AIMessage is committed, there is no dangling tool_use owing a
+# tool_result: the discard leaves history API-valid with zero
+# repair messages. (Code execution is the opposite case — once a
+# tool_use is committed, exec_node emits a matching [cancelled by
+# user] tool_result on the soft-cancel path. A hard cancel
+# (SIGTERM/restart/stop -> asyncio.CancelledError) can still kill
+# the process before that write lands; the dangling-tool_use
+# repair (agent/hooks/repair.py) backfills the tool_result at the
+# next boot / before_llm pass.) Return halted rather than
+# raising CancelledError (a BaseException that made asyncio.run
+# silently exit the process; agent #45 incident). chunks
+# accumulated so far are intentionally ignored.
+# Classify the provider exception (base.lm.errors.classify_error) and
+# log the structured (error_class, provider, status) for the postmortem.
+# A PERMANENT class (400 context length / schema, 401/402/403 auth /
+# billing / forbidden, 404 unknown model, 422 schema) or a configured
+# fatal error type (e.g. engine_overloaded_error returned by the stream) becomes a FatalProviderError:
+# the retry policy skips it and the host settles the turn to idle
+# instead of exhausting the full backoff budget and dying into
+# terminated. TRANSIENT errors reach the explicit retry predicate;
+# UNKNOWN errors propagate once with their original traceback.
+# finish: flush any remaining partial-JSON code increment + publish
+# LLMDone (frontend reload trigger). Not called on cancel path —
+# partial items wait for the next event reload; LLMDone would make
+# frontend pull state not yet committed, causing misalignment
 async def race_stream_vs_cancel(
     ctx: MeivaContext,
     agent_id: int,
     stream_coro: Coroutine[object, object, None],
     handler: RedisStreamHandler,
 ) -> Command[LlmGoto] | None:
-    """Race the streaming task against the durable-interrupt cancel event.
-
-    Returns the cancelled Command (halted=True → after_exec, so claim
-    dispatches the inbound) when the cancel event fires first; returns None
-    once the stream completed cleanly (stream exceptions propagate, with the
-    provider-error classification applied).
-
-    subscribe_interrupt is RAII: on node entry it watches for a durable
-    interrupt inbound (kind cancel/terminate) by polling the durable queue,
-    with an initial SELECT. On context
-    exit the watcher is cancelled. A missed signal is not lost — it stays a
-    pending row the claim node dispatches next pass.
-    """
     assert ctx.event_publisher is not None, (  # noqa: S101
         "race_stream_vs_cancel requires ctx.event_publisher"
     )
@@ -66,26 +98,7 @@ async def race_stream_vs_cancel(
         try:
             await interruptible_model(stream_coro, cancel_event)
         except ModelInterruptedError as interrupted:
-            # Notify frontend the turn was aborted — the SSE Cancelled event
-            # resets turn-active state and drops the still-streaming partial
-            # bubble. emit() is non-blocking (best-effort live view).
             ctx.event_publisher.emit(Cancelled(agent_id=agent_id).model_dump_json())
-            # Clean discard: an interrupted generation is dropped whole, never
-            # committed to history. Generating text has no side effects — the
-            # honest record is "the user interrupted before I said anything",
-            # so there is nothing to preserve. And because no complete
-            # AIMessage is committed, there is no dangling tool_use owing a
-            # tool_result: the discard leaves history API-valid with zero
-            # repair messages. (Code execution is the opposite case — once a
-            # tool_use is committed, exec_node emits a matching [cancelled by
-            # user] tool_result on the soft-cancel path. A hard cancel
-            # (SIGTERM/restart/stop -> asyncio.CancelledError) can still kill
-            # the process before that write lands; the dangling-tool_use
-            # repair (agent/hooks/repair.py) backfills the tool_result at the
-            # next boot / before_llm pass.) Return halted rather than
-            # raising CancelledError (a BaseException that made asyncio.run
-            # silently exit the process; agent #45 incident). chunks
-            # accumulated so far are intentionally ignored.
             logger.info(
                 "[{label}] {body}",
                 label="llm-cancelled",
@@ -97,24 +110,11 @@ async def race_stream_vs_cancel(
         except LLMStreamError:
             raise
         except Exception as e:
-            # Classify the provider exception (base.lm.errors.classify_error) and
-            # log the structured (error_class, provider, status) for the postmortem.
-            # A PERMANENT class (400 context length / schema, 401/402/403 auth /
-            # billing / forbidden, 404 unknown model, 422 schema) or a configured
-            # fatal error type (e.g. engine_overloaded_error returned by the stream) becomes a FatalProviderError:
-            # the retry policy skips it and the host settles the turn to idle
-            # instead of exhausting the full backoff budget and dying into
-            # terminated. TRANSIENT errors reach the explicit retry predicate;
-            # UNKNOWN errors propagate once with their original traceback.
             fatal = classify_and_log_provider_error(
                 e, ctx.require_agent(), catalog=ctx.require_catalog()
             )
             if fatal is not None:
                 raise fatal from e
             raise
-        # finish: flush any remaining partial-JSON code increment + publish
-        # LLMDone (frontend reload trigger). Not called on cancel path —
-        # partial items wait for the next event reload; LLMDone would make
-        # frontend pull state not yet committed, causing misalignment
         handler.finish(time.monotonic())
         return None

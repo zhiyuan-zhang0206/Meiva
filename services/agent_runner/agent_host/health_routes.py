@@ -23,10 +23,11 @@ def _json_object(body: bytes) -> dict[str, object] | None:
 
 
 # meiva:note
-# A `POST /cancel-turn` handler — the stop button, force terminate and wedged
+# A `POST /cancel-turn` handler — the interrupt of a native turn, force terminate and wedged
 #     recovery primitive.
 #
-#     Body: `{"agent_id": <int>}`. Cancels the agent's running turn task with the
+#     Body: `{"agent_id": <int>, "rearm": <bool, optional>}`; `rearm` starts the next turn at once
+#     when a wake arrived during the cancelled one (an interrupt's message). Cancels the agent's running turn task with the
 #     bounded unwind (a C-call-blocked turn is reported, not awaited forever) and
 #     answers `{"cancelled": true|false}` — false means no turn was running here.
 #     The route changes no row: whoever cancels owns the agent's status.
@@ -40,9 +41,9 @@ def cancel_turn_route(scheduler: TurnScheduler) -> RouteHandler:
 
         request = _json_object(body)
         agent_id = None if request is None else request.get("agent_id")
-        if type(agent_id) is not int or agent_id <= 0:
+        if request is None or type(agent_id) is not int or agent_id <= 0:
             return 400, b'{"error":"positive agent_id required"}', "application/json"
-        cancelled = await scheduler.cancel_turn(agent_id)
+        cancelled = await scheduler.cancel_turn(agent_id, rearm=request.get("rearm") is True)
         return 200, json.dumps({"cancelled": cancelled}).encode(), "application/json"
 
     return handler

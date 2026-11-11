@@ -251,9 +251,9 @@ async def test_a_paused_agent_is_restarted_as_idle_not_as_an_interrupted_turn(
     host = await cluster.host()
     turn = host.start_turn(agent_id)
     await asyncio.wait_for(script.entered.wait(), 60)
-    cluster.send(agent_id, "", kind="cancel")
+    cluster.send(agent_id, "", kind="interrupt")
     await asyncio.wait_for(turn, 60)
-    assert cluster.inbound(agent_id, "cancel")[0].status == "done"
+    assert cluster.inbound(agent_id, "interrupt")[0].status == "done"
 
     cluster.send(agent_id, "", kind="restart")
     await asyncio.wait_for(host.host.run_turn(agent_id), 60)

@@ -2,7 +2,7 @@
 
 from datetime import datetime
 from enum import StrEnum
-from typing import Literal, TypeGuard, get_args
+from typing import Literal, Self, TypeGuard, get_args
 from uuid import UUID
 
 from pydantic import (
@@ -20,9 +20,9 @@ from base.agents.messages.envelope import validate_source
 from base.agents.messages.inbound import WakeTriggerKind
 from base.agents.observation.evidence import AvailabilityReason
 from base.api_contracts.agent_contract import (
-    CancelResult,
     Harness,
     HarnessStatus,
+    InterruptResult,
     RestartResult,
     ResurrectResult,
     ShellKillMode,
@@ -319,13 +319,36 @@ class CompactAgentResponse(BaseModel):
 
 
 # meiva:note
-# POST /api/agents/{id}/cancel response.
+# POST /api/agents/{id}/interrupt request: who interrupts, and why.
 #
-#     `cancelled`: the agent's running turn was cancelled; the agent stays alive,
-#         idles, and takes its next input as a fresh turn.
-#     `not_running`: no turn was running, so there was nothing to cancel.
-class CancelAgentResponse(BaseModel):
-    status: CancelResult
+#     `message` is the reason, delivered to the agent as an ordinary chat message from `source`
+#     right after a note saying its turn was interrupted. It is required of every source except
+#     `user`: the web stop button has no text to send and leaves the agent a note alone.
+class InterruptAgentRequest(BaseModel):
+    source: str = Field(default="user", min_length=1, max_length=64)
+    message: UserContent | None = None
+
+    @field_validator("source")
+    @classmethod
+    def _check_source(cls, value: str) -> str:
+        validate_source(value)
+        return value
+
+    @model_validator(mode="after")
+    def _message_required(self) -> Self:
+        if self.message is None and self.source != "user":
+            raise ValueError("an interrupt from anything but the user requires a non-empty message")
+        return self
+
+
+# meiva:note
+# POST /api/agents/{id}/interrupt response.
+#
+#     `interrupted`: the agent had a running turn and its interruption was requested. A native
+#         turn has stopped; an external harness reports how its CLI stopped through the timeline.
+#     `not_running`: no turn was running, so the message was delivered like any other chat.
+class InterruptAgentResponse(BaseModel):
+    status: InterruptResult
 
 
 class ResurrectAgentResponse(BaseModel):

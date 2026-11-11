@@ -22,6 +22,7 @@ _INVENTORY: dict[str, str] = {
     "base/agents/birth/transaction.py::record_birth_event": "local",
     "ops/agents/wake.py::_stage_resurrect_event": "local",
     "ops/lifecycle/termination.py::_stage_termination_event": "local",
+    "ops/lifecycle/delivery.py::_InterruptRows.audit": "local",
     "services/desktop/computer/mcp_daemon.py::ComputerMcpDaemon._emit_action": "local",
     "services/desktop/computer/mcp_daemon.py::ComputerMcpDaemon._emit_session_event": "local",
     "base/agents/inbox/chat_delivery.py::insert_chat_inbound_in_transaction": "local",

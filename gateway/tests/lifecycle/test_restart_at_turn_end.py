@@ -2,7 +2,7 @@
 # `POST /api/agents/{id}/restart` with `at_turn_end`, the agent's own restart: it passes the same
 # validation as any restart (a refusal answers the caller at once, nothing is recorded) and then
 # the home runner records it as a pending command, which a running agent may ask for although a
-# restart sent by anyone else refuses it with 409 (`test_cancel_compact_routes.py`).
+# restart sent by anyone else refuses it with 409 (`test_interrupt_compact_routes.py`).
 # meiva:link gateway/agents/lifecycle.py
 
 from __future__ import annotations

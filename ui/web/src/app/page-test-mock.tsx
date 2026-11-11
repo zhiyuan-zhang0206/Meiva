@@ -328,7 +328,7 @@ export async function resetHomePageTestState() {
   transport.getReplySuggestion.mockImplementation(() => Promise.resolve(replySuggestions));
   resetStreamHandlers();
   transport.sendMessage.mockResolvedValue({ status: "running", inbound_id: 11, duplicate: false });
-  transport.cancel.mockResolvedValue(undefined);
+  transport.interrupt.mockResolvedValue(undefined);
   transport.stageUploadFile.mockResolvedValue(undefined);
   transport.deleteStagedUploadFile.mockResolvedValue(undefined);
   transport.submitUploadedFiles.mockResolvedValue(undefined);
@@ -341,7 +341,7 @@ export async function resetHomePageTestState() {
     // page's `crypto` with a stub.
     newOperationKey: transport.newOperationKey,
     sendMessage: transport.sendMessage,
-    cancel: transport.cancel,
+    interrupt: transport.interrupt,
     stageUploadFile: transport.stageUploadFile,
     deleteStagedUploadFile: transport.deleteStagedUploadFile,
     submitUploadedFiles: transport.submitUploadedFiles,

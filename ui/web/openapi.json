@@ -994,11 +994,11 @@
         }
       }
     },
-    "/api/agents/{agent_id}/cancel": {
+    "/api/agents/{agent_id}/interrupt": {
       "post": {
-        "summary": "Post Agent Cancel",
-        "description": "Cancel the agent's running turn without terminating the agent.\n\nThe home runner returns `cancelled` after cancelling a native turn or\n`enqueued` after recording a foreground cancel for an external harness.\nThe external harness reports the outcome through the timeline. `not_running`\nmeans there was no running turn. An unreachable home runner is an error.",
-        "operationId": "post_agent_cancel_api_agents__agent_id__cancel_post",
+        "summary": "Post Agent Interrupt",
+        "description": "Interrupt the agent's running turn without terminating the agent, and tell it why.\n\nOne transaction writes, in order, a note that the turn was interrupted by `source`, the\n`message` as an ordinary chat from `source`, and for an external harness the interrupt request its\nforeground reacts to. Only after that commits is the turn interrupted: a native turn on the home\nrunner, an external harness's CLI through its foreground watcher. The message is therefore\nqueued whether or not the interruption lands, and an unreachable home runner is an error with the\nmessage still queued. `interrupted` means a turn was running; `not_running` means it was not, and\nthe message was delivered like any other chat (a terminated agent is resurrected by it).\n\n`message` is required unless `source` is `user`: the web stop button has no text, and the agent\nis then left a note that its turn was interrupted by the user, without being woken.",
+        "operationId": "post_agent_interrupt_api_agents__agent_id__interrupt_post",
         "parameters": [
           {
             "name": "agent_id",
@@ -1010,13 +1010,23 @@
             }
           }
         ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InterruptAgentRequest"
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "description": "Successful Response",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/CancelAgentResponse"
+                  "$ref": "#/components/schemas/InterruptAgentResponse"
                 }
               }
             }
@@ -10728,27 +10738,6 @@
         "title": "BuildResponse",
         "description": "POST /api/agents/{agent_id}/understanding/build response.\n\n`build_id` and `rebuild_id` are None for a dry run, which writes nothing. `queued` counts the jobs\nnewly on the queue, `merged` those of the same stretch already live. `jobs` may be empty\n(everything chosen is covered): the rebuild of the upper levels is still queued."
       },
-      "CancelAgentResponse": {
-        "properties": {
-          "status": {
-            "$ref": "#/components/schemas/CancelResult"
-          }
-        },
-        "type": "object",
-        "required": [
-          "status"
-        ],
-        "title": "CancelAgentResponse"
-      },
-      "CancelResult": {
-        "type": "string",
-        "enum": [
-          "cancelled",
-          "enqueued",
-          "not_running"
-        ],
-        "title": "CancelResult"
-      },
       "ChoiceQuestion": {
         "properties": {
           "note_suggestion": {
@@ -12813,7 +12802,7 @@
           "system_note",
           "compact_summary",
           "compact_request",
-          "cancel",
+          "interrupt",
           "terminate",
           "restart",
           "resurrect",
@@ -12968,6 +12957,52 @@
         ],
         "title": "InspectWidgetTask",
         "description": "One task row of a resolved ``taskList`` widget — an element of\n`InspectWidgetResult.tasks` (GET /api/agents/{id}/inspect/widgets).\n\nKernel-resolved data, not policy: the row carries only what the console\nrenders (id for the `/fleet?task=` link, title for the text, priority\nfor the stakes badge — task #3819, user request 2026-09-17). The list is\nalready filtered (the agent's active tasks) and complete — every active row renders (user ruling 2026-09-17)."
+      },
+      "InterruptAgentRequest": {
+        "properties": {
+          "source": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Source",
+            "default": "user"
+          },
+          "message": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 1000000,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Message"
+          }
+        },
+        "type": "object",
+        "title": "InterruptAgentRequest"
+      },
+      "InterruptAgentResponse": {
+        "properties": {
+          "status": {
+            "$ref": "#/components/schemas/InterruptResult"
+          }
+        },
+        "type": "object",
+        "required": [
+          "status"
+        ],
+        "title": "InterruptAgentResponse"
+      },
+      "InterruptResult": {
+        "type": "string",
+        "enum": [
+          "interrupted",
+          "not_running"
+        ],
+        "title": "InterruptResult"
       },
       "InventoryAggregate": {
         "properties": {

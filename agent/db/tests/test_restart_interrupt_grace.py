@@ -58,7 +58,7 @@ async def test_a_claimed_restart_no_longer_interrupts(
     assert await pending_interrupt_reason(aops_pool, agent_id) is None
 
 
-@pytest.mark.parametrize("kind", ["cancel", "terminate"])
+@pytest.mark.parametrize("kind", ["interrupt", "terminate"])
 async def test_cancel_and_terminate_still_interrupt_at_once_beside_a_young_restart(
     db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool, kind: str
 ) -> None:

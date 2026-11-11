@@ -309,7 +309,7 @@ CREATE TABLE inbound_messages (
                    'system_note',       -- framework system notification (task assign/update/reminder); claim renders as a system note
                    'compact_summary',   -- written by agent meiva.compact(summary); on claim, directly replaces messages
                    'compact_request',   -- triggered by UI "/compact" / admin; on claim, runs the backend LLM to generate a summary, then replaces
-                   'cancel',            -- /api/cancel pause; in-flight llm/exec interrupts on it, claim halts to idle (agent stays alive, resumable)
+                   'interrupt',         -- an external harness's interrupt request (the history note and the message are their own rows); claim halts to idle (agent stays alive, resumable)
                    'terminate',         -- meiva.terminate() / admin terminate; claim appends lifecycle marker + goto END
                    'restart',           -- meiva.restart() / admin restart; applied as a hosted lifecycle command (no message appended)
                    'resurrect',         -- INSERTed by resurrect_agent; after the new process is up, claim appends lifecycle marker

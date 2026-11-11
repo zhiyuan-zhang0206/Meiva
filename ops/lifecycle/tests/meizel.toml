@@ -2,7 +2,7 @@
 "conftest.py" = ["loopback"]
 "operations" = ["loopback", "resurrection_setup.py"]
 "test_agents_internals_lifecycle.py" = ["resurrection_setup.py"]
-"test_cancel.py" = ["loopback"]
+"test_interrupt.py" = ["loopback"]
 "test_operations.py" = ["_restart_profile_child.py", "loopback"]
 "test_operations_part2.py" = ["loopback"]
 "test_resurrection_fences.py" = ["resurrection_setup.py"]

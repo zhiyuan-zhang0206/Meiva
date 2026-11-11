@@ -381,12 +381,16 @@ class TestRequestMethods:
         )
 
     def test_a_post_plan_is_sent_as_a_post(self, bound_wire: GatewayWire):
-        bound_wire.stub.reply("POST", "/api/agents/42/cancel", {"status": "cancelled"})
+        bound_wire.stub.reply("POST", "/api/agents/42/interrupt", {"status": "interrupted"})
 
-        assert gateway_client.cancel(42) == "cancelled"
+        assert gateway_client.interrupt(42, message="stop", source="agent:7") == "interrupted"
 
         [sent] = bound_wire.sent
-        assert (sent.method, sent.path, sent.body) == ("POST", "/api/agents/42/cancel", {})
+        assert (sent.method, sent.path, sent.body) == (
+            "POST",
+            "/api/agents/42/interrupt",
+            {"source": "agent:7", "message": "stop"},
+        )
 
 
 # --- transient HTTP 429/5xx retry (task #960) ---

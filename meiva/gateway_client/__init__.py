@@ -374,10 +374,10 @@ def restart(
 
 
 # meiva:note
-# POST /api/agents/{id}/cancel → status string (`cancelled`, `enqueued` or `not_running`).
-def cancel(agent_id: int) -> str:
-    response = _run(Request("POST", f"/api/agents/{agent_id}/cancel", body={}), _ctx(None))
-    return _StatusAnswer.model_validate(_transport.json_object(response)).status
+# POST /api/agents/{id}/interrupt → status string (`interrupted` or `not_running`).
+def interrupt(agent_id: int, *, message: str, source: str | None = None) -> str:
+    plan = agent_plans.interrupt_request(agent_id, _actor_or(source), message=message)
+    return _StatusAnswer.model_validate(_transport.json_object(_run(plan, _ctx(None)))).status
 
 
 def resurrect(agent_id: int, *, prompt: str, resurrected_by: str | None = None) -> str:

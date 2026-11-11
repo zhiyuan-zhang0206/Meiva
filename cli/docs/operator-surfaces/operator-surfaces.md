@@ -2,7 +2,7 @@
 
 ## Agent and context commands
 
-- `meiva agents ls/get/timeline/inbox/send/cancel/compact/restart/resurrect/terminate/kill/transfer`: `ls` renders the
+- `meiva agents ls/get/timeline/inbox/send/interrupt/compact/restart/resurrect/terminate/kill/transfer`: `ls` renders the
   authenticated agent summary projection as stable `id / status / machine /
   label` columns. It does not expose runner-local workspace paths. `get ID [--json]`
   prints one agent's status, machine, harness and activity clocks (`GET /api/agents/{id}`).
@@ -16,8 +16,8 @@
   `shell:N`, `watcher:N`, or `schedule:N`;
   [external caller provenance](../../../base/agents/messages/docs/external_caller.md)).
   `restart`, `resurrect`, `terminate`, `kill` and `transfer --to MACHINE` require
-  `--message TEXT | --no-message` (blank `--message` exits 2 at parse); `cancel`
-  and `compact` take neither. `transfer` relocates an `idling` or `terminated`
+  `--message TEXT | --no-message` (blank `--message` exits 2 at parse); `interrupt` requires
+  `--message TEXT` (and `--source`) and `compact` takes neither. `transfer` relocates an `idling` or `terminated`
   native agent and its workspace across machines and refuses running agents with
   409 ([agent transfer](../../../gateway/agents/docs/agent-transfer.md)).
 - `meiva notices list/resolve/clear`: `resolve` reports success only when the

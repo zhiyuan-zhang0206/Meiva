@@ -159,7 +159,7 @@ describe("model capability notice & unified file staging", () => {
     fireEvent.click(screen.getByTestId("composer-send-plain"));
     await waitFor(() => expect(transport.sendMessage).toHaveBeenCalled());
     fireEvent.click(screen.getByTestId("composer-stop"));
-    await waitFor(() => expect(transport.cancel).toHaveBeenCalledWith(5));
+    await waitFor(() => expect(transport.interrupt).toHaveBeenCalledWith(5));
     expect(hooksState.agents[0].status).toBe("running");
     fireEvent.click(screen.getByTestId("upload-button"));
     expect(screen.getByTestId("composer").getAttribute("data-stage-seq")).toBe("1");

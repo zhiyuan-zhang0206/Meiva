@@ -122,7 +122,7 @@ def test_agents_group_help_lists_timeline_and_send() -> None:
     from cli.parsers import build_parser
 
     normalized_help = " ".join(build_parser().format_help().split())
-    assert "ls / timeline / send / cancel" in normalized_help
+    assert "ls / timeline / send / interrupt" in normalized_help
 
 
 def test_send_help_documents_external_agent_subject_examples(

@@ -550,3 +550,57 @@ class TestNudgeBackoffB7:
             row = cur.fetchone()
             assert row == (2,)
         assert _poll_mirror(aid, "heartbeat_backoff_reset", timeout_s=0.5) is None
+
+    # meiva:note
+    # An interrupted agent has a pending note and message, so it is woken by them and no
+    #         heartbeat is selected for it; the stop button's passive note holds nothing back.
+    @pytest.mark.usefixtures("event_pipeline")
+    def test_an_interrupts_note_and_message_come_before_any_heartbeat(
+        self,
+        redis_url: str,
+        pool: ConnectionPool,
+        db_conn: psycopg.Connection,
+        *,
+        model_catalog: ModelCatalog,
+        config_authority: ConfigAuthority,
+        database_gate: ProcessDbGate,
+        machine_identity: MachineIdentityReader,
+    ) -> None:
+        aid = _make_idle(
+            db_conn,
+            status_changed_s_ago=3600,
+            model_catalog=model_catalog,
+            config_authority=config_authority,
+            database_gate=database_gate,
+            local_machine=machine_identity,
+        )
+        with db_conn.cursor() as cur:
+            cur.execute(
+                "UPDATE agents_meta SET last_heartbeat_at = now() - make_interval(secs => 3600) "
+                "WHERE id = %s",
+                (aid,),
+            )
+            cur.execute(
+                "INSERT INTO inbound_messages (agent_id, content, kind, source, payload) "
+                "VALUES (%s, 'Your running turn was interrupted by user.', 'system_note', 'user', "
+                '\'{"note_tag": "lifecycle_interrupt", "passive": true}\'::jsonb)',
+                (aid,),
+            )
+        db_conn.commit()
+        assert aid in _selected(pool)
+
+        with db_conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO inbound_messages (agent_id, content, kind, source, payload) "
+                "VALUES (%s, 'Your running turn was interrupted by agent:7. Their message "
+                "follows.', 'system_note', 'agent:7', "
+                '\'{"note_tag": "lifecycle_interrupt"}\'::jsonb)',
+                (aid,),
+            )
+            cur.execute(
+                "INSERT INTO inbound_messages (agent_id, content, kind, source) "
+                "VALUES (%s, 'do Y instead', 'chat', 'agent:7')",
+                (aid,),
+            )
+        db_conn.commit()
+        assert aid not in _selected(pool)

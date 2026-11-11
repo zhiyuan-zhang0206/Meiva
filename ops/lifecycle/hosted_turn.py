@@ -31,13 +31,14 @@ class LocalAgentHost:
 # Cancel the agent's running turn on this machine's agent host.
 #
 #     Dials the host's loopback health port (`POST /cancel-turn`); the host cancels the turn
-#     task with its bounded unwind and answers whether one was running. The agent's row is not
+#     task with its bounded unwind and answers whether one was running. `rearm` (an interrupt's)
+#     has the host start the next turn at once when a wake arrived during the cancelled one. The agent's row is not
 #     touched.
-async def cancel_hosted_turn(agent_id: int, *, host: LocalAgentHost) -> bool:
+async def cancel_hosted_turn(agent_id: int, *, host: LocalAgentHost, rearm: bool = False) -> bool:
     async with httpx.AsyncClient(timeout=httpx.Timeout(10.0)) as client:
         resp = await client.post(
             f"http://127.0.0.1:{host.health_port}/cancel-turn",
-            json={"agent_id": agent_id},
+            json={"agent_id": agent_id, "rearm": rearm},
         )
         resp.raise_for_status()
     answer = object_of(resp.json)

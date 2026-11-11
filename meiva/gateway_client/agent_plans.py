@@ -10,6 +10,7 @@ from collections.abc import Mapping
 from meiva.gateway_client.plans import Request
 
 __all__ = [
+    "interrupt_request",
     "restart_request",
     "resurrect_request",
     "terminate_request",
@@ -48,6 +49,14 @@ def restart_request(
     if at_turn_end:
         body["at_turn_end"] = True
     return Request("POST", f"/api/agents/{agent_id}/restart", body=body)
+
+
+def interrupt_request(agent_id: int, source: str, *, message: str) -> Request:
+    return Request(
+        "POST",
+        f"/api/agents/{agent_id}/interrupt",
+        body={"source": source, "message": message},
+    )
 
 
 def resurrect_request(agent_id: int, prompt: str, resurrected_by: str) -> Request:

@@ -26,13 +26,23 @@ from agent.graph.claim.harness_inbox import claimed_deliverable, recovery_notes_
 from agent.graph.claim.harness_turn import harness_turn_node
 from agent.graph.claim.node import claim_node
 from agent.graph.claim.tests.claim_support import make_runtime
-from agent.graph.claim.tests.harness_support import FakeEngine, in_a_turn
+from agent.graph.claim.tests.harness_support import (
+    FakeEngine,
+    completed,
+    in_a_turn,
+    input_key,
+    insert_row,
+    row_status,
+    silent_engine,
+    wait_until,
+)
 from agent.graph.claim.tests.test_harness_turn import config, runtime
 from agent.graph.claim.tests.test_harness_turn import hosted_resources as hosted_resources
 from agent.graph.llm_errors import FatalLLMStreamError
 from agent.ownership.tests.ownership_support import agent_row
 from agent.state import AgentState
 from base.agents.history.harness_messages import aload_harness_timeline_items
+from base.agents.messages.lifecycle_text import interrupt_note
 from base.api_contracts.agent_contract import Harness
 from base.db.code_version_gate import ProcessDbGate
 from base.lm.harness import (
@@ -638,3 +648,122 @@ def test_lifecycle_notes_go_first_and_everything_else_keeps_its_order() -> None:
     ]
 
     assert [r.id for r in recovery_notes_first(rows)] == [3, 5, 1, 2, 4]
+
+
+# meiva:note
+# The three rows an interrupt commits reach the harness as the note then the message, and the control
+# row, last in the queue, stays pending behind them until claim takes it.
+async def test_an_interrupts_note_and_message_are_delivered_in_order_ahead_of_its_control_row(
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    hosted_resources: HostedTurnResources,
+) -> None:
+    agent_id = agent_row(db_conn)
+    first = insert_row(db_conn, agent_id, "chat", "user", "work")
+    engine = silent_engine()
+    rt = runtime(engine, ops_pool=aops_pool, hosted_resources=hosted_resources)
+    note_text = interrupt_note("agent:7", with_message=True)
+
+    async with asyncio.timeout(20), asyncio.TaskGroup() as tasks:
+        node = tasks.create_task(harness_turn_node(AgentState(), rt, config(agent_id)))
+        await wait_until(lambda: len(engine.delivered) == 1, "first delivery")
+        engine.emit(
+            TurnStarted("t1", TurnOrigin.INPUT, (input_key(first),), 1),
+            InputInContext(input_key(first), "t1", 1),
+        )
+        note = insert_row(
+            db_conn,
+            agent_id,
+            "system_note",
+            "agent:7",
+            note_text,
+            payload='{"note_tag": "lifecycle_interrupt"}',
+        )
+        message = insert_row(db_conn, agent_id, "chat", "agent:7", "do Y instead")
+        control = insert_row(db_conn, agent_id, "interrupt", "agent:7", "")
+        engine.notify_inbound()
+        await wait_until(lambda: len(engine.delivered) == 2, "the note and message are delivered")
+        await wait_until(lambda: engine.interrupts == 1, "the control row interrupts")
+        engine.emit(
+            completed("t1", "", interrupted=True),
+            TurnStarted("t2", TurnOrigin.HARNESS, (input_key(note), input_key(message)), 1),
+            InputInContext(input_key(note), "t2", 1),
+            InputInContext(input_key(message), "t2", 1),
+            completed("t2", "MEIVA_DISPLAY_TO_USER\nhandled"),
+        )
+        await node
+
+    delivered = [i for batch in engine.delivered[1:] for i in batch]
+    assert [i.key for i in delivered] == [input_key(note), input_key(message)]
+    assert note_text in delivered[0].text
+    assert "do Y instead" in delivered[1].text
+    assert row_status(db_conn, control) == "pending", "claim takes the control row next"
+
+
+# meiva:note
+# The stop button on an external harness leaves a passive note and a control row. The interrupt ends
+# the turn, and the passive note is not handed to the harness: a delivery would start a turn of the
+# harness's own for a note that asked for none. It waits for the next real input.
+async def test_the_stop_buttons_passive_note_does_not_start_a_turn(
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    hosted_resources: HostedTurnResources,
+) -> None:
+    agent_id = agent_row(db_conn)
+    first = insert_row(db_conn, agent_id, "chat", "user", "work")
+    engine = silent_engine()
+    rt = runtime(engine, ops_pool=aops_pool, hosted_resources=hosted_resources)
+
+    async with asyncio.timeout(20), asyncio.TaskGroup() as tasks:
+        node = tasks.create_task(harness_turn_node(AgentState(), rt, config(agent_id)))
+        await wait_until(lambda: len(engine.delivered) == 1, "first delivery")
+        engine.emit(
+            TurnStarted("t1", TurnOrigin.INPUT, (input_key(first),), 1),
+            InputInContext(input_key(first), "t1", 1),
+        )
+        control = insert_row(db_conn, agent_id, "interrupt", "user", "")
+        note = insert_row(
+            db_conn,
+            agent_id,
+            "system_note",
+            "user",
+            "Your running turn was interrupted by user.",
+            payload='{"note_tag": "lifecycle_interrupt", "passive": true}',
+        )
+        engine.notify_inbound()
+        await wait_until(lambda: engine.interrupts == 1, "the control row interrupts")
+        engine.emit(completed("t1", "", interrupted=True))
+        await node
+
+    assert len(engine.delivered) == 1, "the passive note started no turn"
+    assert row_status(db_conn, note) == "pending"
+    assert row_status(db_conn, control) == "pending", "claim takes the control row next"
+
+
+# meiva:note
+# A passive note waits for the next real input and goes along with it, ahead of it, in queue order.
+async def test_a_passive_note_goes_along_with_the_next_real_input(
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    hosted_resources: HostedTurnResources,
+) -> None:
+    agent_id = agent_row(db_conn)
+    note = insert_row(
+        db_conn,
+        agent_id,
+        "system_note",
+        "user",
+        "Your running turn was interrupted by user.",
+        payload='{"note_tag": "lifecycle_interrupt", "passive": true}',
+    )
+    chat = insert_row(db_conn, agent_id, "chat", "user", "carry on")
+    engine = silent_engine()
+    rt = runtime(engine, ops_pool=aops_pool, hosted_resources=hosted_resources)
+
+    async with asyncio.timeout(20), asyncio.TaskGroup() as tasks:
+        node = tasks.create_task(harness_turn_node(AgentState(), rt, config(agent_id)))
+        while not engine.delivered:
+            await asyncio.sleep(0.02)
+        keys = [i.key for i in engine.delivered[0]]
+        node.cancel()
+    assert keys == [f"inbound-{note}", f"inbound-{chat}"]

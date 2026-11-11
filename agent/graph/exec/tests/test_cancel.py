@@ -55,8 +55,8 @@ _CONFIG: RunnableConfig = {"configurable": {"thread_id": "7"}}
 @pytest.mark.parametrize(
     ("kind", "source", "waited_s", "marker", "unfinished"),
     [
-        ("cancel", "user", 0, "[cancelled by user]", False),
-        ("cancel", "agent:9", 0, "[cancelled by system]", False),
+        ("interrupt", "user", 0, "[cancelled by user]", False),
+        ("interrupt", "agent:9", 0, "[cancelled by system]", False),
         ("restart", "user", RESTART_INTERRUPT_GRACE_S + 1, "[interrupted by restart]", True),
     ],
 )

@@ -387,7 +387,7 @@ async def test_claim_cancel_beats_pending_compact_and_closes_it_replaced(
         machine=machine_identity,
     )
     insert_inbound_kind(db_conn, tid, "", "compact_request")
-    insert_inbound_kind(db_conn, tid, "", "cancel", source="user")
+    insert_inbound_kind(db_conn, tid, "", "interrupt", source="user")
     state = AgentState(
         messages=[
             SystemMessage(content="<sys>"),

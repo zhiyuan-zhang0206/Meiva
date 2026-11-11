@@ -8,6 +8,10 @@ import asyncio
 from collections.abc import Callable, Mapping, Sequence
 from contextlib import suppress
 
+import psycopg
+from psycopg_pool import AsyncConnectionPool
+
+from base.agents.history.harness_messages import aload_harness_timeline_items
 from base.api_contracts.agent_contract import Harness
 from base.lm.harness import (
     BridgeEvent,
@@ -22,7 +26,18 @@ from base.lm.harness import (
     Usage,
 )
 
-__all__ = ["FakeEngine", "FakeSubscription", "completed", "in_a_turn"]
+__all__ = [
+    "FakeEngine",
+    "FakeSubscription",
+    "completed",
+    "in_a_turn",
+    "input_key",
+    "insert_row",
+    "row_status",
+    "silent_engine",
+    "timeline_inbound_ids",
+    "wait_until",
+]
 
 Script = Callable[[Sequence[HarnessInput]], Sequence[BridgeEvent]]
 
@@ -188,3 +203,51 @@ def rejecting(reason: str = "no active turn to steer") -> Script:
         return [InputRejected(i.key, reason, 1) for i in inputs]
 
     return script
+
+
+def insert_row(
+    db: psycopg.Connection,
+    agent_id: int,
+    kind: str,
+    source: str,
+    content: str,
+    payload: str | None = None,
+) -> int:
+    row = db.execute(
+        "INSERT INTO inbound_messages (agent_id, content, kind, source, payload) "
+        "VALUES (%s, %s, %s, %s, %s::jsonb) RETURNING id",
+        (agent_id, content, kind, source, payload),
+    ).fetchone()
+    db.commit()
+    assert row is not None
+    return row[0]
+
+
+def row_status(db: psycopg.Connection, inbound_id: int) -> object:
+    db.commit()
+    row = db.execute("SELECT status FROM inbound_messages WHERE id=%s", (inbound_id,)).fetchone()
+    assert row is not None
+    return row[0]
+
+
+async def wait_until(condition: Callable[[], bool], what: str) -> None:
+    try:
+        async with asyncio.timeout(10):
+            while not condition():
+                await asyncio.sleep(0.02)
+    except TimeoutError as error:
+        raise AssertionError(what) from error
+
+
+def silent_engine() -> FakeEngine:
+    return FakeEngine(script=lambda _inputs: [])
+
+
+def input_key(inbound_id: int) -> str:
+    return f"inbound-{inbound_id}"
+
+
+async def timeline_inbound_ids(pool: AsyncConnectionPool, agent_id: int) -> list[int | None]:
+    async with pool.connection() as conn:
+        items = await aload_harness_timeline_items(conn, agent_id)
+    return [item.inbound_id for item in items if item.kind == "inbound_chat"]

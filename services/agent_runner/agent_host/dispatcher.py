@@ -320,12 +320,26 @@ class TurnScheduler:
     #         False when no turn is running. The cancelled turn leaves the agent's
     #         row to the caller: the task unwinds, the settle boundary idles the row,
     #         and the next wake starts a fresh turn.
-    async def cancel_turn(self, agent_id: int) -> bool:
+    #
+    #         `rearm` is an interrupt's: `_pump` restarts a successor only after a completed turn,
+    #         so a wake recorded while the cancelled turn ran (the interrupt's own message) would
+    #         wait for the next scan. With `rearm`, the unwound turn's pending wake starts the next
+    #         turn at once. A force terminate does not ask: it ends the agent.
+    async def cancel_turn(self, agent_id: int, *, rearm: bool = False) -> bool:
         task = self._tasks.get(agent_id)
         if task is None:
             return False
         task.cancel()
         await self._await_unwind({agent_id: task})
+        if (
+            rearm
+            and task.done()
+            and agent_id not in self._tasks
+            and agent_id in self._pending
+            and not self._closed
+            and not self._stopping
+        ):
+            self._start(agent_id)
         return task.done()
 
     async def aclose(self) -> None:

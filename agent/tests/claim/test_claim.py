@@ -169,8 +169,8 @@ async def test_unowned_resurrect_notification_cannot_cancel_pending_terminate(
         machine=machine_identity,
     )
     # id == insertion order: terminate older than the resurrect that follows it
-    insert_inbound_kind(db_conn, tid, "", "cancel", source="user")
-    insert_inbound_kind(db_conn, tid, "", "cancel", source="user")
+    insert_inbound_kind(db_conn, tid, "", "interrupt", source="user")
+    insert_inbound_kind(db_conn, tid, "", "interrupt", source="user")
     insert_inbound_kind(db_conn, tid, "", "terminate", source="user")
     insert_inbound_kind(db_conn, tid, "", "resurrect", source="user")
 
@@ -185,7 +185,7 @@ async def test_unowned_resurrect_notification_cannot_cancel_pending_terminate(
     assert db_conn.execute(
         "SELECT kind,status,claimed_at FROM inbound_messages WHERE agent_id=%s ORDER BY id", (tid,)
     ).fetchall() == [
-        (kind, "pending", None) for kind in ["cancel", "cancel", "terminate", "resurrect"]
+        (kind, "pending", None) for kind in ["interrupt", "interrupt", "terminate", "resurrect"]
     ]
 
 

@@ -200,9 +200,9 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
         Idempotency.NON_IDEMPOTENT,
         note="a repeat dispatches another restart; HTTP intent has no durable receipt",
     ),
-    ("POST", "/api/agents/{agent_id}/cancel"): RouteContract(
+    ("POST", "/api/agents/{agent_id}/interrupt"): RouteContract(
         Idempotency.NON_IDEMPOTENT,
-        note="a repeat cancels whatever turn is running then; the HTTP intent names no turn",
+        note="a repeat interrupts whatever turn is running then and queues its message again; the HTTP intent names no turn",
     ),
     ("POST", "/api/agents/{agent_id}/compact"): RouteContract(
         Idempotency.NON_IDEMPOTENT, note="a repeat queues another compact request"

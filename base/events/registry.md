@@ -72,7 +72,7 @@ Emit sites and consumers: see the comments at each emit point.
 | `send_message` | message sent to an agent | business | — | events |
 | `terminate` | agent terminated | business | — | events |
 | `restart` | agent restart initiated | business | — | events |
-| `cancel` | in-flight turn cancelled | business | — | events |
+| `interrupt` | running turn interrupted | business | — | events |
 | `resurrect` | terminated agent woken | business | — | events |
 | `transfer` | agent transferred to another machine | business | from_machine, to_machine, files_transferred, bytes_transferred, killed_shell_sessions | events |
 | `compact` | agent context compacted | business | — | events |
@@ -218,7 +218,7 @@ above (or when its name is unregistered); otherwise it stays in the JSONL mirror
 | `wake_restored` | RedisInboundListener wake path recovered (clean consume restored instant wake) | noise | — | — | events | — |
 | `launch_failures` | this start could not read the launch-failure report, so the unlaunched sessions it recorded stay unreported to the rollout aftermath block | anomaly | — | — | events | — |
 | `harness_interrupt` | an external harness turn was interrupted; the adapter's settle answer is carried as it came back | noise | agent_id, settled, turn_id | — | events | — |
-| `harness_interrupt_failed` | interrupting an external harness turn raised; the durable cancel row stays pending and claim dispatches it again on the next pass | anomaly | — | — | events | — |
+| `harness_interrupt_failed` | interrupting an external harness turn raised; the durable interrupt row stays pending and claim dispatches it again on the next pass | anomaly | — | — | events | — |
 | `harness_delivery_pool_timeout` | delivering the inbox to an external harness could not borrow a database connection; nothing was reserved and the same attempt is made again after a short wait | anomaly | — | — | events | — |
 | `harness_unsettled_outcome_failed` | an invocation failed and the outcome of the inputs it had handed to the harness could not be recorded; they stay claimed and the next harness turn reconciles them against the harness's record | anomaly | — | — | events | — |
 | `harness_input_reconciled` | an input handed to an external harness and never acknowledged was judged against the harness's own durable record: in_context settles it, not_found returns it to the queue to be delivered again, persisted_undelivered leaves it claimed for the harness to deliver | noise | — | — | events | — |

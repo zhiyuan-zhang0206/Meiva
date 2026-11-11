@@ -12,8 +12,8 @@ from base.api_contracts.agent_contract import AgentLaunchFailed as AgentLaunchFa
 from base.api_contracts.agent_contract import AgentNotFound as AgentNotFound
 from base.api_contracts.agent_contract import (
     AgentStatus,
-    CancelResult,
     Harness,
+    InterruptResult,
     RestartResult,
     ResurrectResult,
     TerminateResult,
@@ -79,10 +79,10 @@ __all_for_meiva__ = [
     "AgentDirectoryPage",
     "AgentRow",
     "AgentStatus",
-    "CancelResult",
     "Harness",
     "HarnessAttachment",
     "HarnessAvailability",
+    "InterruptResult",
     "Machine",
     "Neighbor",
     "OpenTaskRow",
@@ -94,7 +94,6 @@ __all_for_meiva__ = [
     "ShellSessionsKill",
     "TerminateOutcome",
     "TerminateResult",
-    "cancel",
     "commands",
     "compact",
     "get_ancestors",
@@ -102,6 +101,7 @@ __all_for_meiva__ = [
     "get_neighbors",
     "get_status",
     "harness_availability",
+    "interrupt",
     "list_agents",
     "list_machines",
     "restart",
@@ -472,15 +472,22 @@ def restart(
     )
 
 
-def cancel(agent_id: int) -> CancelResult:
-    """Cancel the agent's running turn; the agent stays alive and idles.
+def interrupt(agent_id: int, message: str) -> InterruptResult:
+    """Interrupt the agent's running turn and tell it why; the agent stays alive.
 
-    `cancelled` means a native turn was cancelled. `enqueued` means an external
-    harness has a foreground cancellation pending. `not_running` means there
-    was no running turn."""
+    `message` is mandatory and non-blank. The agent is first told its turn was
+    interrupted by you, then receives `message` as a chat from you, so the first
+    thing it reads afterwards is your reason. The message is queued before the
+    interruption and is delivered even if no turn was running.
+    `interrupted` means a turn was running and its interruption was requested;
+    `not_running` means there was none. Background work, shell sessions and
+    watchers are not stopped; use `terminate` to end the agent."""
     agent_id = coerce_typed(agent_id, "agent_id", int)
-    schedule_capability.assert_schedule_capability("agents.cancel", target_agent_id=agent_id)
-    return CancelResult(gateway_client.cancel(agent_id))
+    schedule_capability.assert_schedule_capability("agents.interrupt", target_agent_id=agent_id)
+    message = coerce_str(message, "message")
+    if not message.strip():
+        raise ValueError("message must not be blank")
+    return InterruptResult(gateway_client.interrupt(agent_id, message=message))
 
 
 def resurrect(agent_id: int, prompt: str) -> ResurrectResult:

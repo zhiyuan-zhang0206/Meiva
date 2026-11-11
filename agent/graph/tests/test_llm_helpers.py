@@ -237,7 +237,7 @@ async def test_cancel_branch_publishes_cancelled_and_returns_halted(
 
     async def _trigger():
         await asyncio.sleep(0.1)
-        queue_command(db_conn, agent_id, "cancel")
+        queue_command(db_conn, agent_id, "interrupt")
 
     trigger = asyncio.create_task(_trigger())
     result = await llm_node(
@@ -469,7 +469,7 @@ async def test_cancel_event_set_before_first_chunk_returns_halted_no_publish_don
 
     # meiva:note
     # Queued before the node starts, so the stream never yields a first chunk.
-    queue_command(db_conn, agent_id, "cancel")
+    queue_command(db_conn, agent_id, "interrupt")
 
     result = await llm_node(
         state,

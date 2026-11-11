@@ -20,7 +20,7 @@ def test_only_restart_and_terminate_are_executable(kind: str) -> None:
     assert lifecycle_kind(kind) == kind
 
 
-@pytest.mark.parametrize("kind", ["cancel", "chat", ""])
+@pytest.mark.parametrize("kind", ["interrupt", "chat", ""])
 def test_any_other_kind_is_refused(kind: str) -> None:
     with pytest.raises(ValueError, match="not an executable lifecycle command"):
         lifecycle_kind(kind)

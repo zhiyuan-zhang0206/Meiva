@@ -92,7 +92,7 @@ async def test_exec_node_preserves_state_update_on_cancel(
     while time.monotonic() < deadline and not marker.exists():
         await asyncio.sleep(0.05)
     assert marker.exists(), "exec code never started within 20s — cancel would race boot"
-    queue_command(db_conn, agent_id, "cancel")
+    queue_command(db_conn, agent_id, "interrupt")
     cmd = await node_task
 
     update = cast(dict[str, object], cmd.update)

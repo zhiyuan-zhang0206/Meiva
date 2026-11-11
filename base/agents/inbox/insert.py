@@ -45,7 +45,6 @@ def _lineage_event(kind: str, source: str) -> tuple[str | None, int | None]:
         "system_note": "send_message",
         "terminate": "terminate",
         "restart": "restart",
-        "cancel": "cancel",
         "resurrect": "resurrect",
         "fork": "fork",
     }
@@ -79,7 +78,7 @@ def _lineage_event(kind: str, source: str) -> tuple[str | None, int | None]:
 #         `'user'`; a peer agent passes `'agent:N'`.
 #     kind: default `'chat'` (user dialogue). Other valid values
 #         see `db/schema.sql` CHECK constraint: `'compact_summary'`
-#         / `'compact_request'` / `'cancel'` / `'terminate'` / `'restart'`
+#         / `'compact_request'` / `'interrupt'` / `'terminate'` / `'restart'`
 #         / `'resurrect'`. Non-'chat' usually
 #         pairs with `content=''` (control signal without payload).
 #     payload: optional JSONB sidecar. For a multimodal chat inbound this

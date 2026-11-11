@@ -62,7 +62,7 @@ restart or terminate queued in the previous life cannot act on the next.
 
 A restart that ends an unfinished turn also queues the note that continues it. The
 caller of `apply_hosted_lifecycle` states `resume_turn` (the claim found the agent
-mid-turn, not idle; see [Turn interrupts (cancel, terminate and restart)](../graph/docs/turn-interrupts.md)), and the
+mid-turn, not idle; see [Turn interrupts (interrupt, terminate and restart)](../graph/docs/turn-interrupts.md)), and the
 restart's transaction then inserts one pending `system_note` with
 `note_tag='lifecycle_restart'` and the restart's own source, so a restart is never
 done without the note that wakes the agent through the pending scan. Idle agents,
@@ -73,7 +73,7 @@ Force terminate is not a command the host executes. The API writes
 running turn (`POST /cancel-turn`, best effort); the force's own terminate command
 keeps older queued input from auto-resurrecting the agent, since an automatic
 resurrect needs a trigger newer than every terminate command of the agent. The same route,
-without the status write, is the stop button: `POST /api/agents/{id}/cancel`.
+without the status write, is a native interrupt: `POST /api/agents/{id}/interrupt`.
 
 A runtime generation is not a graph work identity: a cancelled turn leaves its
 checkpoint mid-turn, and the next invocation starts halted and waits for fresh

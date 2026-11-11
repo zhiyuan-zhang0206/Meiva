@@ -86,7 +86,7 @@ class TestPendingInboundBackstop:
                 32: Row(status="idling", harness="claude_code"),
             }
         )
-        for agent_id, kind in ((17, "chat"), (23, "chat"), (30, "chat"), (31, "cancel")):
+        for agent_id, kind in ((17, "chat"), (23, "chat"), (30, "chat"), (31, "interrupt")):
             db_conn.execute(
                 "INSERT INTO inbound_messages (agent_id, content, kind, source, status, claimed_at) "
                 "VALUES (%s, 'handed over', %s, 'user', 'claimed', now())",

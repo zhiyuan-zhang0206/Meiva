@@ -47,7 +47,7 @@ class NodeExit(TypedDict):
 # means the adapter never observed the process tree (its provider SDK exposes the pid
 # through a private structure), so it is reported as unknown rather than as reaped; a
 # close that leaves processes behind names how many. Emit sites: the interrupt pair in
-# `agent/graph/claim/harness_cancel.py:interrupt_engine`, the rest in
+# `agent/graph/claim/harness_interrupt.py:interrupt_engine`, the rest in
 # `base/lm/harness/process.py:settle_close` and the session closers that call it.
 # meiva:link base/lm/harness/docs/harness.md
 class HarnessInterrupt(TypedDict):
@@ -137,7 +137,7 @@ EVENTS: dict[str, EventSpec] = {
     ),
     "harness_interrupt_failed": telemetry_event(
         "harness_interrupt_failed",
-        "interrupting an external harness turn raised; the durable cancel row stays pending "
+        "interrupting an external harness turn raised; the durable interrupt row stays pending "
         "and claim dispatches it again on the next pass",
         tier="anomaly",
     ),

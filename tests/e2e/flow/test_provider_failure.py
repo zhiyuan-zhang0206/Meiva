@@ -100,10 +100,10 @@ def test_broken_provider_preserves_browser_history_text_and_stop(
     assert sent.value.status == 201
     expect(page.get_by_test_id("composer-input")).to_have_value("")
     with page.expect_response(
-        lambda response: response.url.endswith(f"/api/agents/{agent_id}/cancel")
+        lambda response: response.url.endswith(f"/api/agents/{agent_id}/interrupt")
     ) as stopped:
         page.get_by_role("button", name="Stop current turn").click()
     # meiva:note
-    # This stack runs the gateway only: the stop button reaches the cancel route, whose
+    # This stack runs the gateway only: the stop button reaches the interrupt route, whose
     # answer from a home runner is covered by the gateway and ops route tests.
     assert stopped.value.request.method == "POST"

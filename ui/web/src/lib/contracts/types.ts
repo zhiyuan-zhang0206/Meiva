@@ -72,7 +72,7 @@ export {
 type Schemas = components["schemas"];
 
 export type TaskStatus = Schemas["TaskStatus"];
-export type CancelAgentResponse = Schemas["CancelAgentResponse"];
+export type InterruptAgentResponse = Schemas["InterruptAgentResponse"];
 export type CompactAgentResponse = Schemas["CompactAgentResponse"];
 export type RetryLaunchAccepted = Schemas["RetryLaunchAccepted"];
 

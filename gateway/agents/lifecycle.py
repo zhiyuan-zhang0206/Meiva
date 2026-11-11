@@ -20,6 +20,7 @@ from base.api_contracts.agent_contract import (
     AgentStatus,
     Harness,
     HarnessNotLaunchable,
+    InterruptResult,
     ProbedHarnessModel,
 )
 from base.db import Database
@@ -27,6 +28,7 @@ from base.db.rows import query_all, query_one
 from base.db.transaction import write_transaction
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
+from gateway.agents.inbound_provenance import request_inbound_provenance
 from gateway.agents.launch.forward import forward_to_home_machine
 from gateway.http.config import (
     GatewayConfig,
@@ -38,9 +40,11 @@ from gateway.http.config import (
 from gateway.http.model_catalog import require_model_catalog
 from gateway.schemas.models import HarnessAvailability
 from ops.cluster.rpc import RpcClient
+from ops.lifecycle.delivery import deliver_interrupt
 from ops.rpc_schemas import (
-    CancelAgentResponse,
     CompactAgentResponse,
+    InterruptAgentRequest,
+    InterruptAgentResponse,
     OpenTaskRow,
     OpenTasksHint,
     RestartAgentRequest,
@@ -437,21 +441,39 @@ async def post_agent_restart(
 
 
 @router.post(
-    "/api/agents/{agent_id}/cancel",
-    description="Cancel the agent's running turn without terminating the agent.\n\nThe home runner returns `cancelled` after cancelling a native turn or\n`enqueued` after recording a foreground cancel for an external harness.\nThe external harness reports the outcome through the timeline. `not_running`\nmeans there was no running turn. An unreachable home runner is an error.",
+    "/api/agents/{agent_id}/interrupt",
+    description="Interrupt the agent's running turn without terminating the agent, and tell it why.\n\nOne transaction writes, in order, a note that the turn was interrupted by `source`, the\n`message` as an ordinary chat from `source`, and for an external harness the interrupt request its\nforeground reacts to. Only after that commits is the turn interrupted: a native turn on the home\nrunner, an external harness's CLI through its foreground watcher. The message is therefore\nqueued whether or not the interruption lands, and an unreachable home runner is an error with the\nmessage still queued. `interrupted` means a turn was running; `not_running` means it was not, and\nthe message was delivered like any other chat (a terminated agent is resurrected by it).\n\n`message` is required unless `source` is `user`: the web stop button has no text, and the agent\nis then left a note that its turn was interrupted by the user, without being woken.",
 )
-async def post_agent_cancel(agent_id: int, request: Request) -> CancelAgentResponse:
+async def post_agent_interrupt(
+    agent_id: int, request: Request, body: InterruptAgentRequest
+) -> InterruptAgentResponse:
 
-    forwarded = await forward_to_home_machine(
+    state = gateway_state(request)
+    delivery = await deliver_interrupt(
+        state.db_pool,
+        state.db,
+        state.bus,
         agent_id,
-        f"/api/agents/{agent_id}/cancel",
-        {},
-        db=gateway_state(request).db,
-        pool=gateway_state(request).db_pool,
-        config=gateway_state(request).gateway_config,
+        message=body.message,
+        source=body.source,
+        provenance=request_inbound_provenance(request),
+        local_machine=state.machine.name(),
         rpc=gateway_rpc(request),
     )
-    return CancelAgentResponse.model_validate(forwarded)
+    if not delivery.running:
+        return InterruptAgentResponse(status=InterruptResult.NOT_RUNNING)
+    if delivery.external:
+        return InterruptAgentResponse(status=InterruptResult.INTERRUPTED)
+    forwarded = await forward_to_home_machine(
+        agent_id,
+        f"/api/agents/{agent_id}/interrupt",
+        {},
+        db=state.db,
+        pool=state.db_pool,
+        config=state.gateway_config,
+        rpc=gateway_rpc(request),
+    )
+    return InterruptAgentResponse.model_validate(forwarded)
 
 
 @router.post(

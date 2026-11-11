@@ -1,5 +1,5 @@
 # meiva:note
-# The plumbing around one invocation's foreground: the interrupt subscriptions, the cancel request that
+# The plumbing around one invocation's foreground: the interrupt subscriptions, the interrupt request that
 # runs beside it and the progress tick. It knows nothing about inputs; the foreground run is a callable.
 # meiva:link agent/graph/docs/harness-turn.md
 
@@ -40,16 +40,16 @@ async def await_foreground(
         ) as lifecycle,
         subscribe_interrupt(
             ctx.ops_pool, agent_id, resources=resources, scope=InterruptScope.FOREGROUND
-        ) as cancel,
+        ) as interrupt,
     ):
 
-        async def request_cancel() -> None:
-            await cancel.wait()
+        async def request_interrupt() -> None:
+            await interrupt.wait()
             if error := await interrupt_engine(agent_id, bridge):
                 await projector.record_control(f"Cancellation unconfirmed: {error}", error=True)
 
         async def go() -> None:
-            await _with_cancel(execute, request_cancel, agent_id)
+            await _with_interrupt(execute, request_interrupt, agent_id)
 
         await interruptible_model(
             _ticking(ctx.turn_progress.mark, agent_id, go(), projector), lifecycle
@@ -57,25 +57,27 @@ async def await_foreground(
 
 
 # meiva:note
-# A foreground cancel sends a control request while the event reader remains alive. Only the harness's
-# own terminal event ends a turn, so a cancel changes nothing about when the invocation ends: it ends
+# A foreground interrupt sends a control request while the event reader remains alive. Only the harness's
+# own terminal event ends a turn, so an interrupt changes nothing about when the invocation ends: it ends
 # when everything handed over is settled and no turn runs. Inputs not yet in the context at that moment
 # are still delivered and settled; they are delivered as a new turn, as in the built-in runtime.
 # meiva:link agent/graph/docs/harness-turn.md
-async def _with_cancel(
+async def _with_interrupt(
     execute: Callable[[], Awaitable[None]],
-    request_cancel: Callable[[], Coroutine[Any, Any, None]],
+    request_interrupt: Callable[[], Coroutine[Any, Any, None]],
     agent_id: int,
 ) -> None:
     outcome: BaseException | None = None
     async with asyncio.TaskGroup() as tasks:
-        cancel_task = tasks.create_task(request_cancel(), name=f"harness-cancel-{agent_id}")
+        interrupt_task = tasks.create_task(
+            request_interrupt(), name=f"harness-interrupt-{agent_id}"
+        )
         try:
             await execute()
         except BaseException as error:
             outcome = error
         finally:
-            cancel_task.cancel()
+            interrupt_task.cancel()
         if isinstance(outcome, asyncio.CancelledError):
             raise outcome
     if outcome is not None:
@@ -122,15 +124,15 @@ async def _ticking(
 
 # meiva:note
 # Tell the live view the turn ended. Its committed activities remain visible and
-# the durable cancel stays pending for the next claim pass.
+# the durable interrupt stays pending for the next claim pass.
 # meiva:link agent/graph/docs/harness-turn.md
-def announce_cancel(ctx: MeivaContext, agent_id: int) -> None:
-    assert ctx.event_publisher is not None, "a cancelled harness turn requires ctx.event_publisher"  # noqa: S101
+def announce_interrupt(ctx: MeivaContext, agent_id: int) -> None:
+    assert ctx.event_publisher is not None, "interrupted turn needs ctx.event_publisher"  # noqa: S101
     ctx.event_publisher.emit(Cancelled(agent_id=agent_id).model_dump_json())
 
 
 # meiva:note
-# An interrupt that cannot be delivered is reported, never raised: the durable cancel row is still
+# An interrupt that cannot be delivered is reported, never raised: the durable interrupt row is still
 # pending and claim dispatches it on the next pass, while a raise here would turn the user's stop into
 # a failed turn. Process observations are diagnostics. The foreground ends only when the executor
 # reports a terminal outcome.

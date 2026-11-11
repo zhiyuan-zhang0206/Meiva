@@ -41,6 +41,61 @@ async def test_cancels_the_running_turn_and_the_next_wake_starts_a_fresh_one() -
         await scheduler.aclose()
 
 
+# meiva:note
+# The interrupt's message commits before the cancel, so its wake (the second `wake(4)`) lands while
+# the turn runs.
+#     `rearm` starts the turn that wake asked for; without it the wake would wait for a scan.
+async def test_an_interrupt_rearms_the_turn_a_mid_turn_wake_asked_for() -> None:
+    entered, second_turn = asyncio.Event(), asyncio.Event()
+    started: list[int] = []
+
+    async def run(agent_id: int) -> None:
+        started.append(agent_id)
+        if len(started) == 1:
+            entered.set()
+            await asyncio.Event().wait()
+        else:
+            second_turn.set()
+
+    scheduler = TurnScheduler(run, timers=SYSTEM_TIMERS)
+    try:
+        scheduler.wake(4)
+        await asyncio.wait_for(entered.wait(), 2)
+        scheduler.wake(4)
+        assert await _post(scheduler, b'{"agent_id": 4, "rearm": true}') == (
+            200,
+            {"cancelled": True},
+        )
+        await asyncio.wait_for(second_turn.wait(), 2)
+        assert started == [4, 4]
+    finally:
+        await scheduler.aclose()
+
+
+# meiva:note
+# A force terminate cancels the turn of an agent that is ending; it must not start another.
+async def test_a_cancel_without_rearm_leaves_a_mid_turn_wake_to_the_next_scan() -> None:
+    entered = asyncio.Event()
+    started: list[int] = []
+
+    async def run(agent_id: int) -> None:
+        started.append(agent_id)
+        entered.set()
+        await asyncio.Event().wait()
+
+    scheduler = TurnScheduler(run, timers=SYSTEM_TIMERS)
+    try:
+        scheduler.wake(4)
+        await asyncio.wait_for(entered.wait(), 2)
+        scheduler.wake(4)
+        assert await _post(scheduler, b'{"agent_id": 4}') == (200, {"cancelled": True})
+        await settle()
+        assert started == [4]
+        assert scheduler.active_agents == frozenset()
+    finally:
+        await scheduler.aclose()
+
+
 async def test_answers_not_cancelled_when_no_turn_is_running() -> None:
     async def run(_agent_id: int) -> None:
         return None

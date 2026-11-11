@@ -1,6 +1,7 @@
 {
   "terminated": "已终止",
   "restarted": "已重启",
+  "interrupted": "已打断",
   "resurrected": "已复活",
   "forked": "已分叉",
   "memory": "记忆",

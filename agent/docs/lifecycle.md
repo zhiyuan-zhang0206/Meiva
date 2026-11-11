@@ -1,7 +1,7 @@
 # Agent Lifecycle
 
 Lifecycle authority is a durable inbound and the admitted runtime incarnation.
-`ops/lifecycle/__init__.py` accepts restart/terminate/cancel through the home runner;
+`ops/lifecycle/__init__.py` accepts restart/terminate/interrupt through the home runner;
 `agent/graph/claim/node.py` applies their routing at the next claim boundary.
 
 Normal restart/terminate returns from the graph, flushes the final checkpoint,
