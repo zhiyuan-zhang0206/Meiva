@@ -37,6 +37,8 @@
   "retryLoad": "Retry",
   "scrollToBottom": "Scroll to bottom",
   "streamingSuffix": " (streaming…)",
+  "subagent": "Sub-agent",
+  "subagentNamed": "Sub-agent · {name}",
   "compactSummary": "Compact summary",
   "compactRequest": "Compact request",
   "compacting": "Compacting",

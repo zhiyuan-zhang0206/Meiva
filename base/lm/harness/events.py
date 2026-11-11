@@ -57,6 +57,22 @@ class AssistantText:
     text: str
 
 
+# meiva:note
+# Text a CLI's own sub-agent said, attributed to the tool call that started it (`tool_use_id`; Claude's
+# Agent/Task call, Codex's spawn call) and to the turn that made the call. It is work detail, never
+# the agent's reply: it stays out of `AssistantText`, so it is not parsed for a visibility prefix and is
+# not part of a turn's reply text. `agent` is the CLI's own label for the sub-agent when it names one.
+# Claude Code and Codex emit it; Antigravity runs sub-agents as sibling conversations this adapter does
+# not read.
+# meiva:link base/lm/harness/docs/subagent-text.md
+@dataclass(frozen=True, slots=True)
+class SubagentText:
+    turn_id: str
+    tool_use_id: str
+    agent: str | None
+    text: str
+
+
 @dataclass(frozen=True, slots=True)
 class ToolUse:
     turn_id: str
@@ -288,6 +304,7 @@ BridgeEvent = (
     | ReasoningText
     | TextDelta
     | AssistantText
+    | SubagentText
     | ToolUse
     | ToolResult
     | RateLimitObserved

@@ -134,6 +134,11 @@ at all and stays `NULL` rather than record a fake `0` (task #5616).
 its pinned field set, the registry's atomicity and refusal cases — with no
 provider dependency, which is the point of the split.
 
+## Sub-agent text
+
+Text a CLI's own sub-agent writes is a `SubagentText` event, shown on the timeline as work detail and
+never as the agent's reply. See [sub-agent text](subagent-text.md).
+
 ## Background work and the idle cache
 
 A session that holds background work (a CLI background command, sub-agent, timer or cron

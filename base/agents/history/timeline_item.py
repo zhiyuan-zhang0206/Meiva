@@ -53,10 +53,17 @@ class TimelineItem(BaseModel):
         "agent_code",
         "agent_reasoning",
         "code_output",
+        "subagent_text",
         "system_prompt",
         "system_marker",
     ]
     source: str | None = None
+    # meiva:note
+    # `subagent_text` only: the `agent_code` item of the tool call that started the sub-agent, when
+    # the projector that wrote the text had seen that call (None for text that outlives its run).
+    # `source` carries the CLI's own label for the sub-agent.
+    # meiva:link base/lm/harness/docs/subagent-text.md
+    parent_item_id: str | None = None
     payload: str  # rendered content
     created_at: str | None = None  # ISO-8601
     inbound_id: int | None = None

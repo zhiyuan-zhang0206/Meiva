@@ -80,6 +80,7 @@ from base.lm.harness import (
     ImageBlock,
     ReasoningDelta,
     ReasoningText,
+    SubagentText,
     TextDelta,
     ToolResult,
     ToolUse,
@@ -452,7 +453,14 @@ class ForegroundRun:
             case AssistantText(turn_id=turn_id, text=text):
                 self._streamed.setdefault(turn_id, []).append(text)
                 await self._projector.on_event(event)
-            case ReasoningDelta() | ReasoningText() | TextDelta() | ToolUse() | ToolResult():
+            case (
+                ReasoningDelta()
+                | ReasoningText()
+                | TextDelta()
+                | SubagentText()
+                | ToolUse()
+                | ToolResult()
+            ):
                 await self._projector.on_event(event)
             case TurnCompleted():
                 await self._on_turn_completed(event)

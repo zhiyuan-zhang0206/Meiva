@@ -94,6 +94,7 @@ export function classifyItem(item: BackendTimelineItem): ItemClass {
     case "agent_reasoning":
     case "agent_code":
     case "code_output":
+    case "subagent_text":
     case "inbound_compact_summary":
     case "inbound_compact_request":
     case "system_prompt":

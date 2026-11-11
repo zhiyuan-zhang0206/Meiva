@@ -46,6 +46,7 @@ from base.lm.harness.codex.requests import (
     steer_request,
     turn_start_request,
 )
+from base.lm.harness.codex.subagents import SubagentThreads
 from base.lm.harness.codex.transport import AppServerTransport, StdioAppServer
 from base.lm.harness.codex.turns import (
     Inbound,
@@ -166,6 +167,7 @@ class CodexSession(BaseHarnessSession[CodexConfig]):
         self._interrupting: set[str] = set()
         self._started = False
         self._commands = OpenCommands()
+        self._subagents = SubagentThreads()
         self._start_tree: dict[int, str] = {}
 
     def _read_records(
@@ -468,13 +470,27 @@ class CodexSession(BaseHarnessSession[CodexConfig]):
         return True
 
     def _on_notification(self, method: str, params: JsonObject) -> None:
+        self._subagents = self._subagents.learned(method, params, session_id=self._session_id)
         message = inbound(method, params, session_id=self._session_id)
         if message is None:
+            self._on_subagent(method, params)
             return
         if self._starting and message.kind is not NotificationKind.TURN_STARTED:
             self._buffer_early_notification(message, params)
             return
         self._dispatch_notification(message, params)
+
+    # meiva:note
+    # A sub-agent's finished message is shown in the turn that is running when it arrives; with no
+    # turn running (a sub-agent that outlives its parent's turn) it has nowhere to be attributed
+    # and is not shown.
+    # meiva:link base/lm/harness/docs/subagent-text.md
+    def _on_subagent(self, method: str, params: JsonObject) -> None:
+        local = self._running_turn_id()
+        if local is None:
+            return
+        if (event := self._subagents.text(method, params, turn_id=local)) is not None:
+            self._emit(event)
 
     def _buffer_early_notification(self, message: Inbound, params: JsonObject) -> None:
         if not message.turn_id or params.get("threadId") != self._session_id:

@@ -62,6 +62,11 @@ describe("classifyItem", () => {
     expect(summary.lastLiveStartedAt).toBe(1000);
   });
 
+  it("a sub-agent's text is secondary work detail, never a primary message", () => {
+    expect(classifyItem(item("subagent_text", "general-purpose"))).toBe("secondary");
+    expect(classifyItem(item("subagent_text", null, undefined, { user_facing: false }))).toBe("secondary");
+  });
+
   it("agent_chat and human inbound are primary; non-user-facing agent_chat is secondary", () => {
     expect(classifyItem(item("agent_chat"))).toBe("primary");
     expect(classifyItem(item("agent_chat", null, undefined, { user_facing: true }))).toBe("primary");

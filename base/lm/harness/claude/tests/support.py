@@ -22,7 +22,9 @@ CLI_PID = 4242
 def _blocks(raw: list[dict[str, Any]]) -> list[Any]:
     blocks: list[Any] = []
     for item in raw:
-        if "text" in item:
+        if "thinking" in item:
+            blocks.append(fake.ThinkingBlock(thinking=item["thinking"]))
+        elif "text" in item:
             blocks.append(fake.TextBlock(text=item["text"]))
         elif "tool" in item:
             blocks.append(fake.ToolUseBlock(**item["tool"]))
@@ -47,9 +49,21 @@ def replay(client: Any, fixture: str, group: str, **keys: str) -> None:
             content: Any = frame["content"]
             if isinstance(content, list):
                 content = _blocks(cast("list[dict[str, Any]]", content))
-            client.push(fake.UserMessage(content=content, uuid=uuid, origin=frame.get("origin")))
+            client.push(
+                fake.UserMessage(
+                    content=content,
+                    uuid=uuid,
+                    origin=frame.get("origin"),
+                    parent_tool_use_id=frame.get("parent_tool_use_id"),
+                )
+            )
         elif kind == "AssistantMessage":
-            client.push(fake.AssistantMessage(content=_blocks(frame["blocks"])))
+            client.push(
+                fake.AssistantMessage(
+                    content=_blocks(frame["blocks"]),
+                    parent_tool_use_id=frame.get("parent_tool_use_id"),
+                )
+            )
         elif kind == "SystemMessage":
             client.push(fake.SystemMessage(subtype=frame["subtype"], data=frame["data"]))
         else:
@@ -60,6 +74,7 @@ def replay(client: Any, fixture: str, group: str, **keys: str) -> None:
 _FRAME_CLASSES: dict[str, Any] = {
     "ResultMessage": fake.ResultMessage,
     "TaskStartedMessage": fake.TaskStartedMessage,
+    "TaskUpdatedMessage": fake.TaskUpdatedMessage,
     "TaskNotificationMessage": fake.TaskNotificationMessage,
 }
 

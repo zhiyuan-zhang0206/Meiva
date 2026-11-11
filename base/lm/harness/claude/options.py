@@ -65,6 +65,7 @@ def option_values(
         tools=None if config.tools is None else list(config.tools),
         permission_mode=config.permission_mode,
         include_partial_messages=True,
+        forward_subagent_text=True,
         env=build_env(environ, config.auth, host=environ),
         resume=resume,
     )

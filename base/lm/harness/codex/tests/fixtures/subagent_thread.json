@@ -1,0 +1,137 @@
+{
+ "source": "RECORDED from codex app-server 0.166 (gpt-5.6-luna, one spawnAgent + wait), 2026-11-11. Thread and turn ids replaced; the order of frames and the field names are as the server sent them.",
+ "frames": {
+  "spawn": [
+   {
+    "method": "item/started",
+    "params": {
+     "threadId": "$thread",
+     "turnId": "$turn",
+     "item": {
+      "type": "collabAgentToolCall",
+      "id": "call-spawn",
+      "tool": "spawnAgent",
+      "status": "inProgress",
+      "senderThreadId": "$thread",
+      "receiverThreadIds": [],
+      "prompt": "Say the word ALPHA in one sentence, then run the shell command `echo hi`, then say BETA.",
+      "agentsStates": {}
+     }
+    }
+   },
+   {
+    "method": "item/completed",
+    "params": {
+     "threadId": "$thread",
+     "turnId": "$turn",
+     "item": {
+      "type": "collabAgentToolCall",
+      "id": "call-spawn",
+      "tool": "spawnAgent",
+      "status": "completed",
+      "senderThreadId": "$thread",
+      "receiverThreadIds": [
+       "child-thread-1"
+      ],
+      "prompt": "Say the word ALPHA in one sentence, then run the shell command `echo hi`, then say BETA.",
+      "agentsStates": {
+       "child-thread-1": {
+        "status": "pendingInit",
+        "message": null
+       }
+      }
+     }
+    }
+   }
+  ],
+  "child": [
+   {
+    "method": "thread/status/changed",
+    "params": {
+     "threadId": "child-thread-1",
+     "status": {
+      "type": "active",
+      "activeFlags": []
+     }
+    }
+   },
+   {
+    "method": "turn/started",
+    "params": {
+     "threadId": "child-thread-1",
+     "turn": {
+      "id": "child-turn-1",
+      "status": "inProgress",
+      "items": []
+     }
+    }
+   },
+   {
+    "method": "item/completed",
+    "params": {
+     "threadId": "child-thread-1",
+     "turnId": "child-turn-1",
+     "item": {
+      "type": "agentMessage",
+      "id": "m1",
+      "text": "ALPHA.",
+      "phase": "commentary"
+     }
+    }
+   },
+   {
+    "method": "item/completed",
+    "params": {
+     "threadId": "child-thread-1",
+     "turnId": "child-turn-1",
+     "item": {
+      "type": "commandExecution",
+      "id": "c1",
+      "command": "/bin/zsh -lc 'echo hi'",
+      "status": "completed"
+     }
+    }
+   },
+   {
+    "method": "item/completed",
+    "params": {
+     "threadId": "child-thread-1",
+     "turnId": "child-turn-1",
+     "item": {
+      "type": "agentMessage",
+      "id": "m2",
+      "text": "BETA",
+      "phase": "final_answer"
+     }
+    }
+   },
+   {
+    "method": "turn/completed",
+    "params": {
+     "threadId": "child-thread-1",
+     "turn": {
+      "id": "child-turn-1",
+      "status": "completed",
+      "durationMs": 7000,
+      "items": []
+     }
+    }
+   }
+  ],
+  "stranger": [
+   {
+    "method": "item/completed",
+    "params": {
+     "threadId": "unrelated-thread",
+     "turnId": "t9",
+     "item": {
+      "type": "agentMessage",
+      "id": "m9",
+      "text": "not ours",
+      "phase": "final_answer"
+     }
+    }
+   }
+  ]
+ }
+}

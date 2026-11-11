@@ -319,7 +319,7 @@ def _current_items(
 
 
 def _is_work_item(item: TimelineItem) -> bool:
-    return item.kind in {"agent_reasoning", "agent_code", "code_output"} or (
+    return item.kind in {"agent_reasoning", "agent_code", "code_output", "subagent_text"} or (
         item.kind == "agent_chat" and item.user_facing is False
     )
 

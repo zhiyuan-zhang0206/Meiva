@@ -40,6 +40,9 @@ inbox row (see [foreground input and cancellation](harness-foreground.md)). Nati
 checkpoints. The external activity projector writes to
 `agent_harness_messages` as events arrive.
 
+A CLI sub-agent's text (`SubagentText`) is written as a capped, non-user-facing `subagent_text` item beside the
+call that started it ([sub-agent text](../../../base/lm/harness/docs/subagent-text.md)).
+
 The first text or reasoning fragment, complete blocks, and tool start and
 result checkpoints are written while the big turn is active. Additional
 fragments are coalesced within a short checkpoint interval. Each item has a

@@ -1,0 +1,165 @@
+{
+ "source": "RECORDED from Claude Code CLI via claude-agent-sdk 0.2.168 (claude-haiku-4-5, an async Agent call), 2026-11-11. Ids shortened and the prompt text trimmed; frame order, parent_tool_use_id placement and field names are as the CLI sent them.",
+ "frames": {
+  "launch": [
+   {
+    "cls": "UserMessage",
+    "uuid": "$first",
+    "content": "spawn a subagent"
+   },
+   {
+    "cls": "AssistantMessage",
+    "blocks": [
+     {
+      "thinking": "I will spawn the agent."
+     }
+    ]
+   },
+   {
+    "cls": "AssistantMessage",
+    "blocks": [
+     {
+      "tool": {
+       "id": "toolu_AGENT",
+       "name": "Agent",
+       "input": {
+        "description": "Execute sequence with ALPHA, echo hi, and BETA",
+        "prompt": "Execute this sequence exactly: say ALPHA, run echo hi, say BETA."
+       }
+      }
+     }
+    ]
+   },
+   {
+    "cls": "TaskStartedMessage",
+    "task_id": "task-agent-1",
+    "tool_use_id": "toolu_AGENT",
+    "description": "Execute sequence with ALPHA, echo hi, and BETA",
+    "task_type": "local_agent",
+    "data": {
+     "subagent_type": "general-purpose",
+     "is_backgrounded": true,
+     "task_type": "local_agent"
+    }
+   },
+   {
+    "cls": "UserMessage",
+    "content": [
+     {
+      "tool_result": {
+       "tool_use_id": "toolu_AGENT",
+       "content": "Async agent launched successfully. agentId: task-agent-1"
+      }
+     }
+    ]
+   },
+   {
+    "cls": "AssistantMessage",
+    "blocks": [
+     {
+      "text": "The background agent is running."
+     }
+    ]
+   },
+   {
+    "cls": "ResultMessage",
+    "result": "The background agent is running.",
+    "num_turns": 2
+   }
+  ],
+  "subagent": [
+   {
+    "cls": "AssistantMessage",
+    "parent_tool_use_id": "toolu_AGENT",
+    "blocks": [
+     {
+      "thinking": "Do the three steps in order."
+     }
+    ]
+   },
+   {
+    "cls": "AssistantMessage",
+    "parent_tool_use_id": "toolu_AGENT",
+    "blocks": [
+     {
+      "text": "I will now execute this sequence.\n\nALPHA: this begins with the word alpha."
+     }
+    ]
+   },
+   {
+    "cls": "AssistantMessage",
+    "parent_tool_use_id": "toolu_AGENT",
+    "blocks": [
+     {
+      "tool": {
+       "id": "toolu_BASH",
+       "name": "Bash",
+       "input": {
+        "command": "echo hi"
+       }
+      }
+     }
+    ]
+   },
+   {
+    "cls": "UserMessage",
+    "parent_tool_use_id": "toolu_AGENT",
+    "content": [
+     {
+      "tool_result": {
+       "tool_use_id": "toolu_BASH",
+       "content": "hi"
+      }
+     }
+    ]
+   },
+   {
+    "cls": "AssistantMessage",
+    "parent_tool_use_id": "toolu_AGENT",
+    "blocks": [
+     {
+      "thinking": "Now say BETA."
+     }
+    ]
+   },
+   {
+    "cls": "AssistantMessage",
+    "parent_tool_use_id": "toolu_AGENT",
+    "blocks": [
+     {
+      "text": "BETA"
+     }
+    ]
+   },
+   {
+    "cls": "TaskUpdatedMessage",
+    "task_id": "task-agent-1",
+    "patch": {
+     "status": "completed"
+    }
+   },
+   {
+    "cls": "TaskNotificationMessage",
+    "task_id": "task-agent-1",
+    "status": "completed",
+    "summary": "BETA"
+   },
+   {
+    "cls": "AssistantMessage",
+    "blocks": [
+     {
+      "text": "DONE"
+     }
+    ]
+   },
+   {
+    "cls": "ResultMessage",
+    "origin": {
+     "kind": "task-notification"
+    },
+    "result": "DONE",
+    "num_turns": 1
+   }
+  ]
+ }
+}
