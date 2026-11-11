@@ -17,13 +17,10 @@ from base.lm.harness.delivery import (
 from base.lm.harness.events import (
     AckSignal,
     BridgeEvent,
-    HarnessCause,
     SessionBound,
     SessionClosed,
     SessionFailed,
     TurnFaulted,
-    TurnOrigin,
-    TurnStarted,
     UnsolicitedOutput,
     UnsolicitedSink,
     is_droppable,
@@ -137,7 +134,6 @@ class BaseHarnessSession[ConfigT: SessionConfig](ExitStatus):
         self._observed: set[str] = set()
         self._lost_background: tuple[BackgroundItem, ...] = ()
         self._live_background: tuple[BackgroundItem, ...] = ()
-        self._harness_causes: dict[str, HarnessCause | None] = {}
 
     async def start(self, *, resume: str | None = None) -> None:
         raise NotImplementedError
@@ -491,29 +487,6 @@ class BaseHarnessSession[ConfigT: SessionConfig](ExitStatus):
             return ()
         return (BackgroundItem(BackgroundKind.TURN, "a turn the CLI started by itself is running"),)
 
-    # meiva:note
-    # An idle agent has to hear that its CLI began a turn of its own and what it answered: the
-    # adapter reads the CLI's stream whether or not the agent has a turn, so the finished turn is
-    # handed to the sink like any other output nobody has read, and the sink wakes the agent. A
-    # turn that answers a background-task report or a queued input of ours is not reported here:
-    # the report already went to the sink, and the input has its own delivery ledger.
-    # meiva:link base/lm/harness/docs/background-work.md
-    def _wake_for_harness_turn(self, turn_id: str, text: str) -> None:
-        if turn_id not in self._harness_causes:
-            return
-        cause = self._harness_causes.pop(turn_id)
-        if cause in (HarnessCause.BACKGROUND_TASK, HarnessCause.QUEUED_INPUT_REVIVED):
-            return
-        if not text.strip():
-            return
-        why = "a scheduled wake" if cause is HarnessCause.SCHEDULED_WAKE else "its own accord"
-        self._unsolicited(
-            UnsolicitedOutput(
-                source="harness-turn",
-                text=f"The {self.harness} CLI ran a turn on {why} and replied:\n{text.strip()}",
-            )
-        )
-
     def take_lost_background(self) -> tuple[BackgroundItem, ...]:
         lost, self._lost_background = self._lost_background, ()
         if lost:
@@ -592,8 +565,6 @@ class BaseHarnessSession[ConfigT: SessionConfig](ExitStatus):
             self._fail_turn(turn, exc)
 
     def _emit(self, event: BridgeEvent) -> None:
-        if isinstance(event, TurnStarted) and event.origin is TurnOrigin.HARNESS:
-            self._harness_causes[event.turn_id] = event.cause
         if is_droppable(event) and self._events.qsize() >= self.config.max_buffered_events:
             self._dropped_deltas += 1
             return

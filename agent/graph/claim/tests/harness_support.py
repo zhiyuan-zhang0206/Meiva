@@ -78,6 +78,10 @@ class FakeSubscription:
         self._engine = engine
         self.queue: asyncio.Queue[BridgeEvent | None] = asyncio.Queue()
 
+    @property
+    def unread(self) -> bool:
+        return not self.queue.empty()
+
     async def get(self) -> BridgeEvent | None:
         return await self.queue.get()
 
@@ -110,6 +114,10 @@ class FakeEngine:
         self.adopted: list[str] = []
         self.subscriptions: set[FakeSubscription] = set()
         self._inbound = asyncio.Event()
+        # meiva:note
+        # The events of a turn the CLI began while nothing was subscribed: the next subscription is primed
+        # with them, the way the real pump primes it, and the engine reports it as not yet presented.
+        self.own_turn_events: list[BridgeEvent] = []
 
         def ordinary(inputs: Sequence[HarnessInput]) -> Sequence[BridgeEvent]:
             return in_a_turn(
@@ -126,8 +134,15 @@ class FakeEngine:
     def submitted(self) -> list[tuple[str, str]]:
         return [(i.text, i.key) for batch in self.delivered for i in batch]
 
+    @property
+    def has_unpresented_turn(self) -> bool:
+        return bool(self.own_turn_events)
+
     async def subscribe(self) -> FakeSubscription:
         subscription = FakeSubscription(self)
+        for event in self.own_turn_events:
+            subscription.queue.put_nowait(event)
+        self.own_turn_events = []
         self.subscriptions.add(subscription)
         return subscription
 

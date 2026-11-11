@@ -285,7 +285,7 @@ async def test_a_cleanly_finished_background_command_leaves_nothing_to_lose(
         await harness.stop()
 
 
-async def test_an_idle_session_wakes_the_agent_when_the_cli_starts_a_turn_by_itself(
+async def test_a_turn_the_cli_starts_by_itself_is_an_observed_turn_not_an_unsolicited_report(
     tmp_path: Path,
 ) -> None:
     delivered: list[UnsolicitedOutput] = []
@@ -295,10 +295,13 @@ async def test_an_idle_session_wakes_the_agent_when_the_cli_starts_a_turn_by_its
         # A fired cron: the CLI answers its own prompt with no turn of ours open.
         harness.client.push(fake.AssistantMessage(content=[fake.TextBlock(text="CRON-917 fired")]))
         harness.client.push(fake.ResultMessage(result="CRON-917 fired"))
-        _ = await harness.wait_for(lambda event: isinstance(event, TurnCompleted))
-        [report] = delivered
-        assert report.source == "harness-turn"
-        assert "CRON-917 fired" in report.text
+        started = await harness.wait_for(
+            lambda event: isinstance(event, TurnStarted) and event.origin is TurnOrigin.HARNESS
+        )
+        done = await harness.wait_for(lambda event: isinstance(event, TurnCompleted))
+        assert isinstance(done, TurnCompleted) and done.turn_id == started.turn_id
+        assert "CRON-917 fired" in done.text
+        assert delivered == []
     finally:
         await harness.stop()
 
@@ -353,7 +356,7 @@ async def test_a_wake_turn_is_classified_and_clears_the_wakeup(tmp_path: Path) -
             lambda event: isinstance(event, TurnCompleted) and event.turn_id == started.turn_id
         )
         assert not harness.session.background_work()
-        assert [r.source for r in delivered] == ["harness-turn"]
+        assert delivered == []
     finally:
         await harness.stop()
 

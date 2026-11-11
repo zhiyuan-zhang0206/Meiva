@@ -93,8 +93,10 @@ class HarnessBridge:
         clock: SessionClock,
         handle_rng: SecureRandom,
         controller_pid: int,
+        own_turn: Callable[[], None] | None = None,
     ) -> None:
         self.harness = harness
+        self._own_turn = own_turn
         self._agent_id = agent_id
         self._factory = factory
         self._machine = machine
@@ -158,6 +160,15 @@ class HarnessBridge:
     def generation(self) -> int:
         return 0 if self._session is None else self._session.generation
 
+    # meiva:note
+    # Whether the CLI began a turn of its own that no subscriber has read yet: the graph enters a run for
+    # it (the host wakes the agent through `own_turn`), and the subscription that run opens is primed
+    # with the turn's events so far.
+    # meiva:link base/lm/harness/docs/delivery.md
+    @property
+    def has_unpresented_turn(self) -> bool:
+        return self._pump is not None and self._pump.has_unpresented_turn
+
     async def ensure(self) -> HarnessSession:
         if self._close_error is not None:
             raise HarnessClosedError(
@@ -193,7 +204,7 @@ class HarnessBridge:
     # here; a turn waiter, or any other caller of `subscribe`, only watches it.
     # meiva:link base/lm/harness/docs/delivery.md
     async def _start_pump(self, session: HarnessSession) -> None:
-        pump = EventPump(session.events(), observe=self._observe)
+        pump = EventPump(session.events(), observe=self._observe, own_turn=self._own_turn)
         group = asyncio.TaskGroup()
         _ = await group.__aenter__()
         self._pump = pump

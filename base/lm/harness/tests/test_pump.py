@@ -4,9 +4,16 @@ import asyncio
 from collections.abc import AsyncIterator, Sequence
 from pathlib import Path
 
-from base.lm.harness import BridgeEvent, ContextCompacted, SessionStarted
+from base.lm.harness import (
+    AssistantText,
+    BridgeEvent,
+    ContextCompacted,
+    SessionStarted,
+    TurnOrigin,
+    TurnStarted,
+)
 from base.lm.harness.delivery import HarnessInput
-from base.lm.harness.events import AckSignal, InputInContext, InputReceived
+from base.lm.harness.events import AckSignal, HarnessCause, InputInContext, InputReceived
 from base.lm.harness.handoff import compaction_reminder
 from base.lm.harness.pump import EventPump
 from base.lm.harness.tests.test_bridge import FakeSession, handoff, make_bridge
@@ -71,3 +78,82 @@ async def test_a_compaction_seen_while_idle_puts_the_reminder_on_the_next_delive
         f"{compaction_reminder(instructions)}\n\ntwo",
         "three",
     ]
+
+
+def _own(turn_id: str) -> TurnStarted:
+    return TurnStarted(turn_id, TurnOrigin.HARNESS, (), 1, cause=HarnessCause.SCHEDULED_WAKE)
+
+
+async def test_a_turn_the_cli_begins_with_nobody_subscribed_is_kept_and_primes_the_next_subscriber() -> (
+    None
+):
+    source: asyncio.Queue[BridgeEvent | None] = asyncio.Queue()
+    woken: list[str] = []
+    pump = EventPump(_stream(source), observe=lambda _e: None, own_turn=lambda: woken.append("w"))
+    task = asyncio.create_task(pump.run())
+
+    source.put_nowait(_own("w1"))
+    source.put_nowait(AssistantText("w1", "tick"))
+    await asyncio.sleep(0)
+    await asyncio.sleep(0)
+    assert woken == ["w"] and pump.has_unpresented_turn
+
+    late = pump.subscribe()
+    first = await late.get()
+    assert isinstance(first, TurnStarted)
+    assert not pump.has_unpresented_turn, "once read, the turn is presented"
+    assert isinstance(await late.get(), AssistantText)
+    source.put_nowait(AssistantText("w1", "tock"))
+    source.put_nowait(None)
+    await task
+    assert [type(event) async for event in late] == [AssistantText]
+
+
+async def test_a_turn_read_by_a_live_subscriber_is_not_offered_to_the_next_one() -> None:
+    source: asyncio.Queue[BridgeEvent | None] = asyncio.Queue()
+    pump = EventPump(_stream(source), observe=lambda _e: None)
+    task = asyncio.create_task(pump.run())
+    live = pump.subscribe()
+
+    source.put_nowait(_own("w1"))
+    await asyncio.sleep(0)
+    await asyncio.sleep(0)
+    assert pump.has_unpresented_turn, "offered is not read"
+    assert isinstance(await live.get(), TurnStarted)
+    assert not pump.has_unpresented_turn
+
+    live.close()
+    again = pump.subscribe()
+    assert not again.unread
+    source.put_nowait(None)
+    await task
+
+
+async def test_a_turn_unread_when_its_subscriber_left_is_still_presented() -> None:
+    source: asyncio.Queue[BridgeEvent | None] = asyncio.Queue()
+    pump = EventPump(_stream(source), observe=lambda _e: None)
+    task = asyncio.create_task(pump.run())
+    leaving = pump.subscribe()
+
+    source.put_nowait(_own("w1"))
+    await asyncio.sleep(0)
+    await asyncio.sleep(0)
+    leaving.close()
+
+    successor = pump.subscribe()
+    assert isinstance(await successor.get(), TurnStarted)
+    source.put_nowait(None)
+    await task
+
+
+async def test_a_turn_begun_by_our_own_input_is_never_kept_or_announced() -> None:
+    source: asyncio.Queue[BridgeEvent | None] = asyncio.Queue()
+    woken: list[str] = []
+    pump = EventPump(_stream(source), observe=lambda _e: None, own_turn=lambda: woken.append("w"))
+    task = asyncio.create_task(pump.run())
+
+    source.put_nowait(TurnStarted("t1", TurnOrigin.INPUT, ("k",), 1))
+    source.put_nowait(None)
+    await task
+
+    assert woken == [] and not pump.has_unpresented_turn

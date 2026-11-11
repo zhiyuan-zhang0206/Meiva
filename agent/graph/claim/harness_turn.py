@@ -25,6 +25,7 @@ from agent.graph.claim.harness_foreground import (
     Requeue,
     Settlement,
     event_generation,
+    own_turn_note,
 )
 from agent.graph.claim.harness_inbox import (
     apply_reconciled,
@@ -77,6 +78,7 @@ from base.lm.harness import (
     ToolResult,
     ToolUse,
     TurnCompleted,
+    TurnStarted,
     completed_turn,
     fault_of_event,
 )
@@ -271,6 +273,8 @@ class ForegroundRun:
         self._settling: list[Handed] = []
         self._kept: set[str] = set()
         self._resumed = False
+        self._subscription: EventSubscription | None = None
+        self._reading = False
 
     def _unsettled(self) -> tuple[Handed, ...]:
         return (*self.fg.handed, *self._settling)
@@ -380,6 +384,7 @@ class ForegroundRun:
 
     async def execute(self) -> None:
         subscription = await self._bridge.subscribe()
+        self._subscription = subscription
         self.fg = replace(self.fg, generation=self._bridge.generation)
         outcome: BaseException | None = None
         try:
@@ -406,7 +411,11 @@ class ForegroundRun:
     async def _read(self, subscription: EventSubscription) -> None:
         try:
             while (event := await subscription.get()) is not None:
-                await self._on_event(event)
+                self._reading = True
+                try:
+                    await self._on_event(event)
+                finally:
+                    self._reading = False
             self._failure = HarnessClosedError(
                 "harness event stream ended while inputs were in flight"
             )
@@ -440,6 +449,8 @@ class ForegroundRun:
                 await self._projector.on_event(event)
             case TurnCompleted():
                 await self._on_turn_completed(event)
+            case TurnStarted() if (note := own_turn_note(event)) is not None:
+                await self._projector.record_control(note)
             case _:
                 pass
         self.fg, settlements = self.fg.on_event(event)
@@ -508,13 +519,29 @@ class ForegroundRun:
                 await self._recheck_kept()
                 continue
             backoff = self._backoff_until - asyncio.get_running_loop().time()
-            if self.fg.quiet and not self._settling and not self._synthetic and backoff <= 0:
+            if self._nothing_left() and backoff <= 0:
                 if not await self._queue_correction():
                     return
                 continue
             timeout = backoff if backoff > 0 else DELIVERY_FALLBACK_SECONDS
             with suppress(TimeoutError):
                 await asyncio.wait_for(self._changed.wait(), timeout)
+
+    # meiva:note
+    # The invocation may end only when nothing is in flight: no input handed over and unsettled, no turn
+    # running, no event read but not yet written, and none still waiting to be read. A turn the CLI began
+    # on its own while the agent was idle reaches the invocation as events already queued on its
+    # subscription, so an empty `fg` alone does not mean there is nothing to present.
+    # meiva:link agent/graph/docs/harness-foreground.md
+    def _nothing_left(self) -> bool:
+        waiting = self._subscription is not None and self._subscription.unread
+        return (
+            self.fg.quiet
+            and not self._settling
+            and not self._synthetic
+            and not self._reading
+            and not waiting
+        )
 
     # meiva:note
     # The session could not take the batch, so none of it was handed over: rows go back to the queue and

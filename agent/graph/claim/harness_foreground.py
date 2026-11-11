@@ -14,6 +14,7 @@ from dataclasses import dataclass, replace
 from base.agents.history.timeline_item import TimelineItem
 from base.lm.harness import (
     BridgeEvent,
+    HarnessCause,
     InputInContext,
     InputLost,
     InputReceived,
@@ -21,6 +22,7 @@ from base.lm.harness import (
     InterruptConfirmed,
     Reconciliation,
     TurnCompleted,
+    TurnOrigin,
     TurnStarted,
 )
 
@@ -32,6 +34,7 @@ __all__ = [
     "Requeue",
     "Settlement",
     "event_generation",
+    "own_turn_note",
     "plan_reconciliation",
 ]
 
@@ -123,6 +126,25 @@ class Foreground:
         settlement = make(found)
         rest = tuple(h for h in self.handed if h.key != key)
         return replace(self, handed=rest), (settlement,)
+
+
+# meiva:note
+# Why a turn the CLI began itself is on the timeline: the one line that names its cause, or None for a
+# turn that needs none (an input's own turn, or the revival of a queued input of ours, whose message is
+# its own entry).
+# meiva:link agent/graph/docs/harness-foreground.md
+def own_turn_note(event: TurnStarted) -> str | None:
+    if event.origin is not TurnOrigin.HARNESS:
+        return None
+    match event.cause:
+        case HarnessCause.QUEUED_INPUT_REVIVED:
+            return None
+        case HarnessCause.SCHEDULED_WAKE:
+            return "The CLI started a turn on a scheduled wake."
+        case HarnessCause.BACKGROUND_TASK:
+            return "The CLI started a turn for a finished background task."
+        case HarnessCause.UNKNOWN | None:
+            return "The CLI started a turn on its own."
 
 
 # meiva:note

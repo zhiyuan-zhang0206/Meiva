@@ -167,7 +167,7 @@ async def test_the_pending_command_is_recorded_for_the_next_process(tmp_path: Pa
         await stop(second)
 
 
-async def test_an_idle_session_wakes_the_agent_when_the_server_starts_a_turn_itself(
+async def test_a_turn_the_server_starts_itself_is_observed_and_not_reported_as_unsolicited(
     tmp_path: Path,
 ) -> None:
     delivered: list[UnsolicitedOutput] = []
@@ -188,9 +188,7 @@ async def test_an_idle_session_wakes_the_agent_when_the_server_starts_a_turn_its
         await asyncio.sleep(0)
         await asyncio.sleep(0)
 
-        [report] = delivered
-        assert report.source == "harness-turn"
-        assert "TIMER-1" in report.text
+        assert delivered == []
         assert not harness.session.background_work()
     finally:
         await stop(harness)

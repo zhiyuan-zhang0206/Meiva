@@ -27,6 +27,12 @@ inbound reaches a running invocation through the host's wake (`TurnScheduler` ha
 task is running to its engine), with `DELIVERY_FALLBACK_SECONDS` as a bound on a lost wake; the queue is not
 polled while a turn runs.
 
+A turn the CLI began itself while the agent was idle (a timer, a finished background task) enters the same
+run: the host's wake finds an empty inbox, but the claim sees the engine's unpresented turn and the run's
+subscription is primed with it. The run writes one status line naming the cause and then projects the turn like
+any other; the invocation ends only when no input is unsettled, no turn runs and no event is waiting to be read.
+The turn is presented once, by whichever run reads its start ([background work](../../../base/lm/harness/docs/background-work.md)).
+
 Inputs without an inbox row (a restart or resurrect note, a fork marker, a continuation after a context
 reset, pre-turn hook notes, a visibility or delivery correction) are synthetic inputs in `harness_inputs`.
 Each has a stable key, goes through the same `deliver()`, and writes its timeline entries at ACK 2. A fork's

@@ -417,6 +417,7 @@ class AgentHost:
                 clock=self._policy.clock_factory(),
                 controller_pid=self._policy.pid,
                 handle_rng=self._policy.rng,
+                own_turn=self._wake_resumed,
             ),
             contributions=tuple(hc for _, hc in self._extensions.harness_contributions(harness)),
             unsolicited=partial(self._report_unsolicited, agent_id),
@@ -427,13 +428,8 @@ class AgentHost:
     # adapter's read loop, so it only hands the report to the owner that writes it off
     # the loop; the write is an ordinary inbound, which is what makes the agent take a
     # turn over it.
-    # A turn the CLI ran by itself while the agent has an invocation running is already presented by
-    # that invocation's foreground (it reads the same events and projects them), so only the idle case
-    # needs the wake: writing the inbound as well would show the same reply twice.
     # meiva:link base/lm/harness/docs/attribution.md
     def _report_unsolicited(self, agent_id: int, event: UnsolicitedOutput) -> None:
-        if event.source == "harness-turn" and agent_id in self._in_flight:
-            return
         self._sessions.notify(agent_id, event, db=self._db, bus=self._bus)
 
     def _evict(self) -> None:

@@ -595,7 +595,6 @@ class ClaudeSession(BaseHarnessSession[BridgeConfig]):
         if completed.interrupted:
             self._emit(InterruptConfirmed(turn.turn_id, self.generation))
         self._observed.discard(turn.turn_id)
-        self._wake_for_harness_turn(turn.turn_id, completed.text)
 
     def _require_client(self) -> ClaudeClientProtocol:
         if self._client is None:
