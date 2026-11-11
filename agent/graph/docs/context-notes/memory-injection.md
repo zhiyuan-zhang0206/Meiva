@@ -7,8 +7,9 @@ stores, the SDK surface, the notes, and the write-discipline section together
 (`notes.py` builds the two index notes —
 [Memory index notes — the two stores' standing context notes](../../../../meiva_builtins/plugins/meiva_memory/docs/memory-index-notes.md) — `inheritance/inherit.py` the
 inherited one —
-[Memory inheritance — INHERIT.md read off the birth chain](../../../../meiva_builtins/plugins/meiva_memory/docs/memory-inheritance.md) — and `plugin.py`
-registers all three). All are laid down by `init_context` behind
+[Memory inheritance — INHERIT.md read off the birth chain](../../../../meiva_builtins/plugins/meiva_memory/docs/memory-inheritance.md) — and `agent_runtime.py`
+registers all three, the `memory_discipline_section` prompt section, and the recall
+hook; `plugin.py` declares the `meiva.memory` SDK surface). All are laid down by `init_context` behind
 the SystemMessage; see [[agent/graph/docs/context-notes/context-notes.md|Standing
 Context]] for the registry itself.
 
@@ -41,18 +42,25 @@ Context]] for the registry itself.
   the source's history — see [[agent/graph/docs/context-notes/context-notes.md|Standing
   Context]]).
 
-Malformed fences (unclosed / stray close / nested open) drop the block with a
-warning; only a file's body counts, split by the pool validator's frontmatter rule
-(`inherit._frontmatter_parts`), so a marker inside frontmatter never opens a block.
+`inherited_blocks.extract_inherit_body` normalizes CRLF, strips an optional
+leading YAML frontmatter block with `_frontmatter_body`, and trims whitespace.
 
 ## Write discipline
 
-The discipline both stores share (criteria, mandatory-write triggers, the
-`type/*` vocabulary, weighing a memory against self-verifying vs asserted
-sources) is a **system prompt section** owned by the same plugin — fixed text,
-where an index is not.
-It states the one `type/*` list the linter enforces and search exposes; the
-shared pool stays restrained where the personal store may be verbose
-(user rulings 2026-08-28), and a correction is due the same turn it is
-noticed — a stale note is fixed before the task continues (user ruling
-2026-08-09).
+`agent_runtime.py:memory_discipline_section` supplies fixed system-prompt text
+for three layers: the shared pool at `meiva.memory.PATH`, personal state in
+`memory/MEMORY.md` and `memory/<slug>.md`, and descendant context in
+`memory/INHERIT.md`. Shared notes hold reusable rules, broadly useful facts and
+user rulings; personal notes may retain verbose working state.
+
+Two-Stage OKF keeps writing simple: agents write pure Markdown (`# Title`, a
+high-level description paragraph, then the body), without write-time frontmatter
+or `type/*` tags. Provenance uses inline body Markdown file links. Meiva Dream
+adds canonical OKF description and lifecycle fields during consolidation.
+
+The discipline weighs self-verifying sources (code, cluster state, filesystem),
+asserted sources (maintained project instructions and docs), and remembered
+claims. Check current evidence and timestamps when they disagree; repo facts
+carry a path, command or SHA verification point. Search before writing, update
+canonical notes in place, and correct stale claims in the same turn they are
+noticed, before continuing the task.

@@ -13,7 +13,7 @@ plugin is [meiva_memory](meiva_memory.md)'s.
 ## Trigger conditions
 
 - **Feature gate**: `settings.passive_memory_recall_enabled` (env `MEIVA_PASSIVE_MEMORY_RECALL`) — the entire hook is a no-op when it is off; its default and the cluster opt-out are in [Memory Recall — Passive Memory Recall](memory-recall.md)
-- Positive gate `tail_has_user_inbound` (`agent/messages/__init__.py:223-232`): **since last AIMessage** any inbound whose source **does not start with `agent:`** triggers — user / system / schedule / watcher / shell sources **all pass**, **only peer agent (`agent:` prefix) is excluded**; no non-empty text check, not "most recent one", but scans tail inbound
+- **Positive gate** `tail_has_recallable_inbound` (`agent/messages/__init__.py`): since the last `AIMessage`, inbound from user chat, peer agents (`agent:`), scheduled turns (`schedule:`), or system notices triggers recall. Machine-originated `watcher:` and `shell:` wake-ups are skipped.
 - If auto-compact hook would also trigger in the same turn, **defers** (returns None) — `messages` have add_messages reducer that merges, without failing loud, but auto-compact's REMOVE_ALL full replacement is order-sensitive and would swallow the same-turn appended note
 
 ## Behavior

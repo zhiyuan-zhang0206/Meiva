@@ -102,7 +102,8 @@ def test_discipline_describes_pure_markdown_note_format(memory_plugin: Any) -> N
     assert "pure Markdown" in section
     assert "# Title" in section
     assert "No YAML frontmatter is needed" in section
-    assert "sources" in section
+    assert "`sources`" not in section
+    assert "inline body file-link provenance" in section
     assert "verified" in section
     assert "stale_after" in section
 

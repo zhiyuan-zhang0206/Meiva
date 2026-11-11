@@ -75,6 +75,10 @@ injected on demand (passive recall); a standalone agent uses
   notes with frontmatter added and stale notes removed, and pruning plus index
   rebuild. The built-in `memory-arbiter` schedule runs it daily at 04:00 and a
   health check at 07:00; the Memory Arbiter agent leads it.
+- Dream's workspace promotion loop uses `dream_gather.py` to gather candidates
+  across hosts and `sources/dream/workspace-memory-ledger.json` to track content
+  hashes. `scope_trapped_candidates` is a P0 signal to promote reusable knowledge
+  into the pool; after promotion, private notes are pruned to canonical pointers.
 - The pool validator (`validate.py`, run by the Vault's pre-commit hook and the
   PR check) enforces encoding, frontmatter syntax, size caps, link targets,
   index pointers and the directory limits.
@@ -82,15 +86,14 @@ injected on demand (passive recall); a standalone agent uses
 ## Sync between machines
 
 By default the Vault syncs through a private Git remote
-(`MEIVA_MEMORY_REMOTE`): each machine's authoring checkout (`$MEIVA_HOME/vault`)
-sits on its own `machine-<name>` branch (`main` only on a gateway-only unit), and
-the steward script pushes that branch and opens a pull request. The arbiter
-merges validated ones into `main` (Dream itself works in a temporary worktree),
-and `meiva memory refresh` brings the gateway checkout, which is on `main`, up to
-date. The commit hook checks size caps and runs `validate.py`; it does not
-refuse commits by branch. With `MEIVA_MEMORY_KEEP_LOCAL` the
-pool has no remote and its notes never leave the machine. Because of this, a
-note may take up to about a day to appear on another machine.
+(`MEIVA_MEMORY_REMOTE`). Each machine's `$MEIVA_HOME/vault` checkout tracks
+`main`. The Vault `.githooks/pre-commit` hook refuses direct commits on `main`
+and runs the character-cap checks plus `validate.py`. All consolidation and
+steward edits run in an isolated temporary git worktree branched from
+`origin/main`, land through a validated PR, and are followed by
+`meiva memory refresh` to update the gateway checkout that search indexes.
+With `MEIVA_MEMORY_KEEP_LOCAL` the pool has no remote and its notes never leave
+the machine. A note may take up to about a day to appear on another machine.
 
 ## On disk
 

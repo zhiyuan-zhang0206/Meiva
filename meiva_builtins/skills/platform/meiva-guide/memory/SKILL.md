@@ -82,7 +82,7 @@ Never run these without approval; reading needs none of them.
 | `meiva memory search` | read-only |
 | `meiva memory init` | provisions the Vault checkouts, the `MEMORY.md` template and the commit hook |
 | `meiva memory refresh` | fast-forwards the gateway checkout, which moves what search indexes |
-| Dream consolidation and its scripts (`consolidate.py`, `steward.py`, `arbiter_merge.py`, `rebuild_memory_index.py`, `gen_indexes.py`) | commit, push, merge or rewrite pool files |
+| Dream consolidation and its scripts (`consolidate.py`, `steward.py`, `arbiter_merge.py`, `rebuild_memory_index.py`, `dream_gather.py`, `workspace_memory.py`) | commit, push, merge or rewrite pool files |
 | `git` add, commit, push, fetch, worktree, checkout or rm inside the Vault | changes the repository |
 | Any file write, move or delete under the pool or a workspace `memory/` folder | changes notes |
 
