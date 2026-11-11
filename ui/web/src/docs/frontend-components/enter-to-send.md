@@ -27,7 +27,7 @@ Uniform, because they are all "type a message, send it":
   (`components/conversation/composer-helpers.tsx`) — the conversation composer.
   Inside an open slash-command dropdown the same rule decides whether Enter
   selects the command or sends the draft.
-- `components/notifications/open-question-detail.tsx` — the question reply box and,
+- `components/notifications/questions-form.tsx` — the question answer fields and,
   through `components/notifications/question-form.tsx`, a question's
   single text answer box or a choice question's optional Note box.
 - `components/agents/agent-prompt-dialog.tsx` — the fork / resurrect prompt: a
@@ -58,4 +58,4 @@ on Enter without a reload.
 ## Relationship to Other Nodes
 
 - [Frontend Components](frontend-components.md) — the catalog this node hangs from; the Composer bullet describes its states, drafts and submissions.
-- [Fleet View](fleet-view.md) — the composer question queue renders `OpenQuestionDetail`, whose question form is one of these fields.
+- [Fleet View](fleet-view.md) — the composer question queue renders `QuestionsForm`, whose question fields are among these.

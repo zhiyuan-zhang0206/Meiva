@@ -6,8 +6,8 @@ from base.events.notifications.catalog import (
 )
 from base.events.notifications.publish import (
     NotificationRecord,
-    stage_question_asked,
-    stage_question_resolved,
+    open_question_count,
+    stage_open_questions,
     stage_unread_delivery,
     stage_unread_seen,
 )
@@ -20,8 +20,8 @@ __all__ = [
     "NotificationAction",
     "NotificationCategory",
     "NotificationRecord",
-    "stage_question_asked",
-    "stage_question_resolved",
+    "open_question_count",
+    "stage_open_questions",
     "stage_unread_delivery",
     "stage_unread_seen",
 ]

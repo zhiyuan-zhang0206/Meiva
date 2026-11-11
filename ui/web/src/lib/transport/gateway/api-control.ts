@@ -29,7 +29,9 @@ import type {
   PackageDraftResponse,
   PackageKind,
   ResolvedConfigView,
-  ResolveQuestionIn,
+  AnswerQuestions,
+  AnswerQuestionsResult,
+  QuestionItem,
   RestartAgentResponse,
   ResurrectAgentResponse,
   RetryLaunchAccepted,
@@ -63,8 +65,15 @@ import { keyedJson, keyedPost, patchJson, postInit, postJson, putJson } from "./
 import { confirmDraftReceipt } from "./plans";
 import { STATS_REQUEST_TIMEOUT_MS } from "./plans";
 
+// meiva:note
+// The body of the answer route's 409 that means "the open set changed": it carries the latest set. A
+// 409 without one (a key reused with different content) is an error.
+function hasOpenSet(body: unknown): body is { open: QuestionItem[] } {
+  return typeof body === "object" && body !== null && "open" in body && Array.isArray(body.open);
+}
+
 export function createControlApi(http: Http) {
-  const { send: f, ok, jsonTimed: jsonWithTimeout, newOperationKey } = http;
+  const { send: f, ok, okOrConflict, jsonTimed: jsonWithTimeout, newOperationKey } = http;
 
   const draftAgent = (path: string, body: unknown, operationKey: string): Promise<GuideDraftResponse> =>
     Promise.resolve().then(() => f(path, keyedJson(body, operationKey)))
@@ -315,17 +324,17 @@ export function createControlApi(http: Http) {
     markUserMessagesSeen: (agentId: number, body: MarkUserMessagesSeen, key: string): Promise<UserMessagesSeen> =>
       f(`/api/keyed/v1/agents/${agentId}/user-messages/seen`, keyedJson(body, key)).then(ok<UserMessagesSeen>),
 
-    resolveQuestion: (
+    // meiva:note
+    // One submission settles every open question of the agent. A 409 is not an error: the open set
+    // changed since the form was built, nothing was settled, and the body carries the latest set.
+    answerQuestions: (
       agentId: number,
-      questionId: number,
-      body: ResolveQuestionIn,
+      body: AnswerQuestions,
       idempotencyKey: string = newOperationKey(),
-    ): Promise<{ status: string }> => {
-      return f(
-        `/api/keyed/v1/agents/${agentId}/questions/${questionId}/resolve`,
-        keyedJson(body, idempotencyKey),
-      ).then(ok<{ status: string }>);
-    },
+    ): Promise<AnswerQuestionsResult> =>
+      f(`/api/keyed/v1/agents/${agentId}/questions/answers`, keyedJson(body, idempotencyKey))
+        .then((res) => okOrConflict<{ status: string }, { open: QuestionItem[] }>(res, hasOpenSet))
+        .then((outcome) => (outcome.kind === "conflict" ? { kind: "changed", open: outcome.body.open } : { kind: "settled" })),
 
     compact: (agentId: number): Promise<CompactAgentResponse> =>
       f(`/api/agents/${agentId}/compact`, postInit).then(ok<CompactAgentResponse>),

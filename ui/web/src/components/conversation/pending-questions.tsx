@@ -5,12 +5,12 @@ import { ChevronDown, ChevronUp, MessageCircleQuestion } from "lucide-react";
 import { useId, useState } from "react";
 import { useTranslations } from "next-intl";
 
-import { OpenQuestionDetail } from "@/components/notifications/open-question-detail";
+import { QuestionsForm } from "@/components/notifications/questions-form";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import type { QuestionItem } from "@/lib/contracts/types";
 import { cn } from "@/lib/format/utils";
 import { FLEX, OVERFLOW_HIDDEN, QUESTION_REGION_MAX_HEIGHT_CLASS } from "@/lib/layout/layout";
-import { dropOpenQuestions } from "@/lib/notifications/use-questions";
+import { dropOpenQuestions, replaceAgentQuestions } from "@/lib/notifications/use-questions";
 
 // meiva:note
 // The queue opens expanded by default when questions are waiting, while the
@@ -41,11 +41,12 @@ export function PendingQuestions({ questions, failed, maxWidthCss }: {
         </button>
         <div id={contentId} hidden={!expanded} className={cn(OVERFLOW_HIDDEN, "absolute -inset-x-px bottom-full rounded-t-xl border border-b-0 border-border bg-background shadow-lg")}>
           <ScrollArea viewportClassName={cn(QUESTION_REGION_MAX_HEIGHT_CLASS, "overscroll-y-contain")}>
-            <div className="divide-y divide-border">
-              {questions.map((question) => <article key={question.id} aria-label={question.title} className="p-3">
-                <OpenQuestionDetail agentId={question.agent_id} question={question} onResolved={() => dropOpenQuestions(cache, [question.id])} />
-              </article>)}
-            </div>
+            <QuestionsForm
+              agentId={questions[0].agent_id}
+              questions={questions}
+              onSettled={(ids) => dropOpenQuestions(cache, ids)}
+              onChanged={(open) => replaceAgentQuestions(cache, questions[0].agent_id, open)}
+            />
           </ScrollArea>
         </div>
       </>}

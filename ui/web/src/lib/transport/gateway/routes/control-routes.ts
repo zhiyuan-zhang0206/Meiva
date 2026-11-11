@@ -1,10 +1,8 @@
 import type { AlertClassRow, AlertsWindow } from "../../../contracts/types";
 import { withQuery } from "./route-query";
 
-export function questionsPath(params?: { limit?: number }): string {
-  const sp = new URLSearchParams();
-  if (params?.limit != null) sp.set("limit", String(params.limit));
-  return withQuery("/api/questions", sp);
+export function agentQuestionsPath(agentId: number): string {
+  return withQuery("/api/questions/open", new URLSearchParams({ agent_id: String(agentId) }));
 }
 
 export function fleetGraphPath(opts?: { hours?: number; decayLambda?: number }): string {

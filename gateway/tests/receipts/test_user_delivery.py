@@ -235,24 +235,33 @@ def test_ask_retries_note_and_answer_share_one_receipt(db_conn: psycopg.Connecti
     aid = sdk_agent(db_conn)
     path = f"/api/agents/{aid}/asks"
     question = {
-        "title": "Choose scope",
-        "question": {
-            "type": "multi_select",
-            "options": [{"id": "small", "label": "Small"}],
-            "note_suggestion": "Validate first",
-        },
+        "questions": [
+            {
+                "title": "Choose scope",
+                "question": {
+                    "type": "multi_select",
+                    "options": [{"id": "small", "label": "Small"}],
+                    "note_suggestion": "Validate first",
+                },
+            }
+        ]
     }
     with gateway_test_client() as client:
         created = client.post(path, json=question, headers=headers("question"))
         assert created.status_code == 201, created.text
-        question_id = created.json()["id"]
+        question_id = created.json()["ids"][0]
         row = client.get(f"/api/questions/open?agent_id={aid}").json()[0]
         assert row["answer"] is None
         assert row["question"]["note_suggestion"] == "Validate first"
-        resolve = f"/api/keyed/v1/agents/{aid}/questions/{question_id}/resolve"
+        resolve = f"/api/keyed/v1/agents/{aid}/questions/answers"
         body = {
-            "action": "answer",
-            "answer": {"option_ids": ["small"], "comment": "Validate tonight"},
+            "expected_ids": [question_id],
+            "results": [
+                {
+                    "id": question_id,
+                    "answer": {"option_ids": ["small"], "comment": "Validate tonight"},
+                }
+            ],
         }
         answer = client.post(resolve, json=body, headers=headers("answer"))
         assert answer.status_code == 201, answer.text
@@ -315,7 +324,7 @@ def test_ask_creation_retry_preserves_each_independent_question(
 ) -> None:
     aid = sdk_agent(db_conn)
     path = f"/api/agents/{aid}/asks"
-    question = {"title": "Choose scope", "question": {"type": "text"}}
+    question = {"questions": [{"title": "Choose scope", "question": {"type": "text"}}]}
     with gateway_test_client() as client, ThreadPoolExecutor(max_workers=3) as pool:
         calls = [
             pool.submit(client.post, path, json=question, headers=headers("question"))
@@ -323,8 +332,8 @@ def test_ask_creation_retry_preserves_each_independent_question(
         ]
         results = [call.result() for call in calls]
         assert all(result.status_code == 201 for result in results), results
-        assert len({result.json()["id"] for result in results}) == 1
-        changed = question | {"title": "Choose timing"}
+        assert len({result.json()["ids"][0] for result in results}) == 1
+        changed = {"questions": [{"title": "Choose timing", "question": {"type": "text"}}]}
         assert client.post(path, json=changed, headers=headers("question")).status_code == 409
         assert client.post(path, json=changed, headers=headers("timing")).status_code == 201
         assert len(client.get(f"/api/questions/open?agent_id={aid}").json()) == 2

@@ -25,6 +25,10 @@ export interface Http {
   readonly send: (path: string, init?: RequestInit) => Promise<Response>;
   readonly ok: <T>(res: Response) => Promise<T>;
   readonly accepted: (res: Response) => Promise<void>;
+  readonly okOrConflict: <T, C>(
+    res: Response,
+    isConflict: (body: unknown) => body is C,
+  ) => Promise<DecodedOrConflict<T, C>>;
   readonly rawJson: <T>(res: Response) => Promise<T>;
   readonly decoded: <T>(res: Response, decode: (status: number, body: unknown) => T) => Promise<T>;
   readonly jsonTimed: <T>(
@@ -37,6 +41,29 @@ export interface Http {
   readonly wait: (ms: number) => Promise<void>;
   readonly newOperationKey: () => string;
   readonly openUpload: () => UploadRequest;
+}
+
+// meiva:note
+// A 409 whose body the caller recognises (the keyed answer submission's latest open set) is a result,
+// not an error; every other 409, such as a key reused with different content, and every other status
+// decodes exactly as `ok`.
+export type DecodedOrConflict<T, C> = { kind: "ok"; value: T } | { kind: "conflict"; body: C };
+
+function okOrConflict<T, C>(
+  res: Response,
+  isConflict: (body: unknown) => body is C,
+): Promise<DecodedOrConflict<T, C>> {
+  if (res.status !== 409) return ok<T>(res).then((value) => ({ kind: "ok" as const, value }));
+  return res.text().then((text) => {
+    let body: unknown;
+    try {
+      body = JSON.parse(text);
+    } catch {
+      body = undefined;
+    }
+    if (isConflict(body)) return { kind: "conflict" as const, body };
+    throw errorFromResponse(res.status, text);
+  });
 }
 
 function ok<T>(res: Response): Promise<T> {
@@ -133,6 +160,7 @@ export function createHttp(transport: HttpTransport, base: string, telemetry: Ht
     send,
     ok,
     accepted,
+    okOrConflict,
     rawJson,
     decoded,
     jsonTimed,

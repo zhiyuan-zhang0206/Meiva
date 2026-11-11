@@ -108,8 +108,8 @@ def normalize_last_message_text(text: str) -> str:
 SDK_DELIVERY_RULE = (
     "Deliver user-facing information through meiva.ui.publish(content, "
     "suggestions=[...]). Suggestions are optional candidates "
-    "for the independent composer service. Ask questions with meiva.ui.ask(title, "
-    "content, question={...}, note_suggestion=...). Every question "
+    "for the independent composer service. Ask questions with meiva.ui.ask([{...}, ...]), "
+    "a list of questions answered together by the user in one reply. Every question "
     "has a user-editable Note. Publishing or asking never ends execution: continue "
     "independent work. Ordinary assistant text, including final summaries, is folded "
     "into Details which the user can expand. Before a natural turn end, publish, ask, "

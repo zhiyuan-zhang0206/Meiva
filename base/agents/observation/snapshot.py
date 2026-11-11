@@ -97,7 +97,7 @@ class OpenQuestion(BaseModel):
     title: str
     content: str | None
     created_at: datetime
-    question: QuestionSpec | None = None
+    question: QuestionSpec
 
 
 # meiva:note

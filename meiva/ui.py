@@ -8,7 +8,6 @@ __all_for_meiva__ = [
     "publish",
 ]
 
-from base.host.boundary.fields import int_field
 from meiva.sdk_surface import agent_identity, process_context
 
 
@@ -35,31 +34,42 @@ def publish(content: str | None, *, suggestions: list[str] | None = None) -> int
     return UserMessage.model_validate(transport.json_object(result)).id
 
 
-def ask(
-    title: str,
-    content: str | None = None,
-    *,
-    question: dict[str, object] | None = None,
-    note_suggestion: str | None = None,
-) -> int:
-    """Ask a persistent question without ending your turn.
+def ask(questions: list[dict[str, object]]) -> list[int]:
+    """Ask the user one or more persistent questions without ending your turn.
 
-    question accepts type=text (default), single_select or multi_select with ordered
-    options (id, label, optional description). Text questions have one answer field;
-    choices keep an optional Note. note_suggestion offers a candidate answer or Note
-    that the user must explicitly apply before submitting.
-    Each call asks one question and returns its own global question id; several may
-    remain open. Questions do not expire or replace earlier ones. The user's answer
-    arrives asynchronously as a message. close_question closes one you no longer need; a question cannot be edited. The user is notified
-    of each question. The runtime owns retry identity. Returns the global question id.
+    questions is a non-empty list; each item has title, optional content, optional
+    type (text by default, single_select or multi_select), options for the choice
+    types (ordered, each with id, label and optional description) and an optional
+    note_suggestion. Text questions have one answer field; choices keep an optional
+    Note, and note_suggestion offers a candidate answer or Note that the user must
+    explicitly apply before submitting. Any item that is invalid rejects the whole
+    call. Returns one question id per item, in the order given.
+    The user answers all of your open questions in one reply (each answered or
+    skipped), which arrives as one message with a "Re: question #<id>" block per
+    question. Questions do not expire; close_question closes one you no longer
+    need, and a question cannot be edited. The user is notified once per agent.
+    The runtime owns retry identity.
     """
     from base.agents.context.gateway_client import transport
-    from base.api_contracts.user_delivery import AskMessage
+    from base.api_contracts.ask import AskBatch, AskResult
 
-    payload: dict[str, object] = {"type": "text"} if question is None else dict(question)
-    if note_suggestion is not None:
-        payload["note_suggestion"] = note_suggestion
-    body = AskMessage.model_validate({"title": title, "content": content, "question": payload})
+    if not isinstance(questions, list) or not questions:
+        raise ValueError("questions must be a non-empty list of dicts")
+    allowed = {"title", "content", "type", "options", "note_suggestion"}
+    items: list[dict[str, object]] = []
+    for index, raw in enumerate(questions):
+        if not isinstance(raw, dict):
+            raise TypeError(f"questions[{index}] must be a dict")
+        unknown = set(raw) - allowed
+        if unknown:
+            raise ValueError(f"questions[{index}] has unknown keys: {sorted(unknown)}")
+        spec: dict[str, object] = {"type": raw.get("type", "text")}
+        if "options" in raw:
+            spec["options"] = raw["options"]
+        if "note_suggestion" in raw:
+            spec["note_suggestion"] = raw["note_suggestion"]
+        items.append({"title": raw.get("title"), "content": raw.get("content"), "question": spec})
+    body = AskBatch.model_validate({"questions": items})
     context = process_context.require_bound_context()
     result = transport.post(
         f"/api/agents/{agent_identity.require_agent_id()}/asks",
@@ -68,7 +78,7 @@ def ask(
         context=context,
     )
     result.raise_for_status()
-    return int_field(transport.json_object(result), "id")
+    return AskResult.model_validate(transport.json_object(result)).ids
 
 
 def close_question(question_id: int) -> None:

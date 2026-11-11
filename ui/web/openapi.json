@@ -2769,7 +2769,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/AskMessage"
+                "$ref": "#/components/schemas/AskBatch"
               }
             }
           }
@@ -2780,11 +2780,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "additionalProperties": {
-                    "type": "integer"
-                  },
-                  "title": "Response Ask Api Agents  Agent Id  Asks Post"
+                  "$ref": "#/components/schemas/AskResult"
                 }
               }
             }
@@ -3240,10 +3236,10 @@
         }
       }
     },
-    "/api/keyed/v1/agents/{agent_id}/questions/{question_id}/resolve": {
+    "/api/keyed/v1/agents/{agent_id}/questions/answers": {
       "post": {
-        "summary": "Resolve Observed",
-        "operationId": "resolve_observed_api_keyed_v1_agents__agent_id__questions__question_id__resolve_post",
+        "summary": "Answer Questions",
+        "operationId": "answer_questions_api_keyed_v1_agents__agent_id__questions_answers_post",
         "parameters": [
           {
             "name": "agent_id",
@@ -3252,15 +3248,6 @@
             "schema": {
               "type": "integer",
               "title": "Agent Id"
-            }
-          },
-          {
-            "name": "question_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "integer",
-              "title": "Question Id"
             }
           },
           {
@@ -3289,7 +3276,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/ResolveQuestionIn"
+                "$ref": "#/components/schemas/AnswerQuestions"
               }
             }
           }
@@ -3304,6 +3291,9 @@
                 }
               }
             }
+          },
+          "409": {
+            "description": "The open questions changed; the body carries the latest set."
           },
           "422": {
             "description": "Validation Error",
@@ -10089,7 +10079,52 @@
         "title": "AlertsListResponse",
         "description": "Unresolved-first alert history + the count the UI badge shows."
       },
-      "AskMessage": {
+      "AnswerQuestions": {
+        "properties": {
+          "expected_ids": {
+            "items": {
+              "type": "integer"
+            },
+            "type": "array",
+            "minItems": 1,
+            "title": "Expected Ids"
+          },
+          "results": {
+            "items": {
+              "$ref": "#/components/schemas/QuestionResult"
+            },
+            "type": "array",
+            "minItems": 1,
+            "title": "Results"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "expected_ids",
+          "results"
+        ],
+        "title": "AnswerQuestions"
+      },
+      "AskBatch": {
+        "properties": {
+          "questions": {
+            "items": {
+              "$ref": "#/components/schemas/AskQuestion"
+            },
+            "type": "array",
+            "minItems": 1,
+            "title": "Questions"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "questions"
+        ],
+        "title": "AskBatch"
+      },
+      "AskQuestion": {
         "properties": {
           "title": {
             "type": "string",
@@ -10135,7 +10170,24 @@
           "title",
           "question"
         ],
-        "title": "AskMessage"
+        "title": "AskQuestion"
+      },
+      "AskResult": {
+        "properties": {
+          "ids": {
+            "items": {
+              "type": "integer"
+            },
+            "type": "array",
+            "title": "Ids"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "ids"
+        ],
+        "title": "AskResult"
       },
       "AssignmentAgentIn": {
         "properties": {
@@ -14704,30 +14756,23 @@
             "title": "Created At"
           },
           "question": {
-            "anyOf": [
+            "oneOf": [
               {
-                "oneOf": [
-                  {
-                    "$ref": "#/components/schemas/ChoiceQuestion"
-                  },
-                  {
-                    "$ref": "#/components/schemas/TextQuestion"
-                  }
-                ],
-                "discriminator": {
-                  "propertyName": "type",
-                  "mapping": {
-                    "multi_select": "#/components/schemas/ChoiceQuestion",
-                    "single_select": "#/components/schemas/ChoiceQuestion",
-                    "text": "#/components/schemas/TextQuestion"
-                  }
-                }
+                "$ref": "#/components/schemas/ChoiceQuestion"
               },
               {
-                "type": "null"
+                "$ref": "#/components/schemas/TextQuestion"
               }
             ],
-            "title": "Question"
+            "title": "Question",
+            "discriminator": {
+              "propertyName": "type",
+              "mapping": {
+                "multi_select": "#/components/schemas/ChoiceQuestion",
+                "single_select": "#/components/schemas/ChoiceQuestion",
+                "text": "#/components/schemas/TextQuestion"
+              }
+            }
           }
         },
         "type": "object",
@@ -14735,7 +14780,8 @@
           "id",
           "title",
           "content",
-          "created_at"
+          "created_at",
+          "question"
         ],
         "title": "OpenQuestion"
       },
@@ -15350,30 +15396,23 @@
             "title": "Reply"
           },
           "question": {
-            "anyOf": [
+            "oneOf": [
               {
-                "oneOf": [
-                  {
-                    "$ref": "#/components/schemas/ChoiceQuestion"
-                  },
-                  {
-                    "$ref": "#/components/schemas/TextQuestion"
-                  }
-                ],
-                "discriminator": {
-                  "propertyName": "type",
-                  "mapping": {
-                    "multi_select": "#/components/schemas/ChoiceQuestion",
-                    "single_select": "#/components/schemas/ChoiceQuestion",
-                    "text": "#/components/schemas/TextQuestion"
-                  }
-                }
+                "$ref": "#/components/schemas/ChoiceQuestion"
               },
               {
-                "type": "null"
+                "$ref": "#/components/schemas/TextQuestion"
               }
             ],
-            "title": "Question"
+            "title": "Question",
+            "discriminator": {
+              "propertyName": "type",
+              "mapping": {
+                "multi_select": "#/components/schemas/ChoiceQuestion",
+                "single_select": "#/components/schemas/ChoiceQuestion",
+                "text": "#/components/schemas/TextQuestion"
+              }
+            }
           },
           "answer": {
             "anyOf": [
@@ -15404,7 +15443,8 @@
           "agent_label",
           "title",
           "content",
-          "created_at"
+          "created_at",
+          "question"
         ],
         "title": "QuestionItem"
       },
@@ -15440,6 +15480,48 @@
           "label"
         ],
         "title": "QuestionOption"
+      },
+      "QuestionResult": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Id"
+          },
+          "answer": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/QuestionAnswer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "reply": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reply"
+          },
+          "skip": {
+            "type": "boolean",
+            "title": "Skip",
+            "default": false
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id"
+        ],
+        "title": "QuestionResult"
       },
       "QuestionsFeed": {
         "properties": {
@@ -15627,48 +15709,6 @@
         ],
         "title": "ReplySuggestionResponse",
         "description": "Drafted replies, or the reason there are none.\n\n`suggestions` is nonempty exactly when `reason` is None. Every non-error outcome is a 200: a\nmissing suggestion is an ordinary result, never a failure of the request."
-      },
-      "ResolveQuestionIn": {
-        "properties": {
-          "action": {
-            "type": "string",
-            "enum": [
-              "answer",
-              "dismiss",
-              "read"
-            ],
-            "title": "Action"
-          },
-          "reply": {
-            "anyOf": [
-              {
-                "type": "string",
-                "maxLength": 1000000,
-                "minLength": 1
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Reply"
-          },
-          "answer": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/QuestionAnswer"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          }
-        },
-        "additionalProperties": false,
-        "type": "object",
-        "required": [
-          "action"
-        ],
-        "title": "ResolveQuestionIn"
       },
       "ResolvedConfigView": {
         "properties": {

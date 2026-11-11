@@ -24,6 +24,24 @@ def seed_agent(db_conn: psycopg.Connection, status: str = "idling") -> int:
     return new_id
 
 
+def answers_path(agent_id: int) -> str:
+    return f"/api/keyed/v1/agents/{agent_id}/questions/answers"
+
+
+def answer_body(question_id: int, reply: str) -> dict[str, object]:
+    return {
+        "expected_ids": [question_id],
+        "results": [{"id": question_id, "reply": reply}],
+    }
+
+
+def skip_body(question_id: int) -> dict[str, object]:
+    return {
+        "expected_ids": [question_id],
+        "results": [{"id": question_id, "skip": True}],
+    }
+
+
 def insert_question(
     db_conn: psycopg.Connection,
     agent_id: int,
@@ -203,8 +221,8 @@ def test_answer_marks_and_delivers_inbound(
     nid = insert_question(db_conn, a, "send the records-release email?")
     with gateway_test_client() as client:
         resp = client.post(
-            f"/api/keyed/v1/agents/{a}/questions/{nid}/resolve",
-            json={"action": "answer", "reply": "yes, send it"},
+            answers_path(a),
+            json=answer_body(nid, "yes, send it"),
             headers={"Idempotency-Key": str(uuid4()), "Idempotency-Scope": "principal-v1"},
         )
     assert resp.status_code == 201
@@ -246,8 +264,8 @@ def test_answer_without_reply_422(
     nid = insert_question(db_conn, a, "q?")
     with gateway_test_client() as client:
         resp = client.post(
-            f"/api/keyed/v1/agents/{a}/questions/{nid}/resolve",
-            json={"action": "answer"},
+            answers_path(a),
+            json={"expected_ids": [nid], "results": [{"id": nid}]},
             headers={"Idempotency-Key": str(uuid4()), "Idempotency-Scope": "principal-v1"},
         )
     assert resp.status_code == 422
@@ -269,8 +287,8 @@ def test_answer_empty_reply_422(
     nid = insert_question(db_conn, a, "q?")
     with gateway_test_client() as client:
         resp = client.post(
-            f"/api/keyed/v1/agents/{a}/questions/{nid}/resolve",
-            json={"action": "answer", "reply": "   "},
+            answers_path(a),
+            json=answer_body(nid, ""),
             headers={"Idempotency-Key": str(uuid4()), "Idempotency-Scope": "principal-v1"},
         )
     assert resp.status_code == 422
@@ -290,8 +308,8 @@ def test_dismiss_delivers_system_note(db_conn: psycopg.Connection) -> None:
     nid = insert_question(db_conn, a, "name the branch?")
     with gateway_test_client() as client:
         resp = client.post(
-            f"/api/keyed/v1/agents/{a}/questions/{nid}/resolve",
-            json={"action": "dismiss"},
+            answers_path(a),
+            json=skip_body(nid),
             headers={"Idempotency-Key": str(uuid4()), "Idempotency-Scope": "principal-v1"},
         )
     assert resp.status_code == 201
@@ -307,7 +325,7 @@ def test_dismiss_delivers_system_note(db_conn: psycopg.Connection) -> None:
     assert kind == "chat"
     assert source == "system:question-dismiss"
     assert "name the branch?" in inbound_text
-    assert "dismissed" in inbound_text.lower()
+    assert "Skipped by the user." in inbound_text
 
 
 def test_answer_publishes_question_resolved(
@@ -317,8 +335,8 @@ def test_answer_publishes_question_resolved(
     nid = insert_question(db_conn, a, "ship it?")
     with published_events(event_bus) as payloads, gateway_test_client() as client:
         resp = client.post(
-            f"/api/keyed/v1/agents/{a}/questions/{nid}/resolve",
-            json={"action": "answer", "reply": "yes"},
+            answers_path(a),
+            json=answer_body(nid, "yes"),
             headers={"Idempotency-Key": str(uuid4()), "Idempotency-Scope": "principal-v1"},
         )
     assert resp.status_code == 201

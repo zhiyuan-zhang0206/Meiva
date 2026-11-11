@@ -1,7 +1,7 @@
 exports = ["answers.py", "asks.py", "feed.py", "resolve.py", "router.py"]
 
 [uses]
-"resolve.py" = ["answers.py"]
+"resolve.py" = ["answers.py", "feed.py"]
 "router.py" = ["resolve.py"]
 
 [purity]

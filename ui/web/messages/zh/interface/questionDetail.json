@@ -1,21 +1,17 @@
 {
-  "dismiss": "忽略",
-  "sendAnswer": "发送回复",
-  "replyTo": "回复通知：{title}",
   "failed": "{verb} 失败：{msg}",
-  "alreadyAnswered": "此通知已回复。",
-  "send": "发送",
-  "alreadyDismissed": "此通知已被忽略。",
-  "answerPlaceholder": "你的回复…（回车发送）",
   "singleSelect": "请选择一项",
   "multiSelect": "请选择一项或多项",
   "openQuestion": "你的回答",
   "openPlaceholder": "写下你的回答…（回车发送）",
-  "closeQuestion": "关闭此问题，不作回答",
-  "submitAnswer": "提交回答",
-  "noLongerAvailable": "此问题已无法回答，请刷新查看最新状态。",
   "comment": "补充说明（可选）",
   "pendingQuestions": "{count} 个待回答问题",
   "questionsUnavailable": "无法加载待回答问题。",
-  "suggestionKeys": "按 Tab 或右箭头采纳建议。"
+  "suggestionKeys": "按 Tab 或右箭头采纳建议。",
+  "skip": "跳过",
+  "undoSkip": "撤销跳过",
+  "skipped": "已跳过",
+  "submitAnswers": "提交回答",
+  "questionsChanged": "问题已变化，请检查后重新提交。",
+  "answerAllHint": "回答或跳过每个问题后才能提交。"
 }

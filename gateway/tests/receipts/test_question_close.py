@@ -12,11 +12,11 @@ pytestmark = pytest.mark.usefixtures("gateway_data_plane")
 def ask(client: TestClient, aid: int, key: str, title: str) -> int:
     created = client.post(
         f"/api/agents/{aid}/asks",
-        json={"title": title, "question": {"type": "text"}},
+        json={"questions": [{"title": title, "question": {"type": "text"}}]},
         headers=headers(key),
     )
     assert created.status_code == 201, created.text
-    return int(created.json()["id"])
+    return int(created.json()["ids"][0])
 
 
 def pushes(conn: psycopg.Connection, aid: int) -> list[tuple[str, str]]:
@@ -56,8 +56,8 @@ def test_closing_an_open_question_withdraws_it_and_its_push(db_conn: psycopg.Con
     ).fetchone() == ("withdrawn", None, None)
     assert pushes(db_conn, aid) == [
         ("alert", "First?"),
-        ("alert", "Second?"),
-        ("retract", "First?"),
+        ("replace", "2 questions awaiting an answer"),
+        ("replace", "Second?"),
     ]
     assert db_conn.execute(
         "SELECT count(*) FROM inbound_messages WHERE agent_id=%s", (aid,)
@@ -70,19 +70,18 @@ def test_closing_refuses_a_missing_foreign_or_already_resolved_question(
     aid = sdk_agent(db_conn)
     other = seed_agent(db_conn)
     with gateway_test_client() as client:
-        mine = ask(client, aid, "mine", "Mine?")
         answered = ask(client, aid, "answered", "Answered?")
         dismissed = ask(client, aid, "dismissed", "Dismissed?")
-        for qid, body in (
-            (answered, {"action": "answer", "reply": "yes"}),
-            (dismissed, {"action": "dismiss"}),
-        ):
-            resolved = client.post(
-                f"/api/keyed/v1/agents/{aid}/questions/{qid}/resolve",
-                json=body,
-                headers=headers(f"r{qid}"),
-            )
-            assert resolved.status_code == 201, resolved.text
+        resolved = client.post(
+            f"/api/keyed/v1/agents/{aid}/questions/answers",
+            json={
+                "expected_ids": [answered, dismissed],
+                "results": [{"id": answered, "reply": "yes"}, {"id": dismissed, "skip": True}],
+            },
+            headers=headers("resolve"),
+        )
+        assert resolved.status_code == 201, resolved.text
+        mine = ask(client, aid, "mine", "Mine?")
 
         def close(agent: int, qid: int, key: str) -> int:
             return client.post(
@@ -98,4 +97,4 @@ def test_closing_refuses_a_missing_foreign_or_already_resolved_question(
         ]
     assert db_conn.execute(
         "SELECT id, resolution FROM agent_questions WHERE agent_id=%s ORDER BY id", (aid,)
-    ).fetchall() == [(mine, None), (answered, "answered"), (dismissed, "dismissed")]
+    ).fetchall() == [(answered, "answered"), (dismissed, "dismissed"), (mine, None)]

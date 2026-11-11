@@ -53,29 +53,35 @@ it("opens expanded by default above the composer and retains independent drafts 
   expect(screen.getAllByRole("textbox")).toHaveLength(2);
 });
 
-it("resolves only the selected question and drops it from the shared pending queue", async () => {
-  transport.resolveQuestion.mockResolvedValue({ status: "ok" });
+it("settles every open question in one submission and drops them all from the shared queue", async () => {
+  transport.answerQuestions.mockResolvedValue({ kind: "settled" });
   const { queryClient } = renderQuestions(<PendingQuestions questions={questions} failed={false} />);
   queryClient.setQueryData(QUESTIONS_QUERY_KEY, { awaiting: questions });
-  const first = within(screen.getByRole("article", { name: "Question 1" }));
-  fireEvent.change(first.getByRole("textbox"), { target: { value: "First answer" } });
-  fireEvent.click(first.getByRole("button", { name: "Submit answer" }));
-  await waitFor(() => expect(transport.resolveQuestion).toHaveBeenCalledWith(7, 1, { action: "answer", answer: { text: "First answer" } }, expect.any(String)));
-  await waitFor(() => expect(queryClient.getQueryData<{ awaiting: QuestionItem[] }>(QUESTIONS_QUERY_KEY)?.awaiting.map((q) => q.id)).toEqual([2]));
-  expect(within(screen.getByRole("article", { name: "Question 2" })).getByRole("textbox").hasAttribute("disabled")).toBe(false);
+  const submit = screen.getByRole<HTMLButtonElement>("button", { name: "Submit answers" });
+  expect(submit.disabled).toBe(true);
+  fireEvent.change(within(screen.getByRole("article", { name: "Question 1" })).getByRole("textbox"), { target: { value: "First answer" } });
+  expect(submit.disabled).toBe(true);
+  fireEvent.click(within(screen.getByRole("article", { name: "Question 2" })).getByRole("button", { name: "Skip" }));
+  expect(submit.disabled).toBe(false);
+  fireEvent.click(submit);
+  await waitFor(() => expect(transport.answerQuestions).toHaveBeenCalledWith(7, {
+    expected_ids: [1, 2],
+    results: [{ id: 1, answer: { text: "First answer" }, skip: false }, { id: 2, skip: true }],
+  }, expect.any(String)));
+  await waitFor(() => expect(queryClient.getQueryData<{ awaiting: QuestionItem[] }>(QUESTIONS_QUERY_KEY)?.awaiting).toEqual([]));
 });
 
-it("retains drafts on a failed answer and permits retry", async () => {
-  transport.resolveQuestion.mockRejectedValueOnce(new Error("offline")).mockResolvedValue({ status: "ok" });
+it("retains drafts on a failed submission and retries it under the same operation key", async () => {
+  transport.answerQuestions.mockRejectedValueOnce(new Error("offline")).mockResolvedValue({ kind: "settled" });
   renderQuestions(<PendingQuestions questions={[questions[0]]} failed={false} />);
   const input = screen.getByRole<HTMLTextAreaElement>("textbox");
   fireEvent.change(input, { target: { value: "Keep this" } });
-  fireEvent.click(screen.getByRole("button", { name: "Submit answer" }));
+  fireEvent.click(screen.getByRole("button", { name: "Submit answers" }));
   expect(await screen.findByRole("alert")).toBeTruthy();
   expect(input.value).toBe("Keep this");
-  fireEvent.click(screen.getByRole("button", { name: "Submit answer" }));
-  await waitFor(() => expect(transport.resolveQuestion).toHaveBeenCalledTimes(2));
-  expect(transport.resolveQuestion.mock.calls[1][3]).toBe(transport.resolveQuestion.mock.calls[0][3]);
+  fireEvent.click(screen.getByRole("button", { name: "Submit answers" }));
+  await waitFor(() => expect(transport.answerQuestions).toHaveBeenCalledTimes(2));
+  expect(transport.answerQuestions.mock.calls[1][2]).toBe(transport.answerQuestions.mock.calls[0][2]);
 });
 
 it("shows a failed queue without losing its stale questions, and renders nothing for a known empty queue", () => {

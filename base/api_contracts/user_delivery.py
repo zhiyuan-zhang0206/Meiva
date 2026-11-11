@@ -3,8 +3,6 @@ from enum import StrEnum
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from base.api_contracts.question import NonBlank, QuestionSpec
-
 
 class UserDeliveryMode(StrEnum):
     NAIVE = "naive"
@@ -62,10 +60,3 @@ class SeenResult(BaseModel):
     model_config = ConfigDict(extra="forbid")
     seen_id: int
     advanced: bool
-
-
-class AskMessage(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    title: NonBlank = Field(max_length=1000)
-    content: str | None = Field(default=None, max_length=100_000)
-    question: QuestionSpec

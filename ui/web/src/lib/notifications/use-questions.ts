@@ -8,11 +8,11 @@ import { useApi } from "../transport/transport-context";
 import type { QuestionItem } from "../contracts/types";
 
 // meiva:note
-// The unresolved-questions query (GET /api/questions).
+// The unresolved-questions queries (GET /api/questions/open?agent_id=<id>), one per agent.
 export const QUESTIONS_QUERY_KEY = ["questions"] as const;
 
 // meiva:note
-// Wire shape of GET /api/questions as cached under QUESTIONS_QUERY_KEY.
+// Cached shape of one agent's open questions under [...QUESTIONS_QUERY_KEY, agentId].
 export interface QuestionsFeedWire {
   awaiting: QuestionItem[];
 }
@@ -62,14 +62,15 @@ function withoutDroppedRows(wire: QuestionsFeedWire): QuestionsFeedWire {
   return { ...wire, awaiting: wire.awaiting.filter((n) => !timers.has(n.id)) };
 }
 
-export function useQuestions(): QuestionsFeed {
+// meiva:note
+// One agent's open questions, whole. The key sits under QUESTIONS_QUERY_KEY, so the question events
+// that invalidate the prefix refetch it and the optimistic helpers below reach it.
+export function useQuestions(agentId: number | null): QuestionsFeed {
   const api = useApi();
   const feedQuery = useQuery({
-    queryKey: QUESTIONS_QUERY_KEY,
-    // meiva:note
-    // The page size comes from the server default
-    // (display.questions_open_default_limit, task #3696); the client pins no window.
-    queryFn: async () => withoutDroppedRows(await api.getQuestions()),
+    queryKey: [...QUESTIONS_QUERY_KEY, agentId],
+    enabled: agentId !== null,
+    queryFn: async () => withoutDroppedRows(await api.getAgentQuestions(agentId ?? 0)),
   });
 
   return {
@@ -114,10 +115,21 @@ export function dropOpenQuestions(queryClient: QueryClient, questionIds: number[
   // (use-user-settings.ts).
   void queryClient.cancelQueries({ queryKey: QUESTIONS_QUERY_KEY });
   const gone = new Set(questionIds);
-  queryClient.setQueryData<QuestionsFeedWire>(QUESTIONS_QUERY_KEY, (old) => {
+  queryClient.setQueriesData<QuestionsFeedWire>({ queryKey: QUESTIONS_QUERY_KEY }, (old) => {
     if (!old) return old;
     return { ...old, awaiting: old.awaiting.filter((n) => !gone.has(n.id)) };
   });
+}
+
+// meiva:note
+// Take the server's latest open set of one agent after a submission found the set changed:
+// replaces that agent's cached set and lets the next refetch reconcile it.
+export function replaceAgentQuestions(queryClient: QueryClient, agentId: number, open: QuestionItem[]): void {
+  queryClient.setQueryData<QuestionsFeedWire>([...QUESTIONS_QUERY_KEY, agentId], (old) => {
+    if (!old) return old;
+    return { ...old, awaiting: open };
+  });
+  void queryClient.invalidateQueries({ queryKey: QUESTIONS_QUERY_KEY });
 }
 
 export function dropTombstonesResetForTest(): void {

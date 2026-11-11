@@ -24,7 +24,6 @@ from base.agents.messages.kwargs import NoteTag
 from base.agents.observation.snapshot import AgentSnapshot
 from base.api_contracts.agent_contract import AgentStatus
 from base.api_contracts.question import QuestionAnswer, QuestionSpec
-from ops.rpc_schemas.content import UserContent
 
 
 class AgentRow(AgentSnapshot):
@@ -110,21 +109,6 @@ class SystemNoteIn(BaseModel):
         return self
 
 
-class ResolveQuestionIn(BaseModel):
-    # meiva:link gateway/agents/docs/operation-receipts.md
-
-    model_config = ConfigDict(extra="forbid")
-    action: Literal["answer", "dismiss", "read"]
-    reply: UserContent | None = None
-    answer: QuestionAnswer | None = None
-
-    @model_validator(mode="after")
-    def validate_answer_intent(self) -> "ResolveQuestionIn":
-        if self.answer is not None and (self.action != "answer" or self.reply is not None):
-            raise ValueError("structured answer requires action=answer and cannot accompany reply")
-        return self
-
-
 class QuestionItem(BaseModel):
     # meiva:link meiva_builtins/plugins/meiva_fleet/docs/ask.md
 
@@ -137,7 +121,7 @@ class QuestionItem(BaseModel):
     resolved_at: datetime | None = None
     resolution: str | None = None
     reply: str | None = None
-    question: QuestionSpec | None = None
+    question: QuestionSpec
     answer: QuestionAnswer | None = None
     # meiva:note
     # The credential fact the server verified for the request that wrote this row:

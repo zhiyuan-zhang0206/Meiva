@@ -9,7 +9,7 @@ from base.agents.to_user.delivery.store import advance_seen, publish
 from base.api_contracts.user_delivery import PublishMessage, UserDeliveryMode
 from base.db import create_agent
 from base.events.notifications.catalog import UNREAD_CATEGORY
-from base.events.notifications.publish import stage_question_asked, stage_question_resolved
+from base.events.notifications.publish import open_question_count, stage_open_questions
 from base.events.notifications.store import SETTINGS_KEY
 
 NOW = datetime(2026, 11, 11, 4, 0, tzinfo=UTC)
@@ -131,16 +131,34 @@ def test_a_switched_off_category_stages_no_alert_or_replace_but_still_retracts(
     assert first < newest
 
 
-def test_a_question_is_one_push_of_its_own_and_is_retracted_when_resolved(
+def test_an_agents_questions_are_one_push_that_updates_silently_and_retracts_when_none_remain(
     db_conn: psycopg.Connection,
 ) -> None:
     agent_id = _agent(db_conn)
-    stage_question_asked(db_conn, agent_id=agent_id, question_id=31, title="Deploy now?")
-    stage_question_asked(db_conn, agent_id=agent_id, question_id=32, title="Which region?")
-    stage_question_resolved(db_conn, agent_id=agent_id, question_id=31, title="Deploy now?")
+    before = open_question_count(db_conn, agent_id)
+    _ask(db_conn, agent_id, "Deploy now?")
+    stage_open_questions(db_conn, agent_id, open_before=before)
+    before = open_question_count(db_conn, agent_id)
+    _ask(db_conn, agent_id, "Which region?")
+    _ask(db_conn, agent_id, "Which tier?")
+    stage_open_questions(db_conn, agent_id, open_before=before)
+    before = open_question_count(db_conn, agent_id)
+    db_conn.execute(
+        "UPDATE agent_questions SET resolved_at=now(), resolution='dismissed' WHERE agent_id=%s",
+        (agent_id,),
+    )
+    stage_open_questions(db_conn, agent_id, open_before=before)
+    stage_open_questions(db_conn, agent_id, open_before=0)
 
     assert _pushes(db_conn, agent_id) == [
-        ("alert", "question:31", "Deploy now?", "Builder"),
-        ("alert", "question:32", "Which region?", "Builder"),
-        ("retract", "question:31", "Deploy now?", "Builder"),
+        ("alert", f"question:agent:{agent_id}", "Deploy now?", "Builder"),
+        ("replace", f"question:agent:{agent_id}", "3 questions awaiting an answer", "Builder"),
+        ("retract", f"question:agent:{agent_id}", "Questions answered", "Builder"),
     ]
+
+
+def _ask(conn: psycopg.Connection, agent_id: int, title: str) -> None:
+    conn.execute(
+        "INSERT INTO agent_questions (agent_id, title, question) VALUES (%s, %s, %s)",
+        (agent_id, title, Jsonb({"type": "text"})),
+    )

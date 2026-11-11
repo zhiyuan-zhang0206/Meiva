@@ -7,7 +7,7 @@ the delivery log are server-side). See
 [the notification spine](../../../base/events/notifications/README.md).
 
 Each event carries an `action` (`alert`, `replace`, `retract`) and a stable `tag`
-(`unread:<agent id>`, `question:<question id>`). The bridge keeps one notification per tag.
+(`unread:<agent id>`, `question:agent:<agent id>`). The bridge keeps one notification per tag.
 
 ## What the bridge decides
 
@@ -112,8 +112,8 @@ dismissed-stays-dismissed). The real notification surfaces can only be confirmed
 1. Android: with agent A not open, have it deliver output: one sounding notification titled with
    A's name. Have it deliver again: the same notification updates with no sound. Open A: the
    notification disappears. Have A deliver once more: it sounds again.
-2. Ask a question from an agent: its own sounding notification. Answer or close it in the console:
-   that notification disappears. Two questions are two notifications.
+2. Ask questions from an agent: one sounding notification for the agent (a second ask only updates
+   it). Answer or skip all of them in the console: that notification disappears.
 3. With A open in the focused window, have it deliver output: nothing is shown. Switch the app to
    the background or open another agent and deliver again: it alerts.
 4. Background the app, produce several deliveries and a question, reopen it: one notification per

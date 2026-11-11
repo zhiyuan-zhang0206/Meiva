@@ -7,7 +7,12 @@ from fastapi.testclient import TestClient
 
 from base.events.live.bus import EventBus
 from gateway.tests.auth.gateway_config import GatewayTestClient, gateway_test_client
-from gateway.tests.events.test_questions_endpoint import insert_question, seed_agent
+from gateway.tests.events.test_questions_endpoint import (
+    answer_body,
+    answers_path,
+    insert_question,
+    seed_agent,
+)
 from gateway.tests.support.live_events.faults import unpublishable_bus
 from gateway.tests.support.openapi_document.document import openapi_document
 
@@ -27,8 +32,8 @@ def client() -> Iterator[GatewayTestClient]:
         yield value
 
 
-def _path(agent: int, question: int) -> str:
-    return f"/api/keyed/v1/agents/{agent}/questions/{question}/resolve"
+def _path(agent: int) -> str:
+    return answers_path(agent)
 
 
 @pytest.mark.parametrize(
@@ -47,9 +52,7 @@ def test_required_identity_rejects_before_effects(
 ) -> None:
     agent = seed_agent(db_conn)
     question = insert_question(db_conn, agent, "Question")
-    result = client.post(
-        _path(agent, question), json={"action": "answer", "reply": "yes"}, headers=headers
-    )
+    result = client.post(_path(agent), json=answer_body(question, "yes"), headers=headers)
     assert result.status_code == 422
     assert db_conn.execute(
         "SELECT resolved_at FROM agent_questions WHERE id=%s", (question,)
@@ -63,22 +66,17 @@ def test_concurrent_answer_reply_replays_one_inbound(
 ) -> None:
     agent = seed_agent(db_conn)
     question = insert_question(db_conn, agent, "Question")
-    path = _path(agent, question)
+    path = _path(agent)
     with ThreadPoolExecutor(max_workers=4) as pool:
         futures = [
-            pool.submit(
-                client.post, path, json={"action": "answer", "reply": "yes"}, headers=HEADERS
-            )
+            pool.submit(client.post, path, json=answer_body(question, "yes"), headers=HEADERS)
             for _ in range(4)
         ]
         results = [future.result(timeout=10) for future in futures]
     assert all(result.status_code == 201 for result in results), [r.text for r in results]
     assert len({r.json()["inbound_id"] for r in results}) == 1
     assert (
-        client.post(
-            path, json={"action": "answer", "reply": "changed"}, headers=HEADERS
-        ).status_code
-        == 409
+        client.post(path, json=answer_body(question, "changed"), headers=HEADERS).status_code == 409
     )
     assert db_conn.execute(
         "SELECT count(*) FROM inbound_messages WHERE agent_id=%s", (agent,)
@@ -90,8 +88,8 @@ def test_lost_tail_replays_after_question_deletion_without_touching_later_row(
 ) -> None:
     agent = seed_agent(db_conn)
     question = insert_question(db_conn, agent, "A")
-    path = _path(agent, question)
-    body = {"action": "answer", "reply": "yes"}
+    path = _path(agent)
+    body = answer_body(question, "yes")
 
     client.app.state.bus = unpublishable_bus()
     assert client.post(path, json=body, headers=HEADERS).status_code == 500
@@ -119,8 +117,8 @@ def test_consumed_original_reply_does_not_resurrect(
 ) -> None:
     agent = seed_agent(db_conn)
     question = insert_question(db_conn, agent, "A")
-    path = _path(agent, question)
-    body = {"action": "answer", "reply": "yes"}
+    path = _path(agent)
+    body = answer_body(question, "yes")
     first = client.post(path, json=body, headers=HEADERS)
     assert first.status_code == 201
     inbound_id = first.json()["inbound_id"]
@@ -148,8 +146,8 @@ def test_authentication_is_rechecked_on_replay(
 ) -> None:
     agent = seed_agent(db_conn)
     question = insert_question(db_conn, agent, "Question")
-    path = _path(agent, question)
-    body = {"action": "answer", "reply": "yes"}
+    path = _path(agent)
+    body = answer_body(question, "yes")
     first = client.post(path, json=body, headers=HEADERS)
     assert first.status_code == 201
     assert (
@@ -161,11 +159,7 @@ def test_authentication_is_rechecked_on_replay(
 
 
 def test_openapi_requires_both_identity_headers() -> None:
-    route = (
-        openapi_document()
-        .paths["/api/keyed/v1/agents/{agent_id}/questions/{question_id}/resolve"]
-        .post
-    )
+    route = openapi_document().paths["/api/keyed/v1/agents/{agent_id}/questions/answers"].post
     assert route is not None
     headers = {
         param.name: param.required for param in route.parameters if param.location == "header"

@@ -34,7 +34,7 @@ import type {
 import { projectAgentStatus } from "../../contracts/types";
 import { agentShellPath, commandsPath, inspectStatisticsPath, listAgentsPath, tasksPath } from "./routes/agent-routes";
 import { createControlApi } from "./api-control";
-import { questionsPath } from "./routes/control-routes";
+import { agentQuestionsPath } from "./routes/control-routes";
 import type { Http } from "./http";
 import { sendMessageWithReconciliation } from "./message-delivery";
 import { INSPECT_REQUEST_TIMEOUT_MS } from "./plans";
@@ -197,8 +197,13 @@ export function createApi(http: Http) {
       return sendMessageWithReconciliation(http, agentId, content, clientMessageId);
     },
 
-    getQuestions: (): Promise<QuestionsFeed> => {
-      return f(questionsPath()).then(ok<QuestionsFeed>);
+    // meiva:note
+    // One agent's whole open set, in question id order: the answer form needs exactly that set, so it
+    // is not read from the fleet-wide feed, which the server cuts at a display limit.
+    getAgentQuestions: (agentId: number): Promise<QuestionsFeed> => {
+      return f(agentQuestionsPath(agentId))
+        .then(ok<QuestionsFeed["awaiting"]>)
+        .then((awaiting) => ({ awaiting }));
     },
 
     getAgentRoster: (signal?: AbortSignal): Promise<AgentRoster> =>

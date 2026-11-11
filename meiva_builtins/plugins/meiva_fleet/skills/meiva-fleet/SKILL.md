@@ -193,10 +193,10 @@ A worker publishes a result by **writing a file and sending the path** to whoeve
 
 ### Asking one numbered question
 
-For discrete decisions, supply `question={"type": "single_select",
-"options": [{"id": "stable-id", "label": "Choice", "description": "Optional detail"}]}` to `meiva.ui.ask(...)`.
-Use `type="multi_select"` for multiple selections. For an open question use `question={"type": "text"}`. Put the question in `title`
-and context in `content`. Each Ask is one question; multiple questions may remain open. Options keep their declared 1-based numbers. Text questions have one answer field; choices keep an optional Note. `note_suggestion` offers candidate text for that field until the user explicitly applies it.
+For discrete decisions, pass `meiva.ui.ask([{"title": "...", "type": "single_select",
+"options": [{"id": "stable-id", "label": "Choice", "description": "Optional detail"}]}])`.
+Use `"type": "multi_select"` for multiple selections; an open question is `"type": "text"` (the default). Put the question in `title`
+and context in `content`. One call may carry several questions and returns one id each; the user answers all open questions in one reply. Options keep their declared 1-based numbers. Text questions have one answer field; choices keep an optional Note. `note_suggestion` offers candidate text for that field until the user explicitly applies it.
 Question/context changes require a replacement question. Interpret both explicit
 selections and the user's comment, preserving references such as "option 2";
 mentions inside text are not selections. A dismissal is not approval.

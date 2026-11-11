@@ -453,10 +453,7 @@ async def notify_desktop_permissions_at_startup(home: Path, *, ask: AskUser) -> 
     notice = permission_notice([(status.headline, status.diagnostic) for _, _, status in claimed])
 
     try:
-        ask(
-            title=notice.title,
-            content=notice.content,
-        )
+        ask([{"title": notice.title, "content": notice.content}])
     except Exception:
         logger.opt(exception=True).warning(
             "Failed to post desktop permissions notification",

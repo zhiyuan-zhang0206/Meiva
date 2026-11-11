@@ -1,21 +1,17 @@
 {
-  "dismiss": "Dismiss",
-  "sendAnswer": "Send answer",
-  "replyTo": "Reply to question: {title}",
   "failed": "{verb} failed: {msg}",
-  "alreadyAnswered": "This question was already answered.",
-  "send": "Send",
-  "alreadyDismissed": "This question was already dismissed.",
-  "answerPlaceholder": "Your answer… (Enter to send)",
   "singleSelect": "Choose one",
   "multiSelect": "Choose one or more",
   "openQuestion": "Your answer",
   "openPlaceholder": "Write your answer… (Enter to send)",
-  "closeQuestion": "Close without answering",
-  "submitAnswer": "Submit answer",
-  "noLongerAvailable": "This question is no longer available. Refresh to see its current status.",
   "comment": "Note (optional)",
   "pendingQuestions": "{count, plural, one {# question waiting} other {# questions waiting}}",
   "questionsUnavailable": "Could not load pending questions.",
-  "suggestionKeys": "Press Tab or Right Arrow to apply the suggestion."
+  "suggestionKeys": "Press Tab or Right Arrow to apply the suggestion.",
+  "skip": "Skip",
+  "undoSkip": "Undo skip",
+  "skipped": "Skipped",
+  "submitAnswers": "Submit answers",
+  "questionsChanged": "The questions changed. Review them and submit again.",
+  "answerAllHint": "Answer or skip every question to submit."
 }

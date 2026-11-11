@@ -53,7 +53,7 @@ live cards and their minimal ancestor closure in one database snapshot;
 unrelated terminated rows receive no per-agent enrichment. Cards carry
 attention counts/priority and an open impersonation session number plus that
 lease's phase (`open_impersonation_status`: `requested` / `accepted` /
-`active`, or null), never notice bodies — only `active` means the agent is
+`active`, or null), never question bodies — only `active` means the agent is
 actually taken over, which the console projects to a distinct `impersonated`
 status. Selected or bookmarked agents
 use the independent ID detail endpoint. SDK, CLI and MCP consume the same

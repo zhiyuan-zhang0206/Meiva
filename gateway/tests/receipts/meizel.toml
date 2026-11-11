@@ -1,4 +1,3 @@
 [uses]
-"test_question_legacy_receipts.py" = ["test_guarded_question_resolution.py", "test_questions.py"]
 "test_questions.py" = ["test_guarded_question_resolution.py"]
 "test_question_close.py" = ["test_user_delivery.py"]

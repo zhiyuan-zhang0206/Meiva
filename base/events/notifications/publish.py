@@ -20,8 +20,8 @@ from base.events.notifications.store import (
 from base.events.notifications.triggers import (
     NotificationAction,
     PushPlan,
-    plan_question_asked,
-    plan_question_resolved,
+    plan_questions_cleared,
+    plan_questions_open,
     plan_unread_delivery,
     plan_unread_seen,
 )
@@ -107,28 +107,49 @@ def stage_unread_seen(
         stage_in_transaction(conn, plan, agent_id=agent_id)
 
 
-def stage_question_asked(
-    conn: psycopg.Connection, *, agent_id: int, question_id: int, title: str
-) -> None:
-    stage_in_transaction(
-        conn,
-        plan_question_asked(
-            question_id=question_id, title=title, agent_label=agent_label(conn, agent_id)
-        ),
-        agent_id=agent_id,
-    )
+def open_question_count(conn: psycopg.Connection, agent_id: int) -> int:
+    row = conn.execute(
+        "SELECT count(*) FROM agent_questions WHERE agent_id=%s AND resolved_at IS NULL",
+        (agent_id,),
+    ).fetchone()
+    if row is None or not isinstance(row[0], int):
+        raise TypeError("open question count must be an integer")
+    return row[0]
 
 
-def stage_question_resolved(
-    conn: psycopg.Connection, *, agent_id: int, question_id: int, title: str
-) -> None:
-    stage_in_transaction(
-        conn,
-        plan_question_resolved(
-            question_id=question_id, title=title, agent_label=agent_label(conn, agent_id)
-        ),
-        agent_id=agent_id,
-    )
+# meiva:note
+# Stage the one per-agent question push after the transaction's writes: read the agent's open set
+# now and compare it with `open_before` (read before the writes). Nothing is staged when the count
+# did not change; the first open question alerts, a changed count while one is showing replaces it
+# silently, and an emptied set retracts it.
+def stage_open_questions(conn: psycopg.Connection, agent_id: int, *, open_before: int) -> None:
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT count(*), (array_agg(title ORDER BY id))[1] FROM agent_questions "
+            "WHERE agent_id=%s AND resolved_at IS NULL",
+            (agent_id,),
+        )
+        row = cur.fetchone()
+    if row is None or not isinstance(row[0], int):
+        raise TypeError("open question summary must carry a count")
+    open_after = row[0]
+    first_title = row[1] if isinstance(row[1], str) else None
+    if open_after == open_before:
+        return
+    label = agent_label(conn, agent_id)
+    if open_after == 0:
+        plan = plan_questions_cleared(agent_id=agent_id, agent_label=label)
+    else:
+        if not isinstance(first_title, str):
+            raise TypeError("an open question must have a title")
+        plan = plan_questions_open(
+            agent_id=agent_id,
+            agent_label=label,
+            open_count=open_after,
+            first_title=first_title,
+            had_open=open_before > 0,
+        )
+    stage_in_transaction(conn, plan, agent_id=agent_id)
 
 
 class SyncPublisher(Protocol):

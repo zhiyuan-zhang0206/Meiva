@@ -450,9 +450,8 @@ function HomeContent({
   const composerMode: "disabled" | "idle" | "busy" =
     activeId == null ? "disabled" : agentBusy ? "busy" : "idle";
   const publications = useUserMessages(activeId);
-  const questions = useQuestions();
-  const pendingQuestions = useMemo(() => questions.awaiting.filter((item) => item.agent_id === activeId)
-    .sort((a, b) => a.created_at.localeCompare(b.created_at)), [questions.awaiting, activeId]);
+  const questions = useQuestions(activeId);
+  const pendingQuestions = questions.awaiting;
   const displayedItems = useMemo(() => withUserMessages(items, publications.data?.items ?? []), [items, publications.data]);
   const loadOlderForReveal = useCallback(() => loadOlder("background"), [loadOlder]);
   const reveal = useSeenPosition({

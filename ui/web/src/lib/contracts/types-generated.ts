@@ -1007,7 +1007,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/keyed/v1/agents/{agent_id}/questions/{question_id}/resolve": {
+    "/api/keyed/v1/agents/{agent_id}/questions/answers": {
         parameters: {
             query?: never;
             header?: never;
@@ -1016,7 +1016,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        post: operations["resolve_observed_api_keyed_v1_agents__agent_id__questions__question_id__resolve_post"];
+        post: operations["answer_questions_api_keyed_v1_agents__agent_id__questions_answers_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2541,10 +2541,20 @@ export interface components {
             alerts: components["schemas"]["AlertRow"][];
             meta: components["schemas"]["AlertsListMeta"];
         };
-        AskMessage: {
+        AnswerQuestions: {
+            expected_ids: number[];
+            results: components["schemas"]["QuestionResult"][];
+        };
+        AskBatch: {
+            questions: components["schemas"]["AskQuestion"][];
+        };
+        AskQuestion: {
             title: string;
             content?: string | null;
             question: components["schemas"]["ChoiceQuestion"] | components["schemas"]["TextQuestion"];
+        };
+        AskResult: {
+            ids: number[];
         };
         AssignmentAgentIn: {
             label?: string | null;
@@ -3292,7 +3302,7 @@ export interface components {
             title: string;
             content: string | null;
             created_at: string;
-            question?: (components["schemas"]["ChoiceQuestion"] | components["schemas"]["TextQuestion"]) | null;
+            question: components["schemas"]["ChoiceQuestion"] | components["schemas"]["TextQuestion"];
         };
         OpenTaskRow: {
             id: number;
@@ -3389,7 +3399,7 @@ export interface components {
             resolved_at?: string | null;
             resolution?: string | null;
             reply?: string | null;
-            question?: (components["schemas"]["ChoiceQuestion"] | components["schemas"]["TextQuestion"]) | null;
+            question: components["schemas"]["ChoiceQuestion"] | components["schemas"]["TextQuestion"];
             answer?: components["schemas"]["QuestionAnswer"] | null;
             source_verified_by?: string | null;
         };
@@ -3397,6 +3407,12 @@ export interface components {
             id: string;
             label: string;
             description?: string | null;
+        };
+        QuestionResult: {
+            id: number;
+            answer?: components["schemas"]["QuestionAnswer"] | null;
+            reply?: string | null;
+            skip: boolean;
         };
         QuestionsFeed: {
             awaiting: components["schemas"]["QuestionItem"][];
@@ -3427,11 +3443,6 @@ export interface components {
             offer_id?: number | null;
             suggestions: string[];
             reason?: ("disabled" | "agent_not_idle" | "no_agent_text" | "not_useful" | "gate_failed" | "generation_failed" | "invalid_generation" | "client_disconnected") | null;
-        };
-        ResolveQuestionIn: {
-            action: "answer" | "dismiss" | "read";
-            reply?: string | null;
-            answer?: components["schemas"]["QuestionAnswer"] | null;
         };
         ResolvedConfigView: {
             model: string;
@@ -5798,7 +5809,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["AskMessage"];
+                "application/json": components["schemas"]["AskBatch"];
             };
         };
         responses: {
@@ -5807,9 +5818,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: number;
-                    };
+                    "application/json": components["schemas"]["AskResult"];
                 };
             };
             422: {
@@ -6107,7 +6116,7 @@ export interface operations {
             };
         };
     };
-    resolve_observed_api_keyed_v1_agents__agent_id__questions__question_id__resolve_post: {
+    answer_questions_api_keyed_v1_agents__agent_id__questions_answers_post: {
         parameters: {
             query?: never;
             header: {
@@ -6116,13 +6125,12 @@ export interface operations {
             };
             path: {
                 agent_id: number;
-                question_id: number;
             };
             cookie?: never;
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["ResolveQuestionIn"];
+                "application/json": components["schemas"]["AnswerQuestions"];
             };
         };
         responses: {
@@ -6133,6 +6141,12 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["AgentMessageEnqueued"];
                 };
+            };
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             422: {
                 headers: {

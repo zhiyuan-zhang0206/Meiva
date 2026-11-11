@@ -17,7 +17,7 @@ _TIMEOUT_S = 15.0
 
 
 # meiva:note
-# Auth headers plus the principal-v1 operation key of one resolve call.
+# Auth headers plus the principal-v1 operation key of one submission.
 def _keyed_headers(headers: dict[str, str], idempotency_key: str) -> dict[str, str]:
     return {**headers, **keyed_headers(idempotency_key)}
 
@@ -40,6 +40,10 @@ class _Question(BaseModel):
 
 
 _QUESTIONS = TypeAdapter(list[_Question])
+
+
+class _Conflict(BaseModel):
+    open: list[_Question]
 
 
 class _AgentStatus(BaseModel):
@@ -85,11 +89,12 @@ def _agent_status_map(access: GatewayAccess, agent_ids: set[int]) -> dict[int, s
     return statuses
 
 
-def _fetch_open_questions(access: GatewayAccess) -> list[_Question]:
+def _fetch_open_questions(access: GatewayAccess, *, agent_id: int | None = None) -> list[_Question]:
     resp = http_dial.get(
         f"{_api(access)}/questions/open",
         timeout=_TIMEOUT_S,
         headers=gateway_auth_headers(access),
+        params=None if agent_id is None else {"agent_id": agent_id},
     )
     resp.raise_for_status()
     return _QUESTIONS.validate_json(resp.content)
@@ -102,17 +107,17 @@ def _filter_questions(questions: list[_Question], *, agent_id: int | None) -> li
 
 
 # meiva:note
-# List what `clear` will resolve and ask for confirmation. An empty or closed stdin reads as
+# List what `skip` will skip and ask for confirmation. An empty or closed stdin reads as
 # no.
-def _confirm_clear(
+def _confirm_skip(
     questions: list[_Question], *, stale: bool, agent_id: int | None, stdin: TextIO
 ) -> bool:
     for i, n in enumerate(questions, start=1):
         _print_question(n, i, len(questions))
     target = "stale (terminated-agent) questions" if stale else f"agent #{agent_id}"
     print(
-        f"Clear {len(questions)} question(s): {target}? "
-        "(dismiss without answering; re-run with --force to skip this prompt)"
+        f"Skip {len(questions)} question(s): {target}? "
+        "(skipped without an answer; re-run with --force to skip this prompt)"
     )
     print("y/N: ", end="", flush=True)
     answer = stdin.readline().strip().lower()
@@ -146,50 +151,78 @@ def cmd_questions_list(
 
 
 # meiva:note
-# `meiva questions resolve <id> --agent <id> --action ...` — resolve one question.
-def cmd_questions_resolve(
+# The gateway settles all of an agent's open questions in one submission, so the CLI reads the
+# agent's open set, requires every one to be answered or skipped, and posts the submission it just
+# read. A changed set is the gateway's 409: nothing is settled and the latest ids are printed.
+def _submit(
     access: GatewayAccess,
-    *,
-    question_id: int,
     agent_id: int,
-    action: str,
-    reply: str | None,
+    results: list[dict[str, JsonValue]],
+    expected_ids: list[int],
     idempotency_key: str,
 ) -> int:
-    if action not in ("answer", "dismiss"):
-        print(f"invalid action {action!r} (answer|dismiss)")
-        return 2
-    if action == "answer" and not reply:
-        print("--reply TEXT is required for action=answer")
-        return 2
     resp = http_dial.post(
-        f"{_api(access)}/keyed/v1/agents/{agent_id}/questions/{question_id}/resolve",
+        f"{_api(access)}/keyed/v1/agents/{agent_id}/questions/answers",
         timeout=_TIMEOUT_S,
         headers=_keyed_headers(gateway_auth_headers(access), idempotency_key),
-        json={"action": action, "reply": reply},
+        json={"expected_ids": expected_ids, "results": results},
     )
+    if resp.status_code == 409:
+        latest = [item.id for item in _Conflict.model_validate_json(resp.content).open]
+        print(f"agent #{agent_id}: the open questions changed, nothing settled; open now: {latest}")
+        return 1
     resp.raise_for_status()
-    print(f"question #{question_id} resolved: {action}")
     return 0
 
 
-# meiva:link cli/docs/operator-surfaces/operator-surfaces.md
-def _resolve_all(access: GatewayAccess, questions: list[_Question], rng: random.Random) -> int:
-    cleared = 0
-    for n in questions:
-        r = http_dial.post(
-            f"{_api(access)}/keyed/v1/agents/{n.agent_id}/questions/{n.id}/resolve",
-            timeout=_TIMEOUT_S,
-            headers=_keyed_headers(gateway_auth_headers(access), new_uuid(rng).hex),
-            json={"action": "dismiss", "reply": None},
+# meiva:note
+# `meiva questions answer --agent N [--answer ID=TEXT]... [--skip ID]...` — settle every open
+# question of one agent. TEXT is a numbered reply (option numbers on the first line, then an
+# optional comment; plain text for a text question).
+def cmd_questions_answer(
+    access: GatewayAccess,
+    *,
+    agent_id: int,
+    answers: list[tuple[int, str]],
+    skips: list[int],
+    idempotency_key: str,
+) -> int:
+    open_ids = [n.id for n in _fetch_open_questions(access, agent_id=agent_id)]
+    if not open_ids:
+        print(f"agent #{agent_id}: no open questions.")
+        return 0
+    given = [question_id for question_id, _ in answers] + skips
+    if sorted(given) != sorted(open_ids):
+        print(
+            f"agent #{agent_id}: every open question must be answered or skipped once; "
+            f"open: {open_ids}, given: {sorted(given)}"
         )
-        if r.status_code in (200, 201):
-            cleared += 1
-    return cleared
+        return 2
+    results: list[dict[str, JsonValue]] = []
+    for question_id, reply in answers:
+        results.append({"id": question_id, "reply": reply})
+    for question_id in skips:
+        results.append({"id": question_id, "skip": True})
+    code = _submit(access, agent_id, results, open_ids, idempotency_key)
+    if code == 0:
+        print(f"agent #{agent_id}: settled {len(open_ids)} question(s)")
+    return code
 
 
-# meiva:link cli/docs/operator-surfaces/operator-surfaces.md
-def cmd_questions_clear(
+# meiva:note
+# The open questions a skip acts on: those of one agent, or those of every terminated agent.
+def _skip_targets(access: GatewayAccess, *, agent_id: int | None, stale: bool) -> list[_Question]:
+    questions = _fetch_open_questions(access)
+    if not stale:
+        return [n for n in questions if n.agent_id == agent_id]
+    statuses = _agent_status_map(access, {n.agent_id for n in questions})
+    return [n for n in questions if statuses.get(n.agent_id) == "terminated"]
+
+
+# meiva:note
+# `meiva questions skip --agent N` or `--stale` — skip every open question of one agent, or of every
+# terminated agent, after confirmation.
+def cmd_questions_skip(
     access: GatewayAccess,
     *,
     agent_id: int | None,
@@ -201,12 +234,7 @@ def cmd_questions_clear(
     if stale and agent_id is not None:
         print("--stale and --agent are mutually exclusive")
         return 2
-    questions = _fetch_open_questions(access)
-    if stale:
-        statuses = _agent_status_map(access, {n.agent_id for n in questions})
-        questions = [n for n in questions if statuses.get(n.agent_id) == "terminated"]
-    else:
-        questions = [n for n in questions if n.agent_id == agent_id]
+    questions = _skip_targets(access, agent_id=agent_id, stale=stale)
     if not questions:
         print(
             "No stale questions (terminated agents)."
@@ -214,10 +242,17 @@ def cmd_questions_clear(
             else f"agent #{agent_id}: no open questions."
         )
         return 0
-    if not force and not _confirm_clear(questions, stale=stale, agent_id=agent_id, stdin=stdin):
+    if not force and not _confirm_skip(questions, stale=stale, agent_id=agent_id, stdin=stdin):
         print("aborted.")
         return 1
-    cleared = _resolve_all(access, questions, rng)
+    by_agent: dict[int, list[int]] = {}
+    for n in questions:
+        by_agent.setdefault(n.agent_id, []).append(n.id)
+    skipped = 0
+    for owner, ids in by_agent.items():
+        results: list[dict[str, JsonValue]] = [{"id": i, "skip": True} for i in ids]
+        if _submit(access, owner, results, ids, new_uuid(rng).hex) == 0:
+            skipped += len(ids)
     target = "stale questions" if stale else f"agent #{agent_id}"
-    print(f"cleared {cleared}/{len(questions)} questions: {target}")
+    print(f"skipped {skipped}/{len(questions)} questions: {target}")
     return 0

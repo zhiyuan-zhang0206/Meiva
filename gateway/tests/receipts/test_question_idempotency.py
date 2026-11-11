@@ -4,20 +4,25 @@ import psycopg
 
 from base.events.live.bus import EventBus
 from gateway.tests.auth.gateway_config import gateway_test_client
-from gateway.tests.events.test_questions_endpoint import insert_question, seed_agent
+from gateway.tests.events.test_questions_endpoint import (
+    answer_body,
+    answers_path,
+    insert_question,
+    seed_agent,
+)
 from gateway.tests.support.live_events.faults import unpublishable_bus
 
 
 def test_concurrent_resolution_replays_one_reply(db_conn: psycopg.Connection) -> None:
     agent = seed_agent(db_conn)
     question = insert_question(db_conn, agent, "question")
-    path = f"/api/keyed/v1/agents/{agent}/questions/{question}/resolve"
+    path = answers_path(agent)
     with gateway_test_client() as client, ThreadPoolExecutor(max_workers=4) as executor:
 
         def resolve() -> dict[str, object]:
             response = client.post(
                 path,
-                json={"action": "answer", "reply": "yes"},
+                json=answer_body(question, "yes"),
                 headers={"Idempotency-Key": "answer-once", "Idempotency-Scope": "principal-v1"},
             )
             assert response.status_code == 201
@@ -27,7 +32,7 @@ def test_concurrent_resolution_replays_one_reply(db_conn: psycopg.Connection) ->
         assert len({result["inbound_id"] for result in results}) == 1
         changed = client.post(
             path,
-            json={"action": "answer", "reply": "no"},
+            json=answer_body(question, "no"),
             headers={"Idempotency-Key": "answer-once", "Idempotency-Scope": "principal-v1"},
         )
         assert changed.status_code == 409
@@ -39,9 +44,9 @@ def test_concurrent_resolution_replays_one_reply(db_conn: psycopg.Connection) ->
 def test_later_answer_requires_a_new_open_question(db_conn: psycopg.Connection) -> None:
     agent = seed_agent(db_conn)
     question = insert_question(db_conn, agent, "Question")
-    path = f"/api/keyed/v1/agents/{agent}/questions/{question}/resolve"
+    path = answers_path(agent)
     with gateway_test_client() as client:
-        body = {"action": "answer", "reply": "yes"}
+        body = answer_body(question, "yes")
         first = client.post(
             path,
             json=body,
@@ -70,20 +75,20 @@ def test_resolution_recovers_after_committed_wake_failure(
 ) -> None:
     agent = seed_agent(db_conn)
     question = insert_question(db_conn, agent, "question")
-    path = f"/api/keyed/v1/agents/{agent}/questions/{question}/resolve"
+    path = answers_path(agent)
 
     with gateway_test_client(raise_server_exceptions=False) as client:
         client.app.state.bus = unpublishable_bus()
         first = client.post(
             path,
-            json={"action": "answer", "reply": "yes"},
+            json=answer_body(question, "yes"),
             headers={"Idempotency-Key": "lost-tail", "Idempotency-Scope": "principal-v1"},
         )
         assert first.status_code == 500
         client.app.state.bus = event_bus
         second = client.post(
             path,
-            json={"action": "answer", "reply": "yes"},
+            json=answer_body(question, "yes"),
             headers={"Idempotency-Key": "lost-tail", "Idempotency-Scope": "principal-v1"},
         )
         assert second.status_code == 201
@@ -95,9 +100,9 @@ def test_resolution_recovers_after_committed_wake_failure(
 def test_missing_key_cannot_mutate_question(db_conn: psycopg.Connection) -> None:
     agent = seed_agent(db_conn)
     question = insert_question(db_conn, agent, "original")
-    path = f"/api/keyed/v1/agents/{agent}/questions/{question}/resolve"
+    path = answers_path(agent)
     with gateway_test_client() as client:
-        assert client.post(path, json={"action": "answer", "reply": "yes"}).status_code == 422
+        assert client.post(path, json=answer_body(question, "yes")).status_code == 422
     assert db_conn.execute(
         "SELECT title, resolved_at FROM agent_questions WHERE agent_id=%s", (agent,)
     ).fetchall() == [("original", None)]
