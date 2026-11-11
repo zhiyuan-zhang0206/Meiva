@@ -458,18 +458,16 @@ def test_put_config_refuses_env_override_mismatching_home_identity(
 def test_local_get_masks_sensitive(
     local_env_home: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    credential_path = "/private/fake-oss-credentials.json"
-    (local_env_home / ".env").write_text(
-        f"MEIVA_BACKUP_OFFSITE_CREDENTIALS_FILE={credential_path}\n"
-    )
+    shown = "fake-webhook-value"
+    (local_env_home / ".env").write_text(f"MEIVA_ALERTS_WEBHOOK_TOKEN={shown}\n")
 
     rc = cfg.cmd_config_get(None, machine=None, process=_process(local_env_home), local=True)
 
     assert rc == 0
     out = capsys.readouterr().out
-    assert "MEIVA_BACKUP_OFFSITE_CREDENTIALS_FILE" in out
+    assert "MEIVA_ALERTS_WEBHOOK_TOKEN" in out
     assert "••••••••" in out
-    assert credential_path not in out
+    assert shown not in out
 
 
 def test_local_set_validates_candidate_and_rejects_incident_shape(local_env_home: Path) -> None:
@@ -495,47 +493,24 @@ def test_local_set_applies_valid_patch(
     assert "restart to apply" in capsys.readouterr().out
 
 
-def test_the_offsite_keys_are_official_local_config(local_env_home: Path) -> None:
-    (local_env_home / ".env").write_text("MEIVA_MACHINE_SERVE_GATEWAY=true\nOTHER=kept\n")
-    credentials = local_env_home / "oss-credentials.json"
-    keys = {
-        "MEIVA_BACKUP_OFFSITE_ENDPOINT": "https://oss-cn-shanghai.aliyuncs.com",
-        "MEIVA_BACKUP_OFFSITE_BUCKET": "backups",
-        "MEIVA_BACKUP_OFFSITE_CREDENTIALS_FILE": str(credentials),
-    }
-
-    process = _process(local_env_home)
-    rc = cfg.cmd_config_set(
-        [f"{key}={value}" for key, value in keys.items()], None, process=process, local=True
+def test_the_retired_walg_key_is_unknown_to_the_local_config_commands(
+    local_env_home: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    (local_env_home / ".env").write_text(
+        "MEIVA_MACHINE_SERVE_GATEWAY=true\nMEIVA_WALG_CONFIG_FILE=/old/walg.json\n"
     )
-
-    assert rc == 0
-    aliases = unit_env_aliases()
-    assert {key: aliases[key] for key in keys} == keys
-    assert "OTHER" in aliases
-
-    assert cfg.cmd_config_unset(list(keys), None, process=process, local=True) == 0
-    assert not set(keys) & set(unit_env_aliases())
-
-
-def test_the_walg_key_is_official_local_config(local_env_home: Path) -> None:
-    (local_env_home / ".env").write_text("MEIVA_MACHINE_SERVE_GATEWAY=true\nOTHER=kept\n")
-    config_file = local_env_home / "walg.json"
-
     process = _process(local_env_home)
 
-    assert (
-        cfg.cmd_config_set(
-            [f"MEIVA_WALG_CONFIG_FILE={config_file}"], None, process=process, local=True
-        )
-        == 0
+    set_rc = cfg.cmd_config_set(
+        ["MEIVA_WALG_CONFIG_FILE=/new/walg.json"], None, process=process, local=True
     )
-    aliases = unit_env_aliases()
-    assert aliases["MEIVA_WALG_CONFIG_FILE"] == str(config_file)
-    assert "OTHER" in aliases
+    unset_rc = cfg.cmd_config_unset(["MEIVA_WALG_CONFIG_FILE"], None, process=process, local=True)
 
-    assert cfg.cmd_config_unset(["MEIVA_WALG_CONFIG_FILE"], None, process=process, local=True) == 0
-    assert "MEIVA_WALG_CONFIG_FILE" not in unit_env_aliases()
+    assert (set_rc, unset_rc) == (1, 1)
+    assert capsys.readouterr().err.count("unknown config key: 'MEIVA_WALG_CONFIG_FILE'") == 2
+    # meiva:note
+    # A line a deployed home still carries is inert: the settings ignore a key no field declares.
+    assert unit_env_aliases()["MEIVA_WALG_CONFIG_FILE"] == "/old/walg.json"
 
 
 def test_local_set_can_pin_the_hosted_runner_health_port(

@@ -32,7 +32,6 @@ from cli.commands.cluster._provider_guard import ProviderGuardConfig
 from cli.commands.cluster.health_readings import HealthOptions
 from cli.commands.cluster.plans.health_verdicts import HealthRules
 from cli.commands.cluster.tests.gateway_server import Reply, ScriptedGateway, serving
-from cli.commands.data_plane.config import data_plane_config_from_boot
 from cli.database.runtime import CommandRuntime
 from cli.database.tests.cli_tests import operator_database as operator_database
 from cli.database.tests.command_inputs import command_runtime as command_runtime
@@ -81,7 +80,7 @@ def provider_off() -> ProviderGuardConfig:
 
 # meiva:note
 # A round that holds a healthy cluster to its rules: the gateway of the test, one live agent
-# required, no prod checkout to guard, WAL-G off, the volume of `tmp_path` with a non-tripping
+# required, no prod checkout to guard, the volume of `tmp_path` with a non-tripping
 # watermark (the watermark check itself is covered by `disk_watermark=0.0`), no retry wait.
 @pytest.fixture
 def healthy_options(
@@ -93,9 +92,6 @@ def healthy_options(
         provider=provider_off(),
         source_root=None,
         editable_allowed_roots=(),
-        data_plane=dataclasses.replace(
-            data_plane_config_from_boot(probe_command.config), walg_config_file=None
-        ),
         data_volume=tmp_path,
         checkout_refusal=None,
         liveness_attempts=3,

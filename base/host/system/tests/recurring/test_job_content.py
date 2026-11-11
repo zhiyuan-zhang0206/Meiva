@@ -5,9 +5,7 @@ import xml.etree.ElementTree as ET
 from datetime import date
 from pathlib import Path
 
-import pytest
-
-from base.host.system import logs_content, packages_content, pr_flow_content, walg_content
+from base.host.system import logs_content, packages_content, pr_flow_content
 from base.host.system.cron import heartbeat_population
 from base.host.system.job_values import HeartbeatRender, JobPaths, JobRoots, JobSchedule
 
@@ -110,47 +108,4 @@ def test_launchd_plist_schedules_the_daily_sampler(job_roots: JobRoots, tmp_path
     ) in content
     assert "<key>RunAtLoad</key>\n    <false/>" in content
     assert f"{tmp_path}/.meiva/logs/pr-flow.out.log" in content
-    assert f"<string>{tmp_path}/.meiva</string>" in content
-
-
-def test_the_tick_runs_three_hours_after_the_logical_dump_becomes_due() -> None:
-    assert (walg_content.hour(backup_hour=3), walg_content.MINUTE) == (
-        6,
-        25,
-    )
-
-
-@pytest.mark.parametrize(("dump_hour", "tick_hour"), [(0, 3), (20, 23), (21, 0), (23, 2)])
-def test_the_tick_hour_follows_the_logical_dump_hour_and_wraps(
-    dump_hour: int, tick_hour: int
-) -> None:
-    assert walg_content.hour(backup_hour=dump_hour) == tick_hour
-
-
-def test_launchd_plist_runs_the_tick_command_daily_and_logs_to_walg_log(
-    job_roots: JobRoots, tmp_path: Path
-) -> None:
-    paths = JobPaths(job_roots, "/work tree/.venv/bin/meiva")
-    content = walg_content.launchd_plist_content(
-        backup_hour=3,
-        paths=paths,
-        path_env="/work tree/.venv/bin:/usr/bin",
-        heartbeat=heartbeat_for(
-            walg_content.LABEL, job_roots, walg_content.schedule(backup_hour=3)
-        ),
-    )
-    # meiva:note
-    # Only this test's rendered XML reaches the parser; no external XML is accepted.
-    root = ET.fromstring(content)  # noqa: S314
-    values = [element.text for element in root.findall("./dict/array/string")]
-
-    assert "<string>com.meiva.walg</string>" in content
-    assert values == ["/bin/sh", "-c", "'/work tree/.venv/bin/meiva' backup walg run"]
-    assert (
-        "<key>StartCalendarInterval</key>\n    <dict>\n"
-        "            <key>Hour</key>\n            <integer>6</integer>\n"
-        "            <key>Minute</key>\n            <integer>25</integer>\n"
-    ) in content
-    assert "<key>RunAtLoad</key>\n    <false/>" in content
-    assert content.count(f"{tmp_path}/.meiva/logs/walg.log") == 2
     assert f"<string>{tmp_path}/.meiva</string>" in content

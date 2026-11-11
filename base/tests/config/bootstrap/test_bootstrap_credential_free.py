@@ -95,25 +95,3 @@ def test_missing_url_refuses_before_boot_time_fallback(
         )
     assert loguru_records.messages("WARNING") == []
     assert "new-private-password" not in str(caught.value)
-
-
-def test_served_payload_excludes_the_offsite_backup_destination(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    _write_gateway_env(tmp_path)
-    env_path = tmp_path / ".env"
-    env_path.write_text(
-        env_path.read_text()
-        + "MEIVA_BACKUP_OFFSITE_ENDPOINT=https://oss-cn-shanghai.aliyuncs.com\n"
-        + "MEIVA_BACKUP_OFFSITE_BUCKET=backups\n"
-        + "MEIVA_BACKUP_OFFSITE_CREDENTIALS_FILE=/private/oss.json\n"
-        + "MEIVA_WALG_CONFIG_FILE=/private/walg.json\n"
-    )
-    vals = _served(tmp_path)
-    for alias in (
-        "MEIVA_BACKUP_OFFSITE_ENDPOINT",
-        "MEIVA_BACKUP_OFFSITE_BUCKET",
-        "MEIVA_BACKUP_OFFSITE_CREDENTIALS_FILE",
-        "MEIVA_WALG_CONFIG_FILE",
-    ):
-        assert alias not in vals

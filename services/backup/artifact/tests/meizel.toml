@@ -1,6 +1,4 @@
-exports = ["oss_fake.py", "passphrase.py"]
+exports = ["passphrase.py"]
 
 [uses]
 "path_scopes.toml" = ["passphrase.py"]
-"test_offsite.py" = ["oss_fake.py"]
-"test_offsite_plan.py" = ["oss_fake.py"]

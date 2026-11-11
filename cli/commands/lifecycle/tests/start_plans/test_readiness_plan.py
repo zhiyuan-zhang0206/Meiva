@@ -9,7 +9,6 @@ from base.host.exit_codes import SERVICES_NOT_READY_EXIT_CODE
 from cli.commands.lifecycle.start.readiness_plan import (
     ReadinessFacts,
     ReadinessVerdict,
-    archive_assertion_needed,
     critical_launch_failures,
     readiness_verdict,
     shows_gateway_hint,
@@ -91,22 +90,6 @@ def test_critical_failures_keep_only_the_core_names() -> None:
 
 def test_a_start_with_no_failures_records_no_critical_failure() -> None:
     assert critical_launch_failures((), _CRITICAL) == ()
-
-
-@pytest.mark.parametrize(
-    ("roles", "gateway_unready", "asserts"),
-    [
-        ({"gateway"}, False, True),
-        ({"gateway", "agent-runner"}, False, True),
-        ({"gateway"}, True, False),
-        ({"agent-runner"}, False, False),
-    ],
-    ids=["gateway", "both roles", "gateway unready", "runner"],
-)
-def test_the_archive_is_asserted_where_the_gateways_postgres_serves(
-    roles: set[str], gateway_unready: bool, asserts: bool
-) -> None:
-    assert archive_assertion_needed(roles, gateway_unready=gateway_unready) is asserts
 
 
 @pytest.mark.parametrize(

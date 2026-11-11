@@ -327,7 +327,6 @@ def run_json(argv: list[str], cwd: Path, *, run: AuditProcess) -> dict[str, obje
 PINS: tuple[tuple[str, str, str], ...] = (
     ("zonky Postgres", "base/cluster/dataplane/runtime_binaries.py", r'^PG_VERSION = "([^"]+)"'),
     ("pgvector", "base/cluster/dataplane/runtime_binaries.py", r'^PGVECTOR_VERSION = "([^"]+)"'),
-    ("wal-g", "base/cluster/dataplane/walg_binary.py", r'^WALG_VERSION = "([^"]+)"'),
     (
         "otelcol-contrib",
         "base/deploy/release/collector/plan.py",
@@ -390,7 +389,6 @@ def latest_binaries(
             max(pgvector_tags, key=_version_key),
             "pgvector/pgvector tags",
         ),
-        Binary("wal-g", pins["wal-g"], release("wal-g/wal-g"), "wal-g/wal-g releases"),
         Binary(
             "otelcol-contrib",
             pins["otelcol-contrib"],

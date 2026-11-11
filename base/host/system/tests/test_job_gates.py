@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest
 
 from base.host.proc import CommandRunner
-from base.host.system import logs_job, packages_job, pr_flow_job, walg_job
+from base.host.system import logs_job, packages_job, pr_flow_job
 from base.host.system.boot_autostart import registration as autostart
 from base.host.system.cron import health_job
 from base.host.system.job_values import JobRoots
@@ -63,14 +63,6 @@ def test_a_non_default_home_does_not_need_either_jobs_policy(
         machine=MACHINE,
         today=TODAY,
     )
-    walg_job.register_walg_job(
-        roots=JobRoots(home=unit_home, repo=Path("/isolated"), user_home=tmp_path),
-        enabled=True,
-        backup_hour=None,
-        host=fake_host(),
-        machine=MACHINE,
-        today=TODAY,
-    )
 
 
 def test_a_registration_with_jobs_on_needs_the_policy_the_root_read(
@@ -87,40 +79,12 @@ def test_a_registration_with_jobs_on_needs_the_policy_the_root_read(
             machine=MACHINE,
             today=TODAY,
         )
-    with pytest.raises(ValueError, match="needs the backup hour"):
-        walg_job.register_walg_job(
-            roots=JobRoots(
-                home=default_home / ".meiva", repo=Path("/isolated"), user_home=default_home
-            ),
-            enabled=True,
-            backup_hour=None,
-            host=fake_host(),
-            machine=MACHINE,
-            today=TODAY,
-        )
-
-
-def _assert_definitions(kind: str, platform: str, first: str, second: str) -> None:
-    if kind == "packages":
-        assert (
-            ("*/20 " in first and "*/30 " in second)
-            if platform == "linux"
-            else ("<integer>1200</integer>" in first and "<integer>1800</integer>" in second)
-        )
-    else:
-        assert (
-            ("25 0 " in first and "25 2 " in second)
-            if platform == "linux"
-            else ("<integer>0</integer>" in first and "<integer>2</integer>" in second)
-        )
 
 
 @pytest.mark.parametrize("platform", ["mac", "linux"])
-@pytest.mark.parametrize("kind", ["packages", "walg"])
 def test_real_platform_job_definition_follows_the_value_given(
     default_home: Path,
     platform: str,
-    kind: str,
 ) -> None:
     crontab = FakeCrontab()
     launchctl = FakeCommands()
@@ -131,42 +95,26 @@ def test_real_platform_job_definition_follows_the_value_given(
         platform=LINUX_X86 if platform == "linux" else DARWIN_ARM64,
         programs={"crontab": "/usr/bin/crontab", "meiva": "/isolated/.venv/bin/meiva"},
     )
-    values = {
-        "first": 1200 if kind == "packages" else 21,
-        "second": 1800 if kind == "packages" else 23,
-    }
+    values = {"first": 1200, "second": 1800}
 
     def register(owner: str) -> str:
-        if kind == "packages":
-            packages_job.register_packages_job(
-                roots=JobRoots(
-                    home=default_home / ".meiva",
-                    repo=Path("/isolated"),
-                    user_home=default_home,
-                ),
-                enabled=True,
-                schedule=RefreshSchedule(refresh_enabled=True, tick_seconds=values[owner]),
-                host=host,
-                machine=MACHINE,
-                today=TODAY,
-            )
-        else:
-            walg_job.register_walg_job(
-                roots=JobRoots(
-                    home=default_home / ".meiva",
-                    repo=Path("/isolated"),
-                    user_home=default_home,
-                ),
-                enabled=True,
-                backup_hour=values[owner],
-                host=host,
-                machine=MACHINE,
-                today=TODAY,
-            )
+        packages_job.register_packages_job(
+            roots=JobRoots(
+                home=default_home / ".meiva",
+                repo=Path("/isolated"),
+                user_home=default_home,
+            ),
+            enabled=True,
+            schedule=RefreshSchedule(refresh_enabled=True, tick_seconds=values[owner]),
+            host=host,
+            machine=MACHINE,
+            today=TODAY,
+        )
         if platform == "linux":
             return crontab.writes[-1]
-        label = "packages-refresh" if kind == "packages" else "walg"
-        return (default_home / "Library" / "LaunchAgents" / f"com.meiva.{label}.plist").read_text()
+        return (
+            default_home / "Library" / "LaunchAgents" / "com.meiva.packages-refresh.plist"
+        ).read_text()
 
     first = register("first")
     second = register("second")
@@ -175,7 +123,11 @@ def test_real_platform_job_definition_follows_the_value_given(
     assert again == first
     operations = [argv[1] for argv in (crontab.argvs if platform == "linux" else launchctl.argvs)]
     assert operations == (["bootout", "bootstrap"] * 3 if platform == "mac" else ["-l", "-"] * 3)
-    _assert_definitions(kind, platform, first, second)
+    assert (
+        ("*/20 " in first and "*/30 " in second)
+        if platform == "linux"
+        else ("<integer>1200</integer>" in first and "<integer>1800</integer>" in second)
+    )
 
 
 @pytest.mark.parametrize(
@@ -214,7 +166,7 @@ def test_every_registrar_stops_at_the_switch_before_the_home(
             register(enabled=True, host=fake_host(), roots=roots)
 
 
-@pytest.mark.parametrize("kind", ["logs", "packages", "pr-flow", "walg"])
+@pytest.mark.parametrize("kind", ["logs", "packages", "pr-flow"])
 def test_maintenance_switch_precedes_real_home_resolution(tmp_path: Path, kind: str) -> None:
     loop = tmp_path / "self-loop"
     loop.symlink_to(loop)
@@ -239,15 +191,6 @@ def test_maintenance_switch_precedes_real_home_resolution(tmp_path: Path, kind: 
                 pr_flow_job.register_pr_flow_job(
                     enabled=enabled,
                     production=True,
-                    roots=roots,
-                    host=fake_host(),
-                    machine=MACHINE,
-                    today=TODAY,
-                )
-            case "walg":
-                walg_job.register_walg_job(
-                    enabled=enabled,
-                    backup_hour=None,
                     roots=roots,
                     host=fake_host(),
                     machine=MACHINE,

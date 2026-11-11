@@ -241,7 +241,6 @@ def native_cluster(
         pgbouncer_enabled=False,
         events_channel="meiva:tinst:events",
         trusted_cidrs="",
-        walg_config_file=None,
     )
     running = NativeCluster(unit_home, ports, plane, retained_children)
     try:

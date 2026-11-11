@@ -16,7 +16,7 @@ host's: reading a host timezone can make a current dump appear to be future.
 - **Atomic write, no plaintext at rest**: writes private plaintext and encrypted `.partial` files first, then publishes the encrypted artifact only after both commands succeed — half-finished dumps won't be mistaken for complete backups by due/prune logic or manual recovery. A failed or interrupted run removes its partials once its tool is killed and reaped. Every run, the scheduled worker's staged one included, first sweeps `backups/db/` under the backup lock: a dead run's partials, key files and cross-filesystem publish copies that no process holds open are removed (one still held by an orphaned writer is reported and waits), so a killed run's plaintext never outlives the next nightly dump.
 - **Scheduled worker**: the dump uses a fixed worker and unique private staging
   (`services/backup/scheduler/worker.py`, see [Shutdown](shutdown.md)).
-  The worker encrypts and publishes off-site; its controller validates zero exit,
+  The worker encrypts the dump; its controller validates zero exit,
   artifact name and SHA-256 before exclusive publication (a verified private
   copy across filesystems). Pruning respects the existing backup lock.
   Failure/cancellation sanitizes staging and reports cleanup errors with the
@@ -26,7 +26,7 @@ host's: reading a host timezone can make a current dump appear to be future.
 - **Timeout guard**: `_DUMP_TIMEOUT_S=60min` bounds pg_dump inside the scheduler; a stalled dump cannot freeze watchdog supervision.
 - **Dump authority** (`dump_source`): a locally owned plane dumps as the administrator acting as the schema owner over the home's owner-only socket (`base.cluster.dataplane.pg_admin`), custody-checked first and password-free, so no write-generation login is needed and a rollout revoking one cannot kill a dump; a remote-managed plane dumps through its provider URL (password in the child environment only). The restore drill recreates the capability groups `meiva_gateway`/`meiva_runner` the dump's grants name.
 
-- **Configuration ownership**: the roots (scheduler daemon, worker, standalone publisher, restore drill) read configuration once and pass values down: `run_backup(now, tree=, db_url=, keep=, offsite_target=)` takes the `BackupTree`, the dial, the retention and the off-site `OssTarget`. Due-ness, names, argv and retention are pure (`schedule.py`, `dump_plan.py`, `dump_lines.py`).
+- **Configuration ownership**: the roots (scheduler daemon, worker, restore drill) read configuration once and pass values down: `run_backup(now, tree=, db_url=, keep=)` takes the `BackupTree`, the dial and the retention. Due-ness, names, argv and retention are pure (`schedule.py`, `dump_plan.py`, `dump_lines.py`).
 
 ## Key Dependencies
 - [Meiva Root — one application service owner](../../../supervision/meiva_root/docs/meiva_root.md) — probes and restarts the scheduler without executing the dump
@@ -34,17 +34,16 @@ host's: reading a host timezone can make a current dump appear to be future.
 
 ## Entry Points
 - `services/backup/scheduler/daemon.py` — scheduled due-check, retry, and health state
-- `services/backup/dump.py` — `run_backup()` dumps, publishes (when handed an off-site target) and prunes in-process; `run_backup(staging=...)` writes the scheduler worker's artifact into its private controls. `python -m services.backup.dump --publish-offsite ARTIFACT [--offsite-root PREFIX]` publishes one existing artifact and, like the scheduled leg, prints its result on stderr
+- `services/backup/dump.py` — `run_backup()` dumps, encrypts and prunes in-process; `run_backup(staging=...)` writes the scheduler worker's artifact into its private controls
 - `services/backup/restore_drill.py` (`python -m services.backup.restore_drill [ARTIFACT]`) — decrypts a managed database backup, restores it into throwaway Postgres, and verifies schema, table counts, and a readable checkpoint conversation without touching the live database; scratch files and the throwaway cluster are removed afterwards
 - `services/backup/scheduler/worker.py` — the dump and logical restore-drill operation kinds, their sanitizers, and `commit_scheduled_backup()`
 - `services/backup/artifact/intermediates.py` — `sweep_closed_partials()`, the closed-intermediate sweep every backup run applies to the backup directory
-- `services/backup/artifact/names.py` — the managed-dump name grammar and the off-site namespace root (`meiva-logical`)
-- `services/backup/artifact/offsite.py` — `publish()`: the best-effort OSS publish of one finished artifact (multipart, per-part `Content-MD5`, ETag-chain verification, forbid-overwrite on completion only, adopt-after-crash)
-- The daily dump is this package's recovery point; point-in-time recovery exists only while the optional WAL-G path ([WAL-G](../../walg/docs/walg.md)) is on — it ships WAL and takes daily base backups, and `meiva backup walg restore` restores one into a directory you name, proved weekly by its recovery drill (see `docs/conventions/data/disaster-recovery.md`). Nothing here deletes a remote object.
+- `services/backup/artifact/names.py` — the managed-dump name grammar
+- The daily dump is this package's recovery point and the only Postgres backup: it stays on this machine, and there is no off-site copy or point-in-time recovery (see `docs/decisions/data/database/2026-11-12-no-offsite-postgres-backup.md`).
 
 ## Notes
 - Gateway capability only; `meiva start --disable-service pg-backup` prevents its scheduler session from starting and watchdog revival respects the same marker.
-- Protects against bad migrations / accidental deletion / DB corruption and makes a best-effort encrypted off-site publish to OSS before local commit and pruning (`services/backup/artifact/offsite.py`, objects under `meiva-logical/`; `MEIVA_BACKUP_OFFSITE_ENDPOINT`, `MEIVA_BACKUP_OFFSITE_BUCKET` and `MEIVA_BACKUP_OFFSITE_CREDENTIALS_FILE`). A home without all three skips the leg with one INFO line; an unavailable store or a failed upload leaves the local artifact intact and logs the cause. The bucket must stay versioning-off, since a versioned bucket ignores forbid-overwrite. See `future/infra/data/pg-backup.md`.
+- Protects against bad migrations / accidental deletion / DB corruption on this machine only: the dump is never copied elsewhere by Meiva. Keeping a copy off the host is an operator's own decision.
 - Restore: follow `.agents/skills/meiva-guide/operations/references/db-restore.md` to decrypt before `pg_restore --clean --if-exists`.
 [Shutdown ownership](shutdown.md)
 [Static recovery-contract test boundary](recovery-contract.md)

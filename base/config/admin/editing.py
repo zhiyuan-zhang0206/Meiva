@@ -80,24 +80,23 @@ def coerce_config_scalar(
     return value
 
 
+# meiva:note
+# Split a JSON-merge-patch body into (writes, removals), reducer semantics.
+#
+# A key with a value is set/replaced, a key mapped to None is unset (reverted
+# to its default), and an ABSENT key is left untouched. A sensitive field
+# carrying the unchanged-sentinel is neither written nor unset ("keep as-is").
+# Deletion is only ever the explicit None, never inferred from a key's
+# absence, so a partial PUT can never drop a field it did not name (a
+# full-replace once wiped a cluster's secrets that way).
+#
+# Shared by the cluster-side PUT reducer and the host-side config_write_op —
+# the host side gains the sentinel guard here too (the frontend never
+# sends a sentinel for a host field today, but a host-scoped sensitive
+# field may exist, so the guard covers it as well).
 def split_reducer_patch(
     fields: dict[str, object], metas: dict[str, ConfigFieldMeta]
 ) -> tuple[dict[str, object], set[str]]:
-    """Split a JSON-merge-patch body into (writes, removals), reducer semantics.
-
-    A key with a value is set/replaced, a key mapped to None is unset (reverted
-    to its default), and an ABSENT key is left untouched. A sensitive field
-    carrying the unchanged-sentinel is neither written nor unset ("keep as-is").
-    Deletion is only ever the explicit None, never inferred from a key's
-    absence, so a partial PUT can never drop a field it did not name (a
-    full-replace once wiped a cluster's secrets that way).
-
-    Shared by the cluster-side PUT reducer and the host-side config_write_op —
-    the host side gains the sentinel guard here too (the frontend never
-    sends a sentinel for a host field today, but host-scoped sensitive fields
-    such as the off-site backup credentials path exist, so the guard covers
-    them as well).
-    """
     writes = {
         k: v
         for k, v in fields.items()

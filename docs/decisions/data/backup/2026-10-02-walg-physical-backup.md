@@ -86,3 +86,5 @@ verified and watched.
 - A hung `wal-g` also hangs Postgres' shutdown while segments are queued, because the
   archiver finishes its queue first; the runbook tells the operator to check the queue before
   a planned stop.
+
+Superseded by [2026-11-12-no-offsite-postgres-backup.md](../database/2026-11-12-no-offsite-postgres-backup.md): the WAL-G path is deleted.

@@ -1,7 +1,6 @@
 [uses]
 "shutdown_worker.py" = ["shutdown_blocker.py"]
 "test_backup_scheduler_daemon.py" = ["operation_support.py"]
-"test_daemon_import_boundary.py" = ["child_import_probe.py"]
 "test_daemon_shutdown.py" = ["child_shutdown.py"]
 "test_operation_worker.py" = ["operation_support.py"]
 "test_scheduler_composition.py" = ["operation_support.py"]

@@ -27,7 +27,6 @@ from base.host.system.job_values import JobRoots
 from base.host.system.logs_job import unregister_logs_job
 from base.host.system.packages_job import unregister_packages_job
 from base.host.system.pr_flow_job import unregister_pr_flow_job
-from base.host.system.walg_job import unregister_walg_job
 from base.native_process.os_platform import file_lock
 from cli.commands.cluster.plans.destroy_plan import (
     CONFIRMATION_PROMPT,
@@ -204,7 +203,7 @@ def _execute(
 
 # meiva:note
 # Remove every OS-scheduled job the host registered (health probe, boot autostart, logs
-# maintenance, packages refresh, PR flow and the WAL-G tick).
+# maintenance, packages refresh and PR flow).
 #
 # Labels name jobs, not homes, and each `unregister_*` is a no-op outside the account's default
 # home, so a scratch home's destroy never touches the host's jobs. Every job must be retired before the
@@ -230,7 +229,6 @@ def unregister_scheduled_jobs(
         ("logs maintenance", unregister_logs_job),
         ("packages refresh", unregister_packages_job),
         ("PR flow", unregister_pr_flow_job),
-        ("WAL-G tick", unregister_walg_job),
     )
     failed: list[tuple[str, str]] = []
     for name, unregister in jobs:

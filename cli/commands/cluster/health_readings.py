@@ -64,10 +64,8 @@ from cli.commands.cluster.plans.service_probe_plan import (
     sessions_to_probe,
 )
 from cli.commands.converge.redis_bridge import probe_redis_bridge
-from cli.commands.data_plane.config import DataPlaneConfig
 from cli.commands.probe import probe_service
 from cli.database.runtime import CommandRuntime
-from services.backup.walg import probe as walg_probe
 from services.supervision.meiva_root_glue.manifests import launched_services
 from services.supervision.roster.composition import gate_settings
 from services.supervision.roster.spec import services_for_capabilities_annotated
@@ -91,7 +89,6 @@ _LIVE_AGENTS = (
 #
 # `gateway_url` is where the gateway answers; `source_root` is the prod source checkout the
 # editable-install and source-tree guards inspect (None when the home has none to guard);
-# `data_plane` is the data plane's configuration, the one owner of the WAL-G configuration file;
 # `data_volume` is the volume whose usage the disk check measures; `checkout_refusal` is why
 # this checkout must not drive the probe at all (the 2026-08-07 accident, task #1025: worktree
 # code misjudging schema health against prod data), None when it may. The liveness retry
@@ -103,7 +100,6 @@ class HealthOptions:
     provider: ProviderGuardConfig
     source_root: Path | None
     editable_allowed_roots: tuple[Path, ...]
-    data_plane: DataPlaneConfig
     data_volume: Path
     checkout_refusal: str | None
     liveness_attempts: int = 3
@@ -279,13 +275,6 @@ def disk_usage_fraction(volume: Path) -> float | None:
 
 
 # meiva:note
-# The first broken WAL-archiving condition, or None (also None while WAL-G is off), and whether
-# WAL-G is on. The path is the configuration's WAL-G config file, read once by the root.
-def read_walg(config_file: Path | None, *, home: Path) -> tuple[str | None, bool]:
-    return walg_probe.failure(path=config_file, home=home), config_file is not None
-
-
-# meiva:note
 # Editable-install records of the prod venv that name source outside the allowlist.
 #
 # A polluted virtualenv can point at disposable source even when the checkout itself is
@@ -325,7 +314,6 @@ def read_health(
     options: HealthOptions, *, database_factory: DatabaseFactory, command: CommandRuntime
 ) -> HealthReadings:
     launched = read_launch_record(command.home)
-    walg_failure, walg_on = read_walg(options.data_plane.walg_config_file, home=command.home)
     return HealthReadings(
         disk_fraction=disk_usage_fraction(options.data_volume),
         gateway=read_gateway(
@@ -334,8 +322,6 @@ def read_health(
         population=read_population(database_factory, launched),
         schema_skew=options.rules.check_schema and read_schema_skew(database_factory),
         service_failures=read_service_failures(command, launched),
-        walg_failure=walg_failure,
-        walg_enabled=walg_on,
         editable_violations=read_editable_violations(
             options.source_root, options.editable_allowed_roots
         ),

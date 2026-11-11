@@ -1,7 +1,7 @@
 # meiva:note
 # Converge steps that register this host's OS-level scheduled jobs.
 #
-# Six jobs, one concept — everything Meiva asks the platform scheduler (launchd /
+# Five jobs, one concept — everything Meiva asks the platform scheduler (launchd /
 # crontab) to run on its behalf:
 #
 # - **health probe** — periodic cluster health check reporting observations
@@ -11,8 +11,6 @@
 # - **packages refresh** — the content channel's recurring pass (skills fast lane).
 # - **PR flow** — the daily merge-pipeline sampler, credential-gated to the
 #   production home whose machine holds `gh` (task #2139).
-# - **WAL-G tick** — the daily physical backup, present exactly while
-#   `MEIVA_WALG_CONFIG_FILE` is set.
 #
 # They share a shape worth keeping together: each is idempotent, each delegates the
 # platform branching to a ``base.os_*`` module, and each fails the converge loudly
@@ -118,36 +116,6 @@ def ensure_pr_flow_job(ctx: ConvergeCtx) -> None:
         machine=machine,
         today=today,
     )
-
-
-# meiva:note
-# Keep the daily WAL-G tick registered exactly while WAL-G is switched on.
-#
-# Key set: register (idempotent). Key unset: remove a job a previous
-# configuration left behind, so turning WAL-G off leaves no schedule that runs
-# a command which now does nothing. Both directions only act in the default
-# home (`owns_os_job_home`), and registration is a no-op where
-# `MEIVA_OS_JOBS_ENABLED` is off. Delegates to `base.host.system.walg_job`.
-def ensure_walg_job(ctx: ConvergeCtx) -> None:
-    from base.host.system.cron import mechanics
-    from base.host.system.walg_job import register_walg_job, unregister_walg_job
-
-    if not mechanics.owns_os_job_home("WAL-G tick", roots=ctx.job_roots):
-        return
-    if ctx.read_config().view.walg.walg_config_file is not None:
-        view = ctx.read_config().view
-        jobs_enabled = view.general.os_jobs_enabled
-        machine, today = heartbeat_inputs(ctx)
-        register_walg_job(
-            enabled=jobs_enabled,
-            backup_hour=view.services.backup_hour if jobs_enabled else None,
-            roots=ctx.job_roots,
-            host=ctx.host,
-            machine=machine,
-            today=today,
-        )
-    else:
-        unregister_walg_job(host=ctx.host, roots=ctx.job_roots)
 
 
 def ensure_cluster_autostart(ctx: ConvergeCtx) -> None:

@@ -5,7 +5,6 @@
 ]
 "meiva.tests.fixtures.sdk" = [
     "test_backup_scheduler_daemon.py",
-    "test_daemon_import_boundary.py",
     "test_daemon_shutdown.py",
     "test_operation_worker.py",
     "test_scheduler_shutdown.py",

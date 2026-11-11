@@ -255,7 +255,7 @@ Two more gateway-side daemons, one root each, no reader outside the package.
   that every slice field equals the live flat field and that `run()` hands the same
   slice to the loops.
 - Left for later: `services/backup/scheduler` (`backup_hour` is also read by
-  `services/backup/dump.py` and `base/host/system/walg_job.py`), and `memory_indexer` (read by ops and the CLI).
+  `services/backup/dump.py`), and `memory_indexer` (read by ops and the CLI).
 
 ### Computer use and memory search
 

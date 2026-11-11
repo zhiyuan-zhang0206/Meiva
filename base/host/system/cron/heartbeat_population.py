@@ -2,7 +2,7 @@
 # The declared population of generated OS jobs, and what this machine expects of it.
 #
 # Every generated job definition lands in one scheduler namespace, so the expectation set has to
-# be one list, not one file per job: `com.meiva.walg` is declared here even on a machine whose
+# be one list, not one file per job: `com.meiva.packages-refresh` is declared here even on a machine whose
 # configuration leaves it uninstalled, and a reader elsewhere can then compute both directions —
 # declared but not installed, installed but not declared — instead of only the second.
 #
@@ -16,7 +16,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date
 
-from base.host.system import logs_content, packages_content, pr_flow_content, walg_content
+from base.host.system import logs_content, packages_content, pr_flow_content
 from base.host.system.cron.heartbeat import (
     render_declaration,
     validate_exception,
@@ -52,12 +52,11 @@ POPULATION: tuple[tuple[str, HeartbeatDeclaration | None], ...] = (
     (logs_content.LABEL, logs_content.HEARTBEAT),
     (packages_content.LABEL, packages_content.HEARTBEAT),
     (pr_flow_content.LABEL, pr_flow_content.HEARTBEAT),
-    (walg_content.LABEL, walg_content.HEARTBEAT),
 )
 
 
 # meiva:note
-# The configuration that decides which of the four this machine should be running. The caller
+# The configuration that decides which of the three this machine should be running. The caller
 # reads it once and hands it in as values, so "does this machine expect this job" is answerable
 # without a converge.
 @dataclass(frozen=True, kw_only=True)
@@ -66,9 +65,7 @@ class MachinePolicy:
     owned_home: bool
     packages_refresh: bool
     packages_tick_seconds: int | None
-    walg_configured: bool
     production: bool
-    backup_hour: int
 
 
 def _declaration_of(job: str) -> HeartbeatDeclaration | None:
@@ -114,8 +111,6 @@ def expected_on_this_machine(policy: MachinePolicy, job: str) -> bool:
         return policy.packages_refresh
     if job == pr_flow_content.LABEL:
         return policy.production
-    if job == walg_content.LABEL:
-        return policy.walg_configured
     return job == logs_content.LABEL
 
 
@@ -123,8 +118,6 @@ def _schedule_of(policy: MachinePolicy, job: str) -> JobSchedule | None:
     if job == packages_content.LABEL:
         tick = policy.packages_tick_seconds
         return None if tick is None else packages_content.schedule(tick_seconds=tick)
-    if job == walg_content.LABEL:
-        return walg_content.schedule(backup_hour=policy.backup_hour)
     if job == pr_flow_content.LABEL:
         return pr_flow_content.schedule()
     return logs_content.schedule()

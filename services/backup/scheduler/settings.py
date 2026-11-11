@@ -39,15 +39,12 @@ class SchedulerSettings:
 
 # meiva:note
 # What one dump worker acts on: which plane it dumps (remote-managed or locally owned) and its
-# URL, the retention, and the off-site destination fields.
+# URL and the retention.
 @dataclass(frozen=True)
 class DumpSettings:
     is_remote: bool
     plane_url: str
     keep: int
-    offsite_endpoint: str
-    offsite_bucket: str
-    offsite_credentials_file: Path | None
 
     @classmethod
     def read(cls, config: ConfigBoot) -> DumpSettings:
@@ -56,7 +53,4 @@ class DumpSettings:
             is_remote=plane.is_remote,
             plane_url=plane.db_url,
             keep=services.backup_keep,
-            offsite_endpoint=services.backup_offsite_endpoint,
-            offsite_bucket=services.backup_offsite_bucket,
-            offsite_credentials_file=services.backup_offsite_credentials_file,
         )

@@ -374,7 +374,7 @@ def test_every_scheduled_job_is_tried_even_when_the_first_fails(default_home: Pa
 
     message = str(failed.value)
     assert message.startswith("could not remove scheduled jobs: health probe (")
-    for job in ("logs maintenance", "packages refresh", "PR flow", "WAL-G tick"):
+    for job in ("logs maintenance", "packages refresh", "PR flow"):
         assert f"{job} (launchctl unavailable)" in message
 
 
@@ -382,8 +382,8 @@ def test_the_crontab_is_read_once_per_cron_based_job_on_a_default_home(
     default_home: Path, tmp_path: Path
 ) -> None:
     # meiva:note
-    # On Linux without systemd the health probe, logs maintenance, packages refresh, PR flow and
-    # WAL-G tick are crontab entries; the boot job has nothing to ask the host.
+    # On Linux without systemd the health probe, logs maintenance, packages refresh and PR flow
+    # are crontab entries; the boot job has nothing to ask the host.
     #
     # The boot unit's locations are this test's own, because the host's are not the test's to read:
     # a machine that really has `/etc/systemd/system/meiva-boot.service` installed (this one does)
@@ -399,7 +399,7 @@ def test_the_crontab_is_read_once_per_cron_based_job_on_a_default_home(
         runtime_dir=tmp_path / "systemd-runtime",
     )
 
-    assert working.argvs == [("crontab", "-l")] * 5
+    assert working.argvs == [("crontab", "-l")] * 4
 
 
 # meiva:note

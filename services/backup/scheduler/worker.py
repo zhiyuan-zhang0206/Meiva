@@ -240,10 +240,6 @@ def execute(
     job: Job = kind
     match job:
         case "dump":
-            # meiva:note
-            # Imported where used: the scheduler daemon imports this module and must not carry
-            # the OSS SDK; this worker, which publishes off-site, loads it.
-            from services.backup.artifact import offsite
             from services.backup.dump import dump_source, run_backup
 
             stamp = request["now"]
@@ -259,11 +255,6 @@ def execute(
                     home=tree.home,
                 ),
                 keep=settings.keep,
-                offsite_target=offsite.configured_target(
-                    settings.offsite_endpoint,
-                    settings.offsite_bucket,
-                    settings.offsite_credentials_file,
-                ),
                 staging=work / "artifact",
                 env=env,
             )

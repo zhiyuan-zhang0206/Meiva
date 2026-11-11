@@ -34,12 +34,10 @@ def test_put_rejects_invalid_candidate_without_writing(configured_home: Path) ->
     assert env_path.read_bytes() == before
 
 
-def test_put_sets_the_offsite_backup_destination_beside_retired_keys(
-    configured_home: Path,
-) -> None:
-    """The daily dump's destination lands in one atomic PUT, the exact patch the
-    rollout runs through `meiva config set`. Keys a retired feature left in the
-    `.env` are inert: they neither block the write nor change how it validates."""
+# meiva:note
+# A cluster-pinned edit lands in one atomic PUT. Keys a retired feature left in the `.env` are
+# inert: they neither block the write nor change how it validates.
+def test_put_sets_a_cluster_pinned_key_beside_retired_keys(configured_home: Path) -> None:
     env_path = configured_home / ".env"
     env_path.write_text(
         env_path.read_text()
@@ -47,39 +45,30 @@ def test_put_sets_the_offsite_backup_destination_beside_retired_keys(
         + "MEIVA_PITR_STORE_BACKEND=oss\n"
         + "MEIVA_PITR_GCS_BUCKET=retired\n"
         + "MEIVA_PITR_SPOOL_HARD_BYTES=2362232013\n"
+        + "MEIVA_WALG_CONFIG_FILE=/retired/walg.json\n"
     )
-    credentials = configured_home / "oss-credentials.json"
     with gateway_test_client() as client:
-        response = client.put(
-            "/api/config",
-            json={
-                "backup_offsite_endpoint": "https://oss-cn-shanghai.aliyuncs.com",
-                "backup_offsite_bucket": "backups",
-                "backup_offsite_credentials_file": str(credentials),
-            },
-        )
+        response = client.put("/api/config", json={"backup_keep": 5})
     assert response.status_code == 200, response.text
     body = response.json()
     assert body["applied"] is True
     assert "gateway" in body["restart_required"]
     aliases = unit_env_aliases()
-    assert aliases["MEIVA_BACKUP_OFFSITE_ENDPOINT"] == "https://oss-cn-shanghai.aliyuncs.com"
-    assert aliases["MEIVA_BACKUP_OFFSITE_BUCKET"] == "backups"
-    assert aliases["MEIVA_BACKUP_OFFSITE_CREDENTIALS_FILE"] == str(credentials)
-    assert aliases["MEIVA_PITR_STORE_BACKEND"] == "oss"  # the retired keys stay as they were
+    assert aliases["MEIVA_BACKUP_KEEP"] == "5"
+    assert aliases["MEIVA_PITR_STORE_BACKEND"] == "oss"
+    assert aliases["MEIVA_WALG_CONFIG_FILE"] == "/retired/walg.json"
 
 
-def test_put_unsets_the_offsite_backup_destination(configured_home: Path) -> None:
-    """The destination is removed through the same official path."""
-    runtime_config.write_fields(
-        {"backup_offsite_endpoint": "https://oss-cn-shanghai.aliyuncs.com"}, set()
-    )
+# meiva:note
+# A key is removed through the same official path.
+def test_put_unsets_a_cluster_pinned_key(configured_home: Path) -> None:
+    runtime_config.write_fields({"backup_keep": 3}, set())
 
     with gateway_test_client() as client:
-        response = client.put("/api/config", json={"backup_offsite_endpoint": None})
+        response = client.put("/api/config", json={"backup_keep": None})
 
     assert response.status_code == 200, response.text
-    assert "MEIVA_BACKUP_OFFSITE_ENDPOINT" not in unit_env_aliases()
+    assert "MEIVA_BACKUP_KEEP" not in unit_env_aliases()
 
 
 # meiva:note

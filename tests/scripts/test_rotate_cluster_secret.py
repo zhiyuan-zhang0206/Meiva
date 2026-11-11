@@ -143,7 +143,6 @@ def backups(tmp_path: Path, db_url: str) -> Callable[[], Path]:
             tree=BackupTree(current_home),
             db_url="dbname=meiva",
             keep=settings.services.backup_keep,
-            offsite_target=None,
             staging=staging,
             env=dict(os.environ),
         )

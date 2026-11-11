@@ -109,7 +109,6 @@ def test_run_backup_narrates_both_silent_stages_through_progress(
         tree=tree,
         db_url=db_url,
         keep=7,
-        offsite_target=None,
         progress=lines.append,
         env=dict(os.environ),
     )
@@ -189,7 +188,6 @@ def test_run_backup_holds_the_lock_while_its_stages_run(tmp_path: Path, db_url: 
         tree=tree,
         db_url=db_url,
         keep=7,
-        offsite_target=None,
         progress=probe,
         env=dict(os.environ),
     )

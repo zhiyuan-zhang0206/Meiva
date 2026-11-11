@@ -44,7 +44,6 @@ from cli.commands.converge.os_jobs import (
     ensure_logs_maintenance,
     ensure_packages_refresh_job,
     ensure_pr_flow_job,
-    ensure_walg_job,
 )
 from cli.commands.converge.ownership_preflight import (
     ensure_ownership_preflight as _ensure_ownership_preflight,
@@ -89,7 +88,7 @@ from cli.commands.converge.steps import (
     retire_install_registry_trust_key,
 )
 from cli.commands.converge.telemetry_token import ensure_telemetry_token_step
-from cli.commands.converge.walg import converge_walg
+from cli.commands.converge.walg_retirement import retire_walg
 from cli.commands.data_plane.pgbouncer import ensure_pgbouncer_step
 from cli.commands.extensions.external_skills import converge_external_agent_skill
 from cli.commands.observability.lgtm_native import ensure_lgtm_native_step
@@ -447,10 +446,10 @@ CONVERGE_STEPS: tuple[ConvergeStep, ...] = (
     ConvergeStep(
         "PostgreSQL 17 + pgvector runtime", ensure_pg_binaries_step, roles=frozenset({"gateway"})
     ),
-    # WAL archiving, when MEIVA_WALG_CONFIG_FILE switches it on: the pinned binary, a
-    # validated configuration and the pinned key fingerprint, all before Postgres
-    # starts. A no-op while the key is unset.
-    ConvergeStep("WAL-G archiving", converge_walg, roles=frozenset({"gateway"})),
+    # meiva:note
+    # Retire what WAL-G archiving left on a deployed host (daily job, state, binary), before
+    # Postgres starts. A no-op on a host that never ran it.
+    ConvergeStep("retire WAL-G archiving", retire_walg, roles=frozenset({"gateway"})),
     # Reconcile the one DB URL (MEIVA_DB_URL) with the pooler toggle + preflight the
     # PgBouncer binary when the pooler is enabled (gateway box's data plane).
     ConvergeStep(
@@ -594,14 +593,6 @@ CONVERGE_STEPS: tuple[ConvergeStep, ...] = (
     ConvergeStep(
         "PR flow sampler job",
         ensure_pr_flow_job,
-        requires_unit_config=True,
-    ),
-    # The WAL-G daily tick: registered while MEIVA_WALG_CONFIG_FILE is set, removed
-    # when it is not. The gateway owns the Postgres it backs up.
-    ConvergeStep(
-        "WAL-G backup job",
-        ensure_walg_job,
-        roles=frozenset({"gateway"}),
         requires_unit_config=True,
     ),
     ConvergeStep(

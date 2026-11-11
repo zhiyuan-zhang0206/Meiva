@@ -203,7 +203,7 @@ def download_with_opener(
         try:
             # meiva:note
             # `url` comes from the pinned HTTPS artifact tables (`PG_ARTIFACTS`,
-            # `PGVECTOR_ARTIFACTS`, `WALG_ARTIFACTS`), and every downloaded blob
+            # `PGVECTOR_ARTIFACTS`), and every downloaded blob
             # is SHA-256 verified before extraction or execution.
             request = urllib.request.Request(url, headers=headers or {})  # noqa: S310
             with open_url(request, 120.0) as resp:

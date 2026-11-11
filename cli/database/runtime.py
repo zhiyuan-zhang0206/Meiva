@@ -156,7 +156,7 @@ class CommandRuntime:
     terminal: Terminal
     # meiva:note
     # The temporary space of this invocation: every command that mints a directory for one call
-    # (`meiva backup walg check`'s probe files, a fleet update's throwaway home, an extension
+    # (a fleet update's throwaway home, an extension
     # clone's parent) takes it here and passes it down, so no command reads where the host keeps
     # temporary space and a test can hand in a `FakeScratch` over its own directory.
     scratch: ScratchSpace

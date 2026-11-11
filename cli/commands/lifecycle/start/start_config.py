@@ -16,8 +16,7 @@ __all__ = ["StartConfig", "read_start_config"]
 
 
 # meiva:note
-# The `general`, `gateway`, `services` and data-plane fields a start reads. The WAL-G configuration
-# file is one of the data plane's (`data_plane.walg_config_file`) and is carried nowhere else.
+# The `general`, `gateway`, `services` and data-plane fields a start reads.
 @dataclass(frozen=True)
 class StartConfig:
     service_path: str

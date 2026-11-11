@@ -12,7 +12,7 @@ from pathlib import Path
 import pytest
 
 from base.host.proc import run_bounded
-from base.host.system import logs_content, packages_content, pr_flow_content, walg_content
+from base.host.system import logs_content, packages_content, pr_flow_content
 from base.host.system.cron import heartbeat_population
 from base.host.system.job_values import HeartbeatRender, JobPaths, JobRoots, JobSchedule
 
@@ -85,19 +85,11 @@ def _definitions(kind: str, paths: JobPaths) -> tuple[str, str]:
                 ),
                 pr_flow_content.cron_entry(paths, heartbeat=heartbeat),
             )
-        case "walg":
-            heartbeat = _heartbeat(walg_content.LABEL, paths, walg_content.schedule(backup_hour=23))
-            return (
-                walg_content.launchd_plist_content(
-                    paths=paths, path_env=path_env, backup_hour=23, heartbeat=heartbeat
-                ),
-                walg_content.cron_entry(paths, backup_hour=23, heartbeat=heartbeat),
-            )
         case _:
             raise ValueError(kind)
 
 
-@pytest.mark.parametrize("kind", ["logs", "packages", "pr-flow", "walg"])
+@pytest.mark.parametrize("kind", ["logs", "packages", "pr-flow"])
 @pytest.mark.parametrize("scheduler", ["launchd", "cron"])
 def test_generated_job_delivers_real_argv_and_environment(
     tmp_path: Path, kind: str, scheduler: str
@@ -128,7 +120,6 @@ def test_generated_job_delivers_real_argv_and_environment(
         "logs": [["logs", "maintenance"]],
         "packages": [["packages", "refresh", "--from-job"]],
         "pr-flow": [[]],
-        "walg": [["backup", "walg", "run"]],
     }
     assert records == [{"argv": args, "home": str(paths.roots.home)} for args in expected[kind]]
 

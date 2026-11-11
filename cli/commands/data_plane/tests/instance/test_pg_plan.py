@@ -14,7 +14,6 @@ import pytest
 
 from cli.commands.data_plane.instance.pg_plan import (
     AwaitReachableBind,
-    CheckArchive,
     EnsureData,
     LaunchPostmaster,
     PgIdentity,
@@ -81,7 +80,6 @@ def _launch(**changes: object) -> PgLaunch:
         max_connections=500,
         tz_args=("-c", "timezone=UTC"),
         shm_args=("-c", "shared_memory_type=mmap"),
-        archive_args=(),
     )
     return dataclasses.replace(base, **changes)
 
@@ -101,16 +99,13 @@ def test_listen_addresses_follow_the_declared_bind_addresses_in_order() -> None:
     assert "listen_addresses=127.0.0.1,10.0.0.5" in argv
 
 
-def test_pinned_settings_and_archive_arguments_close_the_command_line() -> None:
-    archive = ("-c", "archive_mode=on", "-c", "archive_command=wal-g wal-push %p")
-    argv = pg_launch_argv(_launch(archive_args=archive))
-    assert argv[-len(archive) :] == list(archive)
-    assert argv.index("timezone=UTC") < argv.index("shared_memory_type=mmap")
-    assert argv.index("shared_memory_type=mmap") < argv.index("archive_mode=on")
+def test_pinned_settings_close_the_command_line() -> None:
+    argv = pg_launch_argv(_launch())
+    assert argv[-4:] == ["-c", "timezone=UTC", "-c", "shared_memory_type=mmap"]
 
 
-def test_wal_g_off_adds_no_archive_arguments() -> None:
-    assert not [arg for arg in pg_launch_argv(_launch()) if arg.startswith("archive_")]
+def test_the_launch_never_names_archiving() -> None:
+    assert not [arg for arg in pg_launch_argv(_launch()) if "archive" in arg]
 
 
 def test_a_fresh_single_box_start_initializes_authenticates_launches_and_proves() -> None:
@@ -119,7 +114,6 @@ def test_a_fresh_single_box_start_initializes_authenticates_launches_and_proves(
         WriteAuthentication(),
         LaunchPostmaster(),
         ProveAuthentication(),
-        CheckArchive(),
     )
 
 
@@ -130,14 +124,13 @@ def test_a_fresh_start_on_a_declared_reach_waits_for_the_address_before_launchin
         AwaitReachableBind("10.0.0.5"),
         LaunchPostmaster(),
         ProveAuthentication(),
-        CheckArchive(),
     )
 
 
 def test_a_retained_postmaster_never_waits_for_an_address_it_already_holds() -> None:
     steps = plan_pg_start(owner_retained=True, off_box_host="10.0.0.5")
     assert not [step for step in steps if isinstance(step, AwaitReachableBind)]
-    assert steps[-3:] == (LaunchPostmaster(), ProveAuthentication(), CheckArchive())
+    assert steps[-2:] == (LaunchPostmaster(), ProveAuthentication())
 
 
 def test_authentication_is_written_before_anything_serves() -> None:

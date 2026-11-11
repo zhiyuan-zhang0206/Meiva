@@ -28,11 +28,10 @@ from cli.commands.converge.os_jobs import (
     ensure_logs_maintenance,
     ensure_packages_refresh_job,
     ensure_pr_flow_job,
-    ensure_walg_job,
 )
 from cli.commands.converge.spec import ConvergeCtx
 
-_LABELS = ("health-probe", "autostart", "logs-maintenance", "packages-refresh", "walg")
+_LABELS = ("health-probe", "autostart", "logs-maintenance", "packages-refresh")
 
 
 # meiva:note
@@ -44,8 +43,6 @@ def _scheduler_ctx(
         ("os_jobs_enabled", True),
         ("refresh_enabled", True),
         ("refresh_tick_seconds", 1200),
-        ("backup_hour", 21),
-        ("walg_config_file", default_home / "walg.json"),
     ]:
         ctx.config.set_field(name, value)
     host = fake_host(
@@ -83,7 +80,6 @@ def _run_formal_steps(ctx: ConvergeCtx, *, autostart: bool = True) -> None:
         ensure_logs_maintenance,
         ensure_packages_refresh_job,
         ensure_pr_flow_job,
-        ensure_walg_job,
     ):
         if step is not None:
             step(ctx)
@@ -115,17 +111,12 @@ def test_the_formal_steps_follow_the_owners_live_policy_on_macos(
     _run_formal_steps(mac)
     initial = {label: _plist(default_home, label).read_text() for label in _LABELS}
     assert "<integer>1200</integer>" in initial["packages-refresh"]
-    # meiva:note
-    # the hour 21 backup, in the job's own time
-    assert "<integer>0</integer>" in initial["walg"]
 
     mac.config.set_field("refresh_tick_seconds", 1800)
-    mac.config.set_field("backup_hour", 23)
     _run_formal_steps(mac)
 
     changed = {label: _plist(default_home, label).read_text() for label in _LABELS}
     assert "<integer>1800</integer>" in changed["packages-refresh"]
-    assert "<integer>2</integer>" in changed["walg"]
     # meiva:note
     # nothing it reads changed
     assert changed["health-probe"] == initial["health-probe"]
@@ -136,10 +127,6 @@ def test_the_formal_steps_follow_the_owners_live_policy_on_macos(
     assert _plist(default_home, "packages-refresh").read_text() == changed["packages-refresh"], (
         "with OS jobs switched off the steps register nothing"
     )
-
-    mac.config.set_field("walg_config_file", None)
-    ensure_walg_job(mac)
-    assert not _plist(default_home, "walg").exists(), "clearing the key retires the existing job"
 
 
 @pytest.mark.parametrize("refresh_enabled", [True, False])
@@ -171,15 +158,7 @@ def test_the_crontab_jobs_are_scheduled_and_follow_the_owners_live_policy_on_lin
     run()
     assert [len(lines(m)) for m in ("# meiva-health-probe", "# meiva-logs-maintenance")] == [1, 1]
     assert lines("# meiva-packages-refresh")[0].startswith("*/20 ")
-    assert lines("# meiva-walg")[0].startswith("25 0 ")
 
     linux.config.set_field("refresh_tick_seconds", 1800)
-    linux.config.set_field("backup_hour", 23)
     run()
     assert lines("# meiva-packages-refresh")[0].startswith("*/30 ")
-    assert lines("# meiva-walg")[0].startswith("25 2 ")
-    assert len(lines("# meiva-walg")) == 1, "re-registering replaces the job"
-
-    linux.config.set_field("walg_config_file", None)
-    ensure_walg_job(linux)
-    assert lines("# meiva-walg") == [], "clearing the key retires the existing job"

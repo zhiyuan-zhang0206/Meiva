@@ -45,7 +45,6 @@ def test_interrupted_snapshot_dump_leaves_no_plaintext(tree: BackupTree, db_url:
             tree=tree,
             db_url=url,
             keep=7,
-            offsite_target=None,
             progress=interrupt,
             progress_interval_s=0.2,
             env=dict(os.environ),
@@ -108,7 +107,6 @@ def test_every_backup_run_sweeps_closed_intermediates_from_the_backup_directory(
         tree=tree,
         db_url=db_url,
         keep=7,
-        offsite_target=None,
         staging=staging,
         env=dict(os.environ),
     )

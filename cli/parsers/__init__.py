@@ -21,7 +21,6 @@
 # - ``cli.commands.agents.impersonation_parsers`` — external sessions and relays
 # - ``logs`` — local log rotation and retention
 # - ``jobs`` — the heartbeat expectation set of the generated OS jobs
-# - ``backup`` — WAL-G physical backups
 # - ``cli.commands.extensions.parsers`` — plugins, skill, MCP, memory and packages
 # - ``management`` — config + presets + schedules
 
@@ -36,7 +35,6 @@ from cli.commands.extensions.parsers.mcp import add_mcp_parser, add_memory_parse
 from cli.commands.extensions.parsers.packages import add_packages_parser
 from cli.commands.extensions.parsers.plugins import add_plugins_parser, add_skill_parser
 from cli.parsers.auth import add_auth_parser
-from cli.parsers.backup import add_backup_parser
 from cli.parsers.cluster import add_cluster_parser
 from cli.parsers.computer import add_computer_parser
 from cli.parsers.harness import add_harness_parser
@@ -104,7 +102,6 @@ def build_parser(
     add_tasks_parser(sub)
     add_jobs_parser(sub)
     add_logs_parser(sub)
-    add_backup_parser(sub)
     add_agents_parser(sub)
     add_config_parser(sub)
     add_schedules_parser(sub)

@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from base.host.system import logs_job, packages_job, pr_flow_job, walg_job
+from base.host.system import logs_job, packages_job, pr_flow_job
 from base.host.system.cron import health_job, mechanics
 from base.host.system.cron.heartbeat import HeartbeatRender, JobSchedule
 from base.host.system.hostport import Host
@@ -21,7 +21,6 @@ _MARKERS = (
     "# meiva-pr-flow",
     "# meiva-health-probe",
 )
-_WALG_MARKER = "# meiva-walg"
 _OPERATOR_MEIVA = "/home/operator/.meiva/source/.venv/bin/meiva"
 
 
@@ -75,17 +74,6 @@ def _register_all(crontab: FakeCrontab, roots: JobRoots) -> None:
         )
         == 0
     )
-    assert (
-        walg_job.register_linux(
-            roots=roots,
-            backup_hour=3,
-            host=host,
-            heartbeat=_heartbeat(
-                walg_job.content.LABEL, roots, walg_job.content.schedule(backup_hour=3)
-            ),
-        )
-        == 0
-    )
 
 
 def test_register_leaves_exactly_one_line_per_job(crontab: FakeCrontab, default_home: Path) -> None:
@@ -94,9 +82,9 @@ def test_register_leaves_exactly_one_line_per_job(crontab: FakeCrontab, default_
         JobRoots(home=default_home / ".meiva", repo=default_home, user_home=default_home),
     )
 
-    assert len(crontab.lines) == 6
+    assert len(crontab.lines) == 5
     assert _UNRELATED in crontab.lines
-    for marker in (*_MARKERS, _WALG_MARKER):
+    for marker in _MARKERS:
         assert len([line for line in crontab.lines if marker in line]) == 1, marker
         assert len([line for line in crontab.lines if line.endswith(marker)]) == 1, marker
 
@@ -130,7 +118,6 @@ def test_unregister_removes_the_meiva_lines_and_only_them(
         logs_job.unregister_linux,
         packages_job.unregister_linux,
         pr_flow_job.unregister_linux,
-        walg_job.unregister_linux,
     ):
         assert unregister(host=host, roots=roots) == 0
 

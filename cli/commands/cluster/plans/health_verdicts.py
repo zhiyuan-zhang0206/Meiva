@@ -108,8 +108,6 @@ class HealthReadings:
     population: PopulationReading
     schema_skew: bool
     service_failures: tuple[str, ...]
-    walg_failure: str | None
-    walg_enabled: bool
     editable_violations: tuple[str, ...]
     source_tree: SourceTreeReading
     provider: tuple[ProviderCheck, ...]
@@ -220,15 +218,6 @@ def _services(failing: tuple[str, ...]) -> CheckResult:
 
 
 # meiva:note
-# Alert-only: a stuck or misconfigured archiver is fixed by repairing the archive path, not by
-# rolling code back. Silent unless WAL-G is switched on.
-def _walg(failure: str | None, *, enabled: bool) -> CheckResult | None:
-    if failure is not None:
-        return _failed("walg_archive", f"FAIL: {failure}", FailureClass.ALERT_ONLY)
-    return _ok("walg_archive", "  ✓ WAL archiving") if enabled else None
-
-
-# meiva:note
 # Alert-only: the 2026-08-27 outage class (a worktree uv sync under a polluted VIRTUAL_ENV
 # repointed the prod venv at disposable source), but rolling back code does not fix a venv
 # record. Explicit installation repair owns recovery; this probe and ordinary startup never
@@ -283,7 +272,6 @@ def _provider(checks: tuple[ProviderCheck, ...]) -> tuple[CheckResult, ...]:
 
 def judge_health(readings: HealthReadings, rules: HealthRules) -> tuple[CheckResult, ...]:
     disk = _disk_failure(readings, rules)
-    walg = _walg(readings.walg_failure, enabled=readings.walg_enabled)
     return (
         *((disk,) if disk is not None else ()),
         _gateway(readings.gateway),
@@ -303,7 +291,6 @@ def judge_health(readings: HealthReadings, rules: HealthRules) -> tuple[CheckRes
         ),
         _services(readings.service_failures),
         *((_ok("disk_usage", "  ✓ disk usage"),) if disk is None else ()),
-        *((walg,) if walg is not None else ()),
         _editable(readings.editable_violations),
         _source_tree(readings.source_tree),
         *_provider(readings.provider),

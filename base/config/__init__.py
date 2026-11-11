@@ -252,9 +252,6 @@ if TYPE_CHECKING:
         ToUserSettings as ToUserSettings,
     )
     from base.config._full import (
-        WalgSettings as WalgSettings,
-    )
-    from base.config._full import (
         WebSettings as WebSettings,
     )
     from base.config._full import (

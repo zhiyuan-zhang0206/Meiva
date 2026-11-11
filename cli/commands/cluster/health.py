@@ -2,7 +2,7 @@
 # Observe cluster health from the CLI or an OS-scheduled probe.
 #
 # Checks cover gateway liveness, agent population, schema, selected services, Redis relay, disk
-# usage, WAL archiving, editable-install records, source integrity, and provider account health.
+# usage, editable-install records, source integrity, and provider account health.
 # Any failed check returns unhealthy.
 #
 # Every check runs on every round (a failing check never stops the others) and every failed
@@ -33,7 +33,6 @@ from cli.commands.cluster.plans.health_verdicts import (
     HealthRules,
     judge_health,
 )
-from cli.commands.data_plane.config import data_plane_config_from_boot
 from cli.database.runtime import CommandRuntime
 
 # meiva:note
@@ -123,8 +122,7 @@ def run_health_probe(
 # the host: the gateway's address, the agent floor (`MEIVA_HEALTH_PROBE_AGENT_MIN`: a test/QA
 # cluster with no resident agents sets it to 0 or the check otherwise reports a permanent
 # population outage), the prod checkout (every unit runs from its own `<home>/source`) and its
-# allowlist, the data plane's configuration (the WAL-G configuration file is read from it and
-# nowhere else), the volume the disk check measures (macOS keeps user data on its own volume) and
+# allowlist, the volume the disk check measures (macOS keeps user data on its own volume) and
 # whether this checkout may drive the probe at all. The user's home, the checkout and the
 # platform are the invocation's, read once by the entry into `command`.
 def health_options(command: CommandRuntime, *, check_schema: bool) -> HealthOptions:
@@ -139,7 +137,6 @@ def health_options(command: CommandRuntime, *, check_schema: bool) -> HealthOpti
         provider=provider_guard_config(command.config),
         source_root=command.home / "source",
         editable_allowed_roots=(command.session.user_home / "Meiva",),
-        data_plane=data_plane_config_from_boot(command.config),
         data_volume=_MACOS_DATA_VOLUME if command.host.platform.system == "darwin" else Path("/"),
         checkout_refusal=home_checkout_error(command.checkout, home=command.home),
     )

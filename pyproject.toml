@@ -67,7 +67,7 @@ dependencies = [
     "claude-agent-sdk>=0.2.168,<0.3",
     # --- Common runtime libraries ---
     # Imported directly by first-party code (Pillow, requests, mdit,
-    # cryptography, websockets, oss2, trafilatura, feedparser) and
+    # cryptography, websockets, trafilatura, feedparser) and
     # invoked by built-in skills (yt-dlp).
     # Heavy ML/numerical libraries are excluded outright: torch / tensorflow / jax /
     # transformers / opencv / numba / dask.
@@ -77,7 +77,6 @@ dependencies = [
     "markdown-it-py>=4.0",  # Markdown document reference parsing
     "cryptography>=42.0.0",  # crypto primitives
     "websockets>=15.0.1",
-    "oss2>=2.19.1",
     "trafilatura>=2.1.0",  # main-content extraction (web-sources skill)
     "feedparser>=6.0.12",  # RSS/Atom parsing (web-sources/rss skill)
     "yt-dlp>=2026.3.17",  # YouTube/media metadata, captions, and audio extraction
@@ -1027,9 +1026,6 @@ root = "services/backup/scheduler/tests"
 
 [[tool.pyright.executionEnvironments]]
 root = "services/backup/tests"
-
-[[tool.pyright.executionEnvironments]]
-root = "services/backup/walg/tests"
 
 [[tool.pyright.executionEnvironments]]
 root = "services/derived/insights/run_timeline/tests"

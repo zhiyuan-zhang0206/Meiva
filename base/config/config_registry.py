@@ -86,7 +86,6 @@ DOMAIN_MODELS: tuple[tuple[str, str, str | type[object] | _DomainModelLike, str]
     ("observability", "Observability", "ObservabilitySettings", "common"),
     ("display", "Display", "DisplaySettings", "common"),
     ("packages", "Packages", "PackagesSettings", "agent-runner"),
-    ("walg", "WAL-G backup", "WalgSettings", "gateway"),
     ("general", "General", "GeneralSettings", "common"),
 )
 
@@ -108,7 +107,6 @@ def _model_classes() -> dict[str, type[BaseModel]]:
     from base.config.domains.sandbox import SandboxSettings
     from base.config.domains.services.settings import ServiceSettings
     from base.config.domains.storage.data_plane import DataPlaneSettings
-    from base.config.domains.storage.walg import WalgSettings
     from base.config.domains.to_user import ToUserSettings
     from base.config.domains.transfer import TransferSettings
     from base.config.domains.web import WebSettings
@@ -128,7 +126,6 @@ def _model_classes() -> dict[str, type[BaseModel]]:
         "ObservabilitySettings": ObservabilitySettings,
         "DisplaySettings": DisplaySettings,
         "PackagesSettings": PackagesSettings,
-        "WalgSettings": WalgSettings,
         "GeneralSettings": GeneralSettings,
     }
 

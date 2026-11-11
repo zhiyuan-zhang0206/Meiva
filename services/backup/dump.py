@@ -14,19 +14,15 @@
 # UTC timestamps. Retention orders those timestamps independently of host DST.
 #
 # Local dumps guard against bad migrations / accidental deletes / DB
-# corruption. `run_backup` is `dump -> encrypt -> optional off-site publish ->
-# prune`. The best-effort off-site leg publishes the encrypted artifact to OSS
-# iff absent (`services.backup.artifact.offsite`); an unconfigured,
-# unavailable or failing store keeps the local artifact, and nothing here deletes
-# a remote object (see `future/infra/data/pg-backup.md`). The dump uses PostgreSQL's
-# compressed custom format.
+# corruption. `run_backup` is `dump -> encrypt -> prune`; the dump never leaves
+# this machine (see `docs/decisions/data/database/2026-11-12-no-offsite-postgres-backup.md`).
+# The dump uses PostgreSQL's compressed custom format.
 #
 # The LangGraph checkpoint tables (`checkpoint_blobs`, `checkpoints`, and
 # `checkpoint_writes`) are the only copy of conversation history: messages, tool
 # outputs, and compaction segments all live there. Every daily dump includes them.
-# The custom dump is encrypted before publication, so local and optional off-site
-# artifacts contain the complete recoverable database without storing plaintext
-# conversation data at rest.
+# The custom dump is encrypted before publication, so the local artifact contains the
+# complete recoverable database without storing plaintext conversation data at rest.
 #
 # Only files matching `services.backup.artifact.names` are managed (counted
 # for due-ness, pruned); a hand-made dump parked in the same directory is never
@@ -36,10 +32,8 @@
 
 from __future__ import annotations
 
-import argparse
 import logging
 import subprocess
-import sys
 import threading
 import time
 from collections.abc import Callable, Generator, Mapping
@@ -56,14 +50,12 @@ from base.cluster.dataplane.pg_tools import has_pg_tool as has_pg_tool
 from base.cluster.dataplane.pg_tools import pg_tool
 from base.db import Database, connect_url
 from base.db.rows import query_one
-from base.host.boundary.options import options
 from base.host.private_storage import ensure_private_file
 from base.native_process.os_platform import LockTimeoutError, file_lock
 from base.paths.private_dir import ensure_private_dir
 from services.backup.artifact import passphrase as backup_passphrase
 from services.backup.artifact.intermediates import sweep_closed_partials
-from services.backup.artifact.names import DUMP_NAME_RE, REMOTE_ROOT, stamp_utc
-from services.backup.artifact.offsite_plan import OssTarget
+from services.backup.artifact.names import DUMP_NAME_RE, stamp_utc
 from services.backup.dump_lines import beat_line, size_breakdown, started_line
 from services.backup.dump_plan import (
     DumpFiles,
@@ -286,8 +278,7 @@ def _narrated_wait(
 # and leaves publication and pruning to that operation's controller.
 #
 # `timeout_s` lets bounded callers use a tighter ceiling than the daily
-# backup default. `offsite_target=None` keeps the completed artifact local, so
-# off-site network latency cannot extend the run.
+# backup default.
 #
 # `progress` narrates the stages that may run for minutes without writing
 # anything (`pg_dump` and the encryption pass) — see `run_with_progress`.
@@ -297,7 +288,6 @@ def run_backup(
     tree: BackupTree,
     db_url: str,
     keep: int,
-    offsite_target: OssTarget | None,
     staging: Path | None = None,
     timeout_s: float = DUMP_TIMEOUT_S,
     progress: _ProgressSink | None = None,
@@ -319,14 +309,6 @@ def run_backup(
             bound=_Bound(timeout_s, progress, progress_interval_s),
             env=env,
         )
-        if offsite_target is not None:
-            # Imported where used: the scheduler daemon imports this module for
-            # meiva:note
-            # its schedule and must not carry the OSS SDK; its backup worker, which
-            # reaches this line, loads it.
-            from services.backup.artifact import offsite
-
-            offsite.publish(target, offsite_target)
         if staging is None:
             _log_written(target, prune(target.parent, keep=keep))
         return target
@@ -487,55 +469,3 @@ def _dump_and_encrypt(
     finally:
         with suppress(OSError):
             key_file.unlink(missing_ok=True)
-
-
-# meiva:note
-# The publisher's command line, parsed.
-@dataclass(frozen=True)
-class _PublishArguments:
-    publish_offsite: Path | None
-    offsite_root: str
-
-
-def run_offsite_publisher(argv: list[str]) -> int:
-    """Run the detached, best-effort off-site backup publisher."""
-    # Standalone runs leave the module's INFO records to lastResort (WARNING+
-    # only): without this the store-verified publish ACK never appears, so a
-    # successful upload reads as a silent death (2026-09-16 misdiagnosis).
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-    )
-    parser = argparse.ArgumentParser(prog="python -m services.backup.dump")
-    parser.add_argument("--publish-offsite", type=Path, metavar="ARTIFACT")
-    parser.add_argument(
-        "--offsite-root",
-        default=REMOTE_ROOT,
-        metavar="PREFIX",
-        help=f"object-name prefix of the off-site namespace (default {REMOTE_ROOT})",
-    )
-    args = options(parser.parse_args(argv), _PublishArguments)
-    if args.publish_offsite is None:
-        parser.error("--publish-offsite is required")
-    artifact = args.publish_offsite
-    if not artifact.is_absolute():
-        parser.error("--publish-offsite ARTIFACT must be an absolute path")
-    if not args.offsite_root or args.offsite_root != args.offsite_root.strip("/"):
-        parser.error("--offsite-root must be a non-empty prefix without surrounding slashes")
-    from base.config import ConfigBoot
-    from services.backup.artifact import offsite  # the SDK loads only on this entry
-
-    config = ConfigBoot()
-    config.boot()
-    services = config.view.services
-    target = offsite.configured_target(
-        services.backup_offsite_endpoint,
-        services.backup_offsite_bucket,
-        services.backup_offsite_credentials_file,
-    )
-    offsite.publish(artifact, target, root=args.offsite_root)
-    return 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(run_offsite_publisher(sys.argv[1:]))

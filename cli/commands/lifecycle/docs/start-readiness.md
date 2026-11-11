@@ -70,7 +70,7 @@ roster executes, installs a provisionable group through `scripts/provision/*`
 (Homebrew on macOS, apt on Debian/Ubuntu), re-probes, and refuses the start
 before any service launch when something is still missing — naming the tool and
 the command that fixes the host. `crontab` and `systemctl` are part of that
-table, so a host without `cron` no longer dies at the WAL-G job step in the
+table, so a host without `cron` no longer dies at a job-registration step in the
 middle of converge. [The dependency table](start-host-dependencies.md)
 lists every row, its owner and the behavior when it is absent.
 

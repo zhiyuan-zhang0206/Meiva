@@ -98,28 +98,6 @@ All four `to_regclass` values must be non-null. The counts must be plausible
 for the artifact's backup time. Finish with the automated drill when a readable
 checkpoint conversation must be proved.
 
-## Off-site encrypted copy
-
-After local encryption succeeds and before local pruning, the gateway publishes
-the `.dump.enc` artifact to Aliyun OSS under the `meiva-logical/` namespace
-(`services/backup/artifact/offsite.py`). It needs
-`MEIVA_BACKUP_OFFSITE_ENDPOINT`, `MEIVA_BACKUP_OFFSITE_BUCKET` and
-`MEIVA_BACKUP_OFFSITE_CREDENTIALS_FILE` (set through `meiva config set`); a home
-without all three skips the leg with one INFO log line. The publish is
-if-absent (server-enforced `x-oss-forbid-overwrite` on completion; the bucket
-must stay versioning-off) and verified (per-part `Content-MD5` plus the
-multipart ETag chain). It is optional: a failed publish or an unusable
-credentials file logs the cause but never discards the local artifact — the
-local copy remains the primary. Success is judged by the destination, not by
-silence: the log line `[backup] off-site published
-meiva-logical/<name> (size=..., pin=..., checksum=md5:...)` and the object itself,
-its size equal to the local `.dump.enc`. To publish one existing artifact by
-hand: `python -m services.backup.dump --publish-offsite /abs/path/<name>.dump.enc`
-(`--offsite-root PREFIX` publishes under another prefix, for a scratch
-check). Only encrypted artifacts reach the bucket, so its access model does
-not expose database contents. Nothing here deletes a remote object; remote expiry
-belongs to the bucket's lifecycle policy.
-
 ## Migration rollback snapshots
 
 Tables named `*_backfill_*` are finite migration recovery snapshots, not
@@ -131,5 +109,5 @@ the owner dial the scheduled dump uses (`services.backup.dump_source()`) into
 `$MEIVA_HOME/backups/<table>.dump` (mode 0600), confirm it with
 `pg_restore --list` (the listing must name `TABLE DATA public <table>`), and
 keep the file until the migration is verified in production. The dump is not
-encrypted and is not published off-site; delete it once the snapshot has no
+encrypted and stays on this machine; delete it once the snapshot has no
 further use.
