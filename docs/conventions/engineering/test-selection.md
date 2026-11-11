@@ -543,13 +543,14 @@ minutes, `#8339` for 13 — the second one was a combination neither pull reques
 
 ### Where the full suite runs
 
-Two scheduled workflows run the whole population on `main`, each for a different question:
+Scheduled workflows run the whole population on `main`, each for a different question:
 
 | Where | When | What it answers |
 |---|---|---|
 | `.github/workflows/release-gate.yml` | every six hours (`17 */6 * * *`), and on demand before a wave; skipped when `channel/latest` already points at `main` HEAD | may this tree be called `vX.Y.Z` — and, as a side effect, was `main` green |
 | `.github/workflows/refresh-test-durations.yml` (nightly, main) | daily (`30 19 * * *`) | was main green last night — the `verdict` job reads junit only, so a retried measurement cannot wash a first-attempt failure green |
 | `.github/workflows/ci.yml` (nightly, main) | daily (`0 18 * * *` = 02:00 +08) | runs the same full matrix a manual dispatch does, so a merge that landed between two gates is verified the same night; `main-red-watch` turns its red runs into a card |
+| `.github/workflows/random-order.yml` (nightly, main) | daily (`0 21 * * *`) | do any tests only pass in the order the fixed runs give them — the same eight native shards and eight static groups, every test shuffled (`pytest-random-order`, `--random-order-bucket=global`) under a printed seed; informational: no PR and no release reads it, a red run is the alert and its summary lists the failed tests and the seed |
 | `.github/workflows/main-push.yml` (the gate) | every push to `main` | not the suite: the full `meizel check` graph and `scripts/tests/test_hooks_scratch_home.py`, the two checks whose verdict cannot depend on a diff. Its green run never closes a card a full run opened |
 | `.github/workflows/main-typecheck.yml` | on demand only (`workflow_dispatch`, `ref` defaults to `main`); dispatched to backfill a `release-gate.yml` slot GitHub never started | not the suite: the full-tree `basedpyright` and the pyright test-environment drift check, with `contents: read` and nothing that tags or publishes, which dispatching `release-gate.yml` would |
 

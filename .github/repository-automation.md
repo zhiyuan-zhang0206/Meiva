@@ -70,9 +70,9 @@ branch is mounted only as an isolated candidate worktree. Its archive and
 provider sources are parsed as data by the trusted updater, never imported or
 executed. Future effective windows are copied into the PR body for review.
 
-## `workflows/dependency-audit.yml`
+## `workflows/scheduled-audits.yml` — dependency audit
 
-A weekly schedule (plus manual dispatch) runs `scripts/ci/dependency_audit.py`:
+The `dependency-audit` job, on a weekly schedule (plus manual dispatch), runs `scripts/ci/dependency_audit.py`:
 `uv audit` over `uv.lock` (severity looked up in OSV, since its JSON carries
 none), `pnpm audit` over `ui/web` using the canonical npm advisory registry, and
 the version constants Meiva downloads outside the lockfiles (zonky Postgres,
@@ -93,9 +93,9 @@ when an operator invokes the report with an older installed toolchain. PR-time C
 uses the installed pinned `uv audit` and `pnpm audit` directly. The audit job
 populates neither the project wheel cache nor the pnpm store cache.
 
-## `workflows/secret-scan-history.yml`
+## `workflows/scheduled-audits.yml` — secret scan of full history
 
-A nightly schedule (plus manual dispatch, main only) runs `gitleaks git` over
+The `secret-scan-history` job, on a nightly schedule (plus manual dispatch, main only), runs `gitleaks git` over
 every fetched ref's whole history with the same `.gitleaks.toml` as the PR
 check. The required `secret scan (Gitleaks)` check in `ci.yml` scans only a
 change's own commits (or a bounded recent window of 50 commits on manual

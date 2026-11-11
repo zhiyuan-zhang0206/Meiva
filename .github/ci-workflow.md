@@ -28,7 +28,7 @@ language, content-manifest and security gates still run for documentation PRs.
 
 The required Gitleaks job scans only a change's added commits (PRs and
 dispatched topic branches against `origin/main`, or a bounded 50-commit window
-on `main`); `secret-scan-history.yml` re-scans all history nightly.
+on `main`); the `secret-scan-history` job of `scheduled-audits.yml` re-scans all history nightly.
 `.gitleaks.toml` is also the local pre-commit policy (one owner for fixture
 exceptions). A separate dependency-audit job runs `uv audit --frozen` and `pnpm
 audit` as informational checks while the remediation policy matures; its

@@ -1,7 +1,7 @@
 # Weekly dependency audit
 
 `scripts/ci/dependency_audit.py` runs weekly (and on demand) from
-`.github/workflows/dependency-audit.yml`. One markdown report carries three
+`.github/workflows/scheduled-audits.yml` (job `dependency-audit`). One markdown report carries three
 sections into one tracked GitHub issue, found by its marker and updated in
 place, then closed when a run comes back clean:
 

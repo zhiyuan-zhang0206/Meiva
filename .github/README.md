@@ -26,6 +26,14 @@ fail-closed backend test gate and the artifact rules are [The ci.yml workflow](c
 [Nightly Test Duration Refresh](refresh-test-durations.md): isolated measurement; an Actions cache
 carries the timings to CI.
 
+### `workflows/random-order.yml` — daily random-order backend run
+
+Runs the native shards and static groups of the full suite with every test shuffled under a
+printed seed (`pytest-random-order`, opt-in: nothing else in CI shuffles). It finds tests that
+leave process-global state behind and pass only in the fixed order. Informational: it is not
+required by any gate; a red run is the alert, and its summary lists the failed tests and the seed
+to reproduce with (`gh workflow run random-order.yml -f seed=<seed>`).
+
 ### `workflows/ci-app.yml` — path-filtered native app gate
 
 Changes under `ui/app/` or the app release/test tooling run Rust format,
