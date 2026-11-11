@@ -10,3 +10,11 @@ HARNESS_HIDDEN_SELF_MEMBERS: frozenset[str] = frozenset(
         "meiva.self.compact",
     }
 )
+
+# meiva:note
+# The members a native-harness agent never sees rendered: `meiva.attach` binds an external
+# harness process to the identity it was started as, and a native agent already has one, so the
+# entry could only refuse it. The mirror of `HARNESS_HIDDEN_SELF_MEMBERS`: that set is hidden
+# from external harnesses, this one from native agents, and both are applied by the same help
+# profile.
+NATIVE_HIDDEN_MEMBERS: frozenset[str] = frozenset({"meiva.attach"})

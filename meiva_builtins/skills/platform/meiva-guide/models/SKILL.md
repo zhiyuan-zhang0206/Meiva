@@ -135,6 +135,8 @@ expensive model. Three questions decide how much structure a sub-task gets:
 ## Looking at media: `meiva.self.attach` or `meiva.understand`
 
 Both reach a model that can read the file; they differ in where the pixels go.
+(`meiva.self.attach` is for native-harness agents; an agent on Claude Code, Codex
+or Antigravity reads images and files with its CLI's own read tools.)
 
 - `meiva.self.attach(path)` puts the file in your own context: you see it
   natively at your next step, and it stays in the conversation. It needs a

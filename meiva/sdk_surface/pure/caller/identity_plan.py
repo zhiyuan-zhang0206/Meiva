@@ -81,6 +81,12 @@ def actor_after_external(facts: ActorFacts, external_source: str | None) -> Acto
 
 
 def native_harness_refusal(harness: str, action: str) -> str | None:
+    if action == "attach" and harness and harness != "meiva":
+        return (
+            f"meiva.self.attach() is only supported on the native 'meiva' harness "
+            f"(current harness: {harness!r}); read an image or file with the harness CLI's own "
+            f"read tools instead"
+        )
     if action in HARNESS_FORBIDDEN_SELF_ACTIONS and harness and harness != "meiva":
         return (
             f"meiva.self.{action}() is only supported on the native 'meiva' harness "

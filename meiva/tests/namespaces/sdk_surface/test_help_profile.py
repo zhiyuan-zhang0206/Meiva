@@ -116,19 +116,47 @@ def test_the_profile_merges_the_capability_gate_with_the_declaration(
     text_only = ModelHelpProfile.for_model("text-only", catalog=catalog)
     declared = ModelHelpProfile.for_model("declared", catalog=catalog)
 
-    assert text_only.hidden_members == frozenset({"meiva.self.attach"})
+    assert text_only.hidden_members == frozenset({"meiva.self.attach", "meiva.attach"})
     assert text_only.doc_style is None
-    assert declared.hidden_members == frozenset({"meiva.shell.sessions.deep"})
+    assert declared.hidden_members == frozenset({"meiva.shell.sessions.deep", "meiva.attach"})
     assert declared.doc_style == "terse"
 
 
-def test_a_process_that_names_no_model_gets_the_empty_profile() -> None:
+def test_a_native_process_that_names_no_model_hides_only_the_native_members() -> None:
     from base.api_contracts.agent_contract import Harness
+    from meiva.sdk_surface.pure.render.hidden import NATIVE_HIDDEN_MEMBERS
 
     profile = ModelHelpProfile.for_process(
         harness=Harness.MEIVA, external_attach=False, model_setting=None, catalog=None
     )
-    assert profile == ModelHelpProfile()
+    assert profile == ModelHelpProfile(hidden_members=NATIVE_HIDDEN_MEMBERS)
+
+
+def test_native_profile_hides_meiva_attach_and_keeps_self_attach(model_catalog: Any) -> None:
+    import meiva
+    from base.api_contracts.agent_contract import Harness
+
+    model = next(
+        name for name, spec in sorted(model_catalog.models.items()) if "image" in spec.media_types
+    )
+    profile = ModelHelpProfile.for_model(model, catalog=model_catalog, harness=Harness.MEIVA)
+
+    assert "meiva.attach" in profile.hidden_members
+    assert "meiva.self.attach" not in profile.hidden_members
+    assert "def attach(" not in _render_text(meiva, profile=profile)
+    assert "def attach(" in _render_text(meiva.self, profile=profile)
+
+
+def test_external_profile_keeps_meiva_attach_and_hides_self_attach(model_catalog: Any) -> None:
+    import meiva
+    from base.api_contracts.agent_contract import Harness
+
+    model = sorted(model_catalog.models)[0]
+    profile = ModelHelpProfile.for_model(model, catalog=model_catalog, harness=Harness.CODEX)
+
+    assert "meiva.attach" not in profile.hidden_members
+    assert "def attach(" in _render_text(meiva, profile=profile)
+    assert "def attach(" not in _render_text(meiva.self, profile=profile)
 
 
 def test_external_harness_profile_hides_attach_and_compact_but_not_restart_in_self(
