@@ -34,6 +34,8 @@ from agent.graph.llm_errors import (
     LLMRetryBudgetExceededError,
     LLMStreamTruncatedError,
 )
+from agent.graph.llm_stream.chunk import assemble_final_message
+from agent.graph.llm_stream.chunk import validate_stop_reason as validate_stop_reason
 from agent.graph.node_log import StallConfig, node_lifecycle
 from agent.graph.tool_calls import code_from_args
 from agent.hooks.understanding_chunks import due_chunk_update
@@ -56,8 +58,6 @@ from base.log import logger
 
 from ._backoff import WAIT_JITTER_SPAN_S, Attempt, RetryPolicy, assess_failure, budget_spent
 from ._cancel import race_stream_vs_cancel
-from ._chunk import assemble_final_message
-from ._chunk import validate_stop_reason as validate_stop_reason
 from ._retry import record_remaining, retry_policy, retry_wait
 from ._stream import stream_llm
 from .goto import LlmGoto

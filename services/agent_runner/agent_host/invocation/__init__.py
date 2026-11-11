@@ -74,7 +74,9 @@ class InvocationHooks:
 
 
 # meiva:note
-# Finish the original abort's durable writes without another invocation.
+# Finish the original abort's durable writes without another invocation. A failed compaction aborts
+# the turn but is not a crash: the history is intact and the agent idles for its next inbound, so no
+# corpse marker is stamped and the reaper never sees it.
 async def finish_pending_failure(
     graph: AgentGraph,
     checkpointer: object,
@@ -88,7 +90,7 @@ async def finish_pending_failure(
         await attach_trace_checkpoint_ref(graph, ctx, agent_id)
     return TurnOutcome(
         exited=False,
-        crashed=True,
+        crashed=pending.marks_crash,
         aborted=True,
         failure_report=(
             partial(publish_turn_failure, pending, ctx.require_bus()) if pending.errors else None

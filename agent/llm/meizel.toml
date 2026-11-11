@@ -1,8 +1,7 @@
-exports = ["invoke.py", "usage.py"]
+exports = ["usage.py"]
 
 [uses]
-"invoke.py" = ["__init__.py"]
-"tests" = ["__init__.py", "invoke.py", "usage.py"]
+"tests" = ["usage.py"]
 
 [purity]
 "__init__.py" = "strict"

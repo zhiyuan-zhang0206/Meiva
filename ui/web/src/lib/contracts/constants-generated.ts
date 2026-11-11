@@ -20,6 +20,7 @@ export const NOTE_TAGS = [
   "non_human_wake",
   "task",
   "compact_reminder",
+  "compact_failed",
   "history_dump",
   "silent_idle_continue",
   "memory",

@@ -10,7 +10,6 @@ from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage
 from langchain_core.runnables import RunnableConfig
 
 from agent.graph.llm._backoff import Attempt
-from agent.graph.llm._chunk import assemble_final_message, validate_stop_reason
 from agent.graph.llm.node import llm_attempt
 from agent.graph.llm.tests.llm_support import (
     ScriptedModel,
@@ -26,6 +25,7 @@ from agent.graph.llm_errors import (
     LLMStreamUnexpectedStopReasonError,
     retry_exhausted_error,
 )
+from agent.graph.llm_stream.chunk import assemble_final_message, validate_stop_reason
 from agent.state import AgentState
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus

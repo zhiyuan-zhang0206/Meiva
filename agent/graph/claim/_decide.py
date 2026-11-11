@@ -156,6 +156,12 @@ def _fallthrough_outcome(st: BatchState) -> _Outcome:
     publish_snapshot = st.next_goto == END and bool(st.new_msgs)
     halted = st.restart_preserves_idle and not st.committed_chat_ids
     goto = BEFORE_TURN if st.committed_chat_ids and st.next_goto == CLAIM else st.next_goto
+    # meiva:note
+    # A batch whose only messages report a failed compaction request has nothing to answer: the
+    # agent idles with its history intact until the next inbound.
+    if goto == BEFORE_TURN and st.failure_notes and len(st.new_msgs) == st.failure_notes:
+        goto = CLAIM
+        halted = True
     return _Outcome(
         command=Command[ClaimGoto](
             update={

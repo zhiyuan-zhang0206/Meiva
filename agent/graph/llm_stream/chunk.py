@@ -1,14 +1,5 @@
-"""Chunk assembly + final-message validation for the llm node.
-
-``assemble_final_message`` folds the streamed ``AIMessageChunk`` list into one
-``AIMessage`` via chunk addition, then runs the fail-fast validators:
-``sanitize_thinking_blocks`` (DeepSeek thinking-delta drift repair) and
-``validate_stop_reason`` (missing / truncated / unexpected terminal reason).
-
-Split out of ``node.py`` (Task #1004 >800-line outlier) — a leaf dependency of
-the node entry; nothing here imports back into ``node.py``.
-"""
-
+# meiva:note
+# Chunk assembly and final-message validation for a streamed model call. `assemble_final_message` folds the streamed `AIMessageChunk` list into one `AIMessage` via chunk addition, then runs the fail-fast validators: `sanitize_thinking_blocks` (DeepSeek thinking-delta drift repair) and `validate_stop_reason` (missing, truncated or unexpected terminal reason). A leaf of the llm node and of the compaction summary call; nothing here imports back into either.
 from __future__ import annotations
 
 from typing import TypeGuard
@@ -29,29 +20,9 @@ def _is_object_list(value: object) -> TypeGuard[list[object]]:
     return isinstance(value, list)
 
 
+# meiva:note
+# Repair thinking content blocks missing the `thinking` key (DeepSeek drift #167/168). DeepSeek's anthropic-compat endpoint intermittently drops the thinking_delta SSE event, so chunk accumulation yields a thinking block with a signature and no `thinking`. Filling `thinking=""` repairs the wire shape: the filled block round-trips the endpoint (probed 2026-07-25: 200; the key-missing shape 400s), and every downstream consumer (the streaming fan-out, the timeline renderer) already skips empty-thinking blocks. Repair in place replaces the old fail-fast guard: the drift is a permanent protocol quirk (~2% of deepseek turns), not a transient fault, so aborting the turn manufactured a doubled ~100K-token re-request plus a WARNING storm per hit. The sanitize INFO keeps the drift rate observable without counting as an operator alert. Scoped to `model_provider == 'anthropic'` (covers deepseek via ChatAnthropic) and to list content (thinking plus tool_use blocks); string content has no thinking blocks.
 def sanitize_thinking_blocks(final_msg: AIMessage) -> None:
-    """Repair thinking content blocks missing the `thinking` key (DeepSeek drift #167/168).
-
-    DeepSeek's anthropic-compat endpoint intermittently drops the thinking_delta
-    SSE event, so chunk accumulation yields `{"type":"thinking","signature":...}`
-    with no `thinking`. Filling `thinking=""` repairs the wire shape: the filled
-    block round-trips the endpoint (probed 2026-07-25: 200; the key-missing shape
-    400s with "missing field `thinking`"), and every downstream consumer — the
-    streaming fan-out (`agent/graph/_callbacks.py`), the timeline renderer
-    (`base/agents/history/timeline.py`) — already skips empty-thinking blocks.
-
-    Repair-in-place replaces the old fail-fast guard (raise → non-stream
-    fallback): the drift is a permanent protocol quirk (~2% of deepseek turns),
-    not a transient fault, so aborting the turn manufactured a doubled
-    ~100K-token re-request plus a WARNING storm per hit. The sanitize INFO
-    keeps the drift rate observable without counting as an operator alert.
-
-    Scoped to `model_provider == 'anthropic'` (covers deepseek via
-    ChatAnthropic) — openai/gemini reasoning is not Anthropic thinking blocks,
-    so the guard early-returns for them. Within anthropic, only relevant when
-    content is list (thinking + tool_use blocks); str content is plain text
-    with no thinking blocks, skip.
-    """
     if (final_msg.response_metadata or {}).get("model_provider") != "anthropic":  # pyright: ignore[reportUnknownMemberType]
         return
     content: object = final_msg.content  # pyright: ignore[reportUnknownMemberType]
@@ -72,21 +43,14 @@ def sanitize_thinking_blocks(final_msg: AIMessage) -> None:
             block["thinking"] = ""
 
 
-# Terminal reasons that assert the model emitted a tool call: anthropic 'tool_use',
-# openai 'tool_calls'. If one of these is set but no normalized tool_calls survived,
-# the stream lost the tool block (bug 169) — fail-fast rather than idle.
+# meiva:note
+# Terminal reasons that assert the model emitted a tool call: anthropic 'tool_use', openai 'tool_calls'. If one of these is set but no normalized tool_calls survived, the stream lost the tool block (bug 169): fail fast rather than idle.
 _TOOL_CLAIMED_REASONS: frozenset[str] = frozenset({"tool_use", "tool_calls"})
 
 
+# meiva:note
+# Fail fast on a missing or abnormal terminal reason, normalized across providers by `classify_stop` (dispatched on response_metadata['model_provider']): anthropic `stop_reason`, openai/gemini `finish_reason` and their differing vocabularies map to one set of categories. A missing terminal reason is never silently treated as idle (`if not final_msg.tool_calls` would misjudge a lost final frame).
 def validate_stop_reason(final_msg: AIMessage, *, catalog: ModelCatalog) -> None:
-    """Fail-fast on a missing or abnormal terminal reason, normalized across providers.
-
-    Uses `classify_stop` (dispatched on response_metadata['model_provider']) so
-    anthropic `stop_reason`, openai/gemini `finish_reason`, and their differing
-    vocabularies all map to one set of categories. Preserves the existing
-    fail-fast contract: a missing terminal reason cannot be silently treated as
-    idle (would let `if not final_msg.tool_calls` misjudge a lost final frame).
-    """
     from base.lm.compat.stop import StopCategory, classify_stop
 
     category, raw = classify_stop(final_msg, stops=catalog.stops)
@@ -97,8 +61,7 @@ def validate_stop_reason(final_msg: AIMessage, *, catalog: ModelCatalog) -> None
             "Provider stream protocol drift / final frame lost — cannot determine whether the model stopped "
             "normally; cannot fallthrough and let if-not-tool_calls misjudge as idle."
         )
-    # CORRUPTED is the only category where raw is None; after this point raw is always str.
-    assert raw is not None  # noqa: S101 — narrowing: TRUNCATED/UNEXPECTED always have a raw value
+    assert raw is not None  # noqa: S101
     if category is StopCategory.TRUNCATED:
         raise LLMStreamTruncatedError(
             f"LLM stream truncated by server: terminal reason={raw!r} output_tokens={output_tokens}. "
@@ -113,10 +76,6 @@ def validate_stop_reason(final_msg: AIMessage, *, catalog: ModelCatalog) -> None
             stop_reason=raw,
             output_tokens=output_tokens,
         )
-    # NORMAL. Consistency check: the terminal reason claims a tool call but no
-    # normalized tool_calls survived = server emitted a tool intent but the block
-    # was lost (bug 169). Covers anthropic 'tool_use' AND openai 'tool_calls'
-    # (gemini uses 'STOP' for tool turns and is covered by .tool_calls routing).
     if raw in _TOOL_CLAIMED_REASONS and not final_msg.tool_calls:
         raise LLMStreamCorruptedError(
             f"terminal reason={raw!r} claims a tool call but final_msg.tool_calls is empty — "

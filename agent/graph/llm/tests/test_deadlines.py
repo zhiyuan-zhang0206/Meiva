@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from agent.graph.llm._deadlines import (
+from agent.graph.llm_stream.deadlines import (
     ChunkWait,
     StreamBounds,
     decode_window_ms,

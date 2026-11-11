@@ -1,20 +1,12 @@
-"""Tests for agent/graph/agent_traceback.py.
-
-The agent-facing render must keep only the agent's own ``<agent_code>`` frames and
-never leak the exec harness, SDK, plugin, or stdlib frames. The full render is the
-unfiltered counterpart for the server logs. Exceptions are produced by genuinely
-compiling/exec'ing source under the ``<agent_code>`` filename so the frame
-filenames match what `exec/node.py` produces at runtime; this test module's own frame
-(the `exec` call site) stands in for the exec harness frame and must be dropped.
-"""
-
+# meiva:note
+# Tests for agent/execution/agent_traceback.py. The agent-facing render must keep only the agent's own ``<agent_code>`` frames and never leak the exec harness, SDK, plugin, or stdlib frames. The full render is the unfiltered counterpart for the server logs. Exceptions are produced by genuinely compiling/exec'ing source under the ``<agent_code>`` filename so the frame filenames match what `exec/node.py` produces at runtime; this test module's own frame (the `exec` call site) stands in for the exec harness frame and must be dropped.
 from __future__ import annotations
 
 import linecache
 
 import pytest
 
-from agent.graph.agent_traceback import (
+from agent.execution.agent_traceback import (
     AGENT_CODE_FILENAME,
     format_agent_traceback,
     format_full_traceback,

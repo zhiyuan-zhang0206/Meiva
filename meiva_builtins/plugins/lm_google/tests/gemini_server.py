@@ -57,8 +57,13 @@ def gemini_server() -> Iterator[GeminiServer]:
             assert is_object_dict(body)
             server_state.received.append(Received(self.path, body))
             data = json.dumps(server_state.reply).encode()
+            streaming = server_state.status == 200 and "streamGenerateContent" in self.path
+            if streaming:
+                data = b"data: " + data + b"\r\n\r\n"
             self.send_response(server_state.status)
-            self.send_header("Content-Type", "application/json")
+            self.send_header(
+                "Content-Type", "text/event-stream" if streaming else "application/json"
+            )
             self.send_header("Content-Length", str(len(data)))
             self.end_headers()
             self.wfile.write(data)

@@ -60,10 +60,10 @@ from langgraph.runtime import Runtime
 from langgraph.types import Command, Overwrite
 
 from agent import state as _state
+from agent.execution.agent_traceback import format_full_traceback
 from agent.execution.protocol import ResultPayload
 from agent.graph._attach_drain import build_attach_message
 from agent.graph._attach_merge import merge_attachments
-from agent.graph.agent_traceback import format_full_traceback
 from agent.graph.exec._notes import merge_exec_notes
 from agent.graph.interrupt import interrupt_halt, subscribe_interrupt
 from agent.graph.node_log import StallConfig, node_lifecycle

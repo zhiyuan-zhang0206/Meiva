@@ -218,7 +218,6 @@ class AgentSlices:
             "node_stall_dump_seconds",
             "exec_node_timeout_seconds",
             "exec_timeout_seconds",
-            "llm_compact_timeout_seconds",
             "llm_retry_max_total_seconds",
             "llm_retry_initial_interval_seconds",
             "llm_retry_max_interval_seconds",

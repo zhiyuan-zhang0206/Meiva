@@ -22,8 +22,7 @@
 #   - `llm/_stream.py`     — llm streaming consumption (stall timeouts, non-stream fallback, cache retry)
 #   - `llm/_cancel.py`     — llm streaming-vs-cancel race (partial turn discard)
 #   - `llm/goto.py`        — the node names the llm node may route to
-#   - `llm/_chunk.py`      — llm chunk assembly + final-message validation
-#   - `llm_errors.py`      — llm stream error taxonomy
+#   - `llm_stream/`        — one streaming model request: chunk assembly + final-message validation, stall deadlines, error taxonomy
 #   - `prompt/_base_prompt.py` — immutable base system prompt + lazily captured `meiva` SDK overview
 #   - `exec/node.py`      — exec node (one disposable subprocess per execute_code call)
 #   - `exec/output.py`    — code execution output envelope: format / truncate / overflow-to-file
@@ -39,7 +38,7 @@
 #
 # Public API is lazily re-exported via this __init__.py (PEP 562) — external
 # `from agent.graph import X` callers don't need to know the submodule layout,
-# and importing a light submodule (`agent_traceback`) no longer drags the node
+# and importing a light submodule (`agent.execution.agent_traceback`) no longer drags the node
 # set into the importer — the exec child imports those before user code runs
 # (startup-path laziness, task #3585).
 # meiva:link agent/graph/docs/graph.md

@@ -395,6 +395,12 @@ class PendingTurnFailure:
     reports_started: bool = False
     errors: list[Error] = field(default_factory=list[Error])
 
+    # meiva:note
+    # Whether the aborted turn leaves the agent a crash corpse for the reaper. A failed compaction leaves the history intact and the agent alive: it idles for its next inbound. Every other settled abort is a fatal provider or stream failure.
+    @property
+    def marks_crash(self) -> bool:
+        return not isinstance(self.error, CompactionFailedError)
+
     @classmethod
     def from_invocation_error(cls, exc: Exception) -> PendingTurnFailure | None:
         if isinstance(exc, (FatalLLMStreamError, FatalProviderError, CompactionFailedError)):

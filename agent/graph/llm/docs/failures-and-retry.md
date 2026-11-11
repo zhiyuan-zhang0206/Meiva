@@ -7,7 +7,7 @@
 
 ## Chunk assembly and stop-reason validation
 
-`agent/graph/llm/_chunk.py:assemble_final_message` folds streamed `AIMessageChunk` frames into one `AIMessage` and validates protocol completeness in order:
+`agent/graph/llm_stream/chunk.py:assemble_final_message` folds streamed `AIMessageChunk` frames into one `AIMessage` and validates protocol completeness in order:
 
 1. `sanitize_thinking_blocks` repairs the established DeepSeek missing-`thinking`-field drift in place (`thinking=""`).
 2. `validate_stop_reason` checks missing (`LLMStreamCorruptedError`), truncated (`LLMStreamTruncatedError`), or unexpected (`LLMStreamUnexpectedStopReasonError`) terminal reasons, and rejects a tool-claiming stop reason whose `final_msg.tool_calls` is empty (`LLMStreamCorruptedError`). Running `validate_stop_reason` before checking `usage_metadata` ensures an SSE stream cut off at EOF before its terminal frame surfaces missing-stop-reason diagnostics rather than a secondary metadata check.

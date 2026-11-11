@@ -12,9 +12,11 @@ Framework lifecycle markers may follow the summary. A security note attached to 
 
 ## Compact failure boundary
 
-Automatic compaction retries explicitly recoverable empty/short summaries and retryable provider failures within its attempt bound. Exhaustion raises CompactionFailedError without replacing history; programming failures escape immediately. Cancellation wins over a pending compact in claim and closes its live run as replaced.
+The summary call streams (`agent/graph/llm_stream.py:stream_message`) under the stall rules of a turn's llm node: the agent's or model's TTFT and inter-chunk bounds and the stream total ceiling. A model that keeps emitting is never cut by a wall-clock total of the call, and a stall fails at once without a repeat, since the same request would stall again. Both paths retry only what warrants another identical request (`compaction_retryable`: an empty summary, a transient provider error) within the attempt bound.
 
-`CompactionFailedError` is a turn-abort signal, not a process-death instruction. An interrupted automatic request leaves the pending command for claim without a version bump or replacement. Audit and history-dump failures are reported without aborting an otherwise successful compaction; failure must not strand a live run without its terminal signal.
+Automatic compaction raises CompactionFailedError on exhaustion, without replacing history; programming failures escape immediately. A compact request (`meiva agents compact`, `/compact`, `meiva.agents.compact`) does not raise: the claim records the failure as a `compact_failed` system note (the reason, with the failure's type) and closes the live run as a failure, and the chats claimed in the same batch are delivered as usual. A batch whose only messages are that note idles the agent with its history intact. Cancellation wins over a pending compact in claim and closes its live run as replaced.
+
+`CompactionFailedError` is a turn-abort signal, not a process-death instruction: the hosted turn settles to idling with no corpse marker (`PendingTurnFailure.marks_crash`), so the reaper never terminates the agent, and the turn's Error is published once the row is settled. An interrupted automatic request leaves the pending command for claim without a version bump or replacement. Audit and history-dump failures are reported without aborting an otherwise successful compaction; failure must not strand a live run without its terminal signal.
 
 ## Retained boundary checkpoints
 

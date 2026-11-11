@@ -18,6 +18,8 @@ from agent.graph.interrupt import (
     interruptible_model,
     subscribe_interrupt,
 )
+from agent.graph.llm_errors import FatalLLMStreamError, FatalProviderError
+from agent.graph.llm_stream.stream import stream_message
 from agent.graph.prompt.compaction import compact_contract
 from agent.graph.prompt.live import read_compact_doc
 from agent.hooks import Hook
@@ -26,7 +28,6 @@ from agent.hooks.compact_anchor import compose_summary_message as compose_summar
 from agent.hooks.compact_events import emit_compact_finished, emit_compact_started
 from agent.hooks.history_dump import dump_history, history_dump_note
 from agent.hooks.understanding_chunks import await_snapshot, enqueue_closing_chunk
-from agent.llm.invoke import ainvoke_tool_call
 from agent.messages import (
     NoteTag,
     system_note_message,
@@ -71,6 +72,21 @@ class CompactionFailedError(RuntimeError):
 
 class EmptyCompactionSummaryError(RuntimeError):
     pass
+
+
+# meiva:note
+# Which failed summary calls are worth another identical request: an empty summary and a transient provider error, as in a turn's llm node. A stall, a truncated or malformed stream and a permanent rejection repeat on the same request, so they end the attempt.
+# meiva:link agent/graph/docs/context-window/replacement.md
+def compaction_retryable(exc: Exception) -> bool:
+    if isinstance(exc, (FatalLLMStreamError, FatalProviderError, CompactionFailedError)):
+        return False
+    return isinstance(exc, EmptyCompactionSummaryError) or is_retryable_provider_error(exc)
+
+
+# meiva:note
+# A failure named by its type: a bare timeout carries no message, and an empty reason hides what failed.
+def describe_failure(exc: Exception) -> str:
+    return f"{type(exc).__name__}: {exc}" if str(exc) else type(exc).__name__
 
 
 # meiva:note
@@ -178,9 +194,7 @@ async def generate_summary(
         )
     )
     compaction_input = [*system_head, *content_msgs, instruction]
-    response = await ainvoke_tool_call(
-        llm, compaction_input, timeout_seconds=slices.read("lm", "llm_compact_timeout_seconds")
-    )
+    response = await stream_message(llm, compaction_input, agent=slices, catalog=catalog)
     model = slices.brain.llm_model
     if isinstance(model, str) and model:
         from base.lm.usage import UsageOptions, log_usage_from_message
@@ -265,16 +279,14 @@ async def auto_compact_summary(
                 messages, llm, slices, agent_id=agent_id, catalog=catalog, now=now
             )
         except Exception as e:
-            if not isinstance(e, EmptyCompactionSummaryError) and not is_retryable_provider_error(
-                e
-            ):
+            if not compaction_retryable(e):
                 raise
             last_error = e
             logger.warning(
                 "[{label}] {body}",
                 label="auto-compact",
                 event="auto_compact",
-                body=f"attempt {attempt}/{COMPACT_MAX_ATTEMPTS}: {e}; retrying",
+                body=f"attempt {attempt}/{COMPACT_MAX_ATTEMPTS}: {describe_failure(e)}; retrying",
             )
             continue
         logger.info(
@@ -287,7 +299,7 @@ async def auto_compact_summary(
             break
         last_error = None
     else:
-        detail = f"error: {last_error}" if last_error else f"{len(summary)} chars"
+        detail = f"error: {describe_failure(last_error)}" if last_error else f"{len(summary)} chars"
         raise CompactionFailedError(
             f"Compaction produced no usable summary across {COMPACT_MAX_ATTEMPTS}"
             f" attempts (last: {detail}); the model is not following the"

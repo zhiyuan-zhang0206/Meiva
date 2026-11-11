@@ -39,6 +39,7 @@ class NoteTag(StrEnum):
     NON_HUMAN_WAKE = "non_human_wake"
     TASK = "task"
     COMPACT_REMINDER = "compact_reminder"
+    COMPACT_FAILED = "compact_failed"
     HISTORY_DUMP = "history_dump"
     # meiva:note
     # Retained for historical checkpoints; no runtime hook emits this note.
