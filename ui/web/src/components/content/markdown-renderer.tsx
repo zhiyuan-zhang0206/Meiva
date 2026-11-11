@@ -16,6 +16,7 @@ import type { Plugin, PluggableList } from "unified";
 
 import { CopyButton } from "@/components/content/copy-button";
 import { isFilePath } from "@/components/content/file-path-utils";
+import { MermaidCode } from "./mermaid-code";
 import { PythonCode } from "@/components/content/python-code";
 import { useWorkspaceFileStore } from "@/lib/context/workspace-file-store";
 import { MIN_W_0 } from "@/lib/layout/layout";
@@ -200,6 +201,7 @@ const createDefaultComponents = (onOpenFile: (path: string, lineRange?: string) 
       );
     }
     const codeStr = text.replace(/\n$/, "");
+    if (lang === "mermaid") return <MermaidCode code={codeStr} className={className} />;
     if (lang === "python") {
       return <PythonCode code={codeStr} />;
     }

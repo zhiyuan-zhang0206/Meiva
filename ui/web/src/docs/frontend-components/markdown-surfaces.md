@@ -26,3 +26,10 @@ supplies its own chunk with a fake renderer instead of swapping the module's
 import.
 
 Verbatim monospace `pre` stays for content that is not Markdown prose: command output, system-generated `inbound_chat` bodies, attach captions, compact requests, lifecycle markers, logs, JSON and code.
+
+Mermaid fences load a shared diagram renderer only when mounted. Strict security
+and disabled automatic startup apply to every render; diagrams follow the resolved
+light/dark theme. Loading and invalid or incomplete streaming diagrams show copyable
+source. Completed diagrams show horizontally scrollable SVG with source-copy controls.
+Inline code remains literal. Tests inject a lazy renderer through
+`MermaidRendererProvider` without requiring SVG layout in happy-dom.
