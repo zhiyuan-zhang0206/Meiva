@@ -53,6 +53,7 @@ class ScriptedModel:
     ) -> None:
         self._replies = list(replies)
         self._generation = generation
+        self.summary_requests = 0
 
     def bind_tools(self, *_args: object, **_kwargs: object) -> ScriptedModel:
         return self
@@ -61,6 +62,7 @@ class ScriptedModel:
         self, messages: Sequence[BaseMessage], *_args: object, **_kwargs: object
     ) -> AsyncIterator[AIMessageChunk]:
         if asks_for_summary(messages):
+            self.summary_requests += 1
             reply = self._replies.pop(0)
             if isinstance(reply, BaseException):
                 raise reply
