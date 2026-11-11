@@ -160,6 +160,18 @@ def test_stop_flushes_what_is_buffered() -> None:
 # --- bounded queue ---
 
 
+# meiva:note
+# What reached a writer, split into the records it was handed and the records it was told were
+# shed. `EventPipeline.dropped` counts what was shed since the last flush, and the drain thread's
+# flush moves that count into the `event_log_drop` summary it writes, so reading the counter races
+# the flush: a test thread descheduled between a burst and the read sees 0 although most of the
+# burst was shed. The summaries are where the shedding is final.
+def _delivered_and_shed(batches: list[list[Any]]) -> tuple[int, int]:
+    written = [event for batch in batches for event in batch]
+    summaries = [e for e in written if e.event_name == "event_log_drop"]
+    return len(written) - len(summaries), sum(e.attributes["n"] for e in summaries)
+
+
 def test_queue_is_bounded_and_counts_what_it_sheds(loguru_records: LogRecords) -> None:
     """A producer outrunning the drain thread sheds records, not memory.
 
@@ -183,11 +195,14 @@ def test_queue_is_bounded_and_counts_what_it_sheds(loguru_records: LogRecords) -
         assert reports, "expected an error diagnostic after shedding records"
         assert all(record["level"].name == "ERROR" for record in reports)
         assert reports[0]["extra"]["n"] > 0
-        assert sink.dropped > 0
         assert sink._queue.qsize() <= 20, "queue grew past its bound"
     finally:
         release.set()
         assert sink.stop(timeout=1).status is telemetry.DrainStatus.COMPLETED
+    delivered, shed = _delivered_and_shed(blocked.batches)
+    assert shed > 0
+    assert delivered + shed == 500, "a record was neither delivered nor counted as shed"
+    assert delivered <= 20 + 10, "more records were held than the queue and one batch allow"
 
 
 def test_nothing_is_dropped_when_the_drain_keeps_up() -> None:
