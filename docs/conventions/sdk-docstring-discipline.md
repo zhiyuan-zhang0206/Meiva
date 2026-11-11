@@ -182,7 +182,7 @@ Rules for a variant:
      (e.g. `AGENT_ID` resolved from the active turn context); constants no one will pass directly to
      `help(value)`.
    - **`meiva.const(value, doc=...)` wrap** (opt-in) — `PATH = meiva.const(
-     Path.home() / ".meiva" / "memory", doc="...")`, returns a `type(value)` subclass
+     Path.home() / ".meiva" / "vault" / "memory", doc="...")`, returns a `type(value)` subclass
      instance with `__doc__`. **Suitable for**: values that don't change + the agent may directly `help(meiva.X.Y)`
      to drill into the docs. Cost: `type(x) is base` fails (use `isinstance` not
      `type ==`); arithmetic / comparison / stream propagation still follow base behavior; `bool`/`NoneType`

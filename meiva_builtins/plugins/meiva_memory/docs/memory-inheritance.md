@@ -1,13 +1,14 @@
 # Memory inheritance
 
-An ancestor shares standing content with its descendants by fencing it inside a
-personal memory entry (`<workspace>/memory/<slug>.md`) with an
-`<!-- meiva:inheritable -->` … `<!-- /meiva:inheritable -->` pair. Every descendant
-within `memory_inherit_depth` hops up the immutable birth chain
-(`agents_meta.born_spawner`, nearest first) receives the blocks as a context note
-when its window is established — cold start, after a compaction, or on a fork
-(the fork keeps the inherited copy in the source's history and grafts its own
-chain's after the fork marker).
+An ancestor shares standing content with its descendants by writing it as pure
+Markdown into `<workspace>/memory/INHERIT.md` — no fences or special tags. Every
+descendant within `memory_inherit_depth` hops up the immutable birth chain
+(`agents_meta.born_spawner`, nearest first) receives the body of each ancestor's
+`INHERIT.md` as a context note when its window is established — cold start, after
+a compaction, or on a fork (the fork keeps the inherited copy in the source's
+history and grafts its own chain's after the fork marker). Only `INHERIT.md` is
+injected; optional detail files under `memory/inherit/<slug>.md` stay on disk for
+descendants to read on demand.
 The chain read is one light gateway round-trip (no tie graph), cached per
 process: `born_spawner` is append-only, so a row's chain never changes. Entry
 files are read off THIS machine's workspaces — an ancestor on another machine
@@ -16,48 +17,44 @@ the window-side wiring are
 [Memory Injection](../../../../agent/graph/docs/context-notes/memory-injection.md)'s
 to state.
 
-## Block fences
+## The entry body
 
-Only the body of an entry file counts: a leading frontmatter block is skipped
-via the pool validator's own split, so a marker inside frontmatter never opens a
-block; CRLF files split like LF ones.
-
-The inheritable blocks of one entry file: only the body counts — a leading frontmatter block is skipped via the pool validator's split — CRLF is normalized, and fences match line-anchored after strip; malformed fencing fails soft with warnings — an unclosed open fence drops its region without sweeping to EOF, a close without an open or a nested open is ignored — and an empty block declares nothing.
+`extract_inherit_body` strips CRLF, an optional leading YAML frontmatter block
+(skipped via the same split the pool validator uses) and surrounding whitespace;
+what remains is the ancestor's section. A missing, unreadable or empty file
+contributes nothing.
 
 ## The chain read
 
 Read once per establishment; a failed read (or a host without a machine name)
 degrades to no note with a warning and is not cached. Only ancestors whose
-`agents_meta.machine` is this host contribute; an ancestor with no local store
-is skipped quietly.
-
-The note reads the first memory_inherit_depth ancestors off the immutable birth chain in one light gateway call, re-read at each establishment; a failed read degrades to no note with a warning and is not cached; only ancestors whose agents_meta.machine is this host contribute — a remote ancestor is skipped and named in the footer (same-machine read, v1) — and one with no local store is skipped quietly.
+`agents_meta.machine` is this host contribute; an ancestor with no local
+`INHERIT.md` is skipped quietly.
 
 ## Size guardrails
 
-One oversized block must not balloon every descendant's context: the per-block
-cap applies first, then the total budget clips the crossing section to its
-remainder and omits the rest behind one marker; `0` disables either.
-
-Size guardrails truncate oversized declarations with visible markers plus warnings: the per-block cap (memory_inherit_max_block_chars) first, then the total budget (memory_inherit_max_total_chars) clips the crossing section to its remainder and omits the rest behind one marker; 0 disables either; the lengths are the shared character measure.
+One oversized body must not balloon every descendant's context: the per-block
+cap (`memory_inherit_max_block_chars`) applies first, then the total budget
+(`memory_inherit_max_total_chars`) clips the crossing section to its remainder
+and omits the rest behind one marker; `0` disables either. Truncation leaves
+visible markers and a warning; the lengths are the shared character measure.
 
 ## The note
 
-One section per ancestor entry — nearest ancestor first, file names sorted, the
-fences of one file joined into one section — behind the framing, with no
+One section per ancestor — nearest ancestor first — behind the framing, with no
 timestamps, so unchanged state renders byte-identical (the property the fork's
 prefix-cache stability relies on). The assembled text is scanned like the shared
-index and armed when flagged.
-
-The note renders one section per ancestor entry — nearest ancestor first, file names sorted, the fences of one file joined into one section — behind the framing; the content carries no timestamps, so unchanged state renders byte-identical; it is None when the layer is off, no agent id is established, the chain read failed, or nothing was declared.
+index and armed with a visible warning prefix when flagged. The note is None when
+the layer is off (depth 0 or eval isolation), no agent id is established, the
+chain read failed, or no ancestor declared anything.
 
 ## Where the decisions live
 
 `inheritance/inherited_blocks.py` is the strict pure half: which birth-chain rows this host can read
-(`split_ancestors`), the fenced blocks of one entry (`parse_inheritable_blocks`) and the note
+(`split_ancestors`), the body of one entry (`extract_inherit_body`) and the note
 text with both size caps applied (`render_inherited`). It takes plain values and returns
 values, warnings included, so it logs nothing and reads nothing. `inheritance/inherit.py` is the thin
-shell: it reads the agent's slices, makes the one gateway call, reads the entry files of the
+shell: it reads the agent's slices, makes the one gateway call, reads the `INHERIT.md` files of the
 local ancestors, logs the returned warnings, scans the text and wraps it into the note. The
 tests run the pure half on literal values and the shell against a gateway on a port-0
 listener and entry files under a unit home.

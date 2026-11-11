@@ -34,8 +34,8 @@ Keep a note under 8000 characters and on one topic. If you include optional YAML
 wrap any value containing ": " or " #" in double quotes so YAML does not truncate it. Search for
 an existing note before writing a new one and update it in place when it already covers the ground.
 
-Notes you write are checked after the call that writes them; a reminder names any rule a note
-breaks, and any shared note that looks like a duplicate of it."""
+Nothing checks a note when you write it, so follow this format yourself; a note that breaks it is
+fixed or removed later when the notes are consolidated."""
 
 _PATH_DOC = (
     """Root folder of the shared notes that every agent can read. When the pool spans machines,

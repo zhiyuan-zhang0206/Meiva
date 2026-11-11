@@ -37,7 +37,7 @@ provider, Mixture-of-Agents presets, and fallback chains.
 2. **Write the persona as a role card.** SOUL.md → a `be-a-<role>` skill (see
    `skill-creator`), loaded through the spawn's `skills_to_expand_at_start`.
 3. **Seed the memory pool.** Hermes's learned user model does not transfer;
-   let onboarding write the `type/user` and `type/feedback` notes from the
+   let onboarding write the user kind and the feedback kind notes from the
    interview — the pool is the replacement for Honcho-style user modeling.
 4. **Recreate schedules** (`hermes cron` → `meiva schedules` / `meiva.watcher`).
 5. **Choose models per role.** `hermes model` / MoA presets → one model per

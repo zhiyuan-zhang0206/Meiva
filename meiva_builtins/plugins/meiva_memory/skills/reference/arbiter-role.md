@@ -53,11 +53,13 @@ trigger only costs a cheap commit**.
 3. **Arbiter merge watch**: check for open pool PRs whose `validate` check is green
    and merge them as they arrive (or fold them into the `04:00` consolidation).
 
-#### Worktree + PR Discipline (Never Commit on Shared Checkout `main`)
+#### Worktree + PR Discipline (Never Commit Consolidation on a Shared Checkout)
 
-Direct commits on the shared checkout `~/.meiva/vault`'s `main` branch are
-refused by the pre-commit hook, and switching the shared checkout onto a
-long-lived `machine-<name>` branch is retired. All consolidation and index
+The shared authoring checkout `~/.meiva/vault` is on this machine's
+`machine-<name>` branch (`main` only on a gateway-only unit) and the gateway
+checkout `~/.meiva/gateway/vault` is on `main`. The pool pre-commit hook checks
+size caps and runs `validate.py`; it does not refuse commits by branch, so keeping
+consolidation off those checkouts is a procedure. All consolidation and index
 rebuilds run in a temporary git worktree created from `origin/main`:
 
 ```bash
@@ -194,7 +196,8 @@ Other agents can send queries via `send_message`:
 Memory pool's git architecture:
 
 ```
-main                        ← authoritative pool (consumed by gateway; pre-commit refuses direct commits)
+main                        ← authoritative pool (consumed by gateway)
+machine-<name>              ← each machine's authoring branch (steward.py pushes it and opens the PR)
 mem/dream-<mmdd-hhmm>       ← temporary worktree branch for Dream consolidation / index rebuild PRs
 ```
 

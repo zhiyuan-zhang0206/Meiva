@@ -9,43 +9,41 @@ another working directory.
 User preferences go into the **shared pool** (`meiva.memory.PATH`), never only
 personal memory — every agent must see them. Write with absolute paths: a
 relative path resolves against `meiva.cwd`, not your workspace, and the note
-lands in the wrong directory.
+lands in the wrong directory. Search first and update an existing canonical
+note instead of adding a duplicate.
 
-Pool note template (fields the pool validator requires):
+A pool note is plain Markdown: a title, one short paragraph stating the rule or
+fact, then the body. There is no required frontmatter, tag or attribution
+comment; consolidation adds `description` and `verified` later. Keep a note on
+one topic, under 8000 characters, with explicit `YYYY-MM-DD` dates:
 
 ```markdown
----
-type: memory
-title: <short title>
-description: <one line — the only thing a pointer/search result shows>
-tags: [type/<x>, <extra tags>]      # exactly one type/ tag
-timestamp: 'YYYY-MM-DDTHH:MM:SS+00:00'
-meiva_agent: all
-authors:
-- '#<your agent id>'
-meiva_machine: <your machine name>
----
-<!-- agent-<your id> @ <your machine>, YYYY-MM-DD HH:MM -->
+# <short title>
 
-<body>
+<One paragraph: the rule or fact.>
+
+<Body: details, Why, How to apply.>
 ```
 
-### Which tag takes what
+### Which note takes what
 
-| You learned | Tag | File | Example |
+| You learned | Kind | File | Example |
 |---|---|---|---|
-| Who the user is — name, contact, language, timezone, accounts | `type/user` | `<pool>/user-profile.md` (one consolidated note) | "User is on Beijing time" |
-| How to work with them — channels, gates, cadence, corrections | `type/feedback` | one note per rule or per cluster of related rules | "Serve pages, never email reports" |
-| An ongoing goal and its constraints | `type/project` | `<pool>/projects/<slug>.md` | "Track competitor X, weekly" |
-| A role an agent was given and its boundary | `type/role` | `<pool>/agents/<name>.md` | "Health steward: owns health domain only" |
-| A machine or cluster fact discovered | `type/env` | `<pool>/infra/...` | "Backups run at 3 AM" |
-| A pointer to an external resource | `type/reference` | `<pool>/...` | "Their Notion workspace URL" |
+| Who the user is — name, contact, language, timezone, accounts | user | `<pool>/user-profile.md` (one consolidated note) | "User is on Beijing time" |
+| How to work with them — channels, gates, cadence, corrections | feedback | one note per rule or per cluster of related rules | "Serve pages, never email reports" |
+| An ongoing goal and its constraints | project | `<pool>/projects/<slug>.md` | "Track competitor X, weekly" |
+| A role an agent was given and its boundary | role | `<pool>/agents/<name>.md` | "Health steward: owns health domain only" |
+| A machine or cluster fact discovered | env | `<pool>/infra/...` | "Backups run at 3 AM" |
+| A pointer to an external resource | reference | `<pool>/...` | "Their Notion workspace URL" |
 
-A `type/feedback` body leads with the rule, then the reason, then how to
-apply it:
+The kind is a way of choosing the file, not a field to write. Add the new note
+to the pool's `MEMORY.md` index when it is a standing fact every agent needs.
+
+A feedback note leads with the rule, then the reason, then how to apply it:
 
 ```markdown
-## Rule
+# <the rule as a title>
+
 <the rule>
 
 Why: <what the user said, or what broke when this was ignored>

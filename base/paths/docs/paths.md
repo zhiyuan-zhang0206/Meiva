@@ -53,7 +53,7 @@ $MEIVA_HOME/
 ├── otel-collector/             # otelcol-contrib binary + config.yaml + queue/ (sidecar, task #1266)
 ├── backups/db/                 # daily pg_dump --format=custom, UTC-stamped, newest 7 kept
 ├── backups/env/                # .env snapshot taken before each config write
-├── vault/                      # authoring Git repository (machine branch)
+├── vault/                      # authoring Git repository (on machine-<name>; main on a gateway-only unit)
 │   ├── memory/                 # shared Markdown notes, meiva.memory.PATH
 │   └── sources/, papers/, repos/ # evidence and repository mappings
 ├── gateway/vault/memory/       # combined gateway/runner: consolidated main notes

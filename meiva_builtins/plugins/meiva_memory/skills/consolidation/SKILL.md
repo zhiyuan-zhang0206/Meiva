@@ -21,10 +21,13 @@ All index-rebuild / validation / refresh operations are wrapped in scripts under
 - `python ../scripts/arbiter_merge.py` — inspect/merge open PRs whose `validate` check is green + refresh (`--apply` to merge; exit 1 = alert)
 - `meiva memory refresh` — fast-forward the gateway checkout to its configured branch; semantic indexing follows on the next indexer patrol
 
-**Worktree + PR discipline (remote-backed multi-host pools):** Never commit
-directly on the shared checkout's `main` (`~/.meiva/vault` pre-commit hook refuses
-direct commits on `main`, and switching the shared checkout onto a `machine-<name>`
-branch is retired). Always create an isolated temporary git worktree from
+**Worktree + PR discipline (remote-backed multi-host pools):** The shared
+authoring checkout (`~/.meiva/vault`) sits on this machine's `machine-<name>`
+branch (`main` only on a gateway-only unit) and the gateway's consolidated
+checkout (`~/.meiva/gateway/vault`) sits on `main`. The pool's pre-commit hook
+checks size caps and runs `validate.py`; it does not refuse commits by branch, so
+the rule below is a procedure, not a guard. Never commit consolidation work on
+either checkout's branch. Always create an isolated temporary git worktree from
 `origin/main` (`git -C ~/.meiva/vault worktree add -q -B <branch> $W origin/main`),
 point a temporary `MEIVA_HOME` symlink (`$FH/vault -> $W`) when running index
 scripts against the worktree, open and squash-merge the PR once `validate` is

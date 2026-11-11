@@ -29,8 +29,8 @@ arbiter or steward role. Follow the role and scope supplied by the current task.
   during consolidation) rather than creating a new date-suffixed fork, and write
   explicit `YYYY-MM-DD` dates instead of relative time words. Directory
   `index.md` files are optional high-level directory descriptions rather than
-  generated file inventories. Never commit directly on the shared checkout's
-  `main`; remote-backed pool commits use an isolated git worktree + PR.
+  generated file inventories. Consolidation of a remote-backed pool
+  commits from an isolated git worktree and lands by PR, never on the shared checkouts.
 - When recording user preferences or corrections, read
   [user-dimension maintenance](reference/user-dimension.md). Search first,
   update the existing standing note, and keep durable shared facts in the pool.

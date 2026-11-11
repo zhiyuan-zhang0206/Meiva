@@ -2,7 +2,7 @@
 
 ## Attribution
 
-**Provided by the `meiva_memory` plugin**. Not a core module — disabling the plugin makes `meiva.memory.PATH`, `meiva.memory.PERSONAL_PATH` and `meiva.memory.search()` entirely unavailable, and stops the write check.
+**Provided by the `meiva_memory` plugin**. Not a core module — disabling the plugin makes `meiva.memory.PATH`, `meiva.memory.PERSONAL_PATH` and `meiva.memory.search()` entirely unavailable.
 
 ## What it is
 
@@ -12,19 +12,13 @@ Two types of memory, each serving different audiences:
 - **Shared pool** (`meiva.memory.PATH`): notes visible to all agents. Write durable facts that other agents need when taking over your role — user preferences, hard constraints, long-term decisions.
 - **Per-agent memory** (`meiva.memory.PERSONAL_PATH`, `<workspace>/memory/`): your own durable state, maintained by yourself (the agent keeps its `MEMORY.md` index by hand), surviving across compactions.
 
-### Inheritable blocks (personal store → descendants)
+### Descendant inheritance (personal store → descendants)
 
-A personal entry may fence content descendants should receive:
+An agent hands standing guidance to the descendants it spawns by writing pure Markdown in `INHERIT.md` in its personal memory folder; there are no fences or special tags. Only `INHERIT.md` is injected; detail files the agent keeps under `inherit/<slug>.md` are read on demand by descendants.
 
-```markdown
-<!-- meiva:inheritable -->
-Standing guidance descendants should receive.
-<!-- /meiva:inheritable -->
-```
-
-- Read at every context-window establishment (cold start / post-compact / fork regraft) from the first `memory_inherit_depth` (default 1, 0=off, ≤10) hops up the birth chain, nearest ancestor first; multiple fences and multiple entries concatenate in order.
+- `<workspace>/memory/INHERIT.md` is read at every context-window establishment (cold start / post-compact / fork regraft) for the first `memory_inherit_depth` (default 1, 0=off, ≤10) hops up the birth chain, nearest ancestor first.
 - Only ancestors that ran on the same machine contribute; a remote ancestor is skipped and named in the note's footer.
-- Size guardrails: `memory_inherit_max_block_chars` (4000) / `memory_inherit_max_total_chars` (16000) — over either, the note carries a visible `[truncated …]` marker and the log a warning; 0 disables one. Malformed fences (unclosed / stray close) drop the block with a warning — never a silent over-share.
+- Size guardrails: `memory_inherit_max_block_chars` (4000) / `memory_inherit_max_total_chars` (16000) — over either, the note carries a visible `[truncated …]` marker and the log a warning; 0 disables one.
 - Content is a pure function of (chain, files, settings) — no timestamps — so unchanged state re-renders byte-identical (fork prefix-cache stability).
 
 ## Core API
@@ -51,7 +45,7 @@ it is not a plugin state journal entry and does not wait for any handoff.
 
 ## Writing a note
 
-There is no writer function: the agent writes the whole note, frontmatter included, with `meiva.files.write` / `append` under `PATH` or `PERSONAL_PATH`, following the format in `help(meiva.memory.PATH)`. `meiva.files` stores the content as given. What happens afterwards (rule and duplicate reminders) is [Memory write check — Rule and Duplicate Reminders for Written Notes](memory-write-check.md).
+There is no writer function: the agent writes the whole note directly in pure Markdown (YAML frontmatter is optional) with `meiva.files.write` / `append` / `edit` under `PATH` or `PERSONAL_PATH`, following the format in `help(meiva.memory.PATH)`. `meiva.files` stores the content as given and nothing is checked at write time: the pool validator (`template/validate.py`) enforces the format at commit and Dream time ([Memory Pool Scaffold and Validator](memory-pool-scaffold.md)). A note is a `# Title`, a short description paragraph and a body, at most 8000 characters; YAML `sources` is forbidden, and provenance uses inline body file links.
 
 ## Key Dependencies
 
@@ -59,4 +53,4 @@ There is no writer function: the agent writes the whole note, frontmatter includ
 - [Memory-Indexer — Memory Pool Vector Index](../../../../services/docs/gateway_side/memory_indexer/memory-indexer.md) — vector index service
 - [Memory Search — NumPy exact-search service](../../../../services/docs/gateway_side/memory_search/memory-search.md) — the vector store service
 - [Memory Recall — Passive Memory Recall](memory-recall.md) — passive recall mechanism (provided by the same plugin)
-- [Memory write check — Rule and Duplicate Reminders for Written Notes](memory-write-check.md) — the reminders on notes written with `meiva.files`
+- [Memory Pool Scaffold and Validator](memory-pool-scaffold.md) — the rules a written note is checked against at commit time

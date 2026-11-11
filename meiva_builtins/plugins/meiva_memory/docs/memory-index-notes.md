@@ -7,8 +7,8 @@ framework's ordered context-note registry, which `init_context` lays down
 whenever a window is established. Registration lives in `plugin.py` because a
 plugin (re)load re-executes it, while an import of this module hits the
 sys.modules cache — decorators here would not re-run. The third memory note, the
-`inheritable` blocks read off the ancestor chain, is
-[Memory inheritance — the inheritable blocks read off the birth chain](memory-inheritance.md).
+ancestors' `memory/INHERIT.md` files read off the birth chain, is
+[Memory inheritance — INHERIT.md read off the birth chain](memory-inheritance.md).
 
 Neither note is core. Disabling `meiva_memory` removes the stores, the SDK surface
 and these notes together — the agent is then not told about a capability it does
