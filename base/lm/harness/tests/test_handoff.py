@@ -97,6 +97,9 @@ def test_defaults_cover_the_boundary_and_reporting_rules(tmp_path: Path) -> None
     assert "pause_heartbeat" in text
     assert "terminate" in text
     assert "Use your native tools for files" in text
+    assert "timers or wake-ups" in text
+    assert "`meiva.agents.spawn`" in text
+    assert "your CLI's own subagent or task tool" in text
     assert "State what you did and the evidence for it" in text
 
 

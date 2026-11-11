@@ -17,10 +17,16 @@ _FLEET_HARNESS_CONTRIBUTION = HarnessContribution(
             "deliver through the configured user delivery protocol",
         ),
     ),
+    overlaps=(
+        "When you need the user to answer or decide, ask with `meiva.ui.ask` (see "
+        "`meiva.help(meiva.ui)`) in preference to your CLI's own ask-user or question tool. "
+        "Meiva shows the question to the user in Meiva, keeps it open until they answer and "
+        "hands the answer back to you, while a question raised inside the CLI session is never "
+        "seen by them.",
+    ),
     discipline=(
         "When coordinating Fleet work, record status in `meiva.tasks` and deliver progress to "
-        "your agreed delegator (`meiva.agents.send_message`) or queue user questions via "
-        "the configured user delivery protocol.",
+        "your agreed delegator (`meiva.agents.send_message`).",
     ),
 )
 

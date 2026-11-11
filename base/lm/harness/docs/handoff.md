@@ -20,6 +20,22 @@ and in-turn background tools, so `meiva.files` is not exposed in `DEFAULT_ENTRIE
 Listing every namespace there would become a second copy of `meiva.help()` that
 drifts from the SDK; the entry point and its pointer are enough to start.
 
+## Where the CLI's own tools end
+
+The harness owns the work inside one context; Meiva owns identity, persistence, peers and
+the human's attention. Section 4 therefore tells an external agent, by preference and with a
+reason for each, to use Meiva rather than the CLI's own feature in three places: durable
+memory (`meiva.memory`, contributed by the memory plugin) instead of the CLI's memory or
+notes file, since peers and later agents never read the latter; questions for the user
+(`meiva.ui.ask`, contributed by the fleet plugin) instead of the CLI's ask-user tool, since
+a CLI prompt never reaches the person in Meiva; and other agents (`meiva.agents.spawn`,
+`meiva.agents.send_message`, in the default section) instead of the CLI's subagent or task
+tool, since a CLI subagent has no identity, is invisible to people and ends with the session.
+The same section says the CLI's own shell, background commands, monitors and timers stay in
+use. This is prompt guidance only: no CLI tool is disabled and no CLI system prompt is
+replaced, so the agent can still judge the edge cases. A guidance line lives with the plugin
+that owns the entry it names, so it renders only when that entry does.
+
 ## The saved copy and compaction
 
 An external CLI compacts its own context, and a compaction can summarize the first
