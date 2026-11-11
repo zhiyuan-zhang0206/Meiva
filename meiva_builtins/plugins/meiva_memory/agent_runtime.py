@@ -140,7 +140,7 @@ No YAML frontmatter is needed at write time (never write legacy `type: Memory`,
 `meiva_agent`, `meiva_machine`, `type/<x>` tags, or HTML attribution comments);
 Meiva Dream consolidation and the Memory Arbiter handle organization,
 deduplication, and canonical OKF provenance and lifecycle fields (`description`,
-`sources`, `verified`, and optional `stale_after`). Each note must stay under
+`verified`, and optional `stale_after`, plus inline body file-link provenance). Each note must stay under
 8000 characters.
 
 A memory is a claim, not a source of truth. Your sources differ in how they can

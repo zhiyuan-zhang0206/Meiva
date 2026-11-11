@@ -38,7 +38,7 @@ Notes tell the agent what changed and what to do, in its own terms.
 
 ### Context Structure
 - System prompt (fixed, included in every LLM call)
-- Standing context notes (exec timeout / cluster timezone / agent id / preloaded skills / the two memory indexes / the chain-inherited memory blocks) laid down behind the system prompt whenever the window is established
+- Standing context notes (exec timeout / cluster timezone / agent id / preloaded skills / the two memory indexes / the chain-inherited INHERIT.md notes) laid down behind the system prompt whenever the window is established
 - Message history (user messages + agent replies + tool call results)
 - Current turn input
 
@@ -51,5 +51,5 @@ Notes tell the agent what changed and what to do, in its own terms.
 ## Entry Points
 - `agent/graph/_init_context.py` — the node that lays down the head
 - `agent/graph/prompt/context_notes.py` — `context_notes` / `fork_notes`, framework notes; `note_text.py` — their wording
-- `meiva_builtins/plugins/meiva_memory/notes.py` — the two memory index notes; `inheritance/inherit.py` — the inherited-memory note (ancestor chain, block parsing, guardrails)
+- `meiva_builtins/plugins/meiva_memory/notes.py` — the two memory index notes; `inheritance/inherit.py` and `inheritance/inherited_blocks.py` — the inherited-memory note (ancestor chain, `INHERIT.md` extraction, guardrails)
 - `agent/graph/recall/memory_recall.py` — passive recall

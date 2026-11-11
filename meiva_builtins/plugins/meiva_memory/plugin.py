@@ -73,10 +73,11 @@ from __future__ import annotations
 
 __description__ = "Shared memory pool: meiva.memory SDK surface (PATH + PERSONAL_PATH + search) + passive recall hook (auto-surfaces relevant notes) + daily Meiva Dream consolidation skill (Dream-only validate.py, auto-OKF, index rebuild, commit, push, re-index)"
 
+# meiva:note
 # This module is the plugin's SDK **surface** — the only face an agent-launched
 # child loads (task #3633). Its agent-runtime registrations (the two context-note
 # indexes, the memory-discipline prompt section, the passive-recall before_llm
-# hook, the write-check hook) live in `agent_runtime.py`, imported only on the full path (see
+# hook) live in `agent_runtime.py`, imported only on the full path (see
 # `agent/extensions/__init__.py`). The two `files.*` wraps below run in the exec
 # subprocess and keep to the surface-only imports.
 

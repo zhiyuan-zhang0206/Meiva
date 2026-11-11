@@ -17,15 +17,19 @@ class _PassiveMemoryRecallHook(Hook):
     ) -> dict | None: ...
 
 passive_memory_recall_before_llm = _PassiveMemoryRecallHook()
-# declared in contribute(): before_turn=(passive_memory_recall_before_llm,)
+# declared in agent_runtime.py:contribute(): before_turn=(passive_memory_recall_before_llm,)
 ```
 
-**Trigger and behavior**: the hook is a no-op when `settings.passive_memory_recall_enabled` is off, triggers when any inbound since the last AIMessage is not from a peer agent, defers (returns None) when auto-compact would also fire in the same turn, and injects the matched note references as `system_note` messages the agent sees on its next turn; the built-in `memory` sub-state's `injected_paths` holds this window's notes. The gate, the deferral reason and the injected shape: [Passive Recall Hook](memory-recall-hook.md).
+**Trigger and behavior**: the hook is a no-op when `settings.passive_memory_recall_enabled` is off, uses `tail_has_recallable_inbound` to trigger when the tail since the last `AIMessage` contains fresh user chat, peer-agent (`agent:`), scheduled (`schedule:`), or system inbound, skipping machine-originated `watcher:` and `shell:` wake-ups, defers (returns None) when auto-compact would also fire in the same turn, and injects the matched note references as `system_note` messages the agent sees on its next turn; the built-in `memory` sub-state's `injected_paths` holds this window's notes. The gate, the deferral reason and the injected shape: [Passive Recall Hook](memory-recall-hook.md).
 
 The recall engine (search + rendering beyond gating) is in the core `agent/graph/recall/memory_recall.py:passive_memory_recall`;
 this plugin only provides the before_turn wiring + trigger gate. It also bundles memory skills: `meiva.skills.meiva_memory`
-(Memory Steward maintenance manual — daily merge, health check, note consolidation, query service) +
-`meiva.skills.meiva_memory.consolidation` sub-skill (`meiva memory` CLI daily merge — commit / push / rebuild index).
+(Two-Stage OKF: pure-Markdown notes at write time, enrichment during Dream) and
+`meiva.skills.meiva_memory.consolidation` (four-phase **Meiva Dream**: orientation,
+gather signal, consolidate, prune and index). `dream_gather.py` gathers workspace
+candidates across hosts and tracks content hashes in
+`sources/dream/workspace-memory-ledger.json`; `scope_trapped_candidates` is a P0
+promotion signal. After promotion, private notes are pruned to canonical pointers.
 
 **Host-side scaffolding and validator**: explicit `meiva memory init` brings up this cluster's memory pool checkouts and lays the plugin's `template/` down inside the authoring one (the `memory/MEMORY.md` index and the pre-commit character-cap guard); the pool's own `validate.py` runs on every commit. Idempotent, non-destructive, and converge and service startup never touch the memory repository: [Memory Pool Scaffold and Validator](memory-pool-scaffold.md).
 Skill nodes see [Meiva Memory Skills](../skills/README.md).
@@ -36,7 +40,7 @@ This plugin **owns** the `meiva.memory` namespace — `plugin.py` assembles it a
 
 - `meiva.memory.PATH` — memory pool root path (`$MEIVA_HOME/vault/memory`, from the bound context's Meiva home each time it is read, so reading it outside a bound context raises), shared by all agents
 - `meiva.memory.search(query, k=5)` — semantic search, returns `list[MemoryMatch]` (`path`, `description`, `tags`, `score`, `chunk`), most relevant first
-  (description empty string when absent; tags include the note's `type/<x>` tag so a caller can weigh a hit by its kind)
+  (description empty string when absent; tags are empty or come from optional frontmatter tags)
 - `meiva.memory.PERSONAL_PATH` — the agent's own memory folder (`<workspace>/memory`), resolved from the SDK identity when read
 
 There is no writer: an agent writes notes with `meiva.files.write` (see [Memory API](memory-api.md)). `IndexerUnavailable` remains reachable but deliberately excluded from `help(meiva.memory)`.
@@ -69,7 +73,7 @@ There is no writer: an agent writes notes with `meiva.files.write` (see [Memory 
 ## Notes
 
 - Memory notes are shared cross-agent — a note written by one agent can be searched by another
-- Passive recall is "on-demand" rather than "full" — only triggers when tail has non-agent inbound, avoiding search on every turn
+- Passive recall is "on-demand" rather than "full" — triggers on recallable inbound and skips machine-originated wake-ups
 - The mutual exclusion with auto-compact is carefully designed — `messages` have a reducer that merges, but compact's REMOVE_ALL full replacement swallows same-turn appended notes, memory recall yields priority to compaction
 
 Memory note builders read live gates and caps through their owning AgentSlices at the existing use points.
