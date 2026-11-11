@@ -86,23 +86,33 @@ def no_pinned_sdk_context_leaks() -> Iterator[None]:
 
 # meiva:note
 # No test sees the MCP SDK's OAuth client already patched. `install_token_auth_basic_shim` replaces
-# `OAuthContext.prepare_token_auth` on the SDK's class for the whole process, and a test that
-# installs it (or runs a flow that does) left it in place for every later test on the worker. A test
-# that pins the SDK's own behaviour (`test_token_auth_basic_shim_strips_body_client_id`) then failed
-# only under an order that ran an installer first (random-order run 43008460355). The shim keeps the
-# SDK's function as `__wrapped__`, so the guard unwraps before and after each test; it only looks at
-# the module when something has already imported it.
+# `OAuthContext.prepare_token_auth`, and `install_issuer_normalization` replaces the two bound
+# copies of `validate_metadata_issuer`, on the SDK's modules for the whole process; a test that
+# installs one (or runs a flow that does) left it in place for every later test on the worker. A test
+# that pins the SDK's own behaviour then failed only under an order that ran an installer first
+# (random-order run 43008460355). Each installer keeps the SDK's function as `__wrapped__`, so the
+# guard unwraps before and after each test; it only looks at a module when something has already
+# imported it.
 @pytest.fixture(autouse=True)
 def mcp_oauth_sdk_is_unpatched() -> Iterator[None]:
+    def unwrapped(patched: Any) -> Any:
+        while hasattr(patched, "__wrapped__"):
+            patched = patched.__wrapped__
+        return patched
+
     def unwrap() -> None:
         oauth2 = sys.modules.get("mcp.client.auth.oauth2")
         context = getattr(oauth2, "OAuthContext", None)
-        if context is None:
-            return
-        patched = context.prepare_token_auth
-        while hasattr(patched, "__wrapped__"):
-            patched = patched.__wrapped__
-        context.prepare_token_auth = patched
+        if oauth2 is not None and context is not None:
+            context.prepare_token_auth = unwrapped(context.prepare_token_auth)
+            vars(oauth2).update(
+                validate_metadata_issuer=unwrapped(vars(oauth2)["validate_metadata_issuer"])
+            )
+        utils = sys.modules.get("mcp.client.auth.utils")
+        if utils is not None and hasattr(utils, "validate_metadata_issuer"):
+            vars(utils).update(
+                validate_metadata_issuer=unwrapped(vars(utils)["validate_metadata_issuer"])
+            )
 
     unwrap()
     yield

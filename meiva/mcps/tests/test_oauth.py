@@ -14,7 +14,8 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from mcp.shared.auth import OAuthClientInformationFull, OAuthToken
+from mcp.client.auth import OAuthFlowError
+from mcp.shared.auth import OAuthClientInformationFull, OAuthMetadata, OAuthToken
 
 import meiva.mcps._oauth as oauth_mod
 
@@ -124,7 +125,48 @@ def test_normalized_validate_issuer_accepts_google_trailing_slash() -> None:
         authorization_endpoint=AnyHttpUrl("https://accounts.google.com/o/oauth2/v2/auth"),
         token_endpoint=AnyHttpUrl("https://oauth2.googleapis.com/token"),
     )
-    oauth_mod.normalized_validate_issuer(md, "https://accounts.google.com")  # no raise
+    oauth_mod.normalized_validate_issuer(md, "https://accounts.google.com")
+
+
+def _google_metadata() -> OAuthMetadata:
+    from pydantic import AnyHttpUrl
+
+    return OAuthMetadata(
+        issuer=AnyHttpUrl("https://accounts.google.com/"),
+        authorization_endpoint=AnyHttpUrl("https://accounts.google.com/o/oauth2/v2/auth"),
+        token_endpoint=AnyHttpUrl("https://oauth2.googleapis.com/token"),
+    )
+
+
+# meiva:note
+# Polluter first, victim second: the test below installs the patch, the one after it expects the SDK's
+# strict validator back (the autouse guard unwraps between tests). Installing twice keeps one layer.
+def test_issuer_normalization_installs_on_both_bound_copies_without_stacking() -> None:
+    import mcp.client.auth.oauth2 as sdk_oauth2
+    import mcp.client.auth.utils as sdk_utils
+
+    sdk_original = sdk_utils.validate_metadata_issuer
+    flow_copy = vars(sdk_oauth2)["validate_metadata_issuer"]
+    assert flow_copy is sdk_original
+    with pytest.raises(OAuthFlowError, match="issuer mismatch"):
+        sdk_original(_google_metadata(), "https://accounts.google.com")
+
+    oauth_mod.install_issuer_normalization()
+    oauth_mod.install_issuer_normalization()
+
+    for patched in (
+        sdk_utils.validate_metadata_issuer,
+        vars(sdk_oauth2)["validate_metadata_issuer"],
+    ):
+        assert vars(patched)["__wrapped__"] is sdk_original
+        patched(_google_metadata(), "https://accounts.google.com")
+
+
+def test_issuer_normalization_does_not_leak_into_the_next_test() -> None:
+    import mcp.client.auth.utils as sdk_utils
+
+    with pytest.raises(OAuthFlowError, match="issuer mismatch"):
+        sdk_utils.validate_metadata_issuer(_google_metadata(), "https://accounts.google.com")
 
 
 @pytest.mark.parametrize(
