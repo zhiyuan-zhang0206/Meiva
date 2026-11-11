@@ -50,7 +50,7 @@ import tests._test_env_file
 # differently where a launcher's environment reached it.
 #
 # A credential is a whole name element, never a substring: `MEIVA_API_TOKEN`,
-# `MEIVA_TELEGRAM_BOT_TOKEN`, `MEIVA_DB_CAPABILITY_KEY` are credentials;
+# `MEIVA_CLUSTER_SECRET`, `MEIVA_DB_CAPABILITY_KEY` are credentials;
 # `MEIVA_REPLY_SUGGESTION_MAX_INPUT_TOKENS` is a budget and
 # `MEIVA_BACKUP_OFFSITE_CREDENTIALS_FILE` is a path TO a credential — a rule that called
 # those two credentials would teach the reader to ignore this one. `MEIVA_PROCESS_PROFILE`
@@ -76,7 +76,6 @@ def is_credential_name(name: str) -> bool:
 SENTINELS: Mapping[str, str] = {
     "MEIVA_CLUSTER_SECRET": "test-cluster-secret",
     "MEIVA_RUNNER_DB_PASSWORD": "test-runner-db-password",
-    "MEIVA_TELEGRAM_BOT_TOKEN": "",
 }
 
 
@@ -198,8 +197,7 @@ os.environ["MEIVA_COMPACT_HISTORY_DUMP"] = "false"
 # domains that process kind consumes. The pytest process has no process kind,
 # but a local run launched from a fleet agent / runner process INHERITS the
 # launcher's marker (MEIVA_PROCESS_PROFILE=agent), so `settings` builds only the
-# agent domains and gateway-domain reads fail — `settings.telegram` in the
-# im_bridge adapter tests raises "does not construct the telegram config domain" — while CI (no marker, every domain constructed)
+# agent domains and gateway-domain reads fail — while CI (no marker, every domain constructed)
 # stays green. Pop the marker here, before the first Settings() construction,
 # so local runs match CI (2026-08-06, PR #1650 verification).
 os.environ.pop("MEIVA_PROCESS_PROFILE", None)
@@ -207,8 +205,7 @@ os.environ.pop("MEIVA_PROCESS_PROFILE", None)
 # meiva:note
 # Credentials the launching process carries do not reach the suite. Two ways one arrives
 # here and never arrives in CI: the login shell exports the operator's real ~/.meiva/.env
-# into every child process (the 2026-08-04 shell-env leak class the telegram block above
-# describes), and a launcher hands the process it starts its own machine token. Either way a
+# into every child process (the 2026-08-04 shell-env leak class), and a launcher hands the process it starts its own machine token. Either way a
 # test that reads one asserts a different world depending on where it ran — green in CI, red
 # on one box, for a reason no diff explains.
 #
@@ -224,6 +221,7 @@ os.environ.pop("MEIVA_API_TOKEN", None)
 # config field does not erase variables inherited from an older installation.
 os.environ.pop("MEIVA_CF_API_TOKEN", None)
 os.environ.pop("MEIVA_FEISHU_APP_SECRET", None)
+os.environ.pop("MEIVA_TELEGRAM_BOT_TOKEN", None)
 os.environ.pop("MEIVA_ALERTS_WEBHOOK_TOKEN", None)
 # meiva:note
 # The runner database password is the one credential the suite's own home declares below: the
@@ -323,7 +321,7 @@ os.environ["MEIVA_PGBOUNCER_ENABLED"] = "false"
 os.environ["MEIVA_TELEMETRY_OTLP_ENABLED"] = "false"
 
 # ── Host-scope identity and telemetry URLs: loopback, like CI ──
-#
+# meiva:note
 # The native LGTM installer renders Tempo targets from the host-scope
 # telemetry settings (`settings.observability.telemetry_tempo_query_url` /
 # `telemetry_tempo_endpoint`), and `self_machine_host()` prefers the
@@ -334,7 +332,7 @@ os.environ["MEIVA_TELEMETRY_OTLP_ENABLED"] = "false"
 # private-network host override reached the suite and
 # `test_ensure_renders_configs_with_native_paths_and_loopback` rendered
 # `http://100.x.y.z:3200` instead of loopback while CI (no .env) stayed green.
-# Pinned unconditionally, like the gateway/telegram sentinels: local runs
+# Pinned unconditionally, like the gateway sentinels: local runs
 # resolve the same loopback host everywhere, and a test that needs a remote
 # Tempo URL or host address monkeypatches the settings explicitly
 # (base/cluster/tests/test_machine.py does for machine_host).
@@ -373,7 +371,7 @@ os.environ["MEIVA_MACHINE_HOST"] = "localhost"
 #
 # Same leak class: the login shell exports the real GRAFANA_ADMIN_PASSWORD, and the native LGTM
 # render writes `settings.alerts.grafana_admin_password` into the rendered native dir, a
-# production credential flowing through test output. Pinned empty like the telegram token; a test
+# production credential flowing through test output. Pinned empty like the db/redis sentinels; a test
 # that needs a credential hands the renderer a value (`render_grafana_admin_password`, as
 # cli/commands/observability/tests/lgtm/test_converge_lgtm.py does).
 os.environ["GRAFANA_ADMIN_PASSWORD"] = ""
@@ -394,25 +392,6 @@ os.environ["GRAFANA_ADMIN_PASSWORD"] = ""
 # sentinels above, so the suite resolves the same fake gateway everywhere instead
 # of inheriting whatever the box happens to be enrolled with.
 os.environ["MEIVA_GATEWAY_URL"] = "http://test-gateway.invalid:8000"
-# ── Telegram: the suite never carries a live bot token ──
-#
-# On dev boxes the login shell exports the operator's real ~/.meiva/.env into
-# every child process (the 2026-08-04 shell-env leak class), so
-# MEIVA_TELEGRAM_BOT_TOKEN / MEIVA_TELEGRAM_OWNER_ID are live here even though
-# MEIVA_HOME is redirected: pydantic-settings precedence is env > default, and
-# `_enforce_cluster_env_authority` drops only the DERIVED data-plane keys, not
-# these. Anything reading `settings.telegram` then holds a working send path
-# to the operator's bot. The health probe did exactly that pre-W16 — its
-# owner alerts POSTed straight to the Telegram Bot API, so a unit test
-# exercising a probe failure path without stubbing the alert seam sent the
-# operator real "[test_...] [health-probe] cluster unhealthy" messages, four
-# per local pytest run (Task #794, 2026-08-05). W16 moved the probe to
-# the alerts ingest + im_bridge /send, but the leak class is general (the
-# telegram skill, IM adapters, any future direct caller). Pinned empty like
-# the db/redis sentinels: a test that needs a token monkeypatches
-# `settings.telegram` explicitly (cli/commands/cluster/tests/test_cluster_health.py does).
-os.environ["MEIVA_TELEGRAM_BOT_TOKEN"] = SENTINELS["MEIVA_TELEGRAM_BOT_TOKEN"]
-os.environ["MEIVA_TELEGRAM_OWNER_ID"] = "0"
 # meiva:note
 # Shell-session and execution transport tests have no inherited desktop-helper route.
 # This switch does not disable mandatory macOS application-root ancestry:
@@ -435,8 +414,8 @@ os.environ["MEIVA_PERMISSIONS_HELPER_SPAWN"] = "false"
 os.environ.pop("MEIVA_PERMISSIONS_HELPER_PID", None)
 os.environ.pop("MEIVA_PERMISSIONS_HELPER_PORT", None)
 # ── Off-site backup destination: no ambient MEIVA_BACKUP_OFFSITE_* in the suite ──
-#
-# Same shell-leak class as the telegram token above. A field the fixture `.env`
+# meiva:note
+# Same shell-leak class as the credentials above. A field the fixture `.env`
 # does not pin falls back to the BOOT-TIME environment value (candidate
 # validation reconstructs a domain from the captured `.env` image and the patch),
 # and a pytest run inside a process that carries the production destination would
@@ -490,8 +469,6 @@ for _provider_key_env in _TEST_PROVIDER_KEY_ENVS:
             f"MEIVA_RUNNER_DB_PASSWORD={os.environ['MEIVA_RUNNER_DB_PASSWORD']}",
             f"MEIVA_TRANSPORT_ENCRYPTION={os.environ['MEIVA_TRANSPORT_ENCRYPTION']}",
             f"MEIVA_GATEWAY_URL={os.environ['MEIVA_GATEWAY_URL']}",
-            f"MEIVA_TELEGRAM_BOT_TOKEN={os.environ['MEIVA_TELEGRAM_BOT_TOKEN']}",
-            f"MEIVA_TELEGRAM_OWNER_ID={os.environ['MEIVA_TELEGRAM_OWNER_ID']}",
             *(f"{key}={os.environ[key]}" for key in _TEST_PROVIDER_KEY_ENVS),
             # Host binary selections are file-owned. Preserve an explicit test
             # override through Settings refresh without importing a real home.

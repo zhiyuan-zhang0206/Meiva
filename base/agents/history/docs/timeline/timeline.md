@@ -60,8 +60,8 @@ and updates the same row as its revision advances, under the agent metadata row
 lock. A repeat of an identical revision is idempotent. A stale runtime owner,
 legacy row, or conflicting revision cannot replace the stored activity. Native
 and historical items carry no activity revision. `activity_pending` marks a text
-checkpoint that can still change. The IM bridge and reply-suggestion excerpt
-consume only complete text blocks.
+checkpoint that can still change. The reply-suggestion excerpt
+consumes only complete text blocks.
 
 ## Window unit and readers
 

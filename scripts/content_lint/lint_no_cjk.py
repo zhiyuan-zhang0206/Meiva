@@ -35,7 +35,7 @@
 # e.g. `ui/web/messages/{en,zh}/<namespace>.json`).
 # - `**/locales/**` and `**/*.po` — gettext-style locale trees, should they
 # ever appear.
-# - `base/telemetry/alerts/copy.py` — the Python locale module: IM alert-push
+# - `base/telemetry/alerts/copy.py` — the Python locale module: alert notification
 # copy in zh/en variants selected by `user_settings.display.language`, the
 # same language-switching mechanism as the frontend catalogs (documented as a
 # locale module in its own docstring).
@@ -99,8 +99,8 @@ def _is_locale_path(rel_path: str) -> bool:
 
 # meiva:note
 # The Python locale module (zh/en by user_settings display.language, the
-# same language-switching mechanism as the frontend catalogs): the IM
-# alert-push copy.
+# same language-switching mechanism as the frontend catalogs): the alert
+# notification copy.
 _LOCALE_PY_FILES = frozenset({"base/telemetry/alerts/copy.py"})
 
 

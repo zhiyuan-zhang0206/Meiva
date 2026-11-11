@@ -599,8 +599,8 @@ COMMENT ON COLUMN agents_meta.creation_key IS
 -- Generic AtLeastOnceWithKey dedup (R3 doorplate ①): routes whose contract
 -- declares Idempotency.AT_LEAST_ONCE_WITH_KEY (POST /api/agents/{id}/messages)
 -- dedup by the Idempotency-Key header — the first request with a key
--- executes and its response is stored here; same-key retries (SDK / IM
--- bridge retrying one logical request) replay it instead of re-executing.
+-- executes and its response is stored here; same-key retries (an SDK
+-- retrying one logical request) replay it instead of re-executing.
 -- The cluster_rpc mechanism generalized into one shared table (migration
 -- 20260808T200000_unify-ops-idempotency merged the former
 -- cluster_ops_idempotency in): the /ops dispatch channel (agent_ops daemon)
@@ -690,14 +690,14 @@ CREATE TABLE IF NOT EXISTS agent_model_tokens_total_through (
 -- generatorURL). One writer: the Grafana embedded-Alertmanager webhook contact
 -- point (POST /api/alerts, source='grafana'); rows from before 2026-10-04 also
 -- carry the retired in-process writers' tags. Alert is fully separate
--- from Notice: own table, own UI section, own IM channel — nothing here
+-- from Notice: own table, own UI section — nothing here
 -- enters the notices queue.
--- severity: critical / warning / error (all three push to IM).
+-- severity: critical / warning / error.
 -- status: unresolved / resolved only — no ack, no escalation.
 -- Dedup key (fingerprint, starts_at): Alertmanager re-sends the same instance
 -- while firing according to notification policy, and once more on resolution. fingerprint
 -- is the Alertmanager-standard fnv-1a hash over sorted labels; the ingest
--- computes it when a direct writer omits it. notified_at stamps a landed IM send.
+-- computes it when a direct writer omits it. notified_at stamped a landed IM send (retired 2026-11-08; no writer, historical rows keep it).
 CREATE TABLE alerts (
     id           BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     status       TEXT NOT NULL DEFAULT 'unresolved',
@@ -1890,80 +1890,6 @@ BEGIN
     END IF;
 END $$;
 
--- ─────────────── im_bridge_cursors ───────────────
--- im-bridge durable positions (migration 20261002T051710_im-bridge-cursors).
-CREATE TABLE im_bridge_cursors (
-    channel         TEXT        NOT NULL,
-    chat_id         TEXT        NOT NULL,
-    push_agent_id   BIGINT,
-    push_account_id TEXT,
-    push_initialized BOOLEAN NOT NULL DEFAULT FALSE,
-    push_item_id    TEXT,
-    push_created_at TEXT,
-    poll_message_id TEXT,
-    poll_create_ms  BIGINT,
-    updated_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
-    PRIMARY KEY (channel, chat_id),
-    CONSTRAINT im_bridge_cursors_push_pair
-        CHECK (push_item_id IS NULL OR push_agent_id IS NOT NULL)
-);
-
-COMMENT ON TABLE im_bridge_cursors IS
-    'Durable im-bridge selection and positions: push_* = timeline acceptance, poll_* = independently handled platform inbound. Acceptance and provider intents commit atomically; cursor advancement is not proof of delivery.';
-COMMENT ON COLUMN im_bridge_cursors.push_agent_id IS
-    'Canonical recipient selection after initialization/binding; push_item_id belongs to this agent and may be NULL after explicit empty acceptance or clear.';
-COMMENT ON COLUMN im_bridge_cursors.push_initialized IS
-    'Explicitly accepted initial history, including empty switch batches. FALSE legacy NULL positions remain held without implicit backfill.';
-COMMENT ON COLUMN im_bridge_cursors.push_created_at IS
-    'Timestamp of newest durably accepted timeline item, not proof of provider delivery. NULL legacy positions compare item_id alone.';
-
-CREATE TABLE im_bridge_outbound_intents (
-    id BIGSERIAL PRIMARY KEY,
-    channel TEXT NOT NULL,
-    account_id TEXT NOT NULL,
-    chat_id TEXT NOT NULL,
-    agent_id BIGINT,
-    source_kind TEXT NOT NULL CHECK (source_kind IN ('message', 'inbound', 'notice', 'alert_group')),
-    source_id TEXT NOT NULL,
-    block_idx INTEGER NOT NULL CHECK (block_idx >= 0),
-    replay_id TEXT NOT NULL DEFAULT '',
-    request JSONB NOT NULL,
-    status TEXT NOT NULL DEFAULT 'queued'
-        CHECK (status IN ('queued', 'sending', 'sent', 'uncertain', 'failed')),
-    attempt_id UUID,
-    outcome_reason TEXT,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    started_at TIMESTAMPTZ,
-    completed_at TIMESTAMPTZ,
-    CONSTRAINT im_bridge_outbound_identity UNIQUE NULLS NOT DISTINCT (channel, account_id, chat_id, agent_id, source_kind, source_id, block_idx, replay_id),
-    CONSTRAINT im_bridge_outbound_context CHECK ((source_kind='alert_group' AND agent_id IS NULL AND block_idx=0 AND replay_id='')
-           OR (source_kind<>'alert_group' AND agent_id IS NOT NULL AND agent_id>0)),
-    CHECK ((status = 'queued') = (attempt_id IS NULL))
-);
-CREATE INDEX im_bridge_outbound_pending ON im_bridge_outbound_intents (id)
-    WHERE status IN ('queued', 'sending');
-COMMENT ON TABLE im_bridge_outbound_intents IS
-    'Immutable IM timeline and normal notice intents. Producer acceptance commits with its receipt/cursor; sending is persisted before provider calls. Unresolved attempts are uncertain and never automatically replayed. No expiry.';
-COMMENT ON COLUMN im_bridge_cursors.push_account_id IS
-    'Nonsecret adapter account owning the accepted push cursor; legacy NULL binds once without backfill. Explicit switch replay alone may rebind another account.';
-
-
-CREATE TABLE im_bridge_outbound_replays (
-    channel TEXT NOT NULL,
-    account_id TEXT NOT NULL,
-    chat_id TEXT NOT NULL,
-    replay_id TEXT NOT NULL,
-    switch_arg TEXT NOT NULL,
-    agent_id BIGINT NOT NULL,
-    intent_ids BIGINT[] NOT NULL,
-    push_item_id TEXT,
-    push_created_at TEXT,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    PRIMARY KEY (channel, account_id, chat_id, replay_id)
-);
-COMMENT ON TABLE im_bridge_outbound_replays IS
-    'Immutable switch-replay batch acceptance receipts; repeated platform invocations recover the original selected intent IDs and cursor. No expiry or foreign-key pin to delivery rows.';
-
 -- ─────────────── schema_migrations ───────────────
 -- Applied-migration registry — maintained by `base.deploy.schema.migrations`. Keyed by
 -- migration NAME (an applied SET, not a high-water integer). This whole file is
@@ -2115,28 +2041,6 @@ CREATE TABLE task_assignment_receipts (
 COMMENT ON TABLE task_assignment_receipts IS
     'Immutable principal-scoped compound acceptance tombstones; no FK or automatic expiry.';
 
-CREATE TABLE im_bridge_notice_poll_state (
-    singleton BOOLEAN PRIMARY KEY DEFAULT TRUE CHECK (singleton),
-    legacy_floor BIGINT NOT NULL CHECK (legacy_floor >= 0),
-    import_reason TEXT NOT NULL CHECK (import_reason IN ('legacy_cursor', 'no_history', 'legacy_history_unknown')),
-    accepted_notice_id BIGINT NOT NULL DEFAULT 0 CHECK (accepted_notice_id >= 0),
-    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-COMMENT ON TABLE im_bridge_notice_poll_state IS
-    'One-time normal Telegram notice cutover. The immutable legacy floor preserves imported skips or unknown old history; accepted_notice_id is diagnostic and never eligibility.';
-
-CREATE TABLE im_bridge_notice_acceptances (
-    notice_id BIGINT PRIMARY KEY CHECK (notice_id > 0),
-    decision TEXT NOT NULL CHECK (decision IN ('queued', 'filtered')),
-    request JSONB NOT NULL,
-    intent_ids BIGINT[] NOT NULL,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    CHECK ((decision = 'filtered') = (cardinality(intent_ids) = 0))
-);
-COMMENT ON TABLE im_bridge_notice_acceptances IS
-    'Normal-poll notice source receipts with immutable destination/rendering or deliberate filter decision. No foreign-key pin or expiry; explicit listing is a separate producer.';
-
 CREATE TABLE agent_launch_retry_receipts (
     operation_key text PRIMARY KEY,
     agent_id bigint NOT NULL,
@@ -2150,63 +2054,8 @@ CREATE TABLE agent_launch_retry_receipts (
 COMMENT ON TABLE agent_launch_retry_receipts IS
 'Immutable guarded retry-launch intents; retain after target deletion, no TTL.';
 
-CREATE TABLE im_bridge_alert_acceptances (
-    group_id BIGINT PRIMARY KEY CHECK (group_id > 0),
-    request JSONB NOT NULL,
-    decisions JSONB NOT NULL,
-    intent_ids BIGINT[] NOT NULL CHECK (cardinality(intent_ids)>0),
-    accepted_at TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-COMMENT ON TABLE im_bridge_alert_acceptances IS
-    'Frozen available recipient subset and retained unavailable channel decisions, accepted atomically with shared intents. No FK to mutable/retained source or queue, no expiry, no retrospective fanout.';
-
 COMMENT ON COLUMN alerts.notified_revision IS
     'Native revision completed by at least one real SENT channel; legacy notified_at never populates this fact.';
-CREATE TABLE weixin_ingress_bindings (
-    id integer PRIMARY KEY CHECK (id = 1),
-    namespace text NOT NULL CHECK (length(namespace) > 0),
-    account_id text NOT NULL CHECK (length(account_id) > 0),
-    epoch uuid NOT NULL
-);
-
-CREATE TABLE weixin_ingress_cursors (
-    namespace text NOT NULL CHECK (length(namespace) > 0),
-    account_id text NOT NULL CHECK (length(account_id) > 0),
-    cursor text NOT NULL,
-    state text NOT NULL CHECK (state IN ('held','draining','active')),
-    binding_reason text NOT NULL CHECK (binding_reason IN ('unverified_history','legacy_unbound','operator_draining','operator_activated')),
-    updated_at timestamptz NOT NULL DEFAULT now(),
-    PRIMARY KEY (namespace, account_id)
-);
-
-CREATE TABLE weixin_ingress_receipts (
-    id bigint GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
-    namespace text NOT NULL CHECK (length(namespace) > 0),
-    account_id text NOT NULL CHECK (length(account_id) > 0),
-    sender_id text NOT NULL CHECK (length(sender_id) > 0),
-    message_id text NOT NULL CHECK (message_id ~ '^[1-9][0-9]{0,19}$' AND message_id::numeric < 18446744073709551616),
-    request jsonb NOT NULL CHECK (jsonb_typeof(request) = 'object'),
-    provider_payload jsonb NOT NULL CHECK (jsonb_typeof(provider_payload) = 'object'),
-    route jsonb NOT NULL CHECK (jsonb_typeof(route) = 'object'),
-    status text NOT NULL CHECK (status IN ('retained', 'claimed', 'accepted', 'rejected', 'uncertain', 'quarantined')),
-    attempt_id uuid,
-    inbound_id bigint CHECK (inbound_id > 0),
-    outcome_reason text,
-    result jsonb CHECK (jsonb_typeof(result) = 'object'),
-    created_at timestamptz NOT NULL DEFAULT now(),
-    completed_at timestamptz,
-    UNIQUE (namespace, account_id, sender_id, message_id),
-    CHECK (status NOT IN ('claimed','uncertain') OR attempt_id IS NOT NULL),
-    CHECK (status <> 'retained' OR (attempt_id IS NULL AND inbound_id IS NULL AND result IS NULL)),
-    CHECK (inbound_id IS NULL OR status = 'accepted'),
-    CHECK (status <> 'accepted' OR inbound_id IS NOT NULL OR result IS NOT NULL),
-    CHECK (status <> 'uncertain' OR outcome_reason IS NOT NULL),
-    CHECK (status <> 'quarantined' OR (attempt_id IS NULL AND inbound_id IS NULL AND result IS NULL)),
-    CHECK (status NOT IN ('retained','claimed') OR completed_at IS NULL)
-);
-CREATE INDEX weixin_ingress_pending ON weixin_ingress_receipts(namespace,account_id,id)
-    WHERE status IN ('retained','claimed');
-
 CREATE TABLE upload_delivery_batches (
     batch_id text PRIMARY KEY CHECK (batch_id ~ '^[0-9a-f]{32}$'),
     operation_key text NOT NULL UNIQUE,

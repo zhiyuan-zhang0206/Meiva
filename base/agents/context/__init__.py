@@ -288,7 +288,7 @@ class MeivaContext:
 
     # meiva:note
     # Mint a fresh version-4 identifier from the root's generator, as the 32-character hex form
-    # the CLI runtime and the IM bridge use (`new_uuid(rng).hex`). A partial context fails at
+    # the CLI runtime uses (`new_uuid(rng).hex`). A partial context fails at
     # first use, with no fallback to a generator of its own.
     def require_new_id(self) -> str:
         return new_uuid(self.require_rng()).hex

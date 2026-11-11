@@ -8,7 +8,7 @@
 # - an unreachable source means this round does nothing. Falling back to the previous pass's
 #   answer would turn "the database is gone" into "the condition still fires", which is how a
 #   silence becomes an event.
-# - only this pass writes the ledger. The ingest and the IM leg read it; a second writer would
+# - only this pass writes the ledger. The alert ingest reads it; a second writer would
 #   put two answers to "was a person told" in one table.
 from __future__ import annotations
 

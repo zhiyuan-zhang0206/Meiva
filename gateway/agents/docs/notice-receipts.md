@@ -32,7 +32,7 @@ id or allocates one per invocation. The mounted reply component retains the
 same key for a manual retry of an unchanged action/reply/target after failure;
 changed input starts a new intent. It does not persist or automatically retry
 requests, and an unsupported server is refused without fallback.
-CLI and IM bridge resolution use the same route, sending one fresh key and the
+CLI resolution uses the same route, sending one fresh key and the
 `principal-v1` scope per invocation; they remain single attempts.
 
 ## Structured question resolutions

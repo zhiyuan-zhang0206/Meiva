@@ -106,7 +106,7 @@ class TimelineItem(BaseModel):
     show_timestamp: bool = True
     # meiva:note
     # Whether an `agent_chat` item surfaces as a primary user-facing reply in the main dialog
-    # stream, IM bridge, and reply suggestions. False demotes unprefixed closing/narration text
+    # stream and reply suggestions. False demotes unprefixed closing/narration text
     # from non-human background wakes into the collapsible `Details` work block while keeping it
     # inspectable and copyable.
     # meiva:link base/agents/history/docs/timeline/timeline.md

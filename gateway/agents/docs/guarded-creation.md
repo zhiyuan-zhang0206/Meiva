@@ -24,7 +24,7 @@ retry, changed placement, admission, termination or deleted metadata returns
 the original historical acceptance without forwarding a launch. Replay never
 rotates an attempt, restores operator config or creates another first prompt.
 The retained snapshot has no target FK or automatic expiry. This is the only
-agent creation route: the browser, IM bridge, CLI, scripts, SDK and examples all
+agent creation route: the browser, CLI, scripts, SDK and examples all
 use it, and every other creation entry (guarded drafts, the MCP tool and task
 assignment) records its birth through the same snapshot owner.
 

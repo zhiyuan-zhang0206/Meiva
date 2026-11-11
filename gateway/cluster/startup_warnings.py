@@ -82,7 +82,7 @@ def startup_warnings(
         warnings.append(
             f"{_ALERTS_WEBHOOK_KEY} is not set in {env_path}: POST /api/alerts trusts any "
             "loopback caller without a credential, so any process on this machine can forge "
-            "an alert and its IM notification, and a webhook sent from another host is "
+            "an alert, and a webhook sent from another host is "
             f"refused. Write {_ALERTS_WEBHOOK_KEY}=<secret> to {env_path} and restart the "
             "gateway."
         )

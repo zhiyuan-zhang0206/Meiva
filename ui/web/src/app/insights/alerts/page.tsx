@@ -1,5 +1,6 @@
-// IM deep links point at /insights/alerts (the URL the alert IM messages
-// carry). The alert history lives as a section of the Insights page
+// meiva:note
+// Old deep links point at /insights/alerts (the URL the retired alert IM messages
+// carried). The alert history lives as a section of the Insights page
 // (/insights#alerts) — this route forwards the link there.
 
 import type { Route } from "next";

@@ -254,7 +254,7 @@ value is validated as a CSS color literal.
   fail-fast isolation. Rejected.
 - **Composer / conversation-surface extension points** — dsh's hottest UI
   cluster (file drop, @file, prompt toolboxes) targets a chat-first product;
-  Meiva's interaction center of gravity is IM bridge / CLI / notifications.
+  Meiva's interaction center of gravity is CLI / notifications.
   Revisit only on real demand.
 - **User-customizable memory/compaction semantics** (ruling 2026-08-19):
   semantic mechanisms belong to the kernel; the survey's "memory plugins" are

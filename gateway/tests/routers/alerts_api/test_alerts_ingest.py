@@ -7,10 +7,7 @@
 # dedup, severity label parsing (critical/warning/error), the fingerprint
 # computation when the payload omits it, the unresolved-first list + counts
 # (including the badge's unresolved count), the ingest auth split (webhook
-# token / loopback), the SSE publish on every
-# ingest, and the IM-notify gate (the im_bridge fan-out is mocked — the
-# endpoint's side effect is that it POSTs to the daemon, which has its own
-# tests).
+# token / loopback), and the SSE publish on every ingest.
 
 from __future__ import annotations
 
@@ -81,8 +78,7 @@ def test_ingest_refreshes_the_alert_pipeline_heartbeat(db_conn: psycopg.Connecti
 
 # meiva:note
 # Re-sends of the same (fingerprint, starts_at) update the row, not
-# duplicate it — and a still-firing instance that already notified stays
-# silent on IM.
+# duplicate it.
 def test_ingest_dedups_same_instance(db_conn: psycopg.Connection) -> None:
     with alerts_client() as client:
         ingest(client, webhook())
@@ -206,8 +202,7 @@ def test_ingest_zero_ends_at_stored_null(db_conn: psycopg.Connection) -> None:
 
 
 # meiva:note
-# im_bridge down -> the ingest still stores the row (notified_at stays
-# NULL) and answers 200.
+# A resolved instance that fires again with a new starts_at is a new row.
 def test_ingest_refire_after_resolution_notifies_again(db_conn: psycopg.Connection) -> None:
     with alerts_client() as client:
         ingest(client, webhook())

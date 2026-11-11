@@ -71,8 +71,8 @@ key and has no client outbox; this program does not introduce client/browser
 outboxes. MCP chat uses the same domain inbound transaction.
 Agent-ops RPC keys cover their existing dispatch boundary only: HTTP command
 retries are not protected by generating a new RPC key for each attempt.
-External IM sends need provider-specific receipt and uncertainty handling;
-HTTP acceptance does not prove a provider effect occurred exactly once.
+HTTP acceptance does not prove an external provider effect occurred exactly once;
+a route that reaches a provider needs its own receipt and uncertainty handling.
 
 ## Server outbox recovery requirements
 

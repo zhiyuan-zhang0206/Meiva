@@ -29,7 +29,7 @@ control plane for sessions, tools, events and channel connections.
 ## Migration steps
 
 1. **Resize the surface expectation.** Meiva reaches you in the platform dialog
-   and the question queue (through any connected IM adapter).
+   and the question queue.
    WhatsApp/Slack/Discord channels do not port — say so before the user goes
    looking for the bot.
 2. **Recreate the automations.** Cron entries → `meiva schedules`; webhook

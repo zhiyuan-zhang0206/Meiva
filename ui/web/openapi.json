@@ -6362,7 +6362,6 @@
     "/api/alerts": {
       "post": {
         "summary": "Ingest Alerts",
-        "description": "Alertmanager webhook endpoint — store + SSE publish + IM notify.\n\nBody is the standard Alertmanager webhook payload (``status`` +\n``alerts[]``). One row per (fingerprint, starts_at); re-sends while\nfiring update the row, resolution flips status + sets ends_at. Every\nfiring transition notifies IM (all severities) and every ingested row\nis published to the SSE stream.",
         "operationId": "ingest_alerts_api_alerts_post",
         "requestBody": {
           "required": true,

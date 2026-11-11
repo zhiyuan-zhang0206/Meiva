@@ -550,7 +550,6 @@ def test_reservation_tolerates_and_prunes_retired_slots(inputs: identity.Identit
     path = home / identity.INTENT_NAME
     data = json.loads(path.read_text())
     expected_ports = dict(data["record"]["ports"])
-    data["record"]["ports"]["im_bridge"] = 8111
     data["record"]["ports"]["retired_slot"] = 8102
     data["record"]["ports"]["another_retired"] = 999999
     path.write_text(json.dumps(data))
@@ -561,7 +560,6 @@ def test_reservation_tolerates_and_prunes_retired_slots(inputs: identity.Identit
     assert record is not None
     ports = record["ports"]
     assert isinstance(ports, dict)
-    assert "im_bridge" not in ports
     assert "retired_slot" not in ports
     assert "another_retired" not in ports
     assert ports == expected_ports
