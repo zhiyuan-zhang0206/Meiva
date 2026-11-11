@@ -77,7 +77,7 @@ state_update: dict[str, Any]
 
 # meiva:note
 # Framework and plugin-author access to the bound context. Deliberately absent from
-# `__all_for_meiva__` and `__dir__`, so agents are not shown it, as with `const` / `extend`.
+# `__all_for_meiva__`, so `meiva.help()` does not show it, as with `const` / `extend`.
 # An agent that needs cluster data reads the Meiva Guide topic `cluster-data`.
 context: MeivaContext
 
