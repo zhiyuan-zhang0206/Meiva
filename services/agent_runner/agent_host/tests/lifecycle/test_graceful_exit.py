@@ -162,6 +162,42 @@ async def test_a_turn_past_the_drain_budget_is_named_and_its_restart_waits_for_t
     await second.close()
 
 
+# meiva:note
+# The 2026-11-11 rollout: an external harness's CLI dies with the host, so its turn fails before it
+# reaches the restart the exit wrote. The restart stays pending and the turn is stamped as a crash;
+# the next host takes the restart in a fresh invocation, which must still read an unfinished turn,
+# or the agent idles with no note and the corpse reaper terminates it.
+async def test_a_turn_that_dies_with_the_host_is_resumed_by_the_restart_the_next_host_takes(
+    cluster: Cluster,
+) -> None:
+    agent_id, script, first = await _in_flight_turn(
+        cluster,
+        drain_s=30,
+        steps=[Step(partial="half a sentence", holds=True, fails=True), Step(text="resumed")],
+    )
+    serving = first.serve()
+    first.graceful.request()
+    await _until(lambda: cluster.inbound(agent_id, "restart"))
+    script.release.set()
+    await asyncio.wait_for(serving, 30)
+    await first.close()
+
+    [restart] = cluster.inbound(agent_id, "restart")
+    assert (restart.source, restart.status) == (RESTART_SOURCE, "pending")
+    assert cluster.fatal_marked(agent_id)
+    assert await cluster.woken_by_a_new_host(agent_id)
+
+    second = await cluster.host(wakes=True)
+    await asyncio.wait_for(second.host.run_turn(agent_id), 30)
+    assert cluster.inbound(agent_id, "restart")[0].status == "done"
+    [note] = cluster.inbound(agent_id, "system_note")
+    assert (note.source, note.status) == (RESTART_SOURCE, "pending")
+    assert _RESUMED in note.content
+    assert not any(_ACCEPTED + "\n" in str(m.content) for m in await second.messages(agent_id))
+    assert await cluster.woken_by_a_new_host(agent_id)
+    await second.close()
+
+
 async def test_an_unfinished_lifecycle_command_is_kept_instead_of_adding_a_restart(
     cluster: Cluster, loguru_records: LogRecords
 ) -> None:

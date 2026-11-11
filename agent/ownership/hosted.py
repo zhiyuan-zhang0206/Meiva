@@ -527,6 +527,22 @@ async def stamp_turn_fatal(pool: AsyncPool, incarnation: RuntimeIncarnation) -> 
 
 
 # meiva:note
+# Whether this agent's last hosted turn died and no completed turn has cleared the corpse marker
+# since. A restart the exiting host wrote for a turn the process's death cut short reads it: the
+# next host takes that restart as an idle agent's, so the marker is the only durable record that
+# the turn was unfinished.
+async def turn_crash_marked(pool: AsyncPool, agent_id: int) -> bool:
+    async with pool.connection() as conn:
+        row = await (
+            await conn.execute(
+                "SELECT last_turn_fatal_at IS NOT NULL FROM agents_meta WHERE id = %s",
+                (agent_id,),
+            )
+        ).fetchone()
+    return row is not None and row[0] is True
+
+
+# meiva:note
 # Close one hosted turn: stamp the corpse marker first, then settle.
 #
 # The stamp is best-effort and independent of settlement (which may be

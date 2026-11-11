@@ -47,8 +47,14 @@ signal ignored, so a retry cannot abort the exit it started.
    ([Agent Runtime Ownership](../../../../../agent/ownership/README.md)); a turn that had finished
    is idle and only reads "Restart was accepted from system:restart".
    A turn that ends before its next claim leaves the restart pending instead;
-   the next host claims it. `host_exit_drained` means every waited-for turn has
-   ended, by either path.
+   the next host claims it. A turn that died with the process (an external
+   harness's CLI is killed with the host, so its turn fails before it reaches the
+   restart) is stamped as a crash; the next host's claim reads that stamp on the
+   host's own restart (`source='system:restart'`) and treats the turn as unfinished,
+   so the apply queues the continuation note and the agent wakes. Without the stamp
+   the successor would read an idle agent, queue nothing, and the corpse reaper
+   would terminate the agent after `CORPSE_REAP_GRACE_S`.
+   `host_exit_drained` means every waited-for turn has ended, by either path.
 4. **Shutdown.** `run` then performs its ordinary cleanup: the scheduler cancels
    whatever is left, `close_host_resources` joins resources, pools close, and
    the process exits 0.
@@ -69,7 +75,8 @@ A turn still running at the deadline is logged as `host_exit_drain_timeout`
 (ERROR: agent, last turn activity, restart inbound) and falls to the cancel
 path. Its restart stays pending for the next host, which takes it as an idle
 agent's: the step that was cut short is lost and the turn is not resumed, as in
-a crash. An agent left without a restart, by a failed write or one the deadline
+a crash. (A turn the exit crashed is the exception above: the crash stamp makes the
+next host resume it.) An agent left without a restart, by a failed write or one the deadline
 cut off, is named in `host_exit_restart_failed`; its turn is still waited for.
 
 The drain must outlast what its own restart sets in motion: the grace, the
