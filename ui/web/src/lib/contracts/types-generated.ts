@@ -1279,6 +1279,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/agents/{agent_id}/inbound": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["get_agent_inbound_api_agents__agent_id__inbound_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/settings": {
         parameters: {
             query?: never;
@@ -2948,6 +2964,27 @@ export interface components {
             required_missing: number;
             items: components["schemas"]["PermissionItemRow"][];
         };
+        InboundHistoryItem: {
+            id: number;
+            kind: components["schemas"]["InboundKind"];
+            source: string | null;
+            status: "pending" | "claimed" | "done";
+            created_at: string;
+            claimed_at: string | null;
+            content: string;
+            content_truncated: boolean;
+        };
+        InboundHistoryMeta: {
+            window_from: string;
+            limit: number;
+            has_more: boolean;
+        };
+        InboundHistoryResponse: {
+            agent_id: number;
+            meta: components["schemas"]["InboundHistoryMeta"];
+            items: components["schemas"]["InboundHistoryItem"][];
+        };
+        InboundKind: "chat" | "system_note" | "compact_summary" | "compact_request" | "cancel" | "terminate" | "restart" | "resurrect" | "fork" | "heartbeat";
         InspectMetricsMetadata: {
             collection: "observed";
             window_start: string | null;
@@ -6596,6 +6633,42 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ConversationSnapshotResponse"];
+                };
+            };
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_agent_inbound_api_agents__agent_id__inbound_get: {
+        parameters: {
+            query?: {
+                status?: ("pending" | "claimed" | "done") | null;
+                kind?: components["schemas"]["InboundKind"] | null;
+                source?: string | null;
+                hours?: number | null;
+                limit?: number | null;
+                full?: boolean;
+            };
+            header?: never;
+            path: {
+                agent_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InboundHistoryResponse"];
                 };
             };
             422: {

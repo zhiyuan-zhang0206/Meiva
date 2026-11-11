@@ -2,10 +2,15 @@
 
 ## Agent and context commands
 
-- `meiva agents ls/timeline/send/cancel/compact/restart/resurrect/terminate/kill/transfer`: `ls` renders the
+- `meiva agents ls/get/timeline/inbox/send/cancel/compact/restart/resurrect/terminate/kill/transfer`: `ls` renders the
   authenticated agent summary projection as stable `id / status / machine /
-  label` columns. It does not expose runner-local workspace paths. `timeline`
-  reads standing context and recent conversation items. `send` delivers a chat
+  label` columns. It does not expose runner-local workspace paths. `get ID [--json]`
+  prints one agent's status, machine, harness and activity clocks (`GET /api/agents/{id}`).
+  `inbox ID [--status pending|claimed|done] [--kind K] [--source S] [--hours H] [--limit N]
+  [--full] [--json]` reads the agent's inbound queue, newest first (`GET
+  /api/agents/{id}/inbound`): every status and kind, not only what is still queued; content is a
+  200-character preview unless `--full`; one agent's rows only, never a content search across
+  agents. `timeline` reads standing context and recent conversation items. `send` delivers a chat
   message (auto-resurrecting a terminated target) and requires explicit
   `--source` provenance (`user`, `external_agent:<subject>[:<instance>]`,
   `shell:N`, `watcher:N`, or `schedule:N`;

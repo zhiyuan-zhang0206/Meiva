@@ -89,6 +89,24 @@ class _TimelineOptions:
 
 
 @dataclass(frozen=True)
+class _GetOptions:
+    agent_id: int
+    json: bool
+
+
+@dataclass(frozen=True)
+class _InboxOptions:
+    agent_id: int
+    status: str | None
+    kind: str | None
+    source: str | None
+    hours: float | None
+    limit: int | None
+    full: bool
+    json: bool
+
+
+@dataclass(frozen=True)
 class _SendOptions:
     agent_id: int
     content: str
@@ -173,6 +191,36 @@ def _h_agents_timeline(args: argparse.Namespace) -> int:
     opts = options(args, _TimelineOptions)
     return cmd_agents_timeline(
         gateway_access_from_boot(runtime_of(args).config), opts.agent_id, opts.limit, opts.before
+    )
+
+
+def _h_agents_get(args: argparse.Namespace) -> int:
+    from base.cluster.machine.boot import gateway_access_from_boot
+    from cli.commands.agents.observe import cmd_agents_get
+    from cli.database.runtime import runtime_of
+
+    opts = options(args, _GetOptions)
+    return cmd_agents_get(
+        gateway_access_from_boot(runtime_of(args).config), opts.agent_id, as_json=opts.json
+    )
+
+
+def _h_agents_inbox(args: argparse.Namespace) -> int:
+    from base.cluster.machine.boot import gateway_access_from_boot
+    from cli.commands.agents.observe import InboxFilter, cmd_agents_inbox
+    from cli.database.runtime import runtime_of
+
+    opts = options(args, _InboxOptions)
+    flt = InboxFilter(
+        status=opts.status,
+        kind=opts.kind,
+        source=opts.source,
+        hours=opts.hours,
+        limit=opts.limit,
+        full=opts.full,
+    )
+    return cmd_agents_inbox(
+        gateway_access_from_boot(runtime_of(args).config), opts.agent_id, flt, as_json=opts.json
     )
 
 
@@ -383,6 +431,35 @@ def _add_list_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -
     agents_ls_p.set_defaults(func=_h_agents_ls)
 
 
+def _add_get_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
+    parser = sub.add_parser("get", help="one agent's status, machine, harness and activity clocks")
+    parser.add_argument("agent_id", type=int)
+    parser.add_argument("--json", action="store_true", help="print the gateway response as JSON")
+    parser.set_defaults(func=_h_agents_get)
+
+
+def _add_inbox_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
+    parser = sub.add_parser(
+        "inbox",
+        help="one agent's inbound queue, newest first: pending, claimed and done messages",
+    )
+    parser.add_argument("agent_id", type=int)
+    parser.add_argument("--status", choices=("pending", "claimed", "done"))
+    parser.add_argument("--kind", help="message kind, e.g. chat, system_note, heartbeat")
+    parser.add_argument("--source", help="exact source tag, e.g. user or agent:12")
+    parser.add_argument(
+        "--hours", type=float, help="the last N hours (default: the gateway's 24, at most 8760)"
+    )
+    parser.add_argument(
+        "--limit", type=int, help="messages, 1..1000; default: the configured window"
+    )
+    parser.add_argument(
+        "--full", action="store_true", help="print each message's whole text, not a preview"
+    )
+    parser.add_argument("--json", action="store_true", help="print the gateway response as JSON")
+    parser.set_defaults(func=_h_agents_inbox)
+
+
 def _add_send_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     agents_send_p = sub.add_parser(
         "send", help="deliver a chat message to an agent (auto-resurrects a terminated target)"
@@ -470,13 +547,17 @@ def add_agents_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) 
     # by escalating force (cancel < restart < terminate < kill) plus ls.
     agents_p = sub.add_parser(
         "agents",
-        help="observe + control agents: ls / timeline / send / cancel / compact / restart / resurrect / terminate / kill / transfer",
+        help="observe + control agents: ls / timeline / send / cancel / compact / restart / resurrect / terminate / kill / transfer / get / inbox",
     )
     agents_sub = agents_p.add_subparsers(dest="agents_cmd", required=True)
 
     _add_list_parser(agents_sub)
 
+    _add_get_parser(agents_sub)
+
     _add_timeline_parser(agents_sub)
+
+    _add_inbox_parser(agents_sub)
 
     _add_send_parser(agents_sub)
 

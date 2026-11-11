@@ -1,8 +1,8 @@
-exports = ["cleanup_after.py", "computer.py", "control.py", "parsers.py", "pty.py", "tests", "timeline.py"]
+exports = ["cleanup_after.py", "computer.py", "control.py", "observe.py", "parsers.py", "pty.py", "tests", "timeline.py"]
 
 [uses]
-"parsers.py" = ["control.py", "notices.py", "timeline.py"]
-"tests" = ["computer.py", "control.py", "notices.py"]
+"parsers.py" = ["control.py", "observe.py", "notices.py", "timeline.py"]
+"tests" = ["computer.py", "control.py", "observe.py", "notices.py"]
 
 [purity]
 "__init__.py" = "strict"
