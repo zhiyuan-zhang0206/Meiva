@@ -6,6 +6,8 @@ from dataclasses import dataclass, field
 from types import SimpleNamespace
 from typing import Any
 
+from base.lm.harness.process import SIGKILL
+
 
 @dataclass
 class TextBlock:
@@ -418,16 +420,32 @@ class ScriptedProbe:
     def __init__(self, children: dict[int, str] | None = None) -> None:
         self.children = dict(children or {})
         self.alive: set[int] = set(self.children)
+        self.tools: set[int] = set(self.children)
+        self.signals: list[tuple[int, int]] = []
+        self.ignores_sigterm: set[int] = set()
+        self.immortal: set[int] = set()
 
     def descendants(self, pid: int) -> dict[int, str]:
         return dict(self.children)
 
+    def tool_processes(self, pid: int) -> dict[int, str]:
+        return {child: command for child, command in self.children.items() if child in self.tools}
+
     def is_alive(self, pid: int) -> bool:
         return pid in self.alive
 
-    def spawn(self, pid: int, command: str) -> None:
+    def kill(self, pid: int, sig: int) -> None:
+        self.signals.append((pid, sig))
+        if pid in self.immortal:
+            return
+        if sig == SIGKILL or pid not in self.ignores_sigterm:
+            self.alive.discard(pid)
+
+    def spawn(self, pid: int, command: str, *, tool: bool = True) -> None:
         self.children[pid] = command
         self.alive.add(pid)
+        if tool:
+            self.tools.add(pid)
 
     def reap(self, *pids: int) -> None:
         for pid in pids:

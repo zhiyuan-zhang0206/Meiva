@@ -8,8 +8,8 @@ Part of [Antigravity (agy) session bridge](antigravity.md).
 inside this call — the model can no longer track them and the caller never saw
 them — so the adapter reaps them itself, by default and without a switch.
 
-The report still has to be honest: `settled` is true only when every observed pid
-is gone after the reap. A process that survives (permission, pid reuse, a reaper
+The report still has to be honest: `settled` (the turn's foreground work is gone, as in the other adapters)
+is true only when every observed pid is gone after the reap. A process that survives (permission, pid reuse, a reaper
 that refuses) leaves `settled=False` and names the survivors in `remaining`;
 `killed` lists what the adapter actually signalled.
 

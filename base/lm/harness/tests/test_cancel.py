@@ -5,6 +5,7 @@ from base.lm.harness.cancel import (
     ProcessObservation,
     Sweep,
     describe,
+    foreground_work,
     observed_cancel,
     spawned_since,
     term_candidates,
@@ -20,6 +21,12 @@ def test_describe_names_each_pid_with_its_command_in_pid_order() -> None:
         ProcessObservation(pid=12, command="sleep 90"),
     )
     assert describe(TREE, [99]) == (ProcessObservation(pid=99, command=""),)
+
+
+def test_foreground_work_is_what_appeared_since_the_turn_began_and_nothing_claimed() -> None:
+    tools = {20: "sh -c ./build", 21: "make", 22: "npm run dev", 23: "old"}
+    assert foreground_work(tools, {23: "old"}, claimed={22}) == {20: "sh -c ./build", 21: "make"}
+    assert foreground_work(tools, tools) == {}
 
 
 def test_spawned_since_keeps_what_was_not_there_at_the_baseline() -> None:

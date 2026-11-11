@@ -19,7 +19,7 @@ exports = ["antigravity", "base_session.py", "bridge.py", "claude", "codex", "en
 "registry.py" = ["session"]
 "session" = ["events.py"]
 "wiring.py" = ["antigravity", "base_session.py", "bridge.py", "claude", "codex", "events.py", "handoff.py", "registration.py", "registry.py"]
-"tests" = ["__init__.py", "pump.py", "antigravity", "base_session.py", "cancel.py", "claude", "codex", "delivery", "engine.py", "events.py", "faults.py", "handoff.py", "registration.py", "registry.py", "session", "wiring.py"]
+"tests" = ["__init__.py", "pump.py", "antigravity", "base_session.py", "cancel.py", "claude", "codex", "delivery", "engine.py", "events.py", "faults.py", "handoff.py", "process.py", "registration.py", "registry.py", "session", "wiring.py"]
 
 [purity]
 "cancel.py" = "strict"

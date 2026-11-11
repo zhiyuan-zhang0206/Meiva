@@ -21,12 +21,8 @@ invariants the host relies on:
    control leave the turn running and report that cancellation is unavailable;
 5. turns can run for as long as the provider needs, including while it is quiet.
    Setup, transport, cancellation and shutdown keep their own bounds;
-   `CancelReport.settled` is a diagnostic only: its sole consumer is the `harness_interrupt` log line, and nothing
-   (restart, reclaim, retry) reads it. The sweep counts descendants of the CLI that appeared after the turn
-   began, so a Claude MCP server the CLI starts mid-turn is counted as a leftover tool process and makes
-   `settled=False` after the full `cancel_settle_seconds` wait, and Codex's interrupt does not end
-   `unified_exec` commands, which keep running and report `settled=False` as well. Telling a turn's own tool
-   processes from the CLI's own helpers needs an attribution the adapters do not have, so neither is changed;
+   `CancelReport.settled` means the turn's foreground work has stopped (below);
+   its sole consumer is the `harness_interrupt` log line, and nothing (restart, reclaim, retry) reads it;
 6. usage and cost accumulate per turn, and `Usage.input_tokens` is the whole
    prompt — cache reads and cache writes included, with those two fields as
    subsets — whatever shape the provider reports them in;
@@ -39,6 +35,32 @@ invariants the host relies on:
 9. `close()` returns only after the session's process tree is gone, or raises when the
    adapter's settle window still observes residue. An unobservable tree remains
    explicitly unknown; it is not proof that every descendant exited.
+
+## What an interrupt stops
+
+`interrupt()` means "stop the current turn's work", as a native agent's cancel does: a command the turn
+started in the foreground does not keep running after it. Two things are not the turn's work and the
+interrupt leaves them alone, neither signalling nor waiting for them: the CLI's own helpers (MCP servers,
+the Codex code-mode host, however late the CLI starts them) and background work that is meant to outlive
+the turn ([background work](background-work.md)). `CancelReport.settled` says the same in all three
+adapters: the foreground work is gone (`None` when the tree cannot be observed, `False` with the survivors
+in `remaining` when it is not).
+
+What counts as the turn's foreground work is read off the process tree, by the structure the two CLIs
+share and not by command line (the probe keeps 200 characters, and each CLI wraps the command its own way):
+`ChildProbe.tool_processes` returns the members of a session led by a direct child of the CLI that is not
+the CLI's own session. Both CLIs start a tool call's command that way (Claude Code as
+`/bin/zsh -c source …/shell-snapshots/… eval …`, Codex as the command itself), and what the command starts
+without detaching stays in its session; MCP servers and the Codex code-mode host stay in the CLI's own
+session, and a worker a helper detaches sits below the helper, not directly under the CLI. The turn's
+foreground work is the tool processes that appeared since the turn began (`foreground_work`; a background
+command of an earlier turn is already in the baseline).
+
+| Adapter | Foreground work on interrupt |
+|---|---|
+| Claude Code | the CLI ends it; the adapter waits for it to be gone. A background command (`run_in_background`) the CLI announced with `TaskStarted` is claimed when announced and left out |
+| Codex | the adapter ends it: SIGTERM, then SIGKILL after `cancel_settle_seconds`; `killed` names what needed SIGKILL. The protocol has no request for it: `command/exec/terminate` answers only for a `command/exec` the client started, and a `commandExecution` item's `processId` is the app-server's own id, not an OS pid (observed on 0.166). A command the turn started and yielded while the turn still ran cannot be told from a foreground one (the item stays `inProgress` either way), so an interrupt ends it; only a command left over from an earlier turn is background |
+| Antigravity | the adapter ends the observed tree after SIGINT (`killed`); see [interrupt](../antigravity/docs/interrupt.md) |
 
 Adapters: [Claude harness adapter](../claude/docs/claude.md), [Codex app-server session bridge](../codex/docs/codex.md),
 [Antigravity (agy) session bridge](../antigravity/docs/antigravity.md). Contract, provider differences

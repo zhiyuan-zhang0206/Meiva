@@ -78,8 +78,9 @@ and the CLI reports its end on its own:
   Causes of a CLI-started turn: `BACKGROUND_TASK` (a task notification preceded it or its origin is
   `task-notification`), `SCHEDULED_WAKE` (an origin naming cron, schedule, timer, wake, loop or
   monitor; no real sample exists yet, the shape is a guess), otherwise `UNKNOWN`.
-- **Cancellation is asserted.** `interrupt()` reports whether the tool's child
-  processes were reaped, and `settled=None` when the CLI pid is unobservable. A
+- **Cancellation is asserted.** `interrupt()` reports whether the turn's foreground tool
+  processes are gone ([what an interrupt stops](../../docs/harness.md#what-an-interrupt-stops): the MCP
+  servers the CLI starts, even mid-turn, and background commands are not counted), and `settled=None` when the CLI pid is unobservable. A
   result attributed to the foreground confirms cancellation when its
   `terminal_reason` is `aborted_streaming` or `aborted_tools`. Older CLIs can
   omit this field, in which case the bridge uses the ordinary result verdict.
