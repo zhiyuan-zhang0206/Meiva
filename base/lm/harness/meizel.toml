@@ -4,12 +4,13 @@ exports = ["antigravity", "base_session.py", "bridge.py", "claude", "codex", "en
 "__init__.py" = ["base_session.py", "bridge.py", "engine.py", "events.py", "handoff.py", "registration.py", "registry.py"]
 "antigravity" = ["__init__.py", "base_session.py", "cancel.py", "delivery", "events.py", "handoff.py", "process.py", "registry.py", "session"]
 "base_session.py" = ["delivery", "events.py", "handoff.py", "process.py", "registry.py", "session"]
-"bridge.py" = ["base_session.py", "engine.py", "events.py", "faults.py", "handoff.py", "registration.py"]
+"bridge.py" = ["base_session.py", "delivery", "engine.py", "events.py", "faults.py", "handoff.py", "pump.py", "registration.py"]
 "claude" = ["__init__.py", "base_session.py", "cancel.py", "delivery", "events.py", "handoff.py", "process.py", "registry.py", "session"]
 "codex" = ["base_session.py", "cancel.py", "delivery", "events.py", "handoff.py", "process.py", "registry.py", "session"]
 "cancel.py" = []
 "delivery" = ["events.py"]
 "engine.py" = ["delivery", "events.py", "handoff.py"]
+"pump.py" = ["events.py"]
 "events.py" = []
 "faults.py" = ["engine.py"]
 "handoff.py" = []
@@ -18,7 +19,7 @@ exports = ["antigravity", "base_session.py", "bridge.py", "claude", "codex", "en
 "registry.py" = []
 "session" = ["events.py"]
 "wiring.py" = ["antigravity", "base_session.py", "bridge.py", "claude", "codex", "events.py", "handoff.py", "registration.py", "registry.py"]
-"tests" = ["__init__.py", "antigravity", "base_session.py", "cancel.py", "claude", "codex", "delivery", "engine.py", "events.py", "faults.py", "handoff.py", "registration.py", "registry.py", "wiring.py"]
+"tests" = ["__init__.py", "pump.py", "antigravity", "base_session.py", "cancel.py", "claude", "codex", "delivery", "engine.py", "events.py", "faults.py", "handoff.py", "registration.py", "registry.py", "wiring.py"]
 
 [purity]
 "cancel.py" = "strict"

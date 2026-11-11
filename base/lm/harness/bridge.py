@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import asyncio
 import base64
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
+from contextlib import suppress
 from dataclasses import replace
 from datetime import timedelta
 
 from base.api_contracts.agent_contract import Harness
 from base.lm.harness.base_session import SessionClock
+from base.lm.harness.delivery import HarnessInput
 from base.lm.harness.engine import (
     CompletedTurnEvent,
     ForegroundSteering,
@@ -36,6 +38,7 @@ from base.lm.harness.events import (
 )
 from base.lm.harness.faults import fault_message
 from base.lm.harness.handoff import Handoff, compaction_reminder
+from base.lm.harness.pump import EventPump, Subscription
 from base.lm.harness.registration import (
     ATTACHED,
     HarnessRegistration,
@@ -105,6 +108,9 @@ class HarnessBridge:
         self._registration_ttl = timedelta(seconds=registration_ttl_seconds)
         self._created_at: str | None = None
         self._session: HarnessSession | None = None
+        self._pump: EventPump | None = None
+        self._pump_task: asyncio.Task[None] | None = None
+        self._pump_group: asyncio.TaskGroup | None = None
         self._foreground: asyncio.Future[tuple[HarnessSession, str] | None] | None = None
         self._handoff_delivered = False
         self._model: str | None = None
@@ -157,11 +163,82 @@ class HarnessBridge:
             raise
         self._exit_code = None
         self._session = session
+        await self._start_pump(session)
         session_model = getattr(session, "model", None)
         if isinstance(session_model, str) and session_model:
             self._model = session_model
         self._handoff_delivered = bool(getattr(session, "resumed", False))
         return session
+
+    # meiva:note
+    # The pump reads the session's event stream for as long as the session lives, so an event that
+    # arrives with no turn being waited for is still read and observed. The bridge's own state
+    # (the model name, the registration, whether the CLI compacted its context) follows the stream
+    # here; a turn waiter, or any other caller of `subscribe`, only watches it.
+    # meiva:link base/lm/harness/docs/delivery.md
+    async def _start_pump(self, session: HarnessSession) -> None:
+        pump = EventPump(session.events(), observe=self._observe)
+        group = asyncio.TaskGroup()
+        _ = await group.__aenter__()
+        self._pump = pump
+        self._pump_group = group
+        self._pump_task = group.create_task(pump.run(), name=f"harness-pump-{self._agent_id}")
+
+    async def _stop_pump(self) -> None:
+        task, group = self._pump_task, self._pump_group
+        self._pump_task = self._pump_group = self._pump = None
+        if task is None or group is None:
+            return
+        _ = task.cancel()
+        with suppress(asyncio.CancelledError):
+            await task
+        await group.__aexit__(None, None, None)
+
+    def _observe(self, event: BridgeEvent) -> None:
+        if isinstance(event, SessionStarted):
+            if event.model:
+                self._model = event.model
+            try:
+                self._register(event.session_id)
+            except OSError as exc:
+                logger.warning(
+                    "could not register harness session for agent {agent_id}: {error}",
+                    agent_id=self._agent_id,
+                    error=exc,
+                )
+        elif isinstance(event, ContextCompacted):
+            self._context_compacted = True
+
+    # meiva:note
+    # Watch the session's events from now on. Subscribe before handing anything to the session: the
+    # subscription sees only what the pump reads after it exists.
+    async def subscribe(self) -> Subscription:
+        _ = await self.ensure()
+        pump = self._pump
+        if pump is None:
+            raise HarnessClosedError("this harness bridge is closed")
+        return pump.subscribe()
+
+    # meiva:note
+    # The delivery operation of the engine: hand a batch to the foreground, in order. The first
+    # input of a fresh session carries the handoff document, and the first input after the CLI
+    # compacted its context carries the reminder to re-read the saved instructions. Results arrive as
+    # events on a subscription.
+    async def deliver(self, inputs: Sequence[HarnessInput]) -> None:
+        batch = list(inputs)
+        if not batch:
+            raise ValueError("deliver requires at least one input")
+        try:
+            session = await self.ensure()
+        except HarnessClosedError:
+            raise
+        except Exception as exc:
+            raise HarnessSetupError(f"{self.harness.value} session could not start: {exc}") from exc
+        self._register(session.session_id or "")
+        batch[0] = HarnessInput(
+            key=batch[0].key, text=self._opening_input(batch[0].text), images=batch[0].images
+        )
+        await session.deliver(batch)
 
     @property
     def steering_available(self) -> bool:
@@ -209,6 +286,10 @@ class HarnessBridge:
             raise HarnessSetupError(f"{self.harness.value} session could not start: {exc}") from exc
         self._register(session.session_id or "")
         text = self._opening_input(text)
+        pump = self._pump
+        if pump is None:
+            raise HarnessClosedError("this harness bridge is closed")
+        subscription = pump.subscribe()
         try:
             try:
                 ticket: SubmittedTurn = session.submit(text, key=key)
@@ -218,7 +299,7 @@ class HarnessBridge:
                 return replace(_completed(await ticket.outcome(), ""), replayed=True)
             turn_id = str(ticket.turn_id)
             foreground.set_result((session, turn_id))
-            return await self._wait_with_registration(session, turn_id, on_event)
+            return await self._wait_with_registration(session, subscription, turn_id, on_event)
         except HarnessTurnFaultedError as exc:
             if exc.outcome is None:
                 await self._retire(session, reason="unsettled turn fault")
@@ -226,6 +307,8 @@ class HarnessBridge:
         except (HarnessClosedError, HarnessSetupError):
             await self._retire(session, reason="session unavailable")
             raise
+        finally:
+            subscription.close()
 
     # meiva:note
     # What a turn opens with. The first turn of a fresh session carries the handoff, unless the
@@ -251,10 +334,14 @@ class HarnessBridge:
     # callers can distinguish cancellation, an adapter fault, and a session closure.
     # meiva:link base/lm/harness/docs/harness.md
     async def _wait_with_registration(
-        self, session: HarnessSession, turn_id: str, on_event: TurnEventSink | None
+        self,
+        session: HarnessSession,
+        subscription: Subscription,
+        turn_id: str,
+        on_event: TurnEventSink | None,
     ) -> HarnessTurn:
         if self._registrations is None:
-            return await self._await_turn(session, turn_id, on_event=on_event)
+            return await self._await_turn(subscription, turn_id, on_event=on_event)
 
         outcome: HarnessTurn | BaseException
         async with asyncio.TaskGroup() as tasks:
@@ -262,7 +349,7 @@ class HarnessBridge:
                 self._renew_registration(session), name=f"harness-registration-{self._agent_id}"
             )
             try:
-                outcome = await self._await_turn(session, turn_id, on_event=on_event)
+                outcome = await self._await_turn(subscription, turn_id, on_event=on_event)
             except BaseException as error:
                 outcome = error
             finally:
@@ -305,6 +392,7 @@ class HarnessBridge:
             self._session = None
             self._handoff_delivered = False
             self._created_at = None
+            await self._stop_pump()
         self._retire_registration()
         try:
             await session.close(reason=reason)
@@ -365,13 +453,13 @@ class HarnessBridge:
 
     async def _await_turn(
         self,
-        session: HarnessSession,
+        subscription: Subscription,
         turn_id: str,
         *,
         on_event: TurnEventSink | None = None,
     ) -> HarnessTurn:
         streamed: dict[str, list[str]] = {}
-        async for event in session.events():
+        async for event in subscription:
             done = await self._consume_event(event, turn_id, streamed, on_event=on_event)
             if done is not None:
                 if done.is_error and not done.interrupted:
@@ -389,14 +477,6 @@ class HarnessBridge:
         *,
         on_event: TurnEventSink | None = None,
     ) -> HarnessTurn | None:
-        if isinstance(event, SessionStarted):
-            if event.model:
-                self._model = event.model
-            self._register(event.session_id)
-            return None
-        if isinstance(event, ContextCompacted):
-            self._context_compacted = True
-            return None
         if isinstance(event, TurnCompleted):
             if event.turn_id == turn_id:
                 return _completed(event, "".join(streamed.get(event.turn_id, [])))

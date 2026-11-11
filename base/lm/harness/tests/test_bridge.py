@@ -142,8 +142,11 @@ class FakeSession:
 
     def events(self) -> AsyncIterator[BridgeEvent]:
         async def stream() -> AsyncIterator[BridgeEvent]:
-            while self._queue:
-                yield self._queue.pop(0)
+            while not self.closed:
+                if self._queue:
+                    yield self._queue.pop(0)
+                else:
+                    await asyncio.sleep(0.001)
 
         return stream()
 
@@ -644,13 +647,13 @@ def test_a_registration_expires_within_the_configured_ttl(tmp_path: Path) -> Non
     assert before + ttl <= expires <= after + ttl
 
 
-def test_every_turn_renews_the_row_without_restamping_its_creation(tmp_path: Path) -> None:
+async def test_every_turn_renews_the_row_without_restamping_its_creation(tmp_path: Path) -> None:
     store = RegistrationStore(tmp_path / "registrations")
     bridge = make_bridge(FakeSession(), registrations=store)
 
-    asyncio.run(bridge.run_turn("one", key="inbound-1"))
+    await bridge.run_turn("one", key="inbound-1")
     first = store.read(6984)
-    asyncio.run(bridge.run_turn("two", key="inbound-2"))
+    await bridge.run_turn("two", key="inbound-2")
     second = store.read(6984)
 
     assert first is not None and second is not None
