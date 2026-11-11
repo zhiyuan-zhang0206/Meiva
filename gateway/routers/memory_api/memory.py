@@ -133,8 +133,7 @@ async def _backend_topk(
         "each with the chunk that matched and a relevance score.\n"
         "\n"
         "Two stages. Vector search finds the best chunk of the closest\n"
-        "`memory_rerank_candidates` notes (`memory_dedup_candidates` for the `dedup`\n"
-        "purpose); a decision model then judges each chunk\n"
+        "`memory_rerank_candidates` notes; a decision model then judges each chunk\n"
         "against the query, and the response is ordered by the probability that the\n"
         "chunk is relevant (`score`). No text is generated on this path.\n"
         "\n"
@@ -168,14 +167,12 @@ async def post_memory_search(request: Request, body: MemorySearchRequest) -> Mem
     catalog = require_model_catalog(request)
     provider = state_as(request, MemoryAppState).memory_embedder
     plan = memory_plan.search_plan(
-        purpose=body.purpose,
         deadlines=memory_plan.Deadlines(
             configured_s=inputs.deadline,
             requested_s=body.deadline_seconds,
             backend_grace_s=inputs.backend_deadline_grace,
         ),
         rerank_candidates=inputs.rerank_candidates,
-        dedup_candidates=inputs.dedup_candidates,
         exclude=body.exclude,
     )
     try:

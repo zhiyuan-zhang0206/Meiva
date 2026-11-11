@@ -11,7 +11,6 @@ from __future__ import annotations
 
 from collections.abc import Collection
 from dataclasses import dataclass
-from typing import Literal
 
 __all__ = ["Deadlines", "SearchPlan", "search_plan"]
 
@@ -53,22 +52,19 @@ class SearchPlan:
 # meiva:note
 # The plan for one search.
 #
-# `limit` is the candidate count of the purpose (dedup has its own): a `k` above it returns
-# the candidates, and the number of decision requests never grows with `k`. The vector
-# query is widened by the exclusion list so the excluded notes cost no candidate slot.
+# `limit` is the candidate count: a `k` above it returns the candidates, and the number of
+# decision requests never grows with `k`. The vector query is widened by the exclusion list so
+# the excluded notes cost no candidate slot.
 def search_plan(
     *,
-    purpose: Literal["recall", "search", "dedup"],
     deadlines: Deadlines,
     rerank_candidates: int,
-    dedup_candidates: int,
     exclude: Collection[str],
 ) -> SearchPlan:
-    limit = dedup_candidates if purpose == "dedup" else rerank_candidates
     excluded = frozenset(exclude)
     return SearchPlan(
         deadlines=deadlines,
-        limit=limit,
-        vector_count=limit + len(excluded),
+        limit=rerank_candidates,
+        vector_count=rerank_candidates + len(excluded),
         exclude=excluded,
     )

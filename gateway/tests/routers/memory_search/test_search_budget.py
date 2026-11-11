@@ -111,20 +111,6 @@ def test_a_large_k_does_not_raise_the_decision_request_count(
     assert pool.asked == [_CANDIDATES]
 
 
-def test_dedup_ranks_its_own_smaller_candidate_count_whatever_k_is(
-    pool: _Pool, rig: SearchRig
-) -> None:
-    judge = rig.judge
-    rig.configure(memory_dedup_candidates=7)
-
-    with rig.client(pool.root) as client:
-        resp = client.post("/api/memory/search", json=_search(purpose="dedup", k=50))
-
-    assert resp.status_code == 200
-    assert len(judge.calls) == 7
-    assert pool.asked == [7]
-
-
 _TOO_MANY = [f"n{i}.md" for i in range(801)]
 _VALID_PATHS = ["a.md", "notes/n001.md", "a b/c-d_e.md", "ünï/çode.md"]
 

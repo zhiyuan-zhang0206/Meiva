@@ -140,7 +140,7 @@ class MemoryPoolPolicy:
 # The memory-search tunables: the embedding provider and its key, the vector backend, the
 # waits for the concurrency gate and for a whole search (plus the grace that makes the
 # backend's own timeout the backstop of that search deadline), and the candidate counts of
-# the reranking and deduplication purposes.
+# the reranking.
 @dataclass(frozen=True)
 class MemorySearchSettings:
     embedding_backend: str
@@ -153,7 +153,6 @@ class MemorySearchSettings:
     backend_deadline_grace: float
     rerank_model: str
     rerank_candidates: int
-    dedup_candidates: int
     embeddinggemma_config: EmbeddingGemmaConfig | None = None
 
 
@@ -382,7 +381,6 @@ def gateway_config_from_boot(
             backend_deadline_grace=services.memory_search_backend_deadline_grace_seconds,
             rerank_model=services.memory_rerank_model,
             rerank_candidates=services.memory_rerank_candidates,
-            dedup_candidates=services.memory_dedup_candidates,
             embeddinggemma_config=embedding_factory.embeddinggemma_config(
                 services.embedding_backend,
                 endpoint=services.embeddinggemma_endpoint,
