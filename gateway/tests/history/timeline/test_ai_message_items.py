@@ -199,6 +199,7 @@ class TestAiMessageItems:
             NoteTag.HEARTBEAT,
             NoteTag.LIFECYCLE_TERMINATE,
             NoteTag.LIFECYCLE_RESTART,
+            NoteTag.LIFECYCLE_INTERRUPT,
             NoteTag.LIFECYCLE_RESURRECT,
             NoteTag.LIFECYCLE_FORK,
             NoteTag.NEW_SKILLS,
