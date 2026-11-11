@@ -43,7 +43,6 @@ from base.host.boundary.json_values import is_object_dict
 from meiva import gateway_client
 from meiva.agents import peers, schedule_capability
 from meiva.agents.contracts import (
-    CommandInfo,
     HarnessAttachment,
     HarnessAvailability,
     Machine,
@@ -81,7 +80,6 @@ __all_for_meiva__ = [
     "AgentRow",
     "AgentStatus",
     "CancelResult",
-    "CommandInfo",
     "Harness",
     "HarnessAttachment",
     "HarnessAvailability",
@@ -498,22 +496,6 @@ def resurrect(agent_id: int, prompt: str) -> ResurrectResult:
     schedule_capability.assert_schedule_capability("agents.resurrect", target_agent_id=agent_id)
     prompt = coerce_str(prompt, "prompt")
     return ResurrectResult(gateway_client.resurrect(agent_id, prompt=prompt))
-
-
-def commands() -> list[CommandInfo]:
-    """List the commands a peer agent accepts; invoke one by sending
-    `/name <instruction>` as the message text."""
-    from base.packages.composer_commands import CommandCatalog
-    from meiva import skills
-
-    return [
-        CommandInfo(
-            name=c["name"], description=c["description"], instruction_hint=c["instruction_hint"]
-        )
-        for c in CommandCatalog.system(
-            skills=skills.names, home=process_context.current_context().require_meiva_home()
-        ).discover()
-    ]
 
 
 def send_message(agent_id: int, content: str) -> None:

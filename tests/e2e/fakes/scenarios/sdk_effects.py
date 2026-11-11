@@ -62,8 +62,7 @@ print('read-back', len(meiva.files.read(bad)))
 
 
 def build_command(model: str, *, agent_id: int | None) -> RecordingModel:
-    code = "import meiva\nprint('commands', [c.name for c in meiva.agents.commands()])"
-    return RecordingModel(agent_id=agent_id, script=(exec_call(1, code), say(FINAL)))
+    return RecordingModel(agent_id=agent_id, script=(say(FINAL),))
 
 
 def build_upload(model: str, *, agent_id: int | None) -> RecordingModel:

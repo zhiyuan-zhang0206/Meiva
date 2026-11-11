@@ -122,9 +122,7 @@ command accepts one argument — the free text after `/`.
 
 Commands are **user-level** operations ("what should the agent do this
 conversation"), distinct from the `meiva` CLI (ops-level, runs in shell, operates
-the deployment itself). Peers discover each other's commands via the read-only
-`meiva.agents.commands()` (name + description + instruction-hint, no body).
-
+the deployment itself).
 ## Schedules (time-based / condition-triggered persistent tasks)
 
 The gateway hosts **schedules**: scripts written by agents, run persistently in

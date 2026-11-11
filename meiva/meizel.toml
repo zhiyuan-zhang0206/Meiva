@@ -2,7 +2,7 @@ exports = ["agents", "boot.py", "boot_external.py", "files.py", "gateway_client"
 
 [uses]
 "__init__.py" = ["agents", "boot.py", "files.py", "mcps", "sdk_surface", "self", "shell", "skills", "ui.py", "understand", "watcher", "web"]
-"agents" = ["gateway_client", "sdk_surface", "security.py", "skills"]
+"agents" = ["gateway_client", "sdk_surface", "security.py"]
 "boot.py" = ["mcps", "sdk_surface"]
 "boot_external.py" = ["boot.py"]
 "files.py" = ["sdk_surface", "security.py", "skills"]
