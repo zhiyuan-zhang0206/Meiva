@@ -44,7 +44,7 @@ from .pure.render.const import (
 from .pure.render.const import (
     is_documented_const,
 )
-from .pure.render.hidden import HARNESS_HIDDEN_SELF_MEMBERS
+from .pure.render.hidden import HARNESS_HIDDEN_SELF_MEMBERS, NATIVE_HIDDEN_MEMBERS
 from .pure.render.signature import format_signature as format_signature
 
 
@@ -157,7 +157,7 @@ class ModelHelpProfile:
         declared: frozenset[str] = spec.sdk_hidden_members if spec is not None else frozenset()
         style = None if spec is None else spec.sdk_doc_style
         harness_hidden = (
-            HARNESS_HIDDEN_SELF_MEMBERS if harness is not Harness.MEIVA else frozenset[str]()
+            HARNESS_HIDDEN_SELF_MEMBERS if harness is not Harness.MEIVA else NATIVE_HIDDEN_MEMBERS
         )
         return cls(
             hidden_members=media_gated_members(model, catalog=catalog) | declared | harness_hidden,
@@ -168,7 +168,8 @@ class ModelHelpProfile:
     # The profile of a process that reports this harness and model. Reading those facts is the
     # caller's job (`help_entry.current_profile`); what they mean is decided here: an SDK capture
     # handle under the native harness is an external attach too, a process that cannot name its
-    # model hides the harness-gated members rather than guessing one, and no facts at all is the
+    # model hides the harness-gated members rather than guessing one (the native ones for a native
+    # harness, the external ones otherwise), and no facts at all is the
     # empty profile a bare `import meiva` sees.
     @classmethod
     def for_process(
@@ -181,7 +182,9 @@ class ModelHelpProfile:
     ) -> "ModelHelpProfile":
         is_external = external_attach or harness is not Harness.MEIVA
         if model_setting is None or catalog is None:
-            return cls(hidden_members=HARNESS_HIDDEN_SELF_MEMBERS if is_external else frozenset())
+            return cls(
+                hidden_members=HARNESS_HIDDEN_SELF_MEMBERS if is_external else NATIVE_HIDDEN_MEMBERS
+            )
         resolved = (
             harness
             if harness is not Harness.MEIVA

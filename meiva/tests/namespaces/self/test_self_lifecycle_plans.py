@@ -51,6 +51,12 @@ def test_an_external_harness_context_is_refused_the_actions_the_native_loop_owns
     assert "'claude-code'" in refused
 
 
+def test_the_attach_refusal_points_an_external_harness_to_its_own_read_tools() -> None:
+    refused = harness_refusal("attach", replace(_NATIVE, context_harness="codex"))
+    assert refused is not None
+    assert "read tools" in refused
+
+
 @pytest.mark.parametrize("action", ["restart", "terminate", "pause_heartbeat"])
 def test_an_external_harness_may_still_restart_terminate_and_pause(action: str) -> None:
     assert harness_refusal(action, replace(_NATIVE, context_harness="claude-code")) is None

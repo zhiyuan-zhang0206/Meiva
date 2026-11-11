@@ -130,6 +130,10 @@ both are declared data — never a second copy of a contract:
   omits; the render merges them with the capability gate (a text-only model's help drops
   `meiva.self.attach` on its own). A hidden member still exists and still calls — hide what the
   model should not read, not what it cannot use (`MEIVA_SDK_DISABLE` is the removal knob).
+  The harness gates through the same profile: `meiva.attach` (identity binding) is hidden from a
+  native agent, `meiva.self.attach` and `compact` from an external harness (`NATIVE_HIDDEN_MEMBERS`
+  and `HARNESS_HIDDEN_SELF_MEMBERS` in `meiva/sdk_surface/pure/render/hidden.py`); the hidden
+  entry also refuses the call, naming who it is for.
 - **Text.** `@doc_variants(terse="...")` on a function, class or module declares alternative
   contracts; `ModelSpec.sdk_doc_style` selects one per model. The docstring stays the default,
   and an undeclared style falls back to it.

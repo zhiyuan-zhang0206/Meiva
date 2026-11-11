@@ -193,6 +193,23 @@ def test_native_only_self_actions_refuse_on_external_harness(action: str) -> Non
             fn("some/file.png")
 
 
+def test_meiva_attach_refuses_a_native_agent_and_names_who_it_is_for() -> None:
+    pin_agent(1, owns_loop=True)
+
+    with pytest.raises(RuntimeError, match="for external harness processes"):
+        meiva.attach()
+
+
+def test_meiva_attach_does_not_refuse_an_external_harness_process() -> None:
+    from base.api_contracts.agent_contract import Harness
+
+    pin_agent(1, owns_loop=True, harness=Harness.CLAUDE_CODE)
+
+    with pytest.raises(RuntimeError) as raised:
+        meiva.attach()
+    assert "for external harness processes" not in str(raised.value)
+
+
 def test_context_exposes_the_bound_identity() -> None:
     pin_agent(31, owns_loop=False, actor="schedule:3")
     assert meiva.context.identity is not None

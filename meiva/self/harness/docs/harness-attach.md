@@ -24,6 +24,12 @@ requires its store.
 `MEIVA_HARNESS_HANDLE`, attaches once and returns the attachment. Every session's
 first identity read does the same, so the call is optional.
 
+The entry belongs to external harness processes. A native-harness agent's process already
+has its identity, so its `meiva.help()` does not list `meiva.attach` and calling it raises
+`RuntimeError` ("for external harness processes"); the profile that hides it is
+`NATIVE_HIDDEN_MEMBERS` (the mirror of `HARNESS_HIDDEN_SELF_MEMBERS`). The kernel itself never goes
+through the public name: the first-use borrow is `ensure_identity`.
+
 `meiva harness exec --file script.py` is the CLI around the same seam: it reads the
 script (or stdin as `-`) and runs it inside the attachment, with no bootstrap file in
 the child's workspace.

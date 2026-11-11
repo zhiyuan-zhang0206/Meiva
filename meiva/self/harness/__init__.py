@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 
+from base.api_contracts.agent_contract import Harness
 from base.log import guard_default_logging
 from meiva import boot
 from meiva.sdk_surface import process_context, sdk_disable
@@ -107,6 +108,17 @@ def attach(handle: str | None = None) -> object:
             "meiva.attach binds the session this process was started as; it cannot take "
             "another session's handle. Use meiva.self.harness.open_attachment for that."
         )
+    context = process_context.ambient_context()
+    if context is not None:
+        capture = context.sdk_capture
+        from .admission import external_only_attach_refusal
+
+        refused = external_only_attach_refusal(
+            external=context.harness is not Harness.MEIVA
+            or getattr(capture, "handle", None) is not None
+        )
+        if refused is not None:
+            raise RuntimeError(refused)
     attachment = ensure_identity()
     if attachment is not None:
         return attachment
