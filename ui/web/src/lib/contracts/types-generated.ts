@@ -2980,7 +2980,7 @@ export interface components {
             meta: components["schemas"]["InboundHistoryMeta"];
             items: components["schemas"]["InboundHistoryItem"][];
         };
-        InboundKind: "chat" | "system_note" | "compact_summary" | "compact_request" | "cancel" | "terminate" | "restart" | "resurrect" | "fork" | "heartbeat";
+        InboundKind: "chat" | "system_note" | "compact_summary" | "compact_request" | "interrupt" | "terminate" | "restart" | "resurrect" | "fork" | "heartbeat";
         InspectMetricsMetadata: {
             collection: "observed";
             window_start: string | null;

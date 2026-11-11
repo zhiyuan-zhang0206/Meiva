@@ -12802,7 +12802,7 @@
           "system_note",
           "compact_summary",
           "compact_request",
-          "cancel",
+          "interrupt",
           "terminate",
           "restart",
           "resurrect",
