@@ -132,7 +132,7 @@ def test_interrupt_of_a_running_external_agent_records_the_real_source_and_the_r
     with gateway_test_client(machine=_local_machine) as client:
         _seed_harnesses(client, gateway_local_runner.name)
         agent_id = spawn_via_http(
-            client, {"harness": "codex", "config": {"llm_model": "gpt-6.1-sol"}}
+            client, {"config": {"harness": "codex", "llm_model": "gpt-6.1-sol"}}
         ).json()["id"]
         _set_agent(db_conn, agent_id, machine=gateway_local_runner.name, status="running")
         before = len(_inbound(db_conn, agent_id))
@@ -160,7 +160,7 @@ def test_the_stop_button_needs_no_message_and_leaves_a_note_for_the_agent(
     with gateway_test_client(machine=_local_machine) as client:
         _seed_harnesses(client, gateway_local_runner.name)
         agent_id = spawn_via_http(
-            client, {"harness": "codex", "config": {"llm_model": "gpt-6.1-sol"}}
+            client, {"config": {"harness": "codex", "llm_model": "gpt-6.1-sol"}}
         ).json()["id"]
         _set_agent(db_conn, agent_id, machine=gateway_local_runner.name, status="running")
         before = len(_inbound(db_conn, agent_id))
