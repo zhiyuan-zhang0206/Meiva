@@ -148,7 +148,11 @@ export function ComposerAttachmentStrip({
                 FLEX,
               )}
             >
-              {att.status === "error" ? t("failed") : `${att.progress}%`}
+              {att.status === "error"
+                ? t("failed")
+                : att.progress >= 100
+                  ? t("processingUpload")
+                  : `${att.progress}%`}
             </span>
           ) : null}
           {att.status === "error" && att.file !== null ? (

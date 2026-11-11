@@ -18,6 +18,7 @@
   "checkGateway": "加载失败——请检查 gateway 后刷新。",
   "removeImage": "移除 {name}",
   "retryUpload": "重试 {name}",
+  "processingUpload": "处理中…",
   "heldUploadNotice": "文件投递已暂停：{reason}",
   "heldUploadRestore": "恢复到草稿",
   "heldUploadRetry": "重试投递",

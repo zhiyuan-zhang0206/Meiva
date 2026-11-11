@@ -18,6 +18,7 @@
   "checkGateway": "Couldn't load — check the gateway and reload.",
   "removeImage": "Remove {name}",
   "retryUpload": "Retry {name}",
+  "processingUpload": "Processing…",
   "heldUploadNotice": "File delivery paused: {reason}",
   "heldUploadRestore": "Restore to draft",
   "heldUploadRetry": "Retry delivery",
