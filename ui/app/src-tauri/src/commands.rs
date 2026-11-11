@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 use tauri::Manager;
 use tauri::{AppHandle, Runtime, State};
 
+use crate::notify::NotifyMode;
 use crate::state::AppState;
 use crate::{external, window};
 
@@ -225,25 +226,31 @@ pub fn app_open_settings(app: AppHandle) {
     window::open_settings(&app);
 }
 
-/// Raise a local notification for one delivered notification event. The decision
-/// to deliver was already made by the gateway's notification spine; this only
-/// renders it with the platform's own notification surface.
+/// Render one delivered notification event: raise it, silently replace the content of the one
+/// already shown under the same `tag`, or retract it. The decision to deliver was already made
+/// by the gateway's notification spine; this only renders it with the platform's own
+/// notification surface (see `desktop.rs` and `android.rs` for what each platform can do).
 #[tauri::command]
 pub async fn app_notify(
     app: AppHandle,
     state: State<'_, AppState>,
+    mode: NotifyMode,
+    tag: String,
     title: String,
     body: String,
 ) -> Result<(), String> {
-    if !state.settings().notifications || title.trim().is_empty() {
+    if !state.settings().notifications || tag.trim().is_empty() {
+        return Ok(());
+    }
+    if mode != NotifyMode::Retract && title.trim().is_empty() {
         return Ok(());
     }
     let title = title.chars().take(120).collect::<String>();
     let body = body.chars().take(500).collect::<String>();
     #[cfg(target_os = "android")]
-    crate::android::show_notification(app, title, body).await;
+    crate::android::show_notification(app, mode, &tag, title, body).await;
     #[cfg(not(target_os = "android"))]
-    crate::desktop::show_notification(&app, title, body);
+    crate::desktop::show_notification(&app, mode, title, body);
     Ok(())
 }
 

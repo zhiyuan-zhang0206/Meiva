@@ -7,13 +7,14 @@ from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 from psycopg_pool import AsyncConnectionPool
 
-from agent.graph.hooks.user_delivery import with_pending_deliveries
+from agent.graph.hooks.user_delivery import capture_items, with_pending_deliveries
 from agent.graph.llm.node import llm_node
 from agent.graph.llm.tests.llm_support import ScriptedModel
 from agent.graph.llm_errors import FatalLLMStreamError
 from agent.graph.tests.test_llm_helpers import make_runtime
 from agent.state import AgentState
 from base.agents.context import HostedTurnResources
+from base.agents.history.timeline_item import TimelineItem
 from base.agents.messages.kwargs import read_meiva_kwargs
 from base.agents.to_user.delivery.store import advance_seen, publish
 from base.api_contracts.user_delivery import PublishMessage, UserDeliveryMode
@@ -70,6 +71,9 @@ async def test_visible_reply_capture_and_checkpoint_metadata(
     assert db_conn.execute(
         "SELECT mode,content FROM agent_user_messages WHERE agent_id=%s", (agent_id,)
     ).fetchall() == [("naive", "Private wrap-up")]
+    assert db_conn.execute(
+        "SELECT action, tag, body FROM notification_events WHERE agent_id=%s", (agent_id,)
+    ).fetchall() == [("alert", f"unread:{agent_id}", "Private wrap-up")]
 
 
 @pytest.mark.parametrize("delivery", ["publish", "ask", "no_update"])
@@ -178,3 +182,27 @@ async def test_only_deliveries_past_the_seen_cursor_are_restored_to_the_agent(
     advance_seen(db_conn, agent_id, records[1].id)
     db_conn.commit()
     assert await with_pending_deliveries(runtime.context, agent_id, []) == []
+
+
+async def test_external_harness_output_stages_and_replaces_the_unread_notification(
+    db_conn: psycopg.Connection,
+    database_gate: ProcessDbGate,
+    hosted_resources: HostedTurnResources,
+    live_events: LiveEvents,
+) -> None:
+    agent_id = create_agent(db_conn)
+    db_conn.commit()
+    runtime = make_runtime(
+        resources=hosted_resources,
+        event_publisher=live_events.publisher,
+        database_gate=database_gate,
+        pins={"user_delivery_mode": "naive"},
+    )
+    for index, text in enumerate(("first", "second")):
+        item = TimelineItem(
+            item_id=f"h{index}.0", kind="agent_chat", payload=text, user_facing=True
+        )
+        await capture_items(runtime.context, agent_id, [item], source_key="harness")
+    assert db_conn.execute(
+        "SELECT action, body FROM notification_events WHERE agent_id=%s ORDER BY id", (agent_id,)
+    ).fetchall() == [("alert", "first"), ("replace", "second")]

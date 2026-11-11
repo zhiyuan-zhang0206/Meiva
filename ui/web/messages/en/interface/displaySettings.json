@@ -32,7 +32,8 @@
   "english": "English",
   "chinese": "中文",
   "categories": {
-    "coreNeedsInput": "Agent is waiting on your answer"
+    "coreQuestion": "Agent asked a question",
+    "coreUnread": "Agent has unread output"
   },
   "theme": "Theme",
   "appearance": "Appearance",

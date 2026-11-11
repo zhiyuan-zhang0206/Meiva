@@ -15,20 +15,13 @@
   and `compact` take neither. `transfer` relocates an `idling` or `terminated`
   native agent and its workspace across machines and refuses running agents with
   409 ([agent transfer](../../../gateway/agents/docs/agent-transfer.md)).
-- `meiva notices list/resolve/clear/audit`: `resolve` reports success only when the
+- `meiva notices list/resolve/clear`: `resolve` reports success only when the
   gateway accepts the action. A 409 conflict is an error, including an absent
   notice, an action-kind mismatch, or an already-resolved answer/dismissal.
   Every notice requires a response; fresh mark-read operations are rejected.
   `clear --agent` explicitly dismisses each open notice after confirmation
   (`--force` skips confirmation). `clear --stale` targets only terminated agents.
   Resolution is one keyed attempt (`principal-v1`) with a fresh key per invocation.
-  `audit` replays a window of producer candidates through the delivery policy and
-  writes nothing; the gateway serves the report (`GET /api/notifications/audit`) and the
-  CLI renders it, so it reports a switch's effect on a window in which that category
-  was already switched off. `--out json`
-  prints the same report as one object (window, switches, sources, per-day and
-  per-category deliveries, hour buckets, candidate suppression, simulations) for
-  another tool to consume.
 - `meiva memory init`: explicitly provisions the memory-pool checkout and
   plugin-owned templates. Branch validation runs here, never during converge or
   start.

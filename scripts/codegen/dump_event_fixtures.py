@@ -112,7 +112,6 @@ def _samples() -> dict[str, dict[str, object]]:
             "recovery": "Choose a different model overlay, then send a new message.",
         },
         "cancelled": {"role": "cancelled", "agent_id": agent_id},
-        "impersonation_changed": {"role": "impersonation_changed", "agent_id": agent_id},
         "inbound_arrived": {
             "role": "inbound_arrived",
             "agent_id": agent_id,
@@ -189,11 +188,13 @@ def _samples() -> dict[str, dict[str, object]]:
             "role": "notification",
             "agent_id": agent_id,
             "notification_id": 11,
-            "category": "core.needs_input",
-            "subject": "Agent #7 is waiting on your answer",
-            "body": None,
-            "href": None,
-            "importance": "high",
+            "category": "core.unread",
+            "action": "alert",
+            "tag": f"unread:{agent_id}",
+            "subject": "Builder",
+            "body": "The report is ready",
+            "href": f"/?agent_id={agent_id}",
+            "importance": "normal",
         },
     }
 

@@ -32,7 +32,8 @@
   "english": "English",
   "chinese": "中文",
   "categories": {
-    "coreNeedsInput": "等你回答"
+    "coreQuestion": "Agent 提了问题",
+    "coreUnread": "Agent 有未读内容"
   },
   "theme": "主题",
   "appearance": "外观",

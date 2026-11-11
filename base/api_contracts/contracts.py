@@ -287,15 +287,6 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
     ("DELETE", "/api/schedules/{schedule_id}"): RouteContract(note="delete — repeats are harmless"),
     ("GET", "/api/notifications"): RouteContract(),
     ("GET", "/api/notifications/categories"): RouteContract(),
-    ("GET", "/api/notifications/audit"): RouteContract(note="read-only replay over a window"),
-    ("POST", "/api/agents/{agent_id}/notifications"): RouteContract(
-        Idempotency.NON_IDEMPOTENT,
-        note=(
-            "a delivery may be suppressed by its category switch or its dedupe key, "
-            "so a repeat is not guaranteed to be a no-op; dedupe_key carries the "
-            "producer's own replay identity"
-        ),
-    ),
     ("GET", "/api/settings"): RouteContract(),
     ("PUT", "/api/settings/{key}"): RouteContract(note="set one key — PUT is idempotent"),
     ("GET", "/api/agents/{agent_id}/shell/{session_id}"): RouteContract(),
