@@ -95,7 +95,9 @@ Command shutdown removes those sinks before the caller closes captured stderr;
 subsequent invocations can initialize again. An already initialized daemon retains
 ownership of its sinks when it invokes a CLI command.
 
-`release_process_logging` removes the sinks this process's `start_process_logging` opened and
+`release_process_logging` removes the sinks this process's `start_process_logging` or
+`init_subprocess_logger` opened and
 re-arms the initialization guard. A process that opened them keeps them until it exits; an
 embedded caller that holds no release of its own (a test running a schedule round, whose
-`init_gateway_process` drops it) uses this one.
+`init_gateway_process` drops it) uses this one. The event sink `add_event_sink` registers is released
+apart, by `release_event_sink` in `base.telemetry.process_logging`.
