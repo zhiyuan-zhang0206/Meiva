@@ -42,8 +42,6 @@ class MemoryRecall:
     memory_recall_inject_threshold: float
     memory_recall_inject_max: int
     memory_recall_deadline_seconds: float
-    memory_write_check_deadline_seconds: float
-    memory_write_dedup_threshold: float
     memory_inherit_depth: int
 
 
