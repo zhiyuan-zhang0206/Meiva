@@ -52,15 +52,20 @@ def parse_trajectory(payload: Mapping[str, object]) -> Trajectory:
     status = _STATUS.get(raw_status) if isinstance(raw_status, str) else None
     if status is None:
         raise AgyInterfaceError(f"GetCascadeTrajectory returned an unknown status {raw_status!r}")
-    total = payload.get("numTotalSteps")
+    # meiva:note
+    # The server's JSON omits a zero-valued field: a conversation that has no step yet answers with
+    # neither `numTotalSteps` nor `trajectory.steps` (recorded on agy 1.5.5 right after `init`). An
+    # absent count is therefore zero, and an absent step list is empty only when the count is zero.
+    total = payload.get("numTotalSteps", 0)
     if isinstance(total, bool) or not isinstance(total, int):
-        raise AgyInterfaceError("GetCascadeTrajectory returned no numTotalSteps")
+        raise AgyInterfaceError("GetCascadeTrajectory returned a non-integer numTotalSteps")
     trajectory = payload.get("trajectory")
-    if not is_object_dict(trajectory) or not is_object_list(trajectory.get("steps")):
-        raise AgyInterfaceError("GetCascadeTrajectory returned no trajectory.steps list")
-    steps = tuple(
-        _step(index, entry) for index, entry in enumerate(_listed(trajectory.get("steps")))
+    raw_steps = (
+        trajectory.get("steps", [] if total == 0 else None) if is_object_dict(trajectory) else None
     )
+    if not is_object_list(raw_steps):
+        raise AgyInterfaceError("GetCascadeTrajectory returned no trajectory.steps list")
+    steps = tuple(_step(index, entry) for index, entry in enumerate(_listed(raw_steps)))
     return Trajectory(status=status, num_steps=total, steps=steps)
 
 
