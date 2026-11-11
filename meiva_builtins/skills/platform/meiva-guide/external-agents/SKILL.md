@@ -88,6 +88,11 @@ where `<subject>` is `claude_code`, `codex`, or `antigravity`. Never pass
 `--source user` when acting as an external agent, and never craft raw HTTP
 requests against gateway endpoints.
 
+Such a session is not a Meiva agent. It may read Meiva's shared Memory but
+writes nothing there without the user's approval; see [memory](../memory/SKILL.md).
+The numbered harness agents above are Meiva agents and follow the Meiva
+instructions they receive.
+
 ## Availability Diagnosis and Published Client Skills
 
 - The spawn picker prints one word — `unavailable` — for three different probe

@@ -28,6 +28,14 @@ The root is a map; load the relevant sub-skill for the task.
   support their execution identity. A schedule is not an agent; agent-only
   capabilities require handing the work to an agent.
 
+**Shared Memory.** Meiva's agents keep a shared Markdown knowledge pool
+(conventions, incident lessons, machine facts, user rulings) at
+`$MEIVA_HOME/vault/memory/` (default `~/.meiva`), searchable with
+`meiva memory search "<query>"`. Read it before work on Meiva operations,
+a machine, or a past decision. An external agent **never writes it, and never
+runs a command that changes it, without the user's explicit approval**; propose
+the note to the user instead. See [memory](memory/SKILL.md).
+
 `meiva --help` and `meiva <command> --help` own CLI argument syntax. This guide owns
 concepts, task routing, operational judgment, and verification. Repository
 references such as `docs/conventions/runbook.md` are relative to the Meiva source
@@ -49,6 +57,7 @@ checkout, not the installed skill copy. For a deployment, that source is
 | Understand Meiva plugins or develop a native plugin | [plugins](plugins/SKILL.md), then [plugins.develop](plugins/develop/SKILL.md) |
 | Inspect, message, create, or manage agents, commands, and config overlays | [agents](agents/SKILL.md) |
 | Choose a model for an agent | [models](models/SKILL.md) |
+| Look up or search what Meiva's agents have recorded (conventions, incidents, machine facts); decide whether something belongs in Memory | [memory](memory/SKILL.md) |
 | Write, create, inspect, or change persistent scheduled work | [schedules](schedules/SKILL.md) |
 | Launch and supervise an external harness agent (Claude Code, Codex, Antigravity) | [external-agents](external-agents/SKILL.md) |
 | Ask why a harness shows unavailable when spawning an agent | [external-agents](external-agents/SKILL.md), then [harness availability](external-agents/references/harness-availability.md) |

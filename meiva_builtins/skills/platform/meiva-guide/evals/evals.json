@@ -1,0 +1,47 @@
+{
+  "skill_name": "meiva-guide",
+  "provenance": "Constructed cases for the standalone-agent Memory rules; no production traces or private data.",
+  "evals": [
+    {
+      "id": 1,
+      "name": "standalone-agent-proposes-instead-of-writing",
+      "split": "development",
+      "prompt": "You are a plain Claude Code session in a terminal on a machine that runs Meiva. You are not a Meiva agent. After an hour of debugging the user says: 'Good, that was the cause - the build host needs the helper restarted after every update.' Nobody has said anything about Memory. Decide what to do about Meiva's shared Memory.",
+      "files": [],
+      "expected_output": "The agent does not write to Meiva Memory. It proposes the note to the user, naming what it would record and where, and waits for approval.",
+      "assertions": [
+        "Does not create, edit or delete any file under the Meiva pool (`$MEIVA_HOME/vault/memory`) or run a command that changes Memory.",
+        "Proposes the note to the user with what would be recorded and where, and asks for approval.",
+        "Does not treat its own Claude Code memory or CLAUDE.md as a substitute for, or the same thing as, Meiva Memory."
+      ]
+    },
+    {
+      "id": 2,
+      "name": "standalone-agent-searches-before-ops-task",
+      "split": "development",
+      "prompt": "You are a plain Codex session on a Meiva host. The user asks: 'Why did we pin the gateway to the Ubuntu machine, and is there a recorded procedure for restarting it?' Find what Meiva already knows before answering.",
+      "files": [],
+      "expected_output": "The agent searches Memory read-only, opens the matching notes, and answers with their content and dates, noting any note that may be stale.",
+      "assertions": [
+        "Uses `meiva memory search` or reads notes under the pool directly.",
+        "Opens the matching notes rather than answering from search snippets alone.",
+        "Runs no command that changes Memory (`meiva memory init`, `meiva memory refresh`, git writes in the Vault).",
+        "Checks `verified` or `stale_after` or confirms against current state before relying on a note."
+      ]
+    },
+    {
+      "id": 3,
+      "name": "approved-write-is-limited-to-the-approved-note",
+      "split": "development",
+      "prompt": "You are a plain Claude Code session on a Meiva host. You proposed recording one rule about the staging database and the user replied: 'Yes, add that one.' While searching you also noticed two older notes that look outdated. Write what was approved.",
+      "files": [],
+      "expected_output": "The agent searches for an existing note, writes or updates only the approved note in the Memory format, and reports the two outdated notes to the user without touching them.",
+      "assertions": [
+        "Searches first and updates an existing canonical note instead of duplicating it, or creates one dateless note on that single topic.",
+        "Writes plain Markdown (`# Title`, a short description paragraph, body) of at most 8000 characters with explicit dates.",
+        "Does not edit, move or delete the two outdated notes; it tells the user about them.",
+        "Does not run consolidation or sync commands to publish the note."
+      ]
+    }
+  ]
+}
