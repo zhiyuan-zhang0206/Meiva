@@ -13,7 +13,7 @@ group.
 
 - "What language should I use when talking to you?"
 - Follow up only if ambiguous: "Same for reports and pages, or different?"
-- Record: `type/user` (an attribute of the person); add `type/feedback` if
+- Record: the user kind (an attribute of the person); add the feedback kind if
   the user states it as a rule ("always Chinese, including reports").
 
 ### Notification channel
@@ -23,14 +23,14 @@ group.
 - "Which decisions should I wait for your OK on instead of deciding
   myself?" (Expect: irreversible actions, outward-facing actions, spending
   real money, contacting real people.)
-- Record: `type/feedback` — it is how you work, with the reason the user
+- Record: the feedback kind — it is how you work, with the reason the user
   gave.
 
 ### Timezone
 
 - "Which timezone should schedules and reminders use?" Offer to derive it
   from their location if they are unsure.
-- Record: `type/user`; add `type/feedback` if it changes how you schedule
+- Record: the user kind; add the feedback kind if it changes how you schedule
   (e.g. "never schedule anything before 9 AM local").
 
 ### Update rhythm
@@ -38,16 +38,16 @@ group.
 - "How fast should this cluster take updates — as soon as a release lands,
   on a schedule, or only when you say?"
 - "Are there hours when I should avoid maintenance?"
-- Record: `type/feedback` (and `type/env` if the window is a machine fact).
+- Record: the feedback kind (and the env kind if the window is a machine fact).
 
 ### Confirmation gates
 
 - "What should I never do without checking with you first?"
-- Record: `type/feedback` — a standing rule, not a one-off.
+- Record: the feedback kind — a standing rule, not a one-off.
 
 ### Reporting style
 
 - "Do you want finished work as a served page, a short chat summary, or
   both? How often should progress updates arrive while something is
   running?"
-- Record: `type/feedback`.
+- Record: the feedback kind.

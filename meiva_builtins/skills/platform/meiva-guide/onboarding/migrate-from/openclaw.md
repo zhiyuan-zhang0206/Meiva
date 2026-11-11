@@ -23,7 +23,7 @@ control plane for sessions, tools, events and channel connections.
 | Config `~/.openclaw/openclaw.json` (JSON5: channels, messages, providers, security) | `meiva config get/set/unset` | |
 | Control UI (`openclaw dashboard`, :18789) | Platform fleet view; per-report files via `meiva.ui.publish` | |
 | Companion apps (voice, canvas, camera, screen sharing) | No equivalent — Meiva delivers reports and text (`meiva.ui.publish`) | |
-| Memory | Shared memory pool (`~/.meiva/memory`) + per-agent memory | |
+| Memory | Shared memory pool (`~/.meiva/vault/memory`) + per-agent memory | |
 | Self-hosted, single operator | Multi-machine cluster; agents can be spawned on any enrolled machine | |
 
 ## Migration steps
@@ -38,7 +38,7 @@ control plane for sessions, tools, events and channel connections.
    OpenClaw skills/plugins need rewriting as Agent Skills, or finding an MCP
    server that covers the tool.
 4. **Recreate roles.** OpenClaw "agents" → Meiva role agents: spawn one per
-   domain, record each boundary as `type/role` memory.
+   domain, record each boundary as the role kind memory.
 5. **Move provider/model choices** into each agent's `config_overlay`
    (OpenClaw's `providers` block has no single Meiva equivalent).
 

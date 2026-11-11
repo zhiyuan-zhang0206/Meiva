@@ -2,13 +2,11 @@
 
 ## What it is
 
-`meiva_memory` provides shared memory pool capability: passive memory recall (`MEIVA_PASSIVE_MEMORY_RECALL`), the `meiva.memory.*` SDK surface, the write check, and the standing memory context notes — the shared pool index, the per-agent index, and the chain-inherited `inheritable` blocks (`inheritance/inherit.py`, whose decisions are the pure `inheritance/inherited_blocks.py`). Whether recall runs, and the knobs that shape it, are [Memory Recall — Passive Memory Recall](memory-recall.md)'s to state.
+`meiva_memory` provides shared memory pool capability: passive memory recall (`MEIVA_PASSIVE_MEMORY_RECALL`), the `meiva.memory.*` SDK surface, and the standing memory context notes — the shared pool index, the per-agent index, and the ancestors' `memory/INHERIT.md` files (`inheritance/inherit.py`, whose decisions are the pure `inheritance/inherited_blocks.py`). Whether recall runs, and the knobs that shape it, are [Memory Recall — Passive Memory Recall](memory-recall.md)'s to state.
 
 ## Registered hooks
 
-### Memory write check (after_exec hook)
-
-`_MemoryWriteCheckHook` checks the notes the `files.write` / `append` / `edit` wraps recorded and adds at most one `memory_write_check` reminder; it never blocks, rewrites or raises. Details: [Memory write check — Rule and Duplicate Reminders for Written Notes](memory-write-check.md).
+There is no write-time hook: `meiva.files` stores a note exactly as written, and the pool's rules are checked by the validator at commit and Dream time ([Memory Pool Scaffold and Validator](memory-pool-scaffold.md)).
 
 ### Passive memory recall (before_turn hook)
 
@@ -41,7 +39,7 @@ This plugin **owns** the `meiva.memory` namespace — `plugin.py` assembles it a
   (description empty string when absent; tags include the note's `type/<x>` tag so a caller can weigh a hit by its kind)
 - `meiva.memory.PERSONAL_PATH` — the agent's own memory folder (`<workspace>/memory`), resolved from the SDK identity when read
 
-There is no writer: an agent writes notes with `meiva.files.write` (see the write check above). `IndexerUnavailable` remains reachable but deliberately excluded from `help(meiva.memory)`.
+There is no writer: an agent writes notes with `meiva.files.write` (see [Memory API](memory-api.md)). `IndexerUnavailable` remains reachable but deliberately excluded from `help(meiva.memory)`.
 
 ## Key dependencies
 
@@ -64,9 +62,8 @@ There is no writer: an agent writes notes with `meiva.files.write` (see the writ
   Vault root when both enabled and given a nonblank URL; see
   [Vault and optional Git LFS](memory-pool-scaffold.md#vault-and-optional-git-lfs).
 - Pool path: `$MEIVA_HOME/vault/memory`, resolved per access; no `MEIVA_MEMORY_POOL` variable.
-- `memory_write_check_deadline_seconds` (5.0) / `memory_write_dedup_threshold` (0.80): the write check's budget and duplicate threshold
 - `settings.passive_memory_recall_enabled`: passive recall feature toggle (default in [Memory Recall — Passive Memory Recall](memory-recall.md))
-- `settings.agent.memory_inherit_depth`: ancestor hops a descendant inherits `inheritable` blocks from (per-agent, default 1; 0 disables). Size guardrails: `memory_inherit_max_block_chars` / `memory_inherit_max_total_chars` (0 disables one)
+- `settings.agent.memory_inherit_depth`: ancestor hops a descendant inherits `memory/INHERIT.md` from (per-agent, default 1; 0 disables). Size guardrails: `memory_inherit_max_block_chars` / `memory_inherit_max_total_chars` (0 disables one)
 - Memory note format: pure Markdown (`# Title` + high-level description paragraph + body; YAML frontmatter is optional)
 
 ## Notes

@@ -53,9 +53,12 @@ decision, an incident, or a user preference. Both ways of reading are read-only:
 meiva memory search "<question in plain words>" [--limit K] [--json]
 ```
 
-It needs the cluster's gateway and returns ranked notes: score, path relative
-to the pool root, tags and description. A weak score is a weak match. Open the
-note itself afterwards; the pool is plain Markdown on disk:
+It needs the cluster's gateway and returns ranked notes: score, path, tags and
+description. The path is relative to the memory root of the gateway's consolidated
+checkout, and the CLI prints it as is. The same note is
+`$MEIVA_HOME/vault/memory/<path>` on this machine once it has synced there. A weak
+score is a weak match. Open the note itself afterwards; the pool is plain Markdown
+on disk:
 
 | Location (under `$MEIVA_HOME`, default `~/.meiva`) | What |
 |---|---|

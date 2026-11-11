@@ -16,7 +16,7 @@ they land somewhere.
    the target before proposing anything.
 2. Ask what done looks like and the constraints (cadence, budget, what not
    to touch).
-3. Record goal + constraints as `type/project`.
+3. Record goal + constraints as the project kind.
 4. Choose a working strategy with `meiva.skills.meiva_workflow` when alignment,
    evaluation, planning, or coordination needs deliberate attention; these are
    optional, interleaving methods. Use `meiva.skills.meiva_fleet` when peer
@@ -39,7 +39,7 @@ they land somewhere.
    running, owns that domain, reports on a cadence.
 2. Agree each role's boundary before spawning: what it owns, what it may
    never touch.
-3. Record each role as `type/role` with its boundary.
+3. Record each role as the role kind with its boundary.
 4. For time-triggered work, load `meiva.skills.meiva_guide.schedules` and
    create the schedule; spawn the first role agent with a self-contained
    prompt naming the domain and the cadence.

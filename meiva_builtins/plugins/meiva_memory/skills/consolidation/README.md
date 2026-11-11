@@ -23,7 +23,7 @@ commit — when in doubt, trigger.
 
 ## Four-Phase Meiva Dream Workflow
 
-Each full consolidation runs four phases inside an isolated git worktree (`git -C ~/.meiva/vault worktree add -q -B <branch> $W origin/main`; direct commits on `main` are refused by the pool pre-commit hook):
+Each full consolidation runs four phases inside an isolated git worktree (`git -C ~/.meiva/vault worktree add -q -B <branch> $W origin/main`; consolidation work never commits on the shared checkouts' branches; the pool pre-commit hook enforces size caps and validation, not branch choice):
 1. **Phase 1 (Orientation)**: Scan `MEMORY.md` and directory `index.md` files to map topic layout and size budgets.
 2. **Phase 2 (Gather Signal)**: Run `skills/consolidation/scripts/dream_gather.py` to intersect optional note body file links against repository file trees and recent git commits, flag expired `stale_after` and aging `verified` dates, and identify pool churn/conflict hotspots; collect three incremental signals — (a) recent session transcripts (`USER_INPUT` corrections and rulings), (b) generalized World Truth Probes (multi-repo paths/symbols/contracts, cluster DB active/terminated agents and schedule states, host environment and `<!-- fact-check: ... -->`), and (c) per-agent `workspaces/*/memory/` notes.
 3. **Phase 3 (Consolidation)**: Enforce one dateless canonical file per rule/topic slot, overwrite canonical state in place when rulings or world truth change, `git rm` superseded/expired date-suffixed fragments, populate/refresh Dream OKF provenance and lifecycle fields (`description`, `verified`, `stale_after`) on canonical notes, and convert relative time words to explicit `YYYY-MM-DD` dates.

@@ -4,8 +4,7 @@
 
 `meiva_to_user` keeps the workspace `to_user.md` panel — the Markdown document the user
 reads beside the agent's messages ([Markdown shared context decision](../../../../docs/decisions/frontend/documents/2026-10-15-markdown-context-and-file-references.md)) —
-within its soft limit. It is the second member of the write-check family
-([Memory write check — Rule and Duplicate Reminders for Written Notes](../../meiva_memory/docs/memory-write-check.md) is the first):
+within its soft limit. It follows the write-check pattern:
 the plugin's `files.write` / `append` / `edit` wraps record, inside the exec subprocess,
 whether a call wrote this agent's panel (`written.py`; [the recording's own node](panel-write-check.md)), and the after_exec hook
 (`agent_runtime.py`) reads that record in the agent process, counts the panel through the
@@ -58,8 +57,6 @@ within its limit; `every_time` reminds on every over-limit write.
 - [Plugin Declared Contributions](../../../../docs/plugins/declared-contributions.md) — the contribution surfaces this
   plugin declares (wraps, hooks, state, config)
 - [Plugin Graph-Edge Hooks](../../../../docs/plugins/graph-edge-hooks.md) — the after_exec hook contract
-- [Memory write check — Rule and Duplicate Reminders for Written Notes](../../meiva_memory/docs/memory-write-check.md) — the
-  write-check family's other member and the wrap/cadence precedents
 
 ## Notes
 

@@ -18,7 +18,7 @@ connect their goals to capabilities, and start useful work.
 
 Run onboarding when any of these hold:
 
-- The memory pool has no `type/user` note for the person you are talking to
+- The memory pool has no user-profile note for the person you are talking to
   (`meiva.memory.search(...)` for their name, read `MEMORY.md`).
 - The user says they just installed the cluster, are new to Meiva, or asks
   "what can you do?"
@@ -34,8 +34,8 @@ fill only the gaps you notice (a missing timezone, an unrecorded gate).
 
 Onboarding is finished when **all four** are true:
 
-1. The pool carries one `type/user` note (who the user is) plus the
-   `type/feedback` notes (how to work with them) — see
+1. The pool carries one user-profile note (who the user is) plus the
+   feedback notes (how to work with them) — see
    [Record to memory](#record-to-memory).
 2. One concrete piece of work is underway: a task created, a worker
    spawned, or a schedule set.
@@ -49,7 +49,7 @@ Onboarding is finished when **all four** are true:
 ### 1. Check memory before asking anything
 
 Never interview cold. Read `meiva.memory.PATH/MEMORY.md` and search the pool
-for `type/user` notes first. A profile exists → skip to step 3, ask only
+for the user's profile note first. A profile exists → skip to step 3, ask only
 about missing fields. Nothing exists → run the full flow.
 
 ### 2. Preference interview
@@ -98,7 +98,7 @@ impatient, but keep the order.
 
 | Turn | You say | What happens behind it |
 |---|---|---|
-| 1 | Greeting + "let me check what I already know about you" | Read the pool index, search `type/user`. This is the fork: profile found → jump to turn 4. |
+| 1 | Greeting + "let me check what I already know about you" | Read the pool index, search for the user's profile note. This is the fork: profile found → jump to turn 4. |
 | 2 | Language + notification channel + timezone | First batch of questions (see below). Write answers as they come. |
 | 3 | Update rhythm + confirmation gates + reporting style | Second batch. Write answers as they come. |
 | 4 | "What do you want this cluster for?" | Branch A–D below; restate the goal or proposal in one sentence and confirm it. |
@@ -132,7 +132,7 @@ the map instead of re-interviewing from scratch. One page per source tool:
 Each page has the same shape: a concept-map table (their concept → its Meiva
 equivalent), migration steps, and the honest differences and pitfalls, with
 sources. Four facts cut across all four: skills port directly (same Agent
-Skills standard), instructions become memory (`type/feedback`), automations
+Skills standard), instructions become memory (the feedback kind), automations
 become `meiva schedules` / `meiva.watcher`, and every tool's permission system
 becomes recorded gates plus `meiva.ui.ask` questions. Read the page for the
 tool they name, then walk it with them.
@@ -144,7 +144,7 @@ stuff go" part of the conversation.
 ## Record to memory
 
 Before writing shared onboarding notes, read [memory records](references/memory-records.md)
-for frontmatter, tags, and destinations. User preferences belong in the shared
+for the note format and destinations. User preferences belong in the shared
 pool at absolute paths; personal working state belongs in workspace memory.
 
 ## Anti-patterns

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # meiva:note
 # Validate shared notes in the Vault memory tree. The standalone seed owns the
-# single-note rules imported by the plugin write check; its CLI scans memory/.
+# single-note rules; its CLI scans memory/.
 
 from __future__ import annotations
 

@@ -67,7 +67,7 @@ source / target_agent_id / attributes`; `category` = audit | telemetry |
 log). Events are not in Postgres — do not query it for them:
 - tokens: `llm_usage` events — sum `in_total + out_total`.
 - agents spawned: count of `spawn` events (`category='audit'`).
-- memory growth: `meiva.shell.run("cd ~/.meiva/memory && git diff --numstat | awk '{s+=$1+$2} END{print s+0}'")`.
+- memory growth: `meiva.shell.run("cd ~/.meiva/vault/memory && git diff --numstat | awk '{s+=$1+$2} END{print s+0}'")`.
 - Read events via the gateway's `/api/events` endpoint — works from a schedule, no agent
   identity needed.
 
@@ -142,7 +142,7 @@ def ensure_agent(label: str, prompt: str) -> int:
 
 
 def pool_growth():
-    out = meiva.shell.run("cd ~/.meiva/memory && git diff --numstat | awk '{s+=$1+$2} END{print s+0}'")
+    out = meiva.shell.run("cd ~/.meiva/vault/memory && git diff --numstat | awk '{s+=$1+$2} END{print s+0}'")
     return int((out or "0").strip() or 0)
 
 def consolidate(reason):
