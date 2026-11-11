@@ -24,6 +24,7 @@ def test_note_tag_value_set() -> None:
         "reply_visibility",
         "task",
         "compact_reminder",
+        "compact_failed",
         "history_dump",
         "silent_idle_continue",
         "turn_lost",

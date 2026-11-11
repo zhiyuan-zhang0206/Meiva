@@ -8,9 +8,10 @@ import pytest
 from google.genai.errors import ClientError
 from langchain_core.messages import AIMessageChunk, HumanMessage, SystemMessage
 
-from agent.graph.llm._deadlines import StreamBounds
-from agent.graph.llm._stream import consume_stream_with_stall_timeout, stream_llm
+from agent.graph.llm._stream import stream_llm
 from agent.graph.llm.tests.llm_support import ScriptedModel, StubHandler, end_turn_chunk
+from agent.graph.llm_stream.deadlines import StreamBounds
+from agent.graph.llm_stream.stream import consume_stream_with_stall_timeout
 from agent.llm import execute_code
 from base.config.tests.configuration import defaults
 from base.host.env.agent_slices import AgentSlices
@@ -30,7 +31,7 @@ async def test_consume_stream_records_first_and_last_arrival() -> None:
 
     chunks: list[AIMessageChunk] = []
     first_ts, last_ts = await consume_stream_with_stall_timeout(
-        stream(), chunks=chunks, handler=StubHandler(), bounds=_BOUNDS
+        stream(), chunks=chunks, on_chunk=StubHandler().process_chunk, bounds=_BOUNDS
     )
 
     assert first_ts is not None and last_ts is not None
@@ -45,7 +46,7 @@ async def test_consume_stream_empty_stream_returns_none() -> None:
 
     chunks: list[AIMessageChunk] = []
     window = await consume_stream_with_stall_timeout(
-        empty(), chunks=chunks, handler=StubHandler(), bounds=_BOUNDS
+        empty(), chunks=chunks, on_chunk=StubHandler().process_chunk, bounds=_BOUNDS
     )
 
     assert window == (None, None)

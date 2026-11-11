@@ -1,8 +1,10 @@
-"""Compaction aborts survive a real hosted turn and its PostgreSQL flush."""
+# meiva:note
+# A failed compaction request survives a real hosted turn and its PostgreSQL flush: the agent idles alive with its history, a note says why, and no corpse marker is stamped, so the reaper never terminates the agent.
 
 import asyncio
 from typing import Any
 
+import httpx
 import psycopg
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage
@@ -20,6 +22,7 @@ from agent.startup import wrap_saver_writes_with_nstep_interval
 from base.agents.context import MeivaContext
 from base.agents.history.delta_read_compat import wrap_saver_reads_with_delta_reconstruction
 from base.agents.inbox.insert import insert_inbound_message
+from base.agents.messages.kwargs import NoteTag, read_meiva_kwargs
 from base.db import Database
 from base.events.live.bus import EventBus
 from services.agent_runner.agent_host.tests.history import provider_down_model
@@ -95,17 +98,20 @@ async def _assert_failure_is_visible_and_durable(
     compact_id: int,
     history: list[HumanMessage | AIMessage],
 ) -> None:
-    [event] = await event_tap.events("error")
-    assert event["agent_id"] == agent
-    assert "CompactionFailedError" in event["content"]
-    assert "history was preserved" in event["content"]
+    assert await event_tap.events("error") == []
     cold = await cold_reader(pool).aget_tuple(config)
     assert cold is not None
     persisted = cold.checkpoint["channel_values"]
     assert persisted["halted"] is True
-    assert persisted["messages"] == history
+    assert persisted["messages"][:2] == history
+    [note] = persisted["messages"][2:]
+    assert read_meiva_kwargs(note).get("meiva_note_tag") == NoteTag.COMPACT_FAILED.value
+    assert "ModelConnectionError" in note.content
     assert _inbound_status(db_conn, compact_id) == ("done",)
     assert _agent_status(db_conn, agent) == ("idling",)
+    assert db_conn.execute(
+        "SELECT last_turn_fatal_at IS NULL FROM agents_meta WHERE id=%s", (agent,)
+    ).fetchone() == (True,)
 
 
 async def _assert_new_inbound_resumes_with_history(
@@ -136,7 +142,7 @@ async def test_compaction_failure_is_visible_durable_and_recovers_on_new_inbound
 ) -> None:
     agent = 1
     rig.stored.write(agent, Row(status="idling"))
-    provider_error = RuntimeError("compaction provider unavailable")
+    provider_error = httpx.ConnectError("compaction provider unreachable")
     provider_down_model.FAILURES[agent] = provider_error
     provider_down_model.CALLS.pop(agent, None)
     replies: list[str] = []

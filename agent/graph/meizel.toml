@@ -1,8 +1,7 @@
-exports = ["claim", "exec", "hooks", "interrupt", "llm", "llm_errors.py", "node_log", "prompt", "recall", "tests"]
+exports = ["claim", "exec", "hooks", "interrupt", "llm", "llm_errors.py", "llm_stream", "node_log", "prompt", "recall", "tests"]
 
 [purity]
 "_shared.py" = "strict"
-"agent_traceback.py" = "strict"
 "tool_calls.py" = "strict"
 
 [uses]
@@ -10,12 +9,13 @@ exports = ["claim", "exec", "hooks", "interrupt", "llm", "llm_errors.py", "node_
 "_build.py" = ["_init_context.py", "claim", "exec", "hooks", "llm"]
 "_init_context.py" = ["claim", "hooks", "node_log", "prompt"]
 "claim" = ["_attach_drain.py", "hooks", "interrupt", "llm_errors.py", "node_log", "prompt"]
-"exec" = ["_attach_drain.py", "_attach_merge.py", "agent_traceback.py", "claim", "interrupt", "node_log", "tool_calls.py"]
-"hooks" = ["interrupt", "llm_errors.py", "node_log", "prompt", "recall"]
+"exec" = ["_attach_drain.py", "_attach_merge.py", "claim", "interrupt", "node_log", "tool_calls.py"]
+"hooks" = ["interrupt", "llm_errors.py", "llm_stream", "node_log", "prompt", "recall"]
 "interrupt" = ["node_log"]
-"llm" = ["_callbacks.py", "claim", "hooks", "interrupt", "llm_errors.py", "node_log", "tool_calls.py"]
+"llm" = ["_callbacks.py", "claim", "hooks", "interrupt", "llm_errors.py", "llm_stream", "node_log", "tool_calls.py"]
+"llm_stream" = ["llm_errors.py"]
 "recall" = ["prompt"]
-"tests" = ["__init__.py", "_attach_drain.py", "_attach_merge.py", "_callbacks.py", "_init_context.py", "_shared.py", "agent_traceback.py", "claim", "exec", "hooks", "interrupt", "llm", "llm_errors.py", "prompt", "recall"]
+"tests" = ["__init__.py", "_attach_drain.py", "_attach_merge.py", "_callbacks.py", "_init_context.py", "_shared.py", "claim", "exec", "hooks", "interrupt", "llm", "llm_errors.py", "prompt", "recall"]
 
 [debt.restricted-python]
 "__init__.py#module __getattr__" = { count = 1, owner = "#6082", until = "waits for the lazy re-export to import its fixed names explicitly: the module serves a few names written in the source, so none of them is known only at run time" }

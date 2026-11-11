@@ -8,7 +8,11 @@ from datetime import datetime
 from langchain_core.runnables import RunnableConfig
 from langgraph.graph.state import CompiledStateGraph
 
-from agent.graph.hooks.compact import CompactionFailedError
+from agent.graph.hooks.compact import (
+    CompactionFailedError,
+    compact_failure_note,
+    describe_failure,
+)
 from agent.graph.llm_errors import (
     FatalLLMStreamError,
     FatalProviderError,
@@ -395,6 +399,12 @@ class PendingTurnFailure:
     reports_started: bool = False
     errors: list[Error] = field(default_factory=list[Error])
 
+    # meiva:note
+    # Whether the aborted turn leaves the agent a crash corpse for the reaper. A failed compaction leaves the history intact and the agent alive: it idles for its next inbound. Every other settled abort is a fatal provider or stream failure.
+    @property
+    def marks_crash(self) -> bool:
+        return not isinstance(self.error, CompactionFailedError)
+
     @classmethod
     def from_invocation_error(cls, exc: Exception) -> PendingTurnFailure | None:
         if isinstance(exc, (FatalLLMStreamError, FatalProviderError, CompactionFailedError)):
@@ -458,7 +468,10 @@ async def settle_turn_failure(
                 "after resolving the cause.",
                 deferred=pending.errors,
             )
-            pending.prepared_update = {"halted": True}
+            pending.prepared_update = {
+                "halted": True,
+                "messages": [compact_failure_note(ctx, describe_failure(exc))],
+            }
         else:
             pending.prepared_update = await handle_fatal_llm_error(
                 exc,

@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from langchain_core.messages import AIMessage, AIMessageChunk, UsageMetadata
 
-from agent.graph.llm._chunk import assemble_final_message
+from agent.graph.llm_stream.chunk import assemble_final_message
 from base.packages.plugin_providers import build_model_catalog
 from base.paths import meiva_home
 

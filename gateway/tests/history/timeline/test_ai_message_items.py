@@ -204,6 +204,7 @@ class TestAiMessageItems:
             NoteTag.NEW_SKILLS,
             NoteTag.TASK,
             NoteTag.TURN_LOST,
+            NoteTag.COMPACT_FAILED,
         }
         hidden = {
             NoteTag.MEMORY,

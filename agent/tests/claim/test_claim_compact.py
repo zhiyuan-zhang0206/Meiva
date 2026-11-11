@@ -3,6 +3,7 @@
 from collections.abc import Callable
 from typing import Any, cast
 
+import httpx
 import psycopg
 import pytest
 from langchain_core.messages import AIMessage, AnyMessage, HumanMessage, SystemMessage
@@ -451,59 +452,8 @@ async def test_claim_compact_request_empty_conversation_consumed_as_noop(
     assert not any(isinstance(m, RemoveMessage) for m in cmd.update["messages"])  # type: ignore[index]
 
 
-async def test_claim_compact_request_retries_then_raises_compaction_failed(
-    redis_url: str,
-    db_conn: psycopg.Connection,
-    aops_pool: AsyncConnectionPool,
-    live_events: LiveEvents,
-    *,
-    model_catalog: ModelCatalog,
-    config_authority: ConfigAuthority,
-    database_gate: ProcessDbGate,
-    machine_identity: MachineIdentityReader,
-):
-    """compact_request whose Compaction LLM keeps failing → claim retries
-    COMPACT_MAX_ATTEMPTS times, then raises CompactionFailedError (the runloop
-    turns that into a turn-abort; the agent stays alive) instead of letting a
-    raw provider exception kill the process after the row is consumed."""
-    tid = spawn_agent(
-        catalog=model_catalog,
-        authority=config_authority,
-        database_gate=database_gate,
-        machine=machine_identity,
-    )
-    insert_inbound_kind(db_conn, tid, "", "compact_request")
-
-    sys_msg = SystemMessage(content="<test sys prompt>")
-    initial_msgs: list[AnyMessage] = [
-        sys_msg,
-        *(HumanMessage(content=f"history-{i}") for i in range(10)),
-    ]
-    state = AgentState(messages=initial_msgs)
-
-    llm = ScriptedChatModel(replies=[RuntimeError("provider 502 on every attempt")])
-
-    from agent.graph.hooks.compact import COMPACT_MAX_ATTEMPTS, CompactionFailedError
-
-    with pytest.raises(CompactionFailedError, match="no usable summary across"):
-        await claim_node(
-            state,
-            make_runtime(
-                ops_pool=aops_pool,
-                llm=llm,
-                event_publisher=live_events.publisher,
-                database_gate=database_gate,
-            ),
-            thread_config(
-                tid,
-            ),
-        )
-    assert len(llm.requests) == COMPACT_MAX_ATTEMPTS
-    [(started, finished)] = await pair_compact_cycles(live_events)
-    assert started["mode"] == "request"
-    assert finished["status"] == "failure"
-
-
+# meiva:note
+# A compact_request whose first compaction call fails with a transient provider error is retried; a later attempt's summary is applied (the auto-compact hook's retry semantics).
 async def test_claim_compact_request_retries_then_succeeds(
     redis_url: str,
     db_conn: psycopg.Connection,
@@ -514,9 +464,6 @@ async def test_claim_compact_request_retries_then_succeeds(
     database_gate: ProcessDbGate,
     machine_identity: MachineIdentityReader,
 ):
-    """compact_request whose first Compaction LLM call fails → retried; a later
-    attempt's summary is applied (same retry semantics as the auto-compact
-    hook's COMPACT_MAX_ATTEMPTS)."""
     tid = spawn_agent(
         catalog=model_catalog,
         authority=config_authority,
@@ -533,7 +480,7 @@ async def test_claim_compact_request_retries_then_succeeds(
     state = AgentState(messages=initial_msgs)
 
     llm = ScriptedChatModel(
-        replies=[RuntimeError("transient 503"), AIMessage(content="retried summary")]
+        replies=[httpx.ConnectError("wire lost"), AIMessage(content="retried summary")]
     )
 
     cmd = await claim_node(

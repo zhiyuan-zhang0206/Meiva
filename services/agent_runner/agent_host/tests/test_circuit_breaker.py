@@ -450,7 +450,7 @@ async def test_heartbeat_while_breaker_open_parks(
         thread_config(tid),
     )
 
-    fake_llm.bind_tools.return_value.ainvoke.assert_not_called()
+    assert fake_llm.summary_requests == 0
     assert not cmd.update.get("messages"), "no note appended while breaker open"  # pyright: ignore[reportOptionalMemberAccess]
     assert cmd.goto == "claim"
 
@@ -499,7 +499,7 @@ async def test_chat_cobatched_with_open_breaker_heartbeat_reaches_llm(
     assert "real user work" in messages[0].content
     assert messages[0].additional_kwargs["meiva_inbound_id"] == inbound_ids["chat"]
     assert "Heartbeat." not in messages[0].content
-    fake_llm.bind_tools.return_value.ainvoke.assert_not_called()
+    assert fake_llm.summary_requests == 0
 
 
 @pytest.mark.parametrize("reason", ["billing", "context_overflow"])
@@ -598,7 +598,7 @@ async def test_heartbeat_normal_when_breaker_closed(
         thread_config(tid),
     )
 
-    fake_llm.bind_tools.return_value.ainvoke.assert_not_called()
+    assert fake_llm.summary_requests == 0
     assert cmd.update is not None
     msgs = cast("list[BaseMessage]", cmd.update["messages"])
     assert len(msgs) == 1

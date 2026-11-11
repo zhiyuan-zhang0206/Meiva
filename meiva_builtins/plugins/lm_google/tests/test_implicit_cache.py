@@ -7,10 +7,10 @@ from langchain_core.exceptions import ModelError
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_google_genai import ChatGoogleGenerativeAI
 
-from agent.llm.invoke import ainvoke_tool_call
-from base.config import settings
+from agent.graph.llm_stream.stream import stream_message
+from base.config.tests.configuration import defaults
 from base.host.boundary.json_values import is_object_dict, is_object_list
-from base.host.env.agent_slices import ModelOverrides
+from base.host.env.agent_slices import AgentSlices, ModelOverrides
 from base.lm.catalog import ModelCatalog
 from base.lm.catalog.provider_keys import ProviderKeys
 from base.lm.factory import build_chat_model
@@ -26,11 +26,15 @@ def _gemini_flash(model_catalog: ModelCatalog, server: GeminiServer) -> ChatGoog
         keys=ProviderKeys({"GEMINI_API_KEY": "test-not-a-real-key"}),
         llm_override="",
         overrides=ModelOverrides.from_pins(None),
-        streaming=False,
+        streaming=True,
         base_url=server.url,
     )
     assert isinstance(llm, ChatGoogleGenerativeAI)
     return llm
+
+
+def _gemini_agent() -> AgentSlices:
+    return AgentSlices.resolve({"llm_model": "gemini-3.8-flash"}, default_reader=defaults())
 
 
 def _declared_tool_names(body: dict[str, object]) -> list[str]:
@@ -71,14 +75,15 @@ async def test_google_tool_call_uses_complete_prefix_and_accounts_cache_reads(
             ),
         )
     )
-    response = await ainvoke_tool_call(
+    response = await stream_message(
         llm,
         [SystemMessage(content="stable system head"), HumanMessage(content="history")],
-        timeout_seconds=settings.lm.llm_compact_timeout_seconds,
+        agent=_gemini_agent(),
+        catalog=model_catalog,
     )
     assert response.text == "summary"
     [request] = gemini_server.received
-    assert request.path == "/v1beta/models/gemini-3.8-flash:generateContent"
+    assert request.path == "/v1beta/models/gemini-3.8-flash:streamGenerateContent?alt=sse"
     assert "cachedContent" not in request.body
     assert request.body["systemInstruction"] == {"parts": [{"text": "stable system head"}]}
     assert request.body["contents"] == [{"parts": [{"text": "history"}], "role": "user"}]
@@ -102,10 +107,11 @@ async def test_cache_403_has_no_application_recovery(
     llm = _gemini_flash(model_catalog, gemini_server)
     gemini_server.refuse(403, "CachedContent not found or permission denied", "PERMISSION_DENIED")
     with pytest.raises(ModelError) as caught:
-        await ainvoke_tool_call(
+        await stream_message(
             llm,
             [SystemMessage(content="head"), HumanMessage(content="history")],
-            timeout_seconds=settings.lm.llm_compact_timeout_seconds,
+            agent=_gemini_agent(),
+            catalog=model_catalog,
         )
     assert isinstance(caught.value.__cause__, ClientError)
     assert caught.value.__cause__.code == 403

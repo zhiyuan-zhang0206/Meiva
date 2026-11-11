@@ -11,8 +11,7 @@ from langchain_core.messages import AIMessageChunk, HumanMessage
 from langchain_core.runnables import RunnableConfig
 
 from agent.graph.llm._backoff import Attempt
-from agent.graph.llm._deadlines import StreamBounds
-from agent.graph.llm._stream import consume_llm, consume_stream_with_stall_timeout, stream_bounds
+from agent.graph.llm._stream import consume_llm
 from agent.graph.llm.node import llm_attempt
 from agent.graph.llm.tests.llm_support import (
     ScriptedModel,
@@ -21,6 +20,8 @@ from agent.graph.llm.tests.llm_support import (
     llm_runtime,
 )
 from agent.graph.llm_errors import LLMStreamStallTimeoutError
+from agent.graph.llm_stream.deadlines import StreamBounds
+from agent.graph.llm_stream.stream import consume_stream_with_stall_timeout, stream_bounds
 from agent.state import AgentState
 from base.config.tests.configuration import defaults
 from base.db.code_version_gate import ProcessDbGate
@@ -117,7 +118,7 @@ async def test_stream_below_total_timeout_is_unchanged() -> None:
     await consume_stream_with_stall_timeout(
         model.astream([]).__aiter__(),
         chunks=chunks,
-        handler=StubHandler(),
+        on_chunk=StubHandler().process_chunk,
         bounds=StreamBounds(ttft_seconds=10.0, inter_chunk_seconds=10.0, total_seconds=10.0),
     )
 
@@ -132,7 +133,7 @@ async def test_none_disables_stream_total_timeout() -> None:
     await consume_stream_with_stall_timeout(
         ScriptedModel(scripts=[slow]).astream([]).__aiter__(),
         chunks=chunks,
-        handler=StubHandler(),
+        on_chunk=StubHandler().process_chunk,
         bounds=StreamBounds(ttft_seconds=10.0, inter_chunk_seconds=10.0, total_seconds=None),
     )
 

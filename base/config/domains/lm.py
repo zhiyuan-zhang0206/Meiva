@@ -257,24 +257,6 @@ class LmSettings(EnvSettings):
         },
     )
 
-    llm_compact_timeout_seconds: float = Field(
-        title="Compaction summary timeout (seconds)",
-        default=120.0,
-        alias="MEIVA_LLM_COMPACT_TIMEOUT_SECONDS",
-        description=(
-            "Total timeout (seconds) for one compaction-summary generation "
-            "(auto-compact + compact_request). The summary call is larger than "
-            "a plain invoke, hence a wider default than "
-            "llm_invoke_timeout_seconds; bounds an agent wedged mid-compact."
-        ),
-        json_schema_extra={
-            "restart_required": "agent",
-            "writable": True,
-            "sensitive": False,
-            "scope": "cluster-pinned",
-        },
-    )
-
     llm_stream_ttft_timeout_seconds: float | None = Field(
         title="First-token timeout (seconds)",
         default=None,

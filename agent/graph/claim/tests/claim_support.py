@@ -4,7 +4,7 @@ import asyncio
 import os
 from pathlib import Path
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import MagicMock
 
 import psycopg
 from langchain_core.language_models.chat_models import BaseChatModel
@@ -14,6 +14,7 @@ from langgraph.runtime import Runtime
 from psycopg_pool import AsyncConnectionPool
 
 import meiva
+from agent.graph.hooks.tests.scripted_model import ScriptedModel
 from base.agents.context import MeivaContext
 from base.agents.context.identity import AgentIdentity
 from base.clock import SYSTEM_TIMERS, Clock
@@ -32,12 +33,10 @@ from base.paths import meiva_home, resolve_meiva_home
 __all__ = ["insert_inbound_kind", "make_runtime", "thread_config"]
 
 
+# meiva:note
+# A model that answers one compaction summary, as a streamed call (the call shape of generate_summary, which binds the same tool as the main llm node).
 def make_fake_llm(summary: str = "synthetic compaction summary") -> Any:
-    """Mock LLM — bind_tools(...).ainvoke returns AIMessage(content=summary),
-    matching the call shape of generate_summary (same tool binding as the main llm node)."""
-    llm = MagicMock()
-    llm.bind_tools.return_value.ainvoke = AsyncMock(return_value=AIMessage(content=summary))
-    return llm
+    return ScriptedModel(AIMessage(content=summary))
 
 
 # meiva:note

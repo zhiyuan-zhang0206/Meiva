@@ -1,0 +1,8 @@
+exports = ["chunk.py", "deadlines.py", "stream.py"]
+
+[uses]
+"stream.py" = ["chunk.py", "deadlines.py"]
+
+[purity]
+"__init__.py" = "strict"
+"deadlines.py" = "strict"

@@ -6,10 +6,11 @@ import pytest
 from langchain_core.exceptions import ModelConnectionError
 from langchain_core.messages import AIMessage, AIMessageChunk
 
-from agent.graph.llm._deadlines import StreamBounds
 from agent.graph.llm._retry import retry_policy, retry_wait
-from agent.graph.llm._stream import consume_llm, consume_stream_with_stall_timeout
+from agent.graph.llm._stream import consume_llm
 from agent.graph.llm.tests.llm_support import ScriptedModel, StubHandler
+from agent.graph.llm_stream.deadlines import StreamBounds
+from agent.graph.llm_stream.stream import consume_stream_with_stall_timeout
 from base.config.tests.configuration import defaults
 from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
@@ -33,7 +34,7 @@ async def test_transport_authority_stays_at_the_model_boundary(
     expected = ModelConnectionError if during_model_iteration else httpx.ConnectError
     with pytest.raises(expected) as raised:
         await consume_stream_with_stall_timeout(
-            stream(), chunks=[], handler=handler, bounds=_ONE_SECOND
+            stream(), chunks=[], on_chunk=handler.process_chunk, bounds=_ONE_SECOND
         )
     if during_model_iteration:
         assert raised.value.__cause__ is error

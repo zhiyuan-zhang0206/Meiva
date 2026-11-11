@@ -22,7 +22,7 @@ import shutil
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, cast
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import MagicMock
 
 import psycopg
 import pytest
@@ -46,6 +46,7 @@ from agent.graph.hooks.compact import auto_compact_for_llm, compose_summary_mess
 from agent.hooks import history_dump
 from agent.messages import NoteTag, system_note_message
 from agent.state import AgentState
+from agent.tests.scripted_model import ScriptedChatModel
 from base.agents.context import MeivaContext
 from base.agents.tests.units import spawn_agent
 from base.clock import SYSTEM_TIMERS, Clock
@@ -170,9 +171,7 @@ def _compact_tail(update: Any) -> list[AnyMessage]:
 
 
 def _fake_llm(summary_text: str) -> Any:
-    llm = MagicMock()
-    llm.bind_tools.return_value.ainvoke = AsyncMock(return_value=AIMessage(content=summary_text))
-    return llm
+    return ScriptedChatModel(replies=[AIMessage(content=summary_text)])
 
 
 _LONG_SUMMARY = "## Requests\nfollow the template. " * 60

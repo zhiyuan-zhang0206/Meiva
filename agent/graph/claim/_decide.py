@@ -151,11 +151,23 @@ async def _compact_outcome(
     )
 
 
-def _fallthrough_outcome(st: BatchState) -> _Outcome:
+def _fallthrough_outcome(st: BatchState, *, agent_idle: bool) -> _Outcome:
 
     publish_snapshot = st.next_goto == END and bool(st.new_msgs)
     halted = st.restart_preserves_idle and not st.committed_chat_ids
     goto = BEFORE_TURN if st.committed_chat_ids and st.next_goto == CLAIM else st.next_goto
+    # meiva:note
+    # A batch whose only messages report a failed compaction request has nothing to answer: an agent
+    # that was idle stays idle with its history intact until the next inbound. An agent in the middle of
+    # a turn goes on to read the note and decide.
+    if (
+        agent_idle
+        and goto == BEFORE_TURN
+        and st.failure_notes
+        and len(st.new_msgs) == st.failure_notes
+    ):
+        goto = CLAIM
+        halted = True
     return _Outcome(
         command=Command[ClaimGoto](
             update={
@@ -197,4 +209,4 @@ async def decide(
     if st.compact_payload is not None:
         return await _compact_outcome(ctx, state, agent_id, st)
 
-    return _fallthrough_outcome(st)
+    return _fallthrough_outcome(st, agent_idle=state.halted)

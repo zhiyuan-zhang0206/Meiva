@@ -7,13 +7,14 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+import json
+from collections.abc import Iterator, Sequence
 from typing import Annotated, Any
 
 from langchain_core.callbacks import CallbackManagerForLLMRun
 from langchain_core.language_models.chat_models import BaseChatModel
-from langchain_core.messages import AIMessage, BaseMessage
-from langchain_core.outputs import ChatGeneration, ChatResult
+from langchain_core.messages import AIMessage, AIMessageChunk, BaseMessage
+from langchain_core.outputs import ChatGeneration, ChatGenerationChunk, ChatResult
 from pydantic import ConfigDict, Field, SkipValidation
 
 
@@ -42,8 +43,47 @@ class ScriptedChatModel(BaseChatModel):
         run_manager: CallbackManagerForLLMRun | None = None,
         **kwargs: Any,
     ) -> ChatResult:
+        reply = self._next_reply(messages)
+        return ChatResult(generations=[ChatGeneration(message=reply)])
+
+    # meiva:note
+    # The streamed form of the same scripted reply: one chunk that ends like a provider's last frame (a normal terminal reason and usage, unless the reply carries its own), so a caller that streams and validates the stream gets the reply it scripted.
+    def _stream(
+        self,
+        messages: list[BaseMessage],
+        stop: list[str] | None = None,
+        run_manager: CallbackManagerForLLMRun | None = None,
+        **kwargs: Any,
+    ) -> Iterator[ChatGenerationChunk]:
+        reply = self._next_reply(messages)
+        calls = reply.tool_calls
+        yield ChatGenerationChunk(
+            message=AIMessageChunk(
+                content=reply.content,
+                id=reply.id,
+                tool_call_chunks=[
+                    {
+                        "name": call["name"],
+                        "args": json.dumps(call["args"]),
+                        "id": call["id"],
+                        "index": index,
+                        "type": "tool_call_chunk",
+                    }
+                    for index, call in enumerate(calls)
+                ],
+                response_metadata={
+                    "model_provider": "anthropic",
+                    "stop_reason": "tool_use" if calls else "end_turn",
+                    **reply.response_metadata,
+                },
+                usage_metadata=reply.usage_metadata
+                or {"input_tokens": 1, "output_tokens": 1, "total_tokens": 2},
+            )
+        )
+
+    def _next_reply(self, messages: list[BaseMessage]) -> AIMessage:
         self.requests.append(list(messages))
         reply = self.replies[min(len(self.requests), len(self.replies)) - 1]
         if isinstance(reply, Exception):
             raise reply
-        return ChatResult(generations=[ChatGeneration(message=reply)])
+        return reply

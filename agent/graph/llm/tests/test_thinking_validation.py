@@ -18,7 +18,7 @@ from __future__ import annotations
 
 from langchain_core.messages import AIMessage
 
-from agent.graph.llm._chunk import sanitize_thinking_blocks
+from agent.graph.llm_stream.chunk import sanitize_thinking_blocks
 from base.log.tests.log_records import LogRecords
 
 _ANTHROPIC_META = {"model_provider": "anthropic", "stop_reason": "end_turn"}

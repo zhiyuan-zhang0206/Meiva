@@ -44,7 +44,10 @@ async def close_hosted_turn(
         crashed=outcome.crashed,
     )
     if outcome.failure_report is not None:
-        if settlement.stamp is not None and settlement.stamp.applied and settlement.settled:
+        cut_off = (
+            settlement.stamp is not None and settlement.stamp.applied if outcome.crashed else True
+        )
+        if cut_off and settlement.settled:
             report, outcome.failure_report = outcome.failure_report, None
             await report()
         else:

@@ -1,24 +1,23 @@
-"""The agent's single tool schema.
-
-`execute_code` is the sole tool of the single-tool refactor — every
-capability is reached through the Python namespace it runs, not through a
-per-capability tool. See `future/single-tool-rearchitecture.md`.
-
-This module holds only the tool *schema* (name + docstring + arg types that
-`bind_tools` consumes); the actual run is dispatched by the exec node. The
-chat-model factory that the schema is bound onto lives in `base/lm/factory.py`.
-
-The package holds the helpers around the agent's own model calls, outside
-the llm graph node (`agent/graph/llm/`) that drives them:
-
-  - `invoke.py` — one tool-bound compaction call within its total deadline
-  - `usage.py` — usage accounting for a completed llm-node call, over the
-    canonical emitter in `base/lm/usage.py`
-
-This door imports neither: it stays a dependency-free schema leaf (langchain
-only), which is what lets the understanding consumer bind the same schema without
-the rest of the kernel.
-"""
+# meiva:note
+# The agent's single tool schema.
+#
+# `execute_code` is the sole tool of the single-tool refactor — every
+# capability is reached through the Python namespace it runs, not through a
+# per-capability tool. See `future/single-tool-rearchitecture.md`.
+#
+# This module holds only the tool *schema* (name + docstring + arg types that
+# `bind_tools` consumes); the actual run is dispatched by the exec node. The
+# chat-model factory that the schema is bound onto lives in `base/lm/factory.py`.
+#
+# The package holds the helper around the agent's own model calls, outside
+# the llm graph node (`agent/graph/llm/`) that drives them:
+#
+#   - `usage.py` — usage accounting for a completed llm-node call, over the
+#     canonical emitter in `base/lm/usage.py`
+#
+# This door imports nothing of it: it stays a dependency-free schema leaf (langchain
+# only), which is what lets the understanding consumer bind the same schema without
+# the rest of the kernel.
 
 from __future__ import annotations
 
