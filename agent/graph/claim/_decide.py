@@ -42,7 +42,7 @@ def _markers_only(messages: list[BaseMessage]) -> list[BaseMessage]:
 
 
 # meiva:link agent/graph/docs/context-window/replacement.md
-def _cancel_outcome(ctx: MeivaContext, agent_id: int, st: BatchState) -> _Outcome:
+def _interrupt_outcome(ctx: MeivaContext, agent_id: int, st: BatchState) -> _Outcome:
     if st.compact_payload is not None and st.compact_payload[2] is not None:
         emit_compact_finished(
             ctx.event_publisher,
@@ -189,8 +189,8 @@ async def decide(
     st: BatchState,
     routing: Routing,
 ) -> _Outcome:
-    if st.cancelled and routing.cancelled_applies:
-        return _cancel_outcome(ctx, agent_id, st)
+    if st.interrupted and routing.interrupt_applies:
+        return _interrupt_outcome(ctx, agent_id, st)
 
     if _veto_reentry(routing, st):
         return _Outcome(

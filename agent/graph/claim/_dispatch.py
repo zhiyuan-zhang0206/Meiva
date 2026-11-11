@@ -64,7 +64,7 @@ class BatchState:
     """(summary_text, compact_kind, compact_run_id) — the run id pairs the
     live CompactStarted/CompactFinished events; None for the agent-authored
     compact_summary path (not a forced run, emits no ticking block)."""
-    cancelled: bool = False
+    interrupted: bool = False
     restart_preserves_idle: bool = False
     restart_requested: bool = False
     committed_chat_ids: list[int] = field(default_factory=list[int])
@@ -333,16 +333,19 @@ def _record_compact_request_failure(
     st.failure_notes += 1
 
 
-async def _handle_cancel(
+# meiva:note
+# INTERRUPT: the control row of an external harness's interrupt; stop in-flight work, idle.
+#
+#     The history note and the message come as their own rows ahead of it, so it adds no marker.
+async def _handle_interrupt(
     ctx: MeivaContext,
     agent_id: int,
     st: BatchState,
 ) -> None:
-    """CANCEL: pause agent — stop in-flight work, idle. No lifecycle marker."""
-    assert ctx.event_publisher is not None, "_handle_cancel requires ctx.event_publisher"  # noqa: S101
+    assert ctx.event_publisher is not None, "_handle_interrupt requires ctx.event_publisher"  # noqa: S101
     if ctx.harness is Harness.MEIVA:
         ctx.event_publisher.emit(Cancelled(agent_id=agent_id).model_dump_json())
-    st.cancelled = True
+    st.interrupted = True
 
 
 async def handle_heartbeat(
@@ -433,7 +436,7 @@ async def handle_restart(
 # meiva:note
 # Whether a restart finds the agent idle, with no unfinished turn to continue.
 #
-#     `halted` alone cannot say so. A cancel pauses an agent by setting it, and so does a
+#     `halted` alone cannot say so. An interrupt pauses an agent by setting it, and so does a
 #     model call or code run a restart interrupted, though that turn is unfinished:
 #     `interrupted_by_restart` marks the latter. An agent with no history is idle. A
 #     restart from the agent's own code (`meiva.self.restart()`) leaves its exec halted
@@ -562,8 +565,8 @@ async def _dispatch_item(
         await _handle_compact_summary(ctx, agent_id, item, st)
     elif kind == InboundKind.COMPACT_REQUEST:
         await _handle_compact_request(ctx, agent_id, state, item, st)
-    elif kind == InboundKind.CANCEL:
-        await _handle_cancel(ctx, agent_id, st)
+    elif kind == InboundKind.INTERRUPT:
+        await _handle_interrupt(ctx, agent_id, st)
     elif kind == InboundKind.HEARTBEAT:
         await handle_heartbeat(ctx, agent_id, item, st, state)
     elif kind == InboundKind.TERMINATE:
@@ -609,7 +612,7 @@ def _is_continuation_item(item: ClaimedInbound) -> bool:
     if item.kind in (
         InboundKind.COMPACT_SUMMARY,
         InboundKind.COMPACT_REQUEST,
-        InboundKind.CANCEL,
+        InboundKind.INTERRUPT,
     ):
         return True
     if item.kind == InboundKind.SYSTEM_NOTE and isinstance(item.payload, dict):
@@ -634,7 +637,7 @@ def _is_dispatched_for_polarity(
 # meiva:note
 # Any human-sourced chat or manual resurrect (`user`) flips `non_human_wake`
 # to `False` for the remainder of the run. Mid-run continuation/control mechanics
-# (`COMPACT_SUMMARY`, `COMPACT_REQUEST`, `CANCEL`, interrupted-turn restart resume) and
+# (`COMPACT_SUMMARY`, `COMPACT_REQUEST`, `INTERRUPT`, interrupted-turn restart resume) and
 # mid-run secondary arrivals preserve the active run's polarity; waking from idle on purely
 # non-human inbounds sets `True`.
 # meiva:link agent/docs/state.md

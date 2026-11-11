@@ -128,13 +128,37 @@ def test_agents_ls_preserves_http_error_behavior(wire: PublicGateway) -> None:
     assert wire.run("agents", "ls", expect="http", status=401, path="/api/agents") == 0
 
 
-def test_agents_cancel_posts_to_cancel_route(
+def test_agents_interrupt_posts_the_message_to_the_interrupt_route(
     wire: PublicGateway, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    seen = wire.respond("post", {"status": "cancelled"})
-    assert wire.run("agents", "cancel", str(5)) == 0
-    assert seen["url"] == f"{wire.url}/api/agents/5/cancel"
-    assert "agent 5 cancel: cancelled" in capsys.readouterr().out
+    seen = wire.respond("post", {"status": "interrupted"})
+    assert wire.run("agents", "interrupt", str(5), "-m", "wait for me") == 0
+    assert seen["url"] == f"{wire.url}/api/agents/5/interrupt"
+    assert seen["json"] == {"message": "wait for me"}
+    assert "agent 5 interrupt: interrupted" in capsys.readouterr().out
+
+
+def test_agents_interrupt_carries_an_explicit_source(wire: PublicGateway) -> None:
+    seen = wire.respond("post", {"status": "not_running"})
+    argv = ("agents", "interrupt", "5", "-m", "hello", "--source", "external_agent:claude_code")
+    assert wire.run(*argv) == 0
+    assert seen["json"] == {"message": "hello", "source": "external_agent:claude_code"}
+
+
+def test_agents_interrupt_requires_a_nonblank_message(capsys: pytest.CaptureFixture[str]) -> None:
+    from cli.parsers import build_parser
+
+    for bad in (
+        ["agents", "interrupt", "9"],
+        ["agents", "interrupt", "9", "-m", ""],
+        ["agents", "interrupt", "9", "--message", "   "],
+    ):
+        with pytest.raises(SystemExit) as raised:
+            build_parser().parse_args(bad)
+        assert raised.value.code == 2
+    err = capsys.readouterr().err
+    assert "the following arguments are required: -m/--message" in err
+    assert "--message cannot be empty" in err
 
 
 def test_agents_restart_posts(wire: PublicGateway, capsys: pytest.CaptureFixture[str]) -> None:

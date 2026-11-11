@@ -247,14 +247,24 @@ def h_agents_send(args: argparse.Namespace) -> int:
         return 2
 
 
-def _h_agents_cancel(args: argparse.Namespace) -> int:
+def _h_agents_interrupt(args: argparse.Namespace) -> int:
     from base.cluster.machine.boot import gateway_access_from_boot
-    from cli.commands.agents.control import cmd_agents_cancel
+    from cli.commands.agents.control import ProvenanceError, cmd_agents_interrupt
     from cli.database.runtime import runtime_of
 
-    return cmd_agents_cancel(
-        gateway_access_from_boot(runtime_of(args).config), options(args, _AgentId).agent_id
-    )
+    opts = options(args, _LifecycleOptions)
+    if opts.message is None:
+        raise ValueError("interrupt requires a message")
+    try:
+        return cmd_agents_interrupt(
+            gateway_access_from_boot(runtime_of(args).config),
+            opts.agent_id,
+            message=opts.message,
+            source=opts.source,
+        )
+    except ProvenanceError as exc:
+        print(f"meiva: {exc}", file=sys.stderr)
+        return 2
 
 
 def _h_agents_compact(args: argparse.Namespace) -> int:
@@ -540,14 +550,15 @@ def _add_compact_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]
     agents_compact_p.set_defaults(func=_h_agents_compact)
 
 
+# meiva:note
+# `meiva agents` — operator lifecycle ops (thin client over the gateway's
+# creation + observed native control routes). Handlers defer runtime imports so
+# `meiva --help` builds the parser without a configured .env. Verbs are ordered
+# by escalating force (interrupt < restart < terminate < kill) plus ls.
 def add_agents_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
-    # `meiva agents` — operator lifecycle ops (thin client over the gateway's
-    # creation + observed native control routes). Handlers defer runtime imports so
-    # `meiva --help` builds the parser without a configured .env. Verbs are ordered
-    # by escalating force (cancel < restart < terminate < kill) plus ls.
     agents_p = sub.add_parser(
         "agents",
-        help="observe + control agents: ls / timeline / send / cancel / compact / restart / resurrect / terminate / kill / transfer / get / inbox",
+        help="observe + control agents: ls / timeline / send / interrupt / compact / restart / resurrect / terminate / kill / transfer / get / inbox",
     )
     agents_sub = agents_p.add_subparsers(dest="agents_cmd", required=True)
 
@@ -561,11 +572,22 @@ def add_agents_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) 
 
     _add_send_parser(agents_sub)
 
-    agents_cancel_p = agents_sub.add_parser(
-        "cancel", help="halt the agent's current action; it stays alive (resumable)"
+    agents_interrupt_p = agents_sub.add_parser(
+        "interrupt",
+        help="interrupt the agent's running turn and tell it why; it stays alive",
     )
-    agents_cancel_p.add_argument("agent_id", type=int, help="agent id to cancel")
-    agents_cancel_p.set_defaults(func=_h_agents_cancel)
+    agents_interrupt_p.add_argument("agent_id", type=int, help="agent id to interrupt")
+    agents_interrupt_p.add_argument(
+        "-m",
+        "--message",
+        dest="message",
+        type=_nonblank_message,
+        required=True,
+        metavar="TEXT",
+        help="the reason, delivered to the agent as your message right after a note that its "
+        "turn was interrupted by you (required)",
+    )
+    agents_interrupt_p.set_defaults(func=_h_agents_interrupt)
 
     _add_compact_parser(agents_sub)
 
@@ -632,6 +654,7 @@ def add_agents_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) 
         )
 
     _add_source_argument(
+        agents_interrupt_p,
         agents_restart_p,
         agents_resurrect_p,
         agents_terminate_p,

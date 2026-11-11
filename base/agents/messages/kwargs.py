@@ -49,6 +49,7 @@ class NoteTag(StrEnum):
     TO_USER_SOFT_LIMIT = "to_user_soft_limit"
     LIFECYCLE_TERMINATE = "lifecycle_terminate"
     LIFECYCLE_RESTART = "lifecycle_restart"
+    LIFECYCLE_INTERRUPT = "lifecycle_interrupt"
     LIFECYCLE_RESURRECT = "lifecycle_resurrect"
     LIFECYCLE_FORK = "lifecycle_fork"
     HEARTBEAT = "heartbeat"

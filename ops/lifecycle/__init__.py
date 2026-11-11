@@ -17,7 +17,7 @@ from base.agents.messages.inbound import WakeTriggerKind, validate_wake_trigger_
 from base.agents.model.overlay_columns import split_overlay_columns
 from base.api_contracts.agent_contract import (
     AgentStatus,
-    CancelResult,
+    InterruptResult,
     InvalidModelConfig,
     MachinePaused,
     RestartResult,
@@ -55,7 +55,6 @@ from ops.lifecycle.events import (
 from ops.lifecycle.events import (
     publish_notice_resolved as publish_notice_resolved,
 )
-from ops.lifecycle.foreground_cancel import enqueue_external_cancel
 from ops.lifecycle.hosted_turn import (
     LocalAgentHost,
     cancel_hosted_turn,
@@ -88,7 +87,7 @@ from ops.lifecycle.termination import (
     publish_force_terminate_inbound as publish_force_terminate_inbound,
 )
 from ops.rpc_schemas import (
-    CancelAgentResponse,
+    InterruptAgentResponse,
     RestartAgentRequest,
     RestartAgentResponse,
     ResurrectAgentRequest,
@@ -200,17 +199,15 @@ async def _kill_shell_sessions_now(
 
 
 # meiva:note
-# External harness cancellation goes through claim and the adapter. The host task
-# owns the session, so cancelling that task would also close its background work.
-async def cancel_agent_op(
-    db: Database, bus: EventBus, agent_id: int, *, host: LocalAgentHost
-) -> CancelAgentResponse:
-    external = await asyncio.to_thread(enqueue_external_cancel, db, bus, agent_id)
-    if external is not None:
-        return CancelAgentResponse(status=external)
-    cancelled = await cancel_hosted_turn(agent_id, host=host)
-    return CancelAgentResponse(
-        status=CancelResult.CANCELLED if cancelled else CancelResult.NOT_RUNNING
+# The interruption of a native agent's turn, after the gateway committed the note and the message.
+# An external harness is interrupted through its interrupt row and the adapter instead: the host
+# task owns the session, so cancelling that task would also close its background work.
+async def interrupt_hosted_turn_op(
+    agent_id: int, *, host: LocalAgentHost
+) -> InterruptAgentResponse:
+    cancelled = await cancel_hosted_turn(agent_id, host=host, rearm=True)
+    return InterruptAgentResponse(
+        status=InterruptResult.INTERRUPTED if cancelled else InterruptResult.NOT_RUNNING
     )
 
 
@@ -674,7 +671,7 @@ async def restart_agent_op(
 _LIFECYCLE_PATH = re.compile(
     r"^/api/agents/(?P<id>\d+)/"
     r"(?P<action>terminate|resurrect-explicit|"
-    r"resurrect-if-pending-work|restart|cancel)$"
+    r"resurrect-if-pending-work|restart|interrupt)$"
 )
 
 
@@ -688,7 +685,7 @@ def local_agent_host(home: Path, *, health_port: int) -> LocalAgentHost:
 
 
 # meiva:note
-# Dispatch terminate, restart, cancel and explicit or exact-pending-input resurrection.
+# Dispatch terminate, restart, interrupt and explicit or exact-pending-input resurrection.
 #
 #     Retired billing recovery and crash-harvest paths fail validation without effects.
 #     Unknown paths raise ValueError, which the ops server exposes as a failed result.
@@ -704,7 +701,9 @@ async def lifecycle_op(
     agent_host_port: int,
     trigger_inbound_id: int | None = None,
     trigger_inbound_kind: WakeTriggerKind | None = None,
-) -> TerminateAgentResponse | ResurrectAgentResponse | RestartAgentResponse | CancelAgentResponse:
+) -> (
+    TerminateAgentResponse | ResurrectAgentResponse | RestartAgentResponse | InterruptAgentResponse
+):
     m = _LIFECYCLE_PATH.match(path)
     if m is None:
         raise ValueError(f"lifecycle path not recognized: {path!r}")
@@ -716,9 +715,9 @@ async def lifecycle_op(
         raise ValueError(
             f"trigger inbound is only valid for resurrect-if-pending-work, not {action!r}"
         )
-    if action == "cancel":
-        return await cancel_agent_op(
-            db, bus, agent_id, host=local_agent_host(home, health_port=agent_host_port)
+    if action == "interrupt":
+        return await interrupt_hosted_turn_op(
+            agent_id, host=local_agent_host(home, health_port=agent_host_port)
         )
     if action == "terminate":
         return await terminate_agent_op(

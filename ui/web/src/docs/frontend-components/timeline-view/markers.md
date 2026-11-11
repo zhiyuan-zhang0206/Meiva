@@ -26,7 +26,7 @@ reads like machinery still renders.
 The payload-identified ephemeral markers render bare: `compact_done` and
 `compact_request:*` are normally filtered at the SSE layer (`applySystemEvent`),
 so their branches only catch stale rows; `cancelled` and
-`status:Cancellation requested.` are silent (the stop button has no UI noise);
+`status:Cancellation requested.` (legacy rows) are silent (the stop button has no UI noise);
 `error:*` renders the error chip; `status:*` renders a plain status line;
 anything else renders the red `UnknownMarkerChip` with the raw `source`/`payload` shown so the missing
 case is obvious. Because the vocabulary is generated, a non-null source the page

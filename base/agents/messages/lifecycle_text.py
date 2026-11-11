@@ -27,6 +27,14 @@ def restart_accepted_text(source: str, message: str | None = None) -> str:
 
 
 # meiva:note
+# The note an interrupt writes ahead of its message: who interrupted the turn, and whether a message
+# from them follows. It states the fact only; what the agent does next is its own decision.
+def interrupt_note(source: str, *, with_message: bool) -> str:
+    head = f"Your running turn was interrupted by {by_who(source)}."
+    return f"{head} Their message follows." if with_message else head
+
+
+# meiva:note
 # The note that continues a turn a restart ended before it finished. It states only what
 # the writer knows: who asked, why (when explained), and that the turn was unfinished. What
 # the restart did to the code run and the shell sessions depends on where it landed, so both

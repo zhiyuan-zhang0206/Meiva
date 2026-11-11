@@ -23,6 +23,12 @@ describe("ItemView: system_marker → LifecycleChip", () => {
     revealCollapsedCards();
     expect(screen.getByText("Resurrected")).toBeTruthy();
   });
+  it("source='lifecycle_interrupt' → Interrupted chip naming who interrupted", () => {
+    render(<TimelineView items={[makeItem({ kind: "system_marker", source: "lifecycle_interrupt", payload: "[ts] Your running turn was interrupted by agent:7. Their message follows." })]} />);
+    revealCollapsedCards();
+    expect(screen.getByText("Interrupted")).toBeTruthy();
+    expect(screen.getByText(/interrupted by agent:7/)).toBeTruthy();
+  });
   it("source='lifecycle_fork' → Forked chip", () => {
     render(<TimelineView items={[makeItem({ kind: "system_marker", source: "lifecycle_fork", payload: "[ts] forked from agent:7" })]} />);
     revealCollapsedCards();

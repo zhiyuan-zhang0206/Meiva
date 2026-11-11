@@ -144,7 +144,9 @@ class TestAgentsEntries:
                 id="restart",
             ),
             pytest.param(
-                lambda: agents.cancel(cast(Any, ("7",))), "agent_id must be int", id="cancel"
+                lambda: agents.interrupt(cast(Any, ("7",)), "why"),
+                "agent_id must be int",
+                id="interrupt",
             ),
             pytest.param(
                 lambda: agents.get_status(("7",)),  # pyright: ignore[reportArgumentType]

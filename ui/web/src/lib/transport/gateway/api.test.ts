@@ -256,11 +256,11 @@ describe("write endpoints", () => {
     expect(json(request)).toEqual({ label: "New Name" });
   });
 
-  it("cancel and compact post to the agent without a key or a body", async () => {
-    await api().cancel(8);
+  it("interrupt posts the user as the source, with no message, and compact posts nothing", async () => {
+    await api().interrupt(8);
     await api().compact(5);
     expect(requests().map((request) => [request.method, request.path, request.body])).toEqual([
-      ["POST", "/api/agents/8/cancel", ""],
+      ["POST", "/api/agents/8/interrupt", JSON.stringify({ source: "user" })],
       ["POST", "/api/agents/5/compact", ""],
     ]);
     expect(keyOf(requests()[0])).toBeUndefined();

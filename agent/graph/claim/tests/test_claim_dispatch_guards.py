@@ -1,20 +1,24 @@
 """The claim node refuses an unknown inbound kind, and a pending newer inbound vetoes a terminate."""
 
+from typing import cast
+
 import psycopg
 import pytest
-from langchain_core.messages import SystemMessage
+from langchain_core.messages import AnyMessage, HumanMessage, SystemMessage
 from langgraph.graph import END
 from psycopg_pool import AsyncConnectionPool
 
 from agent.db import ClaimedInbound
-from agent.graph.claim.node import settle_claimed_batch
+from agent.graph.claim.node import claim_node, settle_claimed_batch
 from agent.graph.claim.tests.claim_support import (
     await_inbound_visible,
     insert_inbound_kind,
     make_runtime,
+    thread_config,
 )
 from agent.state import AgentState
 from base.agents.inbox.insert import insert_inbound_message
+from base.agents.messages.lifecycle_text import interrupt_note
 from base.agents.tests.units import spawn_agent
 from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
@@ -205,3 +209,53 @@ async def test_claim_drops_compact_but_takes_a_restart_for_external_harness(
         assert update.get("restart_requested") is True
         assert update.get("exit_requested") is False
         assert update.get("halted") is False
+
+
+# meiva:note
+# The gateway writes the note and the message in one transaction, in that order. The claim that
+# follows the cancelled turn reads them as its first input, so the agent knows who interrupted it
+# and why before it reads anything that arrived later, a heartbeat included.
+async def test_the_note_naming_the_interrupter_comes_before_its_message_and_a_heartbeat(
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    database: Database,
+    event_bus: EventBus,
+    *,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
+    machine_identity: MachineIdentityReader,
+) -> None:
+    tid = spawn_agent(
+        catalog=model_catalog,
+        authority=config_authority,
+        database_gate=database_gate,
+        machine=machine_identity,
+    )
+    with db_conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO inbound_messages (agent_id, content, kind, source, payload) "
+            "VALUES (%s, %s, 'system_note', 'agent:7', "
+            '\'{"note_tag": "lifecycle_interrupt"}\'::jsonb)',
+            (tid, interrupt_note("agent:7", with_message=True)),
+        )
+    db_conn.commit()
+    insert_inbound_message(
+        db_conn, tid, "do Y instead", source="agent:7", bus=event_bus, database=database
+    )
+    heartbeat_id = insert_inbound_kind(db_conn, tid, "Heartbeat. Review.", "heartbeat", "system")
+    await await_inbound_visible(aops_pool, heartbeat_id)
+
+    cmd = await claim_node(
+        AgentState(messages=[SystemMessage(content="sys"), HumanMessage(content="earlier")]),
+        make_runtime(ops_pool=aops_pool, database_gate=database_gate),
+        thread_config(tid),
+    )
+
+    assert cmd.goto == "before_turn"
+    assert cmd.update is not None
+    texts = [str(m.content) for m in cast("list[AnyMessage]", cmd.update["messages"])]
+    assert len(texts) == 3
+    assert "Your running turn was interrupted by agent:7. Their message follows." in texts[0]
+    assert "do Y instead" in texts[1]
+    assert "Heartbeat" in texts[2]

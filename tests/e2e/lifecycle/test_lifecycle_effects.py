@@ -168,16 +168,29 @@ def _start_long_exec(agent_id: int) -> None:
 
 
 @pytest.mark.scenario("tests.e2e.fakes.scenarios.lifecycle_effects:build_cancel")
-def test_cancel_interrupts_a_running_exec_and_the_agent_stays_usable(
+def test_interrupt_stops_a_running_exec_and_its_message_is_the_agents_next_input(
     spawned_agent: int, clean_record: None
 ) -> None:
     agent = spawned_agent
     _start_long_exec(agent)
-    cancelled = gateway_post(f"{GATEWAY_URL}/api/agents/{agent}/cancel", timeout=30.0)
-    cancelled.raise_for_status()
-    assert cancelled.json() == {"status": "cancelled"}
+    interrupted = gateway_post(
+        f"{GATEWAY_URL}/api/agents/{agent}/interrupt",
+        json={"source": "agent:9", "message": "stop the long job"},
+        timeout=30.0,
+    )
+    interrupted.raise_for_status()
+    assert interrupted.json() == {"status": "interrupted"}
+
+    def answered() -> tuple[bool, object]:
+        return any("stop the long job" in _human_text(c) for c in model_inputs(agent)), None
+
+    poll_until(answered, timeout=30.0, interval=0.3, what="the model reads the interrupt message")
     wait_for_status(agent, "idling", timeout=30.0)
     _assert_exec_never_finishes()
+    reading = next(c for c in model_inputs(agent) if "stop the long job" in _human_text(c))
+    text = _human_text(reading)
+    assert "interrupted by agent:9" in text
+    assert text.index("interrupted by agent:9") < text.index("stop the long job")
 
     chat_and_wait(agent, "are you still there")
     assert any("are you still there" in _human_text(c) for c in model_inputs(agent))

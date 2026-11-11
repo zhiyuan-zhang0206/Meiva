@@ -150,7 +150,7 @@ _HANDLERS: tuple[tuple[list[str], types.ModuleType, str], ...] = (
     (["plugins", "update"], _plugins, "_h_plugins_update"),
     (["plugins", "verify"], _plugins, "_h_plugins_verify"),
     (["agents", "ls"], _agents, "_h_agents_ls"),
-    (["agents", "cancel", "1"], _agents, "_h_agents_cancel"),
+    (["agents", "interrupt", "1", "-m", "stop"], _agents, "_h_agents_interrupt"),
     (["agents", "restart", "1", "-m", "restarting"], _agents, "_h_agents_restart"),
     (["agents", "terminate", "1", "--no-message"], _agents, "_h_agents_terminate"),
     (["agents", "kill", "1", "--no-message"], _agents, "h_agents_kill"),

@@ -28,6 +28,7 @@ export const NOTE_TAGS = [
   "to_user_soft_limit",
   "lifecycle_terminate",
   "lifecycle_restart",
+  "lifecycle_interrupt",
   "lifecycle_resurrect",
   "lifecycle_fork",
   "heartbeat",

@@ -259,9 +259,8 @@ class RestartResult(StrEnum):
     ALREADY_TERMINATED = "already_terminated"
 
 
-class CancelResult(StrEnum):
-    CANCELLED = "cancelled"
-    ENQUEUED = "enqueued"
+class InterruptResult(StrEnum):
+    INTERRUPTED = "interrupted"
     NOT_RUNNING = "not_running"
 
 

@@ -1,23 +1,26 @@
 # Hosted Turn Cancel
 
-Native stop and force terminate share one primitive: the home host's loopback
+Native interrupt and force terminate share one primitive: the home host's loopback
 `POST /cancel-turn` (`services/agent_runner/agent_host/health_routes.py`) takes
-`{"agent_id": N}`, cancels that agent's running turn Task with a bounded unwind
+`{"agent_id": N, "rearm": bool}`, cancels that agent's running turn Task with a bounded unwind
 (`TurnScheduler.cancel_turn`) and answers `{"cancelled": true|false}`. The route
 changes no row and authenticates nothing beyond the loopback port. Who calls it
 owns the agent's status:
 
-- the stop button (`POST /api/agents/{id}/cancel`, `meiva agents cancel`,
-  `meiva.agents.cancel`) leaves the row alone: the turn Task unwinds, the
+- an interrupt (`POST /api/agents/{id}/interrupt`, the stop button, `meiva agents interrupt`,
+  `meiva.agents.interrupt`) leaves the row alone: the turn Task unwinds, the
   settle boundary idles the row and the next input starts a fresh turn from a
-  halted checkpoint. The API answers `cancelled` or `not_running`; an
-  unreachable host is an error, not `not_running`.
+  halted checkpoint. It asks for `rearm`: a wake that arrived during the cancelled turn (the
+  interrupt's own message, committed before the cancel) starts that next turn at once instead of
+  waiting for a scan, because `_pump` restarts a successor only after a completed turn. The API
+  answers `interrupted` or `not_running`; an unreachable host is an error, not `not_running`, and
+  the message stays queued.
 - force terminate (`ops.lifecycle.terminate_agent_op`) writes `terminated` in its
-  own transaction first and cancels best effort, so a failed cancel only means
+  own transaction first and cancels best effort without `rearm`, so a failed cancel only means
   the turn ends at its next ownership check.
 
-Public stop on an external harness queues a foreground cancel as described in
-[Turn interrupts (cancel, terminate and restart)](../../docs/turn-interrupts.md).
+A public interrupt of an external harness writes an interrupt control row as described in
+[Turn interrupts (interrupt, terminate and restart)](../../docs/turn-interrupts.md).
 
 The scheduler owns one Task per actual turn. The host shields real awaited work,
 including thread-backed work, from outer Task cancellation: a thread that cannot

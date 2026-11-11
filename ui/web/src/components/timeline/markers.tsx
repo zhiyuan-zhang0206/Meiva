@@ -1,6 +1,6 @@
 "use client";
 
-import { GitFork, Info, NotebookText, PowerOff, RotateCw, type LucideIcon } from "lucide-react";
+import { GitFork, Hand, Info, NotebookText, PowerOff, RotateCw, type LucideIcon } from "lucide-react";
 import { useTranslations } from "next-intl";
 
 import { ChatMarkdown } from "@/components/content/markdown";
@@ -21,6 +21,7 @@ const LIFECYCLE_META: Record<
 > = {
   lifecycle_terminate: { icon: PowerOff, title: "Terminated", titleKey: "terminated" },
   lifecycle_restart: { icon: RotateCw, title: "Restarted", titleKey: "restarted" },
+  lifecycle_interrupt: { icon: Hand, title: "Interrupted", titleKey: "interrupted" },
   lifecycle_resurrect: { icon: RotateCw, title: "Resurrected", titleKey: "resurrected" },
   lifecycle_fork: { icon: GitFork, title: "Forked", titleKey: "forked" },
 };

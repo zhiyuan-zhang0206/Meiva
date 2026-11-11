@@ -3,15 +3,15 @@
 #
 # When entering an interruptible section (the LLM stream or code execution), the node uses
 # `async with subscribe_interrupt(...) as event:` to get an asyncio.Event; the context manager
-# spawns a background task that watches for a durable interrupt inbound (kind 'cancel' or
+# spawns a background task that watches for a durable interrupt inbound (kind 'interrupt' or
 # 'terminate', or a 'restart' that has waited its grace) for this agent and sets the event the
 # moment one is queued. The node races its work against `event.wait()` and aborts when the event
 # fires.
 #
-# Durability is the whole point. The signal is a real `inbound_messages` row (a pending cancel
+# Durability is the whole point. The signal is a real `inbound_messages` row (a pending interrupt
 # inbound or the terminate path), detected via a short DB poll. A signal that lands while no node
 # is interruptible is NOT lost: it stays a pending row and the next claim pass dispatches it. This
-# node only *aborts* the current action; the semantic dispatch (cancel -> halt to idle, terminate
+# node only *aborts* the current action; the semantic dispatch (interrupt -> halt to idle, terminate
 # -> goto END, restart -> goto END and resume) stays in the claim node, the single owner of
 # inbound semantics.
 #
@@ -62,7 +62,7 @@ from ._plan import (
 
 
 # meiva:note
-# Sets `event` as soon as a pending cancel/terminate row exists for `agent_id`, polling
+# Sets `event` as soon as a pending interrupt/terminate row exists for `agent_id`, polling
 # `pending_interrupt_reason` every `poll_s`. It deliberately does NOT touch the Redis inbound
 # listener, which the claim node's idle wait owns. Between polls it waits on `stop`, so exit is
 # prompt. `stop` is the belt to cancellation's braces: a CancelledError can be lost in the
@@ -183,7 +183,7 @@ class _OwnedWatch:
 
 
 # meiva:note
-# RAII watch for a durable interrupt (cancel/terminate) on this agent, owned by the hosted
+# RAII watch for a durable interrupt (interrupt/terminate) on this agent, owned by the hosted
 # service. Yields the event the node races its work against. With `pool` None (container/eval, no
 # inbound queue) the event never fires and the wrapped action runs uninterruptibly. On exit
 # (completion, exception or cancel) the watcher is stopped and cancelled; if it does not unwind

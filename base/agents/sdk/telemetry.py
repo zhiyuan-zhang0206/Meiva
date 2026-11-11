@@ -43,6 +43,7 @@ def emit(
     detail: Mapping[str, object] | None = None,
     duration: float | None = None,
     *,
+    target_agent_id: int | None = None,
     identity: Mapping[str, object],
     sampling_owner: SamplingPolicyLike,
     sampling_policy: SamplingPolicy | None = None,
@@ -74,6 +75,7 @@ def emit(
         attributes=extra,
         agent_id=agent_id,
         source=source,
+        target_agent_id=target_agent_id,
         capture=None if admission is None else admission.capture,
         producer=producer,
         machine_reader=machine_reader,
@@ -91,9 +93,21 @@ def _event_capture_admission(
         yield admission
 
 
+# meiva:note
+# The agent a call is aimed at: an `agents.*` entry whose first argument is an agent id
+# (`interrupt`, `terminate`, `send_message`, ...), so the event says whom the caller acted on.
+# Anything else, including `agents.spawn(prompt)`, names no target.
+def _target_agent(fn: str, args: tuple[object, ...], kwargs: Mapping[str, object]) -> int | None:
+    if not fn.startswith("agents."):
+        return None
+    first = args[0] if args else kwargs.get("agent_id")
+    return first if isinstance(first, int) and not isinstance(first, bool) else None
+
+
 @contextlib.contextmanager
 def _measure(
     fn: str,
+    target_agent_id: int | None,
     identity: Mapping[str, object],
     tally: SdkCallTally | None,
     capture_owner: SdkCaptureOwner | None,
@@ -120,6 +134,7 @@ def _measure(
                 emit(
                     fn,
                     duration=time.monotonic() - t0,
+                    target_agent_id=target_agent_id,
                     identity=caller_identity,
                     sampling_owner=sampling_owner,
                     sampling_policy=snapshot,
@@ -157,7 +172,10 @@ def run_metered[ResultT](
     machine_reader: Callable[[], str] | None = None,
 ) -> ResultT:
     """Validate each public entry before execution and retain its call-local snapshots."""
-    with _measure(fn, identity, tally, capture_owner, sampling_owner, producer, machine_reader):
+    target = _target_agent(fn, args, kwargs)
+    with _measure(
+        fn, target, identity, tally, capture_owner, sampling_owner, producer, machine_reader
+    ):
         return original(*args, **kwargs)
 
 
@@ -175,7 +193,10 @@ async def run_metered_async[ResultT](
     machine_reader: Callable[[], str] | None = None,
 ) -> ResultT:
     """Validate when awaited, preserving cancellation and the call's own admission."""
-    with _measure(fn, identity, tally, capture_owner, sampling_owner, producer, machine_reader):
+    target = _target_agent(fn, args, kwargs)
+    with _measure(
+        fn, target, identity, tally, capture_owner, sampling_owner, producer, machine_reader
+    ):
         return await original(*args, **kwargs)
 
 

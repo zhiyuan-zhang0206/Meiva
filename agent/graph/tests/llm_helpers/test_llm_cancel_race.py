@@ -76,7 +76,7 @@ async def test_llm_node_cancel_event_race_discards_partial(
     agent_id = create_agent(db_conn)
     state = AgentState(messages=[HumanMessage(content="hi")], halted=False)
 
-    trigger = asyncio.create_task(_queue_later(db_conn, agent_id, 0.1, "cancel"))
+    trigger = asyncio.create_task(_queue_later(db_conn, agent_id, 0.1, "interrupt"))
     runtime = make_runtime(
         resources=hosted_resources,
         llm=fake_llm,
@@ -181,7 +181,7 @@ async def test_llm_node_cancel_event_race_discards_partial_tool_call(
     agent_id = create_agent(db_conn)
     state = AgentState(messages=[HumanMessage(content="hi")], halted=False)
 
-    trigger = asyncio.create_task(_queue_later(db_conn, agent_id, 0.1, "cancel"))
+    trigger = asyncio.create_task(_queue_later(db_conn, agent_id, 0.1, "interrupt"))
     runtime = make_runtime(
         resources=hosted_resources,
         llm=fake_llm,
@@ -224,7 +224,7 @@ async def test_llm_node_cancel_event_race_no_partial_returns_halted(
     agent_id = create_agent(db_conn)
     state = AgentState(messages=[HumanMessage(content="hi")], halted=False)
 
-    queue_command(db_conn, agent_id, "cancel")
+    queue_command(db_conn, agent_id, "interrupt")
     runtime = make_runtime(
         resources=hosted_resources,
         llm=fake_llm,

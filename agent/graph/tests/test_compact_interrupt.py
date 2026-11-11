@@ -89,7 +89,7 @@ def _runtime(
 @pytest.mark.parametrize(
     ("kind", "expected"),
     [
-        ("cancel", {"halted": True}),
+        ("interrupt", {"halted": True}),
         ("restart", {"halted": True, "interrupted_by_restart": True}),
     ],
 )
@@ -213,7 +213,7 @@ async def test_compaction_returns_through_claim_then_generates_before_compacting
     )
     catalog = build_model_catalog(home=meiva_home())
     assert not auto_compact_will_fire(state, runtime.context.require_agent(), catalog=catalog)
-    queue_command(db_conn, tid, "cancel")
+    queue_command(db_conn, tid, "interrupt")
     cancelled = await claim_node(state, runtime, config)
     assert cancelled.goto == "claim"
     state = _apply(state, cancelled)

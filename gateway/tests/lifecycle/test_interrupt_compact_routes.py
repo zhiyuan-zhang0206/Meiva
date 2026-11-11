@@ -1,5 +1,5 @@
 # meiva:note
-# `POST /api/agents/{id}/cancel` forwards to the home runner; `/compact` queues one request.
+# `POST /api/agents/{id}/interrupt` commits its note and message before interrupting; `/compact` queues one request.
 
 from __future__ import annotations
 
@@ -65,9 +65,111 @@ def _set_agent(db_conn: psycopg.Connection, agent_id: int, *, machine: str, stat
     db_conn.commit()
 
 
-def test_cancel_of_an_unknown_agent_is_404(_local_machine: MachineIdentityReader) -> None:
+def _inbound(db_conn: psycopg.Connection, agent_id: int) -> list[tuple[str, str, str]]:
+    rows = db_conn.execute(
+        "SELECT kind, source, content FROM inbound_messages WHERE agent_id = %s ORDER BY id",
+        (agent_id,),
+    ).fetchall()
+    db_conn.commit()
+    return rows
+
+
+def test_interrupt_of_an_unknown_agent_is_404(_local_machine: MachineIdentityReader) -> None:
     with gateway_test_client(machine=_local_machine) as client:
-        assert client.post("/api/agents/987654/cancel").status_code == 404
+        response = client.post(
+            "/api/agents/987654/interrupt", json={"message": "stop", "source": "agent:3"}
+        )
+    assert response.status_code == 404
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        {"source": "agent:3"},
+        {"source": "agent:3", "message": ""},
+        {"source": "agent:3", "message": "   "},
+        {"source": "user", "message": "  "},
+        {"source": "not-a-source", "message": "stop"},
+    ],
+)
+def test_interrupt_refuses_a_missing_or_blank_message_and_a_bad_source(
+    _local_machine: MachineIdentityReader,
+    gateway_local_runner: RunnerOps,
+    db_conn: psycopg.Connection,
+    body: dict[str, str],
+) -> None:
+    with gateway_test_client(machine=_local_machine) as client:
+        agent_id = spawn_via_http(client, {}).json()["id"]
+        _set_agent(db_conn, agent_id, machine=gateway_local_runner.name, status="running")
+        before = _inbound(db_conn, agent_id)
+        response = client.post(f"/api/agents/{agent_id}/interrupt", json=body)
+    assert response.status_code == 422
+    assert _inbound(db_conn, agent_id) == before
+
+
+def test_interrupt_of_an_idle_agent_delivers_the_message_and_answers_not_running(
+    _local_machine: MachineIdentityReader,
+    gateway_local_runner: RunnerOps,
+    db_conn: psycopg.Connection,
+) -> None:
+    with gateway_test_client(machine=_local_machine) as client:
+        agent_id = spawn_via_http(client, {}).json()["id"]
+        _set_agent(db_conn, agent_id, machine=gateway_local_runner.name, status="idling")
+        before = len(_inbound(db_conn, agent_id))
+        response = client.post(
+            f"/api/agents/{agent_id}/interrupt", json={"message": "hello", "source": "agent:3"}
+        )
+    assert response.status_code == 200
+    assert response.json() == {"status": "not_running"}
+    assert _inbound(db_conn, agent_id)[before:] == [("chat", "agent:3", "hello")]
+
+
+def test_interrupt_of_a_running_external_agent_records_the_real_source_and_the_reason(
+    _local_machine: MachineIdentityReader,
+    gateway_local_runner: RunnerOps,
+    db_conn: psycopg.Connection,
+) -> None:
+    with gateway_test_client(machine=_local_machine) as client:
+        _seed_harnesses(client, gateway_local_runner.name)
+        agent_id = spawn_via_http(
+            client, {"harness": "codex", "config": {"llm_model": "gpt-6.1-sol"}}
+        ).json()["id"]
+        _set_agent(db_conn, agent_id, machine=gateway_local_runner.name, status="running")
+        before = len(_inbound(db_conn, agent_id))
+        response = client.post(
+            f"/api/agents/{agent_id}/interrupt", json={"message": "use plan B", "source": "agent:3"}
+        )
+    assert response.status_code == 200
+    assert response.json() == {"status": "interrupted"}
+    assert _inbound(db_conn, agent_id)[before:] == [
+        (
+            "system_note",
+            "agent:3",
+            "Your running turn was interrupted by agent:3. Their message follows.",
+        ),
+        ("chat", "agent:3", "use plan B"),
+        ("interrupt", "agent:3", ""),
+    ]
+
+
+def test_the_stop_button_needs_no_message_and_leaves_a_note_for_the_agent(
+    _local_machine: MachineIdentityReader,
+    gateway_local_runner: RunnerOps,
+    db_conn: psycopg.Connection,
+) -> None:
+    with gateway_test_client(machine=_local_machine) as client:
+        _seed_harnesses(client, gateway_local_runner.name)
+        agent_id = spawn_via_http(
+            client, {"harness": "codex", "config": {"llm_model": "gpt-6.1-sol"}}
+        ).json()["id"]
+        _set_agent(db_conn, agent_id, machine=gateway_local_runner.name, status="running")
+        before = len(_inbound(db_conn, agent_id))
+        response = client.post(f"/api/agents/{agent_id}/interrupt", json={"source": "user"})
+    assert response.status_code == 200
+    assert _inbound(db_conn, agent_id)[before:] == [
+        ("system_note", "user", "Your running turn was interrupted by user."),
+        ("interrupt", "user", ""),
+    ]
 
 
 def test_compact_queues_one_request_for_the_agents_next_turn(

@@ -28,7 +28,7 @@ _AGENTS = _REPO_ROOT / "meiva/agents/__init__.py"
 _OWNER = 405
 _SCHEDULE_ACTOR = "schedule:55"
 _STEERING_ACTIONS = (
-    "agents.cancel",
+    "agents.interrupt",
     "agents.restart",
     "agents.resurrect",
     "agents.terminate",
@@ -38,7 +38,7 @@ _STEERING_ACTIONS = (
 # The entries that steer a loop, and the one argument each is aimed with. Written out here rather
 # than imported so a renamed entry or a dropped guard fails this test instead of shrinking the rule.
 _STEERING: tuple[tuple[str, Callable[[int], object]], ...] = (
-    ("agents.cancel", meiva.agents.cancel),
+    ("agents.interrupt", partial(meiva.agents.interrupt, message="why")),
     ("agents.restart", partial(meiva.agents.restart, message="why")),
     ("agents.resurrect", partial(meiva.agents.resurrect, prompt="wake")),
     ("agents.terminate", meiva.agents.terminate),

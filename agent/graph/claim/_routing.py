@@ -17,7 +17,7 @@
 #   same batch (the terminate predates the death; the resurrect is newer). The
 #   winner is resolved up front by id, so the dispatch loop's arm order cannot
 #   decide it (per-arm pairwise guards is how order-dependent holes happen).
-# - cancel is a pause, not a routing intent — it always yields to a co-batched
+# - an interrupt is a pause, not a routing intent — it always yields to a co-batched
 #   exit/revive (a stuck agent gets Stop-then-Terminate; the kill must not be
 #   paused away). One deliberate exception to "chat never decides routing": a
 #   terminate yields to a chat the terminating decision did not see — a chat
@@ -48,7 +48,7 @@ from base.api_contracts.agent_contract import Harness
 # (terminate with exit_requested=True, a hosted restart with
 # restart_requested=True, or the turn boundary with both False — the runloop
 # re-invokes and the fresh invocation's claim waits), back
-# to CLAIM (cancel/pause -> re-enter with halted=True; the re-entered pass
+# to CLAIM (interrupt/pause -> re-enter with halted=True; the re-entered pass
 # hits the turn boundary and ends the invocation), or INIT_CONTEXT (a
 # compaction emptied the history; that node re-establishes the standing head,
 # then resumes where this batch was headed). Narrower than
@@ -121,9 +121,10 @@ class Routing:
             return self.exit_kind is None
         return True
 
+    # meiva:note
+    # An interrupt is effective only when no exit won and no revive shares the batch.
     @property
-    def cancelled_applies(self) -> bool:
-        """Cancel is effective only when no exit won and no revive shares the batch."""
+    def interrupt_applies(self) -> bool:
         return self.exit_kind is None and not self.has_revive
 
 

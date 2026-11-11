@@ -36,11 +36,12 @@ Terminates an agent. A terminated agent is resurrected by any new message, inclu
 
 Restart agent process. Agent completes the current turn then restarts as a new process, keeping the same agent_id.
 
-### `meiva.agents.cancel(agent_id: int) -> CancelResult`
+### `meiva.agents.interrupt(agent_id: int, message: str) -> InterruptResult`
 
-Cancel the agent's running turn. `cancelled` means a native turn was
-cancelled, `enqueued` means an external foreground cancel is pending, and
-`not_running` means there was no running turn.
+Interrupt the agent's running turn and tell it why. `message` is required. The agent is first told its turn was
+interrupted by you and then receives `message` as a chat from you, so it reads your reason before anything else.
+`interrupted` means a turn was running; `not_running` means there was none (the message is then delivered like
+`send_message`). Background work and shell sessions are not stopped; `terminate` ends the agent.
 
 ### `meiva.agents.resurrect(agent_id: int, prompt: str) -> ResurrectResult`
 

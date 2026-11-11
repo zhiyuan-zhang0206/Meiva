@@ -64,6 +64,37 @@ def test_emit_without_execution_tally(
     assert _emitted_calls(emitted_events) == [("ns.fn", None)]
 
 
+@pytest.mark.parametrize(
+    ("fn", "args", "kwargs", "target"),
+    [
+        ("agents.interrupt", (12, "why"), {}, 12),
+        ("agents.terminate", (), {"agent_id": 9}, 9),
+        ("agents.spawn", ("a prompt",), {}, None),
+        ("agents.list_agents", (), {"scope": "live"}, None),
+        ("files.read", (5,), {}, None),
+    ],
+)
+def test_an_agents_call_records_the_agent_it_was_aimed_at(
+    emitted_events: EmittedEvents,
+    sampling_owner: call_policy.SamplingPolicyOwner,
+    fn: str,
+    args: tuple[object, ...],
+    kwargs: dict[str, object],
+    target: int | None,
+) -> None:
+    sdk_usage_telemetry.run_metered(
+        fn,
+        lambda *_a, **_k: None,
+        args,
+        kwargs,
+        identity={"agent_id": 3, "source": "agent:3"},
+        sampling_owner=sampling_owner,
+    )
+
+    [event] = emitted_events
+    assert event.target_agent_id == target
+
+
 def test_call_owns_its_entry_identity_snapshot(
     emitted_events: EmittedEvents, sampling_owner: call_policy.SamplingPolicyOwner
 ) -> None:

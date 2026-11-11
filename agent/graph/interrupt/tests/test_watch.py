@@ -20,7 +20,7 @@ async def test_a_pending_cancel_fires_the_event_with_the_reason_of_its_source_an
     db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool
 ) -> None:
     agent_id = create_agent(db_conn)
-    queue_command(db_conn, agent_id, "cancel", source="agent:9")
+    queue_command(db_conn, agent_id, "interrupt", source="agent:9")
     event = InterruptEvent()
 
     await asyncio.wait_for(
@@ -69,7 +69,7 @@ async def test_a_poll_that_returns_after_stop_ends_the_watcher_without_firing(
 ) -> None:
     agent_id = create_agent(db_conn)
     if cancel_is_pending:
-        queue_command(db_conn, agent_id, "cancel")
+        queue_command(db_conn, agent_id, "interrupt")
     event, stop = InterruptEvent(), asyncio.Event()
     async with aops_pool.connection(), aops_pool.connection():
         watcher = asyncio.create_task(
@@ -87,7 +87,7 @@ async def test_a_borrow_that_swallows_the_watchers_cancel_still_ends_after_stop_
     db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool
 ) -> None:
     agent_id = create_agent(db_conn)
-    queue_command(db_conn, agent_id, "cancel")
+    queue_command(db_conn, agent_id, "interrupt")
     event, stop = InterruptEvent(), asyncio.Event()
     pool = CancelSwallowingPool(aops_pool)
     watcher = asyncio.create_task(watch_for_interrupt(pool, event, agent_id, stop, poll_s=_POLL_S))
@@ -125,7 +125,7 @@ async def test_a_subscription_without_a_pool_never_fires() -> None:
 
 
 @pytest.mark.parametrize(
-    ("kind", "fires"), [("cancel", True), ("terminate", True), ("chat", False)]
+    ("kind", "fires"), [("interrupt", True), ("terminate", True), ("chat", False)]
 )
 async def test_a_subscription_fires_for_a_command_that_was_already_pending_but_not_for_a_chat(
     db_conn: psycopg.Connection,
@@ -156,6 +156,6 @@ async def test_a_subscription_fires_on_a_cancel_queued_after_it_began(
         aops_pool, agent_id, resources=hosted_resources, poll_s=_POLL_S
     ) as event:
         assert not event.is_set()
-        queue_command(db_conn, agent_id, "cancel")
+        queue_command(db_conn, agent_id, "interrupt")
         await asyncio.wait_for(event.wait(), timeout=_ARRIVAL_TIMEOUT_S)
         assert event.reason is InterruptReason.USER

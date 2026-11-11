@@ -96,7 +96,7 @@ in `FileSessionRegistry`.
   `harness_close_unobserved`.
 - Missing SDKs or refused submissions raise `HarnessSetupError` and settle on the
   same fatal-stream path.
-- A foreground cancel calls `interrupt` via `subscribe_interrupt` and logs the
+- A foreground interrupt calls `interrupt` via `subscribe_interrupt` and logs the
   adapter's `settled` report verbatim (`None` stays unobservable). It reads the
   terminal result on the same session so background work remains owned there.
 

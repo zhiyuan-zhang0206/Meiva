@@ -2,7 +2,7 @@
 
 ## Agent and context commands
 
-- `meiva agents ls/get/timeline/inbox/send/cancel/compact/restart/resurrect/terminate/kill/transfer`: `ls` renders the
+- `meiva agents ls/get/timeline/inbox/send/interrupt/compact/restart/resurrect/terminate/kill/transfer`: `ls` renders the
   authenticated agent summary projection as stable `id / status / machine /
   label` columns. It does not expose runner-local workspace paths. `get ID [--json]`
   prints one agent's status, machine, harness and activity clocks (`GET /api/agents/{id}`).

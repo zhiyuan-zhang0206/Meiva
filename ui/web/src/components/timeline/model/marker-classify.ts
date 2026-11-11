@@ -11,6 +11,7 @@ function isNoteTag(s: string): s is NoteTag {
 export const LIFECYCLE_TAGS = [
   "lifecycle_terminate",
   "lifecycle_restart",
+  "lifecycle_interrupt",
   "lifecycle_resurrect",
   "lifecycle_fork",
 ] as const satisfies readonly NoteTag[];

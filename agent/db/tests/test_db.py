@@ -427,7 +427,7 @@ def test_claimed_inbound_from_row_keeps_created_at_and_claimed_at():
 @pytest.mark.parametrize(
     ("row", "reason"),
     [
-        (("cancel", "user"), InterruptReason.USER),
+        (("interrupt", "user"), InterruptReason.USER),
         (("terminate", "agent:0"), InterruptReason.SYSTEM),
         (("restart", "user"), InterruptReason.RESTART),
     ],

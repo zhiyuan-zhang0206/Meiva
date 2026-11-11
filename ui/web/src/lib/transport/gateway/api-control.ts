@@ -12,7 +12,6 @@ import type {
   AlertClassSample,
   AlertsResponse,
   AlertsWindow,
-  CancelAgentResponse,
   ClusterStatus,
   CompactAgentResponse,
   ConfigView,
@@ -21,6 +20,7 @@ import type {
   GuideDraftResponse,
   ClusterPluginsView,
   ClusterPluginSaved,
+  InterruptAgentResponse,
   InventoryAggregate,
   InventoryWriteResult,
   MemoryNoteResponse,
@@ -330,8 +330,10 @@ export function createControlApi(http: Http) {
     compact: (agentId: number): Promise<CompactAgentResponse> =>
       f(`/api/agents/${agentId}/compact`, postInit).then(ok<CompactAgentResponse>),
 
-    cancel: (agentId: number): Promise<CancelAgentResponse> =>
-      f(`/api/agents/${agentId}/cancel`, postInit).then(ok<CancelAgentResponse>),
+    interrupt: (agentId: number): Promise<InterruptAgentResponse> =>
+      f(`/api/agents/${agentId}/interrupt`, postJson({ source: "user" })).then(
+        ok<InterruptAgentResponse>,
+      ),
 
     spawnAgent: (req: SpawnAgentRequest = {}, operationKey: string = newOperationKey()): Promise<SpawnedAgent> =>
       f("/api/keyed/v1/agents", keyedJson(req, operationKey)).then(ok<SpawnedAgent>),

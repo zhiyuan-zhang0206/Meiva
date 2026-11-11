@@ -5,18 +5,18 @@ from cli.tests.wire.public_gateway import PublicGateway
 from cli.tests.wire.public_gateway import wire as wire
 
 
-def test_cancel_reports_an_enqueued_request(
+def test_interrupt_reports_an_interrupted_turn(
     wire: PublicGateway, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    wire.respond("POST", {"status": "enqueued"})
-    assert wire.run("agents", "cancel", "7") == 0
-    assert capsys.readouterr().out.strip().endswith("agent 7 cancel: enqueued")
+    wire.respond("POST", {"status": "interrupted"})
+    assert wire.run("agents", "interrupt", "7", "-m", "stop") == 0
+    assert capsys.readouterr().out.strip().endswith("agent 7 interrupt: interrupted")
 
 
 @pytest.mark.parametrize("payload", [{"status": "unknown"}, {"status": None}, {}])
-def test_cancel_without_a_known_answer_never_prints_success(
+def test_interrupt_without_a_known_answer_never_prints_success(
     wire: PublicGateway, capsys: pytest.CaptureFixture[str], payload: dict[str, object]
 ) -> None:
     wire.respond("POST", payload)
-    assert wire.run("agents", "cancel", "7", expect="value") == 0
+    assert wire.run("agents", "interrupt", "7", "-m", "stop", expect="value") == 0
     assert capsys.readouterr().out == ""

@@ -342,7 +342,7 @@ async def _refuse_unadmitted_lifecycle[RowT: tuple[object, ...]](
 #     reconciliation and other kinds become done. An unowned consumer cannot
 #     acknowledge lifecycle work it has no authority to apply.
 #
-#     The lifecycle-only path leaves cancellation for the external decision
+#     The lifecycle-only path leaves the interrupt for the external decision
 #     owner, or the ordinary native claim if that owner returns without ACK.
 #
 #     An external harness owns delivery of chat, system notes and heartbeats
@@ -471,7 +471,7 @@ async def finalize_claimed_inbounds(
                 conn,
                 _LifecycleKindRow,
                 "SELECT kind FROM inbound_messages "
-                "WHERE agent_id = %s AND kind IN ('restart', 'cancel', 'terminate') "
+                "WHERE agent_id = %s AND kind IN ('restart', 'interrupt', 'terminate') "
                 "ORDER BY id DESC LIMIT 1",
                 (agent_id,),
             )
@@ -563,10 +563,10 @@ async def has_pending_interrupt(pool: AsyncConnectionSource, agent_id: int) -> b
 #     A status='pending' EXTERNAL interrupt fires: the in-flight llm/exec node
 #     polls this (via `subscribe_interrupt`) to abort the current action the
 #     moment a pause/terminate lands — without claiming the row; the dispatch
-#     itself (cancel -> idle, terminate -> END, restart -> END and resume) stays
+#     itself (interrupt -> idle, terminate -> END, restart -> END and resume) stays
 #     in the claim node, the single owner of inbound semantics.
 #
-#     A cancel or terminate interrupts at once. A restart interrupts only after
+#     An interrupt or terminate acts at once. A restart interrupts only after
 #     it has waited `RESTART_INTERRUPT_GRACE_S` (its own `created_at`, read on
 #     the database clock): most code runs end well inside the grace, and the
 #     restart then takes effect at the turn's next boundary without cutting
@@ -576,7 +576,7 @@ async def has_pending_interrupt(pool: AsyncConnectionSource, agent_id: int) -> b
 #     restart from inside the agent's own exec) is EXCLUDED: that path already
 #     raises `LifecycleExit` inside the exec child, which the exec node handles
 #     directly, so the watcher must not also fire on the agent's own row — doing
-#     so would race the clean lifecycle exit with an external cancel. Only
+#     so would race the clean lifecycle exit with an external interrupt. Only
 #     external interrupts (user / admin / peer) need the in-flight abort; the
 #     self row is still dispatched normally at claim.
 #
@@ -598,7 +598,7 @@ class PendingInterrupt:
     source: str
 
     # meiva:note
-    # The interrupt this row names: a restart is its own reason; a cancel or terminate is the
+    # The interrupt this row names: a restart is its own reason; an interrupt or terminate is the
     # user's when it carries `source='user'` and the system's otherwise.
     @property
     def reason(self) -> InterruptReason:
@@ -618,10 +618,10 @@ async def pending_interrupt_reason(
             "SELECT i.kind, i.source FROM inbound_messages i WHERE i.agent_id=%s "
             "AND (i.source <> 'self' OR (%s AND i.kind='terminate' "
             "AND i.created_at <= clock_timestamp() - make_interval(secs => %s))) "
-            "AND i.status='pending' AND (i.kind IN ('cancel','terminate') "
+            "AND i.status='pending' AND (i.kind IN ('interrupt','terminate') "
             "OR (i.kind='restart' "
             "AND i.created_at <= clock_timestamp() - make_interval(secs => %s))) "
-            "AND (%s OR i.kind <> 'cancel') AND (%s OR i.kind = 'cancel') "
+            "AND (%s OR i.kind <> 'interrupt') AND (%s OR i.kind = 'interrupt') "
             "ORDER BY i.id LIMIT 1",
             (
                 agent_id,

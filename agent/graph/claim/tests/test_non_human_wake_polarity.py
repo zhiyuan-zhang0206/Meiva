@@ -107,7 +107,7 @@ def test_mid_run_continuations_and_secondary_arrivals_preserve_polarity(
     halted_mid_run = AgentState(halted=True, turn_active=True, non_human_wake=initial_polarity)
     for cont_item in (
         _inbound(2, kind="compact_summary", source="system"),
-        _inbound(3, kind="cancel", source="user"),
+        _inbound(3, kind="interrupt", source="user"),
         _inbound(
             4,
             kind="system_note",

@@ -150,7 +150,7 @@ async def test_a_watcher_that_swallowed_its_cancel_ends_at_its_poll_without_firi
     loguru_records: LogRecords,
 ) -> None:
     agent_id = create_agent(db_conn)
-    queue_command(db_conn, agent_id, "cancel")
+    queue_command(db_conn, agent_id, "interrupt")
     pool = ParkedPool(release=_released(), real=aops_pool)
 
     async with subscribe_interrupt(

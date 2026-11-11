@@ -431,9 +431,9 @@ function HomeContent({
   const handleStop = useCallback(async () => {
     if (activeId == null) return;
     try {
-      await client.cancel(activeId);
+      await client.interrupt(activeId);
     } catch (e: unknown) {
-      showError(`Cancel failed: ${errMsg(e)}`);
+      showError(`Stop failed: ${errMsg(e)}`);
     }
   }, [activeId, client, showError]);
 

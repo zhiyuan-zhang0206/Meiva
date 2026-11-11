@@ -1,21 +1,34 @@
-# Interrupting a turn: cancel, terminate and restart
+# Interrupting a turn: interrupt, terminate and restart
 
-Public cancel (`POST /api/agents/{id}/cancel`) asks the home host to cancel the
-running Task for native Meiva turns. The in-flight node unwinds and the agent
-idles until its next input. See
-[Hosted Turn Cancel](../exec/docs/hosted-turn-cancel.md).
+A public interrupt (`POST /api/agents/{id}/interrupt`) first commits, in one transaction, a
+`lifecycle_interrupt` system note (who interrupted), the interrupter's message as an ordinary `chat`
+inbound and, for an external harness, a control row of `kind='interrupt'`; only then is the turn
+interrupted. The agent's first input afterwards is that note and message, in id order, so it learns
+who interrupted it and why before anything else (a heartbeat can only come later). See
+[the decision](../../../docs/decisions/agents/graph/2026-11-12-interrupt-carries-a-message.md).
 
-For a running external harness, the same route records a durable `cancel`
-inbound and answers `enqueued`. The foreground watcher asks the adapter to
-interrupt while it keeps reading the session. The harness's terminal event ends the turn, and the
+For native Meiva turns the gateway then asks the home host to cancel the running Task. The in-flight
+node unwinds, the settle boundary idles the agent, and the host starts the next turn at once from the
+wake the message left (`cancel_turn(rearm=True)`). See
+[Hosted Turn Cancel](../exec/docs/hosted-turn-cancel.md). A native agent gets no control row: that
+durable row was removed on purpose.
+
+For a running external harness the control row is the interrupt. The foreground watcher asks the
+adapter to interrupt while it keeps reading the session. The harness's terminal event ends the turn, and the
 invocation ends once everything it handed over is settled; an input that was not in the context when the
-turn was interrupted is still delivered and becomes a new turn, as in the built-in runtime. Claim consumes
-the cancel before admitting anything behind it. Session shutdown remains a separate operation.
+turn was interrupted is still delivered and becomes a new turn, as in the built-in runtime. The control row
+is the last of the three, so claim consumes it only after the note and the message in front of it have been
+delivered. Session shutdown remains a separate operation.
+
+The web stop button has no text: it sends the same request without a message and as `user`. The agent
+is left one passive note (`Your running turn was interrupted by user.`) that it reads at its next real
+wake, and it is not woken to a turn of its own. An interrupt of an agent with no running turn writes no
+note and no control row: its message is an ordinary chat.
 
 Terminate remains a durable inbound. The two-second DB poll in
-`agent/graph/interrupt/` (`watch_for_interrupt`, cadence `INTERRUPT_POLL_S`) observes a pending cancel/terminate row during
+`agent/graph/interrupt/` (`watch_for_interrupt`, cadence `INTERRUPT_POLL_S`) observes a pending interrupt/terminate row during
 LLM/exec, halts and returns to claim; claim routes termination to `END` while a
-`kind='cancel'` inbound keeps the agent alive and idle. A pending restart
+`kind='interrupt'` inbound keeps the agent alive and idle. A pending restart
 joins the poll after a grace, below.
 
 A terminate **yields to a message the death decision did not see**: a chat
@@ -56,7 +69,7 @@ exec by raising) is an interrupt too, but only once its row has waited
 `RESTART_INTERRUPT_GRACE_S` (10 s, `base/native_process/stop_timing.py`) on the
 database clock; `pending_interrupt_reason` reads the row's `created_at`. Most code
 runs end inside the grace and the restart then takes effect at the next turn
-boundary with nothing cut short. Cancel and terminate need no grace. The watcher's
+boundary with nothing cut short. Interrupt and terminate need no grace. The watcher's
 poll (`INTERRUPT_POLL_S`) bounds how soon past the grace the node notices, and the
 graceful exit's drain is held above grace, poll and one unwind by the clock lattice. The
 production cadence and the five-second exit bound are the defaults of

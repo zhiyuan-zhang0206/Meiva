@@ -20,6 +20,12 @@ An **agent** is a running AI process — you are one. The lifecycle verbs:
 - `restart` — finish current turn, then restart as a fresh process under the
   same `agent_id` (mandatory `message` explaining the restart reason; optional
   `config_overlay` to change model, effort, or switch harness).
+- `interrupt` — stop the agent's running turn now so it reads your message
+  (`meiva.agents.interrupt(agent_id, message)`, `meiva agents interrupt <id> -m "..." --source ...`).
+  The mandatory `message` is your reason: the agent is told its turn was
+  interrupted by you and then receives the message as a chat from you. The agent
+  stays alive; its background work and shell sessions keep running. Use
+  `send_message` when you do not need the running turn to stop.
 - `resurrect` — wake a `terminated` agent with its full conversation state
   intact (must include a `prompt` telling it why it was woken).
 - `transfer` (CLI only: `meiva agents transfer <id> --to <machine> --message "..."`
@@ -56,7 +62,7 @@ Each agent can have a **label** (`meiva.self.set_label`) — a
 human-readable role/name that persists once set; it is also stated in the
 agent's own agent-ID context note at each window establishment.
 
-SDK reference: `meiva.agents` (`spawn` / `terminate` / `restart` / `resurrect` /
+SDK reference: `meiva.agents` (`spawn` / `terminate` / `restart` / `interrupt` / `resurrect` /
 `send_message` / `list_agents` / `list_machines` / `get_neighbors` /
 `get_ancestors` / `commands` / `get_last_message`).
 

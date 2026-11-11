@@ -116,8 +116,10 @@ EVENTS: dict[str, EventSpec] = {
         "terminate", "agent terminated", site="base/agents/inbox/insert.py:46 same as above"
     ),
     "restart": audit_event("restart", "agent restart initiated"),
-    "cancel": audit_event(
-        "cancel", "in-flight turn cancelled", site="base/agents/inbox/insert.py:48 same as above"
+    "interrupt": audit_event(
+        "interrupt",
+        "running turn interrupted",
+        site="ops/lifecycle/delivery.py:deliver_interrupt",
     ),
     "resurrect": audit_event("resurrect", "terminated agent woken"),
     "transfer": audit_event(

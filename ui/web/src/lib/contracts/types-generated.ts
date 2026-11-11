@@ -367,7 +367,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/agents/{agent_id}/cancel": {
+    "/api/agents/{agent_id}/interrupt": {
         parameters: {
             query?: never;
             header?: never;
@@ -376,7 +376,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        post: operations["post_agent_cancel_api_agents__agent_id__cancel_post"];
+        post: operations["post_agent_interrupt_api_agents__agent_id__interrupt_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2639,10 +2639,6 @@ export interface components {
             build_id: number | null;
             rebuild_id: number | null;
         };
-        CancelAgentResponse: {
-            status: components["schemas"]["CancelResult"];
-        };
-        CancelResult: "cancelled" | "enqueued" | "not_running";
         ChoiceQuestion: {
             note_suggestion?: string | null;
             type: "multi_select" | "single_select";
@@ -3010,6 +3006,14 @@ export interface components {
             title: string;
             priority: components["schemas"]["Priority"];
         };
+        InterruptAgentRequest: {
+            source: string;
+            message?: string | null;
+        };
+        InterruptAgentResponse: {
+            status: components["schemas"]["InterruptResult"];
+        };
+        InterruptResult: "interrupted" | "not_running";
         InventoryAggregate: {
             machines: string[];
             unreachable: string[];
@@ -4831,7 +4835,7 @@ export interface operations {
             };
         };
     };
-    post_agent_cancel_api_agents__agent_id__cancel_post: {
+    post_agent_interrupt_api_agents__agent_id__interrupt_post: {
         parameters: {
             query?: never;
             header?: never;
@@ -4840,14 +4844,18 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["InterruptAgentRequest"];
+            };
+        };
         responses: {
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["CancelAgentResponse"];
+                    "application/json": components["schemas"]["InterruptAgentResponse"];
                 };
             };
             422: {

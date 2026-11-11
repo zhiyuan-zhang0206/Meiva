@@ -3,7 +3,7 @@ exports = ["creation.py", "eval_guard.py", "history", "inbound_provenance.py", "
 [uses]
 "creation.py" = ["launch"]
 "history" = ["eval_guard.py", "schemas.py", "state.py"]
-"lifecycle.py" = ["launch"]
+"lifecycle.py" = ["inbound_provenance.py", "launch"]
 "notice_operations" = ["inbound_provenance.py", "schemas.py"]
 "reply_suggestion" = ["eval_guard.py", "history", "notice_operations"]
 "router.py" = ["creation.py", "schemas.py"]

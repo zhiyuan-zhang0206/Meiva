@@ -190,7 +190,7 @@ def test_events_that_are_not_between_agents_or_with_the_user_are_left_out(
     record(db_conn, "resurrect", source="system", agent=6657)
     record(db_conn, "restart", source="schedule:3", agent=6657)
     record(db_conn, "send_message", source="agent:6657", agent=6657, target=6657)
-    record(db_conn, "cancel", source="agent:405", agent=6657)
+    record(db_conn, "interrupt", source="agent:405", agent=6657)
     assert read(6657, 405, database_gate=database_gate) == []
 
 

@@ -63,8 +63,8 @@ class TestHasPendingInterrupt:
         reason: InterruptReason,
     ):
         tid = create_agent(db_conn)
-        _insert(db_conn, tid, "cancel", source=source)
-        _insert(db_conn, tid, "cancel", source="user")
+        _insert(db_conn, tid, "interrupt", source=source)
+        _insert(db_conn, tid, "interrupt", source="user")
         assert await pending_interrupt_reason(aops_pool, tid) is reason
         async with subscribe_interrupt(aops_pool, tid, resources=hosted_resources) as event:
             await asyncio.wait_for(event.wait(), timeout=_TIMEOUT_S)
@@ -88,7 +88,7 @@ class TestHasPendingInterrupt:
         self, db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool
     ):
         tid = create_agent(db_conn)
-        _insert(db_conn, tid, "cancel")
+        _insert(db_conn, tid, "interrupt")
         assert await has_pending_interrupt(aops_pool, tid) is True
 
     async def test_true_on_terminate(
@@ -110,7 +110,7 @@ class TestHasPendingInterrupt:
     ):
         mine = create_agent(db_conn)
         other = create_agent(db_conn)
-        _insert(db_conn, other, "cancel")
+        _insert(db_conn, other, "interrupt")
         assert await has_pending_interrupt(aops_pool, mine) is False
 
     async def test_ignores_self_initiated_terminate(

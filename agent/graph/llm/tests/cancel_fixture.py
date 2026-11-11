@@ -19,9 +19,9 @@ class _CancelCursor:
         if self._event.reason is InterruptReason.RESTART:
             row = ("restart", "user")
         elif self._event.reason is InterruptReason.SYSTEM:
-            row = ("cancel", "agent:0")
+            row = ("interrupt", "agent:0")
         else:
-            row = ("cancel", "user")
+            row = ("interrupt", "user")
         async with FakeAsyncConnection(("kind", "source"), [row]).cursor(
             row_factory=self._row_factory
         ) as cursor:
@@ -38,7 +38,7 @@ class _CancelConnection:
 
 
 # meiva:note
-# In-memory interrupt pool that yields a pending cancel row once `event` is set.
+# In-memory interrupt pool that yields a pending interrupt row once `event` is set.
 class CancelPool:
     def __init__(self, event: InterruptEvent) -> None:
         self.event = event

@@ -1,6 +1,7 @@
 {
   "terminated": "Terminated",
   "restarted": "Restarted",
+  "interrupted": "Interrupted",
   "resurrected": "Resurrected",
   "forked": "Forked",
   "memory": "Memory",

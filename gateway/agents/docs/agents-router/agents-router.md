@@ -11,8 +11,8 @@ and spawn live in `router.py`; lifecycle actions live in `lifecycle.py`; message
 and state reads live in `state.py`; `forward.py` provides the cross-machine
 forwarding helpers. New message delivery retains an exact-input home-machine wake and bounded sender retry. Billing batch recovery is removed.
 
-`POST /api/agents/{id}/cancel` and `/compact` are plain unkeyed requests:
-[Cancel and Compact Requests](../control-acceptance.md) owns their contract. `/api/models` lists models,
+`POST /api/agents/{id}/interrupt` and `/compact` are plain unkeyed requests:
+[Interrupt and Compact Requests](../control-acceptance.md) owns their contract. `/api/models` lists models,
 their declared `fast_of` relationships and reasoning effort options.
 `/api/agents/{id}/exited` finalizes agent exit.
 

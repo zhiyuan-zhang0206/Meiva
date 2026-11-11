@@ -16,7 +16,6 @@ from agent import state as _state
 from agent.db import ClaimedInbound
 from agent.graph.claim._dispatch import is_human_wake_item, prepare_steered_inbound
 from agent.graph.claim.harness_activity import HarnessTurnProjector, log_turn_usage
-from agent.graph.claim.harness_cancel import announce_cancel, await_foreground
 from agent.graph.claim.harness_foreground import (
     Commit,
     Foreground,
@@ -40,6 +39,7 @@ from agent.graph.claim.harness_inbox import (
     requeue_handed,
     reserve_head_batch,
 )
+from agent.graph.claim.harness_interrupt import announce_interrupt, await_foreground
 from agent.graph.claim.harness_render import (
     native_images,
     render_message,
@@ -239,7 +239,7 @@ async def _run_harness_turn(
     await projector.finish(interrupted=run.interrupted)
     _apply_wake_polarity(state, projector, extra_updates)
     if run.interrupted:
-        announce_cancel(ctx, agent_id)
+        announce_interrupt(ctx, agent_id)
     return Command[HarnessGoto](update={**extra_updates, "halted": True, **_CLEARED}, goto=CLAIM)
 
 

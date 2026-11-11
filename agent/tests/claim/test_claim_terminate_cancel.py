@@ -1,4 +1,5 @@
-"""The claim node's terminate and cancel inbounds, the hosted turn boundary and the chat a terminate keeps or vetoes."""
+# meiva:note
+# The claim node's terminate and interrupt inbounds, the hosted turn boundary and the chat a terminate keeps or vetoes.
 
 from collections.abc import Callable
 from dataclasses import replace
@@ -59,7 +60,8 @@ async def test_claim_terminate_kind_appends_lifecycle_marker_and_routes_to_end(
         ),
     )
     assert cmd.goto == END
-    assert cmd.update["exit_requested"] is True  # type: ignore[index]
+    assert cmd.update is not None
+    assert cmd.update["exit_requested"] is True
     assert cmd.update is not None
     msgs = cast("list[AnyMessage]", cmd.update["messages"])
     # Claim appends the lifecycle marker alone; the head belongs to `init_context`.
@@ -223,11 +225,19 @@ async def test_claim_hosted_still_dispatches_an_available_batch(
     )
 
     assert cmd.goto == "before_turn"
-    assert cmd.update["turn_active"] is True  # type: ignore[index]
+    assert cmd.update is not None
+    assert cmd.update["turn_active"] is True
     assert cmd.update.get("turn_idle") in (None, False)  # type: ignore[union-attr]
 
 
-async def test_claim_cancel_kind_halts_to_idle_without_marker(
+# meiva:note
+# interrupt inbound → pause: halted=True + re-enter CLAIM (-> idle), NOT END
+#     (process stays alive). No lifecycle marker (a pause leaves no trace); a
+#     Cancelled SSE is emitted so the live UI clears turn-active state.
+# re-enter claim to idle (alive), not END (dead)
+# no marker appended — pause is silent (state.messages already had the sys msg)
+# Cancelled emitted for the live view
+async def test_claim_interrupt_kind_halts_to_idle_without_marker(
     redis_url: str,
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
@@ -238,16 +248,13 @@ async def test_claim_cancel_kind_halts_to_idle_without_marker(
     database_gate: ProcessDbGate,
     machine_identity: MachineIdentityReader,
 ):
-    """cancel inbound → pause: halted=True + re-enter CLAIM (-> idle), NOT END
-    (process stays alive). No lifecycle marker (a pause leaves no trace); a
-    Cancelled SSE is emitted so the live UI clears turn-active state."""
     tid = spawn_agent(
         catalog=model_catalog,
         authority=config_authority,
         database_gate=database_gate,
         machine=machine_identity,
     )
-    insert_inbound_kind(db_conn, tid, "", "cancel", source="user")
+    insert_inbound_kind(db_conn, tid, "", "interrupt", source="user")
 
     cmd = await claim_node(
         AgentState(messages=[SystemMessage(content="sys")]),
@@ -256,17 +263,32 @@ async def test_claim_cancel_kind_halts_to_idle_without_marker(
         ),
         thread_config(tid),
     )
-    # re-enter claim to idle (alive), not END (dead)
     assert cmd.goto == "claim"
     assert cmd.goto != END
-    assert cmd.update["halted"] is True  # type: ignore[index]
-    # no marker appended — pause is silent (state.messages already had the sys msg)
-    assert cmd.update["messages"] == []  # type: ignore[index]
-    # Cancelled emitted for the live view
+    assert cmd.update is not None
+    assert cmd.update["halted"] is True
+    assert cmd.update["messages"] == []
     assert any("cancelled" in payload.lower() for payload in await live_events.payloads())
 
 
-async def test_claim_cancel_with_chat_cobatch_wakes_to_process_chat(
+# meiva:note
+# User sends a chat, then clicks Stop while the agent's code is executing;
+#     both land pending and are claimed in one batch (the interrupt aborts the
+#     in-flight node, which returns to claim). The cancel stopped the OLD work, but
+#     the fresh chat is new intent — claim must wake straight to before_llm with
+#     halted=False and the chat committed, NOT idle. Regression: the cancel arm
+#     used to unconditionally set halted=True + re-enter claim, stranding the
+#     co-batched chat in state.messages (surfaced to the UI via InboundCommitted)
+#     until some later inbound happened to arrive — "message picked up but the
+#     agent never continued".
+# chat first (older id), then cancel — the real sequence: message queued,
+# then Stop pressed mid-execution.
+# non-empty state = an in-flight turn (not cold start); the exec/llm
+# node already aborted and returned here with halted=True.
+# wake to run the LLM on the new chat, not idle
+# the co-batched chat is committed and drives the turn
+# Cancelled still emitted so the live UI clears the interrupted turn's state
+async def test_claim_interrupt_with_chat_cobatch_wakes_to_process_chat(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     database: Database,
@@ -278,32 +300,19 @@ async def test_claim_cancel_with_chat_cobatch_wakes_to_process_chat(
     database_gate: ProcessDbGate,
     machine_identity: MachineIdentityReader,
 ):
-    """User sends a chat, then clicks Stop while the agent's code is executing;
-    both land pending and are claimed in one batch (the interrupt aborts the
-    in-flight node, which returns to claim). The cancel stopped the OLD work, but
-    the fresh chat is new intent — claim must wake straight to before_llm with
-    halted=False and the chat committed, NOT idle. Regression: the cancel arm
-    used to unconditionally set halted=True + re-enter claim, stranding the
-    co-batched chat in state.messages (surfaced to the UI via InboundCommitted)
-    until some later inbound happened to arrive — "message picked up but the
-    agent never continued"."""
     tid = spawn_agent(
         catalog=model_catalog,
         authority=config_authority,
         database_gate=database_gate,
         machine=machine_identity,
     )
-    # chat first (older id), then cancel — the real sequence: message queued,
-    # then Stop pressed mid-execution.
     insert_inbound_message(
         db_conn, tid, "please also do X", source="user", bus=event_bus, database=database
     )
-    cancel_id = insert_inbound_kind(db_conn, tid, "", "cancel", source="user")
+    cancel_id = insert_inbound_kind(db_conn, tid, "", "interrupt", source="user")
     await await_inbound_visible(aops_pool, cancel_id)
 
     cmd = await claim_node(
-        # non-empty state = an in-flight turn (not cold start); the exec/llm
-        # node already aborted and returned here with halted=True.
         AgentState(messages=[SystemMessage(content="sys"), HumanMessage(content="earlier")]),
         make_runtime(
             ops_pool=aops_pool, event_publisher=live_events.publisher, database_gate=database_gate
@@ -313,20 +322,23 @@ async def test_claim_cancel_with_chat_cobatch_wakes_to_process_chat(
         ),
     )
 
-    # wake to run the LLM on the new chat, not idle
     assert cmd.goto == "before_turn"
-    assert cmd.update["halted"] is False  # type: ignore[index]
-    # the co-batched chat is committed and drives the turn
     assert cmd.update is not None
+    assert cmd.update["halted"] is False
     msgs = cast("list[AnyMessage]", cmd.update["messages"])
     assert len(msgs) == 1
     assert isinstance(msgs[0], HumanMessage)
     assert "please also do X" in msgs[0].content
-    # Cancelled still emitted so the live UI clears the interrupted turn's state
     assert any("cancelled" in payload.lower() for payload in await live_events.payloads())
 
 
-async def test_claim_cancel_before_chat_cobatch_wakes_to_process_chat(
+# meiva:note
+# Same as above but the cancel is the OLDER row (user clicks Stop, then
+#     sends a new message while both are still pending). The wake decision is
+#     order-independent — a chat anywhere in the cancel batch means new intent to
+#     process, so goto=before_llm + halted=False regardless of insertion order.
+# cancel first (older id), then chat
+async def test_claim_interrupt_before_chat_cobatch_wakes_to_process_chat(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     database: Database,
@@ -337,18 +349,13 @@ async def test_claim_cancel_before_chat_cobatch_wakes_to_process_chat(
     database_gate: ProcessDbGate,
     machine_identity: MachineIdentityReader,
 ):
-    """Same as above but the cancel is the OLDER row (user clicks Stop, then
-    sends a new message while both are still pending). The wake decision is
-    order-independent — a chat anywhere in the cancel batch means new intent to
-    process, so goto=before_llm + halted=False regardless of insertion order."""
     tid = spawn_agent(
         catalog=model_catalog,
         authority=config_authority,
         database_gate=database_gate,
         machine=machine_identity,
     )
-    # cancel first (older id), then chat
-    insert_inbound_kind(db_conn, tid, "", "cancel", source="user")
+    insert_inbound_kind(db_conn, tid, "", "interrupt", source="user")
     chat_id = insert_inbound_message(
         db_conn, tid, "new instruction", source="user", bus=event_bus, database=database
     )
@@ -363,15 +370,23 @@ async def test_claim_cancel_before_chat_cobatch_wakes_to_process_chat(
     )
 
     assert cmd.goto == "before_turn"
-    assert cmd.update["halted"] is False  # type: ignore[index]
     assert cmd.update is not None
+    assert cmd.update["halted"] is False
     msgs = cast("list[AnyMessage]", cmd.update["messages"])
     assert len(msgs) == 1
     assert isinstance(msgs[0], HumanMessage)
     assert "new instruction" in msgs[0].content
 
 
-async def test_claim_cancel_batched_with_terminate_terminate_wins(
+# meiva:note
+# interrupt + terminate in the same claim batch (user clicks Stop then
+#     Terminate before claim runs) → terminate WINS: goto END (process exits), not
+#     the cancel idle. Both rows are claimed/done in one pass; the pause must not
+#     swallow the stronger kill. Regression for the cancel-over-terminate
+#     precedence inversion.
+# insertion order shouldn't matter; put cancel first to make the override tempting
+# the terminate lifecycle marker is still committed
+async def test_claim_interrupt_batched_with_terminate_terminate_wins(
     running_agent: Callable[[], int],
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
@@ -379,14 +394,8 @@ async def test_claim_cancel_batched_with_terminate_terminate_wins(
     database_gate: ProcessDbGate,
     machine_identity: MachineIdentityReader,
 ):
-    """cancel + terminate in the same claim batch (user clicks Stop then
-    Terminate before claim runs) → terminate WINS: goto END (process exits), not
-    the cancel idle. Both rows are claimed/done in one pass; the pause must not
-    swallow the stronger kill. Regression for the cancel-over-terminate
-    precedence inversion."""
     tid = running_agent()
-    # insertion order shouldn't matter; put cancel first to make the override tempting
-    insert_inbound_kind(db_conn, tid, "", "cancel", source="user")
+    insert_inbound_kind(db_conn, tid, "", "interrupt", source="user")
     insert_inbound_kind(db_conn, tid, "", "terminate", source="user")
 
     cmd = await claim_node(
@@ -396,8 +405,7 @@ async def test_claim_cancel_batched_with_terminate_terminate_wins(
             tid,
         ),
     )
-    assert cmd.goto == END  # terminate wins; agent exits, cancel does not keep it alive
-    # the terminate lifecycle marker is still committed
+    assert cmd.goto == END
     assert cmd.update is not None
     msgs = cast("list[AnyMessage]", cmd.update["messages"])
     assert any(
@@ -436,7 +444,8 @@ async def test_claim_lifecycle_marker_drops_timestamp_when_disabled(
             tid,
         ),
     )
-    content = cmd.update["messages"][-1].content  # type: ignore[index]
+    assert cmd.update is not None
+    content = cmd.update["messages"][-1].content
     assert content.startswith(  # pyright: ignore[reportUnknownMemberType]
         "<system_note>\nTermination was accepted from user"
     )
@@ -642,8 +651,9 @@ async def test_claim_restart_kind_hosted_ends_turn_and_stays_runnable(
     )
 
     assert cmd.goto == END
-    assert cmd.update["restart_requested"] is True  # type: ignore[index]
-    assert cmd.update["exit_requested"] is False  # type: ignore[index]
+    assert cmd.update is not None
+    assert cmd.update["restart_requested"] is True
+    assert cmd.update["exit_requested"] is False
     update = cast(dict[str, Any], cmd.update)
     assert update["messages"] == []
     assert update["halted"] is False
@@ -683,8 +693,15 @@ async def test_claim_restart_before_terminate_preserves_serial_order(
     ).fetchone() == ("pending",)
 
 
-@pytest.mark.flaky  # poll await_status for claim_node status transition
-async def test_claim_cancel_batched_with_restart_idle_restart_silent(
+# meiva:note
+# cancel + restart in the same batch (user clicks Stop then Restart) → restart wins over cancel:
+#     exits normally via restart; the Cancelled event for cancel is still emitted (frontend clears
+#     turn-active), the pause intent is absorbed into 'silent idle after restart' (halted=True preserved).
+# restart exit, not the cancel pause branch
+# idle before restart (halted=True) + external → silent after restart
+# No phantom cancellation: the successor will consume the still-pending command.
+@pytest.mark.flaky
+async def test_claim_interrupt_batched_with_restart_idle_restart_silent(
     running_agent: Callable[[], int],
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
@@ -693,12 +710,9 @@ async def test_claim_cancel_batched_with_restart_idle_restart_silent(
     database_gate: ProcessDbGate,
     machine_identity: MachineIdentityReader,
 ):
-    """cancel + restart in the same batch (user clicks Stop then Restart) → restart wins over cancel:
-    exits normally via restart; the Cancelled event for cancel is still emitted (frontend clears
-    turn-active), the pause intent is absorbed into 'silent idle after restart' (halted=True preserved)."""
     tid = running_agent()
     set_agent_status(db_conn, tid, "running")
-    insert_inbound_kind(db_conn, tid, "", "cancel", source="user")
+    insert_inbound_kind(db_conn, tid, "", "interrupt", source="user")
     restart_id = insert_inbound_kind(db_conn, tid, "", "restart", source="user")
     await await_inbound_visible(aops_pool, restart_id)
 
@@ -712,19 +726,17 @@ async def test_claim_cancel_batched_with_restart_idle_restart_silent(
         ),
     )
 
-    # restart exit, not the cancel pause branch
     assert cmd.goto == END
-    # idle before restart (halted=True) + external → silent after restart
-    assert cmd.update["halted"] is True  # type: ignore[index]
-    # No phantom cancellation: the successor will consume the still-pending command.
+    assert cmd.update is not None
+    assert cmd.update["halted"] is True
     assert not any("cancelled" in payload.lower() for payload in await live_events.payloads())
     assert db_conn.execute(
-        "SELECT status FROM inbound_messages WHERE agent_id=%s AND kind='cancel'", (tid,)
+        "SELECT status FROM inbound_messages WHERE agent_id=%s AND kind='interrupt'", (tid,)
     ).fetchone() == ("pending",)
     await await_status(aops_pool, tid, "running")
 
 
-@pytest.mark.flaky  # poll await_status for claim_node status transition
+@pytest.mark.flaky
 async def test_claim_terminate_then_restart_preserves_serial_order(
     running_agent: Callable[[], int],
     db_conn: psycopg.Connection,

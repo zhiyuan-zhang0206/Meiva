@@ -1,5 +1,5 @@
 # meiva:note
-# Agent control CLI: ordinary send, terminate, cancel, restart and resurrection.
+# Agent control CLI: ordinary send, terminate, interrupt, restart and resurrection.
 #
 # Every verb is a thin client over the gateway's /api/agents surface, and takes the
 # `GatewayAccess` its handler built from the invocation's configuration.
@@ -23,7 +23,7 @@ from base.host.net import http_dial
 from base.host.net.resilience import ExponentialBackoff, Policy, retry
 from base.host.net.transport_errors import RETRYABLE_NETWORK_ERRORS
 from cli.boundary.json_body import loads, response_object
-from ops.rpc_schemas import CancelAgentResponse, CompactAgentResponse, TransferAgentResponse
+from ops.rpc_schemas import CompactAgentResponse, InterruptAgentResponse, TransferAgentResponse
 
 _TIMEOUT_S = 15.0
 _TRANSFER_TIMEOUT_S = 120.0
@@ -308,19 +308,26 @@ def send_agent_message(
 
 
 # meiva:note
-# `meiva agents cancel <id>` — POST /api/agents/{id}/cancel.
+# `meiva agents interrupt <id> -m TEXT` — POST /api/agents/{id}/interrupt.
 #
-# Reports the home runner's verdict: cancelled for a settled native turn, enqueued
-# for an external foreground request, or not_running when there is no turn.
-def cmd_agents_cancel(access: GatewayAccess, agent_id: int) -> int:
+# Interrupts the agent's running turn and delivers `TEXT` to it as a chat from `--source`, after a
+# note that the turn was interrupted by that source. Reports `interrupted`, or `not_running` when
+# there was no turn (the message is then delivered like `send`).
+def cmd_agents_interrupt(
+    access: GatewayAccess, agent_id: int, *, message: str, source: str | None = None
+) -> int:
+    if not message.strip():
+        print("interrupt requires a non-blank --message", file=sys.stderr)
+        return 1
     resp = http_dial.post(
-        _api(access, f"agents/{agent_id}/cancel"),
+        _api(access, f"agents/{agent_id}/interrupt"),
+        json={**_explicit_caller(source), "message": message},
         timeout=_TIMEOUT_S,
         headers=gateway_auth_headers(access),
     )
     resp.raise_for_status()
-    answer = CancelAgentResponse.model_validate(resp.json())
-    print(f"  ✓ agent {agent_id} cancel: {answer.status.value}")
+    answer = InterruptAgentResponse.model_validate(resp.json())
+    print(f"  ✓ agent {agent_id} interrupt: {answer.status.value}")
     return 0
 
 

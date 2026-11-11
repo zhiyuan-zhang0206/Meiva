@@ -12,24 +12,33 @@ from __future__ import annotations
 import asyncio
 import functools
 from collections.abc import Callable
+from dataclasses import dataclass
 from typing import NamedTuple
 
 import psycopg
 from psycopg_pool import ConnectionPool
 
+from base import telemetry
 from base.agents.inbox.chat_delivery import (
     ChatInboundCommittedError,
     ChatInboundReceipt,
+    insert_chat_inbound_in_transaction,
     insert_chat_inbound_once,
     reconcile_chat_inbound,
 )
+from base.agents.inbox.insert import insert_inbound_message_in_transaction
 from base.agents.inbox.wake import publish_inbound_wake
-from base.agents.messages.inbound import InboundKind
+from base.agents.messages.inbound import PASSIVE_INBOUND_KEY, InboundKind
 from base.agents.messages.inbound_provenance import InboundProvenance
-from base.api_contracts.agent_contract import AgentStatus
+from base.agents.messages.kwargs import NoteTag
+from base.agents.messages.lifecycle_text import interrupt_note
+from base.api_contracts.agent_contract import AgentNotFound, AgentStatus, Harness
 from base.db import Database
+from base.db.rows import query_one
+from base.db.transaction import write_transaction
 from base.events.live.announce import publish_agent_updated_sync
 from base.events.live.bus import EventBus
+from base.telemetry.audit_events import prepare_event_log, record_audit
 from ops import lifecycle as ops
 from ops.agents import get_agent_status
 from ops.cluster.rpc import RpcClient
@@ -245,3 +254,140 @@ def _reconcile_blocking(
             source=source,
             payload=payload,
         )
+
+
+@dataclass(frozen=True)
+class _InterruptTarget:
+    status: str
+    harness: str
+
+
+# meiva:note
+# What one interrupt wrote, and whether a turn was there to interrupt.
+class InterruptDelivery(NamedTuple):
+    running: bool
+    external: bool
+    chat: ChatInboundReceipt | None
+
+
+# meiva:note
+# Write an interrupt's rows in one transaction, then announce them.
+#
+#     The target row is locked first, so "running" is read against agent admission and settlement.
+#     A running target gets, in id order, a note saying its turn was interrupted by `source`, the
+#     message as an ordinary chat from `source`, and (external harness only) the interrupt control
+#     row its foreground watcher reacts to; the control row comes last, behind the input it
+#     accompanies. A message to an agent with no running turn is a plain chat: no note, no control
+#     row. Without a message (the web stop button) the note is passive, so the agent is not woken to
+#     a turn of its own, and an idle agent is left alone. The caller interrupts the turn only after
+#     this commits, so the message is queued whether or not the interruption lands.
+async def deliver_interrupt(
+    pool: ConnectionPool,
+    db: Database,
+    bus: EventBus,
+    agent_id: int,
+    *,
+    message: str | None,
+    source: str,
+    provenance: InboundProvenance | None,
+    local_machine: str,
+    rpc: RpcClient,
+) -> InterruptDelivery:
+    delivery = await asyncio.to_thread(
+        _interrupt_blocking, pool, db, bus, agent_id, message, source, provenance
+    )
+    if delivery.chat is not None and message is not None:
+        await _finish_chat_delivery(
+            db,
+            bus,
+            agent_id,
+            delivery.chat,
+            message,
+            source,
+            None,
+            local_machine=local_machine,
+            rpc=rpc,
+        )
+    return delivery
+
+
+def _interrupt_blocking(
+    pool: ConnectionPool,
+    db: Database,
+    bus: EventBus,
+    agent_id: int,
+    message: str | None,
+    source: str,
+    provenance: InboundProvenance | None,
+) -> InterruptDelivery:
+    wakes: list[int] = []
+    events: list[telemetry.Event | None] = []
+    chat: ChatInboundReceipt | None = None
+    with write_transaction(pool) as conn:
+        target = query_one(
+            conn,
+            _InterruptTarget,
+            "SELECT status, harness FROM agents_meta WHERE id = %s FOR UPDATE",
+            (agent_id,),
+        )
+        if target is None:
+            raise AgentNotFound(f"agent {agent_id} does not exist")
+        running = AgentStatus(target.status) is AgentStatus.RUNNING
+        external = Harness(target.harness) is not Harness.MEIVA
+        with conn.transaction(), conn.cursor() as cur:
+            if running:
+                note_payload: dict[str, object] = {"note_tag": NoteTag.LIFECYCLE_INTERRUPT.value}
+                if message is None:
+                    note_payload[PASSIVE_INBOUND_KEY] = True
+                note_id, event = insert_inbound_message_in_transaction(
+                    cur,
+                    agent_id,
+                    interrupt_note(source, with_message=message is not None),
+                    source,
+                    kind=InboundKind.SYSTEM_NOTE.value,
+                    payload=note_payload,
+                )
+                events.append(event)
+                if message is not None:
+                    wakes.append(note_id)
+            if message is not None:
+                chat, event = insert_chat_inbound_in_transaction(
+                    conn,
+                    agent_id=agent_id,
+                    content=message,
+                    source=source,
+                    payload=None,
+                    client_message_id=None,
+                    provenance=provenance,
+                )
+                events.append(event)
+                wakes.append(chat.inbound_id)
+            if running:
+                if external:
+                    control_id, event = insert_inbound_message_in_transaction(
+                        cur, agent_id, "", source, kind=InboundKind.INTERRUPT.value
+                    )
+                    events.append(event)
+                    wakes.append(control_id)
+                events.append(
+                    record_audit(
+                        conn,
+                        prepare_event_log(
+                            event_type="interrupt",
+                            agent_id=agent_id,
+                            source=source,
+                            target_agent_id=_agent_of(source),
+                            payload={"inbound_id": chat.inbound_id} if chat is not None else {},
+                        ),
+                    )
+                )
+    for event in events:
+        if event is not None:
+            telemetry.emit_prepared(event)
+    for inbound_id in wakes:
+        publish_inbound_wake(db, bus, agent_id, str(inbound_id))
+    return InterruptDelivery(running, external, chat)
+
+
+def _agent_of(source: str) -> int | None:
+    return int(source.removeprefix("agent:")) if source.startswith("agent:") else None

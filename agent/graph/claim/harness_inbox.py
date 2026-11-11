@@ -40,7 +40,7 @@ _COLUMNS: LiteralString = "id,agent_id,content,kind,source,payload,created_at,cl
 # meiva:note
 # The contiguous FIFO batch of pending deliverable rows at the head of the inbox. Any other pending kind
 # is a barrier for the rows behind it, by the same (created_at, id) order the claim uses to take control
-# rows, so each side waits only for what is in front of it: a cancel queued behind a message lets the message
+# rows, so each side waits only for what is in front of it: an interrupt queued behind a message lets the message
 # go and is claimed once it is out of the way. Nothing is handed over while a restart or terminate is pending
 # or claimed: the claim takes it first and alone.
 # meiva:link agent/graph/docs/harness-turn.md
@@ -354,7 +354,11 @@ def recovery_notes_first(rows: Sequence[ClaimedInbound]) -> list[ClaimedInbound]
         return row.kind == InboundKind.SYSTEM_NOTE.value and bool(
             row.payload
             and row.payload.get("note_tag")
-            in (NoteTag.LIFECYCLE_RESTART.value, NoteTag.LIFECYCLE_RESURRECT.value)
+            in (
+                NoteTag.LIFECYCLE_RESTART.value,
+                NoteTag.LIFECYCLE_RESURRECT.value,
+                NoteTag.LIFECYCLE_INTERRUPT.value,
+            )
         )
 
     return [*(r for r in rows if is_note(r)), *(r for r in rows if not is_note(r))]
