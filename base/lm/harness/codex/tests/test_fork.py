@@ -26,6 +26,7 @@ def _register(registry: FileSessionRegistry, agent_id: int, thread: str, cwd: Pa
             harness="codex",
             created_at=now,
             updated_at=now,
+            generation=0,
         )
     )
 

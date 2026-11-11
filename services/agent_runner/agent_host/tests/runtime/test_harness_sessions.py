@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from unittest.mock import Mock
 
@@ -9,7 +9,7 @@ import pytest
 
 from base.api_contracts.agent_contract import Harness
 from base.clock.tests.fakes import system_clock
-from base.lm.harness import EventSubscription, HarnessInput, RegistrationStore
+from base.lm.harness import EventSubscription, HarnessInput, Reconciliation, RegistrationStore
 from base.lm.harness.antigravity import AgyTransport, AntigravityConfig
 from base.log.tests.log_records import LogRecords
 from services.agent_runner.agent_host.runtime import AgentRuntime, HarnessSessions
@@ -33,6 +33,16 @@ class ClosingEngine:
 
     async def deliver(self, inputs: Sequence[HarnessInput]) -> None:
         raise AssertionError("these tests never deliver")
+
+    @property
+    def generation(self) -> int:
+        return 0
+
+    async def reconcile(self, keys: Sequence[str]) -> Mapping[str, Reconciliation]:
+        raise AssertionError("these tests never reconcile")
+
+    def adopt(self, keys: Sequence[str]) -> None:
+        raise AssertionError("these tests never adopt")
 
     async def retire(self, reason: str) -> None:
         raise AssertionError("these tests never retire")
@@ -240,6 +250,16 @@ class TransportBackedEngine:
 
     async def deliver(self, inputs: Sequence[HarnessInput]) -> None:
         raise AssertionError("these tests never deliver")
+
+    @property
+    def generation(self) -> int:
+        return 0
+
+    async def reconcile(self, keys: Sequence[str]) -> Mapping[str, Reconciliation]:
+        raise AssertionError("these tests never reconcile")
+
+    def adopt(self, keys: Sequence[str]) -> None:
+        raise AssertionError("these tests never adopt")
 
     async def retire(self, reason: str) -> None:
         raise AssertionError("these tests never retire")

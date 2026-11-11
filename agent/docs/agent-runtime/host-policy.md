@@ -21,8 +21,9 @@ capacity is read at construction, cache limits at each eviction, and the model
 and override readers at the existing admission, slice and runtime-build boundaries.
 The same process `ConfigBoot` supplies the live default reader, operation-time
 clock factory and handoff note inputs. Cold build, database recovery and turn
-settlement consume claimed chat rows through `consume_claimed_inbounds` without
-reading history.
+settlement consume a built-in agent's claimed chat rows through `consume_claimed_inbounds`
+without reading history. A row claimed for an external harness is not consumed there: the next
+harness turn reconciles it against the harness's durable record.
 The process entry owns one captured code image and one `ProcessDbGate` for its
 database factory, workload pool and control pool. Host logging and the plugin
 installation capture that same ClientSet producer; the heartbeat alert and

@@ -448,8 +448,10 @@ class _ConsumedRow:
 # redelivered. Used at the compaction boundary and when a turn ends, aborts or
 # a runtime is rebuilt. A row claimed for an external harness is handed over and
 # not settled: only the harness's own facts settle it (`agent/graph/claim/harness_inbox.py`),
-# so the turn-end and compaction passes leave it alone, and only an abort or a rebuilt
-# runtime (`unknown_execution`) consumes it, whatever its deliverable kind. Co-batched chats deferred before any execution remain
+# so no pass here touches it, not even an abort or a rebuilt runtime (`unknown_execution`):
+# the next harness turn reconciles it against the harness's durable record and delivers it
+# again only when the record has no trace of it. `unknown_execution` is the built-in
+# runtime's rule, for every deliverable kind. Co-batched chats deferred before any execution remain
 # pending for the fresh context. The caller must hold the admitted identity. A
 # missing pool in container/eval mode is a no-op.
 async def finalize_claimed_inbounds(
@@ -495,10 +497,12 @@ async def finalize_claimed_inbounds(
                 "WHERE status = 'claimed' AND agent_id = %s "
                 "AND ((kind = 'chat' AND NOT EXISTS (SELECT 1 FROM agents_meta am "
                 "      WHERE am.id = %s AND am.harness <> 'meiva')) "
-                "     OR (%s AND kind IN ('chat', 'system_note', 'heartbeat'))) "
+                "     OR (%s AND kind IN ('chat', 'system_note', 'heartbeat') "
+                "         AND NOT EXISTS (SELECT 1 FROM agents_meta am "
+                "         WHERE am.id = %s AND am.harness <> 'meiva'))) "
                 "RETURNING id, kind, content, "
                 "EXTRACT(EPOCH FROM (now() - created_at))::float8 AS age_s",
-                (unknown_execution, agent_id, agent_id, unknown_execution),
+                (unknown_execution, agent_id, agent_id, unknown_execution, agent_id),
             )
             rows = await cur.fetchall()
     for consumed in rows if unknown_execution else ():

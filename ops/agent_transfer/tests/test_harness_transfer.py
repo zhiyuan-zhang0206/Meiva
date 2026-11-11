@@ -56,6 +56,7 @@ def test_claude_code_transfer_collect_and_apply(tmp_path: Path) -> None:
                 "session_id": session_id,
                 "cwd": src_cwd,
                 "harness": "claude_code",
+                "generation": 0,
                 "model": "claude-sonnet-5-5",
                 "resumes": 3,
                 "created_at": "2026-10-28T13:15:26+00:00",
@@ -124,6 +125,7 @@ def test_antigravity_transfer_collect_and_apply(tmp_path: Path) -> None:
                 "session_id": session_id,
                 "cwd": src_cwd,
                 "harness": "antigravity",
+                "generation": 0,
                 "model": "gemini-4-argon-low",
                 "resumes": 1,
                 "created_at": "2026-10-28T13:15:32+00:00",
@@ -209,6 +211,7 @@ def test_codex_transfer_collect_and_apply(tmp_path: Path) -> None:
                 "session_id": session_id,
                 "cwd": src_cwd,
                 "harness": "codex",
+                "generation": 0,
                 "model": "gpt-6-astra",
                 "resumes": 1,
                 "created_at": "2026-10-28T13:15:27+00:00",
@@ -310,6 +313,7 @@ def test_bundle_pack_and_activate_with_harness_transfer(tmp_path: Path) -> None:
                 "session_id": session_id,
                 "cwd": str(src_ws),
                 "harness": "claude_code",
+                "generation": 0,
                 "model": "claude-sonnet-5-5",
                 "resumes": 0,
                 "created_at": "2026-11-01T00:00:00Z",
@@ -389,6 +393,7 @@ def _write_record(home: Path, agent_id: int, harness: str, session_id: str, cwd:
             created_at="2026-11-01T00:00:00+00:00",
             updated_at="2026-11-01T00:00:00+00:00",
             harness=harness,
+            generation=0,
         )
     )
 

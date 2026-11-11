@@ -1,9 +1,11 @@
 # meiva:note
 # What a turn leaves behind when it dies before its first word.
 #
-# The queue's at-most-once rule consumes a claimed inbound and never redelivers it
-# (agent/db/finalize_claimed_inbounds says so on purpose), so without this a turn that faulted
-# before producing any text is indistinguishable from the user never having said anything. The loss
+# A claimed inbound whose fate cannot be established is consumed with an uncertainty marker and never
+# redelivered, so without this a turn that faulted before producing any text is indistinguishable
+# from the user never having said anything. Only rows that were actually consumed that way are named:
+# one the harness's record showed in the context, or that went back to the queue to be delivered
+# again, is not lost, and the note would contradict what happens next. The loss
 # is recorded twice: a system note in the conversation, worded so it cannot be read as a reply, and
 # a registered event so the count is queryable instead of living in someone's memory. Only a turn
 # that produced nothing is recorded -- one that already streamed text showed the reader something.
@@ -24,8 +26,8 @@ __all__ = ["lost_turn_note", "report_lost_turn"]
 
 
 # meiva:note
-# The note says three things and no fourth: the message was not answered, which rows were consumed,
-# and that they will not come back.
+# The note says three things and no fourth: the message was not answered, which rows were consumed
+# (the caller passes only those), and that they will not come back.
 def lost_turn_note(
     inbound_ids: Sequence[int], turn_key: str, reason: str, *, now: datetime
 ) -> BaseMessage:

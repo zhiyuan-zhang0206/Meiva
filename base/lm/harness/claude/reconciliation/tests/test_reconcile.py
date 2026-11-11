@@ -7,10 +7,15 @@ from pathlib import Path
 import pytest
 
 from base.lm.harness.claude.reconciliation.judge import judge
-from base.lm.harness.claude.reconciliation.transcript import reconcile_input, transcript_path
+from base.lm.harness.claude.reconciliation.transcript import reconcile_inputs, transcript_path
 from base.lm.harness.delivery import Reconciliation
 
 FIXTURE = Path(__file__).parent / "fixtures" / "session-1.jsonl"
+
+
+def reconcile_input(home: Path, session: str, key: str) -> Reconciliation | None:
+    answers = reconcile_inputs(home, session, [key])
+    return None if answers is None else answers[key]
 
 
 def home_with_transcript(tmp_path: Path) -> Path:
@@ -47,3 +52,24 @@ def test_a_malformed_row_is_an_error_not_a_skipped_record(tmp_path: Path) -> Non
     path.write_text(path.read_text() + "{not json\n")
     with pytest.raises(json.JSONDecodeError):
         _ = reconcile_input(home, "session-1", "k-absorbed")
+
+
+def test_a_half_written_last_line_is_skipped_but_a_bad_line_in_the_middle_is_not(
+    tmp_path: Path,
+) -> None:
+    home = home_with_transcript(tmp_path)
+    path = transcript_path(home, "session-1")
+    assert path is not None
+    path.write_text(path.read_text() + '{"type": "user", "uuid": "cut off by a ki')
+
+    assert reconcile_input(home, "session-1", "k-absorbed") is Reconciliation.IN_CONTEXT
+    assert reconcile_input(home, "session-1", "k-enqueued") is Reconciliation.NOT_FOUND
+
+
+def test_a_batch_is_judged_with_one_read(tmp_path: Path) -> None:
+    home = home_with_transcript(tmp_path)
+
+    assert reconcile_inputs(home, "session-1", ["k-absorbed", "k-enqueued"]) == {
+        "k-absorbed": Reconciliation.IN_CONTEXT,
+        "k-enqueued": Reconciliation.NOT_FOUND,
+    }

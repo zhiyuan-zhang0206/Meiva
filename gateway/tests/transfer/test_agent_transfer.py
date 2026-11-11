@@ -304,6 +304,7 @@ def test_transfer_reports_an_external_session_whose_transcript_cannot_move(
                 "session_id": "codex-test-sess-1",
                 "cwd": str(ws_a),
                 "harness": "codex",
+                "generation": 0,
                 "model": "gpt-5",
                 "created_at": "2026-11-01T00:00:00Z",
                 "updated_at": "2026-11-01T00:00:00Z",

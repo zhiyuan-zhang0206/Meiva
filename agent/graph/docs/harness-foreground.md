@@ -35,15 +35,8 @@ first input is appended to the inherited conversation and never repeats the hand
 A batch the session could not take at all (it failed to start, so nothing was handed over) goes back to the queue
 untouched. A control row only blocks the rows queued behind it, by the same (created_at, id) order the claim uses,
 so a message followed by a stop is delivered first and the stop is taken when it is out of the way. Any other
-failure of the invocation first gives every input handed over an explicit outcome (the marker below) and then
-raises.
-
-An input whose delivery outcome is unknown because the session failed (the write raised, the process died) is
-consumed with an uncertainty marker in the timeline and is never sent a second time; reconciling it against
-the harness's durable record and re-delivering the ones that are not there is the restart-and-crash step of
-[the delivery decision](../../../docs/decisions/agents/graph/2026-11-11-harness-delivery-two-acks.md), and
-`retire_unconfirmed` in `claim/harness_inbox.py` is its single entry point. Rows claimed for an external
-harness are not consumed by a hosted turn's settlement; only an abort or a rebuilt runtime consumes them.
+failure of the invocation first gives every input handed over an explicit outcome (reconciled, or the marker, as below)
+and then raises.
 
 Cancel targets the foreground. The graph continues reading activity until the
 executor reports the terminal outcome. A normal finish that races a cancel
@@ -51,5 +44,75 @@ remains a normal finish. The cancel request does not retire a healthy session
 or stop independent background work. A provider that lacks scoped cancellation
 reports it as unavailable and the foreground continues. Restart and terminate
 remain separate lifecycle commands and can still interrupt a graph invocation.
+
+## Inputs handed over and never acknowledged
+
+A failure, an interrupt, a host abort or a restart can leave rows `claimed` that the harness never reported as in
+its context. No harness de-duplicates, so such a row is delivered again only when the harness's own durable
+record (Claude's transcript, Codex's rollout, Antigravity's message-queue files) shows it is not there, and
+nothing is guessed when the record cannot tell. `bridge.reconcile(keys)` reads the record once and answers, per
+input, `IN_CONTEXT`, `PERSISTED_UNDELIVERED`, `NOT_FOUND` or `UNKNOWN`; `plan_reconciliation` (pure, in
+`claim/harness_foreground.py`) turns the answers into one decision per input:
+
+| Record says | The row | Timeline |
+|---|---|---|
+| `IN_CONTEXT` | `done`, like an ACK 2 | its entries are written |
+| `NOT_FOUND` | back to `pending` at its original position, delivered again in order | nothing yet |
+| `PERSISTED_UNDELIVERED` (Antigravity's queue holds it) | stays `claimed`; the session adopts it and the harness's later facts settle it | nothing yet |
+| `UNKNOWN` (Antigravity: no queue file for it) | consumed with the uncertainty marker, never sent again | marker |
+| no record exists (no session record, file gone) | consumed with the marker (event `harness_reconcile_failed`) | marker |
+| a record exists but could not be read (I/O, an interface change) | stays `claimed` and the error propagates; the next wake reconciles again | nothing |
+
+Antigravity's queue only holds inputs steered into a running turn. An input sent while the conversation was idle
+starts a turn on stdin, carries no id and leaves no file (observed on a live agy: no queue directory at all after
+an idle input ran), so its absence proves nothing and is `UNKNOWN`, not `NOT_FOUND`. A Claude transcript or Codex
+rollout whose last line is half written (a process killed mid-write, no trailing newline) is read without that
+line; a bad line anywhere else is an error.
+
+There are two entry points, both in `ForegroundRun`:
+
+- **A run that fails or is interrupted** (`retire_unconfirmed`). It retires the session first, so a CLI that
+  still held an input in a queue of its own cannot take it later and "not found" is final; then it reconciles
+  the inputs it had handed over. When the session cannot be retired the record is not asked and the marker is
+  written. It returns the rows it consumed with the marker, and only those are named by the lost-turn note.
+- **The start of a run** (`_adopt_claimed`). After the session is up (resumed, with a higher generation), every
+  claimed deliverable row that this run did not hand over is an orphan of an earlier process (a crash, an abort,
+  a host restart) and is reconciled before anything new is delivered. The claim also enters the turn for such
+  an orphan when the queue is empty, and the host's pending scan wakes an idling external agent that holds one,
+  so a message is not stranded until the next one arrives.
+
+What the agent is told. An input settled as in the context lost the turn it was in with the process, and the
+harness will not continue it by itself, so a recovery input is added (`reconciled-resume-<id>`: the process was
+restarted and the turn was interrupted, continue), unless another recovery input (a restart or resurrect note, a
+harness switch's `context-reset-…`) is already on its way. It is also what makes an adopted Antigravity input
+arrive: agy delivers its queue before the next stdin input, and the trajectory poll can only attribute that
+input to a turn while one of ours is running. Once that turn is over and every other input is settled, an adopted
+input that has still not appeared is asked about once more: gone means `NOT_FOUND` (back to the queue, delivered
+in this run), still stored means it stays claimed and is marked `harness_reconcile_deferred`, so neither the claim
+nor the pending scan wakes the agent for it again; the next run that starts reconciles it once more (and settles
+it if it is in the context by then).
+
+Order after a restart: the recovery input (`control-…`, `context-reset-…`, hook notes, `reconciled-resume-…`) is
+the front of the first batch, then the rows in their original queue order, returned ones included; a pending
+restart or resurrect note (`lifecycle_restart` / `lifecycle_resurrect`, written by the restart apply after the
+older rows) is moved ahead of the rows in its batch (`recovery_notes_first`), so the agent learns it was restarted
+before it sees the messages that are delivered again. The handoff or compaction reminder still rides the batch's
+first input. An input the harness stored itself and delivers on resume is in the context before that batch, as
+the harness decides. Inputs not in the context when a turn was interrupted are delivered as usual and become a
+new turn.
+
+Process generation: each frame carries the generation of the process that produced it, and the session record
+keeps it (a required field; converge gives older records generation 0), so it grows across respawns, sessions
+and host restarts. `Foreground` reads the bridge's generation when it starts and drops, before anything reads
+it, a frame of an earlier generation (event `harness_event_stale`): turn names restart with each session and a
+re-delivered input keeps its key, so a late frame of the old process must not end the new process's turn or
+settle the re-delivered input. Synthetic inputs lost with a failed run (no row to return them to) are not
+re-delivered.
+
+The old CLI process. A killed host closes the CLI's stdin, and all three CLIs exit on that (observed on macOS by
+SIGKILLing the host process while a Claude Code, Codex and Antigravity session was up: each CLI was gone within
+four seconds, `agy`'s `start_new_session` notwithstanding). The session record keeps no pid and the host does
+not wait for the old process before it resumes, so a CLI that survives its host (stuck in a tool, for instance)
+is not detected; the facts above are the whole protection, and no process registry was added for it.
 
 Parent: [Harness turn](harness-turn.md).

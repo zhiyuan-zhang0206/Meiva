@@ -8,7 +8,7 @@ from base.lm.harness.bridge import (
     HarnessTurnFaultedError,
     fault_of_event,
 )
-from base.lm.harness.delivery import HarnessInput
+from base.lm.harness.delivery import HarnessInput, Reconciliation, ReconciliationUnavailableError
 from base.lm.harness.engine import (
     EventSubscription,
     HarnessSession,
@@ -82,6 +82,8 @@ __all__ = [
     "RateLimitObserved",
     "ReasoningDelta",
     "ReasoningText",
+    "Reconciliation",
+    "ReconciliationUnavailableError",
     "RegistrationStore",
     "SessionBound",
     "SessionClosed",

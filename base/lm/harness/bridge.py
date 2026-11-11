@@ -2,13 +2,13 @@ from __future__ import annotations
 
 import asyncio
 import base64
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from contextlib import suppress
 from datetime import timedelta
 
 from base.api_contracts.agent_contract import Harness
 from base.lm.harness.base_session import SessionClock
-from base.lm.harness.delivery import HarnessInput
+from base.lm.harness.delivery import HarnessInput, Reconciliation, ReconciliationUnavailableError
 from base.lm.harness.engine import HarnessSession, HarnessTurn, completed_turn
 from base.lm.harness.events import (
     BridgeEvent,
@@ -103,6 +103,7 @@ class HarnessBridge:
         self._registration_ttl = timedelta(seconds=registration_ttl_seconds)
         self._created_at: str | None = None
         self._session: HarnessSession | None = None
+        self._last_session: HarnessSession | None = None
         self._pump: EventPump | None = None
         self._pump_task: asyncio.Task[None] | None = None
         self._pump_group: asyncio.TaskGroup | None = None
@@ -140,6 +141,15 @@ class HarnessBridge:
     def session_id(self) -> str | None:
         return None if self._session is None else self._session.session_id
 
+    # meiva:note
+    # The generation of the process the bridge's session runs, 0 while there is none. It grows
+    # across sessions (the registry record carries it), so a consumer can tell a fact of the current
+    # process from a late one of an earlier process.
+    # meiva:link base/lm/harness/docs/delivery.md
+    @property
+    def generation(self) -> int:
+        return 0 if self._session is None else self._session.generation
+
     async def ensure(self) -> HarnessSession:
         if self._close_error is not None:
             raise HarnessClosedError(
@@ -160,6 +170,7 @@ class HarnessBridge:
             raise
         self._exit_code = None
         self._session = session
+        self._last_session = session
         await self._start_pump(session)
         session_model = getattr(session, "model", None)
         if isinstance(session_model, str) and session_model:
@@ -265,6 +276,25 @@ class HarnessBridge:
             images=batch[0].images,
         )
         await session.deliver(batch)
+
+    # meiva:note
+    # What the harness's own durable record says about inputs handed to an earlier process. It reads
+    # the record of the live session, or of the one just retired: the record is a file, so asking needs no
+    # running CLI. Nothing is answered when no session was ever started on this bridge.
+    # meiva:link base/lm/harness/docs/delivery.md
+    async def reconcile(self, keys: Sequence[str]) -> Mapping[str, Reconciliation]:
+        session = self._session or self._last_session
+        if session is None:
+            raise ReconciliationUnavailableError("no harness session was started to reconcile with")
+        return await session.reconcile(list(keys))
+
+    # meiva:note
+    # Tell the live session about inputs a previous process handed over that the harness will deliver
+    # by itself, so their later facts settle them. Nothing is handed to the CLI.
+    def adopt(self, keys: Sequence[str]) -> None:
+        if self._session is None:
+            raise HarnessClosedError("this harness bridge has no live session to adopt inputs into")
+        self._session.adopt(list(keys))
 
     # meiva:note
     # What a turn opens with. The first turn of a fresh session carries the handoff, unless the

@@ -8,12 +8,14 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from functools import partial
 from typing import LiteralString
 
 from psycopg import sql
 
 from agent.db import CLAIM_ACQUIRE_TIMEOUT_CAP_S, ClaimedInbound
-from agent.graph.claim.harness_foreground import Handed
+from agent.graph.claim.harness_activity import HarnessTurnProjector
+from agent.graph.claim.harness_foreground import Handed, Reconciled, plan_reconciliation
 from agent.ownership.inbound import lock_inbound_owner
 from base.agents.context import MeivaContext
 from base.agents.history.harness_messages import aappend_harness_timeline_items
@@ -22,6 +24,10 @@ from base.agents.messages.inbound import InboundKind
 from base.agents.messages.kwargs import NoteTag
 from base.db.rows import IdRow, aquery_all
 from base.db.transaction import async_write_transaction
+from base.events.live.projection import InboundCommitted, TimelineSnapshot
+from base.lm.harness import ReconciliationUnavailableError
+from base.lm.harness.engine import TurnEngine
+from base.log import logger
 
 DELIVERABLE_INBOUND_KINDS = (
     InboundKind.CHAT.value,
@@ -64,6 +70,34 @@ async def peek_head_batch(ctx: MeivaContext, agent_id: int) -> list[ClaimedInbou
                 "ORDER BY created_at ASC, id ASC"
             ).format(columns=sql.SQL(_COLUMNS), head=sql.SQL(_HEAD_IDS)),
             {"agent": agent_id, "kinds": list(DELIVERABLE_INBOUND_KINDS)},
+        )
+        return [ClaimedInbound.from_row(row) for row in await cursor.fetchall()]
+
+
+# meiva:note
+# The deliverable rows an earlier invocation or process handed to the harness and left claimed: this run
+# did not hand them, so nothing settles them unless they are reconciled against the harness's own
+# record (`ForegroundRun` does, before it delivers anything).
+# meiva:link agent/graph/docs/harness-foreground.md
+async def claimed_deliverable(
+    ctx: MeivaContext, agent_id: int, *, include_deferred: bool
+) -> list[ClaimedInbound]:
+    pool = ctx.ops_pool
+    if pool is None:
+        return []
+    async with pool.connection() as conn:
+        cursor = await conn.execute(
+            sql.SQL(
+                "SELECT {columns} FROM inbound_messages "
+                "WHERE agent_id=%(agent)s AND status='claimed' AND kind = ANY(%(kinds)s) "
+                "AND (%(deferred)s OR COALESCE(payload->>'harness_reconcile_deferred', '') = '') "
+                "ORDER BY created_at ASC, id ASC"
+            ).format(columns=sql.SQL(_COLUMNS)),
+            {
+                "agent": agent_id,
+                "kinds": list(DELIVERABLE_INBOUND_KINDS),
+                "deferred": include_deferred,
+            },
         )
         return [ClaimedInbound.from_row(row) for row in await cursor.fetchall()]
 
@@ -123,6 +157,42 @@ async def commit_handed(
 
 
 # meiva:note
+# The harness's own record puts the input in the model's context, so it settles like an
+# acknowledgement. The row may already have been settled by the run that was failing (a write that
+# finished as the failure struck), so only a row still claimed gets its timeline entries and nothing is
+# written twice.
+async def commit_reconciled(
+    ctx: MeivaContext, agent_id: int, handed: Sequence[Handed]
+) -> list[TimelineItem]:
+    pool = ctx.ops_pool
+    if pool is None or not handed:
+        return []
+    ids = [h.inbound_id for h in handed if h.inbound_id is not None]
+    async with async_write_transaction(pool) as conn:
+        await lock_inbound_owner(conn, agent_id, incarnation=ctx.original_incarnation)
+        rows = (
+            await aquery_all(
+                conn,
+                IdRow,
+                "UPDATE inbound_messages SET status='done' "
+                "WHERE agent_id=%s AND id=ANY(%s) AND kind=ANY(%s) AND status='claimed' "
+                "RETURNING id",
+                (agent_id, ids, list(DELIVERABLE_INBOUND_KINDS)),
+            )
+            if ids
+            else []
+        )
+        settled = {row.id for row in rows}
+        items = [
+            item
+            for h in handed
+            if h.inbound_id is None or h.inbound_id in settled
+            for item in h.items
+        ]
+        return await aappend_harness_timeline_items(conn, agent_id, ctx.harness.value, items)
+
+
+# meiva:note
 # A refused or lost input goes back to the queue: `pending` with no claim time, so it sorts at its
 # original position and the next reservation hands it over again, ahead of anything newer.
 async def requeue_handed(ctx: MeivaContext, agent_id: int, handed: Sequence[Handed]) -> None:
@@ -140,10 +210,10 @@ async def requeue_handed(ctx: MeivaContext, agent_id: int, handed: Sequence[Hand
 
 
 # meiva:note
-# The session failed with inputs in flight: whether they arrived is unknown, so they are consumed and
-# marked rather than sent a second time. Reconciling them against the harness's durable record (and
-# re-delivering the ones that are not there) is the restart-and-crash step of the delivery unification;
-# this is its single entry point.
+# Inputs in flight whose fate cannot be established: the harness's durable record could not be asked
+# (or its session could not be retired first), so they are consumed and marked rather than sent a
+# second time. When the record can be asked, `reconcile_handed` decides each input instead and
+# this is only the fallback.
 # meiva:link agent/graph/docs/harness-turn.md
 async def retire_unconfirmed(
     ctx: MeivaContext, agent_id: int, handed: Sequence[Handed]
@@ -182,3 +252,130 @@ def unconfirmed_input_items(inbound_ids: Sequence[int], *, created_at: str) -> l
         )
         for inbound_id in inbound_ids
     ]
+
+
+# meiva:note
+# Ask the harness's own durable record what became of inputs that were handed over and never
+# acknowledged: the effect half of reconciliation (the decision is `plan_reconciliation`). An answer that
+# cannot be had (no session record, a record that is gone or unreadable) is a failure, never a guess: the
+# caller then falls back to the uncertainty marker, because only a record that exists and lacks the input
+# may let it be delivered again.
+# meiva:link agent/graph/docs/harness-foreground.md
+async def reconcile_handed(
+    bridge: TurnEngine, agent_id: int, handed: Sequence[Handed], *, where: str
+) -> Reconciled | None:
+    keys = [h.key for h in handed]
+    try:
+        plan = plan_reconciliation(handed, await bridge.reconcile(keys))
+    except ReconciliationUnavailableError as exc:
+        logger.warning(
+            "the harness has no durable record to reconcile its inputs against",
+            event="harness_reconcile_failed",
+            agent_id=agent_id,
+            keys=keys,
+            where=where,
+            error=str(exc),
+        )
+        return None
+    for outcome, entries in (
+        ("in_context", plan.commit),
+        ("not_found", plan.requeue),
+        ("persisted_undelivered", plan.keep),
+        ("unknown", plan.unknown),
+    ):
+        for entry in entries:
+            logger.info(
+                "reconciled an input handed to the harness",
+                event="harness_input_reconciled",
+                agent_id=agent_id,
+                key=entry.key,
+                outcome=outcome,
+                where=where,
+            )
+    return plan
+
+
+# meiva:note
+# Consume the inputs with the uncertainty marker and say so in the timeline; returns the inbox rows it
+# marked, which are the only ones a "turn lost" note may name.
+async def mark_unconfirmed(
+    ctx: MeivaContext, agent_id: int, projector: HarnessTurnProjector, handed: Sequence[Handed]
+) -> list[int]:
+    items = await projector.append_inbound(partial(retire_unconfirmed, ctx, agent_id, handed))
+    publish_inbound(ctx, agent_id, items)
+    return [item.inbound_id for item in items if item.inbound_id is not None]
+
+
+# meiva:note
+# Write what a reconciliation decided: inputs in the context settle like an acknowledgement, absent ones go
+# back to the queue (the caller wakes the delivery loop), inputs the record cannot tell about are consumed
+# with the marker. Inputs the harness stored itself are left alone. Returns the rows marked.
+async def apply_reconciled(
+    ctx: MeivaContext, agent_id: int, projector: HarnessTurnProjector, plan: Reconciled
+) -> list[int]:
+    for entry in plan.commit:
+        items = await projector.append_inbound(
+            partial(commit_reconciled, ctx, agent_id, [entry]), human_input=entry.human
+        )
+        publish_inbound(ctx, agent_id, items)
+    if plan.requeue:
+        await requeue_handed(ctx, agent_id, plan.requeue)
+    if plan.unknown:
+        return await mark_unconfirmed(ctx, agent_id, projector, plan.unknown)
+    return []
+
+
+# meiva:note
+# A row the harness stored and still has not delivered after one more reconciliation: it stays claimed
+# and is marked, so neither the claim nor the pending scan wakes the agent for it again. The next run that
+# starts for another reason reconciles it once more.
+async def defer_reconciliation(ctx: MeivaContext, agent_id: int, handed: Sequence[Handed]) -> None:
+    pool = ctx.ops_pool
+    ids = [h.inbound_id for h in handed if h.inbound_id is not None]
+    if pool is None or not ids:
+        return
+    async with async_write_transaction(pool) as conn:
+        await lock_inbound_owner(conn, agent_id, incarnation=ctx.original_incarnation)
+        _ = await conn.execute(
+            "UPDATE inbound_messages SET payload = COALESCE(payload, '{}'::jsonb) "
+            "|| jsonb_build_object('harness_reconcile_deferred', true) "
+            "WHERE agent_id=%s AND id=ANY(%s) AND status='claimed'",
+            (agent_id, ids),
+        )
+
+
+# meiva:note
+# A restart or resurrect note is a pending row like any other, so a row returned to the queue by a
+# reconciliation sorts ahead of it by its original position. The agent has to learn that it was
+# restarted before it sees the messages that are delivered again, so within a batch the lifecycle
+# notes go first (stable: everything else keeps its queue order).
+def recovery_notes_first(rows: Sequence[ClaimedInbound]) -> list[ClaimedInbound]:
+    def is_note(row: ClaimedInbound) -> bool:
+        return row.kind == InboundKind.SYSTEM_NOTE.value and bool(
+            row.payload
+            and row.payload.get("note_tag")
+            in (NoteTag.LIFECYCLE_RESTART.value, NoteTag.LIFECYCLE_RESURRECT.value)
+        )
+
+    return [*(r for r in rows if is_note(r)), *(r for r in rows if not is_note(r))]
+
+
+def is_deferred(row: ClaimedInbound) -> bool:
+    return bool(row.payload and row.payload.get("harness_reconcile_deferred") is True)
+
+
+def publish_inbound(ctx: MeivaContext, agent_id: int, items: list[TimelineItem]) -> None:
+    publisher = ctx.event_publisher
+    if publisher is None or not items:
+        return
+    count = int(items[-1].item_id.split(".")[0].removeprefix("h")) + 1
+    publisher.emit(
+        TimelineSnapshot(
+            agent_id=agent_id, items=[item.model_dump() for item in items], msg_count=count
+        ).model_dump_json()
+    )
+    for item in items:
+        if item.kind == "inbound_chat" and item.inbound_id is not None:
+            publisher.emit(
+                InboundCommitted(agent_id=agent_id, inbound_id=item.inbound_id).model_dump_json()
+            )

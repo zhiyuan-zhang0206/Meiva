@@ -8,7 +8,7 @@ import pytest
 
 from base.lm.harness.antigravity.reconciliation.judge import QueuedMessage, judge
 from base.lm.harness.antigravity.reconciliation.payload import client_message_id
-from base.lm.harness.antigravity.reconciliation.queue_files import queue_dir, reconcile_input
+from base.lm.harness.antigravity.reconciliation.queue_files import queue_dir, reconcile_inputs
 from base.lm.harness.antigravity.trajectory import AgyInterfaceError
 from base.lm.harness.delivery import Reconciliation
 
@@ -18,6 +18,13 @@ FIXTURE = Path(__file__).parent / "fixtures" / "conversation-1" / "messages"
 # meiva:note
 # The fixture is a minimal re-encoding of a recorded queue file (agy 1.5.5): the same two-level field
 # layout (step field 19 = user input, whose field 19 = clientMessageId), without the recorded paths.
+
+
+def reconcile_input(home: Path, session: str, key: str) -> Reconciliation | None:
+    answers = reconcile_inputs(home, session, [key])
+    return None if answers is None else answers[key]
+
+
 def home_with_queue(tmp_path: Path) -> Path:
     target = queue_dir(tmp_path, "conversation-1")
     target.parent.mkdir(parents=True)
@@ -32,7 +39,7 @@ def test_a_delivered_message_is_in_context_and_a_stored_one_is_not_sent_again() 
     ]
     assert judge(queue, "k-delivered") is Reconciliation.IN_CONTEXT
     assert judge(queue, "k-waiting") is Reconciliation.PERSISTED_UNDELIVERED
-    assert judge(queue, "k-never") is Reconciliation.NOT_FOUND
+    assert judge(queue, "k-never") is Reconciliation.UNKNOWN, "a stdin input leaves no file"
 
 
 def test_the_queue_is_read_from_the_injected_home(tmp_path: Path) -> None:
@@ -41,7 +48,7 @@ def test_the_queue_is_read_from_the_injected_home(tmp_path: Path) -> None:
     assert (
         reconcile_input(home, "conversation-1", "k-waiting") is Reconciliation.PERSISTED_UNDELIVERED
     )
-    assert reconcile_input(home, "conversation-1", "k-lost") is Reconciliation.NOT_FOUND
+    assert reconcile_input(home, "conversation-1", "k-lost") is Reconciliation.UNKNOWN
     assert reconcile_input(home, "conversation-2", "k-lost") is None
 
 

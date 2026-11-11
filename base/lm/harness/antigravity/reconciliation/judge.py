@@ -22,10 +22,12 @@ class QueuedMessage:
 # Decide from the queue whether one input reached the model. A message in `read.json` was delivered:
 # IN_CONTEXT. A message that is stored but not delivered, whether or not `undelivered/` lists it,
 # will be delivered by the CLI itself, so it is PERSISTED_UNDELIVERED and must not be sent again.
-# No file carrying the id means the HTTP 200 never became a stored message: NOT_FOUND.
+# No file carrying the id answers UNKNOWN, never NOT_FOUND: only an input steered into a running turn
+# is written to the queue with our id; an input sent while the conversation was idle starts a turn on
+# stdin, carries no id and leaves no file, so its absence says nothing about whether it ran.
 # meiva:link base/lm/harness/antigravity/docs/antigravity.md
 def judge(messages: Iterable[QueuedMessage], key: str) -> Reconciliation:
-    outcome = Reconciliation.NOT_FOUND
+    outcome = Reconciliation.UNKNOWN
     for message in messages:
         if message.client_message_id != key:
             continue

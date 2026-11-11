@@ -47,7 +47,7 @@ class NodeExit(TypedDict):
 # means the adapter never observed the process tree (its provider SDK exposes the pid
 # through a private structure), so it is reported as unknown rather than as reaped; a
 # close that leaves processes behind names how many. Emit sites: the interrupt pair in
-# `agent/graph/claim/harness_turn.py:interrupt_engine`, the rest in
+# `agent/graph/claim/harness_cancel.py:interrupt_engine`, the rest in
 # `base/lm/harness/process.py:settle_close` and the session closers that call it.
 # meiva:link base/lm/harness/docs/harness.md
 class HarnessInterrupt(TypedDict):
@@ -150,8 +150,30 @@ EVENTS: dict[str, EventSpec] = {
     "harness_unsettled_outcome_failed": telemetry_event(
         "harness_unsettled_outcome_failed",
         "an invocation failed and the outcome of the inputs it had handed to the harness could not "
-        "be recorded; the host's abort pass consumes them without a marker",
+        "be recorded; they stay claimed and the next harness turn reconciles them against the "
+        "harness's record",
         tier="anomaly",
+    ),
+    "harness_input_reconciled": telemetry_event(
+        "harness_input_reconciled",
+        "an input handed to an external harness and never acknowledged was judged against the "
+        "harness's own durable record: in_context settles it, not_found returns it to the queue to "
+        "be delivered again, persisted_undelivered leaves it claimed for the harness to deliver",
+        tier="noise",
+    ),
+    "harness_reconcile_failed": telemetry_event(
+        "harness_reconcile_failed",
+        "the harness has no durable record to ask about inputs handed to it (no session record or "
+        "file), or its session could not be retired first, or a record that exists could not be read; "
+        "nothing is guessed: the inputs are consumed with the uncertainty marker, or, when an "
+        "existing record could not be read, left claimed for the next wake",
+        tier="anomaly",
+    ),
+    "harness_event_stale": telemetry_event(
+        "harness_event_stale",
+        "a frame of an earlier harness process arrived after a later generation began and was "
+        "dropped before it could settle an input or end a turn",
+        tier="noise",
     ),
     "harness_input_requeued": telemetry_event(
         "harness_input_requeued",

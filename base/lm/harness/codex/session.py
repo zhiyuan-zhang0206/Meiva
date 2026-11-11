@@ -32,6 +32,7 @@ from base.lm.harness.codex.mapping import (
     text_delta,
     usage_from,
 )
+from base.lm.harness.codex.reconciliation.rollout import codex_home, reconcile_inputs
 from base.lm.harness.codex.requests import (
     INITIALIZED,
     OpenedThread,
@@ -54,7 +55,7 @@ from base.lm.harness.codex.turns import (
     settle,
     unclaimed_text,
 )
-from base.lm.harness.delivery import HarnessInput, InputPhase, validated_batch
+from base.lm.harness.delivery import HarnessInput, InputPhase, Reconciliation, validated_batch
 from base.lm.harness.events import (
     AckSignal,
     AssistantText,
@@ -150,12 +151,18 @@ class CodexSession(BaseHarnessSession[CodexConfig]):
             environ=build_env(environ, api_key_mode=config.api_key_mode),
             request_timeout=config.startup_timeout_seconds,
         )
+        self._home_environ = dict(environ)
         self._starting = False
         self._early_notifications: list[tuple[Inbound, JsonObject]] = []
         self._records: dict[str, TurnRecord] = {}
         self._delivery_lock = asyncio.Lock()
         self._interrupting: set[str] = set()
         self._started = False
+
+    def _read_records(
+        self, session_id: str, keys: Sequence[str]
+    ) -> dict[str, Reconciliation] | None:
+        return reconcile_inputs(codex_home(self._home_environ), session_id, keys)
 
     async def start(self, *, resume: str | None = None) -> None:
         if self._started:

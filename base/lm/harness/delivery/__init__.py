@@ -11,7 +11,11 @@ from base.lm.harness.delivery.inputs import (
     validated_batch,
 )
 from base.lm.harness.delivery.ledger import DeliveryLedger, InputPhase, LedgerStep
-from base.lm.harness.delivery.reconcile import Reconciliation
+from base.lm.harness.delivery.reconcile import (
+    Reconciliation,
+    ReconciliationUnavailableError,
+    home_in,
+)
 
 __all__ = [
     "IMAGE_MIME_TYPES",
@@ -21,5 +25,7 @@ __all__ = [
     "InputPhase",
     "LedgerStep",
     "Reconciliation",
+    "ReconciliationUnavailableError",
+    "home_in",
     "validated_batch",
 ]

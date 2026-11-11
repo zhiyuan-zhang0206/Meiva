@@ -185,6 +185,7 @@ async def test_resume_uses_the_registry(tmp_path: Path) -> None:
             created_at=now,
             updated_at=now,
             harness="codex",
+            generation=0,
         )
     )
     harness = await start(tmp_path, registry=registry, agent_id=7)
@@ -221,6 +222,7 @@ async def test_a_resume_failure_is_raised_and_the_record_kept(
             created_at=now,
             updated_at=now,
             harness="codex",
+            generation=0,
         )
     )
     server = FakeAppServer(resume_fails=True)

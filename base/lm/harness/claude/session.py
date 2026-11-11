@@ -40,8 +40,9 @@ from base.lm.harness.claude.inbound import (
 )
 from base.lm.harness.claude.mapping import map_message, parse_result, task_update_status
 from base.lm.harness.claude.options import fork_session_id, option_values
+from base.lm.harness.claude.reconciliation.transcript import claude_home, reconcile_inputs
 from base.lm.harness.claude.settle import RunningTurn, settle_result
-from base.lm.harness.delivery import HarnessInput, InputPhase, validated_batch
+from base.lm.harness.delivery import HarnessInput, InputPhase, Reconciliation, validated_batch
 from base.lm.harness.events import (
     AckSignal,
     HarnessCause,
@@ -318,6 +319,13 @@ class ClaudeSession(BaseHarnessSession[BridgeConfig]):
         if self.agent_id is None:
             raise RuntimeError("a fork session needs the agent that owns it")
         return self.agent_id
+
+    def _read_records(
+        self, session_id: str, keys: Sequence[str]
+    ) -> dict[str, Reconciliation] | None:
+        return reconcile_inputs(
+            claude_home(self.config.auth.config_dir, self._environ), session_id, keys
+        )
 
     def _build_options(self, resume: str | None, fork_to: str | None = None) -> object:
         options = self._sdk.ClaudeAgentOptions
