@@ -51,8 +51,7 @@ def test_converged_namespaces_load_real_task_instructions(
     repo = _repo(tmp_path)
     converge_skills(repo, unit_home, binding=PROD_ELSEWHERE, now=datetime.now(UTC))
 
-    root_body = meiva.skills.meiva_guide.__doc__
-    assert isinstance(root_body, str)
+    root_body = (Path(meiva.skills.meiva_guide.path) / "SKILL.md").read_text(encoding="utf-8")
     assert "meiva agents send" in root_body
 
     guide = meiva.skills.meiva_guide
@@ -68,8 +67,7 @@ def test_converged_namespaces_load_real_task_instructions(
         (meiva.skills.meiva_workflow.capability_timescale, "Gather evidence"),
     )
     for skill, instruction in expected:
-        body = skill.__doc__
-        assert isinstance(body, str)
+        body = (Path(skill.path) / "SKILL.md").read_text(encoding="utf-8")
         assert instruction in body
 
     for read in (

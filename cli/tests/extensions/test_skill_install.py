@@ -156,8 +156,9 @@ def test_optional_standard_fields_do_not_block_the_mount(
 
     proxy = skills_mod.code_review
     assert proxy.name == "code-review"
-    assert "allowed-tools: Bash(git:*) Bash(jq:*) Read" in (proxy.__doc__ or "")
-    assert "license: Apache-2.0" in (proxy.__doc__ or "")
+    body = (Path(proxy.path) / "SKILL.md").read_text(encoding="utf-8")
+    assert "allowed-tools: Bash(git:*) Bash(jq:*) Read" in body
+    assert "license: Apache-2.0" in body
 
 
 def test_claude_code_skills_tree(
