@@ -13,7 +13,6 @@ import types
 from base.agents.lifecycle import (
     release_agent_chrome_pages as release_agent_chrome_pages,
 )
-from base.host.boundary.json_values import is_object_dict
 from meiva.mcps import _tools
 from meiva.mcps._clients import McpClients
 from meiva.mcps.config import (
@@ -26,17 +25,15 @@ from meiva.mcps.config import (
     MCPError as MCPError,
 )
 from meiva.mcps.config import (
-    MCPServerNotFound,
-    load_mcp_config,
-)
-from meiva.mcps.config import (
     MCPToolNotFound as MCPToolNotFound,
 )
 from meiva.mcps.config import (
     ToolInfo as ToolInfo,
 )
+from meiva.mcps.config import (
+    load_mcp_config,
+)
 from meiva.sdk_surface import process_context
-from meiva.sdk_surface.validation import coerce_str
 
 # The module whose `call_raw` every tool call funnels through, text form and `raw` form alike.
 # The SDK metering wrapper replaces that attribute (`meiva/sdk_surface/metering.py`), so it reaches
@@ -69,20 +66,13 @@ def load_config() -> dict[str, dict[str, object]]:
     return load_mcp_config(home=process_context.current_context().require_meiva_home())
 
 
-def servers() -> list[str]:
-    return sorted(load_config().keys())
+def _server_names() -> list[str]:
+    return sorted(load_config())
 
 
-def description(server: str) -> str | None:
-    """One-line summary of a configured server, or None when it declares
-    none."""
-    server = coerce_str(server, "server")
-    config = load_config()
-    if server not in config:
-        raise MCPServerNotFound(f"meiva.mcps has no server {server!r} (have: {sorted(config)})")
-    entry = config[server]
-    if not is_object_dict(entry):
-        raise TypeError(f"{server}: the server entry must be an object")
+# meiva:note
+# The one-line `description` a server's configuration declares: None when it declares none, a `TypeError` naming the server when it declares a non-string. A bad configuration fails the render of `meiva.help(meiva.mcps)` instead of being listed bare.
+def _declared_description(server: str, entry: dict[str, object]) -> str | None:
     description = entry.get("description")
     if description is None:
         return None
@@ -95,35 +85,34 @@ def __getattr__(name: str) -> _tools.ServerProxy:
     """`meiva.mcps.<server>` lazily returns server proxy (module-level PEP 562)."""
     if name.startswith("_"):
         raise AttributeError(name)
-    if name not in load_config():
+    config = load_config()
+    if name not in config:
         raise AttributeError(
-            f"meiva.mcps has no server {name!r} (not configured in `$MEIVA_HOME/mcp.json`; have: {servers()})"
+            f"meiva.mcps has no server {name!r} (not configured in `$MEIVA_HOME/mcp.json`; have: {sorted(config)})"
         )
-    return _tools.ServerProxy(name, _source())
+    description = _declared_description(name, config[name])
+    return _tools.ServerProxy(name, _source(), description)
 
 
 def __dir__() -> list[str]:
-    """List every configured server name plus the module's public helpers."""
-    return [*servers(), "servers", "description"]
+    """List every configured server name."""
+    return _server_names()
 
 
 class _McpsModule(types.ModuleType):
     """The class of the `meiva.mcps` module object itself.
 
     Carries `__all_for_meiva__` as a property, like `meiva.skills`: the agent-visible members are
-    the two helpers below plus every configured server (`meiva.mcps.<server>`, served by the
-    module `__getattr__`), and the servers come from `$MEIVA_HOME/mcp.json` and the plugins'
+    every configured server (`meiva.mcps.<server>`, served by the module `__getattr__`), and the servers come from `$MEIVA_HOME/mcp.json` and the plugins'
     bundled `.mcp.json`, so the list is live rather than a literal. Only this list decides what
     `help()` and the metering wrappers see; a new public name or submodule here widens nothing.
     """
 
     @property
     def __all_for_meiva__(self) -> list[str]:
-        """The configured server names and the two helpers, sorted. A process that holds no SDK
-        context (a host building an installation) has no home to read servers from and lists the
-        two helpers alone."""
-        configured = servers() if process_context.ambient_context() is not None else []
-        return sorted([*configured, "servers", "description"])
+        """The configured server names, sorted. A process that holds no SDK context (a host
+        building an installation) has no home to read servers from and lists none."""
+        return _server_names() if process_context.ambient_context() is not None else []
 
 
 sys.modules[__name__].__class__ = _McpsModule

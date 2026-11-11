@@ -129,11 +129,9 @@ def test_the_signatures_behind_the_visible_names_are_pinned(
     assert str(inspect.signature(function)) == signature  # pyright: ignore[reportArgumentType]
 
 
-def test_the_mcps_surface_is_its_two_helpers_plus_the_configured_servers() -> None:
-    """The servers come from the machine's mcp.json and the plugins' bundled .mcp.json, so the
-    list is live; what is pinned is that nothing else is in it."""
+# meiva:note
+# The servers come from the machine's mcp.json and the plugins' bundled .mcp.json, so the list is live; what is pinned is that nothing else is in it (no `servers` / `description` helper: `meiva.help(meiva.mcps)` is the listing).
+def test_the_mcps_surface_is_the_configured_servers_alone() -> None:
     from meiva import mcps
 
-    names = agent_visible_names(mcps)
-    assert {"servers", "description"} <= set(names)
-    assert set(names) - {"servers", "description"} <= set(mcps.servers())
+    assert set(agent_visible_names(mcps)) == set(dir(mcps))

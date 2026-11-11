@@ -11,8 +11,8 @@ MCP servers run as child processes managed by the shared per-machine MCP
 daemon (`meiva/mcps/_daemon.py`, ops roster session "mcp-daemon"). Tool
 discovery is **lazy, not at startup**: config reloads on every call
 (`meiva/mcps/config.py:load_mcp_config`), and tool lists load on first access (daemon → 24h disk
-cache for metadata only) — `servers()` and `meiva.help(meiva.mcps)` prioritize the cache so
-they trigger no connections; the daemon does not prefetch at boot.
+cache for metadata only) — `meiva.help(meiva.mcps)` lists the servers from configuration and
+`meiva.help(meiva.mcps.<server>)` prioritizes the cache, so neither triggers a connection; the daemon does not prefetch at boot.
 
 Remote `url` entries spawn no child: the daemon dials the Streamable HTTP endpoint directly. A missing or unreachable daemon fails the request; the SDK never creates a local server.
 
@@ -44,8 +44,7 @@ at all, replacing the ~63MB per-agent wrapper. `"shared": true` (x) keeps one da
 
 - `meiva.mcps.<server>.<tool>(...)` — call an MCP tool. Pass parameters as named arguments (positional not allowed).
 - `meiva.mcps.<server>.raw(tool, **args) → dict` — get the raw structured return of a tool (default call returns text).
-- `servers() → list[str]` — list all configured MCP server names.
-- `description(server) → str | None` — get a one-line description of a server.
+- `meiva.help(meiva.mcps)` — list every configured server, each with the one-line `description` its configuration declares (a server that declares none is listed by name alone); `meiva.help(meiva.mcps.<server>)` lists that server's tools. There is no `servers()` or `description()` function: `dir(meiva.mcps)` and `meiva.help` are the listing, and a configured `description` that is not a string fails the render.
 
 ## Where Servers Come From
 

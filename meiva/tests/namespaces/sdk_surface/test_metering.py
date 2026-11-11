@@ -203,9 +203,7 @@ def test_instrument_targets_selects_routines_not_classes_or_constants() -> None:
     fqs = {fq for _parent, _attr, fq in metering.read_surface(meiva_module()).routines}
     # plain functions, nested-namespace functions, and top-level functions
     assert {"files.read", "shell.run", "shell.sessions.new", "self.compact", "understand"} <= fqs
-    # meiva.mcps declares its helpers (and the configured servers) in __all_for_meiva__; the
-    # helpers are metered here, while dynamic tool calls are metered at the call funnel.
-    assert {"mcps.servers", "mcps.description"} <= fqs
+    assert not {fq for fq in fqs if fq.startswith("mcps.")}
     # classes and constants exposed in __all_for_meiva__ are never wrapped
     assert "agents.AgentRow" not in fqs  # a class
     assert "self.AGENT_ID" not in fqs  # a constant

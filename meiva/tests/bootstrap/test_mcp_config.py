@@ -484,12 +484,12 @@ def test_definition_inventory_can_inspect_disabled_entries_with_invalid_overlay(
     assert _machine_names(_two_servers, include_disabled=True) == {"fs", "github"}
 
 
-def test_sdk_servers_surfaces_the_overlay_error(_two_servers: Path) -> None:
+def test_sdk_server_listing_surfaces_the_overlay_error(_two_servers: Path) -> None:
     from meiva import mcps
 
     pin_agent(1, meiva_home=_two_servers)
     (_two_servers / "mcp_enabled.json").write_text("{not json")
     with pytest.raises(McpEnabledConfigError):
-        mcps.servers()
+        dir(mcps)
     with pytest.raises(McpEnabledConfigError):
         _ = mcps.fs
