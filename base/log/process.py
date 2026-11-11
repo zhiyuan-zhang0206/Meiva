@@ -103,7 +103,7 @@ def flush_startup_records() -> None:
         stamped.opt(exception=record.exc_info).log(record.levelname, record.getMessage())
 
 
-def _add_stderr_sink_before_settings() -> None:
+def _add_stderr_sink_before_settings() -> int:
     """The human stderr sink, opened before the init imports `base.paths`.
 
     That import builds the Settings chain, and the build logs: a configured
@@ -111,7 +111,7 @@ def _add_stderr_sink_before_settings() -> None:
     (`base/host/env/bootstrap.py`). The fresh executable prelude removed loguru's default handler; open the
     human sink before configuration warnings can be emitted.
     """
-    add_sink(sys.stderr, format=HUMAN_FORMAT, level="INFO", colorize=True)
+    return add_sink(sys.stderr, format=HUMAN_FORMAT, level="INFO", colorize=True)
 
 
 # meiva:note
@@ -126,21 +126,44 @@ def _add_stderr_sink_before_settings() -> None:
 def start_process_logging(
     name: str,
     *,
-    attach_events: Callable[[], object],
+    attach_events: Callable[[], int | None],
     announce: Callable[[], None] | None = None,
     home: Path,
-) -> None:
+) -> Callable[[], None] | None:
     global init_done  # noqa: PLW0603
     if init_done:
-        return
+        return None
     logger.configure(extra={"agent_id": "-"})
-    _add_stderr_sink_before_settings()
-    from base.paths import logs_dir
+    # meiva:note
+    # Embedded CLI owners release these sinks before their captured stderr closes;
+    # daemon entries retain them for the lifetime of the process.
+    sinks: list[int] = []
 
-    add_file_sink(logs_dir(home=home) / f"{name}.log")
-    attach_events()
-    install_stdlib_intercept()
-    flush_startup_records()
-    if announce is not None:
-        announce()
-    init_done = True
+    def close() -> None:
+        # meiva:note
+        # Releasing the owned sinks also releases the process initialization guard.
+        global init_done  # noqa: PLW0603
+        if not sinks:
+            return
+        for sink in sinks:
+            logger.remove(sink)
+        sinks.clear()
+        init_done = False
+
+    try:
+        sinks.append(_add_stderr_sink_before_settings())
+        from base.paths import logs_dir
+
+        sinks.append(add_file_sink(logs_dir(home=home) / f"{name}.log"))
+        event_sink = attach_events()
+        if event_sink is not None:
+            sinks.append(event_sink)
+        install_stdlib_intercept()
+        flush_startup_records()
+        if announce is not None:
+            announce()
+        init_done = True
+    except BaseException:
+        close()
+        raise
+    return close

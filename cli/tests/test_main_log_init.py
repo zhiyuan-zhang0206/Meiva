@@ -618,3 +618,55 @@ def test_status_handler_body_forwards_the_parsed_namespace(
     assert isinstance(args.runtime, CommandRuntime)
     assert isinstance(args.database_factory, OperatorDatabaseFactory)
     assert "agent-runner" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("body_fails", [False, True])
+def test_embedded_command_releases_sinks_before_its_stderr_closes(
+    command_runtime: CommandRuntime,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    body_fails: bool,
+) -> None:
+    from contextlib import redirect_stderr
+    from io import StringIO
+
+    from base.log import logger
+
+    def fail_command() -> None:
+        raise ValueError("command failure")
+
+    records: list[str] = []
+    caller_sink = logger.add(lambda message: records.append(str(message)), diagnose=False)
+    try:
+        for _ in range(2):
+            owner = OperatorEventPipeline.wrapping(
+                EventPipeline(now=system_clock().now, writer=lambda _rows: None),
+                attach_process_logging=True,
+                database_factory=operator_database_factory(
+                    local_host=command_runtime.machine.host,
+                    home=command_runtime.home,
+                    open_database=open_operator_database,
+                ),
+                machine=command_runtime.machine,
+                home=tmp_path,
+                now=system_clock().now,
+                otlp_enabled=command_runtime.otlp_enabled,
+                otlp_endpoint=command_runtime.otlp_endpoint,
+                rng=command_runtime.rng,
+            )
+            with StringIO() as stream, redirect_stderr(stream):
+                try:
+                    owner.initialize_logging("embedded")
+                    logger.warning("inside embedded command")
+                    assert "inside embedded command" in stream.getvalue()
+                    if body_fails:
+                        fail_command()
+                except ValueError:
+                    owner.close_command(primary=sys.exception())
+                else:
+                    owner.close_command(primary=None)
+            logger.warning("after stream closed")
+        assert sum("after stream closed" in record for record in records) == 2
+        assert "closed file" not in capsys.readouterr().err
+    finally:
+        logger.remove(caller_sink)
