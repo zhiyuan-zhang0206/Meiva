@@ -105,6 +105,10 @@ class NS(dict[str, "Node"]):
 
     skill: Skill | None = None
     doc: str | None = None
+    # meiva:note
+    # The folder this namespace was scanned from (None for a node built by hand), so a namespace
+    # with no SKILL.md of its own still tells the agent where to look.
+    path: str | None = None
 
 
 type Node = Leaf | NS

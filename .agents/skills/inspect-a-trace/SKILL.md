@@ -102,8 +102,8 @@ uids are `tempo` / `loki` / `prometheus`; swap `datasource` and give a LogQL
 
 ## The toolchain scripts
 
-`scripts/` holds three chained steps, each runnable standalone. The loader
-prints this skill's path (`meiva.help(meiva.skills.inspect_a_trace)`); in a repo
+`scripts/` holds three chained steps, each runnable standalone. `meiva.help(meiva.skills.inspect_a_trace)`
+shows this skill's path; in a repo
 worktree it is `.agents/skills/inspect-a-trace/scripts/`, abbreviated
 `<scripts>/` below.
 

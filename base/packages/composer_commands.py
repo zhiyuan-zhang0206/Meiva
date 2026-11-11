@@ -191,8 +191,9 @@ def _expand_one(inv: Invocation) -> str:
     name = inv.typed_name
     if inv.command["skill_target"]:
         out = (
-            f"/{name} invokes the {name} skill. Load it with "
-            f"meiva.help(meiva.skills.{inv.command['skill_target']}) and follow it for this task."
+            f"/{name} invokes the {name} skill. Find its SKILL.md path with "
+            f"meiva.help(meiva.skills.{inv.command['skill_target']}), read that file and follow it "
+            "for this task."
         )
     else:
         out = f"Command /{name}:\n{inv.command['body']}"

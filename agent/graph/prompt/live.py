@@ -203,9 +203,8 @@ def effective_sdk_expand(
     for path in plan.refused:
         logging.getLogger(__name__).warning(
             "sdk_expand_in_system_prompt: refusing %r — expanding one member of a "
-            "capability surface would render that skill's whole body (or that "
-            "server's tool schemas) into every prompt and record a bogus 'loaded' "
-            "attribution. Preload a skill with skills_to_expand_at_start; leave a "
+            "capability surface would render that skill's entry (or that "
+            "server's tool schemas) into every prompt. Preload a skill with skills_to_expand_at_start; leave a "
             "server's tools to meiva.help(meiva.mcps.<server>)",
             path,
         )

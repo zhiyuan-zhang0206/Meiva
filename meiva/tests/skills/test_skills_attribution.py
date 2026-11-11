@@ -71,17 +71,16 @@ def test_resolution_is_not_consumption(fake_skills_dir: Path, audited_agent: Aud
     dir(ns)
     assert audited_agent.invoked() == []
 
-    _ = leaf.__doc__
-    assert audited_agent.invoked() == [("alpha", "loaded")]
-    _ = leaf.__doc__
+    meiva.help(meiva.skills.guide)
+    meiva.help(meiva.skills.alpha)
     assert audited_agent.invoked() == []
 
-    meiva.help(meiva.skills.guide)
-    assert audited_agent.invoked() == [("guide", "loaded")]
+    meiva.files.read(leaf.path + "/SKILL.md")
+    assert audited_agent.invoked() == [("alpha", "loaded")]
 
 
 @pytest.mark.usefixtures("sdk_model_owner")
-def test_index_render_records_no_loaded_attribution(
+def test_help_at_every_level_records_no_loaded_attribution(
     fake_skills_dir: Path, audited_agent: AuditedAgent
 ) -> None:
     _alpha_beta_guide(fake_skills_dir)
@@ -91,10 +90,8 @@ def test_index_render_records_no_loaded_attribution(
     meiva.help(meiva.skills.grp)
     assert audited_agent.invoked() == []
     meiva.help(meiva.skills.guide)
-    assert audited_agent.invoked() == [("guide", "loaded")]
-
     meiva.help(meiva.skills.alpha)
-    assert audited_agent.invoked() == [("alpha", "loaded")]
+    assert audited_agent.invoked() == []
 
 
 def test_files_read_skill_md_records_consumption(
@@ -111,15 +108,14 @@ def test_files_read_skill_md_records_consumption(
     assert audited_agent.invoked() == [("alpha", "loaded")]
 
 
-@pytest.mark.usefixtures("sdk_model_owner")
-def test_skill_help_uses_the_attached_machine_for_its_audit_event(
+def test_skill_read_uses_the_attached_machine_for_its_audit_event(
     fake_skills_dir: Path, audited_agent: AuditedAgent, db_conn: psycopg.Connection
 ) -> None:
     write_skill(fake_skills_dir, "alpha", "name: alpha\ndescription: a", body="# A\n")
     machine = MachineFacts.of(name="attached-runner", role="agent-runner")
     pin_agent(audited_agent.id, machine=machine)
 
-    meiva.help(meiva.skills.alpha)
+    meiva.files.read(meiva.skills.alpha.path + "/SKILL.md")
 
     row = db_conn.execute(
         "SELECT machine FROM audit_events WHERE agent_id = %s AND event_name = 'skill_invoked'",
@@ -174,7 +170,7 @@ def test_every_consumption_records_one_event_and_nothing_is_remembered(
     meiva.files.read(path)
     meiva.help(meiva.skills.alpha)
 
-    assert audited_agent.invoked() == [("alpha", "loaded")] * 3
+    assert audited_agent.invoked() == [("alpha", "loaded")] * 2
     assert not hasattr(skills_mod, "_recorded_skill_invocations")
 
 
@@ -185,31 +181,31 @@ def test_files_read_skill_md_silent_outside_agent(db_url: str, fake_skills_dir: 
     assert out.endswith("# A\n")
 
 
-def test_proxy_doc_consumes_and_records(fake_skills_dir: Path, audited_agent: AuditedAgent) -> None:
+def test_reading_each_skill_md_records_that_skill(
+    fake_skills_dir: Path, audited_agent: AuditedAgent
+) -> None:
     write_skill(fake_skills_dir, "alpha", "name: alpha\ndescription: a", body="# A\n")
     d = fake_skills_dir / "grp"
     d.mkdir()
     write_skill(d, "beta", "name: beta\ndescription: b", body="# B\n")
 
-    out = meiva.skills.alpha.__doc__
-    assert out is not None
+    out = meiva.files.read(meiva.skills.alpha.path + "/SKILL.md")
     assert out.endswith("# A\n")
-    assert "alpha" in out
     assert audited_agent.invoked() == [("alpha", "loaded")]
 
-    nested = meiva.skills.grp.beta.__doc__
-    assert nested is not None
+    nested = meiva.files.read(meiva.skills.grp.beta.path + "/SKILL.md")
     assert nested.endswith("# B\n")
     assert audited_agent.invoked() == [("beta", "loaded")]
 
 
-def test_consuming_a_skill_lands_a_skill_invoked_row(
+def test_reading_a_skill_lands_a_skill_invoked_row(
     fake_skills_dir: Path, db_conn: psycopg.Connection, audited_agent: AuditedAgent
 ) -> None:
     write_skill(fake_skills_dir, "alpha", "name: alpha\ndescription: a", body="# A\n")
 
-    assert meiva.skills.alpha.__doc__
-    assert meiva.skills.alpha.__doc__
+    path = meiva.skills.alpha.path + "/SKILL.md"
+    meiva.files.read(path)
+    meiva.files.read(path)
 
     rows = db_conn.execute(
         "SELECT source, attributes FROM audit_events "
@@ -243,8 +239,7 @@ def test_a_failed_write_is_reported_and_does_not_fail_the_read(
     captured: list[str] = []
     sink = logger.add(lambda m: captured.append(str(m)), level="ERROR", diagnose=False)
     try:
-        body = meiva.skills.alpha.__doc__
-        assert body is not None
+        body = meiva.files.read(meiva.skills.alpha.path + "/SKILL.md")
         assert body.endswith("# A\n")
     finally:
         logger.remove(sink)

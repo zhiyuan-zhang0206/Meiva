@@ -11,17 +11,15 @@ from typing import TypeGuard
 from base.packages.skills.tree import Skill, Tree, flatten, identifier
 from base.paths import skills_dir
 from meiva.sdk_surface import process_context, skill_sources
-from meiva.skills.skill_proxies import Namespace, SkillProxy, consumed_text, node_to_obj
+from meiva.skills.skill_proxies import Namespace, SkillProxy, node_to_obj
 
-# Attribution timing: a `skill_invoked` row at depth `"loaded"` — the only
-# depth the producer writes — means the agent CONSUMED a skill's SKILL.md body
-# (a `help()` render, a direct `__doc__` read, or an `meiva.files.read` of the
-# skill's SKILL.md — see `record_skill_invoked_by_path`). Resolving a node
-# (`meiva.skills.<name>` access) is exposure, not use: the system-prompt index
-# and every index render walk the same tree every turn and read only
-# frontmatter descriptions, so they must record nothing. `_SkillProxy` and
-# `_Namespace` therefore load their SKILL.md body lazily on first `__doc__`
-# access and record the attribution there. `"loaded"` is the only depth
+# meiva:note
+# Attribution: a `skill_invoked` row at depth `"loaded"` — the only depth the producer writes —
+# means the agent READ a skill's SKILL.md file through `meiva.files.read` (see
+# `record_skill_invoked_by_path`). `meiva.help` on a skill or a namespace shows its name,
+# description and path and reads no body, and resolving a node (`meiva.skills.<name>`) is
+# exposure; neither records anything. A read that does not go through `meiva.files.read` (a
+# shell `cat`, an external harness's own file tool) is not recorded. `"loaded"` is the only depth
 # meiva_self_evolution scores
 # (`meiva_builtins/skills/meiva_self_evolution/reference/collect.py:_skills_touched`);
 # baseline prompt exposure is not recorded at all.
@@ -135,25 +133,11 @@ def names() -> list[Skill]:
     return flatten(_scan_tree())
 
 
-def _consume_skill_body(skill: Skill) -> str:
-    """Read one skill's SKILL.md body, record the `skill_invoked` attribution,
-    and return the consumed shape — a path line (tilde-shortened) then the raw
-    body, the shape a proxy's `__doc__` carries. The one body-consumption
-    point behind every proxy `__doc__` and `meiva.help` render, so each records
-    identically."""
-    content = (Path(skill["path"]) / "SKILL.md").read_text(encoding="utf-8")
-    _record_skill_invoked(skill)
-    return consumed_text(skill["path"], str(Path.home()), content)
-
-
 def record_skill_invoked_by_path(path: str | Path) -> bool:
-    """Record the `skill_invoked` attribution for a direct SKILL.md file read.
+    """Record the `skill_invoked` attribution for a SKILL.md file read.
 
-    The `.path` + `meiva.files.read(SKILL.md)` pattern consumes a skill body like
-    a `help()` render, but never touches the lazy proxy hook that carries the
-    attribution — so it used to record nothing and under-counted `loaded`
-    (facility-wide scan: 68 agents / 3 days used the pattern, 13 with zero
-    rows). `meiva.files.read` routes here, after it has resolved the path
+    Reading the file is the one way a skill body reaches the agent (`meiva.help` shows only
+    name, description and path). `meiva.files.read` routes here, after it has resolved the path
     against the agent's workspace. Only a loaded skill's own SKILL.md
     qualifies (a SKILL.md outside the mount roots is not a skill the agent
     loaded). Returns whether a matching skill was found and attributed.
@@ -169,7 +153,7 @@ def record_skill_invoked_by_path(path: str | Path) -> bool:
     if p.name != "SKILL.md":
         return False
     for skill in names():
-        if Path(skill["path"]).expanduser() == p.parent:
+        if Path(skill["path"]) == p.parent:
             _record_skill_invoked(skill)
             return True
     return False
@@ -184,8 +168,7 @@ def _note_skill_read(skill_identifier: str) -> None:
     so the agent host knows which skills are already in this context window (skill recall
     does not offer them again).
 
-    The same single point as the `skill_invoked` audit, so every way of reading a body is
-    covered. Plain strings only: this runs in the exec child, which must not import the
+    The same single point as the `skill_invoked` audit, so every recorded read is covered. Plain strings only: this runs in the exec child, which must not import the
     agent state classes or the model stack. Outside an exec turn there is no state update to
     carry it and the read is not noted; a `skill_reads` value that is not a list — agent code
     wrote the channel by hand — drops the note too, because a skill read must hand the body
@@ -204,11 +187,11 @@ def _note_skill_read(skill_identifier: str) -> None:
 
 
 def _record_skill_invoked(skill: Skill) -> None:
-    """Record that this agent opened this skill: one `skill_invoked` audit event
+    """Record that this agent read this skill's SKILL.md: one `skill_invoked` audit event
     at the `"loaded"` depth (the only depth the producer writes), written at the
-    moment of consumption through the audit-event path (`audit_events` row in
+    moment of the file read through the audit-event path (`audit_events` row in
     Postgres, then the unified stream). Nothing is buffered or deduplicated in
-    this process: every body consumption is one event, and the consumer
+    this process: every SKILL.md read is one event, and the consumer
     (`meiva_self_evolution`'s `_skills_touched`) reads the set of skills, not row
     counts. Skipped outside an agent process (no identity to attribute to).
 
@@ -270,7 +253,7 @@ def __getattr__(name: str) -> SkillProxy | Namespace:
     tree = _scan_tree()
     if name not in tree:
         raise AttributeError(f"meiva.skills has no {name!r} (available: {sorted(tree)})")
-    return node_to_obj(name, tree[name], _consume_skill_body)
+    return node_to_obj(name, tree[name])
 
 
 def __dir__() -> list[str]:
@@ -298,9 +281,9 @@ class _SkillsModule(types.ModuleType):
     @property
     def __all_for_meiva__(self) -> list[str]:
         """Top-level skill and namespace names — the index a bare
-        `meiva.help(meiva.skills)` renders, one heading + one-line description per
-        entry. Bodies never render from here; `meiva.help(meiva.skills.<name>)`
-        opens one. A process that holds no SDK context (a host building an installation) has
+        `meiva.help(meiva.skills)` renders: per entry its path, description and the
+        file or folder to read. Nothing below the top level is expanded; `meiva.help(meiva.skills.<name>)`
+        shows one entry and its direct children. A process that holds no SDK context (a host building an installation) has
         no home to scan and lists nothing."""
         return sorted(_scan_tree()) if process_context.ambient_context() is not None else []
 

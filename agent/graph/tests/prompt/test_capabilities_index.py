@@ -186,7 +186,7 @@ def test_delegation_check_routes_nontrivial_work_without_forcing_methods(tmp_pat
 
     text = _delegation_check(tmp_path, inject=["*"])
 
-    assert "load meiva-workflow when available" in text
+    assert "read meiva-workflow when available" in text
     assert "meiva.help(meiva.skills.meiva_workflow)" in text
     assert "non-trivial, ambiguous, consequential, sustained, or parallel" in text
     assert "does not mandate an interview" in text

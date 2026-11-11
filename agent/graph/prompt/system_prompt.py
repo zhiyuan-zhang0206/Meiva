@@ -202,9 +202,9 @@ def align_before_action_section(inputs: SectionInputs) -> str:
 _STEP_SKILL_INDEX = (
     "Does a skill already cover this? Read the `# Capabilities` index "
     "and match the task against descriptions and expected outputs before "
-    "starting work. Load applicable skills with meiva.help(meiva.skills.<name>). "
+    "starting work. Read applicable skills: meiva.help(meiva.skills.<name>) shows the SKILL.md path. "
     "For non-trivial, ambiguous, consequential, sustained, or parallel work, "
-    "load meiva-workflow when available (`meiva.help(meiva.skills.meiva_workflow)`) "
+    "read meiva-workflow when available (`meiva.help(meiva.skills.meiva_workflow)`) "
     "to choose how to work. Its lightweight "
     "entry selects only the needed methods; it does not mandate an interview, "
     "goal supervision, or a plan document."

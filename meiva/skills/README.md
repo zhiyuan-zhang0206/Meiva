@@ -7,7 +7,7 @@ catalog, grouped by what each skill does, is
 [the skills index](../../meiva_builtins/skills/README.md).
 
 ## How Skills Work
-Skills are loaded on-demand by agents via `meiva.help(meiva.skills.<name>)`.
+`meiva.help(meiva.skills.<name>)` shows a skill's name, description and SKILL.md path; the agent reads that file.
 Each skill is a Markdown file with frontmatter describing when to use it.
 Skills can be nested; every agent-visible spelling (index lines, `meiva.help` headings, preloaded-skill sections) is the loadable path, e.g. `meiva.skills.meiva_memory.consolidation`.
 
@@ -25,7 +25,7 @@ Skills can be nested; every agent-visible spelling (index lines, `meiva.help` he
 
 Node three states (like Python packages):
 - **Leaf skill**: Only SKILL.md, no children with skills → pure leaf. `meiva.skills.meiva_goal`.
-- **root skill**: Has both SKILL.md and children with skills → both callable and a namespace. `meiva.help` renders its own SKILL.md then lists children.
+- **root skill**: Has both SKILL.md and children with skills → both callable and a namespace. `meiva.help` shows its own entry (description, SKILL.md path) then lists its children the same way.
 - **Pure namespace**: Only INDEX.md (or neither) → just a labeled layer with a description. `meiva.skills.coding.tdd`, `meiva.skills.superpowers.brainstorming`.
 
 ## Naming: dash outside, underscore inside
@@ -64,9 +64,10 @@ plugin carries are dash-named like any other.
 
 ## Core API
 
-- `meiva.skills.<path>` — Access a skill or namespace (module `__getattr__` lazy resolution). Resolution is exposure, not use — it records nothing. The `skill_invoked` event at depth `loaded` (the only depth meiva_self_evolution scores as real use) fires on SKILL.md body consumption: `meiva.help(meiva.skills.<path>)` or a direct `__doc__` read loads the body lazily and attributes it there. Each body load writes its event on the spot through `_record_skill_invoked` (an `audit_events` row, then the unified stream); the SDK keeps no in-process buffer or dedup set, and a failed write logs an error with traceback and emits `audit_write_failed` without failing the read. The same point notes the skill's identifier in the exec turn's state update (`meiva.state_update["skill_reads"]`, plain strings, once per skill per exec) so skill recall knows the body is already in the window; outside an exec turn nothing is noted.
-- `meiva.help(meiva.skills.<path>)` — Load full text (path line + SKILL.md body).
-- `meiva.help(meiva.skills)` / `dir(meiva.skills)` — **Index only**: one `meiva.skills.<path>` heading + one-line description per entry, never a body. The child walk reads frontmatter `_description`s and never touches `__doc__`, and node resolution records no `loaded` attribution — listing the catalog is silent. The agent-visible surface is the `__all_for_meiva__` property on `_SkillsModule` (the module's own class) — `agent_visible_names` reads it with `getattr_static`, which a PEP 562 module `__getattr__` cannot serve.
+- `meiva.skills.<path>` — Access a skill or namespace (module `__getattr__` lazy resolution). Resolution is exposure, not use — it records nothing and reads no file.
+- `meiva.help(meiva.skills.<path>)` — Name, description and path, nothing else; the agent reads the file for the body. A skill and a root skill (a folder with a SKILL.md and skill children) show their description and the `SKILL.md` path; a namespace labelled by an INDEX.md shows the INDEX.md text and the folder path; a bare folder (no description source) shows the folder path alone. A root skill or namespace then lists its direct children the same way (a child namespace is not expanded); each entry is a heading with the loadable `meiva.skills.<path>`, the description and `Path: <absolute path>`. The path is absolute, so `meiva.files.read` and a native harness's file tool take it as given. A node's folder is recorded on the tree (`NS.path`, written by `SkillIndexBuilder`).
+- `meiva.help(meiva.skills)` / `dir(meiva.skills)` — the top level only: each top-level skill or namespace as one entry, none expanded. The agent-visible surface is the `__all_for_meiva__` property on `_SkillsModule` (the module's own class) — `agent_visible_names` reads it with `getattr_static`, which a PEP 562 module `__getattr__` cannot serve.
+- Attribution: the `skill_invoked` event at depth `loaded` (the only depth meiva_self_evolution scores as real use) is written when the agent reads a SKILL.md through `meiva.files.read` (`record_skill_invoked_by_path`, an `audit_events` row, then the unified stream); `meiva.help` and node resolution record nothing. A read that bypasses `meiva.files.read` (a shell `cat`, an external harness's own file tool) is not recorded. The same point notes the skill's identifier in the exec turn's state update (`meiva.state_update["skill_reads"]`, plain strings, once per skill per exec) so skill recall knows the body is already in the window; outside an exec turn nothing is noted. The SDK keeps no in-process buffer or dedup set, and a failed write logs an error with traceback and emits `audit_write_failed` without failing the read.
 - Plugin skill sources: a plugin declares `skill_sources` (`provider() -> list[Path]`) in `contribute()`; the SDK install adds them and the scan reads them (project-local, scanned last, can override same-named built-ins).
 
 ## Loading Sources
@@ -77,9 +78,7 @@ A mount root's `INDEX.md` is ignored; its `SKILL.md` is retained. Auto-promotion
 of a same-named child preserves the old child access path but omits its duplicate
 flat-list entry. An existing root skill is not replaced.
 
-Body caching belongs to each proxy: rereading a saved proxy's `__doc__` does not
-load or attribute again. A fresh `meiva.skills.<path>` resolution creates a fresh
-proxy. Direct skill-file reads, including partial reads, attribute each read.
+Direct skill-file reads, including partial reads, attribute each read.
 `meiva/tests/skills/test_skills_attribution.py` checks these boundaries; its failed
 audit-write case checks the returned body and logged traceback, not live telemetry
 delivery. Mount fixtures in `test_skills_mount.py` compare raw file content.
