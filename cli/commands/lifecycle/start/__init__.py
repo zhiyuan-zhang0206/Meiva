@@ -597,6 +597,7 @@ def cmd_start(
     producer: Callable[[], EventPipeline],
     command: CommandRuntime,
     boot_attempt: bool = False,
+    converge_steps: tuple[ConvergeStep, ...] | None = None,
 ) -> int:
     # meiva:note
     # Converge one configured unit through storage, schema, root and readiness.
@@ -624,6 +625,7 @@ def cmd_start(
             producer=producer,
             command=command,
             boot_attempt=boot_attempt,
+            converge_steps=converge_steps,
         )
         audit.exited(code)
         return code

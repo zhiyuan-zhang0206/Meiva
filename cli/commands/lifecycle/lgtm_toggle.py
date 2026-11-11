@@ -13,6 +13,7 @@ from collections.abc import Callable
 
 from base.telemetry import EventPipeline
 from base.telemetry.lgtm_local import BACKENDS
+from cli.commands.converge.spec import ConvergeStep
 from cli.commands.lifecycle import start
 from cli.database import OperatorDatabaseFactory
 from cli.database.runtime import CommandRuntime
@@ -45,6 +46,7 @@ def cmd_lgtm_on(
     database_factory: OperatorDatabaseFactory,
     producer: Callable[[], EventPipeline],
     command: CommandRuntime,
+    converge_steps: tuple[ConvergeStep, ...] | None = None,
 ) -> int:
     # meiva:note
     # Declare this home an observability station and start the named selection. The operator
@@ -67,6 +69,7 @@ def cmd_lgtm_on(
         database_factory=database_factory,
         producer=producer,
         command=command,
+        converge_steps=converge_steps,
     )
 
 
@@ -80,6 +83,7 @@ def cmd_lgtm_off(
     database_factory: OperatorDatabaseFactory,
     producer: Callable[[], EventPipeline],
     command: CommandRuntime,
+    converge_steps: tuple[ConvergeStep, ...] | None = None,
 ) -> int:
     # meiva:note
     # Retract the station marker and start the named selection, preserving observation data.
@@ -98,4 +102,5 @@ def cmd_lgtm_off(
         database_factory=database_factory,
         producer=producer,
         command=command,
+        converge_steps=converge_steps,
     )

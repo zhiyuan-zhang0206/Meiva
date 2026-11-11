@@ -233,6 +233,7 @@ class StartRun:
             database_factory=self.database_factory,
             producer=self.producer,
             command=self.command,
+            converge_steps=host_steps(),
         )
 
 

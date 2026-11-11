@@ -13,7 +13,11 @@ import pytest
 from base.telemetry.lgtm_local import BACKENDS
 from cli.commands.lifecycle import lgtm_toggle as lgtm
 from cli.commands.lifecycle.tests.scripted_root import UnitRow
-from cli.commands.lifecycle.tests.startup.start_harness import StartRun, gateway_listener
+from cli.commands.lifecycle.tests.startup.start_harness import (
+    StartRun,
+    gateway_listener,
+    host_steps,
+)
 from services.supervision.healthchecks.lgtm import lgtm_host_marker
 
 GATEWAY = frozenset({"gateway"})
@@ -37,6 +41,7 @@ def _toggle(
         database_factory=run.database_factory,
         producer=run.producer,
         command=run.command,
+        converge_steps=host_steps(),
     )
 
 
