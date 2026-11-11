@@ -63,7 +63,6 @@ def test_seen_moves_one_cursor_and_the_feed_reports_what_lies_past_it(
         assert "read_at" not in feed.items[0].model_dump()
         old_shape = client.post(seen_path(aid), json={"action": "read"}, headers=headers("old"))
         assert old_shape.status_code == 422
-    assert db_conn.execute("SELECT count(*) FROM notification_events").fetchone() == (0,)
     assert db_conn.execute(
         "SELECT count(*) FROM inbound_messages WHERE agent_id=%s", (aid,)
     ).fetchone() == (0,)
@@ -259,7 +258,6 @@ def test_ask_retries_note_and_answer_share_one_receipt(db_conn: psycopg.Connecti
         assert answer.status_code == 201, answer.text
         assert client.post(resolve, json=body, headers=headers("answer")).json() == answer.json()
         assert client.get(f"/api/notices/open?agent_id={aid}").json() == []
-    assert db_conn.execute("SELECT count(*) FROM notification_events").fetchone() == (0,)
     assert db_conn.execute(
         "SELECT count(*) FROM inbound_messages WHERE agent_id=%s", (aid,)
     ).fetchone() == (1,)
@@ -330,3 +328,30 @@ def test_ask_creation_retry_preserves_each_independent_question(
         assert client.post(path, json=changed, headers=headers("question")).status_code == 409
         assert client.post(path, json=changed, headers=headers("timing")).status_code == 201
         assert len(client.get(f"/api/notices/open?agent_id={aid}").json()) == 2
+
+
+def unread_pushes(conn: psycopg.Connection, aid: int) -> list[tuple[str, str, str | None]]:
+    rows = conn.execute(
+        "SELECT action, subject, body FROM notification_events "
+        "WHERE agent_id=%s AND category='core.unread' ORDER BY id",
+        (aid,),
+    ).fetchall()
+    return [(row[0], row[1], row[2]) for row in rows]
+
+
+def test_sdk_publication_stages_one_unread_push_that_the_seen_cursor_retracts(
+    db_conn: psycopg.Connection,
+) -> None:
+    aid = sdk_agent(db_conn)
+    with gateway_test_client() as client:
+        publish_one(client, aid, "a")
+        newest = publish_one(client, aid, "b")
+        assert unread_pushes(db_conn, aid) == [
+            ("alert", f"#{aid}", "Update a"),
+            ("replace", f"#{aid}", "Update b"),
+        ]
+        marked = client.post(seen_path(aid), json={"up_to_id": newest.id}, headers=headers("s"))
+        assert marked.status_code == 200, marked.text
+        replay = client.post(seen_path(aid), json={"up_to_id": newest.id}, headers=headers("s2"))
+        assert replay.json()["advanced"] is False
+    assert [action for action, *_ in unread_pushes(db_conn, aid)] == ["alert", "replace", "retract"]

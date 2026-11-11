@@ -11,6 +11,7 @@ from psycopg.types.json import Jsonb
 from base.api_contracts.notice_question import ChoiceQuestion
 from base.api_contracts.user_delivery import AskMessage
 from base.db.transaction import write_transaction
+from base.events.notifications.publish import stage_question_asked
 from gateway.agents.inbound_provenance import request_inbound_provenance
 from gateway.agents.notice_operations.keyed_operation import operation_key
 from gateway.agents.notice_operations.notices import existing_receipt, save_receipt
@@ -61,6 +62,7 @@ async def ask(
                 question_id = cur.fetchone()
                 if not isinstance(question_id, int):
                     raise TypeError("question insert must return an integer id")
+            stage_question_asked(conn, agent_id=agent_id, notice_id=question_id, title=body.title)
             save_receipt(conn, request.url.path, key, payload, {"id": question_id})
             return question_id
 

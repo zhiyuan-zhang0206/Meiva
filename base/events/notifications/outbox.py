@@ -19,22 +19,18 @@ _log = logging.getLogger("base.events.notifications.outbox")
 
 
 # meiva:note
-# A row younger than `min_age_seconds` is left alone: its producer is still inside
-# the request that staged it and will announce it itself, and sweeping it here
-# would double-publish every notice. Older than that, no producer is still
-# working and the row is genuinely owed. A failed publish inside the sweep leaves
+# Producers stage a row inside their own transaction and never announce it, so
+# every committed unannounced row is owed to this sweep. A failed publish leaves
 # the row unannounced, which is the condition that brings the next sweep back to
 # it — so a Redis outage delays pushes instead of dropping them. Re-announcing a
 # row whose mark was lost is at-least-once on purpose: clients deduplicate on
 # `notification_id`, and a duplicate ping is cheaper than a missing decision.
 # meiva:link base/events/notifications/README.md
-def republish_pending(
-    pool: ConnectionPool, bus: SyncPublisher | None, *, min_age_seconds: float, limit: int
-) -> int:
+def republish_pending(pool: ConnectionPool, bus: SyncPublisher | None, *, limit: int) -> int:
     if bus is None:
         return 0
     announced = 0
-    for notification_id in pending_sync(pool, min_age_seconds=min_age_seconds, limit=limit):
+    for notification_id in pending_sync(pool, limit=limit):
         # meiva:note
         # One row's failure must not decide the rest of the batch. The row stays
         # unannounced, so the next sweep returns to it, while the deliveries

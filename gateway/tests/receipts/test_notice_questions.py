@@ -194,3 +194,76 @@ def test_ask_requires_a_response_and_cannot_be_marked_read(
     assert db_conn.execute(
         "SELECT resolved_at FROM agent_notices WHERE id=%s", (notice["id"],)
     ).fetchone() == (None,)
+
+
+def question_notifications(
+    conn: psycopg.Connection, agent: int
+) -> list[tuple[str, str, str, str | None]]:
+    rows = conn.execute(
+        "SELECT action, tag, subject, body FROM notification_events "
+        "WHERE agent_id=%s AND category='core.question' ORDER BY id",
+        (agent,),
+    ).fetchall()
+    return [(row[0], row[1], row[2], row[3]) for row in rows]
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        {"action": "answer", "answer": {"option_ids": ["desktop"], "comment": "Use 1 later."}},
+        {"action": "dismiss"},
+    ],
+    ids=["answered", "closed"],
+)
+def test_a_question_alerts_when_asked_and_is_retracted_when_resolved(
+    client: TestClient, db_conn: psycopg.Connection, body: dict[str, object]
+) -> None:
+    agent = seed_agent(db_conn)
+    notice = post_question(client, agent)
+    tag = f"question:{notice}"
+    assert question_notifications(db_conn, agent) == [
+        ("alert", tag, "Which surfaces?", f"#{agent}")
+    ]
+
+    path = f"/api/keyed/v1/agents/{agent}/notices/{notice}/resolve"
+    assert client.post(path, json=body, headers=keyed_headers(str(uuid4()))).status_code == 201
+
+    assert question_notifications(db_conn, agent)[1:] == [
+        ("retract", tag, "Which surfaces?", f"#{agent}")
+    ]
+
+
+def test_a_rejected_answer_leaves_the_question_notification_standing(
+    client: TestClient, db_conn: psycopg.Connection
+) -> None:
+    agent = seed_agent(db_conn)
+    notice = post_question(client, agent)
+    path = f"/api/keyed/v1/agents/{agent}/notices/{notice}/resolve"
+
+    rejected = client.post(
+        path,
+        json={"action": "answer", "answer": {"option_ids": ["missing"]}},
+        headers=keyed_headers(str(uuid4())),
+    )
+
+    assert rejected.status_code == 422
+    assert [action for action, *_ in question_notifications(db_conn, agent)] == ["alert"]
+
+
+def test_each_open_question_has_its_own_notification(
+    client: TestClient, db_conn: psycopg.Connection
+) -> None:
+    agent = seed_agent(db_conn)
+    for title in ("First?", "Second?"):
+        asked = client.post(
+            f"/api/agents/{agent}/asks",
+            json={"title": title, "question": {"type": "text"}},
+            headers=keyed_headers(str(uuid4())),
+        )
+        assert asked.status_code == 201, asked.text
+    rows = question_notifications(db_conn, agent)
+    assert [(action, subject) for action, _, subject, _ in rows] == [
+        ("alert", "First?"),
+        ("alert", "Second?"),
+    ]
+    assert rows[0][1] != rows[1][1]

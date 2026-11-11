@@ -1,4 +1,7 @@
 exports = ["ports.py", "store.py"]
 
+[uses]
+"tests" = ["store.py"]
+
 [purity]
 "__init__.py" = "strict"

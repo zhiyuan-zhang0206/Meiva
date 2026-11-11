@@ -5,12 +5,14 @@ from psycopg.rows import dict_row, scalar_row
 from psycopg.types.json import Jsonb
 from pydantic import BaseModel
 
+from base.agents.messages.reply_intent import normalize_last_message_text
 from base.api_contracts.notice_question import NoticeQuestion
 from base.api_contracts.user_delivery import (
     PublishMessage,
     UserDeliveryMode,
     UserMessage,
 )
+from base.events.notifications.publish import stage_unread_delivery, stage_unread_seen
 
 COLUMNS = (
     "id, agent_id, mode, source_key, content, suggestions, created_at, "
@@ -43,6 +45,7 @@ def publish(
     mode: UserDeliveryMode,
     created_at: datetime,
 ) -> UserMessage:
+    had_unread = has_unseen(conn, agent_id)
     with conn.cursor(row_factory=dict_row) as cur:
         cur.execute(
             "INSERT INTO agent_user_messages (agent_id, source_key, mode, content, "
@@ -57,6 +60,7 @@ def publish(
                 created_at,
             ),
         )
+        inserted = cur.rowcount == 1
         cur.execute(
             sql.SQL(
                 "SELECT {} FROM agent_user_messages WHERE agent_id=%s AND source_key=%s"
@@ -70,6 +74,10 @@ def publish(
         mode,
     ):
         raise DeliveryConflictError("this publication key already identifies different content")
+    if inserted and body.content is not None:
+        stage_unread_delivery(
+            conn, agent_id, normalize_last_message_text(body.content), had_unread=had_unread
+        )
     return message
 
 
@@ -122,13 +130,17 @@ def advance_seen(conn: Connection, agent_id: int, up_to_id: int) -> tuple[int, b
         raise LookupError(f"agent {agent_id} does not exist")
     if up_to_id > newest[0]:
         raise ValueError(f"up_to_id {up_to_id} is beyond the agent's newest delivery {newest[0]}")
+    had_unread = has_unseen(conn, agent_id)
     moved = conn.execute(
         "INSERT INTO agent_user_seen AS s (agent_id, seen_id) VALUES (%s, %s) "
         "ON CONFLICT (agent_id) DO UPDATE SET seen_id = EXCLUDED.seen_id "
         "WHERE s.seen_id < EXCLUDED.seen_id RETURNING seen_id",
         (agent_id, up_to_id),
     ).fetchone()
-    return (up_to_id, True) if moved is not None else (seen_id(conn, agent_id), False)
+    if moved is None:
+        return seen_id(conn, agent_id), False
+    stage_unread_seen(conn, agent_id, had_unread=had_unread, has_unread=has_unseen(conn, agent_id))
+    return up_to_id, True
 
 
 def latest_decision(conn: Connection, agent_id: int) -> int:

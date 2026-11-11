@@ -31,7 +31,6 @@ async def run(pool: ConnectionPool, bus: EventBus, *, interval_seconds: float, b
                     republish_pending,
                     pool,
                     bus,
-                    min_age_seconds=interval_seconds,
                     limit=batch,
                 )
                 if announced:

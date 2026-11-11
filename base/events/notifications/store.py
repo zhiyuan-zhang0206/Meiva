@@ -13,33 +13,25 @@ from base.db.transaction import write_transaction
 SETTINGS_KEY = "notifications.categories"
 
 _SELECT_OVERRIDES = "SELECT value FROM user_settings WHERE key = %s"
-_SELECT_INPUT_BASE = (
-    "SELECT (SELECT value FROM user_settings WHERE key = %s) AS overrides, now() AS now"
-)
-_SELECT_LAST_KEYED = (
-    "SELECT created_at FROM notification_events "
-    "WHERE category = %s AND dedupe_key = %s ORDER BY created_at DESC LIMIT 1"
-)
+_SELECT_LABEL = "SELECT label FROM agents WHERE id = %s"
 _INSERT = (
     "INSERT INTO notification_events "
-    "(category, subject, body, href, dedupe_key, importance, agent_id) "
-    "VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING id"
+    "(category, action, tag, subject, body, href, importance, agent_id) "
+    "VALUES (%s, %s, %s, %s, %s, %s, %s, %s) RETURNING id"
 )
 # meiva:note
 # One row still owed its live event, by id: `announced_at IS NULL` is the whole
-# outbox condition — the producer committed the delivery, the transport never
-# accepted the publication. The pending scan is oldest first and never takes a row
-# a producer staged moments ago, so a sweep cannot duplicate an announce that is
-# still in flight.
+# outbox condition — the producer committed the delivery and no live event has
+# been accepted yet. The pending scan is oldest first. Producers never announce
+# themselves: the gateway sweep is the one announce path, and an uncommitted row
+# is invisible to it.
 # meiva:link base/events/notifications/README.md
 _SELECT_UNANNOUNCED = (
-    "SELECT id, category, subject, body, href, importance, agent_id "
+    "SELECT id, category, action, tag, subject, body, href, importance, agent_id "
     "FROM notification_events WHERE id = %s AND announced_at IS NULL"
 )
 _SELECT_PENDING = (
-    "SELECT id FROM notification_events "
-    "WHERE announced_at IS NULL AND created_at < now() - make_interval(secs => %s) "
-    "ORDER BY id LIMIT %s"
+    "SELECT id FROM notification_events WHERE announced_at IS NULL ORDER BY id LIMIT %s"
 )
 _MARK_ANNOUNCED = (
     "UPDATE notification_events SET announced_at = now() WHERE id = %s AND announced_at IS NULL"
@@ -50,7 +42,7 @@ _MARK_ANNOUNCED = (
 # the cap must drop the OLDEST row of a long gap, not the most recent one.
 # meiva:link base/events/notifications/README.md
 _SELECT_RECENT = (
-    "SELECT id, category, subject, body, href, importance, agent_id, created_at "
+    "SELECT id, category, action, tag, subject, body, href, importance, agent_id, created_at "
     "FROM notification_events WHERE id > %s ORDER BY id DESC LIMIT %s"
 )
 _SELECT_LATEST = "SELECT COALESCE(MAX(id), 0) AS id FROM notification_events"
@@ -76,19 +68,13 @@ def parse_overrides(value: object) -> dict[str, bool]:
 # meiva:note
 # The single column of each read below, by name: `class_row` builds one of these per row.
 @dataclass(frozen=True)
-class _InputBase:
-    overrides: object
-    now: datetime
-
-
-@dataclass(frozen=True)
-class _CreatedAt:
-    created_at: datetime
-
-
-@dataclass(frozen=True)
 class _Value:
     value: object
+
+
+@dataclass(frozen=True)
+class _Label:
+    label: str | None
 
 
 @dataclass(frozen=True)
@@ -102,6 +88,8 @@ class _Id:
 class UnannouncedRow:
     id: int
     category: str
+    action: str
+    tag: str
     subject: str
     body: str | None
     href: str | None
@@ -109,20 +97,22 @@ class UnannouncedRow:
     agent_id: int
 
 
-def read_inputs(
-    conn: psycopg.Connection, *, category: str, dedupe_key: str | None
-) -> tuple[dict[str, bool], datetime | None, datetime]:
-    with conn.cursor(row_factory=class_row(_InputBase)) as cur:
-        base_row = cur.execute(_SELECT_INPUT_BASE, (SETTINGS_KEY,)).fetchone()
-    if base_row is None:
-        raise RuntimeError("notification input query returned no row")
-    overrides = parse_overrides(base_row.overrides)
-    last = None
-    if dedupe_key is not None:
-        with conn.cursor(row_factory=class_row(_CreatedAt)) as cur:
-            keyed = cur.execute(_SELECT_LAST_KEYED, (category, dedupe_key)).fetchone()
-        last = None if keyed is None else keyed.created_at
-    return overrides, last, base_row.now
+def read_overrides(conn: psycopg.Connection) -> dict[str, bool]:
+    with conn.cursor(row_factory=class_row(_Value)) as cur:
+        row = cur.execute(_SELECT_OVERRIDES, (SETTINGS_KEY,)).fetchone()
+    return parse_overrides(None if row is None else row.value)
+
+
+# meiva:note
+# The display name a push carries: the agent's label, or `#<id>` for an agent that has none yet,
+# the same fallback the console shows.
+# meiva:link base/events/notifications/README.md
+def agent_label(conn: psycopg.Connection, agent_id: int) -> str:
+    with conn.cursor(row_factory=class_row(_Label)) as cur:
+        row = cur.execute(_SELECT_LABEL, (agent_id,)).fetchone()
+    if row is None:
+        raise LookupError(f"agent {agent_id} does not exist")
+    return row.label or f"#{agent_id}"
 
 
 def insert(conn: psycopg.Connection, params: tuple[object, ...]) -> int:
@@ -149,9 +139,9 @@ def mark_announced_sync(pool: ConnectionPool, notification_id: int) -> bool:
         return conn.execute(_MARK_ANNOUNCED, (notification_id,)).rowcount > 0
 
 
-def pending_sync(pool: ConnectionPool, *, min_age_seconds: float, limit: int) -> list[int]:
+def pending_sync(pool: ConnectionPool, *, limit: int) -> list[int]:
     with pool.connection() as conn, conn.cursor(row_factory=class_row(_Id)) as cur:
-        rows = cur.execute(_SELECT_PENDING, (min_age_seconds, limit)).fetchall()
+        rows = cur.execute(_SELECT_PENDING, (limit,)).fetchall()
     return [row.id for row in rows]
 
 
@@ -161,6 +151,8 @@ def pending_sync(pool: ConnectionPool, *, min_age_seconds: float, limit: int) ->
 class NotificationDelivery:
     id: int
     category: str
+    action: str
+    tag: str
     subject: str
     body: str | None
     href: str | None

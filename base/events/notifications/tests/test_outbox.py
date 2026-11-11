@@ -8,9 +8,8 @@ from psycopg_pool import ConnectionPool
 
 from base.db import create_agent
 from base.db.transaction import write_transaction
-from base.events.notifications.notices import stage_notice_notification
 from base.events.notifications.outbox import republish_pending
-from base.events.notifications.publish import announce_sync, deliver_sync
+from base.events.notifications.publish import announce_sync, stage_question_asked
 
 
 def _pool(db_url: str) -> ConnectionPool[psycopg.Connection[TupleRow]]:
@@ -55,13 +54,16 @@ def _announced_at(conn: psycopg.Connection, notification_id: int) -> Any:
     return row[0]
 
 
-def _age(conn: psycopg.Connection, notification_id: int, seconds: float) -> None:
-    conn.execute(
-        "UPDATE notification_events SET created_at = now() - make_interval(secs => %s) "
-        "WHERE id = %s",
-        (seconds, notification_id),
-    )
-    conn.commit()
+def _stage(
+    pool: ConnectionPool[psycopg.Connection[TupleRow]], agent_id: int, notice_id: int
+) -> int:
+    with write_transaction(pool) as conn:
+        stage_question_asked(
+            conn, agent_id=agent_id, notice_id=notice_id, title=f"Question {notice_id}?"
+        )
+        row = conn.execute("SELECT max(id) FROM notification_events").fetchone()
+    assert row is not None
+    return int(row[0])
 
 
 # meiva:note
@@ -74,90 +76,37 @@ def test_a_failed_announce_leaves_the_row_owed(db_conn: psycopg.Connection, db_u
     bus = RecordingBus()
     bus.drop = True
     with _pool(db_url) as pool:
-        record = deliver_sync(
-            pool, category_id="core.needs_input", subject="needs an answer", agent_id=agent_id
-        )
-        assert record is not None
-        assert announce_sync(pool, bus, record.id) is False
-        assert _announced_at(db_conn, record.id) is None
+        notification_id = _stage(pool, agent_id, 1)
+        assert announce_sync(pool, bus, notification_id) is False
+        assert _announced_at(db_conn, notification_id) is None
         bus.drop = False
-        assert announce_sync(pool, bus, record.id) is True
-        assert _announced_at(db_conn, record.id) is not None
-    assert [event["notification_id"] for event in bus.notifications()] == [record.id]
+        assert announce_sync(pool, bus, notification_id) is True
+        assert _announced_at(db_conn, notification_id) is not None
+    assert [event["notification_id"] for event in bus.notifications()] == [notification_id]
 
 
 # meiva:note
-# The crash case: a producer committed the delivery and died before publishing.
-# The sweep is what makes that recoverable, and a second sweep must not push the
-# same delivery again.
+# Producers never announce: the committed row is owed to the sweep, the live event
+# carries the push's action and tag, and a second sweep must not push it again.
 # meiva:link base/events/notifications/README.md
-def test_the_sweep_announces_a_committed_but_unannounced_delivery(
+def test_the_sweep_announces_a_committed_push_once(
     db_conn: psycopg.Connection, db_url: str
 ) -> None:
     agent_id = create_agent(db_conn)
     db_conn.commit()
     bus = RecordingBus()
     with _pool(db_url) as pool:
-        record = deliver_sync(
-            pool, category_id="core.needs_input", subject="needs an answer", agent_id=agent_id
-        )
-        assert record is not None
-        # meiva:note
-        # The producer died here: committed, never announced.
-        # meiva:link base/events/notifications/README.md
-        _age(db_conn, record.id, 120)
-        assert republish_pending(pool, bus, min_age_seconds=30, limit=10) == 1
-        assert _announced_at(db_conn, record.id) is not None
-        assert republish_pending(pool, bus, min_age_seconds=30, limit=10) == 0
-    assert [event["notification_id"] for event in bus.notifications()] == [record.id]
-
-
-def test_a_fresh_row_is_left_to_its_producer(db_conn: psycopg.Connection, db_url: str) -> None:
-    agent_id = create_agent(db_conn)
-    db_conn.commit()
-    bus = RecordingBus()
-    with _pool(db_url) as pool:
-        record = deliver_sync(
-            pool, category_id="core.needs_input", subject="needs an answer", agent_id=agent_id
-        )
-        assert record is not None
-        assert republish_pending(pool, bus, min_age_seconds=30, limit=10) == 0
-        assert _announced_at(db_conn, record.id) is None
-    assert bus.notifications() == []
-
-
-# meiva:note
-# A notice's delivery is owed from the moment the notice commits, so the sweep
-# recovers a notice whose post-commit announce never ran.
-# meiva:link base/events/notifications/README.md
-def test_the_sweep_recovers_a_committed_notice_with_no_announce(
-    db_conn: psycopg.Connection, db_url: str
-) -> None:
-    agent_id = create_agent(db_conn)
-    db_conn.commit()
-    inserted = db_conn.execute(
-        "INSERT INTO agent_notices "
-        "(agent_id, local_id, title, content, priority, require_response, expire_at) "
-        "VALUES (%s, 1, 'Need a decision', 'A or B', 'P1', TRUE, now() + interval '1 day') "
-        "RETURNING id",
-        (agent_id,),
-    ).fetchone()
-    assert inserted is not None
-    notice_id = int(inserted[0])
-    db_conn.commit()
-    bus = RecordingBus()
-    with _pool(db_url) as pool:
-        with write_transaction(pool) as conn:
-            staged = stage_notice_notification(conn, agent_id=agent_id, notice_id=notice_id)
-        assert staged is not None
-        # meiva:note
-        # ... and the process died before announcing it.
-        # meiva:link base/events/notifications/README.md
-        _age(db_conn, staged, 120)
-        assert republish_pending(pool, bus, min_age_seconds=30, limit=10) == 1
-    delivered = bus.notifications()
-    assert len(delivered) == 1
-    assert delivered[0]["subject"] == "Need a decision"
+        notification_id = _stage(pool, agent_id, 5)
+        assert republish_pending(pool, bus, limit=10) == 1
+        assert _announced_at(db_conn, notification_id) is not None
+        assert republish_pending(pool, bus, limit=10) == 0
+    [event] = bus.notifications()
+    assert event["notification_id"] == notification_id
+    assert (event["action"], event["tag"], event["subject"]) == (
+        "alert",
+        "question:5",
+        "Question 5?",
+    )
 
 
 # meiva:note
@@ -194,26 +143,11 @@ def test_one_failing_row_does_not_hold_the_rest_of_the_sweep(
     agent_id = create_agent(db_conn)
     db_conn.commit()
     with _pool(db_url) as pool:
-        records = [
-            deliver_sync(
-                pool,
-                category_id="core.needs_input",
-                subject=f"needs an answer {index}",
-                agent_id=agent_id,
-            )
-            for index in range(3)
-        ]
-        ids = [record.id for record in records if record is not None]
-        assert len(ids) == 3
-        for notification_id in ids:
-            _age(db_conn, notification_id, 120)
+        ids = [_stage(pool, agent_id, index) for index in range(3)]
         broken = ids[1]
-        assert (
-            republish_pending(pool, ExplodingBus("needs an answer 1"), min_age_seconds=30, limit=10)
-            == 2
-        )
+        assert republish_pending(pool, ExplodingBus("Question 1?"), limit=10) == 2
         assert _announced_at(db_conn, ids[0]) is not None
         assert _announced_at(db_conn, broken) is None
         assert _announced_at(db_conn, ids[2]) is not None
-        assert republish_pending(pool, RecordingBus(), min_age_seconds=30, limit=10) == 1
+        assert republish_pending(pool, RecordingBus(), limit=10) == 1
         assert _announced_at(db_conn, broken) is not None

@@ -128,14 +128,14 @@ class GatewaySettings(EnvSettings):
 
     notification_outbox_interval_seconds: float = Field(
         title="Notification recovery interval (seconds)",
-        default=30.0,
+        default=2.0,
         gt=0,
         alias="MEIVA_NOTIFICATION_OUTBOX_INTERVAL_SECONDS",
         description=(
-            "Gateway notification-outbox sweep interval (seconds): how often a delivery "
-            "row left unannounced (a failed Redis announce, or a crash between the "
-            "producing commit and the publish) is re-announced. A row younger than one "
-            "interval is left to the producer that staged it."
+            "Gateway notification-outbox sweep interval (seconds): how often the push rows "
+            "staged by the runner and the gateway (and still unannounced) are published as "
+            "live events. This is the announce path itself, so it bounds how late a push "
+            "reaches a connected client."
         ),
         json_schema_extra={
             "restart_required": "gateway",

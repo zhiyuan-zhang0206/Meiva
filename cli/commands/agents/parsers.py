@@ -10,9 +10,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from collections.abc import Sequence
 from dataclasses import dataclass
-from datetime import datetime
 from typing import Literal
 
 from base.host.boundary.options import options
@@ -150,17 +148,6 @@ class _NoticesClearOptions:
     agent: int
     force: bool
     stale: bool
-
-
-@dataclass(frozen=True)
-class _NoticesAuditOptions:
-    days: int
-    category: str | None
-    tz: str | None
-    now: datetime | None
-    simulate: Sequence[str] | None
-    out: Literal["text", "json"]
-    explain: bool
 
 
 def _h_agents_ls(args: argparse.Namespace) -> int:
@@ -373,34 +360,6 @@ def _h_notices_clear(args: argparse.Namespace) -> int:
         stdin=runtime.terminal.stdin,
         rng=runtime.rng,
     )
-
-
-def _h_notices_audit(args: argparse.Namespace) -> int:
-    from base.cluster.machine.boot import gateway_access_from_boot
-    from cli.commands.agents.notices_audit import cmd_notices_audit
-    from cli.database.runtime import runtime_of
-
-    opts = options(args, _NoticesAuditOptions)
-    return cmd_notices_audit(
-        access=gateway_access_from_boot(runtime_of(args).config),
-        days=opts.days,
-        category=opts.category,
-        tz_name=opts.tz,
-        now=opts.now,
-        simulate=opts.simulate or (),
-        out=opts.out,
-        explain=opts.explain,
-    )
-
-
-def _instant(value: str) -> datetime:
-    try:
-        moment = datetime.fromisoformat(value)
-    except ValueError as exc:
-        raise argparse.ArgumentTypeError(f"--now is not an ISO 8601 instant: {value!r}") from exc
-    if moment.tzinfo is None:
-        raise argparse.ArgumentTypeError("--now needs an offset, e.g. 2026-10-18T21:00:00+08:00")
-    return moment
 
 
 def _add_timeline_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
@@ -646,39 +605,3 @@ def _add_notices_parsers(sub: argparse._SubParsersAction[argparse.ArgumentParser
         help="clear open questions of terminated agents (not --agent)",
     )
     notices_clear_p.set_defaults(func=_h_notices_clear)
-
-    notices_audit_p = notices_sub.add_parser(
-        "audit",
-        help="replay a window of notification candidates through the delivery policy",
-    )
-    notices_audit_p.add_argument("--days", type=int, default=7, help="window length in days")
-    notices_audit_p.add_argument(
-        "--category", default=None, help="one modelled category (default: all of them)"
-    )
-    notices_audit_p.add_argument(
-        "--tz",
-        default=None,
-        help="IANA zone for the day and hour buckets (default: the cluster clock zone)",
-    )
-    notices_audit_p.add_argument(
-        "--now", type=_instant, default=None, help="window end as an ISO instant (default: now)"
-    )
-    notices_audit_p.add_argument(
-        "--explain",
-        action="store_true",
-        help="also list every candidate with why it was delivered or held back",
-    )
-    notices_audit_p.add_argument(
-        "--out",
-        choices=("text", "json"),
-        default="text",
-        help="text for the operator table, json for another tool",
-    )
-    notices_audit_p.add_argument(
-        "--simulate",
-        action="append",
-        default=None,
-        metavar="SWITCH=on|off",
-        help="flip one input: requestion=on|off (repeatable)",
-    )
-    notices_audit_p.set_defaults(func=_h_notices_audit)

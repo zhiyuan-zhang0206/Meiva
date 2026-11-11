@@ -13,9 +13,6 @@ from base.host.boundary.json_values import is_object_dict, is_object_list
 from base.host.boundary.untyped import object_of
 from base.host.git import host_version as host_version_module
 from base.host.git.host_version_plan import Version, parse_version
-from base.packages.plugins.surface.notification_contributions import (
-    validate_notification_contributions,
-)
 from base.packages.plugins.surface.ui_contributions import validate_ui_contributions
 
 PluginCategory = Literal["provider", "builtin", "extension"]
@@ -115,7 +112,6 @@ CONTRIBUTION_KEYS = {
     "skills",
     "commands",
     "mcpServers",
-    "notifications",
     "ui",
 }
 HOST_CAPABILITIES = {
@@ -336,9 +332,6 @@ def _validate_contributions(data: dict[str, object], errors: list[str]) -> dict[
             continue
         if key == "ui":
             parsed[key] = validate_ui_contributions(value, errors)
-            continue
-        if key == "notifications":
-            parsed[key] = validate_notification_contributions(value, errors)
             continue
         lst = _str_list(value, f"contributions.{key}", errors)
         if lst is None:
