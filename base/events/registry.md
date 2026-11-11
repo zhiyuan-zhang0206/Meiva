@@ -218,6 +218,8 @@ above (or when its name is unregistered); otherwise it stays in the JSONL mirror
 | `launch_failures` | this start could not read the launch-failure report, so the unlaunched sessions it recorded stay unreported to the rollout aftermath block | anomaly | — | — | events | — |
 | `harness_interrupt` | an external harness turn was interrupted; the adapter's settle answer is carried as it came back | noise | agent_id, settled, turn_id | — | events | — |
 | `harness_interrupt_failed` | interrupting an external harness turn raised; the durable cancel row stays pending and claim dispatches it again on the next pass | anomaly | — | — | events | — |
+| `harness_delivery_pool_timeout` | delivering the inbox to an external harness could not borrow a database connection; nothing was reserved and the same attempt is made again after a short wait | anomaly | — | — | events | — |
+| `harness_unsettled_outcome_failed` | an invocation failed and the outcome of the inputs it had handed to the harness could not be recorded; the host's abort pass consumes them without a marker | anomaly | — | — | events | — |
 | `harness_input_requeued` | an external harness refused an input or declared it lost; the inbound went back to the queue at its original position and is delivered again | noise | — | — | events | — |
 | `harness_close_settled` | an external harness session closed and none of its observed processes survived | noise | harness, agent_id, waited_ms | — | events | — |
 | `harness_close_unobserved` | an external harness session closed without ever observing its process tree; the close answers unknown, not settled | noise | harness, agent_id | — | events | — |

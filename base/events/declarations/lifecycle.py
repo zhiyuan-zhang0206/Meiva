@@ -141,6 +141,18 @@ EVENTS: dict[str, EventSpec] = {
         "and claim dispatches it again on the next pass",
         tier="anomaly",
     ),
+    "harness_delivery_pool_timeout": telemetry_event(
+        "harness_delivery_pool_timeout",
+        "delivering the inbox to an external harness could not borrow a database connection; "
+        "nothing was reserved and the same attempt is made again after a short wait",
+        tier="anomaly",
+    ),
+    "harness_unsettled_outcome_failed": telemetry_event(
+        "harness_unsettled_outcome_failed",
+        "an invocation failed and the outcome of the inputs it had handed to the harness could not "
+        "be recorded; the host's abort pass consumes them without a marker",
+        tier="anomaly",
+    ),
     "harness_input_requeued": telemetry_event(
         "harness_input_requeued",
         "an external harness refused an input or declared it lost; the inbound went back to the "

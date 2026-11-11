@@ -13,6 +13,9 @@ from base.lm.harness.engine import HarnessSession, HarnessTurn, completed_turn
 from base.lm.harness.events import (
     BridgeEvent,
     ContextCompacted,
+    InputInContext,
+    InputLost,
+    InputRejected,
     SessionClosed,
     SessionFailed,
     SessionFaulted,
@@ -50,6 +53,14 @@ class HarnessClosedError(RuntimeError):
 # thing, and both settle the turn as a reported abort rather than a host crash.
 # meiva:link base/lm/harness/docs/harness.md
 class HarnessSetupError(RuntimeError):
+    pass
+
+
+# meiva:note
+# The session could not take the batch: nothing was handed to the harness, so the inputs can go back to the
+# queue and be delivered again, unlike a failure after the hand-over, where whether they arrived is unknown.
+# meiva:link base/lm/harness/docs/delivery.md
+class HarnessNotDeliveredError(HarnessSetupError):
     pass
 
 
@@ -98,6 +109,7 @@ class HarnessBridge:
         self._renew_task: asyncio.Task[None] | None = None
         self._inbound = asyncio.Event()
         self._handoff_delivered = False
+        self._opening_key: str | None = None
         self._model: str | None = None
         self._digest: str | None = None
         self._closed = False
@@ -202,6 +214,13 @@ class HarnessBridge:
                 )
         elif isinstance(event, ContextCompacted):
             self._context_compacted = True
+        elif isinstance(event, InputInContext) and event.key == self._opening_key:
+            self._handoff = None
+            self._handoff_delivered = True
+            self._context_compacted = False
+            self._opening_key = None
+        elif isinstance(event, (InputRejected, InputLost)) and event.key == self._opening_key:
+            self._opening_key = None
 
     # meiva:note
     # A session that cannot start is a setup failure, not a crash: the graph settles it as a reported
@@ -233,10 +252,17 @@ class HarnessBridge:
         batch = list(inputs)
         if not batch:
             raise ValueError("deliver requires at least one input")
-        session = await self._ensure_for_delivery()
+        try:
+            session = await self._ensure_for_delivery()
+        except HarnessNotDeliveredError:
+            raise
+        except (HarnessClosedError, HarnessSetupError) as exc:
+            raise HarnessNotDeliveredError(str(exc)) from exc
         self._register(session.session_id or "")
         batch[0] = HarnessInput(
-            key=batch[0].key, text=self._opening_input(batch[0].text), images=batch[0].images
+            key=batch[0].key,
+            text=self._opening_input(batch[0].key, batch[0].text),
+            images=batch[0].images,
         )
         await session.deliver(batch)
 
@@ -245,18 +271,22 @@ class HarnessBridge:
     # text already starts with it. After the CLI compacted its context, the next turn instead
     # opens with a reminder to re-read the saved instructions: the first message may be a summary
     # by now. The reminder rides the opening input rather than a mid-turn steer, and a turn that
-    # carries the full handoff needs none.
+    # carries the full handoff needs none. Whatever rode the opening input counts as delivered only when
+    # that input is in the model's context: a refused or lost input is handed over again with it.
     # meiva:link base/lm/harness/docs/harness.md
-    def _opening_input(self, text: str) -> str:
-        handoff, self._handoff = self._handoff, None
-        if handoff is not None and not self._handoff_delivered:
-            rendered = handoff.render().strip()
+    def _opening_input(self, key: str, text: str) -> str:
+        if self._opening_key not in (None, key):
+            return text
+        if self._handoff is not None and self._handoff_delivered:
+            self._handoff = None
+        if self._handoff is not None:
+            rendered = self._handoff.render().strip()
+            self._opening_key = key
             if not text.startswith(rendered):
                 text = f"{rendered}\n\n{text}" if text else rendered
         elif self._context_compacted and self._instructions_file is not None and text:
+            self._opening_key = key
             text = f"{compaction_reminder(self._instructions_file)}\n\n{text}"
-        self._context_compacted = False
-        self._handoff_delivered = True
         return text
 
     # meiva:note
@@ -316,6 +346,7 @@ class HarnessBridge:
         if self._session is session:
             self._session = None
             self._handoff_delivered = False
+            self._opening_key = None
             self._created_at = None
             await self._stop_pump()
         self._retire_registration()

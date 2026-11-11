@@ -24,6 +24,7 @@ from base.lm.harness import (
     HarnessRegistration,
     HarnessSetupError,
     HarnessTurnFaultedError,
+    InputInContext,
     RegistrationStore,
     SessionFailed,
     SessionFaulted,
@@ -127,6 +128,8 @@ class FakeSession:
         self._n += 1
         turn_id = f"t{self._n}"
         self.submitted.append((text, key, turn_id))
+        if key is not None:
+            self._queue.append(InputInContext(key, turn_id, 1))
         self._queue.append(AssistantText(turn_id=turn_id, text=f"partial-{turn_id}"))
         self._queue.extend(self._during)
         if self._n == 1 and self._opening is not None:

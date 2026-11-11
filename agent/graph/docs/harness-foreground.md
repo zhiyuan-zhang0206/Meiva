@@ -32,6 +32,12 @@ reset, pre-turn hook notes, a visibility or delivery correction) are synthetic i
 Each has a stable key, goes through the same `deliver()`, and writes its timeline entries at ACK 2. A fork's
 first input is appended to the inherited conversation and never repeats the handoff.
 
+A batch the session could not take at all (it failed to start, so nothing was handed over) goes back to the queue
+untouched. A control row only blocks the rows queued behind it, by the same (created_at, id) order the claim uses,
+so a message followed by a stop is delivered first and the stop is taken when it is out of the way. Any other
+failure of the invocation first gives every input handed over an explicit outcome (the marker below) and then
+raises.
+
 An input whose delivery outcome is unknown because the session failed (the write raised, the process died) is
 consumed with an uncertainty marker in the timeline and is never sent a second time; reconciling it against
 the harness's durable record and re-delivering the ones that are not there is the restart-and-crash step of

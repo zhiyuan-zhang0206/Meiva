@@ -69,6 +69,12 @@ class Foreground:
     def hand(self, batch: tuple[Handed, ...]) -> Foreground:
         return replace(self, handed=(*self.handed, *batch))
 
+    # meiva:note
+    # Inputs that were certainly never handed over (the session could not take them) leave the unsettled
+    # set without a settlement: there is nothing to write for them.
+    def withdraw(self, keys: frozenset[str]) -> Foreground:
+        return replace(self, handed=tuple(h for h in self.handed if h.key not in keys))
+
     def on_event(self, event: BridgeEvent) -> tuple[Foreground, tuple[Settlement, ...]]:
         match event:
             case TurnStarted(turn_id=turn_id):

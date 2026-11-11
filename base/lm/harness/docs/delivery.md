@@ -16,6 +16,11 @@ returns "did it work": a refusal is an `InputRejected` event, a protocol failure
 input joins the running turn or starts one is the adapter's choice. The graph delivers with `deliver()`
 and reads `subscribe()`; there is no per-input call that answers "arrived".
 
+A batch can settle in part: the inputs the harness refused or lost go back to the queue and are handed over again, so the
+timeline shows them after any later input of the same batch that did enter the context; which order the model sees
+is the harness's decision and is not repaired. The handoff or compaction reminder that rides a batch's first input
+counts as delivered only when that input is in the context, and is attached again to a refused or lost one.
+
 ## The events (`events.py`)
 
 Every event carries the process `generation` (1 for the first process a session starts, +1 per

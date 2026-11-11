@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import time
 from collections import OrderedDict
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Sequence
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
@@ -22,7 +22,7 @@ from base.db import Database
 from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
 from base.lm.catalog.provider_keys import ProviderKeys
-from base.lm.harness import FileSessionRegistry, HarnessTurn
+from base.lm.harness import EventSubscription, FileSessionRegistry, HarnessInput
 from base.lm.harness.bridge import HarnessBridge
 from base.lm.harness.tests.roots import bridge_root_values
 from base.native_process.runtime_incarnation import RuntimeIncarnation
@@ -168,8 +168,20 @@ class FakeEngine:
         self.reason: str | None = None
         self.exit_code: int | None = None
 
-    async def run_turn(self, text: str, *, key: str, on_event: object = None) -> HarnessTurn:
-        raise AssertionError("these tests never run a turn")
+    async def subscribe(self) -> EventSubscription:
+        raise AssertionError("these tests never watch events")
+
+    async def deliver(self, inputs: Sequence[HarnessInput]) -> None:
+        raise AssertionError("these tests never deliver")
+
+    async def retire(self, reason: str) -> None:
+        raise AssertionError("these tests never retire")
+
+    def notify_inbound(self) -> None:
+        raise AssertionError("these tests never wake")
+
+    async def wait_inbound(self, timeout: float) -> None:
+        raise AssertionError("these tests never wait")
 
     async def interrupt(self) -> object:
         raise AssertionError("these tests never interrupt")

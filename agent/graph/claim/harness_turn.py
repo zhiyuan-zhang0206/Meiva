@@ -8,6 +8,7 @@ from typing import Any, Literal
 from langchain_core.runnables import RunnableConfig
 from langgraph.runtime import Runtime
 from langgraph.types import Command
+from psycopg_pool import PoolTimeout
 from pydantic import TypeAdapter
 
 from agent import state as _state
@@ -54,6 +55,7 @@ from base.lm.harness import (
     EventSubscription,
     HarnessClosedError,
     HarnessInput,
+    HarnessNotDeliveredError,
     HarnessSetupError,
     HarnessTurnFaultedError,
     ReasoningDelta,
@@ -85,6 +87,7 @@ PROGRESS_TICK_SECONDS = 60.0
 # meiva:link agent/graph/docs/harness-turn.md
 DELIVERY_FALLBACK_SECONDS = 15.0
 REDELIVER_BACKOFF_SECONDS = 2.0
+POOL_RETRY_SECONDS = 1.0
 
 
 # meiva:note
@@ -182,6 +185,22 @@ async def _run_harness_turn(
                 ctx, agent_id, inbound_ids, run.last_key, exc, append=append_turn_timeline
             )
         raise FatalLLMStreamError(f"{ctx.harness.value} harness turn aborted: {exc}") from exc
+    except Exception:
+        # meiva:note
+        # Whatever else goes wrong (a pool timeout past its retries, a failed commit, a projector that
+        # cannot checkpoint), what was handed over gets an explicit outcome before the error propagates:
+        # the host's abort pass would otherwise consume the claimed rows with no trace in the timeline.
+        # The original error is the one raised; a failure to record the outcome is logged beside it.
+        # meiva:link agent/graph/docs/harness-foreground.md
+        try:
+            await run.retire_unconfirmed()
+        except Exception:
+            logger.opt(exception=True).warning(
+                "could not record the outcome of inputs handed over before a failure",
+                event="harness_unsettled_outcome_failed",
+                agent_id=agent_id,
+            )
+        raise
 
     await projector.finish(interrupted=run.interrupted)
     _apply_wake_polarity(state, projector, extra_updates)
@@ -227,13 +246,22 @@ class ForegroundRun:
         self._changed = asyncio.Event()
         self._backoff_until = 0.0
         self._failure: Exception | None = None
+        # meiva:note
+        # Inputs the harness has settled whose settlement is not yet written. They are no longer in `fg`, but
+        # they are still unsettled as far as the database goes: the invocation must not end (nor a cancelled
+        # write be forgotten) while one is in flight.
+        # meiva:link agent/graph/docs/harness-foreground.md
+        self._settling: list[Handed] = []
 
     def unsettled_inbound_ids(self) -> list[int]:
-        return [h.inbound_id for h in self.fg.handed if h.inbound_id is not None]
+        return [h.inbound_id for h in self._unsettled() if h.inbound_id is not None]
+
+    def _unsettled(self) -> tuple[Handed, ...]:
+        return (*self.fg.handed, *self._settling)
 
     async def retire_unconfirmed(self) -> None:
         items = await self._projector.append_inbound(
-            lambda: retire_unconfirmed(self._ctx, self._agent_id, self.fg.handed)
+            lambda: retire_unconfirmed(self._ctx, self._agent_id, self._unsettled())
         )
         _publish_inbound(self._ctx, self._agent_id, items)
 
@@ -290,8 +318,10 @@ class ForegroundRun:
             case _:
                 pass
         self.fg, settlements = self.fg.on_event(event)
+        self._settling.extend(s.handed for s in settlements)
         for settlement in settlements:
             await self._settle(settlement)
+            self._settling.remove(settlement.handed)
         self._changed.set()
 
     async def _on_turn_completed(self, event: TurnCompleted) -> None:
@@ -330,16 +360,41 @@ class ForegroundRun:
     async def _deliver_until_quiet(self) -> None:
         while self._failure is None:
             self._changed.clear()
-            if await self._deliver_ready():
+            try:
+                delivered = await self._deliver_ready()
+            except PoolTimeout as exc:
+                # meiva:note
+                # PoolTimeout comes from borrowing a connection, before any reservation SQL ran, so there
+                # is nothing to undo: the same attempt is made after a short wait.
+                # meiva:link agent/graph/docs/harness-foreground.md
+                logger.warning(
+                    "harness delivery could not borrow a database connection",
+                    event="harness_delivery_pool_timeout",
+                    agent_id=self._agent_id,
+                    error=str(exc),
+                    retry_after_seconds=POOL_RETRY_SECONDS,
+                )
+                self._backoff_until = asyncio.get_running_loop().time() + POOL_RETRY_SECONDS
+                continue
+            if delivered:
                 continue
             backoff = self._backoff_until - asyncio.get_running_loop().time()
-            if self.fg.quiet and not self._synthetic and backoff <= 0:
+            if self.fg.quiet and not self._settling and not self._synthetic and backoff <= 0:
                 if not await self._queue_correction():
                     return
                 continue
             timeout = backoff if backoff > 0 else DELIVERY_FALLBACK_SECONDS
             with suppress(TimeoutError):
                 await asyncio.wait_for(self._changed.wait(), timeout)
+
+    # meiva:note
+    # The session could not take the batch, so none of it was handed over: rows go back to the queue and
+    # synthetic inputs back to the front of the pending ones, to be delivered when a session can.
+    # meiva:link agent/graph/docs/harness-foreground.md
+    async def _take_back(self, handed: Sequence[Handed]) -> None:
+        self.fg = self.fg.withdraw(frozenset(h.key for h in handed))
+        await requeue_handed(self._ctx, self._agent_id, handed)
+        self._synthetic[:0] = [(h, self._prompts[h.key]) for h in handed if h.inbound_id is None]
 
     # meiva:note
     # Reserve the head of the inbox, unless a refusal is still backing off. A refusal can be folded in
@@ -405,6 +460,9 @@ class ForegroundRun:
         self.fg = self.fg.hand(tuple(handed))
         try:
             await self._bridge.deliver(inputs)
+        except HarnessNotDeliveredError:
+            await self._take_back(handed)
+            raise
         except (HarnessClosedError, HarnessSetupError, ModelInterruptedError):
             raise
         except Exception as exc:

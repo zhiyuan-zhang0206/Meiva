@@ -5,27 +5,43 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable, Sequence
+import traceback
+from collections.abc import AsyncGenerator, Callable, Sequence
+from contextlib import asynccontextmanager
+from dataclasses import replace
+from pathlib import Path
 
 import psycopg
-from psycopg_pool import AsyncConnectionPool
+import pytest
+from langgraph.runtime import Runtime
+from psycopg import sql
+from psycopg.rows import TupleRow
+from psycopg_pool import AsyncConnectionPool, PoolTimeout
 
 from agent.db import claim_inbound_batch
 from agent.graph.claim.harness_turn import harness_turn_node
+from agent.graph.claim.node import claim_node
+from agent.graph.claim.tests.claim_support import make_runtime
 from agent.graph.claim.tests.harness_support import FakeEngine, completed, in_a_turn, rejecting
 from agent.graph.claim.tests.test_harness_turn import config, runtime
 from agent.graph.claim.tests.test_harness_turn import hosted_resources as hosted_resources
+from agent.graph.llm_errors import FatalLLMStreamError
 from agent.ownership.tests.ownership_support import admit_owner, agent_row
 from agent.state import AgentState
+from base.agents.context import MeivaContext
 from base.agents.history.harness_messages import aload_harness_timeline_items
 from base.agents.inbox.rows import list_pending_inbounds
+from base.api_contracts.agent_contract import Harness
+from base.db import PG_KEEPALIVE_KWARGS
 from base.db.code_version_gate import ProcessDbGate
 from base.lm.harness import (
     AssistantText,
     BridgeEvent,
     HarnessInput,
+    HarnessNotDeliveredError,
     InputInContext,
     InputLost,
+    TextDelta,
     TurnOrigin,
     TurnStarted,
 )
@@ -395,3 +411,199 @@ async def test_the_claim_leaves_deliverable_rows_to_delivery_and_takes_leading_c
         aops_pool, agent_id, deliverable_by_harness=True, incarnation=owner
     )
     assert again == [], "the chat is next, and it is delivery's"
+
+
+class _ReserveTimeoutPool(AsyncConnectionPool):
+    def __init__(self, delegate: AsyncConnectionPool) -> None:
+        super().__init__(open=False, kwargs={**PG_KEEPALIVE_KWARGS})
+        self.delegate = delegate
+        self.failed = asyncio.Event()
+        self.attempts = 0
+
+    @asynccontextmanager
+    async def connection(
+        self, timeout: float | None = None
+    ) -> AsyncGenerator[psycopg.AsyncConnection[TupleRow]]:
+        if any(frame.name == "reserve_head_batch" for frame in traceback.extract_stack()):
+            self.attempts += 1
+            if self.attempts <= 2:
+                self.failed.set()
+                raise PoolTimeout("injected reservation borrow timeout")
+        async with self.delegate.connection(timeout=timeout) as conn:
+            yield conn
+
+
+async def test_a_pool_timeout_while_reserving_is_retried_and_the_message_is_delivered_once(
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    hosted_resources: HostedTurnResources,
+) -> None:
+    agent_id = agent_row(db_conn)
+    row = _insert(db_conn, agent_id, "chat", "user", "keep the logs")
+    pool = _ReserveTimeoutPool(aops_pool)
+    engine = FakeEngine()
+    rt = runtime(engine, ops_pool=pool, hosted_resources=hosted_resources)
+
+    async with asyncio.timeout(20):
+        await harness_turn_node(AgentState(), rt, config(agent_id))
+
+    assert pool.failed.is_set() and pool.attempts >= 3
+    assert [i.key for batch in engine.delivered for i in batch] == [_key(row)], "delivered once"
+    assert _status(db_conn, row) == "done"
+
+
+# meiva:note
+# The delta carries a number where text belongs, which no harness sends: it is how a test makes the
+# projector fail, so the failure path of an invocation can be observed.
+# meiva:link agent/graph/docs/harness-foreground.md
+async def test_a_failure_in_the_foreground_gives_the_handed_inputs_an_explicit_outcome(
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    hosted_resources: HostedTurnResources,
+) -> None:
+    agent_id = agent_row(db_conn)
+    row = _insert(db_conn, agent_id, "chat", "user", "work")
+    engine = _silent()
+    rt = runtime(engine, ops_pool=aops_pool, hosted_resources=hosted_resources)
+
+    node = asyncio.create_task(harness_turn_node(AgentState(), rt, config(agent_id)))
+    await _until(lambda: bool(engine.delivered), "delivery")
+    engine.emit(TextDelta("t1", 5))  # pyright: ignore[reportArgumentType]
+    with pytest.raises(TypeError):
+        await asyncio.wait_for(node, 20)
+
+    assert _status(db_conn, row) == "done", "consumed, never left claimed for a silent sweep"
+    async with aops_pool.connection() as conn:
+        items = await aload_harness_timeline_items(conn, agent_id)
+    assert any("could not be confirmed" in item.payload for item in items)
+
+
+async def test_an_input_that_cannot_reach_the_session_goes_back_to_the_queue(
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    hosted_resources: HostedTurnResources,
+) -> None:
+    agent_id = agent_row(db_conn)
+    row = _insert(db_conn, agent_id, "chat", "user", "work")
+
+    class Unstartable(FakeEngine):
+        async def deliver(self, inputs: Sequence[HarnessInput]) -> None:
+            raise HarnessNotDeliveredError("session could not start")
+
+    rt = runtime(Unstartable(), ops_pool=aops_pool, hosted_resources=hosted_resources)
+
+    with pytest.raises(FatalLLMStreamError):
+        await harness_turn_node(AgentState(), rt, config(agent_id))
+
+    assert _status(db_conn, row) == "pending", "never handed over, so delivered again later"
+    async with aops_pool.connection() as conn:
+        items = await aload_harness_timeline_items(conn, agent_id)
+    assert not any("could not be confirmed" in item.payload for item in items)
+
+
+async def test_a_settlement_that_arrives_after_its_turn_ended_is_still_written(
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    hosted_resources: HostedTurnResources,
+) -> None:
+    agent_id = agent_row(db_conn)
+    row = _insert(db_conn, agent_id, "chat", "user", "work")
+
+    def script(inputs: Sequence[HarnessInput]) -> Sequence[BridgeEvent]:
+        keys = [i.key for i in inputs]
+        return [
+            TurnStarted("t1", TurnOrigin.INPUT, tuple(keys), 1),
+            completed("t1", "MEIVA_DISPLAY_TO_USER\nok"),
+            *(InputInContext(key, "t1", 1) for key in keys),
+        ]
+
+    rt = runtime(FakeEngine(script=script), ops_pool=aops_pool, hosted_resources=hosted_resources)
+
+    async with asyncio.timeout(20):
+        await harness_turn_node(AgentState(), rt, config(agent_id))
+
+    assert _status(db_conn, row) == "done"
+    assert await _timeline_inbound_ids(aops_pool, agent_id) == [row]
+
+
+def _external_ctx(
+    aops_pool: AsyncConnectionPool,
+    database_gate: ProcessDbGate,
+    engine: FakeEngine,
+    resources: HostedTurnResources,
+) -> MeivaContext:
+    base = make_runtime(ops_pool=aops_pool, database_gate=database_gate)
+    return replace(
+        base.context, harness=Harness.CLAUDE_CODE, harness_bridge=engine, hosted_resources=resources
+    )
+
+
+@pytest.mark.parametrize("refused_first", [False, True])
+async def test_a_message_followed_by_a_stop_is_delivered_and_then_the_stop_is_taken(
+    refused_first: bool,
+    redis_url: str,
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    database_gate: ProcessDbGate,
+    hosted_resources: HostedTurnResources,
+) -> None:
+    agent_id = agent_row(db_conn)
+    message = _insert(db_conn, agent_id, "chat", "user", "work")
+    attempts = 0
+
+    def script(inputs: Sequence[HarnessInput]) -> Sequence[BridgeEvent]:
+        nonlocal attempts
+        attempts += 1
+        if refused_first and attempts == 1:
+            _insert(db_conn, agent_id, "cancel", "user", "")
+            return rejecting()(inputs)
+        return in_a_turn([i.key for i in inputs], "MEIVA_DISPLAY_TO_USER\nok")
+
+    engine = FakeEngine(script=script)
+    ctx = _external_ctx(aops_pool, database_gate, engine, hosted_resources)
+    if not refused_first:
+        _insert(db_conn, agent_id, "cancel", "user", "")
+    rt = Runtime(context=ctx)
+    state = AgentState(halted=True)
+
+    async with asyncio.timeout(30):
+        entry = await claim_node(state, rt, config(agent_id))
+        assert entry.goto == "before_turn", "the message in front of the stop is delivery's"
+        node_state = state.model_copy(update=entry.update or {})
+        await harness_turn_node(node_state, rt, config(agent_id))
+        stop = await claim_node(state, rt, config(agent_id))
+
+    assert _status(db_conn, message) == "done"
+    assert stop.goto == "claim" and dict[str, object](stop.update or {}).get("halted") is True, (
+        "the stop is taken"
+    )
+
+
+# meiva:note
+# The migration file is plain SQL read at run time, so its type is a runtime string, not a literal.
+# meiva:link agent/db/docs/db.md
+def test_the_migration_moves_only_old_reservations_of_external_agents(
+    db_conn: psycopg.Connection,
+) -> None:
+    external = agent_row(db_conn)
+    native = agent_row(db_conn)
+    db_conn.execute("UPDATE agents_meta SET harness='claude_code' WHERE id=%s", (external,))
+    db_conn.commit()
+
+    def reserved(agent_id: int, kind: str) -> int:
+        row = db_conn.execute(
+            "INSERT INTO inbound_messages (agent_id, content, kind, source, payload, status, claimed_at) "
+            "VALUES (%s, 'x', %s, 'user', %s::jsonb, 'pending', now()) RETURNING id",
+            (agent_id, kind, '{"note_tag": "agent_reply"}' if kind == "system_note" else None),
+        ).fetchone()
+        assert row is not None
+        return row[0]
+
+    moved = [reserved(external, "chat"), reserved(external, "system_note")]
+    untouched = [reserved(native, "chat"), reserved(external, "cancel")]
+    migration = next(Path("migrations").rglob("*harness-inflight-claimed.sql"))
+    db_conn.execute(sql.SQL(migration.read_text()))  # pyright: ignore[reportArgumentType]
+    db_conn.commit()
+
+    assert [_status(db_conn, i) for i in moved] == ["claimed", "claimed"]
+    assert [_status(db_conn, i) for i in untouched] == ["pending", "pending"]

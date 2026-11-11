@@ -33,8 +33,10 @@ _COLUMNS: LiteralString = "id,agent_id,content,kind,source,payload,created_at,cl
 
 # meiva:note
 # The contiguous FIFO batch of pending deliverable rows at the head of the inbox. Any other pending kind
-# is a barrier: delivery never overtakes a lifecycle or compaction boundary. Nothing is handed over while
-# a cancel is pending or a restart or terminate is pending or claimed.
+# is a barrier for the rows behind it, by the same (created_at, id) order the claim uses to take control
+# rows, so each side waits only for what is in front of it: a cancel queued behind a message lets the message
+# go and is claimed once it is out of the way. Nothing is handed over while a restart or terminate is pending
+# or claimed: the claim takes it first and alone.
 # meiva:link agent/graph/docs/harness-turn.md
 _HEAD_IDS: LiteralString = (
     "SELECT m.id FROM inbound_messages m "
@@ -45,9 +47,8 @@ _HEAD_IDS: LiteralString = (
     "  ) "
     "  AND NOT EXISTS ("
     "    SELECT 1 FROM inbound_messages control WHERE control.agent_id=%(agent)s "
-    "    AND ((control.status='pending' AND control.kind='cancel') "
-    "         OR (control.status IN ('pending','claimed') "
-    "             AND control.kind IN ('restart','terminate')))"
+    "    AND control.status IN ('pending','claimed') "
+    "    AND control.kind IN ('restart','terminate')"
     "  )"
 )
 
