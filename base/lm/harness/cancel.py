@@ -42,6 +42,20 @@ def spawned_since(observed: Mapping[int, str], baseline: Mapping[int, str]) -> d
 
 
 # meiva:note
+# The turn's foreground work: tool processes seen now that were not there when the turn began and
+# that nothing has claimed as background work. `tools` and `baseline` are both tool-process
+# snapshots (`ChildProbe.tool_processes`), so the CLI's own helpers never enter. Work that was
+# already running when the turn began (a background command of an earlier turn) is in `baseline`.
+# meiva:link base/lm/harness/docs/harness.md
+def foreground_work(
+    tools: Mapping[int, str], baseline: Mapping[int, str], claimed: Collection[int] = ()
+) -> dict[int, str]:
+    return {
+        pid: command for pid, command in tools.items() if pid not in baseline and pid not in claimed
+    }
+
+
+# meiva:note
 # A cancel that could not look at a process tree: no runtime pid, no transport, or nothing running.
 # Nothing is claimed about the tree, so `settled` is None; `cli_pid` and `cli_alive` carry what is
 # known about the CLI itself (nothing, or a healthy process that was left alone).

@@ -10,7 +10,9 @@ closed the CLI is a Meiva bug
 
 The CLI process is the owner of the work. Close it and the work goes: Claude's `CronCreate`
 and `ScheduleWakeup` timers live in the process (they do not survive a resume), Codex's
-`unified_exec` commands die with the app-server, and an Antigravity interrupt kills `agy`.
+`unified_exec` commands die with the app-server, and an Antigravity interrupt kills `agy`. An interrupt
+of a turn does not touch background work, but it does end the foreground commands the turn started
+([what an interrupt stops](harness.md#what-an-interrupt-stops)).
 
 ## When a CLI process is closed
 

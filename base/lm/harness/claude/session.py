@@ -19,8 +19,8 @@ from base.lm.harness.base_session import (
 from base.lm.harness.cancel import (
     CancelReport,
     Sweep,
+    foreground_work,
     observed_cancel,
-    spawned_since,
     unobserved_cancel,
 )
 from base.lm.harness.claude.config import BridgeConfig
@@ -64,7 +64,7 @@ from base.lm.harness.process import (
     client_process,
     process_returncode,
     settle_close,
-    snapshot,
+    tool_snapshot,
     wait_gone,
     watch_tree,
 )
@@ -159,6 +159,7 @@ class ClaudeSession(BaseHarnessSession[BridgeConfig]):
         # The tasks the CLI says are running: started and not yet reported terminal.
         # `close()` is their one stop caller, and the note there says why.
         self._background = BackgroundTasks()
+        self._claimed_by_background: frozenset[int] = frozenset()
         self._scheduled = ScheduledWork()
         self._open: OpenTurn | None = None
         self._uuid_keys: dict[str, str] = {}
@@ -271,14 +272,22 @@ class ClaudeSession(BaseHarnessSession[BridgeConfig]):
             raise
         self._apply(self._ledger.received(entry.key, AckSignal.WEAK))
 
+    # meiva:note
+    # The CLI ends the turn's foreground commands itself; the adapter waits for them to be gone and
+    # reports whether they are (`settled`). What it waits for is the turn's tool processes
+    # (`ChildProbe.tool_processes`): the MCP servers and other helpers the CLI starts, even in the
+    # middle of a turn, are not the turn's work and neither wait nor report. A background command is
+    # not the turn's work either: when the CLI announces a task (`TaskStarted`), the tool processes
+    # running at that moment are claimed for it and left out. Nothing is signalled here.
+    # meiva:link base/lm/harness/docs/harness.md
     async def interrupt(self, *, turn_id: str | None = None) -> CancelReport:
         if not self._open_turn_named(turn_id):
             return unobserved_cancel(turn_id=turn_id)
         client = self._require_client()
         pid = self._cli_pid
         turn_id = self._open_id()
-        observed = snapshot(self._probe, pid)
-        spawned = spawned_since(observed, self._baseline)
+        observed = tool_snapshot(self._probe, pid)
+        spawned = foreground_work(observed, self._baseline, self._claimed_by_background)
         started = self._monotonic()
         await self._interrupt_control(client)
         interrupt_ms = (self._monotonic() - started) * 1000.0
@@ -440,7 +449,7 @@ class ClaudeSession(BaseHarnessSession[BridgeConfig]):
     # meiva:link base/lm/harness/docs/delivery.md
     def _open_input_turn(self, key: str) -> None:
         turn_id = self._mint_turn_id()
-        self._baseline = snapshot(self._probe, self._cli_pid)
+        self._baseline = tool_snapshot(self._probe, self._cli_pid)
         self._open = OpenTurn(turn_id, (key,))
         revived = self._ledger.scope_of(key) is not None
         self._emit(
@@ -457,7 +466,7 @@ class ClaudeSession(BaseHarnessSession[BridgeConfig]):
         turn_id = self._mint_turn_id()
         cause = self._pending_cause or harness_cause(origin)
         self._pending_cause = None
-        self._baseline = snapshot(self._probe, self._cli_pid)
+        self._baseline = tool_snapshot(self._probe, self._cli_pid)
         if cause is HarnessCause.UNKNOWN:
             self._scheduled, fired = self._scheduled.fired(self._clock.now().timestamp())
             if fired:
@@ -490,6 +499,8 @@ class ClaudeSession(BaseHarnessSession[BridgeConfig]):
             self._unsolicited(plan.report)
 
     def _track_task_started(self, message: object) -> None:
+        claimed = self._claimed_by_background | frozenset(tool_snapshot(self._probe, self._cli_pid))
+        self._claimed_by_background = frozenset(pid for pid in claimed if self._probe.is_alive(pid))
         self._background = self._background.started(
             _task_id(message),
             description=str(getattr(message, "description", "") or ""),

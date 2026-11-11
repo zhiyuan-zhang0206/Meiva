@@ -112,7 +112,7 @@ Adapter invariants are pinned by tests in `tests/`:
 
 | # | Invariant | Test |
 |---|---|---|
-| 4 | interrupt asserts the tool children are reaped | `test_cancel.py::test_interrupt_asserts_the_tool_children_are_reaped` |
+| 4 | interrupt ends the turn's foreground commands and leaves background commands and helpers alone | `test_cancel.py::test_interrupt_ends_the_command_the_turn_started`, `test_a_background_command_of_an_earlier_turn_is_left_running`, `test_the_app_servers_own_helpers_are_neither_waited_for_nor_ended` |
 | 5 | a turn can finish after two quiet days | `test_cancel.py::test_default_turn_can_finish_after_two_quiet_days` |
 | 6 | usage accumulates per turn | `test_session.py::test_usage_accumulates_across_turns` |
 | 7 | a resume names the recorded thread and a rejected resume fails fast | `test_session.py::test_resume_uses_the_registry` |
@@ -139,4 +139,5 @@ from `item/started` to `item/completed`; open ones count as pending background w
 while the process tree shows a descendant the app-server did not start with (the app-server does send
 `item/completed` when a background command ends after its turn; the check covers an item
 whose completion never comes). A turn that ends
-interrupted or failed drops its open items. See [background work](../../docs/background-work.md).
+interrupted or failed drops its open items (its interrupt ended them,
+[what an interrupt stops](../../docs/harness.md#what-an-interrupt-stops)). See [background work](../../docs/background-work.md).

@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+from base.lm.harness.claude.tests import fake_sdk as fake
 from base.lm.harness.claude.tests.fake_sdk import Block, Say
 from base.lm.harness.claude.tests.support import CLI_PID, start
 from base.lm.harness.delivery.tests.sent import send
@@ -77,6 +78,50 @@ async def test_processes_seen_before_the_turn_are_not_blamed(tmp_path: Path) -> 
         assert report.settled is True
         assert [observation.pid for observation in report.observed] == [5150]
         harness.probe.reap(4000)
+    finally:
+        await harness.stop()
+
+
+async def test_a_helper_the_cli_starts_mid_turn_is_neither_waited_for_nor_signalled(
+    tmp_path: Path,
+) -> None:
+    harness = await start(tmp_path, scripts=[[Block()]], cancel_settle_seconds=0.5)
+    try:
+        await send(harness, "use a tool")
+        await asyncio.sleep(0.01)
+        harness.probe.spawn(5200, "npx some-mcp-server", tool=False)
+        harness.probe.spawn(5150, TOOL_MARKER)
+        harness.client.on_interrupt = lambda: harness.probe.reap(5150)
+        report = await harness.session.interrupt()
+        assert report.settled is True
+        assert report.remaining == ()
+        assert [observation.pid for observation in report.observed] == [5150]
+        assert report.waited_ms < 500.0
+        assert harness.probe.signals == []
+        assert harness.probe.is_alive(5200)
+        harness.probe.reap(5200)
+    finally:
+        await harness.stop()
+
+
+async def test_a_background_command_the_cli_announced_is_not_the_turns_work(
+    tmp_path: Path,
+) -> None:
+    harness = await start(tmp_path, scripts=[[Block()]], cancel_settle_seconds=0.5)
+    try:
+        await send(harness, "start a server, then run a command")
+        await asyncio.sleep(0.01)
+        harness.probe.spawn(6000, "npm run dev")
+        harness.client.push(fake.TaskStartedMessage(subtype="task_started", data={}, task_id="t1"))
+        await asyncio.sleep(0.01)
+        harness.probe.spawn(5150, TOOL_MARKER)
+        harness.client.on_interrupt = lambda: harness.probe.reap(5150)
+        report = await harness.session.interrupt()
+        assert report.settled is True
+        assert [observation.pid for observation in report.observed] == [5150]
+        assert harness.probe.signals == []
+        assert harness.probe.is_alive(6000)
+        harness.probe.reap(6000)
     finally:
         await harness.stop()
 

@@ -15,7 +15,11 @@ SIGKILL = 9
 class ChildProbe(Protocol):
     def descendants(self, pid: int) -> dict[int, str]: ...
 
+    def tool_processes(self, pid: int) -> dict[int, str]: ...
+
     def is_alive(self, pid: int) -> bool: ...
+
+    def kill(self, pid: int, sig: int) -> None: ...
 
 
 class PsutilChildProbe:
@@ -33,6 +37,41 @@ class PsutilChildProbe:
                 continue
         return observed
 
+    # meiva:note
+    # The processes of the CLI's tool calls, told from the CLI's own helpers (MCP servers, the Codex
+    # code-mode host). Both CLIs start a tool call's command as a direct child that leads a session of
+    # its own, and everything the command starts without detaching stays in that session; a helper stays
+    # in the CLI's session, or sits below such a helper. So a tool process is a member of a session led
+    # by a direct child of `pid` that is not `pid`'s own session. A process that detaches itself (a
+    # daemon, a helper's detached worker) is not a tool process: it was set apart from the call on purpose.
+    # Command lines cannot tell them apart (the probe keeps 200 characters and the CLIs wrap the command
+    # differently); the session structure can, and was recorded on Claude Code and Codex 0.166.
+    # meiva:link base/lm/harness/docs/harness.md
+    def tool_processes(self, pid: int) -> dict[int, str]:
+        try:
+            parent = psutil.Process(pid)
+            own_session = os.getsid(pid)
+            children = parent.children(recursive=True)
+            direct = {child.pid for child in parent.children()}
+        except (psutil.Error, OSError):
+            return {}
+        tools: dict[int, str] = {}
+        for child in children:
+            try:
+                session = os.getsid(child.pid)
+            except OSError:
+                continue
+            if session != own_session and session == child.pid and child.pid in direct:
+                tools[child.pid] = _command(child)
+        for child in children:
+            try:
+                session = os.getsid(child.pid)
+            except OSError:
+                continue
+            if session in tools and child.pid not in tools:
+                tools[child.pid] = _command(child)
+        return tools
+
     def is_alive(self, pid: int) -> bool:
         try:
             process = psutil.Process(pid)
@@ -40,8 +79,11 @@ class PsutilChildProbe:
         except psutil.Error:
             return False
 
-    def kill(self, pid: int, sig: int = 15) -> None:
-        os.kill(pid, sig)
+    def kill(self, pid: int, sig: int) -> None:
+        try:
+            os.kill(pid, sig)
+        except ProcessLookupError:
+            return
 
 
 def _command(process: psutil.Process) -> str:
@@ -113,6 +155,39 @@ def snapshot(probe: ChildProbe, pid: int | None) -> dict[int, str]:
     if pid is None:
         return {}
     return probe.descendants(pid)
+
+
+def tool_snapshot(probe: ChildProbe, pid: int | None) -> dict[int, str]:
+    if pid is None:
+        return {}
+    return probe.tool_processes(pid)
+
+
+# meiva:note
+# Ends processes a cancel is answerable for: SIGTERM first, SIGKILL for whatever is still running
+# after `grace_seconds`. Returns the pids that needed SIGKILL, so the report names what did not
+# leave on request. Callers pass pids read from a fresh snapshot, never remembered ones.
+# meiva:link base/lm/harness/docs/harness.md
+async def terminate(
+    probe: ChildProbe,
+    pids: Iterable[int],
+    *,
+    grace_seconds: float,
+    poll_seconds: float,
+    clock: WaitClock,
+) -> tuple[int, ...]:
+    targets = [pid for pid in pids if pid > 1]
+    for pid in targets:
+        probe.kill(pid, SIGTERM)
+    gone, _ = await wait_gone(
+        probe, targets, timeout_seconds=grace_seconds, poll_seconds=poll_seconds, clock=clock
+    )
+    if gone:
+        return ()
+    stubborn = tuple(pid for pid in targets if probe.is_alive(pid))
+    for pid in stubborn:
+        probe.kill(pid, SIGKILL)
+    return stubborn
 
 
 # meiva:note

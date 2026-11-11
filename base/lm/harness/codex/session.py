@@ -12,6 +12,7 @@ from base.lm.harness.base_session import ActiveTurn, BaseHarnessSession, Session
 from base.lm.harness.cancel import (
     CancelReport,
     Sweep,
+    foreground_work,
     observed_cancel,
     spawned_since,
     unobserved_cancel,
@@ -74,6 +75,8 @@ from base.lm.harness.process import (
     ChildProbe,
     settle_close,
     snapshot,
+    terminate,
+    tool_snapshot,
     wait_gone,
     watch_tree,
 )
@@ -265,6 +268,17 @@ class CodexSession(BaseHarnessSession[CodexConfig]):
             return None
         return name
 
+    # meiva:note
+    # An interrupt ends the turn's work, like a native agent's cancel: the commands the turn started
+    # and still has running stop with it. `turn/interrupt` ends the turn but leaves the app-server's
+    # `unified_exec` commands running, and the protocol has no request that stops one the model
+    # started (`command/exec/terminate` answers only for a `command/exec` the client itself began,
+    # and an item's `processId` is the app-server's own id, not an OS pid), so the adapter ends the
+    # process tree: the tool processes that appeared since the turn began (`ChildProbe.tool_processes`),
+    # SIGTERM then SIGKILL. A command of an earlier turn that outlived it (a background command, see
+    # `commands.py`) was running at the baseline and is left alone, and so are the app-server's own
+    # helpers, which are not tool processes. `settled` is whether that foreground work is gone.
+    # meiva:link base/lm/harness/docs/harness.md
     async def interrupt(self, *, turn_id: str | None = None) -> CancelReport:
         ticket = await self._interrupt_target(turn_id)
         name = ticket.provider_turn_id if ticket is not None else self._observed_interrupt(turn_id)
@@ -272,8 +286,8 @@ class CodexSession(BaseHarnessSession[CodexConfig]):
             return unobserved_cancel(turn_id=turn_id)
         pid = self._transport.pid
         turn_id = ticket.turn_id if ticket is not None else self._ledger.local_turn(name)
-        observed = snapshot(self._probe, pid)
-        spawned = spawned_since(observed, self._baseline)
+        observed = tool_snapshot(self._probe, pid)
+        spawned = foreground_work(observed, self._baseline)
         started = self._monotonic()
         self._interrupting.add(name)
         try:
@@ -286,13 +300,22 @@ class CodexSession(BaseHarnessSession[CodexConfig]):
         interrupt_ms = (self._monotonic() - started) * 1000.0
         if pid is None:
             return unobserved_cancel(turn_id=turn_id, interrupt_ms=interrupt_ms)
-        gone, waited_ms = await wait_gone(
+        stopping = self._monotonic()
+        killed = await terminate(
+            self._probe,
+            [child for child in spawned if self._probe.is_alive(child)],
+            grace_seconds=self.config.cancel_settle_seconds,
+            poll_seconds=CANCEL_POLL_SECONDS,
+            clock=self._clock,
+        )
+        gone, _ = await wait_gone(
             self._probe,
             spawned,
             timeout_seconds=self.config.cancel_settle_seconds,
             poll_seconds=CANCEL_POLL_SECONDS,
             clock=self._clock,
         )
+        waited_ms = (self._monotonic() - stopping) * 1000.0
         return observed_cancel(
             turn_id=turn_id,
             interrupt_ms=interrupt_ms,
@@ -305,6 +328,7 @@ class CodexSession(BaseHarnessSession[CodexConfig]):
                 waited_ms=waited_ms,
                 alive=() if gone else [child for child in spawned if self._probe.is_alive(child)],
             ),
+            killed=killed,
         )
 
     def _observed_name(self) -> str | None:
@@ -385,7 +409,7 @@ class CodexSession(BaseHarnessSession[CodexConfig]):
 
     async def _begin(self, ticket: ActiveTurn) -> None:
         ticket.started_at = self._monotonic()
-        self._baseline = snapshot(self._probe, self._transport.pid)
+        self._baseline = tool_snapshot(self._probe, self._transport.pid)
         key = ticket.input_key
         if self._ledger.phase(key) in (None, InputPhase.REJECTED, InputPhase.LOST):
             self._ledger = self._ledger.sent(key)
@@ -563,6 +587,7 @@ class CodexSession(BaseHarnessSession[CodexConfig]):
         local = self._mint_turn_id()
         self._ledger = self._ledger.bind_turn(name, local)
         self._observed.add(local)
+        self._baseline = tool_snapshot(self._probe, self._transport.pid)
         self._emit(
             TurnStarted(
                 local,
