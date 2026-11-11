@@ -167,8 +167,8 @@ def test_the_stop_button_needs_no_message_and_leaves_a_note_for_the_agent(
         response = client.post(f"/api/agents/{agent_id}/interrupt", json={"source": "user"})
     assert response.status_code == 200
     assert _inbound(db_conn, agent_id)[before:] == [
-        ("system_note", "user", "Your running turn was interrupted by user."),
         ("interrupt", "user", ""),
+        ("system_note", "user", "Your running turn was interrupted by user."),
     ]
 
 

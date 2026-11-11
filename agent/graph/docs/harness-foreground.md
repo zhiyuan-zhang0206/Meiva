@@ -1,12 +1,15 @@
-# Foreground input and cancellation
+# Foreground input and interruption
 
 One path hands inbox rows to an external harness, idle or mid-turn. The head of the inbox (chat, system
 notes and heartbeats, contiguous, stopping before the first row of any other kind) is reserved as `claimed`,
 rendered, and handed to the engine with `deliver()` after the invocation has subscribed to the session's
 events. Whether the harness starts a turn for it or the running turn absorbs it is the harness's decision; the
-graph learns what happened only from events. Control kinds (restart, terminate, cancel, resurrect, fork,
+graph learns what happened only from events. Control kinds (restart, terminate, interrupt, resurrect, fork,
 compaction) are barriers: nothing behind one is delivered until the claim has dispatched it, and nothing is
-delivered at all while a cancel, restart or terminate is pending.
+delivered at all while a restart or terminate is pending. A batch made only of passive notes is not handed
+over: it waits and goes along with the next input that is not passive. An interrupt request still pending when
+an invocation starts was aimed at a turn that has ended; the invocation settles it before it subscribes, so it
+cannot cut short the turn that answers the interrupt's message.
 
 A row has two states in front of the user, and only two. `claimed` is the pending strip: the harness was handed
 the message and has not shown it to the model. When the harness reports it in the model's context (ACK 2,
@@ -48,9 +51,9 @@ so a message followed by a stop is delivered first and the stop is taken when it
 failure of the invocation first gives every input handed over an explicit outcome (reconciled, or the marker, as below)
 and then raises.
 
-Cancel targets the foreground. The graph continues reading activity until the
-executor reports the terminal outcome. A normal finish that races a cancel
-remains a normal finish. The cancel request does not retire a healthy session
+An interrupt targets the foreground. The graph continues reading activity until the
+executor reports the terminal outcome. A normal finish that races an interrupt
+remains a normal finish. The interrupt request does not retire a healthy session
 or stop independent background work. A provider that lacks scoped cancellation
 reports it as unavailable and the foreground continues. Restart and terminate
 remain separate lifecycle commands and can still interrupt a graph invocation.

@@ -20,7 +20,7 @@ from agent.ownership.inbound import lock_inbound_owner
 from base.agents.context import MeivaContext
 from base.agents.history.harness_messages import aappend_harness_timeline_items
 from base.agents.history.timeline_item import TimelineItem
-from base.agents.messages.inbound import InboundKind
+from base.agents.messages.inbound import InboundKind, not_passive_inbound
 from base.agents.messages.kwargs import NoteTag
 from base.db.rows import IdRow, aquery_all
 from base.db.transaction import async_write_transaction
@@ -42,10 +42,12 @@ _COLUMNS: LiteralString = "id,agent_id,content,kind,source,payload,created_at,cl
 # is a barrier for the rows behind it, by the same (created_at, id) order the claim uses to take control
 # rows, so each side waits only for what is in front of it: an interrupt queued behind a message lets the message
 # go and is claimed once it is out of the way. Nothing is handed over while a restart or terminate is pending
-# or claimed: the claim takes it first and alone.
+# or claimed: the claim takes it first and alone. A batch of passive notes alone is not handed over: a
+# delivery would start a turn of the harness's own for notes that asked for none, so they wait and go
+# along with the next input that is not passive.
 # meiva:link agent/graph/docs/harness-turn.md
-_HEAD_IDS: LiteralString = (
-    "SELECT m.id FROM inbound_messages m "
+_HEAD_ROWS: LiteralString = (
+    "SELECT m.id, m.payload FROM inbound_messages m "
     "WHERE m.agent_id=%(agent)s AND m.status='pending' AND m.kind = ANY(%(kinds)s) "
     "  AND NOT EXISTS ("
     "    SELECT 1 FROM inbound_messages b WHERE b.agent_id=%(agent)s AND b.status='pending' "
@@ -57,6 +59,31 @@ _HEAD_IDS: LiteralString = (
     "    AND control.kind IN ('restart','terminate')"
     "  )"
 )
+
+# meiva:note
+# The head batch, or nothing when every row in it is passive. Composed from literal fragments only.
+_HEAD_IDS: LiteralString = (
+    f"SELECT h.id FROM ({_HEAD_ROWS}) h "  # noqa: S608
+    f"WHERE EXISTS (SELECT 1 FROM ({_HEAD_ROWS}) x WHERE {not_passive_inbound('x')})"
+)
+
+
+# meiva:note
+# Settle the interrupt requests still pending when an invocation starts. The claim takes an interrupt that
+# stands in front of the inbox before the invocation begins, so one left behind a note or a message was
+# aimed at a turn that has since ended by itself. Left pending it would fire at the first turn of this
+# invocation, the one that is answering the message, and cut it short.
+async def settle_stale_interrupts(ctx: MeivaContext, agent_id: int) -> None:
+    pool = ctx.ops_pool
+    if pool is None:
+        return
+    async with async_write_transaction(pool) as conn:
+        await lock_inbound_owner(conn, agent_id, incarnation=ctx.original_incarnation)
+        _ = await conn.execute(
+            "UPDATE inbound_messages SET status='done' "
+            "WHERE agent_id=%s AND kind=%s AND status='pending'",
+            (agent_id, InboundKind.INTERRUPT.value),
+        )
 
 
 async def peek_head_batch(ctx: MeivaContext, agent_id: int) -> list[ClaimedInbound]:

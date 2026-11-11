@@ -21,8 +21,11 @@ is the last of the three, so claim consumes it only after the note and the messa
 delivered. Session shutdown remains a separate operation.
 
 The web stop button has no text: it sends the same request without a message and as `user`. The agent
-is left one passive note (`Your running turn was interrupted by user.`) that it reads at its next real
-wake, and it is not woken to a turn of its own. An interrupt of an agent with no running turn writes no
+is left one passive note (`Your running turn was interrupted by user.`) that it reads along with its next
+real input, and it is not woken to a turn of its own. On an external harness a passive note alone is never
+handed to the harness (a delivery would start a turn for it), so the control row is written ahead of the
+note, where claim takes it. An interrupt request still pending when an invocation starts is stale (its turn
+ended on its own first) and is settled at once. An interrupt of an agent with no running turn writes no
 note and no control row: its message is an ordinary chat.
 
 Terminate remains a durable inbound. The two-second DB poll in

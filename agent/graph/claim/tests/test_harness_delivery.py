@@ -44,7 +44,6 @@ from agent.state import AgentState
 from base.agents.context import MeivaContext
 from base.agents.history.harness_messages import aload_harness_timeline_items
 from base.agents.inbox.rows import list_pending_inbounds
-from base.agents.messages.lifecycle_text import interrupt_note
 from base.api_contracts.agent_contract import Harness
 from base.db import PG_KEEPALIVE_KWARGS
 from base.db.code_version_gate import ProcessDbGate
@@ -360,56 +359,6 @@ async def test_a_message_not_in_context_when_the_turn_is_interrupted_is_still_de
     assert await timeline_inbound_ids(aops_pool, agent_id) == [first, queued]
 
 
-# meiva:note
-# The three rows an interrupt commits reach the harness as the note then the message, and the control
-# row, last in the queue, stays pending behind them until claim takes it.
-async def test_an_interrupts_note_and_message_are_delivered_in_order_ahead_of_its_control_row(
-    db_conn: psycopg.Connection,
-    aops_pool: AsyncConnectionPool,
-    hosted_resources: HostedTurnResources,
-) -> None:
-    agent_id = agent_row(db_conn)
-    first = insert_row(db_conn, agent_id, "chat", "user", "work")
-    engine = silent_engine()
-    rt = runtime(engine, ops_pool=aops_pool, hosted_resources=hosted_resources)
-    note_text = interrupt_note("agent:7", with_message=True)
-
-    async with asyncio.timeout(20), asyncio.TaskGroup() as tasks:
-        node = tasks.create_task(harness_turn_node(AgentState(), rt, config(agent_id)))
-        await wait_until(lambda: len(engine.delivered) == 1, "first delivery")
-        engine.emit(
-            TurnStarted("t1", TurnOrigin.INPUT, (input_key(first),), 1),
-            InputInContext(input_key(first), "t1", 1),
-        )
-        note = insert_row(
-            db_conn,
-            agent_id,
-            "system_note",
-            "agent:7",
-            note_text,
-            payload='{"note_tag": "lifecycle_interrupt"}',
-        )
-        message = insert_row(db_conn, agent_id, "chat", "agent:7", "do Y instead")
-        control = insert_row(db_conn, agent_id, "interrupt", "agent:7", "")
-        engine.notify_inbound()
-        await wait_until(lambda: len(engine.delivered) == 2, "the note and message are delivered")
-        await wait_until(lambda: engine.interrupts == 1, "the control row interrupts")
-        engine.emit(
-            completed("t1", "", interrupted=True),
-            TurnStarted("t2", TurnOrigin.HARNESS, (input_key(note), input_key(message)), 1),
-            InputInContext(input_key(note), "t2", 1),
-            InputInContext(input_key(message), "t2", 1),
-            completed("t2", "MEIVA_DISPLAY_TO_USER\nhandled"),
-        )
-        await node
-
-    delivered = [i for batch in engine.delivered[1:] for i in batch]
-    assert [i.key for i in delivered] == [input_key(note), input_key(message)]
-    assert note_text in delivered[0].text
-    assert "do Y instead" in delivered[1].text
-    assert row_status(db_conn, control) == "pending", "claim takes the control row next"
-
-
 async def test_the_claim_leaves_deliverable_rows_to_delivery_and_takes_leading_controls(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
@@ -560,6 +509,9 @@ def _external_ctx(
     )
 
 
+# meiva:note
+# A stop that arrives during delivery is taken once the message is out of the way; one already pending
+# when the invocation starts aimed at a turn that has ended, so it is settled and applied to nothing.
 @pytest.mark.parametrize("refused_first", [False, True])
 async def test_a_message_followed_by_a_stop_is_delivered_and_then_the_stop_is_taken(
     refused_first: bool,
@@ -572,19 +524,20 @@ async def test_a_message_followed_by_a_stop_is_delivered_and_then_the_stop_is_ta
     agent_id = agent_row(db_conn)
     message = insert_row(db_conn, agent_id, "chat", "user", "work")
     attempts = 0
+    stops: list[int] = []
 
     def script(inputs: Sequence[HarnessInput]) -> Sequence[BridgeEvent]:
         nonlocal attempts
         attempts += 1
         if refused_first and attempts == 1:
-            insert_row(db_conn, agent_id, "interrupt", "user", "")
+            stops.append(insert_row(db_conn, agent_id, "interrupt", "user", ""))
             return rejecting()(inputs)
         return in_a_turn([i.key for i in inputs], "MEIVA_DISPLAY_TO_USER\nok")
 
     engine = FakeEngine(script=script)
     ctx = _external_ctx(aops_pool, database_gate, engine, hosted_resources)
     if not refused_first:
-        insert_row(db_conn, agent_id, "interrupt", "user", "")
+        stops.append(insert_row(db_conn, agent_id, "interrupt", "user", ""))
     rt = Runtime(context=ctx)
     state = AgentState(halted=True)
 
@@ -596,9 +549,10 @@ async def test_a_message_followed_by_a_stop_is_delivered_and_then_the_stop_is_ta
         stop = await claim_node(state, rt, config(agent_id))
 
     assert row_status(db_conn, message) == "done"
-    assert stop.goto == "claim" and dict[str, object](stop.update or {}).get("halted") is True, (
-        "the stop is taken"
-    )
+    if refused_first:
+        assert stop.goto == "claim" and dict[str, object](stop.update or {}).get("halted") is True
+    else:
+        assert row_status(db_conn, stops[0]) == "done"
 
 
 # meiva:note
@@ -798,3 +752,40 @@ def test_the_migration_moves_only_old_reservations_of_external_agents(
 
     assert [row_status(db_conn, i) for i in moved] == ["claimed", "claimed"]
     assert [row_status(db_conn, i) for i in untouched] == ["pending", "pending"]
+
+
+# meiva:note
+# An interrupt whose turn ended on its own first: the next invocation finds the note, the message and
+# the control row all pending. The message is answered, not interrupted: the control row aimed at a
+# turn that no longer exists.
+async def test_an_interrupt_after_its_turn_ended_does_not_cut_the_answer_short(
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    hosted_resources: HostedTurnResources,
+) -> None:
+    agent_id = agent_row(db_conn)
+    note = insert_row(
+        db_conn,
+        agent_id,
+        "system_note",
+        "agent:7",
+        "Your running turn was interrupted by agent:7. Their message follows.",
+        payload='{"note_tag": "lifecycle_interrupt"}',
+    )
+    message = insert_row(db_conn, agent_id, "chat", "agent:7", "do Y instead")
+    insert_row(db_conn, agent_id, "interrupt", "agent:7", "")
+    engine = silent_engine()
+    rt = runtime(engine, ops_pool=aops_pool, hosted_resources=hosted_resources)
+
+    async with asyncio.timeout(20), asyncio.TaskGroup() as tasks:
+        node = tasks.create_task(harness_turn_node(AgentState(), rt, config(agent_id)))
+        await wait_until(lambda: bool(engine.delivered), "the note and message are delivered")
+        engine.emit(
+            TurnStarted("t2", TurnOrigin.INPUT, (input_key(note), input_key(message)), 1),
+            InputInContext(input_key(note), "t2", 1),
+            InputInContext(input_key(message), "t2", 1),
+        )
+        await asyncio.sleep(0.5)
+        assert engine.interrupts == 0, "the answer to the message was interrupted"
+        engine.emit(completed("t2", "MEIVA_DISPLAY_TO_USER\nhandled"))
+        await node

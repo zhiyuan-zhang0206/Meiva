@@ -141,7 +141,7 @@ async def test_an_interrupt_of_an_idle_agent_is_a_plain_chat(
 
 @pytest.mark.parametrize(
     ("harness", "kinds"),
-    [("meiva", ["system_note"]), ("claude_code", ["system_note", "interrupt"])],
+    [("meiva", ["system_note"]), ("claude_code", ["interrupt", "system_note"])],
 )
 async def test_the_stop_button_leaves_a_passive_note_and_no_chat(
     db_conn: psycopg.Connection,
@@ -160,7 +160,7 @@ async def test_the_stop_button_leaves_a_passive_note_and_no_chat(
 
     rows = _rows(db_conn, agent_id)
     assert [kind for kind, _s, _c, _p in rows] == kinds
-    assert rows[0][1:] == (
+    assert rows[-1][1:] == (
         "user",
         "Your running turn was interrupted by user.",
         {"note_tag": "lifecycle_interrupt", "passive": True},

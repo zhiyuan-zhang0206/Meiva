@@ -38,6 +38,7 @@ from agent.graph.claim.harness_inbox import (
     recovery_notes_first,
     requeue_handed,
     reserve_head_batch,
+    settle_stale_interrupts,
 )
 from agent.graph.claim.harness_interrupt import announce_interrupt, await_foreground
 from agent.graph.claim.harness_render import (
@@ -195,6 +196,7 @@ async def _run_harness_turn(
         delivery_mode=ctx.require_agent().prompt.user_delivery_mode,
     )
     run = ForegroundRun(ctx, agent_id, bridge, projector, state, event_publisher)
+    await settle_stale_interrupts(ctx, agent_id)
 
     try:
         await await_foreground(ctx, agent_id, bridge, projector, run.execute)
