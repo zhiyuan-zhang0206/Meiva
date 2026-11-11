@@ -33,18 +33,18 @@ def test_alias_scan_does_not_probe_module_getattr(monkeypatch: pytest.MonkeyPatc
     assert touched == []
 
 
-def test_alias_scan_does_not_trigger_the_mcps_servers_probe(
+def test_alias_scan_does_not_trigger_the_mcps_server_lookup(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     import meiva.mcps
     from base.agents.inbox import wake
 
     calls: list[str] = []
-    target_code = meiva.mcps.servers.__code__
+    target_code = meiva.mcps.__getattr__.__code__
 
     def _profile(frame: object, event: str, _arg: object) -> None:
         if event == "call" and getattr(frame, "f_code", None) is target_code:
-            calls.append("servers")
+            calls.append("server lookup")
 
     previous = sys.getprofile()
     sys.setprofile(_profile)

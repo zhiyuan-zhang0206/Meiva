@@ -42,17 +42,29 @@ def _clock() -> Clock:
 # The servers that exist before a test writes any machine config: the ones the repo bundles.
 @pytest.fixture
 def builtin_servers(machine_config: Path) -> list[str]:
-    return mcps_mod.servers()
+    return dir(mcps_mod)
 
 
-def write_servers(path: Path, servers: dict[str, dict[str, str]]) -> None:
+def bind_unused_daemon(bound_agent: BindAgent) -> None:
+    bound_agent(
+        1,
+        clients=ClientSet(
+            factories={
+                McpClients: lambda: McpClients(Path("unused.sock"), 1.0, timers=SYSTEM_TIMERS)
+            }
+        ),
+        clock_factory=_clock,
+    )
+
+
+def write_servers(path: Path, servers: dict[str, dict[str, object]]) -> None:
     path.write_text(json.dumps({"mcpServers": servers}), encoding="utf-8")
 
 
 def test_servers_are_only_the_bundled_ones_without_machine_config(
     builtin_servers: list[str],
 ) -> None:
-    assert mcps_mod.servers() == builtin_servers
+    assert dir(mcps_mod) == builtin_servers
     assert "fs" not in builtin_servers
 
 
@@ -63,7 +75,7 @@ def test_servers_lists_configured_names_sorted(
         machine_config,
         {"zebra": {"command": "z"}, "apple": {"command": "a"}, "mango": {"command": "m"}},
     )
-    assert mcps_mod.servers() == sorted([*builtin_servers, "apple", "mango", "zebra"])
+    assert dir(mcps_mod) == sorted([*builtin_servers, "apple", "mango", "zebra"])
 
 
 # meiva:note
@@ -72,7 +84,7 @@ def test_servers_ignore_a_file_without_the_section(
     machine_config: Path, builtin_servers: list[str]
 ) -> None:
     machine_config.write_text(json.dumps({"other_key": {}}), encoding="utf-8")
-    assert mcps_mod.servers() == builtin_servers
+    assert dir(mcps_mod) == builtin_servers
 
 
 def test_load_config_raises_on_bad_json(machine_config: Path) -> None:
@@ -88,21 +100,36 @@ def test_load_config_raises_when_section_not_dict(machine_config: Path) -> None:
         mcps_mod.load_config()
 
 
-def test_description_returns_config_field(machine_config: Path) -> None:
+def test_a_server_proxy_carries_the_description_its_configuration_declares(
+    machine_config: Path, bound_agent: BindAgent
+) -> None:
+    bind_unused_daemon(bound_agent)
     write_servers(machine_config, {"notes": {"command": "x", "description": "drive a notebook"}})
-    assert mcps_mod.description("notes") == "drive a notebook"
+    assert mcps_mod.notes.__doc__ == "drive a notebook"
 
 
-def test_description_none_when_field_absent(machine_config: Path) -> None:
-    # No `description` field -> the capabilities index renders a bare name.
+def test_a_server_proxy_without_a_declared_description_has_the_generic_doc(
+    machine_config: Path, bound_agent: BindAgent
+) -> None:
+    bind_unused_daemon(bound_agent)
     write_servers(machine_config, {"notes": {"command": "x"}})
-    assert mcps_mod.description("notes") is None
+    assert mcps_mod.notes.__doc__ == "Tools of MCP server 'notes'."
 
 
-def test_description_raises_for_missing_server(machine_config: Path) -> None:
+def test_a_non_string_description_fails_fast(machine_config: Path) -> None:
+    write_servers(machine_config, {"notes": {"command": "x", "description": 3}})
+    with pytest.raises(TypeError, match="notes: description must be a string, got int"):
+        _ = mcps_mod.notes
+
+
+def test_the_removed_helpers_are_not_attributes_and_read_as_unconfigured_servers(
+    machine_config: Path,
+) -> None:
     write_servers(machine_config, {"fs": {"command": "x"}})
-    with pytest.raises(mcps_mod.MCPServerNotFound, match="nope"):
-        mcps_mod.description("nope")
+    with pytest.raises(AttributeError, match=r"no server 'servers'.*have: \[.*'fs'.*\]"):
+        _ = mcps_mod.servers
+    with pytest.raises(AttributeError, match=r"no server 'description'.*have: \[.*'fs'.*\]"):
+        _ = mcps_mod.description
 
 
 # ─── module-level __getattr__ / __dir__ namespace dispatch ────────────────
@@ -154,21 +181,18 @@ def test_module_dir_lists_servers(machine_config: Path) -> None:
     # server names are present; tool methods are present; other _-prefixed filtered out
     assert "fs" in listing
     assert "github" in listing
-    assert "servers" in listing
-    assert "description" in listing
+    assert "servers" not in listing
+    assert "description" not in listing
 
 
-def test_the_agent_visible_surface_is_the_helpers_plus_the_configured_servers(
+# meiva:note
+# `__all_for_meiva__` is declared on the module class and computed live, so `help()` and the metering wrappers see exactly each configured server, however many names the module itself gains.
+def test_the_agent_visible_surface_is_the_configured_servers_alone(
     machine_config: Path, builtin_servers: list[str]
 ) -> None:
-    """`__all_for_meiva__` is declared on the module class and computed live, so `help()` and the
-    metering wrappers see exactly `servers` / `description` and each configured server, however
-    many names the module itself gains."""
-    assert mcps_mod.__all_for_meiva__ == sorted([*builtin_servers, "description", "servers"])
+    assert mcps_mod.__all_for_meiva__ == builtin_servers
     write_servers(machine_config, {"fs": {"command": "x"}, "github": {"command": "y"}})
-    assert mcps_mod.__all_for_meiva__ == sorted(
-        [*builtin_servers, "description", "fs", "github", "servers"]
-    )
+    assert mcps_mod.__all_for_meiva__ == sorted([*builtin_servers, "fs", "github"])
 
 
 # ─── tools / call / call_raw via ServerProxy ─────────────────────────────

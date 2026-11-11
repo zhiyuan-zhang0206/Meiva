@@ -40,10 +40,21 @@ def test_help_on_mcps_module_is_index_only(
     out = capsys.readouterr().out
     assert "from . import fs" in out
     assert "from . import github" in out
-    # Positively: each server carries its one-liner. It is the proxy's generic
-    # doc, not the `description` from mcp.json — that one reaches the agent
-    # through the `# Capabilities` index, which is the MCP index of record.
-    assert "Tools of MCP server 'fs'." in out
+    assert 'from . import fs\n"""Local filesystem"""' in out
+    assert 'from . import github\n"""Tools of MCP server \'github\'."""' in out
+    assert "def servers" not in out
+    assert "def description" not in out
     # No tool-schema surface: the render must not have connected to a server.
     assert "inputSchema" not in out
     assert "**kwargs" not in out
+
+
+# meiva:note
+# A bad `description` in a server's configuration fails the render loudly instead of being listed bare.
+@pytest.mark.usefixtures("sdk_model_owner")
+def test_help_on_mcps_module_rejects_a_non_string_description(fake_config: Path) -> None:
+    fake_config.write_text(
+        json.dumps({"mcpServers": {"fs": {"command": "x", "description": 3}}}), encoding="utf-8"
+    )
+    with pytest.raises(TypeError, match="fs: description must be a string, got int"):
+        meiva.help(meiva.mcps)

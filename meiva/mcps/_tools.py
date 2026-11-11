@@ -225,13 +225,15 @@ class ServerProxy(types.ModuleType):
 
     Attribute access lazily returns a tool callable; `dir(proxy)` lists
     the server's tools. `__all_for_meiva__` reads disk cache first; only on cache
-    miss does it connect — so `meiva.help()` doesn't trigger server startup.
+    miss does it connect — so `meiva.help()` doesn't trigger server startup. Its docstring is
+    the `description` the server's configuration declares (the generic line when it declares none),
+    which is what `meiva.help(meiva.mcps)` lists next to the server's name.
     """
 
-    def __init__(self, server: str, source: ToolSource) -> None:
+    def __init__(self, server: str, source: ToolSource, description: str | None = None) -> None:
         super().__init__(f"meiva.mcps.{server}")
         self._source = source
-        self.__doc__ = f"Tools of MCP server {server!r}."
+        self.__doc__ = description if description else f"Tools of MCP server {server!r}."
         self._server = server
         self._tools_cache: dict[str, ToolInfo] | None = None
 

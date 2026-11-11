@@ -135,7 +135,7 @@ _SKILLS_HOWTO = (
 )
 
 _MCP_HOWTO = (
-    "`meiva.mcps.servers()` lists every configured server and "
+    "`meiva.help(meiva.mcps)` lists every configured server and "
     "`meiva.help(meiva.mcps.<server>)` lists one server's tools."
 )
 
