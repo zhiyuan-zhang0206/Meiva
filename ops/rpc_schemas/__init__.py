@@ -29,6 +29,8 @@ from base.api_contracts.agent_contract import (
 )
 from base.api_contracts.caller_identity import CallerIdentity, is_caller_source
 from base.api_contracts.op_envelope import OpEnvelope as OpEnvelope
+from base.host.boundary.json_values import is_object_dict
+from base.host.boundary.untyped import object_of
 
 # Re-exported so existing `ops.rpc_schemas` importers keep their import paths.
 from ops.rpc_schemas.content import UserContent
@@ -148,12 +150,14 @@ class SpawnAgentRequest(BaseModel):
 
     @model_serializer(mode="wrap")
     def _serialize_with_harness(self, handler: SerializerFunctionWrapHandler) -> dict[str, object]:
-        data: dict[str, object] = handler(self)
-        if self._harness is not None:
-            config = data.get("config")
-            held = config if isinstance(config, dict) else {}
-            data["config"] = {**held, "harness": self._harness.value}
-        return data
+        raw = object_of(handler, self)
+        if not is_object_dict(raw):
+            raise TypeError(f"SpawnAgentRequest serialized to {type(raw).__name__}, not an object")
+        if self._harness is None:
+            return raw
+        config = raw.get("config")
+        held = config if is_object_dict(config) else {}
+        return {**raw, "config": {**held, "harness": self._harness.value}}
 
     @model_validator(mode="after")
     def _validate_prompt_source(self) -> "SpawnAgentRequest":
