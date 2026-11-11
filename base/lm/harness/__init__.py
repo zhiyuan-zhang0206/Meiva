@@ -58,6 +58,7 @@ from base.lm.harness.session import (
     BackgroundKind,
     BackgroundWork,
     BackgroundWorkReporting,
+    encode_items,
 )
 
 __all__ = [

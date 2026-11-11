@@ -151,7 +151,10 @@ class FileSessionRegistry:
     def save(self, record: SessionRecord) -> None:
         path = self.path(record.agent_id, record.harness)
         path.parent.mkdir(parents=True, exist_ok=True)
-        document = {**asdict(record), "background": encode_items(record.background)}
+        document: dict[str, object] = {
+            **asdict(record),
+            "background": encode_items(record.background),
+        }
         _write_document(path, document)
 
     def delete_harnesses(self, agent_id: int, harnesses: Collection[str]) -> None:
