@@ -596,14 +596,16 @@ def test_update_refuses_worktree_repo_for_default_home(
     assert not (unit_home / "skills" / "builtin-a").exists()
 
 
-# ─── adopt trust + stale origin_path re-anchor (audit 02 #5/#15) ────────────
+# meiva:note
+# adopt + stale origin_path re-anchor (audit 02 #5/#15)
 
 
-def test_update_adopt_sets_builtin_trust(
+# meiva:note
+# Adopting a hand-installed residue of a repo skill makes it repo-owned.
+def test_update_adopts_a_hand_installed_residue_as_a_repo_skill(
     process_config: ConfigBoot, unit_home: Path, repo: Path
 ) -> None:
-    """Adopting a hand-installed residue of a repo skill stamps it builtin —
-    it ships under the checkout's review, not third-party."""
+    # meiva:note
     # Simulate the pre-incorporation state: user row (no disk copy - update materializes source content)
     from datetime import UTC, datetime
 
@@ -613,7 +615,6 @@ def test_update_adopt_sets_builtin_trust(
             type="skill",
             origin="user",
             source=".agents/skills/builtin-a",
-            trust="unreviewed",
             installed_at=datetime.now(UTC).isoformat(),
         ),
         home=unit_home,
@@ -629,7 +630,7 @@ def test_update_adopt_sets_builtin_trust(
         )
         == 0
     )
-    assert _entry("builtin-a").trust == "builtin"
+    assert _entry("builtin-a").origin == "repo"
 
 
 def test_update_unchanged_reanchors_stale_origin_path(

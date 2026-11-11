@@ -30,10 +30,8 @@ from cli.commands.extensions.skill import (
     cmd_skill_install,
     cmd_skill_register,
     cmd_skill_scan,
-    cmd_skill_trust,
 )
 from cli.commands.extensions.skill_package import ExtensionRegistryError
-from cli.commands.extensions.tests.support.source_bindings import PROD_ELSEWHERE
 from cli.database.runtime import CommandRuntime
 from cli.database.tests.command_inputs import command_runtime as command_runtime
 from meiva.sdk_surface.tests.context_home import context_over_unit_home as context_over_unit_home
@@ -186,19 +184,16 @@ def test_accept_risk_installs_and_records_what_it_waived(
     entry = reg.get("helpful-backup", home=unit_home)
     assert entry is not None
     assert entry.accepted_findings == ["credential-exfiltration"]
-    assert entry.trust == "unreviewed"  # an override records a decision, it does not promote
     assert entry.scanned_at is not None
 
 
-def test_a_clean_third_party_install_is_still_unreviewed(
+def test_a_clean_third_party_install_records_no_accepted_findings(
     db_url: str,
     unit_home: Path,
     tmp_path: Path,
     *,
     command_runtime: CommandRuntime,
 ) -> None:
-    """A clean scan means "no rule matched", never "someone read this" — so the
-    tier a passing install lands at is the untrusted one."""
     src = _write(tmp_path / "code-review", "code-review", _BENIGN)
 
     assert (
@@ -218,8 +213,8 @@ def test_a_clean_third_party_install_is_still_unreviewed(
 
     entry = reg.get("code-review", home=unit_home)
     assert entry is not None
-    assert entry.trust == "unreviewed"
     assert entry.accepted_findings == []
+    assert entry.scanned_at is not None
 
 
 def test_register_scans_too_so_a_hand_copy_is_not_the_way_around_the_gate(
@@ -267,43 +262,9 @@ def test_register_and_enable_fold_the_typed_name_onto_the_real_directory(
     assert [p.name for p in reg.load(home=unit_home).packages] == ["page_ocr"]
 
 
-def test_trust_is_a_separate_human_verb(
-    db_url: str,
-    unit_home: Path,
-    tmp_path: Path,
-    *,
-    command_runtime: CommandRuntime,
-) -> None:
-    src = _write(tmp_path / "code-review", "code-review", _BENIGN)
-    assert (
-        cmd_skill_install(
-            str(src),
-            None,
-            None,
-            gateway=RecordingGateway(),
-            machine=command_runtime.machine,
-            home=unit_home,
-            now=datetime.now(UTC),
-            environ=ENVIRON,
-            scratch=FakeScratch(unit_home / "scratch"),
-        )
-        == 0
-    )
-
-    assert cmd_skill_trust("code-review", now=datetime.now(UTC), home=unit_home) == 0
-    assert reg.get("code-review", home=unit_home).trust == "reviewed"  # type: ignore[union-attr]
-
-    assert cmd_skill_trust("code-review", revoke=True, now=datetime.now(UTC), home=unit_home) == 0
-    assert reg.get("code-review", home=unit_home).trust == "unreviewed"  # type: ignore[union-attr]
-
-
-def test_trust_refuses_an_unknown_package(
-    unit_home: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
-    assert cmd_skill_trust("nope", now=datetime.now(UTC), home=unit_home) == 1
-    assert "not tracked" in capsys.readouterr().err
-
-
+# meiva:note
+# `meiva skill scan` exit code is what a caller gates on: 2 for critical, 0 for
+#     notices only.
 def test_scan_reports_an_installed_package_and_exits_on_criticals(
     db_url: str,
     unit_home: Path,
@@ -312,8 +273,6 @@ def test_scan_reports_an_installed_package_and_exits_on_criticals(
     *,
     command_runtime: CommandRuntime,
 ) -> None:
-    """`meiva skill scan` is the read-before-you-trust companion, and its exit
-    code is what a caller gates on: 2 for critical, 0 for notices only."""
     clean = _write(tmp_path / "code-review", "code-review", _BENIGN)
     assert (
         cmd_skill_install(
@@ -330,7 +289,7 @@ def test_scan_reports_an_installed_package_and_exits_on_criticals(
         == 0
     )
     assert cmd_skill_scan("code-review", home=unit_home) == 0
-    assert "trust=unreviewed" in capsys.readouterr().out
+    assert "[meiva skill scan]" in capsys.readouterr().out
 
     dirty = _write(tmp_path / "helpful-backup", "helpful-backup", _MALICIOUS)
     assert cmd_skill_scan(str(dirty), home=unit_home) == 2
@@ -366,55 +325,6 @@ def test_scan_surfaces_previously_accepted_findings(
 
     assert cmd_skill_scan("helpful-backup", home=unit_home) == 2
     assert "previously accepted: credential-exfiltration" in capsys.readouterr().out
-
-
-def test_converge_stamps_repo_skills_builtin_and_leaves_a_review_alone(
-    db_url: str,
-    unit_home: Path,
-    tmp_path: Path,
-    *,
-    command_runtime: CommandRuntime,
-) -> None:
-    """Converge owns the builtin stamp for content out of the checkout; a
-    human's `reviewed` promotion on a third-party package survives it."""
-    from cli.commands.extensions.skills_sync import converge_skills
-
-    repo = tmp_path / "repo"
-    _write(repo / "meiva_builtins" / "skills" / "meiva-goal", "meiva-goal", _BENIGN)
-    installed = _write(tmp_path / "code-review", "code-review", _BENIGN)
-    assert (
-        cmd_skill_install(
-            str(installed),
-            None,
-            None,
-            gateway=RecordingGateway(),
-            machine=command_runtime.machine,
-            home=unit_home,
-            now=datetime.now(UTC),
-            environ=ENVIRON,
-            scratch=FakeScratch(unit_home / "scratch"),
-        )
-        == 0
-    )
-    assert cmd_skill_trust("code-review", now=datetime.now(UTC), home=unit_home) == 0
-
-    converge_skills(repo, unit_home, binding=PROD_ELSEWHERE, now=datetime.now(UTC))
-
-    assert reg.get("meiva-goal", home=unit_home).trust == "builtin"  # type: ignore[union-attr]
-    assert reg.get("code-review", home=unit_home).trust == "reviewed"  # type: ignore[union-attr]
-
-
-def test_trust_refuses_to_hand_edit_a_builtin_tier(unit_home: Path, tmp_path: Path) -> None:
-    """Builtin means "this came out of the checkout" — a fact converge owns, not
-    an opinion a user holds."""
-    from cli.commands.extensions.skills_sync import converge_skills
-
-    repo = tmp_path / "repo"
-    _write(repo / "meiva_builtins" / "skills" / "meiva-goal", "meiva-goal", _BENIGN)
-    converge_skills(repo, unit_home, binding=PROD_ELSEWHERE, now=datetime.now(UTC))
-
-    assert cmd_skill_trust("meiva-goal", now=datetime.now(UTC), home=unit_home) == 1
-    assert reg.get("meiva-goal", home=unit_home).trust == "builtin"  # type: ignore[union-attr]
 
 
 def test_install_registers_through_the_gateway_before_the_local_copy(

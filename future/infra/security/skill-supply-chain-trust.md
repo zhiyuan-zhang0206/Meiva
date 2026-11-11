@@ -1,6 +1,6 @@
 # Skill supply chain — what is left after the install gate
 
-> **Status: the install-time gate and the trust tier are BUILT.** What shipped,
+> **Status: the install-time gate is BUILT; there are no trust tiers (deleted 2026-11-12, an installed skill is trusted).** What shipped,
 > and why it is shaped this way, is
 > [`docs/decisions/runtime/processes/shutdown/2026-07-29-skill-trust-tiers-and-install-scan.md`](../../../docs/decisions/runtime/processes/shutdown/2026-07-29-skill-trust-tiers-and-install-scan.md);
 > the current-state description lives in
@@ -10,25 +10,7 @@
 
 In one line: every package entering `$MEIVA_HOME/skills/` from outside the
 checkout is scanned by `base/packages/skills/scan.py` and refused on a critical finding
-(`--accept-risk` overrides, loudly and on the record), and it lands at trust tier
-`unreviewed` until a human runs `meiva skill trust`.
-
-## 1. Recall must enforce the tier — the reason the tier exists
-
-**Open, and the highest-value item here.** The tier is written but nothing reads
-it at runtime yet. Skill recall pulls skill text into an agent's context because
-a similarity search matched, with no human deciding that this stranger's prose
-should be consulted right now — which is the install gate's whole threat model
-arriving through a side door.
-
-The rule to implement: recall may **name** an `unreviewed` skill (so the agent
-can choose to open it, a decision that is at least in the transcript) but must
-not **inject its body**. `builtin` and `reviewed` inject normally. A skill whose name the registry
-does not track — a plugin's runtime provider root, which never passes through
-the registry — counts as `unreviewed`. (The former accessor `trust_by_name()` was
-deleted 2026-11-12 with no caller; the consumer will bring its own read.)
-
-Owner: the skill-recall work, not this one.
+(`--accept-risk` overrides, loudly and on the record).
 
 ## 2. Semantic review of SKILL.md prose (the static half's missing half)
 
@@ -63,7 +45,7 @@ A package is scanned once, at install. When a rule is added for an attack shape
 we did not know about, every already-installed package is unexamined against it.
 `meiva skill scan <name>` re-runs on demand, but nothing sweeps.
 
-Wanted: a converge-time sweep that re-scans `unreviewed` packages against the
+Wanted: a converge-time sweep that re-scans installed packages against the
 current table and surfaces newly-critical ones as warnings (not a retroactive
 uninstall — converge must not delete a user's content). Cheap: the whole
 first-party library scans in well under a second. Needs a stored rule-table

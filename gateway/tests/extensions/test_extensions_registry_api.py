@@ -45,12 +45,7 @@ def test_put_registers_the_tree_and_returns_its_hash(
     }
     row = registry.get(db_conn, "demo")
     assert row is not None
-    assert (row.kind, row.source, row.trust, row.default_enabled) == (
-        "skill",
-        "local:laptop",
-        "unreviewed",
-        True,
-    )
+    assert (row.kind, row.source, row.default_enabled) == ("skill", "local:laptop", True)
     assert row.content_hash == tree_hash(root)
     archive = registry.get_blob(db_conn, tree_hash(root))
     assert archive is not None and archive == registry.pack_tree(root)
@@ -70,7 +65,7 @@ def test_replay_is_idempotent(
     assert db_conn.execute("SELECT count(*) FROM extension_blobs").fetchone() == (1,)
 
 
-def test_changed_content_replaces_the_row_and_resets_trust(
+def test_changed_content_replaces_the_row(
     client: TestClient, db_conn: psycopg.Connection, tmp_path: Path
 ) -> None:
     v1 = _tree(tmp_path / "v1", "one\n")

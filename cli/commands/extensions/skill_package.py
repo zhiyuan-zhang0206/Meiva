@@ -152,6 +152,16 @@ def discover(root: Path) -> list[SkillPackage]:
     )
 
 
+# meiva:note
+# Record a freshly-installed package in the install registry (origin='user',
+#     so converge leaves it alone).
+#
+#     `content_hash` / `installed_hash` record the tree hash of what was just
+#     written (R5): the later `upgrade` path compares the on-disk tree against
+#     `installed_hash` to report local edits before replacing the copy. (`content_hash`
+#     is written too so converge's copy-change detection agrees on first sight;
+#     on installed-plugin rows converge then re-owns `content_hash` for the
+#     load-dir skills copy.)
 def register_installed(
     name: str,
     pkg_type: str,
@@ -166,20 +176,6 @@ def register_installed(
     check_every: int | None = None,
     home: Path,
 ) -> None:
-    """Record a freshly-installed package in the install registry (origin='user',
-    so converge leaves it alone).
-
-    Trust is always `"unreviewed"` here: this is third-party content, and a
-    clean scan does not stand in for a human having read it. Promotion is the
-    separate, explicit `meiva skill trust <name>`.
-
-    `content_hash` / `installed_hash` record the tree hash of what was just
-    written (R5): the later `upgrade` path compares the on-disk tree against
-    `installed_hash` to report local edits before replacing the copy. (`content_hash`
-    is written too so converge's copy-change detection agrees on first sight;
-    on installed-plugin rows converge then re-owns `content_hash` for the
-    load-dir skills copy.)
-    """
     from base.packages.extensions import install_registry
 
     stamp = now.isoformat(timespec="seconds")
@@ -198,7 +194,6 @@ def register_installed(
             enabled=True,
             installed_at=stamp,
             updated_at=stamp,
-            trust="unreviewed",
             scanned_at=stamp,
             accepted_findings=accepted_findings or [],
             content_hash=content_hash,

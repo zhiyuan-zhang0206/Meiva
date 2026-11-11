@@ -22,8 +22,7 @@
 #
 # The iframe the console wraps this in is breakage containment, not a security
 # boundary: plugin Python already runs in agent processes with shell and DB
-# access, so the trust decision was made at install time (the scan gate + trust
-# tier). What the boundary buys is that a broken or slow plugin page cannot take
+# access, so the trust decision was made at install time (the scan gate). What the boundary buys is that a broken or slow plugin page cannot take
 # down the console, and that no third-party code enters the console's bundle.
 
 from __future__ import annotations

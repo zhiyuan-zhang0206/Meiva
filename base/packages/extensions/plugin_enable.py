@@ -55,7 +55,6 @@ def set_enabled(conn: psycopg.Connection, name: str, *, enabled: bool, home: Pat
             kind="plugin",
             source="repo" if builtin else "local:gateway",
             content_hash=digest,
-            trust="builtin" if builtin else "unreviewed",
         )
     registry.set_default_enabled(conn, resolved, enabled=enabled)
     return resolved

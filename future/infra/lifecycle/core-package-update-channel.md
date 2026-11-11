@@ -289,7 +289,7 @@ Rules:
 - Unversioned legacy content: no gates, unchanged behavior.
 
 **Trust (unchanged by versioning).**
-- Core content stays `builtin`; a refreshed third-party package keeps its tier (a changed adopted cluster row resets to `unreviewed` per S2 semantics); auto paths never promote trust and never pass `--accept-risk`.
+- Auto paths never pass `--accept-risk`.
 - Third-party auto-update is the default per the user ruling (24h); the scan gate, the trust rules and report-on-replace are what keep that safe, and per-package `notify`/`off` overrides remain.
 - A `ref` pinned to a tag or commit stays pinned: the channel never advances a pinned ref.
 

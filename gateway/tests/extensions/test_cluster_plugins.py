@@ -105,4 +105,3 @@ def test_registry_only_readonly_plugin_keeps_policy_and_category(
     stored = registry.get(db_conn, "remote_readonly")
     assert stored is not None
     assert stored.default_enabled is False
-    assert stored.trust == "unreviewed"

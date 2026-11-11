@@ -31,8 +31,7 @@ download-and-execute pipeline, an obfuscated payload, a credential store read
 paired with an outbound sink, instructions to work behind the user's back)
 **refuses the install**. It is pattern matching, so the same sentence applies:
 a clean report means "no rule matched", not "safe". Installed third-party
-content is recorded at trust tier `unreviewed` until a person runs `meiva skill trust`;
-the tier is a label that nothing reads at runtime.
+content is trusted once installed: there are no trust tiers.
 
 ### Local privileged services
 

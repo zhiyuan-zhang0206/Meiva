@@ -141,7 +141,7 @@ gateway behind its normal auth:
 - The frontend embeds it in a **sandboxed iframe**. The sandbox is **breakage
   containment, not a security boundary**: plugin Python already runs in agent
   processes with shell and DB access, so the trust decision is made at install
-  time (the install scan gate + trust tier,
+  time (the install scan gate,
   `future/infra/security/skill-supply-chain-trust.md`) — a plugin page learns nothing
   its Python half does not already have. What the iframe buys is that a
   broken/slow page cannot take down the console, and the app's own bundle

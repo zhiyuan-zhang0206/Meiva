@@ -95,6 +95,22 @@ def test_empty_file_is_empty_registry(unit_home: Path) -> None:
     assert reg.load(home=unit_home).packages == []
 
 
+def test_a_row_written_with_the_retired_trust_key_still_loads_and_drops_it(
+    unit_home: Path,
+) -> None:
+    path = install_registry_path(meiva_home())
+    path.write_text(
+        '{"version": 2, "packages": [{"name": "old", "type": "skill", "trust": "reviewed"}]}',
+        encoding="utf-8",
+    )
+
+    [entry] = reg.load(home=unit_home).packages
+    assert entry.name == "old"
+
+    reg.register(entry, home=unit_home)
+    assert "trust" not in path.read_text(encoding="utf-8")
+
+
 def test_save_is_atomic_and_leaves_no_temp(unit_home: Path) -> None:
     """save() stages through a temp sibling + rename (audit #2): no `.tmp`
     lingers, and a stale temp from a crashed earlier writer is swept."""

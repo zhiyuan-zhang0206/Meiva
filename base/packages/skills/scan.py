@@ -19,8 +19,7 @@
 #   human reviewer. The install refuses. Nothing lands on disk.
 # - **notice** — a capability worth a reviewer's eye but routinely legitimate
 #   (`sudo`, `rm -rf`, an AWS credential path in a deploy skill, an HTTP POST).
-#   Never blocks; printed, and the material a human reads before promoting a
-#   package to the `reviewed` trust tier.
+#   Never blocks; printed, and the material a human reads before installing.
 #
 # This is a mitigation layer, not a boundary (`SECURITY.md`). It matches *known shapes of
 # known attacks* in *text this scanner can read*. A clean report means "no rule

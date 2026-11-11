@@ -1,9 +1,10 @@
-"""`meiva plugins` + `meiva skill` — package install/toggle lifecycle.
-
-Builders plus their `_h_*` handlers for plugin config updates, external skill
-package installs, and the supply-chain review pair (`scan` / `trust`).
-Handlers lazy-import their `cmd_*` implementation from ``cli.commands`` so
-parser building never loads Settings (see ``cli.main`` module docstring)."""
+# meiva:note
+# `meiva plugins` + `meiva skill` — package install/toggle lifecycle.
+#
+# Builders plus their `_h_*` handlers for plugin config updates, external skill
+# package installs, and the supply-chain re-scan (`scan`).
+# Handlers lazy-import their `cmd_*` implementation from ``cli.commands`` so
+# parser building never loads Settings (see ``cli.main`` module docstring).
 
 from __future__ import annotations
 
@@ -69,12 +70,6 @@ class _SkillRegisterOptions:
 @dataclass(frozen=True)
 class _SkillScanOptions:
     target: str
-
-
-@dataclass(frozen=True)
-class _SkillTrustOptions:
-    name: str
-    revoke: bool
 
 
 def _h_plugins_update(args: argparse.Namespace) -> int:
@@ -294,17 +289,6 @@ def _h_skill_scan(args: argparse.Namespace) -> int:
     return cmd_skill_scan(target, home=runtime.home)
 
 
-def _h_skill_trust(args: argparse.Namespace) -> int:
-    from cli.commands.extensions.skill import cmd_skill_trust
-    from cli.database.runtime import runtime_of
-
-    opts = options(args, _SkillTrustOptions)
-    runtime = runtime_of(args)
-    return cmd_skill_trust(
-        opts.name, revoke=opts.revoke, now=runtime.clock.now(), home=runtime.home
-    )
-
-
 def add_plugins_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     # `meiva plugins` — plugin config update + external skill package install lifecycle.
     plugins_p = sub.add_parser(
@@ -478,20 +462,11 @@ def add_skill_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -
     )
     skill_register_p.set_defaults(func=_h_skill_register)
 
-    # `meiva skill scan` / `meiva skill trust` — the supply-chain review pair: read
-    # what the scanner saw, then vouch for the content as a human.
+    # meiva:note
+    # `meiva skill scan` — read what the supply-chain scanner sees in a package.
     skill_scan_p = skill_sub.add_parser(
         "scan",
         help="re-run the supply-chain scan over an installed package or any directory",
     )
     skill_scan_p.add_argument("target", help="tracked package name, or a path to a skill directory")
     skill_scan_p.set_defaults(func=_h_skill_scan)
-
-    skill_trust_p = skill_sub.add_parser(
-        "trust", help="record that a human read this package's content (trust=reviewed)"
-    )
-    skill_trust_p.add_argument("name", help="tracked package name")
-    skill_trust_p.add_argument(
-        "--revoke", action="store_true", help="take the review back (trust=unreviewed)"
-    )
-    skill_trust_p.set_defaults(func=_h_skill_trust)

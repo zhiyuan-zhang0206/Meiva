@@ -16,7 +16,6 @@ from base.api_contracts.agent_contract import (
 )
 from base.cluster.machine import MachineRole
 from base.events.signals import SignalSeverity
-from base.packages.extensions.install_registry import TrustTier
 from base.packages.extensions.registry import ExtensionKind
 
 _SCHEMA = re.sub(
@@ -33,7 +32,6 @@ _CASES: dict[tuple[str, str], set[str]] = {
     ("inbound_messages", "kind"): {s.value for s in InboundKind},
     ("machines", "role"): set(get_args(MachineRole)),
     ("extensions", "kind"): set(get_args(ExtensionKind)),
-    ("extensions", "trust"): set(get_args(TrustTier)),
     ("agent_tasks", "status"): {s.value for s in TaskStatus},
     ("signal_state", "severity"): {s.value for s in SignalSeverity},
 }

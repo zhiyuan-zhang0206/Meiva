@@ -12,16 +12,15 @@ dropped into a gateway-only host's `$MEIVA_HOME/plugins/` is never scanned.
 ## Entry shape
 
 `{name, type, source, path, ref, enabled, origin, origin_path, content_hash,
-installed_at, updated_at, trust, scanned_at, accepted_findings, update}`
+installed_at, updated_at, scanned_at, accepted_findings, update}`
 
 - `type` — `skill` | `plugin` | `mcp`
 - `source` / `path` / `ref` — the git URL, the subdir within it, the pinned ref
 - `origin` / `origin_path` / `content_hash` — converge provenance written by
   `cli/commands/extensions/skills_sync.py`; `base/packages/extensions/install_registry.py:tree_hash()` recomputes
   the hash to surface a `modified_locally` drift flag
-- `trust` / `scanned_at` / `accepted_findings` — the content trust tier, when
-  `base/packages/skills/scan.py` last read the package, and the rule ids a human waived
-  with `--accept-risk` (see below)
+- `scanned_at` / `accepted_findings` — when `base/packages/skills/scan.py` last read the
+  package, and the rule ids a human waived with `--accept-risk` (see below)
 - `update` — the per-package content-channel policy + bookkeeping (schema v2,
   tasks #2915 / #3267): `mode` (`auto` / `notify` / `off`), `interval_seconds`,
   `channel` (`core` = this repo's content paths / `git` = the recorded source),
@@ -36,26 +35,10 @@ installed_at, updated_at, trust, scanned_at, accepted_findings, update}`
 
 See [update policy and explicit defaults inputs](policy-inputs.md).
 
-## Trust tiers
+## No trust tiers
 
-`trust` records how far a package's *content* may be trusted, written where the
-content enters. It is a recorded label: no runtime code consults it.
-
-| tier | means | written by |
-|---|---|---|
-| `builtin` | came out of this Meiva checkout (`meiva_builtins/`) | converge |
-| `reviewed` | a human here read the content and vouches for it | `meiva skill trust <name>` |
-| `unreviewed` | ingested from outside — treat as attacker-controlled | every install path |
-
-A **clean scan does not promote**: an install matching no rule still lands
-`unreviewed`, as does an `--accept-risk` install. Converge owns the `builtin`
-stamp only, so a `reviewed` promotion survives every pass. A row predating the
-field reads `unreviewed` until the next converge — the safe direction.
-
-Its consumer is any runtime layer pulling skill text into a context **without a
-human choosing it** (skill recall): `unreviewed` content may be named, not
-auto-injected. An untracked skill — a plugin's runtime provider root — counts as
-`unreviewed`.
+An installed package is trusted. The registry records no tier: the only gate is the
+install-time scan below.
 
 ## The registry is the gate, not a record
 
@@ -105,13 +88,14 @@ the same load dir, so it meets the same gate) — is read file by file by
 decoded recursively before matching. A **critical** finding refuses the install
 with a file/line report and writes nothing; `--accept-risk` overrides and
 records the waived rule ids. **Notice** findings never block — they are what a
-reviewer reads before `meiva skill trust`. `meiva skill scan <name-or-path>` re-runs
+reviewer reads before installing. `meiva skill scan <name-or-path>` re-runs
 it on demand (exit 2 on criticals).
 
 A **mitigation layer, not a boundary**: known shapes of known attacks, in text
 it can read. A clean report means "no rule matched", never "safe". Rationale +
 rejected alternatives:
-[the decision record](../../../../../docs/decisions/runtime/processes/shutdown/2026-07-29-skill-trust-tiers-and-install-scan.md);
+[the decision record](../../../../../docs/decisions/runtime/processes/shutdown/2026-07-29-skill-trust-tiers-and-install-scan.md)
+(its tier half was reversed, see [no trust tiers](../../../../../docs/decisions/data/security/2026-11-12-no-skill-trust-tiers.md));
 open gaps: [what's left](../../../../../future/infra/security/skill-supply-chain-trust.md).
 
 Beyond the load dir, a plugin can contribute skill roots at scan time via

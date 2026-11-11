@@ -116,22 +116,6 @@ def differing_paths(
 
 PackageType = Literal["skill", "plugin", "mcp"]
 
-# meiva:note
-# How much a package's *content* may be trusted, recorded where it enters:
-#
-# - "builtin" — the content came from this Meiva checkout (`meiva_builtins/`), so it
-#   ships under the same review as the code. Written by converge.
-# - "reviewed" — third-party content a human on this cluster read and approved
-#   (`meiva skill trust <name>`). Never inferred: a clean
-#   `base.packages.skills.scan` report is "no rule matched", not "someone looked".
-# - "unreviewed" — the default for anything ingested from outside.
-#
-# The tier is a recorded label: no runtime code reads it.
-#
-# The default is the least-trusted tier, so a registry row written before this
-# field existed reads as third-party until the next converge re-stamps it.
-TrustTier = Literal["builtin", "reviewed", "unreviewed"]
-
 PackageOrigin = Literal["repo", "plugin", "user"]
 """Who owns a package's content in `~/.meiva/skills/`:
 
@@ -200,27 +184,25 @@ class ChannelState(BaseModel):
     last_result: str | None = None
 
 
+# meiva:note
+# One tracked package.
+#
+#     `source` is the git URL / marketplace ref it was installed from (None for
+#     converge-managed and hand-registered packages); `path` is the subdirectory
+#     within that source repo holding the package (None = repo root — a
+#     marketplace plugin lives at e.g. `plugins/<name>/` in a monorepo). `ref`
+#     pins a tag / commit / branch (None = source default branch). `enabled` is
+#     a local toggle — disabled skills stay on disk but are not surfaced.
+#
+#     `origin` / `origin_path` record converge provenance (see `PackageOrigin`);
+#     `content_hash` is the tree hash of what converge last wrote (its
+#     user-modification detector). `installed_at` / `updated_at` are UTC ISO
+#     timestamps.
+#
+#     `scanned_at` is when `base.packages.skills.scan` last ran over it, and
+#     `accepted_findings` holds the rule ids a human waved through with `--accept-risk`.
+#     An installed package is trusted: there are no tiers.
 class InstalledPackage(BaseModel):
-    """One tracked package.
-
-    `source` is the git URL / marketplace ref it was installed from (None for
-    converge-managed and hand-registered packages); `path` is the subdirectory
-    within that source repo holding the package (None = repo root — a
-    marketplace plugin lives at e.g. `plugins/<name>/` in a monorepo). `ref`
-    pins a tag / commit / branch (None = source default branch). `enabled` is
-    a local toggle — disabled skills stay on disk but are not surfaced.
-
-    `origin` / `origin_path` record converge provenance (see `PackageOrigin`);
-    `content_hash` is the tree hash of what converge last wrote (its
-    user-modification detector). `installed_at` / `updated_at` are UTC ISO
-    timestamps.
-
-    `trust` is the content trust tier (see `TrustTier`); `scanned_at` is when
-    `base.packages.skills.scan` last ran over it, and `accepted_findings` holds the rule
-    ids a human waved through with `--accept-risk`. An accepted-risk package
-    stays `unreviewed` — the override records a decision, it does not promote.
-    """
-
     name: str
     type: PackageType
     source: str | None = None
@@ -239,7 +221,6 @@ class InstalledPackage(BaseModel):
     rows) counts as changed — see `copy_changed`."""
     installed_at: str | None = None
     updated_at: str | None = None
-    trust: TrustTier = "unreviewed"
     scanned_at: str | None = None
     accepted_findings: list[str] = []
 

@@ -34,15 +34,12 @@ def _install_locally(
     body: str = "Original instructions.",
     origin: install_registry.PackageOrigin = "user",
     enabled: bool = True,
-    trust: install_registry.TrustTier = "unreviewed",
 ) -> Path:
     dest = paths.skills_dir(paths.meiva_home()) / name
     dest.mkdir(parents=True, exist_ok=True)
     (dest / "SKILL.md").write_text(_SKILL_MD.format(name=name, body=body), encoding="utf-8")
     install_registry.register(
-        install_registry.InstalledPackage(
-            name=name, type="skill", origin=origin, enabled=enabled, trust=trust
-        ),
+        install_registry.InstalledPackage(name=name, type="skill", origin=origin, enabled=enabled),
         home=meiva_home(),
     )
     return dest
@@ -69,7 +66,6 @@ def test_sweep_uploads_a_pre_registry_install(
     row = reg.get(db_conn, "sweep-demo")
     assert row is not None
     assert row.source == "local:home-a"
-    assert row.trust == "unreviewed"
     assert row.content_hash is not None
 
 
@@ -245,7 +241,7 @@ def test_a_locally_disabled_skill_adopts_disabled(
     assert [e.name for e in reg.list_enabled(db_conn, kind="skill")] == []
 
 
-def test_local_reviewed_trust_travels(
+def test_a_second_machine_with_the_same_bytes_finds_the_name_already_claimed(
     tmp_path: Path,
     as_machine: _AsMachine,
     db_conn: psycopg.Connection,
@@ -253,29 +249,7 @@ def test_local_reviewed_trust_travels(
     database_gate: ProcessDbGate,
 ) -> None:
     with as_machine(tmp_path / "home-a") as installing_machine:
-        _install_locally("trusted-demo", trust="reviewed")
-        with db.pool(gate=database_gate) as pool:
-            adopt.adopt_local_installs(
-                pool,
-                skills_root=paths.skills_dir(paths.meiva_home()),
-                machine_name=installing_machine.name(),
-                home=meiva_home(),
-            )
-
-    row = reg.get(db_conn, "trusted-demo")
-    assert row is not None
-    assert row.trust == "reviewed"
-
-
-def test_reviewed_row_survives_a_later_unreviewed_machine(
-    tmp_path: Path,
-    as_machine: _AsMachine,
-    db_conn: psycopg.Connection,
-    *,
-    database_gate: ProcessDbGate,
-) -> None:
-    with as_machine(tmp_path / "home-a") as installing_machine:
-        _install_locally("shared-trust-demo", body="Same bytes.", trust="reviewed")
+        _install_locally("shared-bytes-demo", body="Same bytes.")
         with db.pool(gate=database_gate) as pool:
             adopt.adopt_local_installs(
                 pool,
@@ -285,7 +259,7 @@ def test_reviewed_row_survives_a_later_unreviewed_machine(
             )
 
     with as_machine(tmp_path / "home-b") as installing_machine:
-        _install_locally("shared-trust-demo", body="Same bytes.", trust="unreviewed")
+        _install_locally("shared-bytes-demo", body="Same bytes.")
         with db.pool(gate=database_gate) as pool:
             result = adopt.adopt_local_installs(
                 pool,
@@ -294,11 +268,11 @@ def test_reviewed_row_survives_a_later_unreviewed_machine(
                 home=meiva_home(),
             )
         assert result.conflicts == []
-        assert result.already_claimed == ["shared-trust-demo"]
+        assert result.already_claimed == ["shared-bytes-demo"]
 
-    row = reg.get(db_conn, "shared-trust-demo")
+    row = reg.get(db_conn, "shared-bytes-demo")
     assert row is not None
-    assert row.trust == "reviewed", "a later unreviewed sweep must not downgrade a review"
+    assert row.source == "local:home-a"
 
 
 def test_a_tracked_name_missing_from_disk_is_reported_not_invented(

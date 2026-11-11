@@ -207,7 +207,7 @@ def test_converge_adopts_what_this_machine_installed_before_the_registry(
     _write_skill(converge.home / "skills", "pre-registry", "Installed long ago.")
     install_registry.register(
         install_registry.InstalledPackage(
-            name="pre-registry", type="skill", origin="user", enabled=True, trust="unreviewed"
+            name="pre-registry", type="skill", origin="user", enabled=True
         ),
         home=meiva_home(),
     )
