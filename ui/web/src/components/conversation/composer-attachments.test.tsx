@@ -154,6 +154,24 @@ describe("Composer unified staged attachments & batch delivery", () => {
     );
   });
 
+  it("shows processing, not 100%, once every byte is sent and the receipt is still pending", async () => {
+    let report: ((pct: number) => void) | undefined;
+    transport.stageUploadFile.mockImplementation((_agentId, _file, _key, onProgress) => {
+      report = onProgress;
+      return new Promise<StagedFile>(() => undefined);
+    });
+    renderComposerTree(<Composer {...baseProps} mode="idle" agentId={7} />);
+    const ta = screen.getByTestId("composer-input");
+    fireEvent.paste(ta, { clipboardData: { files: [imageFile()], types: ["Files"] } });
+    await waitFor(() => expect(report).toBeDefined());
+    act(() => report?.(60));
+    expect(screen.getByTestId("composer-attachment-card").textContent).toContain("60%");
+    act(() => report?.(100));
+    const card = screen.getByTestId("composer-attachment-card");
+    expect(card.textContent).toContain("Processing…");
+    expect(card.textContent).not.toContain("100%");
+  });
+
   it("revokes image preview object URLs when the composer unmounts", async () => {
     transport.stageUploadFile.mockResolvedValue({
       file_id: stagedId1,
