@@ -42,7 +42,7 @@ configured events channel it is given.
 - It calls `meiva.gateway_client.patch_label` (`PATCH /api/agents/{id}`, source `self`), so the gateway must be reachable. The gateway writes the label and the sticky `label_user_set` bit (the labeler does not overwrite it), records the `label_change` audit fact in the same transaction (attributed to `agent:<id>`, so a label set while a lease borrows the agent also lands in the lease's event log), and publishes `label_updated` so the fleet monitoring view refreshes. It does not depend on the Fleet plugin.
 
 ## Borrowed harness identity
-An external harness process acts as this agent through `meiva.attach()`: the bridge writes one registration row, exports the handle, and the SDK borrows that identity on the process's first read that needs one. A native agent does not see `meiva.attach` and is refused if it calls it. See [harness attach](harness/docs/harness-attach.md).
+An external harness process acts as this agent automatically: the bridge writes one registration row, exports the handle, and the SDK borrows that identity on the process's first read that needs one. See [harness attach](harness/docs/harness-attach.md).
 
 ## Key Dependencies
 - [Agent Lifecycle](../../agent/docs/lifecycle.md) — underlying implementation of restart/terminate

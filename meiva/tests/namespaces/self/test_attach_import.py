@@ -134,13 +134,6 @@ def test_a_live_registration_attaches_on_the_first_identity_read(
     assert "no harness session matches" not in report["agent_id"].get("message", "")
 
 
-def test_attach_without_a_handle_says_how_to_get_one(marker: Path) -> None:
-    report = _run_probe(marker)
-
-    assert report["attach"]["error"] == "RegistrationError"
-    assert "MEIVA_HARNESS_HANDLE" in report["attach"]["message"]
-
-
 # meiva:note
 # A handle shaped like the one the bridge mints: 32 random bytes, URL-safe base64. The store keeps
 # only its digest, so the value itself is the test's to choose.

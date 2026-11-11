@@ -38,7 +38,7 @@ from base.lm.harness.registry import SessionRegistry
 # works, and sits at `state.messages[0]` so the first inbound turn co-delivers the
 # handoff and the user's messages in one submission without overriding the CLI's
 # native system prompt. Section 3 lists what every attached process may reach, led
-# by `meiva.attach()`, which `import meiva` has already done here; what a particular
+# by `meiva`, whose identity binds on first use here; what a particular
 # role may reach is the role's business, not the wake's.
 # meiva:link agent/graph/docs/harness-turn.md
 HANDOFF_INSTRUCTION = (

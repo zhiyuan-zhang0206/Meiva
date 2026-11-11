@@ -74,19 +74,3 @@ def require_claimed(
     if session_id is not None and registration.external_session_id != session_id:
         raise RegistrationError("this handle belongs to another external session")
     return registration
-
-
-# meiva:note
-# The refusal `meiva.attach` earns from a process that is not an external harness: the entry
-# binds the identity an external harness process was started as, and a native agent's process
-# has its own (its help does not list the entry either). `external` is the fact the caller read:
-# the bound context names a harness other than the native one, or an SDK capture owner holds a
-# live handle.
-def external_only_attach_refusal(*, external: bool) -> str | None:
-    if external:
-        return None
-    return (
-        "meiva.attach() is for external harness processes (Claude Code, Codex, Antigravity): "
-        "they bind the agent identity they were started as. This agent runs on the native "
-        "'meiva' harness and already has its identity; do not call it."
-    )

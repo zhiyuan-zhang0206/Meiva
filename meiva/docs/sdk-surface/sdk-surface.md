@@ -41,7 +41,7 @@ The decisions of the surface are strict modules under `meiva/sdk_surface/pure/`:
 - [meiva.shell — Shell Operations](../../shell/docs/shell.md) — Shell commands: run() / run_background() (auto-report on completion) + sessions (new / send / capture / kill)
 
 ### Agent Interop
-- [Harness attach](../../self/harness/docs/harness-attach.md) — external process attachment to an agent identity via `meiva.attach()`
+- [Harness attach](../../self/harness/docs/harness-attach.md) — external process attachment to an agent identity, bound on the first read that needs one
 - [meiva.agents — Agent Interop](../../agents/docs/agents.md) — spawn / fork / send_message / terminate / resurrect / get_neighbors / get_ancestors / get_status
 - [Tasks](../../../meiva_builtins/plugins/meiva_fleet/docs/tasks/tasks.md) — Task registry `meiva.tasks`: create / get / list / update / log (injected by meiva_fleet plugin, not core SDK—docs in fleet subtree)
 

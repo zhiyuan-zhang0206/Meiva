@@ -137,7 +137,7 @@ class _PluginConfigReader(Protocol):
 
 # meiva:note
 # The pins and plugin-config view of the agent this process attached to
-# (`meiva.attach`: one attachment per process), if any: the lease its context carries.
+# (an external harness attachment: one per process), if any: the lease its context carries.
 def attached_agent_view() -> tuple[Mapping[str, object], _PluginConfigReader] | None:
     context = process_context.ambient_context()
     lease = None if context is None or context.identity is None else context.identity.lease

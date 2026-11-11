@@ -40,9 +40,9 @@
   Python file (or stdin as `-`) inside a provider-harness attachment, so the script's
   `meiva.*` calls carry the agent identity the bridge registered. The handle defaults to
   `$MEIVA_HARNESS_HANDLE`, which is how the bridge hands it to the child; nothing is
-  written to the workspace. The process refuses to attach a second identity, so a script
-  that calls `attach()` itself fails instead of nesting
-  ([meiva.attach](../../../meiva/self/harness/docs/harness-attach.md)).
+  written to the workspace. The process holds one identity, so the script's first identity read
+  reuses this attachment instead of nesting a second
+  ([harness attach](../../../meiva/self/harness/docs/harness-attach.md)).
 
 ## Local and package operations
 

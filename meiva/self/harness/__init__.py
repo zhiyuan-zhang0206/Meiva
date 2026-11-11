@@ -2,12 +2,9 @@ from __future__ import annotations
 
 import os
 
-from base.api_contracts.agent_contract import Harness
 from base.log import guard_default_logging
 from meiva import boot
 from meiva.sdk_surface import process_context, sdk_disable
-
-__all_for_meiva__ = ["attach"]
 
 HANDLE_ENV = "MEIVA_HARNESS_HANDLE"
 
@@ -82,66 +79,3 @@ def ensure_identity() -> object:
 
     atexit.register(attachment.close)
     return attachment
-
-
-def attach(handle: str | None = None) -> object:
-    """Bind this external process to the Meiva agent identity it was started as.
-
-    Call it with no argument: the handle comes from `MEIVA_HARNESS_HANDLE`, which the
-    bridge exported into this process. The call is idempotent — the first one
-    attaches, later ones return the same attachment — and every session's first
-    identity read does the same thing, so calling it explicitly is optional.
-
-    Raises:
-        RegistrationError: no handle in this process, or no session matches it.
-        HarnessAttachError: the session could not be attached (expired, ended,
-            another machine); the message carries the reason and says not to retry.
-        RuntimeError: this process already has an identity of its own.
-    """
-    guard_default_logging()
-    if process_context.is_host_process():
-        raise RuntimeError(
-            "meiva.attach found no identity to borrow: this process runs the shared host"
-        )
-    if handle is not None and handle != os.environ.get(HANDLE_ENV):
-        raise _registration_error(
-            "meiva.attach binds the session this process was started as; it cannot take "
-            "another session's handle. Use meiva.self.harness.open_attachment for that."
-        )
-    context = process_context.ambient_context()
-    if context is not None:
-        capture = context.sdk_capture
-        from .admission import external_only_attach_refusal
-
-        refused = external_only_attach_refusal(
-            external=context.harness is not Harness.MEIVA
-            or getattr(capture, "handle", None) is not None
-        )
-        if refused is not None:
-            raise RuntimeError(refused)
-    attachment = ensure_identity()
-    if attachment is not None:
-        return attachment
-    raise no_identity_error(os.environ.get(HANDLE_ENV))
-
-
-# meiva:note
-# Which failure a call without an identity reports: a process the bridge did not start has no
-# handle at all -- the variable is exported per launch or not exported -- so an empty value is the
-# same answer as a missing one, and only a handle that is there makes this the borrow failure.
-def no_identity_error(handle: str | None) -> BaseException:
-    if not handle:
-        return _registration_error(
-            "meiva.attach needs the session handle: run inside a process the bridge "
-            f"started, which exports {HANDLE_ENV}"
-        )
-    return RuntimeError(
-        "meiva.attach found no identity to borrow: this process already has one, or it "
-        "runs the shared host"
-    )
-
-
-def _registration_error(message: str) -> BaseException:
-    from meiva.self.harness.registration import RegistrationError
-
-    return RegistrationError(message)

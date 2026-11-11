@@ -52,7 +52,7 @@
     },
     {
       "id": 5,
-      "prompt": "You are agent R running inside an attached external CLI harness session (`meiva.attach()` borrowed identity, where the exec ceiling does not govern the loop and `meiva.self.restart` would only apply after the turn ends). The human writes: \"ok let's do this one live — dig into why the nightly report job keeps drifting, and keep me posted while you're at it.\" They did not say \"immersive on\". Logs are in your scratch directory; deep multi-day log correlation takes ~5 minutes and background execution is available. Handle the first minutes and list your actions and messages.",
+      "prompt": "You are agent R running inside an attached external CLI harness session (borrowed identity, where the exec ceiling does not govern the loop and `meiva.self.restart` would only apply after the turn ends). The human writes: \"ok let's do this one live — dig into why the nightly report job keeps drifting, and keep me posted while you're at it.\" They did not say \"immersive on\". Logs are in your scratch directory; deep multi-day log correlation takes ~5 minutes and background execution is available. Handle the first minutes and list your actions and messages.",
       "files": [],
       "expected_output": "Activates meiva-immersive-mode from the natural-language live request without needing the literal phrase \"immersive on\"; writes the workspace ledger noting the attached harness boundary, skips meiva.self.restart cleanly without failing, announces the live contract (silence watchdog cap 60s, hot/cold split, exit), performs a quick initial log check inline, and dispatches the 5-minute correlation job to the background.",
       "assertions": [
