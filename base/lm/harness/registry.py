@@ -47,7 +47,7 @@ class SessionRecord:
     # process that produced it, and a respawn or a resume is one more, so a record that outlives the
     # process keeps the count monotonic across sessions: a frame from an earlier process can never be
     # mistaken for one from the current process. Required: a record written before the field existed
-    # is completed by `backfill_generation` in converge, never read leniently.
+    # is completed by `backfill_record_fields` in converge, never read leniently.
     # meiva:link base/lm/harness/docs/delivery.md
     generation: int
     resumes: int = 0
@@ -258,7 +258,7 @@ def backfill_record_fields(root: Path) -> list[Path]:
             raise TypeError(f"session record at {entry} is not an object")
         if "generation" in raw and "background" in raw:
             continue
-        completed = {"generation": 0, "background": [], **raw}
+        completed: dict[str, object] = {"generation": 0, "background": [], **raw}
         record = record_from_payload(completed, source=str(entry))
         FileSessionRegistry(root).save(record)
         changed.append(entry)

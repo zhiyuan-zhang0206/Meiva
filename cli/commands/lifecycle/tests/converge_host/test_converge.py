@@ -313,7 +313,7 @@ def test_the_session_record_migration_step_converts_the_homes_records(
     assert capsys.readouterr().out == ""
 
 
-def test_the_session_record_step_backfills_the_background_field(
+def test_the_session_record_step_backfills_the_generation_and_background_fields(
     ctx: ConvergeCtx, capsys: pytest.CaptureFixture[str]
 ) -> None:
     sessions = paths.harness_sessions_dir(home=ctx.meiva_home)
@@ -331,8 +331,9 @@ def test_the_session_record_step_backfills_the_background_field(
 
     _steps.migrate_harness_session_records(ctx)
 
-    assert "added the background field to 1" in capsys.readouterr().out
-    assert json.loads((sessions / "7.codex.json").read_text())["background"] == []
+    assert "completed the generation or background field of 1" in capsys.readouterr().out
+    completed = json.loads((sessions / "7.codex.json").read_text())
+    assert completed["background"] == [] and completed["generation"] == 0
     _steps.migrate_harness_session_records(ctx)
     assert capsys.readouterr().out == ""
 

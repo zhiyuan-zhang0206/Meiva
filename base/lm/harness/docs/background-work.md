@@ -62,7 +62,10 @@ switch away and back — the next session reads the list back as lost
 (`take_lost_background`), and `HarnessBridge._opening_input` prepends one system note to
 the first input, listing each item by its description. The record is cleared when the note
 is taken, so it is told once. Items whose own end time has passed (a wakeup that already
-fired) are left out. The agent decides whether to recreate anything.
+fired) are left out. The agent decides whether to recreate anything. The note is the outermost
+part of the opening input: it comes before the handoff (or the compaction reminder), which comes
+before the input's own text, and after a restart that text can be the graph's resume note for a
+reconciled input (`reconciled-resume-…`, see `delivery.md`).
 
 ## Turns the CLI starts itself
 
@@ -77,8 +80,10 @@ timeline belongs to the event pump work, not to this file.
 
 `SessionRecord.background` is a required field. A record written before it existed is refused on
 read (the same way an old single-slot record is), and `meiva converge` backfills it as an empty
-list (`backfill_background_field`, run by the harness session records step) before the runner
-starts; an empty list is the true value for a record written by a process that tracked nothing.
+list (`backfill_record_fields`, run by the harness session records step) before the runner
+starts, together with `generation`; `meiva harness verify-sessions` and `unreadable_records` report a record
+missing either field as unconverged. An empty list is the true value for a record written by a process
+that tracked nothing.
 When an agent moves to another machine, the record travels with its pending list as it stood. The
 CLI process stays behind, so on the target the list is lost work: the target's first session reads
 it back and the agent is told once.

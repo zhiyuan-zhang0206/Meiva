@@ -20,7 +20,7 @@ from base.lm.harness.session import (
     lost_work_note,
 )
 from base.lm.harness.tests.bridge_support import run_turn
-from base.lm.harness.tests.test_bridge import FakeSession, make_bridge
+from base.lm.harness.tests.test_bridge import FakeSession, handoff, make_bridge
 
 HARNESS = "claude_code"
 NOW = time.time()
@@ -110,6 +110,7 @@ def test_a_record_keeps_its_background(tmp_path: Path) -> None:
         created_at="2026-11-11T00:00:00+00:00",
         updated_at="2026-11-11T00:00:00+00:00",
         harness=HARNESS,
+        generation=0,
     )
     registry.save(base)
     assert registry.load(6984, harness=HARNESS) == base
@@ -198,3 +199,22 @@ async def test_a_refused_input_hands_the_lost_note_over_again_until_it_is_in_con
     assert "sleep 100" in texts[0], "the refused delivery carried the note"
     assert "sleep 100" in texts[1], "so does the delivery that follows the refusal"
     assert texts[2] == "two", "once the input is in the context it is not repeated"
+
+
+# meiva:note
+# The opening input is read top to bottom as: the lost-work note, then the handoff (or, after a
+# compaction, the reminder), then the input's own text, which after a restart can be the graph's
+# resume note for a reconciled input.
+# meiva:link base/lm/harness/docs/background-work.md
+async def test_the_lost_note_comes_before_the_handoff_and_the_input_text() -> None:
+    session = WorkingSession(lost=(_item(BackgroundKind.COMMAND, "sleep 100"),))
+    doc = handoff()
+    bridge = make_bridge(session, handoff=doc)
+
+    _ = await run_turn(bridge, "resume note", key="reconciled-resume-1")
+
+    text = session.submitted[0][0]
+    rendered = doc.render().strip()
+    assert text.startswith("System note: the claude_code CLI process")
+    assert text.index("sleep 100") < text.index(rendered) < text.index("resume note")
+    assert text.endswith("\n\nresume note")
