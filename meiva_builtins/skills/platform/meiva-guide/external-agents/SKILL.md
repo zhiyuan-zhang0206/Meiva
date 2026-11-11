@@ -31,7 +31,7 @@ spawning:
 import meiva
 
 for row in meiva.agents.harness_availability():
-    print(row.harness, row.status, row.default_model, row.models, "|", row.reason)
+    print(row.harness, row.status, row.binary, row.on_path, row.models, "|", row.reason)
 ```
 
 Spawn a fresh agent on `codex`, `claude_code`, or `antigravity` with the top-level
