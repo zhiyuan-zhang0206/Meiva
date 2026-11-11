@@ -46,7 +46,11 @@ never used it. The settings page has two switches, both on by default.
 ## Consequences
 
 The push channel cannot grow a trigger without a decision here. Desktop platforms whose
-notification API cannot replace or withdraw a shown notification show the alert only (see
-`ui/app/docs/notifications.md`). The outbox sweep is now the only announce path, so its default
+notification API cannot replace or withdraw a shown notification (Linux, Windows) show the alert
+only (see `ui/app/docs/notifications.md`). macOS does not: the app bundle posts through
+`UNUserNotificationCenter` under an identifier derived from the tag, so `replace` updates the shown
+entry quietly (passive interruption level), `retract` removes it, and a notification the user
+dismissed is not brought back. The notification plugin remains the path only where there is no
+bundle (`tauri dev`) or no native API. The outbox sweep is now the only announce path, so its default
 interval is two seconds, which bounds how late a push reaches a connected client. `dedupe_key` and
 its index stay in `notification_events` until a later contract migration.

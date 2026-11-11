@@ -156,36 +156,66 @@ pub fn check_for_updates(app: AppHandle, interactive: bool) {
     });
 }
 
-/// Ask the operating system for permission to post notifications.
+/// Wire the native notification centre at startup (macOS only; a no-op elsewhere).
 ///
-/// macOS answers with its own one-time prompt and remembers the choice, so this
-/// is safe to call whenever the user turns the switch on; a later denial is left
-/// alone rather than re-prompted.
-pub fn request_notification_permission(app: &AppHandle) {
-    use tauri_plugin_notification::NotificationExt;
-
-    if let Ok(tauri_plugin_notification::PermissionState::Granted) =
-        app.notification().permission_state()
-    {
-        return;
+/// The delegate must exist before the app finishes launching so a tap that launched it is
+/// delivered. Authorization is requested here when the switch is already on, so an install that
+/// turned notifications on before this build gets its one-time system prompt.
+pub fn setup_notifications(app: &AppHandle) {
+    #[cfg(target_os = "macos")]
+    if crate::macos_notify::is_available() {
+        crate::macos_notify::install(app);
+        if app
+            .state::<crate::state::AppState>()
+            .settings()
+            .notifications
+        {
+            crate::macos_notify::request_authorization();
+        }
     }
-    if let Err(err) = app.notification().request_permission() {
-        log::warn!("notification permission request failed: {err}");
-    }
+    #[cfg(not(target_os = "macos"))]
+    let _ = app;
 }
 
-/// Post one local notification through the platform's own surface.
+/// Ask the operating system for permission to post notifications.
 ///
-/// The console window stays the full view; this renders the same delivered
-/// notification event Android renders, so both platforms agree on what is worth
-/// interrupting for.
+/// macOS answers with its own one-time prompt and remembers the choice, so this is safe to call
+/// whenever the user turns the switch on; a later denial is left alone rather than re-prompted.
+/// The other desktop platforms have no permission prompt for the plugin to trigger.
+pub fn request_notification_permission(app: &AppHandle) {
+    #[cfg(target_os = "macos")]
+    if crate::macos_notify::is_available() {
+        crate::macos_notify::request_authorization();
+        return;
+    }
+    let _ = app;
+}
+
+/// Render one delivered notification on the desktop.
 ///
-/// The desktop notification plugin can only post: it has no notification id, no silent update
-/// and no way to withdraw one that is shown. A replace would pop a second banner and a retract
-/// cannot be honored, so both do nothing here; the one alert per unread round stays in the
-/// notification centre until the user clears it.
-pub fn show_notification(app: &AppHandle, mode: NotifyMode, title: String, body: String) {
+/// The console window stays the full view; this renders the same delivered notification event
+/// Android renders, so both platforms agree on what is worth interrupting for.
+///
+/// On macOS from an app bundle all three modes go through the native notification centre
+/// (`macos_notify`). Everywhere else the notification plugin can only post: it has no id, no
+/// silent update and no way to withdraw one that is shown, so a replace and a retract do nothing
+/// and the one alert per unread round stays until the user clears it. A macOS binary that is not
+/// in a bundle (`tauri dev`) takes that same path.
+pub fn show_notification(
+    app: &AppHandle,
+    mode: NotifyMode,
+    tag: &str,
+    title: String,
+    body: String,
+) {
     use tauri_plugin_notification::NotificationExt;
+
+    #[cfg(target_os = "macos")]
+    if crate::macos_notify::is_available() {
+        crate::macos_notify::apply(mode, tag, title, body);
+        return;
+    }
+    let _ = tag;
 
     if mode != NotifyMode::Alert {
         log::debug!("desktop notifications cannot {mode:?} a shown notification");

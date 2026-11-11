@@ -250,11 +250,11 @@ pub async fn app_notify(
     #[cfg(target_os = "android")]
     crate::android::show_notification(app, mode, &tag, title, body).await;
     #[cfg(not(target_os = "android"))]
-    crate::desktop::show_notification(&app, mode, title, body);
+    crate::desktop::show_notification(&app, mode, &tag, title, body);
     Ok(())
 }
 
-/// Consume an Android notification tap once the authenticated console is ready.
+/// Consume an Android or macOS notification tap once the authenticated console is ready.
 #[tauri::command]
 pub async fn app_take_pending_click(app: AppHandle) -> bool {
     if !app.state::<AppState>().settings().notifications {
@@ -266,10 +266,15 @@ pub async fn app_take_pending_click(app: AppHandle) -> bool {
             .await
             .unwrap_or(false)
     }
-    #[cfg(not(target_os = "android"))]
+    #[cfg(target_os = "macos")]
     {
         let _ = app;
-        log::debug!("notification-click capture suppressed off Android");
+        crate::macos_notify::take_pending_click()
+    }
+    #[cfg(not(any(target_os = "android", target_os = "macos")))]
+    {
+        let _ = app;
+        log::debug!("notification-click capture is only available on Android and macOS");
         false
     }
 }

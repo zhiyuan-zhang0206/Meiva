@@ -23,7 +23,9 @@ and the scoped remote IPC capability live in their own node:
 close-to-tray, launch-at-login, and Tauri updater checks. The bundle and tray
 item use the brand `M` monogram assets in `src-tauri/icons/`, while Android
 launcher icons live in `android/res/` and are installed by
-`android/apply_overlay.py`. Auto-login reads the
+`android/apply_overlay.py`. System notifications on macOS go through
+`src-tauri/src/macos_notify.rs` (`UNUserNotificationCenter`; see
+[notifications](notifications.md)). Auto-login reads the
 local `$MEIVA_HOME/.env` secret, performs the gateway login outside web content,
 and reloads after its native cookie store receives the session.
 
