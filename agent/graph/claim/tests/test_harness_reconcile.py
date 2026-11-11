@@ -226,7 +226,11 @@ async def test_a_claimed_input_the_harness_never_saw_goes_back_and_is_delivered_
         await harness_turn_node(AgentState(), rt, config(agent_id))
 
     [batch] = engine.delivered
-    assert [i.key for i in batch] == [h_key(lost), h_key(newer)], "its original position"
+    [one] = batch
+    assert one.key == h_key(lost)
+    assert one.text.index("never reached the CLI") < one.text.index(
+        "arrived while the host was down"
+    ), "its original position"
     assert [h_status(db_conn, i) for i in (lost, newer)] == ["done", "done"]
 
 
@@ -253,7 +257,8 @@ async def test_a_batch_of_claimed_inputs_is_judged_one_by_one_and_redelivered_in
         await harness_turn_node(AgentState(), rt, config(agent_id))
 
     [batch] = engine.delivered
-    assert [i.key for i in batch] == [f"reconciled-resume-{stored}", h_key(lost), h_key(newer)]
+    assert [i.key for i in batch] == [f"reconciled-resume-{stored}", h_key(lost)]
+    assert "queued while down" in batch[1].text
     assert engine.adopted == [h_key(stored)]
     assert [h_status(db_conn, i) for i in (seen, lost, unknown, newer)] == ["done"] * 4
     assert h_status(db_conn, stored) == "claimed"
@@ -289,7 +294,7 @@ async def test_the_recovery_note_is_delivered_before_the_messages_that_queued_up
 ) -> None:
     agent_id = agent_row(db_conn)
     lost = h_insert(db_conn, agent_id, "claimed before the restart", claimed=True)
-    queued = h_insert(db_conn, agent_id, "queued during the restart")
+    _ = h_insert(db_conn, agent_id, "queued during the restart")
     state = AgentState(
         harness_inputs=[{"key": "control-9", "prompt": "you were restarted", "timeline_items": []}]
     )
@@ -301,7 +306,8 @@ async def test_the_recovery_note_is_delivered_before_the_messages_that_queued_up
         await harness_turn_node(state, rt, config(agent_id))
 
     [batch] = engine.delivered
-    assert [i.key for i in batch] == ["control-9", h_key(lost), h_key(queued)]
+    assert [i.key for i in batch] == ["control-9", h_key(lost)]
+    assert "queued" in batch[1].text
 
 
 async def test_a_frame_of_an_earlier_generation_does_not_settle_the_current_generations_input(
@@ -557,8 +563,8 @@ async def test_a_restart_note_goes_ahead_of_the_messages_that_were_returned_to_t
     hosted_resources: HostedTurnResources,
 ) -> None:
     agent_id = agent_row(db_conn)
-    lost = h_insert(db_conn, agent_id, "claimed before the restart", claimed=True)
-    queued = h_insert(db_conn, agent_id, "queued while it restarted")
+    _ = h_insert(db_conn, agent_id, "claimed before the restart", claimed=True)
+    _ = h_insert(db_conn, agent_id, "queued while it restarted")
     row = db_conn.execute(
         "INSERT INTO inbound_messages (agent_id, content, kind, source, payload) "
         "VALUES (%s, 'you were restarted', 'system_note', 'system', "
@@ -576,9 +582,13 @@ async def test_a_restart_note_goes_ahead_of_the_messages_that_were_returned_to_t
         await harness_turn_node(AgentState(), rt, config(agent_id))
 
     [batch] = engine.delivered
-    assert [i.key for i in batch] == [h_key(note), h_key(lost), h_key(queued)], (
-        "the agent learns it was restarted before it sees the messages that are delivered again"
-    )
+    [one] = batch
+    assert one.key == h_key(note)
+    assert (
+        one.text.index("you were restarted")
+        < one.text.index("claimed before the restart")
+        < one.text.index("queued while it restarted")
+    ), "the agent learns it was restarted before it sees the messages that are delivered again"
 
 
 async def test_a_row_the_harness_still_has_undelivered_is_left_to_the_next_real_wake(
@@ -694,9 +704,8 @@ async def test_an_interrupts_note_and_message_are_delivered_in_order_ahead_of_it
         await node
 
     delivered = [i for batch in engine.delivered[1:] for i in batch]
-    assert [i.key for i in delivered] == [input_key(note), input_key(message)]
-    assert note_text in delivered[0].text
-    assert "do Y instead" in delivered[1].text
+    assert [i.key for i in delivered] == [input_key(note)]
+    assert delivered[0].text.index(note_text) < delivered[0].text.index("do Y instead")
     assert row_status(db_conn, control) == "pending", "claim takes the control row next"
 
 
@@ -748,7 +757,7 @@ async def test_a_passive_note_goes_along_with_the_next_real_input(
     hosted_resources: HostedTurnResources,
 ) -> None:
     agent_id = agent_row(db_conn)
-    note = insert_row(
+    _ = insert_row(
         db_conn,
         agent_id,
         "system_note",
@@ -765,5 +774,7 @@ async def test_a_passive_note_goes_along_with_the_next_real_input(
         while not engine.delivered:
             await asyncio.sleep(0.02)
         keys = [i.key for i in engine.delivered[0]]
+        text = engine.delivered[0][0].text
         node.cancel()
-    assert keys == [f"inbound-{note}", f"inbound-{chat}"]
+    assert keys == [f"inbound-{chat}"], "the passive note rides the message and opens no turn"
+    assert text.index("was interrupted") < text.index("carry on")

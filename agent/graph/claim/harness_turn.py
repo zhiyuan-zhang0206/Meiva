@@ -24,14 +24,19 @@ from agent.graph.claim.harness_foreground import (
     Requeue,
     Settlement,
     event_generation,
+    merge_handed,
     own_turn_note,
+    plan_wake,
 )
 from agent.graph.claim.harness_inbox import (
+    INPUT_KEY_FIELD,
     apply_reconciled,
     claimed_deliverable,
     commit_handed,
     defer_reconciliation,
     is_deferred,
+    is_passive,
+    mark_input_group,
     mark_unconfirmed,
     publish_inbound,
     reconcile_handed,
@@ -78,7 +83,6 @@ from base.lm.harness import (
     BridgeEvent,
     EventSubscription,
     HarnessClosedError,
-    HarnessInput,
     HarnessNotDeliveredError,
     HarnessSetupError,
     HarnessTurnFaultedError,
@@ -370,13 +374,13 @@ class ForegroundRun:
         rows = await claimed_deliverable(self._ctx, self._agent_id, include_deferred=True)
         if not rows:
             return
-        handed = [self._handed_of(item)[0] for item in rows]
+        handed = self._grouped(rows)
         plan = await reconcile_handed(self._bridge, self._agent_id, handed, where="session_start")
         if plan is None:
             _ = await mark_unconfirmed(self._ctx, self._agent_id, self._projector, handed)
             return
         deferred = {r.id for r in rows if is_deferred(r)}
-        keep = tuple(h for h in plan.keep if h.inbound_id not in deferred)
+        keep = tuple(h for h in plan.keep if not deferred.intersection(h.row_ids))
         _ = await self._apply(plan)
         self._queue_resume_note((*plan.commit, *keep))
         if keep:
@@ -384,10 +388,25 @@ class ForegroundRun:
             self._kept = {h.key for h in keep}
             self._bridge.adopt([h.key for h in keep])
 
+    # meiva:note
+    # Claimed rows as the inputs they were handed over as: rows marked with the same input key are
+    # one input again (a batch handed over as one), every other row is its own.
+    def _grouped(self, rows: Sequence[ClaimedInbound]) -> list[Handed]:
+        by_key: dict[str, list[ClaimedInbound]] = {}
+        for row in rows:
+            key = row.payload.get(INPUT_KEY_FIELD) if row.payload else None
+            by_key.setdefault(key if isinstance(key, str) else f"inbound-{row.id}", []).append(row)
+        return [
+            replace(
+                merge_handed([(self._handed_of(row)[0], is_passive(row)) for row in group]), key=key
+            )
+            for key, group in by_key.items()
+        ]
+
     def _queue_resume_note(self, settled: Sequence[Handed]) -> None:
         if not settled or self._synthetic:
             return
-        newest = max(h.inbound_id or 0 for h in settled)
+        newest = max((i for h in settled for i in h.row_ids), default=0)
         self._synthetic.append(
             (Handed(f"reconciled-resume-{newest}", None, ()), RESUME_AFTER_RESTART)
         )
@@ -634,22 +653,24 @@ class ForegroundRun:
         rows = recovery_notes_first(await self._reserve())
         synthetic, self._synthetic = self._synthetic, []
         rendered = await self._render(rows)
-        synthetic, rendered = fold_hook_notes(synthetic, rendered)
-        handed: list[Handed] = []
-        inputs: list[HarnessInput] = []
+        plan = plan_wake(
+            synthetic,
+            [
+                (entry, text, is_passive(row))
+                for row, (entry, text) in zip(rows, rendered, strict=True)
+            ],
+            self._images,
+            hook_notes_key=HOOK_NOTES_KEY,
+        )
+        handed, inputs, settled_now, group = (
+            list(plan.handed),
+            list(plan.inputs),
+            list(plan.settled_now),
+            plan.group,
+        )
         for entry, prompt in synthetic:
-            self._prompts[entry.key] = prompt
-            handed.append(entry)
-            inputs.append(HarnessInput(key=entry.key, text=prompt))
-        settled_now: list[Handed] = []
-        for entry, text in rendered:
-            if text.strip():
-                handed.append(entry)
-                inputs.append(
-                    HarnessInput(key=entry.key, text=text, images=self._images.get(entry.key, ()))
-                )
-            else:
-                settled_now.append(entry)
+            if entry in plan.handed:
+                self._prompts[entry.key] = prompt
         if not handed and not settled_now:
             return False
         if settled_now:
@@ -662,6 +683,8 @@ class ForegroundRun:
         compaction_note = await self._compaction_note()
         self.last_key = handed[-1].key
         self.fg = self.fg.hand(tuple(handed))
+        if group is not None:
+            await mark_input_group(self._ctx, self._agent_id, group.row_ids, group.key)
         try:
             await self._bridge.deliver(inputs, compaction_note=compaction_note)
         except HarnessNotDeliveredError:
@@ -710,28 +733,6 @@ class ForegroundRun:
         self._correcting = True
         self._synthetic.append(correction)
         return True
-
-
-# meiva:note
-# The pre-turn hooks' note joins the first row that has text, after the message, in one input. A note
-# of its own is a second write right behind the one that starts the turn: Claude Code runs it as a turn
-# of its own, Codex and Antigravity steer it into the turn after the first model request has gone out
-# with the note alone, so the agent first answers a note and only then the person. The note has no row
-# and no acknowledgement of its own; it settles with the row it rides on. A wake with no row text keeps
-# the note as an input of its own.
-# meiva:link agent/graph/docs/harness-turn.md
-def fold_hook_notes(
-    synthetic: Sequence[tuple[Handed, str]], rendered: Sequence[tuple[Handed, str]]
-) -> tuple[list[tuple[Handed, str]], list[tuple[Handed, str]]]:
-    notes = [prompt for entry, prompt in synthetic if entry.key.startswith(HOOK_NOTES_KEY)]
-    target = next((i for i, (_, text) in enumerate(rendered) if text.strip()), None)
-    if not notes or target is None:
-        return list(synthetic), list(rendered)
-    entry, text = rendered[target]
-    folded = list(rendered)
-    folded[target] = (entry, "\n\n".join([text, *notes]))
-    rest = [pair for pair in synthetic if not pair[0].key.startswith(HOOK_NOTES_KEY)]
-    return rest, folded
 
 
 # meiva:note

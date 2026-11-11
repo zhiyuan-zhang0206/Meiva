@@ -20,7 +20,7 @@ from agent.ownership.inbound import lock_inbound_owner
 from base.agents.context import MeivaContext
 from base.agents.history.harness_messages import aappend_harness_timeline_items
 from base.agents.history.timeline_item import TimelineItem
-from base.agents.messages.inbound import InboundKind, not_passive_inbound
+from base.agents.messages.inbound import PASSIVE_INBOUND_KEY, InboundKind, not_passive_inbound
 from base.agents.messages.kwargs import NoteTag
 from base.db.rows import IdRow, aquery_all
 from base.db.transaction import async_write_transaction
@@ -34,6 +34,13 @@ DELIVERABLE_INBOUND_KINDS = (
     InboundKind.SYSTEM_NOTE.value,
     InboundKind.HEARTBEAT.value,
 )
+
+# meiva:note
+# The payload field that names the one harness input a claimed row rides in, written when a batch of
+# several rows is handed over as one input, so a later run can rebuild the group before it asks the
+# harness's record about the input's key.
+# meiva:link agent/graph/docs/harness-foreground.md
+INPUT_KEY_FIELD = "harness_input_key"
 
 _COLUMNS: LiteralString = "id,agent_id,content,kind,source,payload,created_at,claimed_at"
 
@@ -165,7 +172,7 @@ async def commit_handed(
     pool = ctx.ops_pool
     if pool is None:
         return []
-    ids = [h.inbound_id for h in handed if h.inbound_id is not None]
+    ids = [i for h in handed for i in h.row_ids]
     items = [item for h in handed for item in h.items]
     async with async_write_transaction(pool) as conn:
         await lock_inbound_owner(conn, agent_id, incarnation=ctx.original_incarnation)
@@ -194,7 +201,7 @@ async def commit_reconciled(
     pool = ctx.ops_pool
     if pool is None or not handed:
         return []
-    ids = [h.inbound_id for h in handed if h.inbound_id is not None]
+    ids = [i for h in handed for i in h.row_ids]
     async with async_write_transaction(pool) as conn:
         await lock_inbound_owner(conn, agent_id, incarnation=ctx.original_incarnation)
         rows = (
@@ -213,7 +220,7 @@ async def commit_reconciled(
         items = [
             item
             for h in handed
-            if h.inbound_id is None or h.inbound_id in settled
+            if not h.row_ids or settled.intersection(h.row_ids)
             for item in h.items
         ]
         return await aappend_harness_timeline_items(conn, agent_id, ctx.harness.value, items)
@@ -224,15 +231,32 @@ async def commit_reconciled(
 # original position and the next reservation hands it over again, ahead of anything newer.
 async def requeue_handed(ctx: MeivaContext, agent_id: int, handed: Sequence[Handed]) -> None:
     pool = ctx.ops_pool
-    ids = [h.inbound_id for h in handed if h.inbound_id is not None]
+    ids = [i for h in handed for i in h.row_ids]
     if pool is None or not ids:
         return
     async with async_write_transaction(pool) as conn:
         await lock_inbound_owner(conn, agent_id, incarnation=ctx.original_incarnation)
         _ = await conn.execute(
-            "UPDATE inbound_messages SET status='pending', claimed_at=NULL "
+            "UPDATE inbound_messages SET status='pending', claimed_at=NULL, "
+            "payload = payload - %s "
             "WHERE agent_id=%s AND id=ANY(%s) AND kind=ANY(%s) AND status='claimed'",
-            (agent_id, ids, list(DELIVERABLE_INBOUND_KINDS)),
+            (INPUT_KEY_FIELD, agent_id, ids, list(DELIVERABLE_INBOUND_KINDS)),
+        )
+
+
+async def mark_input_group(
+    ctx: MeivaContext, agent_id: int, row_ids: Sequence[int], key: str
+) -> None:
+    pool = ctx.ops_pool
+    if pool is None:
+        return
+    async with async_write_transaction(pool) as conn:
+        await lock_inbound_owner(conn, agent_id, incarnation=ctx.original_incarnation)
+        _ = await conn.execute(
+            "UPDATE inbound_messages SET payload = COALESCE(payload, '{}'::jsonb) "
+            "|| jsonb_build_object(%s::text, %s::text) "
+            "WHERE agent_id=%s AND id=ANY(%s) AND status='claimed'",
+            (INPUT_KEY_FIELD, key, agent_id, list(row_ids)),
         )
 
 
@@ -246,7 +270,7 @@ async def retire_unconfirmed(
     ctx: MeivaContext, agent_id: int, handed: Sequence[Handed]
 ) -> list[TimelineItem]:
     pool = ctx.ops_pool
-    ids = [h.inbound_id for h in handed if h.inbound_id is not None]
+    ids = [i for h in handed for i in h.row_ids]
     if pool is None or not ids:
         return []
     async with async_write_transaction(pool) as conn:
@@ -358,7 +382,7 @@ async def apply_reconciled(
 # starts for another reason reconciles it once more.
 async def defer_reconciliation(ctx: MeivaContext, agent_id: int, handed: Sequence[Handed]) -> None:
     pool = ctx.ops_pool
-    ids = [h.inbound_id for h in handed if h.inbound_id is not None]
+    ids = [i for h in handed for i in h.row_ids]
     if pool is None or not ids:
         return
     async with async_write_transaction(pool) as conn:
@@ -389,6 +413,10 @@ def recovery_notes_first(rows: Sequence[ClaimedInbound]) -> list[ClaimedInbound]
         )
 
     return [*(r for r in rows if is_note(r)), *(r for r in rows if not is_note(r))]
+
+
+def is_passive(row: ClaimedInbound) -> bool:
+    return bool(row.payload and row.payload.get(PASSIVE_INBOUND_KEY) is True)
 
 
 def is_deferred(row: ClaimedInbound) -> bool:

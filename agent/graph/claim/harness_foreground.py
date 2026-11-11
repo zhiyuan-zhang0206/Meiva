@@ -15,6 +15,8 @@ from base.agents.history.timeline_item import TimelineItem
 from base.lm.harness import (
     BridgeEvent,
     HarnessCause,
+    HarnessInput,
+    ImageBlock,
     InputInContext,
     InputLost,
     InputReceived,
@@ -42,7 +44,10 @@ __all__ = [
 # meiva:note
 # One input handed to the harness and not yet settled. `inbound_id` names its inbox row; a synthetic
 # input (a continuation note, a fork marker, a visibility correction) has no row and `None` there.
-# `items` are the timeline entries written when the input enters the context, never before.
+# One wake's batch is one input: `inbound_id` is the row that names it (the first that is not passive)
+# and `carried` the other rows that ride in its text, settled with it by the one acknowledgement.
+# `items` are the timeline entries of all its rows, written when the input enters the context, never
+# before.
 # meiva:link agent/graph/docs/harness-turn.md
 @dataclass(frozen=True, slots=True)
 class Handed:
@@ -50,6 +55,26 @@ class Handed:
     inbound_id: int | None
     items: tuple[TimelineItem, ...]
     human: bool = False
+    carried: tuple[int, ...] = ()
+
+    @property
+    def row_ids(self) -> tuple[int, ...]:
+        return (*(() if self.inbound_id is None else (self.inbound_id,)), *self.carried)
+
+
+# meiva:note
+# The rows of one wake's batch as one input: the first row that is not passive names it (a batch of
+# passive rows alone is never handed over), the others ride in its text and settle with it. Their
+# timeline entries stay in queue order.
+def merge_handed(parts: Sequence[tuple[Handed, bool]]) -> Handed:
+    primary = next((h for h, passive in parts if not passive), parts[0][0])
+    return Handed(
+        primary.key,
+        primary.inbound_id,
+        tuple(item for h, _ in parts for item in h.items),
+        any(h.human for h, _ in parts),
+        tuple(i for h, _ in parts for i in h.row_ids if i != primary.inbound_id),
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -202,3 +227,70 @@ def plan_reconciliation(
             case Reconciliation.UNKNOWN:
                 unknown.append(entry)
     return Reconciled(tuple(commit), tuple(requeue), tuple(keep), tuple(unknown))
+
+
+# meiva:note
+# One wake's rows and the pre-turn hooks' note are one input, so the model's first request holds all of
+# them: each row's text in queue order, then the note, separated by blank lines (a native request
+# carries the same messages in one call). Handing them over one by one made the first input open the
+# turn alone and every other one run as a turn of its own about a second later (Claude Code), or reach
+# the model only after its first request had gone out (Codex, Antigravity): the agent first answered a
+# passive note or a hook note and only then the person. The rows keep their own timeline entries and
+# settle together with the one acknowledgement.
+# meiva:link agent/graph/docs/harness-turn.md
+@dataclass(frozen=True, slots=True)
+class WakePlan:
+    handed: tuple[Handed, ...]
+    inputs: tuple[HarnessInput, ...]
+    settled_now: tuple[Handed, ...]
+    group: Handed | None
+
+
+# meiva:note
+# What one reservation hands the harness: the synthetic inputs, then the wake's rows as one input (a
+# row with no text settles at once, a wake with no row text keeps the hook note as an input of its
+# own). `group` is the merged input when it carries several rows, which is what must be marked so a
+# crash can rebuild it.
+def plan_wake(
+    synthetic: Sequence[tuple[Handed, str]],
+    rows: Sequence[tuple[Handed, str, bool]],
+    images: Mapping[str, tuple[ImageBlock, ...]],
+    *,
+    hook_notes_key: str,
+) -> WakePlan:
+    parts = [(entry, text, passive) for entry, text, passive in rows if text.strip()]
+    settled_now = tuple(entry for entry, text, _ in rows if not text.strip())
+    if not parts:
+        return WakePlan(*_own_inputs(synthetic), settled_now, None)
+    notes = [prompt for entry, prompt in synthetic if entry.key.startswith(hook_notes_key)]
+    own = [pair for pair in synthetic if not pair[0].key.startswith(hook_notes_key)]
+    handed, inputs = _own_inputs(own)
+    wake = merge_handed([(entry, passive) for entry, _, passive in parts])
+    return WakePlan(
+        (*handed, wake),
+        (*inputs, _wake_input(wake, parts, notes, images)),
+        settled_now,
+        wake if wake.carried else None,
+    )
+
+
+def _wake_input(
+    wake: Handed,
+    parts: Sequence[tuple[Handed, str, bool]],
+    notes: Sequence[str],
+    images: Mapping[str, tuple[ImageBlock, ...]],
+) -> HarnessInput:
+    return HarnessInput(
+        key=wake.key,
+        text="\n\n".join([*(text for _, text, _ in parts), *notes]),
+        images=tuple(image for entry, _, _ in parts for image in images.get(entry.key, ())),
+    )
+
+
+def _own_inputs(
+    synthetic: Sequence[tuple[Handed, str]],
+) -> tuple[tuple[Handed, ...], tuple[HarnessInput, ...]]:
+    return (
+        tuple(entry for entry, _ in synthetic),
+        tuple(HarnessInput(key=entry.key, text=prompt) for entry, prompt in synthetic),
+    )
