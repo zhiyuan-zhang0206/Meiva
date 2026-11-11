@@ -11,7 +11,7 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import Literal
+from typing import Literal, LiteralString
 
 import psycopg
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
@@ -259,22 +259,42 @@ def get_task(request: Request, task_id: int) -> TaskRow:
     return _full_task(row)
 
 
-_TASK_LIST_TAIL = (
-    ", a.label AS owner_label FROM agent_tasks t "
-    "LEFT JOIN agents a ON t.owner = a.id ORDER BY t.created_at DESC"
-)
+_TASK_LIST_FROM = ", a.label AS owner_label FROM agent_tasks t LEFT JOIN agents a ON t.owner = a.id"
+_TASK_LIST_ORDER = " ORDER BY t.created_at DESC"
+
+
+# meiva:note
+# The list statement's tail and its parameters: the optional owner and status filters, then the
+# newest-first order. Each filter is a fixed clause, so the statement is one of four literals.
+def _task_list_tail(
+    owner: int | None, status: TaskStatus | None
+) -> tuple[LiteralString, list[object]]:
+    if owner is not None and status is not None:
+        return (
+            _TASK_LIST_FROM + " WHERE t.owner = %s AND t.status = %s" + _TASK_LIST_ORDER,
+            [owner, status.value],
+        )
+    if owner is not None:
+        return _TASK_LIST_FROM + " WHERE t.owner = %s" + _TASK_LIST_ORDER, [owner]
+    if status is not None:
+        return _TASK_LIST_FROM + " WHERE t.status = %s" + _TASK_LIST_ORDER, [status.value]
+    return _TASK_LIST_FROM + _TASK_LIST_ORDER, []
 
 
 def _list_tasks(
-    conn: psycopg.Connection, fields: Literal["full", "summary", "graph"]
+    conn: psycopg.Connection,
+    fields: Literal["full", "summary", "graph"],
+    owner: int | None,
+    status: TaskStatus | None,
 ) -> list[TaskRow | TaskSummaryRow]:
+    tail, params = _task_list_tail(owner, status)
     if fields == "full":
-        full = query_all(conn, _FullDbRow, "SELECT " + _TASK_COLS + _TASK_LIST_TAIL)
+        full = query_all(conn, _FullDbRow, "SELECT " + _TASK_COLS + tail, params)
         return [_full_task(row) for row in full]
     if fields == "graph":
-        graph = query_all(conn, _GraphDbRow, "SELECT " + _TASK_GRAPH_COLS + _TASK_LIST_TAIL)
+        graph = query_all(conn, _GraphDbRow, "SELECT " + _TASK_GRAPH_COLS + tail, params)
         return [_graph_task(row) for row in graph]
-    summary = query_all(conn, _SummaryDbRow, "SELECT " + _TASK_SUMMARY_COLS + _TASK_LIST_TAIL)
+    summary = query_all(conn, _SummaryDbRow, "SELECT " + _TASK_SUMMARY_COLS + tail, params)
     return [_summary_task(row) for row in summary]
 
 
@@ -287,15 +307,18 @@ def _list_tasks(
 # the list by last activity, so the graph's default 24-hour view never pulls the
 # full registry; a windowed list still carries every kept task's out-of-window
 # ancestors flagged ghost=True (see _windowed_tasks). No pagination - the
-# registry is bounded. Order by created_at DESC so the newest tasks surface first.
+# registry is bounded. Order by created_at DESC so the newest tasks surface first. `owner` and
+# `status` narrow the list in SQL (AND); the window then applies to what they kept.
 # meiva:link gateway/routers/docs/routers.md
 def get_tasks(
     request: Request,
     window: str = Query("all", pattern="^(24h|7d|30d|all)$"),
     fields: Literal["full", "summary", "graph"] = Query("full"),
+    owner: int | None = Query(None, ge=1),
+    status: TaskStatus | None = None,
 ) -> TaskListResponse:
     with gateway_state(request).db_pool.connection() as conn:
-        tasks = _list_tasks(conn, fields)
+        tasks = _list_tasks(conn, fields, owner, status)
     if window == "all":
         return TaskListResponse(tasks=tasks)
     return TaskListResponse(tasks=_windowed_tasks(tasks, window, now=gateway_clock(request).now()))

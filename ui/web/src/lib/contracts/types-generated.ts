@@ -8405,6 +8405,8 @@ export interface operations {
             query?: {
                 window?: string;
                 fields?: "full" | "summary" | "graph";
+                owner?: number | null;
+                status?: components["schemas"]["TaskStatus"] | null;
             };
             header?: never;
             path?: never;

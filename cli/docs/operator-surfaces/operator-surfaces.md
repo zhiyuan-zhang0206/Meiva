@@ -56,6 +56,13 @@ instead of SQL or hand-built HTTP calls.
 - `meiva stats [--hours 0|1|6|24|72|168|720] [--json]`: the fleet's tokens, cost (API and
   subscription), warning and error totals over a window, then the plugin status cards such as
   provider balances (`GET /api/stats/dashboard`; `0` is the last five minutes).
+- `meiva tasks ls [--owner ID] [--status in_progress|done|cancelled] [--window 24h|7d|30d|all]
+  [--json]`: the metadata of the matching tasks, newest created first (`GET /api/tasks?fields=
+  summary`; `owner` and `status` narrow in SQL, and a trailing `*` on an id marks an
+  out-of-window ancestor delivered for tree shape). The registry holds every task ever created,
+  so `ls` exits 2 unless at least one filter is named; `--window all` asks for everything.
+  `meiva tasks get ID [--json]` prints one task in full: owner, priority, reminder state
+  (interval, count, last, paused until), description and results (`GET /api/tasks/{id}`).
 
 ## Harness attachment
 
