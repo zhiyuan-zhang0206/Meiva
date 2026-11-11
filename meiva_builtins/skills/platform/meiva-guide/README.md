@@ -26,6 +26,9 @@ sub-skills carry executable procedures and their bundled resources.
   publishers, MCP directories and providers, and prompt sources.
 - `mcp`, `plugins` / `plugins.develop`: MCP management and native plugin development.
 - `agents`, `models`: agent concepts, configuration, and model choice.
+- `memory`: how an external agent finds and reads Meiva's shared Memory, and why
+  it writes there only with the user's approval; design detail in
+  `memory/references/design.md`.
 - `schedules`: persistent work; [meiva-guide.schedules skill — NL → Gateway-Managed Scheduled Task](schedules/README.md).
 - `external-agents`: external harness agents, availability diagnosis, and published client skill directories;
   [meiva-guide.external-agents skill — External harness agents and client skills](external-agents/README.md).

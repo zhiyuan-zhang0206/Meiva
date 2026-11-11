@@ -71,6 +71,7 @@ Follow the user's authorized scope.
 | Change the database | [Migration guide](db/docs/migrations.md) |
 | Maintain SDK docstrings | [SDK docstrings](docs/conventions/sdk-docstring-discipline.md) |
 | Understand runtime operations | [Runbook](docs/conventions/runbook.md) |
+| Look up Meiva's shared Memory (read-only; write only with user approval) | [meiva-guide memory](.agents/skills/meiva-guide/memory/SKILL.md) |
 
 Before moving or changing a symbol, use
 `.venv/bin/python scripts/audit/where_used.py TARGET` (`pkg.mod:name`, a module
