@@ -3,7 +3,7 @@
 #
 # A schedule-launched process carries its owner as `agent_id` and `schedule:<id>` as its actor, so
 # every SDK entry is reachable from an unattended script. What it must never aim at that owner is a
-# lifecycle action: ending, restarting, compacting or cancelling the loop it was handed would let a
+# lifecycle action: ending, restarting, resurrecting or cancelling the loop it was handed would let a
 # timer seize the agent whose identity it borrowed. Everything else stays available, because a
 # scheduled batch legitimately sends messages, spawns workers and reads the cluster.
 #
@@ -29,7 +29,6 @@ _OWNER = 405
 _SCHEDULE_ACTOR = "schedule:55"
 _STEERING_ACTIONS = (
     "agents.cancel",
-    "agents.compact",
     "agents.restart",
     "agents.resurrect",
     "agents.terminate",
@@ -40,7 +39,6 @@ _STEERING_ACTIONS = (
 # than imported so a renamed entry or a dropped guard fails this test instead of shrinking the rule.
 _STEERING: tuple[tuple[str, Callable[[int], object]], ...] = (
     ("agents.cancel", meiva.agents.cancel),
-    ("agents.compact", meiva.agents.compact),
     ("agents.restart", partial(meiva.agents.restart, message="why")),
     ("agents.resurrect", partial(meiva.agents.resurrect, prompt="wake")),
     ("agents.terminate", meiva.agents.terminate),
@@ -99,7 +97,7 @@ def test_a_process_without_an_identity_is_never_refused() -> None:
 
 
 # meiva:note
-# The guard is wired at each entry, not only in the plan: a schedule process calling one of the four
+# The guard is wired at each entry, not only in the plan: a schedule process calling one of these
 # against its owner gets the refusal before the gateway is touched. Without the guard the call would
 # fail differently (a transport or argument error), which is what makes this a test of the wiring.
 @pytest.mark.parametrize(("action", "call"), _STEERING, ids=[name for name, _ in _STEERING])

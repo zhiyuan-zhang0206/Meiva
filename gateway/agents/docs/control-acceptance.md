@@ -18,7 +18,8 @@ applied. A terminated agent returns 409 and nothing resurrects it for a
 compaction. A repeat queues another request.
 
 Callers: the web stop button and compact action, `meiva agents cancel` and
-`compact`, and `meiva.agents.cancel` / `meiva.agents.compact`. The compact
+`compact`, and `meiva.agents.cancel`. There is no SDK entry for the compact
+request: an agent compacts itself with `meiva.self.compact(summary)`. The compact
 envelope insertion primitive (`base/agents/inbox/compact.py`) is shared with
 the graph and history producers. Historical `agent_control_receipts` data has no
 remaining writer; merged migrations and stored evidence are retained.
