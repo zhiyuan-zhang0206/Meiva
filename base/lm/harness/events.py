@@ -62,8 +62,7 @@ class AssistantText:
 # Agent/Task call, Codex's spawn call) and to the turn that made the call. It is work detail, never
 # the agent's reply: it stays out of `AssistantText`, so it is not parsed for a visibility prefix and is
 # not part of a turn's reply text. `agent` is the CLI's own label for the sub-agent when it names one.
-# Claude Code and Codex emit it; Antigravity runs sub-agents as sibling conversations this adapter does
-# not read.
+# All three adapters emit it; Antigravity reads the sibling conversation's transcript file.
 # meiva:link base/lm/harness/docs/subagent-text.md
 @dataclass(frozen=True, slots=True)
 class SubagentText:

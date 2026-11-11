@@ -6,12 +6,15 @@ exports = ["mapping.py", "rpc.py", "session.py", "tests", "transport.py"]
 "mapping.py" = []
 "reconciliation" = ["trajectory.py"]
 "schedules.py" = []
-"session.py" = ["config.py", "mapping.py", "reconciliation", "schedules.py", "trajectory.py", "transport.py"]
+"session.py" = ["config.py", "mapping.py", "reconciliation", "schedules.py", "subagent_files.py", "trajectory.py", "transport.py"]
+"subagent_files.py" = ["mapping.py", "subagents.py"]
+"subagents.py" = []
 "trajectory.py" = []
 "transport.py" = ["config.py", "rpc.py", "trajectory.py"]
-"tests" = ["config.py", "mapping.py", "schedules.py", "session.py", "trajectory.py", "transport.py"]
+"tests" = ["config.py", "mapping.py", "schedules.py", "session.py", "subagent_files.py", "subagents.py", "trajectory.py", "transport.py"]
 
 [purity]
 "config.py" = "strict"
 "schedules.py" = "strict"
+"subagents.py" = "strict"
 "trajectory.py" = "strict"
