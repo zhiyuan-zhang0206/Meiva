@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from base.lm.harness.base_session import InputLostError
 from base.lm.harness.bridge import (
     HarnessBridge,
     HarnessClosedError,
@@ -60,6 +61,7 @@ __all__ = [
     "HarnessSetupError",
     "HarnessTurn",
     "HarnessTurnFaultedError",
+    "InputLostError",
     "RateLimitObserved",
     "ReasoningDelta",
     "ReasoningText",

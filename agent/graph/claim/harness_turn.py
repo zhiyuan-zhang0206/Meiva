@@ -60,6 +60,7 @@ from base.lm.harness import (
     HarnessClosedError,
     HarnessSetupError,
     HarnessTurnFaultedError,
+    InputLostError,
 )
 from base.lm.harness.engine import ForegroundSteering, HarnessTurn, TurnEngine
 from base.lm.usage import UsageFields, log_usage_fields
@@ -548,6 +549,18 @@ async def _send_steer(
     newest_id = inbound_ids[-1]
     try:
         accepted = not stopping.is_set() and await engine.steer(prompt, key=f"inbound-{newest_id}")
+    except InputLostError:
+        # meiva:note
+        # The harness declared the input lost: it never reached the model's context, so it goes
+        # back to the queue in its original position and the next claim hands it over again.
+        # meiva:link agent/graph/docs/harness-turn.md
+        logger.info(
+            "harness steer input lost; returned to the queue",
+            agent_id=agent_id,
+            inbound_ids=inbound_ids,
+        )
+        await finish_harness_steer(ctx, agent_id, inbound_ids, accepted_items=None)
+        return False
     except Exception as exc:
         logger.warning(
             "could not confirm harness steer delivery",

@@ -20,7 +20,7 @@ from base.agents.history.harness_messages import aload_harness_timeline_items
 from base.db import PG_KEEPALIVE_KWARGS
 from base.events.live.tests.live_capture import LiveEvents
 from base.host.boundary.json_values import is_object_dict
-from base.lm.harness import AssistantText, ForegroundAccepted, HarnessTurn
+from base.lm.harness import AssistantText, ForegroundAccepted, HarnessTurn, InputLostError
 from base.lm.harness.engine import TurnEventSink
 from base.native_process.turn_identity import HostedTurnResources
 
@@ -327,3 +327,50 @@ async def test_steer_pool_timeout_preserves_foreground_and_delivers_once_after_r
         inbound_id
     ]
     assert events[-1]["role"] == "llm_done"
+
+
+class _LostSteerEngine(_Foreground):
+    async def steer(self, text: str, *, key: str) -> bool:
+        self.control_received.set()
+        await self.continue_work.wait()
+        raise InputLostError("turn ended before the steer receipt arrived")
+
+
+async def test_lost_steer_returns_to_the_queue_without_an_uncertainty_marker(
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    hosted_resources: HostedTurnResources,
+    live_events: LiveEvents,
+) -> None:
+    agent_id = agent_row(db_conn)
+    engine = _LostSteerEngine()
+    engine.steering_available = True
+    state = AgentState(harness_pending_input={"prompt": "work", "key": "initial"})
+    rt = runtime(
+        engine,
+        ops_pool=aops_pool,
+        hosted_resources=hosted_resources,
+        publisher=live_events.publisher,
+    )
+    async with asyncio.timeout(8), asyncio.TaskGroup() as tasks:
+        _ = tasks.create_task(harness_turn_node(state, rt, config(agent_id)))
+        await engine.running.wait()
+        row = db_conn.execute(
+            "INSERT INTO inbound_messages (agent_id, content, kind, source) "
+            "VALUES (%s, 'keep the logs', 'chat', 'user') RETURNING id",
+            (agent_id,),
+        ).fetchone()
+        db_conn.commit()
+        assert row is not None
+        inbound_id = row[0]
+        await engine.control_received.wait()
+        engine.continue_work.set()
+        engine.terminal.set()
+
+    assert db_conn.execute(
+        "SELECT status, claimed_at FROM inbound_messages WHERE id=%s", (inbound_id,)
+    ).fetchone() == ("pending", None)
+    async with aops_pool.connection() as conn:
+        items = await aload_harness_timeline_items(conn, agent_id)
+    assert [item.kind for item in items if item.inbound_id == inbound_id] == []
+    assert [e for e in await live_events.events() if e["role"] == "inbound_committed"] == []
