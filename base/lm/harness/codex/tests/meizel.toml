@@ -2,6 +2,7 @@ exports = ["child_environment_server.py", "fake_app_server.py", "fake_stdio_serv
 
 [uses]
 "support.py" = ["fake_app_server.py"]
+"test_background_commands.py" = ["fake_app_server.py", "support.py"]
 "test_approvals.py" = ["support.py"]
 "test_cancel.py" = ["fake_app_server.py", "support.py"]
 "test_fork.py" = ["fake_app_server.py", "support.py"]

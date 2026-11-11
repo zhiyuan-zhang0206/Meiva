@@ -105,3 +105,11 @@ at all and stays `NULL` rather than record a fake `0` (task #5616).
 `base/lm/harness/tests/` covers the shared half alone — the handoff render and
 its pinned field set, the registry's atomicity and refusal cases — with no
 provider dependency, which is the point of the split.
+
+## Background work and the idle cache
+
+A session that holds background work (a CLI background command, sub-agent, timer or cron
+job) is not idle: the host's idle TTL skips it and the LRU bound takes it last, and a CLI
+process that is closed anyway leaves a note for the agent about what was lost. The
+adapters answer `background_work()`; the bridge prepends the lost-work note in
+`_opening_input`. See [background work](background-work.md).

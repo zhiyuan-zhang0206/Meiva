@@ -313,6 +313,31 @@ def test_the_session_record_migration_step_converts_the_homes_records(
     assert capsys.readouterr().out == ""
 
 
+def test_the_session_record_step_backfills_the_generation_and_background_fields(
+    ctx: ConvergeCtx, capsys: pytest.CaptureFixture[str]
+) -> None:
+    sessions = paths.harness_sessions_dir(home=ctx.meiva_home)
+    sessions.mkdir(parents=True)
+    old = {
+        "agent_id": 7,
+        "session_id": "s",
+        "cwd": "/w",
+        "model": "m",
+        "harness": "codex",
+        "created_at": "t",
+        "updated_at": "t",
+    }
+    (sessions / "7.codex.json").write_text(json.dumps(old), encoding="utf-8")
+
+    _steps.migrate_harness_session_records(ctx)
+
+    assert "completed the generation or background field of 1" in capsys.readouterr().out
+    completed = json.loads((sessions / "7.codex.json").read_text())
+    assert completed["background"] == [] and completed["generation"] == 0
+    _steps.migrate_harness_session_records(ctx)
+    assert capsys.readouterr().out == ""
+
+
 def test_ensure_meiva_home_dirs(ctx: ConvergeCtx) -> None:
     _steps.ensure_meiva_home_dirs(ctx)
 

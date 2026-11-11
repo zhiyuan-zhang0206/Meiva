@@ -33,6 +33,13 @@ from base.lm.harness.registration import (
     SecureRandom,
     handle_digest,
 )
+from base.lm.harness.session import (
+    BackgroundItem,
+    BackgroundWork,
+    BackgroundWorkReporting,
+    LostBackgroundReporting,
+    lost_work_note,
+)
 from base.log import logger
 
 
@@ -110,6 +117,7 @@ class HarnessBridge:
         self._renew_task: asyncio.Task[None] | None = None
         self._inbound = asyncio.Event()
         self._handoff_delivered = False
+        self._lost: tuple[BackgroundItem, ...] = ()
         self._opening_key: str | None = None
         self._model: str | None = None
         self._digest: str | None = None
@@ -230,6 +238,7 @@ class HarnessBridge:
             self._handoff_delivered = True
             self._context_compacted = False
             self._opening_key = None
+            self._lost = ()
         elif isinstance(event, (InputRejected, InputLost)) and event.key == self._opening_key:
             self._opening_key = None
 
@@ -272,7 +281,7 @@ class HarnessBridge:
         self._register(session.session_id or "")
         batch[0] = HarnessInput(
             key=batch[0].key,
-            text=self._opening_input(batch[0].key, batch[0].text),
+            text=self._opening_input(batch[0].key, batch[0].text, session),
             images=batch[0].images,
         )
         await session.deliver(batch)
@@ -304,7 +313,7 @@ class HarnessBridge:
     # carries the full handoff needs none. Whatever rode the opening input counts as delivered only when
     # that input is in the model's context: a refused or lost input is handed over again with it.
     # meiva:link base/lm/harness/docs/harness.md
-    def _opening_input(self, key: str, text: str) -> str:
+    def _opening_input(self, key: str, text: str, session: HarnessSession) -> str:
         if self._opening_key not in (None, key):
             return text
         if self._handoff is not None and self._handoff_delivered:
@@ -317,7 +326,47 @@ class HarnessBridge:
         elif self._context_compacted and self._instructions_file is not None and text:
             self._opening_key = key
             text = f"{compaction_reminder(self._instructions_file)}\n\n{text}"
-        return text
+        return self._with_lost_work(key, text, session)
+
+    # meiva:note
+    # What the CLI lost when its process went away, told until an input carrying it is in the model's
+    # context: a refused or lost input hands it over again with the next one. The session reads it back from its
+    # record when it resumes (or hands over what an in-session respawn dropped), and this is the
+    # one place that turns it into words, on the first input after the process was replaced. The
+    # note rides the input like the compaction reminder does: there is no separate turn for it, and
+    # an agent that does not need the work anymore simply ignores it.
+    # meiva:link base/lm/harness/docs/background-work.md
+    def _with_lost_work(self, key: str, text: str, session: HarnessSession) -> str:
+        if self._opening_key not in (None, key):
+            return text
+        if isinstance(session, LostBackgroundReporting):
+            self._lost = (*self._lost, *session.take_lost_background())
+        note = lost_work_note(
+            self._lost, harness=self.harness.value, now=self._clock.now().timestamp()
+        )
+        if note is None:
+            self._lost = ()
+            return text
+        self._opening_key = key
+        logger.info(
+            "agent {agent_id}: {count} background item(s) lost with the {harness} CLI process",
+            event="harness_background_work_lost",
+            agent_id=self._agent_id,
+            count=len(self._lost),
+            harness=self.harness.value,
+        )
+        return f"{note}\n\n{text}" if text else note
+
+    # meiva:note
+    # What the live session is holding that closing it would drop (nothing when there is no
+    # session, or when its adapter cannot tell). The host's idle TTL and LRU read this and leave
+    # such a session alone while the cache has room for it.
+    # meiva:link base/lm/harness/docs/background-work.md
+    def background_work(self) -> BackgroundWork:
+        session = self._session
+        if session is None or not isinstance(session, BackgroundWorkReporting):
+            return BackgroundWork()
+        return session.background_work()
 
     # meiva:note
     # Interrupt whatever the foreground is running. The target is the session's own running turn,

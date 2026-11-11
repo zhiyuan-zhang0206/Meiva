@@ -8,9 +8,11 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from dataclasses import replace
 from pathlib import Path
 
 from base import paths
+from base.lm.harness import BackgroundItem, BackgroundKind
 from base.lm.harness.registry import FileSessionRegistry, SessionRecord
 from ops.agent_transfer.archive_io import pack_workspace, stage_and_activate_workspace
 from ops.agent_transfer.budget import WorkspaceTransferLimits
@@ -59,6 +61,7 @@ def test_claude_code_transfer_collect_and_apply(tmp_path: Path) -> None:
                 "generation": 0,
                 "model": "claude-sonnet-5-5",
                 "resumes": 3,
+                "background": [],
                 "created_at": "2026-10-28T13:15:26+00:00",
                 "updated_at": "2026-10-28T20:37:10+00:00",
             }
@@ -105,6 +108,38 @@ def test_claude_code_transfer_collect_and_apply(tmp_path: Path) -> None:
     assert "hi there" in dst_content
 
 
+# meiva:note
+# A session that moves machines leaves its CLI process behind, so the work it held is gone on the target:
+# the pending list travels in the record as it stood, and the target's first session reads it back as lost
+# and tells the agent once.
+# meiva:link base/lm/harness/docs/background-work.md
+def test_pending_background_work_travels_and_is_lost_on_the_target(tmp_path: Path) -> None:
+    src_home, dst_home = tmp_path / "src_home", tmp_path / "dst_home"
+    src_user, dst_user = tmp_path / "src_user", tmp_path / "dst_user"
+    agent_id = 7190
+    src_cwd = str(paths.workspace_path(src_home, agent_id))
+    _write_record(src_home, agent_id, "claude_code", "claude-session", src_cwd)
+    registry = FileSessionRegistry(paths.harness_sessions_dir(home=src_home))
+    pending = BackgroundItem(BackgroundKind.CRON, "recurring cron `* * * * *`: ping", until=9e12)
+    stored = registry.load(agent_id, harness="claude_code")
+    assert stored is not None
+    registry.save(replace(stored, background=(pending,)))
+    transcripts = src_user / ".claude" / "projects" / claude_project_slug(src_cwd)
+    transcripts.mkdir(parents=True)
+    (transcripts / "claude-session.jsonl").write_text('{"type":"say"}\n', encoding="utf-8")
+
+    carried, _ = collect_harness_transfers(home=src_home, agent_id=agent_id, user_home=src_user)
+    (payload,) = carried
+    apply_harness_transfer(
+        home=dst_home, payload=payload, to_machine="dst_runner", user_home=dst_user
+    )
+
+    moved = FileSessionRegistry(paths.harness_sessions_dir(home=dst_home)).load(
+        agent_id, harness="claude_code"
+    )
+    assert moved is not None and moved.background == (pending,)
+
+
 def test_antigravity_transfer_collect_and_apply(tmp_path: Path) -> None:
     src_home = tmp_path / "src_home"
     dst_home = tmp_path / "dst_home"
@@ -128,6 +163,7 @@ def test_antigravity_transfer_collect_and_apply(tmp_path: Path) -> None:
                 "generation": 0,
                 "model": "gemini-4-argon-low",
                 "resumes": 1,
+                "background": [],
                 "created_at": "2026-10-28T13:15:32+00:00",
                 "updated_at": "2026-10-28T20:33:11+00:00",
             }
@@ -214,6 +250,7 @@ def test_codex_transfer_collect_and_apply(tmp_path: Path) -> None:
                 "generation": 0,
                 "model": "gpt-6-astra",
                 "resumes": 1,
+                "background": [],
                 "created_at": "2026-10-28T13:15:27+00:00",
                 "updated_at": "2026-10-28T20:33:10+00:00",
             }
@@ -316,6 +353,7 @@ def test_bundle_pack_and_activate_with_harness_transfer(tmp_path: Path) -> None:
                 "generation": 0,
                 "model": "claude-sonnet-5-5",
                 "resumes": 0,
+                "background": [],
                 "created_at": "2026-11-01T00:00:00Z",
                 "updated_at": "2026-11-01T00:00:00Z",
             }

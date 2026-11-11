@@ -165,3 +165,13 @@ an unknown cost is not the same as a zero one.
 including the SIGINT exit path and a real child process, so the cancel assertions
 run against a real process tree. The suite pins the seven shared invariants plus
 the three differences above.
+
+## Scheduled work
+
+`agy` has a `schedule` tool (cron jobs and timers). The step stream shows the call and its
+success. A timer call (`DurationSeconds`, `Prompt`) blocks inside its turn and its result
+arrives when it fires, so it adds nothing after the turn. A call without a duration
+(cron-like) shows neither firing nor cancellation, so `schedules.py` holds it as pending for
+one day. An interrupt kills `agy` and the schedules with it; the
+respawn hands them to the next turn's note as lost. See
+[background work](../../docs/background-work.md).

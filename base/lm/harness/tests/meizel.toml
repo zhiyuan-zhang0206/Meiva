@@ -1,6 +1,7 @@
 exports = ["roots.py"]
 
 [uses]
+"test_background_work.py" = ["bridge_support.py", "test_bridge.py"]
 "test_bridge.py" = ["bridge_support.py", "roots.py"]
 "test_bridge_compaction.py" = ["bridge_support.py", "test_bridge.py"]
 "test_bridge_lifecycle.py" = ["bridge_support.py"]

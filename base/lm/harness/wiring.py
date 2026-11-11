@@ -4,7 +4,9 @@ import os
 import sys
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, replace
+from datetime import datetime, tzinfo
 from pathlib import Path
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from base.api_contracts.agent_contract import Harness
 from base.host.env.agent_env import MEIVA_PYTHON_ENV
@@ -70,6 +72,20 @@ def session_environ(environ: Mapping[str, str]) -> dict[str, str]:
     return with_harness_path(base)
 
 
+# meiva:note
+# The zone a harness CLI child runs in, which is how it reads a cron expression: the `TZ` the launcher
+# passes (or the host's own, which the child inherits), else the host process's local zone.
+# meiva:link base/lm/harness/claude/docs/background-tasks.md
+def cli_timezone(environ: Mapping[str, str]) -> tzinfo | None:
+    name = environ.get("TZ")
+    if name:
+        try:
+            return ZoneInfo(name)
+        except ZoneInfoNotFoundError:
+            return None
+    return datetime.now().astimezone().tzinfo
+
+
 def open_session(
     harness: Harness,
     *,
@@ -89,6 +105,7 @@ def open_session(
         claude_env = session_environ(environ)
         claude_config = BridgeConfig(
             cwd=cwd,
+            cron_timezone=cli_timezone(environ),
             reasoning_effort=reasoning_effort,
             cli_path=resolve_harness_binary("claude", path_env=claude_env.get("PATH")),
         )

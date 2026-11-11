@@ -130,3 +130,13 @@ experimental surface is not adopted.
 
 See [Session environment](environment.md) for authentication filtering,
 explicit environment inputs and construction/reconnect timing.
+
+## Background commands
+
+`unified_exec` commands outlive their turn while the app-server runs and die with it.
+`commands.py` follows `commandExecution` items (`agent` and `unifiedExecStartup` sources)
+from `item/started` to `item/completed`; open ones count as pending background work only
+while the process tree shows a descendant the app-server did not start with (the app-server does send
+`item/completed` when a background command ends after its turn; the check covers an item
+whose completion never comes). A turn that ends
+interrupted or failed drops its open items. See [background work](../../docs/background-work.md).

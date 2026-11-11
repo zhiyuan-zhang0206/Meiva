@@ -245,4 +245,16 @@ EVENTS: dict[str, EventSpec] = {
         "and the agent that was waiting on it is never told",
         tier="anomaly",
     ),
+    "harness_background_work_lost": telemetry_event(
+        "harness_background_work_lost",
+        "an external harness CLI process was replaced while it held background work (a command, a "
+        "sub-agent, a timer); the agent's next input carries a note naming what was lost",
+    ),
+    "harness_background_work_evicted": telemetry_event(
+        "harness_background_work_evicted",
+        "the host evicted a hosted runtime whose external CLI still held background work, because "
+        "the cache was over its size bound with nothing idle left to evict; its next input "
+        "carries a note naming what was lost",
+        tier="anomaly",
+    ),
 }

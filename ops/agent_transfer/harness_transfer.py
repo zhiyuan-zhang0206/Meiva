@@ -17,6 +17,7 @@ from pathlib import Path
 from base import paths
 from base.host.boundary.json_values import is_object_dict, is_object_list
 from base.host.boundary.untyped import object_of
+from base.lm.harness import encode_items
 from base.lm.harness.registry import FileSessionRegistry, SessionRecord, record_from_payload
 from ops.rpc_schemas.transfer import HarnessTransferFile, HarnessTransferPayload
 
@@ -282,7 +283,10 @@ def _collect_one(
 ) -> HarnessTransferPayload | None:
     if record.harness not in _TRANSFERABLE or not record.session_id:
         return None
-    session_record: dict[str, object] = dict(asdict(record))
+    session_record: dict[str, object] = {
+        **asdict(record),
+        "background": encode_items(record.background),
+    }
     from_cwd = record.cwd or str(paths.workspace_path(home, record.agent_id))
     files: list[HarnessTransferFile] = []
     extra: dict[str, object] = {}

@@ -17,6 +17,7 @@ from base.lm.harness.antigravity.mapping import (
     parse_usage,
 )
 from base.lm.harness.antigravity.reconciliation.queue_files import agy_home, reconcile_inputs
+from base.lm.harness.antigravity.schedules import Schedules
 from base.lm.harness.antigravity.trajectory import (
     PhantomAction,
     PhantomTurn,
@@ -41,6 +42,8 @@ from base.lm.harness.events import (
     HarnessCause,
     InterruptConfirmed,
     SessionFailed,
+    ToolResult,
+    ToolUse,
     TurnCompleted,
     TurnOrigin,
     TurnStarted,
@@ -53,7 +56,7 @@ from base.lm.harness.process import (
     snapshot,
     watch_tree,
 )
-from base.lm.harness.session import SessionClosedError, SessionTotals
+from base.lm.harness.session import BackgroundWork, SessionClosedError, SessionTotals
 
 TRAJECTORY_POLL_SECONDS = 0.5
 
@@ -107,6 +110,7 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
         self._phantom: PhantomTurn | None = None
         self._acked_start = False
         self._last_turn: str | None = None
+        self._schedules = Schedules()
 
     def _read_records(
         self, session_id: str, keys: Sequence[str]
@@ -130,6 +134,7 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
         if self._closed:
             return
         self._closed = True
+        self._schedules = Schedules()
         self._sent_turn = None
         self._phantom = None
         self._observed.clear()
@@ -254,6 +259,7 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
         if current is not None:
             self._transport = None
             await current.close()
+        self._lose_schedules()
         self._close_phantom(None)
         _ = self._begin_generation()
         transport = self._factory()
@@ -442,6 +448,7 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
         self._accumulate(update)
         for event in map_step_update(update, turn_id=ticket.turn_id, home=self._home):
             self._emit(event)
+            self._track_schedule(event)
         if update.get("state") != "DONE":
             return
         if update.get("step_type") == "agent_response" and isinstance(update.get("usage"), dict):
@@ -450,6 +457,33 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
         if done is not None and done.text:
             ticket.parts.append(done.text)
             self._emit(done)
+
+    # meiva:note
+    # The `schedule` tool's calls, followed from the step stream (see `schedules.py` for what that
+    # can and cannot see). Interrupting a turn kills the `agy` process and the timers with it: the
+    # respawn hands them to the next turn's note as lost.
+    # meiva:link base/lm/harness/antigravity/docs/antigravity.md
+    def _track_schedule(self, event: object) -> None:
+        before = self._schedules
+        if isinstance(event, ToolUse):
+            self._schedules = before.tool_used(event.tool_use_id, event.name, event.tool_input)
+        elif isinstance(event, ToolResult):
+            self._schedules = before.tool_returned(
+                event.tool_use_id, is_error=event.is_error, now=self._clock.now().timestamp()
+            )
+        if self._schedules != before:
+            self._persist_background(self._schedules.pending_at(self._clock.now().timestamp()))
+
+    def _lose_schedules(self) -> None:
+        lost = self._schedules.pending_at(self._clock.now().timestamp())
+        self._schedules = Schedules()
+        self._lose_background(lost)
+
+    def background_work(self) -> BackgroundWork:
+        if self._closed:
+            return BackgroundWork()
+        now = self._clock.now().timestamp()
+        return BackgroundWork((*self._schedules.pending_at(now), *self._observed_turn_items()))
 
     # meiva:note
     # A step with an index below `_floor` was already attributed (a phantom turn closed from the

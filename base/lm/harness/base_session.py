@@ -17,10 +17,13 @@ from base.lm.harness.delivery import (
 from base.lm.harness.events import (
     AckSignal,
     BridgeEvent,
+    HarnessCause,
     SessionBound,
     SessionClosed,
     SessionFailed,
     TurnFaulted,
+    TurnOrigin,
+    TurnStarted,
     UnsolicitedOutput,
     UnsolicitedSink,
     is_droppable,
@@ -29,6 +32,9 @@ from base.lm.harness.process import ChildProbe, ExitStatus, PsutilChildProbe
 from base.lm.harness.registry import SessionRecord, SessionRegistry
 from base.lm.harness.session import (
     EVENT_STREAM_END,
+    BackgroundItem,
+    BackgroundKind,
+    BackgroundWork,
     SessionClock,
     SessionConfig,
     SessionTotals,
@@ -129,6 +135,9 @@ class BaseHarnessSession[ConfigT: SessionConfig](ExitStatus):
         self._unconsumed_events = 0
         self._ledger = DeliveryLedger()
         self._observed: set[str] = set()
+        self._lost_background: tuple[BackgroundItem, ...] = ()
+        self._live_background: tuple[BackgroundItem, ...] = ()
+        self._harness_causes: dict[str, HarnessCause | None] = {}
 
     async def start(self, *, resume: str | None = None) -> None:
         raise NotImplementedError
@@ -402,6 +411,7 @@ class BaseHarnessSession[ConfigT: SessionConfig](ExitStatus):
             return None
         self._resumed_existing = True
         self._record = record
+        self._lost_background = record.background
         return record.session_id
 
     def _bind(self) -> None:
@@ -420,6 +430,7 @@ class BaseHarnessSession[ConfigT: SessionConfig](ExitStatus):
             + (1 if self._resumed_existing else 0),
             harness=self.harness,
             generation=self._ledger.generation,
+            background=(*self._lost_background, *self._live_background),
         )
         self._registry.save(self._record)
         self._emit(
@@ -433,6 +444,81 @@ class BaseHarnessSession[ConfigT: SessionConfig](ExitStatus):
             return
         self._record = replace(self._record, updated_at=self._now_iso())
         self._registry.save(self._record)
+
+    # meiva:note
+    # The background work this session's CLI holds, written to the record every time the set
+    # changes. What a restart loses has to survive the process that held it, and a host that dies
+    # cannot write at the moment it dies, so the record is kept current instead. `lost` is what a
+    # previous process left behind and nobody has told the agent about yet; it stays in the
+    # record until `take_lost_background` hands it over.
+    # meiva:link base/lm/harness/docs/background-work.md
+    def _persist_background(self, live: tuple[BackgroundItem, ...]) -> None:
+        if live == self._live_background:
+            return
+        self._live_background = live
+        self._write_background()
+
+    def _write_background(self) -> None:
+        if self._registry is None or self._record is None:
+            return
+        self._record = replace(
+            self._record, background=(*self._lost_background, *self._live_background)
+        )
+        self._registry.save(self._record)
+
+    # meiva:note
+    # A process the session itself replaced (Antigravity respawns `agy` after an interrupt) took
+    # its background work with it: it joins what the previous process left, for the next turn's
+    # note, and the live set starts empty.
+    def _lose_background(self, items: tuple[BackgroundItem, ...]) -> None:
+        if not items:
+            return
+        self._lost_background = (*self._lost_background, *items)
+        self._live_background = ()
+        self._write_background()
+
+    # meiva:note
+    # The read-only question the bridge and the host ask: what is this session's CLI holding that
+    # a close would drop. The base answers nothing; an adapter that can see its CLI's background
+    # work overrides it. A turn the CLI began on its own and is still running counts: closing the
+    # CLI then would cut the turn, and a session that is mid-turn is not idle.
+    # meiva:link base/lm/harness/docs/background-work.md
+    def background_work(self) -> BackgroundWork:
+        return BackgroundWork(self._observed_turn_items())
+
+    def _observed_turn_items(self) -> tuple[BackgroundItem, ...]:
+        if self._closed or not self._observed:
+            return ()
+        return (BackgroundItem(BackgroundKind.TURN, "a turn the CLI started by itself is running"),)
+
+    # meiva:note
+    # An idle agent has to hear that its CLI began a turn of its own and what it answered: the
+    # adapter reads the CLI's stream whether or not the agent has a turn, so the finished turn is
+    # handed to the sink like any other output nobody has read, and the sink wakes the agent. A
+    # turn that answers a background-task report or a queued input of ours is not reported here:
+    # the report already went to the sink, and the input has its own delivery ledger.
+    # meiva:link base/lm/harness/docs/background-work.md
+    def _wake_for_harness_turn(self, turn_id: str, text: str) -> None:
+        if turn_id not in self._harness_causes:
+            return
+        cause = self._harness_causes.pop(turn_id)
+        if cause in (HarnessCause.BACKGROUND_TASK, HarnessCause.QUEUED_INPUT_REVIVED):
+            return
+        if not text.strip():
+            return
+        why = "a scheduled wake" if cause is HarnessCause.SCHEDULED_WAKE else "its own accord"
+        self._unsolicited(
+            UnsolicitedOutput(
+                source="harness-turn",
+                text=f"The {self.harness} CLI ran a turn on {why} and replied:\n{text.strip()}",
+            )
+        )
+
+    def take_lost_background(self) -> tuple[BackgroundItem, ...]:
+        lost, self._lost_background = self._lost_background, ()
+        if lost:
+            self._write_background()
+        return lost
 
     def _complete(self, turn: ActiveTurn) -> None:
         turn.interrupt_ready.set()
@@ -506,6 +592,8 @@ class BaseHarnessSession[ConfigT: SessionConfig](ExitStatus):
             self._fail_turn(turn, exc)
 
     def _emit(self, event: BridgeEvent) -> None:
+        if isinstance(event, TurnStarted) and event.origin is TurnOrigin.HARNESS:
+            self._harness_causes[event.turn_id] = event.cause
         if is_droppable(event) and self._events.qsize() >= self.config.max_buffered_events:
             self._dropped_deltas += 1
             return

@@ -27,7 +27,7 @@ from base.host.env.agent_slices import AgentBrain, AgentSlices
 from base.lm.catalog import ModelCatalog
 from base.lm.catalog.provider_keys import ProviderKeys
 from base.lm.factory import validate_model_launch
-from base.lm.harness import UnsolicitedOutput, UnsolicitedSink
+from base.lm.harness import BackgroundWorkReporting, UnsolicitedOutput, UnsolicitedSink
 from base.lm.harness.bridge import HarnessBridge
 from base.lm.harness.engine import TurnEngine
 from base.lm.harness.handoff import HarnessContribution
@@ -332,12 +332,26 @@ async def cached_runtime(
 
 
 # meiva:note
+# Whether the runtime's external CLI is holding work a close would drop: a background command, a
+# sub-agent, a timer the model set. Such a runtime is not idle however long it has been quiet. The
+# answer comes from the session itself (`background_work()` on the bridge), so no harness is named
+# here; a runtime with no bridge, or a bridge whose adapter cannot tell, holds nothing.
+# meiva:link base/lm/harness/docs/background-work.md
+def holds_background_work(runtime: AgentRuntime) -> bool:
+    bridge = runtime.harness_bridge
+    return isinstance(bridge, BackgroundWorkReporting) and bool(bridge.background_work())
+
+
+# meiva:note
 # Evict idle runtimes by age and least-recent use; misses rebuild on wake. Active
 # runtimes survive both bounds, including turns longer than the idle TTL; completion
 # refreshes idle time and LRU position before eviction, and an over-budget warm cache
-# returns to its configured size as active runtimes settle. What it evicted is
-# returned so the caller can close the sessions those runtimes hold: dropping the
-# entry is what retires an external harness runtime.
+# returns to its configured size as active runtimes settle. A runtime whose external CLI holds
+# background work counts as active for the idle TTL and is the last the size bound takes: it goes
+# only when no idle runtime is left to evict, in least-recent order, and the caller reports it
+# (the agent is told what was lost on its next input). What it evicted is returned so the caller
+# can close the sessions those runtimes hold: dropping the entry is what retires an external
+# harness runtime.
 # meiva:link agent/graph/docs/harness-turn.md
 def evict_runtimes(
     runtimes: OrderedDict[int, AgentRuntime],
@@ -348,15 +362,21 @@ def evict_runtimes(
 ) -> list[tuple[int, AgentRuntime]]:
     evicted: list[tuple[int, AgentRuntime]] = []
     cutoff = now - policy.idle_ttl_seconds
-    aged = [a for a, r in runtimes.items() if r.last_used < cutoff and a not in in_flight]
+    kept = {a for a, r in runtimes.items() if a not in in_flight and holds_background_work(r)}
+    aged = [
+        a
+        for a, r in runtimes.items()
+        if r.last_used < cutoff and a not in in_flight and a not in kept
+    ]
     for agent_id in aged:
         evicted.append((agent_id, runtimes.pop(agent_id)))
     cap = policy.size
-    for agent_id in list(runtimes):
-        if len(runtimes) <= cap:
-            break
-        if agent_id not in in_flight:
-            evicted.append((agent_id, runtimes.pop(agent_id)))
+    for protected in (False, True):
+        for agent_id in list(runtimes):
+            if len(runtimes) <= cap:
+                break
+            if agent_id not in in_flight and (agent_id in kept) is protected:
+                evicted.append((agent_id, runtimes.pop(agent_id)))
     return evicted
 
 
