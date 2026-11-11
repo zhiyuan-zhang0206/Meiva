@@ -66,12 +66,12 @@ def test_a_message_expands_the_way_each_kind_of_command_does(
     assert CommandCatalog.system(skills=skills.names, home=unit_home).expand(
         "/goal write the plan"
     ) == (
-        "/goal invokes the goal skill. Load it with meiva.help(meiva.skills.goal) and follow it for "
+        "/goal invokes the goal skill. Find its SKILL.md path with meiva.help(meiva.skills.goal), read that file and follow it for "
         "this task.\nAdditional message: write the plan"
     )
     assert CommandCatalog.system(skills=skills.names, home=unit_home).expand("/ship /goal") == (
         "Command /ship:\nShip the release.\n\n"
-        "/goal invokes the goal skill. Load it with meiva.help(meiva.skills.goal) and follow it for "
+        "/goal invokes the goal skill. Find its SKILL.md path with meiva.help(meiva.skills.goal), read that file and follow it for "
         "this task."
     )
     assert (

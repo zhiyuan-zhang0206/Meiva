@@ -24,7 +24,8 @@ find something and get it working", read
 ## Skill (Reusable Instruction Pack)
 
 A **skill** is a reusable instruction pack — you read and follow it, it is not
-code. Use `meiva.help(meiva.skills.<name>)` to load it. All skills form a namespace
+code. `meiva.help(meiva.skills.<name>)` shows its description and SKILL.md path; read that
+file. All skills form a namespace
 tree mirroring the folder structure (top-level bare, plugin-bundled under
 `plugin.name`, nested as `a.b.name`). Python access replaces hyphens with
 underscores (e.g. `meiva.skills.superpowers.test_driven_development`).

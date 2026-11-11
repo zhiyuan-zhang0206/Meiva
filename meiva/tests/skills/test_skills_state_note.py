@@ -52,24 +52,29 @@ def _skills(root: Path) -> None:
     write_skill(group, "beta", "name: beta\ndescription: b", body="# B\n")
 
 
-@pytest.mark.parametrize(
-    "read",
-    [
-        pytest.param(lambda: meiva.skills.alpha.__doc__, id="doc"),
-        pytest.param(lambda: meiva.help(meiva.skills.alpha), id="help"),
-        pytest.param(
-            lambda: meiva.files.read(meiva.skills.alpha.path + "/SKILL.md"), id="files-read"
-        ),
-    ],
-)
-def test_every_way_of_reading_a_body_notes_the_skill(
-    fake_skills_dir: Path, _exec_turn: dict[str, Any], read: Any
+def _read_body(skill_path: str) -> str:
+    return meiva.files.read(skill_path + "/SKILL.md")
+
+
+def test_reading_a_skill_md_notes_the_skill(
+    fake_skills_dir: Path, _exec_turn: dict[str, Any]
 ) -> None:
     _skills(fake_skills_dir)
 
-    read()
+    _ = _read_body(meiva.skills.alpha.path)
 
     assert _exec_turn == {"skill_reads": ["alpha"]}
+
+
+def test_help_notes_nothing_because_it_hands_over_no_body(
+    fake_skills_dir: Path, _exec_turn: dict[str, Any]
+) -> None:
+    _skills(fake_skills_dir)
+
+    meiva.help(meiva.skills.alpha)
+    meiva.help(meiva.skills.grp)
+
+    assert _exec_turn == {}
 
 
 def test_a_namespaced_skill_is_noted_by_its_display_identifier(
@@ -77,7 +82,7 @@ def test_a_namespaced_skill_is_noted_by_its_display_identifier(
 ) -> None:
     _skills(fake_skills_dir)
 
-    _ = meiva.skills.grp.beta.__doc__
+    _ = _read_body(meiva.skills.grp.beta.path)
 
     assert _exec_turn == {"skill_reads": ["grp:beta"]}
 
@@ -87,17 +92,18 @@ def test_reading_a_body_twice_notes_it_once_and_two_skills_note_both(
 ) -> None:
     _skills(fake_skills_dir)
 
-    _ = meiva.skills.alpha.__doc__
-    _ = meiva.skills.grp.beta.__doc__
-    _ = meiva.skills.alpha.__doc__
+    _ = _read_body(meiva.skills.alpha.path)
+    _ = _read_body(meiva.skills.grp.beta.path)
+    _ = _read_body(meiva.skills.alpha.path)
 
     assert _exec_turn == {"skill_reads": ["alpha", "grp:beta"]}
 
 
+# meiva:note
+# Exposure is not use: only a SKILL.md file read counts.
 def test_resolving_or_listing_a_skill_notes_nothing(
     fake_skills_dir: Path, _exec_turn: dict[str, Any]
 ) -> None:
-    """Exposure is not use: only a body that was handed over counts as read."""
     _skills(fake_skills_dir)
 
     leaf = meiva.skills.alpha
@@ -111,7 +117,7 @@ def test_outside_an_exec_turn_a_read_succeeds_and_notes_nothing(fake_skills_dir:
     _skills(fake_skills_dir)
     process_context.unbind_exec_turn()
 
-    assert "# A" in (meiva.skills.alpha.__doc__ or "")
+    assert "# A" in _read_body(meiva.skills.alpha.path)
 
 
 def test_agent_code_that_replaced_the_update_does_not_break_the_read(
@@ -122,7 +128,7 @@ def test_agent_code_that_replaced_the_update_does_not_break_the_read(
     _skills(fake_skills_dir)
     process_context.set_state_update("not a dict")
 
-    assert "# A" in (meiva.skills.alpha.__doc__ or "")
+    assert "# A" in _read_body(meiva.skills.alpha.path)
 
 
 # meiva:note
@@ -134,7 +140,7 @@ def test_agent_code_that_wrote_the_channel_by_hand_does_not_break_the_read(
     _skills(fake_skills_dir)
     _exec_turn["skill_reads"] = {"other": True}
 
-    assert "# A" in (meiva.skills.alpha.__doc__ or "")
+    assert "# A" in _read_body(meiva.skills.alpha.path)
     assert _exec_turn == {"skill_reads": {"other": True}}
 
 
@@ -143,7 +149,7 @@ def test_the_audit_is_still_written_when_the_read_is_noted(
 ) -> None:
     _skills(fake_skills_dir)
 
-    _ = meiva.skills.alpha.__doc__
+    _ = _read_body(meiva.skills.alpha.path)
 
     assert audited_agent.invoked() == [("alpha", "loaded")]
 
@@ -177,7 +183,7 @@ def _run_child_probe() -> None:
     process_context.set_state(object())
     process_context.set_state_update({})
     before = set(sys.modules)
-    _ = meiva.skills.alpha.__doc__
+    _ = meiva.files.read(meiva.skills.alpha.path + "/SKILL.md")
     forbidden = ("httpx", "langchain", "langgraph", "agent", "base.lm.decision.call")
     print(
         json.dumps(

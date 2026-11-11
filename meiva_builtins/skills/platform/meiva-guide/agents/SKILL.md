@@ -116,7 +116,7 @@ intent with a description.
 Two sources:**built-in commands** (`commands/*.md` + `~/.meiva/commands/*.md` for
 user overrides) and **plugin commands** (plugins carrying a `commands/` directory,
 exposed as `/plugin.name`). Every active skill also gets a free eponymous command
-(calling it loads the skill via `meiva.help(meiva.skills.<name>)`).
+(calling it points the agent at the skill's SKILL.md via `meiva.help(meiva.skills.<name>)`).
 
 Create a command by placing a `<name>.md` file with optional frontmatter
 (`description` + `instruction-hint`) and a fixed prompt template as the body. One

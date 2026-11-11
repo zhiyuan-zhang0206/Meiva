@@ -33,7 +33,7 @@ class SkillIndexBuilder:
         gate_keys = None if gate is None else {match_key(g) for g in gate}
         for entry in entries:
             self._mount_folder_skill(root, entry, gate_keys)
-            self._mount_folder_index(entry, gate_keys)
+            self._mount_folder_index(root, entry, gate_keys)
 
     def _mount_folder_skill(self, root: Path, entry: SkillFile, gate_keys: set[str] | None) -> None:
         skill_md = entry.skill_md
@@ -71,6 +71,7 @@ class SkillIndexBuilder:
         ns = self._base_ns + rel[:-1] if rel else self._base_ns
         skill["namespace"] = ns
         parent = descend(self.tree, ns)
+        self._stamp_folders(root, rel, include_self=False)
         key = match_key(skill["name"])
         self._claim_paths(root, rel, key, str(skill_md.parent))
         existing = parent.get(key)
@@ -80,7 +81,7 @@ class SkillIndexBuilder:
             parent[key] = Leaf(skill)
             self._maybe_promote(parent, key, skill, ns)
 
-    def _mount_folder_index(self, entry: SkillFile, gate_keys: set[str] | None) -> None:
+    def _mount_folder_index(self, root: Path, entry: SkillFile, gate_keys: set[str] | None) -> None:
         index_md = entry.index_md
         if index_md is None:
             return
@@ -90,6 +91,25 @@ class SkillIndexBuilder:
         if entry.index_text is None:
             return
         descend(self.tree, self._base_ns + rel).doc = entry.index_text
+        self._stamp_folders(root, rel, include_self=True)
+
+    # meiva:note
+    # Record on each namespace node along `rel` the folder it came from (first mount wins).
+    def _stamp_folders(self, root: Path, rel: tuple[str, ...], *, include_self: bool) -> None:
+        node: Tree | NS = self.tree
+        for seg in self._base_ns:
+            base = node[match_key(seg)]
+            if not isinstance(base, NS):
+                return
+            node = base
+        stop = len(rel) if include_self else len(rel) - 1
+        for depth in range(stop):
+            child = node[match_key(rel[depth])]
+            if not isinstance(child, NS):
+                return
+            if child.path is None:
+                child.path = str(root.joinpath(*rel[: depth + 1]))
+            node = child
 
     def _claim_paths(self, root: Path, rel: tuple[str, ...], key: str, src: str) -> None:
         attr_path = tuple(match_key(seg) for seg in self._base_ns)

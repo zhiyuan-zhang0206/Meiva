@@ -11,12 +11,13 @@ from pathlib import Path
 
 import pytest
 
+import meiva
 import meiva.skills as skills_mod
 from base.packages.extensions import install_registry
 from base.packages.skills.tree import identifier, target
 from base.paths import meiva_home, skills_dir
 from meiva.sdk_surface import skill_sources
-from meiva.skills.skill_proxies import Namespace, SkillProxy, consumed_text
+from meiva.skills.skill_proxies import Namespace, SkillProxy
 from meiva.tests.skills._skills_helpers import fake_skills_dir as fake_skills_dir
 from meiva.tests.skills._skills_helpers import track, track_present, write_skill
 
@@ -153,45 +154,35 @@ def test_module_getattr_returns_proxy(db_url: str, fake_skills_dir: Path) -> Non
     assert isinstance(proxy, SkillProxy)
     assert proxy.name == "sk"
     assert proxy.path.endswith("/sk")
-    # __doc__ includes path + full body; _description stores frontmatter description for listing
-    assert isinstance(proxy.__doc__, str)
-    assert "1. Do X" in proxy.__doc__
-    assert "name: sk" in proxy.__doc__
     assert proxy._description == "d"
     assert hasattr(proxy, "_meiva_skill_kind")
 
 
+# meiva:note
+# `meiva.help(skill)` is the heading, the description and the SKILL.md path; the agent
+#     reads the file for the body.
 @pytest.mark.usefixtures("sdk_model_owner")
-def test_help_on_skill_renders_full_body(
+def test_help_on_skill_shows_name_description_and_path_not_the_body(
     db_url: str, fake_skills_dir: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """Regression: `meiva.help(skill)` must render the full SKILL.md, not just
-    the heading. The body lives in ``__doc__`` (path line + full body); the
-    skill marker forces ``include_own_doc=True``."""
     import meiva
 
     body = "# Steps\n\n1. Do the thing\n2. Do the other thing\n"
     write_skill(fake_skills_dir, "deep", "name: deep\ndescription: dd", body=body)
     meiva.help(meiva.skills.deep)
     out = capsys.readouterr().out
-    assert "### meiva.skills.deep" in out  # heading
-    assert "1. Do the thing" in out  # full body, not silently dropped
-    assert "BODY: str" not in out  # no synthetic BODY wrapping
-    assert "deep" in out  # path line is in the doc rendering
-    # The skill's own doc renders the full body — no separate BODY/PATH attrs
-    # skill list scan, and a "Filesystem path…" line on PATH is pure noise.
-    assert '"""dd"""' not in out
-    assert "Filesystem path" not in out
+    assert out == f"### meiva.skills.deep\n\ndd\n\nPath: {fake_skills_dir}/deep/SKILL.md\n"
 
 
+# meiva:note
+# Regression: `meiva.help(namespace)` lists each child skill as a Markdown
+#     heading at its FQN depth with its description and SKILL.md path below, not an
+#     empty heading. Depends on the proxy carrying its full `__name__` so the renderer
+#     attributes it as a child of the namespace.
 @pytest.mark.usefixtures("sdk_model_owner")
 def test_help_on_skill_namespace_lists_children(
     fake_skills_dir: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """Regression: `meiva.help(namespace)` lists each child skill as a Markdown
-    heading at its FQN depth with the one-line description below, not an empty
-    heading. Depends on the proxy carrying its full `__name__` so the renderer
-    attributes it as a child of the namespace."""
     import meiva
 
     d = fake_skills_dir / "superpowers"
@@ -201,8 +192,14 @@ def test_help_on_skill_namespace_lists_children(
     meiva.help(meiva.skills.superpowers)
     out = capsys.readouterr().out
     # Heading is the loadable path, at a depth set by its segment count.
-    assert "#### meiva.skills.superpowers.brainstorming\n\nbs" in out
-    assert "#### meiva.skills.superpowers.writing_plans\n\nwp" in out
+    assert (
+        f"#### meiva.skills.superpowers.brainstorming\n\nbs\n\nPath: {d}/brainstorming/SKILL.md"
+        in out
+    )
+    assert (
+        f"#### meiva.skills.superpowers.writing_plans\n\nwp\n\nPath: {d}/writing-plans/SKILL.md"
+        in out
+    )
 
 
 def test_module_getattr_handles_dash_in_name(fake_skills_dir: Path) -> None:
@@ -382,8 +379,6 @@ def test_plugin_skill_nested_access(db_url: str, fake_skills_dir: Path) -> None:
     proxy = ns.brainstorming
     assert isinstance(proxy, SkillProxy)
     assert proxy.name == "brainstorming"
-    assert isinstance(proxy.__doc__, str)
-    assert "# Steps" in proxy.__doc__  # full body is in __doc__
     assert proxy._description == "bs"  # description stored separately
     # full namespace path on __name__ so heading + parent child-attribution work
     assert proxy.__name__ == "meiva.skills.superpowers.brainstorming"
@@ -472,8 +467,6 @@ def test_root_skill_is_both_skill_and_namespace(db_url: str, fake_skills_dir: Pa
     node = skills_mod.sources
     assert isinstance(node, Namespace)
     assert node._description == "get content"  # root skill description stored on _description
-    assert isinstance(node.__doc__, str)
-    assert "get content" in node.__doc__  # full body in __doc__
     assert node.name == "sources"
     assert "bilibili" in dir(node)
     assert isinstance(node.bilibili, SkillProxy)
@@ -484,12 +477,13 @@ def test_root_skill_is_both_skill_and_namespace(db_url: str, fake_skills_dir: Pa
     assert "sources:bilibili" in by_id and by_id["sources:bilibili"]["namespace"] == ("sources",)
 
 
+# meiva:note
+# `meiva.help` on a root skill shows its own description and SKILL.md path AND lists
+#     its child adapters the same way — never the body.
 @pytest.mark.usefixtures("sdk_model_owner")
-def test_root_skill_help_renders_body_then_children(
+def test_root_skill_help_renders_entry_then_children(
     db_url: str, fake_skills_dir: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """`meiva.help` on a root skill shows its own SKILL.md (router) AND lists its
-    child adapters — the package-with-a-body view."""
     import meiva
 
     _root_skill_repo(fake_skills_dir)
@@ -497,42 +491,82 @@ def test_root_skill_help_renders_body_then_children(
     meiva.help(meiva.skills.sources)
     out = capsys.readouterr().out
     assert "### meiva.skills.sources" in out
-    assert "pick an adapter" in out  # root SKILL.md body via BODY
-    # child adapter listed as a heading at its FQN depth + description below
-    assert "#### meiva.skills.sources.bilibili\n\nbili" in out
-    assert "sources" in out  # path line is in the rendering
-    # same no-docstring rule as a leaf skill's BODY/PATH
-    assert '"""get content"""' not in out
-    assert "Filesystem path" not in out
+    assert "pick an adapter" not in out
+    assert (
+        f"### meiva.skills.sources\n\nget content\n\nPath: {fake_skills_dir}/sources/SKILL.md"
+        in out
+    )
+    assert (
+        f"#### meiva.skills.sources.bilibili\n\nbili\n\nPath: {fake_skills_dir}/sources/bilibili/SKILL.md"
+        in out
+    )
 
 
-def test_index_md_sets_namespace_doc(fake_skills_dir: Path) -> None:
-    """A folder's INDEX.md authors its namespace description (shown where a parent
-    lists it), replacing the synthesized 'contains: …'."""
+# meiva:note
+# A folder's INDEX.md authors its namespace description; the entry also names the folder.
+@pytest.mark.usefixtures("sdk_model_owner")
+def test_index_md_sets_namespace_doc(
+    fake_skills_dir: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
     (fake_skills_dir / "feeds").mkdir()
     (fake_skills_dir / "feeds" / "INDEX.md").write_text("follow internet sources", encoding="utf-8")
     write_skill(fake_skills_dir / "feeds", "rss", "name: rss\ndescription: r")
 
-    assert skills_mod.feeds.__doc__ == "follow internet sources"
+    meiva.help(meiva.skills.feeds)
+    out = capsys.readouterr().out
+    assert out.startswith(
+        f"### meiva.skills.feeds\n\nfollow internet sources\n\nPath: {fake_skills_dir}/feeds"
+    )
 
 
-def test_namespace_without_index_synthesizes_contains(fake_skills_dir: Path) -> None:
-    """A bare namespace folder (no INDEX.md, no own SKILL.md) still self-describes
-    via a synthesized 'contains: …' line — INDEX.md is optional."""
+# meiva:note
+# A bare namespace folder (no INDEX.md, no own SKILL.md) has no description source:
+#     its entry is the folder path alone.
+@pytest.mark.usefixtures("sdk_model_owner")
+def test_namespace_without_index_has_a_path_and_no_description(
+    fake_skills_dir: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
     (fake_skills_dir / "feeds").mkdir()
     write_skill(fake_skills_dir / "feeds", "rss", "name: rss\ndescription: r")
 
-    assert skills_mod.feeds.__doc__ == "Contains: rss"
+    meiva.help(meiva.skills.feeds)
+    out = capsys.readouterr().out
+    assert out.startswith(f"### meiva.skills.feeds\n\nPath: {fake_skills_dir}/feeds")
+    assert "Contains" not in out
 
 
-def test_a_consumed_body_shortens_the_home_prefix_to_a_tilde() -> None:
-    assert consumed_text("/home/u/.meiva/skills/alpha", "/home/u", "# A\n") == (
-        "~/.meiva/skills/alpha\n\n# A\n"
-    )
-    assert consumed_text("/opt/skills/alpha", "/home/u", "# A\n") == "/opt/skills/alpha\n\n# A\n"
-    assert consumed_text("/home/user2/skills/alpha", "/home/u", "# A\n") == (
-        "/home/user2/skills/alpha\n\n# A\n"
-    )
+# meiva:note
+# Top level: each top-level skill and package once (a package's contents are not
+#     expanded). A package: its own entry and its direct children, one level down.
+@pytest.mark.usefixtures("sdk_model_owner")
+def test_help_levels_list_only_their_own_entries(
+    fake_skills_dir: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    write_skill(fake_skills_dir, "alpha", "name: alpha\ndescription: Alpha desc", body="BODY_A")
+    pkg = fake_skills_dir / "pkg"
+    pkg.mkdir()
+    (pkg / "INDEX.md").write_text("The pkg package", encoding="utf-8")
+    write_skill(pkg, "one", "name: one\ndescription: One desc", body="BODY_ONE")
+    inner = pkg / "inner"
+    inner.mkdir()
+    write_skill(inner, "deep", "name: deep\ndescription: Deep desc", body="BODY_DEEP")
+    bare = fake_skills_dir / "bare"
+    bare.mkdir()
+    write_skill(bare, "two", "name: two\ndescription: Two desc")
+
+    meiva.help(meiva.skills)
+    top = capsys.readouterr().out
+    assert f"## meiva.skills.alpha\n\nAlpha desc\n\nPath: {fake_skills_dir}/alpha/SKILL.md" in top
+    assert f"## meiva.skills.pkg\n\nThe pkg package\n\nPath: {pkg}" in top
+    assert f"## meiva.skills.bare\n\nPath: {bare}" in top
+    assert "pkg.one" not in top and "Two desc" not in top and "BODY_" not in top
+
+    meiva.help(meiva.skills.pkg)
+    level = capsys.readouterr().out
+    assert level.startswith(f"### meiva.skills.pkg\n\nThe pkg package\n\nPath: {pkg}")
+    assert f"#### meiva.skills.pkg.one\n\nOne desc\n\nPath: {pkg}/one/SKILL.md" in level
+    assert f"#### meiva.skills.pkg.inner\n\nPath: {inner}" in level
+    assert "Deep desc" not in level and "BODY_" not in level
 
 
 # meiva:note

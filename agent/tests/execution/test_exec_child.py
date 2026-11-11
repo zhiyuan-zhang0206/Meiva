@@ -353,7 +353,7 @@ def test_help_is_meiva_target_accepts_only_agent_visible_sdk_objects() -> None:
         return None
 
     foreign_function.__module__ = "__main__"
-    skill_namespace = Namespace("example", NS(), lambda _skill: "")
+    skill_namespace = Namespace("example", NS())
 
     assert is_meiva_target(meiva)
     assert is_meiva_target(meiva.files)

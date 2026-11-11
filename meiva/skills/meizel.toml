@@ -10,6 +10,3 @@ exports = ["skill_index.py", "skill_proxies.py"]
 [purity]
 "skill_index.py" = { mode = "none", why = "the lazily imported door of the skill scan: it re-exports the scan_tree and skills_in shells of base.packages.skills, and the facade imports it inside functions so that loading the facade loads no scanner" }
 "skill_proxies.py" = "strict"
-
-[roots]
-"__init__.py" = { kinds = ["home"], why = "_consume_skill_body reads Path.home() to tilde-shorten the skill directory header in rendered skill docstrings" }

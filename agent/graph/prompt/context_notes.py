@@ -247,7 +247,7 @@ _PRELOADED_SKILLS_FRAMING = (
     "Preloaded skills — each section below contains a skill's complete SKILL.md. "
     "Follow these instructions as standing guidance; you do not need to reload "
     "these bodies. Read any supporting files referenced by a skill with "
-    "meiva.help(meiva.skills.<path>) or meiva.files.read."
+    "meiva.files.read."
 )
 
 _FORK_TAIL_SKILLS_FRAMING = (
@@ -312,8 +312,8 @@ def preloaded_note(
     framing = _PRELOADED_SKILLS_FRAMING
     if harness is not Harness.MEIVA:
         framing = framing.replace(
-            "meiva.help(meiva.skills.<path>) or meiva.files.read.",
-            "meiva.help(meiva.skills.<path>) or your native file-reading tool.",
+            "meiva.files.read.",
+            "your native file-reading tool.",
         )
     return _skill_bodies_note(
         skills, framing=framing, label="preloaded-skills", created_at=created_at

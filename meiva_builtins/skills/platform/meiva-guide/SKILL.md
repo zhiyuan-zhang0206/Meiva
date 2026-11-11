@@ -22,8 +22,8 @@ The root is a map; load the relevant sub-skill for the task.
   In a development checkout, use its own `.venv/bin/meiva` with an isolated
   `MEIVA_HOME`, never against the production home.
 - **Meiva agents:** use the `meiva.*` SDK for capabilities available to your agent;
-  use `meiva.shell.run(...)` for CLI operations. Load a sub-skill with
-  `meiva.help(meiva.skills.meiva_guide.<subskill>)`.
+  use `meiva.shell.run(...)` for CLI operations. Find a sub-skill's SKILL.md
+  path with `meiva.help(meiva.skills.meiva_guide.<subskill>)` and read it.
 - **Scripts and schedules:** use the documented CLI/API or SDK surfaces that
   support their execution identity. A schedule is not an agent; agent-only
   capabilities require handing the work to an agent.

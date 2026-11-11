@@ -162,7 +162,6 @@ def test_auto_promote_same_named_child_to_root(db_url: str, fake_skills_dir: Pat
     assert isinstance(node, Namespace)
     assert node.name == "meiva-fleet"
     assert node._description == "Fleet coordination patterns"
-    assert "Fleet" in (node.__doc__ or "")
 
     assert "sub_skill" in dir(node)
     proxy = node.sub_skill
@@ -179,7 +178,6 @@ def test_auto_promote_backward_compat_child_still_accessible(
     proxy = skills_mod.meiva_fleet.meiva_fleet
     assert isinstance(proxy, SkillProxy)
     assert proxy.name == "meiva-fleet"
-    assert "Fleet" in (proxy.__doc__ or "")
 
 
 def test_auto_promote_names_only_emits_root_not_duplicate(
@@ -213,7 +211,6 @@ def test_auto_promote_does_not_override_existing_root_skill(
     node = skills_mod.sources
     assert isinstance(node, Namespace)
     assert node._description == "Natural root"
-    assert "Router" in (node.__doc__ or "")
 
 
 def test_auto_promote_deep_nesting(fake_skills_dir: Path) -> None:
@@ -256,7 +253,7 @@ def test_auto_promote_help_renders_root_skill(
     out = capsys.readouterr().out
     assert "### meiva.skills.meiva_fleet" in out
     assert "Fleet" in out
-    assert "#### meiva.skills.meiva_fleet.sub_skill\n\nA sub skill" in out
+    assert "#### meiva.skills.meiva_fleet.sub_skill\n\nA sub skill\n\nPath: " in out
 
 
 def test_dash_dir_renders_dash_identifier_and_underscore_target(fake_skills_dir: Path) -> None:
@@ -340,7 +337,7 @@ def test_index_gate_folds_dash_underscore(fake_skills_dir: Path) -> None:
     (fake_skills_dir / "foo_bar").mkdir()
     (fake_skills_dir / "foo_bar" / "INDEX.md").write_text("namespace doc", encoding="utf-8")
     track("foo-bar")
-    assert skills_mod.foo_bar.__doc__ == "namespace doc"
+    assert skills_mod.foo_bar._description == "namespace doc"
 
 
 def test_index_gate_still_hides_unlisted_dirs(fake_skills_dir: Path) -> None:
@@ -354,7 +351,7 @@ def test_root_index_md_is_ignored(fake_skills_dir: Path) -> None:
     (fake_skills_dir / "INDEX.md").write_text("root doc", encoding="utf-8")
     (fake_skills_dir / "feeds").mkdir()
     write_skill(fake_skills_dir / "feeds", "rss", "name: rss\ndescription: r")
-    assert skills_mod.feeds.__doc__ == "Contains: rss"
+    assert skills_mod.feeds._description is None
 
 
 def test_root_skill_md_still_loads(fake_skills_dir: Path) -> None:

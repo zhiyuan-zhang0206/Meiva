@@ -76,8 +76,8 @@ def _skill_index_lines(view: SkillView) -> list[str]:
 
 _NEW_SKILLS_FRAMING = (
     "Additional skills are now available beyond those listed in `# Capabilities`. "
-    "The descriptions below are summaries; load a skill's full instructions "
-    "with `meiva.help(meiva.skills.<path>)` before using it."
+    "The descriptions below are summaries; `meiva.help(meiva.skills.<path>)` shows a "
+    "skill's SKILL.md path, and that file holds its full instructions. Read it before using the skill."
 )
 
 
@@ -110,10 +110,10 @@ _WHAT_SKILLS = "reusable skills (playbooks)"
 _WHAT_MCPS = "live MCP tool servers"
 
 _SKILLS_HOWTO = (
-    "Before using a skill, load its full body with `meiva.help(meiva.skills.<path>)` "
-    "with a path exactly as the skill list gives it, e.g. "
-    "`meiva.skills.web_sources.youtube`; the render also names the skill's "
-    "directory, where its other files live. "
+    "Before using a skill, run `meiva.help(meiva.skills.<path>)` with a path exactly as "
+    "the skill list gives it, e.g. `meiva.skills.web_sources.youtube`: it shows the skill's "
+    "name, description and the path of its SKILL.md. Read that file for the instructions; "
+    "the skill's other files live beside it. "
     "This listing may be a subset of what is installed — "
     "`meiva.help(meiva.skills)` enumerates the full catalog, and an unlisted skill "
     "is still reachable by name. Entry skills group their sub-skills: inspect "

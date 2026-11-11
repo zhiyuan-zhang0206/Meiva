@@ -325,11 +325,12 @@ def _print_target(target: object, render: _Render = _DEFAULT_RENDER) -> None:
 def _target_body(target: object, fqn: str, render: _Render = _DEFAULT_RENDER) -> str:
     """Render the body under the heading for a help() target."""
     if is_container(target):
+        # meiva:note
         # A top-level module target (the root `meiva`, heading depth 1) shows its
         # own docstring; a nested submodule target (meiva.X, depth >= 2) drops it
         # — its description is already shown where its parent lists it.
-        # Skill proxies/namespaces always show their own doc (which carries
-        # the path + full body), regardless of depth.
+        # Skill proxies/namespaces always show their own doc (description + path,
+        # never the SKILL.md body), regardless of depth.
         include_doc = (_heading_depth(fqn) == 1) or is_skill_object(target)
         return _format_module_stub(target, include_own_doc=include_doc, render=render)
     if inspect.isroutine(target):
@@ -465,22 +466,22 @@ def _format_module_stub(
     return "\n\n".join(pieces)
 
 
+# meiva:note
+# `children(mod)`, with a skills container's walk kept index-safe.
+#
+#     Listing the children of `meiva.skills` (or of a skill namespace node) resolves
+#     every node underneath it through the same accessor a deliberate
+#     `meiva.skills.<name>` takes — but only to print each one's heading and
+#     description and path, never a body. Resolution records no `skill_invoked`
+#     attribution at all: the signal fires on a `meiva.files.read` of a SKILL.md
+#     (`record_skill_invoked_by_path`), and this walk reads only frontmatter `_description`s.
+#
+#     The module is looked up through `globals()` rather than the bound name:
+#     `MEIVA_SDK_DISABLE=skills` deletes that global, and help() must keep rendering
+#     every other namespace on a cluster that runs without the skills surface.
 def _skill_aware_children(
     mod: object, render: _Render = _DEFAULT_RENDER
 ) -> list[tuple[str, object]]:
-    """`children(mod)`, with a skills container's walk kept index-safe.
-
-    Listing the children of `meiva.skills` (or of a skill namespace node) resolves
-    every node underneath it through the same accessor a deliberate
-    `meiva.skills.<name>` takes — but only to print each one's heading and
-    one-line description, never a body. Resolution records no `skill_invoked`
-    attribution at all: the signal fires on first SKILL.md body consumption
-    (the lazy `__doc__` loaders in `meiva/skills/__init__.py`), and this walk reads only
-    frontmatter `_description`s, so no suppression scope is needed.
-
-    The module is looked up through `globals()` rather than the bound name:
-    `MEIVA_SDK_DISABLE=skills` deletes that global, and help() must keep rendering
-    every other namespace on a cluster that runs without the skills surface."""
     return children(mod, hidden_members=render.hidden_members)
 
 
@@ -539,22 +540,25 @@ def _format_submodule_ref(name: str, mod: object, render: _Render = _DEFAULT_REN
     return "\n".join(lines)
 
 
+# meiva:note
+# Skill child: a Markdown heading at the child's own FQN depth (the same
+#     depth rule every other heading follows), then the description and the `Path:` line
+#     (the SKILL.md file to read, or the folder of a bare namespace).
+#
+#     The heading spells the loadable path (`meiva.skills.web_ai.deep_research`), so
+#     it pastes straight into `meiva.help(...)`; its segment count decides the level.
+#
+#     The description is ``_description`` (frontmatter, or the first line of an INDEX.md);
+#     a bare folder has none.
 def _format_skill_child(name: str, child: object) -> str:
-    """Skill child: a Markdown heading at the child's own FQN depth (the same
-    depth rule every other heading follows), description as the body below.
-
-    The heading spells the loadable path (`meiva.skills.web_ai.deep_research`), so
-    it pastes straight into `meiva.help(...)`; its segment count decides the level.
-
-    The description is ``_description`` (frontmatter) when available, else the
-    first line of ``__doc__`` (namespace nodes carry theirs there)."""
     fqn = getattr(child, "__name__", None) or name
     heading = f"{'#' * _heading_depth(fqn)} {fqn}"
-    desc = getattr(child, "_description", None)
-    if not desc:
-        doc = inspect.getdoc(child)
-        desc = doc.split("\n")[0] if doc else ""
-    return f"{heading}\n\n{desc}" if desc else heading
+    path = getattr(child, "_file", None)
+    return "\n\n".join(
+        part
+        for part in (heading, getattr(child, "_description", None), path and f"Path: {path}")
+        if part
+    )
 
 
 def _format_pep224_const(name: str, const: "Constant") -> str:
