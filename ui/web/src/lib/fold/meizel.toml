@@ -1,4 +1,4 @@
-exports = ["agents.ts", "notices.ts", "owner.ts", "timeline.ts"]
+exports = ["agents.ts", "owner.ts", "timeline.ts"]
 
 [uses]
 "agents.ts" = ["types.ts"]

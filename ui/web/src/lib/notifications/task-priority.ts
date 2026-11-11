@@ -2,7 +2,7 @@
 // Shared task-priority helpers, so the task board, the task graph and the
 // inspector's task button can't drift apart on priority ranking or colors.
 
-import type { TaskPriority } from "../contracts/types-settings";
+import type { TaskPriority } from "../contracts/types";
 
 // meiva:note
 // P0 highest .. P3 lowest -- the task board's sort key.

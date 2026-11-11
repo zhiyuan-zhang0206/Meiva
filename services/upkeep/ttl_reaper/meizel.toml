@@ -6,7 +6,7 @@ exports = ["daemon.py", "shells.py"]
 "shell_plan.py" = ["owner_text.py"]
 "shells.py" = ["config.py", "owner_notice.py", "shell_plan.py", "stale_plan.py"]
 "stale_plan.py" = ["shell_plan.py"]
-"sweep.py" = ["cadence.py", "config.py", "owner_notice.py", "owner_text.py"]
+"sweep.py" = ["cadence.py", "config.py", "owner_notice.py"]
 "tests" = ["cadence.py", "config.py", "daemon.py", "owner_text.py", "remote.py", "shell_plan.py", "shells.py", "stale_plan.py", "sweep.py"]
 
 [purity]
