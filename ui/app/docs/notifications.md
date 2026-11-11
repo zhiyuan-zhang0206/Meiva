@@ -51,14 +51,48 @@ the persisted consent first.
 | | alert | replace | retract |
 |---|---|---|---|
 | Android | `builder().id(h(tag))`, default channel (sounds) | only if that id is still shown (`active()`): `id(h(tag))` on the low-importance `meiva_updates` channel, which the plugin posts after cancelling the old one, so it is silent | `remove_active([h(tag)])` |
-| macOS / Linux / Windows | `builder().show()` | not possible: the plugin's desktop API has no id, no silent update and no withdraw | not possible |
+| macOS, from the app bundle | request `meiva.notify.<tag>` with sound | only if that identifier is still delivered (`getDeliveredNotifications`): same identifier, passive interruption level, no sound, so the content changes in the notification centre without a banner | `removeDeliveredNotifications` |
+| macOS bare binary (`tauri dev`), Linux, Windows | `builder().show()` through the plugin | not possible: the plugin's desktop API has no id, no silent update and no withdraw | not possible |
 
 `h(tag)` is a stable non-negative FNV-1a hash (`src/notify.rs`). The Android plugin cancels a
 visible notification of the same id before re-posting it (`TauriNotificationManager.trigger`),
 which defeats `setOnlyAlertOnce`, so silence comes from the quiet channel, not the id. The desktop
-plugin (`notify-rust`) exposes only title, body, icon and sound, so a desktop shows the first
-alert of an unread round and leaves it in the notification centre; a replace would pop a second
-banner, so it is skipped.
+plugin (`notify-rust`) exposes only title, body, icon and sound, so Linux and Windows show the
+first alert of an unread round and leave it in the notification centre; a replace would pop a
+second banner, so it is skipped.
+
+### macOS native path
+
+On macOS the three modes do not touch the plugin at all (no second, duplicate notification):
+`src/macos_notify.rs` talks to `UNUserNotificationCenter` through the `objc2-user-notifications`
+bindings, and `notify::decide_mac` (pure, unit tested) decides the operation.
+
+- **Identifier.** `meiva.notify.<tag>`, a pure function of the tag, so a replace or retract finds
+  the notification an earlier alert posted, across webview reloads and app restarts.
+- **Dismissed stays dismissed.** A replace first asks the centre what is still delivered and does
+  nothing when the identifier is gone, as on Android: a notification the user swiped away is not
+  pulled back by later output. An alert is the deliberate "tell the user again" and always posts.
+- **Tap.** A delegate (`UNUserNotificationCenterDelegate`) shows the window and sets the pending
+  click flag that `app_take_pending_click` consumes, so the bridge jumps to the newest delivery's
+  target exactly as on Android. The delegate also lets a notification present while the app is in
+  the foreground (banner and sound for an alert, list only for a quiet update).
+- **Bundle required.** The notification centre exists only for a process inside a `.app` with a
+  bundle identifier (`com.meiva.app`); asking for it from a bare binary raises an Objective-C
+  exception. `macos_notify::is_available` checks the main bundle, and `tauri dev` falls back to
+  the plugin path above (alert only, posted under Terminal's identity by the plugin).
+- **Authorization.** `requestAuthorization(alert, sound)` runs when the notifications switch is
+  turned on and at startup when it is already on. The system prompt appears once per bundle
+  identifier and the answer is remembered; a denial is not re-prompted. The plugin on macOS never
+  requested a permission (its `request_permission` returns granted without asking), so an install
+  that notified through the plugin before this path may see the prompt for the first time.
+- **Verified so far.** A locally built, ad-hoc signed debug bundle reaches the centre (bundle
+  identifier present, no exception) and reports authorization `notDetermined` until the user
+  answers the system prompt; nothing is delivered before that. Banner, silent replace and
+  retract are therefore confirmed by the manual steps below, not by CI.
+- **Signing.** A release build is Developer ID signed and notarized (`release-app.yml`); a build
+  without the certificate is ad-hoc signed. Both are bundles with an identifier, so the centre
+  works for both; the identity only matters to Gatekeeper on first open. Moving an app between
+  signing identities can make macOS treat it as a different app for the permission.
 
 Android posts through the notification plugin's mobile path off the main looper
 (`android::show_notification`) with **zero persistent foreground-service notification**:
@@ -71,8 +105,9 @@ notifying: the bridge carries no trigger of its own.
 
 `base/events/notifications/tests/test_notify_bridge.py` runs the checked-in bridge against a fake gateway under node
 (alert, silent replace, retract, foreground suppression, catch-up folding, deduplication). The
-Rust crate is checked by CI (`cargo check` and clippy on the desktop hosts, the Android APK build);
-the Android code path and the real notification surfaces can only be confirmed on a device:
+Rust crate is checked by CI (`cargo check` and clippy on the desktop hosts, the Android APK build)
+and `cargo test` covers the pure decisions (`notify::decide_mac`: identifier, the three modes,
+dismissed-stays-dismissed). The real notification surfaces can only be confirmed on a device:
 
 1. Android: with agent A not open, have it deliver output: one sounding notification titled with
    A's name. Have it deliver again: the same notification updates with no sound. Open A: the
@@ -83,4 +118,8 @@ the Android code path and the real notification surfaces can only be confirmed o
    the background or open another agent and deliver again: it alerts.
 4. Background the app, produce several deliveries and a question, reopen it: one notification per
    agent, with the newest content, and the answered question absent.
-5. macOS: step 1 shows one banner per unread round; later output adds no banner.
+5. macOS (installed or locally built `.app`, notifications switch on; allow the system prompt the
+   first time): step 1 shows one banner and sound per unread round; later output changes the
+   content of that same entry in the notification centre with no banner or sound; opening the agent
+   removes it. Swipe the notification away, deliver again: it does not come back. Click it: the
+   window opens on the agent. Run from `tauri dev` instead and only the first alert appears.

@@ -14,6 +14,8 @@ mod commands;
 #[cfg(desktop)]
 mod desktop;
 mod external;
+#[cfg(target_os = "macos")]
+mod macos_notify;
 mod notify;
 mod settings;
 mod state;
@@ -83,6 +85,7 @@ pub fn run() {
             #[cfg(desktop)]
             {
                 desktop::setup_tray(handle)?;
+                desktop::setup_notifications(handle);
                 desktop::check_for_updates(handle.clone(), false);
             }
 

@@ -25,6 +25,15 @@ reqwest = { version = "0.13", features = ["blocking", "json"] }
 sha2 = "0.10"
 tauri-plugin-notification = "2"
 
+# macOS notifications go through UNUserNotificationCenter directly: replace and retract need a
+# stable request identifier, which the notification plugin cannot express. The objc2 family is
+# already what tao and wry link, so this adds no new runtime to the app.
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+objc2-foundation = "0.3"
+objc2-user-notifications = "0.3"
+block2 = "0.6"
+
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 tauri-plugin-single-instance = "2"
 tauri-plugin-updater = "2"
