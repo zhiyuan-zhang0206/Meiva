@@ -220,7 +220,7 @@ def test_the_extension_steps_adopt_this_machines_installs_and_land_the_clusters_
     _write_skill(run.process_home / "skills", "pre-registry", "Installed long ago.")
     install_registry.register(
         install_registry.InstalledPackage(
-            name="pre-registry", type="skill", origin="user", enabled=True, trust="unreviewed"
+            name="pre-registry", type="skill", origin="user", enabled=True
         ),
         home=meiva_home(),
     )

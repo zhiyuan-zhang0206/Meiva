@@ -24,9 +24,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal, Protocol
 
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from base import paths
+from base.host.boundary.json_values import is_object_dict, is_object_list
+from base.host.boundary.untyped import object_of
 from base.native_process.os_platform import LockTimeoutError as LockTimeoutError
 from base.native_process.os_platform import file_lock
 from base.packages.skills.names import match_key
@@ -116,22 +118,6 @@ def differing_paths(
 
 PackageType = Literal["skill", "plugin", "mcp"]
 
-# meiva:note
-# How much a package's *content* may be trusted, recorded where it enters:
-#
-# - "builtin" — the content came from this Meiva checkout (`meiva_builtins/`), so it
-#   ships under the same review as the code. Written by converge.
-# - "reviewed" — third-party content a human on this cluster read and approved
-#   (`meiva skill trust <name>`). Never inferred: a clean
-#   `base.packages.skills.scan` report is "no rule matched", not "someone looked".
-# - "unreviewed" — the default for anything ingested from outside.
-#
-# The tier is a recorded label: no runtime code reads it.
-#
-# The default is the least-trusted tier, so a registry row written before this
-# field existed reads as third-party until the next converge re-stamps it.
-TrustTier = Literal["builtin", "reviewed", "unreviewed"]
-
 PackageOrigin = Literal["repo", "plugin", "user"]
 """Who owns a package's content in `~/.meiva/skills/`:
 
@@ -200,26 +186,26 @@ class ChannelState(BaseModel):
     last_result: str | None = None
 
 
+# meiva:note
+# One tracked package.
+#
+#     `source` is the git URL / marketplace ref it was installed from (None for
+#     converge-managed and hand-registered packages); `path` is the subdirectory
+#     within that source repo holding the package (None = repo root — a
+#     marketplace plugin lives at e.g. `plugins/<name>/` in a monorepo). `ref`
+#     pins a tag / commit / branch (None = source default branch). `enabled` is
+#     a local toggle — disabled skills stay on disk but are not surfaced.
+#
+#     `origin` / `origin_path` record converge provenance (see `PackageOrigin`);
+#     `content_hash` is the tree hash of what converge last wrote (its
+#     user-modification detector). `installed_at` / `updated_at` are UTC ISO
+#     timestamps.
+#
+#     `scanned_at` is when `base.packages.skills.scan` last ran over it, and
+#     `accepted_findings` holds the rule ids a human waved through with `--accept-risk`.
+#     An installed package is trusted: there are no tiers.
 class InstalledPackage(BaseModel):
-    """One tracked package.
-
-    `source` is the git URL / marketplace ref it was installed from (None for
-    converge-managed and hand-registered packages); `path` is the subdirectory
-    within that source repo holding the package (None = repo root — a
-    marketplace plugin lives at e.g. `plugins/<name>/` in a monorepo). `ref`
-    pins a tag / commit / branch (None = source default branch). `enabled` is
-    a local toggle — disabled skills stay on disk but are not surfaced.
-
-    `origin` / `origin_path` record converge provenance (see `PackageOrigin`);
-    `content_hash` is the tree hash of what converge last wrote (its
-    user-modification detector). `installed_at` / `updated_at` are UTC ISO
-    timestamps.
-
-    `trust` is the content trust tier (see `TrustTier`); `scanned_at` is when
-    `base.packages.skills.scan` last ran over it, and `accepted_findings` holds the rule
-    ids a human waved through with `--accept-risk`. An accepted-risk package
-    stays `unreviewed` — the override records a decision, it does not promote.
-    """
+    model_config = ConfigDict(extra="forbid")
 
     name: str
     type: PackageType
@@ -239,7 +225,6 @@ class InstalledPackage(BaseModel):
     rows) counts as changed — see `copy_changed`."""
     installed_at: str | None = None
     updated_at: str | None = None
-    trust: TrustTier = "unreviewed"
     scanned_at: str | None = None
     accepted_findings: list[str] = []
 
@@ -360,6 +345,38 @@ def save(registry: Registry, *, home: Path) -> None:
         tmp.replace(path)
     finally:
         tmp.unlink(missing_ok=True)
+
+
+# meiva:note
+# One-shot converge step for the deleted trust tier: removes the `trust` key every row of an
+# installed.json written before the tier was deleted still carries, so the strict reader
+# (`InstalledPackage` forbids unknown keys) never meets it. Idempotent; returns how many rows
+# changed. A file that is not a registry document fails naming it.
+def retire_trust_key(*, home: Path) -> int:
+    path = paths.install_registry_path(home)
+    with registry_lock(home=home):
+        if not path.exists():
+            return 0
+        raw = path.read_text(encoding="utf-8")
+        if not raw.strip():
+            return 0
+        document = object_of(json.loads, raw)
+        packages = document.get("packages") if is_object_dict(document) else None
+        if not is_object_dict(document) or not is_object_list(packages):
+            raise SchemaInvalid(f"{path} is not an install registry document")
+        changed = 0
+        for row in packages:
+            if is_object_dict(row) and "trust" in row:
+                del row["trust"]
+                changed += 1
+        if changed:
+            tmp = path.with_name(f"{path.name}.tmp")
+            try:
+                tmp.write_text(json.dumps(document, indent=2) + "\n", encoding="utf-8")
+                tmp.replace(path)
+            finally:
+                tmp.unlink(missing_ok=True)
+        return changed
 
 
 def get(name: str, *, home: Path) -> InstalledPackage | None:

@@ -1297,8 +1297,6 @@ CREATE TABLE extensions (
     version         TEXT,               -- manifest version, when the package declares one
     content_hash    TEXT REFERENCES extension_blobs(content_hash),
     manifest        JSONB,              -- meiva-plugin.json as landed
-    trust           TEXT NOT NULL DEFAULT 'unreviewed'
-                    CHECK (trust IN ('builtin', 'reviewed', 'unreviewed')),
     default_enabled BOOLEAN NOT NULL DEFAULT true,
     installed_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT now(),

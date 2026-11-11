@@ -49,7 +49,6 @@ from base.packages.extensions.install_registry import (
     IGNORED_NAMES,
     InstalledPackage,
     PackageOrigin,
-    TrustTier,
     tree_hash,
 )
 from base.packages.skills.names import SkillIdentity, match_key
@@ -138,29 +137,10 @@ class Source:
     key: str  # SkillIdentity.from_dir(name).key — one skill = one match_key
     src: Path
     origin: PackageOrigin  # "repo" | "plugin" (never "user")
-    trust: TrustTier
-    """Content trust for what this source lands. `"builtin"` only when the tree
-    came out of the Meiva checkout — an *installed* plugin's skills converge with
-    origin="plugin" too, but their content is third-party and was scanned at
-    `meiva plugins install` time, so they stay `"unreviewed"` here."""
     bootstrap_only: bool = False
     """True for repo-native sources (R5): converge lands the copy only when
     absent and never updates it — updates are the explicit `meiva skill update`.
     False for installed-plugin skills, which keep the sync-on-change behavior."""
-
-
-def _stamp_trust(entry: InstalledPackage, s: Source) -> None:
-    """Apply this source's content trust to its registry row.
-
-    Converge owns the *builtin* stamp and nothing else: it marks repo-sourced
-    content builtin, and takes the stamp back off if that name stops coming out
-    of the checkout. A `reviewed` promotion is a human's statement about content
-    they read (`meiva skill trust`), so it survives every pass.
-    """
-    if s.trust == "builtin":
-        entry.trust = "builtin"
-    elif entry.trust == "builtin":
-        entry.trust = "unreviewed"
 
 
 def _repo_skill_dirs(repo_skills: Path) -> list[Path]:
@@ -194,9 +174,7 @@ def iter_sources(repo: Path, *, home: Path) -> tuple[list[Source], list[str]]:
     sources: dict[str, Source] = {}
     conflicts: list[str] = []
 
-    def add(
-        name: str, src: Path, origin: PackageOrigin, trust: TrustTier, *, bootstrap_only: bool
-    ) -> None:
+    def add(name: str, src: Path, origin: PackageOrigin, *, bootstrap_only: bool) -> None:
         # One skill = one match_key (design R2-B1): dash and underscore are
         # one name, so a repo `foo-bar/` and a plugin `foo_bar/` collide —
         # report it instead of letting both become registry rows (the
@@ -206,10 +184,10 @@ def iter_sources(repo: Path, *, home: Path) -> tuple[list[Source], list[str]]:
         if prev is not None:
             conflicts.append(f"{src} (name '{name}' already provided by {prev.src})")
             return
-        sources[name] = Source(name, key, src, origin, trust, bootstrap_only=bootstrap_only)
+        sources[name] = Source(name, key, src, origin, bootstrap_only=bootstrap_only)
 
     for d in _repo_skill_dirs(repo / "meiva_builtins" / "skills"):
-        add(d.name, d, "repo", "builtin", bootstrap_only=True)
+        add(d.name, d, "repo", bootstrap_only=True)
     # The repo's `.agents/skills/` project skills (the kernel-contributor
     # family: meiva-self-development, review-contribution, …) are deliberately NOT a
     # converge source (issue #146 / decision 2026-08-20). They reach agents
@@ -217,11 +195,11 @@ def iter_sources(repo: Path, *, home: Path) -> tuple[list[Source], list[str]]:
     # `meiva_builtins/plugins/meiva_code/_walk.py` resolves `.agents/skills/` from
     # `meiva.cwd` at scan time — so only an agent working inside the checkout
     # sees them, never a runtime agent via the fleet-wide load dir.
-    builtin_then_installed: tuple[tuple[Path, TrustTier, bool], ...] = (
-        (repo / "meiva_builtins" / "plugins", "builtin", True),
-        (paths.plugins_dir(home=home), "unreviewed", False),
+    builtin_then_installed: tuple[tuple[Path, bool], ...] = (
+        (repo / "meiva_builtins" / "plugins", True),
+        (paths.plugins_dir(home=home), False),
     )
-    for plugins_root, trust, bootstrap_only in builtin_then_installed:
+    for plugins_root, bootstrap_only in builtin_then_installed:
         if not plugins_root.is_dir():
             continue
         for p in sorted(plugins_root.iterdir()):
@@ -232,7 +210,7 @@ def iter_sources(repo: Path, *, home: Path) -> tuple[list[Source], list[str]]:
                 continue
             skills_sub = p / "skills"
             if p.is_dir() and skills_sub.is_dir() and contains_skill_md(skills_sub):
-                add(p.name, skills_sub, "plugin", trust, bootstrap_only=bootstrap_only)
+                add(p.name, skills_sub, "plugin", bootstrap_only=bootstrap_only)
     return list(sources.values()), conflicts
 
 
@@ -262,7 +240,6 @@ def _adopt_copy(
     registry.packages.append(entry)
     entry.origin = s.origin
     entry.origin_path = str(s.src)
-    _stamp_trust(entry, s)
     entry.content_hash = tree_hash(s.src)
     entry.updated_at = now
     result.unchanged.append(s.name)
@@ -324,7 +301,6 @@ def _land_new_copy(
         registry.packages.append(entry)
     entry.origin = s.origin
     entry.origin_path = str(s.src)
-    _stamp_trust(entry, s)
     entry.content_hash = src_hash
     entry.updated_at = now
     if entry.installed_at is None:
@@ -363,7 +339,6 @@ def _sync_existing(
         return
     entry.origin = s.origin
     entry.origin_path = str(s.src)
-    _stamp_trust(entry, s)
     if src_hash == dest_hash:
         if entry.content_hash is None:  # tracked pre-hash copy — adopt it
             entry.content_hash = src_hash
@@ -460,10 +435,6 @@ def _cleanup_gone_sources(
             entry.origin = "user"
             entry.origin_path = None
             entry.content_hash = None
-            if entry.trust == "builtin":
-                # Nothing in the checkout backs this content any more, so the
-                # builtin stamp no longer describes it.
-                entry.trust = "unreviewed"
 
 
 def converge_skills(

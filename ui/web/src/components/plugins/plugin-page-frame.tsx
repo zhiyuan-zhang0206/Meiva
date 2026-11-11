@@ -1,11 +1,12 @@
 "use client";
 
+// meiva:note
 // A plugin-served page, embedded.
 //
 // The iframe is **breakage containment, not a security boundary** — the design
 // is explicit about this. Plugin Python already runs inside agent processes
 // with shell and DB access, so the trust decision was made at install time (the
-// scan gate + trust tier); a plugin page learns nothing its Python half does
+// scan gate); a plugin page learns nothing its Python half does
 // not already have. What the frame buys is that a broken or slow page fails
 // alone instead of taking the console with it, and that the console's own
 // bundle never contains third-party code.

@@ -92,7 +92,7 @@ instead of SQL or hand-built HTTP calls.
 - `meiva mcp ...`: isolated environments at `$MEIVA_HOME/mcps/`
   ([MCP](../../../meiva/mcps/docs/mcps.md)).
 - `meiva plugins ...`
-- `meiva skill install/update/upgrade/enable/disable/register/scan/trust`
+- `meiva skill install/update/upgrade/enable/disable/register/scan`
 - `meiva schedules ls/get/create/update/delete/provision/start/stop/restart/logs/runs`:
   provision creates the built-in schedules from `schedules/manifest.json` and
   also runs at every schedule-manager start;

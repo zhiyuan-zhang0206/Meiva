@@ -1,52 +1,43 @@
-"""Adopt this machine's locally installed skills into the cluster registry.
-
-The migration half of S2 (`future/infra/extensions/extension-ownership.md`): every machine
-that installed a skill before the registry existed still holds it as a purely
-local fact in `installed.json`. Nothing else in the slice looks at those — the
-install path writes the cluster row going forward, and materialization only ever
-reads rows — so without this, content that predates the registry stays invisible
-to the cluster forever and the ownership model has a hole exactly the size of
-everything installed so far.
-
-Adoption, not a flag day: the sweep runs on every converge, is idempotent, and
-never asks anyone to re-install anything.
-
-## What it takes, and what it deliberately leaves
-
-Only `origin='user'` skills — what a person installed here. Repo- and
-plugin-origin packages are converge-managed derived state whose content comes
-from the checkout; a `source='repo'` row is forbidden to carry a blob at all
-(the schema's `extensions_blob_iff_installed` CHECK), and their enablement fold
-is a separate step that needs the plugin and MCP kinds this slice does not have
-yet.
-
-`trust` travels, exactly like `enabled` (user ruling 2026-08-21, issue #218):
-trust is a CLUSTER-level fact about CONTENT — "has a human reviewed these
-bytes" — and which machine the reviewer sat at is not part of the fact. The
-sweep uploads the local tier as the row's `trust`, keyed to the content_hash
-it is carried with; the registry's upsert only ever lets trust rise (never
-downgrade a `reviewed`/`builtin` row for the same content) and resets it
-when the content changes. So a review survives the sweep but never launders
-across versions.
-
-`enabled` travels too, as the row's `default_enabled`. It is the only signal
-available about what the operator wanted, and the alternative — adopting
-everything as enabled — silently switches on something a person deliberately
-turned off.
-
-## The one case that refuses
-
-Two machines can both hold a name. If their trees hash the same, they are the
-same content by two routes and the second machine simply finds itself already
-claimed — nothing to do, no report worth making.
-
-If they differ, this is the one place in the model where two machines disagree
-about what a name MEANS, and there is no evidence here for which is right.
-Picking either destroys the other's work with no trace, so the sweep refuses
-that name, names both machines, and leaves both copies where they are. It is
-the same conservative direction `base/packages/extensions/materialize.py` takes for a
-locally edited tree, for the same reason.
-"""
+# meiva:note
+# Adopt this machine's locally installed skills into the cluster registry.
+#
+# The migration half of S2 (`future/infra/extensions/extension-ownership.md`): every machine
+# that installed a skill before the registry existed still holds it as a purely
+# local fact in `installed.json`. Nothing else in the slice looks at those — the
+# install path writes the cluster row going forward, and materialization only ever
+# reads rows — so without this, content that predates the registry stays invisible
+# to the cluster forever and the ownership model has a hole exactly the size of
+# everything installed so far.
+#
+# Adoption, not a flag day: the sweep runs on every converge, is idempotent, and
+# never asks anyone to re-install anything.
+#
+# ## What it takes, and what it deliberately leaves
+#
+# Only `origin='user'` skills — what a person installed here. Repo- and
+# plugin-origin packages are converge-managed derived state whose content comes
+# from the checkout; a `source='repo'` row is forbidden to carry a blob at all
+# (the schema's `extensions_blob_iff_installed` CHECK), and their enablement fold
+# is a separate step that needs the plugin and MCP kinds this slice does not have
+# yet.
+#
+# `enabled` travels too, as the row's `default_enabled`. It is the only signal
+# available about what the operator wanted, and the alternative — adopting
+# everything as enabled — silently switches on something a person deliberately
+# turned off.
+#
+# ## The one case that refuses
+#
+# Two machines can both hold a name. If their trees hash the same, they are the
+# same content by two routes and the second machine simply finds itself already
+# claimed — nothing to do, no report worth making.
+#
+# If they differ, this is the one place in the model where two machines disagree
+# about what a name MEANS, and there is no evidence here for which is right.
+# Picking either destroys the other's work with no trace, so the sweep refuses
+# that name, names both machines, and leaves both copies where they are. It is
+# the same conservative direction `base/packages/extensions/materialize.py` takes for a
+# locally edited tree, for the same reason.
 
 from __future__ import annotations
 
@@ -156,9 +147,6 @@ def adopt_local_installs(
             name=pkg.name,
             kind="skill",
             source=f"local:{machine_name}",
-            # Trust is a cluster-level fact about these bytes (issue #218): the
-            # local review tier travels with the content it was given for.
-            trust=pkg.trust,
             default_enabled=pkg.enabled,
         )
         result.adopted.append(pkg.name)

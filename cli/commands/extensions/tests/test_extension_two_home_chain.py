@@ -180,7 +180,6 @@ def test_the_row_records_the_installing_machine(
     assert row is not None
     assert row.source == f"local:{home_a.name}"
     assert row.kind == "skill"
-    assert row.trust == "unreviewed", "third-party content is never auto-trusted"
     assert row.content_hash is not None, "an installed row must carry its content"
 
 

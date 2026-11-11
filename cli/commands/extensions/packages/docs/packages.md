@@ -31,7 +31,6 @@ meiva skill install <src> [--path <subdir>] [--ref <ref>] [--accept-risk]
 meiva skill enable <name> | disable <name>      # toggle a tracked package in the scanner
 meiva skill register <name> [--accept-risk]     # adopt a hand-copied dir in $MEIVA_HOME/skills/
 meiva skill scan <name-or-path>                 # re-run the supply-chain scan (exit 2 on criticals)
-meiva skill trust <name> [--revoke]             # record that a human read it (trust=reviewed)
 ```
 
 ## `meiva plugins verify` — does every enabled plugin load
@@ -78,13 +77,10 @@ full per-package state lives in `status --json`:
 Every ingestion path above runs `base/packages/skills/scan.py` over the package before
 the first byte is copied, and **refuses on a critical finding** — the load dir is
 left untouched and the report names file, line and matched text. `--accept-risk`
-is the override; it installs and records the waived rule ids, and it never
-promotes the package's trust tier. `register` is gated too, because `cp -r` into
+is the override; it installs and records the waived rule ids. `register` is gated too, because `cp -r` into
 the load dir otherwise routes around every check `install` makes.
 
-Nothing installs at a tier better than `unreviewed`. `meiva skill trust` is a
-separate verb precisely so "a person read this" cannot be asserted by an install
-that merely matched no rule. [The tiers](../../../../../base/packages/extensions/docs/install_registry/install_registry.md).
+An installed package is trusted: there are no trust tiers, and the install-time scan is the only gate.
 
 ```bash
 meiva mcp install <source> [--path <subdir>] [--ref <ref>] [--env K=V]...

@@ -1,30 +1,28 @@
-"""`meiva skill` subcommands — install into, and toggle entries in, the skills load dir.
-
-installed (the dir exists under `$MEIVA_HOME/skills/`) and enabled (the skill
-scanner loads it) are orthogonal: the scanner loads only directories the
-install registry tracks as enabled, so a hand-copied dir is invisible until
-registered and a disabled one stays on disk but out of every agent's tree.
-
-- `install <src>`    — install Agent Skills standard skill package(s) from a git
-  URL or a local directory (layout detection in `skill_package.py`).
-- `enable <name>` / `disable <name>` — flip the registry toggle (any tracked
-  package: converged repo/plugin skills, user installs, plugin namespaces).
-- `register <name>`  — start tracking a dir already under `$MEIVA_HOME/skills/`
-  as a user package (origin="user", so converge never touches it).
-- `scan <name-or-path>` — re-run the supply-chain scan and print the report.
-- `trust <name>`     — record that a human read this package (tier "reviewed").
-
-Everything arriving through `install` / `register` is third-party content, so
-it goes through `base.packages.skills.scan` first: a critical finding refuses the
-install outright and `--accept-risk` is the recorded override. Nothing here
-promotes a package's trust tier on its own — a clean scan means "no rule
-matched", which is why `trust` is a separate verb a person runs.
-
-Removing a package is `meiva plugins uninstall`; `meiva plugins install` is the
-sibling entry point for a Claude Code *plugin* bundle (agents / commands /
-`.mcp.json`, of which skills are one part). The converge that populates the
-load dir from repo + plugin sources is `cli/commands/extensions/skills_sync.py`.
-"""
+# meiva:note
+# `meiva skill` subcommands — install into, and toggle entries in, the skills load dir.
+#
+# installed (the dir exists under `$MEIVA_HOME/skills/`) and enabled (the skill
+# scanner loads it) are orthogonal: the scanner loads only directories the
+# install registry tracks as enabled, so a hand-copied dir is invisible until
+# registered and a disabled one stays on disk but out of every agent's tree.
+#
+# - `install <src>`    — install Agent Skills standard skill package(s) from a git
+#   URL or a local directory (layout detection in `skill_package.py`).
+# - `enable <name>` / `disable <name>` — flip the registry toggle (any tracked
+#   package: converged repo/plugin skills, user installs, plugin namespaces).
+# - `register <name>`  — start tracking a dir already under `$MEIVA_HOME/skills/`
+#   as a user package (origin="user", so converge never touches it).
+# - `scan <name-or-path>` — re-run the supply-chain scan and print the report.
+#
+# Everything arriving through `install` / `register` is third-party content, so
+# it goes through `base.packages.skills.scan` first: a critical finding refuses the
+# install outright and `--accept-risk` is the recorded override. An installed
+# package is trusted: there are no tiers.
+#
+# Removing a package is `meiva plugins uninstall`; `meiva plugins install` is the
+# sibling entry point for a Claude Code *plugin* bundle (agents / commands /
+# `.mcp.json`, of which skills are one part). The converge that populates the
+# load dir from repo + plugin sources is `cli/commands/extensions/skills_sync.py`.
 
 from __future__ import annotations
 
@@ -47,7 +45,7 @@ _REFUSAL_ADVICE = (
     "  Refusing to install. Read the package yourself — these patterns are how a\n"
     "  malicious skill reaches your credentials, and the report above says where.\n"
     "  If you have read it and still want it, re-run with --accept-risk (the\n"
-    "  accepted rule ids are recorded, and the package stays trust=unreviewed)."
+    "  accepted rule ids are recorded)."
 )
 
 
@@ -133,19 +131,17 @@ def cmd_skill_install(
         for pkg, (dest, report) in zip(packages, results, strict=True):
             print(f"[meiva skill install] installed skill '{pkg.name}' -> {dest}")
             print(report)
-        print("  trust=unreviewed — `meiva skill trust <name>` once a person has read it.")
         print("  active on the next skill scan; no restart needed.")
         return 0
 
 
+# meiva:note
+# `meiva skill scan <name-or-path>` — print the supply-chain scan report for
+#     an installed package or any directory on disk.
+#
+#     The way to re-scan an installed package after the rule table grows. Exit code 2 on
+#     critical findings, so a caller can gate on it; 0 when only notices remain.
 def cmd_skill_scan(target: str, *, home: Path) -> int:
-    """`meiva skill scan <name-or-path>` — print the supply-chain scan report for
-    an installed package or any directory on disk.
-
-    The read-it-before-you-trust-it companion to `meiva skill trust`, and the way
-    to re-scan an installed package after the rule table grows. Exit code 2 on
-    critical findings, so a caller can gate on it; 0 when only notices remain.
-    """
     from base import paths
     from base.packages.extensions import install_registry
     from base.packages.skills import scan, scan_package
@@ -161,43 +157,11 @@ def cmd_skill_scan(target: str, *, home: Path) -> int:
         return 1
     findings = scan_package(root)
     entry = install_registry.get(root.name, home=home)
-    tier = entry.trust if entry is not None else "untracked"
-    print(f"[meiva skill scan] {root} (trust={tier})")
+    print(f"[meiva skill scan] {root}")
     print(scan.render(findings, package=root.name))
     if entry is not None and entry.accepted_findings:
         print(f"  previously accepted: {', '.join(entry.accepted_findings)}")
     return 2 if scan.criticals(findings) else 0
-
-
-def cmd_skill_trust(name: str, *, revoke: bool = False, now: datetime, home: Path) -> int:
-    """`meiva skill trust <name> [--revoke]` — record that a human read this
-    package's content and vouches for it (tier "reviewed"), or take that back.
-
-    Deliberately not something an install can do for you: "reviewed" is the one
-    tier that asserts a person looked, and it is what the recall layer consults
-    before pulling a skill's text into an agent's context unprompted. Read the
-    package (`meiva skill scan <name>` shows what the scanner saw) first.
-    """
-    from base.packages.extensions import install_registry
-
-    entry = install_registry.get(name, home=home)
-    if entry is None:
-        print(
-            f"[meiva skill trust] '{name}' is not tracked in the install registry.", file=sys.stderr
-        )
-        return 1
-    if entry.trust == "builtin":
-        print(
-            f"[meiva skill trust] '{name}' is builtin (converge-managed from this checkout); "
-            "its trust tier is not yours to set.",
-            file=sys.stderr,
-        )
-        return 1
-    entry.trust = "unreviewed" if revoke else "reviewed"
-    entry.updated_at = now.isoformat(timespec="seconds")
-    install_registry.register(entry, home=home)
-    print(f"[meiva skill trust] {name} -> trust={entry.trust}.")
-    return 0
 
 
 def cmd_skill_enable(name: str, *, home: Path) -> int:
@@ -298,13 +262,12 @@ def cmd_skill_register(name: str, *, accept_risk: bool = False, home: Path, now:
             type="skill",
             installed_at=stamp,
             updated_at=stamp,
-            trust="unreviewed",
             scanned_at=stamp,
             accepted_findings=accepted,
         ),
         home=home,
     )
-    print(f"[meiva skill register] '{name}' registered (origin=user, trust=unreviewed).")
+    print(f"[meiva skill register] '{name}' registered (origin=user).")
     print(report)
     print("  active on the next skill scan; no restart needed.")
     return 0
@@ -352,7 +315,6 @@ def _land_repo_copy(
     entry.source = None
     entry.path = None
     entry.ref = None
-    entry.trust = "builtin"
     entry.content_hash = tree_hash(s.src)
     entry.updated_at = now
     if entry.installed_at is None:
@@ -394,12 +356,6 @@ def _adopt_user_residue(
         entry.source = None
         entry.path = None
         entry.ref = None
-        # Adopting a repo skill's own content: it ships under the
-        # checkout's review, so the builtin stamp applies (converge's
-        # `_stamp_trust` sets it on its own adopt path; the update
-        # residue-adopt path had been leaving trust=unreviewed —
-        # audit round 2, skills-plugins #5).
-        entry.trust = "builtin"
         entry.content_hash = src_hash
         entry.updated_at = now
         unchanged.append(s.name)

@@ -54,4 +54,4 @@ def test_the_scan_verb_finds_a_tilde_target_in_the_home_the_session_read(
 
     assert args.func(args) == 0
     out = capsys.readouterr().out
-    assert f"[meiva skill scan] {target} (trust=" in out
+    assert f"[meiva skill scan] {target}" in out

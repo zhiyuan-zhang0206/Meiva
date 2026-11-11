@@ -9,7 +9,7 @@ install carries machinery specific to whatever other tool it was written for
 tool's native features) that does not hold in Meiva, so we copy, strip, rewire
 to `meiva.*` idioms, and own the sync cost.
 
-Anything landed here is stamped `trust="builtin"` by converge
+Anything landed here is synced by converge
 (`cli/commands/extensions/skills_sync.py`) and bypasses the install-time supply-chain
 scanner — so a vendored pack must be **read in full before it is committed**,
 not merely copied.

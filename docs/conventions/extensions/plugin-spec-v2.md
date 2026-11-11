@@ -437,7 +437,7 @@ Reading stays backward compatible: every new field is optional, old rows read
 as "no manifest, installed" — no migration, no silent re-trust. The manifest
 file and the registry row stay bound by `manifest_hash`: the registry is *what
 is installed*, the manifest is *what it claims to be* — a third party that
-lies in the manifest is caught by the scan gate + trust tier, unchanged.
+lies in the manifest is caught by the scan gate, unchanged.
 
 
 ### Cluster collectors

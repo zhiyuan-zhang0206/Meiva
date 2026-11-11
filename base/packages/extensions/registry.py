@@ -59,18 +59,14 @@ import psycopg
 from psycopg.rows import class_row
 from psycopg_pool import ConnectionPool
 
-from base.packages.extensions.install_registry import IGNORED_NAMES, TrustTier
+from base.packages.extensions.install_registry import IGNORED_NAMES
 
 ExtensionKind = Literal["skill", "plugin", "mcp"]
 """What a registry row carries. Mirrors `install_registry.PackageType` — the two
 will converge as the per-machine registry demotes to a cache, and until then a
 name means the same kind on both sides."""
 
-# TrustTier is re-exported from install_registry rather than redefined: the tier
-# a package was ingested at is the same fact whether it is recorded in the
-# per-machine registry or the cluster row, and the design has it "moved up with
-# the row". Two Literals would be two things to keep equal.
-__all__ = ["Extension", "ExtensionKind", "TrustTier"]
+__all__ = ["Extension", "ExtensionKind"]
 
 # The ceiling on one extension's archived tree. See the module docstring for why
 # this is a constraint rather than a convention, and `db/schema.sql`'s
@@ -101,7 +97,6 @@ class Extension:
     kind: ExtensionKind
     source: str
     content_hash: str | None
-    trust: TrustTier
     default_enabled: bool
     source_ref: str | None = None
     version: str | None = None
@@ -252,6 +247,16 @@ def get_blob(conn: psycopg.Connection, content_hash: str) -> bytes | None:
     return None if row is None else bytes(row.archive)
 
 
+# meiva:note
+# Write or update one extension row.
+#
+#     `default_enabled=None` on an update PRESERVES the stored value — that column
+#     is cluster POLICY, and reinstalling or upgrading a package must not silently
+#     re-enable something an operator turned off. On a fresh insert None means the
+#     schema default (enabled).
+#
+#     `updated_at` is stamped on every write, which is what makes a materializer
+#     able to ask "has anything changed since I last converged".
 def upsert(
     conn: psycopg.Connection,
     *,
@@ -259,51 +264,21 @@ def upsert(
     kind: ExtensionKind,
     source: str,
     content_hash: str | None,
-    trust: TrustTier = "unreviewed",
     source_ref: str | None = None,
     version: str | None = None,
     manifest: dict[str, object] | None = None,
     default_enabled: bool | None = None,
 ) -> None:
-    """Write or update one extension row.
-
-    `default_enabled=None` on an update PRESERVES the stored value — that column
-    is cluster POLICY, and reinstalling or upgrading a package must not silently
-    re-enable something an operator turned off. On a fresh insert None means the
-    schema default (enabled).
-
-    `trust` is keyed to `content_hash` (user ruling 2026-08-21, issue #218):
-    trust is a cluster-level fact about content. When the upsert CHANGES the
-    content_hash, the caller's tier lands (the default `unreviewed` — a review
-    never launders across versions). When the content_hash is unchanged, trust
-    only ever rises: a `reviewed`/`builtin` row is never downgraded by a later
-    `unreviewed` write (multi-machine convergence), while an `unreviewed` row
-    accepts a `reviewed` promotion.
-
-    `updated_at` is stamped on every write, which is what makes a materializer
-    able to ask "has anything changed since I last converged".
-    """
     import json
 
     conn.execute(
         "INSERT INTO extensions "
-        "  (name, kind, source, source_ref, version, content_hash, manifest, trust, "
-        "   default_enabled) "
-        "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, COALESCE(%s, true)) "
+        "  (name, kind, source, source_ref, version, content_hash, manifest, default_enabled) "
+        "VALUES (%s, %s, %s, %s, %s, %s, %s, COALESCE(%s, true)) "
         "ON CONFLICT (name) DO UPDATE SET "
         "  kind = EXCLUDED.kind, source = EXCLUDED.source, source_ref = EXCLUDED.source_ref, "
         "  version = EXCLUDED.version, content_hash = EXCLUDED.content_hash, "
         "  manifest = EXCLUDED.manifest, "
-        # Trust is keyed to content (user ruling 2026-08-21, issue #218): a
-        # review means "I reviewed THESE BYTES". Content changed -> the caller's
-        # tier lands (default unreviewed — a review never launders across
-        # versions). Content unchanged -> trust only ever rises: a reviewed /
-        # builtin row is never downgraded by a later unreviewed write.
-        "  trust = CASE "
-        "    WHEN EXCLUDED.content_hash IS DISTINCT FROM extensions.content_hash "
-        "      THEN EXCLUDED.trust "
-        "    WHEN extensions.trust IN ('reviewed', 'builtin') THEN extensions.trust "
-        "    ELSE EXCLUDED.trust END, "
         "  default_enabled = COALESCE(%s, extensions.default_enabled), "
         "  updated_at = now()",
         (
@@ -314,7 +289,6 @@ def upsert(
             version,
             content_hash,
             json.dumps(manifest) if manifest is not None else None,
-            trust,
             default_enabled,
             default_enabled,
         ),
@@ -322,7 +296,7 @@ def upsert(
 
 
 _SELECT = (
-    "SELECT name, kind, source, content_hash, trust, default_enabled, source_ref, version, "
+    "SELECT name, kind, source, content_hash, default_enabled, source_ref, version, "
     "       manifest, installed_at, updated_at FROM extensions"
 )
 
@@ -374,7 +348,6 @@ def register_tree(
     name: str,
     kind: ExtensionKind,
     source: str,
-    trust: TrustTier = "unreviewed",
     source_ref: str | None = None,
     version: str | None = None,
     manifest: dict[str, object] | None = None,
@@ -412,7 +385,6 @@ def register_tree(
             kind=kind,
             source=source,
             content_hash=digest,
-            trust=trust,
             source_ref=source_ref,
             version=version,
             manifest=manifest,

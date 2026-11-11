@@ -466,7 +466,6 @@ def test_legacy_agents_skill_converge_copy_cleaned_up(unit_home: Path, tmp_path:
             type="skill",
             origin="repo",
             origin_path=str(src),
-            trust="builtin",
             content_hash=tree_hash(src),
             installed_at="2026-08-20T00:00:00+00:00",
         ),
