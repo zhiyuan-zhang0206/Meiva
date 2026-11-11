@@ -48,7 +48,7 @@ class FakeShellRunner:
 
 
 def test_parse_cli_version() -> None:
-    assert parse_cli_version("claude 2.1.290") == "2.1.290"
+    assert parse_cli_version("claude 2.1.322") == "2.1.322"
     assert parse_cli_version("agy version 1.4.2\ncommit abc") == "1.4.2"
     assert parse_cli_version("dsh 0.1.5-rc.3") == "0.1.5-rc.3"
     assert parse_cli_version("no version here") == ""
@@ -64,9 +64,10 @@ def test_needs_cli_update_unpinned_ordering() -> None:
 def test_needs_cli_update_pinned() -> None:
     pinned = CATALOG["claude"]
     assert needs_cli_update(pinned, "") is True
-    assert needs_cli_update(pinned, "2.1.289") is True
-    assert needs_cli_update(pinned, "2.1.290") is False
-    assert needs_cli_update(pinned, "2.1.291") is True
+    assert needs_cli_update(pinned, "2.1.290") is True
+    assert needs_cli_update(pinned, "2.1.321") is True
+    assert needs_cli_update(pinned, "2.1.322") is False
+    assert needs_cli_update(pinned, "2.1.323") is True
 
 
 def test_needs_cli_update_unpinned_agy() -> None:
@@ -136,7 +137,7 @@ def test_skips_up_to_date_clis_without_installing(tmp_path: Path) -> None:
     meiva_home.mkdir()
 
     runner = FakeShellRunner()
-    runner.handle("claude", CommandResult(exit_code=0, stdout="claude 2.1.290\n", stderr=""))
+    runner.handle("claude", CommandResult(exit_code=0, stdout="claude 2.1.322\n", stderr=""))
 
     report = converge_local_harness_clis(
         user_home=user_home,
@@ -153,7 +154,7 @@ def test_skips_up_to_date_clis_without_installing(tmp_path: Path) -> None:
     assert len(report.failed) == 0
     assert len(report.outcomes) == 1
     assert report.outcomes[0].status == "up_to_date"
-    assert report.outcomes[0].installed_version == "2.1.290"
+    assert report.outcomes[0].installed_version == "2.1.322"
     assert len(runner.calls) == 1
 
 
@@ -309,7 +310,7 @@ def test_rollback_on_pinned_cli_failure(tmp_path: Path) -> None:
     bin_dir = user_home / ".local" / "bin"
     bin_dir.mkdir(parents=True)
     claude_bin = bin_dir / "claude"
-    claude_bin.write_text("v2.1.289-bin\n")
+    claude_bin.write_text("v2.1.321-bin\n")
     claude_bin.chmod(0o755)
 
     meiva_home = (tmp_path / "meiva").resolve()
@@ -318,7 +319,7 @@ def test_rollback_on_pinned_cli_failure(tmp_path: Path) -> None:
     runner = FakeShellRunner()
     runner.handle(
         lambda cmd: "--version" in cmd,
-        CommandResult(exit_code=0, stdout="claude 2.1.289\n", stderr=""),
+        CommandResult(exit_code=0, stdout="claude 2.1.321\n", stderr=""),
     )
     runner.handle(
         "curl -fsSL https://claude.ai/install.sh",
@@ -338,4 +339,4 @@ def test_rollback_on_pinned_cli_failure(tmp_path: Path) -> None:
     assert report.ok is False
     assert len(report.failed) == 1
     assert "restored previous binary from backup" in report.failed[0].detail
-    assert claude_bin.read_text() == "v2.1.289-bin\n"
+    assert claude_bin.read_text() == "v2.1.321-bin\n"
