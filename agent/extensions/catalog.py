@@ -76,7 +76,7 @@ SURFACES: tuple[Surface, ...] = (
         manifest_key=None,
         protocol=None,
         note=(
-            "`sdk_members`: hangs one callable on an existing namespace (meiva.self.set_label); preferred over "
+            "`sdk_members`: hangs one callable on an existing namespace; preferred over "
             "a new top-level name, and its docstring is what the agent reads"
         ),
     ),

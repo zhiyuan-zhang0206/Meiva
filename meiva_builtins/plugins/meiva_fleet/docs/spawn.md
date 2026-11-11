@@ -2,7 +2,7 @@
 
 ## Responsibility
 
-Agent creation, copying, termination, restart, resurrection — dynamic member management for the fleet. spawn/fork/terminate/restart/resurrect, including the `label=` keyword, are `meiva.agents` **core** methods: the fleet plugin does not register or wrap them. Disabling fleet removes `create_and_assign` and the fleet-only `self.set_label` member, not `spawn`.
+Agent creation, copying, termination, restart, resurrection — dynamic member management for the fleet. spawn/fork/terminate/restart/resurrect, including the `label=` keyword, are `meiva.agents` **core** methods: the fleet plugin does not register or wrap them. Disabling fleet removes `create_and_assign`, not `spawn`.
 
 ## API
 
@@ -94,6 +94,6 @@ child_id = meiva.agents.spawn(
 ## Relationship with Other Subsystems
 
 - [Neighbors — Inter-Agent Communication and Discovery](neighbors/neighbors.md) — spawn/fork/resurrect establish ties, terminate does not affect existing ties
-- [Self — Agent Self-Presentation](self.md) — label can be specified during spawn
+- [meiva.self](../../../../meiva/self/README.md) — `set_label` changes the label after spawn
 - [Tasks — Shared Task Registry Overview](tasks/tasks.md) — task owner is an agent_id, agent must exist when changing
 - [meiva_fleet — Fleet Plugin Overview](meiva_fleet.md) — Overview

@@ -16,7 +16,6 @@ from base.host.env.agent_slices import AgentSlices
 from base.packages.plugin_providers import build_model_catalog
 from base.packages.plugins.extensions import EMPTY
 from base.paths import meiva_home
-from meiva.sdk_surface import install
 from meiva.sdk_surface.installation import installed
 from meiva.tests.fixtures.gateway_wire import GatewayWire
 from meiva.tests.fixtures.gateway_wire import gateway_stub as gateway_stub
@@ -46,17 +45,6 @@ def load_activity_plugin() -> Iterator[None]:
         yield
 
 
-def test_plugin_registers_self_members(load_activity_plugin: None):
-    assert callable(meiva.self.set_label)
-    assert "set_label" in meiva.self.__all_for_meiva__
-
-
-def test_member_torn_down_on_uninstall(load_activity_plugin: None):
-    install.uninstall()
-    assert not hasattr(meiva.self, "set_label")
-    assert "set_label" not in meiva.self.__all_for_meiva__
-
-
 def test_plugin_registers_prompt_section(load_activity_plugin: None):
     prompt = build_system_prompt(
         fleet_registry(),
@@ -66,7 +54,7 @@ def test_plugin_registers_prompt_section(load_activity_plugin: None):
         home=meiva_home(),
         environ=ENVIRON,
     )
-    assert "meiva.self.set_label" in prompt
+    assert "meiva.tasks" in prompt
 
 
 def test_prompt_assigns_shared_milestone_reporting(load_activity_plugin: None):
@@ -343,22 +331,6 @@ def _label_of(db_conn: psycopg.Connection, agent_id: int) -> str | None:
         cur.execute("SELECT label FROM agents WHERE id=%s", (agent_id,))
         row = cur.fetchone()
     return None if row is None else row[0]
-
-
-def test_set_label_hands_the_agents_own_label_to_the_gateway(
-    load_activity_plugin: None, wire: GatewayWire
-):
-    wire.stub.reply("PATCH", "/api/agents/7", {})
-    pin_agent(7, clients=wire.context.clients)
-    set_label = meiva.self.set_label
-    assert callable(set_label)
-    set_label("auth-refactor lead")
-    set_label("")
-
-    assert [(sent.method, sent.path, sent.body) for sent in wire.sent] == [
-        ("PATCH", "/api/agents/7", {"label": "auth-refactor lead", "source": "self"}),
-        ("PATCH", "/api/agents/7", {"label": "", "source": "self"}),
-    ]
 
 
 def test_plugin_keeps_core_ask_without_legacy_notice_members(load_activity_plugin: None):
