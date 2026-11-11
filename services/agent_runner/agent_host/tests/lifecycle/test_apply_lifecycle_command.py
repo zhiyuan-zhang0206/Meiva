@@ -7,9 +7,13 @@ from pathlib import Path
 
 import psycopg
 import pytest
+from langchain_core.messages import SystemMessage
 from psycopg_pool import AsyncConnectionPool
 
 from agent.db import claim_inbound_batch
+from agent.graph.claim.node import settle_claimed_batch
+from agent.graph.claim.tests.claim_support import make_runtime
+from agent.ownership.hosted import apply_hosted_lifecycle, stamp_turn_fatal
 from agent.ownership.tests.ownership_support import (
     BusTap,
     PublicationDefectBus,
@@ -17,6 +21,7 @@ from agent.ownership.tests.ownership_support import (
     agent_row,
     insert_lifecycle_command,
 )
+from agent.state import AgentState
 from base.clock import SYSTEM_TIMERS
 from base.clock.tests.seeded_rng import seeded_rng
 from base.config import settings
@@ -25,6 +30,9 @@ from base.events.live.bus import EventBus, EventBusConfig
 from base.log.tests.log_records import LogRecords
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.paths import chrome_mcp_socket, meiva_home
+from services.agent_runner.agent_host.invocation.completion_decisions import (
+    restart_resumes_turn,
+)
 from services.agent_runner.agent_host.lifecycle.shells import (
     apply_lifecycle_command,
     reap_and_announce_corpses,
@@ -363,3 +371,90 @@ async def test_a_publication_defect_does_not_stop_the_next_corpse_from_being_rel
     ] == [corpse.agent_id for corpse in reaped]
     for corpse in reaped:
         assert len(_browser_release_attempts(loguru_records, corpse.agent_id)) == 1
+
+
+# meiva:note
+# The host's own restart of a turn that died with the process: the claim reads the corpse marker
+# the host stamped, so the apply queues the note that resumes the agent. Operators' restarts and
+# agents whose turn finished are unchanged.
+# The next host's first invocation claims a pending restart (`halted` is how `fresh_input` starts it)
+# and the host applies it the way `finish_completed_invocation` does. Returns the notes the apply
+# queued for the agent.
+async def _restart_notes(
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    *,
+    source: str,
+    crashed: bool,
+    database_gate: ProcessDbGate,
+) -> list[str]:
+    agent_id = agent_row(db_conn)
+    incarnation = await admit_owner(aops_pool, agent_id, database_gate=database_gate)
+    if crashed:
+        assert (await stamp_turn_fatal(aops_pool, incarnation)).applied
+    _ = db_conn.execute(
+        "INSERT INTO inbound_messages (agent_id, content, kind, source) "
+        "VALUES (%s, '', 'restart', %s)",
+        (agent_id, source),
+    )
+    db_conn.commit()
+    batch = await claim_inbound_batch(aops_pool, agent_id, incarnation=incarnation)
+    update = (
+        await settle_claimed_batch(
+            make_runtime(ops_pool=aops_pool, database_gate=database_gate).context,
+            AgentState(messages=[SystemMessage(content="prompt")], halted=True),
+            agent_id,
+            batch,
+        )
+    ).update
+    assert update is not None
+    applied = await apply_hosted_lifecycle(
+        aops_pool,
+        incarnation,
+        resume_turn=restart_resumes_turn(dict(update)),  # pyright: ignore[reportArgumentType]
+    )
+    assert applied is not None
+    return [
+        content
+        for (content,) in db_conn.execute(
+            "SELECT content FROM inbound_messages WHERE agent_id=%s AND kind='system_note' "
+            "AND status='pending' AND payload->>'note_tag'='lifecycle_restart'",
+            (agent_id,),
+        ).fetchall()
+    ]
+
+
+async def test_the_hosts_restart_of_a_turn_that_died_with_it_queues_the_note_that_resumes_it(
+    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool, *, database_gate: ProcessDbGate
+) -> None:
+    [note] = await _restart_notes(
+        db_conn, aops_pool, source="system:restart", crashed=True, database_gate=database_gate
+    )
+
+    assert "while your turn was unfinished" in note
+
+
+async def test_the_hosts_restart_of_an_agent_whose_turn_finished_queues_no_note(
+    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool, *, database_gate: ProcessDbGate
+) -> None:
+    assert (
+        await _restart_notes(
+            db_conn,
+            aops_pool,
+            source="system:restart",
+            crashed=False,
+            database_gate=database_gate,
+        )
+        == []
+    )
+
+
+async def test_an_operators_restart_of_a_crashed_agent_queues_no_note(
+    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool, *, database_gate: ProcessDbGate
+) -> None:
+    assert (
+        await _restart_notes(
+            db_conn, aops_pool, source="user", crashed=True, database_gate=database_gate
+        )
+        == []
+    )

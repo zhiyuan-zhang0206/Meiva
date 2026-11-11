@@ -30,6 +30,7 @@ from agent.graph.prompt import context_notes
 from agent.hooks.compact_events import emit_compact_finished, emit_compact_started
 from agent.messages import NoteTag, security_note_message, system_note_message
 from agent.nodes import BEFORE_TURN, CLAIM, END
+from agent.ownership.hosted import turn_crash_marked
 from base.agents.context import MeivaContext
 from base.agents.messages.envelope import sender_class
 from base.agents.messages.inbound import InboundKind
@@ -39,6 +40,7 @@ from base.agents.messages.lifecycle_text import by_who, restart_accepted_text
 from base.agents.messages.reply_intent import delivery_disabled_entries
 from base.agents.messages.security_finding import SecurityFindingEntry
 from base.api_contracts.agent_contract import Harness
+from base.deploy.lifecycle.host_exit_message import HOST_RESTART_SOURCE
 from base.events.live.projection import Cancelled, CompactionMode, CompactionStatus
 from base.host.env.agent_slices import AgentSlices
 from base.log import logger
@@ -440,7 +442,8 @@ async def _handle_terminate(
 # An agent that was idle stays idle (`restart_preserves_idle`) and reads the acceptance
 # marker. An agent whose turn was unfinished resumes: the host's apply queues the one note
 # that continues it (`restart_resume_note`), so no marker is added here. The two cases are
-# told apart by `_turn_was_idle`. A restart is taken the same way on every harness: dropping one
+# told apart by `_turn_was_idle`, and a turn the exiting host's CLI died under (the corpse marker the
+# host stamped for it) is unfinished although the new host's invocation starts idle. A restart is taken the same way on every harness: dropping one
 # would leave the command claimed for the next incarnation to claim again, forever. The
 # external harness's own restart (the agent's, `source='self'`, or the host's) reaches here only at
 # a turn boundary, because the claim takes a lifecycle command first and the harness turn that
@@ -453,7 +456,9 @@ async def handle_restart(
 ) -> None:
     st.next_goto = END
     st.restart_requested = True
-    st.restart_preserves_idle = _turn_was_idle(state, item)
+    st.restart_preserves_idle = _turn_was_idle(
+        state, item, crash_marked=await _host_restart_found_crash(ctx, item)
+    )
     if st.restart_preserves_idle:
         finding = (
             scan_inbound_content(
@@ -485,9 +490,20 @@ async def handle_restart(
 #     `interrupted_by_restart` marks the latter. An agent with no history is idle. A
 #     restart from the agent's own code (`meiva.self.restart()`) leaves its exec halted
 #     with the turn unfinished, so it never counts as idle.
-def _turn_was_idle(state: _state.AgentState, item: ClaimedInbound) -> bool:
+#
+#     The host's own restart (`HOST_RESTART_SOURCE`) is written for a turn that was running when the
+#     host exited. When that turn died before claiming it (an external harness's CLI is killed with
+#     the host), the next host's invocation starts with `halted` set and would read an idle agent;
+#     `crash_marked` is the durable record that the turn was cut short.
+def _turn_was_idle(state: _state.AgentState, item: ClaimedInbound, *, crash_marked: bool) -> bool:
     halted = state.halted and not state.interrupted_by_restart
-    return (halted or not state.messages) and item.source != "self"
+    return (halted or not state.messages) and item.source != "self" and not crash_marked
+
+
+async def _host_restart_found_crash(ctx: MeivaContext, item: ClaimedInbound) -> bool:
+    if item.source != HOST_RESTART_SOURCE or ctx.ops_pool is None:
+        return False
+    return await turn_crash_marked(ctx.ops_pool, item.agent_id)
 
 
 async def _handle_resurrect(

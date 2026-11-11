@@ -174,6 +174,14 @@ class Cluster:
         assert row is not None
         return row
 
+    def fatal_marked(self, agent_id: int) -> bool:
+        self.conn.commit()
+        row = self.conn.execute(
+            "SELECT last_turn_fatal_at IS NOT NULL FROM agents_meta WHERE id=%s", (agent_id,)
+        ).fetchone()
+        assert row is not None
+        return row[0]
+
     async def woken_by_a_new_host(self, agent_id: int) -> bool:
         return agent_id in await scan_rows(self.pool, self.machine.name())
 

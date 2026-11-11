@@ -17,6 +17,7 @@ from langchain_core.messages import AIMessageChunk, BaseMessage
 from langchain_core.messages.ai import UsageMetadata
 from langchain_core.outputs import ChatGenerationChunk, ChatResult
 
+from agent.graph.llm_errors import FatalLLMStreamError
 from base.agents.messages.reply_intent import DISPLAY_TO_USER
 
 OVERRIDE = f"{__name__}:build"
@@ -26,13 +27,16 @@ _USAGE: UsageMetadata = {"input_tokens": 1, "output_tokens": 1, "total_tokens": 
 
 # meiva:note
 # One model call: write `code` for the agent to run, or say `text`. A call that `holds` waits
-# for the script's `release` before it finishes, after `partial` (if any) has streamed.
+# for the script's `release` before it finishes, after `partial` (if any) has streamed. A call that
+# `fails` dies with a fatal stream error once it is let go, as a turn does when its harness process is
+# killed under it.
 @dataclass(frozen=True)
 class Step:
     text: str = "done"
     code: str | None = None
     partial: str | None = None
     holds: bool = False
+    fails: bool = False
 
 
 # meiva:note
@@ -81,6 +85,8 @@ class ScriptedChatModel(BaseChatModel):
             )
         if step.holds:
             await script.release.wait()
+        if step.fails:
+            raise FatalLLMStreamError("test: the provider stream died with the process")
         if step.code is not None:
             yield ChatGenerationChunk(
                 message=AIMessageChunk(
