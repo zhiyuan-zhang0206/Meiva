@@ -15,7 +15,7 @@ from __future__ import annotations
 from datetime import datetime
 
 from base.db.protocols import SyncConnection
-from base.events.contract import EventTier
+from base.events.contract import EventGroupBy, EventTier
 from base.events.reads import (
     EDGE_EVENT_NAMES as EDGE_EVENT_NAMES,
 )
@@ -25,6 +25,7 @@ from base.events.reads import (
 from base.events.reads import (
     AuditFilter,
     EventRecord,
+    count_audit_groups,
     count_audit_rows,
     query_audit_rows,
 )
@@ -102,4 +103,39 @@ def count_events(
             from_=from_,
             to=to,
         ),
+    )
+
+
+# meiva:note
+# The audit rows `count_events` counts, grouped by one dimension, largest group first.
+def count_event_groups(
+    conn: SyncConnection,
+    *,
+    by: EventGroupBy,
+    limit: int,
+    agent_id: int | None = None,
+    event_names: list[str] | None = None,
+    tiers: list[EventTier] | None = None,
+    trace_id: str | None = None,
+    machine: str | None = None,
+    level: str | None = None,
+    attribute_filters: dict[str, str] | None = None,
+    from_: datetime | None = None,
+    to: datetime | None = None,
+) -> list[tuple[str | None, int]]:
+    return count_audit_groups(
+        conn,
+        AuditFilter(
+            agent_id=agent_id,
+            event_names=event_names,
+            tiers=tiers,
+            trace_id=trace_id,
+            machine=machine,
+            level=level,
+            attribute_filters=attribute_filters,
+            from_=from_,
+            to=to,
+        ),
+        by=by,
+        limit=limit,
     )

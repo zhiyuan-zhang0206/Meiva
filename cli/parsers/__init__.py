@@ -14,6 +14,7 @@
 # - ``host`` — init/start/stop/restart/status/converge/firewall
 # - ``update`` — whole-cluster source-mode rollout over SSH (run/down/up)
 # - ``observability`` — lgtm/trace
+# - ``query`` — the read-only cluster queries (events)
 # - ``cluster`` — the whole-cluster verbs
 # - ``auth`` — the web login password
 # - ``cli.commands.agents.parsers`` — agents + notices, beside their implementations
@@ -57,6 +58,7 @@ from cli.parsers.management import (
 from cli.parsers.observability import add_lgtm_parser, add_trace_parser
 from cli.parsers.permissions import add_permissions_parser
 from cli.parsers.pty import add_pty_parser
+from cli.parsers.query import add_events_parser
 from cli.parsers.update import add_update_parser
 
 __all__ = ["build_parser", "command_options", "parse_args"]
@@ -91,6 +93,7 @@ def build_parser(
     add_cluster_parser(sub)
     add_computer_parser(sub)
     add_trace_parser(sub)
+    add_events_parser(sub)
     add_jobs_parser(sub)
     add_logs_parser(sub)
     add_backup_parser(sub)

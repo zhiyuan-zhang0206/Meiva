@@ -41,7 +41,7 @@ from typing import Annotated
 import psycopg
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
-from base.events.contract import tier_for
+from base.events.contract import EventGroupBy, tier_for
 from base.events.reads import EventRecord, audit_rows
 from gateway.agents.eval_guard import deny_isolated_result_read
 from gateway.events import telemetry_rows
@@ -52,7 +52,14 @@ from gateway.events.events_plan import (
     page_depth,
     plan_events,
 )
-from gateway.events.schemas import EventRow, EventsMeta, EventsResponse
+from gateway.events.schemas import (
+    EventCountGroup,
+    EventCountsMeta,
+    EventCountsResponse,
+    EventRow,
+    EventsMeta,
+    EventsResponse,
+)
 from gateway.http.config import GatewayConfig, gateway_clock, gateway_config, gateway_state
 
 router = APIRouter()
@@ -257,3 +264,107 @@ def get_events(
         generated_at=now.isoformat(),
     )
     return EventsResponse(meta=meta, items=items)
+
+
+# meiva:note
+# How many distinct values one store may report for the grouped dimension before the request is
+# refused: the groups of both stores are merged before the `limit` cut, so a store cannot be
+# cut early without under-counting a value the other store also holds.
+_MAX_GROUPS = 1000
+
+
+# meiva:note
+# Per-value event counts summed across the stores the request reads.
+def _merged_groups(request: Request, plan: EventsPlan, by: EventGroupBy) -> dict[str | None, int]:
+    f = plan.filters
+    merged: dict[str | None, int] = {}
+    with _read_connection(request) as conn:
+        pages: list[list[tuple[str | None, int]]] = []
+        if plan.use_audit:
+            pages.append(
+                audit_rows.count_event_groups(conn, by=by, limit=_MAX_GROUPS + 1, **f.kwargs())
+            )
+        if plan.use_telemetry:
+            pages.append(
+                telemetry_rows.count_event_groups(
+                    conn,
+                    by=by,
+                    limit=_MAX_GROUPS + 1,
+                    categories=plan.telemetry_categories,
+                    **f.kwargs(),
+                )
+            )
+    for page in pages:
+        if len(page) > _MAX_GROUPS:
+            raise HTTPException(
+                status_code=422,
+                detail=f"more than {_MAX_GROUPS} distinct {by} values in the window; "
+                "narrow the window or add a filter",
+            )
+        for key, count in page:
+            merged[key] = merged.get(key, 0) + count
+    return merged
+
+
+@router.get(
+    "/api/events/counts",
+    dependencies=[Depends(deny_isolated_result_read)],
+    description="Events of the unified stream counted per value of one dimension (`by`: `event_name`,\n`machine`, `level`, `agent_id` or `category`), largest group first, ties by key.\n\nThe filters and the window are `GET /api/events`' (same names, same 24-hour default lower\nbound, same 422 on a bad value); the counts are computed in SQL, so the answer is a few rows\nhowever many events match. `limit` (default: the configured events page, cap 1000) bounds\nthe groups returned; `meta.total` counts every event of the window and `meta.truncated`\nsays more groups exist. A window with more than 1000 distinct values is refused with 422.",
+)
+def get_event_counts(
+    request: Request,
+    by: Annotated[EventGroupBy, Query()],
+    category: Annotated[str | None, Query()] = None,
+    event_name: Annotated[str | None, Query()] = None,
+    agent_id: Annotated[int | None, Query()] = None,
+    trace_id: Annotated[str | None, Query()] = None,
+    machine: Annotated[str | None, Query()] = None,
+    level: Annotated[str | None, Query()] = None,
+    tier: Annotated[str | None, Query()] = None,
+    from_: Annotated[datetime | None, Query(alias="from")] = None,
+    to: Annotated[datetime | None, Query()] = None,
+    hours: Annotated[float | None, Query(gt=0, le=_MAX_HOURS)] = None,
+    limit: Annotated[int | None, Query(ge=1, le=1000)] = None,
+) -> EventCountsResponse:
+    now = gateway_clock(request).now()
+    default_limit = gateway_config(request).display.events_default_limit
+    try:
+        plan = plan_events(
+            EventsRequest(
+                category=category,
+                event_name=event_name,
+                agent_id=agent_id,
+                trace_id=trace_id,
+                machine=machine,
+                level=level,
+                tier=tier,
+                from_=from_,
+                to=to,
+                hours=hours,
+                limit=None,
+                offset=0,
+                with_total=False,
+            ),
+            now=now,
+            default_limit=default_limit,
+        )
+    except InvalidEventsQueryError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    try:
+        merged = _merged_groups(request, plan, by)
+    except psycopg.errors.QueryCanceled as exc:
+        raise HTTPException(status_code=503, detail="events read timed out") from exc
+    shown = limit if limit is not None else default_limit
+    ordered = sorted(merged.items(), key=lambda item: (-item[1], item[0] is None, item[0] or ""))
+    return EventCountsResponse(
+        meta=EventCountsMeta(
+            by=by,
+            window_from=plan.filters.from_,
+            window_to=plan.filters.to,
+            limit=shown,
+            total=sum(merged.values()),
+            truncated=len(ordered) > shown,
+            generated_at=now.isoformat(),
+        ),
+        groups=[EventCountGroup(key=key, count=count) for key, count in ordered[:shown]],
+    )

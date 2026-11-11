@@ -1,4 +1,4 @@
-exports = ["config.py", "fleet_gateway.py", "schedules.py", "schedules_verify.py", "schedules_verify_read_rows.py"]
+exports = ["config.py", "fleet_gateway.py", "query", "schedules.py", "schedules_verify.py", "schedules_verify_read_rows.py"]
 
 [uses]
 "schedule_verify_checks.py" = []

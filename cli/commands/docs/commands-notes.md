@@ -9,6 +9,11 @@
 - `agents/timeline.py` exposes the existing timeline API as `meiva agents timeline`
   and its exact `context` alias.
 
+- `management/query/` holds the read-only verbs (their parsers are `cli/parsers/query.py`) over cluster data (`meiva events`, with the same
+  shape for the verbs added beside it): each forwards its filters to one gateway read route
+  through `cli/boundary/gateway_read.py` and renders the answer. They carry no defaults for
+  windows or page sizes (the gateway's apply) and open no database connection.
+
 - Which cluster a command acts on comes from `cli/commands/_repo.py:repo_root` — the
   checkout the running `meiva` belongs to — never the current directory.
 - What `meiva start` treats as already-up, what it waits for, and when an unready

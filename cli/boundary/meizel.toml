@@ -1,6 +1,7 @@
-exports = ["json_body.py", "json_text.py"]
+exports = ["gateway_read.py", "json_body.py", "json_text.py"]
 
 [uses]
+"gateway_read.py" = ["json_body.py"]
 "json_body.py" = ["json_text.py"]
 
 [purity]

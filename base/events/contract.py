@@ -27,6 +27,7 @@ from base.events.vocabulary import LLM_ERROR_FAMILY as LLM_ERROR_FAMILY
 from base.events.vocabulary import OPS_BUCKET_S as OPS_BUCKET_S
 from base.events.vocabulary import OPS_GRID_ORIGIN as OPS_GRID_ORIGIN
 from base.events.vocabulary import Category as Category
+from base.events.vocabulary import EventGroupBy as EventGroupBy
 from base.events.vocabulary import EventSpec as EventSpec
 from base.events.vocabulary import EventTier as EventTier
 
