@@ -19,9 +19,8 @@ REPLY_VISIBILITY_RULE = (
     f"The visibility prefix is parsed only once at the very start of the message. "
     "Streamed text cannot be retracted or overwritten mid-message, so never output the prefix "
     "a second time inside the same message to revise or replace earlier text. "
-    f"Use {DISPLAY_TO_USER} for answers, deliverables, decisions and meaningful milestones "
-    f"the user needs to see in the main conversation. Use {HIDE_FROM_USER} for working notes. "
-    "Those notes are folded into Details and the user can expand and read them."
+    f"Text under {DISPLAY_TO_USER} is shown to the user directly in the main conversation. "
+    f"Text under {HIDE_FROM_USER} is folded into Details, which the user can expand and read."
 )
 REPLY_VISIBILITY_CORRECTION = (
     "Your previous output contained text with a missing or invalid visibility prefix. "
