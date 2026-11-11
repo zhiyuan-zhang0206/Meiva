@@ -379,7 +379,15 @@ def _perform(step: PoolerStep, run: _Run) -> int:
             print(text.degraded_restart(), file=sys.stderr)
         case StopRunning():
             custodian = run.running()
-            if not custodian.stop(deadline=Deadline.after(run.timers, spec.stop_wait_s)):
+            # meiva:note
+            # A budget spent before the stop reaches the pooler (the lock, the listener scans) is
+            # the same outcome as a drain that outlasts it: the pooler keeps custody and the call
+            # fails cleanly instead of raising out of bring-up.
+            try:
+                stopped = custodian.stop(deadline=Deadline.after(run.timers, spec.stop_wait_s))
+            except (TimeoutError, LockTimeoutError):
+                stopped = False
+            if not stopped:
                 print(text.stop_survived(custodian.identity.pid), file=sys.stderr)
                 return 1
         case Launch():
