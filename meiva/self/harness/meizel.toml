@@ -1,12 +1,12 @@
 exports = ["attachment.py", "registration.py", "store.py"]
 
 [uses]
-"__init__.py" = ["admission.py", "attachment.py", "registration.py", "store.py"]
+"__init__.py" = ["attachment.py", "registration.py", "store.py"]
 "admission.py" = ["registration.py"]
 "attachment.py" = ["admission.py", "registration.py", "store.py"]
 "registration.py" = []
 "store.py" = ["registration.py"]
-"tests" = ["__init__.py", "admission.py", "attachment.py", "registration.py", "store.py"]
+"tests" = ["admission.py", "attachment.py", "registration.py", "store.py"]
 
 [purity]
 "admission.py" = "strict"
