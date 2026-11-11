@@ -68,6 +68,10 @@ rejected, so the text of the message still stands and names the image. The traje
 not observed to carry the text, so the phantom turn's answer comes from the transcript file.
 `deliveryStrategy=WHEN_IDLE` was tried once, never against an idle conversation, so nothing here relies on it.
 
+Sub-agents. `invoke_subagent` creates a sibling conversation that the stream-json output never mentions;
+`SubagentReader` reads the parent's `subagents/` descriptors and the child's transcript file and the
+session reports them as sub-agent text and tool calls ([sub-agent text](../../docs/subagent-text.md)).
+
 Reconciliation (`reconciliation/`): the durable queue is
 `brain/<conversation>/.system_generated/messages/` (not the transcript). A message listed in
 `read.json` is delivered (IN_CONTEXT); a stored one, listed in `undelivered/` or not, will be delivered

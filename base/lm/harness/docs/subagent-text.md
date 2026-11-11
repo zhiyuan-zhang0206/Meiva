@@ -17,7 +17,7 @@ visibility prefix and is not part of `TurnCompleted.text`.
 |---|---|---|
 | Claude Code | `AssistantMessage` text blocks whose `parent_tool_use_id` is set | `subagent_type` of the call's task-started message |
 | Codex | `item/completed` `agentMessage` of a thread named in a `spawnAgent` item's `receiverThreadIds` | none on the frames |
-| Antigravity | not read (below) | |
+| Antigravity | the `PLANNER_RESPONSE` rows of the child conversation's transcript file | the descriptor's `role` |
 
 A sub-agent's tool calls are the ordinary `ToolUse` / `ToolResult` events with `parent_tool_use_id` set to
 the same call id (None for the main agent's own). Claude Code: the `parent_tool_use_id` of the
@@ -45,9 +45,29 @@ What the CLIs send, recorded on Claude Code (claude-agent-sdk 0.2.168) and Codex
   `threadId` and were dropped as another thread's. `SubagentThreads` learns the child id when the
   parent's `spawnAgent` item completes and shows the child's finished messages in the turn that is
   running. A child that speaks while no turn runs is not shown.
-- **Antigravity.** `invoke_subagent` creates a sibling conversation with its own transcript, and its
-  result returns to the parent as a system message. The stream-json adapter observes no step for the call
-  and nothing of the child, so nothing is emitted. Reading the child's transcript is the remaining work.
+- **Antigravity.** `invoke_subagent` creates a sibling conversation (its own `brain/<id>/` directory) and
+  its result returns to the parent as a system message. The stream-json frames show no step for the call
+  and nothing of the child, so everything is read from files (recorded on agy 1.5.5, none of it a
+  published interface):
+  - The child's id is in the parent's `brain/<parent>/.system_generated/subagents/<child>.json`
+    (`conversationId`, `subagentDescriptor` with `typeName` and `role`, `spawnStepIndex`) and in the
+    output row of the call in the parent's transcript.
+  - The child's transcript, `brain/<child>/.system_generated/logs/transcript_full.jsonl`, has the parent's
+    shape: a `PLANNER_RESPONSE` row's `content` is what it said and its `tool_calls` what it ran, the call
+    `k` of the row at step `i` having its output in the `GENERIC` row at step `i + 1 + k`.
+  - `AgySession` polls these files every 0.5 s while a turn of ours, or one it observes, is open, and once
+    more as the turn ends (`SubagentReader`, `subagents.py`). The parent's own `invoke_subagent` call is
+    written as a `ToolUse` / `ToolResult` with the child's conversation id as its call id (the stream
+    never shows one), the child's text is `SubagentText` labelled with the descriptor's `role`, and
+    its tool calls carry that id as `parent_tool_use_id`.
+  - Timing. A poll shows whatever agy has flushed to the transcript, so a child's activity appears
+    within about half a second of being written when agy writes it while the child runs, and otherwise at
+    the end of the parent's turn. Whether agy writes it live was not observed (the recorded run finished
+    inside one second); the end-of-turn read is what is guaranteed. A child that writes while no turn is
+    open is shown in the next one. After a resume the children that already existed are marked shown up
+    to what is on disk and only what they write next is reported.
+  - A descriptor or transcript that is not the recorded shape is skipped and logged once
+    (`agy_subagent_descriptor_unreadable`): this is display only and never fails a turn.
 
 ## On the timeline
 

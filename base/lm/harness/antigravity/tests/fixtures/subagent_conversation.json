@@ -1,0 +1,142 @@
+{
+ "source": "RECORDED from agy 1.5.5 (gemini-3.8-flash-low), 2026-11-11: one invoke_subagent whose child ran `echo hi` and reported back. Conversation ids and paths replaced, thinking and token counts dropped; rows and field names are as the CLI wrote them to brain/<id>/.system_generated/.",
+ "parent_descriptor": {
+  "conversationId": "child-conv",
+  "subagentDescriptor": {
+   "typeName": "self",
+   "role": "Task Runner"
+  },
+  "state": "SUBAGENT_STATE_ALIVE",
+  "spawnStepIndex": 2,
+  "workspaceUris": [
+   "file:///work"
+  ]
+ },
+ "parent_rows": [
+  {
+   "step_index": 0,
+   "source": "USER_EXPLICIT",
+   "type": "USER_INPUT",
+   "status": "DONE",
+   "created_at": "2026-11-11T08:07:32Z",
+   "content": "<USER_REQUEST>\nUse your subagent / delegate-task tool (the one that starts another agent, e.g. invoke_subagent or a browser subagent) exactly once. Its task: say ALPHA in one sentence, then run the shell command `echo hi`, then say BETA. Then reply with exactly the word DONE. If you have no tool that starts another agent, reply exactly: NO-SUBAGENT-TOOL and list your tool names.\n</USER_REQUEST>\n<ADDITIONAL_METADATA>\nThe current local time is: 2026-11-11T16:07:32+08:00.\n</ADDITIONAL_METADATA>\n<USER_SETTINGS_CHANGE>\nThe user changed setting `Model Selection` from None to Gemini 3.8 Flash (Low). No need to comment on this change if the user doesn't ask about it. If reporting what model you are, please use a human readable name instead of the exact string.\n</USER_SETTINGS_CHANGE>"
+  },
+  {
+   "step_index": 1,
+   "source": "MODEL",
+   "type": "PLANNER_RESPONSE",
+   "status": "DONE",
+   "created_at": "2026-11-11T08:07:32Z",
+   "tool_calls": [
+    {
+     "name": "invoke_subagent",
+     "args": {
+      "Model": "flash_lite",
+      "Prompt": "Say ALPHA in one sentence, then run the shell command `echo hi`, then say BETA.",
+      "Role": "Task Runner",
+      "TypeName": "self"
+     }
+    }
+   ]
+  },
+  {
+   "step_index": 2,
+   "source": "MODEL",
+   "type": "GENERIC",
+   "status": "DONE",
+   "created_at": "2026-11-11T08:07:36Z",
+   "content": "Created At: 2026-11-11T16:07:36+08:00\nCompleted At: 2026-11-11T16:07:36+08:00\nCreated At: 2026-11-11T16:07:36+08:00\nCompleted At: 2026-11-11T16:07:36+08:00\nCreated the following subagent:\n{\n  \"conversationId\":  \"child-conv\",\n  \"logAbsoluteUri\":  \"file:///home/user/.gemini/antigravity-cli/brain/child-conv/.system_generated/logs/transcript.jsonl\",\n  \"workspaceUris\":  [\n    \"file:///work\"\n  ]\n}\nThe subagent will send you a message when it has completed its task or requires guidance. There is no need to poll for its response."
+  },
+  {
+   "step_index": 3,
+   "source": "MODEL",
+   "type": "PLANNER_RESPONSE",
+   "status": "DONE",
+   "created_at": "2026-11-11T08:07:36Z",
+   "content": "DONE"
+  },
+  {
+   "step_index": 4,
+   "source": "SYSTEM",
+   "type": "SYSTEM_MESSAGE",
+   "status": "DONE",
+   "created_at": "2026-11-11T08:07:40Z",
+   "content": "The following is a <SYSTEM_MESSAGE> not actually sent by the user. It is provided by the system as important information to pay attention to.\n\n<SYSTEM_MESSAGE>\n[Message] timestamp=2026-11-11T08:07:40Z sender=child-conv priority=MESSAGE_PRIORITY_HIGH content=ALPHA: This is the alpha sentence.\nShell output: hi\nBETA\n</SYSTEM_MESSAGE>"
+  },
+  {
+   "step_index": 5,
+   "source": "MODEL",
+   "type": "PLANNER_RESPONSE",
+   "status": "DONE",
+   "created_at": "2026-11-11T08:07:40Z",
+   "content": "DONE"
+  }
+ ],
+ "child_rows": [
+  {
+   "step_index": 0,
+   "source": "SYSTEM",
+   "type": "SYSTEM_MESSAGE",
+   "status": "DONE",
+   "created_at": "2026-11-11T08:07:36Z",
+   "content": "The following is a <SYSTEM_MESSAGE> not actually sent by the user. It is provided by the system as important information to pay attention to.\n\n<SYSTEM_MESSAGE>\n[Message] timestamp=2026-11-11T08:07:36Z sender=parent-conv priority=MESSAGE_PRIORITY_HIGH content=Say ALPHA in one sentence, then run the shell command `echo hi`, then say BETA.\n</SYSTEM_MESSAGE>"
+  },
+  {
+   "step_index": 1,
+   "source": "MODEL",
+   "type": "PLANNER_RESPONSE",
+   "status": "DONE",
+   "created_at": "2026-11-11T08:07:36Z",
+   "tool_calls": [
+    {
+     "name": "run_command",
+     "args": {
+      "CommandLine": "echo hi",
+      "WaitMsBeforeAsync": 5000,
+      "toolSummary": "Echo hi"
+     }
+    }
+   ]
+  },
+  {
+   "step_index": 2,
+   "source": "MODEL",
+   "type": "GENERIC",
+   "status": "DONE",
+   "created_at": "2026-11-11T08:07:38Z",
+   "content": "Created At: 2026-11-11T16:07:38+08:00\nCompleted At: 2026-11-11T16:07:38+08:00\nCreated At: 2026-11-11T16:07:38+08:00\nCompleted At: 2026-11-11T16:07:38+08:00\nCommand exited with code 0.\n\nCommand output:\nhi\r\n"
+  },
+  {
+   "step_index": 3,
+   "source": "MODEL",
+   "type": "PLANNER_RESPONSE",
+   "status": "DONE",
+   "created_at": "2026-11-11T08:07:38Z",
+   "tool_calls": [
+    {
+     "name": "send_message",
+     "args": {
+      "Message": "ALPHA: This is the alpha sentence.\nShell output: hi\nBETA",
+      "Recipient": "parent-conv"
+     }
+    }
+   ]
+  },
+  {
+   "step_index": 4,
+   "source": "MODEL",
+   "type": "GENERIC",
+   "status": "DONE",
+   "created_at": "2026-11-11T08:07:40Z",
+   "content": "Created At: 2026-11-11T16:07:40+08:00\nCompleted At: 2026-11-11T16:07:40+08:00\nCreated At: 2026-11-11T16:07:40+08:00\nCompleted At: 2026-11-11T16:07:40+08:00\nMessage sent to \"parent-conv\"."
+  },
+  {
+   "step_index": 5,
+   "source": "MODEL",
+   "type": "PLANNER_RESPONSE",
+   "status": "DONE",
+   "created_at": "2026-11-11T08:07:40Z",
+   "content": "ALPHA.\nShell output:\nhi\nBETA."
+  }
+ ]
+}

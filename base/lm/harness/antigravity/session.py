@@ -18,6 +18,7 @@ from base.lm.harness.antigravity.mapping import (
 )
 from base.lm.harness.antigravity.reconciliation.queue_files import agy_home, reconcile_inputs
 from base.lm.harness.antigravity.schedules import Schedules
+from base.lm.harness.antigravity.subagent_files import SubagentReader
 from base.lm.harness.antigravity.trajectory import (
     PhantomAction,
     PhantomTurn,
@@ -113,6 +114,7 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
         self._acked_start = False
         self._last_turn: str | None = None
         self._schedules = Schedules()
+        self._subagents = SubagentReader(home)
 
     def _read_records(
         self, session_id: str, keys: Sequence[str]
@@ -125,6 +127,8 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
         if self._closed:
             raise SessionClosedError("session is closed")
         resume = self._resolve_resume(resume)
+        if resume:
+            self._subagents.adopt(resume)
         _ = self._begin_generation()
         transport = self._factory()
         await transport.start(resume=resume)
@@ -372,9 +376,24 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
             self._ledger.accepts(generation) and self._transport is transport and not self._closed
         ):
             await self._clock.asleep(TRAJECTORY_POLL_SECONDS)
+            self._show_subagents()
             if not self._session_id or not self._needs_poll():
                 continue
             self._observe(await transport.trajectory())
+
+    # meiva:note
+    # What the conversation's sub-agents wrote, read from their transcript files (agy's stream shows
+    # none of it) and reported as `SubagentText` and tool calls tied to the `invoke_subagent` call, in
+    # the turn that is open: ours, or an observed one. With no turn open nothing is reported and the
+    # rows wait on disk for the next one. A turn end reads once more so a child that finished first
+    # is shown complete.
+    # meiva:link base/lm/harness/docs/subagent-text.md
+    def _show_subagents(self, turn_id: str | None = None) -> None:
+        turn = turn_id or (self._active.turn_id if self._active is not None else self._phantom_id())
+        if turn is None or not self._session_id:
+            return
+        for event in self._subagents.poll(self._session_id, turn):
+            self._emit(event)
 
     def _needs_poll(self) -> bool:
         unsettled = self._ledger.keys_in(InputPhase.SENT) + self._ledger.keys_in(
@@ -426,6 +445,7 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
         phantom, self._phantom = self._phantom, None
         if phantom is None:
             return
+        self._show_subagents(phantom.turn_id)
         self._last_turn = phantom.turn_id
         texts = (
             answer_texts(self._session_id, phantom.first_step, home=self._home)
@@ -606,6 +626,7 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
             self._acked_start = True
             self._apply(self._ledger.in_context(ticket.input_key, ticket.turn_id))
         fields = parse_result(payload if is_object_dict(payload) else {}, home=self._home)
+        self._show_subagents(ticket.turn_id)
         text = "\n".join(ticket.parts).strip() or self._flush_step_text() or fields.text.strip()
         errors = (fields.error,) if fields.error else ()
         self._totals = self._totals.with_turn(fields.usage, None)

@@ -115,7 +115,7 @@ def _map_tool_step(
         if conversation_id:
             params = {
                 **params,
-                **_transcript_tool_args(conversation_id, step_index, name, home=home),
+                **transcript_tool_args(conversation_id, step_index, name, home=home),
             }
         thinking = _text(update.get("thinking")) or (
             _transcript_thinking(conversation_id, step_index, before_tool=True, home=home)
@@ -134,7 +134,7 @@ def _map_tool_step(
     if state == "DONE":
         content = _tool_content(info)
         if conversation_id:
-            transcript_out = _transcript_tool_output(conversation_id, step_index, home=home)
+            transcript_out = transcript_tool_output(conversation_id, step_index, home=home)
             if transcript_out and len(transcript_out) >= len(content):
                 content = transcript_out
         return (
@@ -219,7 +219,7 @@ def parse_result(payload: Mapping[str, object], *, home: Path | None = None) -> 
 def _transcript_turn_recovered(conversation_id: str | None, *, home: Path | None = None) -> bool:
     if not conversation_id:
         return False
-    rows = _read_transcript_rows(conversation_id, home=home)
+    rows = transcript_rows(conversation_id, home=home)
     if not rows:
         return False
     for row in reversed(rows):
@@ -258,9 +258,7 @@ def _tool_content(info: Mapping[str, object]) -> str:
     return ""
 
 
-def _read_transcript_rows(
-    conversation_id: str, *, home: Path | None = None
-) -> list[dict[str, object]]:
+def transcript_rows(conversation_id: str, *, home: Path | None = None) -> list[dict[str, object]]:
     log_dir = (
         resolve_user_home(home)
         / ".gemini"
@@ -288,10 +286,10 @@ def _read_transcript_rows(
     return []
 
 
-def _transcript_tool_args(
+def transcript_tool_args(
     conversation_id: str, step_index: int, name: str, *, home: Path | None = None
 ) -> dict[str, object]:
-    rows = _read_transcript_rows(conversation_id, home=home)
+    rows = transcript_rows(conversation_id, home=home)
     for row in reversed(rows):
         idx = _int(row.get("step_index"))
         if step_index > 0 and idx > step_index:
@@ -314,10 +312,10 @@ def _transcript_tool_args(
     return {}
 
 
-def _transcript_tool_output(
+def transcript_tool_output(
     conversation_id: str, step_index: int, *, home: Path | None = None
 ) -> str:
-    for row in _read_transcript_rows(conversation_id, home=home):
+    for row in transcript_rows(conversation_id, home=home):
         if _int(row.get("step_index")) == step_index:
             content = _text(row.get("content"))
             if content:
@@ -333,7 +331,7 @@ def answer_texts(
     conversation_id: str, first_step: int, *, home: Path | None = None
 ) -> tuple[str, ...]:
     texts: list[str] = []
-    for row in _read_transcript_rows(conversation_id, home=home):
+    for row in transcript_rows(conversation_id, home=home):
         if _int(row.get("step_index")) < first_step or _text(row.get("type")) != "PLANNER_RESPONSE":
             continue
         content = _text(row.get("content"))
@@ -348,7 +346,7 @@ def _transcript_thinking(
     target_idx = step_index - 1 if before_tool else step_index
     if target_idx < 0:
         return None
-    for row in _read_transcript_rows(conversation_id, home=home):
+    for row in transcript_rows(conversation_id, home=home):
         if _int(row.get("step_index")) != target_idx:
             continue
         if _text(row.get("type")) != "PLANNER_RESPONSE":
