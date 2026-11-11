@@ -1,10 +1,9 @@
 # meiva:note
-# Answer one prompt per target: read the files, call the provider, scan what goes in and comes
-# out, and save the answers. `meiva/understand/__init__.py` is the namespace function; it
+# Answer one prompt per target: read the files, call the provider, and save the answers. `meiva/understand/__init__.py` is the namespace function; it
 # validates its arguments (`plans.py`), builds the `UnderstandDeps` of this process (`wiring.py`)
 # and calls `run`. What each call is (`calls.py`) and what is saved (`outputs.py`) are decided
 # from values; this shell builds the model through the real provider factory, reads and writes
-# the files, and returns the findings of what goes in and out next to the answers.
+# the files.
 # meiva:link meiva/understand/README.md
 
 from __future__ import annotations
@@ -26,17 +25,8 @@ from base.lm.catalog import ModelCatalog
 from base.lm.catalog.provider_keys import ProviderKeys
 from base.lm.effort import ReasoningEffort
 from base.lm.usage.metering import unmeter
-from meiva import security
 from meiva.sdk_surface.batch import run_batch
 from meiva.sdk_surface.pure.media.attach.attach_plan import resolve_in
-from meiva.sdk_surface.pure.media.finding_plan import (
-    CarriedFindingsError,
-    FindingDelivery,
-    Findings,
-    Scanned,
-    findings_of,
-    gather,
-)
 from meiva.understand import calls, outputs, routing
 from meiva.understand.calls import MediaSettings, ModelCall
 from meiva.understand.content import (
@@ -106,54 +96,29 @@ class UnderstandDeps:
 
 
 # meiva:note
-# Answer every target of the plan, in input order, and save each answer. The findings of every
-# input and answer are handed to `meiva.security.deliver` once, with the process facts the caller
-# read (`delivery`), also when a target fails after its input was scanned or a save fails. The
+# Answer every target of the plan, in input order, and save each answer. The
 # per-invoke bound lives in the provider client (the chat model's timeout) rather than a
 # batch-layer wait_for: asyncio.run's loop close waits for to_thread executor threads, so a
 # wait_for timeout would not return until the wedged SDK call finished anyway. The SDK timeout
 # makes the worker thread end on its own, and invoke_text's retry restarts the bounded call.
-def run(plan: Plan, deps: UnderstandDeps, delivery: FindingDelivery) -> list[str]:
-    try:
-        answered = gather(
-            asyncio.run(
-                run_batch(
-                    list(plan.targets),
-                    lambda t: _understand_one(
-                        deps,
-                        prompt=t.prompt,
-                        text=t.text,
-                        paths=t.paths,
-                        effort=plan.effort,
-                    ),
-                    plan.max_concurrent,
-                )
-            )
-        )
-    except CarriedFindingsError as failed:
-        error = security.deliver_kept(delivery, failed)
-    else:
-        findings: Findings = (
-            *answered.findings,
-            *(
-                finding
-                for result in answered.value
-                for finding in findings_of(result, "understand.output")
+def run(plan: Plan, deps: UnderstandDeps) -> list[str]:
+    answers = asyncio.run(
+        run_batch(
+            list(plan.targets),
+            lambda t: _understand_one(
+                deps, prompt=t.prompt, text=t.text, paths=t.paths, effort=plan.effort
             ),
+            plan.max_concurrent,
         )
-        try:
-            for target, result in zip(plan.targets, answered.value, strict=True):
-                _save_result(deps, target, result)
-        finally:
-            security.deliver(delivery, findings)
-        return answered.value
-    raise error
+    )
+    for target, result in zip(plan.targets, answers, strict=True):
+        _save_result(deps, target, result)
+    return answers
 
 
 # meiva:note
 # Synchronous unit of work, one prompt against one source; split out so the asyncio layer can
-# schedule multiple copies via `asyncio.to_thread`. The findings of the input ride with the answer,
-# and with the failure when reading or answering fails after the scan.
+# schedule multiple copies via `asyncio.to_thread`.
 def _understand_one(
     deps: UnderstandDeps,
     *,
@@ -161,18 +126,13 @@ def _understand_one(
     text: str | None,
     paths: tuple[str | Path, ...] | None,
     effort: str | ReasoningEffort,
-) -> Scanned[str]:
+) -> str:
     if text is not None:
-        findings = findings_of(text, "understand.input")
-        try:
-            answer = _call_text(
-                deps,
-                [{"type": "text", "text": text}, {"type": "text", "text": prompt}],
-                effort=effort,
-            )
-        except Exception as error:
-            raise CarriedFindingsError(error, findings) from error
-        return Scanned(answer, findings)
+        return _call_text(
+            deps,
+            [{"type": "text", "text": text}, {"type": "text", "text": prompt}],
+            effort=effort,
+        )
     assert paths is not None  # noqa: S101 — validated by caller
     return _understand_paths(deps, paths, prompt, effort=effort)
 
@@ -192,45 +152,31 @@ def _read_text_file(p: Path) -> str:
 
 # meiva:note
 # Read the file `path` names as one part: a media file (image, video, audio, PDF by suffix) as its
-# bytes, MIME type and (for images) pixel dimensions, any other file as UTF-8 text, which is also
-# scanned.
-def _read_part(deps: UnderstandDeps, path: str | Path) -> Scanned[Part]:
+# bytes, MIME type and (for images) pixel dimensions, any other file as UTF-8 text.
+def _read_part(deps: UnderstandDeps, path: str | Path) -> Part:
     p = resolve_in(deps.base_dir, Path(path).expanduser())
     if not p.is_file():
         raise FileNotFoundError(f"path {str(path)!r} does not name an existing file ({p})")
     mime = calls.media_mime(p.suffix)
     if mime is not None:
         dimensions = image_dimensions(p) if media_type_for_mime(mime) == "image" else None
-        return Scanned(
-            MediaPart(path=str(path), mime=mime, data=p.read_bytes(), dimensions=dimensions)
-        )
-    content = _read_text_file(p)
-    return Scanned(TextPart(content), findings_of(content, "understand.input"))
+        return MediaPart(path=str(path), mime=mime, data=p.read_bytes(), dimensions=dimensions)
+    return TextPart(_read_text_file(p))
 
 
 # meiva:note
 # Answer `prompt` over several files in ONE model call. The content types present pick the one
 # model (`routing.route`), whose provider receives the media blocks built for it; text files become
 # text parts. Part order follows `paths`, prompt last. Routing, effort, size and image-dimension
-# refusals happen before any model is built. The findings of the files read so far ride with the
-# answer, and with the failure when reading or answering fails.
+# refusals happen before any model is built.
 def _understand_paths(
     deps: UnderstandDeps,
     paths: tuple[str | Path, ...],
     prompt: str,
     effort: str | ReasoningEffort,
-) -> Scanned[str]:
-    parts: list[Part] = []
-    found: Findings = ()
-    try:
-        for path in paths:
-            read = _read_part(deps, path)
-            parts.append(read.value)
-            found = (*found, *read.findings)
-        answer = _call_paths(deps, parts, prompt, effort=effort)
-    except Exception as error:
-        raise CarriedFindingsError(error, found) from error
-    return Scanned(answer, found)
+) -> str:
+    parts = [_read_part(deps, path) for path in paths]
+    return _call_paths(deps, parts, prompt, effort=effort)
 
 
 # meiva:note

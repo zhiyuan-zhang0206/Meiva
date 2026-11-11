@@ -10,15 +10,12 @@ from base.config.service_read import ConfigAuthority
 from base.host.env.agent_slices import ModelOverrides
 from base.lm.catalog import ModelCatalog
 from base.lm.catalog.provider_keys import ProviderKeys
-from meiva.sdk_surface import agent_identity
 from meiva.sdk_surface import settings as sdk_settings
-from meiva.sdk_surface.injection_check import InjectionCheckInputs
-from meiva.sdk_surface.pure.media.finding_plan import FindingDelivery
 from meiva.web.configs import BraveConfig, DeepSeekFetchConfig, DeepSeekSearchConfig, JinaConfig
 from meiva.web.deps import FetchDeps, FetchModel, SearchDeps, reader_provider, search_provider
 from meiva.web.errors import FetchError
 
-__all__ = ["fetch_deps", "fetch_deps_for", "injection_inputs", "search_deps", "search_deps_for"]
+__all__ = ["fetch_deps", "fetch_deps_for", "search_deps", "search_deps_for"]
 
 
 # meiva:note
@@ -49,7 +46,7 @@ def search_deps_for(authority: ConfigAuthority, *, rng: random.Random) -> Search
     )
 
 
-def fetch_deps(delivery: FindingDelivery, *, rng: random.Random) -> FetchDeps:
+def fetch_deps(*, rng: random.Random) -> FetchDeps:
     authority = sdk_settings.config_authority()
     try:
         catalog = sdk_settings.model_catalog()
@@ -65,8 +62,6 @@ def fetch_deps(delivery: FindingDelivery, *, rng: random.Random) -> FetchDeps:
         catalog=catalog,
         keys=keys,
         overrides=overrides,
-        delivery_active=delivery.active,
-        agent_id=agent_identity.agent_id(),
         now=sdk_settings.clock().now,
         rng=rng,
     )
@@ -78,8 +73,6 @@ def fetch_deps_for(
     catalog: ModelCatalog,
     keys: ProviderKeys,
     overrides: ModelOverrides,
-    delivery_active: bool,
-    agent_id: int | None,
     now: Callable[[], datetime],
     rng: random.Random,
 ) -> FetchDeps:
@@ -112,37 +105,5 @@ def fetch_deps_for(
             overrides=overrides,
             now=now,
         ),
-        injection=injection_inputs(
-            authority,
-            catalog,
-            keys=keys,
-            agent_id=agent_id,
-            delivery_active=delivery_active,
-            now=now,
-        ),
         rng=rng,
-    )
-
-
-# meiva:note
-# The inputs of one page check: the three service fields of `authority`, the catalog the model is
-# looked up in, the agent the usage rows are billed to and whether a finding has anywhere to go.
-def injection_inputs(
-    authority: ConfigAuthority,
-    catalog: ModelCatalog,
-    *,
-    keys: ProviderKeys,
-    agent_id: int | None,
-    delivery_active: bool,
-    now: Callable[[], datetime],
-) -> InjectionCheckInputs:
-    return InjectionCheckInputs(
-        enabled=bool(authority.service_field_value("web_fetch_injection_check_enabled")),
-        model=authority.service_field_value("web_fetch_injection_model"),
-        threshold=authority.service_field_value("web_fetch_injection_threshold"),
-        catalog=catalog,
-        keys=keys,
-        agent_id=agent_id,
-        delivery_active=delivery_active,
-        now=now,
     )

@@ -1,12 +1,11 @@
 # meiva:note
-# The `# Capabilities` section is the system prompt's single index of available skills and live MCP servers, rendering only non-empty halves and omitting the section when both are empty. It directs the agent to match every task against the index before starting so established playbooks and domain capabilities are not skipped or rebuilt. Skill resolution shares one resolver across the index and preloaded skills (`skill_selection.py`), folding descendants under selected ancestor entry skills on wildcard selection while preserving full catalog membership for drift tracking and preloading. Untrusted skill descriptions are flattened and truncated to one 300-character line, and injection-flagged descriptions are withheld from the index and excluded from recall candidates along with preloaded skills. Disable checks honor the configured entries and the runtime removals folded into `SkillView.disabled`, so a disabled surface renders nothing. Every function here is a function of its `SkillView` and server list; the live reads that fill them are in `live.py`. Index drift diffs live membership in one scan and caps additions at 20 lines while advancing the snapshot over full membership. Prompt assembly records no skill attribution and requests no capability report in final output.
+# The `# Capabilities` section is the system prompt's single index of available skills and live MCP servers, rendering only non-empty halves and omitting the section when both are empty. It directs the agent to match every task against the index before starting so established playbooks and domain capabilities are not skipped or rebuilt. Skill resolution shares one resolver across the index and preloaded skills (`skill_selection.py`), folding descendants under selected ancestor entry skills on wildcard selection while preserving full catalog membership for drift tracking and preloading. Skill descriptions are flattened and truncated to one 300-character line; recall candidates exclude preloaded skills. Disable checks honor the configured entries and the runtime removals folded into `SkillView.disabled`, so a disabled surface renders nothing. Every function here is a function of its `SkillView` and server list; the live reads that fill them are in `live.py`. Index drift diffs live membership in one scan and caps additions at 20 lines while advancing the snapshot over full membership. Prompt assembly records no skill attribution and requests no capability report in final output.
 from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import NamedTuple
 
-from base.agents.messages.injection_scan import is_flagged
 from base.packages.skills.names import match_key
 from base.packages.skills.tree import Skill, identifier, target
 
@@ -33,24 +32,12 @@ def _one_line(description: str) -> str:
     return flat if len(flat) <= _DESC_MAX_CHARS else flat[: _DESC_MAX_CHARS - 1] + "…"
 
 
-def _index_description(skill: Skill) -> str | None:
-    description = skill["description"]
-    return None if is_flagged(description) else _one_line(description)
-
-
 def index_entry(path: str, description: str) -> str:
     return f"- `meiva.skills.{path}` — {description}"
 
 
 def _index_line(skill: Skill) -> str:
-    path = target(skill)
-    description = _index_description(skill)
-    if description is None:
-        return (
-            f"- `meiva.skills.{path}` — [security-flagged] description withheld "
-            f"(load the body with `meiva.help(meiva.skills.{path})` and judge it yourself)"
-        )
-    return index_entry(path, description)
+    return index_entry(target(skill), _one_line(skill["description"]))
 
 
 def recall_candidates(view: SkillView) -> list[RecallCandidate]:
@@ -58,10 +45,9 @@ def recall_candidates(view: SkillView) -> list[RecallCandidate]:
     candidates: list[RecallCandidate] = []
     for skill in indexed_skills(view):
         ident = identifier(skill)
-        description = _index_description(skill)
-        if description is None or ident in preloaded:
+        if ident in preloaded:
             continue
-        candidates.append(RecallCandidate(ident, description, target(skill)))
+        candidates.append(RecallCandidate(ident, _one_line(skill["description"]), target(skill)))
     return candidates
 
 

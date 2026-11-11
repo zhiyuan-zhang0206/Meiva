@@ -2,8 +2,7 @@
 # The harness the meiva.understand tests share: `meiva.understand` run over deps built from the
 # test's configuration authority and catalog, with the text and media models scripted behind the
 # real provider factory (the deps name the `llm_override` seam). Relative paths resolve against
-# `tmp_path`, nothing is saved unless a test gives an output site, and findings are dropped
-# unless a test binds an exec turn (`use_exec_turn`; the fixture unbinds it).
+# `tmp_path`, and nothing is saved unless a test gives an output site.
 
 from __future__ import annotations
 
@@ -26,8 +25,6 @@ from base.config.tests.configuration import model_overrides
 from base.lm.catalog import ModelCatalog
 from base.lm.effort import ReasoningEffort
 from base.packages.tests.model_catalog import inert_keys
-from meiva.sdk_surface import process_context
-from meiva.sdk_surface.pure.media.finding_plan import FindingDelivery
 from meiva.sdk_surface.pure.plans.batch_plan import DEFAULT_BATCH_MAX_CONCURRENT
 from meiva.tests.fixtures.scripted_chat_model import OVERRIDE, Script, ScriptedModels
 from meiva.understand import answer, plans, wiring
@@ -59,8 +56,7 @@ def run_understand(
     effort: str | ReasoningEffort = ReasoningEffort.MAX,
     max_concurrent: int | None = DEFAULT_BATCH_MAX_CONCURRENT,
 ) -> list[str]:
-    delivery = FindingDelivery(enabled=True, in_turn=process_context.in_exec_turn())
-    return answer.run(plans.normalize(targets, effort, max_concurrent), deps, delivery)
+    return answer.run(plans.normalize(targets, effort, max_concurrent), deps)
 
 
 # meiva:note
@@ -111,15 +107,6 @@ class UnderstandHarness:
     # Configure the model of some content types (`text`, `image`, `pdf`, `audio`, `video`).
     def configure_models(self, **changes: str) -> None:
         self.configure(models=dataclasses.replace(self.deps.models, **changes))
-
-    # meiva:note
-    # Bind an exec turn in this process and return its state update, where the findings land.
-    @staticmethod
-    def use_exec_turn() -> dict[str, Any]:
-        update: dict[str, Any] = {}
-        process_context.set_state(object())
-        process_context.set_state_update(update)
-        return update
 
     def save_to(self, directory: Path) -> None:
         timers = ManualTimers()
@@ -172,7 +159,7 @@ def fake_pdf(tmp_path: Path) -> Path:
 
 # meiva:note
 # The deps of the test configuration: relative paths resolve against `tmp_path`, the answer
-# models are scripted, nothing is saved and findings are dropped.
+# models are scripted and nothing is saved.
 @pytest.fixture
 def understand_harness(
     scripted_models: ScriptedModels,
@@ -191,4 +178,3 @@ def understand_harness(
         rng=seeded_rng(),
     )
     yield UnderstandHarness(dataclasses.replace(deps, llm_override=OVERRIDE), scripted_models)
-    process_context.unbind_exec_turn()

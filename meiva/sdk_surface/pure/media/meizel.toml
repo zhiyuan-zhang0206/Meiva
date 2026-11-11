@@ -1,4 +1,4 @@
-exports = ["attach", "finding_plan.py", "injection"]
+exports = ["attach"]
 
 [purity]
 "." = "strict"

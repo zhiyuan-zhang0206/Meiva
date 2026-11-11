@@ -28,8 +28,6 @@ every other role by scram.
 
 ## User rulings (do NOT "fix")
 
-- **Prompt-injection scan off is deliberate**: `MEIVA_SECURITY_SCAN_ENABLED=false`
-  — user ruling (little web browsing, low injection worry). Not a config drift.
 
 ## Open debt
 

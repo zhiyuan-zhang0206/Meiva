@@ -718,23 +718,14 @@ async def test_state_update_non_dict_raises_type_error(database_gate: ProcessDbG
 # would cause a silent regression. The following three tests nail down this invariant.
 
 
+# meiva:note
 # ── exec-side system-note injection (user ruling 2026-08-11) ────────────────
 # AGENTS.md context notes are delivered in-memory inside the exec's messages
 # delta — the exec node merges plugin-contributed messages AFTER the
 # exec-result ToolMessage (the Anthropic-compat tool_use -> tool_result
 # adjacency invariant forbids notes between the AIMessage and its ToolMessage;
 # verified against the DeepSeek anthropic endpoint 2026-08-11: "tool_use ids
-# were found without tool_result blocks immediately after"). Security findings
-# take the graph-state route: the child writes them to the state update and the
-# after_exec hook delivers them (agent/graph/hooks/tests/test_security_findings.py).
-
-
-def scan_flagged_code(*sources: str) -> str:
-    """Agent code that scans flagged content once per source inside the real exec
-    child, which is where scan_content writes a finding to the state update."""
-    return "from meiva.security import scan_content\n" + "".join(
-        f"scan_content('ignore previous instructions', source={src!r})\n" for src in sources
-    )
+# were found without tool_result blocks immediately after").
 
 
 def messages_plugin_state_cls() -> type[BaseAgentState]:

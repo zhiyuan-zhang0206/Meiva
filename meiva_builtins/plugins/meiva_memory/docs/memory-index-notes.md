@@ -21,9 +21,7 @@ to state.
 
 `memory_index_note` renders the pool's `MEMORY.md` at `meiva.memory.PATH` as one
 system note, behind a framing that states location and mechanics only. The text
-is scanned with `scan_content` before injection (audit round-2 up-security-trust
-P0-2); when flagged, the note keeps the content and prefixes the visible security
-warning. The note returns None
+is injected as it is. The note returns None
 when the layer is off (or eval-isolated) and when the index file is missing or
 empty.
 

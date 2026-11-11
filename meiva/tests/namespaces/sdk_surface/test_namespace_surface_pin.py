@@ -8,12 +8,9 @@ deliberate change to a namespace edits its list here in the same PR.
 
 from __future__ import annotations
 
-import inspect
-
 import pytest
 
 import meiva
-from meiva import security
 from meiva.sdk_surface.discovery import agent_visible_names
 
 _SURFACE: dict[str, list[str]] = {
@@ -70,9 +67,6 @@ _SURFACE: dict[str, list[str]] = {
     "files": ["append", "delete", "edit", "glob", "read", "write"],
     "cwd": ["get", "set"],
     "shell": ["SessionHandle", "run", "run_background", "sessions"],
-    # Not a top-level namespace: the scan the other namespaces run their results through. Its
-    # three names are still what `meiva.help` and the docs lint treat as its surface.
-    "security": ["SecurityFindingEntry", "is_flagged", "scan_content"],
 }
 
 _TOP_LEVEL = [
@@ -104,7 +98,6 @@ def test_the_agent_visible_names_of_a_core_namespace_are_pinned(namespace: str) 
         "files": meiva.files,
         "cwd": meiva.cwd,
         "shell": meiva.shell,
-        "security": security,
     }[namespace]
     assert agent_visible_names(module) == _SURFACE[namespace]
 
@@ -127,20 +120,6 @@ def test_the_connection_and_context_names_are_not_shown_to_the_agent() -> None:
     for name in ("context", "DB", "REDIS"):
         assert f"meiva.{name}" not in shown
     assert "context.sql" not in shown
-
-
-@pytest.mark.parametrize(
-    ("function", "signature"),
-    [
-        (security.is_flagged, "(content: str) -> bool"),
-        (security.scan_content, "(content: str, source: str = 'unknown') -> str"),
-    ],
-    ids=["is_flagged", "scan_content"],
-)
-def test_the_signatures_behind_the_visible_names_are_pinned(
-    function: object, signature: str
-) -> None:
-    assert str(inspect.signature(function)) == signature  # pyright: ignore[reportArgumentType]
 
 
 # meiva:note

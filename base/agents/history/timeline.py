@@ -36,7 +36,7 @@ __all__ = [
 
 
 # meiva:note
-# system_marker.show_timestamp hides the ts for ambient context and the one-time guidance notes (compact reminder, SDK hint, agent reply, silent idle-continue, security, exec timeout, timezone, the to_user soft limit, skipped SDK-expand entries); heartbeats, lifecycle_* transitions, task notifications, and NEW_SKILLS keep it. NEW_SKILLS stays visible deliberately: the drift note is the only place that mid-window install is visible. The split is closed over NoteTag — a new member needs an explicit decision.
+# system_marker.show_timestamp hides the ts for ambient context and the one-time guidance notes (compact reminder, SDK hint, agent reply, silent idle-continue, historical security notes, exec timeout, timezone, the to_user soft limit, skipped SDK-expand entries); heartbeats, lifecycle_* transitions, task notifications, and NEW_SKILLS keep it. NEW_SKILLS stays visible deliberately: the drift note is the only place that mid-window install is visible. The split is closed over NoteTag — a new member needs an explicit decision.
 # meiva:link base/agents/history/docs/timeline/note-timestamp-policy.md
 _NO_TIMESTAMP_NOTE_TAGS = frozenset(
     {

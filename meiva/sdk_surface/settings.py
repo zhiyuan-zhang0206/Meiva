@@ -151,10 +151,6 @@ def agent_setting(name: Literal["llm_model"]) -> str: ...
 
 
 @overload
-def agent_setting(name: Literal["security_scan_enabled"]) -> bool: ...
-
-
-@overload
 def agent_setting(name: Literal["heartbeat_pause_max_seconds"]) -> float: ...
 
 

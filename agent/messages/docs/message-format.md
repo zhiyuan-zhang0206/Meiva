@@ -10,7 +10,6 @@ Message formats exchanged between agent, LLM, users, and other agents. `agent/me
 - Framework text the model must read as framework-originated — not as the human or a peer — is wrapped in a pair of tags: `<system_note>` on its own line, the text, then `</system_note>` on its own line. `base/lm/system_note.py` owns them: `wrap_system_note` is the one construction point, `SYSTEM_NOTE_LEAD` / `SYSTEM_NOTE_TRAIL` are the tags with the newline that always separates them from a body, and `unwrap_system_note` is the reader's inverse. The leaf sits in the LLM layer because both sides already reach it (attach packing and the message builders).
 - Writers: `system_note_message` (every NoteTag note), the compaction instruction, the compact summary (`compose_summary_message`), the attachment block, and every system-sourced inbound (below).
 - Inbounds keep the offset contract: `inbound_head` returns the open tag as the header, `inbound_tail` the close tag after the body, and `meiva_inbound_body_start` stays the header length. Readers render `inbound_body(text, source=…, body_start=…)` (drops the close tag) or `unwrap_system_note` when the whole payload is one note, so the framing never reaches a rendered timeline entry or catalog line.
-- The injection scan (`base/agents/messages/injection_scan.py`) triggers on both tags: a message that tries to forge or close a system note is flagged like any other forged structural markup.
 
 ### Inbound Messages (`inbound_message`)
 - `inbound_message(*, content, source, inbound_id, body_start, times, image_urls=)` — envelope wrapper (the header is `base/agents/messages/envelope.py:inbound_head`; `meiva_inbound_body_start` records its length so readers cut the content out by offset and never parse the header; the sender is `meiva_source`). Inbounds written before the field existed show whole, header included, in the hierarchy catalog. A system source (`system`, `system:<subtype>`) is wrapped as a system note (see above); every other source's header is a self-contained sender line.
@@ -33,7 +32,6 @@ stamp. Arrival-time formatting and source validation keep their existing order.
 
 ### System Messages (`system_note_message`)
 - Builds system notification messages such as heartbeats, watcher wake-up calls, and process-lifecycle transitions; the content is wrapped by `wrap_system_note`, so the model reads where the note ends
-- `security_note_message(*, source, triggers, picked_up_at, created_at=)` is the one writer of the SECURITY note for a prompt-injection scan finding (source + matched triggers, never the content); the claim node (behind a flagged inbound) and the exec node (child-drained findings) both use it
 
 ### Exec Output (`exec_output_message`)
 - Wraps sandbox execution results from `execute_code`
@@ -44,7 +42,7 @@ stamp. Arrival-time formatting and source validation keep their existing order.
 - The media message of the files one exec call registered with `meiva.self.attach`; see [Attachment Message](attachment-message.md)
 
 ### Chat Inbound Assembly (`_chat_inbound.py`)
-- Assembles `kind='chat'` inbound rows into `(HumanMessage, finding)`: plain text via envelope wrapper as string message; multimodal inbound places text as first block, then uploads referenced images as native base64 blocks inline to the model. `finding` is the injection-scan result for the row's text (None when clean); the claim node owns delivering it as a SECURITY note
+- Assembles `kind='chat'` inbound rows into a `HumanMessage`: plain text via envelope wrapper as string message; multimodal inbound places text as first block, then uploads referenced images as native base64 blocks inline to the model.
 - Split out from `claim/node.py`, focused on multimodal image inline path
 
 ## Key Dependencies
@@ -56,7 +54,6 @@ stamp. Arrival-time formatting and source validation keep their existing order.
 ## Entry Points
 - `agent/messages/__init__.py:inbound_message(*, content, source, inbound_id, body_start, times, image_urls=)` — envelope-wrapped inbound message
 - `agent/messages/__init__.py:system_note_message(...)` — system notification (with `NoteTag`)
-- `agent/messages/__init__.py:security_note_message(...)` — SECURITY note for one injection-scan finding
 - `agent/messages/__init__.py:exec_output_message(...)` — execution output; one shape for every ending. The structured record is `meiva_exec_status` (`ExecStatus`: completed / failed / timed_out / cancelled / halted / not_run / unknown), `meiva_exec_started_at` (the end is `meiva_created_at`), `meiva_exec_ms` and `meiva_exec_body_start` (where the body begins after the header); readers use these fields and never parse the header text, which is for the model. Results written before these fields existed carry no offset; the hierarchy catalog shows them whole, header included, instead of parsing the header
 - `agent/messages/__init__.py:attach_message(...)` — the media message of the files attached by one exec call ([Attachment Message](attachment-message.md))
-- `agent/graph/claim/_chat_inbound.py` — chat inbound → (HumanMessage, scan finding) assembly (multimodal inline)
+- `agent/graph/claim/_chat_inbound.py` — chat inbound → HumanMessage assembly (multimodal inline)

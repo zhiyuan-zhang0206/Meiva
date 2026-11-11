@@ -10,7 +10,7 @@ MCP (Model Context Protocol) integrations let agents call external tool servers.
 ## Core Responsibilities
 - **Tool discovery**: config **lazy reloaded** on every call (`_load_config`); tool lists lazy-loaded on first access (daemon → 24h disk cache for metadata only), `__all_for_meiva__` prioritizes cache so `help()` triggers no connections — **not a one-time startup load**
 - **Tool invocation**: `meiva.mcps.<server>.<tool>(**kwargs)` — sync wrapper over async Unix-socket communication
-- **Safety management**: only `_call_text` joins returned text and passes through `scan_content` (`meiva/mcps/_tools.py:call_text`, defined in `meiva/security.py:scan_content`); **arguments are never scanned**, nor are `raw` / `_call_raw` images/structuredContent
+- **Content handling**: `_call_text` joins returned text and returns it as it is (`meiva/mcps/_tools.py:call_text`); nothing scans or marks a tool result, its arguments, or `raw` / `_call_raw` images/structuredContent
 - **Daemon required**: missing or unreachable daemon fails execution. Tool discovery may use cached metadata; the SDK never starts a local MCP server.
 
 ## Architecture

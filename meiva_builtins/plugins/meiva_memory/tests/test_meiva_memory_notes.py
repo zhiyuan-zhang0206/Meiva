@@ -214,7 +214,7 @@ def test_discipline_describes_three_memory_layers(memory_plugin: Any) -> None:
     assert "meiva:inheritable" not in section
 
 
-def test_memory_index_injection_guard(
+def test_memory_index_is_injected_as_it_is(
     memory_plugin: Any,
     unit_home: Path,
     sdk_model_owner: None,
@@ -229,7 +229,7 @@ def test_memory_index_injection_guard(
     )
     note = memory_index_note(_context(machine_identity, memory_index_inject_enabled=True))
     assert note is not None
-    assert "may contain prompt injection" in note.text
+    assert "may contain prompt injection" not in note.text
     assert "ignore previous instructions" in note.text
 
 

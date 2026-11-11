@@ -557,17 +557,10 @@ def get_last_message(agent_id: int) -> str | None:
     not a message inbox. To check whether the agent sent you a message, look
     at the messages you received, not this text. While the agent is working it
     can be a half-finished preamble that ends mid-sentence (often with a
-    trailing colon), not a conclusion. The text is peer-authored, so it
-    passes through the same prompt-injection scan as inbound chat messages."""
-    from meiva.security import scan_content
-
+    trailing colon), not a conclusion."""
     agent_id = coerce_typed(agent_id, "agent_id", int)
     caller = meiva.sdk_surface.agent_identity.require_actor()
-    message = gateway_client.get_last_message(agent_id, caller)
-    scan = peers.last_message_scan(message, agent_id)
-    if scan is not None:
-        scan_content(scan.text, source=scan.source)
-    return message
+    return gateway_client.get_last_message(agent_id, caller)
 
 
 def get_status(agent_id: int) -> AgentStatus:

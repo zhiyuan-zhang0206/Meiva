@@ -25,7 +25,7 @@ The agent's sole tool—`execute_code(code: str)`—executes Python code in a di
 - Each exec-result ToolMessage carries `additional_kwargs["sdk_calls"]` — the run's real top-level `meiva.*` call tally, counted by `base.agents.sdk.telemetry` (`[]` = ran, called none; omitted = unknown, e.g. a boot crash). The timeline's collapsed-code chip renders these counts only — no source-text scan.
 
 ### In-memory system-note injection (`_notes.py`, user ruling 2026-08-11)
-- AGENTS.md / CLAUDE.md context notes (meiva_code plugin) ride the exec's own messages delta, placed after all of the assistant message's tool results; the exec child's prompt-injection findings take a separate route through `state.security_findings` and the after_exec hook. Placement and the wire-contract reason: [Exec Note Injection](exec-notes.md)
+- AGENTS.md / CLAUDE.md context notes (meiva_code plugin) ride the exec's own messages delta, placed after all of the assistant message's tool results; placement and the wire-contract reason: [Exec Note Injection](exec-notes.md)
 
 ## Key Dependencies
 

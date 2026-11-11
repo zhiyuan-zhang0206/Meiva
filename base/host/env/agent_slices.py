@@ -249,7 +249,6 @@ class AgentSlices:
         domain: str,
         field: Literal[
             "understanding_enabled",
-            "security_scan_enabled",
             "message_timestamps",
             "workspace_in_system_prompt",
             "prompt_sdk_overview_enabled",

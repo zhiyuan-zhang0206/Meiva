@@ -1,5 +1,7 @@
 # The SDK keeps no buffers: a finding goes to the graph state, an audit fact goes to the event path
 
+> Status 2026-11-12: the prompt-injection findings half of this record is moot: the scan, its `security_findings` channel and `meiva/security.py` were deleted ([no content scan](../../data/security/2026-11-12-no-content-scan.md)). The skill-invocation half stands.
+
 ## Context
 
 Two process-level containers lived in the `meiva` package. `meiva/security.py::_pending_findings` held

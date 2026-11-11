@@ -10,7 +10,6 @@ from pathlib import Path
 from meiva.files import agent_workspace
 from meiva.sdk_surface import agent_identity, process_context
 from meiva.sdk_surface.validation import coerce_str, coerce_typed
-from meiva.security import scan_content
 
 from . import background, background_plan, log_ring
 from . import sessions as sessions
@@ -107,16 +106,7 @@ def run(
         timeout=timeout,
         check=False,
     )
-    # The command itself is deliberately not part of `source`: it routinely
-    # carries credentials (a curl with an Authorization header), and the
-    # findings file is not a place to copy them into. Both streams are
-    # scanned: stdout is the return value itself, stderr is exposed on the
-    # result, so either one can carry fetched content into the agent.
-    return ShellResult(
-        scan_content(completed.stdout, source="shell.run"),
-        returncode=completed.returncode,
-        stderr=scan_content(completed.stderr, source="shell.run"),
-    )
+    return ShellResult(completed.stdout, returncode=completed.returncode, stderr=completed.stderr)
 
 
 def run_background(

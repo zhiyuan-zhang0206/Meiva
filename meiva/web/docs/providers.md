@@ -21,7 +21,7 @@ The defaults stay on the incumbent pair: adding a provider must not move them, a
 
 **Search.** `kind` collapses to `web`: the DeepSeek tool returns one result list, so Brave's news / videos / discussions partitions are absent (a caller sees fewer `kind` values, never an error). `snippet` is the tool's snippet, or its 600-800 character `summary` when the snippet is empty. `rerank_score`, `authority`, `date` and `site_name` have no field on `SearchResult` and are dropped. The two engines order results differently rather than one dominating: DeepSeek's reranker favours primary and official sources and repeats one site's pages; Brave surfaces more popular tutorial content, keeps the query language, and honours `freshness` while DeepSeek honours query operators such as `after:`.
 
-**Fetch.** DeepSeek's body is escaped Markdown (`\#`, `\.`, `https\:\/\/…`); `fetch()` still truncates at `max_chars`, still answers the prompt with the web-fetch model, and still runs the injection check on the body. There is no wall page to detect — an unreadable page is 403/404, surfaced as `FetchError` carrying the provider's message — so `_WALL_MARKERS` stays a Jina-path guard. Jina renders JavaScript and returns the full page including navigation; DeepSeek returns a cleaner, shorter body but does not render, and fails more often (one of five evaluation URLs).
+**Fetch.** DeepSeek's body is escaped Markdown (`\#`, `\.`, `https\:\/\/…`); `fetch()` still truncates at `max_chars` and still answers the prompt with the web-fetch model. There is no wall page to detect — an unreadable page is 403/404, surfaced as `FetchError` carrying the provider's message — so `_WALL_MARKERS` stays a Jina-path guard. Jina renders JavaScript and returns the full page including navigation; DeepSeek returns a cleaner, shorter body but does not render, and fails more often (one of five evaluation URLs).
 
 ## Request rate
 
@@ -31,4 +31,4 @@ The deps carry the rate as a value (`qps`); `runner.py` builds one limiter per b
 
 The DeepSeek path authenticates with DEEPSEEK_API_KEY, clamps count to the DeepSeek result ceiling, maps each result to SearchResult with kind web and the snippet-or-summary text, waits on the batch's rate limiter before every request attempt, and raises SearchError or FetchError carrying the provider's own error message.
 
-web_search_provider and web_fetch_reader select the provider when the deps are built, both default to the incumbent brave and jina, and a provider switch leaves the fetch answer step and the injection check unchanged.
+web_search_provider and web_fetch_reader select the provider when the deps are built, both default to the incumbent brave and jina, and a provider switch leaves the fetch answer step unchanged.

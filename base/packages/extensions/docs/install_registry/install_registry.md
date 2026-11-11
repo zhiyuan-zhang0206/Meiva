@@ -39,7 +39,7 @@ See [update policy and explicit defaults inputs](policy-inputs.md).
 ## Trust tiers
 
 `trust` records how far a package's *content* may be trusted, written where the
-content enters; `trust_by_name()` classifies a whole tree in one read.
+content enters. It is a recorded label: no runtime code consults it.
 
 | tier | means | written by |
 |---|---|---|

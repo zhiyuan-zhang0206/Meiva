@@ -25,8 +25,6 @@ from base.agents.messages.inbound_images import (
     inbound_upload_files,
     parse_upload_url,
 )
-from base.agents.messages.injection_scan import scan_inbound_content
-from base.agents.messages.security_finding import SecurityFindingEntry
 from base.agents.messages.timestamp_policy import TimestampPolicy
 from base.agents.upload_delivery.paths import UploadClient, fetch_upload_b64
 from base.log import logger
@@ -130,14 +128,11 @@ def _build_chat_inbound_with_uploads(
     image_uploads: list[_DeliveredImageUpload],
     *,
     picked_up_at: datetime,
-    scan_src: str,
-    read_security_enabled: Callable[[], bool],
     envelope_inputs: TimestampPolicy,
     expand_command: Callable[[str], str],
     gateway: Callable[[], UploadClient],
-) -> tuple[HumanMessage, SecurityFindingEntry | None]:
+) -> HumanMessage:
     raw_text = expand_command(item.content)
-    finding = scan_inbound_content(raw_text, source=scan_src, enabled=read_security_enabled())
     head = inbound_head(item.source, created_at=item.created_at, inputs=envelope_inputs)
     content: list[dict[str, Any]] = [
         {"type": "text", "text": head + raw_text + inbound_tail(item.source)}
@@ -169,44 +164,32 @@ def _build_chat_inbound_with_uploads(
         for img in image_uploads
     ]
     _attach_upload_files(message, item.agent_id, item.payload)
-    return message, finding
+    return message
 
 
+# meiva:note
+# Build the HumanMessage for a kind='chat' inbound row.
+#
+#     Plain text (no content_blocks payload): a `/<name> ...` composer message is
+#     expanded here — every command in it, in the order typed — into each
+#     command's template + the user's note, then envelope-wrapped into a string
+#     message. Multimodal (payload carries content_blocks):
+#     the text part is wrapped into a leading text block, then each referenced
+#     image upload is read off disk and inlined as a native base64 image block the
+#     model decodes; the reference urls ride on additional_kwargs for the timeline.
+#
+#     An image that cannot be read (deleted between send and claim, or a split
+#     deployment where the upload lives on the gateway not this runner) degrades to
+#     a "[image unavailable]" text note rather than crashing the claim — the miss
+#     is logged, the rest of the message still delivers.
 def build_chat_inbound(
     item: ClaimedInbound,
     *,
     picked_up_at: datetime,
-    read_security_enabled: Callable[[], bool],
     envelope_inputs: TimestampPolicy,
     expand_command: Callable[[str], str],
     gateway: Callable[[], UploadClient],
-) -> tuple[HumanMessage, SecurityFindingEntry | None]:
-    """Build the HumanMessage for a kind='chat' inbound row, plus its scan finding.
-
-    The second element is the injection-scan finding for the row's text, or None
-    when it is clean (or scanning is disabled). The caller owns delivering it —
-    the claim node appends a SECURITY note right behind the message.
-
-    Plain text (no content_blocks payload): a `/<name> ...` composer message is
-    expanded here — every command in it, in the order typed — into each
-    command's template + the user's note, then envelope-wrapped into a string
-    message. Multimodal (payload carries content_blocks):
-    the text part is wrapped into a leading text block, then each referenced
-    image upload is read off disk and inlined as a native base64 image block the
-    model decodes; the reference urls ride on additional_kwargs for the timeline.
-
-    An image that cannot be read (deleted between send and claim, or a split
-    deployment where the upload lives on the gateway not this runner) degrades to
-    a "[image unavailable]" text note rather than crashing the claim — the miss
-    is logged, the rest of the message still delivers.
-    """
-    # meiva:note
-    # Inbound chat is untrusted (a user, or a peer agent that may itself be injected), so
-    # its text is scanned before entering the conversation. The scan runs on the raw
-    # content before envelope wrapping: the framing around it is trusted text and must not
-    # trip the scan itself, and image blocks are binary.
-    # meiva:link agent/messages/docs/message-format.md
-    scan_src = f"inbound.chat:{item.source}"
+) -> HumanMessage:
     raw_blocks = item.payload.get("content_blocks") if item.payload else None
     image_uploads = _parse_image_uploads(item.agent_id, item.payload)
     if image_uploads:
@@ -214,15 +197,12 @@ def build_chat_inbound(
             item,
             image_uploads,
             picked_up_at=picked_up_at,
-            scan_src=scan_src,
-            read_security_enabled=read_security_enabled,
             envelope_inputs=envelope_inputs,
             expand_command=expand_command,
             gateway=gateway,
         )
     if not _is_object_list(raw_blocks):
         raw = expand_command(item.content)
-        finding = scan_inbound_content(raw, source=scan_src, enabled=read_security_enabled())
         head = inbound_head(item.source, created_at=item.created_at, inputs=envelope_inputs)
         message = inbound_message(
             content=head + raw + inbound_tail(item.source),
@@ -232,14 +212,13 @@ def build_chat_inbound(
             times=InboundTimes(arrived_at=item.created_at, picked_up_at=picked_up_at),
         )
         _attach_upload_files(message, item.agent_id, item.payload)
-        return message, finding
+        return message
     blocks: list[dict[str, Any]] = [
         {str(k): v for k, v in b.items()} for b in raw_blocks if _is_object_dict(b)
     ]
 
     text = "\n".join(str(b["text"]) for b in blocks if b.get("type") == "text")
     raw_text = expand_command(text)
-    finding = scan_inbound_content(raw_text, source=scan_src, enabled=read_security_enabled())
     head = inbound_head(item.source, created_at=item.created_at, inputs=envelope_inputs)
     content: list[dict[str, Any]] = [
         {"type": "text", "text": head + raw_text + inbound_tail(item.source)}
@@ -270,7 +249,7 @@ def build_chat_inbound(
         data_uri = f"data:{mime};base64,{b64}"
         content.append({"type": "image_url", "image_url": {"url": data_uri}})
         image_urls.append(url)
-    message = inbound_message(
+    return inbound_message(
         content=content,
         source=item.source,
         inbound_id=item.id,
@@ -278,4 +257,3 @@ def build_chat_inbound(
         times=InboundTimes(arrived_at=item.created_at, picked_up_at=picked_up_at),
         image_urls=image_urls,
     )
-    return message, finding

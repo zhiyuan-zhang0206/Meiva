@@ -5,7 +5,7 @@ exports = ["peers.py", "schedule_capability.py"]
 "contracts.py" = []
 "gateway_rows.py" = ["contracts.py", "row_text.py"]
 "schedule_capability.py" = []
-"tests" = ["__init__.py", "gateway_rows.py", "peers.py", "row_text.py"]
+"tests" = ["__init__.py", "gateway_rows.py", "row_text.py"]
 
 [purity]
 "contracts.py" = "strict"

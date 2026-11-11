@@ -48,8 +48,6 @@ STATIC_CHECKPOINT_MSGPACK_TYPES: frozenset[tuple[str, str]] = frozenset(
         ("agent.state_channels", "CapabilitiesState"),
         ("agent.state_channels", "CircuitState"),
         ("agent.state_channels", "SkillRecallState"),
-        # A list-channel element, not a sub-state: `BaseAgentState.security_findings`.
-        ("base.agents.messages.security_finding", "SecurityFindingEntry"),
     }
 )
 
@@ -92,6 +90,17 @@ class RetiredCheckpointType:
 
 
 RETIRED_CHECKPOINT_MSGPACK_TYPES: tuple[RetiredCheckpointType, ...] = (
+    RetiredCheckpointType(
+        module="base.agents.messages.security_finding",
+        name="SecurityFindingEntry",
+        retired_in="PENDINGSHA0",
+        retired_at=datetime(2026, 11, 12, 12, 0, 0, tzinfo=UTC),
+        note=(
+            "An element of the retired `security_findings` list channel (a prompt-injection scan "
+            "finding awaiting delivery). Deleted with the content scan; the channel was cleared "
+            "after every exec, so only a checkpoint cut between commit and delivery holds one."
+        ),
+    ),
     RetiredCheckpointType(
         module="base.agents.incarnation.native_work_models",
         name="NativeWorkTarget",

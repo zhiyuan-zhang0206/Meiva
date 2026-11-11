@@ -11,7 +11,6 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass, field
-from datetime import datetime
 from pathlib import Path
 from typing import TypeGuard
 
@@ -27,17 +26,15 @@ from agent.graph.hooks.compact import (
 )
 from agent.graph.prompt import context_notes
 from agent.hooks.compact_events import emit_compact_finished, emit_compact_started
-from agent.messages import NoteTag, security_note_message, system_note_message
+from agent.messages import NoteTag, system_note_message
 from agent.nodes import BEFORE_TURN, CLAIM, END
 from agent.ownership.hosted import turn_crash_marked
 from base.agents.context import MeivaContext
 from base.agents.messages.envelope import sender_class
 from base.agents.messages.inbound import InboundKind
-from base.agents.messages.injection_scan import scan_inbound_content
 from base.agents.messages.kwargs import MeivaMsgType
 from base.agents.messages.lifecycle_text import by_who, restart_accepted_text
 from base.agents.messages.reply_intent import delivery_disabled_entries
-from base.agents.messages.security_finding import SecurityFindingEntry
 from base.api_contracts.agent_contract import Harness
 from base.deploy.lifecycle.host_exit_message import HOST_RESTART_SOURCE
 from base.events.live.projection import Cancelled, CompactionMode, CompactionStatus
@@ -73,43 +70,6 @@ class BatchState:
     committed_chat_ids: list[int] = field(default_factory=list[int])
     failure_notes: int = 0
 
-    def append_scanned(
-        self,
-        message: BaseMessage,
-        finding: SecurityFindingEntry | None,
-        *,
-        now: datetime,
-    ) -> None:
-        """Append an inbound `message`; when its injection scan flagged it
-        (`finding`), the SECURITY note rides right behind it.
-
-        The finding is delivered here, in this claim's own delta — never parked
-        in process state for a later node — so it reaches exactly the agent
-        whose inbound it is, whatever other agent turns the host interleaves.
-        Claim runs between turns, with no tool_use awaiting its result, so a
-        note behind the message cannot split a tool_use -> tool_result pair.
-        """
-        self.new_msgs.extend(_scanned_messages(message, finding, now=now))
-
-
-def _scanned_messages(
-    message: BaseMessage,
-    finding: SecurityFindingEntry | None,
-    *,
-    now: datetime,
-) -> list[BaseMessage]:
-    if finding is None:
-        return [message]
-    return [
-        message,
-        security_note_message(
-            source=finding.source,
-            triggers=finding.triggers,
-            picked_up_at=now,
-            created_at=now,
-        ),
-    ]
-
 
 def _ts_prefix(ctx: MeivaContext) -> str:
     """Leading `[ts] ` for lifecycle markers, or `` when agent-facing message
@@ -122,46 +82,34 @@ def _ts_prefix(ctx: MeivaContext) -> str:
 
 
 # meiva:note
-# Ordinary claim and foreground steering share inbound message construction and
-# security notes across chat, system notes, and heartbeats.
+# Ordinary claim and foreground steering share inbound message construction across chat, system
+# notes, and heartbeats.
 # meiva:link agent/messages/docs/message-format.md
 def prepare_chat_inbound(ctx: MeivaContext, item: ClaimedInbound) -> list[BaseMessage]:
-    now = ctx.require_clock().now()
-    return _scanned_messages(
-        *build_chat_inbound(
+    return [
+        build_chat_inbound(
             item,
-            picked_up_at=now,
-            read_security_enabled=lambda: ctx.require_agent().read(
-                "agent", "security_scan_enabled"
-            ),
+            picked_up_at=ctx.require_clock().now(),
             envelope_inputs=ctx.timestamp_policy(),
             expand_command=ctx.require_commands().expand,
             gateway=lambda: ctx.gateway,
-        ),
-        now=now,
-    )
+        )
+    ]
 
 
 def prepare_system_note_inbound(ctx: MeivaContext, item: ClaimedInbound) -> list[BaseMessage]:
-    finding = scan_inbound_content(
-        item.content,
-        source=f"inbound.system_note:{item.source}",
-        enabled=ctx.require_agent().read("agent", "security_scan_enabled"),
-    )
     tag = _system_note_tag(item.payload)
     task_id = _task_id_from_system_note(item.payload, tag)
     now = ctx.require_clock().now()
-    return _scanned_messages(
+    return [
         system_note_message(
             content=f"{_ts_prefix(ctx)}{item.content}",
-            tag=_system_note_tag(item.payload),
+            tag=tag,
             task_id=task_id,
             picked_up_at=now,
             created_at=item.created_at,
-        ),
-        finding,
-        now=now,
-    )
+        )
+    ]
 
 
 def prepare_heartbeat_inbound(ctx: MeivaContext, item: ClaimedInbound) -> list[BaseMessage]:
@@ -229,17 +177,13 @@ def _task_id_from_system_note(payload: dict[str, object] | None, tag: NoteTag) -
     return task_id
 
 
+# meiva:note
+# SYSTEM_NOTE inbound: render as a system note (system_marker), not chat.
 async def _handle_system_note(
     ctx: MeivaContext,
     item: ClaimedInbound,
     st: BatchState,
 ) -> None:
-    """SYSTEM_NOTE inbound: render as a system note (system_marker), not chat.
-
-    The note's content is peer-authored (the task title / description / change
-    summary written by another agent), so it passes through the same
-    injection scan as inbound chat before entering the conversation.
-    """
     tag = _system_note_tag(item.payload)
     st.new_msgs.extend(prepare_system_note_inbound(ctx, item))
     if tag is NoteTag.LIFECYCLE_RESTART and st.next_goto == CLAIM:
@@ -476,25 +420,14 @@ async def handle_restart(
         state, item, crash_marked=await _host_restart_found_crash(ctx, item)
     )
     if st.restart_preserves_idle:
-        finding = (
-            scan_inbound_content(
-                item.content,
-                source=f"inbound.restart:{item.source}",
-                enabled=ctx.require_agent().read("agent", "security_scan_enabled"),
-            )
-            if item.content
-            else None
-        )
         now = ctx.require_clock().now()
-        st.append_scanned(
+        st.new_msgs.append(
             system_note_message(
                 content=f"{_ts_prefix(ctx)}{restart_accepted_text(item.source, item.content or None)}",
                 tag=NoteTag.LIFECYCLE_RESTART,
                 picked_up_at=now,
                 created_at=now,
-            ),
-            finding,
-            now=now,
+            )
         )
 
 

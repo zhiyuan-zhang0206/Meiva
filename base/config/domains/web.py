@@ -79,7 +79,7 @@ class WebSettings(EnvSettings):
             "the body, which `meiva.web` detects and turns into a FetchError); `deepseek` runs "
             "the DeepSeek Fetch tool (Markdown body, needs DEEPSEEK_API_KEY, answers 403/404 "
             "when it cannot read the page, so there is no wall page to detect). The answer step "
-            "and the injection check are unchanged by this switch."
+            "is unchanged by this switch."
         ),
         json_schema_extra={
             "restart_required": "agent",
@@ -218,47 +218,6 @@ class WebSettings(EnvSettings):
         default="none",
         alias="MEIVA_WEB_FETCH_REASONING",
         description="Reasoning effort for the `meiva.web.fetch` summarization model. `none` skips reasoning entirely since the summarization prompt is simple.",
-        json_schema_extra={
-            "restart_required": "agent",
-            "writable": True,
-            "sensitive": False,
-            "scope": "cluster-pinned",
-        },
-    )
-
-    web_fetch_injection_check_enabled: bool = Field(
-        title="Scan fetched pages for prompt injection",
-        default=True,
-        alias="MEIVA_WEB_FETCH_INJECTION_CHECK_ENABLED",
-        description="Check the page text `meiva.web.fetch` reads for instructions aimed at an AI reader, using a decision model, and attach a SECURITY note to the turn when the page looks like prompt injection. The page and its summary are never altered. The check only adds a warning: if the decision model is unavailable the fetch still succeeds. Needs `security_scan_enabled` and the decision model's API key.",
-        json_schema_extra={
-            "restart_required": "agent",
-            "writable": True,
-            "sensitive": False,
-            "scope": "cluster-pinned",
-        },
-    )
-
-    web_fetch_injection_model: str = Field(
-        title="Fetched page security decision model",
-        default="jev-1.13.0",
-        alias="MEIVA_WEB_FETCH_INJECTION_MODEL",
-        description="Decision model (an id from the decision-model catalog, not a chat model) that judges fetched page text for `web_fetch_injection_check_enabled`. An id the catalog does not list makes `meiva.web.fetch` fail instead of silently skipping the check.",
-        json_schema_extra={
-            "restart_required": "agent",
-            "writable": True,
-            "sensitive": False,
-            "scope": "cluster-pinned",
-        },
-    )
-
-    web_fetch_injection_threshold: float = Field(
-        title="Fetched page injection warning threshold",
-        default=0.4,
-        gt=0.0,
-        lt=1.0,
-        alias="MEIVA_WEB_FETCH_INJECTION_THRESHOLD",
-        description="Probability (exclusive 0..1) at or above which a fetched page is reported as likely prompt injection. The page is judged in chunks; the highest chunk probability is compared. Lower values warn more often. The default 0.4 was calibrated together with the hijack-intent question wording of `meiva/sdk_surface/injection_check.py` (0 false positives on 209 benign pages, all 35 synthetic injections caught); recalibrate if either changes.",
         json_schema_extra={
             "restart_required": "agent",
             "writable": True,

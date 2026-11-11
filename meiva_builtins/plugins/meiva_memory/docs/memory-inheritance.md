@@ -43,8 +43,7 @@ visible markers and a warning; the lengths are the shared character measure.
 
 One section per ancestor — nearest ancestor first — behind the framing, with no
 timestamps, so unchanged state renders byte-identical (the property the fork's
-prefix-cache stability relies on). The assembled text is scanned like the shared
-index and armed with a visible warning prefix when flagged. The note is None when
+prefix-cache stability relies on). The assembled text is injected as it is. The note is None when
 the layer is off (depth 0 or eval isolation), no agent id is established, the
 chain read failed, or no ancestor declared anything.
 
@@ -55,7 +54,7 @@ chain read failed, or no ancestor declared anything.
 text with both size caps applied (`render_inherited`). It takes plain values and returns
 values, warnings included, so it logs nothing and reads nothing. `inheritance/inherit.py` is the thin
 shell: it reads the agent's slices, makes the one gateway call, reads the `INHERIT.md` files of the
-local ancestors, logs the returned warnings, scans the text and wraps it into the note. The
+local ancestors, logs the returned warnings and wraps the text into the note. The
 tests run the pure half on literal values and the shell against a gateway on a port-0
 listener and entry files under a unit home.
 

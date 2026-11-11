@@ -1,46 +1,46 @@
-"""exec node: agent-written code runs in a disposable subprocess.
-
-Each execute_code call runs in a fresh child process (`agent/execution/child.py`),
-so a stuck native call is SIGKILLable without touching the agent process
-(issue #184). Each graph step executes one call and returns its delta to LangGraph.
-Pending calls route back to exec after that commit; the completed batch routes to
-after_exec, then claim, which decides whether to wait or continue the turn.
-
-Core mechanisms:
-  - Subprocess backend (`agent/graph/exec/_subprocess.py`): the parent spawns
-    one `python -I -X utf8 -m agent.execution.child` per exec, polls every 50ms, streams
-    output through the chunk pipeline. Cancel/timeout sends a signal then
-    closes the process group after a grace period. Natural root exit also closes
-    the domain, so an `os._exit`
-    cannot strand an ordinary descendant holding stdout. Cancellation returns
-    only after the direct child is reaped and the pipe reader gets its bounded
-    join. The child rebuilds the state snapshot from the request envelope; the
-    state-update delta (plugin fields, security findings) rides the result
-    envelope back and is validated here.
-  - Halt signal uses exception type rather than exit code: agent code raising
-    `LifecycleExit` (AgentTermination / AgentRestart / SystemHalt) → captured
-    in result_holder["lifecycle"] → exec_node decides halted + writes marker
-    based on isinstance.
-  - The child writes stdout/stderr line-buffered onto the pipe (both
-    streams merge chronologically — same as what running Python in a
-    terminal shows); the parent drains the pipe into a `StreamingTextIO`
-    and pushes each new accumulated chunk to redis every 50ms poll
-    (frontend streaming). Accumulation is bounded by
-    `exec_output_accumulation_max_chars`: past it the middle is dropped as
-    it streams and a `StreamCap` rides the result to the envelope, so a
-    runaway print loop is truncated rather than left to OOM the parent —
-    the run itself is not killed.
-  - `run_in_subprocess` returns the `ExecResult` sum type
-    (`ExecDone | ExecCancelled | ExecTimedOut | ExecLifecycle |
-    ExecCrashed`) plus the raw child envelope; exec_node dispatches via
-    `match`, illegal state combinations are unrepresentable. Ordinary
-    exception tracebacks are already in the stream output.
-
-State type hint (`state: _state.AgentState`): the annotation is static only, the base schema, so
-`state.messages` / `state.halted` type-check; plugin fields are accessed dynamically. The state a
-node receives is the class `build_graph` registers it with (`input_schema=`, which carries the
-plugins' channels), not what the annotation names.
-"""
+# meiva:note
+# exec node: agent-written code runs in a disposable subprocess.
+#
+# Each execute_code call runs in a fresh child process (`agent/execution/child.py`),
+# so a stuck native call is SIGKILLable without touching the agent process
+# (issue #184). Each graph step executes one call and returns its delta to LangGraph.
+# Pending calls route back to exec after that commit; the completed batch routes to
+# after_exec, then claim, which decides whether to wait or continue the turn.
+#
+# Core mechanisms:
+#   - Subprocess backend (`agent/graph/exec/_subprocess.py`): the parent spawns
+#     one `python -I -X utf8 -m agent.execution.child` per exec, polls every 50ms, streams
+#     output through the chunk pipeline. Cancel/timeout sends a signal then
+#     closes the process group after a grace period. Natural root exit also closes
+#     the domain, so an `os._exit`
+#     cannot strand an ordinary descendant holding stdout. Cancellation returns
+#     only after the direct child is reaped and the pipe reader gets its bounded
+#     join. The child rebuilds the state snapshot from the request envelope; the
+#     state-update delta (plugin fields) rides the result
+#     envelope back and is validated here.
+#   - Halt signal uses exception type rather than exit code: agent code raising
+#     `LifecycleExit` (AgentTermination / AgentRestart / SystemHalt) → captured
+#     in result_holder["lifecycle"] → exec_node decides halted + writes marker
+#     based on isinstance.
+#   - The child writes stdout/stderr line-buffered onto the pipe (both
+#     streams merge chronologically — same as what running Python in a
+#     terminal shows); the parent drains the pipe into a `StreamingTextIO`
+#     and pushes each new accumulated chunk to redis every 50ms poll
+#     (frontend streaming). Accumulation is bounded by
+#     `exec_output_accumulation_max_chars`: past it the middle is dropped as
+#     it streams and a `StreamCap` rides the result to the envelope, so a
+#     runaway print loop is truncated rather than left to OOM the parent —
+#     the run itself is not killed.
+#   - `run_in_subprocess` returns the `ExecResult` sum type
+#     (`ExecDone | ExecCancelled | ExecTimedOut | ExecLifecycle |
+#     ExecCrashed`) plus the raw child envelope; exec_node dispatches via
+#     `match`, illegal state combinations are unrepresentable. Ordinary
+#     exception tracebacks are already in the stream output.
+#
+# State type hint (`state: _state.AgentState`): the annotation is static only, the base schema, so
+# `state.messages` / `state.halted` type-check; plugin fields are accessed dynamically. The state a
+# node receives is the class `build_graph` registers it with (`input_schema=`, which carries the
+# plugins' channels), not what the annotation names.
 
 from __future__ import annotations
 
@@ -57,7 +57,7 @@ from uuid import NAMESPACE_URL, uuid5
 from langchain_core.messages import AIMessage, AnyMessage, BaseMessage, ToolCall, ToolMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.runtime import Runtime
-from langgraph.types import Command, Overwrite
+from langgraph.types import Command
 
 from agent import state as _state
 from agent.execution.agent_traceback import format_full_traceback
@@ -69,13 +69,11 @@ from agent.graph.interrupt import interrupt_halt, subscribe_interrupt
 from agent.graph.node_log import StallConfig, node_lifecycle
 from agent.graph.tool_calls import code_from_args, normalize_tool_calls
 from agent.hooks.reply_visibility import deliver_reply_visibility_correction
-from agent.hooks.security import deliver_security_findings
 from agent.messages import exec_output_message
 from agent.nodes import CLAIM, EXEC
 from agent.state import AttachState, validate_plugin_state_keys
 from base.agents.context import MeivaContext, agent_id_from_config
 from base.agents.messages.kwargs import ExecStatus, read_meiva_kwargs
-from base.agents.messages.security_finding import SecurityFindingEntry
 from base.agents.observation import ended_with
 from base.agents.sdk.operation_ids import ExecutionIdentity
 from base.events.live.projection import Cancelled, ExecOutput, ExecStart
@@ -252,6 +250,16 @@ def _refuse_unusable_turn_end(state_update: dict[str, object], *, agent_id: int)
     state_update["ended_with_reason"] = None
 
 
+# meiva:note
+# Run the agent's code in one disposable child process.
+#
+#     The parent does not touch the meiva.state slot — the child rebuilds the
+#     snapshot from the request envelope (`agent/execution/child.py`), and the
+#     state-update delta (plugin fields) rides the result
+#     envelope back. Validation is fail-fast on a tampered slot, and the child
+#     receives the bound turn's config maps so its SDK calls
+#     resolve the same settings. Returns
+#     (result, plugin_state_update, exec_ms, attachments, sdk_calls).
 async def run_agent_code(
     state: _state.AgentState,
     ctx: MeivaContext,
@@ -268,15 +276,6 @@ async def run_agent_code(
     object,
     list[dict[str, object]] | None,
 ]:
-    """Run the agent's code in one disposable child process.
-
-    The parent does not touch the meiva.state slot — the child rebuilds the
-    snapshot from the request envelope (`agent/execution/child.py`), and the
-    state-update delta (plugin fields, security findings) rides the result
-    envelope back. Validation is fail-fast on a tampered slot, and the child
-    receives the bound turn's config maps so its SDK calls
-    resolve the same settings. Returns
-    (result, plugin_state_update, exec_ms, attachments, sdk_calls)."""
     config_overlay = ctx.require_agent().overlay()
     exec_started = time.monotonic()
     async with subscribe_interrupt(
@@ -521,12 +520,7 @@ async def _exec_single_call(
     # whole history this turn, so ToolMessage/notes would be wiped anyway.
     compact_halt = not plan.writes_back
     attach_state: AttachState | None = None
-    if compact_halt:
-        # Findings annotate the history claim is about to wipe; the rest of the delta (plugin
-        # fields) is written back as before, and the findings otherwise ride the spread below
-        # into `state.security_findings` for the after_exec hook.
-        _ = plugin_state_update.pop("security_findings", None)
-    else:
+    if not compact_halt:
         # The UI shows exactly what the agent sees in exec output — same blob
         # fed back to the LLM below (ExecOutput shares item_id with the chunk).
         ctx.event_publisher.emit(
@@ -608,10 +602,6 @@ def _extract_messages(raw: object) -> list[BaseMessage]:
     return [m for m in raw if isinstance(m, BaseMessage)] if is_object_list(raw) else []
 
 
-def _extract_findings(raw: object) -> list[SecurityFindingEntry]:
-    return [f for f in raw if isinstance(f, SecurityFindingEntry)] if is_object_list(raw) else []
-
-
 async def _apply_after_exec_hooks(
     state: _state.AgentState,
     runtime: Runtime[MeivaContext],
@@ -619,24 +609,13 @@ async def _apply_after_exec_hooks(
     update: dict[str, object],
 ) -> None:
     new_msgs = _extract_messages(update.get("messages"))
-    new_findings = _extract_findings(update.get("security_findings"))
-    post_state = state.model_copy(
-        update={
-            "messages": [*state.messages, *new_msgs],
-            "security_findings": [*state.security_findings, *new_findings],
-        }
-    )
-    sec_update = await deliver_security_findings(post_state, runtime, config)
+    post_state = state.model_copy(update={"messages": [*state.messages, *new_msgs]})
     vis_update = (
         await deliver_reply_visibility_correction(post_state, runtime, config)
         if runtime.context.clock_factory is not None
         else None
     )
     extra_msgs: list[BaseMessage] = []
-    if sec_update is not None:
-        extra_msgs.extend(_extract_messages(sec_update.get("messages")))
-        if "security_findings" in sec_update:
-            update["security_findings"] = sec_update["security_findings"]
     if vis_update is not None:
         extra_msgs.extend(_extract_messages(vis_update.get("messages")))
     if extra_msgs:
@@ -671,8 +650,7 @@ def _skipped_call_results(
 
 # meiva:note
 # Run one call; LangGraph owns reducer application and the next snapshot. Recovery may already
-# have paired an interrupted remainder when `calls` is empty, and compaction wipes any findings
-# raised by earlier calls of this batch along with the history.
+# have paired an interrupted remainder when `calls` is empty.
 async def exec_node_impl(
     state: _state.AgentState,
     runtime: Runtime[MeivaContext],
@@ -704,7 +682,6 @@ async def exec_node_impl(
     update = step.update()
     if compacted:
         update["pending_exec_notes"] = []
-        update["security_findings"] = Overwrite([])
         return Command[ExecGoto](update=update, goto=CLAIM)
 
     results = [message for message in step.messages if isinstance(message, ToolMessage)]

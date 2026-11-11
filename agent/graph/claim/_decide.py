@@ -21,7 +21,7 @@ from agent.hooks.compact_events import emit_compact_finished
 from agent.hooks.history_dump import dump_history, history_dump_note
 from agent.nodes import BEFORE_TURN, CLAIM, END, INIT_CONTEXT
 from base.agents.context import MeivaContext
-from base.agents.messages.kwargs import MeivaMsgType, NoteTag, read_meiva_kwargs
+from base.agents.messages.kwargs import MeivaMsgType, read_meiva_kwargs
 from base.events.live.projection import CompactDone, CompactionStatus
 from base.paths import workspace_dir
 
@@ -34,17 +34,11 @@ class _Outcome:
 
 # meiva:link agent/graph/docs/context-window/replacement.md
 def _markers_only(messages: list[BaseMessage]) -> list[BaseMessage]:
-    kept: list[BaseMessage] = []
-    subject_kept = False
-    for message in messages:
-        kwargs = read_meiva_kwargs(message)
-        keep = kwargs.get("meiva_msg_type") == MeivaMsgType.SYSTEM_NOTE.value
-        if keep and kwargs.get("meiva_note_tag") == NoteTag.SECURITY.value:
-            keep = subject_kept
-        if keep:
-            kept.append(message)
-        subject_kept = keep
-    return kept
+    return [
+        message
+        for message in messages
+        if read_meiva_kwargs(message).get("meiva_msg_type") == MeivaMsgType.SYSTEM_NOTE.value
+    ]
 
 
 # meiva:link agent/graph/docs/context-window/replacement.md

@@ -1,39 +1,33 @@
-"""Install-time static scan of a third-party skill package.
-
-A skill package is data an agent is instructed to *follow*, shipped with
-whatever scripts it bundles. Installing one from a public index is a supply-chain
-event: the ClawHub audit that found ~341 malicious skills delivering a macOS
-stealer is the shape this module exists for. So every package entering
-`$MEIVA_HOME/skills/` from outside the repo is read first, file by file, and
-matched against a rule table — after any encoded blob it carries is decoded,
-recursively, since base64-wrapping the payload was that campaign's primary
-evasion.
-
-Two severities, and only one of them is a gate:
-
-- **critical** — a pattern with no ordinary explanation inside an instruction
-  pack: a download-and-execute pipeline, an obfuscated payload, a credential
-  path paired with an outbound sink in the same file, instructions aimed at
-  making the reading agent work behind its user's back, or text hidden from a
-  human reviewer. The install refuses. Nothing lands on disk.
-- **notice** — a capability worth a reviewer's eye but routinely legitimate
-  (`sudo`, `rm -rf`, an AWS credential path in a deploy skill, an HTTP POST).
-  Never blocks; printed, and the material a human reads before promoting a
-  package to the `reviewed` trust tier.
-
-This is a mitigation layer, not a boundary — the same honesty `base/agents/messages/injection_scan.py`
-and `SECURITY.md` apply to everything else here. It matches *known shapes of
-known attacks* in *text this scanner can read*. A clean report means "no rule
-fired", never "this package is safe". Anyone who knows these rules can write a
-package that walks past all of them, and nothing here constrains what a skill
-does once an agent follows it (Meiva does not sandbox execution — see
-`docs/decisions/data/security/2026-07-29-security-model-host-isolation-not-sandbox.md`).
-
-Sibling, deliberately not shared: `base/agents/messages/injection_scan.py` scans content an
-agent ingests *mid-turn* and reports through a side channel. This one scans a whole
-package tree *before* it exists on disk, needs file/line anchoring, and answers
-a yes/no install question. The two tables overlap on hidden-text patterns only.
-"""
+# meiva:note
+# Install-time static scan of a third-party skill package.
+#
+# A skill package is data an agent is instructed to *follow*, shipped with
+# whatever scripts it bundles. Installing one from a public index is a supply-chain
+# event: the ClawHub audit that found ~341 malicious skills delivering a macOS
+# stealer is the shape this module exists for. So every package entering
+# `$MEIVA_HOME/skills/` from outside the repo is read first, file by file, and
+# matched against a rule table — after any encoded blob it carries is decoded,
+# recursively, since base64-wrapping the payload was that campaign's primary
+# evasion.
+#
+# Two severities, and only one of them is a gate:
+#
+# - **critical** — a pattern with no ordinary explanation inside an instruction
+#   pack: a download-and-execute pipeline, an obfuscated payload, a credential
+#   path paired with an outbound sink in the same file, instructions aimed at
+#   making the reading agent work behind its user's back, or text hidden from a
+#   human reviewer. The install refuses. Nothing lands on disk.
+# - **notice** — a capability worth a reviewer's eye but routinely legitimate
+#   (`sudo`, `rm -rf`, an AWS credential path in a deploy skill, an HTTP POST).
+#   Never blocks; printed, and the material a human reads before promoting a
+#   package to the `reviewed` trust tier.
+#
+# This is a mitigation layer, not a boundary (`SECURITY.md`). It matches *known shapes of
+# known attacks* in *text this scanner can read*. A clean report means "no rule
+# fired", never "this package is safe". Anyone who knows these rules can write a
+# package that walks past all of them, and nothing here constrains what a skill
+# does once an agent follows it (Meiva does not sandbox execution — see
+# `docs/decisions/data/security/2026-07-29-security-model-host-isolation-not-sandbox.md`).
 
 from __future__ import annotations
 

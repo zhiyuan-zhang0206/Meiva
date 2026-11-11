@@ -133,7 +133,6 @@ def test_retired_env_aliases_are_not_read() -> None:
     """The retired names are inert: a stale key left in an environment no longer
     reaches its field (defaults / the None sentinel survive) — the settings
     never read the old spelling."""
-    from base.config.domains.agent.eval import AgentEvalSettings
     from base.config.domains.agent.settings import AgentSettings
     from base.config.domains.gateway import GatewaySettings
     from base.config.domains.observability.alerts import AlertsSettings
@@ -142,14 +141,12 @@ def test_retired_env_aliases_are_not_read() -> None:
     legacy_env = {
         "MEIVA_PRIMARY_GATEWAY_URL": "http://legacy-gw",
         "MEIVA_SKIP_AUTH": "true",
-        "MEIVA_SKIP_SECURITY_SCAN": "true",
         "MEIVA_NATIVE_HELPER_PORT": "11111",
         "MEIVA_SYSTEM_PROMPT_PROGRESS": "true",
         "MEIVA_OPS_ALERTS_WEBHOOK_TOKEN": "tok-legacy",
     }
 
     assert GatewaySettings.from_environment(legacy_env).gateway_url == ""
-    assert AgentEvalSettings.from_environment(legacy_env).security_scan_enabled is True
     assert ServiceSettings.from_environment(legacy_env).permissions_helper_port == 9223
     assert AgentSettings.from_environment(legacy_env).agent_communication_style is None
     assert AlertsSettings.from_environment(legacy_env).webhook_token is None

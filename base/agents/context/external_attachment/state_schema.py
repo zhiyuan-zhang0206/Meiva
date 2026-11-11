@@ -25,7 +25,6 @@ from base.agents.context.external_attachment.state_channels import (
 from base.agents.history.checkpoint_serde import STATIC_CHECKPOINT_MSGPACK_TYPES
 from base.agents.history.checkpoint_serializer import CheckpointSerializer
 from base.agents.messages.guard import guarded_add_messages, guarded_delta_reducer
-from base.agents.messages.security_finding import SecurityFindingEntry
 from base.host.boundary.json_values import is_object_dict, is_object_list
 from base.host.boundary.untyped import object_mapping, object_of, object_sequence
 from base.packages.plugins.extensions import (
@@ -44,10 +43,6 @@ def _new_any_messages() -> list[AnyMessage]:
     return []
 
 
-def _new_security_findings() -> list[SecurityFindingEntry]:
-    return []
-
-
 def default_cwd() -> str:
     return ""
 
@@ -60,9 +55,6 @@ class BaseAgentState(BaseModel):
         default_factory=_new_any_messages
     )
     pending_exec_notes: list[AnyMessage] = Field(default_factory=_new_any_messages)
-    security_findings: Annotated[list[SecurityFindingEntry], operator.add] = Field(
-        default_factory=_new_security_findings
-    )
     skill_reads: Annotated[list[str], operator.add] = Field(default_factory=list)
     halted: bool = False
     interrupted_by_restart: bool = False

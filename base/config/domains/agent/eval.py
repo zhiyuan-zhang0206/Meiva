@@ -45,22 +45,6 @@ class AgentEvalSettings(EnvSettings):
         },
     )
 
-    security_scan_enabled: bool = Field(
-        title="Scan inbound messages for prompt injection",
-        default=True,
-        alias="MEIVA_SECURITY_SCAN_ENABLED",
-        description=(
-            "Enable prompt-injection security scan on inbound chat. "
-            "Set false for benchmark / hermetic environments where all input is trusted."
-        ),
-        json_schema_extra={
-            "restart_required": "agent",
-            "writable": True,
-            "sensitive": False,
-            "scope": "cluster-pinned",
-        },
-    )
-
     @field_validator("eval_network_allowlist", mode="before")
     @classmethod
     def _split_eval_network_allowlist(cls, value: object) -> object:

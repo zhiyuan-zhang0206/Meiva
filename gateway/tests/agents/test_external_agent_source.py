@@ -29,7 +29,6 @@ from base.clock import SYSTEM_TIMERS, Clock
 from base.clock.tests.seeded_rng import seeded_rng
 from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
-from base.config import settings
 from base.db import Database, create_agent
 from base.events.live.bus import EventBus
 from base.native_process.runtime_incarnation import RuntimeIncarnation
@@ -96,9 +95,8 @@ async def _claimed_text(
     claimed = await claim_inbound_batch(pool, incarnation.agent_id, incarnation=incarnation)
     assert len(claimed) == 1
     item = claimed[0]
-    message, _ = build_chat_inbound(
+    message = build_chat_inbound(
         item,
-        read_security_enabled=lambda: settings.agent.security_scan_enabled,
         envelope_inputs=_ENVELOPE_INPUTS,
         expand_command=CommandCatalog.system(skills=list, home=meiva_home()).expand,
         gateway=_forbidden_gateway,

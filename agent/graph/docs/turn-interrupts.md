@@ -72,7 +72,7 @@ restart is not the agent's own; `meiva.self.restart()` ends its exec halted with
 turn unfinished, so it never counts as idle. After the claim `halted` is that
 verdict: set, the agent was idle and reads `restart_accepted_text(source, message)`
 ("Restart was accepted from ..." plus `: {message}` when the restart row carried
-a non-empty `content`, scanned for prompt injection); clear,
+a non-empty `content`); clear,
 the turn was unfinished and claim adds no marker. The claim clears the mark, and
 every invocation's input does.
 
