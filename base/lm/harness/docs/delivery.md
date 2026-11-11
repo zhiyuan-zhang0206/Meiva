@@ -46,6 +46,18 @@ a neighbouring turn, and the next turn the graph submits waits until it ends.
   turn starts on `_idle()` (no ticket, no harness-started turn, no hold).
 - Adapters only translate protocol frames to ledger calls.
 
+## The bridge's event pump
+
+`pump.py` — `EventPump` is the one reader of a session's event stream, and it lives as long as the session
+(the bridge starts it in `ensure()` and stops it when it retires the session), not as long as a turn. It
+hands every event to the bridge's own state (model name, registration, the context-compacted flag) and
+to every current `Subscription`; a subscription sees only what the pump reads after it subscribed, so a
+waiter subscribes before it hands anything to the session, and an event nobody waits for is read and
+dropped instead of queueing inside the session. `HarnessBridge.subscribe()` and
+`HarnessBridge.deliver(inputs)` are the engine's delivery interface: `deliver` ensures the session and puts the
+handoff or compaction reminder on the batch's first input; results come back as events on a
+subscription. `run_turn()` is built on the same pump (it still submits through the adapter).
+
 ## Reconciliation
 
 After a crash the live acknowledgements are gone. Each adapter can answer, from the harness's own
