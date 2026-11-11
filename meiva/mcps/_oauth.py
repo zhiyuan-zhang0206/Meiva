@@ -24,6 +24,7 @@ so authorization happens once per server, not per daemon restart.
 from __future__ import annotations
 
 import asyncio
+import functools
 import json
 import os
 import webbrowser
@@ -232,26 +233,31 @@ def normalized_validate_issuer(oauth_metadata: OAuthMetadata, expected_issuer: s
         )
 
 
+# meiva:note
+# Drop the duplicate body ``client_id`` on client_secret_basic requests.
+#
+# The SDK's ``OAuthContext.prepare_token_auth`` leaves the form body's
+# ``client_id`` in place when the registered auth method is
+# ``client_secret_basic`` (only ``client_secret`` is stripped; both the
+# authorization-code exchange and the refresh request seed ``client_id``
+# into the body). RFC 6749 §2.3.1 puts the client identity entirely in the
+# Basic header for that method, and Notion's token endpoint rejects the
+# duplicate outright (HTTP 400). Notion's /register endpoint returns
+# ``client_secret_basic`` + a real secret no matter what was requested, so
+# every Meiva->Notion flow reaches this path. Tracked upstream:
+# modelcontextprotocol/python-sdk (2026-08-30, prepare_token_auth — still
+# unfixed on main as of 2026-08-30). Round-2 of the same class of fix as
+# ``_install_issuer_normalization``. Installing twice does not stack a second
+# wrapper; the SDK's own function stays reachable as ``__wrapped__``, which is
+# how the test guard puts the SDK back between tests.
 def install_token_auth_basic_shim() -> None:
-    """Drop the duplicate body ``client_id`` on client_secret_basic requests.
-
-    The SDK's ``OAuthContext.prepare_token_auth`` leaves the form body's
-    ``client_id`` in place when the registered auth method is
-    ``client_secret_basic`` (only ``client_secret`` is stripped; both the
-    authorization-code exchange and the refresh request seed ``client_id``
-    into the body). RFC 6749 §2.3.1 puts the client identity entirely in the
-    Basic header for that method, and Notion's token endpoint rejects the
-    duplicate outright (HTTP 400). Notion's /register endpoint returns
-    ``client_secret_basic`` + a real secret no matter what was requested, so
-    every Meiva->Notion flow reaches this path. Tracked upstream:
-    modelcontextprotocol/python-sdk (2026-08-30, prepare_token_auth — still
-    unfixed on main as of 2026-08-30). Round-2 of the same class of fix as
-    ``_install_issuer_normalization``; patching is idempotent in effect.
-    """
     import mcp.client.auth.oauth2 as _oauth2
 
     original = _oauth2.OAuthContext.prepare_token_auth
+    if hasattr(original, "__wrapped__"):
+        return
 
+    @functools.wraps(original)
     def _patched(
         self: OAuthContext, data: dict[str, str], headers: dict[str, str] | None = None
     ) -> tuple[dict[str, str], dict[str, str]]:
