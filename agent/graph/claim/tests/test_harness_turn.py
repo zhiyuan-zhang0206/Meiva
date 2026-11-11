@@ -764,7 +764,11 @@ async def test_a_hook_note_rides_the_first_message_as_one_input(
     first = _chat_row(db_conn, agent_id, "why is the build red?")
     second = _chat_row(db_conn, agent_id, "and the tests?")
     engine = FakeEngine()
-    note = {"key": f"hook-notes-{first}", "prompt": _HOOK_NOTE, "timeline_items": []}
+    note: dict[str, object] = {
+        "key": f"hook-notes-{first}",
+        "prompt": _HOOK_NOTE,
+        "timeline_items": [],
+    }
 
     _ = await harness_turn_node(
         AgentState(harness_inputs=[note]),
@@ -790,7 +794,7 @@ async def test_a_wake_without_a_message_keeps_the_note_as_its_own_input(
 ) -> None:
     agent_id = agent_row(db_conn)
     engine = FakeEngine()
-    note = {"key": "hook-notes", "prompt": _HOOK_NOTE, "timeline_items": []}
+    note: dict[str, object] = {"key": "hook-notes", "prompt": _HOOK_NOTE, "timeline_items": []}
 
     _ = await harness_turn_node(
         AgentState(harness_inputs=[note]),
