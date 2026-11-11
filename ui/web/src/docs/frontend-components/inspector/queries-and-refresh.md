@@ -28,7 +28,10 @@ showing the old numbers, rendering empty metric skeleton cards, or remounting th
 - Window picker: re-scopes the windowed statistics read; `All` is cumulative
   since spawn (`null`), `5m` is `0`, and `1h` / `24h` / `7d` are the backend's
   supported subset. When the backend clamps the request to its retention, the
-  option label shows the applied hours (`applied_window_hours`).
+  option label shows the applied hours (`applied_window_hours`). The shared
+  `WindowSelect` keeps a compact visible label separate from its transparent
+  native select: touch devices retain a 16px native control to prevent iOS focus
+  zoom without enlarging the section header's time range.
 - Notice events: the global notices fold invalidates only the live query without
   re-reading statistics.
 - Task events (`task_created` / `task_updated` for the selected agent): refresh
