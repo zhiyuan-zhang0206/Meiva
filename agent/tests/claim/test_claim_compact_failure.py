@@ -206,7 +206,7 @@ async def test_compact_request_failure_still_delivers_the_chat_claimed_beside_it
 
 
 # meiva:note
-# A request that fails while the agent is in the middle of a turn (the agent asked for it from its own code) must not stop that turn: the agent goes on to read the note and decide. An idle agent, as in the first test, stays idle.
+# A request that fails while the agent is in the middle of a turn must not stop that turn: the agent goes on to read the note and decide. An idle agent, as in the first test, stays idle.
 async def test_compact_request_failure_in_a_running_turn_wakes_the_agent_to_read_it(
     redis_url: str,
     db_conn: psycopg.Connection,

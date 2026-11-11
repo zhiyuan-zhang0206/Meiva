@@ -159,7 +159,7 @@ def _fallthrough_outcome(st: BatchState, *, agent_idle: bool) -> _Outcome:
     # meiva:note
     # A batch whose only messages report a failed compaction request has nothing to answer: an agent
     # that was idle stays idle with its history intact until the next inbound. An agent in the middle of
-    # a turn (the request came from its own code) goes on to read the note and decide.
+    # a turn goes on to read the note and decide.
     if (
         agent_idle
         and goto == BEFORE_TURN

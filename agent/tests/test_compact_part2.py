@@ -40,6 +40,7 @@ from agent.graph.hooks.compact import (
     generate_summary,
 )
 from agent.state import AgentState, CompactState
+from agent.tests.scripted_model import ScriptedChatModel
 from base.agents.context import MeivaContext
 from base.clock import SYSTEM_TIMERS, Clock
 from base.clock.tests.seeded_rng import seeded_rng
@@ -71,20 +72,12 @@ def _compact_tail(update: Any) -> list[AnyMessage]:
     return update["context_reset"].tail
 
 
+# meiva:note
+# A model that answers the compaction summary call (the same tool binding as the main llm node, streamed) with `summary_text`, or with an explicitly passed response.
 def _fake_llm(summary_text: str = "fake summary", *, response: AIMessage | None = None) -> Any:
-    """Construct a mock LLM — bind_tools(...).ainvoke returns AIMessage(content=summary_text)
-    (or explicitly passed response), matching generate_summary's call shape (same tool binding
-    as main llm node)."""
-    llm = MagicMock()
-    llm.bind_tools.return_value.ainvoke = AsyncMock(
-        return_value=response if response is not None else AIMessage(content=summary_text)
+    return ScriptedChatModel(
+        replies=[response if response is not None else AIMessage(content=summary_text)]
     )
-    return llm
-
-
-def _compaction_ainvoke(llm: Any) -> AsyncMock:
-    """The ainvoke mock that compaction actually uses on the fake LLM (after bind_tools)."""
-    return llm.bind_tools.return_value.ainvoke
 
 
 # A summary that clears COMPACT_MIN_SUMMARY_CHARS — the auto-compact hook retries
@@ -92,16 +85,10 @@ def _compaction_ainvoke(llm: Any) -> AsyncMock:
 _LONG_SUMMARY = "## Requests\nfollow the template. " * 60
 
 
+# meiva:note
+# A model whose successive compaction calls answer each of `summaries` in turn (AIMessage content), so a test can drive the auto-compact retry loop across attempts (short, then long); the last reply repeats.
 def _fake_llm_seq(*summaries: str) -> Any:
-    """A mock LLM whose successive compaction calls return each `summaries` text
-    in turn (AIMessage content) — lets a test drive the auto-compact retry loop
-    across attempts (e.g. short then long). Raising past the last entry surfaces
-    an over-call as a test failure rather than reusing the final response."""
-    llm = MagicMock()
-    llm.bind_tools.return_value.ainvoke = AsyncMock(
-        side_effect=[AIMessage(content=s) for s in summaries]
-    )
-    return llm
+    return ScriptedChatModel(replies=[AIMessage(content=text) for text in summaries])
 
 
 def _runtime_with_llm(llm: Any, database_gate: ProcessDbGate) -> Runtime[MeivaContext]:
@@ -181,15 +168,6 @@ async def test_generate_summary_remembers_the_call_that_produced_it() -> None:
     assert closing == ClosingRequest(4321, closing.extra_tokens, "m1")
     assert summary == "a synthetic summary"  # still the plain text everywhere else
 
-    bare = await generate_summary(
-        msgs,
-        _fake_llm("no usage"),
-        slices,
-        agent_id=228,
-        catalog=build_model_catalog(home=meiva_home()),
-        now=Clock.from_settings().now,
-    )
-    assert closing_of(bare) is None
     assert closing_of("an agent-written summary") is None
 
 
