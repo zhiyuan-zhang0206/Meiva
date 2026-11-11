@@ -19,6 +19,26 @@ which once mangled a record carrying a quoted `$HOME`.
 Only after a stop fails — which hosts the window took down and must bring back
 ([The failed-stop recovery](failed-stop-recovery.md)).
 
+## The kept-root gate
+
+A window that keeps the application root (`--keep-shell-sessions` or a kept service) does not
+restart `meiva-root`: the `up` half's `meiva start` finds it running and reuses it only when
+NEW would request the generation it was launched with (its launch digest and every unit's manifest
+digest); otherwise that start is refused (`requested services change the immutable root generation:
+root launch inputs`) after every service stopped, and the cluster stays down until the root is
+stopped by hand (2026-11-11, twice). So before anything stops, `down` asks every host: NEW is
+checked out in a throwaway worktree (`$HOME/.meiva/pre-update-root-check`) and its own
+`cli/commands/lifecycle/live_generation.py` reads the running root's status and builds the manifest
+a start of NEW would request with the operator's service selection, so the verdict is the code
+that would refuse, not a guess from the diff. A host whose root NEW cannot reuse refuses the
+window (exit 2, nothing touched) and the message names the choice to make instead:
+`--close-shell-sessions` with `--keep-no-services`, which restarts the root on the new code. The
+fleet never changes the operator's choice for them. A host with no root passes; a check that
+could not run warns and the window goes on (the start would say the same thing for real).
+The gate also runs under `--dry-run`, where it fetches NEW's objects on each host (nothing else:
+no ref, no checkout) because its answer is NEW's. A window that stops everything has no root to
+check and skips it.
+
 ## The stored-schedule gate
 
 A stored schedule script lives in the database, not the checkout: a library
@@ -60,7 +80,7 @@ reporting its label and log path; its label is its own
 
 down refuses before touching anything — exit 2, no effects — when a listed host has uncommitted changes, a post-checkout hook, an active update marker, when the hosts disagree on HEAD, and when .python-version changes without --allow-python-change; the probe reads its facts through the host's own shell, among them whether the host is already stopped: its last lifecycle operation (`run/lifecycle-op.json`) is a completed stop with rc 0 and no meiva-root is running. A stop counts only when `meiva stop` exits 0 and that journal then records it complete with rc 0; a start counts when `meiva start` exits 0, which it does only after readiness.
 
-Before anything stops — under --dry-run too — down runs NEW's offline verify over the gateway's stored schedule table from a throwaway worktree: the read step runs on the home's OLD checkout by signature dispatch, the check goes through NEW's schedules CLI under a throwaway home, VERIFY_RC separates a crashed check from a red, a host that has not fetched NEW is reported as not checked, and a red or unevaluable table warns with the rows listed, continuing; when the rows cannot be read, a receipt of an earlier pass of the same NEW younger than --silence-hours is reused and reported instead.
+Before anything stops — under --dry-run too — down asks every host whether the root a kept-root choice leaves running can serve NEW ([The kept-root gate](#the-kept-root-gate)); a root of another generation refuses with exit 2. Then down runs NEW's offline verify over the gateway's stored schedule table from a throwaway worktree: the read step runs on the home's OLD checkout by signature dispatch, the check goes through NEW's schedules CLI under a throwaway home, VERIFY_RC separates a crashed check from a red, a host that has not fetched NEW is reported as not checked, and a red or unevaluable table warns with the rows listed, continuing; when the rows cannot be read, a receipt of an earlier pass of the same NEW younger than --silence-hours is reused and reported instead.
 
 After a failed stop, down recovers the hosts that stop took down: [The failed-stop recovery](failed-stop-recovery.md).
 

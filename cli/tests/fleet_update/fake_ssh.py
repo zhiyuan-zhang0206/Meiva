@@ -56,6 +56,8 @@
 #   converge evidence a host reports, verbatim; `stored_schedules`: [int, list[str]] — the
 #   schedules verification answers, and its exit code; `helper_hash`, `helper_cert_root`: str —
 #   the healthy helper every host reports unless it stages its own.
+# - `root_checks`: dict[alias -> [rc, verdict]] — what NEW's check of the root a host keeps answers
+#   (`same`, `none` or `changed: <refusal>`) and the exit code it reports.
 # - `barriers`: dict[wave -> list[participant]] — the concurrency the test expects of one wave;
 #   `violations`: list[str] — every order the double refused, prefixed by the alias.
 #
@@ -206,6 +208,8 @@ class Sim:
             return 0
         if "converge-incomplete.json" in command:
             return self._incomplete(alias, emit)
+        if "pre-update-root-check" in command:
+            return self._root_check(alias, command, emit)
         if "verify" in command:
             return self._verify(alias, command, emit)
         return self._effect_for(alias, host, command, emit)
@@ -283,6 +287,19 @@ class Sim:
         else:
             self.s["silence_open"] = False
             emit.append("SILENCE closed 1")
+        return 0
+
+    # meiva:note
+    # NEW's answer about the root a host keeps: `root_checks[alias]` is `[rc, verdict]`, and a host
+    # a test does not stage reports the same generation. It is a read, asked before any stop.
+    def _root_check(self, alias: str, command: str, emit: list[str]) -> int:
+        assert self.s["new"] in command, "the root check did not target NEW"
+        fresh = [k for k, _ in self.s["effects"][self.s["run_started_at"] :]]
+        assert "stop" not in fresh, "the kept root was checked after a service stopped"
+        self.s["effects"].append(["root-check", alias])
+        rc, verdict = self.s["root_checks"].get(alias, [0, "same"])
+        emit.append(f"ROOT_GENERATION={verdict}")
+        emit.append(f"ROOT_CHECK_RC={rc}")
         return 0
 
     def _verify(self, alias: str, command: str, emit: list[str]) -> int:

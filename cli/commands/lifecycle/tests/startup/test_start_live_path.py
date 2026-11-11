@@ -22,6 +22,12 @@ from base.deploy.lifecycle import home_lifecycle_locks, launch_failures, start_s
 from base.host.boundary.json_values import is_object_dict
 from base.host.boundary.untyped import object_of
 from base.host.exit_codes import SERVICES_NOT_READY_EXIT_CODE
+from cli.commands.lifecycle.live_generation import (
+    ROOT_NONE,
+    ROOT_SAME,
+    main,
+    root_generation_verdict,
+)
 from cli.commands.lifecycle.tests.scripted_root import UnitRow
 from cli.commands.lifecycle.tests.startup.start_harness import (
     STATUS_PATH,
@@ -481,3 +487,67 @@ def test_a_gateways_live_start_fails_when_the_migration_fails(
         if not _is_applied(db_conn, forgotten):
             db_conn.execute("INSERT INTO schema_migrations (name) VALUES (%s)", (forgotten,))
         db_conn.commit()
+
+
+def _generation_verdict(run: StartRun) -> str:
+    return root_generation_verdict(
+        run.command,
+        repo=run.runtime.code_root,
+        selection="--only-service",
+        names=("pty-sessions",),
+    )
+
+
+def test_a_root_launched_with_the_requested_inputs_is_the_same_generation(
+    start_run: StartRun,
+) -> None:
+    run = start_run
+    with gateway_listener() as gateway:
+        run.declare(gateway=False, agent_runner=True, gateway_url=gateway.url)
+        generation = run.generation(RUNNER, run.roster(RUNNER, only=("pty-sessions",)))
+        row = _pty_row(run)
+
+        with run.root([row], launch_digest=generation.launch_digest) as root:
+            assert _generation_verdict(run) == ROOT_SAME
+
+    assert [call for call in root.calls if call[0] != "status"] == [], "the check only reads"
+
+
+# meiva:note
+# 2026-11-11: the first production update failed here, after every service had stopped.
+def test_a_root_launched_with_other_inputs_is_reported_with_the_refusal_a_start_would_print(
+    start_run: StartRun,
+) -> None:
+    run = start_run
+    with gateway_listener() as gateway:
+        run.declare(gateway=False, agent_runner=True, gateway_url=gateway.url)
+        row = _pty_row(run)
+
+        with run.root([row], launch_digest="0" * 64):
+            verdict = _generation_verdict(run)
+
+    assert verdict.startswith("changed: requested services change the immutable root generation:")
+    assert "root launch inputs" in verdict
+
+
+def test_a_host_with_no_root_has_nothing_to_refuse(start_run: StartRun) -> None:
+    run = start_run
+    with gateway_listener() as gateway:
+        run.declare(gateway=False, agent_runner=True, gateway_url=gateway.url)
+
+        assert _generation_verdict(run) == ROOT_NONE
+
+
+def test_the_program_refuses_a_selection_it_does_not_know() -> None:
+    with pytest.raises(ValueError, match="unknown service selection"):
+        main(["/repo", "--keep-service", "pty-sessions"], home=Path("/home"))
+
+
+def _pty_row(run: StartRun) -> UnitRow:
+    generation = run.generation(RUNNER, run.roster(RUNNER, only=("pty-sessions",)))
+    return UnitRow(
+        "pty-sessions",
+        state="running",
+        intent="running",
+        manifest_digest=generation.units["pty-sessions"],
+    )

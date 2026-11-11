@@ -207,6 +207,19 @@ def _resolve_identity(command: CommandRuntime) -> tuple[SetupValues, MachineRole
     return resolved, roles
 
 
+# meiva:note
+# What a root launch reads from this invocation: the launch delivery and the home's service PATH.
+def read_launch_inputs(command: CommandRuntime, config: StartConfig) -> RootLaunchInputs:
+    return RootLaunchInputs(
+        delivery=read_launch_delivery(
+            home=command.home,
+            remote_data_plane=config.data_plane.is_remote,
+            config=command.config,
+        ),
+        service_path=config.service_path,
+    )
+
+
 def launch_roster(
     roles: MachineRoles,
     *,
@@ -560,14 +573,7 @@ def cmd_start_body(
             resolved=resolved,
             roles=roles,
             config=config,
-            launch_inputs=RootLaunchInputs(
-                delivery=read_launch_delivery(
-                    home=command.home,
-                    remote_data_plane=config.data_plane.is_remote,
-                    config=command.config,
-                ),
-                service_path=config.service_path,
-            ),
+            launch_inputs=read_launch_inputs(command, config),
             converge_steps=converge_steps,
         )
         admitted = _admit(start, retained_children=retained_children)
