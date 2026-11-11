@@ -4,7 +4,7 @@ from dataclasses import dataclass
 
 from base.lm.harness.claude.mapping import ResultFields
 from base.lm.harness.events import TurnCompleted
-from base.lm.harness.session import SessionTotals, TurnOutcome
+from base.lm.harness.session import SessionTotals
 
 # meiva:note
 # How one result message settles a turn: what the outcome is, what the stream is told, and what
@@ -27,7 +27,6 @@ class ResultSettlement:
     totals: SessionTotals
     session_id: str | None
     completed: TurnCompleted
-    outcome: TurnOutcome
 
 
 # meiva:note
@@ -45,17 +44,6 @@ def settle_result(
     text = "\n".join(turn.parts).strip() or (fields.result_text or "")
     resolved_session = fields.session_id or session_id
     updated = totals.with_turn(fields.usage, fields.cost_usd)
-    outcome = TurnOutcome(
-        turn_id=turn.turn_id,
-        text=text,
-        subtype=fields.subtype,
-        is_error=fields.is_error,
-        interrupted=fields.interrupted,
-        stop_reason=fields.stop_reason,
-        usage=fields.usage,
-        cost_usd=fields.cost_usd,
-        permission_denials=fields.permission_denials,
-    )
     completed = TurnCompleted(
         turn_id=turn.turn_id,
         session_id=resolved_session,
@@ -73,6 +61,4 @@ def settle_result(
         api_error_status=fields.api_error_status,
         errors=fields.errors,
     )
-    return ResultSettlement(
-        totals=updated, session_id=resolved_session, completed=completed, outcome=outcome
-    )
+    return ResultSettlement(totals=updated, session_id=resolved_session, completed=completed)

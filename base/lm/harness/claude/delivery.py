@@ -71,24 +71,17 @@ def harness_cause(origin_kind: str | None) -> HarnessCause:
 
 
 # meiva:note
-# One turn the CLI is running, as observed. `turn_id` is the id the stream names it by; `owner` is
-# set when a ticket of ours submitted its input and this turn is the one that took it. `aliases` are
-# tickets whose input was absorbed into a turn that is not theirs (their echo arrived while another
-# turn was open): they settle with this turn's outcome.
+# One turn the CLI is running, as observed. `turn_id` is the id the stream names it by and `keys` the inputs
+# of ours that are in its context. A turn is reported once, under that id.
 @dataclass(frozen=True, slots=True)
 class OpenTurn:
     turn_id: str
     keys: tuple[str, ...] = ()
     parts: tuple[str, ...] = ()
     steps: int = 0
-    owner_ticket: bool = False
-    aliases: tuple[str, ...] = ()
 
     def absorbing(self, key: str) -> OpenTurn:
         return replace(self, keys=(*self.keys, key))
 
     def with_parts(self, texts: tuple[str, ...], *, stepped: bool) -> OpenTurn:
         return replace(self, parts=(*self.parts, *texts), steps=self.steps + (1 if stepped else 0))
-
-    def with_alias(self, ticket_turn_id: str) -> OpenTurn:
-        return replace(self, aliases=(*self.aliases, ticket_turn_id))

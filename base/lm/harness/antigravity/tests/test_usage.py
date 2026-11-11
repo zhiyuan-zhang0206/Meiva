@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from base.lm.harness.antigravity.tests.support import start
+from base.lm.harness.delivery.tests.sent import send
 
 
 def turn(text: str, *, input_tokens: int, output_tokens: int, thinking: int) -> dict[str, object]:
@@ -37,8 +38,8 @@ async def test_usage_accumulates_across_turns(tmp_path: Path) -> None:
         ],
     )
     try:
-        await harness.session.submit("a").outcome()
-        await harness.session.submit("b").outcome()
+        await (await send(harness, "a")).outcome()
+        await (await send(harness, "b")).outcome()
         totals = harness.session.totals
         assert totals.turns == 2
         assert totals.input_tokens == 30

@@ -4,11 +4,10 @@ import asyncio
 from pathlib import Path
 from typing import Any
 
-import pytest
-
 from base.lm.harness.claude.delivery import key_uuid
 from base.lm.harness.claude.tests.support import Harness, replay, start
 from base.lm.harness.delivery import HarnessInput, ImageBlock
+from base.lm.harness.delivery.tests.sent import send
 from base.lm.harness.events import (
     AckSignal,
     AssistantText,
@@ -29,7 +28,7 @@ async def seen(harness: Harness, kind: type) -> list[Any]:
 
 
 async def first_turn(harness: Harness) -> Any:
-    ticket = harness.session.submit("one", key="first")
+    ticket = await send(harness, "one", key="first")
     await asyncio.sleep(0.01)
     return ticket
 
@@ -94,7 +93,7 @@ async def test_a_turn_submitted_right_after_does_not_take_the_deferred_turns_res
         await harness.session.deliver([HarnessInput("steer", "late input")])
         replay(harness.client, "deferred_new_turn", "turn1", first="first", steer="steer")
         await asyncio.wait_for(first.outcome(), 2)
-        second = harness.session.submit("next instruction", key="next")
+        second = await send(harness, "next instruction", key="next")
         await asyncio.sleep(0.01)
         replay(harness.client, "deferred_new_turn", "turn2", first="first", steer="steer")
         replay(harness.client, "deferred_new_turn", "next", next="next")
@@ -195,11 +194,10 @@ async def test_a_cli_that_does_not_echo_fails_the_session_instead_of_guessing(
 ) -> None:
     harness = await start(tmp_path, passive=True)
     try:
-        ticket = await first_turn(harness)
+        await first_turn(harness)
         replay(harness.client, "deferred_new_turn", "turn1", first="nobody")
-        with pytest.raises(Exception, match="replay-user-messages"):
-            _ = await asyncio.wait_for(ticket.outcome(), 2)
-        assert "replay-user-messages" in (await seen(harness, SessionFailed))[0].error
+        failed = await harness.wait_for(lambda event: isinstance(event, SessionFailed))
+        assert "replay-user-messages" in failed.error
     finally:
         await harness.stop()
 

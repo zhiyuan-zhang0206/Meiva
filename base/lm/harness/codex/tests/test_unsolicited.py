@@ -3,13 +3,12 @@ from __future__ import annotations
 import asyncio
 from pathlib import Path
 
-import pytest
-
-from base.lm.harness.base_session import TurnTicket
 from base.lm.harness.codex.frames import INVALID_REQUEST, JsonRpcError
 from base.lm.harness.codex.tests.support import start
+from base.lm.harness.delivery.tests.sent import Sent, send, send_nowait
 from base.lm.harness.events import (
     AssistantText,
+    InputRejected,
     SessionFailed,
     TextDelta,
     ToolUse,
@@ -17,7 +16,6 @@ from base.lm.harness.events import (
     TurnFaulted,
     UnsolicitedOutput,
 )
-from base.lm.harness.session import SessionClosedError
 
 
 # meiva:note
@@ -26,7 +24,7 @@ from base.lm.harness.session import SessionClosedError
 # response is read, one event-loop turn later. Every test below that asserts "a
 # foreign name is not adopted" has to start from a bound ticket, or it would pass
 # because nothing was bound yet rather than because the adoption is gone.
-async def bound(turn: TurnTicket) -> None:
+async def bound(turn: Sent) -> None:
     for _ in range(1000):
         if turn.provider_turn_id is not None:
             return
@@ -68,7 +66,7 @@ async def test_a_completion_for_a_turn_we_did_not_start_does_not_poison_the_next
         assert harness.of(SessionFailed) == []
         assert [event.text for event in delivered] == ["BGDONE"]
 
-        turn = harness.session.submit("hello")
+        turn = await send(harness, "hello")
         await harness.turn_started(1)
         harness.server.message("reply")
         harness.server.complete()
@@ -83,7 +81,7 @@ async def test_a_completion_for_another_turn_does_not_truncate_a_live_turn(
 ) -> None:
     harness = await start(tmp_path)
     try:
-        turn = harness.session.submit("slow")
+        turn = await send(harness, "slow")
         await harness.turn_started(1)
         await bound(turn)
 
@@ -108,7 +106,7 @@ async def test_a_completion_for_another_turn_does_not_truncate_a_live_turn(
 async def test_an_error_naming_a_turn_of_ours_faults_only_that_turn(tmp_path: Path) -> None:
     harness = await start(tmp_path)
     try:
-        turn = harness.session.submit("hello")
+        turn = await send(harness, "hello")
         await harness.turn_started(1)
         await bound(turn)
         harness.server.emit(
@@ -139,7 +137,7 @@ async def test_an_error_naming_no_turn_of_ours_is_not_a_fault(tmp_path: Path) ->
     delivered: list[UnsolicitedOutput] = []
     harness = await start(tmp_path, unsolicited=delivered.append)
     try:
-        turn = harness.session.submit("hello")
+        turn = await send(harness, "hello")
         await harness.turn_started(1)
         await bound(turn)
         harness.server.emit(
@@ -167,7 +165,7 @@ async def test_an_error_naming_no_turn_of_ours_is_not_a_fault(tmp_path: Path) ->
 async def test_items_naming_an_unknown_turn_are_not_adopted(tmp_path: Path) -> None:
     harness = await start(tmp_path)
     try:
-        turn = harness.session.submit("hello")
+        turn = await send(harness, "hello")
         await harness.turn_started(1)
         await bound(turn)
         harness.server.emit(
@@ -194,7 +192,7 @@ async def test_items_naming_an_unknown_turn_are_not_adopted(tmp_path: Path) -> N
 async def test_a_notification_from_another_thread_is_ignored(tmp_path: Path) -> None:
     harness = await start(tmp_path)
     try:
-        turn = harness.session.submit("hello")
+        turn = await send(harness, "hello")
         await harness.turn_started(1)
         harness.server.emit(
             "item/agentMessage/delta",
@@ -226,9 +224,8 @@ async def test_turn_started_binds_the_name_before_the_response(tmp_path: Path) -
     try:
         harness.server.turn_start_gate = asyncio.get_running_loop().create_future()
         harness.server.turn_start_id = "codex-turn-early"
-        turn = harness.session.submit("hello")
-        await asyncio.sleep(0)
-        assert harness.server.params_for("turn/start")
+        turn = send_nowait(harness, "hello")
+        await harness.wait_until(lambda: bool(harness.server.params_for("turn/start")))
 
         harness.server.emit(
             "turn/started",
@@ -279,9 +276,8 @@ async def test_rejected_start_never_accepts_a_provisionally_bound_turn(tmp_path:
     try:
         gate: asyncio.Future[None] = asyncio.get_running_loop().create_future()
         harness.server.turn_start_gate = gate
-        turn = harness.session.submit("hello")
-        await asyncio.sleep(0)
-        assert harness.server.params_for("turn/start")
+        turn = send_nowait(harness, "hello")
+        await harness.wait_until(lambda: bool(harness.server.params_for("turn/start")))
         harness.server.emit(
             "turn/started",
             {
@@ -293,8 +289,10 @@ async def test_rejected_start_never_accepts_a_provisionally_bound_turn(tmp_path:
         harness.server.message("foreign", turn_id="replayed-turn")
         harness.server.complete(turn_id="replayed-turn")
         gate.set_exception(JsonRpcError(INVALID_REQUEST, "start rejected"))
-        with pytest.raises(SessionClosedError, match="start rejected"):
-            _ = await asyncio.wait_for(turn.outcome(), 2)
+        rejected = await harness.wait_for(lambda event: isinstance(event, InputRejected))
+        assert "start rejected" in rejected.reason
+        assert turn.delivery is not None
+        await asyncio.wait_for(turn.delivery, 2)
         assert harness.of(ToolUse) == []
         assert harness.of(AssistantText) == []
         assert harness.of(TurnCompleted) == []
@@ -308,8 +306,8 @@ async def test_early_activity_follows_the_authoritative_turn_id(tmp_path: Path) 
         gate: asyncio.Future[None] = asyncio.get_running_loop().create_future()
         harness.server.turn_start_gate = gate
         harness.server.turn_start_id = "actual-turn"
-        turn = harness.session.submit("hello")
-        await asyncio.sleep(0)
+        turn = send_nowait(harness, "hello")
+        await harness.wait_until(lambda: bool(harness.server.params_for("turn/start")))
         harness.server.emit(
             "turn/started",
             {

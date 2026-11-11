@@ -1,17 +1,18 @@
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 
 import pytest
 
-from base.lm.harness import ClusterFact, EntryPoint, FileSessionRegistry, Handoff, SessionRecord
+from base.lm.harness import FileSessionRegistry, SessionRecord
 from base.lm.harness.claude.config import DEFAULT_MODEL
 from base.lm.harness.claude.session import SessionClosedError
 from base.lm.harness.claude.tests import fake_sdk as fake
 from base.lm.harness.claude.tests.fake_sdk import Emit, Say
 from base.lm.harness.claude.tests.support import start
+from base.lm.harness.delivery.tests.sent import send
 from base.lm.harness.events import (
-    HandoffInjected,
     RateLimitObserved,
     SessionBound,
     SessionClosed,
@@ -50,8 +51,8 @@ async def test_resume_passes_the_session_id_and_reports_it(tmp_path: Path) -> No
 async def test_totals_accumulate_across_turns(tmp_path: Path) -> None:
     harness = await start(tmp_path, scripts=[[Say("one")], [Say("two")]])
     try:
-        first = await harness.session.submit("first").outcome()
-        second = await harness.session.submit("second").outcome()
+        first = await (await send(harness, "first")).outcome()
+        second = await (await send(harness, "second")).outcome()
         totals = harness.session.totals
         assert totals.turns == 2
         assert totals.input_tokens == 8 + 5476, "the prompt totals its cache reads"
@@ -86,7 +87,7 @@ async def test_rate_limit_signal_reaches_the_stream(tmp_path: Path) -> None:
         ],
     )
     try:
-        await harness.session.submit("hello").outcome()
+        await (await send(harness, "hello")).outcome()
         [signal] = harness.of(RateLimitObserved)
         assert signal.status == "allowed_warning"
         assert signal.utilization == 0.96
@@ -104,7 +105,7 @@ async def test_close_emits_session_closed_and_disconnects(tmp_path: Path) -> Non
         closed = await harness.wait_for(lambda event: isinstance(event, SessionClosed))
         assert closed.reason == "done"
         with pytest.raises(SessionClosedError):
-            harness.session.submit("too late")
+            await send(harness, "too late")
     finally:
         await harness.stop()
 
@@ -113,8 +114,10 @@ async def test_dropped_deltas_are_counted_when_nothing_drains(tmp_path: Path) ->
     harness = await start(tmp_path, scripts=[[Say("long answer")]], max_buffered_events=0)
     try:
         await harness.detach_consumer()
-        outcome = await harness.session.submit("hello").outcome()
-        assert outcome.text == "long answer"
+        await send(harness, "hello")
+        async with asyncio.timeout(2):
+            while harness.session.dropped_deltas < 1:
+                await asyncio.sleep(0.002)
         assert harness.session.dropped_deltas == 1
     finally:
         await harness.stop()
@@ -190,59 +193,6 @@ async def test_a_session_resumes_its_own_record_after_another_harness_used_the_a
         await again.stop()
     kept = registry.load(7003, harness="codex")
     assert kept is not None and kept.session_id == "codex-thread"
-
-
-async def test_handoff_is_injected_as_the_first_turn(tmp_path: Path) -> None:
-    registry = FileSessionRegistry(tmp_path / "sessions")
-    handoff = Handoff(
-        agent_id=6984,
-        instruction="Read hello.txt and reply with the third word.",
-        machine="macmini",
-        workspace=tmp_path,
-        label="claude-sdk-bridge",
-        cluster=(ClusterFact("macmini", "primary host"),),
-        entries=(EntryPoint("meiva.files", "read and write files"),),
-    )
-    harness = await start(
-        tmp_path,
-        agent_id=6984,
-        registry=registry,
-        handoff=handoff,
-        scripts=[[Say("ack")], [Say("brown")]],
-    )
-    try:
-        injected = await harness.wait_for(lambda event: isinstance(event, HandoffInjected))
-        assert injected.agent_id == 6984
-        assert injected.size_bytes == handoff.size_bytes()
-        outcome = await harness.session.submit("Read hello.txt.").outcome()
-        assert outcome.text == "brown"
-        assert harness.client.queries == [handoff.render().strip(), "Read hello.txt."]
-    finally:
-        await harness.stop()
-
-
-async def test_resume_does_not_reinject_the_handoff(tmp_path: Path) -> None:
-    registry = FileSessionRegistry(tmp_path / "sessions")
-    handoff = Handoff(agent_id=7002, instruction="Say OK.", machine="macmini", workspace=tmp_path)
-    first = await start(
-        tmp_path, agent_id=7002, registry=registry, handoff=handoff, scripts=[[Say("OK")]]
-    )
-    try:
-        await first.wait_for(lambda event: isinstance(event, SessionBound))
-        await first.session.submit("go").outcome()
-    finally:
-        await first.stop()
-
-    second = await start(
-        tmp_path, agent_id=7002, registry=registry, handoff=handoff, scripts=[[Say("still here")]]
-    )
-    try:
-        assert second.session.resumed is True
-        assert second.client.queries == []
-        assert (await second.session.submit("go").outcome()).text == "still here"
-        assert second.of(HandoffInjected) == []
-    finally:
-        await second.stop()
 
 
 def test_the_shared_package_does_not_reach_into_an_adapter() -> None:

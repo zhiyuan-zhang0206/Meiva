@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from base.lm.harness.antigravity.tests.support import start
+from base.lm.harness.delivery.tests.sent import send
 
 
 def denied_turn() -> dict[str, object]:
@@ -36,7 +37,7 @@ async def test_a_denied_action_is_a_failed_turn_even_though_the_cli_says_success
 ) -> None:
     harness = await start(tmp_path, turns=[denied_turn()])
     try:
-        outcome = await harness.session.submit("list files").outcome()
+        outcome = await (await send(harness, "list files")).outcome()
         assert outcome.is_error is True
         assert outcome.subtype == "denied"
         assert outcome.permission_denials == ("command:RunCommand",)
@@ -51,7 +52,7 @@ async def test_a_clean_turn_reports_no_denials(tmp_path: Path) -> None:
         turns=[{"steps": [], "result": {"status": "SUCCESS", "response": "ok"}}],
     )
     try:
-        outcome = await harness.session.submit("hi").outcome()
+        outcome = await (await send(harness, "hi")).outcome()
         assert outcome.is_error is False
         assert outcome.permission_denials == ()
     finally:

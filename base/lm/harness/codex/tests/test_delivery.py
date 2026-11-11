@@ -9,6 +9,7 @@ import pytest
 from base.lm.harness.codex.frames import INTERNAL_ERROR, INVALID_REQUEST, JsonRpcError
 from base.lm.harness.codex.tests.support import Harness, replay, start
 from base.lm.harness.delivery import HarnessInput, ImageBlock
+from base.lm.harness.delivery.tests.sent import send
 from base.lm.harness.events import (
     AckSignal,
     AssistantText,
@@ -36,9 +37,9 @@ async def kinds(harness: Harness, *types: type) -> list[type]:
 
 
 async def running_turn(harness: Harness) -> str:
-    ticket = harness.session.submit("one", key="first")
+    ticket = await send(harness, "one", key="first")
     await harness.turn_started()
-    await asyncio.wait_for(ticket.interrupt_ready.wait(), 2)
+    await ticket.started()
     harness.server.emit(
         "item/completed",
         {
@@ -96,14 +97,14 @@ async def test_a_command_completion_of_an_ended_turn_is_not_attributed_to_the_ne
 ) -> None:
     harness = await start(tmp_path)
     try:
-        first = harness.session.submit("one")
+        first = await send(harness, "one")
         await harness.turn_started(1)
         old = harness.server.current_turn
         replay(harness.server, "steer_lost_on_interrupt", "end")
         await asyncio.wait_for(first.outcome(), 2)
-        second = harness.session.submit("two")
+        second = await send(harness, "two")
         await harness.turn_started(2)
-        await asyncio.wait_for(second.interrupt_ready.wait(), 2)
+        await second.started()
         replay(harness.server, "steer_lost_on_interrupt", "late_command", turn=old)
         await asyncio.sleep(0.01)
         assert (await seen(harness, ToolResult)) == []
@@ -192,16 +193,11 @@ async def test_a_turn_the_server_began_is_observed_attributed_and_completed_once
         started = (await seen(harness, TurnStarted))[0]
         assert started.origin is TurnOrigin.HARNESS
         assert started.cause is HarnessCause.UNKNOWN
-        waiting = harness.session.submit("ours")
-        await asyncio.sleep(0.01)
-        assert not harness.server.params_for("turn/start"), "our turn waits for the server's"
         replay(harness.server, "server_started_turn", "activity", turn="srv-turn")
         replay(harness.server, "server_started_turn", "end", turn="srv-turn")
         replay(harness.server, "server_started_turn", "end", turn="srv-turn")
         assert [e.turn_id for e in (await seen(harness, AssistantText))] == [started.turn_id]
         completions = await seen(harness, TurnCompleted)
         assert [c.turn_id for c in completions] == [started.turn_id]
-        await harness.turn_started()
-        assert waiting.turn_id != started.turn_id
     finally:
         await harness.stop()

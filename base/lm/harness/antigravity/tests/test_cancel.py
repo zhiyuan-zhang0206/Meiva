@@ -12,6 +12,7 @@ import pytest
 from base.clock.tests.fakes import system_clock
 from base.lm.harness.antigravity.tests.support import config, say, start
 from base.lm.harness.antigravity.transport import AgyTransport
+from base.lm.harness.delivery.tests.sent import send
 from base.lm.harness.events import TurnCompleted
 
 
@@ -27,7 +28,7 @@ async def test_interrupt_reaps_the_tool_children_the_cli_leaves_behind(tmp_path:
     harness = await start(tmp_path, turns=[turn], cancel_settle_seconds=0.3)
     child = None
     try:
-        ticket = harness.session.submit("run the long command")
+        ticket = await send(harness, "run the long command")
         await harness.wait_until(lambda: harness.child_pid() is not None)
         child = harness.child_pid()
         report = await harness.session.interrupt()
@@ -52,11 +53,11 @@ async def test_interrupt_reaps_the_tool_children_the_cli_leaves_behind(tmp_path:
 async def test_the_session_serves_the_next_turn_after_interrupt(tmp_path: Path) -> None:
     harness = await start(tmp_path, turns=[{"hang": True}, say("after")])
     try:
-        first = harness.session.submit("hang")
+        first = await send(harness, "hang")
         await harness.wait_until(lambda: harness.messages() == ["hang"])
         await harness.session.interrupt()
         assert (await first.outcome()).interrupted
-        second = await harness.session.submit("now work").outcome()
+        second = await (await send(harness, "now work")).outcome()
         assert second.text == "after"
         assert not second.is_error
     finally:
@@ -75,7 +76,7 @@ async def test_close_during_a_tool_reaps_or_reports_its_child(
     )
     child = None
     try:
-        harness.session.submit("run the long command")
+        await send(harness, "run the long command")
         await harness.wait_until(lambda: harness.child_pid() is not None)
         child = harness.child_pid()
         assert child is not None
@@ -108,7 +109,7 @@ async def test_an_unkillable_child_is_still_reported_as_residue(tmp_path: Path) 
     harness = await start(tmp_path, turns=[turn], cancel_settle_seconds=0.2, reap=_reap_nothing)
     child = None
     try:
-        harness.session.submit("run the long command")
+        await send(harness, "run the long command")
         await harness.wait_until(lambda: harness.child_pid() is not None)
         child = harness.child_pid()
         report = await harness.session.interrupt()
@@ -127,7 +128,7 @@ async def test_interrupt_without_an_active_turn_keeps_the_process(tmp_path: Path
 
     harness = await start(tmp_path, turns=[say("one")])
     try:
-        await harness.session.submit("a").outcome()
+        await (await send(harness, "a")).outcome()
         report = await harness.session.interrupt()
         assert report.turn_id is None
         assert report.settled is None
@@ -140,13 +141,13 @@ async def test_interrupt_without_an_active_turn_keeps_the_process(tmp_path: Path
 async def test_foreground_interrupt_leaves_the_process_running(tmp_path: Path) -> None:
     harness = await start(tmp_path, turns=[{"hang": True}])
     try:
-        ticket = harness.session.submit("run")
+        await send(harness, "run")
         await harness.wait_until(lambda: harness.messages() == ["run"])
         pid = harness.session.cli_pid
         with pytest.raises(NotImplementedError, match="foreground-only"):
-            await harness.session.interrupt(turn_id=ticket.turn_id)
+            await harness.session.interrupt(turn_id=harness.session.active_turn_id)
         assert harness.session.cli_pid == pid
-        assert not ticket.settled
+        assert not harness.of(TurnCompleted)
     finally:
         await harness.stop()
 

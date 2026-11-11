@@ -17,6 +17,7 @@ from base.lm.harness.base_session import SessionBinding
 from base.lm.harness.claude import BridgeConfig
 from base.lm.harness.claude.session import ClaudeSession
 from base.lm.harness.claude.tests.fake_sdk import (
+    Block,
     Emit,
     FakeSDK,
     ResultMessage,
@@ -300,3 +301,42 @@ async def test_observed_process_residue_blocks_subsequent_sessions(tmp_path: Pat
     with pytest.raises(HarnessClosedError, match="previous harness session could not close"):
         await bridge.close()
     assert len(sdk.clients) == 1
+
+
+async def test_claude_cancel_during_first_turn_keeps_the_handoff_and_the_session(
+    tmp_path: Path,
+) -> None:
+    sdk = FakeSDK([[Block()], [Say("next reply")]])
+    session = ClaudeSession(
+        BridgeConfig(cwd=tmp_path),
+        environ={},
+        sdk=sdk,
+        probe=ScriptedProbe(),
+        binding=SessionBinding(),
+        clock=system_clock(),
+    )
+    bridge = HarnessBridge(
+        Harness.CLAUDE_CODE,
+        7,
+        lambda _: session,
+        handoff=handoff(tmp_path),
+        registration_ttl_seconds=3600,
+        clock=system_clock(),
+        handle_rng=SecureRandom(random.SystemRandom()),
+        controller_pid=os.getpid(),
+    )
+    task = asyncio.create_task(run_turn(bridge, "user work", key="inbound-1"))
+    try:
+        await until(lambda: bool(sdk.clients and sdk.clients[0].queries))
+        await asyncio.sleep(0.05)
+        await bridge.interrupt()
+        assert (await asyncio.wait_for(task, timeout=2)).interrupted
+        assert sdk.clients[0].queries == [f"{handoff(tmp_path).render().strip()}\n\nuser work"]
+        assert not sdk.clients[0].disconnected
+        assert bridge.session_id == session.session_id
+        assert (await run_turn(bridge, "next", key="inbound-2")).text == "next reply"
+        assert len(sdk.clients) == 1
+    finally:
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+        await bridge.close()

@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-import asyncio
 from pathlib import Path
 
 from base.lm.harness.claude.tests import fake_sdk as fake
 from base.lm.harness.claude.tests.fake_sdk import Emit, Say
 from base.lm.harness.claude.tests.support import start
+from base.lm.harness.delivery.tests.sent import send
 from base.lm.harness.events import (
     AssistantText,
     HarnessCause,
@@ -33,49 +33,6 @@ def _answer(text: str = "The background command finished with exit code 0.") -> 
     return fake.ResultMessage(origin={"kind": "task-notification"}, result=text)
 
 
-async def test_an_idle_task_report_starts_the_dispatch_hold(tmp_path: Path) -> None:
-    delivered: list[UnsolicitedOutput] = []
-    harness = await start(tmp_path, unsolicited=delivered.append)
-    try:
-        harness.client.push(_report())
-        report = await harness.wait_for(
-            lambda event: isinstance(event, UnsolicitedOutput) and "task-1" in event.text
-        )
-        assert report.source == "task-notification"
-        assert "/var/tasks/task-1.output" in report.text
-        assert "completed" in report.text
-
-        # meiva:note
-        # The report is inbound content: the agent has not read it yet, so it goes to
-        # the sink that turns it into an inbound turn.
-        # meiva:link base/lm/harness/claude/docs/background-tasks.md
-        assert [event.text for event in delivered] == [report.text]
-
-        # meiva:note
-        # Dispatch is held while the CLI answers the notification itself, so that
-        # answer cannot be collected into a turn of ours.
-        # meiva:link base/lm/harness/claude/docs/background-tasks.md
-        queued = harness.session.submit("next instruction")
-        assert harness.session.active_turn_id is None
-        assert harness.session.pending_turns == (queued.turn_id,)
-
-        harness.client.push(_answer())
-        completed = await harness.wait_for(
-            lambda event: isinstance(event, TurnCompleted) and event.turn_id == queued.turn_id
-        )
-        assert completed.text == "" or isinstance(completed.text, str)
-        assert harness.session.active_turn_id is None
-
-        # meiva:note
-        # The CLI's own answer belongs to no turn of ours and is not re-delivered as
-        # new inbound content: the model already wrote it in the provider transcript.
-        # meiva:link base/lm/harness/claude/docs/background-tasks.md
-        assert [event.text for event in delivered] == [report.text]
-        assert harness.of(SessionFailed) == [] and harness.of(TurnFaulted) == []
-    finally:
-        await harness.stop()
-
-
 async def test_a_background_answer_is_an_observed_turn_with_its_cause(tmp_path: Path) -> None:
     harness = await start(tmp_path)
     try:
@@ -91,7 +48,7 @@ async def test_a_background_answer_is_an_observed_turn_with_its_cause(tmp_path: 
         assert completed.turn_id == started.turn_id
         assert [event.turn_id for event in harness.of(AssistantText)] == [started.turn_id]
         assert harness.of(SessionFailed) == [] and harness.of(TurnFaulted) == []
-        late = harness.session.submit("ours")
+        late = await send(harness, "ours")
         assert (await late.outcome()).turn_id == late.turn_id
     finally:
         await harness.stop()
@@ -105,7 +62,7 @@ async def test_a_notification_during_a_turn_is_not_delivered_again(tmp_path: Pat
         unsolicited=delivered.append,
     )
     try:
-        outcome = await harness.session.submit("work").outcome()
+        outcome = await (await send(harness, "work")).outcome()
         assert outcome.text == "saw it mid-turn"
         # meiva:note
         # The running turn received the notification in its own context; a second
@@ -127,26 +84,5 @@ async def test_close_stops_the_tasks_the_cli_still_runs(tmp_path: Path) -> None:
         await harness.wait_for(lambda event: isinstance(event, UnsolicitedOutput))
         await harness.session.close(reason="test done")
         assert harness.client.stopped == ["t2"]
-    finally:
-        await harness.stop()
-
-
-async def test_an_idle_report_is_not_replayed_into_the_next_turn(tmp_path: Path) -> None:
-    # meiva:note
-    # Nobody consumes the event stream between turns, so an event that arrived while
-    # the session was idle waits in the queue. A report that belonged to no turn must not be read as
-    # the next turn's own outcome (#5663): turns are attributed by their own ids, so the report
-    # stays an event of the stream and the turn's text is only what the turn said.
-    # meiva:link base/lm/harness/claude/docs/claude.md
-    harness = await start(tmp_path, scripts=[[Say("its own reply")]])
-    try:
-        await harness.detach_consumer()
-        harness.client.push(_report("t1"))
-        await asyncio.sleep(0.02)
-        ticket = harness.session.submit("next")
-        harness.client.push(_answer())
-        outcome = await ticket.outcome()
-        assert outcome.text == "its own reply"
-        assert "task-1" not in outcome.text
     finally:
         await harness.stop()

@@ -7,7 +7,7 @@ from base.host.boundary.json_values import is_object_list
 from base.lm.harness.codex.frames import JsonObject, RequestParams, as_object, as_text
 from base.lm.harness.codex.mapping import TurnFields, assistant_text
 from base.lm.harness.events import TurnCompleted, Usage
-from base.lm.harness.session import SessionTotals, TurnOutcome
+from base.lm.harness.session import SessionTotals
 
 
 class NotificationKind(StrEnum):
@@ -123,11 +123,10 @@ class TurnRecord:
 
 
 # meiva:note
-# What a `turn/completed` naming our turn settles it with: the outcome the caller awaits, the event
+# What a `turn/completed` naming our turn settles it with: the event
 # that records it, and the session totals after the turn.
 @dataclass(frozen=True, slots=True)
 class Settlement:
-    outcome: TurnOutcome
     completed: TurnCompleted
     totals: SessionTotals
 
@@ -225,19 +224,6 @@ def settle(
     text = record.text
     interrupted = fields.status == "interrupted"
     is_error = fields.status in {"failed", "interrupted"} or fields.error_message is not None
-    outcome = TurnOutcome(
-        turn_id=turn_id,
-        text=text,
-        subtype=fields.status,
-        is_error=is_error,
-        interrupted=interrupted,
-        stop_reason=fields.error_message,
-        usage=usage,
-        cost_usd=None,
-        permission_denials=record.denials,
-        num_turns=num_turns,
-        steps=steps,
-    )
     completed = TurnCompleted(
         turn_id=turn_id,
         session_id=session_id,
@@ -254,4 +240,4 @@ def settle(
         permission_denials=record.denials,
         steps=steps,
     )
-    return Settlement(outcome=outcome, completed=completed, totals=totals.with_turn(usage, None))
+    return Settlement(completed=completed, totals=totals.with_turn(usage, None))

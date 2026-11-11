@@ -10,11 +10,12 @@ The adapters implement one contract — `connect(resume)` / `send(text)` /
 `interrupt()` / `stream()` / `close()` — and are expected to preserve nine
 invariants the host relies on:
 
-1. inbound is queued only at a turn boundary, never mid-turn;
-2. a repeated submission key returns the same ticket, and a completed key
-   replays its recorded outcome instead of re-running;
-3. a full queue refuses; it never buffers beyond its bound;
-4. a hosted `interrupt()` targets the current submitted ticket and preserves the
+1. an input is handed over with `deliver()` and reported only by events; the session
+   keeps no queue, and the caller decides what to hand over next;
+2. an input's key is the caller's own and is echoed by every event about it; a
+   repeated key is a re-delivery that reaches the harness, never a replayed answer;
+3. nothing is buffered beyond the bounded event queue;
+4. a hosted `interrupt()` targets the running turn, whoever began it, and preserves the
    session. A matching provider terminal result confirms cancellation. Process
    observations report cleanup separately. Providers without a foreground-only
    control leave the turn running and report that cancellation is unavailable;
@@ -28,7 +29,7 @@ invariants the host relies on:
    the registry), a failed resume fails fast instead of silently
    falling back to a fresh session;
 8. a faulted or closed session stops being usable: the bridge retires it instead of
-   submitting to it again;
+   delivering to it again;
 9. `close()` returns only after the session's process tree is gone, or raises when the
    adapter's settle window still observes residue. An unobservable tree remains
    explicitly unknown; it is not proof that every descendant exited.
@@ -42,11 +43,11 @@ and open questions are recorded in
 
 | Module | Owns |
 |---|---|
-| `base_session.py` | `BaseHarnessSession`, `TurnTicket`, `SessionBinding`, `InboundQueueFullError`, `SessionClosedError`, and `EVENT_STREAM_END`: the shared session state machine (inbound queue, turn promotion, idempotency dedupe, bounded event queue with delta dropping, background `TaskGroup` management, `SessionRegistry` persistence, injected `Clock`) |
+| `base_session.py` | `BaseHarnessSession`, `ActiveTurn` and `SessionBinding`: the shared session state (the turn an input of ours started in an idle session, the delivery ledger, bounded event queue with delta dropping, background `TaskGroup` management, `SessionRegistry` persistence, injected `Clock`). There is no queue and no outcome: a turn is reported only by its events, and what to deliver next is the caller's decision |
 | `cancel.py` | `CancelReport`, `ProcessObservation`, `describe`, `Sweep`, and the pure functions that cut a report from them |
 | `events.py` | `BridgeEvent` and its members, plus the droppable (text delta) versus control split |
-| `turn.py` | `SessionTotals`, `TurnOutcome`, `add_cost` |
-| `engine.py` | `HarnessSession` (the adapter contract), `TurnEngine` (what a graph run needs), and `HarnessTurn` (one turn's reply, usage and boundary, plus the `prelude` turns that completed before it) |
+| `turn.py` | `SessionTotals`, `add_cost` |
+| `engine.py` | `HarnessSession` (the adapter contract), `TurnEngine` (what a graph run needs), and `HarnessTurn` (one turn's reply, usage and boundary) |
 | `handoff.py` | the six-section handoff document, `HANDOFF_VERSION`, its rendered byte size, and the workspace file it is saved to for after a compaction |
 | `registry.py` | `SessionRecord` and `FileSessionRegistry`: one JSON document per (agent id, harness), atomic replace; `migrate_single_slot_records` converts the older one-document-per-agent layout; the source of a fork's session to clone ([fork](fork.md)) |
 | `registration.py` | `HarnessRegistration` and `RegistrationStore`: the attachment row the bridge writes, always with an expiry, plus the crash sweep |
@@ -71,9 +72,8 @@ Path resolution, discovery, catalog pinning, host convergence steps, and runner 
 
 The handoff is a wire format, not an internal dataclass: the waking agent reads
 it as the first message of a fresh session, and its rendered size is a per-wake
-cost the host reports (`Handoff.size_bytes()`, and a `HandoffInjected` event).
-Section order, the versioned field set, the tests that pin both and
-completed-key replay are defined in
+cost the host reports (`Handoff.size_bytes()`).
+Section order, the versioned field set and the tests that pin both are defined in
 [The handoff document](handoff.md).
 
 ## Who a message belongs to

@@ -16,7 +16,7 @@ decides differently from another provider.
 | `session.py` | the effect shell of `ClaudeSession`: start / resume / close, `deliver()`, the observed-turn model, one event stream, interrupt, totals — it awaits the SDK and holds the state, and every decision it makes comes from the modules below |
 | `inbound.py` | what one inbound message is (dispatch by class name), what an input is sent as and which echo opens a turn (`delivery.py`), what a step and a turn's text are, the background-task set, and whether a task report goes to the sink or the stream |
 | `options.py` | the keyword values handed to the SDK's option class, including the two that ride only when resolved or supported |
-| `settle.py` | how one result settles a turn: the outcome, the stream event, the new session id and the running totals |
+| `settle.py` | how one result settles a turn: the stream event, the new session id and the running totals |
 | `mapping.py` | pure SDK-message → `BridgeEvent` translation, dispatched by class name |
 | `auth.py` | the credential boundary: OAuth by default, API key only on request, secrets never returned |
 | `config.py` | `BridgeConfig` |
@@ -30,9 +30,9 @@ exports come from `base.lm.harness.claude.session`, so the door itself stays `st
    writes the CLI's own working surface: no system-prompt override, no approval
    callback, no MCP servers of ours. `resume` comes from the caller or from the
    registry.
-2. **Inject the handoff as the first message.** The session submits the rendered
-   handoff as its first turn on a fresh session. A resumed session is **not**
-   re-injected: its transcript already carries it.
+2. **The handoff rides the first input.** The bridge puts the rendered handoff in
+   front of the first input of a fresh session; a resumed session gets none, its
+   transcript already carries it.
 3. **Map events back and persist the identity pair.** `events()` is the single
    outbound stream, and the registry writes `agent_id ↔ session_id` as soon as
    the SDK reports its init.
@@ -45,10 +45,7 @@ exports come from `base.lm.harness.claude.session`, so the door itself stays `st
 | `tools` | `None` | retain the complete native CLI tool set; an explicit tuple restricts it |
 | `permission_mode` | `bypassPermissions` | headless session with no approval layer: the CLI must not park on a prompt nobody can answer. The workspace is the boundary. |
 | `cancel_settle_seconds` | 5 | observed reaping is ~40ms; 5s tolerates load without hiding a leak |
-| `max_pending_turns` | 32 | overflow returns the message to its durable owner instead of growing memory |
 | `max_buffered_events` | 256 | text deltas are droppable past this; control events are bounded by tool-call count |
-| `dedupe_window` | 256 | a redelivery inside the window replays the outcome instead of re-running the turn |
-| `injected_dispatch_wait_seconds` | 30 | the CLI answers a background-task notification in a turn of its own; dispatch is held until that turn reports, and this bound turns a CLI that never reports into one wait instead of a wedged agent. Observed notification turns are two to three seconds, so 30 is an order above them and still bounds a user's wait |
 
 Native user, project and local settings remain enabled, including CLAUDE.md,
 skills, hooks, plugins and configured MCP servers. The adapter does not set
@@ -77,8 +74,7 @@ and the CLI reports its end on its own:
 - **Turns are observed, not submitted.** A turn opens at the first echo of our uuid, at an echo that
   names an origin (`task-notification`, a timer word), or at the first content with no turn open; a
   `ResultMessage` ends it. Echoes that are not ours (`[Request interrupted by user]`) are ignored.
-  `submit()` still waits for the result of the turn that took its input; if its input was absorbed
-  into a turn that is not its own, it settles with that turn's outcome (an alias completion).
+  Each turn is reported once under its own id; there is no alias completion.
   Causes of a CLI-started turn: `BACKGROUND_TASK` (a task notification preceded it or its origin is
   `task-notification`), `SCHEDULED_WAKE` (an origin naming cron, schedule, timer, wake, loop or
   monitor; no real sample exists yet, the shape is a guess), otherwise `UNKNOWN`.
@@ -126,5 +122,4 @@ and the CLI reports its end on its own:
 
 `base/lm/harness/claude/tests/` runs against `fake_sdk.py`, a scripted stand-in
 whose classes carry the SDK's names and fields: turns, tool calls, interrupts and
-rate-limit events, with no CLI and no quota. The real end-to-end run is
-`demos/claude-sdk-bridge/bridge_demo.py`, one command.
+rate-limit events, with no CLI and no quota.

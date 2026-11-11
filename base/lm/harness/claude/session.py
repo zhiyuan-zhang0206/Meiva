@@ -11,11 +11,8 @@ from base.host.boundary.json_values import is_object_dict
 from base.lm.harness.base_session import (
     EVENT_STREAM_END,
     BaseHarnessSession,
-    InboundQueueFullError,
     SessionBinding,
     SessionClock,
-    SessionClosedError,
-    TurnTicket,
 )
 from base.lm.harness.cancel import (
     CancelReport,
@@ -51,11 +48,9 @@ from base.lm.harness.events import (
     InterruptConfirmed,
     SessionFailed,
     SessionStarted,
-    TurnCompleted,
     TurnOrigin,
     TurnStarted,
 )
-from base.lm.harness.handoff import Handoff
 from base.lm.harness.process import (
     ChildProbe,
     SdkClient,
@@ -67,7 +62,7 @@ from base.lm.harness.process import (
     wait_gone,
     watch_tree,
 )
-from base.lm.harness.session import TurnOutcome
+from base.lm.harness.session import SessionClosedError
 
 # meiva:note
 # One session is one turn engine with three boundaries. Inbound is `deliver()`: every input is
@@ -163,7 +158,7 @@ class ClaudeSession(BaseHarnessSession[BridgeConfig]):
         self._echo_seen = False
         self._pending_cause: HarnessCause | None = None
 
-    async def start(self, *, resume: str | None = None, handoff: Handoff | None = None) -> None:
+    async def start(self, *, resume: str | None = None) -> None:
         if self._client is not None:
             raise RuntimeError("session already started")
         if self._closed:
@@ -184,14 +179,12 @@ class ClaudeSession(BaseHarnessSession[BridgeConfig]):
         self._cli_pid = client_pid(client)
         await self._enter_tasks()
         self._reader = self._spawn(self._read_loop())
-        self._inject_handoff(handoff)
 
     async def close(self, *, reason: str = "closed") -> None:
         if self._closed:
             return
         self._closed = True
         watched = watch_tree(self._probe, self._cli_pid)
-        self._fail_pending(SessionClosedError("session closed"))
         # meiva:note
         # A background task outlives the turn that started it by design, so nothing in
         # `interrupt()` touches it — and a closing session is the moment nobody will ever
@@ -204,7 +197,6 @@ class ClaudeSession(BaseHarnessSession[BridgeConfig]):
         client, live = self._client, list(self._background.open_task_ids)
         self._background = BackgroundTasks()
         self._open = None
-        self._observed.clear()
         if client is not None and live:
             await asyncio.gather(
                 *(client.stop_task(task_id) for task_id in live), return_exceptions=True
@@ -240,6 +232,8 @@ class ClaudeSession(BaseHarnessSession[BridgeConfig]):
     # meiva:link base/lm/harness/docs/delivery.md
     async def deliver(self, inputs: Sequence[HarnessInput]) -> None:
         batch = validated_batch(inputs)
+        if self._closed:
+            raise SessionClosedError("session is closed")
         _ = self._require_client()
         for entry in batch:
             await self._send(entry)
@@ -270,16 +264,15 @@ class ClaudeSession(BaseHarnessSession[BridgeConfig]):
         self._apply(self._ledger.received(entry.key, AckSignal.WEAK))
 
     async def interrupt(self, *, turn_id: str | None = None) -> CancelReport:
-        ticket = await self._interrupt_target(turn_id)
-        if ticket is None and not self._observed_turn_named(turn_id):
+        if not self._open_turn_named(turn_id):
             return unobserved_cancel(turn_id=turn_id)
         client = self._require_client()
         pid = self._cli_pid
-        turn_id = ticket.turn_id if ticket is not None else self._open_id()
+        turn_id = self._open_id()
         observed = snapshot(self._probe, pid)
         spawned = spawned_since(observed, self._baseline)
         started = self._monotonic()
-        await self._interrupt_control(client, ticket)
+        await self._interrupt_control(client)
         interrupt_ms = (self._monotonic() - started) * 1000.0
         if pid is None:
             return unobserved_cancel(turn_id=turn_id, interrupt_ms=interrupt_ms)
@@ -308,18 +301,13 @@ class ClaudeSession(BaseHarnessSession[BridgeConfig]):
     # The result may reach the bridge before the SDK sees its control reply.
     # Let the session finish that exchange so the SDK can clear its request
     # bookkeeping even when the foreground no longer needs to await the ACK.
-    async def _interrupt_control(
-        self, client: ClaudeClientProtocol, ticket: TurnTicket | None
-    ) -> None:
+    async def _interrupt_control(self, client: ClaudeClientProtocol) -> None:
         errors: list[Exception] = []
 
         async def send() -> None:
             try:
-                if ticket is None or self._active is ticket:
-                    await client.interrupt()
+                await client.interrupt()
             except Exception as exc:
-                if ticket is not None:
-                    ticket.interrupt_requested = False
                 errors.append(exc)
 
         await asyncio.shield(self._spawn(send()))
@@ -344,16 +332,6 @@ class ClaudeSession(BaseHarnessSession[BridgeConfig]):
             )
         )
 
-    async def _begin(self, ticket: TurnTicket) -> None:
-        ticket.started_at = self._monotonic()
-        self._baseline = snapshot(self._probe, self._cli_pid)
-        entry = HarnessInput(key=ticket.input_key, text=ticket.text, images=ticket.images)
-        try:
-            await self._send(entry)
-            ticket.interrupt_ready.set()
-        except Exception as exc:
-            self._fail_turn(ticket, exc)
-
     async def _read_loop(self) -> None:
         client = self._require_client()
         try:
@@ -363,11 +341,9 @@ class ClaudeSession(BaseHarnessSession[BridgeConfig]):
             raise
         except Exception as exc:
             self._emit(SessionFailed(error=f"session stream failed: {exc}"))
-            self._fail_active(exc)
         else:
             error = SessionClosedError("Claude event stream ended")
             self._emit(SessionFailed(error=str(error)))
-            self._fail_active(error)
 
     # meiva:note
     # One dispatch table, keyed by the provider's own class name: a result is a turn
@@ -438,28 +414,18 @@ class ClaudeSession(BaseHarnessSession[BridgeConfig]):
 
     def _absorb(self, key: str) -> None:
         turn = self._open
-        if turn is None:
-            return
-        ticket = self._active
-        mine = ticket is not None and ticket.input_key == key
-        if mine and ticket is not None and not turn.owner_ticket:
-            turn = turn.with_alias(ticket.turn_id)
-        self._open = turn.absorbing(key)
+        if turn is not None:
+            self._open = turn.absorbing(key)
 
     # meiva:note
-    # An echo of our input with no turn open begins a turn. If the input is the one our active ticket
-    # sent, the turn is the ticket's. If it was written while another turn ran and that turn ended
-    # without taking it, the CLI revived it as a turn of its own: that is a harness turn
+    # An echo of our input with no turn open begins a turn. If it was written while another turn ran and
+    # that turn ended without taking it, the CLI revived it as a turn of its own: that is a harness turn
     # (QUEUED_INPUT_REVIVED) that names the key. Otherwise the input started the turn.
+    # meiva:link base/lm/harness/docs/delivery.md
     def _open_input_turn(self, key: str) -> None:
-        ticket = self._active
-        if ticket is not None and ticket.input_key == key:
-            self._open = OpenTurn(ticket.turn_id, (key,), owner_ticket=True)
-            self._emit(TurnStarted(ticket.turn_id, TurnOrigin.INPUT, (key,), self.generation))
-            return
         turn_id = self._mint_turn_id()
+        self._baseline = snapshot(self._probe, self._cli_pid)
         self._open = OpenTurn(turn_id, (key,))
-        self._observed.add(turn_id)
         revived = self._ledger.scope_of(key) is not None
         self._emit(
             TurnStarted(
@@ -475,8 +441,8 @@ class ClaudeSession(BaseHarnessSession[BridgeConfig]):
         turn_id = self._mint_turn_id()
         cause = self._pending_cause or harness_cause(origin)
         self._pending_cause = None
+        self._baseline = snapshot(self._probe, self._cli_pid)
         self._open = OpenTurn(turn_id)
-        self._observed.add(turn_id)
         self._emit(
             TurnStarted(
                 turn_id, TurnOrigin.HARNESS, (), self.generation, cause=cause, detail=origin
@@ -487,11 +453,9 @@ class ClaudeSession(BaseHarnessSession[BridgeConfig]):
     def _open_id(self) -> str | None:
         return self._open.turn_id if self._open is not None else None
 
-    def _observed_turn_named(self, turn_id: str | None) -> bool:
+    def _open_turn_named(self, turn_id: str | None) -> bool:
         turn = self._open
-        if turn is None or turn.owner_ticket:
-            return False
-        return turn_id is None or turn_id == turn.turn_id
+        return turn is not None and (turn_id is None or turn_id == turn.turn_id)
 
     def _handle_task_notification(self, message: object) -> None:
         self._background = self._background.reported(_task_id(message))
@@ -500,7 +464,6 @@ class ClaudeSession(BaseHarnessSession[BridgeConfig]):
             self._emit(event)
         if plan.report is not None:
             self._pending_cause = HarnessCause.BACKGROUND_TASK
-            self._hold_dispatch(self.config.injected_dispatch_wait_seconds)
             self._unsolicited(plan.report)
 
     def _track_task_started(self, message: object) -> None:
@@ -522,7 +485,6 @@ class ClaudeSession(BaseHarnessSession[BridgeConfig]):
         if not self._echo_seen and self._ledger.keys_in(InputPhase.RECEIVED):
             error = "the CLI did not echo our user message; replay-user-messages is not available"
             self._emit(SessionFailed(error=error))
-            self._fail_active(SessionClosedError(error))
             return
         turn = self._open or self._open_harness_turn(fields.origin_kind)
         settlement = settle_result(
@@ -538,22 +500,6 @@ class ClaudeSession(BaseHarnessSession[BridgeConfig]):
         self._emit(completed)
         if completed.interrupted:
             self._emit(InterruptConfirmed(turn.turn_id, self.generation))
-        self._finish_turn(turn, settlement.outcome, completed)
-
-    def _finish_turn(self, turn: OpenTurn, outcome: TurnOutcome, completed: TurnCompleted) -> None:
-        ticket = self._active
-        for alias in turn.aliases:
-            if ticket is not None and ticket.turn_id == alias:
-                self._emit(replace(completed, turn_id=alias))
-                self._complete(ticket, replace(outcome, turn_id=alias))
-                ticket = None
-        if turn.owner_ticket and ticket is not None:
-            self._complete(ticket, outcome)
-            return
-        if not turn.owner_ticket:
-            self._observed.discard(turn.turn_id)
-            self._release_dispatch(keep_events=True)
-            self._promote(keep_events=True)
 
     def _require_client(self) -> ClaudeClientProtocol:
         if self._client is None:
@@ -566,7 +512,5 @@ __all__ = [
     "EVENT_STREAM_END",
     "CancelReport",
     "ClaudeSession",
-    "InboundQueueFullError",
     "SessionClosedError",
-    "TurnTicket",
 ]

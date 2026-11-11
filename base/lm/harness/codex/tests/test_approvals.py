@@ -4,6 +4,7 @@ import asyncio
 from pathlib import Path
 
 from base.lm.harness.codex.tests.support import start
+from base.lm.harness.delivery.tests.sent import send
 from base.lm.harness.events import TurnCompleted
 
 COMMAND = "rm -rf /tmp/definitely-not-needed"
@@ -12,7 +13,7 @@ COMMAND = "rm -rf /tmp/definitely-not-needed"
 async def test_declined_command_is_reported_by_the_model(tmp_path: Path) -> None:
     harness = await start(tmp_path, approval_policy="untrusted", approval_decision="decline")
     try:
-        ticket = harness.session.submit("delete the temp directory")
+        ticket = await send(harness, "delete the temp directory")
         await harness.turn_started()
         answer = await harness.server.ask(
             "item/commandExecution/requestApproval",
@@ -39,7 +40,7 @@ async def test_declined_command_is_reported_by_the_model(tmp_path: Path) -> None
 async def test_accepted_command_is_answered_with_accept(tmp_path: Path) -> None:
     harness = await start(tmp_path, approval_policy="untrusted", approval_decision="accept")
     try:
-        harness.session.submit("delete the temp directory")
+        await send(harness, "delete the temp directory")
         await harness.turn_started()
         answer = await harness.server.ask(
             "item/commandExecution/requestApproval", {"command": COMMAND}
@@ -52,7 +53,7 @@ async def test_accepted_command_is_answered_with_accept(tmp_path: Path) -> None:
 async def test_file_change_approval_uses_the_same_decision(tmp_path: Path) -> None:
     harness = await start(tmp_path, approval_policy="untrusted", approval_decision="decline")
     try:
-        harness.session.submit("edit the file")
+        await send(harness, "edit the file")
         await harness.turn_started()
         answer = await harness.server.ask("item/fileChange/requestApproval", {"itemId": "change-1"})
         assert answer == {"decision": "decline"}
@@ -63,7 +64,7 @@ async def test_file_change_approval_uses_the_same_decision(tmp_path: Path) -> No
 async def test_legacy_patch_approval_uses_its_own_vocabulary(tmp_path: Path) -> None:
     harness = await start(tmp_path, approval_policy="untrusted", approval_decision="accept")
     try:
-        harness.session.submit("apply the patch")
+        await send(harness, "apply the patch")
         await harness.turn_started()
         answer = await harness.server.ask("applyPatchApproval", {"callId": "call-1"})
         assert answer == {"decision": "approved"}
@@ -74,7 +75,7 @@ async def test_legacy_patch_approval_uses_its_own_vocabulary(tmp_path: Path) -> 
 async def test_permission_requests_grant_nothing(tmp_path: Path) -> None:
     harness = await start(tmp_path, approval_policy="untrusted")
     try:
-        harness.session.submit("ask for more")
+        await send(harness, "ask for more")
         await harness.turn_started()
         answer = await harness.server.ask(
             "item/permissions/requestApproval", {"cwd": str(tmp_path), "permissions": {}}

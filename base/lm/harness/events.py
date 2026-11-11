@@ -22,13 +22,6 @@ class SessionBound:
     turn_id: str | None = None
 
 
-@dataclass(frozen=True, slots=True)
-class HandoffInjected:
-    agent_id: int
-    turn_id: str
-    size_bytes: int
-
-
 # meiva:note
 # The CLI compacted its own context: what the agent was told earlier, the host's standing
 # instructions included, may now exist only as a summary. Claude reports it as a
@@ -290,7 +283,6 @@ UnsolicitedSink = Callable[[UnsolicitedOutput], None]
 BridgeEvent = (
     SessionStarted
     | SessionBound
-    | HandoffInjected
     | ContextCompacted
     | ReasoningDelta
     | ReasoningText

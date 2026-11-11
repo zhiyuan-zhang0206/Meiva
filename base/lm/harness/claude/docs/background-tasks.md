@@ -21,8 +21,8 @@ mean different things.
   and one `TurnCompleted`. It is not read as our turn's boundary and not recorded as unsolicited
   output. The report itself still goes to the sink while no turn runs, as above, because the
   graph does not yet surface observed turns; that delivery goes when it does.
-- Dispatch is held for the CLI's own turn so a turn of ours does not start in the middle of it;
-  `injected_dispatch_wait_seconds` bounds the wait, and the end of the observed turn releases it.
+- Nothing is held for the CLI's own turn: an input delivered meanwhile is written to the CLI, which
+  runs it behind its own turn, and the events say which turn it entered.
 
 ## Stopping them
 

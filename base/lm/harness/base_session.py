@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-from collections import OrderedDict, deque
 from collections.abc import AsyncIterator, Coroutine, Sequence
 from dataclasses import dataclass, replace
 from types import TracebackType
@@ -10,7 +9,6 @@ from typing import ClassVar, Self
 from base.lm.harness.delivery import DeliveryLedger, HarnessInput, ImageBlock, LedgerStep
 from base.lm.harness.events import (
     BridgeEvent,
-    HandoffInjected,
     SessionBound,
     SessionClosed,
     SessionFailed,
@@ -19,17 +17,13 @@ from base.lm.harness.events import (
     UnsolicitedSink,
     is_droppable,
 )
-from base.lm.harness.handoff import Handoff
 from base.lm.harness.process import ChildProbe, ExitStatus, PsutilChildProbe
 from base.lm.harness.registry import SessionRecord, SessionRegistry
 from base.lm.harness.session import (
     EVENT_STREAM_END,
-    InboundQueueFullError,
     SessionClock,
-    SessionClosedError,
     SessionConfig,
     SessionTotals,
-    TurnOutcome,
 )
 
 # meiva:note
@@ -44,70 +38,27 @@ class ForkSourceUnavailableError(RuntimeError):
     pass
 
 
-class TurnTicket:
+# meiva:note
+# The turn an input of ours started in an idle session, as far as the session needs to know it: its local
+# id, the provider's name for it once known, whether an interrupt is under way and whether one can be sent yet.
+# It carries no outcome and no queue: a turn is reported only by the events it produces, and what to
+# deliver next is the caller's decision.
+# meiva:link base/lm/harness/docs/harness.md
+class ActiveTurn:
     def __init__(
-        self,
-        *,
-        turn_id: str,
-        text: str,
-        key: str | None,
-        future: asyncio.Future[TurnOutcome],
-        deduplicated: bool = False,
-        submitted_at: float,
-        input_key: str | None = None,
-        images: tuple[ImageBlock, ...] = (),
+        self, *, turn_id: str, text: str, key: str, images: tuple[ImageBlock, ...] = ()
     ) -> None:
         self.turn_id = turn_id
         self.text = text
-        self.key = key
-        # meiva:note
-        # The id the delivery events name this ticket's input by. `key` is the idempotency key a
-        # caller replays an outcome with; a ticket that starts a turn for a delivered input keeps
-        # `key` empty (a re-delivery must reach the harness, not replay an old outcome) and carries
-        # the input's own key here. A ticket without either falls back to its turn id.
-        # meiva:link base/lm/harness/docs/delivery.md
-        self.input_key = input_key or key or turn_id
+        self.input_key = key
         self.images = images
-        self.deduplicated = deduplicated
-        self.submitted_at = submitted_at
         self.started_at: float | None = None
-        # meiva:note
-        # The name the provider gave the turn this ticket runs, when it gives one.
-        # An adapter sets it as soon as it learns the name; `_claim` is the only
-        # reader, and a ticket whose provider names no turns keeps it None.
-        # meiva:link base/lm/harness/docs/harness.md
         self.provider_turn_id: str | None = None
         self.interrupt_requested = False
         self.interrupt_ready = asyncio.Event()
         self.parts: list[str] = []
         self.thoughts: list[str] = []
         self.denials: list[str] = []
-        self._future = future
-
-    async def outcome(self) -> TurnOutcome:
-        return await self._future
-
-    @property
-    def settled(self) -> bool:
-        return self._future.done()
-
-    def settle(self, outcome: TurnOutcome) -> None:
-        self.interrupt_ready.set()
-        if not self._future.done():
-            self._future.set_result(outcome)
-
-    def _settle(self, outcome: TurnOutcome) -> None:
-        self.settle(outcome)
-
-    def fail(self, exc: BaseException) -> None:
-        self.interrupt_ready.set()
-        if self._future.done():
-            return
-        self._future.set_exception(exc)
-        self._future.exception()
-
-    def _fail(self, exc: BaseException) -> None:
-        self.fail(exc)
 
 
 # meiva:note
@@ -149,9 +100,7 @@ class BaseHarnessSession[ConfigT: SessionConfig](ExitStatus):
         self._registry: SessionRegistry | None = binding.registry
         self._clock: SessionClock = clock
         self._events: asyncio.Queue[BridgeEvent | object] = asyncio.Queue()
-        self._pending: deque[TurnTicket] = deque()
-        self._completed: OrderedDict[str, TurnOutcome] = OrderedDict()
-        self._active: TurnTicket | None = None
+        self._active: ActiveTurn | None = None
         self._reader: asyncio.Task[None] | None = None
         self._tasks = asyncio.TaskGroup()
         self._children: set[asyncio.Task[None]] = set()
@@ -164,7 +113,6 @@ class BaseHarnessSession[ConfigT: SessionConfig](ExitStatus):
         self._dropped_deltas = 0
         self._resumed_existing = False
         self._record: SessionRecord | None = None
-        self._handoff_ticket: TurnTicket | None = None
         self._turn_seq = 0
         self._unsolicited_sink = binding.unsolicited
         self._fork_source_agent_id = binding.fork_source_agent_id
@@ -174,7 +122,7 @@ class BaseHarnessSession[ConfigT: SessionConfig](ExitStatus):
         self._ledger = DeliveryLedger()
         self._observed: set[str] = set()
 
-    async def start(self, *, resume: str | None = None, handoff: Handoff | None = None) -> None:
+    async def start(self, *, resume: str | None = None) -> None:
         raise NotImplementedError
 
     async def close(self, *, reason: str = "closed") -> None:
@@ -212,19 +160,17 @@ class BaseHarnessSession[ConfigT: SessionConfig](ExitStatus):
     # meiva:note
     # Startup and completion can both race a cancel. Wait on the captured ticket
     # for the adapter to finish addressing the prompt, then recheck ownership.
-    async def _interrupt_target(self, turn_id: str | None) -> TurnTicket | None:
-        ticket = self._active
-        if turn_id is not None and (ticket is None or ticket.turn_id != turn_id):
-            ticket = next((queued for queued in self._pending if queued.turn_id == turn_id), None)
-        if ticket is None:
+    async def _interrupt_target(self, turn_id: str | None) -> ActiveTurn | None:
+        turn = self._active
+        if turn is None or (turn_id is not None and turn.turn_id != turn_id):
             return None
-        await ticket.interrupt_ready.wait()
-        if self._active is not ticket or ticket.interrupt_requested:
+        await turn.interrupt_ready.wait()
+        if self._active is not turn or turn.interrupt_requested:
             return None
-        ticket.interrupt_requested = True
-        return ticket
+        turn.interrupt_requested = True
+        return turn
 
-    async def _begin(self, ticket: TurnTicket) -> None:
+    async def _begin(self, ticket: ActiveTurn) -> None:
         raise NotImplementedError
 
     async def __aenter__(self) -> Self:
@@ -240,54 +186,23 @@ class BaseHarnessSession[ConfigT: SessionConfig](ExitStatus):
         await self.close(reason="context exit")
         return False
 
-    def submit(
-        self,
-        text: str,
-        *,
-        key: str | None = None,
-        input_key: str | None = None,
-        images: tuple[ImageBlock, ...] = (),
-    ) -> TurnTicket:
-        if self._closed:
-            raise SessionClosedError("session is closed")
-        trimmed = text.strip()
-        if not trimmed and not images:
-            raise ValueError("inbound message is empty")
-        if key is not None:
-            existing = self._recall(key)
-            if existing is not None:
-                return existing
-        if len(self._pending) >= self.config.max_pending_turns:
-            raise InboundQueueFullError(
-                f"{len(self._pending)} turns already queued "
-                f"(limit {self.config.max_pending_turns}); keep the message and retry"
-            )
-        ticket = TurnTicket(
-            turn_id=self._mint_turn_id(),
-            text=trimmed,
-            key=key,
-            future=asyncio.get_running_loop().create_future(),
-            submitted_at=self._monotonic(),
-            input_key=input_key,
-            images=images,
-        )
-        if self._idle():
-            self._start_turn(ticket)
-        else:
-            self._pending.append(ticket)
-        return ticket
-
     # meiva:note
-    # Every turn starts here, whether it was submitted into an idle session or promoted
-    # from the queue after a hold, and every start discards what nobody consumed. A turn
-    # that begins from a queue the idle period filled would otherwise read an event that
-    # belonged to no turn as its own outcome (#5663).
+    # An input delivered to an idle session starts a turn of ours: the turn record is created, what nobody
+    # consumed while the session was idle is dropped (a turn that began from a queue the idle period filled
+    # would otherwise read an event that belonged to no turn as its own, #5663), and the adapter's `_begin`
+    # addresses the prompt to the CLI. This is the only place a turn of ours starts.
     # meiva:link base/lm/harness/docs/harness.md
-    def _start_turn(self, ticket: TurnTicket, *, keep_events: bool = False) -> None:
-        if not keep_events:
-            self._discard_unconsumed_events()
-        self._active = ticket
-        self._spawn(self._begin(ticket))
+    def _start_input_turn(self, entry: HarnessInput) -> ActiveTurn:
+        turn = ActiveTurn(
+            turn_id=self._mint_turn_id(),
+            text=entry.text.strip(),
+            key=entry.key,
+            images=entry.images,
+        )
+        self._discard_unconsumed_events()
+        self._active = turn
+        _ = self._spawn(self._begin(turn))
+        return turn
 
     # meiva:note
     # The one place a session decides which of its turns an incoming provider
@@ -299,7 +214,7 @@ class BaseHarnessSession[ConfigT: SessionConfig](ExitStatus):
     # caller routes it to `_unsolicited` instead. That is what keeps a provider's
     # own turn from being read as our turn's boundary (#5663).
     # meiva:link base/lm/harness/docs/harness.md
-    def _claim(self, origin_id: str | None = None) -> TurnTicket | None:
+    def _claim(self, origin_id: str | None = None) -> ActiveTurn | None:
         ticket = self._active
         if ticket is None or (origin_id is not None and origin_id != ticket.provider_turn_id):
             return None
@@ -322,8 +237,8 @@ class BaseHarnessSession[ConfigT: SessionConfig](ExitStatus):
         return self._active.turn_id if self._active is not None else None
 
     @property
-    def pending_turns(self) -> tuple[str, ...]:
-        return tuple(ticket.turn_id for ticket in self._pending)
+    def active_provider_turn_id(self) -> str | None:
+        return self._active.provider_turn_id if self._active is not None else None
 
     @property
     def session_id(self) -> str | None:
@@ -332,10 +247,6 @@ class BaseHarnessSession[ConfigT: SessionConfig](ExitStatus):
     @property
     def model(self) -> str | None:
         return self._model
-
-    @property
-    def handoff_ticket(self) -> TurnTicket | None:
-        return self._handoff_ticket
 
     @property
     def record(self) -> SessionRecord | None:
@@ -419,20 +330,6 @@ class BaseHarnessSession[ConfigT: SessionConfig](ExitStatus):
         self._record = record
         return record.session_id
 
-    def _inject_handoff(self, handoff: Handoff | None) -> None:
-        if handoff is None or self._resumed_existing:
-            return
-        key = f"handoff:{self.agent_id}" if self.agent_id is not None else None
-        ticket = self.submit(handoff.render(), key=key)
-        self._handoff_ticket = ticket
-        self._emit(
-            HandoffInjected(
-                agent_id=self.agent_id or 0,
-                turn_id=ticket.turn_id,
-                size_bytes=handoff.size_bytes(),
-            )
-        )
-
     def _bind(self) -> None:
         if self._registry is None or self.agent_id is None or not self._session_id:
             return
@@ -462,29 +359,18 @@ class BaseHarnessSession[ConfigT: SessionConfig](ExitStatus):
         self._record = replace(self._record, updated_at=self._now_iso())
         self._registry.save(self._record)
 
-    def _complete(self, ticket: TurnTicket, outcome: TurnOutcome) -> None:
-        if self._active is ticket:
+    def _complete(self, turn: ActiveTurn) -> None:
+        turn.interrupt_ready.set()
+        if self._active is turn:
             self._active = None
-        if ticket.key is not None:
-            self._remember(ticket.key, outcome)
         self._touch()
-        ticket.settle(outcome)
-        self._promote()
 
     # meiva:note
     # Idle means nothing of ours or the harness's is running: no ticket, no turn the harness began on
     # its own (`_observed`), and no hold. A turn we start while the harness runs one of its own would
-    # land in the middle of it, so it waits in the queue.
+    # land in the middle of it, so the adapter hands it to the running turn or refuses it.
     def _idle(self) -> bool:
         return self._active is None and not self._observed and not self._dispatch_held
-
-    # meiva:note
-    # `keep_events` is for the moment a turn the harness ran on its own has just ended: its events
-    # are the turn's own, not leftovers of an idle period, and the consumer may not have read them yet.
-    def _promote(self, *, keep_events: bool = False) -> None:
-        if self._closed or not self._idle() or not self._pending:
-            return
-        self._start_turn(self._pending.popleft(), keep_events=keep_events)
 
     # meiva:note
     # A provider can run a turn of its own — the CLI answers a background-task
@@ -506,14 +392,13 @@ class BaseHarnessSession[ConfigT: SessionConfig](ExitStatus):
         await self._clock.asleep(seconds)
         self._release_dispatch()
 
-    def _release_dispatch(self, *, keep_events: bool = False) -> None:
+    def _release_dispatch(self) -> None:
         if not self._dispatch_held:
             return
         self._dispatch_held = False
         timer, self._release_timer = self._release_timer, None
         if timer is not None and timer is not asyncio.current_task():
             timer.cancel()
-        self._promote(keep_events=keep_events)
 
     # meiva:note
     # A turn sees only what happened during it. Whatever nobody consumed while the
@@ -534,54 +419,16 @@ class BaseHarnessSession[ConfigT: SessionConfig](ExitStatus):
                 return
             self._unconsumed_events += 1
 
-    def _fail_turn(self, ticket: TurnTicket, exc: BaseException) -> None:
-        self._emit(TurnFaulted(turn_id=ticket.turn_id, error=f"turn failed: {exc}"))
-        ticket.fail(SessionClosedError(f"turn failed: {exc}"))
-        if self._active is ticket:
+    def _fail_turn(self, turn: ActiveTurn, exc: BaseException) -> None:
+        turn.interrupt_ready.set()
+        self._emit(TurnFaulted(turn_id=turn.turn_id, error=f"turn failed: {exc}"))
+        if self._active is turn:
             self._active = None
-        self._promote()
 
     def _fail_active(self, exc: BaseException) -> None:
-        ticket = self._active
-        if ticket is not None:
-            self._fail_turn(ticket, exc)
-        self._fail_pending(SessionClosedError(f"session stream failed: {exc}"))
-
-    def _fail_pending(self, exc: BaseException) -> None:
-        queued = list(self._pending)
-        self._pending.clear()
-        for ticket in queued:
-            ticket.fail(exc)
-        active = self._active
-        if active is not None:
-            active.fail(exc)
-            self._active = None
-
-    def _recall(self, key: str) -> TurnTicket | None:
-        active = self._active
-        if active is not None and active.key == key:
-            return active
-        for ticket in self._pending:
-            if ticket.key == key:
-                return ticket
-        completed = self._completed.get(key)
-        if completed is None:
-            return None
-        future: asyncio.Future[TurnOutcome] = asyncio.get_running_loop().create_future()
-        future.set_result(completed)
-        return TurnTicket(
-            turn_id=completed.turn_id,
-            text=completed.text,
-            key=key,
-            future=future,
-            deduplicated=True,
-            submitted_at=self._monotonic(),
-        )
-
-    def _remember(self, key: str, outcome: TurnOutcome) -> None:
-        self._completed[key] = outcome
-        while len(self._completed) > self.config.dedupe_window:
-            self._completed.popitem(last=False)
+        turn = self._active
+        if turn is not None:
+            self._fail_turn(turn, exc)
 
     def _emit(self, event: BridgeEvent) -> None:
         if is_droppable(event) and self._events.qsize() >= self.config.max_buffered_events:

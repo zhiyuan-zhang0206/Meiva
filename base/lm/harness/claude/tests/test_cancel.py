@@ -7,6 +7,7 @@ import pytest
 
 from base.lm.harness.claude.tests.fake_sdk import Block, Say
 from base.lm.harness.claude.tests.support import CLI_PID, start
+from base.lm.harness.delivery.tests.sent import send
 from base.lm.harness.events import TurnCompleted
 
 TOOL_MARKER = "ping -c 40 127.0.0.1"
@@ -15,7 +16,7 @@ TOOL_MARKER = "ping -c 40 127.0.0.1"
 async def test_interrupt_asserts_the_tool_children_are_reaped(tmp_path: Path) -> None:
     harness = await start(tmp_path, scripts=[[Block()]])
     try:
-        ticket = harness.session.submit("run the long command")
+        ticket = await send(harness, "run the long command")
         await asyncio.sleep(0.01)
         harness.probe.spawn(5150, TOOL_MARKER)
         harness.client.on_interrupt = lambda: harness.probe.reap(5150)
@@ -37,7 +38,7 @@ async def test_interrupt_asserts_the_tool_children_are_reaped(tmp_path: Path) ->
 async def test_surviving_child_is_reported_as_residue(tmp_path: Path) -> None:
     harness = await start(tmp_path, scripts=[[Block()]], cancel_settle_seconds=0.1)
     try:
-        harness.session.submit("run the long command")
+        await send(harness, "run the long command")
         await asyncio.sleep(0.01)
         harness.probe.spawn(5150, TOOL_MARKER)
         report = await harness.session.interrupt()
@@ -54,7 +55,7 @@ async def test_surviving_child_is_reported_as_residue(tmp_path: Path) -> None:
 async def test_unobservable_cli_is_not_a_pass(tmp_path: Path) -> None:
     harness = await start(tmp_path, scripts=[[Block()]], observe_pid=False)
     try:
-        harness.session.submit("run something")
+        await send(harness, "run something")
         await asyncio.sleep(0.01)
         report = await harness.session.interrupt()
         assert report.settled is None
@@ -68,7 +69,7 @@ async def test_processes_seen_before_the_turn_are_not_blamed(tmp_path: Path) -> 
     harness = await start(tmp_path, scripts=[[Block()]])
     try:
         harness.probe.spawn(4000, "claude --version")
-        harness.session.submit("run something")
+        await send(harness, "run something")
         await asyncio.sleep(0.01)
         harness.probe.spawn(5150, TOOL_MARKER)
         harness.client.on_interrupt = lambda: harness.probe.reap(5150)
@@ -83,10 +84,10 @@ async def test_processes_seen_before_the_turn_are_not_blamed(tmp_path: Path) -> 
 async def test_session_stays_usable_after_interrupt(tmp_path: Path) -> None:
     harness = await start(tmp_path, scripts=[[Block()], [Say("still alive")]])
     try:
-        harness.session.submit("run something")
+        await send(harness, "run something")
         await asyncio.sleep(0.01)
         await harness.session.interrupt()
-        outcome = await harness.session.submit("next one").outcome()
+        outcome = await (await send(harness, "next one")).outcome()
         assert outcome.text == "still alive"
         assert harness.client.queries == ["run something", "next one"]
     finally:

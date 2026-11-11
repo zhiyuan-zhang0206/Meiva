@@ -8,7 +8,7 @@ from pathlib import Path
 
 from base.host.boundary.json_values import is_object_dict
 from base.host.env.harness_binaries import resolve_harness_binary
-from base.lm.harness.base_session import BaseHarnessSession, SessionBinding, TurnTicket
+from base.lm.harness.base_session import ActiveTurn, BaseHarnessSession, SessionBinding
 from base.lm.harness.cancel import (
     CancelReport,
     Sweep,
@@ -67,7 +67,6 @@ from base.lm.harness.events import (
     TurnStarted,
     UnsolicitedOutput,
 )
-from base.lm.harness.handoff import Handoff
 from base.lm.harness.process import (
     ChildProbe,
     settle_close,
@@ -78,11 +77,9 @@ from base.lm.harness.process import (
 from base.lm.harness.registry import SessionRecord
 from base.lm.harness.session import (
     EVENT_STREAM_END,
-    InboundQueueFullError,
     SessionClock,
     SessionClosedError,
     SessionTotals,
-    TurnOutcome,
 )
 
 # meiva:note
@@ -160,7 +157,7 @@ class CodexSession(BaseHarnessSession[CodexConfig]):
         self._interrupting: set[str] = set()
         self._started = False
 
-    async def start(self, *, resume: str | None = None, handoff: Handoff | None = None) -> None:
+    async def start(self, *, resume: str | None = None) -> None:
         if self._started:
             raise RuntimeError("session already started")
         if self._closed:
@@ -201,7 +198,6 @@ class CodexSession(BaseHarnessSession[CodexConfig]):
         )
         if origin is None:
             self._bind()
-        self._inject_handoff(handoff)
 
     # meiva:note
     # The clone's id is registered the moment the app-server answers, before the thread is
@@ -225,7 +221,6 @@ class CodexSession(BaseHarnessSession[CodexConfig]):
             return
         self._closed = True
         watched = watch_tree(self._probe, self._transport.pid)
-        self._fail_pending(SessionClosedError("session closed"))
         await self._close_tasks()
         await self._transport.close()
         await settle_close(
@@ -353,8 +348,8 @@ class CodexSession(BaseHarnessSession[CodexConfig]):
         return False
 
     async def _start_input(self, item: HarnessInput) -> bool:
-        ticket = self.submit(item.text, input_key=item.key, images=item.images)
-        await ticket.interrupt_ready.wait()
+        turn = self._start_input_turn(item)
+        await turn.interrupt_ready.wait()
         return self._ledger.phase(item.key) is not InputPhase.REJECTED
 
     async def _steer_input(self, item: HarnessInput, thread_id: str, turn_name: str) -> bool:
@@ -372,7 +367,7 @@ class CodexSession(BaseHarnessSession[CodexConfig]):
         self._apply(self._ledger.received(item.key, AckSignal.STRONG))
         return True
 
-    async def _begin(self, ticket: TurnTicket) -> None:
+    async def _begin(self, ticket: ActiveTurn) -> None:
         ticket.started_at = self._monotonic()
         self._baseline = snapshot(self._probe, self._transport.pid)
         key = ticket.input_key
@@ -411,14 +406,14 @@ class CodexSession(BaseHarnessSession[CodexConfig]):
         for message, params in early:
             self._dispatch_notification(message, params)
 
-    def _starting_failed(self, ticket: TurnTicket, key: str, exc: Exception) -> None:
+    def _starting_failed(self, ticket: ActiveTurn, key: str, exc: Exception) -> None:
         if isinstance(exc, JsonRpcError):
             reason = rejection_reason(exc.code, exc.message)
             if reason is not None:
                 self._apply(self._ledger.rejected(key, reason))
         self._fail_turn(ticket, exc)
 
-    def _bind_turn(self, ticket: TurnTicket, announce: RequestParams, *, starting: bool) -> bool:
+    def _bind_turn(self, ticket: ActiveTurn, announce: RequestParams, *, starting: bool) -> bool:
         bound = binding(announce, previous=ticket.provider_turn_id, starting=starting)
         if bound is None:
             return False
@@ -595,10 +590,9 @@ class CodexSession(BaseHarnessSession[CodexConfig]):
         if completed.interrupted:
             self._emit(InterruptConfirmed(local, self.generation))
         if ticket is not None:
-            self._complete(ticket, settlement.outcome)
+            self._complete(ticket)
         else:
             self._observed.discard(local)
-            self._promote(keep_events=True)
 
     def _on_request(self, method: str, params: JsonObject) -> JsonObject:
         answer = answer_request(method, params, decision=self.config.approval_decision)
@@ -638,11 +632,9 @@ class CodexSession(BaseHarnessSession[CodexConfig]):
 __all__ = [
     "CANCEL_POLL_SECONDS",
     "EVENT_STREAM_END",
+    "ActiveTurn",
     "CancelReport",
     "CodexSession",
-    "InboundQueueFullError",
     "SessionClosedError",
     "SessionTotals",
-    "TurnOutcome",
-    "TurnTicket",
 ]

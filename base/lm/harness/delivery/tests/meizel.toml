@@ -1,4 +1,4 @@
-exports = []
+exports = ["sent.py"]
 
 [uses]
 "test_ledger.py" = []

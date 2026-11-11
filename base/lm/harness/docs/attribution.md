@@ -39,12 +39,10 @@ reaches a turn.
 
 ## Holding dispatch
 
-`_hold_dispatch(seconds)` parks turn dispatch — `submit` queues, `_active` stays
-empty — while the provider runs a turn of its own, so that turn's text takes the
-idle path instead of being collected into a turn of ours and committed as our
-reply. `_release_dispatch()` ends it and starts the oldest queued turn; the bound
-is the adapter's own knob, because only the adapter knows how long its provider
-may take.
+`_hold_dispatch(seconds)` keeps the session from reading itself idle while the provider
+runs a turn of its own, so a turn of ours is not started in the middle of it
+(`_idle()` is false); `_release_dispatch()` ends it. The bound is the adapter's own, because
+only the adapter knows how long its provider may take.
 
 ## What a report becomes
 

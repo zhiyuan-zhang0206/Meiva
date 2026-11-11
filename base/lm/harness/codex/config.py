@@ -34,9 +34,7 @@ class CodexConfig:
     api_key_mode: bool = False
     startup_timeout_seconds: float = 120.0
     cancel_settle_seconds: float = 5.0
-    max_pending_turns: int = 32
     max_buffered_events: int = 256
-    dedupe_window: int = 256
 
     def __post_init__(self) -> None:
         if self.sandbox not in SANDBOX_MODES:
@@ -50,12 +48,8 @@ class CodexConfig:
                 f"approval decision must be one of {APPROVAL_DECISIONS}, "
                 f"got {self.approval_decision!r}"
             )
-        if self.max_pending_turns < 1:
-            raise ValueError("max_pending_turns must be at least 1")
         if self.max_buffered_events < 1:
             raise ValueError("max_buffered_events must be at least 1")
-        if self.dedupe_window < 1:
-            raise ValueError("dedupe_window must be at least 1")
 
     def command(self, binary: str | None = None) -> tuple[str, ...]:
         return (binary or self.binary, "app-server", "--listen", "stdio://", *self.extra_args)

@@ -9,6 +9,7 @@ from base.clock.tests.fakes import clock_over
 from base.clock.tests.manual_timers import ManualTimers
 from base.lm.harness.codex.tests.fake_app_server import CODEX_PID
 from base.lm.harness.codex.tests.support import start
+from base.lm.harness.delivery.tests.sent import send
 from base.lm.harness.events import TurnCompleted
 
 TOOL_MARKER = "sleep 40"
@@ -17,7 +18,7 @@ TOOL_MARKER = "sleep 40"
 async def test_interrupt_asserts_the_tool_children_are_reaped(tmp_path: Path) -> None:
     harness = await start(tmp_path)
     try:
-        ticket = harness.session.submit("run the long command")
+        ticket = await send(harness, "run the long command")
         await harness.turn_started()
         harness.server.command_started(command=TOOL_MARKER)
         harness.probe.spawn(5150, TOOL_MARKER)
@@ -41,7 +42,7 @@ async def test_interrupt_asserts_the_tool_children_are_reaped(tmp_path: Path) ->
 async def test_surviving_child_is_reported_as_residue(tmp_path: Path) -> None:
     harness = await start(tmp_path, cancel_settle_seconds=0.1)
     try:
-        harness.session.submit("run the long command")
+        await send(harness, "run the long command")
         await harness.turn_started()
         harness.probe.spawn(5150, TOOL_MARKER)
         report = await harness.session.interrupt()
@@ -58,7 +59,7 @@ async def test_surviving_child_is_reported_as_residue(tmp_path: Path) -> None:
 async def test_unobservable_app_server_is_not_a_pass(tmp_path: Path) -> None:
     harness = await start(tmp_path, observe_pid=False)
     try:
-        harness.session.submit("run something")
+        await send(harness, "run something")
         await harness.turn_started()
         report = await harness.session.interrupt()
         assert report.settled is None
@@ -72,7 +73,7 @@ async def test_default_turn_can_finish_after_two_quiet_days(tmp_path: Path) -> N
     timers = ManualTimers()
     harness = await start(tmp_path, clock=clock_over(timers))
     try:
-        ticket = harness.session.submit("wait for the provider")
+        ticket = await send(harness, "wait for the provider")
         await harness.turn_started()
         timers.advance(2 * 24 * 3600)
         await asyncio.sleep(0)
@@ -87,12 +88,12 @@ async def test_default_turn_can_finish_after_two_quiet_days(tmp_path: Path) -> N
 async def test_session_stays_usable_after_interrupt(tmp_path: Path) -> None:
     harness = await start(tmp_path)
     try:
-        harness.session.submit("run something")
+        await send(harness, "run something")
         await harness.turn_started()
         await harness.session.interrupt()
         harness.server.complete(status="interrupted")
         await harness.wait_for(lambda event: isinstance(event, TurnCompleted))
-        second = harness.session.submit("next one")
+        second = await send(harness, "next one")
         await harness.turn_started(2)
         harness.server.message("still alive")
         harness.server.complete()

@@ -141,9 +141,7 @@ nothing in the protocol can tell the two apart.
 | Field | Default | Reason |
 |---|---|---|
 | `cancel_settle_seconds` | 5 | how long an interrupt waits for the CLI and its children before escalating to SIGTERM/SIGKILL and reporting residue |
-| `max_pending_turns` | 32 | the queue refuses instead of buffering without bound |
 | `max_buffered_events` | 256 | text deltas are droppable under lag; control events never are |
-| `dedupe_window` | 256 | how many completed keys stay replayable |
 | `skip_permissions` | `False` | headless cannot prompt; a command outside the configured policy is denied, which the adapter reports as failure. Opting in trades that denial for auto-approval |
 | `MAX_FRAME_BYTES` (`transport.py`) | `256 MiB` | one NDJSON `step_update` or `result` line can carry a multi-megabyte tool result or accumulated turn state; `AgyTransport` reads 64 KiB chunks into a `bytearray` without `StreamReader.readline()`'s 8 MiB separator limit while capping one frame at 256 MiB so an unterminated stream from a wedged child cannot grow memory without bound |
 

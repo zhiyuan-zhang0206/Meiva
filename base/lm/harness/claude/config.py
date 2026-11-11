@@ -24,7 +24,4 @@ class BridgeConfig:
     permission_mode: str = "bypassPermissions"
     auth: AuthConfig = field(default_factory=AuthConfig)
     cancel_settle_seconds: float = 5.0
-    max_pending_turns: int = 32
     max_buffered_events: int = 256
-    dedupe_window: int = 256
-    injected_dispatch_wait_seconds: float = 30.0
