@@ -34,25 +34,25 @@ for row in meiva.agents.harness_availability():
     print(row.harness, row.status, row.default_model, row.models, "|", row.reason)
 ```
 
-Spawn a fresh agent on `codex`, `claude_code`, or `antigravity` via
-`config_overlay`:
+Spawn a fresh agent on `codex`, `claude_code`, or `antigravity` with the top-level
+`harness` keyword argument:
 
 ```python
 child_id = meiva.agents.spawn(
     prompt="Mission, required skill(s), and milestone report-back contract...",
     label="codex-auth-fix",
+    harness="codex",                # "codex" | "claude_code" | "antigravity" | "meiva"
     config_overlay={
-        "harness": "codex",          # "codex" | "claude_code" | "antigravity" | "meiva"
         "llm_model": "gpt-5.4",      # optional; must be supported by the chosen harness
         "reasoning_effort": "xhigh", # optional
     },
 )
 ```
 
-From the CLI:
+From an attached harness shell:
 
 ```bash
-meiva agents spawn "<prompt>" --label codex-auth-fix --overlay harness=codex
+meiva harness -c 'import meiva; print(meiva.agents.spawn(prompt="<prompt>", label="codex-auth-fix", harness="codex", config_overlay={"llm_model": "gpt-5.4", "reasoning_effort": "xhigh"}))'
 ```
 
 ## Steering, Supervising, and Switching Harnesses

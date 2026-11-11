@@ -188,7 +188,7 @@
       "skill": "meiva_builtins/skills/platform/meiva-guide/external-agents/SKILL.md",
       "request": "I am the current Meiva agent. The user wants a Codex agent to work as its own Meiva agent on the login fix, with the full briefing supplied inline. Give the concrete spawn call and explain how that agent's turns are owned and steered, without launching anything.",
       "checks": [
-        "Uses meiva.agents.spawn with config_overlay harness=codex",
+        "Uses meiva.agents.spawn with harness=codex",
         "No PTY shell session, tasks/work files, or supervisor watcher",
         "agent-host owns the turn lifecycle and batch-steers inbound messages mid-turn or resurrects on send_message"
       ]
