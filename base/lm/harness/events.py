@@ -73,12 +73,18 @@ class SubagentText:
     text: str
 
 
+# meiva:note
+# `parent_tool_use_id` is set when a CLI's own sub-agent made the call: it is the id of the call that
+# started that sub-agent (the `tool_use_id` of its `SubagentText`). The main agent's own tool activity
+# leaves it None.
+# meiva:link base/lm/harness/docs/subagent-text.md
 @dataclass(frozen=True, slots=True)
 class ToolUse:
     turn_id: str
     tool_use_id: str
     name: str
     tool_input: dict[str, object]
+    parent_tool_use_id: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -87,6 +93,7 @@ class ToolResult:
     tool_use_id: str
     is_error: bool
     content: str
+    parent_tool_use_id: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

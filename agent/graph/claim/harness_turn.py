@@ -60,6 +60,7 @@ from agent.messages.reply_visibility import reply_visibility_note
 from agent.nodes import CLAIM, HARNESS_TURN
 from base.agents.context import MeivaContext, agent_id_from_config
 from base.agents.history.harness_messages import (
+    aget_harness_call_item_id,
     aget_next_harness_message_seq,
     aupsert_harness_timeline_item,
 )
@@ -178,8 +179,15 @@ async def _run_harness_turn(
         await _checkpoint_activity(ctx, agent_id, event_publisher, item, msg_count)
         await capture_items(ctx, agent_id, [item], source_key="harness")
 
+    async def find_call(tool_use_id: str) -> str | None:
+        if ctx.ops_pool is None:
+            return None
+        async with ctx.ops_pool.connection() as pool_conn:
+            return await aget_harness_call_item_id(pool_conn, agent_id, tool_use_id)
+
     projector = HarnessTurnProjector(
         checkpoint=checkpoint,
+        find_call=find_call,
         base_idx=base_idx,
         clock=ctx.require_clock(),
         non_human_wake=state.non_human_wake,

@@ -59,11 +59,18 @@ class TimelineItem(BaseModel):
     ]
     source: str | None = None
     # meiva:note
-    # `subagent_text` only: the `agent_code` item of the tool call that started the sub-agent, when
-    # the projector that wrote the text had seen that call (None for text that outlives its run).
-    # `source` carries the CLI's own label for the sub-agent.
+    # A CLI sub-agent's activity (`subagent_text`, and the `agent_code` / `code_output` pair of a tool
+    # call the sub-agent made): the `agent_code` item of the call that started the sub-agent, when it
+    # can be found (the same invocation, or an earlier one through `tool_use_id`). None for the main
+    # agent's own items. On `subagent_text`, `source` carries the CLI's own label for the sub-agent.
     # meiva:link base/lm/harness/docs/subagent-text.md
     parent_item_id: str | None = None
+    # meiva:note
+    # `agent_code` of an external harness only: the CLI's id of the tool call. It is what ties a
+    # sub-agent's activity to the call that started it when the activity arrives after the graph
+    # invocation that wrote the call has ended.
+    # meiva:link base/lm/harness/docs/subagent-text.md
+    tool_use_id: str | None = None
     payload: str  # rendered content
     created_at: str | None = None  # ISO-8601
     inbound_id: int | None = None

@@ -27,7 +27,14 @@ from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.events.live.tests.live_capture import LiveEvents
 from base.host.env.agent_slices import AgentSlices
-from base.lm.harness import AssistantText, SubagentText, TextDelta, ToolResult, ToolUse
+from base.lm.harness import (
+    AssistantText,
+    BridgeEvent,
+    SubagentText,
+    TextDelta,
+    ToolResult,
+    ToolUse,
+)
 from meiva.tests.fixtures.pin_agent import hosted_resources as hosted_resources
 
 
@@ -169,21 +176,28 @@ async def _subagent_turn(
     database_gate: ProcessDbGate,
     hosted_resources: HostedTurnResources,
     live_events: LiveEvents,
-    said: tuple[SubagentText, ...],
+    said: tuple[BridgeEvent, ...],
+    *,
+    agent_id: int | None = None,
+    launching: bool = True,
 ) -> tuple[list[TimelineItem], list[tuple[object, ...]]]:
-    aid = create_agent(db_conn)
-    db_conn.execute(
-        "INSERT INTO agents_meta (id, status, harness) VALUES (%s, 'running', 'claude_code')",
-        (aid,),
-    )
-    db_conn.commit()
+    aid = agent_id if agent_id is not None else create_agent(db_conn)
+    if agent_id is None:
+        db_conn.execute(
+            "INSERT INTO agents_meta (id, status, harness) VALUES (%s, 'running', 'claude_code')",
+            (aid,),
+        )
+        db_conn.commit()
     launch = ToolUse(
         turn_id="t1", tool_use_id="call-agent", name="Agent", tool_input={"prompt": "go"}
     )
     launched = ToolResult(
         turn_id="t1", tool_use_id="call-agent", content="launched", is_error=False
     )
-    engine = FakeEngine(reply="MEIVA_DISPLAY_TO_USER\nthe answer", events=(launch, launched, *said))
+    engine = FakeEngine(
+        reply="MEIVA_DISPLAY_TO_USER\nthe answer",
+        events=(launch, launched, *said) if launching else said,
+    )
     base = runtime(
         engine,
         ops_pool=aops_pool,
@@ -262,3 +276,132 @@ async def test_subagent_text_volume_is_capped_per_message_and_per_run(
     [marker] = [i for i in items if i.payload == f"status:{SUBAGENT_LIMIT_NOTE}"]
     assert marker.kind == "system_marker"
     assert "after the limit" not in [i.payload for i in items]
+
+
+def _subagent_call(call: str, name: str = "Bash", *, parent: str = "call-agent") -> ToolUse:
+    return ToolUse(
+        turn_id="t1",
+        tool_use_id=call,
+        name=name,
+        tool_input={"command": "echo hi"},
+        parent_tool_use_id=parent,
+    )
+
+
+def _subagent_result(call: str, content: str, *, parent: str = "call-agent") -> ToolResult:
+    return ToolResult(
+        turn_id="t1", tool_use_id=call, is_error=False, content=content, parent_tool_use_id=parent
+    )
+
+
+# meiva:note
+# A tool call the sub-agent made lands as the usual `agent_code` / `code_output` pair, tied to the
+# `agent_code` item of the call that started the sub-agent; the main agent's own calls stay untied.
+# meiva:link base/lm/harness/docs/subagent-text.md
+async def test_a_subagents_tool_activity_is_tied_to_the_call_that_started_it(
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    database_gate: ProcessDbGate,
+    hosted_resources: HostedTurnResources,
+    live_events: LiveEvents,
+) -> None:
+    said = (
+        _said("ALPHA", agent="general-purpose"),
+        _subagent_call("sub-bash"),
+        _subagent_result("sub-bash", "hi"),
+        _subagent_call("lost-bash", parent="unknown-call"),
+    )
+    items, rows = await _subagent_turn(
+        db_conn, aops_pool, database_gate, hosted_resources, live_events, said
+    )
+    spawn = next(i for i in items if i.tool_use_id == "call-agent")
+    assert spawn.parent_item_id is None
+    parents = {i.tool_use_id: i.parent_item_id for i in items if i.kind == "agent_code"}
+    assert parents == {"call-agent": None, "sub-bash": spawn.item_id, "lost-bash": None}, (
+        "a call whose parent is nowhere stays unattributed"
+    )
+    outputs = {i.payload: i.parent_item_id for i in items if i.kind == "code_output"}
+    assert outputs["launched"] is None and outputs["hi"] == spawn.item_id
+    reply = next(i for i in items if i.kind == "agent_chat")
+    assert rows == [(f"harness:{reply.item_id}", "MEIVA_DISPLAY_TO_USER\nthe answer")]
+
+
+# meiva:note
+# A sub-agent's tool output is capped like its text: one output is cut, and once the run's budget is
+# spent further sub-agent calls write nothing but the single marker.
+# meiva:link base/lm/harness/docs/subagent-text.md
+async def test_a_subagents_tool_output_is_capped(
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    database_gate: ProcessDbGate,
+    hosted_resources: HostedTurnResources,
+    live_events: LiveEvents,
+) -> None:
+    said = (
+        _subagent_call("big"),
+        _subagent_result("big", "z" * (SUBAGENT_ITEM_CHARS + 10)),
+        _subagent_call("fill"),
+        _subagent_result("fill", "w" * SUBAGENT_ITEM_CHARS),
+        *[
+            event
+            for n in range(SUBAGENT_RUN_CHARS // SUBAGENT_ITEM_CHARS + 1)
+            for event in (
+                _subagent_call(f"c{n}"),
+                _subagent_result(f"c{n}", "v" * SUBAGENT_ITEM_CHARS),
+            )
+        ],
+        _subagent_call("after"),
+        _subagent_result("after", "late"),
+    )
+    items, _ = await _subagent_turn(
+        db_conn, aops_pool, database_gate, hosted_resources, live_events, said
+    )
+    [big] = [i for i in items if i.kind == "code_output" and i.payload.startswith("z")]
+    assert big.payload.endswith(SUBAGENT_CUT) and len(big.payload) < SUBAGENT_ITEM_CHARS + 100
+    assert [i.payload for i in items].count(f"status:{SUBAGENT_LIMIT_NOTE}") == 1
+    assert "late" not in [i.payload for i in items]
+    assert not [i for i in items if i.tool_use_id == "after"]
+    assert not [i for i in items if i.payload == "Tool running"], "no call is left running"
+
+
+# meiva:note
+# A sub-agent that keeps working after the invocation that saw its spawning call ended is still tied to
+# that call: the call's timeline item is found by the CLI's call id.
+# meiva:link base/lm/harness/docs/subagent-text.md
+async def test_activity_after_the_launching_invocation_still_finds_its_call(
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    database_gate: ProcessDbGate,
+    hosted_resources: HostedTurnResources,
+    live_events: LiveEvents,
+) -> None:
+    aid = create_agent(db_conn)
+    db_conn.execute(
+        "INSERT INTO agents_meta (id, status, harness) VALUES (%s, 'running', 'claude_code')",
+        (aid,),
+    )
+    db_conn.commit()
+    await _subagent_turn(
+        db_conn, aops_pool, database_gate, hosted_resources, live_events, (), agent_id=aid
+    )
+    items, _ = await _subagent_turn(
+        db_conn,
+        aops_pool,
+        database_gate,
+        hosted_resources,
+        live_events,
+        (
+            _said("LATE"),
+            _said("nobody's", call="never-seen"),
+            _subagent_call("late-bash"),
+            _subagent_result("late-bash", "hi"),
+        ),
+        agent_id=aid,
+        launching=False,
+    )
+    [spawn] = [i for i in items if i.tool_use_id == "call-agent"]
+    [late] = [i for i in items if i.payload == "LATE"]
+    [nobody] = [i for i in items if i.payload == "nobody's"]
+    [late_code] = [i for i in items if i.tool_use_id == "late-bash"]
+    assert (late.parent_item_id, late_code.parent_item_id) == (spawn.item_id, spawn.item_id)
+    assert nobody.parent_item_id is None

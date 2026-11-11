@@ -276,6 +276,42 @@ describe("CardHeader", () => {
     expect(container.textContent).toContain("Sub-agent · general-purpose");
   });
 
+  // meiva:note
+  // A tool call a sub-agent made is an ordinary tool row marked by `parent_item_id`: a `Sub-agent` badge in its header and a nested row; the main agent's own tool row carries neither.
+  // meiva:link ui/web/src/docs/frontend-components/timeline-view/card-chrome.md
+  it("a sub-agent's tool header carries a Sub-agent badge, the main agent's does not", () => {
+    const sub = item("agent_code", { source: "Bash", payload: "echo hi", parent_item_id: "h3.0" });
+    const main = item("agent_code", { source: "Bash", payload: "echo hi" });
+    const marked = renderWithQuery(
+      <CardHeader item={sub} config={messageCardConfig(sub)!} expanded={false} onToggle={noop} />,
+    );
+    expect(marked.getByTestId("subagent-badge").textContent).toBe("Sub-agent");
+    marked.unmount();
+    const plain = renderWithQuery(
+      <CardHeader item={main} config={messageCardConfig(main)!} expanded={false} onToggle={noop} />,
+    );
+    expect(plain.queryByTestId("subagent-badge")).toBeNull();
+  });
+
+  it("a sub-agent's tool rows nest under the call that started them", () => {
+    const row = (it: BackendTimelineItem) => (
+      <TimelineRow
+        item={it}
+        config={messageCardConfig(it)}
+        streaming={false}
+        expanded={false}
+        copyable={false}
+        onToggle={noop}
+      />
+    );
+    const sub = renderWithQuery(row(item("code_output", { payload: "hi", parent_item_id: "h3.0" })));
+    const nested = sub.container.querySelector("[data-subagent-parent]");
+    expect(nested?.getAttribute("data-subagent-parent")).toBe("h3.0");
+    sub.unmount();
+    const main = renderWithQuery(row(item("code_output", { payload: "hi" })));
+    expect(main.container.querySelector("[data-subagent-parent]")).toBeNull();
+  });
+
   it("an expanded sub-agent row shows its text as work detail, collapsed it shows only the header", () => {
     const spoken = item("subagent_text", { source: "general-purpose", payload: "ALPHA says **hi**" });
     const row = (expanded: boolean) => (

@@ -18697,6 +18697,17 @@
             ],
             "title": "Parent Item Id"
           },
+          "tool_use_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tool Use Id"
+          },
           "payload": {
             "type": "string",
             "title": "Payload"
