@@ -1,0 +1,115 @@
+trim trailing whitespace..............................................................................Passed
+fix end of files......................................................................................Passed
+check for merge conflicts.............................................................................Passed
+check for added large files...........................................................................Passed
+basedpyright (strict mode, branch-changed files only).................................................Passed
+- hook id: pyright
+- duration: 2.56s
+
+WARNING: PRE-PUSH SKIPPED [pyright]: 1-minute load/core 2.35 exceeds threshold 1.5. CI must pass before merge.
+
+lint tests location, full (every tracked top-level test; catches a stale entry).......................Passed
+meizel check at push (full graph for Python or manifests, global role lists)..........................Failed
+- hook id: meizel-check-full
+- duration: 19.17s
+- exit code: 1
+
+meizel: 2 violations [manifest-stale-edge: 2]
+meizel: analyzed 5603 Python files (stdlib AST), 676 TypeScript files (compiler AST); selection and rule coverage follow repository policy
+base/events/notifications/meizel.toml:9: [manifest-stale-edge] tests -> store.py is declared but no fact edge needs it
+    run `python -m meizel sync --prune` to remove it
+gateway/meizel.toml:14: [manifest-stale-edge] routers -> extensions is declared but no fact edge needs it
+    run `python -m meizel sync --prune` to remove it
+
+frontend tsc --noEmit.................................................................................Passed
+- hook id: frontend-tsc
+- duration: 3.2s
+
+WARNING: PRE-PUSH SKIPPED [tsc]: 1-minute load/core 3.26 exceeds threshold 1.5. CI must pass before merge.
+
+frontend eslint (branch files)........................................................................Passed
+- hook id: frontend-eslint-full
+- duration: 3.25s
+
+WARNING: PRE-PUSH SKIPPED [eslint]: 1-minute load/core 3.04 exceeds threshold 1.5. CI must pass before merge.
+
+frontend vitest run...................................................................................Passed
+- hook id: frontend-vitest
+- duration: 3.57s
+
+WARNING: PRE-PUSH SKIPPED [vitest]: 1-minute load/core 3.04 exceeds threshold 1.5. CI must pass before merge.
+WARNING: PRE-PUSH SKIPPED [vitest]: 1-minute load/core 3.04 exceeds threshold 1.5. CI must pass before merge.
+
+lint prepush branch diff (re-run pre-commit stage over merge-base..HEAD)..............................Passed
+- hook id: lint-prepush-branch-diff
+- duration: 76.76s
+
+ruff (legacy alias)................................................................................................................................................................Passed
+ruff format........................................................................................................................................................................Passed
+trim trailing whitespace...........................................................................................................................................................Passed
+fix end of files...................................................................................................................................................................Passed
+check yaml.....................................................................................................................................................(no files to check)Skipped
+check toml.........................................................................................................................................................................Passed
+check for merge conflicts..........................................................................................................................................................Passed
+check for added large files........................................................................................................................................................Passed
+check for case conflicts...........................................................................................................................................................Passed
+mixed line ending..................................................................................................................................................................Passed
+Detect hardcoded secrets...........................................................................................................................................................Passed
+check Git hooks installation (warn-only)...........................................................................................................................................Passed
+- hook id: check-git-hooks-install
+- duration: 0.07s
+check source notes and changed-file migration......................................................................................................................................Passed
+lint audit machine reads (one read path for the machine dimension).................................................................................................................Passed
+lint Python lock (canonical PyPI sources)......................................................................................................................(no files to check)Skipped
+lint pnpm lock (canonical registry sources)....................................................................................................................(no files to check)Skipped
+lint async bodies (no sync blocking calls).........................................................................................................................................Passed
+lint setenv in tests (force settings)..............................................................................................................................................Passed
+lint anti-ambient-fallback (no ambient fallbacks for None parameters)..............................................................................................................Passed
+lint wall-clock judgements in tests (assert a counted fact)........................................................................................................................Passed
+lint script sibling imports (PYTHONSAFEPATH guard).................................................................................................................................Passed
+lint per-agent config reads (force the agent's slices).............................................................................................................................Passed
+lint fixture scope (no session-scoped mutation of a process global)................................................................................................................Passed
+lint host-platform marks (a test injects a host or names the one it needs).........................................................................................................Passed
+lint tests location (a new test belongs in its package, not the top-level tests/)..................................................................................................Passed
+plugin prices match the archive lattice........................................................................................................................(no files to check)Skipped
+- hook id: plugin-price-lattice
+lint pool keepalives (no pool without PG_KEEPALIVE_KWARGS outside Rule 5)..........................................................................................................Passed
+lint logger.add diagnose (no sink without diagnose=False)..........................................................................................................................Passed
+lint log format (loguru takes {}, stdlib logging takes %s).........................................................................................................................Passed
+lint silent failures (no broad handler swallows an exception unreported)...........................................................................................................Passed
+lint no CJK (repo-wide, English-only source).......................................................................................................................................Passed
+lint no tailnet IP literals (repo-wide)............................................................................................................................................Passed
+lint meiva-root scope (no permission-domain symbols)...........................................................................................................(no files to check)Skipped
+lint no emoji (core code stays glyph-free).........................................................................................................................................Passed
+lint no plugin wrap (force meiva.extend.wrap)......................................................................................................................................Passed
+lint hook modules (no `import meiva`)..............................................................................................................................................Passed
+lint agent-visible docstrings (no CJK, no impl-detail leak)....................................................................................................(no files to check)Skipped
+lint code structure (AST rules, file/directory budgets, package doors, single owners)..............................................................................................Passed
+lint AGENTS.md size (245-line ceiling).........................................................................................................................(no files to check)Skipped
+lint SKILL.md frontmatter (parse + required fields + description length).......................................................................................(no files to check)Skipped
+lint core-content manifests (ranges + requires_commit vs derived host version).....................................................................................................Passed
+lint SKILL.md size (line-count ceiling)........................................................................................................................(no files to check)Skipped
+check doc references (CLI flags + relative links + wikilinks resolve)..............................................................................................................Passed
+lint Ruff S112 with typed exceptions off...........................................................................................................................................Passed
+lint termination_source stamping (every terminated-write names its source).........................................................................................................Passed
+lint hermetic db transactions (no external network, llm, subprocess or sleep in tx)................................................................................................Passed
+lint audit record (every audit emit site records to Postgres first)................................................................................................................Passed
+lint clock lattice (lattice-vocabulary clocks only in the family modules)..........................................................................................................Passed
+lint time bombs (fixed instant x real clock).......................................................................................................................................Passed
+lint zombie Pyright ignores (zero warning-tier ignores)............................................................................................................................Passed
+meizel check --changed (staged facts, manifests and global role lists)............................................................................................................Skipped
+lint migrations (timestamp-id format + merged files immutable + baseline seed).....................................................................................................Passed
+frontend eslint (changed files)....................................................................................................................................................Passed
+types-generated.ts in sync with Pydantic schema (drift: run ./scripts/codegen/codegen-types.sh)....................................................................................Passed
+constants-generated.ts in sync with its backend owners (drift: run ./scripts/codegen/dump_frontend_constants.py)...................................................................Passed
+base/events/registry.md in sync with EVENTS registry (drift: run .venv/bin/python scripts/codegen/gen_event_registry.py)...........................................................Passed
+base/host/env/config_lite_table.json in sync with the config registry (drift: run .venv/bin/python scripts/codegen/gen_config_lite_table.py).......................................Passed
+lint pyright tests environments (pyproject.toml matches the tests directories; drift: run .venv/bin/python scripts/codegen/gen_pyright_test_environments.py).......................Passed
+
+lint prepush artifact freshness (hooks whose inputs the branch deleted)...............................Passed
+- hook id: lint-prepush-artifact-freshness
+- duration: 3.1s
+
+pre-push: the branch deletes no input of a generated artifact on its own; nothing to add
+
+error: failed to push some refs to 'github.com:zhiyuan-zhang0206/Meiva.git'

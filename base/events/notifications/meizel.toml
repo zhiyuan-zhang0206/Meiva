@@ -6,7 +6,7 @@ exports = ["catalog.py", "outbox.py", "publish.py", "store.py"]
 "policy.py" = ["catalog.py"]
 "publish.py" = ["catalog.py", "policy.py", "store.py", "triggers.py"]
 "triggers.py" = ["catalog.py", "preview.py"]
-"tests" = ["catalog.py", "outbox.py", "policy.py", "preview.py", "publish.py", "store.py", "triggers.py"]
+"tests" = ["catalog.py", "outbox.py", "policy.py", "preview.py", "publish.py", "triggers.py"]
 
 [purity]
 "catalog.py" = "strict"
