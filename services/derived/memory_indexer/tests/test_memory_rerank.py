@@ -278,7 +278,7 @@ async def test_purpose_selects_the_state_lead_in_and_the_question(
 ) -> None:
     _write(tmp_path, "a.md", "---\ntype: Memory\n---\n\nbody a")
     seen: dict[str, tuple[str, YesNo]] = {}
-    for purpose in ("recall", "search", "dedup"):
+    for purpose in ("recall", "search"):
         judge = _FakeJudge()
         await _rank(tmp_path, judge, [_hit(tmp_path, "a.md")], query="Q!", purpose=purpose)
         _, state, question = judge.calls[0]
@@ -286,52 +286,23 @@ async def test_purpose_selects_the_state_lead_in_and_the_question(
 
     leads = {state.splitlines()[0] for state, _ in seen.values()}
     questions = {question for _, question in seen.values()}
-    assert len(leads) == len(questions) == 3
+    assert len(leads) == len(questions) == 2
     for state, question in seen.values():
         assert "Q!" in state
         assert question.question and question.true_if and question.false_if
-    # The recall and search state keeps its calibrated shape; only dedup labels the candidate.
+    # meiva:note
+    # The recall and search state keeps its calibrated shape.
     assert "\n\nCandidate memory note:\n" in seen["recall"][0]
     assert "\n\nCandidate memory note:\n" in seen["search"][0]
-    assert "\n\nExisting memory note:\n" in seen["dedup"][0]
 
 
-async def test_the_dedup_question_is_the_measured_wording(
-    tmp_path: Path,
-) -> None:
-    # meiva:note
-    # The 2026-10-19 decision measured this exact prompt; a paraphrase is a different question,
-    # so the three strings that reach the model are pinned here.
-    _write(tmp_path, "a.md", "---\ntype: Memory\n---\n\nbody a")
-    judge = _FakeJudge()
-
-    await _rank(tmp_path, judge, [_hit(tmp_path, "a.md")], purpose="dedup")
-
-    _, _, question = judge.calls[0]
-    assert question.question == (
-        "The existing note governs the same specific rule, policy, or subject slot as the "
-        "new note — whether it restates the same decision, adds an exception or detail, or "
-        "revises, amends, or supersedes an earlier decision on that same question — such "
-        "that an agent reading one needs to know the other exists or has been superseded, "
-        "and keeping both as separate files would leave duplicate or conflicting guidance."
-    )
-    assert question.true_if == (
-        "Both notes govern the same specific rule or subject slot (including revisions, "
-        "exceptions, or superseding decisions that should update or replace the existing note)."
-    )
-    assert question.false_if == (
-        "They address genuinely separate rules or independent questions that happen to "
-        "share a broad domain or keywords."
-    )
-
-
-async def test_duplicate_check_is_billed_apart_from_search(
+async def test_recall_and_search_are_billed_as_memory_rerank(
     tmp_path: Path, loguru_records: LogRecords
 ) -> None:
     _write(tmp_path, "a.md", "---\ntype: Memory\n---\n\nbody a")
     kinds: dict[str, list[str]] = {}
     before = 0
-    for purpose in ("recall", "search", "dedup"):
+    for purpose in ("recall", "search"):
         judge = _FakeJudge()
         await _rank(tmp_path, judge, [_hit(tmp_path, "a.md")], purpose=purpose)
         events = loguru_records.events("llm_usage")[before:]
@@ -340,7 +311,6 @@ async def test_duplicate_check_is_billed_apart_from_search(
     assert kinds == {
         "recall": ["memory_rerank"],
         "search": ["memory_rerank"],
-        "dedup": ["memory_write_dedup"],
     }
 
 
@@ -602,7 +572,7 @@ async def test_ask_relevance_reads_the_true_probability_and_clamps(
     judge = _FakeJudge(on_decide=fake_decide)
     cat = _catalog_for(judge)
     question = YesNo("q?", "yes", "no")
-    kind = "memory_write_dedup"
+    kind = "memory_rerank"
     assert (
         await rerank.ask_relevance(
             _MODEL,

@@ -20,7 +20,6 @@ from fastapi import Request
 from pydantic import SecretStr
 
 from base.clock.tests.seeded_rng import seeded_rng
-from base.config import settings
 from base.host.net.tests.local_http import serve_asgi
 from base.lm.pricing import Rates
 from gateway.routers.memory_api import memory
@@ -200,7 +199,7 @@ class TestRerank:
         self._pool(tmp_path)
         rig.service.hits = [hit(tmp_path / "a.md")]
         questions: dict[str, Any] = {}
-        for purpose in ("recall", "search", "dedup"):
+        for purpose in ("recall", "search"):
             rig.judge.calls.clear()
             with rig.client(tmp_path) as client:
                 resp = client.post(
@@ -208,7 +207,7 @@ class TestRerank:
                 )
             assert resp.status_code == 200
             questions[purpose] = rig.judge.calls[0][2]
-        assert len(set(questions.values())) == 3
+        assert len(set(questions.values())) == 2
 
     def test_backend_is_asked_for_the_configured_candidate_count(
         self, tmp_path: Path, rig: SearchRig
@@ -224,20 +223,6 @@ class TestRerank:
         # meiva:note
         # a `k` above the candidate count does not widen the retrieval
         assert rig.service.asked == [40, 40]
-
-    def test_dedup_asks_for_its_own_candidate_count(self, tmp_path: Path, rig: SearchRig) -> None:
-        self._pool(tmp_path)
-        rig.configure(memory_rerank_candidates=40, memory_dedup_candidates=7)
-
-        with rig.client(tmp_path) as client:
-            for purpose, k in (("dedup", 5), ("dedup", 9), ("recall", 5), ("search", 5)):
-                client.post("/api/memory/search", json={"query": "q", "k": k, "purpose": purpose})
-        # meiva:note
-        # dedup ranks its own count whatever `k` is; recall and search keep the shared one
-        assert rig.service.asked == [7, 7, 40, 40]
-
-    def test_dedup_candidate_count_defaults_to_five(self) -> None:
-        assert settings.services.memory_dedup_candidates == 5
 
     def test_stale_vector_hits_are_dropped_before_ranking(
         self, tmp_path: Path, rig: SearchRig

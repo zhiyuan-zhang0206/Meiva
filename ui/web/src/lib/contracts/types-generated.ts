@@ -3087,7 +3087,7 @@ export interface components {
         MemorySearchRequest: {
             query: string;
             k: number;
-            purpose: "recall" | "search" | "dedup";
+            purpose: "recall" | "search";
             exclude?: string[];
             deadline_seconds?: number | null;
         };

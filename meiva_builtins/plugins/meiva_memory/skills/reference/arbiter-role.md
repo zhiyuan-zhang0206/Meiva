@@ -199,7 +199,7 @@ Trigger: built-in `memory-arbiter` schedule (`schedules/memory-steward-schedule.
 Check items:
 - **Lint**: Run `python3 <pool>/validate.py` (UTF-8, optional YAML frontmatter syntax and truncation checks, pointer integrity, character caps, directory Locality caps, fact-checks). Fix every finding via a worktree PR.
 - **Size Limits**: files over caps (`MEMORY.md` cap = 16000 chars; notes = 8000 chars) → trim, consolidate, or move bulk material to Vault with a pointer left
-- **Deduplication & Canonical Convergence**: semantic search (`purpose="dedup"` / `meiva.memory.search`) for notes governing the same rule or subject slot → merge into a single dateless canonical note and `git rm` superseded date-suffixed fragments
+- **Deduplication & Canonical Convergence**: semantic search (`meiva.memory.search`) for notes governing the same rule or subject slot → merge into a single dateless canonical note and `git rm` superseded date-suffixed fragments
 - **World-Truth Drift & Stale Content**: run World Truth Probes (repo paths/symbols, active/terminated agents, schedule triggers, `<!-- fact-check: <cmd> -->`) → update drifted notes in place or `git rm` obsolete rulings
 - **Index Consistency**: `python3 validate.py` (and the pre-commit hook) reports pointers to missing files, duplicate pointers, and orphaned root notes / top-level directories; fix them and rebuild `MEMORY.md` pointers
 - **Directory Structure** (hard rules, from `validate.py` — never skip): every directory holds at most **20 md notes** and at most **20 subdirectories**. Depth is deliberately **unlimited**. When a directory exceeds a limit, consolidate fragments or restructure into topical subdirectories.
