@@ -20,6 +20,8 @@ to a read-only query only when none fits.
 | Tasks: read, create, update, log progress | `meiva.tasks` (`get`, `list`, `create`, `update`, `log`; `meiva.help(meiva.tasks)`) |
 | Audit, telemetry and log events: what happened, when, on which machine | `meiva events ls [--agent ID] [--name EVENT] [--category audit\|telemetry\|log] [--level L] [--machine M] [--hours H] [--limit N]` (newest first; default window: the last 24 hours; `--json` for scripts) |
 | How many events of each kind, machine, level or agent | `meiva events count --by event_name\|machine\|level\|agent_id\|category` with the same filters |
+| What each agent costs (calls, tokens, cost, turn outcomes) | `meiva metrics agents [--days N] [--json]` (costliest first) |
+| Fleet cost and tokens over a window, warning and error totals, balances and quotas that plugins report | `meiva stats [--hours 0\|1\|6\|24\|72\|168\|720] [--json]` (the plugin cards, such as provider balances, are listed under the totals) |
 | Schedules and their runs | `meiva schedules ls`, `meiva schedules get <name>`, `meiva schedules runs <name> [--limit N]`, `meiva schedules logs <name> [--lines N]` |
 | Open questions waiting for the user | `meiva notices list [--agent ID]` |
 | Files of an agent, delivering something to the user | `meiva.files`, `meiva.ui` |
@@ -30,7 +32,7 @@ question, stop there.
 
 ## 2. Query the database read-only
 
-The cross-agent inbox, cost totals and the scheduler's bookkeeping have no entry. Your process environment carries
+The cross-agent inbox, cost split per model and day, and the scheduler's bookkeeping have no entry. Your process environment carries
 `MEIVA_DB_URL`, the cluster's database address, so a query is one call away:
 
 ```python
@@ -116,7 +118,7 @@ ORDER BY updated_at DESC
 LIMIT 50;
 ```
 
-Spend per agent and model over the last week:
+Spend per agent and model over the last week (`meiva metrics agents --days 7` gives the per-agent totals without the model split):
 
 ```sql
 SELECT agent_id, model, sum(tokens_in) AS tokens_in, sum(tokens_out) AS tokens_out,

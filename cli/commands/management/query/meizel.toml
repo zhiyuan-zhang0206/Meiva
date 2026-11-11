@@ -1,7 +1,7 @@
-exports = ["events.py", "tests"]
+exports = ["events.py", "metrics.py", "tests"]
 
 [uses]
-"tests" = ["events.py"]
+"tests" = ["events.py", "metrics.py"]
 
 [purity]
 "__init__.py" = "strict"
