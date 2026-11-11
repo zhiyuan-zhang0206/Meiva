@@ -1,0 +1,339 @@
+# Daily random-order run of the whole backend suite on `main`: it looks for tests that only pass
+# in the order they happen to be run in.
+#
+# A pull request runs a selected subset, split into whole-file groups, so which tests share a
+# pytest-xdist worker differs from one PR to the next. A test that leaves process-global state
+# behind (a log sink bound to a captured stream, an initialization guard that never resets) is then
+# green on `main` and red on whichever unrelated PR happens to land after it on a worker; it reads
+# as a flake and nobody connects it to its cause (2026-11-11, three PRs, #8831). Every other run
+# of the suite uses one fixed order, so it cannot find such a test. This one shuffles every test
+# in the shard (`--random-order-bucket=global`, so tests of different files interleave within a
+# worker) with a seed printed in the run, then reports which tests failed.
+#
+# It is an alarm and nothing else: it runs on no pull request, is not a required check, and
+# `release-gate.yml` and `main-red-watch` read other workflows. A red run is the alert. The shards
+# are the same eight whole-file groups `ci.yml` runs (same plan, same pytest arguments, minus
+# coverage and the retry that would hide an order-dependent failure), so a shard here is the
+# `ci.yml` shard of the same number with a different order. The static-environment tests run in
+# eight `pytest-split` groups as in `ci.yml`.
+#
+# Reproduce a failure: dispatch this workflow with the printed `seed` (same commit), or run the
+# command each job prints in its summary against the same plan. `--random-order-seed` fixes the
+# order of a given collection; a different set of files changes it.
+#
+#   gh workflow run random-order.yml -f seed=<seed> -f ref=<sha>
+#
+# The slot is off the other timed workflows (`ci.yml` nightly at 18:00 UTC, the duration refresh at
+# 19:30 UTC, `release-gate.yml` at :17 every six hours) so the runner pool, which CI saturates
+# easily, is shared as little as possible: 16 jobs, one run a day.
+#
+# `uses:` is pinned to a commit SHA with the version in a trailing comment, exactly as in `ci.yml`.
+
+name: Random-order backend run
+
+on:
+  schedule:
+    - cron: '0 21 * * *'  # UTC — GitHub Actions schedule cron is always UTC (05:00 +08)
+  workflow_dispatch:
+    inputs:
+      seed:
+        description: Shuffle seed (integer) to reproduce a run; empty draws a new one
+        required: false
+        default: ''
+      ref:
+        description: Branch, tag, or commit to run (default main)
+        required: false
+        default: 'main'
+
+permissions:
+  contents: read
+
+env:
+  # uv reads UV_FROZEN=1 as --frozen: CI never rewrites uv.lock; a stale lock fails the run.
+  UV_FROZEN: "1"
+
+concurrency:
+  group: random-order
+  cancel-in-progress: false
+
+jobs:
+  plan:
+    name: draw the seed
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      seed: ${{ steps.seed.outputs.seed }}
+      durations_key: ${{ steps.durations.outputs.key }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref || 'main' }}
+
+      - name: Draw the shuffle seed
+        id: seed
+        env:
+          REQUESTED_SEED: ${{ inputs.seed }}
+        run: |
+          set -euo pipefail
+          if [ -n "$REQUESTED_SEED" ]; then
+            case "$REQUESTED_SEED" in
+              *[!0-9]*) echo "::error::seed must be a non-negative integer, got '$REQUESTED_SEED'"; exit 1 ;;
+            esac
+            seed="$REQUESTED_SEED"
+          else
+            seed="$(python3 -c 'import secrets; print(secrets.randbelow(2**31))')"
+          fi
+          echo "seed=$seed" >> "$GITHUB_OUTPUT"
+          {
+            echo "### Random-order run"
+            echo
+            echo "- commit: \`$(git rev-parse HEAD)\`"
+            echo "- seed: \`$seed\`"
+            echo "- reproduce: \`gh workflow run random-order.yml -f seed=$seed -f ref=$(git rev-parse HEAD)\`"
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Resolve the test durations
+        id: durations
+        uses: ./.github/actions/resolve-test-durations
+
+  native:
+    name: native shard (${{ matrix.group }}/8)
+    runs-on: ubuntu-24.04
+    container:
+      image: ghcr.io/zhiyuan-zhang0206/meiva-ci-runner@sha256:a17652b71203a57be18bd343938fc20d8227ccb40010aba8067a08b0e74b3029
+      options: --init --shm-size=2g
+    defaults:
+      run:
+        shell: bash
+    timeout-minutes: 25
+    needs: [plan]
+    strategy:
+      fail-fast: false
+      matrix:
+        group: [1, 2, 3, 4, 5, 6, 7, 8]
+    env:
+      MEIVA_DB_URL: postgresql://unused@127.0.0.1:1/unused
+      MEIVA_REDIS_URL: redis://127.0.0.1:1/0
+      SEED: ${{ needs.plan.outputs.seed }}
+    steps:
+      # A gate, not a note: a container whose PID 1 is not an init reparents orphans onto a
+      # process that never waits, and process/data-plane tests then fail as psutil timeouts.
+      - name: Container PID 1 reaps orphans
+        run: |
+          comm=$(cat /proc/1/comm)
+          case "$comm" in
+            docker-init|tini) echo "PID 1 is $comm, which reaps orphans" ;;
+            *) echo "::error::container PID 1 is '$comm', not an init that reaps orphans - container.options lost --init"; exit 1 ;;
+          esac
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref || 'main' }}
+
+      - name: Restore the test durations
+        uses: ./.github/actions/restore-test-durations
+        with:
+          key: ${{ needs.plan.outputs.durations_key }}
+
+      - name: Cache uv wheels
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/uv
+          key: uv-container-${{ runner.os }}-${{ hashFiles('uv.lock') }}
+          restore-keys: |
+            uv-container-${{ runner.os }}-
+
+      - name: Install Python deps
+        uses: ./.github/actions/uv-sync
+
+      - name: Cache frontend node_modules
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ui/web/node_modules
+          key: ui-web-node-modules-${{ runner.os }}-${{ hashFiles('ui/web/pnpm-lock.yaml') }}
+
+      - name: Install frontend deps (TypeScript source parser)
+        working-directory: ui/web
+        run: pnpm install --frozen-lockfile
+
+      - name: Run the shard in random order
+        id: pytest-shard
+        run: |
+          set -e
+          set -o pipefail
+          mkdir -p tmp/file-shards
+          timeout --kill-after=15s 4m uv run python -u -m scripts.ci.pull_requests.plan_file_shards \
+            --count 8 --plan tmp/file-shards/plan.json --stacks tmp/file-shards/plan-stacks.log \
+            2>&1 | tee tmp/file-shards/plan-collection.log
+          {
+            echo "### native shard ${{ matrix.group }}/8, seed \`$SEED\`"
+            echo
+            echo "Same plan and arguments as the ci.yml shard of this number, in the order this seed gives:"
+            echo '```'
+            echo "pytest ... -m 'not flaky' -n 4 --dist=loadfile --random-order --random-order-bucket=global --random-order-seed=$SEED --file-shard-check=<plan> --file-shard-group=${{ matrix.group }}"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          set +e
+          uv run pytest -c pyproject.toml --rootdir=. -q --omit-static-tests --ignore=tests/e2e -m "not flaky" -n 4 --dist=loadfile \
+            --random-order --random-order-bucket=global --random-order-seed="$SEED" \
+            -p scripts.ci.file_shard_shadow --file-shard-execute \
+            --file-shard-check=tmp/file-shards/plan.json --file-shard-group=${{ matrix.group }} \
+            --file-shard-report=tmp/file-shards/collection.json \
+            --file-shard-runtime-report=tmp/file-shards/runtime.json \
+            --junit-xml=tmp/junit-random-native-${{ matrix.group }}.xml -o junit_family=xunit1 \
+            -o faulthandler_timeout=300 \
+            2>&1 | tee tmp/random-native-${{ matrix.group }}.log
+
+      - name: Upload the shard's reports
+        if: ${{ !cancelled() }}
+        continue-on-error: true
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: random-order-native-${{ matrix.group }}
+          path: |
+            tmp/junit-random-native-${{ matrix.group }}.xml
+            tmp/random-native-${{ matrix.group }}.log
+          if-no-files-found: warn
+
+      - name: Upload pg fixture logs on failure
+        if: failure()
+        continue-on-error: true
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: random-order-pg-fixture-logs-${{ matrix.group }}
+          if-no-files-found: ignore
+          path: tmp/pg-fixture-logs/
+
+  static:
+    name: static tests (${{ matrix.group }}/8)
+    runs-on: ubuntu-24.04
+    container:
+      image: ghcr.io/zhiyuan-zhang0206/meiva-ci-runner@sha256:a17652b71203a57be18bd343938fc20d8227ccb40010aba8067a08b0e74b3029
+      options: --init --shm-size=2g
+    defaults:
+      run:
+        shell: bash
+    timeout-minutes: 25
+    needs: [plan]
+    strategy:
+      fail-fast: false
+      matrix:
+        group: [1, 2, 3, 4, 5, 6, 7, 8]
+    env:
+      MEIVA_DB_URL: postgresql://unused@127.0.0.1:1/unused
+      MEIVA_REDIS_URL: redis://127.0.0.1:1/0
+      SEED: ${{ needs.plan.outputs.seed }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref || 'main' }}
+
+      - name: Restore the test durations
+        uses: ./.github/actions/restore-test-durations
+        with:
+          key: ${{ needs.plan.outputs.durations_key }}
+
+      - name: Cache uv wheels
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/uv
+          key: uv-container-${{ runner.os }}-${{ hashFiles('uv.lock') }}
+          restore-keys: |
+            uv-container-${{ runner.os }}-
+
+      - name: Install Python deps
+        uses: ./.github/actions/uv-sync
+
+      - name: Cache frontend node_modules
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ui/web/node_modules
+          key: ui-web-node-modules-${{ runner.os }}-${{ hashFiles('ui/web/pnpm-lock.yaml') }}
+
+      - name: Install frontend deps (TypeScript source parser)
+        working-directory: ui/web
+        run: pnpm install --frozen-lockfile
+
+      - name: Run the static group in random order
+        run: |
+          set -euo pipefail
+          mkdir -p tmp
+          echo "### static group ${{ matrix.group }}/8, seed \`$SEED\`" >> "$GITHUB_STEP_SUMMARY"
+          uv run pytest --test-environment=static -q -n 4 --dist=loadfile \
+            -W error::pytest.PytestUnhandledThreadExceptionWarning \
+            --random-order --random-order-bucket=global --random-order-seed="$SEED" \
+            --splits 8 --group ${{ matrix.group }} --splitting-algorithm least_duration \
+            --junit-xml=tmp/junit-random-static-${{ matrix.group }}.xml -o junit_family=xunit1 \
+            2>&1 | tee tmp/random-static-${{ matrix.group }}.log
+
+      - name: Upload the group's reports
+        if: ${{ !cancelled() }}
+        continue-on-error: true
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: random-order-static-${{ matrix.group }}
+          path: |
+            tmp/junit-random-static-${{ matrix.group }}.xml
+            tmp/random-static-${{ matrix.group }}.log
+          if-no-files-found: warn
+
+  report:
+    name: failed tests and seed
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    needs: [plan, native, static]
+    if: ${{ always() && !cancelled() }}
+    steps:
+      - name: Download every shard's reports
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: random-order-*
+          path: tmp/reports
+
+      # The list a person acts on: which tests failed, in which shard, under which seed. It lists
+      # from the junit the shards uploaded, so a shard that died before writing one is named
+      # separately; the run is red either way.
+      - name: List the failed tests
+        env:
+          SEED: ${{ needs.plan.outputs.seed }}
+          NATIVE_RESULT: ${{ needs.native.result }}
+          STATIC_RESULT: ${{ needs.static.result }}
+        run: |
+          python3 - <<'PY'
+          import glob
+          import os
+          import sys
+          from xml.etree import ElementTree as ET
+
+          seed = os.environ["SEED"]
+          failed: list[tuple[str, str, str]] = []
+          reports = sorted(glob.glob("tmp/reports/**/junit-random-*.xml", recursive=True))
+          for path in reports:
+              shard = os.path.basename(path).removeprefix("junit-random-").removesuffix(".xml")
+              for case in ET.parse(path).getroot().iter("testcase"):
+                  for child in case:
+                      if child.tag in {"failure", "error"}:
+                          name = f"{case.get('classname', '')}::{case.get('name', '')}"
+                          failed.append((shard, name, (child.get("message") or "")[:200]))
+          lines = [f"## Random-order run, seed `{seed}`", ""]
+          lines.append(f"native shards: {os.environ['NATIVE_RESULT']}, static groups: {os.environ['STATIC_RESULT']}; "
+                       f"{len(reports)} of 16 reports arrived.")
+          lines.append("")
+          if failed:
+              lines += [f"{len(failed)} failed test(s). Rerun with `-f seed={seed}`; "
+                        "a test failing here and passing in `ci.yml` depends on what ran before it.", ""]
+              lines += ["| shard | test | message |", "|---|---|---|"]
+              lines += [f"| {s} | `{n}` | {m.replace('|', '/').replace(chr(10), ' ')} |" for s, n, m in failed]
+          else:
+              lines.append("No failed test in the reports that arrived.")
+          text = "\n".join(lines) + "\n"
+          print(text)
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as out:
+              out.write(text)
+          for shard, name, _ in failed:
+              print(f"::error title=order-dependent failure (seed {seed})::{shard}: {name}")
+          sys.exit(0)
+          PY

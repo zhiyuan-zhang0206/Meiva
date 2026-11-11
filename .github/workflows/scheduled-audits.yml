@@ -1,0 +1,90 @@
+# Two timed audits that report and never gate, in one file because `.github/workflows` is at its
+# 20-entry directory cap.
+#
+# `dependency-audit` (weekly): the PR-time dependency audit in ci.yml is informational and nobody
+# reads it. This run turns the same checks (plus the version constants Meiva downloads outside the
+# lockfiles) into one tracked issue: opened or updated while a high/critical advisory or a behind
+# pin exists, closed when a run comes back clean. It never changes a pin.
+#
+# `secret-scan-history` (nightly): the nightly half of the secret scan. ci.yml's `secret scan
+# (Gitleaks)` check scans only the commits a change adds, which keeps it to about a minute; this
+# job re-proves every ref's whole history once a day, so a secret that reached a ref without
+# passing that check (a force-push, a branch that never opened a PR) is still found within a day.
+# It runs against main's checkout and fetches all refs.
+#
+# Each job runs on its own cron slot (`github.event.schedule`) and both on a manual dispatch.
+
+name: Scheduled audits
+
+on:
+  schedule:
+    - cron: '41 2 * * 1'   # UTC - dependency-audit, weekly
+    - cron: '17 20 * * *'  # UTC - secret-scan-history, nightly
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  dependency-audit:
+    name: weekly dependency audit
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.schedule == '41 2 * * 1' }}
+    permissions:
+      contents: read
+      issues: write
+    concurrency:
+      group: dependency-audit
+      cancel-in-progress: false
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # `uvx` runs the audit-capable uv the script pins; the script itself is stdlib-only.
+      - name: Install uv
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          version: 0.13.1
+          enable-cache: false
+
+      - name: Install Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+        with:
+          version: "11.9.0"
+
+      - name: Audit dependencies and pinned binaries
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MEIVA_HOME: ${{ runner.temp }}/meiva-home
+        run: |
+          mkdir -p "$MEIVA_HOME"
+          python3 scripts/ci/dependency_audit.py \
+            --out "$RUNNER_TEMP/dependency-audit.md" --sync-issue "$GITHUB_REPOSITORY"
+          cat "$RUNNER_TEMP/dependency-audit.md" >> "$GITHUB_STEP_SUMMARY"
+
+  secret-scan-history:
+    name: secret scan (Gitleaks, full history)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    if: ${{ github.ref == 'refs/heads/main' && (github.event_name == 'workflow_dispatch' || github.event.schedule == '17 20 * * *') }}
+    concurrency:
+      group: secret-scan-history
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Install Gitleaks
+        run: |
+          export GOBIN="$RUNNER_TEMP/gitleaks-bin"
+          go install github.com/zricethezav/gitleaks/v8@v8.30.1
+          echo "$GOBIN" >> "$GITHUB_PATH"
+
+      - name: Scan every ref's history
+        run: gitleaks git --config .gitleaks.toml --redact --no-banner .

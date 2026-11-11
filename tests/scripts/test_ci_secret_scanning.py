@@ -12,7 +12,7 @@ from base.host import tool_pins
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _WORKFLOW = _REPO_ROOT / ".github" / "workflows" / "ci.yml"
-_NIGHTLY_WORKFLOW = _REPO_ROOT / ".github" / "workflows" / "secret-scan-history.yml"
+_NIGHTLY_WORKFLOW = _REPO_ROOT / ".github" / "workflows" / "scheduled-audits.yml"
 _PRE_COMMIT = _REPO_ROOT / ".pre-commit-config.yaml"
 _POLICY = _REPO_ROOT / ".gitleaks.toml"
 
@@ -52,7 +52,7 @@ def _assert_nightly_scan_covers_full_history() -> None:
     triggers = nightly[True]
     assert set(triggers) == {"schedule", "workflow_dispatch"}
     job = nightly["jobs"]["secret-scan-history"]
-    assert job["if"] == "github.ref == 'refs/heads/main'"
+    assert job["if"].startswith("${{ github.ref == 'refs/heads/main' && ")
     assert job["steps"][0]["with"]["fetch-depth"] == 0
     assert "github.com/zricethezav/gitleaks/v8@v8.30.1" in job["steps"][1]["run"]
     assert job["steps"][2]["run"] == "gitleaks git --config .gitleaks.toml --redact --no-banner ."
