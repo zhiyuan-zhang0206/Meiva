@@ -115,7 +115,7 @@ def test_compact_refuses_an_external_harness_agent_with_400(
     with gateway_test_client(machine=_local_machine) as client:
         _seed_harnesses(client, gateway_local_runner.name)
         agent_id = spawn_via_http(
-            client, {"harness": "claude_code", "config": {"llm_model": "claude-opus-5-5"}}
+            client, {"config": {"harness": "claude_code", "llm_model": "claude-opus-5-5"}}
         ).json()["id"]
         _set_agent(db_conn, agent_id, machine=gateway_local_runner.name, status="idling")
         response = client.post(f"/api/agents/{agent_id}/compact")
@@ -138,7 +138,7 @@ def test_restart_rejects_external_harness_while_running_and_accepts_while_idling
     with gateway_test_client(machine=_local_machine) as client:
         _seed_harnesses(client, gateway_local_runner.name)
         agent_id = spawn_via_http(
-            client, {"harness": "codex", "config": {"llm_model": "gpt-6.1-sol"}}
+            client, {"config": {"harness": "codex", "llm_model": "gpt-6.1-sol"}}
         ).json()["id"]
         _set_agent(db_conn, agent_id, machine=gateway_local_runner.name, status="running")
         running_resp = client.post(

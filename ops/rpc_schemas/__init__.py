@@ -9,7 +9,10 @@ from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
+    PrivateAttr,
+    SerializerFunctionWrapHandler,
     field_validator,
+    model_serializer,
     model_validator,
 )
 
@@ -26,6 +29,8 @@ from base.api_contracts.agent_contract import (
 )
 from base.api_contracts.caller_identity import CallerIdentity, is_caller_source
 from base.api_contracts.op_envelope import OpEnvelope as OpEnvelope
+from base.host.boundary.json_values import is_object_dict
+from base.host.boundary.untyped import object_of
 
 # Re-exported so existing `ops.rpc_schemas` importers keep their import paths.
 from ops.rpc_schemas.content import UserContent
@@ -113,11 +118,46 @@ class SpawnAgentRequest(BaseModel):
     # labeler does not overwrite it; the agent can change it via meiva.self.set_label.
     label: str | None = Field(default=None, max_length=64)
     # meiva:note
-    # The runtime loop the agent is born on. A fork inherits its source's harness;
-    # naming a different one fails the birth instead of overriding it, and an
-    # unknown value is a 422 here rather than a fallback to the default.
+    # `config` may name the runtime loop the agent is born on as `config["harness"]`, beside the
+    # config fields (`split_overlay_columns` in `base.agents.model.overlay_columns`).
+    # Validation takes it out: `config` then holds config fields only and `harness` returns the
+    # parsed value, so nothing downstream sees a config key that is really a column of the agent's
+    # row. Serialization puts it back, so a dump of the request round-trips and the creation
+    # identity covers it. A fork inherits its source's harness; naming a different one fails the
+    # birth instead of overriding it, and an unknown value is a 422 here rather than a fallback
+    # to the default.
     # meiva:link base/agents/docs/harness/harness.md
-    harness: Harness | None = Field(default=None)
+    _harness: Harness | None = PrivateAttr(default=None)
+
+    @property
+    def harness(self) -> Harness | None:
+        return self._harness
+
+    @model_validator(mode="after")
+    def _split_harness(self) -> "SpawnAgentRequest":
+        from base.agents.model.overlay_columns import split_overlay_columns
+        from base.packages.plugins.plugin_errors import InvalidConfigOverlay
+
+        if self.config is None or "harness" not in self.config:
+            return self
+        try:
+            columns = split_overlay_columns(self.config)
+        except InvalidConfigOverlay as exc:
+            raise ValueError(str(exc)) from exc
+        self._harness = columns.harness
+        self.config = columns.fields or None
+        return self
+
+    @model_serializer(mode="wrap")
+    def _serialize_with_harness(self, handler: SerializerFunctionWrapHandler) -> dict[str, object]:
+        raw = object_of(handler, self)
+        if not is_object_dict(raw):
+            raise TypeError(f"SpawnAgentRequest serialized to {type(raw).__name__}, not an object")
+        if self._harness is None:
+            return raw
+        config = raw.get("config")
+        held = config if is_object_dict(config) else {}
+        return {**raw, "config": {**held, "harness": self._harness.value}}
 
     @model_validator(mode="after")
     def _validate_prompt_source(self) -> "SpawnAgentRequest":

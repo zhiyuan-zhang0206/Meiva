@@ -19,6 +19,7 @@ from psycopg_pool import ConnectionPool
 
 from base.agents.inbox.insert import insert_inbound_message
 from base.agents.incarnation.restart_transition import RestartTransition
+from base.agents.model.overlay_columns import split_overlay_columns
 from base.db import Database
 from base.db.rows import IdRow, query_one
 from base.db.transaction import write_transaction
@@ -57,8 +58,7 @@ def defer_restart_blocking(
     *,
     catalog: ModelCatalog,
 ) -> int:
-    overlay = dict(body.config_overlay or {})
-    requested = overlay.pop("harness", None)
+    requested, overlay = split_overlay_columns(body.config_overlay)
     with write_transaction(db_pool) as conn:
         row = query_one(
             conn,
@@ -72,7 +72,7 @@ def defer_restart_blocking(
             raise ValueError(
                 f"cannot queue a restart for agent {agent_id} in status {row.status!r}"
             )
-        target = row.harness if requested is None else str(requested)
+        target = row.harness if requested is None else requested.value
         if target == "meiva":
             receipt = normalize_overlay_llm_model(overlay, models=catalog.models)
             if receipt is not None:

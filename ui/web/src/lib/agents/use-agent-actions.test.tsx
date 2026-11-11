@@ -68,7 +68,7 @@ it("selects the committed agent after launch failure instead of retrying create"
   expect(client.getQueryState([...AGENT_DETAIL_QUERY_KEY, 123])?.isInvalidated).toBe(true);
 });
 
-it("sends the chosen harness and leaves the built-in default implicit", async () => {
+it("sends the chosen harness inside the config overlay and leaves the built-in default implicit", async () => {
   const spawn = vi.fn<Api["spawnAgent"]>().mockResolvedValue({ id: 7 });
   const testApi: Api = { ...cacheOnlyApi(), spawnAgent: spawn };
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -76,14 +76,18 @@ it("sends the chosen harness and leaves the built-in default implicit", async ()
   const { result } = renderHook(() => useAgentActions(vi.fn(), []), { wrapper });
 
   await act(async () => {
-    await result.current.spawn(undefined, undefined, undefined, "codex");
+    await result.current.spawn("host", "gpt-6.1-terra", "high", "codex");
   });
-  expect(spawn.mock.calls[0][0]).toMatchObject({ harness: "codex" });
+  expect(spawn.mock.calls[0][0]).toEqual({
+    machine: "host",
+    config: { harness: "codex", llm_model: "gpt-6.1-terra", reasoning_effort: "high" },
+  });
 
   await act(async () => {
     await result.current.spawn(undefined, undefined, undefined, undefined);
   });
   expect(spawn.mock.calls[1][0]).not.toHaveProperty("harness");
+  expect(spawn.mock.calls[1][0]).not.toHaveProperty("config");
   client.clear();
 });
 

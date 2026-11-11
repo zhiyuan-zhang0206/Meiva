@@ -151,7 +151,6 @@ def spawn(
     machine: str | None = None,
     config: dict[str, object] | None = None,
     label: str | None = None,
-    harness: str | None = None,
     idempotency_key: str,
 ) -> int:
     """Create or fork an agent with a caller-owned immutable identity."""
@@ -164,7 +163,6 @@ def spawn(
             machine=machine,
             config=config,
             label=label,
-            harness=harness,
         ),
         idempotency_key,
     )

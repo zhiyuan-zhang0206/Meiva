@@ -275,32 +275,29 @@ def spawn(
     machine: str | None = None,
     config_overlay: dict[str, object] | None = None,
     label: str | None = None,
-    harness: str | Harness | None = None,
 ) -> int:
     """Start a new agent; does not block.
 
     The runtime identifies each creation or fork. A replay of the original
     execution recovers its accepted agent ID. Acceptance only records birth.
 
-    `harness` selects the initial runtime loop. It defaults to "meiva" and also
-    accepts "claude_code", "codex" or "antigravity". Unknown names are refused.
-    Use `restart` to switch harnesses later. A fork keeps its source's harness: naming another one
-    fails with `ForkHarnessMismatch`. Forking works for "meiva", "claude_code" and "codex"
-    agents; a "claude_code" or "codex" source can only be forked onto its own machine (its CLI
-    session is a local file), and an "antigravity" source cannot be forked at all (spawn instead).
-    `harness_availability()` reports which ones this machine can run. A harness no launcher
-    can start yet is refused with `HarnessNotLaunchable` before any row is written, and so is
-    a fork of an agent born on one.
-
     `prompt` is the first message — make it self-contained; omit it to leave the agent idling.
     `label` names the new agent's role, which peers and the fleet view show; omit it to let the
     system name the agent. `machine` defaults to yours (for a fork of a "claude_code" or "codex" agent, to the source's machine, the only one it can be born on). `config_overlay` carries per-agent config
     fields; keys it does not name follow the shared default. Identity config you do not name
     (model, reasoning effort, the inject/expand lists, prompt shaping) is frozen at spawn;
-    operational knobs follow the shared default. `fork_from` copies another agent's conversation
-    and keeps its config: the overlay may then only add entries to
-    `skills_to_inject_into_system_prompt` / `skills_to_expand_at_start` (anything else raises
-    ForkConfigChangeNotAllowed).
+    operational knobs follow the shared default. Its `harness` key selects the initial runtime
+    loop, the way `restart` switches it later: "meiva" (the default), "claude_code", "codex" or
+    "antigravity". An unknown name is refused. `harness_availability()` reports which ones this
+    machine can run. A harness no launcher can start yet is refused with `HarnessNotLaunchable`
+    before any row is written, and so is a fork of an agent born on one.
+    `fork_from` copies another agent's conversation and keeps its config: the overlay may then
+    only add entries to `skills_to_inject_into_system_prompt` / `skills_to_expand_at_start`
+    (anything else raises ForkConfigChangeNotAllowed). A fork keeps its source's harness: naming
+    another one fails with `ForkHarnessMismatch`. Forking works for "meiva", "claude_code" and
+    "codex" agents; a "claude_code" or "codex" source can only be forked onto its own machine
+    (its CLI session is a local file), and an "antigravity" source cannot be forked at all
+    (spawn instead).
     A fork taken while that agent is inside a tool call carries the call without its result: the
     new agent sees it as already interrupted, not as work still running, so it checks whether the
     call already took effect instead of repeating it.
@@ -322,7 +319,6 @@ def spawn(
         machine=machine,
         config=config_overlay,
         label=label,
-        harness=harness,
     )
 
 
@@ -338,15 +334,15 @@ def _check_spawn_model_required(
 
 
 def _validate_spawn_config_overlay(
-    config: dict[str, object],
-    coerced_harness: Harness | None,
+    fields: dict[str, object],
+    harness: Harness | None,
 ) -> None:
     from base.packages.plugins.config_registration import validate_config_overlay
     from meiva.sdk_surface import settings as sdk_settings
     from meiva.sdk_surface.installation import installed
 
     installation = installed()
-    effective_harness = coerced_harness or Harness.MEIVA
+    effective_harness = harness or Harness.MEIVA
     if effective_harness is Harness.MEIVA:
         catalog = sdk_settings.model_catalog()
         models_map = catalog.models
@@ -361,7 +357,7 @@ def _validate_spawn_config_overlay(
         )
         prices = None
     validate_config_overlay(
-        config,
+        fields,
         None if installation is None else installation.configs,
         models=models_map,
         decision_models=decision_models,
@@ -388,21 +384,19 @@ def spawn_impl(
     machine: str | None,
     config: dict[str, object] | None,
     label: str | None,
-    harness: str | Harness | None,
 ) -> int:
     prompt = coerce_str(prompt, "prompt", allow_none=True)
     fork_from = coerce_typed(fork_from, "fork_from", int, allow_none=True)
     machine = coerce_str(machine, "machine", allow_none=True)
     config = coerce_typed(config, "config", dict, allow_none=True)
     label = coerce_str(label, "label", allow_none=True)
-    from base.agents.birth.harness import coerce_harness
+    from base.agents.model.overlay_columns import split_overlay_columns
 
-    coerced_harness = None if harness is None else coerce_harness(harness)
-    harness = None if coerced_harness is None else coerced_harness.value
+    harness, fields = split_overlay_columns(config)
     spawner = meiva.sdk_surface.agent_identity.require_actor()
-    _check_spawn_model_required(fork_from, spawner, config)
-    if config:
-        _validate_spawn_config_overlay(config, coerced_harness)
+    _check_spawn_model_required(fork_from, spawner, fields)
+    if fields:
+        _validate_spawn_config_overlay(fields, harness)
     return gateway_client.spawn(
         spawner=spawner,
         prompt=prompt,
@@ -411,7 +405,6 @@ def spawn_impl(
         machine=_spawn_machine(machine, fork_from),
         config=config,
         label=label,
-        harness=harness,
         idempotency_key=process_context.current_context().sdk_operation_uid(),
     )
 

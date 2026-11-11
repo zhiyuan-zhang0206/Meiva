@@ -7,9 +7,13 @@ its provider are separate choices. `Harness` values: `meiva` (default),
 
 ## Choosing one at spawn
 
-`spawn(..., harness=None)`. Omitted, a plain spawn runs the built-in `meiva`
-runtime. An unknown name is refused before any request is sent. Spawn sets the
-initial harness.
+`spawn(..., config_overlay={"harness": "codex", ...})`. Without the key, a plain
+spawn runs the built-in `meiva` runtime (a spawn from an agent runs the spawner's
+harness; a fork keeps its source's). An unknown name, or a null, is refused before
+any request is sent with `InvalidConfigOverlay`. Spawn sets the initial harness;
+`spawn` has no separate `harness` parameter, and passing one is a `TypeError`.
+`harness` is not a config field: it is read out of the overlay and stored in
+`agents_meta.harness` only, never in `config_overlay` or `birth_config`.
 
 A harness no launcher can start is refused rather than recorded: `spawn` raises
 `harness_not_launchable` (HTTP 400) and creates no agent,

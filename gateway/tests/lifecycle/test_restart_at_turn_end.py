@@ -87,7 +87,7 @@ def test_a_running_external_agent_may_ask_for_a_switch_and_is_not_touched_yet(
     with gateway_test_client(machine=_local_machine) as client:
         _seed_codex(client, gateway_local_runner.name)
         agent_id = spawn_via_http(
-            client, {"harness": "codex", "config": {"llm_model": "gpt-6.1-sol"}}
+            client, {"config": {"harness": "codex", "llm_model": "gpt-6.1-sol"}}
         ).json()["id"]
         _set_status(db_conn, agent_id, "running")
 
@@ -110,7 +110,7 @@ def test_only_the_agent_itself_may_queue_its_restart(
     with gateway_test_client(machine=_local_machine) as client:
         _seed_codex(client, gateway_local_runner.name)
         agent_id = spawn_via_http(
-            client, {"harness": "codex", "config": {"llm_model": "gpt-6.1-sol"}}
+            client, {"config": {"harness": "codex", "llm_model": "gpt-6.1-sol"}}
         ).json()["id"]
         _set_status(db_conn, agent_id, "running")
 
@@ -146,7 +146,7 @@ def test_a_request_that_fails_the_usual_validation_is_refused_at_once_and_record
     with gateway_test_client(machine=_local_machine) as client:
         _seed_codex(client, gateway_local_runner.name)
         agent_id = spawn_via_http(
-            client, {"harness": "codex", "config": {"llm_model": "gpt-6.1-sol"}}
+            client, {"config": {"harness": "codex", "llm_model": "gpt-6.1-sol"}}
         ).json()["id"]
         _set_status(db_conn, agent_id, "running")
 
@@ -170,7 +170,7 @@ def test_a_terminated_agent_cannot_queue_a_restart(
     with gateway_test_client(machine=_local_machine) as client:
         _seed_codex(client, gateway_local_runner.name)
         agent_id = spawn_via_http(
-            client, {"harness": "codex", "config": {"llm_model": "gpt-6.1-sol"}}
+            client, {"config": {"harness": "codex", "llm_model": "gpt-6.1-sol"}}
         ).json()["id"]
         _set_status(db_conn, agent_id, "terminated")
 

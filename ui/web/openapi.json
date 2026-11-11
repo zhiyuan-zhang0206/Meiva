@@ -17316,16 +17316,6 @@
               }
             ],
             "title": "Label"
-          },
-          "harness": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/Harness"
-              },
-              {
-                "type": "null"
-              }
-            ]
           }
         },
         "additionalProperties": false,

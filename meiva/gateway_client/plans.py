@@ -57,7 +57,6 @@ class SpawnIntent:
     machine: str | None
     config: dict[str, object] | None
     label: str | None
-    harness: str | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -89,8 +88,6 @@ def spawn_request(intent: SpawnIntent, idempotency_key: str) -> Request:
         body["config"] = intent.config
     if intent.label is not None:
         body["label"] = intent.label
-    if intent.harness is not None:
-        body["harness"] = intent.harness
     return Request("POST", "/api/keyed/v1/agents", body=body, idempotency_key=key)
 
 

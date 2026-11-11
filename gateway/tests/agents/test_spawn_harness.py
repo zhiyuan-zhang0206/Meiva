@@ -127,8 +127,11 @@ class TestSpawnHarness:
             agent = _spawn(
                 client,
                 {
-                    "harness": "antigravity",
-                    "config": {"llm_model": "gemini-4-argon", "reasoning_effort": "high"},
+                    "config": {
+                        "harness": "antigravity",
+                        "llm_model": "gemini-4-argon",
+                        "reasoning_effort": "high",
+                    },
                 },
             )
         assert _harness(db_conn, agent) == "antigravity"
@@ -141,8 +144,11 @@ class TestSpawnHarness:
             agent = _spawn(
                 client,
                 {
-                    "harness": "antigravity",
-                    "config": {"llm_model": "gpt-oss-120b", "reasoning_effort": "medium"},
+                    "config": {
+                        "harness": "antigravity",
+                        "llm_model": "gpt-oss-120b",
+                        "reasoning_effort": "medium",
+                    },
                 },
             )
         with db_conn.cursor() as cur:
@@ -186,16 +192,18 @@ class TestSpawnHarness:
                 client,
                 {
                     "machine": "remote-probe",
-                    "harness": "codex",
-                    "config": {"llm_model": "gpt-6.1-terra"},
+                    "config": {"harness": "codex", "llm_model": "gpt-6.1-terra"},
                 },
             )
             second = _spawn(
                 client,
                 {
                     "machine": "remote-probe",
-                    "harness": "codex",
-                    "config": {"llm_model": "gpt-6.1-terra", "reasoning_effort": "ultra"},
+                    "config": {
+                        "harness": "codex",
+                        "llm_model": "gpt-6.1-terra",
+                        "reasoning_effort": "ultra",
+                    },
                 },
             )
             assert len(remote.calls_of("harness_probe")) == 1
@@ -223,14 +231,17 @@ class TestSpawnHarness:
             _seed_harnesses(client)
             bad_model = spawn_via_http(
                 client,
-                {"spawner": "user", "harness": "codex", "config": {"llm_model": "gpt-6.1-sol"}},
+                {"spawner": "user", "config": {"harness": "codex", "llm_model": "gpt-6.1-sol"}},
             )
             bad_effort = spawn_via_http(
                 client,
                 {
                     "spawner": "user",
-                    "harness": "codex",
-                    "config": {"llm_model": "gpt-6.1-terra", "reasoning_effort": "xhigh"},
+                    "config": {
+                        "harness": "codex",
+                        "llm_model": "gpt-6.1-terra",
+                        "reasoning_effort": "xhigh",
+                    },
                 },
             )
         assert bad_model.status_code == 400
@@ -249,8 +260,7 @@ class TestSpawnHarness:
                 client,
                 {
                     "spawner": "user",
-                    "harness": "claude_code",
-                    "config": {"llm_model": "claude-opus-4-6"},
+                    "config": {"harness": "claude_code", "llm_model": "claude-opus-4-6"},
                 },
             )
         assert response.status_code == 400
@@ -282,18 +292,50 @@ class TestSpawnHarness:
                 client,
                 {
                     "spawner": "user",
-                    "harness": "claude-code",
-                    "config": {"llm_model": "deepseek-flash"},
+                    "config": {"harness": "claude-code", "llm_model": "deepseek-flash"},
                 },
             )
         assert response.status_code == 422
         assert _agent_count(db_conn) == before
 
+    def test_a_top_level_harness_field_and_a_null_harness_are_rejected(
+        self, db_conn: psycopg.Connection
+    ) -> None:
+        before = _agent_count(db_conn)
+        with gateway_test_client() as client:
+            old_field = spawn_via_http(
+                client,
+                {"spawner": "user", "harness": "codex", "config": {"llm_model": "gpt-6.1-terra"}},
+            )
+            null_harness = spawn_via_http(
+                client,
+                {"spawner": "user", "config": {"harness": None, "llm_model": "deepseek-flash"}},
+            )
+        assert old_field.status_code == 422
+        assert null_harness.status_code == 422
+        assert _agent_count(db_conn) == before
+
+    def test_the_harness_is_stored_in_its_column_only(self, db_conn: psycopg.Connection) -> None:
+        with gateway_test_client() as client:
+            _seed_harnesses(client)
+            agent = _spawn(
+                client,
+                {"config": {"harness": "codex", "llm_model": "gpt-6.1-terra"}},
+            )
+        with db_conn.cursor() as cur:
+            cur.execute(
+                "SELECT config_overlay, birth_config FROM agents_meta WHERE id = %s", (agent,)
+            )
+            row = cur.fetchone()
+        assert row is not None
+        assert "harness" not in row[0]
+        assert "harness" not in row[1]
+
     def test_fork_inherits_the_source_harness_through_http(
         self, db_conn: psycopg.Connection
     ) -> None:
         with gateway_test_client() as client:
-            source = _spawn(client, {"harness": "meiva", "config": {"llm_model": "deepseek-flash"}})
+            source = _spawn(client, {"config": {"harness": "meiva", "llm_model": "deepseek-flash"}})
             _checkpoint(db_conn, source)
             fork = _spawn(client, {"fork_from": source})
         assert _harness(db_conn, source) == "meiva"
@@ -307,8 +349,11 @@ class TestSpawnHarness:
             source = _spawn(
                 client,
                 {
-                    "harness": "antigravity",
-                    "config": {"llm_model": "gemini-4-argon", "reasoning_effort": "high"},
+                    "config": {
+                        "harness": "antigravity",
+                        "llm_model": "gemini-4-argon",
+                        "reasoning_effort": "high",
+                    },
                 },
             )
             _checkpoint(db_conn, source)
@@ -328,8 +373,11 @@ class TestSpawnHarness:
             source = _spawn(
                 client,
                 {
-                    "harness": "codex",
-                    "config": {"llm_model": "gpt-6.1-terra", "reasoning_effort": "high"},
+                    "config": {
+                        "harness": "codex",
+                        "llm_model": "gpt-6.1-terra",
+                        "reasoning_effort": "high",
+                    },
                 },
             )
             _checkpoint(db_conn, source)
@@ -344,7 +392,7 @@ class TestSpawnHarness:
             _checkpoint(db_conn, source)
             response = spawn_via_http(
                 client,
-                {"spawner": "user", "fork_from": source, "harness": "claude_code"},
+                {"spawner": "user", "fork_from": source, "config": {"harness": "claude_code"}},
             )
         assert response.status_code == 400
         body = response.json()
@@ -353,9 +401,9 @@ class TestSpawnHarness:
 
     def test_fork_naming_its_own_harness_is_not_refused(self, db_conn: psycopg.Connection) -> None:
         with gateway_test_client() as client:
-            source = _spawn(client, {"harness": "meiva", "config": {"llm_model": "deepseek-flash"}})
+            source = _spawn(client, {"config": {"harness": "meiva", "llm_model": "deepseek-flash"}})
             _checkpoint(db_conn, source)
-            fork = _spawn(client, {"fork_from": source, "harness": "meiva"})
+            fork = _spawn(client, {"fork_from": source, "config": {"harness": "meiva"}})
         assert _harness(db_conn, fork) == "meiva"
 
     def test_agent_spawner_inherits_parent_model_and_effort(
@@ -366,8 +414,11 @@ class TestSpawnHarness:
             parent = _spawn(
                 client,
                 {
-                    "harness": "antigravity",
-                    "config": {"llm_model": "gemini-4-argon", "reasoning_effort": "high"},
+                    "config": {
+                        "harness": "antigravity",
+                        "llm_model": "gemini-4-argon",
+                        "reasoning_effort": "high",
+                    },
                 },
             )
             child_resp = spawn_via_http(
@@ -391,12 +442,15 @@ class TestSpawnHarness:
             parent = _spawn(
                 client,
                 {
-                    "harness": "antigravity",
-                    "config": {"llm_model": "gemini-4-argon", "reasoning_effort": "high"},
+                    "config": {
+                        "harness": "antigravity",
+                        "llm_model": "gemini-4-argon",
+                        "reasoning_effort": "high",
+                    },
                 },
             )
             child_resp = spawn_via_http(
                 client,
-                {"spawner": f"agent:{parent}", "harness": "codex"},
+                {"spawner": f"agent:{parent}", "config": {"harness": "codex"}},
             )
             assert child_resp.status_code == 422
