@@ -674,6 +674,9 @@ root = "base/agents/model/tests"
 root = "base/agents/observation/tests"
 
 [[tool.pyright.executionEnvironments]]
+root = "base/agents/questions/tests"
+
+[[tool.pyright.executionEnvironments]]
 root = "base/agents/sdk/tests"
 
 [[tool.pyright.executionEnvironments]]

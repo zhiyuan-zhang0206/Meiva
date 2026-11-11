@@ -44,6 +44,7 @@ def test_an_unpinned_agent_is_below_its_models_thresholds() -> None:
             _agent(),
             catalog=build_model_catalog(home=meiva_home()),
             extensions=EMPTY,
+            open_questions=[],
             now=_NOW,
         )
         is None
@@ -76,6 +77,7 @@ def test_an_agent_reminder_threshold_below_the_conversation_injects_the_reminder
         _agent(compact_reminder_fraction=_TINY_FRACTION),
         catalog=build_model_catalog(home=meiva_home()),
         extensions=EMPTY,
+        open_questions=[],
         now=_NOW,
     )
     assert update is not None

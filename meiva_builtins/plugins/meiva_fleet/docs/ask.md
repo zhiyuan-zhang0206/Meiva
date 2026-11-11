@@ -19,6 +19,8 @@ question ID order. The reply is one inbound to the agent with a `Re: question #<
 per question; a skipped question reads `Skipped by the user.` and grants nothing. Reading a
 publication does not answer any question.
 
+The agent is shown its unanswered questions (id, title, content and options) by the platform, never by a read entry: the pre-compaction reminder lists them as the moment to close the ones that no longer matter, the context a compaction rebuilds opens with them (read from the database, for every compaction path), and an external CLI's first input after it compacted itself lists them. Closed and answered questions are absent; a fork shows only its own. There is no query entry.
+
 The user gets one system notification per agent: the first open question alerts, later ones update
 it silently ("N questions awaiting an answer"), and it is retracted when the agent has no open
 question left.

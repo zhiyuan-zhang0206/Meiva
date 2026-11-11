@@ -13,6 +13,7 @@ from langgraph.runtime import Runtime
 from langgraph.types import Command
 
 from agent import state as _state
+from agent.messages import NoteTag, system_note_message
 from agent.nodes import INIT_CONTEXT, NodeName
 from agent.state import CapabilitiesState, ContextReset
 from base.agents.context import MeivaContext, agent_id_from_config
@@ -23,6 +24,7 @@ from base.agents.history.harness_messages import (
 from base.agents.history.timeline import build_timeline_items
 from base.agents.messages.delivery.retry_io import retryable_database_error
 from base.agents.messages.kwargs import read_meiva_kwargs
+from base.agents.questions.render import reinjection_text
 from base.api_contracts.agent_contract import Harness
 from base.db.transaction import async_write_transaction
 from base.host.atomic_io import write_text_atomic
@@ -34,6 +36,7 @@ from base.paths import workspace_dir
 from .claim import route_target
 from .claim.harness_render import pending_messages, render_messages
 from .hooks.cwd import ValidateCwdAfterInitHook
+from .hooks.question_context import read_agent_open_questions
 from .node_log import StallConfig, node_lifecycle
 from .prompt.context_notes import (
     context_notes,
@@ -258,6 +261,30 @@ def _with_instructions_file(handoff: Handoff) -> Handoff:
 
 
 # meiva:link agent/graph/docs/context-notes/context-notes.md
+# meiva:note
+# A context rebuilt from a compaction (the reset carries the summary as its tail) opens with the
+# agent's still-unanswered questions, read from the database so the agent need not have kept them in
+# its summary. Auto compaction, a compaction request and a summary the agent wrote all rebuild their
+# context here. A first context, a restart and a fork have no summary tail and show nothing: a fork is a
+# new agent, so it never reads the source agent's questions.
+# meiva:link meiva_builtins/plugins/meiva_fleet/docs/ask.md
+async def _open_questions_note(
+    ctx: MeivaContext, agent_id: int, reset: ContextReset
+) -> list[BaseMessage]:
+    if not reset.tail:
+        return []
+    text = reinjection_text(
+        await read_agent_open_questions(ctx, agent_id),
+        source="read from the database, not from your summary",
+    )
+    if not text:
+        return []
+    now = ctx.require_clock().now()
+    return [
+        system_note_message(content=text, tag=NoteTag.CONTEXT, picked_up_at=now, created_at=now)
+    ]
+
+
 async def init_context_node(
     state: _state.AgentState,
     runtime: Runtime[MeivaContext],
@@ -351,6 +378,7 @@ async def init_context_node(
             ),
             *notes,
             *reset.tail,
+            *await _open_questions_note(runtime.context, agent_id_from_config(config), reset),
         ]
         update: dict[str, Any] = {
             **(cwd_update or {}),

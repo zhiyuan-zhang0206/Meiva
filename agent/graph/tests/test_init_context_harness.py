@@ -350,7 +350,9 @@ def _make_antigravity_recall_runtime(
     )
 
     class _Bridge(FakeEngine):
-        async def deliver(self, inputs: Sequence[HarnessInput]) -> None:
+        async def deliver(
+            self, inputs: Sequence[HarnessInput], *, compaction_note: str = ""
+        ) -> None:
             recorded_prompts.extend(item.text for item in inputs)
             await super().deliver(inputs)
 

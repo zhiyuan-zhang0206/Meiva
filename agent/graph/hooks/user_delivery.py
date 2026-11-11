@@ -14,7 +14,6 @@ from base.agents.to_user.delivery.store import (
     latest_decision,
     messages,
     pending_context,
-    pending_questions,
     publish,
 )
 from base.api_contracts.user_delivery import PublishMessage, UserDeliveryMode
@@ -90,15 +89,7 @@ async def with_pending_deliveries[T: BaseMessage](
 
     def read() -> str:
         with ctx.require_db().connect() as conn:
-            return "\n\n".join(
-                filter(
-                    None,
-                    (
-                        pending_context(messages(conn, agent_id, pending_only=True, limit=21)),
-                        pending_questions(conn, agent_id),
-                    ),
-                )
-            )
+            return pending_context(messages(conn, agent_id, pending_only=True, limit=21))
 
     pending = await asyncio.to_thread(read)
     if not pending:
@@ -107,7 +98,7 @@ async def with_pending_deliveries[T: BaseMessage](
     return [
         *history,
         system_note_message(
-            content="Outstanding user deliveries remain durable independently of your workspace overview. Reading is not answering.\n\n"
+            content="Unread publications remain durable independently of your workspace overview.\n\n"
             + pending,
             tag=NoteTag.REPLY_VISIBILITY,
             picked_up_at=now,

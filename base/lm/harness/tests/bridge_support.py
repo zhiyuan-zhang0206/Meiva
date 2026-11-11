@@ -23,7 +23,9 @@ from base.lm.harness import (
 )
 
 
-async def run_turn(bridge: HarnessBridge, text: str, *, key: str) -> HarnessTurn:
+async def run_turn(
+    bridge: HarnessBridge, text: str, *, key: str, compaction_note: str = ""
+) -> HarnessTurn:
     try:
         subscription = await bridge.subscribe()
     except (HarnessClosedError, HarnessSetupError):
@@ -31,7 +33,9 @@ async def run_turn(bridge: HarnessBridge, text: str, *, key: str) -> HarnessTurn
         raise
     try:
         try:
-            await bridge.deliver([HarnessInput(key=key, text=text)])
+            await bridge.deliver(
+                [HarnessInput(key=key, text=text)], compaction_note=compaction_note
+            )
         except (HarnessClosedError, HarnessSetupError):
             await bridge.retire("session unavailable")
             raise

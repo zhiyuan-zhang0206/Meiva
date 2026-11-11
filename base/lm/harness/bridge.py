@@ -136,6 +136,10 @@ class HarnessBridge:
         return self._model
 
     @property
+    def context_compacted(self) -> bool:
+        return self._context_compacted
+
+    @property
     def exit_code(self) -> int | None:
         return self._exit_code
 
@@ -277,9 +281,9 @@ class HarnessBridge:
     # meiva:note
     # The delivery operation of the engine: hand a batch to the foreground, in order. The first
     # input of a fresh session carries the handoff document, and the first input after the CLI
-    # compacted its context carries the reminder to re-read the saved instructions. Results arrive as
-    # events on a subscription.
-    async def deliver(self, inputs: Sequence[HarnessInput]) -> None:
+    # compacted its context carries the reminder to re-read the saved instructions and the caller's
+    # note (the agent's unanswered questions). Results arrive as events on a subscription.
+    async def deliver(self, inputs: Sequence[HarnessInput], *, compaction_note: str = "") -> None:
         batch = list(inputs)
         if not batch:
             raise ValueError("deliver requires at least one input")
@@ -292,7 +296,7 @@ class HarnessBridge:
         self._register(session.session_id or "")
         batch[0] = HarnessInput(
             key=batch[0].key,
-            text=self._opening_input(batch[0].key, batch[0].text, session),
+            text=self._opening_input(batch[0].key, batch[0].text, session, compaction_note),
             images=batch[0].images,
         )
         await session.deliver(batch)
@@ -324,7 +328,9 @@ class HarnessBridge:
     # carries the full handoff needs none. Whatever rode the opening input counts as delivered only when
     # that input is in the model's context: a refused or lost input is handed over again with it.
     # meiva:link base/lm/harness/docs/harness.md
-    def _opening_input(self, key: str, text: str, session: HarnessSession) -> str:
+    def _opening_input(
+        self, key: str, text: str, session: HarnessSession, compaction_note: str
+    ) -> str:
         if self._opening_key not in (None, key):
             return text
         if self._handoff is not None and self._handoff_delivered:
@@ -336,7 +342,10 @@ class HarnessBridge:
                 text = f"{rendered}\n\n{text}" if text else rendered
         elif self._context_compacted and self._instructions_file is not None and text:
             self._opening_key = key
-            text = f"{compaction_reminder(self._instructions_file)}\n\n{text}"
+            reminder = compaction_reminder(self._instructions_file)
+            if compaction_note:
+                reminder = f"{reminder}\n\n{compaction_note}"
+            text = f"{reminder}\n\n{text}"
         return self._with_lost_work(key, text, session)
 
     # meiva:note

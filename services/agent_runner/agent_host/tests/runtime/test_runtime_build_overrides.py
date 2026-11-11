@@ -180,8 +180,12 @@ class FakeEngine:
     async def subscribe(self) -> EventSubscription:
         raise AssertionError("these tests never watch events")
 
-    async def deliver(self, inputs: Sequence[HarnessInput]) -> None:
+    async def deliver(self, inputs: Sequence[HarnessInput], *, compaction_note: str = "") -> None:
         raise AssertionError("these tests never deliver")
+
+    @property
+    def context_compacted(self) -> bool:
+        return False
 
     @property
     def generation(self) -> int:

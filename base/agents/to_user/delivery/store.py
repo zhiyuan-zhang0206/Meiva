@@ -3,10 +3,8 @@ from datetime import datetime
 from psycopg import Connection, sql
 from psycopg.rows import dict_row, scalar_row
 from psycopg.types.json import Jsonb
-from pydantic import BaseModel
 
 from base.agents.messages.reply_intent import normalize_last_message_text
-from base.api_contracts.question import QuestionSpec
 from base.api_contracts.user_delivery import (
     PublishMessage,
     UserDeliveryMode,
@@ -167,32 +165,4 @@ def pending_context(records: list[UserMessage]) -> str:
     ]
     if len(records) > 20:
         entries.append("More pending deliveries remain.")
-    return "\n\n".join(entries)
-
-
-class PendingQuestion(BaseModel):
-    id: int
-    title: str
-    content: str | None
-    question: QuestionSpec
-
-
-def pending_questions(conn: Connection, agent_id: int) -> str:
-    with conn.cursor(row_factory=dict_row) as cur:
-        cur.execute(
-            "SELECT id,title,content,question FROM agent_questions WHERE agent_id=%s "
-            "AND resolved_at IS NULL ORDER BY id LIMIT 21",
-            (agent_id,),
-        )
-        rows = [PendingQuestion.model_validate(row) for row in cur.fetchall()]
-    if not rows:
-        return ""
-    entries = [
-        f"Open Ask #{row.id}: {row.title[:1000]}\n{(row.content or '')[:800]}\nQuestion: "
-        + row.question.model_dump_json()[:1600]
-        for row in rows[:20]
-    ]
-    if len(rows) > 20:
-        entries.append("More open questions remain.")
-    entries.append("meiva.ui.close_question(id) closes one of these questions.")
     return "\n\n".join(entries)

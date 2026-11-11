@@ -19,13 +19,17 @@ import pytest
 from langchain_core.messages import AIMessage, AnyMessage, HumanMessage, SystemMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.runtime import Runtime
+from psycopg.types.json import Jsonb
 from psycopg_pool import AsyncConnectionPool
 
 from agent.graph._init_context import init_context_node
+from agent.graph.hooks.compact import build_compact_transition
 from agent.graph.hooks.tests.scripted_model import ScriptedModel
+from agent.nodes import CLAIM
 from agent.state import AgentState, CapabilitiesState, ContextReset
 from base.agents.context import MeivaContext
 from base.agents.context.identity import AgentIdentity
+from base.agents.messages.kwargs import MeivaMsgType, read_meiva_kwargs
 from base.api_contracts.agent_contract import Harness
 from base.clock import SYSTEM_TIMERS, Clock
 from base.clock.tests.seeded_rng import seeded_rng
@@ -658,3 +662,101 @@ def test_capabilities_snapshot_survives_the_checkpoint_round_trip() -> None:
     # they take opposite branches in the drift check.
     assert serde.loads_typed(serde.dumps_typed(CapabilitiesState())).indexed is None
     assert serde.loads_typed(serde.dumps_typed(CapabilitiesState(indexed=set()))).indexed == set()
+
+
+_TEXT = Jsonb({"type": "text"})
+
+
+def _ask(conn: psycopg.Connection, agent_id: int, title: str, resolution: str | None = None) -> int:
+    row = conn.execute(
+        "INSERT INTO agent_questions (agent_id, title, question, resolved_at, resolution, reply) "
+        "VALUES (%s, %s, %s, CASE WHEN %s::text IS NULL THEN NULL ELSE now() END, %s::text, "
+        "CASE WHEN %s::text = 'answered' THEN 'yes' END) RETURNING id",
+        (agent_id, title, _TEXT, resolution, resolution, resolution),
+    ).fetchone()
+    assert row is not None
+    return int(row[0])
+
+
+async def _rebuilt(
+    pool: AsyncConnectionPool, gate: ProcessDbGate, agent_id: int, reset: ContextReset
+) -> list[AnyMessage]:
+    command = await init_context_node(
+        AgentState(context_reset=reset),
+        _runtime(pool, _registry("memory"), database_gate=gate),
+        _config(agent_id),
+    )
+    assert command.update is not None
+    return cast("list[AnyMessage]", command.update["messages"])
+
+
+def _tail(text: str = "THE-SUMMARY") -> ContextReset:
+    return ContextReset(tail=[HumanMessage(content=text)], resume=CLAIM)
+
+
+def _question_notes(messages: list[AnyMessage]) -> list[str]:
+    return [
+        str(m.content)
+        for m in messages
+        if "still unanswered" in str(m.content) and read_meiva_kwargs(m).get("meiva_msg_type")
+    ]
+
+
+async def test_a_compaction_rebuilds_the_context_with_the_open_questions_after_the_summary(
+    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool, database_gate: ProcessDbGate
+) -> None:
+    agent = create_agent(db_conn)
+    first = _ask(db_conn, agent, "Which database?")
+    _ask(db_conn, agent, "Answered one", "answered")
+    _ask(db_conn, agent, "Dismissed one", "dismissed")
+    _ask(db_conn, agent, "Closed one", "withdrawn")
+    second = _ask(db_conn, agent, "Ship v2 now?")
+    db_conn.commit()
+    messages = await _rebuilt(aops_pool, database_gate, agent, _tail())
+    [note] = _question_notes(messages)
+    assert str(messages[-2].content) == "THE-SUMMARY"
+    assert "Questions you asked the user that are still unanswered (read from the database" in note
+    assert f'#{first} "Which database?"' in note and f'#{second} "Ship v2 now?"' in note
+    assert "Answered one" not in note and "Dismissed one" not in note and "Closed one" not in note
+    assert note.index(f"#{first}") < note.index(f"#{second}")
+
+
+async def test_no_note_without_open_questions_or_without_a_summary_tail(
+    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool, database_gate: ProcessDbGate
+) -> None:
+    agent = create_agent(db_conn)
+    _ask(db_conn, agent, "Answered", "answered")
+    db_conn.commit()
+    assert _question_notes(await _rebuilt(aops_pool, database_gate, agent, _tail())) == []
+    _ask(db_conn, agent, "Still open")
+    db_conn.commit()
+    assert _question_notes(await _rebuilt(aops_pool, database_gate, agent, ContextReset())) == []
+
+
+async def test_a_fork_shows_only_its_own_questions(
+    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool, database_gate: ProcessDbGate
+) -> None:
+    source, fork = create_agent(db_conn), create_agent(db_conn)
+    _ask(db_conn, source, "The source agent's question")
+    own = _ask(db_conn, fork, "The fork's own question")
+    db_conn.commit()
+    [note] = _question_notes(await _rebuilt(aops_pool, database_gate, fork, _tail()))
+    assert f'#{own} "The fork\'s own question"' in note
+    assert "source agent" not in note
+    assert (
+        _question_notes(await _rebuilt(aops_pool, database_gate, create_agent(db_conn), _tail()))
+        == []
+    )
+
+
+def test_every_compaction_path_parks_its_summary_in_the_reset_tail_this_node_serves() -> None:
+    transition = build_compact_transition(
+        "SUMMARY",
+        resume=CLAIM,
+        summary_kwargs={
+            "additional_kwargs": {"meiva_msg_type": MeivaMsgType.COMPACT_SUMMARY.value}
+        },
+    )
+    reset = cast("ContextReset", transition["context_reset"])
+    assert transition["goto"] == "init_context"
+    assert "SUMMARY" in str(reset.tail[0].content)

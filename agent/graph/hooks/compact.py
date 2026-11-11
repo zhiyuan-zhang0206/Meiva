@@ -1,6 +1,6 @@
 __description__ = "Auto-compact history when token count exceeds threshold"
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from datetime import datetime
 from typing import Any
 
@@ -12,6 +12,7 @@ from langgraph.graph.message import REMOVE_ALL_MESSAGES
 from langgraph.runtime import Runtime
 from psycopg_pool import AsyncConnectionPool
 
+from agent.graph.hooks.question_context import read_agent_open_questions
 from agent.graph.interrupt import (
     ModelInterruptedError,
     interrupt_halt,
@@ -38,6 +39,8 @@ from base.agents.context import MeivaContext, agent_id_from_config
 from base.agents.history.closing_request import ClosingRequest
 from base.agents.history.compact_boundary import mark_compact_boundary
 from base.agents.messages.kwargs import MeivaMsgType, read_meiva_kwargs
+from base.agents.questions.model import OpenQuestion
+from base.agents.questions.render import reminder_text
 from base.agents.to_user import DOCUMENT_FILENAME
 from base.api_contracts.agent_contract import Harness
 from base.clock import Timers
@@ -533,7 +536,11 @@ COMPACT_REMINDER_NOTE = (
 
 # meiva:link agent/graph/docs/context-window/preparation.md
 def _reminder_content(
-    agent: AgentSlices, *, catalog: ModelCatalog, extensions: ExtensionRegistry
+    agent: AgentSlices,
+    *,
+    catalog: ModelCatalog,
+    extensions: ExtensionRegistry,
+    open_questions: Sequence[OpenQuestion],
 ) -> str:
     parts = [COMPACT_REMINDER_NOTE]
     if agent.read("agent", "workspace_in_system_prompt"):
@@ -544,6 +551,9 @@ def _reminder_content(
             "render for the user, so detail can live in linked files. Edit in place, "
             "without a separate notification."
         )
+    questions = reminder_text(open_questions)
+    if questions:
+        parts.append(questions)
     for plugin, section in extensions.compact_reminder_sections():
         contribution = section(agent, catalog=catalog)
         if not isinstance(contribution, str):
@@ -560,6 +570,22 @@ def _reminder_content(
     return "\n\n".join(parts)
 
 
+# meiva:note
+# Whether the wind-down reminder is owed now: the context is over the soft threshold, holds a
+# conversation, and the reminder was not already shown for this compaction version.
+# meiva:link agent/graph/docs/context-window/preparation.md
+def reminder_due(state: AgentState, agent: AgentSlices, *, catalog: ModelCatalog) -> bool:
+    occupancy = _context_occupancy(state.messages)
+    soft = resolve_context_budget(
+        agent.brain.llm_model, agent.overrides, catalog=catalog
+    ).soft_compact_tokens
+    if occupancy <= soft or not conversation_messages(state.messages):
+        return False
+    compact = state.compact
+    shown = compact.reminder_shown and compact.reminder_seen_version >= compact.version
+    return not shown
+
+
 # meiva:link agent/graph/docs/context-window/preparation.md
 def compact_reminder_update(
     state: AgentState,
@@ -567,37 +593,28 @@ def compact_reminder_update(
     *,
     catalog: ModelCatalog,
     extensions: ExtensionRegistry,
+    open_questions: Sequence[OpenQuestion],
     now: datetime,
 ) -> dict[str, Any] | None:
-    occupancy = _context_occupancy(state.messages)
-    if (
-        occupancy
-        <= resolve_context_budget(
-            agent.brain.llm_model, agent.overrides, catalog=catalog
-        ).soft_compact_tokens
-    ):
-        return None
-    if not conversation_messages(state.messages):
+    if not reminder_due(state, agent, catalog=catalog):
         return None
     compact: CompactState = state.compact
-    shown: bool = compact.reminder_shown
-    seen: int = compact.reminder_seen_version
-    if compact.version > seen:
-        shown = False
-        seen = compact.version
-    if shown:
-        return None
-
+    seen = max(compact.reminder_seen_version, compact.version)
     logger.info(
         "[{label}] {body}",
         label="compact-reminder",
         event="compact_reminder",
-        body=f"injecting wind-down note, tokens≈{occupancy}",
+        body=f"injecting wind-down note, tokens≈{_context_occupancy(state.messages)}",
     )
     return {
         "messages": [
             system_note_message(
-                content=_reminder_content(agent, catalog=catalog, extensions=extensions),
+                content=_reminder_content(
+                    agent,
+                    catalog=catalog,
+                    extensions=extensions,
+                    open_questions=open_questions,
+                ),
                 tag=NoteTag.COMPACT_REMINDER,
                 picked_up_at=now,
                 created_at=now,
@@ -625,11 +642,17 @@ class _CompactReminderHook(Hook):
             state, agent, catalog=catalog
         ):
             return None
+        if not reminder_due(state, agent, catalog=catalog):
+            return None
         return compact_reminder_update(
             state,
             agent,
             catalog=catalog,
             extensions=runtime.context.plugin_registry(),
+            open_questions=await read_agent_open_questions(
+                runtime.context,
+                runtime.context.identity.agent_id if runtime.context.identity else None,
+            ),
             now=runtime.context.require_clock().now(),
         )
 
