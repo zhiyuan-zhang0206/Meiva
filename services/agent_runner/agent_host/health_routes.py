@@ -104,6 +104,7 @@ def stats_route(host: AgentHost, scheduler: TurnScheduler, *, pid: int, home: Pa
                 active_progress[agent_id] = round(age, 1)
         payload = {
             **host.stats.as_payload(),
+            "kept_alive_sessions": host.kept_alive_sessions(),
             **host.admission.payload(),
             "maintenance_protocol": 1,
             "runtime_owner": str(host.runtime_owner),

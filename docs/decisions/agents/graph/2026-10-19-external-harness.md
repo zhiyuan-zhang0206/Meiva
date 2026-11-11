@@ -521,3 +521,5 @@ the same gate and the same telemetry, which is the point of having one logic wit
 two entry points.
 
 <!-- Superseded in part by 2026-11-11-self-restart-at-turn-end.md (`meiva.self.restart` on an external harness; compact and attach stay native only) -->
+
+<!-- Superseded in part by 2026-11-11-background-work-keeps-sessions.md (the idle TTL/LRU no longer closes a session that holds background work) -->

@@ -1,0 +1,42 @@
+{
+  "source": "Recorded from Claude Code (SDK 0.2.168) transcripts of real CronCreate, CronDelete, CronList and ScheduleWakeup calls. Ids and prompts are shortened; field names, result text and the structured tool_use_result shapes are as the CLI wrote them. `now` is a fixed epoch second the tests use as the call time.",
+  "now": 1794329400,
+  "calls": {
+    "cron_recurring": {
+      "name": "CronCreate",
+      "input": {"cron": "* * * * *", "prompt": "CRON-917 fired", "recurring": true},
+      "content": "Scheduled recurring job 29b6c779 (Every minute). Next run: Nov 11 1:00am. Session-only (not written to disk, dies when Claude exits). Auto-expires after 7 days. Use CronDelete to cancel sooner.",
+      "structured": {"id": "29b6c779", "humanSchedule": "Every minute", "recurring": true, "durable": false, "nextFireAt": 1794330004888.3572}
+    },
+    "cron_one_shot": {
+      "name": "CronCreate",
+      "input": {"cron": "2 14 11 11 *", "prompt": "CRON-917 fired", "recurring": false},
+      "content": "Scheduled one-shot task 53a50213 (2 14 11 11 *). Next run: Nov 11 2:02pm. Session-only (not written to disk, dies when Claude exits). It will fire once then auto-delete.",
+      "structured": {"id": "53a50213", "humanSchedule": "2 14 11 11 *", "recurring": false, "durable": false, "nextFireAt": 1794376920000}
+    },
+    "cron_delete": {
+      "name": "CronDelete",
+      "input": {"id": "29b6c779"},
+      "content": "Cancelled job 29b6c779.",
+      "structured": {"id": "29b6c779"}
+    },
+    "cron_list": {
+      "name": "CronList",
+      "input": {},
+      "content": "c8d329a9 — 7,27,47 * * * * (recurring) [session-only]: status check every twenty minutes",
+      "structured": {"jobs": [{"id": "c8d329a9", "cron": "7,27,47 * * * *", "humanSchedule": "7,27,47 * * * *", "prompt": "status check every twenty minutes"}]}
+    },
+    "wakeup": {
+      "name": "ScheduleWakeup",
+      "input": {"delaySeconds": 60, "prompt": "WAKE-917 fired", "reason": "User requested scheduled wakeup test", "noop": false},
+      "content": "Next wakeup scheduled for 00:52:00 (in 71s). If you owe the user a status update this tick, write it now as ordinary response text; then end the turn — the harness re-invokes you when the wakeup fires or a task-notification arrives.",
+      "structured": {"scheduledFor": 1794329520000, "clampedDelaySeconds": 60, "wasClamped": false}
+    },
+    "wakeup_stop": {
+      "name": "ScheduleWakeup",
+      "input": {"stop": true},
+      "content": "Wakeups stopped.",
+      "structured": null
+    }
+  }
+}

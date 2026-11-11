@@ -38,6 +38,7 @@ class UserMessage:
     content: Any
     uuid: str | None = None
     origin: dict[str, Any] | None = None
+    tool_use_result: dict[str, Any] | None = None
 
 
 @dataclass
@@ -56,6 +57,7 @@ class SystemMessage:
 class TaskStartedMessage(SystemMessage):
     task_id: str = "task-1"
     description: str = ""
+    task_type: str = ""
 
 
 @dataclass
@@ -157,6 +159,7 @@ class CallTool:
     tool_use_id: str = "toolu-1"
     content: str = "ok"
     is_error: bool = False
+    structured: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -308,7 +311,8 @@ class FakeClaudeSDKClient:
                                     content=step.content,
                                     is_error=step.is_error,
                                 )
-                            ]
+                            ],
+                            tool_use_result=step.structured,
                         )
                     )
                     self._absorb_waiting()

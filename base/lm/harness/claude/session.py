@@ -3,9 +3,11 @@ from __future__ import annotations
 import asyncio
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping, Sequence
 from dataclasses import replace
+from datetime import datetime
 from typing import Protocol, assert_never
 
 import claude_agent_sdk
+from croniter import croniter
 
 from base.host.boundary.json_values import is_object_dict
 from base.lm.harness.base_session import (
@@ -31,6 +33,7 @@ from base.lm.harness.claude.delivery import (
 from base.lm.harness.claude.inbound import (
     BackgroundTasks,
     MessageKind,
+    ScheduledWork,
     assistant_texts,
     counts_as_step,
     is_tool_result,
@@ -49,6 +52,8 @@ from base.lm.harness.events import (
     InterruptConfirmed,
     SessionFailed,
     SessionStarted,
+    ToolResult,
+    ToolUse,
     TurnOrigin,
     TurnStarted,
 )
@@ -63,7 +68,7 @@ from base.lm.harness.process import (
     wait_gone,
     watch_tree,
 )
-from base.lm.harness.session import SessionClosedError
+from base.lm.harness.session import BackgroundWork, SessionClosedError
 
 # meiva:note
 # One session is one turn engine with three boundaries. Inbound is `deliver()`: every input is
@@ -154,6 +159,7 @@ class ClaudeSession(BaseHarnessSession[BridgeConfig]):
         # The tasks the CLI says are running: started and not yet reported terminal.
         # `close()` is their one stop caller, and the note there says why.
         self._background = BackgroundTasks()
+        self._scheduled = ScheduledWork()
         self._open: OpenTurn | None = None
         self._uuid_keys: dict[str, str] = {}
         self._echo_seen = False
@@ -197,6 +203,7 @@ class ClaudeSession(BaseHarnessSession[BridgeConfig]):
         # meiva:link base/lm/harness/claude/docs/claude.md
         client, live = self._client, list(self._background.open_task_ids)
         self._background = BackgroundTasks()
+        self._scheduled = ScheduledWork()
         self._open = None
         if client is not None and live:
             await asyncio.gather(
@@ -404,6 +411,7 @@ class ClaudeSession(BaseHarnessSession[BridgeConfig]):
         )
         for event in mapped:
             self._emit(event)
+        self._track_scheduling(message, mapped)
 
     def _handle_echo(self, message: object) -> None:
         key = self._uuid_keys.get(str(getattr(message, "uuid", "") or ""))
@@ -450,7 +458,13 @@ class ClaudeSession(BaseHarnessSession[BridgeConfig]):
         cause = self._pending_cause or harness_cause(origin)
         self._pending_cause = None
         self._baseline = snapshot(self._probe, self._cli_pid)
+        if cause is HarnessCause.UNKNOWN:
+            self._scheduled, fired = self._scheduled.fired(self._clock.now().timestamp())
+            if fired:
+                cause = HarnessCause.SCHEDULED_WAKE
+                self._persist_pending()
         self._open = OpenTurn(turn_id)
+        self._observed.add(turn_id)
         self._emit(
             TurnStarted(
                 turn_id, TurnOrigin.HARNESS, (), self.generation, cause=cause, detail=origin
@@ -467,6 +481,7 @@ class ClaudeSession(BaseHarnessSession[BridgeConfig]):
 
     def _handle_task_notification(self, message: object) -> None:
         self._background = self._background.reported(_task_id(message))
+        self._persist_pending()
         plan = notification_plan(map_message(message, turn_id=None), claimed=self._open is not None)
         for event in plan.stream:
             self._emit(event)
@@ -475,10 +490,81 @@ class ClaudeSession(BaseHarnessSession[BridgeConfig]):
             self._unsolicited(plan.report)
 
     def _track_task_started(self, message: object) -> None:
-        self._background = self._background.started(_task_id(message))
+        self._background = self._background.started(
+            _task_id(message),
+            description=str(getattr(message, "description", "") or ""),
+            task_type=str(getattr(message, "task_type", "") or ""),
+        )
+        self._persist_pending()
 
     def _track_task_update(self, message: object) -> None:
         self._background = self._background.updated(_task_id(message), task_update_status(message))
+        self._persist_pending()
+
+    # meiva:note
+    # Follow the model's own timer tools through the stream: a call is remembered when the model makes
+    # it and applied when its result arrives, with the structured result the SDK attaches to the
+    # user message when it has one. The set is persisted whenever it changes.
+    # meiva:link base/lm/harness/claude/docs/background-tasks.md
+    def _track_scheduling(self, message: object, mapped: Sequence[object]) -> None:
+        structured: object = getattr(message, "tool_use_result", None)
+        now = self._clock.now().timestamp()
+        before = self._scheduled
+        for event in mapped:
+            if isinstance(event, ToolUse):
+                self._scheduled = self._scheduled.tool_used(
+                    event.tool_use_id, event.name, event.tool_input
+                )
+            elif isinstance(event, ToolResult):
+                self._scheduled = self._scheduled.tool_returned(
+                    event.tool_use_id,
+                    content=event.content,
+                    is_error=event.is_error,
+                    structured=structured if is_object_dict(structured) else None,
+                    now=now,
+                    fire_fallback=self._one_shot_fire(event.tool_use_id),
+                )
+        if self._scheduled != before:
+            self._persist_pending()
+
+    # meiva:note
+    # The structured result is not always in the stream (a fired one-shot cron was recorded with none),
+    # so a one-shot job's due time falls back to the next match of its own five-field expression, which
+    # the CLI process reads in its own zone (`cron_timezone`, handed down by the launcher). An expression croniter cannot read yields None and the job keeps the
+    # seven-day bound rather than a guess.
+    # meiva:link base/lm/harness/claude/docs/background-tasks.md
+    def _one_shot_fire(self, tool_use_id: str) -> float | None:
+        fields = self._scheduled.call_input(tool_use_id, "CronCreate")
+        cron = None if fields is None else fields.get("cron")
+        zone = self.config.cron_timezone
+        if (
+            zone is None
+            or fields is None
+            or fields.get("recurring", True) is not False
+            or not isinstance(cron, str)
+        ):
+            return None
+        try:
+            start = datetime.fromtimestamp(self._clock.now().timestamp(), tz=zone)
+            return croniter(cron, start).get_next(datetime).timestamp()
+        except (ValueError, KeyError):
+            return None
+
+    def background_work(self) -> BackgroundWork:
+        if self._closed:
+            return BackgroundWork()
+        now = self._clock.now().timestamp()
+        return BackgroundWork(
+            (
+                *self._background.items,
+                *self._scheduled.pending_at(now),
+                *self._observed_turn_items(),
+            )
+        )
+
+    def _persist_pending(self) -> None:
+        now = self._clock.now().timestamp()
+        self._persist_background((*self._background.items, *self._scheduled.pending_at(now)))
 
     # meiva:note
     # A result ends the open turn, whoever began it: a turn of ours settles its ticket, a turn the CLI
@@ -508,6 +594,8 @@ class ClaudeSession(BaseHarnessSession[BridgeConfig]):
         self._emit(completed)
         if completed.interrupted:
             self._emit(InterruptConfirmed(turn.turn_id, self.generation))
+        self._observed.discard(turn.turn_id)
+        self._wake_for_harness_turn(turn.turn_id, completed.text)
 
     def _require_client(self) -> ClaudeClientProtocol:
         if self._client is None:

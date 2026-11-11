@@ -88,6 +88,7 @@ from services.agent_runner.agent_host.runtime import (
     build_runtime,
     cached_runtime,
     evict_runtimes,
+    holds_background_work,
     read_last_active_at,
     record_harness_exit,
     refresh_cached_runtime,
@@ -426,8 +427,13 @@ class AgentHost:
     # adapter's read loop, so it only hands the report to the owner that writes it off
     # the loop; the write is an ordinary inbound, which is what makes the agent take a
     # turn over it.
+    # A turn the CLI ran by itself while the agent has an invocation running is already presented by
+    # that invocation's foreground (it reads the same events and projects them), so only the idle case
+    # needs the wake: writing the inbound as well would show the same reply twice.
     # meiva:link base/lm/harness/docs/attribution.md
     def _report_unsolicited(self, agent_id: int, event: UnsolicitedOutput) -> None:
+        if event.source == "harness-turn" and agent_id in self._in_flight:
+            return
         self._sessions.notify(agent_id, event, db=self._db, bus=self._bus)
 
     def _evict(self) -> None:
@@ -435,7 +441,26 @@ class AgentHost:
         for agent_id, runtime in evict_runtimes(
             self._runtimes, self._in_flight, policy=self._policy.cache, now=time.monotonic()
         ):
+            if holds_background_work(runtime):
+                logger.warning(
+                    "agent {agent_id}: evicting a runtime whose CLI still holds background work "
+                    "(cache over its bound of {size}); the agent is told what was lost",
+                    event="harness_background_work_evicted",
+                    agent_id=agent_id,
+                    size=self._policy.cache.size,
+                )
             self._sessions.retire(agent_id, runtime)
+
+    # meiva:note
+    # How many cached runtimes the host is keeping warm only because their external CLI holds
+    # background work: the number a runner's operator reads to see what the keep-alive costs.
+    # meiva:link base/lm/harness/docs/background-work.md
+    def kept_alive_sessions(self) -> int:
+        return sum(
+            1
+            for agent_id, runtime in self._runtimes.items()
+            if agent_id not in self._in_flight and holds_background_work(runtime)
+        )
 
     async def last_active_at(self, agent_id: int) -> datetime | None:
         """Read the scheduler's actual LLM activity clock."""

@@ -12,11 +12,12 @@ from typing import Protocol
 from base.host.boundary.fields import int_field, str_field
 from base.host.boundary.json_values import is_object_dict
 from base.host.boundary.untyped import object_of
+from base.lm.harness.session import BackgroundItem, decode_items, encode_items
 
 _REQUIRED_FIELDS = frozenset(
     {"agent_id", "session_id", "cwd", "model", "created_at", "updated_at", "harness", "generation"}
 )
-_FIELDS = _REQUIRED_FIELDS | {"resumes"}
+_FIELDS = _REQUIRED_FIELDS | {"resumes", "background"}
 _PRE_FIELD_HARNESS = "meiva"
 _SINGLE_SLOT = re.compile(r"\d+\.json")
 _HARNESS_NAME = re.compile(r"[a-z][a-z0-9_]*")
@@ -40,6 +41,13 @@ class SessionRecord:
     # meiva:link base/lm/harness/docs/delivery.md
     generation: int
     resumes: int = 0
+    # meiva:note
+    # The background work the CLI held when this record was last written: what a restart would
+    # lose. The session rewrites it whenever the set changes, so a host that dies without closing
+    # the session still leaves it behind, and the next start reads it back as "lost" and tells the
+    # agent once. It is a small list of one-line descriptions, not a log.
+    # meiva:link base/lm/harness/docs/background-work.md
+    background: tuple[BackgroundItem, ...] = ()
 
 
 class SessionRegistry(Protocol):
@@ -133,7 +141,8 @@ class FileSessionRegistry:
     def save(self, record: SessionRecord) -> None:
         path = self.path(record.agent_id, record.harness)
         path.parent.mkdir(parents=True, exist_ok=True)
-        payload = json.dumps(asdict(record), indent=2, sort_keys=True) + "\n"
+        document = {**asdict(record), "background": encode_items(record.background)}
+        payload = json.dumps(document, indent=2, sort_keys=True) + "\n"
         handle, temporary = tempfile.mkstemp(dir=path.parent, prefix=".session-", suffix=".json")
         try:
             with os.fdopen(handle, "w", encoding="utf-8") as stream:
@@ -267,6 +276,9 @@ def record_from_payload(payload: dict[str, object], *, source: str) -> SessionRe
             harness=str_field(payload, "harness"),
             resumes=int_field(payload, "resumes") if "resumes" in payload else 0,
             generation=int_field(payload, "generation"),
+            background=decode_items(payload["background"], source=source)
+            if "background" in payload
+            else (),
         )
     except (TypeError, ValueError) as exc:
         raise ValueError(f"session record at {source} has invalid values: {exc}") from exc

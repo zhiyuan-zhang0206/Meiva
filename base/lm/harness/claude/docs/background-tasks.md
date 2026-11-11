@@ -34,3 +34,16 @@ running turn, not a background task — and a task stopped that way reports `kil
 through the update message, sometimes with no notification behind it. That case is
 cleared from the set but not delivered as a report: the report the agent would have
 read is the notification's.
+
+## Counting them as pending work
+
+The same task set backs `ClaudeSession.background_work()`, with each task's description
+and kind (command or sub-agent). The timers the model sets with `CronCreate`,
+`CronDelete`, `CronList` and `ScheduleWakeup` are followed from those tool calls and their
+results (`ScheduledWork` in `inbound.py`; fixture
+`tests/fixtures/scheduled_work.json` holds the recorded shapes). They live only in the CLI
+process and do not survive a resume. No event says one fired, so a one-shot timer stops
+counting a few minutes after its due time and a recurring cron at `CronDelete` or the CLI's
+seven-day expiry; `CronList` replaces the cron set when it is in the stream. While any of
+this is pending, the host keeps the session out of the idle TTL
+([background work](../../docs/background-work.md)).

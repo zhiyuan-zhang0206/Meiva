@@ -53,10 +53,20 @@ from base.lm.harness.registration import (
     handle_digest,
 )
 from base.lm.harness.registry import FileSessionRegistry, SessionRecord, SessionRegistry
+from base.lm.harness.session import (
+    BackgroundItem,
+    BackgroundKind,
+    BackgroundWork,
+    BackgroundWorkReporting,
+)
 
 __all__ = [
     "HANDLE_ENV",
     "AssistantText",
+    "BackgroundItem",
+    "BackgroundKind",
+    "BackgroundWork",
+    "BackgroundWorkReporting",
     "BridgeEvent",
     "ClusterFact",
     "ContextCompacted",

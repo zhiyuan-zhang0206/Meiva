@@ -18,6 +18,7 @@ from base.lm.harness.cancel import (
 )
 from base.lm.harness.codex.admission import observed_turn_name, rejection_reason
 from base.lm.harness.codex.auth import build_env
+from base.lm.harness.codex.commands import OpenCommands
 from base.lm.harness.codex.config import CodexConfig
 from base.lm.harness.codex.fork import fork_thread_request
 from base.lm.harness.codex.frames import (
@@ -25,6 +26,7 @@ from base.lm.harness.codex.frames import (
     JsonRpcError,
     RequestParams,
     TransportClosedError,
+    as_object,
 )
 from base.lm.harness.codex.mapping import (
     item_event,
@@ -78,6 +80,8 @@ from base.lm.harness.process import (
 from base.lm.harness.registry import SessionRecord
 from base.lm.harness.session import (
     EVENT_STREAM_END,
+    BackgroundItem,
+    BackgroundWork,
     SessionClock,
     SessionClosedError,
     SessionTotals,
@@ -158,6 +162,8 @@ class CodexSession(BaseHarnessSession[CodexConfig]):
         self._delivery_lock = asyncio.Lock()
         self._interrupting: set[str] = set()
         self._started = False
+        self._commands = OpenCommands()
+        self._start_tree: dict[int, str] = {}
 
     def _read_records(
         self, session_id: str, keys: Sequence[str]
@@ -174,6 +180,7 @@ class CodexSession(BaseHarnessSession[CodexConfig]):
         self._transport.on_request(self._on_request)
         self._transport.on_closed(self._on_transport_closed)
         await self._transport.start()
+        self._start_tree = snapshot(self._probe, self._transport.pid)
         await self._enter_tasks()
         self._started = True
         await self._call(*initialize_request())
@@ -226,8 +233,10 @@ class CodexSession(BaseHarnessSession[CodexConfig]):
     async def close(self, *, reason: str = "closed") -> None:
         if self._closed:
             return
+        self._persist_pending()
         self._closed = True
         watched = watch_tree(self._probe, self._transport.pid)
+        self._commands = OpenCommands()
         await self._close_tasks()
         await self._transport.close()
         await settle_close(
@@ -498,6 +507,9 @@ class CodexSession(BaseHarnessSession[CodexConfig]):
             self._emit(event)
 
     def _on_item(self, message: Inbound, params: JsonObject) -> None:
+        phase = "completed" if message.kind is NotificationKind.ITEM_COMPLETED else "started"
+        self._commands = self._commands.seen(phase, message.turn_id, as_object(params.get("item")))
+        self._persist_pending()
         local = self._attribute(message.turn_id)
         if local is None:
             return
@@ -564,6 +576,9 @@ class CodexSession(BaseHarnessSession[CodexConfig]):
 
     def _on_turn_completed(self, message: Inbound) -> None:
         name = message.turn_id
+        survived = message.turn.get("status") == "completed"
+        self._commands = self._commands.turn_ended(name, survived=survived)
+        self._persist_pending()
         ticket = self._claim(name)
         local = ticket.turn_id if ticket is not None else self._ledger.local_turn(name)
         if local is None:
@@ -600,6 +615,29 @@ class CodexSession(BaseHarnessSession[CodexConfig]):
             self._complete(ticket)
         else:
             self._observed.discard(local)
+            self._wake_for_harness_turn(local, settlement.completed.text)
+
+    # meiva:note
+    # A command item still `inProgress` is pending only while the process tree agrees: the
+    # app-server's descendants beyond those it had when it started. An app-server whose tree
+    # cannot be observed (no pid) is taken at its word, because forgetting a live command is the
+    # failure this exists to prevent.
+    # meiva:link base/lm/harness/codex/docs/codex.md
+    def _pending_commands(self) -> tuple[BackgroundItem, ...]:
+        items = self._commands.items
+        pid = self._transport.pid
+        if not items or pid is None:
+            return items
+        grown = spawned_since(snapshot(self._probe, pid), self._start_tree)
+        return items if grown else ()
+
+    def background_work(self) -> BackgroundWork:
+        if self._closed:
+            return BackgroundWork()
+        return BackgroundWork((*self._pending_commands(), *self._observed_turn_items()))
+
+    def _persist_pending(self) -> None:
+        self._persist_background(self._pending_commands())
 
     def _on_request(self, method: str, params: JsonObject) -> JsonObject:
         answer = answer_request(method, params, decision=self.config.approval_decision)
