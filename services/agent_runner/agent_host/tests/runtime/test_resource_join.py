@@ -4,6 +4,7 @@ import asyncio
 import os
 import subprocess
 import sys
+import time
 from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
@@ -209,6 +210,26 @@ def exercise_unfinished_main() -> None:
     daemon.main()
 
 
+STARTUP_GUARD_S = 120.0
+EXIT_AFTER_JOIN_S = 20.0
+
+
+# meiva:note
+# Poll for the marker; stop early when the child exited without writing it.
+def _reached(marker: Path, guard_s: float, child: subprocess.Popen[bytes]) -> bool:
+    deadline = time.monotonic() + guard_s
+    while not marker.exists():
+        if child.poll() is not None or time.monotonic() > deadline:
+            return False
+        time.sleep(0.05)
+    return True
+
+
+# meiva:note
+# Importing and booting the host takes as long as the runner lets it, so the test makes no
+# wall-clock claim about it: the child marks the moment its bounded join gave up, a hang before
+# that is bounded only by a guard a starved runner cannot reach, and the claim under test (the
+# unfinished task must not hold the exit) starts at the marker.
 def test_unfinished_actual_task_reaches_existing_hard_exit(
     tmp_path: Path, db_conn: psycopg.Connection
 ) -> None:
@@ -228,23 +249,26 @@ def test_unfinished_actual_task_reaches_existing_hard_exit(
         MEIVA_MACHINE_NAME="resource-join-test",
     )
     env.pop("MEIVA_PERMISSIONS_HELPER_PID", None)
-    result = subprocess.run(  # noqa: S603 -- fixed interpreter and repository-owned helper
-        [
-            sys.executable,
-            __file__,
-        ],
-        env=env,
-        capture_output=True,
-        text=True,
-        timeout=8,
-        check=False,
-    )
-    assert result.returncode == 1, result.stdout + result.stderr
-    assert marker.exists(), result.stdout + result.stderr
+    stdout_path, stderr_path = tmp_path / "stdout.txt", tmp_path / "stderr.txt"
+    with stdout_path.open("w") as stdout, stderr_path.open("w") as stderr:
+        child = subprocess.Popen(  # noqa: S603 -- fixed interpreter and repository-owned helper
+            [sys.executable, __file__], env=env, stdout=stdout, stderr=stderr
+        )
+        try:
+            reached = _reached(marker, STARTUP_GUARD_S, child)
+            returncode = child.wait(timeout=EXIT_AFTER_JOIN_S) if reached else child.poll()
+        except subprocess.TimeoutExpired:
+            returncode = None
+        finally:
+            if child.poll() is None:
+                child.kill()
+                child.wait()
+    output = stdout_path.read_text() + stderr_path.read_text()
+    assert returncode == 1, f"reached the join: {marker.exists()}, exit {returncode}\n{output}"
     assert marker.read_text() == "False"
     assert not marker.with_suffix(".clients").exists()
-    assert "uncooperative-resource" in result.stderr
-    assert "keeping pools open until hard exit" in result.stderr
+    assert "uncooperative-resource" in output
+    assert "keeping pools open until hard exit" in output
 
 
 if __name__ == "__main__":
