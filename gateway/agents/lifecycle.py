@@ -14,6 +14,7 @@ from psycopg_pool import ConnectionPool, PoolTimeout
 
 from base.agents.birth.harness import coerce_harness
 from base.agents.inbox.compact import insert_compact_request_inbound
+from base.agents.model.overlay_columns import split_overlay_columns
 from base.api_contracts.agent_contract import (
     AgentNotFound,
     AgentStatus,
@@ -211,19 +212,18 @@ async def post_agent_resurrect(
 def _resolve_restart_target_harness(
     overlay: Mapping[str, object] | None, current_harness: Harness
 ) -> Harness:
-    if not overlay or "harness" not in overlay:
-        return current_harness
     from base.api_contracts.agent_contract import LAUNCHABLE_HARNESSES
+    from base.packages.plugins.plugin_errors import InvalidConfigOverlay
 
-    raw_h = overlay["harness"]
     try:
-        target_harness = coerce_harness(raw_h)
-        is_launchable = target_harness.value in LAUNCHABLE_HARNESSES
-    except Exception as exc:
+        target_harness = split_overlay_columns(overlay).harness
+    except InvalidConfigOverlay as exc:
         raise HTTPException(
             status_code=422, detail=f"Invalid harness in config_overlay: {exc}"
         ) from exc
-    if not is_launchable:
+    if target_harness is None:
+        return current_harness
+    if target_harness.value not in LAUNCHABLE_HARNESSES:
         raise HTTPException(
             status_code=422,
             detail=f"Invalid harness in config_overlay: Harness '{target_harness.value}' is not launchable",
@@ -299,11 +299,7 @@ def _prepare_restart_validation_blocking(
             at_turn_end=body.at_turn_end,
         )
 
-    overlay_without_harness = (
-        {k: v for k, v in body.config_overlay.items() if k != "harness"}
-        if body.config_overlay
-        else {}
-    )
+    overlay_without_harness = split_overlay_columns(body.config_overlay).fields
     if overlay_without_harness:
         from base.packages.plugins.config_registration import validate_config_overlay
         from base.packages.plugins.plugin_errors import InvalidConfigOverlay

@@ -3707,7 +3707,6 @@ export interface components {
                 [key: string]: unknown;
             } | null;
             label?: string | null;
-            harness?: components["schemas"]["Harness"] | null;
         };
         SpawnedAgent: {
             id: number;

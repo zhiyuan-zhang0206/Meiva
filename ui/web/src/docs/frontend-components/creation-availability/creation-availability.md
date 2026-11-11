@@ -71,7 +71,7 @@ Creation HTTP calls send one operation key with the `principal-v1` scope. Spawn/
 
 ## Harness choice
 
-A spawn names its harness (`meiva` by default, or an external CLI). It is a birth attribute: the
+A spawn names its harness (`meiva` by default, or an external CLI) as `config.harness` in the request body, beside `llm_model`. It is a birth attribute: the
 row records it once and a fork inherits its source's value, so the fork dialog
 says so instead of offering a choice the backend would refuse with
 `fork_harness_mismatch`.

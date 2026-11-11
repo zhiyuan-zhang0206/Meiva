@@ -91,7 +91,7 @@ def _refuse_unforkable_source(
             f"cannot fork agent {fork_from}: it runs on 'antigravity', and agy has no supported "
             f"fork entry (the in-process RPC `ForkConversation` is not a public interface, and a "
             f"fork made through it gets no cache hit). Spawn a new agent with "
-            f"harness='antigravity' instead."
+            f"config_overlay={{'harness': 'antigravity'}} instead."
         )
     if (
         source is not Harness.MEIVA
@@ -102,7 +102,8 @@ def _refuse_unforkable_source(
             f"cannot fork agent {fork_from} onto machine {target_machine!r}: it runs on external "
             f"harness {source.value!r} on machine {source_machine!r}, and the CLI session a fork "
             f"clones is a local file there. Fork it on its own machine ({source_machine!r}), or "
-            f"spawn a new agent with harness={source.value!r} on {target_machine!r}."
+            f"spawn a new agent with config_overlay={{'harness': {source.value!r}}} on "
+            f"{target_machine!r}."
         )
 
 
@@ -148,7 +149,7 @@ def resolve_birth_harness(
                 f"cannot fork agent {fork_from} onto harness {requested_harness.value!r}: the "
                 f"source runs on {source.value!r}, and harness is an immutable property of an "
                 f"agent. A fork inherits the source's conversation, which only its own harness "
-                f"can read. Spawn a new agent with harness={requested_harness.value!r} instead of "
+                f"can read. Spawn a new agent with config_overlay={{'harness': {requested_harness.value!r}}} instead of "
                 f"forking onto it, or restart the source onto that harness first and fork it "
                 f"there."
             )

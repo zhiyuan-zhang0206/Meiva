@@ -30,18 +30,33 @@ migration `20261019T092549_agents-meta-harness.sql` record.
 The birth boundary carries the value: `create_agent_row(harness=...)` takes a
 plain spawn's requested harness (None = the built-in runtime) and lets a fork
 inherit its source's, then `insert_agent_birth` writes it and raises
-`ForkHarnessMismatch` for a cross-harness fork. Only the SDK/spawn path names a
-harness today; the MCP tool endpoint and the task-assignment router build their
-bodies without one and therefore always birth on `meiva`, which is what their
-callers run.
+`ForkHarnessMismatch` for a cross-harness fork.
+
+## One key in the overlay, one column in the row
+
+A caller names the harness as `config_overlay["harness"]`, at spawn and at restart alike.
+It is declared in `COLUMN_OVERLAY_KEYS` (`base/agents/model/overlay_columns.py`) and is
+deliberately not a framework `Settings` field: it has no cluster default, no `.env` alias, no
+lifecycle class, and no copy in `agents_meta.config_overlay` or `birth_config`.
+`agents_meta.harness` stays the only place it is stored. Every reader takes the key out with
+`split_overlay_columns`, which returns the parsed `Harness` (None when the key is absent, so each
+caller keeps its own default: native for a plain spawn, the spawner's for an agent spawn, the
+source's for a fork, the stored one for a restart) and the remaining config fields. An unknown
+value, a non-string or a null raises `InvalidConfigOverlay`. `SpawnAgentRequest` does this at
+validation (HTTP 422), so its `config` holds config fields only and `harness` is a derived value;
+the config-field validators reject a `harness` key that was not taken out first as an unknown key.
+The task-assignment router passes the agent spec's `config` through the same request, so it can
+name a harness too; the MCP tool endpoint and the built-in guide spawns still build their bodies
+without one and birth on `meiva`.
 
 ## Birth settlement and restart switching
 
 Harness is a property of the agent initialized at birth and switchable on restart:
 
 - The SDK and the request schema reject an unknown name at the boundary
-  (`meiva.agents.spawn` raises before any request; `SpawnAgentRequest.harness` is
-  a typed enum, so HTTP answers 422). No path falls back to the default.
+  (`meiva.agents.spawn` raises `InvalidConfigOverlay` before any request;
+  `SpawnAgentRequest` refuses it while validating `config`, so HTTP answers 422).
+  No path falls back to the default.
 - The birth transaction settles the initial value
   (`base/agents/birth/transaction.py` calls `resolve_birth_harness` before it
   writes the row).

@@ -31,7 +31,6 @@ BARE = SpawnIntent(
     machine=None,
     config=None,
     label=None,
-    harness=None,
 )
 
 
@@ -51,16 +50,13 @@ def test_a_prompt_travels_with_its_source() -> None:
 
 
 def test_every_given_field_is_sent_and_an_empty_config_still_counts() -> None:
-    plan = spawn_request(
-        intent(fork_from=4, machine="m", config={}, label="lead", harness="codex"), "key"
-    )
+    plan = spawn_request(intent(fork_from=4, machine="m", config={}, label="lead"), "key")
     assert plan.body == {
         "spawner": "agent:1",
         "fork_from": 4,
         "machine": "m",
         "config": {},
         "label": "lead",
-        "harness": "codex",
     }
 
 

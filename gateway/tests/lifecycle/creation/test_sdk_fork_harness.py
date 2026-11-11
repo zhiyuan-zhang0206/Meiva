@@ -37,7 +37,7 @@ def test_sdk_fork_without_a_harness_keeps_the_source_harness(
     source = meiva.agents.spawn(
         prompt="one goal",
         machine="local-test",
-        harness="meiva",
+        config_overlay={"harness": "meiva"},
     )
     _checkpoint(db_conn, source)
     child = meiva.agents.spawn(
@@ -62,15 +62,20 @@ def test_sdk_fork_of_an_external_harness_keeps_the_source_harness_and_config(
     source = meiva.agents.spawn(
         prompt="one goal",
         machine="local-test",
-        harness="codex",
-        config_overlay={"llm_model": "gpt-6-astra", "reasoning_effort": "ultra"},
+        config_overlay={
+            "harness": "codex",
+            "llm_model": "gpt-6-astra",
+            "reasoning_effort": "ultra",
+        },
     )
     assert len(runner.calls_of("harness_probe")) == 1
     _checkpoint(db_conn, source)
     child = meiva.agents.spawn(fork_from=source, machine="local-test")
     assert _harness(db_conn, child) == "codex"
     with pytest.raises(ForkHarnessMismatch, match="onto harness 'meiva'"):
-        meiva.agents.spawn(fork_from=source, machine="local-test", harness="meiva")
+        meiva.agents.spawn(
+            fork_from=source, machine="local-test", config_overlay={"harness": "meiva"}
+        )
     assert _harness(db_conn, source) == "codex"
     stored = db_conn.execute(
         "SELECT config_overlay FROM agents_meta WHERE id=%s", (source,)

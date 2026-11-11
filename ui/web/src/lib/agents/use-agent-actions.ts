@@ -37,10 +37,13 @@ function buildSpawnPayload(
 ): SpawnAgentRequest {
   return {
     ...(machine !== undefined ? { machine } : {}),
-    ...(harness !== undefined ? { harness } : {}),
-    ...(model !== undefined || reasoning_effort !== undefined
+    // meiva:note
+    // The harness travels inside the overlay, beside the model: the gateway reads it from there
+    // for spawn and restart alike.
+    ...(model !== undefined || reasoning_effort !== undefined || harness !== undefined
       ? {
           config: {
+            ...(harness !== undefined ? { harness } : {}),
             ...(model !== undefined ? { llm_model: model } : {}),
             ...(reasoning_effort !== undefined ? { reasoning_effort } : {}),
           },

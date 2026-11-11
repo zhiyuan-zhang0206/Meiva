@@ -14,6 +14,7 @@ from psycopg_pool import ConnectionPool
 from base.agents.inbox.insert import insert_inbound_message
 from base.agents.lifecycle import release_browser_pages
 from base.agents.messages.inbound import WakeTriggerKind, validate_wake_trigger_kind
+from base.agents.model.overlay_columns import split_overlay_columns
 from base.api_contracts.agent_contract import (
     AgentStatus,
     CancelResult,
@@ -443,11 +444,7 @@ def restart_blocking(
     from base.packages.plugins.config_registration import validate_config_overlay
     from base.packages.plugins.plugin_errors import InvalidConfigOverlay
 
-    clean_overlay = (
-        {k: v for k, v in body.config_overlay.items() if k != "harness"}
-        if body.config_overlay
-        else {}
-    )
+    clean_overlay = split_overlay_columns(body.config_overlay).fields
     if clean_overlay:
         try:
             validate_config_overlay(
@@ -529,7 +526,7 @@ def _update_harness_transition_meta_blocking(
     config_overlay: dict[str, object] | None,
     catalog: ModelCatalog,
 ) -> None:
-    overlay_without_harness = {k: v for k, v in (config_overlay or {}).items() if k != "harness"}
+    overlay_without_harness = split_overlay_columns(config_overlay).fields
     with write_transaction(db_pool) as conn:
         if overlay_without_harness:
             if target_harness == "meiva":
@@ -633,11 +630,8 @@ async def restart_agent_op(
     status, old_harness = await asyncio.to_thread(
         read_restart_status_and_harness_blocking, db_pool, agent_id
     )
-    target_harness = (
-        str(body.config_overlay["harness"])
-        if body.config_overlay and "harness" in body.config_overlay
-        else old_harness
-    )
+    requested_harness = split_overlay_columns(body.config_overlay).harness
+    target_harness = old_harness if requested_harness is None else requested_harness.value
 
     is_switch = target_harness != old_harness
     if not is_switch and status == "terminated":

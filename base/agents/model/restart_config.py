@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from typing import LiteralString, Protocol, TypeGuard
 
 from base.agents.model.harness_models import resolve_probed_harness_selection
+from base.agents.model.overlay_columns import split_overlay_columns
 from base.api_contracts.agent_contract import (
     AgentNotFound,
     Harness,
@@ -151,8 +152,9 @@ def _resolve_target_harness(
 ) -> Harness:
     if target is not None:
         return target.harness
-    if "harness" in overlay:
-        return coerce_harness(overlay["harness"])
+    requested = split_overlay_columns(overlay).harness
+    if requested is not None:
+        return requested
     return coerce_harness(stored_harness)
 
 

@@ -64,7 +64,9 @@ SDK reference: `meiva.agents` (`spawn` / `terminate` / `restart` / `resurrect` /
 
 An agent's harness (the runtime loop it runs on: `meiva`, `claude_code`, `codex`,
 `antigravity`) can be switched bidirectionally (`meiva` <-> external,
-or external <-> external) via `restart` with a config overlay:
+or external <-> external) via `restart` with a config overlay. A new agent picks its
+harness the same way: `meiva.agents.spawn(..., config_overlay={"harness": "codex", "llm_model": "<model>"})`
+(`spawn` has no separate `harness` argument).
 
 - **SDK**: `meiva.agents.restart(agent_id, message="Switching to Codex", config_overlay={"harness": "codex"})`
 - **CLI**: `meiva agents restart <agent_id> -m "Switching to Codex" --overlay harness=codex`

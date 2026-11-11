@@ -15,7 +15,7 @@ Creates a new agent, returns its agent_id.
 | `prompt` | First message; omit = agent idle after creation |
 | `fork_from` | Copy that agent's conversation state to the new agent |
 | `machine` | Target machine; omit = current machine (`meiva.self.MACHINE_SPEC.name`) |
-| `config_overlay` | Per-field config override, e.g. `{"llm_model": "..."}` |
+| `config_overlay` | Per-field config override, e.g. `{"llm_model": "..."}`; its `harness` key picks the runtime loop (`"meiva"` default, `"claude_code"`, `"codex"`, `"antigravity"`), the same key `restart` uses to switch it |
 | `label` | Initial role/name; omit = auto-named |
 
 ### `meiva.agents.fork_from` (parameter of spawn, not a standalone function)
