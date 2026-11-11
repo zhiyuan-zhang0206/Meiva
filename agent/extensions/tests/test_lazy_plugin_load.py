@@ -51,7 +51,7 @@ _PLUGIN = """\
 from pathlib import Path
 from types import SimpleNamespace
 
-from base.packages.plugins.extensions import PluginContributions, SdkMember, SdkNamespace
+from base.packages.plugins.extensions import PluginContributions, SdkNamespace
 
 with Path(r"{counter}").open("a", encoding="utf-8") as counter:
     counter.write("executed\\n")
@@ -61,10 +61,6 @@ def contribute() -> PluginContributions:
     return PluginContributions(
         sdk_namespaces=(
             SdkNamespace("lazytasks", SimpleNamespace(ping=lambda: "pong", __doc__="t")),
-        ),
-        sdk_members=(
-            SdkMember("self", "lazylog", lambda: "pong"),
-            SdkMember("ui", "lazynotify", lambda: "pong"),
         ),
     )
 """
@@ -199,14 +195,3 @@ def test_faces_failure_is_not_marked_successful_and_repeats_original_error(
     assert report["faces"]["same_error"] is True
     assert report["still_the_surface"] is True
     assert report["executions"] == 1
-
-
-def test_member_lazy_load_on_meiva_self(counter: Path, unit_home: Path) -> None:
-    report = run("member_on_framework_namespace", counter, unit_home, launched=True)
-    assert report == {"pong": "pong", "executions": 1}
-
-
-def test_member_fail_fast_outside_child(counter: Path, unit_home: Path) -> None:
-    report = run("missing_member", counter, unit_home, launched=False)
-    assert report["self"] is not None and report["ui"] is not None
-    assert report["executions"] == 0

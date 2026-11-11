@@ -10,7 +10,6 @@ SurfaceId = Literal[
     "systemPromptSections",
     "compactReminderSections",
     "config",
-    "sdkMembers",
     "sdkExpansions",
     "state",
     "contextNotes",

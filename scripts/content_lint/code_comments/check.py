@@ -84,7 +84,7 @@ class Repository:
         return self.surface_modules
 
     # meiva:note
-    # A plugin's own `plugin.py` contributes `SdkMember` / `SdkWrap` docstrings that `help()`
+    # A plugin's own `plugin.py` contributes `SdkWrap` docstrings that `help()`
     # renders, so it is agent surface for the same reason a namespace module is; the docstring
     # lint already scans it on that basis, and the two checks must agree on the boundary.
     def _plugin_modules(self) -> set[Path]:

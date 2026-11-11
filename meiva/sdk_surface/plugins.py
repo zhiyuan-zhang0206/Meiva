@@ -1,30 +1,28 @@
-"""Plugin SDK extension primitives — namespace / member installation and its exception hierarchy.
-
-A plugin declares `sdk_namespaces` / `sdk_members` (`base.packages.plugins.extensions`); nothing here is a
-plugin-facing entry point. `meiva.sdk_surface.install` is the one writer of the `meiva` module and applies each
-declaration through `install_namespace` / `install_member`, which return the undo that reverses it. The
-registries that used to live here (`_REGISTERED_NAMESPACES`, `_REGISTERED_MEMBERS`,
-`REGISTERED_SDK_EXPANSIONS`) are gone: the installation records what it applied, and the prompt's expanded
-SDK reference reads `meiva.sdk_surface.install.expansions()`.
-"""
+# meiva:note
+# Plugin SDK extension primitives — namespace installation and its exception hierarchy.
+#
+# A plugin declares `sdk_namespaces` (`base.packages.plugins.extensions`); nothing here is a
+# plugin-facing entry point. `meiva.sdk_surface.install` is the one writer of the `meiva` module and applies each
+# declaration through `install_namespace`, which returns the undo that reverses it. The
+# registries that used to live here (`_REGISTERED_NAMESPACES`, `REGISTERED_SDK_EXPANSIONS`) are gone: the installation records what it applied, and the prompt's expanded
+# SDK reference reads `meiva.sdk_surface.install.expansions()`.
 
 import sys as _sys
 from collections.abc import Mapping
 from types import ModuleType, SimpleNamespace
-from typing import assert_never
 
 from base.host.boundary.json_values import is_object_list
 from base.host.boundary.untyped import object_of
 
 from . import CONTEXT_KEY, SdkProcessPurpose, meiva_module
-from .installation import MemberAdded, NamespaceAdded
+from .installation import NamespaceAdded
 from .sdk_disable import DisabledSDKModule
 
 
 # meiva:note
 # The live `__all_for_meiva__` list a namespace declares: the object this module appends plugin
 # names to and removes them from, not a copy of the names it holds. A container that declares none
-# cannot host a member, which each caller reports in its own terms.
+# cannot host a namespace.
 def _surface_list(container: object) -> list[object] | None:
     declared = object_of(getattr, container, "__all_for_meiva__", None)
     return declared if is_object_list(declared) else None
@@ -58,12 +56,16 @@ def bind_context(context: object) -> None:
 # Convention: do not directly modify `meiva.__all_for_meiva__`.
 
 
+# meiva:note
+# Root of namespace install failures. Plugin authors use this for coarse catch.
 class RegisterNamespaceError(Exception):
-    """Root of namespace / member install failures. Plugin authors use this for coarse catch."""
+    pass
 
 
+# meiva:note
+# A namespace name or expansion path has an invalid or private identifier.
 class InvalidNamespaceNameError(RegisterNamespaceError):
-    """A namespace/member name or expansion path has an invalid or private identifier."""
+    pass
 
 
 class InvalidNamespaceModuleError(RegisterNamespaceError):
@@ -90,25 +92,6 @@ class PluginNamespaceConflictError(NamespaceConflictError):
     """name already installed by another plugin — last-write-wins would
     cause plugins to silently trample on each other; fail-fast so plugin
     authors negotiate to rename. Message contains the name-holding plugin."""
-
-
-class UnknownNamespaceError(RegisterNamespaceError):
-    """member install target namespace does not exist — the parent
-    (e.g. meiva.self) must be an existing namespace before a plugin can hang a
-    member on it. Typo in the namespace name, or a namespace disabled by
-    MEIVA_SDK_DISABLE."""
-
-
-class InvalidNamespaceMemberError(RegisterNamespaceError):
-    """a declared member is not callable. Members are
-    functions the agent invokes (meiva.<namespace>.<name>(...)); a non-callable
-    has no signature/docstring to render and cannot be called — raise now."""
-
-
-class MemberConflictError(NamespaceConflictError):
-    """a declared member name already exists on the target namespace
-    (any existing attribute — a framework member/constant or another plugin's) —
-    last-write-wins would silently trample; fail-fast so the plugin author renames."""
 
 
 def _materialize_namespace(name: str, ns: SimpleNamespace) -> ModuleType:
@@ -220,84 +203,17 @@ def install_namespace(
 
 
 # meiva:note
-# Attach a callable as a member of an existing meiva namespace; the agent invokes it via
-# `meiva.{namespace}.{name}(...)`. Returns what was done.
-#
-# Prefer this over a new namespace when a capability belongs under an existing group — the meiva
-# top level is deliberately small, so a new self-action goes on `meiva.self` next to terminate /
-# restart / compact, not as `meiva.<thing>`.
-#
-# Args: plugin: the declaring plugin, named in a conflict message. namespace: an existing meiva
-# namespace to extend (e.g. "self"). name: member name — valid identifier, no underscore prefix,
-# must not collide with an existing member of that namespace. fn: the callable the agent calls.
-# Its signature + docstring are what the agent reads under `help(meiva.{namespace})`, so the
-# docstring obeys the same agent-facing rules as any SDK function.
-#
-# Raises: InvalidNamespaceNameError: name is not a valid identifier or starts with underscore.
-# InvalidNamespaceMemberError: fn is not callable. UnknownNamespaceError: namespace is not an
-# existing meiva namespace module. MemberConflictError: name already exists on that namespace.
-def install_member(plugin: str, namespace: str, name: str, fn: object) -> MemberAdded:
-    if not name.isidentifier():
-        raise InvalidNamespaceNameError(
-            f"member name {name!r} is invalid — must be a valid Python identifier."
-        )
-    if name.startswith("_"):
-        raise InvalidNamespaceNameError(
-            f"member name {name!r} cannot start with underscore — that's the framework / private namespace convention."
-        )
-    if not callable(fn):
-        raise InvalidNamespaceMemberError(
-            f"plugin {plugin!r} member {namespace}.{name} must be callable, "
-            f"got {type(fn).__name__} — the agent calls meiva.{namespace}.{name}(...)."
-        )
-
+# Reverse an added namespace: drop the package attribute and the surface entry, then the importable
+# alias (otherwise `import meiva.<name>` keeps returning the stale module after the namespace is
+# torn down) and the agent-facing name stamp (the module object outlives the namespace, a plugin
+# keeps it, so a later install of the same object starts clean).
+def uninstall(added: NamespaceAdded) -> None:
     pkg = meiva_module()
-    parent = object_of(getattr, pkg, namespace, None)
-    # Member discovery (help) + this attach both rely on the parent being a real module with an
-    # `__all_for_meiva__` whitelist; SimpleNamespace plugin namespaces and disabled-module sentinels are
-    # not valid member hosts.
-    surface = _surface_list(parent) if isinstance(parent, ModuleType) else None
-    if not isinstance(parent, ModuleType) or surface is None:
-        raise UnknownNamespaceError(
-            f"meiva.{namespace} is not an existing namespace that can host members — "
-            f"check the name (or it may be disabled by MEIVA_SDK_DISABLE)."
-        )
-    if hasattr(parent, name):
-        raise MemberConflictError(
-            f"meiva.{namespace}.{name} already exists (a framework attribute or another plugin's member) — "
-            f"same-name override not allowed; plugin {plugin!r} renames."
-        )
-
-    setattr(parent, name, fn)
-    surface.append(name)
-
-    return MemberAdded(namespace=namespace, name=name, parent=parent)
-
-
-# meiva:note
-# Reverse an added namespace or member. A namespace: drop the package attribute and the surface
-# entry, then the importable alias (otherwise `import meiva.<name>` keeps returning the stale
-# module after the namespace is torn down) and the agent-facing name stamp (the module object
-# outlives the namespace, a plugin keeps it, so a later install of the same object starts clean).
-# A member: the parent gone is reachable, not a bug, because a member can sit on a plugin namespace
-# whose own reversal already ran; the whole module is being discarded, so the member goes with it.
-def uninstall(added: NamespaceAdded | MemberAdded) -> None:
-    pkg = meiva_module()
-    match added:
-        case NamespaceAdded():
-            _remove_attr(pkg, added.name)
-            if added.on_surface:
-                _remove_from_surface(object_of(getattr, pkg, "__all_for_meiva__", None), added.name)
-            _sys.modules.pop(f"meiva.{added.name}", None)
-            added.module.__dict__.pop("_qualname", None)
-        case MemberAdded():
-            if getattr(pkg, added.namespace, None) is added.parent:
-                _remove_attr(added.parent, added.name)
-                _remove_from_surface(
-                    object_of(getattr, added.parent, "__all_for_meiva__", None), added.name
-                )
-        case _:
-            assert_never(added)
+    _remove_attr(pkg, added.name)
+    if added.on_surface:
+        _remove_from_surface(object_of(getattr, pkg, "__all_for_meiva__", None), added.name)
+    _sys.modules.pop(f"meiva.{added.name}", None)
+    added.module.__dict__.pop("_qualname", None)
 
 
 def _remove_attr(obj: object, name: str) -> None:

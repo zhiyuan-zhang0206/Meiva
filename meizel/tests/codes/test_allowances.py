@@ -170,7 +170,7 @@ def test_snapshot_decoder_rejects_every_other_unknown_or_malformed_input(text: s
 def test_repo_policy_allowance_counts_are_pinned() -> None:
     policy = allowances.load(open_repository(ROOT))
     assert len(policy.external) == 33
-    assert len(policy.dynamic_attrs) == 34
+    assert len(policy.dynamic_attrs) == 33
     assert len(policy.loads) == 23
 
 

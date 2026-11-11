@@ -22,7 +22,7 @@ from collections.abc import Callable, Coroutine, Generator, Iterator
 from dataclasses import replace
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
-from typing import TypeGuard, cast
+from typing import Any, TypeGuard, cast
 
 import pytest
 
@@ -42,7 +42,7 @@ from base.packages.plugin_config_images import DiskPluginConfigImages
 from base.packages.plugins.extensions import (
     ExtensionRegistry,
     PluginContributions,
-    SdkMember,
+    SdkNamespace,
     SdkWrap,
 )
 from base.paths import meiva_home
@@ -507,10 +507,16 @@ async def test_plugin_wrap_preserves_awaited_single_event(
             (
                 "async-test",
                 PluginContributions(
-                    sdk_members=(SdkMember("self", "review_async_test", body),),
+                    sdk_namespaces=(
+                        SdkNamespace(
+                            "async_probe",
+                            SimpleNamespace(review_async_test=body, __doc__="An async probe."),
+                        ),
+                    ),
                     sdk_wraps=(
                         SdkWrap(
-                            "self.review_async_test", awaited if async_wrapper else passthrough
+                            "async_probe.review_async_test",
+                            awaited if async_wrapper else passthrough,
                         ),
                     ),
                 ),
@@ -523,14 +529,14 @@ async def test_plugin_wrap_preserves_awaited_single_event(
             config_images=DiskPluginConfigImages(resolve_meiva_home()),
             sampling=sampling_owner,
         )  # the recorder goes on last, over the plugin's wrap
-        call = meiva.self.review_async_test
+        call = cast(Any, meiva).async_probe.review_async_test
         assert inspect.iscoroutinefunction(call)
         emitted_events.clear()
         pending = call()
         assert _calls(emitted_events) == []
         assert await pending == "ok"
         [(fn, duration)] = _calls(emitted_events)
-        assert fn == "self.review_async_test"
+        assert fn == "async_probe.review_async_test"
         assert duration is not None and duration >= 0.04
     finally:
         install.uninstall()
@@ -648,10 +654,15 @@ def test_plugin_reload_and_multi_call_wrap_have_one_final_recorder(
             (
                 "probe",
                 PluginContributions(
-                    sdk_members=(SdkMember("self", "multi_probe_test", body),),
+                    sdk_namespaces=(
+                        SdkNamespace(
+                            "multi_probe",
+                            SimpleNamespace(multi_probe_test=body, __doc__="A multi-wrap probe."),
+                        ),
+                    ),
                     sdk_wraps=(
-                        SdkWrap("self.multi_probe_test", twice),
-                        SdkWrap("self.multi_probe_test", twice),
+                        SdkWrap("multi_probe.multi_probe_test", twice),
+                        SdkWrap("multi_probe.multi_probe_test", twice),
                     ),
                 ),
             ),
@@ -664,8 +675,8 @@ def test_plugin_reload_and_multi_call_wrap_have_one_final_recorder(
             sampling=sampling_owner,
         )
         with _execution_tally() as tally:
-            assert cast(Callable[[], int], meiva.self.multi_probe_test)() == 4
-        assert tally.snapshot() == {"self.multi_probe_test": 1}
+            assert cast(Any, meiva).multi_probe.multi_probe_test() == 4
+        assert tally.snapshot() == {"multi_probe.multi_probe_test": 1}
         install.uninstall()
     assert bodies == ["body"] * 8
-    assert [fn for fn, _duration in _calls(emitted_events)] == ["self.multi_probe_test"] * 2
+    assert [fn for fn, _duration in _calls(emitted_events)] == ["multi_probe.multi_probe_test"] * 2

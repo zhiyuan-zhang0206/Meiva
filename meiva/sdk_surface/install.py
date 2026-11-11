@@ -2,7 +2,7 @@
 # The one writer of the `meiva` module: install a registry's SDK surface, undo it, nothing else.
 #
 # A plugin declares its SDK surface in `plugin.py`'s `contribute()`
-# (`PluginContributions.sdk_namespaces`, `sdk_members`, `sdk_expansions`, `sdk_wraps`,
+# (`PluginContributions.sdk_namespaces`, `sdk_expansions`, `sdk_wraps`,
 # `skill_sources`, `config`, `flags`) and never touches `meiva`. `install(registry)` applies
 # every plugin's declaration, in registry order (plugin name order), through the primitives in
 # `plugins.py` / `wraps.py` / `skill_sources.py` / `config_registration.py` / `flags.py`; each
@@ -27,9 +27,8 @@
 # recorder is installed over the final surface, so it sits outermost of any wrap layer (one
 # count per agent call); `uninstall` removes it first for the same reason.
 #
-# Per plugin the order is: namespaces, members (a member may hang on the plugin's own
-# namespace), expansions, wraps (a wrap target may be a namespace or member just added, or
-# another plugin's), skill sources, flags, config. Explicit declaration refusals
+# Per plugin the order is: namespaces, expansions, wraps (a wrap target may be a namespace just
+# added, or another plugin's), skill sources, flags, config. Explicit declaration refusals
 # (`RegisterNamespaceError`, `WrapTargetError`, `PluginFlagError`, `SchemaDriftError`,
 # `InvalidConfigData`) are rolled back whole, reported, and left out of the returned registry
 # only if rollback succeeds. Other errors abort the entire installation and propagate unchanged
@@ -66,7 +65,6 @@ from .installation import (
     Installation,
     InstallOptions,
     Loading,
-    MemberAdded,
     NamespaceAdded,
     PluginContributions,
     ProviderAdded,
@@ -138,8 +136,6 @@ def _apply(
         if ns.expand:
             _check_expansion(ns.name)
             promoted.append(ns.name)
-    for member in contributions.sdk_members:
-        build.undo.append(_plugins.install_member(plugin, member.namespace, member.name, member.fn))
     for path in contributions.sdk_expansions:
         _check_expansion(path)
         promoted.append(path)
@@ -198,7 +194,7 @@ class Build:
     # by the function its binding returned.
     def revert(self, record: Reversal) -> None:
         match record:
-            case NamespaceAdded() | MemberAdded():
+            case NamespaceAdded():
                 _plugins.uninstall(record)
             case WrapAdded():
                 _drop_layer(self.layers, record.layer)

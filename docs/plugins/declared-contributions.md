@@ -12,8 +12,7 @@ frozen declaration.
   `PluginStateHandle(cls, plugin)`.
 - `metrics` / `inspect_widgets` — `MetricSpec` / `InspectWidgetSpec`, declared by the plugin's `metrics.py` /
   `inspector.py` instead (see below).
-- The SDK surface, declared by `plugin.py`: `sdk_namespaces` (`SdkNamespace(name, module, expand)`), `sdk_members`
-  (`SdkMember(namespace, name, fn)` on an existing namespace), `sdk_expansions` (dotted paths promoted into the
+- The SDK surface, declared by `plugin.py`: `sdk_namespaces` (`SdkNamespace(name, module, expand)`), `sdk_expansions` (dotted paths promoted into the
   prompt's expanded SDK reference), `sdk_wraps` (`SdkWrap(target, wrapper)`) and `skill_sources`.
 - `config`, declared by the plugin's `default_config.py` (the config face): one frozen BaseModel bound from
   `~/.meiva/configs/<plugin>/config.json`, schema drift points at `meiva plugins update`.
@@ -49,7 +48,7 @@ Conversation, Conduct and Capabilities groups.
 
 `meiva` is a singleton module that agent code reaches by attribute access, so it cannot be passed around as a value; its
 surface installation is concentrated in `meiva/sdk_surface/install.py:install(registry, config_images=...)`. The execution bootstrap separately initializes the disposable child's `context`, `state` and `state_update` slots before agent code runs. Per plugin, in
-registry (plugin name) order: namespaces, members, expansions, wraps (a target may be a namespace or member just added),
+registry (plugin name) order: namespaces, expansions, wraps (a target may be a namespace just added),
 skill sources, flags, config. Only explicit declaration refusals (`RegisterNamespaceError`,
 `WrapTargetError`, `PluginFlagError`, config `SchemaDriftError` / `InvalidConfigData`) isolate one plugin:
 its already-applied pieces are undone newest-first, the refusal is reported, and it is absent from the

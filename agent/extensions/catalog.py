@@ -13,7 +13,6 @@ from base.packages.plugins.contributions import Contribution
 from base.packages.plugins.extensions import (
     ContextNote,
     PluginContributions,
-    SdkMember,
     SdkNamespace,
     SdkWrap,
 )
@@ -68,16 +67,6 @@ SURFACES: tuple[Surface, ...] = (
             "`sdk_namespaces` of what `plugin.py`'s `contribute()` returns: adds meiva.<name> for the "
             "agent to call (`expand=True` also promotes it into the prompt's expanded SDK "
             "reference); a name that conflicts with an existing one refuses the plugin"
-        ),
-    ),
-    Surface(
-        id="sdkMembers",
-        entry_points=(SdkMember,),
-        manifest_key=None,
-        protocol=None,
-        note=(
-            "`sdk_members`: hangs one callable on an existing namespace; preferred over "
-            "a new top-level name, and its docstring is what the agent reads"
         ),
     ),
     Surface(

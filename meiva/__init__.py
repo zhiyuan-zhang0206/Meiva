@@ -43,14 +43,11 @@ from .sdk_surface.discovery import agent_visible_names as agent_visible_names
 from .sdk_surface.help import ModelHelpProfile as _ModelHelpProfile
 from .sdk_surface.help import render as _render_help
 from .sdk_surface.plugins import FrameworkNamespaceConflictError as FrameworkNamespaceConflictError
-from .sdk_surface.plugins import InvalidNamespaceMemberError as InvalidNamespaceMemberError
 from .sdk_surface.plugins import InvalidNamespaceModuleError as InvalidNamespaceModuleError
 from .sdk_surface.plugins import InvalidNamespaceNameError as InvalidNamespaceNameError
-from .sdk_surface.plugins import MemberConflictError as MemberConflictError
 from .sdk_surface.plugins import NamespaceConflictError as NamespaceConflictError
 from .sdk_surface.plugins import PluginNamespaceConflictError as PluginNamespaceConflictError
 from .sdk_surface.plugins import RegisterNamespaceError as RegisterNamespaceError
-from .sdk_surface.plugins import UnknownNamespaceError as UnknownNamespaceError
 
 # ── SDK entry machinery — implementations in `meiva/sdk_surface/` ─────────────
 #

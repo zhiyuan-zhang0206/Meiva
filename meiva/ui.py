@@ -9,22 +9,7 @@ __all_for_meiva__ = [
 ]
 
 from base.host.boundary.fields import int_field
-from base.host.boundary.untyped import object_of
-from meiva import boot
 from meiva.sdk_surface import agent_identity, process_context
-
-
-def __getattr__(name: str) -> object:
-    # meiva:note
-    # Plugin members can extend meiva.ui via a declared `SdkMember`. In an agent-launched
-    # persistent-shell child they are absent until plugins load, and this module
-    # already exists so meiva.__getattr__ never fires — trigger the shared lazy
-    # load here, then retry.
-    import sys as _sys
-
-    if boot.maybe_load_plugins_for_missing(name):
-        return object_of(getattr, _sys.modules[__name__], name)
-    raise AttributeError(f"module 'meiva.ui' has no attribute {name!r}")
 
 
 def publish(content: str | None, *, suggestions: list[str] | None = None) -> int:

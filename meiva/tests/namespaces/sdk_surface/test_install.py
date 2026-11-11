@@ -35,7 +35,6 @@ from base.packages.plugins import flags
 from base.packages.plugins.extensions import (
     ExtensionRegistry,
     PluginContributions,
-    SdkMember,
     SdkNamespace,
     SdkWrap,
 )
@@ -203,12 +202,8 @@ def _assert_surface_unchanged(before: dict[str, Any]) -> None:
 
 def _assert_namespaces_visible() -> None:
     assert meiva.install_ns.ping() == "w(pong)"  # type: ignore[attr-defined]
-    assert meiva.install_ns.extra() == "extra"  # type: ignore[attr-defined]
-    assert "extra" in meiva.install_ns.__all_for_meiva__  # type: ignore[attr-defined]
     assert "install_ns" in meiva.__all_for_meiva__
     assert sys.modules["meiva.install_ns"] is meiva.install_ns  # type: ignore[attr-defined]
-    assert meiva.self.install_probe() == "extra"  # type: ignore[attr-defined]
-    assert "install_probe" in meiva.self.__all_for_meiva__
 
 
 def _assert_wraps_and_roots(root: Path) -> None:
@@ -228,10 +223,6 @@ def test_a_one_plugin_install_is_fully_removed_by_uninstall(
             "demo",
             PluginContributions(
                 sdk_namespaces=(SdkNamespace("install_ns", _namespace(ping=_ping), expand=True),),
-                sdk_members=(
-                    SdkMember("install_ns", "extra", _extra),
-                    SdkMember("self", "install_probe", _extra),
-                ),
                 sdk_expansions=("shell.sessions",),
                 sdk_wraps=(
                     SdkWrap("install_ns.ping", _tag("w")),
@@ -256,7 +247,6 @@ def test_a_one_plugin_install_is_fully_removed_by_uninstall(
     assert installed() is None
     assert install.expansions() == ()
     assert not hasattr(meiva, "install_ns")
-    assert not hasattr(meiva.self, "install_probe")
     _assert_surface_unchanged(before)
 
 
@@ -295,7 +285,6 @@ def test_a_second_plugin_declaring_a_taken_namespace_is_refused_and_the_first_st
     first = PluginContributions(sdk_namespaces=(SdkNamespace("install_ns", first_ns),))
     second = PluginContributions(
         sdk_namespaces=(SdkNamespace("install_ns", second_ns),),
-        sdk_members=(SdkMember("self", "second_member", _extra),),
     )
 
     admitted = install_surface(_registry(("first", first), ("second", second)))
@@ -306,7 +295,6 @@ def test_a_second_plugin_declaring_a_taken_namespace_is_refused_and_the_first_st
     assert isinstance(exc, PluginNamespaceConflictError)
     assert "'first'" in str(exc)
     assert meiva.install_ns.ping() == "pong"  # type: ignore[attr-defined]  # the first plugin's module
-    assert not hasattr(meiva.self, "second_member")
     installation = installed()
     assert installation is not None and installation.registry == admitted
 
@@ -314,12 +302,12 @@ def test_a_second_plugin_declaring_a_taken_namespace_is_refused_and_the_first_st
     assert not hasattr(meiva, "install_ns")
 
 
+# meiva:note
+# A plugin whose pieces apply in order — namespace, expansion, wrap, skill source — until the one
+# named by `failing` cannot be applied.
 def _declaring(failing: str) -> PluginContributions:
-    """A plugin whose pieces apply in order — namespace, member, expansion, wrap, skill source —
-    until the one named by `failing` cannot be applied."""
     base: dict[str, Any] = {
         "sdk_namespaces": (SdkNamespace("rolled_ns", _namespace(ping=_ping), expand=True),),
-        "sdk_members": (SdkMember("self", "rolled_member", _extra),),
         "sdk_wraps": (SdkWrap("files.read", _passthrough),),
         "skill_sources": (lambda: [Path("/nonexistent-rolled-skill-root")],),
     }
@@ -364,7 +352,6 @@ def test_a_plugin_whose_later_piece_fails_is_rolled_back_whole(
     assert not hasattr(meiva, "rolled_ns")
     assert "rolled_ns" not in meiva.__all_for_meiva__
     assert "meiva.rolled_ns" not in sys.modules
-    assert not hasattr(meiva.self, "rolled_member")
     assert wraps.stack("files.read") == []
     assert not any(str(r).startswith("/nonexistent-rolled") for r in skill_sources.roots())
     assert install.expansions() == ("good_ns",)
@@ -592,7 +579,6 @@ def test_unknown_binding_failure_rolls_back_every_plugin_and_propagates_identity
     before = _surface_snapshot()
     failing = PluginContributions(
         sdk_namespaces=(SdkNamespace("failed_ns", _namespace(ping=_ping)),),
-        sdk_members=(SdkMember("self", "failed_member", _extra),),
         sdk_wraps=(SdkWrap("files.read", _passthrough),),
         skill_sources=(lambda: [Path("/nonexistent-failed")],),
         flags=("general.message_timestamps",),
@@ -617,8 +603,8 @@ def test_unknown_binding_failure_rolls_back_every_plugin_and_propagates_identity
 
 # meiva:note
 # Rollback attempts every undo even when one fails, and a cleanup failure is never success. The
-# cleanup fault is real: the failed plugin's namespace is a module whose attribute removal
-# refuses, so the member undo raises while the namespace undos behind it must still run. With a
+# cleanup fault is real: the failed plugin's namespace is a module that refuses to take its original
+# attribute back, so the wrap undo raises while the namespace undos behind it must still run. With a
 # typed refusal as the primary the cleanup failure is fatal; with an unknown primary failure it
 # rides on the original error as a note.
 class _StubbornModule(ModuleType):
@@ -626,17 +612,18 @@ class _StubbornModule(ModuleType):
         super().__init__(name)
         self.__dict__["__all_for_meiva__"] = []
         self.__dict__["_failure"] = failure
+        self.__dict__["ping"] = _ping
 
-    def __delattr__(self, name: str) -> None:
-        if name == "failed_member":
+    def __setattr__(self, name: str, value: object) -> None:
+        if value is _ping:
             raise self.__dict__["_failure"]
-        super().__delattr__(name)
+        super().__setattr__(name, value)
 
 
 @pytest.mark.parametrize("refused", [False, True], ids=["unknown-primary", "typed-refusal"])
 @pytest.mark.parametrize(
     "cleanup",
-    [OSError("member cleanup failed"), KeyboardInterrupt("member cleanup interrupted")],
+    [OSError("wrap cleanup failed"), KeyboardInterrupt("wrap cleanup interrupted")],
     ids=["os-error", "cancellation"],
 )
 def test_rollback_attempts_all_undos_and_cleanup_failure_is_never_success(
@@ -651,7 +638,7 @@ def test_rollback_attempts_all_undos_and_cleanup_failure_is_never_success(
     before = _surface_snapshot()
     failing = PluginContributions(
         sdk_namespaces=(SdkNamespace("failed_ns", _StubbornModule("failed_ns", cleanup)),),
-        sdk_members=(SdkMember("failed_ns", "failed_member", _extra),),
+        sdk_wraps=(SdkWrap("failed_ns.ping", _tag("x")),),
         flags=("not_a_flag",) if refused else (),
         config=None if refused else BaseModel,
     )
@@ -667,7 +654,7 @@ def test_rollback_attempts_all_undos_and_cleanup_failure_is_never_success(
 
     assert caught.value is expected
     if not refused:
-        assert any("member cleanup" in note for note in caught.value.__notes__)
+        assert any("wrap cleanup" in note for note in caught.value.__notes__)
     assert load_failures == []
     assert installed() is None
     _assert_surface_unchanged(before)

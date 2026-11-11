@@ -33,8 +33,8 @@
 #
 # Not flagged: dunder assignments (`meiva.files.__doc__ = ...` — a legitimate
 # module-docstring override) and ALL-CAPS constant assignments
-# (`meiva.memory.PATH = ...`). New namespaces / members are declared as
-# `SdkNamespace` / `SdkMember` (Call nodes, never matched here).
+# (`meiva.memory.PATH = ...`). New namespaces are declared as
+# `SdkNamespace` (a Call node, never matched here).
 #
 # Known gap: assignment through a module alias (`import meiva.files as f; f.read = x`)
 # is not caught — the target must be a literal `meiva.…` attribute chain. The
@@ -157,7 +157,7 @@ def _scan_file(reads: SourceTree, path: Path) -> list[tuple[int, str]]:
                 (
                     node.lineno,
                     "bare `setattr(meiva..., ...)` monkey-patches the SDK — use "
-                    "`SdkWrap(target, wrapper)` in `contribute()` (or SdkNamespace / SdkMember for new members)",
+                    "`SdkWrap(target, wrapper)` in `contribute()` (or SdkNamespace for a new namespace)",
                 )
             )
     return out
