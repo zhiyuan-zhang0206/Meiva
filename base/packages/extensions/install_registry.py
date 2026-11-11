@@ -24,9 +24,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal, Protocol
 
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from base import paths
+from base.host.boundary.json_values import is_object_dict, is_object_list
+from base.host.boundary.untyped import object_of
 from base.native_process.os_platform import LockTimeoutError as LockTimeoutError
 from base.native_process.os_platform import file_lock
 from base.packages.skills.names import match_key
@@ -203,6 +205,8 @@ class ChannelState(BaseModel):
 #     `accepted_findings` holds the rule ids a human waved through with `--accept-risk`.
 #     An installed package is trusted: there are no tiers.
 class InstalledPackage(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     name: str
     type: PackageType
     source: str | None = None
@@ -341,6 +345,37 @@ def save(registry: Registry, *, home: Path) -> None:
         tmp.replace(path)
     finally:
         tmp.unlink(missing_ok=True)
+
+
+# meiva:note
+# One-shot converge step for the deleted trust tier: removes the `trust` key every row of an
+# installed.json written before the tier was deleted still carries, so the strict reader
+# (`InstalledPackage` forbids unknown keys) never meets it. Idempotent; returns how many rows
+# changed. A file that is not a registry document fails naming it.
+def retire_trust_key(*, home: Path) -> int:
+    path = paths.install_registry_path(home)
+    with registry_lock(home=home):
+        if not path.exists():
+            return 0
+        raw = path.read_text(encoding="utf-8")
+        if not raw.strip():
+            return 0
+        document = object_of(json.loads, raw)
+        if not is_object_dict(document) or not is_object_list(document.get("packages")):
+            raise SchemaInvalid(f"{path} is not an install registry document")
+        changed = 0
+        for row in document["packages"]:
+            if is_object_dict(row) and "trust" in row:
+                del row["trust"]
+                changed += 1
+        if changed:
+            tmp = path.with_name(f"{path.name}.tmp")
+            try:
+                tmp.write_text(json.dumps(document, indent=2) + "\n", encoding="utf-8")
+                tmp.replace(path)
+            finally:
+                tmp.unlink(missing_ok=True)
+        return changed
 
 
 def get(name: str, *, home: Path) -> InstalledPackage | None:

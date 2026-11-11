@@ -95,7 +95,7 @@ def test_empty_file_is_empty_registry(unit_home: Path) -> None:
     assert reg.load(home=unit_home).packages == []
 
 
-def test_a_row_written_with_the_retired_trust_key_still_loads_and_drops_it(
+def test_a_row_with_the_retired_trust_key_is_refused_until_the_converge_step_removes_it(
     unit_home: Path,
 ) -> None:
     path = install_registry_path(meiva_home())
@@ -103,12 +103,20 @@ def test_a_row_written_with_the_retired_trust_key_still_loads_and_drops_it(
         '{"version": 2, "packages": [{"name": "old", "type": "skill", "trust": "reviewed"}]}',
         encoding="utf-8",
     )
+    with pytest.raises(reg.SchemaInvalid):
+        reg.load(home=unit_home)
 
-    [entry] = reg.load(home=unit_home).packages
-    assert entry.name == "old"
+    assert reg.retire_trust_key(home=unit_home) == 1
+    assert reg.retire_trust_key(home=unit_home) == 0
+    assert [p.name for p in reg.load(home=unit_home).packages] == ["old"]
 
-    reg.register(entry, home=unit_home)
-    assert "trust" not in path.read_text(encoding="utf-8")
+
+def test_retiring_the_trust_key_of_a_missing_or_empty_registry_is_a_no_op(
+    unit_home: Path,
+) -> None:
+    assert reg.retire_trust_key(home=unit_home) == 0
+    install_registry_path(meiva_home()).write_text("  \n", encoding="utf-8")
+    assert reg.retire_trust_key(home=unit_home) == 0
 
 
 def test_save_is_atomic_and_leaves_no_temp(unit_home: Path) -> None:

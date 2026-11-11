@@ -11,6 +11,7 @@ from base.host.boundary.process import stderr_text, stdout_text
 from base.host.env.harness_binaries import with_harness_path
 from base.host.private_storage import converge_private_tree, ensure_private_file
 from base.lm.harness.registry import backfill_record_fields, migrate_single_slot_records
+from base.packages.extensions import install_registry
 from cli.commands.converge.plans.checkout_warnings import hook_scan_argv, hook_scan_warnings
 from cli.commands.converge.plans.shell_rc import (
     rc_file_name,
@@ -121,6 +122,15 @@ def migrate_harness_session_records(ctx: ConvergeCtx) -> None:
         print(
             f"harness session records: completed the generation or background field of {len(completed)}"
         )
+
+
+# meiva:note
+# Remove the deleted trust tier's `trust` key from the machine's installed.json (see
+# `install_registry.retire_trust_key`); runs before any step that reads the registry.
+def retire_install_registry_trust_key(ctx: ConvergeCtx) -> None:
+    changed = install_registry.retire_trust_key(home=ctx.meiva_home)
+    if changed:
+        print(f"install registry: removed the retired trust key from {changed} rows")
 
 
 def ensure_pg_binaries_step(

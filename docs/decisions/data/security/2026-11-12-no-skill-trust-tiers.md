@@ -32,18 +32,22 @@ person to run a verb whose result changed no behavior. The security model is tha
 agents and its installed content trust each other ([host isolation, not sandbox](2026-07-29-security-model-host-isolation-not-sandbox.md),
 [no content scan](2026-11-12-no-content-scan.md)).
 
-## Migration (expand-contract)
+## Migration
 
-The cluster database column `extensions.trust` is **not** dropped in this change. The code stops reading
-and writing it (`INSERT` omits it, so the column default `'unreviewed'` fills it; `SELECT` omits it), but
-a runner or gateway still on the previous build reads and writes it during a rollout, so the drop is a
-later contract migration (`db/docs/migrations.md`: ship the code that stops using the object first).
-`db/schema.sql` therefore still declares the column and its CHECK until that migration. Old
-`installed.json` rows that carry a `"trust"` key load unchanged (the model ignores unknown keys) and lose
-the key the next time the registry is written.
+One step, deployed with a full stop of the gateway and every runner (the same stop the question
+table rename needs), so no build that still names the column runs against the new schema:
+
+- Database: migration `20261111T192920_drop-extensions-trust.sql` drops `extensions.trust` (and its
+  CHECK with it); `db/schema.sql` is synced.
+- Machine file: `installed.json` rows written before this carry a `"trust"` key. `InstalledPackage` now
+  forbids unknown keys, and a converge step ("install registry trust key",
+  `install_registry.retire_trust_key`, run right after the home skeleton) removes the key once per
+  machine, so the reader stays strict. Same shape as the session-record backfill.
 
 ## Consequences
 
 - `meiva skill trust ...` now reports an unknown subcommand.
+- A machine that is read before converge has run (a CLI command on an unconverged home) refuses the old
+  `installed.json` with a schema error until `meiva start` / converge ran.
 - Content installed from outside is no longer marked as such anywhere.
 - An installed skill's text may be used by any layer without a tier check; nothing did the check before.

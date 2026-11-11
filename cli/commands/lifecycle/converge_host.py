@@ -86,6 +86,7 @@ from cli.commands.converge.steps import (
     ensure_meiva_on_path,
     ensure_pg_binaries_step,
     migrate_harness_session_records,
+    retire_install_registry_trust_key,
 )
 from cli.commands.converge.telemetry_token import ensure_telemetry_token_step
 from cli.commands.converge.walg import converge_walg
@@ -413,6 +414,10 @@ CONVERGE_STEPS: tuple[ConvergeStep, ...] = (
     # running (`--keep-shell-sessions`) runs it too.
     # meiva:link base/lm/harness/docs/session-identity.md
     ConvergeStep("harness session records layout", migrate_harness_session_records),
+    # meiva:note
+    # The machine's installed.json is read strictly, so the deleted trust tier's key is removed
+    # here, before any later step loads the registry.
+    ConvergeStep("install registry trust key", retire_install_registry_trust_key),
     # meiva:note
     # External agent CLIs own their global homes: this prod-only host step
     # contributes exactly Meiva's two skills, and only to the clients registered in

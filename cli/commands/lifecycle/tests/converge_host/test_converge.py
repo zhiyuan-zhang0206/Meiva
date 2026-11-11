@@ -338,6 +338,32 @@ def test_the_session_record_step_backfills_the_generation_and_background_fields(
     assert capsys.readouterr().out == ""
 
 
+def test_the_install_registry_step_removes_the_retired_trust_key_once(
+    ctx: ConvergeCtx, capsys: pytest.CaptureFixture[str]
+) -> None:
+    registry = paths.install_registry_path(ctx.meiva_home)
+    registry.parent.mkdir(parents=True, exist_ok=True)
+    registry.write_text(
+        json.dumps(
+            {
+                "version": 2,
+                "packages": [
+                    {"name": "a", "type": "skill", "trust": "reviewed"},
+                    {"name": "b", "type": "skill", "trust": "unreviewed"},
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    _steps.retire_install_registry_trust_key(ctx)
+
+    assert "from 2 rows" in capsys.readouterr().out
+    assert all("trust" not in row for row in json.loads(registry.read_text())["packages"])
+    _steps.retire_install_registry_trust_key(ctx)
+    assert capsys.readouterr().out == ""
+
+
 def test_ensure_meiva_home_dirs(ctx: ConvergeCtx) -> None:
     _steps.ensure_meiva_home_dirs(ctx)
 
