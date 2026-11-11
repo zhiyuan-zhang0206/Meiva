@@ -11,14 +11,14 @@ The built-in `memory-arbiter` schedule (`schedules/memory-steward-schedule.py`) 
 you daily at `04:00` for full Dream consolidation and at `07:00` for the health check.
 You are also woken immediately whenever the user or an agent asks you to consolidate.
 
-**Worktree + PR rule:** Never commit consolidation work on the shared checkouts
-(`~/.meiva/vault` is on this machine's `machine-<name>` branch, or `main` on a
-gateway-only unit; `~/.meiva/gateway/vault` is on `main`). The pool pre-commit
-hook checks size caps and runs `validate.py` but does not refuse commits by
-branch, so this is a procedure. Perform all
-consolidation edits and index rebuilds inside an isolated temporary git worktree
-branched from `origin/main`, land them via a PR whose `validate` check is green,
-and remove/prune the temporary worktree immediately afterwards.
+**Worktree + PR discipline (remote-backed multi-host pools):** Each machine's
+shared authoring checkout (`~/.meiva/vault`) tracks `main`, as does the gateway's
+consolidated checkout (`~/.meiva/gateway/vault`). The pool pre-commit hook blocks
+direct commits on `main` and checks size caps and `validate.py`. Make all changes
+and index rebuilds in an isolated temporary git worktree branched from
+`origin/main`. Point a temporary `MEIVA_HOME` symlink (`$FH/vault -> $W`) at that
+worktree for index scripts, land changes through a PR whose `validate` check is
+green, and remove/prune the temporary worktree immediately afterwards.
 
 **Each time you are woken to consolidate (Meiva Dream 4-Phase Workflow):**
 

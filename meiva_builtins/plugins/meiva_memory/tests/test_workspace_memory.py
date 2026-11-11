@@ -3,10 +3,15 @@ from __future__ import annotations
 import datetime as dt
 import json
 import os
+import random
+import time
+from collections.abc import Sequence
 from pathlib import Path
 
 import pytest
 
+from base.host.boundary.json_values import is_object_dict
+from base.host.boundary.untyped import object_of
 from meiva_builtins.plugins.meiva_memory.skills.consolidation.scripts import workspace_memory as wm
 
 TODAY = dt.date(2026, 11, 11)
@@ -203,3 +208,141 @@ def test_prune_rejects_symlink_index_and_cross_agent_detail(tmp_path: Path) -> N
             pool,
         )
     assert other.exists()
+
+
+def _similarity(left: dict[str, str], right: dict[str, str]) -> float:
+    a, b = set(left.get("tokens", "").split()), set(right.get("tokens", "").split())
+    lexical = len(a & b) / len(a | b) if a | b else 0.0
+    ah = {h for h in left.get("headings", "").splitlines() if len(h.split()) >= 2}
+    bh = set(right.get("headings", "").splitlines())
+    return max(lexical, 0.8 if ah & bh else 0.0)
+
+
+def _demands(path: Path | None) -> list[dict[str, str]]:
+    if path is None:
+        return []
+    rows: list[dict[str, str]] = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        value = object_of(json.loads, line)
+        if not is_object_dict(value) or not isinstance(text := value.get("text"), str):
+            raise ValueError("Demand JSONL requires objects with text and agent_id or kind")
+        kind, agent = value.get("kind"), value.get("agent_id")
+        if not isinstance(agent, (str, int)) and kind not in ("user-preference", "platform-rule"):
+            raise ValueError("Demand needs agent_id or a user-preference/platform-rule kind")
+        rows.append(
+            {
+                **wm.summary(text),
+                "agent_id": str(agent) if agent is not None else "",
+                "kind": str(kind) if kind is not None else "",
+            }
+        )
+    return rows
+
+
+def _brute_scope_traps(
+    candidates: Sequence[dict[str, str]], pool_texts: Sequence[str], demand_path: Path | None
+) -> list[dict[str, object]]:
+    pool = [wm.summary(text) for text in pool_texts]
+    demands = _demands(demand_path)
+    result: list[dict[str, object]] = []
+    for row in candidates:
+        coverage = max((_similarity(row, note) for note in pool), default=0.0)
+        if coverage >= 0.45:
+            continue
+        peers = sorted(
+            wm.candidate_key(peer)
+            for peer in candidates
+            if peer["agent_id"] != row["agent_id"] and _similarity(row, peer) >= 0.45
+        )
+        demand = any(
+            _similarity(row, item) >= 0.45
+            and (
+                item["agent_id"] != row["agent_id"]
+                or item["kind"] in ("user-preference", "platform-rule")
+            )
+            for item in demands
+        )
+        if peers or demand:
+            result.append(
+                {
+                    **row,
+                    "priority": "P0",
+                    "overlapping_notes": peers,
+                    "demand_match": demand,
+                    "max_pool_similarity": round(coverage, 4),
+                }
+            )
+    return result
+
+
+def test_indexed_scope_traps_matches_brute_force_bytes(tmp_path: Path) -> None:
+    rng = random.Random(6802)  # noqa: S311
+    rows: list[dict[str, str]] = []
+    for i in range(140):
+        rows.append(
+            {
+                "machine": "mini",
+                "agent_id": str(i % 9),
+                "path": f"{i}/memory/n.md",
+                "tokens": " ".join(rng.choices([str(n) for n in range(25)], k=rng.randrange(40))),
+                "headings": rng.choice(
+                    ["", "one", "two words", "two  words", "two words\nother heading"]
+                ),
+            }
+        )
+    # meiva:note
+    # Exact 0.45 boundary, unequal sizes, duplicates, missing fields and heading-only matches.
+    rows.extend(
+        [
+            {"machine": "mini", "agent_id": str(i), "path": f"edge/{i}.md", **fields}
+            for i, fields in enumerate(
+                [
+                    {"tokens": " ".join(str(n) for n in range(20))},
+                    {"tokens": " ".join(str(n) for n in range(9))},
+                    {"headings": "shared heading"},
+                    {"headings": "shared heading"},
+                    {},
+                ]
+            )
+        ]
+    )
+    rows.append(dict(rows[0]))
+    demands = tmp_path / "demands.jsonl"
+    _ = demands.write_text(
+        "\n".join(
+            json.dumps(item)
+            for item in [
+                {"text": "# two words\n1 2 3", "agent_id": "1"},
+                {"text": "# shared heading", "kind": "user-preference"},
+            ]
+        )
+    )
+    for pool in [[], ["# one\n1 2 3 4", "# Other heading\n7 8"], ["# shared heading"]]:
+        expected = _brute_scope_traps(rows, pool, demands)
+        actual = wm.scope_traps(rows, pool, demands)
+        assert json.dumps(actual) == json.dumps(expected)
+
+
+def test_scope_traps_3900_candidates_under_one_second() -> None:
+    rows = [
+        {
+            "machine": "mini",
+            "agent_id": str(i),
+            "path": f"{i}/memory/n.md",
+            **wm.summary(
+                f"# Topic {i // 2}\ncommon shared "
+                + " ".join(f"term{i // 2}_{j}" for j in range(30))
+            ),
+        }
+        for i in range(3900)
+    ]
+    started = time.perf_counter()
+    result = wm.scope_traps(rows, ["# unrelated pool\ncommon"], None)
+    elapsed = time.perf_counter() - started
+    assert len(result) == 3900
+    assert result[0]["overlapping_notes"] == ["mini:1/memory/n.md"]
+    # meiva:note
+    # timing-guard: only catches a hang; the task requires a 3900-note latency ceiling.
+    assert elapsed < 1.0, f"3900 candidates took {elapsed:.3f}s"

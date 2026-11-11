@@ -4,7 +4,10 @@ import datetime as dt
 import hashlib
 import json
 import re
+from collections import Counter, defaultdict
 from collections.abc import Sequence
+from dataclasses import dataclass
+from math import ceil
 from pathlib import Path
 
 from base.host.boundary.json_values import is_object_dict, is_object_list
@@ -152,6 +155,72 @@ def _similarity(left: dict[str, str], right: dict[str, str]) -> float:
     return max(lexical, 0.8 if ah & bh else 0.0)
 
 
+@dataclass(frozen=True)
+class _Parsed:
+    tokens: frozenset[str]
+    multi_headings: frozenset[str]
+    headings: frozenset[str]
+
+    @classmethod
+    def from_row(cls, row: dict[str, str]) -> _Parsed:
+        headings = frozenset(row.get("headings", "").splitlines())
+        return cls(
+            frozenset(row.get("tokens", "").split()),
+            frozenset(h for h in headings if len(h.split()) >= 2),
+            headings,
+        )
+
+    def similarity(self, other: _Parsed) -> float:
+        common = len(self.tokens & other.tokens)
+        union = len(self.tokens) + len(other.tokens) - common
+        return max(
+            common / union if union else 0.0, 0.8 if self.multi_headings & other.headings else 0.0
+        )
+
+
+class _SimilarityIndex:
+    def __init__(self, rows: Sequence[_Parsed], *, threshold: bool) -> None:
+        self.rows = rows
+        self.threshold = threshold
+        self.frequency = Counter(token for row in rows for token in row.tokens)
+        self.tokens: dict[str, set[int]] = defaultdict(set)
+        self.headings: dict[str, set[int]] = defaultdict(set)
+        for i, row in enumerate(rows):
+            for token in self._prefix(row):
+                self.tokens[token].add(i)
+            for heading in row.headings:
+                self.headings[heading].add(i)
+
+    def _prefix(self, row: _Parsed) -> Sequence[str]:
+        if not self.threshold:
+            return list(row.tokens)
+        # meiva:note
+        # Jaccard >= t requires a shared token in these globally ordered prefixes:
+        # disjoint prefixes leave fewer than ceil(t * size) possible matches.
+        ordered = sorted(row.tokens, key=lambda token: (self.frequency[token], token))
+        return ordered[: len(ordered) - ceil(0.45 * len(ordered)) + 1]
+
+    def maximum(self, row: _Parsed) -> float:
+        return max((row.similarity(self.rows[i]) for i in self.matches(row)), default=0.0)
+
+    def matches(self, row: _Parsed) -> set[int]:
+        lexical: set[int] = set()
+        for token in self._prefix(row):
+            lexical.update(self.tokens.get(token, ()))
+        if self.threshold:
+            lexical = {
+                i
+                for i in lexical
+                if min(len(row.tokens), len(self.rows[i].tokens))
+                >= 0.45 * max(len(row.tokens), len(self.rows[i].tokens))
+            }
+        # meiva:note
+        # Heading matches bypass token-size pruning, including empty token sets.
+        for heading in row.multi_headings:
+            lexical.update(self.headings.get(heading, ()))
+        return lexical
+
+
 def _demands(path: Path | None) -> list[dict[str, str]]:
     if path is None:
         return []
@@ -178,25 +247,30 @@ def _demands(path: Path | None) -> list[dict[str, str]]:
 def scope_traps(
     candidates: Sequence[dict[str, str]], pool_texts: Sequence[str], demand_path: Path | None
 ) -> list[dict[str, object]]:
-    pool = [summary(text) for text in pool_texts]
+    parsed = [_Parsed.from_row(row) for row in candidates]
+    pool = [_Parsed.from_row(summary(text)) for text in pool_texts]
     demands = _demands(demand_path)
+    demand_rows = [_Parsed.from_row(row) for row in demands]
+    peers_index = _SimilarityIndex(parsed, threshold=True)
+    pool_index = _SimilarityIndex(pool, threshold=False)
+    demand_index = _SimilarityIndex(demand_rows, threshold=True)
     result: list[dict[str, object]] = []
-    for row in candidates:
-        coverage = max((_similarity(row, note) for note in pool), default=0.0)
+    for row, record in zip(candidates, parsed, strict=True):
+        coverage = pool_index.maximum(record)
         if coverage >= 0.45:
             continue
         peers = sorted(
-            candidate_key(peer)
-            for peer in candidates
-            if peer["agent_id"] != row["agent_id"] and _similarity(row, peer) >= 0.45
+            candidate_key(candidates[i])
+            for i in peers_index.matches(record)
+            if candidates[i]["agent_id"] != row["agent_id"] and record.similarity(parsed[i]) >= 0.45
         )
         demand = any(
-            _similarity(row, item) >= 0.45
+            record.similarity(demand_rows[i]) >= 0.45
             and (
-                item["agent_id"] != row["agent_id"]
-                or item["kind"] in ("user-preference", "platform-rule")
+                demands[i]["agent_id"] != row["agent_id"]
+                or demands[i]["kind"] in ("user-preference", "platform-rule")
             )
-            for item in demands
+            for i in demand_index.matches(record)
         )
         if peers or demand:
             result.append(
