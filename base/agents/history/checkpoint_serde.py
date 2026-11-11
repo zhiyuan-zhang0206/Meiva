@@ -93,7 +93,7 @@ RETIRED_CHECKPOINT_MSGPACK_TYPES: tuple[RetiredCheckpointType, ...] = (
     RetiredCheckpointType(
         module="base.agents.messages.security_finding",
         name="SecurityFindingEntry",
-        retired_in="PENDINGSHA0",
+        retired_in="PR #8875 (squash)",
         retired_at=datetime(2026, 11, 12, 12, 0, 0, tzinfo=UTC),
         note=(
             "An element of the retired `security_findings` list channel (a prompt-injection scan "
