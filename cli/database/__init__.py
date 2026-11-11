@@ -161,6 +161,7 @@ class OperatorEventPipeline:
         self._flush_interval_s = flush_interval_s
         self._database_factory = database_factory
         self._pipeline: EventPipeline | None = None
+        self._close_logging: Callable[[], None] | None = None
         self._attach_process_logging = True
         self.log_sinks: list[str] = []
 
@@ -178,6 +179,7 @@ class OperatorEventPipeline:
         otlp_enabled: Callable[[], bool],
         otlp_endpoint: Callable[[], str],
         rng: random.Random,
+        attach_process_logging: bool = False,
     ) -> OperatorEventPipeline:
         owner = cls(
             database_factory,
@@ -189,7 +191,7 @@ class OperatorEventPipeline:
             rng=rng,
         )
         owner._pipeline = pipeline
-        owner._attach_process_logging = False
+        owner._attach_process_logging = attach_process_logging
         return owner
 
     # meiva:note
@@ -239,11 +241,11 @@ class OperatorEventPipeline:
     def initialize_logging(self, name: str) -> None:
         """Bind logging to this command's lazy writer and identity reader."""
         self.log_sinks.append(name)
-        if not self._attach_process_logging:
+        if not self._attach_process_logging or self._close_logging is not None:
             return
         from base.telemetry.process_logging import init_cli_process
 
-        init_cli_process(
+        self._close_logging = init_cli_process(
             name=name, producer=self, machine_reader=self._machine.name, home=self._home
         )
 
@@ -266,6 +268,9 @@ class OperatorEventPipeline:
 
     def close(self, timeout: float = 5.0) -> DrainResult | None:
         """Stop only an existing writer; retain unfinished handles and errors."""
+        if self._close_logging is not None:
+            self._close_logging()
+            self._close_logging = None
         if self._pipeline is None:
             return None
         return self._pipeline.stop(timeout=timeout)

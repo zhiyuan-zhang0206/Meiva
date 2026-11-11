@@ -89,3 +89,8 @@ printed is evidence the agent and its logs have to agree on.
 
 The rule cannot live in `base.host.net.url_text`'s `redacted_url`: the root manifest declares
 `"log" = ["paths"]`, and `base.host` declares `base.log`, so importing it would close a cycle.
+
+Embedded CLI commands own the sinks installed during their logging initialization.
+Command shutdown removes those sinks before the caller closes captured stderr;
+subsequent invocations can initialize again. An already initialized daemon retains
+ownership of its sinks when it invokes a CLI command.

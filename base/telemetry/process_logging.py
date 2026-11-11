@@ -391,8 +391,8 @@ def init_cli_process(
     producer: Callable[[], EventPipeline],
     machine_reader: Callable[[], str],
     home: Path,
-) -> None:
-    start_process_logging(
+) -> Callable[[], None] | None:
+    return start_process_logging(
         name,
         attach_events=partial(
             add_event_sink,
