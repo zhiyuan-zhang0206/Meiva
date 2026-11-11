@@ -48,6 +48,19 @@ retired 2026-10-17 under T5280 when full retention made them fire forever), and
 `meiva-ops-agent-continuation-lost` / `meiva-ops-maintenance-hold-overdue`, which
 read events only the deleted maintenance hold raised.
 
+## Interval collector silence
+
+The collector-silence rule was restored after the schedule runner's telemetry
+binding fix was verified in production Loki. It reads every service identity:
+`service_name` is not part of the collector's event contract. Both successful
+and failed cycles establish liveness.
+
+The existing 35-minute window accommodates the current slowest collector's
+30-minute refresh. This is a fleet-wide dead-man signal: one collector still
+emitting prevents the rule from firing. Per-collector freshness requires a
+separate expected-set policy. Restoring this rule removes its tombstone in
+the same change so provisioning keeps it active.
+
 ## Where these run (LGTM stack)
 
 Native Grafana on the LGTM host (port 3003 by default, 53003 on the station via
