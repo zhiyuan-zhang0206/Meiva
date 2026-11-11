@@ -61,7 +61,7 @@ def test_the_values_are_the_boundary_the_cli_runs_under(tmp_path: Path) -> None:
     assert values["include_partial_messages"] is True
     assert values["resume"] == "sess-9"
     assert values["system_prompt"] == {"type": "preset", "preset": "claude_code"}
-    assert "forward_subagent_text" not in values
+    assert values["forward_subagent_text"] is True
 
 
 def test_the_child_environment_is_the_allowlist_built_from_what_the_caller_hands_in(

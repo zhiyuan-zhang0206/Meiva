@@ -10,7 +10,8 @@ exports = ["auth.py", "frames.py", "session.py", "tests"]
 "frames.py" = []
 "mapping.py" = []
 "requests.py" = ["frames.py", "mapping.py"]
-"session.py" = ["admission.py", "auth.py", "commands.py", "config.py", "fork.py", "frames.py", "mapping.py", "reconciliation", "requests.py", "transport.py", "turns.py"]
+"session.py" = ["admission.py", "auth.py", "commands.py", "config.py", "fork.py", "frames.py", "mapping.py", "reconciliation", "requests.py", "subagents.py", "transport.py", "turns.py"]
+"subagents.py" = ["frames.py"]
 "tests" = ["__init__.py", "auth.py", "frames.py", "mapping.py", "requests.py", "session.py", "transport.py", "turns.py"]
 "transport.py" = ["frames.py"]
 "turns.py" = ["frames.py", "mapping.py"]
@@ -25,6 +26,7 @@ exports = ["auth.py", "frames.py", "session.py", "tests"]
 "frames.py" = "strict"
 "mapping.py" = "strict"
 "requests.py" = "strict"
+"subagents.py" = "strict"
 "session.py" = { mode = "none", why = "the shell that runs one turn against the app-server: it starts the transport, awaits the requests it sends, keeps the one event stream and reaps the process tree on close; what to send and what an approval is answered with are decided in requests.py, what an inbound notification is and what a settled turn is in turns.py, and the per-turn state it applies is turns.TurnRecord" }
 "transport.py" = { mode = "none", why = "the shell that owns the app-server child: it spawns the process, writes lines to its stdin, reads its stdout and correlates replies with the requests that are waiting; the JSON-RPC frames, the classification of one stdin line and the reply-to-result rule are decided in frames.py" }
 "turns.py" = "strict"

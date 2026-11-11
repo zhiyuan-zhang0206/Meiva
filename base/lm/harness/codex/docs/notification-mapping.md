@@ -11,6 +11,7 @@ into.
 | `item/completed` (`userMessage`) | confirms foreground steering when the thread, turn and client message IDs match a pending request |
 | `item/started` / `item/completed` (`commandExecution`) | `ToolUse` / `ToolResult` (`is_error` when the status is failed/declined or the exit code is non-zero) |
 | `item/started` / `item/completed` (`fileChange`) | `ToolUse` / `ToolResult` named `patch` |
+| `item/completed` (`agentMessage`) of a thread a `spawnAgent` item named in `receiverThreadIds` | `SubagentText`, keyed by the spawn call's item ID ([sub-agent text](../../docs/subagent-text.md)) |
 | `item/*` (`mcpToolCall`, `dynamicToolCall`, `webSearch`) | `ToolUse` / `ToolResult` |
 | `item/started` / `item/completed` (`collabAgentToolCall`) | `ToolUse` / `ToolResult`, keyed by item ID with the operation and receiver status |
 | `item/reasoning/summaryTextDelta`, `item/reasoning/textDelta` | `ReasoningDelta` |
@@ -22,7 +23,7 @@ into.
 | `error` with `willRetry=false`, naming our turn | `TurnFaulted` |
 | `error` with `willRetry=false`, naming any other turn | `UnsolicitedOutput(source="error")` |
 
-Plan, image, standalone sub-agent lifecycle, queue and rate-limit notifications have no timeline activity mapping.
+Plan, image, sub-agent thread lifecycle (`thread/*`, `turn/*` of a child), queue and rate-limit notifications have no timeline activity mapping.
 
 The authoritative `turn/start` response binds the turn before
 buffered notifications are dispatched.

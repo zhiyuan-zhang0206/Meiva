@@ -11,6 +11,7 @@ from base.lm.harness.events import (
     ReasoningDelta,
     ReasoningText,
     SessionStarted,
+    SubagentText,
     TextDelta,
     ToolResult,
     ToolUse,
@@ -114,7 +115,7 @@ def _system(message: object, turn_id: str | None) -> list[BridgeEvent]:
 
 
 def _stream(message: object, turn_id: str | None) -> list[BridgeEvent]:
-    if turn_id is None:
+    if turn_id is None or _parent_tool_use_id(message) is not None:
         return []
     event = _as_dict(getattr(message, "event", None))
     if event.get("type") != "content_block_delta":
@@ -138,15 +139,20 @@ def _assistant(message: object, turn_id: str | None) -> list[BridgeEvent]:
     if turn_id is None:
         return []
     events: list[BridgeEvent] = []
+    parent = _parent_tool_use_id(message)
     for block in _as_list(getattr(message, "content", None)):
         kind = type(block).__name__
         if kind == "ThinkingBlock":
             thinking = _text(getattr(block, "thinking", None))
-            if thinking:
+            if thinking and parent is None:
                 events.append(ReasoningText(turn_id=turn_id, text=thinking))
         elif kind == "TextBlock":
             text = _text(getattr(block, "text", None))
-            if text:
+            if text and parent is not None:
+                events.append(
+                    SubagentText(turn_id=turn_id, tool_use_id=parent, agent=None, text=text)
+                )
+            elif text:
                 events.append(AssistantText(turn_id=turn_id, text=text))
         elif kind == "ToolUseBlock":
             events.append(
@@ -158,6 +164,20 @@ def _assistant(message: object, turn_id: str | None) -> list[BridgeEvent]:
                 )
             )
     return events
+
+
+# meiva:note
+# A message a sub-agent produced carries the id of the tool call that started it in
+# `parent_tool_use_id`; the main agent's own messages carry none. The sub-agent's text is not the main
+# agent's reply, so it maps to `SubagentText`, and its thinking and token stream are dropped.
+# meiva:link base/lm/harness/docs/subagent-text.md
+def is_subagent_message(message: object) -> bool:
+    return _parent_tool_use_id(message) is not None
+
+
+def _parent_tool_use_id(message: object) -> str | None:
+    value = getattr(message, "parent_tool_use_id", None)
+    return value if isinstance(value, str) and value else None
 
 
 def _user(message: object, turn_id: str | None) -> list[BridgeEvent]:

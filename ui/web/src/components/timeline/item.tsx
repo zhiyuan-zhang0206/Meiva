@@ -472,6 +472,13 @@ export const ItemView = memo(function ItemView({
     case "code_output":
       return <EnvelopeContent payload={item.payload} codeSurface />;
 
+    case "subagent_text":
+      return (
+        <div className="text-[12.5px] leading-relaxed text-muted-foreground/90">
+          <ChatMarkdown content={item.payload} />
+        </div>
+      );
+
     case "system_prompt":
       return (
         <div className="text-[12px] leading-relaxed text-muted-foreground/90">

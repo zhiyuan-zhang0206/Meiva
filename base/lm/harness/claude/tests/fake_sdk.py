@@ -15,6 +15,12 @@ class TextBlock:
 
 
 @dataclass
+class ThinkingBlock:
+    thinking: str
+    signature: str = ""
+
+
+@dataclass
 class ToolUseBlock:
     id: str
     name: str
@@ -39,6 +45,7 @@ class AssistantMessage:
 class UserMessage:
     content: Any
     uuid: str | None = None
+    parent_tool_use_id: str | None = None
     origin: dict[str, Any] | None = None
     tool_use_result: dict[str, Any] | None = None
 
@@ -60,6 +67,7 @@ class TaskStartedMessage(SystemMessage):
     task_id: str = "task-1"
     description: str = ""
     task_type: str = ""
+    tool_use_id: str | None = None
 
 
 @dataclass
@@ -137,6 +145,7 @@ class ClaudeAgentOptions:
     setting_sources: list[str] | None = None
     strict_mcp_config: bool = False
     include_partial_messages: bool = False
+    forward_subagent_text: bool = False
     env: dict[str, str] = field(default_factory=dict[str, str])
     resume: str | None = None
     extra_args: dict[str, str | None] | None = None

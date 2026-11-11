@@ -16,6 +16,7 @@ from base.lm.harness import (
     BridgeEvent,
     ReasoningDelta,
     ReasoningText,
+    SubagentText,
     TextDelta,
     ToolResult,
     ToolUse,
@@ -25,6 +26,18 @@ from base.lm.usage import UsageFields, log_usage_fields
 from base.log import logger
 
 TEXT_CHECKPOINT_SECONDS = 0.2
+
+# meiva:note
+# Sub-agent text is work detail a CLI can produce without bound, and every item is a database row the
+# timeline pages through, so it is capped twice: one message is cut at `SUBAGENT_ITEM_CHARS`, and
+# one projector (one graph invocation) stops writing sub-agent items after `SUBAGENT_RUN_CHARS` in
+# total, leaving a single marker item where it stopped. The main agent's own text and tool output are
+# not capped here; these limits are only for the part a person never asked the agent to produce.
+# meiva:link base/lm/harness/docs/subagent-text.md
+SUBAGENT_ITEM_CHARS = 8_000
+SUBAGENT_RUN_CHARS = 200_000
+SUBAGENT_CUT = "\n[... sub-agent text cut]"
+SUBAGENT_LIMIT_NOTE = "Sub-agent text limit reached; further sub-agent text is not shown."
 
 
 def _elapsed(start: datetime, end: datetime) -> int:
@@ -61,6 +74,8 @@ class HarnessTurnProjector:
         self._last_chat_raw = ""
         self._tools: dict[str, tuple[TimelineItem, TimelineItem, int, datetime]] = {}
         self._seen_tools: set[str] = set()
+        self._tool_items: dict[str, str] = {}
+        self._subagent_chars = 0
         self._pending: dict[str, TimelineItem] = {}
         self._dirty = asyncio.Event()
         self._lock = asyncio.Lock()
@@ -79,6 +94,9 @@ class HarnessTurnProjector:
             match event:
                 case ReasoningDelta() | ReasoningText() | TextDelta() | AssistantText():
                     await self._on_text(event, now)
+                case SubagentText():
+                    self._on_subagent_text(event, now)
+                    await self._flush()
                 case ToolUse():
                     self._on_tool_use(event, now)
                     await self._flush()
@@ -260,9 +278,31 @@ class HarnessTurnProjector:
             sdk_calls=[SdkCall(method=event.name, count=1)],
         )
         output_item = self._new_item("code_output", "Tool running", now, activity_pending=True)
+        self._tool_items[event.tool_use_id] = code_item.item_id
         self._tools[event.tool_use_id] = (code_item, output_item, code_ms, now)
         self._activity_started = now
         self._reasoning_ended = None
+
+    def _on_subagent_text(self, event: SubagentText, now: datetime) -> None:
+        if self._subagent_chars > SUBAGENT_RUN_CHARS or not event.text.strip():
+            return
+        self._close_text(now)
+        self._last_chat_raw = ""
+        self._subagent_chars += len(event.text)
+        if self._subagent_chars > SUBAGENT_RUN_CHARS:
+            _ = self._new_item("system_marker", f"status:{SUBAGENT_LIMIT_NOTE}", now)
+            return
+        text = event.text
+        if len(text) > SUBAGENT_ITEM_CHARS:
+            text = text[:SUBAGENT_ITEM_CHARS] + SUBAGENT_CUT
+        _ = self._new_item(
+            "subagent_text",
+            text,
+            now,
+            source=event.agent,
+            parent_item_id=self._tool_items.get(event.tool_use_id),
+            user_facing=False,
+        )
 
     def _on_tool_result(self, event: ToolResult, now: datetime) -> None:
         if (slot := self._tools.pop(event.tool_use_id, None)) is None:

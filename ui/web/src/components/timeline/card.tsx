@@ -103,6 +103,17 @@ export function messageCardConfig(item: BackendTimelineItem): CardConfig | null 
         showTimestamp: true,
         copy: false,
       };
+    case "subagent_text":
+      return {
+        rich: null,
+        icon: Bot,
+        title: item.source ? `Sub-agent · ${item.source}` : "Sub-agent",
+        titleKey: item.source ? "timeline.subagentNamed" : "timeline.subagent",
+        titleValues: item.source ? { name: item.source } : undefined,
+        fixedDefault: false,
+        showTimestamp: true,
+        copy: false,
+      };
     case "agent_chat": {
       const chatTitle = agentChatTitle(item);
       return {

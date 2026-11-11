@@ -110,11 +110,10 @@ and the CLI reports its end on its own:
   depends on the CLI's `--system-prompt-snapshot` (default `on`: the prompt "is
   rendered on the conversation's first request ... and recorded; every later request
   and resume sends the record as-is"), which has not been measured here.
-- **Subagent text is not forwarded.** `forward_subagent_text` stays off. Turned on,
-  subagent text blocks arrive as `AssistantMessage`s with `parent_tool_use_id`, which
-  `mapping.py` would emit as `AssistantText` and the projector would present as the
-  main agent's reply (visibility parsing, reply fallback). A correct presentation
-  needs a sub-activity event and timeline item kind that do not exist yet.
+- **Subagent text is forwarded as its own event.** `forward_subagent_text` is on, so a
+  synchronous sub-agent's text reaches the stream like an asynchronous one's. Messages carrying
+  `parent_tool_use_id` map to `SubagentText` (text only), never to `AssistantText`; see
+  [what a CLI's own sub-agents say](../../docs/subagent-text.md).
 - **A killed host leaves the CLI behind.** If the host is SIGKILLed, the bundled
   CLI reparents to init and keeps the session; a supervisor must sweep it by the
   session id in the registry.

@@ -41,17 +41,24 @@ from base.lm.harness.claude.inbound import (
     notification_plan,
     started_identity,
 )
-from base.lm.harness.claude.mapping import map_message, parse_result, task_update_status
+from base.lm.harness.claude.mapping import (
+    is_subagent_message,
+    map_message,
+    parse_result,
+    task_update_status,
+)
 from base.lm.harness.claude.options import fork_session_id, option_values
 from base.lm.harness.claude.reconciliation.transcript import claude_home, reconcile_inputs
 from base.lm.harness.claude.settle import RunningTurn, settle_result
 from base.lm.harness.delivery import HarnessInput, InputPhase, Reconciliation, validated_batch
 from base.lm.harness.events import (
     AckSignal,
+    BridgeEvent,
     HarnessCause,
     InterruptConfirmed,
     SessionFailed,
     SessionStarted,
+    SubagentText,
     ToolResult,
     ToolUse,
     TurnOrigin,
@@ -165,6 +172,7 @@ class ClaudeSession(BaseHarnessSession[BridgeConfig]):
         self._uuid_keys: dict[str, str] = {}
         self._echo_seen = False
         self._pending_cause: HarnessCause | None = None
+        self._subagent_labels: dict[str, str] = {}
 
     async def start(self, *, resume: str | None = None) -> None:
         if self._client is not None:
@@ -413,14 +421,31 @@ class ClaudeSession(BaseHarnessSession[BridgeConfig]):
         if type(message).__name__ == "UserMessage" and not is_tool_result(message):
             self._handle_echo(message)
             return
+        subagent = is_subagent_message(message)
+        if subagent and not map_message(message, turn_id=""):
+            return
+        if subagent and self._open is None and self._pending_cause is None:
+            self._pending_cause = HarnessCause.BACKGROUND_TASK
         turn = self._open or self._open_harness_turn(None)
-        mapped = map_message(message, turn_id=turn.turn_id)
+        mapped = self._labelled(map_message(message, turn_id=turn.turn_id))
         self._open = turn.with_parts(
             assistant_texts(mapped), stepped=counts_as_step(type(message).__name__, mapped)
         )
         for event in mapped:
             self._emit(event)
         self._track_scheduling(message, mapped)
+
+    # meiva:note
+    # A sub-agent's text names the call that started it; the CLI's own label for the sub-agent
+    # (`subagent_type`) arrives earlier, on the task-started message of the same call.
+    # meiva:link base/lm/harness/docs/subagent-text.md
+    def _labelled(self, events: list[BridgeEvent]) -> list[BridgeEvent]:
+        return [
+            replace(event, agent=self._subagent_labels.get(event.tool_use_id))
+            if isinstance(event, SubagentText)
+            else event
+            for event in events
+        ]
 
     def _handle_echo(self, message: object) -> None:
         key = self._uuid_keys.get(str(getattr(message, "uuid", "") or ""))
@@ -501,6 +526,11 @@ class ClaudeSession(BaseHarnessSession[BridgeConfig]):
     def _track_task_started(self, message: object) -> None:
         claimed = self._claimed_by_background | frozenset(tool_snapshot(self._probe, self._cli_pid))
         self._claimed_by_background = frozenset(pid for pid in claimed if self._probe.is_alive(pid))
+        tool_use_id = getattr(message, "tool_use_id", None)
+        data = getattr(message, "data", None)
+        label = data.get("subagent_type") if is_object_dict(data) else None
+        if isinstance(tool_use_id, str) and tool_use_id and isinstance(label, str) and label:
+            self._subagent_labels[tool_use_id] = label
         self._background = self._background.started(
             _task_id(message),
             description=str(getattr(message, "description", "") or ""),

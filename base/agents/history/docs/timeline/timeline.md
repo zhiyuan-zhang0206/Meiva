@@ -31,6 +31,13 @@ strips valid markers, preserves malformed text in Details, and keeps block
 indices stable. Older checkpoints without that flag use their wake-based
 projection. Reply suggestions use only user-facing chat.
 
+## Sub-agent text (`subagent_text`)
+
+An external harness's own sub-agent text is a `subagent_text` item: `payload` the text, `source` the CLI's label for
+the sub-agent, `parent_item_id` the `agent_code` item of the call that started it (when known), `user_facing` false.
+It exists only in `agent_harness_messages`, is always work detail (Details, collapsed), and is never a delivery,
+an unread or a push. See [sub-agent text](../../../../lm/harness/docs/subagent-text.md).
+
 ## Reasoning timing
 
 Each thinking block carries its own per-block duration (meiva_reasoning_ms_by_block, keyed by block_idx); the turn-level reasoning tokens attach to the FIRST thinking item only; historical messages keep None rather than an invented value. Provider-native reasoning is folded to canonical thinking blocks on a copy — the stored message stays native.
