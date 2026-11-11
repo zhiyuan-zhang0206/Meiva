@@ -10,7 +10,7 @@ from typing import LiteralString, NamedTuple, TypedDict
 from pydantic import TypeAdapter
 
 from base.db.protocols import SyncConnection
-from base.events.contract import EventTier
+from base.events.contract import EventGroupBy, EventTier
 
 LINEAGE_EVENT_NAMES = ("spawn", "fork", "resurrect")
 EDGE_EVENT_NAMES = ("send_message", *LINEAGE_EVENT_NAMES)
@@ -220,6 +220,43 @@ def count_audit_rows(
     assert row is not None  # noqa: S101
     (count,) = _COUNT_ROW.validate_python(row)
     return count
+
+
+# meiva:note
+# The SQL expression each grouping dimension reads from `audit_events`. Every audit row has the
+# category `audit`; the identifier is cast to text so every dimension returns one key type.
+_AUDIT_GROUP_KEY: dict[EventGroupBy, LiteralString] = {
+    "event_name": "event_name",
+    "machine": "machine",
+    "level": "level",
+    "agent_id": "agent_id::text",
+    "category": "'audit'",
+}
+_GROUP_ROWS = TypeAdapter(list[tuple[str | None, int]])
+
+
+# meiva:note
+# The rows `count_audit_rows` would count, grouped by one dimension: `(key, count)` newest-largest
+# first, at most `limit` groups. A NULL key (a service event has no agent) comes back as None.
+def count_audit_groups(
+    conn: SyncConnection,
+    filters: AuditFilter,
+    *,
+    by: EventGroupBy,
+    limit: int,
+) -> list[tuple[str | None, int]]:
+    where = _where(filters)
+    if where is None:
+        return []
+    clause, params = where
+    key = _AUDIT_GROUP_KEY[by]
+    # meiva:note
+    # key and clause are LiteralString fragments from fixed SQL templates; user values stay in params.
+    query: LiteralString = (
+        f"SELECT {key} AS k, count(*) AS n FROM audit_events WHERE {clause} "  # noqa: S608
+        "GROUP BY 1 ORDER BY n DESC, k LIMIT %s"
+    )
+    return _GROUP_ROWS.validate_python(conn.execute(query, [*params, limit]).fetchall())
 
 
 class _EdgeWeightRow(NamedTuple):

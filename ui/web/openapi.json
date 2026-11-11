@@ -5631,6 +5631,235 @@
         }
       }
     },
+    "/api/events/counts": {
+      "get": {
+        "summary": "Get Event Counts",
+        "description": "Events of the unified stream counted per value of one dimension (`by`: `event_name`,\n`machine`, `level`, `agent_id` or `category`), largest group first, ties by key.\n\nThe filters and the window are `GET /api/events`' (same names, same 24-hour default lower\nbound, same 422 on a bad value); the counts are computed in SQL, so the answer is a few rows\nhowever many events match. `limit` (default: the configured events page, cap 1000) bounds\nthe groups returned; `meta.total` counts every event of the window and `meta.truncated`\nsays more groups exist. A window with more than 1000 distinct values is refused with 422.",
+        "operationId": "get_event_counts_api_events_counts_get",
+        "parameters": [
+          {
+            "name": "by",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "enum": [
+                "event_name",
+                "machine",
+                "level",
+                "agent_id",
+                "category"
+              ],
+              "type": "string",
+              "title": "By"
+            }
+          },
+          {
+            "name": "category",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Category"
+            }
+          },
+          {
+            "name": "event_name",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Event Name"
+            }
+          },
+          {
+            "name": "agent_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Agent Id"
+            }
+          },
+          {
+            "name": "trace_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Trace Id"
+            }
+          },
+          {
+            "name": "machine",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Machine"
+            }
+          },
+          {
+            "name": "level",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Level"
+            }
+          },
+          {
+            "name": "tier",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Tier"
+            }
+          },
+          {
+            "name": "from",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "From"
+            }
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "To"
+            }
+          },
+          {
+            "name": "hours",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "number",
+                  "maximum": 8760,
+                  "exclusiveMinimum": 0
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Hours"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "maximum": 1000,
+                  "minimum": 1
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EventCountsResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/stream": {
       "get": {
         "summary": "Get Merged Stream",
@@ -11193,6 +11422,117 @@
           "next_attempt_at"
         ],
         "title": "DeliveryStatus"
+      },
+      "EventCountGroup": {
+        "properties": {
+          "key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Key"
+          },
+          "count": {
+            "type": "integer",
+            "title": "Count"
+          }
+        },
+        "type": "object",
+        "required": [
+          "key",
+          "count"
+        ],
+        "title": "EventCountGroup"
+      },
+      "EventCountsMeta": {
+        "properties": {
+          "by": {
+            "type": "string",
+            "enum": [
+              "event_name",
+              "machine",
+              "level",
+              "agent_id",
+              "category"
+            ],
+            "title": "By"
+          },
+          "window_from": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Window From"
+          },
+          "window_to": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Window To"
+          },
+          "limit": {
+            "type": "integer",
+            "title": "Limit"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "truncated": {
+            "type": "boolean",
+            "title": "Truncated"
+          },
+          "generated_at": {
+            "type": "string",
+            "title": "Generated At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "by",
+          "window_from",
+          "window_to",
+          "limit",
+          "total",
+          "truncated",
+          "generated_at"
+        ],
+        "title": "EventCountsMeta"
+      },
+      "EventCountsResponse": {
+        "properties": {
+          "meta": {
+            "$ref": "#/components/schemas/EventCountsMeta"
+          },
+          "groups": {
+            "items": {
+              "$ref": "#/components/schemas/EventCountGroup"
+            },
+            "type": "array",
+            "title": "Groups"
+          }
+        },
+        "type": "object",
+        "required": [
+          "meta",
+          "groups"
+        ],
+        "title": "EventCountsResponse"
       },
       "EventResolutionCreate": {
         "properties": {

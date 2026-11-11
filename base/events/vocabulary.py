@@ -14,6 +14,11 @@ from typing import Literal, TypedDict, Unpack
 Category = Literal["audit", "telemetry", "log"]
 EventTier = Literal["business", "anomaly", "observation", "noise"]
 
+# meiva:note
+# The dimensions an event count can be grouped by: the one place that names them, shared by the
+# stores' grouped reads, the `GET /api/events/counts` route and `meiva events count --by`.
+EventGroupBy = Literal["event_name", "machine", "level", "agent_id", "category"]
+
 # Event tiers control the human-facing event stream, independently from the
 # category that controls event-class access semantics:
 #

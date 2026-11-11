@@ -24,7 +24,7 @@ from psycopg import sql
 from psycopg.rows import class_row
 
 from base.db.rows import count_one
-from base.events.contract import TIER_BY_EVENT, EventTier
+from base.events.contract import TIER_BY_EVENT, EventGroupBy, EventTier
 from base.events.reads import EventRecord
 
 _LEVELS = ("debug", "info", "warning", "error", "critical")
@@ -335,3 +335,70 @@ def count_events(
     clause, params = where
     query = sql.SQL("SELECT count(*) AS n FROM telemetry_events WHERE {where}").format(where=clause)
     return count_one(conn, query, params)
+
+
+# meiva:note
+# One grouped count: the dimension's value (text, NULL for a service event's agent) and its rows.
+@dataclass(frozen=True)
+class _GroupRow:
+    k: str | None
+    n: int
+
+
+# meiva:note
+# The SQL expression each grouping dimension reads from `telemetry_events`; the identifier is cast
+# to text so every dimension returns one key type.
+_GROUP_KEY: dict[EventGroupBy, LiteralString] = {
+    "event_name": "event_name",
+    "machine": "machine",
+    "level": "level",
+    "agent_id": "agent_id::text",
+    "category": "category",
+}
+
+
+# meiva:note
+# The rows `count_events` counts, grouped by one dimension, largest group first.
+def count_event_groups(
+    conn: psycopg.Connection,
+    *,
+    by: EventGroupBy,
+    limit: int,
+    agent_id: int | None = None,
+    event_names: list[str] | None = None,
+    tiers: list[EventTier] | None = None,
+    level: str | None = None,
+    categories: list[str] | None = None,
+    machine: str | None = None,
+    trace_id: str | None = None,
+    attribute_filters: dict[str, str] | None = None,
+    from_: datetime | None = None,
+    to: datetime | None = None,
+) -> list[tuple[str | None, int]]:
+    where = _where(
+        agent_id=agent_id,
+        exclude_agent_ids=None,
+        service_only=False,
+        event_names=event_names,
+        tiers=tiers,
+        level_min=None,
+        level=level,
+        grep=None,
+        categories=categories,
+        cluster=None,
+        machine=machine,
+        trace_id=trace_id,
+        attribute_filters=attribute_filters,
+        from_=from_,
+        to=to,
+    )
+    if where is None:
+        return []
+    clause, params = where
+    query = sql.SQL(
+        "SELECT {key} AS k, count(*) AS n FROM telemetry_events WHERE {where} "
+        "GROUP BY 1 ORDER BY n DESC, k LIMIT %s"
+    ).format(key=sql.SQL(_GROUP_KEY[by]), where=clause)
+    with conn.cursor(row_factory=class_row(_GroupRow)) as cur:
+        cur.execute(query, [*params, limit])
+        return [(row.k, row.n) for row in cur.fetchall()]

@@ -1615,6 +1615,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/events/counts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["get_event_counts_api_events_counts_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/stream": {
         parameters: {
             query?: never;
@@ -2752,6 +2768,23 @@ export interface components {
             target: components["schemas"]["UnitIdentity"];
             attempts: number;
             next_attempt_at: string | null;
+        };
+        EventCountGroup: {
+            key: string | null;
+            count: number;
+        };
+        EventCountsMeta: {
+            by: "event_name" | "machine" | "level" | "agent_id" | "category";
+            window_from: string | null;
+            window_to: string | null;
+            limit: number;
+            total: number;
+            truncated: boolean;
+            generated_at: string;
+        };
+        EventCountsResponse: {
+            meta: components["schemas"]["EventCountsMeta"];
+            groups: components["schemas"]["EventCountGroup"][];
         };
         EventResolutionCreate: {
             category: "telemetry" | "log";
@@ -7339,6 +7372,46 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["EventsResponse"];
+                };
+            };
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_event_counts_api_events_counts_get: {
+        parameters: {
+            query: {
+                by: "event_name" | "machine" | "level" | "agent_id" | "category";
+                category?: string | null;
+                event_name?: string | null;
+                agent_id?: number | null;
+                trace_id?: string | null;
+                machine?: string | null;
+                level?: string | null;
+                tier?: string | null;
+                from?: string | null;
+                to?: string | null;
+                hours?: number | null;
+                limit?: number | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EventCountsResponse"];
                 };
             };
             422: {

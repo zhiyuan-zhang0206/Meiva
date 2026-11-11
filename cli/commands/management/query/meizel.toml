@@ -1,0 +1,7 @@
+exports = ["events.py", "tests"]
+
+[uses]
+"tests" = ["events.py"]
+
+[purity]
+"__init__.py" = "strict"

@@ -19,7 +19,7 @@ from pydantic import (
     model_validator,
 )
 
-from base.events.contract import EventTier
+from base.events.contract import EventGroupBy, EventTier
 
 
 class AgentEventRow(BaseModel):
@@ -112,6 +112,42 @@ class EventsResponse(BaseModel):
 
     meta: EventsMeta
     items: list[EventRow]
+
+
+# meiva:note
+# One group of `GET /api/events/counts`: the dimension's value (`agent_id` as its decimal text;
+# None for service events that belong to no agent) and how many events carry it.
+class EventCountGroup(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    key: str | None
+    count: int
+
+
+# meiva:note
+# GET /api/events/counts header: the dimension, the effective window and the totals. `total` is the
+# event count over every group (not only the returned ones); `truncated` says that more groups
+# exist than `limit` returned.
+class EventCountsMeta(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    by: EventGroupBy
+    window_from: datetime | None
+    window_to: datetime | None
+    limit: int
+    total: int
+    truncated: bool
+    generated_at: str
+
+
+# meiva:note
+# GET /api/events/counts response: events of the unified stream counted per value of one
+# dimension, largest group first (ties by key).
+class EventCountsResponse(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    meta: EventCountsMeta
+    groups: list[EventCountGroup]
 
 
 EventResolutionCategory = Literal["telemetry", "log"]

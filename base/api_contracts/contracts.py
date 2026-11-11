@@ -138,6 +138,7 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
         note="computer-use task replay (Phase 3, task #1101): one task's desktop trail"
     ),
     ("GET", "/api/events"): RouteContract(),
+    ("GET", "/api/events/counts"): RouteContract(note="grouped event counts, computed in SQL"),
     ("GET", "/api/event-resolutions"): RouteContract(),
     ("POST", "/api/event-resolutions"): RouteContract(
         Idempotency.NON_IDEMPOTENT,

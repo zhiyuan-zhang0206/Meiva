@@ -34,6 +34,23 @@
   tags and descriptions; JSON emits the gateway response's `results` list
   without converting paths or normalizing null and empty metadata.
 
+## Read-only cluster queries
+
+These verbs are thin clients of the gateway's read routes: they forward the filters you name,
+print a table (or `--json`, the gateway's response unchanged) and leave windows and page sizes to
+the gateway. A refusal prints the gateway's reason on stderr and exits 1. None of them touches the
+database or takes a free-form query; an agent that needs an answer from cluster data uses these
+instead of SQL or hand-built HTTP calls.
+
+- `meiva events ls [--category audit|telemetry|log] [--name EVENT] [--agent ID] [--trace ID]
+  [--machine M] [--level L] [--tier T] [--hours H | --from ISO --to ISO] [--limit N]
+  [--offset N] [--total] [--json]`: newest-first slice of the unified event stream
+  (`GET /api/events`). Without a window the gateway reads the last 24 hours.
+- `meiva events count --by event_name|machine|level|agent_id|category` plus the same filters:
+  the matching events counted per value of one dimension, largest group first
+  (`GET /api/events/counts`; the counting runs in SQL under the events statement timeout, and a
+  window with more than 1000 distinct values is refused).
+
 ## Harness attachment
 
 - `meiva harness exec [--file PATH] [--handle H] [--agent-id N] [--session-id S]`: run one

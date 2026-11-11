@@ -18,6 +18,8 @@ to a read-only query only when none fits.
 | Which agents exist, their status and machine | `meiva.agents` (`meiva.help(meiva.agents)`), or `meiva agents ls [--scope live\|terminated\|all] [--query Q] [--limit N]` |
 | What an agent has been doing | `meiva agents timeline <agent_id> [--limit N] [--before ITEM_ID]` |
 | Tasks: read, create, update, log progress | `meiva.tasks` (`get`, `list`, `create`, `update`, `log`; `meiva.help(meiva.tasks)`) |
+| Audit, telemetry and log events: what happened, when, on which machine | `meiva events ls [--agent ID] [--name EVENT] [--category audit\|telemetry\|log] [--level L] [--machine M] [--hours H] [--limit N]` (newest first; default window: the last 24 hours; `--json` for scripts) |
+| How many events of each kind, machine, level or agent | `meiva events count --by event_name\|machine\|level\|agent_id\|category` with the same filters |
 | Schedules and their runs | `meiva schedules ls`, `meiva schedules get <name>`, `meiva schedules runs <name> [--limit N]`, `meiva schedules logs <name> [--lines N]` |
 | Open questions waiting for the user | `meiva notices list [--agent ID]` |
 | Files of an agent, delivering something to the user | `meiva.files`, `meiva.ui` |
@@ -28,8 +30,7 @@ question, stop there.
 
 ## 2. Query the database read-only
 
-Audit events, telemetry events, the cross-agent inbox, cost totals and the
-scheduler's bookkeeping have no entry. Your process environment carries
+The cross-agent inbox, cost totals and the scheduler's bookkeeping have no entry. Your process environment carries
 `MEIVA_DB_URL`, the cluster's database address, so a query is one call away:
 
 ```python
@@ -79,30 +80,11 @@ How to use it:
 | `agent_model_tokens_daily` | Per-agent, per-model token and cost totals by day | `agent_id`, `day`, `model`, `llm_calls`, `tokens_in`, `tokens_out`, `cost_usd` |
 | `agent_notices`, `machines`, `machine_status_snapshot` | Open questions for the user; which machines are in the cluster and how they look | see `db/schema.sql` |
 
-`event_name` values come from the emitting code. List the distinct names in a short
-window first, then filter on the one you found:
-
-```sql
-SELECT event_name, count(*)
-FROM audit_events
-WHERE ts > now() - interval '1 day'
-GROUP BY 1 ORDER BY 2 DESC
-LIMIT 50;
-```
+`event_name` values come from the emitting code. To find the one you want, list the
+names that occurred in a short window with `meiva events count --by event_name --hours 24`,
+then filter on it with `meiva events ls --name <event_name>`.
 
 ### Example queries
-
-Recent errors one agent's telemetry recorded:
-
-```sql
-SELECT ts, event_name, source, attributes
-FROM telemetry_events
-WHERE agent_id = 123
-  AND ts > now() - interval '6 hours'
-  AND level IN ('error', 'critical')
-ORDER BY ts DESC
-LIMIT 100;
-```
 
 Messages an agent has not consumed yet:
 
