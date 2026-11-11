@@ -7,7 +7,7 @@ import pytest
 from psycopg_pool import AsyncConnectionPool
 
 from agent.db import has_pending_interrupt, pending_interrupt_reason
-from base.agents.messages.inbound import InterruptReason
+from base.agents.messages.inbound import InterruptReason, InterruptScope
 from base.db import create_agent
 from base.native_process.stop_timing import RESTART_INTERRUPT_GRACE_S
 
@@ -66,3 +66,47 @@ async def test_cancel_and_terminate_still_interrupt_at_once_beside_a_young_resta
     _queue(db_conn, agent_id, "restart")
     _queue(db_conn, agent_id, kind)
     assert await pending_interrupt_reason(aops_pool, agent_id) is InterruptReason.USER
+
+
+# meiva:note
+# An external harness agent's own `meiva.self.terminate()` runs in a shell of the CLI, where no exec
+# node raises `LifecycleExit`: its foreground (`InterruptScope.LIFECYCLE`) reads the row once it has
+# waited the grace, and nothing else does.
+async def test_an_own_terminate_interrupts_the_harness_foreground_after_its_grace(
+    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool
+) -> None:
+    agent_id = create_agent(db_conn)
+    _queue(db_conn, agent_id, "terminate", source="self", waited_s=RESTART_INTERRUPT_GRACE_S + 2)
+    assert (
+        await pending_interrupt_reason(aops_pool, agent_id, scope=InterruptScope.LIFECYCLE)
+        is InterruptReason.SYSTEM
+    )
+
+
+async def test_a_young_own_terminate_lets_the_turn_write_its_closing_words(
+    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool
+) -> None:
+    agent_id = create_agent(db_conn)
+    _queue(db_conn, agent_id, "terminate", source="self", waited_s=RESTART_INTERRUPT_GRACE_S - 2)
+    assert (
+        await pending_interrupt_reason(aops_pool, agent_id, scope=InterruptScope.LIFECYCLE) is None
+    )
+
+
+@pytest.mark.parametrize("scope", [InterruptScope.ALL, InterruptScope.FOREGROUND])
+async def test_a_native_node_and_the_cancel_watch_never_read_an_own_terminate(
+    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool, scope: InterruptScope
+) -> None:
+    agent_id = create_agent(db_conn)
+    _queue(db_conn, agent_id, "terminate", source="self", waited_s=RESTART_INTERRUPT_GRACE_S * 10)
+    assert await pending_interrupt_reason(aops_pool, agent_id, scope=scope) is None
+
+
+async def test_an_own_restart_never_interrupts_the_harness_foreground(
+    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool
+) -> None:
+    agent_id = create_agent(db_conn)
+    _queue(db_conn, agent_id, "restart", source="self", waited_s=RESTART_INTERRUPT_GRACE_S * 10)
+    assert (
+        await pending_interrupt_reason(aops_pool, agent_id, scope=InterruptScope.LIFECYCLE) is None
+    )

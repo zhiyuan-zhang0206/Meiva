@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import os
 from collections.abc import AsyncGenerator, Sequence
 from datetime import UTC, datetime
@@ -21,6 +22,7 @@ from agent.graph.claim.lost_turn import lost_turn_note, report_lost_turn
 from agent.graph.claim.tests.harness_support import FakeEngine
 from agent.graph.llm_errors import FatalLLMStreamError
 from agent.messages import NoteTag
+from agent.ownership.tests.ownership_support import agent_row
 from agent.state import AgentState
 from base.agents.context import HostedTurnResources, MeivaContext
 from base.agents.history.harness_messages import aload_harness_timeline_items
@@ -42,12 +44,15 @@ from base.lm.harness import (
     HarnessInput,
     HarnessSetupError,
     HarnessTurn,
+    InputInContext,
     ReasoningDelta,
     ReasoningText,
     TextDelta,
     ToolResult,
     ToolUse,
     TurnFaulted,
+    TurnOrigin,
+    TurnStarted,
     Usage,
 )
 from base.log.tests.log_records import LogRecords
@@ -625,3 +630,51 @@ async def test_a_lost_turn_appends_one_note_and_a_quiet_turn_appends_none() -> N
     assert len(appended) == 1
     assert read_meiva_kwargs(appended[0][0]).get("meiva_note_tag") == NoteTag.TURN_LOST.value
     assert "7379" in str(appended[0][0].content)
+
+
+# meiva:note
+# The call that never ends: the agent asked to terminate, and the CLI's own model request cannot finish
+# (agent 7600, 2026-11-11, three hours of provider retries). Its own terminate is read by the foreground's
+# lifecycle watcher once the grace has passed, so the invocation returns to claim, which takes the terminate
+# (the host's exit then closes the session). The row is aged instead of waiting out the grace.
+# meiva:link agent/graph/docs/turn-interrupts.md
+async def test_an_own_terminate_ends_an_invocation_whose_turn_cannot_finish(
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    hosted_resources: HostedTurnResources,
+) -> None:
+    def insert(kind: str, source: str) -> int:
+        row = db_conn.execute(
+            "INSERT INTO inbound_messages (agent_id, content, kind, source) "
+            "VALUES (%s, '', %s, %s) RETURNING id",
+            (agent_id, kind, source),
+        ).fetchone()
+        db_conn.commit()
+        assert row is not None
+        return row[0]
+
+    agent_id = agent_row(db_conn)
+    key = f"inbound-{insert('chat', 'user')}"
+    engine = FakeEngine(script=lambda _inputs: [])
+    rt = runtime(engine, ops_pool=aops_pool, hosted_resources=hosted_resources)
+
+    async with asyncio.timeout(20), asyncio.TaskGroup() as tasks:
+        node = tasks.create_task(harness_turn_node(AgentState(), rt, config(agent_id)))
+        while not engine.delivered:
+            await asyncio.sleep(0.02)
+        engine.emit(TurnStarted("t1", TurnOrigin.INPUT, (key,), 1), InputInContext(key, "t1", 1))
+        terminate = insert("terminate", "self")
+        db_conn.execute(
+            "UPDATE inbound_messages SET created_at = clock_timestamp() - interval '1 minute' "
+            "WHERE id=%s",
+            (terminate,),
+        )
+        db_conn.commit()
+        command = await node
+
+    assert command.goto == "claim"
+    assert command.update is not None and command.update["halted"] is True
+    row = db_conn.execute(
+        "SELECT status FROM inbound_messages WHERE id=%s", (terminate,)
+    ).fetchone()
+    assert row == ("pending",), "claim dispatches the terminate next"

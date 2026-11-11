@@ -28,6 +28,16 @@ consumed no-op: no marker, no `END`, never retried — the agent stays alive and
 processes the message, so the last message is never swallowed by a racing
 death.
 
+An external harness's own terminate is the one self-initiated command that interrupts. The agent's
+`meiva.self.terminate()` runs in a shell of the CLI, where nothing raises `LifecycleExit`, so the row would
+wait for the CLI's turn to end by itself, and a turn blocked on a provider the CLI keeps retrying never
+does (agent 7600, 2026-11-11: the model request after the call failed for three hours). The foreground's
+lifecycle watcher (`InterruptScope.LIFECYCLE`) therefore reads the agent's own terminate once its row has
+waited `RESTART_INTERRUPT_GRACE_S`: the closing words an agent writes after the call arrive within seconds,
+so a normal turn ends inside the grace with nothing cut short, and one that is still running has nothing
+left to say. The interrupted invocation returns to claim, which takes the terminate as for any other.
+Native nodes keep excluding the agent's own row.
+
 Node-level discard semantics differ, and deliberately so:
 
 - **llm_node** discards the partial generation whole — nothing was committed, so
