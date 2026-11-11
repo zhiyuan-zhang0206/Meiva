@@ -75,16 +75,11 @@ from .sdk_surface.pure.render.const import const as const
 state: Any
 state_update: dict[str, Any]
 
+# meiva:note
+# Framework and plugin-author access to the bound context. Deliberately absent from
+# `__all_for_meiva__` and `__dir__`, so agents are not shown it, as with `const` / `extend`.
+# An agent that needs cluster data reads the Meiva Guide topic `cluster-data`.
 context: MeivaContext
-"""Your execution identity and supplied service connections.
-
-`meiva.self.AGENT_ID` identifies the agent your SDK calls represent.
-`context.identity` records execution ownership and caller provenance. Compact,
-restart and terminate require that you own the represented agent's native loop.
-
-Use `context.sql`, `context.redis` and `context.gateway` for database, Redis and
-gateway API access. Unavailable when no execution context is established.
-"""
 
 
 # meiva:note
@@ -147,7 +142,7 @@ class _SdkModule(_ModuleType):
         return self.context.redis
 
     def __dir__(self) -> list[str]:
-        return sorted({*super().__dir__(), "DB", "REDIS", "context", "state", "state_update"})
+        return sorted({*super().__dir__(), "state", "state_update"})
 
 
 _sys.modules[__name__].__class__ = _SdkModule
@@ -319,7 +314,6 @@ extend._qualname = "meiva.extend"  # type: ignore[attr-defined]  # agent-facing 
 __all_for_meiva__ = [
     "agents",
     "attach",
-    "context",
     "cwd",
     "files",
     "help",

@@ -66,7 +66,8 @@ They are of three different kinds, and the package treated them as one.
    registry is read through `plugin_registry()`.
 
 Agent-visible behavior: `meiva.context` exists (documented: identity, read-only; connection objects
-are provided by the framework). The `meiva.*` free functions keep their call shapes. `meiva.context`
+are provided by the framework). **Amended 2026-11-12:** `meiva.context` is no longer shown to agents; see
+[the 2026-11-12 decision](../sdk/2026-11-12-meiva-context-not-agent-visible.md). The `meiva.*` free functions keep their call shapes. `meiva.context`
 raises outside an exec child, launched script or attachment. Threads that agent code starts after
 the context is bound carry it (see below).
 

@@ -454,7 +454,8 @@ requires an active runnable context and is not a process-wide service locator.
 The disposable execution child has no LangGraph runtime. Its bootstrap initializes
 `meiva.context`, `meiva.state` and `meiva.state_update` before user code runs; normal
 imports and threads in that one execution use those same child-local slots.
-SDK modules read context through `meiva.context`, not a separate context variable,
+SDK modules read context through `meiva.context` (framework and plugin access; it is not
+in the agent-visible surface), not a separate context variable,
 thread inheritance patch or hidden host-current getter. Shared-host code receives
 `Runtime[MeivaContext]`, an explicit context or the narrower dependency it needs.
 Plugin context-note builders receive `MeivaContext` explicitly. See the

@@ -57,6 +57,7 @@ checkout, not the installed skill copy. For a deployment, that source is
 | Understand Meiva plugins or develop a native plugin | [plugins](plugins/SKILL.md), then [plugins.develop](plugins/develop/SKILL.md) |
 | Inspect, message, create, or manage agents, commands, and config overlays | [agents](agents/SKILL.md) |
 | Choose a model for an agent | [models](models/SKILL.md) |
+| Read cluster data (audit, telemetry, inbox, tasks, schedules, costs), including a read-only database query | [cluster-data](cluster-data/SKILL.md) |
 | Look up or search what Meiva's agents have recorded (conventions, incidents, machine facts); decide whether something belongs in Memory | [memory](memory/SKILL.md) |
 | Write, create, inspect, or change persistent scheduled work | [schedules](schedules/SKILL.md) |
 | Launch and supervise an external harness agent (Claude Code, Codex, Antigravity) | [external-agents](external-agents/SKILL.md) |
