@@ -50,8 +50,8 @@ from agent.graph.claim.harness_render import (
 from agent.graph.claim.lost_turn import report_lost_turn
 from agent.graph.claim.timeline import append_turn_timeline
 from agent.graph.claim.turn_stamp import persist_last_active
-from agent.graph.hooks.question_context import read_agent_open_questions
 from agent.graph.hooks.node import HOOK_NOTES_KEY
+from agent.graph.hooks.question_context import read_agent_open_questions
 from agent.graph.hooks.user_delivery import capture_items, delivery_end_reminder
 from agent.graph.interrupt import (
     ModelInterruptedError,
