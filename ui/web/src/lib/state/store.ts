@@ -24,6 +24,13 @@
 import { create } from "zustand";
 
 import type { OpenTasksHint } from "../contracts/types";
+import {
+  onlyOpen,
+  withDraft,
+  withoutQuestions,
+  type QuestionDraft,
+  type QuestionDrafts,
+} from "./question-drafts-plan";
 import { registerSseRuntime } from "../transport/sse-lifecycle";
 
 // Single dismiss timer for the toast slot (see showToast).
@@ -81,6 +88,15 @@ interface UISlice {
   /** Search query for filtering agents in the sidebar by label / ID. */
   searchQuery: string;
   setSearchQuery: (q: string) => void;
+
+  // meiva:note
+  // The answer form's drafts and skips per agent and question, so switching to another agent and back
+  // keeps them. Memory only: never written to disk or sent to the server.
+  // meiva:link ui/web/src/docs/frontend-state/shared-context/questions.md
+  questionDrafts: QuestionDrafts;
+  setQuestionDraft: (agentId: number, questionId: number, draft: QuestionDraft) => void;
+  clearQuestionDrafts: (agentId: number, questionIds: readonly number[]) => void;
+  pruneQuestionDrafts: (agentId: number, openIds: readonly number[]) => void;
 }
 
 // =============================================================
@@ -155,6 +171,20 @@ export const useStore = create<Store>()((set) => ({
 
   searchQuery: "",
   setSearchQuery: (q) => set({ searchQuery: q }),
+
+  questionDrafts: {},
+  setQuestionDraft: (agentId, questionId, draft) =>
+    set((s) => ({ questionDrafts: withDraft(s.questionDrafts, agentId, questionId, draft) })),
+  clearQuestionDrafts: (agentId, questionIds) =>
+    set((s) => {
+      const next = withoutQuestions(s.questionDrafts, agentId, questionIds);
+      return next === s.questionDrafts ? s : { questionDrafts: next };
+    }),
+  pruneQuestionDrafts: (agentId, openIds) =>
+    set((s) => {
+      const next = onlyOpen(s.questionDrafts, agentId, openIds);
+      return next === s.questionDrafts ? s : { questionDrafts: next };
+    }),
 
   // -- Cluster-coordination defaults --
   reconnectNonce: 0,

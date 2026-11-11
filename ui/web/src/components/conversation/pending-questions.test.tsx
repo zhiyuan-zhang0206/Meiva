@@ -5,6 +5,7 @@ import { afterEach, beforeEach, expect, it } from "vitest";
 import type { QuestionItem } from "@/lib/contracts/types";
 import { QUESTION_REGION_MAX_HEIGHT_CLASS } from "@/lib/layout/layout";
 import { QUESTIONS_QUERY_KEY, dropTombstonesResetForTest } from "@/lib/notifications/use-questions";
+import { useStore } from "@/lib/state/store";
 import { resetTransport, transport } from "@/test-support/fake-api";
 import { renderWithProviders } from "@/test-support/render";
 import { PendingQuestions } from "./pending-questions";
@@ -20,6 +21,7 @@ function renderQuestions(ui: ReactElement) {
 }
 
 beforeEach(() => {
+  useStore.setState({ questionDrafts: {} });
   resetTransport();
   transport.getSettings.mockResolvedValue({ settings: [] });
 });
