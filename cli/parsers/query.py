@@ -1,6 +1,6 @@
 # meiva:note
-# `meiva events` — read-only queries over the cluster's event stream, as a thin client of the
-# gateway's read routes. Handlers lazy-import their `cmd_*` implementation so building the
+# `meiva events`, `meiva metrics` and `meiva stats` — read-only queries over the cluster's records, as
+# thin clients of the gateway's read routes. Handlers lazy-import their `cmd_*` implementation so building the
 # parser never loads Settings.
 
 from __future__ import annotations
@@ -132,3 +132,74 @@ def add_events_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) 
     count_p.add_argument("--by", choices=get_args(EventGroupBy), required=True)
     _add_event_filters(count_p)
     count_p.set_defaults(func=_h_events_count)
+
+
+@dataclass(frozen=True)
+class _MetricsAgentsOptions:
+    days: int | None
+    since_compact: bool
+    json: bool
+
+
+@dataclass(frozen=True)
+class _StatsOptions:
+    hours: int | None
+    json: bool
+
+
+def _h_metrics_agents(args: argparse.Namespace) -> int:
+    from base.cluster.machine.boot import gateway_access_from_boot
+    from cli.commands.management.query.metrics import cmd_metrics_agents
+    from cli.database.runtime import runtime_of
+
+    opts = options(args, _MetricsAgentsOptions)
+    return cmd_metrics_agents(
+        gateway_access_from_boot(runtime_of(args).config),
+        days=opts.days,
+        since_compact=opts.since_compact,
+        as_json=opts.json,
+    )
+
+
+def _h_stats(args: argparse.Namespace) -> int:
+    from base.cluster.machine.boot import gateway_access_from_boot
+    from cli.commands.management.query.metrics import cmd_stats
+    from cli.database.runtime import runtime_of
+
+    opts = options(args, _StatsOptions)
+    return cmd_stats(
+        gateway_access_from_boot(runtime_of(args).config), hours=opts.hours, as_json=opts.json
+    )
+
+
+def add_metrics_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
+    # meiva:note
+    # `meiva metrics agents` reads the per-agent cost, token and turn breakdown.
+    metrics_p = sub.add_parser("metrics", help="per-agent cost, token and turn breakdown")
+    metrics_sub = metrics_p.add_subparsers(dest="metrics_cmd", required=True)
+    agents_p = metrics_sub.add_parser(
+        "agents", help="one row per agent over the last N days, the costliest first"
+    )
+    agents_p.add_argument("--days", type=int, help="window in days, 1..30; default: the gateway's")
+    agents_p.add_argument(
+        "--since-compact",
+        action="store_true",
+        help="count each agent's events from its latest compaction on",
+    )
+    agents_p.add_argument("--json", action="store_true", help="print the gateway response as JSON")
+    agents_p.set_defaults(func=_h_metrics_agents)
+
+
+def add_stats_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
+    # meiva:note
+    # `meiva stats` reads the fleet totals of the sidebar Status popover and the plugin cards.
+    stats_p = sub.add_parser(
+        "stats", help="fleet cost, tokens and alert totals, and plugin status cards (balances)"
+    )
+    stats_p.add_argument(
+        "--hours",
+        type=int,
+        help="window: 0 (last 5 minutes), 1, 6, 24, 72, 168 or 720 hours; default: the gateway's 24",
+    )
+    stats_p.add_argument("--json", action="store_true", help="print the gateway response as JSON")
+    stats_p.set_defaults(func=_h_stats)
