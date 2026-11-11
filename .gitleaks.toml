@@ -23,19 +23,6 @@ commits = [
     "c15f00344d4805b82ed2e0cda824a7527cc0b943",
 ]
 
-# The empty bot-token placeholder is immediately followed by the owner-id
-# setting. Limit the exception to the environment template and exact match.
-[[allowlists]]
-description = "Empty Telegram bot-token placeholder in the environment template"
-condition = "AND"
-paths = [
-    '''^\.env\.example$''',
-]
-regexTarget = "match"
-regexes = [
-    '''(?s)[A-Z]{3,5}_TELEGRAM_BOT_TOKEN=\n[A-Z]{3,5}_TELEGRAM_OWNER_ID=0''',
-]
-
 # This demo's fixed localStorage key is not an API key. Keep its exception
 # limited to this exact value in the weekly-planner demo.
 [[allowlists]]

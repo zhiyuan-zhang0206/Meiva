@@ -218,8 +218,8 @@ finish in one change freezes what is left; a finished one has none.
    type in its package, build it at the root, take it in the constructor, make tests
    build the type instead of patching `settings`, and declare the package sliced in
    its `ambient_roots.toml`. Order: the slices no other package reads (31 in the survey)
-   first, then the shared kernel and the secrets. The IM bridge batch is done
-   (below); the other slices of that kind follow the same pattern.
+   first, then the shared kernel and the secrets. The events-maintenance and labeler
+   batches are done (below); the other slices of that kind follow the same pattern.
 5. **Turn context.** Move the config pins, plugin config and turn identity from
    ContextVars into `MeivaContext` once the agent-level slices exist; delete the
    views and the lint that polices them.
@@ -235,15 +235,7 @@ finish in one change freezes what is left; a finished one has none.
 
 ## Config slices (done)
 
-Batches so far: the IM bridge daemon, then the events-maintenance and labeler daemons
-(below). Each package declares itself sliced in its `ambient_roots.toml` with its daemon as the root.
-
-### IM bridge
-
-The gateway-side IM daemon builds `ImBridgeConfig` from its `ConfigBoot` and
-passes it to the shared core. The retained Weixin adapter receives its state
-directory, clock and random generator. Telegram and Feishu native integrations
-are retired by the [2026-11-06 decision](../../../docs/history/2026-11-06/im-channel-retirement.md).
+Batches so far: the events-maintenance and labeler daemons (below). Each package declares itself sliced in its `ambient_roots.toml` with its daemon as the root.
 
 ### Events maintenance and labeler
 
@@ -296,7 +288,7 @@ and the clock; the endpoint table is indexed by service name, a daemon taking on
 - **Held by a rule, package by package**: the `ambient-db` rule of the ambient-state gate bans the
   shim in the packages listed in `DB_HANDLE_PACKAGES` (`scripts/structure/ambient_state/
   allowlist.py`), and bans `Database.from_settings()` outside the roots named there. Listed so far:
-  labeler, events maintenance, IM bridge. A package joins when its
+  labeler, events maintenance. A package joins when its
   last ambient dial is gone, in the same change; the shim is deleted with the last package.
 - **Done, the endpoint table** (`base/daemon/endpoints.py`): `ServiceEndpoints.from_settings()`
   builds one row per health daemon (`ServiceEndpoint`: name, healthz port, pidfile under
@@ -307,7 +299,7 @@ and the clock; the endpoint table is indexed by service name, a daemon taking on
   manifests' `[state]`/`[roots]` and the `ambient-read` rule) failed `ServiceEndpoints.
   from_settings()` outside the modules named in `ENDPOINT_PACKAGES`: every daemon root, and the
   entry points of the commands and probes that read a daemon's row (agent pause, cluster pause,
-  lifecycle, cluster status, roster, IM alert delivery, machine registration). Those entry points
+  lifecycle, cluster status, roster, machine registration). Those entry points
   are their own roots; threading the table through them is not done.
 - **Done, the event bus** (`base/events/live/bus.py`): `EventBusConfig` (Redis URL, events
   channel) is read once, by `EventBus.from_settings()`; the handle gives `async_redis()` (one
@@ -334,10 +326,9 @@ and the clock; the endpoint table is indexed by service name, a daemon taking on
   command and the cluster-status probe); libraries build their own clock at the call. The
   endpoint, bus and clock rules share one shape (`scripts/structure/ambient_state/rootrule.py`).
 - **Done, the cluster secret** (behavior change, `docs/decisions/data/security/2026-10-03-cluster-secret-contraction.md`):
-  outside the gateway, the CLI and the root, no component holds the human secret. im_bridge
-  presents its machine API token and accepts the write generation's tokens on `/send`
-  (`base.cluster.machine.daemon_acceptance`, shared with the ops server); the callers of `/send`
-  send `gateway_auth_headers()`; the heartbeat's station probe reads the telemetry token from a
+  outside the gateway, the CLI and the root, no component holds the human secret. The daemons
+  present their machine API token and accept the write generation's tokens
+  (`base.cluster.machine.daemon_acceptance`, shared with the ops server); the heartbeat's station probe reads the telemetry token from a
   private file the gateway home's start writes. A remote-managed data plane keeps the human secret
   (it issues no token), in `daemon_acceptance` and `gateway_bearer` only.
 - **Root-local bundles**: a root may gather what it wires into a frozen dataclass marked

@@ -77,16 +77,12 @@ def ingest_authorized(request: Request) -> bool:
 
 
 @router.post("/api/alerts")
+# meiva:note
+# Alertmanager webhook endpoint: the body is the standard webhook payload (`status` +
+# `alerts[]`). One row per (fingerprint, starts_at); re-sends while firing update the row,
+# resolution flips status and sets ends_at. Every ingested row is published to the SSE stream;
+# nothing delivers it elsewhere.
 def ingest_alerts(body: AlertWebhookPayload, request: Request) -> AlertIngestResult:
-    """Alertmanager webhook endpoint — store + SSE publish + IM notify.
-
-    Body is the standard Alertmanager webhook payload (``status`` +
-    ``alerts[]``). One row per (fingerprint, starts_at); re-sends while
-    firing update the row, resolution flips status + sets ends_at. Every
-    firing transition notifies IM (all severities) and every ingested row
-    is published to the SSE stream.
-    """
-
     if not ingest_authorized(request):
         raise HTTPException(status_code=401, detail="unauthorized webhook caller")
 

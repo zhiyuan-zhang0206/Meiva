@@ -14,10 +14,10 @@ the mechanical publish steps.
 
 ## IM ingress channels (20+)
 
-Today: Weixin is the only shipped native IM adapter, and remains production-disabled
-since 2026-08-06. Telegram and Feishu were retired by the 2026-11-06 user decision.
-The shared bridge command framework remains available for an explicitly enabled
-Weixin account; web notices and conversations remain independent surfaces.
+Today: Meiva has no IM support. Telegram and Feishu were retired on 2026-11-06 and
+Weixin, the last adapter, with the whole IM bridge on 2026-11-08
+([decision](../../docs/decisions/extensions/im/2026-11-08-im-support-removed.md)). Web
+notices and conversations are the only surfaces.
 
 At open-source time: native ingress for the IM apps users actually live in —
 Slack, Discord, WhatsApp, Signal, WeChat/Weixin, and the

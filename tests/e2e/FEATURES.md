@@ -12,7 +12,7 @@ the meiva_code after_exec bug broke: every test passed because none asserted the
 
 **Harness.** `tests/e2e/conftest.py` starts gateway, agent-ops, agent-host, pty-sessions, the Next.js
 frontend and Playwright, with a scripted fake model (`MEIVA_LLM_OVERRIDE`) and gateway auth off, on one
-machine. Not in the stack: heartbeat, delivery-watchdog, schedule-manager, insights, im-bridge,
+machine. Not in the stack: heartbeat, delivery-watchdog, schedule-manager, insights,
 memory-search/indexer, ttl-reaper, mcp-daemon, browser-mcp. Browser-free tests use the
 `spawned_agent` fixture and `tests/e2e/_db.py` helpers; the recording model in
 `fakes/scenarios/meiva_code.py` shows what the model was handed.
@@ -156,6 +156,5 @@ Each batch is one PR, ordered by importance; a batch adds the tests and flips th
 2. `execute_code` and SDK: E2 timeout, E3 crash, E4 files edge cases, E7/E8 attachments and uploads, E9 composer commands.
 3. Shell sessions: S2 `run_background` completion wake, S3 session verbs with asserted output, S4 survival across agent restart, agent-host restart and gateway restart, S7 watchers.
 4. Schedules: SC1 REST CRUD, SC2/SC3 manager plus runner driving an agent (needs schedule-manager in the stack).
-5. IM: IM1/IM2 bridge with a fake adapter (needs im-bridge in the stack).
-6. Plugin hook injection beyond meiva_code: PL1 `before_exec`, PL5 syntax-fix, PL8 notices and labels, PL10 tasks, PL11 memory.
-7. Public control plane: M4 gateway `/mcp` server, G1 auth (needs an auth-enabled gateway variant).
+5. Plugin hook injection beyond meiva_code: PL1 `before_exec`, PL5 syntax-fix, PL8 notices and labels, PL10 tasks, PL11 memory.
+6. Public control plane: M4 gateway `/mcp` server, G1 auth (needs an auth-enabled gateway variant).

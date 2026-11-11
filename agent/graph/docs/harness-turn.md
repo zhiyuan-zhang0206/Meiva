@@ -51,8 +51,8 @@ stable flat `<seq>.0` ID and a monotonic revision. A tool result revises its
 pending output in place, even if other tools or text appear in the meantime.
 The hosted runtime incarnation fences writes. After each commit the same
 checkpoint is published to the live timeline, and reloads read it from storage.
-The IM bridge accepts completed chat blocks. Incomplete text remains visible
-in the work history and is excluded from outbound message delivery.
+Incomplete text remains visible in the work history; only completed chat
+blocks count as replies.
 
 Cancellation and failure preserve committed work. Terminal handling flushes
 pending text (a reply cut off mid-stream is sealed as it stood, so it is

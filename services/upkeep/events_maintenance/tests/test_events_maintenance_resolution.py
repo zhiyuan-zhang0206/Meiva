@@ -465,9 +465,9 @@ def test_daemon_emits_dismissed_gauges_alongside_unresolved(
 def test_process_scopes_dismissal_matching() -> None:
 
     agent_host = event_class(process="agent_host")
-    im_bridge = event_class(process="im_bridge")
+    schedule_manager = event_class(process="schedule_manager")
     legacy = event_class()
-    counts = {agent_host: 3, im_bridge: 3, legacy: 1}
+    counts = {agent_host: 3, schedule_manager: 3, legacy: 1}
 
     exact = resolution.level_splits(counts, {agent_host})
     assert exact["warning"] == resolution.LevelSplit(total=7, dismissed=3, net=4)
@@ -484,10 +484,10 @@ def test_exact_dismissal_reopens_only_on_its_own_process_burst(
 ) -> None:
 
     host_class = event_class(process="agent_host")
-    bridge_class = event_class(process="im_bridge")
+    manager_class = event_class(process="schedule_manager")
     _insert_dismissal(db_conn, host_class)
-    _insert_dismissal(db_conn, bridge_class)
-    counts = {host_class: 6, bridge_class: 2}
+    _insert_dismissal(db_conn, manager_class)
+    counts = {host_class: 6, manager_class: 2}
 
     _seed(db_conn, unresolved=counts, burst=counts)
 
@@ -506,7 +506,7 @@ def test_exact_dismissal_reopens_only_on_its_own_process_burst(
         cur.execute("SELECT event_name, process, status FROM event_dismissals ORDER BY process")
         assert cur.fetchall() == [
             ("x", "agent_host", "reopened"),
-            ("x", "im_bridge", "dismissed"),
+            ("x", "schedule_manager", "dismissed"),
         ]
 
 
@@ -518,7 +518,7 @@ def test_wildcard_dismissal_reopens_on_the_whole_base_burst(
 ) -> None:
 
     _insert_dismissal(db_conn, event_class())
-    counts = {event_class(process="agent_host"): 4, event_class(process="im_bridge"): 2}
+    counts = {event_class(process="agent_host"): 4, event_class(process="schedule_manager"): 2}
 
     _seed(db_conn, unresolved=counts, burst=counts)
 
@@ -551,7 +551,7 @@ def test_category_agnostic_matching_keeps_the_process_rules() -> None:
 
     exact = event_class(category="log", process="agent_host")
     same_process = event_class(category="telemetry", process="agent_host")
-    other_process = event_class(category="telemetry", process="im_bridge")
+    other_process = event_class(category="telemetry", process="schedule_manager")
     counts = {same_process: 3, other_process: 3}
 
     scoped = resolution.level_splits(counts, {exact})
@@ -594,10 +594,10 @@ def test_exact_burst_valve_watches_its_process_across_the_category_split(
 ) -> None:
 
     _insert_dismissal(db_conn, event_class(category="log", process="agent_host"))
-    _insert_dismissal(db_conn, event_class(category="log", process="im_bridge"))
+    _insert_dismissal(db_conn, event_class(category="log", process="schedule_manager"))
     counts = {
         event_class(category="telemetry", process="agent_host"): 6,
-        event_class(category="telemetry", process="im_bridge"): 2,
+        event_class(category="telemetry", process="schedule_manager"): 2,
     }
 
     _seed(db_conn, unresolved=counts, burst=counts)

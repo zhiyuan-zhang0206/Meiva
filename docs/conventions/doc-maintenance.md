@@ -118,7 +118,7 @@ Personal, strategic, and deployment-specific material does not belong in
 this public tree — keep it in your own private storage (a private skills
 repo, the cluster memory pool):
 
-- Personal skills (IM, mail, social-media adapters tied to user accounts)
+- Personal skills (mail, social-media adapters tied to user accounts)
 - Deployment instance details (machine roster, IPs, CI fleet config)
 - Strategy/competitor notes
 - Raw run/result histories of your own deployment

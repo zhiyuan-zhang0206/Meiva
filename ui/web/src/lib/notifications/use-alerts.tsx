@@ -1,8 +1,8 @@
 "use client";
 
+// meiva:note
 // Alerts live data — the Alert system's SSE provider + cache hooks
-// (Task #1224). Alert is fully separate from Notice: own table, own UI, own
-// IM channel.
+// (Task #1224). Alert is fully separate from Notice: own table, own UI.
 //
 // One profile-shared stream to /api/alerts/stream feeds the TanStack Query ["alerts"]
 // prefix: every frame invalidates matching snapshots — no polling for

@@ -115,7 +115,7 @@ from `<MEIVA_HOME>/.env`.
 | Key | Default | What the open value allows | Check |
 |---|---|---|---|
 | `MEIVA_GATEWAY_HUMAN_AUTH` | `trusted_network` | Any client that reaches the listener is served as the cluster administrator; the browser `Origin` and `Host` checks still apply | `grep -c '^MEIVA_GATEWAY_HUMAN_AUTH=required' "$MEIVA_HOME/.env"` returns 1, and no such line appears at gateway start |
-| `MEIVA_ALERTS_WEBHOOK_TOKEN` | unset | `POST /api/alerts` admits any loopback caller without a credential (any process on the box can forge an alert and its IM notification) and refuses a webhook sent from another host | `grep -c '^MEIVA_ALERTS_WEBHOOK_TOKEN=.' "$MEIVA_HOME/.env"` returns 1, and no such line appears at gateway start |
+| `MEIVA_ALERTS_WEBHOOK_TOKEN` | unset | `POST /api/alerts` admits any loopback caller without a credential (any process on the box can forge an alert) and refuses a webhook sent from another host | `grep -c '^MEIVA_ALERTS_WEBHOOK_TOKEN=.' "$MEIVA_HOME/.env"` returns 1, and no such line appears at gateway start |
 
 Both keys live in `<MEIVA_HOME>/.env` and take effect on the next gateway restart. A key
 that is written — even when its value is the open one — silences the line: the operator

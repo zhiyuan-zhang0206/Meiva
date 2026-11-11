@@ -94,13 +94,6 @@ def _assert_gitleaks_policy_allowlists() -> None:
         "c15f00344d4805b82ed2e0cda824a7527cc0b943",
     }
     assert allowlists[1] == {
-        "description": "Empty Telegram bot-token placeholder in the environment template",
-        "condition": "AND",
-        "paths": [r"^\.env\.example$"],
-        "regexTarget": "match",
-        "regexes": [r"(?s)[A-Z]{3,5}_TELEGRAM_BOT_TOKEN=\n[A-Z]{3,5}_TELEGRAM_OWNER_ID=0"],
-    }
-    assert allowlists[2] == {
         "description": "Weekly planner demo localStorage key",
         "condition": "AND",
         "paths": [r"^demos/goal-mode/weekly-planner/store\.js$"],

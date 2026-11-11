@@ -10,7 +10,7 @@ Receipt replay precedes mutable target and expiration checks, survives
 deletion, and never selects the later current row. A receipt is historical
 acceptance, not proof the row is still active.
 
-Browser, CLI and IM bridge resolution use the keyed
+Browser and CLI resolution use the keyed
 resolve path; the browser's mounted reply component retains a key for manual
 same-intent recovery after failure. A changed action, reply or target gets a new
 key. The resolve response is 201 with the original optional `inbound_id`;

@@ -19,7 +19,7 @@ meiva.ui.ask(
 
 Options are numbered **1, 2, ... in their declared order**, not sorted by ID,
 label, recommendation or selection. The same numbers appear in Web, inspector,
-CLI, IM, history and agent inbounds.
+CLI, history and agent inbounds.
 
 There are three answer types:
 
@@ -46,7 +46,7 @@ text answers send `answer.text`. Existing stored answers and other callers'
 optional text-answer comments remain compatible with the wire contract.
 The gateway validates against the stored immutable question and
 stores the canonical answer and readable reply in the same transaction as the
-agent inbound. CLI and IM use option numbers separated by commas on the first
+agent inbound. CLI uses option numbers separated by commas on the first
 line, followed by an optional multiline comment. Open questions accept plain text.
 A numbered reply writes `0` on that first line to choose nothing, then the
 comment below it — the same comment-only answer the Web form submits, so no

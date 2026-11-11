@@ -104,8 +104,9 @@ def _validate_choice_fields(question: ChoiceQuestion, answer: NoticeAnswer) -> N
         raise ValueError("Other is not an answer option; use a choice with an optional comment")
 
 
+# meiva:note
+# One one-based option mapping for terminal and agent inbounds.
 def numbered_options(question: ChoiceQuestion) -> str:
-    """Render the same one-based option mapping for terminal, IM and agent inbounds."""
     lines: list[str] = []
     for number, option in enumerate(question.options, start=1):
         line = f"{number}. {option.label}"
@@ -131,8 +132,9 @@ def question_instructions(question: NoticeQuestion) -> str:
     )
 
 
+# meiva:note
+# Adapts a CLI reply to the same answer contract as the Web form.
 def parse_numbered_answer(question: NoticeQuestion, reply: str) -> NoticeAnswer:
-    """Adapt a CLI/IM reply to the same answer contract as the Web form."""
     if isinstance(question, TextQuestion):
         return validate_answer(question, NoticeAnswer(text=reply))
     first, _, following = reply.strip().partition("\n")
