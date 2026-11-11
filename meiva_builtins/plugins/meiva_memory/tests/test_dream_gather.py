@@ -222,9 +222,9 @@ def test_dream_gather_cli_json_and_markdown(
 
 
 def test_gather_rejects_frontmatter_sources(tmp_path: Path) -> None:
-    (tmp_path / "note.md").write_text("---\nsources: null\n---\n# Rule")
+    _ = (tmp_path / "note.md").write_text("---\nsources: null\n---\n# Rule")
     with pytest.raises(ValueError, match="frontmatter sources is forbidden"):
-        dream_gather.gather_signals(tmp_path, today=_dt.date(2026, 11, 9))
+        _ = dream_gather.gather_signals(tmp_path, today=_dt.date(2026, 11, 9))
 
 
 def test_vault_file_history_drives_source_drift(tmp_path: Path) -> None:
@@ -232,7 +232,7 @@ def test_vault_file_history_drives_source_drift(tmp_path: Path) -> None:
     pool = vault / "memory"
     pool.mkdir()
     _git_commit(vault, "sources/ruling.jsonl", "{}\n", "2026-11-05", "evidence")
-    (pool / "rule.md").write_text(
+    _ = (pool / "rule.md").write_text(
         '---\nverified: "2026-11-01"\n---\n[Evidence](/sources/ruling.jsonl)'
     )
     report = dream_gather.gather_signals(pool, today=_dt.date(2026, 11, 9))
@@ -254,3 +254,35 @@ def _repo_head(repo: Path) -> str:
         timeout=30,
     )
     return result.stdout.strip()
+
+
+def test_gather_hash_mode_and_cross_host_scope(tmp_path: Path) -> None:
+    from meiva_builtins.plugins.meiva_memory.skills.consolidation.scripts.workspace_memory import (
+        collect_candidates,
+    )
+
+    pool = tmp_path / "vault" / "memory"
+    pool.mkdir(parents=True)
+    home = tmp_path / "home"
+    remote = tmp_path / "remote"
+    for root, agent in ((home, "1"), (remote, "2")):
+        note = root / "workspaces" / agent / "memory" / "rule.md"
+        note.parent.mkdir(parents=True)
+        _ = note.write_text(
+            "# Shared review protocol\nUse content hashes to review private notes once."
+        )
+    export = tmp_path / "remote.json"
+    _ = export.write_text(json.dumps(collect_candidates(remote, "ubuntu")))
+    report = dream_gather.gather_signals(
+        pool,
+        home=home,
+        machine="macmini",
+        today=_dt.date(2099, 1, 1),
+        include_unreviewed=True,
+        remote_candidates=[export],
+    )
+    candidates = report["workspace_memory_candidates"]
+    assert is_object_list(candidates) and len(candidates) == 2
+    trapped = report["scope_trapped_candidates"]
+    assert is_object_list(trapped) and len(trapped) == 2
+    assert "## Scope-Trapped Promotion Candidates (2)" in dream_gather.render_report(report)

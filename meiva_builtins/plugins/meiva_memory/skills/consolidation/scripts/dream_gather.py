@@ -18,6 +18,13 @@ from meiva_builtins.plugins.meiva_memory.pool_ops import (
     pool_dir,
     untracked_notes,
 )
+from meiva_builtins.plugins.meiva_memory.skills.consolidation.scripts.workspace_memory import (
+    collect_candidates,
+    filter_candidates,
+    merge_candidates,
+    record_review,
+    scope_traps,
+)
 from meiva_builtins.plugins.meiva_memory.template.validate import (
     body_links,
     note_parts,
@@ -326,6 +333,11 @@ def gather_signals(
     today: _dt.date,
     since_days: int = 7,
     max_verified_age_days: int = 30,
+    machine: str = "local",
+    ledger: Path | None = None,
+    include_unreviewed: bool = False,
+    remote_candidates: Sequence[Path] = (),
+    user_demand_jsonl: Path | None = None,
 ) -> dict[str, object]:
     resolved_home = home if home is not None else resolve_meiva_home()
     repo_map = _source_roots(pool, repos)
@@ -343,7 +355,21 @@ def gather_signals(
     source_drift = _scan_note_sources(records, repo_map, touches_by_repo, since_cutoff)
     missing_okf = [gap for rec in records if (gap := _missing_okf_entry(rec)) is not None]
     conflict_notes = [rec.path for rec in records if rec.has_conflict_marker]
+    workspace, skipped, traps = _workspace_signals(
+        resolved_home,
+        machine,
+        ledger,
+        repo_map["vault"],
+        since_cutoff,
+        include_unreviewed,
+        remote_candidates,
+        pool,
+        records,
+        user_demand_jsonl,
+    )
     return {
+        "skipped_reviewed_count": skipped,
+        "scope_trapped_candidates": traps,
         "pool": str(pool),
         "today": today.isoformat(),
         "total_notes": len(records),
@@ -351,13 +377,38 @@ def gather_signals(
         "expired_notes": _expired_entries(records, today),
         "aging_verified_notes": _aging_entries(records, today, max_verified_age_days),
         "missing_okf_notes": missing_okf,
-        "workspace_memory_candidates": _workspace_memory_candidates(resolved_home, since_cutoff),
+        "workspace_memory_candidates": workspace,
         "pool_hotspots": {
             "churn_hotspots": _pool_churn_hotspots(pool, pool_window_touches),
             "conflict_markers": conflict_notes,
             "uncommitted_notes": _pool_dirty_notes(pool),
         },
     }
+
+
+def _workspace_signals(
+    home: Path,
+    machine: str,
+    ledger: Path | None,
+    vault: Path,
+    since_cutoff: _dt.date,
+    include_unreviewed: bool,
+    remote_candidates: Sequence[Path],
+    pool: Path,
+    records: Sequence[NoteRecord],
+    user_demand_jsonl: Path | None,
+) -> tuple[list[dict[str, str]], int, list[dict[str, object]]]:
+    ledger_path = ledger or vault / "sources/dream/workspace-memory-ledger.json"
+    candidates = merge_candidates(collect_candidates(home, machine), remote_candidates)
+    filtered, skipped = filter_candidates(candidates, ledger_path, since_cutoff, include_unreviewed)
+    enhanced = ledger_path.exists() or include_unreviewed or bool(remote_candidates)
+    workspace = filtered if enhanced else _workspace_memory_candidates(home, since_cutoff)
+    traps = scope_traps(
+        filtered,
+        [(pool / rec.path).read_text(encoding="utf-8") for rec in records],
+        user_demand_jsonl,
+    )
+    return workspace, skipped, traps
 
 
 def _dict_items(value: object) -> list[dict[str, object]]:
@@ -452,6 +503,12 @@ def render_report(report: Mapping[str, object]) -> str:
     _append_hotspot_section(lines, report)
     _append_lifecycle_sections(lines, report)
     _append_workspace_section(lines, report)
+    trapped = _dict_items(report.get("scope_trapped_candidates"))
+    lines.append(f"\n## Scope-Trapped Promotion Candidates ({len(trapped)})")
+    for row in trapped:
+        lines.append(f"- P0 `{row.get('path')}`: {row.get('reason')}")
+    if not trapped:
+        lines.append("- (none)")
     return "\n".join(lines) + "\n"
 
 
@@ -473,6 +530,47 @@ class _Arguments:
     since_days: int
     max_verified_age_days: int
     json_output: bool
+    machine: str
+    ledger: str | None
+    include_unreviewed: bool
+    collect_workspace_candidates: bool
+    remote_candidates: list[str]
+    user_demand_jsonl: str | None
+    record_review: str | None
+    status: str | None
+    promoted_to: str | None
+    prune_private: bool
+
+
+def _review_action(
+    args: _Arguments,
+    ap: argparse.ArgumentParser,
+    home: Path,
+    pool: Path,
+    ledger: Path,
+    today: _dt.date,
+) -> bool:
+    if args.collect_workspace_candidates:
+        print(json.dumps(collect_candidates(home, args.machine), indent=2, sort_keys=True))
+        return True
+    if args.record_review:
+        if args.status is None:
+            ap.error("--record-review requires --status")
+        record_review(
+            home,
+            ledger,
+            args.record_review,
+            args.status,
+            args.promoted_to,
+            today,
+            args.prune_private,
+            args.machine,
+            pool,
+        )
+        return True
+    if args.status or args.promoted_to or args.prune_private:
+        ap.error("review options require --record-review")
+    return False
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -505,12 +603,30 @@ def main(argv: Sequence[str] | None = None) -> int:
         action="store_true",
         help="Print structured JSON report instead of Markdown",
     )
+    _ = ap.add_argument("--machine", default="local")
+    _ = ap.add_argument("--ledger")
+    _ = ap.add_argument("--include-unreviewed", action="store_true")
+    _ = ap.add_argument("--collect-workspace-candidates", action="store_true")
+    _ = ap.add_argument("--remote-candidates", action="append", default=[])
+    _ = ap.add_argument("--user-demand-jsonl")
+    _ = ap.add_argument("--record-review")
+    _ = ap.add_argument("--status", choices=["promoted", "local_only"])
+    _ = ap.add_argument("--promoted-to")
+    _ = ap.add_argument("--prune-private", action="store_true")
     args = options(ap.parse_args(argv), _Arguments)
     home = resolve_meiva_home()
     pool = Path(args.pool).expanduser().resolve() if args.pool else pool_dir(home)
     today = _parse_date(args.today) if args.today else _dt.datetime.now(_dt.UTC).date()
     if today is None:
         raise SystemExit(f"Invalid --today date (expected YYYY-MM-DD): {args.today!r}")
+    vault = pool.parent if pool.name == "memory" else pool
+    ledger = (
+        Path(args.ledger).expanduser()
+        if args.ledger
+        else vault / "sources/dream/workspace-memory-ledger.json"
+    )
+    if _review_action(args, ap, home, pool, ledger, today):
+        return 0
     repos = _parse_repo_specs(args.repo)
     report = gather_signals(
         pool,
@@ -519,6 +635,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         today=today,
         since_days=args.since_days,
         max_verified_age_days=args.max_verified_age_days,
+        machine=args.machine,
+        ledger=ledger,
+        include_unreviewed=args.include_unreviewed,
+        remote_candidates=[Path(path).expanduser() for path in args.remote_candidates],
+        user_demand_jsonl=Path(args.user_demand_jsonl).expanduser()
+        if args.user_demand_jsonl
+        else None,
     )
     try:
         if args.json_output:
