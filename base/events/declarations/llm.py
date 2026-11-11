@@ -165,6 +165,11 @@ EVENTS: dict[str, EventSpec] = {
         "compact boundary stamp failed (segment anchor not recorded)",
         tier="noise",
     ),
+    "open_questions_unavailable": telemetry_event(
+        "open_questions_unavailable",
+        "an agent's open questions could not be read; the list was left out of its context",
+        tier="noise",
+    ),
     "llm_retry": telemetry_event(
         "llm_retry", "LLM retry sequence completion", payload=LlmRetry, tier="observation"
     ),
