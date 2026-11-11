@@ -12,7 +12,7 @@ from meiva.tests.fixtures.replay_sdk_write import replay_sdk_write
 pytestmark = pytest.mark.usefixtures("gateway_data_plane", "sdk_identity")
 
 
-def test_sdk_publication_and_reader_share_the_gateway_contract(db_conn: psycopg.Connection) -> None:
+def test_sdk_publish_is_replayed_by_its_runtime_key(db_conn: psycopg.Connection) -> None:
     agent_id = create_agent(db_conn)
     db_conn.execute(
         "INSERT INTO agents_meta (birth_config, id, spawner, status) VALUES (%s,%s,'test','idling')",
@@ -23,23 +23,11 @@ def test_sdk_publication_and_reader_share_the_gateway_contract(db_conn: psycopg.
     with gateway_test_client(base_url="http://test-gateway") as client, use_client(client):
         first = replay_sdk_write("first", ui.publish, "First milestone", suggestions=[])
         assert replay_sdk_write("first", ui.publish, "First milestone", suggestions=[]) == first
-        second = ui.publish(
-            "Choose a scope",
-            suggestions=["Small", "Large"],
-        )
-        records = ui.publications(limit=1)
-        assert [record.id for record in records] == [first]
-        assert [record.id for record in ui.publications(after_id=first)] == [second]
-        assert [record.seen for record in ui.publications()] == [False, False]
-        assert [record.seen for record in ui.publications(pending_only=False)] == [False, False]
-        db_conn.execute(
-            "INSERT INTO agent_user_seen (agent_id, seen_id) VALUES (%s, %s)", (agent_id, first)
-        )
-        db_conn.commit()
-        assert [record.id for record in ui.publications()] == [second]
-        assert [record.seen for record in ui.publications(pending_only=False)] == [True, False]
+        assert ui.publish("Choose a scope", suggestions=["Small", "Large"]) != first
         ui.publish(None, suggestions=[])
-        assert len(ui.publications(pending_only=False)) == 2
+    assert db_conn.execute(
+        "SELECT count(*) FROM agent_user_messages WHERE agent_id=%s", (agent_id,)
+    ).fetchone() == (3,)
 
 
 def test_sdk_ask_keeps_multiple_questions_and_agent_note_drafts(
@@ -67,10 +55,21 @@ def test_sdk_ask_keeps_multiple_questions_and_agent_note_drafts(
             == first
         )
         second = ui.ask("When?", note_suggestion="Tomorrow")
-        rows = ui.questions()
-        assert {row["id"] for row in rows} == {first, second}
-        assert rows[0]["answer"] is None
+        assert first != second
+        ui.close_question(first)
+        replay_sdk_write("close", ui.close_question, second)
+        replay_sdk_write("close", ui.close_question, second)
+        with pytest.raises(LookupError):
+            ui.close_question(second + 1000)
     assert db_conn.execute(
         "SELECT action, subject FROM notification_events WHERE category = 'core.question' "
         "ORDER BY id"
-    ).fetchall() == [("alert", "Choose scope"), ("alert", "When?")]
+    ).fetchall() == [
+        ("alert", "Choose scope"),
+        ("alert", "When?"),
+        ("retract", "Choose scope"),
+        ("retract", "When?"),
+    ]
+    assert db_conn.execute(
+        "SELECT resolution FROM agent_notices WHERE agent_id=%s ORDER BY id", (agent_id,)
+    ).fetchall() == [("withdrawn",), ("withdrawn",)]

@@ -232,6 +232,10 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
         Idempotency.AT_LEAST_ONCE_WITH_KEY,
         note="persistent question and receipt commit atomically",
     ),
+    ("POST", "/api/agents/{agent_id}/asks/{question_id}/close"): RouteContract(
+        Idempotency.AT_LEAST_ONCE_WITH_KEY,
+        note="the agent withdraws its own open question; closing an already withdrawn one is a no-op",
+    ),
     ("GET", "/api/agents/{agent_id}/user-messages"): RouteContract(),
     ("POST", "/api/agents/{agent_id}/user-messages"): RouteContract(
         Idempotency.AT_LEAST_ONCE_WITH_KEY,

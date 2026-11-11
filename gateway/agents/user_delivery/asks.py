@@ -1,24 +1,31 @@
 # meiva:note
-# Persistent questions reuse the existing answer store and transaction receipts.
+# Persistent questions reuse the existing answer store and transaction receipts. An agent can close
+# its own unanswered question; it can never edit one.
 
 import asyncio
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from psycopg.rows import scalar_row
+from psycopg.rows import class_row, scalar_row
 from psycopg.types.json import Jsonb
+from pydantic import BaseModel
 
 from base.api_contracts.notice_question import ChoiceQuestion
 from base.api_contracts.user_delivery import AskMessage
 from base.db.transaction import write_transaction
-from base.events.notifications.publish import stage_question_asked
+from base.events.notifications.publish import stage_question_asked, stage_question_resolved
 from gateway.agents.inbound_provenance import request_inbound_provenance
 from gateway.agents.notice_operations.keyed_operation import operation_key
 from gateway.agents.notice_operations.notices import existing_receipt, save_receipt
 from gateway.http.config import gateway_state
-from ops.lifecycle import publish_notice_posted
+from ops.lifecycle import publish_notice_posted, publish_notice_resolved
 
 router = APIRouter()
+
+
+class _CloseTarget(BaseModel):
+    title: str
+    resolution: str | None
 
 
 @router.post("/api/agents/{agent_id}/asks", status_code=201)
@@ -65,4 +72,55 @@ async def ask(
 
     question_id = await asyncio.to_thread(write)
     await publish_notice_posted(gateway_state(request).bus, agent_id, question_id, body.title)
+    return {"id": question_id}
+
+
+# meiva:note
+# The agent closes its own open question: `resolution='withdrawn'`, the question's push is retracted
+# exactly as an answer retracts it, and no inbound is delivered (the agent did this itself). A question
+# of another agent and one that does not exist are the same 404, so the route names no one else's
+# question. A question the user answered or dismissed is a 409 that names the outcome; one already
+# withdrawn is a no-op success.
+@router.post("/api/agents/{agent_id}/asks/{question_id}/close")
+async def close_ask(
+    agent_id: int,
+    question_id: int,
+    request: Request,
+    key: Annotated[str, Depends(operation_key)],
+) -> dict[str, int]:
+    payload: dict[str, object] = {"question_id": question_id}
+
+    def write() -> bool:
+        with write_transaction(gateway_state(request).db_pool) as conn:
+            if existing_receipt(conn, request.url.path, key, payload) is not None:
+                return False
+            with conn.cursor(row_factory=class_row(_CloseTarget)) as cur:
+                cur.execute(
+                    "SELECT title, resolution FROM agent_notices "
+                    "WHERE id=%s AND agent_id=%s FOR UPDATE",
+                    (question_id, agent_id),
+                )
+                target = cur.fetchone()
+                if target is None:
+                    raise HTTPException(404, f"question {question_id} does not exist")
+                if target.resolution is not None and target.resolution != "withdrawn":
+                    raise HTTPException(
+                        409, f"question {question_id} was already {target.resolution}"
+                    )
+                closed = target.resolution is None
+                if closed:
+                    cur.execute(
+                        "UPDATE agent_notices SET resolved_at=now(), resolution='withdrawn' "
+                        "WHERE id=%s",
+                        (question_id,),
+                    )
+            if closed:
+                stage_question_resolved(
+                    conn, agent_id=agent_id, notice_id=question_id, title=target.title
+                )
+            save_receipt(conn, request.url.path, key, payload, payload)
+            return closed
+
+    if await asyncio.to_thread(write):
+        await publish_notice_resolved(gateway_state(request).bus, agent_id, question_id)
     return {"id": question_id}

@@ -16,16 +16,21 @@
   options. Text questions have one answer field; choices keep an optional Note.
   `note_suggestion` offers light candidate text for that field until the user
   explicitly applies it.
-- `publications(pending_only=True, after_id=0, limit=50)` reads durable messages
-  in increasing ID order; each carries `seen`, whether the user has seen it (their seen
-  position advances when they open the conversation, and `pending_only` keeps those
-  past it). Reading never marks anything seen. Continue after the last ID.
-- `questions()` reads up to 500 open questions without answering them.
+- `close_question(question_id) -> None` closes one of the agent's own unanswered
+  questions (`resolution='withdrawn'`): its notification is withdrawn, the user no
+  longer sees it as awaiting an answer, and nothing is delivered to the agent. A
+  closed question closes again quietly; a missing or foreign id raises
+  `LookupError`; one the user already answered or dismissed raises `ValueError`.
+  A question cannot be edited.
+
+Each `ask` call asks one question and returns its own ID; any number may be open
+at once. There is no
+read entry for publications or questions: the runtime shows the agent its
+unanswered questions itself.
 
 The runtime owns operation identity for SDK writes and deterministic replay.
-The gateway refuses changed content under an accepted key. Several questions
-may remain open concurrently. New Ask
-records do not expire automatically. Their content and answers remain durable.
+The gateway refuses changed content under an accepted key. New Ask records do
+not expire automatically. Their content and answers remain durable.
 
 Publishing or asking during work never ends the turn. Ordinary assistant text,
 including final summaries, stays in expandable Details. At natural completion,
@@ -34,8 +39,9 @@ corrective retry if neither happened. `publish(None)`
 explicitly records that no user update is needed.
 
 Publications carry unread state; Ask carries awaiting-answer state. Reading is
-not answering, and closing without an answer grants no authorization. Neither
-call sends an additional notification. Rewriting `to_user.md` cannot overwrite
+not answering, and closing without an answer grants no authorization. Each ask
+sends a system notification, withdrawn when the question is answered or closed.
+Rewriting `to_user.md` cannot overwrite
 publications or pending questions; it remains an editable overview.
 
 The independent composer service combines agent candidates, explicit suggestion

@@ -162,14 +162,11 @@ def pending_context(records: list[UserMessage]) -> str:
     entries = [
         f"Unread publication #{record.id}:\n"
         + (record.content or "")[:800]
-        + ("\n[Excerpt; retrieve the full publication.]" if len(record.content or "") > 800 else "")
+        + ("\n[Excerpt.]" if len(record.content or "") > 800 else "")
         for record in records[:20]
     ]
     if len(records) > 20:
         entries.append("More pending deliveries remain.")
-    entries.append(
-        "Retrieve full durable messages with meiva.ui.publications(pending_only=True, after_id=0, limit=50); continue after the last returned id."
-    )
     return "\n\n".join(entries)
 
 
@@ -197,5 +194,5 @@ def pending_questions(conn: Connection, agent_id: int) -> str:
     ]
     if len(rows) > 20:
         entries.append("More open questions remain.")
-    entries.append("Retrieve complete questions and options with meiva.ui.questions().")
+    entries.append("meiva.ui.close_question(id) closes one of these questions.")
     return "\n\n".join(entries)

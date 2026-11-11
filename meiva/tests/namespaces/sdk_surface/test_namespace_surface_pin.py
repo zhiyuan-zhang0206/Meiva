@@ -63,7 +63,7 @@ _SURFACE: dict[str, list[str]] = {
         "set_label",
         "terminate",
     ],
-    "ui": ["ask", "publications", "publish", "questions"],
+    "ui": ["ask", "close_question", "publish"],
     "watcher": ["at", "cron", "launch"],
     "web": ["ReasoningEffort", "SearchResult", "fetch", "search"],
     "skills": [],
