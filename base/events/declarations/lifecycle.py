@@ -264,4 +264,9 @@ EVENTS: dict[str, EventSpec] = {
         "the message was delivered and names the image, whose path is in the message",
         tier="anomaly",
     ),
+    "agy_subagent_descriptor_unreadable": telemetry_event(
+        "agy_subagent_descriptor_unreadable",
+        "an Antigravity sub-agent descriptor file was not the recorded shape, so that sub-agent's "
+        "text and tool calls are not shown on the timeline; the turn is unaffected",
+    ),
 }
