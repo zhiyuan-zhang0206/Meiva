@@ -103,10 +103,7 @@ def test_proceeds_on_machine_branch(tmp_path: Path) -> None:
     assert "refs/heads/main" not in heads
 
 
-_NOTE = (
-    "---\ntype: Memory\nmeiva_agent: 7\ntitle: Retry rule\ndescription: Retries above three hurt\n"
-    "tags: [type/feedback]\n---\nBody.\n"
-)
+_NOTE = "---\ndescription: Retries above three hurt\n---\n# Retry rule\n\nBody.\n"
 
 
 def test_directory_indexes_are_rebuilt_before_the_commit(tmp_path: Path) -> None:
@@ -130,7 +127,7 @@ def test_directory_indexes_are_rebuilt_before_the_commit(tmp_path: Path) -> None
     res = _run_steward(pool, path_extra=str(bindir))
 
     assert res.returncode == 0, res.stderr
-    assert "* [Retry rule](retry.md) - Retries above three hurt" in _git(
+    assert "* [retry](retry.md) - Retries above three hurt" in _git(
         pool, "show", "HEAD:topics/index.md"
     )
     assert "* [topics/](topics/index.md) - 1 notes" in _git(pool, "show", "HEAD:index.md")
@@ -146,7 +143,7 @@ def test_regenerate_indexes_writes_every_directory_index(unit_home: Path) -> Non
 
     pool_ops.regenerate_indexes(pool)
 
-    assert "* [Retry rule](deep.md)" in (pool / "a" / "b" / "index.md").read_text()
+    assert "* [deep](deep.md)" in (pool / "a" / "b" / "index.md").read_text()
     assert "* [b/](b/index.md) - 1 notes" in (pool / "a" / "index.md").read_text()
     assert (pool / "index.md").is_file()
 
@@ -188,7 +185,7 @@ def test_a_new_root_note_passes_the_pool_validator_after_the_steward(tmp_path: P
     assert res.returncode == 0, res.stderr
     memory_index = (pool / "MEMORY.md").read_text()
     assert "## Setup (keep current, do not drop)" in memory_index
-    assert "- [Retry rule](rule.md) — Retries above three hurt" in memory_index
+    assert "- [rule](rule.md) — Retries above three hurt" in memory_index
     assert "- [topics/](topics/index.md) — 1 notes" in memory_index
     findings, checked = validate.validate_bundle(pool.parent)
     assert findings == []

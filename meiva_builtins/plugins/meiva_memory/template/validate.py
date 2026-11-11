@@ -22,16 +22,8 @@ _BUNDLE = Path(__file__).resolve().parent
 _FM_KEY_LINE_RE = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*): (.*)$")
 _DATE_ONLY_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 _OFFSET_DATETIME_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(Z|[+-]\d{2}:\d{2})$")
-_MISREAD_STRING_KEYS = (
-    "title",
-    "description",
-    "name",
-    "type",
-    "meiva_machine",
-    "timestamp",
-    "verified",
-    "stale_after",
-)
+_ALLOWED_OKF_KEYS = frozenset({"description", "verified", "stale_after"})
+_MISREAD_STRING_KEYS = ("description", "verified", "stale_after")
 
 
 def _is_str_dict(value: object) -> TypeGuard[dict[str, object]]:
@@ -96,8 +88,11 @@ def _frontmatter_problem(content: str) -> tuple[dict[str, object] | None, str | 
 
 def _optional_okf_field_errors(fm: dict[str, object]) -> list[str]:
     errors: list[str] = []
-    if "sources" in fm:
-        errors.append("Frontmatter 'sources' is forbidden; use inline Markdown file links")
+    for key in fm:
+        if key not in _ALLOWED_OKF_KEYS:
+            errors.append(
+                f"Frontmatter key {key!r} is forbidden; allowed keys: description, verified, stale_after"
+            )
     for date_key in ("verified", "stale_after"):
         if date_key in fm and fm[date_key] is not None:
             val = fm[date_key]
@@ -242,6 +237,9 @@ def validate_file(
         return [problem]
     assert fm is not None and fm_raw is not None  # noqa: S101
 
+    if re.search(r"<!--\s*(?:agent|ava)-[^>]*-->", content):
+        errors.append("Legacy HTML attribution comments are forbidden")
+
     errors.extend(_optional_okf_field_errors(fm))
     for line, target in body_links(content):
         try:
@@ -284,10 +282,9 @@ def note_parts(content: str) -> tuple[dict[str, object], str] | None:
     return fm, content.split("---\n", 2)[2]
 
 
+# meiva:note
+# Single-note checks combine OKF validation with the character cap; reserved files skip the cap.
 def validate_note(file_path: Path) -> list[str]:
-    """Every finding that concerns one note by itself: `validate_file`, the tag discipline
-    (valid `type/<x>`, no junk tags, a tags field at all) and the character cap.
-    Returns [] for a reserved file name."""
     errors = validate_file(file_path)
     if file_path.name in _RESERVED:
         return errors
