@@ -495,14 +495,21 @@ def _no_stdlib_telemetry_bridge() -> Iterator[None]:
 # guard silently skips its own initialization. Which tests share a worker changes with every PR's
 # selected subset and with `--dist load`, so the victim is red only on some runs (2026-11-11: three
 # unrelated PRs, #8831). Releasing at teardown puts every worker back where it started, wherever the
-# opener lives. The module is read through `loaded_attribute`, so a test that never loaded it pays
-# one dict lookup, and a test that owns its sinks (`release_process_logging`'s own) is unaffected.
+# opener lives; the event sink is released apart, because `add_event_sink` is also called directly
+# (the exec child pairs it with `init_subprocess_logger`) and a sink left live answers the next
+# `add_event_sink` with its own, stale producer (`test_request_envelope_transfers_emit_size_and_
+# serialize_time` read 0 events). The modules are read through `loaded_attribute`, so a test that
+# never loaded them pays one dict lookup, and a test that owns its sinks
+# (`release_process_logging`'s own) is unaffected.
 @pytest.fixture(autouse=True)
 def _release_process_logging() -> Iterator[None]:
     yield
     release = loaded_attribute("base.log.process", "release_process_logging")
     if release is not None:
         release()
+    release_event_sink = loaded_attribute("base.telemetry.process_logging", "release_event_sink")
+    if release_event_sink is not None:
+        release_event_sink()
 
 
 # Save each public/class descriptor before monkeypatching, preserving classmethod

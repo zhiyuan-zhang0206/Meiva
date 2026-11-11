@@ -32,6 +32,7 @@ __all__ = [
     "event_sink",
     "init_cli_process",
     "init_gateway_process",
+    "release_event_sink",
     "reset_info_sample_counter",
 ]
 
@@ -296,6 +297,20 @@ def add_event_sink(
         filter=event_pipeline_filter,
     )
     return _event_sink_id
+
+
+# meiva:note
+# Remove the event sink `add_event_sink` registered, if it is still live. `add_event_sink` returns a
+# live sink without registering a new one, so a sink left behind keeps its producer: every later
+# caller in the process then emits into a pipeline it did not build (a stopped one, in a test). A
+# process that registered it keeps it until it exits and has no use for this; the test suite calls
+# it after every test.
+def release_event_sink() -> None:
+    global _event_sink_id
+    sink, _event_sink_id = _event_sink_id, None
+    core: object = getattr(logger, "_core", None)
+    if sink is not None and isinstance(core, _LoguruCore) and sink in core.handlers:
+        logger.remove(sink)
 
 
 # Process-level singleton: exec_child calls this from two paths (env

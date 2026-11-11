@@ -38,7 +38,7 @@ __all__ = [
 init_done = False
 
 # meiva:note
-# The release of the sinks `start_process_logging` opened in this process, until they are released;
+# The release of the sinks `start_process_logging` or `init_subprocess_logger` opened in this process, until they are released;
 # `release_process_logging` runs it.
 _release_sinks: Callable[[], None] | None = None
 
@@ -57,15 +57,25 @@ _release_sinks: Callable[[], None] | None = None
 # Idempotent — repeat in the same process silent-skips (see
 # ``init_done`` at module top).
 def init_subprocess_logger(*, agent_id: int, home: Path) -> None:
-    global init_done  # noqa: PLW0603
+    global init_done, _release_sinks  # noqa: PLW0603
     if init_done:
         return
     from base.paths import logs_dir
 
     logger.configure(extra={"agent_id": str(agent_id), "process_role": "subprocess"})
-    add_file_sink(logs_dir(home=home) / f"agent-{agent_id}.log")
+    sink = add_file_sink(logs_dir(home=home) / f"agent-{agent_id}.log")
     install_stdlib_intercept()
     init_done = True
+
+    def close() -> None:
+        # meiva:note
+        # Releasing the file sink also releases the process initialization guard.
+        global init_done, _release_sinks  # noqa: PLW0603
+        logger.remove(sink)
+        init_done = False
+        _release_sinks = None
+
+    _release_sinks = close
 
 
 # meiva:note
