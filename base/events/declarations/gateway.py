@@ -251,7 +251,6 @@ EVENTS: dict[str, EventSpec] = {
         payload=StagedUploadReceived,
         tier="noise",
         site="gateway/upload_delivery/receipt.py:_emit telemetry.emit(attributes=...)",
-        persist=True,
     ),
     "sse": telemetry_event(
         "sse",
