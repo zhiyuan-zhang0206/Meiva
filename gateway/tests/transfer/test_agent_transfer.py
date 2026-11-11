@@ -308,6 +308,7 @@ def test_transfer_reports_an_external_session_whose_transcript_cannot_move(
                 "model": "gpt-5",
                 "created_at": "2026-11-01T00:00:00Z",
                 "updated_at": "2026-11-01T00:00:00Z",
+                "background": [],
             }
         ),
         encoding="utf-8",
