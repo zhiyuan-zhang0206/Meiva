@@ -162,7 +162,7 @@ def test_explicit_visibility_guidance_in_native_and_harness_sections() -> None:
         assert "## Output visibility" in section
         assert DISPLAY_TO_USER in section
         assert HIDE_FROM_USER in section
-        assert "the user can expand and read them" in section
+        assert "folded into Details, which the user can expand and read" in section
         assert "human and background wakes alike" in section
 
 
