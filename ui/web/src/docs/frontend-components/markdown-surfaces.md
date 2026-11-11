@@ -6,7 +6,7 @@ Text written as Markdown by a model or an author renders through the one `ChatMa
   through the shared allowlist and local references resolved through the
   authenticated document resource API.
 - Timeline: agent replies, human and inter-agent `inbound_chat` bodies, reasoning, compact summaries, system prompts, and system markers (`memory` / `agent_memory` / `inherited_memory` and guidance notes).
-- Open-notice and fleet-inbox content, memory-note bodies, and task descriptions / results (task graph hover card, kanban row).
+- Open-question content, memory-note bodies, and task descriptions / results (task graph hover card, kanban row).
 
 Notice titles and question option labels/descriptions use the same renderer in
 inline mode, including resolved history. Emphasis, links and inline code render

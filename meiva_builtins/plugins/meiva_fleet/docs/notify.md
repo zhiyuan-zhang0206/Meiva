@@ -15,9 +15,10 @@ Answers and Notes commit with one agent inbound. Closing without answering
 records a dismissal and grants no authorization. Reading a publication does not
 answer any question. New Ask records create no notification delivery event.
 
-The old agent-facing notify/edit/dismiss SDK entries are removed. Existing
-`agent_notices` IDs, canonical answers and keyed answer receipts remain their
-storage owner. Pending legacy questions retain their IDs and lose automatic
-expiry; completed history remains intact. Legacy internal writers and system
-alerts keep their existing protocols. See [meiva.ui — User Interface](../../../../meiva/docs/ui.md) for the
+The old agent-facing notify/edit/dismiss SDK entries and the Inbox page are removed.
+`agent_notices` rows, canonical answers and keyed answer receipts remain the storage owner
+of questions, and a question is the only kind of open item: a migration resolved every
+still-open row that was not a question, or that carried an expiry, as `expired`. A pending
+question appears in its agent's question bar above the composer and as a question mark on
+the agent's sidebar row ([decision](../../../../docs/decisions/frontend/ui/2026-11-11-remove-inbox-and-counts.md)). See [meiva.ui — User Interface](../../../../meiva/docs/ui.md) for the
 mode and publication contract, and [Numbered Notice Questions](notice-questions.md) for answers.

@@ -90,9 +90,8 @@ worker = meiva.agents.spawn(
 meiva.agents.send_message(worker, "Skip the legacy SAML path — out of scope.")
 ```
 
-The human side is first-class as well: every agent's notices — progress, FYIs,
-decisions that need your call — converge into **one aggregated inbox**, and an
-answerable notice also reaches you as a notification; agents organize across
+The human side is first-class as well: what an agent delivers to you, and the
+questions it asks, show up as an orange dot or a question mark on its row; agents organize across
 conversations through a **shared persistent task graph** (parent/child trees,
 owners, reminders).
 

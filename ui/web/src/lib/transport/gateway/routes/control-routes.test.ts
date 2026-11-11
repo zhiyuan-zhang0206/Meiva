@@ -45,10 +45,9 @@ describe("control routes", () => {
       .toBe("/api/alerts?window=24h&status=unresolved&severity=error&limit=200");
   });
 
-  it("notices list only the cursor fields that are set", () => {
+  it("notices list only the limit when it is set", () => {
     expect(noticesPath()).toBe("/api/notices");
-    expect(noticesPath({ limit: 50, resolvedLimit: 10, beforeAt: "2026-10-01T00:00:00Z", beforeId: 7 }))
-      .toBe("/api/notices?limit=50&resolved_limit=10&before_at=2026-10-01T00%3A00%3A00Z&before_id=7");
+    expect(noticesPath({ limit: 50 })).toBe("/api/notices?limit=50");
   });
 
   it("the fleet graph takes hours and the decay constant when given", () => {

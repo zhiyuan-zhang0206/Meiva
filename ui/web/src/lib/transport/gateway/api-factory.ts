@@ -197,13 +197,8 @@ export function createApi(http: Http) {
       return sendMessageWithReconciliation(http, agentId, content, clientMessageId);
     },
 
-    getNotices: (params?: {
-      limit?: number;
-      resolvedLimit?: number;
-      beforeAt?: string;
-      beforeId?: number;
-    }): Promise<NoticesFeed> => {
-      return f(noticesPath(params)).then(ok<NoticesFeed>);
+    getNotices: (): Promise<NoticesFeed> => {
+      return f(noticesPath()).then(ok<NoticesFeed>);
     },
 
     getAgentRoster: (signal?: AbortSignal): Promise<AgentRoster> =>

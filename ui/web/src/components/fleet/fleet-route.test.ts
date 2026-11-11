@@ -11,24 +11,18 @@ function search(qs: string): URLSearchParams {
 }
 
 describe("readFleetRouteIds", () => {
-  it("parses all three ids", () => {
-    expect(readFleetRouteIds(search("agent_id=3&notice=7&task=9"))).toEqual({
-      agentId: 3,
-      noticeId: 7,
-      taskId: 9,
-    });
+  it("parses the task id", () => {
+    expect(readFleetRouteIds(search("task=9"))).toEqual({ taskId: 9 });
   });
 
-  it("absent params are null", () => {
-    expect(readFleetRouteIds(search(""))).toEqual({ agentId: null, noticeId: null, taskId: null });
+  it("an absent param is null", () => {
+    expect(readFleetRouteIds(search(""))).toEqual({ taskId: null });
   });
 
   it("malformed and non-positive values are null, never 0 or NaN", () => {
-    expect(readFleetRouteIds(search("notice=abc&task=-2"))).toEqual({
-      agentId: null,
-      noticeId: null,
-      taskId: null,
-    });
-    expect(readFleetRouteIds(search("notice=0&task=")).taskId).toBeNull();
+    expect(readFleetRouteIds(search("task=-2"))).toEqual({ taskId: null });
+    expect(readFleetRouteIds(search("task=abc")).taskId).toBeNull();
+    expect(readFleetRouteIds(search("task=0")).taskId).toBeNull();
+    expect(readFleetRouteIds(search("task=")).taskId).toBeNull();
   });
 });

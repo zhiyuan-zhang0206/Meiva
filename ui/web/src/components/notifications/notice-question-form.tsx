@@ -160,32 +160,3 @@ export function NoticeQuestionForm({
     </div>
   );
 }
-
-/** Read-only answer history keeps the complete numbering context for Other. */
-export function NoticeQuestionSummary({ question, answer }: { question: NoticeQuestion; answer: NoticeAnswer | null | undefined }) {
-  const t = useTranslations("noticeDetail");
-  if (question.type === "text") {
-    return (
-      <div className="space-y-3 text-sm">
-        {answer?.text && <p className="whitespace-pre-wrap break-words">{answer.text}</p>}
-        {answer?.comment && <p className="whitespace-pre-wrap break-words">{t("comment")}: {answer.comment}</p>}
-      </div>
-    );
-  }
-  return (
-    <div className="space-y-3 text-sm">
-      <ol className="space-y-2" aria-label={t("originalOptions")}>
-        {question.options.map((option, index) => (
-          <li key={option.id} className={cn("break-words", answer?.option_ids?.includes(option.id) ? "font-medium text-foreground" : "text-muted-foreground")}>
-            {index + 1}. <ChatMarkdown content={option.label} inline />
-            {option.description && <span className="mt-1 block font-normal text-muted-foreground"><ChatMarkdown content={option.description} inline /></span>}
-            {answer?.option_ids?.includes(option.id) && <span className="ml-2 text-xs">{t("selected")}</span>}
-          </li>
-        ))}
-        {question.allow_other && <li>{question.options.length + 1}. {t("other")}{answer?.other_text && <span className="ml-2 text-xs">{t("selected")}</span>}</li>}
-      </ol>
-      {answer?.other_text && <p className="whitespace-pre-wrap break-words">{t("other")}: {answer.other_text}</p>}
-      {answer?.comment && <p className="whitespace-pre-wrap break-words"><span className="text-muted-foreground">{t("comment")}: </span>{answer.comment}</p>}
-    </div>
-  );
-}

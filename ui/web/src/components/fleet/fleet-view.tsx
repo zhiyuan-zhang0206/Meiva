@@ -1,6 +1,6 @@
 // meiva:note
 // Fleet view — full-screen supervision surface. Read-only over the agent and
-// task graphs; the only writes are InboxQueue's notice reply/dismiss.
+// task graphs.
 //
 // The thesis: a human should be able to judge the work of 10-20 agents WITHOUT
 // opening any conversation. The agents surface is the force-directed
@@ -9,78 +9,61 @@
 // status and label and links straight to its conversation page for a
 // drill-down.
 //
-// Responsive: on desktop (>= lg / 1024px) the graph and the right-side Inbox sit
-// side-by-side in a resizable split. On mobile (< lg) the surfaces — Agents
-// (graph), Tasks (task graph), Inbox (the unified notice queue) — become
+// Responsive: on desktop (>= lg / 1024px) the graph panel fills the page. On
+// mobile (< lg) the surfaces — Agents (graph) and Tasks (task graph) — become
 // full-screen tabs, each filling the viewport, with a tab bar at the bottom to
 // switch between them.
 // meiva:link ui/web/src/docs/frontend-components/fleet-view.md
 
 "use client";
 
-import { MessageSquare, PanelRightOpen } from "lucide-react";
+import { MessageSquare } from "lucide-react";
 import type { Route } from "next";
 import Link from "next/link";
 import { useTranslations } from "next-intl";
 import { memo, useEffect, useMemo, useRef, useState } from "react";
-import { useDefaultLayout } from "react-resizable-panels";
 
 import { GraphView } from "@/components/fleet/graph-view";
-import { InboxQueue } from "@/components/fleet/inbox-queue";
 import { LeftGraphPanel } from "@/components/fleet/left-graph-panel";
 import { readFleetRouteIds } from "@/components/fleet/fleet-route";
 import { TaskGraph } from "@/components/fleet/task-graph";
 import { PluginNavIcons } from "@/components/plugins/plugin-nav";
-import {
-  ResizablePanel,
-  ResizablePanelGroup,
-  ResizableHandle,
-} from "@/components/ui/resizable";
 import type { AgentRow } from "@/lib/contracts/types";
 import { useFleetAgents } from "@/lib/agents/use-fleet-agents";
-import { useNotices } from "@/lib/notifications/use-notices";
 import { useBreakpoint } from "@/lib/layout/breakpoint";
-import { useUserSettings } from "@/lib/state/use-user-settings";
 import { cn } from "@/lib/format/utils";
 import { FLEX, FLEX_1, FLEX_COL, MIN_H_0, MIN_W_0 } from "@/lib/layout/layout";
-import { usePanelLayoutStorage } from "@/lib/layout/panel-layout-storage";
 import { useBrowser } from "@/lib/browser/browser-provider";
 
+// meiva:note
 // Which mobile tab is on screen is an EPHEMERAL, per-device selection ("which
 // surface am I looking at right now"), not a durable preference — so it stays
 // in localStorage rather than syncing to the DB across frontends. Written
 // post-mount only (SSR renders the default; reading localStorage during render
-// would mismatch hydration). The Inbox deep link is the exception: it writes
-// the tab because it is the user's current surface choice.
+// would mismatch hydration). A task deep link is the exception: it writes the
+// tab because it is the user's current surface choice.
 const LS_MOBILE_TAB = "meiva.fleet.mobileTab";
-// v4 stores the split as { <panelId>: percent }; panel ids are part of the
-// persisted state (the library also writes them to id/data-testid on the panel
-// node — keep them unique across the app).
-const PANEL_GRAPH = "panel-graph";
-const PANEL_QUEUE = "panel-queue";
-const FLEET_SPLIT_LAYOUT_ID = "meiva.fleet.split";
-// The desktop left-panel view (Graph vs Task Graph) and the collapsed-queue
-// choice ARE durable preferences — DB-backed (display.fleet_left_view /
-// display.fleet_queue_collapsed) so they follow the user across frontends.
+// meiva:note
+// The desktop left-panel view (Graph vs Task Graph) is a durable preference —
+// DB-backed (display.fleet_left_view) so it follows the user across frontends.
 
-type MobileTab = "agents" | "tasks" | "inbox";
+type MobileTab = "agents" | "tasks";
 
 function isMobileTab(value: string): value is MobileTab {
-  return value === "agents" || value === "tasks" || value === "inbox";
+  return value === "agents" || value === "tasks";
 }
 export function FleetView({ navigate }: { navigate: (href: Route) => void }) {
   const agents = useFleetAgents();
   const { isLarge } = useBreakpoint();
-  // Cross-component selection: selecting an item in the right-side
-  // Decisions/Reviews panel highlights the corresponding node in the Graph, and
-  // vice versa.
+  // meiva:note
+  // Cross-component selection shared by the Graph and the Task Graph.
   const [selectedAgentId, setSelectedAgentId] = useState<number | null>(null);
   const [selectedTaskId, setSelectedTaskId] = useState<number | null>(null);
-  const [anchorAgentId, setAnchorAgentId] = useState<number | null>(null);
-  // Route jumps from an inspector widget button (task #2909).
-  const [focusNoticeId, setFocusNoticeId] = useState<number | null>(null);
+  // meiva:note
+  // Route jump from an inspector widget button (task #2909).
   const [routeTaskId, setRouteTaskId] = useState<number | null>(null);
-  // Mobile tab selection (Agents | Decisions | Reviews).
+  // meiva:note
+  // Mobile tab selection (Agents | Tasks).
   const [mobileTab, setMobileTab] = useState<MobileTab>("agents");
 
   // meiva:note
@@ -96,6 +79,7 @@ export function FleetView({ navigate }: { navigate: (href: Route) => void }) {
   useEffect(() => {
     const stored = storage.read(LS_MOBILE_TAB);
     if (stored.state === "found" && isMobileTab(stored.value)) {
+      // meiva:note
       // eslint-disable-next-line react-hooks/set-state-in-effect -- SSR-safe localStorage hydration: must run once after mount to avoid a hydration mismatch
       setMobileTab(stored.value);
     }
@@ -106,20 +90,12 @@ export function FleetView({ navigate }: { navigate: (href: Route) => void }) {
     if (where === null) return;
     const search = new URLSearchParams(where.search);
     const route = readFleetRouteIds(search);
-    if (route.agentId != null) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect -- Route state is hydrated after mount to avoid an SSR mismatch.
-      setAnchorAgentId(route.agentId);
-    }
-    if (route.noticeId != null) {
-      setFocusNoticeId(route.noticeId);
-      setMobileTab("inbox");
-    }
     if (route.taskId != null) {
+      // meiva:note
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- Route state is hydrated after mount to avoid an SSR mismatch.
       setSelectedTaskId(route.taskId);
       setRouteTaskId(route.taskId);
       setMobileTab("tasks");
-    } else if (where.hash === "#inbox" || search.get("tab") === "inbox") {
-      setMobileTab("inbox");
     }
   }, [navigation]);
   useEffect(() => {
@@ -132,28 +108,14 @@ export function FleetView({ navigate }: { navigate: (href: Route) => void }) {
   );
   const aliveCount = agents.length - terminatedCount;
 
-  // meiva:note
-  // Inbox tab badge: the count the panel itself renders, from the panel's own feed.
-  // It used to roll up the agent snapshot (`awaiting_response_count` +
-  // `unread_notice_count`), a second derivation of the same fact: the roster holds
-  // live agents only, so a terminated owner's open notice counted in the list and
-  // not in the badge, and the two numbers disagreed on the same screen.
-  // meiva:link ui/web/src/docs/frontend-components/fleet-view.md
-  const noticeFeed = useNotices();
-  const inboxCount = useMemo(
-    () => noticeFeed.awaiting.length,
-    [noticeFeed],
-  );
-
   return (
+    // meiva:note
     // Task #1066: the root must FILL main's width (flex-1), not shrink to
     // its content's max-content — main is a row-flex landmark, so without
-    // flex-1 a short Inbox selection collapses the whole surface to the
-    // content width (observed as the UI shrinking to the left ~60%).
+    // flex-1 a short surface collapses the whole page to the content width.
     // meiva:note
     // Fill `<main>` with `h-full` rather than `h-dvh`: on iOS/iPadOS `dvh` ignores the on-screen
-    // keyboard, whereas `h-full` shrinks with `<html>` (`VisualViewportHeightSync`) so Inbox reply
-    // boxes stay above the keyboard.
+    // keyboard, whereas `h-full` shrinks with `<html>` (`VisualViewportHeightSync`).
     <div className={cn("h-full bg-background text-foreground font-mono", FLEX, FLEX_COL, FLEX_1, MIN_H_0, MIN_W_0)}>
       {isLarge ? (
         <DesktopLayout
@@ -163,8 +125,6 @@ export function FleetView({ navigate }: { navigate: (href: Route) => void }) {
           setSelectedAgentId={setSelectedAgentId}
           selectedTaskId={selectedTaskId}
           setSelectedTaskId={setSelectedTaskId}
-          anchorAgentId={anchorAgentId}
-          focusNoticeId={focusNoticeId}
           routeTaskId={routeTaskId}
           navigate={navigate}
         />
@@ -178,9 +138,6 @@ export function FleetView({ navigate }: { navigate: (href: Route) => void }) {
           setSelectedTaskId={setSelectedTaskId}
           mobileTab={mobileTab}
           setMobileTab={setMobileTab}
-          inboxCount={inboxCount}
-          anchorAgentId={anchorAgentId}
-          focusNoticeId={focusNoticeId}
           routeTaskId={routeTaskId}
           navigate={navigate}
         />
@@ -189,7 +146,8 @@ export function FleetView({ navigate }: { navigate: (href: Route) => void }) {
   );
 }
 
-// ── Desktop layout (>= lg): side-by-side resizable panels ──
+// meiva:note
+// ── Desktop layout (>= lg): the graph panel fills the page ──
 
 const DesktopLayout = memo(function DesktopLayout({
   aliveCount,
@@ -198,8 +156,6 @@ const DesktopLayout = memo(function DesktopLayout({
   setSelectedAgentId,
   selectedTaskId,
   setSelectedTaskId,
-  anchorAgentId,
-  focusNoticeId,
   routeTaskId,
   navigate,
 }: {
@@ -209,29 +165,10 @@ const DesktopLayout = memo(function DesktopLayout({
   setSelectedAgentId: (id: number | null) => void;
   selectedTaskId: number | null;
   setSelectedTaskId: (id: number | null) => void;
-  anchorAgentId: number | null;
-  focusNoticeId: number | null;
   routeTaskId: number | null;
   navigate: (href: Route) => void;
 }) {
   const t = useTranslations("fleet");
-  // Queue panel collapse (RCS): collapsed leaves only a STATIC handle — no
-  // badge, no count, nothing that pulses in the periphery. Expanding is the
-  // user's pull. DB-backed (display.fleet_queue_collapsed) so the choice follows
-  // the user across frontends.
-  const splitStorage = usePanelLayoutStorage();
-  const { settings, setSetting } = useUserSettings();
-  const queueCollapsed = settings["display.fleet_queue_collapsed"] === true;
-  const setQueueCollapsed = (v: boolean) => setSetting("display.fleet_queue_collapsed", v);
-
-  // Only user-driven commits persist: mount / window-resize / shape commits
-  // must not overwrite the user's dragged split.
-  const splitLayout = useDefaultLayout({
-    id: FLEET_SPLIT_LAYOUT_ID,
-    storage: splitStorage,
-    onlySaveAfterUserInteractions: true,
-  });
-
   return (
     <>
       <header className={cn("shrink-0 items-center gap-3 border-b border-border px-6 py-3", FLEX)}>
@@ -253,66 +190,16 @@ const DesktopLayout = memo(function DesktopLayout({
         </Link>
       </header>
 
-      {queueCollapsed ? (
-        <div className={cn(FLEX_1, MIN_H_0, FLEX)}>
-          <div className={cn(FLEX_1, MIN_W_0, MIN_H_0)}>
-            <LeftGraphPanel
-              selectedAgentId={selectedAgentId}
-              setSelectedAgentId={setSelectedAgentId}
-              selectedTaskId={selectedTaskId}
-              setSelectedTaskId={setSelectedTaskId}
-              routeTaskId={routeTaskId}
-              navigate={navigate}
-            />
-          </div>
-          {/* Static expand handle — deliberately free of any dynamic signal. */}
-          <button
-            type="button"
-            onClick={() => setQueueCollapsed(false)}
-            aria-label={t("expandQueue")}
-            className={cn("shrink-0 w-7 items-center gap-2 border-l border-border pt-3 text-muted-foreground hover:bg-sidebar-accent hover:text-foreground", FLEX, FLEX_COL)}
-          >
-            <PanelRightOpen className="size-4" aria-hidden />
-            <span className="text-[10px] font-medium tracking-wide [writing-mode:vertical-rl]">
-              {t("queue")}
-            </span>
-          </button>
-        </div>
-      ) : (
-        // The split ratio is a per-viewport layout value persisted by
-        // react-resizable-panels through its own synchronous Storage interface
-        // (useDefaultLayout), which does not bridge to the async user_settings
-        // API. Kept per-device by design.
-        <ResizablePanelGroup
-          orientation="horizontal"
-          defaultLayout={splitLayout.defaultLayout}
-          onLayoutChanged={splitLayout.onLayoutChanged}
-          className={cn(FLEX_1, MIN_H_0)}
-        >
-          <ResizablePanel id={PANEL_GRAPH} defaultSize="52%" minSize="25%">
-            <LeftGraphPanel
-              selectedAgentId={selectedAgentId}
-              setSelectedAgentId={setSelectedAgentId}
-              selectedTaskId={selectedTaskId}
-              setSelectedTaskId={setSelectedTaskId}
-              routeTaskId={routeTaskId}
-              navigate={navigate}
-            />
-          </ResizablePanel>
-          <ResizableHandle />
-          <ResizablePanel id={PANEL_QUEUE} defaultSize="48%" minSize="30%">
-            <InboxQueue
-              agents={agents}
-              className="h-full"
-              selectedAgentId={selectedAgentId}
-              onSelectAgent={setSelectedAgentId}
-              onCollapse={() => setQueueCollapsed(true)}
-              anchorAgentId={anchorAgentId}
-              focusNoticeId={focusNoticeId}
-            />
-          </ResizablePanel>
-        </ResizablePanelGroup>
-      )}
+      <div className={cn(FLEX_1, MIN_H_0, MIN_W_0)}>
+        <LeftGraphPanel
+          selectedAgentId={selectedAgentId}
+          setSelectedAgentId={setSelectedAgentId}
+          selectedTaskId={selectedTaskId}
+          setSelectedTaskId={setSelectedTaskId}
+          routeTaskId={routeTaskId}
+          navigate={navigate}
+        />
+      </div>
     </>
   );
 });
@@ -328,9 +215,6 @@ const MobileLayout = memo(function MobileLayout({
   setSelectedTaskId,
   mobileTab,
   setMobileTab,
-  inboxCount,
-  anchorAgentId,
-  focusNoticeId,
   routeTaskId,
   navigate,
 }: {
@@ -342,9 +226,6 @@ const MobileLayout = memo(function MobileLayout({
   setSelectedTaskId: (id: number | null) => void;
   mobileTab: MobileTab;
   setMobileTab: (t: MobileTab) => void;
-  inboxCount: number;
-  anchorAgentId: number | null;
-  focusNoticeId: number | null;
   routeTaskId: number | null;
   navigate: (href: Route) => void;
 }) {
@@ -393,16 +274,6 @@ const MobileLayout = memo(function MobileLayout({
             />
           </div>
         ) : null}
-        {mobileTab === "inbox" ? (
-          <InboxQueue
-            agents={agents}
-            className="h-full"
-            onSelectAgent={setSelectedAgentId}
-            anchorAgentId={anchorAgentId}
-            focusNoticeId={focusNoticeId}
-            compact
-          />
-        ) : null}
       </div>
 
       {/* Tab bar — fixed at the bottom */}
@@ -425,12 +296,6 @@ const MobileLayout = memo(function MobileLayout({
           count={0}
           active={mobileTab === "tasks"}
           onClick={() => setMobileTab("tasks")}
-        />
-        <MobileTabButton
-          label={t("inbox")}
-          count={inboxCount}
-          active={mobileTab === "inbox"}
-          onClick={() => setMobileTab("inbox")}
         />
       </div>
     </>

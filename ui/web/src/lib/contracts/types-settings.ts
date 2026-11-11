@@ -57,7 +57,6 @@ export const USER_SETTING_DEFAULTS: Record<string, unknown> = {
   "display.stats_window_hours": 24,
 
   "display.fleet_left_view": "graph",
-  "display.fleet_queue_collapsed": false,
   "display.task_graph_mode": "graph",
   "display.task_show_done": false,
   "display.task_show_canceled": false,
@@ -76,7 +75,6 @@ export const USER_SETTING_DEFAULTS: Record<string, unknown> = {
   "behavior.replySuggestions": true,
   "behavior.spawn_model": null,
   "behavior.spawn_reasoning_effort": null,
-  "notification.awaiting_reply": false,
   "web.sseSingleStream": false,
 
   "models.hidden": [],

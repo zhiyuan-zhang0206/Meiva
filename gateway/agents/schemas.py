@@ -155,22 +155,10 @@ class NoticeItem(BaseModel):
     expire_at: datetime | None
 
 
-class NoticesCursor(BaseModel):
-    """Keyset cursor for the resolved-history page of GET /api/notices —
-    a (resolved_at, id) pair. Supplied together or not at all;
-    `before_at` is the last row's resolution time, `before_id` its id."""
-
-    before_at: datetime
-    before_id: int
-
-
 class NoticesFeed(BaseModel):
     # meiva:link gateway/routers/docs/frontend-ui-data.md
 
-    open: list[NoticeItem]
     awaiting: list[NoticeItem]
-    resolved_page: list[NoticeItem]
-    next_cursor: NoticesCursor | None
 
 
 class PendingInbound(BaseModel):

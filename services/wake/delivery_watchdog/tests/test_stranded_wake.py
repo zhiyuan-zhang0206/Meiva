@@ -362,7 +362,7 @@ class TestSelectStranded:
                 (aid,),
             )
         db_conn.commit()
-        _chat(db_conn, aid, database_gate=database_gate, source="system:notice-expire")
+        _chat(db_conn, aid, database_gate=database_gate, source="system:notice-reply")
         assert select_stranded(pool, _AGE_BOUND_S) == []
 
     def test_ignores_work_past_the_age_bound(

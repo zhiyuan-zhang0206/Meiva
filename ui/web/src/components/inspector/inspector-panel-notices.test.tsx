@@ -2,10 +2,7 @@ import { act, fireEvent, screen, waitFor } from "@testing-library/react";
 import { renderWithBrowser } from "@/test-support/render";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { foldNotices } from "@/lib/fold/notices";
-import { inspectLiveQueryKey } from "@/lib/inspector/inspector-queries";
 import { useTimelineStore } from "@/lib/timeline/timeline-store";
-import type { SystemEvent } from "@/lib/contracts/types";
 import {
   cleanupInspectorTest,
   createInspectorQueryClient,
@@ -20,7 +17,6 @@ import {
   render,
   rosterFixture,
   setupInspectorTest,
-  streamHandlers,
   widgetFixture,
 } from "./inspector-test-mock";
 
@@ -33,61 +29,6 @@ beforeEach(setupInspectorTest);
 afterEach(cleanupInspectorTest);
 
 describe("InspectorPanel", () => {
-  it("never renders an inline Notice reply section inside the inspector body", async () => {
-    getAgentInspectLive.mockResolvedValue(
-      liveFixture({
-        notice: {
-          id: 1,
-          title: "Approve deploy?",
-          content: "Can we push to prod?",
-          priority: "P0",
-          require_response: true,
-          blocking: true,
-          created_at: "2026-06-15T13:30:00Z",
-        },
-      }),
-    );
-    render(<InspectorPanel agentId={1} />);
-
-    await waitFor(() => expect(screen.queryByLabelText("Liveness loading")).toBeNull());
-    expect(screen.queryByText("Notice")).toBeNull();
-    expect(screen.queryByText("Approve deploy?")).toBeNull();
-    expect(screen.queryByRole("textbox")).toBeNull();
-  });
-
-  it("updates the notice without rereading statistics when notice SSE arrives", async () => {
-    const queryClient = createInspectorQueryClient();
-    renderWithBrowser(
-      <QueryClientProvider client={queryClient}>
-        <InspectorPanel agentId={1} />
-      </QueryClientProvider>,
-    );
-    await waitFor(() => expect(screen.getByText("Persistent shells")).toBeTruthy());
-    const liveReads = getAgentInspectLive.mock.calls.length;
-
-    act(() => {
-      const event = { agent_id: 1, role: "notice_posted", notice_id: 1, priority: "P2", title: "t", task_id: null } as SystemEvent;
-      for (const { key } of foldNotices(event).invalidations) {
-        void queryClient.invalidateQueries({ queryKey: key });
-      }
-      streamHandlers.system?.(event);
-    });
-
-    // meiva:note
-    // Two observables, both read from the cache the panel writes to: the notice's own query is
-    // invalidated, and the windowed statistics query is not — an invalidation is an action on the
-    // cache, and a refetch follows from it, so the flag is what a wrong call would leave behind.
-    // Reading it beats replacing `invalidateQueries` with a spy.
-    const live = queryClient.getQueryCache().find({ queryKey: inspectLiveQueryKey(1) });
-    expect(live?.state.isInvalidated).toBe(true);
-    const windowed = queryClient.getQueryCache().findAll({ queryKey: ["agent-inspect"] });
-    expect(windowed.length).toBeGreaterThan(0);
-    expect(windowed.some((query) => query.state.isInvalidated)).toBe(false);
-
-    await waitFor(() => expect(getAgentInspectLive.mock.calls.length).toBeGreaterThan(liveReads));
-    expect(getAgentInspectStatistics).toHaveBeenCalledTimes(1);
-  });
-
   it("hides available-but-empty shells and an empty config overlay", async () => {
     getAgentInspectLive.mockResolvedValue(liveFixture({ shells: [], config_overlay: {} }));
     render(<InspectorPanel agentId={1} />);

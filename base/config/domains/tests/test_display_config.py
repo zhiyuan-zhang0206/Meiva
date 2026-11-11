@@ -7,7 +7,6 @@ DISPLAY_RANGES = (
     ("messages_default_limit", 1, 10000),
     ("timeline_default_limit", 1, 1000),
     ("notices_open_default_limit", 1, 500),
-    ("notices_resolved_default_page", 1, 100),
     ("shell_capture_default_lines", 50, 2000),
     ("timeline_history_page_base", 1, 1000),
     ("timeline_window_activation_rows", 2, 5000),

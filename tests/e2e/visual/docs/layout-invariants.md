@@ -18,7 +18,7 @@ session-scoped `frontend_proc` build with stubbed `/api/**` (CI mode). Engine:
 chromium — CI installs chromium only; webkit is reserved for the iOS-Chrome
 popover test.
 
-The real-engine layer asserts the named layout invariants at the 320/390/768 tiers: I1 no page-level horizontal scroll (home and fleet), I2 the timeline surface stays inside its parent, I3 the composer stays inside the viewport, I4 the Tasks toolbar never widens the fleet page, I5 inbox rows never overflow their container, I6 the page does not scroll as a whole — the min-h-0 flex chain routes scrolling into the timeline surface.
+The real-engine layer asserts the named layout invariants at the 320/390/768 tiers: I1 no page-level horizontal scroll (home and fleet), I2 the timeline surface stays inside its parent, I3 the composer stays inside the viewport, I4 the Tasks toolbar never widens the fleet page, I6 the page does not scroll as a whole — the min-h-0 flex chain routes scrolling into the timeline surface.
 
 The shared ScrollArea track stays hit-testable at opacity 0 and reveals on hover or scroll without taking layout space: the track reaches full opacity while hovered and after a wheel scroll, content hover and idle hide it back, the viewport keeps its client width (no native-scrollbar reservation), and no reveal widens the document. The inspector's secondary view carries the same overlay scroll contract as the timeline.
 

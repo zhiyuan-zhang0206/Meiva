@@ -12,7 +12,7 @@ Source of truth = services in `build_services()` of `services/supervision/roster
 |---------|----------------|------|
 | heartbeat | Idle agent heartbeat wake-up | [Heartbeat — Idle Agent Heartbeat](heartbeat.md) |
 | delivery-watchdog | Stall alerting + stranded-owner wake fallback + stale-inbound dead-letter sweeps | [Delivery watchdog](delivery_watchdog/delivery_watchdog.md) |
-| ttl-reaper | Wall-clock deadline enforcement: expired pages / persistent shells / browser sessions / notices / impersonation leases, lifecycle-pointer scans, fire-log prune | [TTL Reaper — wall-clock deadline enforcement](ttl_reaper.md) |
+| ttl-reaper | Wall-clock deadline enforcement: expired pages / persistent shells / browser sessions / impersonation leases, lifecycle-pointer scans, fire-log prune | [TTL Reaper — wall-clock deadline enforcement](ttl_reaper.md) |
 | schedule-manager | Keeps one resident session alive per enabled schedule (reconcile + crash backoff/breaker, API sync requests) | [Schedule Manager — resident schedule sessions](schedule_manager.md) |
 | insights | CPU-heavy read models over agent history (run timeline) on a Unix socket; the gateway authenticates and proxies | [Insights service — read models over agent history](../../derived/insights/README.md) |
 | events-maintenance | unified `events` stream maintenance (immutable-Loki class resolution + day-grain rollup) | [Events Maintenance — cost-ledger rollup + class resolution](events_maintenance/events_maintenance.md) |

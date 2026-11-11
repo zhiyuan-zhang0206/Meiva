@@ -11,7 +11,6 @@ from pydantic import (
 )
 
 from base.agents.observation.evidence import AgentObservation
-from base.agents.observation.snapshot import OpenNotice
 from base.agents.tasks.priority import Priority
 from base.api_contracts.agent_contract import LivenessState
 from gateway.schemas.stats import StatsWindowHours
@@ -177,7 +176,6 @@ class AgentInspectLive(BaseModel):
     spawned_at: datetime
     shells: list[ShellInfo]
     config_overlay: dict[str, object]
-    notice: OpenNotice | None = None
     heartbeat: HeartbeatInfo
 
 

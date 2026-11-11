@@ -118,7 +118,6 @@ def test_snapshot_lists_awaiting_oldest_first(
     assert snap.notices_awaiting_response[1].content is None
     assert snap.notices_awaiting_response[1].priority == "P3"
     assert snap.notices_awaiting_response[1].blocking is False
-    assert snap.unread_notice_count == 1
 
 
 def test_snapshot_awaiting_empty_when_none(
@@ -133,7 +132,6 @@ def test_snapshot_awaiting_empty_when_none(
     )
     assert snap is not None
     assert snap.notices_awaiting_response == []
-    assert snap.unread_notice_count == 0
 
 
 def test_snapshot_scoped_by_agent(
@@ -153,27 +151,9 @@ def test_snapshot_scoped_by_agent(
     )
     assert snap_a is not None
     assert [n.id for n in snap_a.notices_awaiting_response] == [na]
-    assert snap_a.unread_notice_count == 0
 
 
-def test_snapshot_counts_unread_fyi(
-    db_conn: psycopg.Connection, *, model_catalog: ModelCatalog
-) -> None:
-    a = seed_agent(db_conn)
-    insert_notice(db_conn, a, "milestone 1")
-    insert_notice(db_conn, a, "milestone 2")
-    insert_notice(db_conn, a, "old one", resolved_at="2026-06-14T01:00:00Z", resolution="read")
-    snap = select_one(
-        db_conn,
-        a,
-        catalog=model_catalog,
-        default_model=settings.lm.llm_model,
-    )
-    assert snap is not None
-    assert snap.unread_notice_count == 2
-
-
-def test_open_feed_priority_then_oldest(db_conn: psycopg.Connection) -> None:
+def test_open_feed_oldest_first(db_conn: psycopg.Connection) -> None:
     a = seed_agent(db_conn)
     with db_conn.cursor() as cur:
         cur.execute("UPDATE agents SET label = 'agent-a' WHERE id = %s", (a,))
@@ -186,8 +166,8 @@ def test_open_feed_priority_then_oldest(db_conn: psycopg.Connection) -> None:
         resp = client.get("/api/notices/open")
     assert resp.status_code == 200
     data = resp.json()
-    assert [r["title"] for r in data] == ["p0", "p2 older", "p2 newer"]
-    assert data[0]["id"] == p0
+    assert [r["title"] for r in data] == ["p2 older", "p0", "p2 newer"]
+    assert data[1]["id"] == p0
     assert data[0]["agent_label"] == "agent-a"
     assert data[0]["require_response"] is True
     assert data[0]["resolved_at"] is None
@@ -213,7 +193,7 @@ def _seed_task(
     return row[0]
 
 
-def test_notices_feed_returns_open_awaiting_and_resolved(
+def test_notices_feed_returns_awaiting_questions(
     db_conn: psycopg.Connection,
 ) -> None:
     a = seed_agent(db_conn)
@@ -221,7 +201,7 @@ def test_notices_feed_returns_open_awaiting_and_resolved(
     insert_notice(db_conn, a, "fyi two", priority="P0")
     aw1 = insert_notice(db_conn, a, "decision one", priority="P1", require_response=True)
     aw2 = insert_notice(db_conn, a, "decision two", priority="P2", require_response=True)
-    r1 = insert_notice(
+    insert_notice(
         db_conn,
         a,
         "done one",
@@ -230,7 +210,7 @@ def test_notices_feed_returns_open_awaiting_and_resolved(
         resolution="answered",
         reply="ok",
     )
-    r2 = insert_notice(
+    insert_notice(
         db_conn,
         a,
         "done two",
@@ -239,7 +219,7 @@ def test_notices_feed_returns_open_awaiting_and_resolved(
         resolution="answered",
         reply="ok",
     )
-    r3 = insert_notice(
+    insert_notice(
         db_conn,
         a,
         "done three",
@@ -251,59 +231,9 @@ def test_notices_feed_returns_open_awaiting_and_resolved(
     with gateway_test_client() as client:
         feed = client.get("/api/notices").json()
 
-    assert feed["open"] == []
+    assert list(feed) == ["awaiting"]
     assert [n["title"] for n in feed["awaiting"]] == ["decision one", "decision two"]
     assert [n["id"] for n in feed["awaiting"]] == [aw1, aw2]
-    assert [n["id"] for n in feed["resolved_page"]] == [r1, r2, r3]
-    assert feed["next_cursor"] is None
-
-
-def test_notices_feed_resolved_page_keyset_cursor(db_conn: psycopg.Connection) -> None:
-    a = seed_agent(db_conn)
-    for i, ts in enumerate(
-        ["2026-06-14T03:00:00Z", "2026-06-14T02:00:00Z", "2026-06-14T01:00:00Z"]
-    ):
-        insert_notice(
-            db_conn,
-            a,
-            f"done {i}",
-            require_response=True,
-            resolved_at=ts,
-            resolution="answered",
-            reply="ok",
-        )
-
-    with gateway_test_client() as client:
-        page1 = client.get("/api/notices", params={"resolved_limit": 2}).json()
-        assert len(page1["resolved_page"]) == 2
-        assert page1["next_cursor"] is not None
-        page2 = client.get(
-            "/api/notices",
-            params={
-                "resolved_limit": 2,
-                "before_at": page1["next_cursor"]["before_at"],
-                "before_id": page1["next_cursor"]["before_id"],
-            },
-        ).json()
-        page2 = client.get(
-            "/api/notices",
-            params={
-                "resolved_limit": 2,
-                "before_at": page1["next_cursor"]["before_at"],
-                "before_id": page1["next_cursor"]["before_id"],
-            },
-        ).json()
-        assert len(page2["resolved_page"]) == 1
-        assert page2["next_cursor"] is None
-        assert {n["id"] for n in page1["resolved_page"]} & {
-            n["id"] for n in page2["resolved_page"]
-        } == set()
-
-
-def test_notices_feed_422_with_partial_cursor(db_conn: psycopg.Connection) -> None:
-    with gateway_test_client() as client:
-        r = client.get("/api/notices", params={"before_at": "2026-06-14T00:00:00Z"})
-        assert r.status_code == 422
 
 
 def test_notices_feed_excludes_resolved_from_open_lists(
@@ -322,9 +252,7 @@ def test_notices_feed_excludes_resolved_from_open_lists(
     )
     with gateway_test_client() as client:
         feed = client.get("/api/notices").json()
-    assert feed["open"] == []
     assert feed["awaiting"] == []
-    assert [n["title"] for n in feed["resolved_page"]] == ["was decision"]
 
 
 def test_task_id_flows_to_snapshot_and_feed(
@@ -394,36 +322,6 @@ def test_open_feed_excludes_all_fyi_without_mutating_history(
         row = cur.fetchone()
         assert row is not None
         assert row[0] is None
-
-
-def test_snapshot_unread_count_excludes_expired_fyi(
-    db_conn: psycopg.Connection, *, model_catalog: ModelCatalog
-) -> None:
-    a = seed_agent(db_conn)
-    insert_notice(db_conn, a, "fresh")
-    stale = insert_notice(db_conn, a, "stale")
-    _age_notice(db_conn, stale, 31)
-    snap = select_one(
-        db_conn,
-        a,
-        catalog=model_catalog,
-        default_model=settings.lm.llm_model,
-    )
-    assert snap is not None
-    assert snap.unread_notice_count == 1
-
-
-def test_live_excludes_expired_fyi(db_conn: psycopg.Connection) -> None:
-    a = seed_agent(db_conn)
-    stale = insert_notice(db_conn, a, "stale fyi")
-    _age_notice(db_conn, stale, 31)
-    req = insert_notice(db_conn, a, "old decision", require_response=True)
-    _age_notice(db_conn, req, 60)
-
-    with gateway_test_client() as client:
-        r = client.get("/api/notices/live", params={"after": 0})
-    assert r.status_code == 200
-    assert [it["title"] for it in r.json()] == ["old decision"]
 
 
 def test_open_feed_include_awaiting_excludes_expired_fyi(

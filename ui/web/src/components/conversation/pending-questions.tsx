@@ -43,10 +43,7 @@ export function PendingQuestions({ questions, failed, maxWidthCss }: {
           <ScrollArea viewportClassName={cn(QUESTION_REGION_MAX_HEIGHT_CLASS, "overscroll-y-contain")}>
             <div className="divide-y divide-border">
               {questions.map((question) => <article key={question.id} aria-label={question.title} className="p-3">
-                <OpenNoticeDetail agentId={question.agent_id} notice={question} onResolved={() => {
-                  dropOpenNotices(cache, [question.id]);
-                  void cache.invalidateQueries({ queryKey: ["notices-resolved"] });
-                }} />
+                <OpenNoticeDetail agentId={question.agent_id} notice={question} onResolved={() => dropOpenNotices(cache, [question.id])} />
               </article>)}
             </div>
           </ScrollArea>

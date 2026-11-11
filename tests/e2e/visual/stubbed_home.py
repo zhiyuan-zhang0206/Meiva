@@ -53,9 +53,6 @@ _AGENT = {
         "runtime_owner": "unknown",
     },
     "heartbeat_paused_until": None,
-    "awaiting_response_count": 0,
-    "highest_notice_priority": "P2",
-    "unread_notice_count": 1,
 }
 
 _AWAITING_NOTICES = [
@@ -72,35 +69,6 @@ _AWAITING_NOTICES = [
         "updated_at": "2026-08-07T00:00:00Z",
     }
 ]
-
-_FYI_NOTICE = {
-    "id": 2,
-    "agent_id": 1,
-    "agent_label": "layout-test",
-    "title": "\u8f7b\u63d0\u9192\uff1a" + "x" * 40,
-    "content": "Just so you know.",
-    "priority": "P3",
-    "require_response": False,
-    "blocking": False,
-    "created_at": "2026-08-07T00:00:00Z",
-    "updated_at": "2026-08-07T00:00:00Z",
-}
-
-_RESOLVED_NOTICE = {
-    "id": 3,
-    "agent_id": 1,
-    "agent_label": "layout-test",
-    "title": "Done deal",
-    "content": "Resolved earlier.",
-    "priority": "P2",
-    "require_response": True,
-    "blocking": False,
-    "created_at": "2026-08-06T00:00:00Z",
-    "updated_at": "2026-08-06T00:00:00Z",
-    "resolved_at": "2026-08-06T01:00:00Z",
-    "resolution": "answered",
-    "reply": "ok",
-}
 
 _TASKS = {
     "tasks": [
@@ -140,12 +108,7 @@ API_STUBS: dict[str, object] = {
         "fork_source_checkpoint_id": None,
         "last_probe_at": None,
     },
-    "/api/notices": {
-        "open": [_FYI_NOTICE],
-        "awaiting": _AWAITING_NOTICES,
-        "resolved_page": [_RESOLVED_NOTICE],
-        "next_cursor": None,
-    },
+    "/api/notices": {"awaiting": _AWAITING_NOTICES},
     "/api/tasks": _TASKS,
     "/api/agents/1/timeline": {"items": [], "msg_count": 0, "has_more": False},
     "/api/agents/1/token-usage": {

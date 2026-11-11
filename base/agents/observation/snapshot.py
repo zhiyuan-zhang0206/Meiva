@@ -39,14 +39,12 @@ from base.log import logger
 # long single turn — the case where "is it alive" is the real question
 # (issue #183). agents JOIN agents_meta on id; t.label is the user-editable
 # thread name.
+# meiva:note
 # notices_awaiting_response is a correlated scalar subquery (a json array —
 # json has no equality operator, so it never joins) over the agent's open
-# require_response notices (migration 0053) — the bounded "needs response"
-# worklist. unread_notice_count is a scalar subquery counting the agent's open
-# FYI notices (require_response false): the FYI content stays off the snapshot
-# (its own paginated feed, since a backlog could be large), only the badge count
-# rides here. Both subqueries and the lateral lookups are per-agent (indexed),
-# so the whole snapshot is O(agents), not O(agents x inbound rows).
+# questions (`meiva.ui.ask`) — the bounded "needs response" worklist. The subquery
+# and the lateral lookups are per-agent (indexed), so the whole snapshot is
+# O(agents), not O(agents x inbound rows).
 _FULL_COLS = (
     "a.id, a.spawner, a.fork_source_agent_id, "
     "a.fork_source_checkpoint_id, a.status, "
@@ -63,15 +61,6 @@ _FULL_COLS = (
     "FROM agent_notices n "
     "WHERE n.agent_id = a.id AND n.require_response AND n.resolved_at IS NULL), "
     "'[]'::json) AS notices_awaiting_response, "
-    "(SELECT count(*) FROM agent_notices n "
-    "WHERE n.agent_id = a.id AND NOT n.require_response AND n.resolved_at IS NULL "
-    # Expired FYI notices (older than NOTICE_FYI_TTL_DAYS, audit C1) do not
-    # count toward the unread badge — the feed and the IM bridge drop them the
-    # same way. The TTL is inlined as a plain SQL literal (the snapshot query
-    # takes no params and stays a pure string constant, per the repo's
-    # no-interpolation preference); keep the '30' in sync with
-    # base.agents.inbox.rows.NOTICE_FYI_TTL_DAYS — the C1 tests lock the coupling.
-    "AND n.created_at > now() - interval '30 days') AS unread_notice_count, "
     "EXISTS (SELECT 1 FROM agent_user_messages d WHERE d.agent_id=a.id AND d.content IS NOT NULL "
     "AND d.id > COALESCE((SELECT seen_id FROM agent_user_seen WHERE agent_id=a.id), 0)) AS has_unread_user_messages "
     ", a.config_overlay, mp.last_probe_at AS machine_probe_at, "
@@ -100,12 +89,10 @@ _GROUP = ""
 
 # meiva:note
 # One open notice (a `meiva.ui.ask` question; migration 0053). The agent snapshot's
-# `notices_awaiting_response` carries only the require_response subset (the "needs response"
+# `notices_awaiting_response` carries only the question rows (the "needs response"
 # worklist); this model also serves the per-agent inspector panel. `title` is the one-line
 # headline; `content` is the optional detail body. `priority` is P0..P3 (the stakes axis) and
 # `blocking` says whether the agent is stalled waiting on the answer (the urgency axis).
-# `require_response` is False only for legacy FYI rows; it defaults to True for backward
-# compatibility with the snapshot subquery, which selects only require_response rows.
 class OpenNotice(BaseModel):
     id: int
     title: str
@@ -139,7 +126,7 @@ class OpenNotice(BaseModel):
 # spawned_at before any activity/inbound. The frontend sorts
 # within status groups by last_active_at desc.
 #
-# `notices_awaiting_response` is the agent's open require_response notices,
+# `notices_awaiting_response` is the agent's unresolved questions,
 # oldest first — empty when it is not waiting on the user.
 #
 # `supports_vision` describes the effective model, resolved as the agent host
@@ -174,7 +161,6 @@ class AgentSnapshot(BaseModel):
     observation: AgentObservation | None = None
     notices_awaiting_response: list[OpenNotice]
     has_unread_user_messages: bool
-    unread_notice_count: int
     heartbeat_paused_until: datetime | None
     # meiva:note
     # How the agent's external harness session ended (task #5616): None while it runs
@@ -315,7 +301,6 @@ class _SnapshotRow:
     last_probe_at: datetime | None
     notices_awaiting_response: object
     has_unread_user_messages: bool
-    unread_notice_count: int
     config_overlay: object
     machine_probe_at: datetime | None
     agent_host_online: bool | None
@@ -357,7 +342,6 @@ def _row_to_snapshot(
             "liveness_state": row.liveness_state,
             "last_probe_at": row.last_probe_at,
             "notices_awaiting_response": row.notices_awaiting_response,
-            "unread_notice_count": row.unread_notice_count,
             "has_unread_user_messages": row.has_unread_user_messages,
             "supports_vision": supports_vision,
             "observation": observation(row.machine_probe_at),

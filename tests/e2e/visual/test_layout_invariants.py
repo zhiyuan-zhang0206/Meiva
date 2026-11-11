@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import os
-import re
 from pathlib import Path
 from typing import TypedDict, cast
 
@@ -9,7 +8,6 @@ import pytest
 from playwright.sync_api import Browser, BrowserContext, Locator, Page, expect
 
 from scripts.verify.post_deploy_visual.layout_assertions import (
-    all_elements_within_parents,
     element_within_parent,
     element_within_viewport,
     no_document_horizontal_overflow,
@@ -51,10 +49,6 @@ def _no_page_vertical_scroll(page: Page) -> bool:
     return page.evaluate(
         "() => document.scrollingElement.scrollHeight <= document.scrollingElement.clientHeight + 1"
     )
-
-
-def _inbox_rows_within_container(page: Page) -> bool:
-    return all_elements_within_parents(page, '[data-testid="inbox-row"]')
 
 
 @pytest.mark.parametrize("width", VIEWPORTS)
@@ -277,15 +271,6 @@ def test_fleet_layout_invariants(
         page.wait_for_selector('button:has-text("Kanban")', timeout=15_000)
         page.wait_for_timeout(800)
         assert _no_page_scroll(page), "I4: Tasks toolbar widens the page"
-
-        page.get_by_role("tab", name=re.compile(r"^Ask(?:\s|$)")).click()
-        page.wait_for_timeout(1200)
-        assert _no_page_scroll(page), "I1: long-title inbox row widens the page"
-        if OVERRIDE_BASE_URL:
-            if page.locator('[data-testid="inbox-row"]').count() > 0:
-                assert _inbox_rows_within_container(page), "I5: inbox row overflows"
-        else:
-            assert _inbox_rows_within_container(page), "I5: inbox row overflows"
     finally:
         ctx.close()
 

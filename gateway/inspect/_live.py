@@ -13,7 +13,6 @@ from psycopg_pool import ConnectionPool
 
 from base.agents.messages.inbound import not_passive_inbound
 from base.agents.observation.evidence import AgentObservation, observation
-from base.agents.observation.snapshot import OpenNotice
 from base.api_contracts.agent_contract import AgentStatus, LivenessState
 from base.db.rows import query_one
 from base.host.boundary.json_values import is_object_dict
@@ -131,26 +130,6 @@ def db_rows_blocking(pool: ConnectionPool, agent_id: int) -> InspectDbRows:
             last_probe_at=row.last_probe_at,
             observation=observation(row.machine_probed_at),
             backoff_level=int(row.heartbeat_backoff_level or 0),
-        )
-
-
-def notice_blocking(pool: ConnectionPool, agent_id: int) -> OpenNotice | None:
-    """Read the agent's single unexpired open notice, if one exists.
-
-    The full row, including `task_id` — the inspector widget resolver
-    (`gateway/inspect/_plugin_widgets.py`) reads the same notice to decide
-    whether the agent's task button has a target."""
-    with pool.connection() as conn:
-        return query_one(
-            conn,
-            OpenNotice,
-            "SELECT id, title, content, priority, require_response, blocking, created_at, expire_at, "
-            "task_id, question "
-            "FROM agent_notices "
-            "WHERE agent_id = %s AND resolved_at IS NULL AND (expire_at IS NULL OR expire_at > now()) "
-            "AND require_response "
-            "ORDER BY created_at DESC LIMIT 1",
-            (agent_id,),
         )
 
 

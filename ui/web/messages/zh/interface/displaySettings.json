@@ -18,8 +18,6 @@
   "timelineMaxWidth": "时间线最大宽度",
   "timelineMaxWidthDesc": "对话列的最大像素宽度（{min}px–{max}px）。对话列会填满所在面板直至该上限，更宽时居中留白。默认 {def}px。",
   "notifications": "通知",
-  "awaitingReply": "等待回复通知",
-  "awaitingReplyDesc": "在侧边栏标题栏显示等待回复的通知总数",
   "confirmations": "确认对话框",
   "confirmTerminate": "终止前确认",
   "confirmTerminateDesc": "终止 agent 时显示确认对话框",
@@ -36,7 +34,6 @@
   "categories": {
     "coreNeedsInput": "等你回答"
   },
-  "awaitingReplyDescription": "在侧栏标题显示等待回复的通知总数。",
   "theme": "主题",
   "appearance": "外观",
   "appearanceDescription": "跟随系统配色方案，或固定使用亮色 / 暗色模式。",

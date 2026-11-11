@@ -2,7 +2,6 @@ import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 import { SIDEBAR_SORT_DEFAULT } from "@/lib/agents/sidebar";
-import type { OpenNotice } from "@/lib/contracts/types";
 import { useStore } from "@/lib/state/store";
 import { transport } from "@/test-support/fake-api";
 
@@ -337,49 +336,12 @@ describe("agent status quick toggle (display.show_agent_status)", () => {
   });
 });
 
-describe("awaiting-reply indicator (notification.awaiting_reply)", () => {
-  const notice: OpenNotice = {
-    id: 1,
-    title: "Q",
-    content: null,
-    priority: "P2",
-    require_response: true,
-    blocking: false,
-    created_at: "2026-06-06T00:00:00Z",
-  };
-  it("default off → no waiting indicator even when agents have open notices", () => {
+describe("no aggregate attention count in the header", () => {
+  it("agents with pending questions add no cross-agent count or link to the header", () => {
     state.agents = [
-      makeAgent({
-        agent_id: 1,
-        awaiting_response_count: [notice].length,
-        highest_notice_priority: [notice][0]?.priority ?? null,
-      }),
+      makeAgent({ agent_id: 1, has_pending_question: true }),
+      makeAgent({ agent_id: 2, has_pending_question: true }),
     ];
-    wrap(<AgentSidebar {...handlers} />);
-    expect(screen.queryByTitle(/waiting on you/)).toBeNull();
-  });
-  it("opted in → red-dot indicator with the cross-agent count", () => {
-    state.userSettings = { "notification.awaiting_reply": true };
-    state.agents = [
-      makeAgent({
-        agent_id: 1,
-        awaiting_response_count: [notice].length,
-        highest_notice_priority: [notice][0]?.priority ?? null,
-      }),
-      makeAgent({
-        agent_id: 2,
-        awaiting_response_count: [{ ...notice, id: 2 }].length,
-        highest_notice_priority: [{ ...notice, id: 2 }][0]?.priority ?? null,
-      }),
-    ];
-    state.activeId = 2;
-    wrap(<AgentSidebar {...handlers} />);
-    const link = screen.getByRole("link", { name: /2/ });
-    expect(link.getAttribute("href")).toBe("/fleet?agent_id=2");
-  });
-  it("opted in but nothing waiting → no indicator", () => {
-    state.userSettings = { "notification.awaiting_reply": true };
-    state.agents = [makeAgent({ agent_id: 1 })];
     wrap(<AgentSidebar {...handlers} />);
     expect(screen.queryByRole("link", { name: /^\d+$/ })).toBeNull();
   });

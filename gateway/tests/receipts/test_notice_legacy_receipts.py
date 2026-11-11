@@ -54,16 +54,3 @@ def test_legacy_other_is_readable_but_cannot_be_submitted_again(
         headers=keyed_headers(str(uuid4())),
     )
     assert rejected.status_code == 422
-    answer: dict[str, object] = {
-        "option_ids": [],
-        "other_text": "CLI",
-        "text": None,
-        "comment": "Keep the original meaning",
-    }
-    db_conn.execute(
-        "UPDATE agent_notices SET answer=%s, reply='Other: CLI', resolved_at=now(), resolution='answered' WHERE id=%s",
-        (Jsonb(answer), notice),
-    )
-    db_conn.commit()
-    history = client.get("/api/notices").json()["resolved_page"]
-    assert history[0]["question"] == question and history[0]["answer"] == answer

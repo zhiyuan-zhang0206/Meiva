@@ -26,7 +26,6 @@ from base.agents.observation.snapshot import (
     agent_supports_vision,
     db_now,
 )
-from base.agents.tasks.priority import Priority
 from base.api_contracts.agent_contract import AgentStatus, Harness, LivenessState
 from base.db.rows import query_all, query_one
 from base.lm.catalog import ModelCatalog
@@ -62,11 +61,8 @@ class AgentCard(AgentLineage):
     liveness_state: LivenessState
     availability: AgentAvailability | None = None
     observation: AgentObservation
-    awaiting_response_count: int
     has_pending_question: bool
-    highest_notice_priority: Priority | None
     has_unread_user_messages: bool = False
-    unread_notice_count: int
     heartbeat_paused_until: datetime | None
     # meiva:note
     # Same three states as the snapshot (task #5616): None = running / never recorded
@@ -100,9 +96,7 @@ _CARD_COLUMNS = """
     mp.last_probe_at AS machine_probe_at, mp.agent_host_online,
     a.last_admission_at,
     a.last_launch_failure_reason, a.last_launch_failure_at,
-    attention.awaiting_response_count, attention.has_pending_question,
-    attention.highest_notice_priority,
-    fyi.unread_notice_count,
+    attention.has_pending_question,
     deliveries.has_unread_user_messages
 """
 _CARD_FROM = """
@@ -115,11 +109,11 @@ _CARD_FROM = """
         FROM inbound_messages WHERE agent_id = a.id
     ) im ON true
     LEFT JOIN LATERAL (
-        SELECT count(*) AS awaiting_response_count,
-            count(question) > 0 AS has_pending_question,
-            min(priority) AS highest_notice_priority
-        FROM agent_notices
-        WHERE agent_id = a.id AND require_response AND resolved_at IS NULL
+        SELECT EXISTS (
+            SELECT 1 FROM agent_notices
+            WHERE agent_id = a.id AND require_response AND question IS NOT NULL
+              AND resolved_at IS NULL
+        ) AS has_pending_question
     ) attention ON true
     LEFT JOIN LATERAL (
         SELECT EXISTS (
@@ -128,11 +122,6 @@ _CARD_FROM = """
               AND m.id > COALESCE((SELECT seen_id FROM agent_user_seen WHERE agent_id=a.id), 0)
         ) AS has_unread_user_messages
     ) deliveries ON true
-    LEFT JOIN LATERAL (
-        SELECT count(*) AS unread_notice_count FROM agent_notices
-        WHERE agent_id = a.id AND NOT require_response AND resolved_at IS NULL
-          AND created_at > now() - interval '30 days'
-    ) fyi ON true
 """
 # UNION (not UNION ALL) deduplicates ancestors shared by many live agents and
 # terminates even on corrupt cyclic links. Fork-source existence takes priority;

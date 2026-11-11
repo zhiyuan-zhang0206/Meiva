@@ -43,7 +43,7 @@ and prefetch triggers, and when tokenization runs — has its own node:
 
 ## Fleet View
 
-The full-screen supervision surface (`components/fleet/`, `app/fleet/page.tsx`) — relationship graph, task graph, task board, unified Inbox queue, shared force controls — has its own node: [Fleet View](fleet-view.md).
+The full-screen supervision surface (`components/fleet/`, `app/fleet/page.tsx`) — relationship graph, task graph, task board, shared force controls — has its own node: [Fleet View](fleet-view.md).
 
 ## Settings / Auth
 
