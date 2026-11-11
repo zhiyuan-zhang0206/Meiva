@@ -361,10 +361,11 @@ def retire_trust_key(*, home: Path) -> int:
         if not raw.strip():
             return 0
         document = object_of(json.loads, raw)
-        if not is_object_dict(document) or not is_object_list(document.get("packages")):
+        packages = document.get("packages") if is_object_dict(document) else None
+        if not is_object_dict(document) or not is_object_list(packages):
             raise SchemaInvalid(f"{path} is not an install registry document")
         changed = 0
-        for row in document["packages"]:
+        for row in packages:
             if is_object_dict(row) and "trust" in row:
                 del row["trust"]
                 changed += 1
