@@ -41,7 +41,7 @@ MEIVA_PYTHON_ENV = "MEIVA_PYTHON"
 # The two Homebrew prefixes in precedence order: Apple Silicon installs under `/opt/homebrew`,
 # an Intel Mac under `/usr/local`, and a host can carry both — the native one must win over the
 # other architecture's. A non-login shell reads only `~/.zshenv`, where neither is on PATH, so a
-# host that resolved `bat` for its login shell could not resolve it for `ssh host bat` (#6433).
+# host that resolved `fd` for its login shell could not resolve it for `ssh host fd` (#6433).
 HOMEBREW_PREFIXES: tuple[str, ...] = ("/opt/homebrew", "/usr/local")
 
 MACOS_GNU_BIN_DIRS: tuple[str, ...] = (
