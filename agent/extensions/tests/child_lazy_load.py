@@ -205,25 +205,6 @@ def faces_failure(counter: Path) -> dict[str, Any]:
     }
 
 
-def member_on_framework_namespace(counter: Path) -> dict[str, Any]:
-    _as_exec_entry()
-    import meiva
-
-    member = meiva.self.lazylog
-    assert callable(member)
-    return {"pong": member(), "executions": _executions(counter)}
-
-
-def missing_member(counter: Path) -> dict[str, Any]:
-    import meiva
-
-    return {
-        "self": _attribute_error(lambda: meiva.self.lazylog),
-        "ui": _attribute_error(lambda: meiva.ui.lazynotify),
-        "executions": _executions(counter),
-    }
-
-
 SCENARIOS: dict[str, Callable[[Path], dict[str, Any]]] = {
     "loads_at_import": loads_at_import,
     "loads_on_first_miss": loads_on_first_miss,
@@ -236,8 +217,6 @@ SCENARIOS: dict[str, Callable[[Path], dict[str, Any]]] = {
     "unreadable_plugin_config": unreadable_plugin_config,
     "unreadable_config_on_lookup": unreadable_config_on_lookup,
     "faces_failure": faces_failure,
-    "member_on_framework_namespace": member_on_framework_namespace,
-    "missing_member": missing_member,
 }
 
 

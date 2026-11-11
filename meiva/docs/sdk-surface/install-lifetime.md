@@ -18,15 +18,15 @@ MeivaContext, and reload preserves those clients.
 ## The reversal ledger is data
 
 `Installation.undo` is a tuple of records, not callables: `NamespaceAdded`,
-`MemberAdded`, `WrapAdded`, `ProviderAdded` and `ConfigBound`
+`WrapAdded`, `ProviderAdded` and `ConfigBound`
 (`Reversal` in `meiva/sdk_surface/installation.py`). Each primitive that changes the process returns the
 record of what it did; `uninstall()` and the rollback of a plugin whose declaration failed
 halfway read the ledger newest-first and reverse each record
 (`meiva/sdk_surface/install.py:Build.revert`, whose `match` names every record kind and ends in
-`assert_never`). A record names the objects it touched (a wrap's parent and attribute, a member's
+`assert_never`). A record names the objects it touched (a wrap's parent and attribute, a namespace's
 parent module), so reversing one needs nothing from the code that applied it. A wrap puts the
-original back only while its parent still holds that wrap's own function; namespaces and members
-reverse through `meiva/sdk_surface/plugins.py:uninstall`; a bound plugin config is released by the
+original back only while its parent still holds that wrap's own function; a namespace
+reverses through `meiva/sdk_surface/plugins.py:uninstall`; a bound plugin config is released by the
 function `bind_plugin_config` returned, which its record keeps. An installed surface is reversed
 through the same ledger, rebuilt by `Build.of` from the installation's frozen snapshots.
 

@@ -312,15 +312,15 @@ def test_a_plugin_namespace_module_keeps_its_docstrings(tmp_path: Path) -> None:
     assert codes(repository(tmp_path, source)) == []
 
 
-def test_a_plugin_file_keeps_the_member_docstrings_it_contributes(tmp_path: Path) -> None:
+def test_a_plugin_file_keeps_the_wrap_docstrings_it_contributes(tmp_path: Path) -> None:
     source = files()
     source["meiva_builtins/plugins/demo/plugin.py"] = (
-        "from base.packages.plugins.extensions import PluginContributions, SdkMember\n\n\n"
+        "from base.packages.plugins.extensions import PluginContributions, SdkWrap\n\n\n"
         "def shout(message: str) -> None:\n"
         '    """Post one message where the user reads it."""\n'
         "    print(message)\n\n\n"
         "def contribute() -> PluginContributions:\n"
-        '    return PluginContributions(sdk_members=(SdkMember("ui", "shout", shout),))\n'
+        '    return PluginContributions(sdk_wraps=(SdkWrap("ui.publish", shout),))\n'
     )
     assert codes(repository(tmp_path, source)) == []
 
@@ -330,7 +330,7 @@ def test_mentioning_the_surface_names_does_not_exempt_a_module(tmp_path: Path) -
     source["pkg/core.py"] = note((), links=(DOC,)) + (
         'def budget() -> int:\n    """Explains the body."""\n    return 1\n'
     )
-    source["pkg/core.py"] += 'WORDS = ("__all_for_meiva__", "SdkNamespace(", "SdkMember(")\n'
+    source["pkg/core.py"] += 'WORDS = ("__all_for_meiva__", "SdkNamespace(")\n'
     assert codes(repository(tmp_path, source)) == ["free-comment"]
 
 

@@ -570,12 +570,12 @@ def test_module_children_uses_all_whitelist_when_present() -> None:
     assert "alsohidden" not in children  # not in __all_for_meiva__
 
 
+# meiva:note
+# The underscore guard is applied to `__all_for_meiva__` itself, not only to the module's own
+# names: a private helper a plugin appended to the surface list (`install_namespace` never allows
+# it, but a hand-built list could) must not leak into `help()`. This is the one guard, written once
+# in `agent_visible_names`.
 def test_module_children_drops_underscore_names_in_surface() -> None:
-    """The underscore guard is applied to `__all_for_meiva__` itself, not only to
-    the module's own names: a private helper a plugin appended to the surface list
-    (`install_member` never allows it, but a hand-built list could)
-    must not leak into `help()`. This is the one guard, written once in
-    `agent_visible_names`."""
     mod = _fake_module(
         '''
         """Module."""

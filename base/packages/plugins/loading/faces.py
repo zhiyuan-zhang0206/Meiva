@@ -1,32 +1,32 @@
-"""Plugin face import: load each enabled plugin's faces and build the registry of what they declare.
-
-A plugin declares; the framework registers. Every plugin loads in up to three faces here, each exporting a
-pure `contribute()` that returns the `PluginContributions` fields it owns (`registry.py` merges them):
-
-- ``plugin.py`` — the SDK **surface**: `sdk_namespaces`, `sdk_members`, `sdk_wraps`, `skill_sources`,
-  `flags`. Its imports must stay off the agent runtime (no `agent.state`, `agent.hooks`,
-  `agent.graph.*`, or LangChain chain), because every process that runs agent code loads it.
-- ``default_config.py`` — optional sibling: the plugin's **config class** (`config`), declared on its own so
-  the gateway and `meiva plugins update` can read it without importing `plugin.py`
-  (`base/packages/plugins/config_face.py`). Loaded with the surface.
-- ``agent_runtime.py`` — optional sibling file: the plugin's **agent runtime** (hooks, state, system
-  prompt sections, context notes). Imported on the full path only (the agent process, and
-  `load_agent_faces()` for a child upgrading to the full load). An exec / watcher / schedule child
-  never imports it — its boot stays off the graph and LM stacks.
-
-Entry points:
-
-- ``import_faces(surface=False)`` — import plugin.py + agent_runtime.py for every enabled plugin and
-  build the gated registry of what they declare.
-- ``import_faces(surface=True)`` — surfaces only (child contexts).
-- ``load_agent_faces()`` — runtime faces only, for a process that already loaded the surfaces (a child
-  upgrading to the full load because its request carries a state snapshot).
-
-Installing the registry's SDK surface into `meiva` is `meiva.sdk_surface.extensions.load_extensions`; this
-module imports nothing from `meiva` or `agent`. A plugin whose agent-runtime face declares state is
-validated against the agent kernel's state schema, which the caller that runs agent code supplies as
-`validate_state` (`agent.state.plugin_state_schema`).
-"""
+# meiva:note
+# Plugin face import: load each enabled plugin's faces and build the registry of what they declare.
+#
+# A plugin declares; the framework registers. Every plugin loads in up to three faces here, each exporting a
+# pure `contribute()` that returns the `PluginContributions` fields it owns (`registry.py` merges them):
+#
+# - ``plugin.py`` — the SDK **surface**: `sdk_namespaces`, `sdk_wraps`, `skill_sources`,
+#   `flags`. Its imports must stay off the agent runtime (no `agent.state`, `agent.hooks`,
+#   `agent.graph.*`, or LangChain chain), because every process that runs agent code loads it.
+# - ``default_config.py`` — optional sibling: the plugin's **config class** (`config`), declared on its own so
+#   the gateway and `meiva plugins update` can read it without importing `plugin.py`
+#   (`base/packages/plugins/config_face.py`). Loaded with the surface.
+# - ``agent_runtime.py`` — optional sibling file: the plugin's **agent runtime** (hooks, state, system
+#   prompt sections, context notes). Imported on the full path only (the agent process, and
+#   `load_agent_faces()` for a child upgrading to the full load). An exec / watcher / schedule child
+#   never imports it — its boot stays off the graph and LM stacks.
+#
+# Entry points:
+#
+# - ``import_faces(surface=False)`` — import plugin.py + agent_runtime.py for every enabled plugin and
+#   build the gated registry of what they declare.
+# - ``import_faces(surface=True)`` — surfaces only (child contexts).
+# - ``load_agent_faces()`` — runtime faces only, for a process that already loaded the surfaces (a child
+#   upgrading to the full load because its request carries a state snapshot).
+#
+# Installing the registry's SDK surface into `meiva` is `meiva.sdk_surface.extensions.load_extensions`; this
+# module imports nothing from `meiva` or `agent`. A plugin whose agent-runtime face declares state is
+# validated against the agent kernel's state schema, which the caller that runs agent code supplies as
+# `validate_state` (`agent.state.plugin_state_schema`).
 
 from __future__ import annotations
 

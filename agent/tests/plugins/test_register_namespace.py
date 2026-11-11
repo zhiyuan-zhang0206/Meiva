@@ -1,9 +1,9 @@
 # meiva:note
-# Guard for the namespace / member install primitives (`meiva.sdk_surface.plugins`).
+# Guard for the namespace install primitives (`meiva.sdk_surface.plugins`).
 #
-# A plugin declares `SdkNamespace` / `SdkMember` values; `meiva.sdk_surface.install` applies
-# each through `install_namespace` / `install_member`, which attach to the `meiva` module and
-# return the record that `uninstall_namespace` / `uninstall_member` reverse. These tests drive
+# A plugin declares `SdkNamespace` values; `meiva.sdk_surface.install` applies
+# each through `install_namespace`, which attaches to the `meiva` module and
+# returns the record that `uninstall` reverses. These tests drive
 # the primitives directly (one declaration, one reversal) so a failure points at the primitive;
 # the whole-registry behavior (rollback, ordering, uninstall) is in
 # `meiva/tests/namespaces/sdk_surface/test_install.py`.
@@ -32,7 +32,7 @@ import pytest
 
 import meiva
 from meiva.sdk_surface import plugins
-from meiva.sdk_surface.installation import MemberAdded, NamespaceAdded
+from meiva.sdk_surface.installation import NamespaceAdded
 
 PLUGIN = "test-plugin"
 
@@ -41,7 +41,7 @@ PLUGIN = "test-plugin"
 # Installs through the primitives and keeps every record so teardown can reverse them.
 class _Installer:
     def __init__(self) -> None:
-        self.applied: list[NamespaceAdded | MemberAdded] = []
+        self.applied: list[NamespaceAdded] = []
 
     def namespace(
         self, name: str, module: Any, taken: Mapping[str, str] | None = None
@@ -50,12 +50,7 @@ class _Installer:
         self.applied.append(added)
         return added
 
-    def member(self, namespace: str, name: str, fn: Any) -> MemberAdded:
-        added = plugins.install_member(PLUGIN, namespace, name, fn)
-        self.applied.append(added)
-        return added
-
-    def undo(self, added: NamespaceAdded | MemberAdded) -> None:
+    def undo(self, added: NamespaceAdded) -> None:
         plugins.uninstall(added)
 
 
@@ -281,87 +276,6 @@ def test_install_namespace_visible_via_sys_modules(installer: _Installer):
 
     meiva_from_sys = sys.modules["meiva"]
     assert meiva_from_sys.code is mod  # type: ignore[attr-defined]
-
-
-# ── install_member (attach a callable under an existing namespace) ─
-
-
-def _noop(text: str) -> None:
-    """A sample member. Update something."""
-
-
-def test_install_member_attaches_to_existing_namespace(installer: _Installer):
-    """Member lands on the parent module + its __all_for_meiva__ exactly once (so help
-    lists it, no duplicate), callable through meiva.<namespace>.<name>."""
-    installer.member("self", "sample_member", _noop)
-    assert meiva.self.sample_member is _noop  # type: ignore[attr-defined]
-    assert meiva.self.__all_for_meiva__.count("sample_member") == 1
-
-
-@pytest.mark.usefixtures("sdk_model_owner")
-def test_install_member_visible_in_help(installer: _Installer):
-    """The member's product purpose is discoverability — it must render in
-    help(meiva.self), not merely sit in __all_for_meiva__."""
-    installer.member("self", "sample_member", _noop)
-    buf = io.StringIO()
-    with redirect_stdout(buf):
-        meiva.help(meiva.self)
-    assert "sample_member" in buf.getvalue()
-
-
-def test_member_undo_tears_it_off_the_parent(installer: _Installer):
-    """The undo takes the member off the parent + __all_for_meiva__."""
-    installer.undo(installer.member("self", "sample_member", _noop))
-    assert not hasattr(meiva.self, "sample_member")
-    assert "sample_member" not in meiva.self.__all_for_meiva__
-
-
-def test_install_member_reload_round_trip(installer: _Installer):
-    """install -> undo -> install again succeeds with no __all_for_meiva__ duplicate: the
-    undo takes both the attr and the surface entry, so the second install neither hits
-    MemberConflictError nor accumulates a duplicate."""
-    installer.undo(installer.member("self", "sample_member", _noop))
-    installer.member("self", "sample_member", _noop)
-    assert callable(meiva.self.sample_member)  # type: ignore[attr-defined]
-    assert meiva.self.__all_for_meiva__.count("sample_member") == 1
-
-
-def test_member_on_a_plugin_namespace_goes_with_it(installer: _Installer):
-    """A member may hang on a namespace the same install added; undoing newest-first removes
-    the member and then the namespace, and undoing the namespace first is also safe (the module
-    is being discarded, so the member goes with it)."""
-    # A SimpleNamespace is materialized with a synthesized `__all_for_meiva__`, which is what lets it host members.
-    added_ns = installer.namespace("code", SimpleNamespace(greet=lambda: "hello", __doc__="ns"))
-    added_member = installer.member("code", "extra", _noop)
-    assert meiva.code.extra is _noop  # type: ignore[attr-defined]
-    assert "extra" in meiva.code.__all_for_meiva__  # type: ignore[attr-defined]
-
-    installer.undo(added_ns)
-    installer.undo(added_member)  # parent already gone: nothing to do, no error
-    assert not hasattr(meiva, "code")
-
-
-def test_install_member_rejects_bad_name(installer: _Installer):
-    with pytest.raises(meiva.InvalidNamespaceNameError):
-        installer.member("self", "_private", _noop)
-    with pytest.raises(meiva.InvalidNamespaceNameError):
-        installer.member("self", "not an ident", _noop)
-
-
-def test_install_member_rejects_non_callable(installer: _Installer):
-    with pytest.raises(meiva.InvalidNamespaceMemberError):
-        installer.member("self", "sample_member", 123)
-
-
-def test_install_member_unknown_namespace(installer: _Installer):
-    with pytest.raises(meiva.UnknownNamespaceError):
-        installer.member("does_not_exist", "sample_member", _noop)
-
-
-def test_install_member_conflict_with_existing(installer: _Installer):
-    """A name already on the namespace (e.g. self.terminate) is not overridable."""
-    with pytest.raises(meiva.MemberConflictError):
-        installer.member("self", "terminate", _noop)
 
 
 # ── importable submodule (import meiva.<name>) ─────────────────────────────

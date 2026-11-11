@@ -72,13 +72,6 @@ class NamespaceAdded:
 
 
 @dataclass(frozen=True)
-class MemberAdded:
-    namespace: str
-    name: str
-    parent: ModuleType
-
-
-@dataclass(frozen=True)
 class WrapAdded:
     layer: WrapLayer
     parent: object
@@ -98,7 +91,7 @@ class ConfigBound:
     release: Callable[[], None]
 
 
-type Reversal = NamespaceAdded | MemberAdded | WrapAdded | ProviderAdded | ConfigBound
+type Reversal = NamespaceAdded | WrapAdded | ProviderAdded | ConfigBound
 
 
 # meiva:note

@@ -70,13 +70,6 @@ class SdkNamespace:
 
 
 @dataclass(frozen=True)
-class SdkMember:
-    namespace: str
-    name: str
-    fn: Callable[..., object]
-
-
-@dataclass(frozen=True)
 class SdkWrap:
     target: str
     wrapper: Callable[..., object]
@@ -95,7 +88,6 @@ class PluginContributions:
     providers: tuple[ProviderContribution, ...] = ()
     decision_providers: tuple[DecisionProviderContribution, ...] = ()
     sdk_namespaces: tuple[SdkNamespace, ...] = ()
-    sdk_members: tuple[SdkMember, ...] = ()
     sdk_wraps: tuple[SdkWrap, ...] = ()
     skill_sources: tuple[Callable[[], list[Path]], ...] = ()
     sdk_expansions: tuple[str, ...] = ()
@@ -118,7 +110,6 @@ class PluginContributions:
             providers=self.providers + other.providers,
             decision_providers=self.decision_providers + other.decision_providers,
             sdk_namespaces=self.sdk_namespaces + other.sdk_namespaces,
-            sdk_members=self.sdk_members + other.sdk_members,
             sdk_wraps=self.sdk_wraps + other.sdk_wraps,
             skill_sources=self.skill_sources + other.skill_sources,
             sdk_expansions=self.sdk_expansions + other.sdk_expansions,
@@ -192,15 +183,6 @@ class PluginContributions:
             Contribution("sdkNamespaces", ns.name, plugin, getattr(ns.module, "__name__", ""))
             for ns in self.sdk_namespaces
         )
-        members = (
-            Contribution(
-                "sdkMembers",
-                f"{m.namespace}.{m.name}",
-                plugin,
-                f"{getattr(m.fn, '__module__', '?')}.{getattr(m.fn, '__qualname__', m.fn)}",
-            )
-            for m in self.sdk_members
-        )
         promoted = (*(ns.name for ns in self.sdk_namespaces if ns.expand), *self.sdk_expansions)
         expansions = (
             Contribution("sdkExpansions", path, plugin, "expanded ahead of the framework list")
@@ -230,7 +212,7 @@ class PluginContributions:
             config = (
                 Contribution("config", self.config.__name__, plugin, f"fields: {fields_text}"),
             )
-        return (*namespaces, *members, *expansions, *wraps, *sources, *config)
+        return (*namespaces, *expansions, *wraps, *sources, *config)
 
 
 # meiva:link base/packages/plugins/docs/runtime-contributions.md
