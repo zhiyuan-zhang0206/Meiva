@@ -42,9 +42,13 @@ from gateway.http.config import (
     gateway_state,
     state_as,
 )
+from gateway.upload_delivery.receipt import StagedUploadRoute
 from gateway.upload_delivery.worker import UploadRecovery
 
 router = APIRouter()
+# meiva:note
+# Only the staged-upload route is timed (`receipt.py`); every other route here keeps the default.
+_staging = APIRouter(route_class=StagedUploadRoute)
 
 
 # meiva:note
@@ -77,7 +81,7 @@ def operation_key(
     return principal_key(principal, request.method, request.url.path, idempotency_key)
 
 
-@router.post("/api/keyed/v1/agents/{agent_id}/uploads/staged", status_code=201)
+@_staging.post("/api/keyed/v1/agents/{agent_id}/uploads/staged", status_code=201)
 async def stage_upload(
     agent_id: Annotated[int, Path(gt=0, lt=2**63)],
     request: Request,
@@ -115,6 +119,9 @@ async def stage_upload(
         raise HTTPException(413, str(exc)) from exc
     except ValidationError as exc:
         raise HTTPException(422, "invalid staged upload") from exc
+
+
+router.include_router(_staging)
 
 
 @router.delete("/api/keyed/v1/agents/{agent_id}/uploads/staged/{file_id}", status_code=204)

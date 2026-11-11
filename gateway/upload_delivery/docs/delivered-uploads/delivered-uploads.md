@@ -112,3 +112,14 @@ existing request and native-worker drainage (`agent_ops/in_flight.py`).
 See [silent upload owner](../../../routers/docs/upload-batches.md) for the
 native-image silent save. This is server Outbox recovery of one
 upload domain, not a generic workflow or client Outbox.
+
+## Staged-upload receipt event
+
+Each `POST .../uploads/staged` emits one `staged_upload_received` event when it
+finishes (`receipt.py`; no other route is logged per request). It carries the received
+body bytes and declared `Content-Length`, `receive_ms` (handler start to last body
+byte), `after_ms` (last byte to response), `total_ms`, status, and the entry path from
+`ingress.py`: whether `CF-Ray` was present, its colo suffix only, whether
+`CF-Connecting-IP` was present, and the `Host` name. Ray ids, client addresses and
+file names are never recorded. A client that disconnects mid-body ends with status
+499 and no `receive_ms`/`after_ms`.

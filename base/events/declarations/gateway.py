@@ -49,6 +49,27 @@ class GatewayLatency(TypedDict):
     count: int
 
 
+# meiva:note
+# The `staged_upload_received` payload — gateway/upload_delivery/receipt.py. One event per
+# staged-upload request (`POST .../uploads/staged`), never for any other route. Times run from the
+# start of the route handler; `receive_ms` is the wait for the last body byte and `after_ms` the
+# work after it (both `None` when the body never completed, status 499). The entry is Cloudflare
+# when `via_cloudflare` (`CF-Ray` present); `cf_colo` is only the edge code at the end of that
+# header. No ray id, client address, cookie, token or file name.
+class StagedUploadReceived(TypedDict):
+    route: str
+    status: int
+    body_bytes: int
+    content_length: int | None
+    receive_ms: float | None
+    after_ms: float | None
+    total_ms: float
+    via_cloudflare: bool
+    cf_colo: str | None
+    cf_connecting_ip: bool
+    host: str | None
+
+
 class SseLifecycle(TypedDict):
     """`sse` payload — one established or closed gateway stream."""
 
@@ -222,6 +243,14 @@ EVENTS: dict[str, EventSpec] = {
         tier="noise",
         site=('gateway/http/middleware/latency.py:emit_bucket telemetry.emit("telemetry", ...)'),
         persist=True,
+    ),
+    "staged_upload_received": telemetry_event(
+        "staged_upload_received",
+        "one staged-upload request finished: body bytes, body receive time, entry path "
+        "(Cloudflare colo or direct), status",
+        payload=StagedUploadReceived,
+        tier="noise",
+        site="gateway/upload_delivery/receipt.py:_emit telemetry.emit(attributes=...)",
     ),
     "sse": telemetry_event(
         "sse",
