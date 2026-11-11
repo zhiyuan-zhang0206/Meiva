@@ -387,9 +387,9 @@ same origin as persistent events but uses an independent schema.
 | `label_updated` | ✓ |
 | `llm_done` | — |
 | `llm_keepalive` | — |
-| `notice_posted` | ✓ |
-| `notice_resolved` | ✓ |
 | `notification` | ✓ |
+| `question_asked` | ✓ |
+| `question_resolved` | ✓ |
 | `reasoning_delta` | — |
 | `reasoning_start` | — |
 | `task_created` | ✓ |

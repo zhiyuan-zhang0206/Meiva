@@ -162,13 +162,13 @@ def test_the_link_window_needs_zoned_ordered_bounds() -> None:
     check_link_window(NOON, NOON + timedelta(seconds=1))
 
 
-@pytest.mark.parametrize(("inbound_id", "notice_id"), [(None, None), (1, 2)])
+@pytest.mark.parametrize(("inbound_id", "question_id"), [(None, None), (1, 2)])
 def test_exactly_one_link_reference_is_required(
-    inbound_id: int | None, notice_id: int | None
+    inbound_id: int | None, question_id: int | None
 ) -> None:
-    error = refusal(check_link_content_selector, inbound_id, notice_id)
+    error = refusal(check_link_content_selector, inbound_id, question_id)
 
-    assert (error.status, error.detail) == (422, "give exactly one of inbound_id and notice_id")
+    assert (error.status, error.detail) == (422, "give exactly one of inbound_id and question_id")
     check_link_content_selector(1, None)
     check_link_content_selector(None, 2)
 

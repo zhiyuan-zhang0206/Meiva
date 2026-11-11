@@ -5,12 +5,12 @@ import { ChevronDown, ChevronUp, MessageCircleQuestion } from "lucide-react";
 import { useId, useState } from "react";
 import { useTranslations } from "next-intl";
 
-import { OpenNoticeDetail } from "@/components/notifications/open-notice-detail";
+import { OpenQuestionDetail } from "@/components/notifications/open-question-detail";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import type { NoticeItem } from "@/lib/contracts/types";
+import type { QuestionItem } from "@/lib/contracts/types";
 import { cn } from "@/lib/format/utils";
 import { FLEX, OVERFLOW_HIDDEN, QUESTION_REGION_MAX_HEIGHT_CLASS } from "@/lib/layout/layout";
-import { dropOpenNotices } from "@/lib/notifications/use-notices";
+import { dropOpenQuestions } from "@/lib/notifications/use-questions";
 
 // meiva:note
 // The queue opens expanded by default when questions are waiting, while the
@@ -18,11 +18,11 @@ import { dropOpenNotices } from "@/lib/notifications/use-notices";
 // the timeline without resizing it; hidden mounted forms retain every draft.
 // meiva:link ui/web/src/docs/frontend-state/shared-context/questions.md
 export function PendingQuestions({ questions, failed, maxWidthCss }: {
-  questions: readonly NoticeItem[];
+  questions: readonly QuestionItem[];
   failed: boolean;
   maxWidthCss?: string;
 }) {
-  const t = useTranslations("noticeDetail");
+  const t = useTranslations("questionDetail");
   const cache = useQueryClient();
   const [expanded, setExpanded] = useState(true);
   const contentId = useId();
@@ -43,7 +43,7 @@ export function PendingQuestions({ questions, failed, maxWidthCss }: {
           <ScrollArea viewportClassName={cn(QUESTION_REGION_MAX_HEIGHT_CLASS, "overscroll-y-contain")}>
             <div className="divide-y divide-border">
               {questions.map((question) => <article key={question.id} aria-label={question.title} className="p-3">
-                <OpenNoticeDetail agentId={question.agent_id} notice={question} onResolved={() => dropOpenNotices(cache, [question.id])} />
+                <OpenQuestionDetail agentId={question.agent_id} question={question} onResolved={() => dropOpenQuestions(cache, [question.id])} />
               </article>)}
             </div>
           </ScrollArea>

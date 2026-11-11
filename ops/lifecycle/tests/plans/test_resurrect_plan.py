@@ -93,8 +93,8 @@ def test_a_background_trigger_forwards_while_the_breaker_is_clear(kind: WakeTrig
 # meiva:note
 # A notification never wakes its owner, and names its source in the plan.
 def test_a_system_notice_never_wakes_its_owner() -> None:
-    assert plan_resurrection(_facts(notice_source="system:notice-reply")) == NotificationOnly(
-        "system:notice-reply"
+    assert plan_resurrection(_facts(notice_source="system:question-reply")) == NotificationOnly(
+        "system:question-reply"
     )
 
 

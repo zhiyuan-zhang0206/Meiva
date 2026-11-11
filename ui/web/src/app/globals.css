@@ -112,7 +112,7 @@
   --link-terminate: #b91c1c;
   --link-restart: #b45309;
   --link-resurrect: #7e22ce;
-  --link-notice: #be185d;
+  --link-question: #be185d;
   /* raw-context strip part colors (P4-2, task #4023): the demo timeline's
      palette, remapped onto theme variables. Keep the light/dark pair in
      sync. */
@@ -190,7 +190,7 @@
   --link-terminate: #f87171;
   --link-restart: #fbbf24;
   --link-resurrect: #c084fc;
-  --link-notice: #f472b6;
+  --link-question: #f472b6;
   --strip-think: rgb(96 165 250 / 55%);
   --strip-text: rgb(16 185 129 / 62%);
   --strip-call: rgb(6 182 212 / 75%);

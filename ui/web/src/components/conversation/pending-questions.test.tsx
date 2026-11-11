@@ -2,14 +2,14 @@ import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/re
 import type { ReactElement } from "react";
 import { afterEach, beforeEach, expect, it } from "vitest";
 
-import type { NoticeItem } from "@/lib/contracts/types";
+import type { QuestionItem } from "@/lib/contracts/types";
 import { QUESTION_REGION_MAX_HEIGHT_CLASS } from "@/lib/layout/layout";
-import { NOTICES_QUERY_KEY, dropTombstonesResetForTest } from "@/lib/notifications/use-notices";
+import { QUESTIONS_QUERY_KEY, dropTombstonesResetForTest } from "@/lib/notifications/use-questions";
 import { resetTransport, transport } from "@/test-support/fake-api";
 import { renderWithProviders } from "@/test-support/render";
 import { PendingQuestions } from "./pending-questions";
 
-const questions: NoticeItem[] = [1, 2].map((id) => ({
+const questions: QuestionItem[] = [1, 2].map((id) => ({
   id, agent_id: 7, agent_label: null, title: `Question ${id}`, content: null,
   created_at: "2026-11-07T00:00:00Z", resolved_at: null,
   question: { type: "text", note_suggestion: `Suggested answer ${id}` },
@@ -54,19 +54,19 @@ it("opens expanded by default above the composer and retains independent drafts 
 });
 
 it("resolves only the selected question and drops it from the shared pending queue", async () => {
-  transport.resolveNotice.mockResolvedValue({ status: "ok" });
+  transport.resolveQuestion.mockResolvedValue({ status: "ok" });
   const { queryClient } = renderQuestions(<PendingQuestions questions={questions} failed={false} />);
-  queryClient.setQueryData(NOTICES_QUERY_KEY, { awaiting: questions });
+  queryClient.setQueryData(QUESTIONS_QUERY_KEY, { awaiting: questions });
   const first = within(screen.getByRole("article", { name: "Question 1" }));
   fireEvent.change(first.getByRole("textbox"), { target: { value: "First answer" } });
   fireEvent.click(first.getByRole("button", { name: "Submit answer" }));
-  await waitFor(() => expect(transport.resolveNotice).toHaveBeenCalledWith(7, 1, { action: "answer", answer: { text: "First answer" } }, expect.any(String)));
-  await waitFor(() => expect(queryClient.getQueryData<{ awaiting: NoticeItem[] }>(NOTICES_QUERY_KEY)?.awaiting.map((q) => q.id)).toEqual([2]));
+  await waitFor(() => expect(transport.resolveQuestion).toHaveBeenCalledWith(7, 1, { action: "answer", answer: { text: "First answer" } }, expect.any(String)));
+  await waitFor(() => expect(queryClient.getQueryData<{ awaiting: QuestionItem[] }>(QUESTIONS_QUERY_KEY)?.awaiting.map((q) => q.id)).toEqual([2]));
   expect(within(screen.getByRole("article", { name: "Question 2" })).getByRole("textbox").hasAttribute("disabled")).toBe(false);
 });
 
 it("retains drafts on a failed answer and permits retry", async () => {
-  transport.resolveNotice.mockRejectedValueOnce(new Error("offline")).mockResolvedValue({ status: "ok" });
+  transport.resolveQuestion.mockRejectedValueOnce(new Error("offline")).mockResolvedValue({ status: "ok" });
   renderQuestions(<PendingQuestions questions={[questions[0]]} failed={false} />);
   const input = screen.getByRole<HTMLTextAreaElement>("textbox");
   fireEvent.change(input, { target: { value: "Keep this" } });
@@ -74,8 +74,8 @@ it("retains drafts on a failed answer and permits retry", async () => {
   expect(await screen.findByRole("alert")).toBeTruthy();
   expect(input.value).toBe("Keep this");
   fireEvent.click(screen.getByRole("button", { name: "Submit answer" }));
-  await waitFor(() => expect(transport.resolveNotice).toHaveBeenCalledTimes(2));
-  expect(transport.resolveNotice.mock.calls[1][3]).toBe(transport.resolveNotice.mock.calls[0][3]);
+  await waitFor(() => expect(transport.resolveQuestion).toHaveBeenCalledTimes(2));
+  expect(transport.resolveQuestion.mock.calls[1][3]).toBe(transport.resolveQuestion.mock.calls[0][3]);
 });
 
 it("shows a failed queue without losing its stale questions, and renders nothing for a known empty queue", () => {

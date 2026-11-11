@@ -1,8 +1,9 @@
-"""Full lifecycle detail for one selected agent.
+# meiva:note
+# Full lifecycle detail for one selected agent.
+#
+# Directory cards and the live tree have their own bounded read contract in
+# ``base.agents.observation.roster``; detailed question bodies never cross that boundary.
 
-Directory cards and the live tree have their own bounded read contract in
-``base.agents.observation.roster``; detailed notice bodies never cross that boundary.
-"""
 
 from __future__ import annotations
 
@@ -22,7 +23,7 @@ from base.agents.observation.evidence import (
     observation,
 )
 from base.api_contracts.agent_contract import AgentStatus, Harness, LivenessState
-from base.api_contracts.notice_question import NoticeQuestion
+from base.api_contracts.question import QuestionSpec
 from base.db import Database
 from base.db.rows import query_one
 from base.host.env.agent_slices import ModelOverrides
@@ -39,7 +40,7 @@ from base.log import logger
 # (issue #183). agents JOIN agents_meta on id; t.label is the user-editable
 # thread name.
 # meiva:note
-# notices_awaiting_response is a correlated scalar subquery (a json array —
+# questions_awaiting_response is a correlated scalar subquery (a json array —
 # json has no equality operator, so it never joins) over the agent's open
 # questions (`meiva.ui.ask`) — the bounded "needs response" worklist. The subquery
 # and the lateral lookups are per-agent (indexed), so the whole snapshot is
@@ -57,11 +58,11 @@ _FULL_COLS = (
     "(SELECT json_agg(json_build_object("
     "'id', n.id, 'title', n.title, 'content', n.content, "
     "'created_at', n.created_at, 'question', n.question) ORDER BY n.created_at) "
-    "FROM agent_notices n "
+    "FROM agent_questions n "
     "WHERE n.agent_id = a.id AND n.resolved_at IS NULL), "
-    "'[]'::json) AS notices_awaiting_response, "
-    "EXISTS (SELECT 1 FROM agent_user_messages d WHERE d.agent_id=a.id AND d.content IS NOT NULL "
-    "AND d.id > COALESCE((SELECT seen_id FROM agent_user_seen WHERE agent_id=a.id), 0)) AS has_unread_user_messages "
+    "'[]'::json) AS questions_awaiting_response, "
+    "EXISTS (SELECT 1 FROM agent_publications d WHERE d.agent_id=a.id AND d.content IS NOT NULL "
+    "AND d.id > COALESCE((SELECT seen_id FROM agent_publication_seen WHERE agent_id=a.id), 0)) AS has_unread_user_messages "
     ", a.config_overlay, mp.last_probe_at AS machine_probe_at, "
     "mp.agent_host_online, a.last_admission_at, "
     "a.last_launch_failure_reason, a.last_launch_failure_at, a.birth_config, a.last_launch_attempt_id, a.harness, "
@@ -81,21 +82,22 @@ _FROM = (
     "WHERE im.agent_id = a.id"
     ") im ON true "
 )
+# meiva:note
 # Every join above yields at most one row per agent (agents PK, LATERAL MAX),
-# and the notices are scalar subqueries — no GROUP BY needed.
+# and the questions are scalar subqueries — no GROUP BY needed.
 _GROUP = ""
 
 
 # meiva:note
-# One open question (`meiva.ui.ask`). The agent snapshot's `notices_awaiting_response` carries
+# One open question (`meiva.ui.ask`). The agent snapshot's `questions_awaiting_response` carries
 # only the unresolved rows (the "needs response" worklist); this model also serves the per-agent
 # inspector panel. `title` is the one-line headline; `content` is the optional detail body.
-class OpenNotice(BaseModel):
+class OpenQuestion(BaseModel):
     id: int
     title: str
     content: str | None
     created_at: datetime
-    question: NoticeQuestion | None = None
+    question: QuestionSpec | None = None
 
 
 # meiva:note
@@ -116,7 +118,7 @@ class OpenNotice(BaseModel):
 # spawned_at before any activity/inbound. The frontend sorts
 # within status groups by last_active_at desc.
 #
-# `notices_awaiting_response` is the agent's unresolved questions,
+# `questions_awaiting_response` is the agent's unresolved questions,
 # oldest first — empty when it is not waiting on the user.
 #
 # `supports_vision` describes the effective model, resolved as the agent host
@@ -149,7 +151,7 @@ class AgentSnapshot(BaseModel):
     last_launch_attempt_id: UUID | None = None
     availability: AgentAvailability | None = None
     observation: AgentObservation | None = None
-    notices_awaiting_response: list[OpenNotice]
+    questions_awaiting_response: list[OpenQuestion]
     has_unread_user_messages: bool
     heartbeat_paused_until: datetime | None
     # meiva:note
@@ -271,7 +273,7 @@ def db_now(conn: psycopg.Connection) -> datetime:
 
 
 # meiva:note
-# One `_FULL_COLS` row, a field per selected column. `notices_awaiting_response` is a json
+# One `_FULL_COLS` row, a field per selected column. `questions_awaiting_response` is a json
 # array and the two configuration maps are jsonb; the reader validates all three. The harness
 # exit columns are selected but this snapshot does not report them.
 @dataclass(frozen=True)
@@ -289,7 +291,7 @@ class _SnapshotRow:
     heartbeat_paused_until: datetime | None
     liveness_state: str
     last_probe_at: datetime | None
-    notices_awaiting_response: object
+    questions_awaiting_response: object
     has_unread_user_messages: bool
     config_overlay: object
     machine_probe_at: datetime | None
@@ -331,7 +333,7 @@ def _row_to_snapshot(
             "heartbeat_paused_until": row.heartbeat_paused_until,
             "liveness_state": row.liveness_state,
             "last_probe_at": row.last_probe_at,
-            "notices_awaiting_response": row.notices_awaiting_response,
+            "questions_awaiting_response": row.questions_awaiting_response,
             "has_unread_user_messages": row.has_unread_user_messages,
             "supports_vision": supports_vision,
             "observation": observation(row.machine_probe_at),

@@ -4,7 +4,7 @@ Policy: `base/api_contracts/contracts.py`.
 `natural` means repeatable effects; `keyed` requires a receipt;
 `one-shot` forbids ambiguous automatic retries.
 Versioned routes: [Guarded creation retry surfaces](guarded-creation.md),
-[Guarded Notice Write Surfaces](guarded-notices.md) and [Guarded delivered upload retry surface](guarded-uploads.md).
+[Guarded Question Write Surfaces](guarded-questions.md) and [Guarded delivered upload retry surface](guarded-uploads.md).
 
 Schedule receipts are optional; their routes remain `NON_IDEMPOTENT`.
 Keyless calls stay one-shot with no retry promise; a supplied key must carry

@@ -1,6 +1,6 @@
 # meiva:note
 # POST /api/alerts + GET /api/alerts + GET /api/alerts/stream integration tests
-# (Task #1224 — the Alert system, separate from Notice).
+# (Task #1224 — the Alert system, separate from Question).
 #
 # Same posture as the old test_ops_alerts_api.py: real SQL on the session DB.
 # Locks the contract: Alertmanager-webhook upsert + (fingerprint, starts_at)

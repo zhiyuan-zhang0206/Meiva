@@ -4,7 +4,7 @@
 names (it never reads `sys.argv`) and preserves argparse defaults, help and error
 exits without dispatch; `build_parser` composes handler
 bindings; `command_options` gives doc checks command-scoped long options and
-aliases. Parsing preserves caller-owned children. Agents/notices
+aliases. Parsing preserves caller-owned children. Agents/questions
 and impersonation builders live in `cli.commands.agents`, extensions in
 `cli.commands.extensions.parsers`, others in `cli/parsers/`. Adapters lazy-import
 `cmd_*` at dispatch; `pyproject.toml` installs `.venv/bin/meiva` via `uv sync`.

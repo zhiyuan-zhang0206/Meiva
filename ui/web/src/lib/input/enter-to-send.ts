@@ -1,6 +1,6 @@
 // meiva:note
-// One rule for every send-type text field: the conversation composer, a notice
-// reply, a notice question's answer and comment, and the fork/resurrect prompt.
+// One rule for every send-type text field: the conversation composer, a question
+// reply, a question's answer and comment, and the fork/resurrect prompt.
 // Enter sends. Shift+Enter breaks the line. A keystroke an input method is
 // consuming is left to that input method — committing a CJK candidate with Enter
 // must neither send nor be swallowed — and a touch keyboard keeps Enter as a line

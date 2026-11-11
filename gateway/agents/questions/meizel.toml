@@ -1,0 +1,8 @@
+exports = ["answers.py", "asks.py", "feed.py", "resolve.py", "router.py"]
+
+[uses]
+"resolve.py" = ["answers.py"]
+"router.py" = ["resolve.py"]
+
+[purity]
+"__init__.py" = "strict"

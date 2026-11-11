@@ -108,24 +108,24 @@ def stage_unread_seen(
 
 
 def stage_question_asked(
-    conn: psycopg.Connection, *, agent_id: int, notice_id: int, title: str
+    conn: psycopg.Connection, *, agent_id: int, question_id: int, title: str
 ) -> None:
     stage_in_transaction(
         conn,
         plan_question_asked(
-            notice_id=notice_id, title=title, agent_label=agent_label(conn, agent_id)
+            question_id=question_id, title=title, agent_label=agent_label(conn, agent_id)
         ),
         agent_id=agent_id,
     )
 
 
 def stage_question_resolved(
-    conn: psycopg.Connection, *, agent_id: int, notice_id: int, title: str
+    conn: psycopg.Connection, *, agent_id: int, question_id: int, title: str
 ) -> None:
     stage_in_transaction(
         conn,
         plan_question_resolved(
-            notice_id=notice_id, title=title, agent_label=agent_label(conn, agent_id)
+            question_id=question_id, title=title, agent_label=agent_label(conn, agent_id)
         ),
         agent_id=agent_id,
     )

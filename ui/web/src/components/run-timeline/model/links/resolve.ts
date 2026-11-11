@@ -8,7 +8,7 @@ export type LinkKind = RunTimelineLink["kind"] | "user_message";
 
 // meiva:note
 // The kinds in legend order; a kind is told apart by its color alone.
-export const LINK_KINDS: readonly LinkKind[] = ["send_message", "user_message", "spawn", "fork", "terminate", "restart", "resurrect", "notice"];
+export const LINK_KINDS: readonly LinkKind[] = ["send_message", "user_message", "spawn", "fork", "terminate", "restart", "resurrect", "question"];
 
 // meiva:note
 // One token per kind, shared by the arrows, the legend and the event ticks; each theme keeps every kind
@@ -22,7 +22,7 @@ export const LINK_COLORS: Record<LinkKind, string> = {
   terminate: "var(--link-terminate)",
   restart: "var(--link-restart)",
   resurrect: "var(--link-resurrect)",
-  notice: "var(--link-notice)",
+  question: "var(--link-question)",
 };
 
 // meiva:note
@@ -158,7 +158,7 @@ function resolveLinksUncached(
       out.push({
         key: `user-${id}-${unit.i0}`,
         kind: "user_message",
-        link: { kind: "send_message", ts: unit.start, sender: null, receiver: id, inbound_id: unit.inbound_id, fork_from: null, notice_id: null },
+        link: { kind: "send_message", ts: unit.start, sender: null, receiver: id, inbound_id: unit.inbound_id, fork_from: null, question_id: null },
         from: { row: "user", agent: 0, ms },
         to: { row: "units", agent: id, ms: middle(unit) },
         external: null,

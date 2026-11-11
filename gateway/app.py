@@ -42,18 +42,18 @@ from gateway.agents.history import conversation as conversation_router
 from gateway.agents.history import inbound as inbound_router
 from gateway.agents.history import timeline as timeline_router
 from gateway.agents.history import understanding as agents_understanding_router
-from gateway.agents.notice_operations import notices as notices_router
-from gateway.agents.notice_operations import router as guarded_notices_router
+from gateway.agents.questions import asks as asks_router
+from gateway.agents.questions import feed as questions_feed_router
+from gateway.agents.questions import router as guarded_questions_router
 from gateway.agents.reply_suggestion import feedback as suggestion_feedback_router
 from gateway.agents.reply_suggestion import router as reply_suggestion_router
 from gateway.agents.reply_suggestion.configuration import reply_suggestion_policy
 from gateway.agents.reply_suggestion.service import ReplySuggestionService
 from gateway.agents.task_assignment import router as task_assignments_router
 from gateway.agents.to_user import document as to_user_router
+from gateway.agents.to_user import publications as publications_router
 from gateway.agents.transfer import router as agents_transfer_router
 from gateway.agents.transfer.bundle_store import TransferBundleStore
-from gateway.agents.user_delivery import asks as asks_router
-from gateway.agents.user_delivery import router as user_delivery_router
 from gateway.alerts import router as alerts_router
 from gateway.cluster import bootstrap as bootstrap_router
 from gateway.cluster import machine_pause as machine_pause_router
@@ -516,13 +516,13 @@ def create_app(
         shell_router.router,
         timeline_router.router,
         reply_suggestion_router.router,
-        user_delivery_router.router,
+        publications_router.router,
         asks_router.router,
         suggestion_feedback_router.router,
         system_router.router,
         host_permissions_router.router,
-        notices_router.router,
-        guarded_notices_router.router,
+        questions_feed_router.router,
+        guarded_questions_router.router,
         cluster_router.router,
         machine_pause_router.router,
         commands_router.router,

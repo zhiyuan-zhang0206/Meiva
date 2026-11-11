@@ -1,6 +1,6 @@
 # meiva:note
 # Priority — the shared stakes axis of tasks and notices. Single source of truth for the four
-# P0..P3 rungs: the SDK validation (meiva.tasks), the gateway wire schemas (TaskRow / NoticeItem /
+# P0..P3 rungs: the SDK validation (meiva.tasks), the gateway wire schemas (TaskRow / QuestionItem /
 # the snapshot), and the OpenAPI enum the frontend types are generated from all reference this
 # one enum, so none of them can drift.
 

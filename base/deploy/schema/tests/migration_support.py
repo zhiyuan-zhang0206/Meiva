@@ -7,6 +7,7 @@ import time
 from collections.abc import Generator, Iterable, Iterator
 from contextlib import contextmanager
 from pathlib import Path
+from typing import LiteralString, cast
 
 import psycopg
 import pytest
@@ -175,3 +176,51 @@ def restore_legacy_notice_columns(conn: psycopg.Connection) -> None:
         "ADD COLUMN task_id BIGINT, "
         "ADD COLUMN expire_at TIMESTAMPTZ"
     )
+
+
+# meiva:note
+# The question, publication and receipt tables carry content names since the split migration; a test
+# of an older migration upgrades the schema that had the old names, so it puts them back first (the
+# exact inverse of that migration's renames and constraint tightening) before it builds its rows.
+RESTORE_PRE_SPLIT_NAMES = """
+ALTER TABLE agent_questions DROP CONSTRAINT agent_questions_resolution_legal;
+ALTER TABLE agent_questions DROP CONSTRAINT agent_questions_question_is_object;
+ALTER TABLE agent_questions DROP CONSTRAINT agent_questions_answer_is_answered;
+ALTER TABLE agent_questions ALTER COLUMN question DROP NOT NULL;
+ALTER TABLE agent_questions RENAME TO agent_notices;
+ALTER SEQUENCE agent_questions_id_seq RENAME TO agent_notices_id_seq;
+ALTER INDEX agent_questions_pkey RENAME TO agent_notices_pkey;
+ALTER INDEX agent_questions_open_idx RENAME TO agent_notices_open_idx;
+ALTER TABLE agent_notices RENAME CONSTRAINT agent_questions_agent_id_fkey TO agent_notices_agent_id_fkey;
+ALTER TABLE agent_notices RENAME CONSTRAINT agent_questions_resolution_pair TO agent_notices_resolution_pair;
+ALTER TABLE agent_notices RENAME CONSTRAINT agent_questions_answered_has_reply TO agent_notices_answered_has_reply;
+ALTER TABLE agent_notices ADD CONSTRAINT agent_notices_resolution_check
+    CHECK (resolution IN ('answered', 'dismissed', 'read', 'withdrawn', 'superseded', 'expired'));
+ALTER TABLE agent_notices ADD CONSTRAINT agent_notices_question_is_object
+    CHECK (question IS NULL OR jsonb_typeof(question) = 'object');
+ALTER TABLE agent_notices ADD CONSTRAINT agent_notices_answer_requires_question
+    CHECK (answer IS NULL OR (jsonb_typeof(answer) = 'object' AND question IS NOT NULL
+                              AND resolution IS NOT DISTINCT FROM 'answered'));
+ALTER TABLE agent_publications RENAME TO agent_user_messages;
+ALTER SEQUENCE agent_publications_id_seq RENAME TO agent_user_messages_id_seq;
+ALTER INDEX agent_publications_pkey RENAME TO agent_user_messages_pkey;
+ALTER INDEX agent_publications_by_agent RENAME TO agent_user_messages_by_agent;
+ALTER INDEX agent_publications_agent_id_source_key_key RENAME TO agent_user_messages_agent_id_source_key_key;
+ALTER TABLE agent_user_messages RENAME CONSTRAINT agent_publications_agent_id_fkey TO agent_user_messages_agent_id_fkey;
+ALTER TABLE agent_user_messages RENAME CONSTRAINT agent_publications_mode_check TO agent_user_messages_mode_check;
+ALTER TABLE agent_user_messages RENAME CONSTRAINT agent_publications_suggestions_check TO agent_user_messages_suggestions_check;
+ALTER TABLE agent_user_messages RENAME CONSTRAINT agent_publications_check TO agent_user_messages_check;
+ALTER TABLE agent_user_messages RENAME CONSTRAINT agent_publications_content_check TO agent_user_messages_content_check;
+ALTER TABLE agent_publication_seen RENAME TO agent_user_seen;
+ALTER INDEX agent_publication_seen_pkey RENAME TO agent_user_seen_pkey;
+ALTER TABLE agent_user_seen RENAME CONSTRAINT agent_publication_seen_agent_id_fkey TO agent_user_seen_agent_id_fkey;
+ALTER TABLE agent_user_seen RENAME CONSTRAINT agent_publication_seen_seen_id_check TO agent_user_seen_seen_id_check;
+COMMENT ON TABLE agent_user_seen IS 'The user has seen deliveries (agent_user_messages.id) up to seen_id; no row means none.';
+ALTER TABLE keyed_operation_receipts RENAME TO notice_operation_receipts;
+ALTER INDEX keyed_operation_receipts_pkey RENAME TO notice_operation_receipts_pkey;
+ALTER TABLE notice_operation_receipts RENAME CONSTRAINT keyed_operation_receipts_operation_key_check TO notice_operation_receipts_operation_key_check;
+"""
+
+
+def restore_pre_split_names(conn: psycopg.Connection) -> None:
+    conn.execute(cast(LiteralString, RESTORE_PRE_SPLIT_NAMES))

@@ -1,3 +1,4 @@
+// meiva:note
 // R4 layer 1 — the fold's single entry point (Task #1024, design §5.2).
 //
 // applyEvent is the ONLY place the global stream's events reconcile into the
@@ -5,13 +6,13 @@
 // and applies the returned outcome; hooks only read their keys.
 //
 // Lifecycle hints schedule authoritative roster/directory/detail reads.
-// Pages, notices, fleet graph and tasks invalidate from event hints.
+// Pages, questions, fleet graph and tasks invalidate from event hints.
 // The owner coalesces reads and guarantees trailing repair across event races.
 
 import { AGENTS_QUERY_KEY, AGENT_DIRECTORY_QUERY_KEY, AGENT_DETAIL_QUERY_KEY, foldAgents } from "./agents";
 import type { SystemEvent } from "../contracts/types";
 import { FLEET_GRAPH_KEY_PREFIX, foldFleetGraph } from "./graph";
-import { foldNotices, NOTICES_QUERY_KEY } from "./notices";
+import { foldQuestions, QUESTIONS_QUERY_KEY } from "./questions";
 import { foldTasks, TASKS_QUERY_KEY } from "./tasks";
 import type { FoldInvalidation, FoldOutcome, FoldWrite } from "./types";
 import { NO_FOLD } from "./types";
@@ -25,12 +26,12 @@ export const RECONNECT_QUERY_KEYS: readonly (readonly unknown[])[] = [
   AGENT_DETAIL_QUERY_KEY,
   ["to-user"],
   ["user-messages"],
-  NOTICES_QUERY_KEY,
+  QUESTIONS_QUERY_KEY,
   FLEET_GRAPH_KEY_PREFIX,
   TASKS_QUERY_KEY,
 ];
 export { AGENTS_QUERY_KEY, AGENT_DIRECTORY_QUERY_KEY, AGENT_DETAIL_QUERY_KEY } from "./agents";
-export { NOTICES_QUERY_KEY } from "./notices";
+export { QUESTIONS_QUERY_KEY } from "./questions";
 export { TASKS_QUERY_KEY } from "./tasks";
 export { FLEET_GRAPH_KEY_PREFIX } from "./graph";
 export {
@@ -86,8 +87,9 @@ export function foldAgainstCache(
     invalidations.push({ key: ["to-user", ev.agent_id] });
   }
 
-  // Notices / fleet graph / tasks share the owner's bounded coalescing policy.
-  invalidations.push(...foldNotices(ev).invalidations);
+  // meiva:note
+  // Questions / fleet graph / tasks share the owner's bounded coalescing policy.
+  invalidations.push(...foldQuestions(ev).invalidations);
   invalidations.push(...foldFleetGraph(ev).invalidations);
   invalidations.push(...foldTasks(ev).invalidations);
 

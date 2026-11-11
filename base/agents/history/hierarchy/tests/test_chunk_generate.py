@@ -195,7 +195,7 @@ def test_inbound_lines_carry_the_sender_as_their_type_and_drop_the_header_at_the
         inbound("user", "[2026-10-05 Mon 11:04:06]\n\n  fix it\n  now"),
         inbound("watcher:1955", "Watcher (id 1955) [2026-10-05 Mon 11:04:07]:\n\nwatch fired"),
         inbound("shell:1940", "Shell session (id 1940) [2026-10-05 Mon 11:04:08]:\n\nexited 0"),
-        inbound("system:notice-reply", "<system_note>\nRe: x\n</system_note>"),
+        inbound("system:question-reply", "<system_note>\nRe: x\n</system_note>"),
         inbound(None, "no source"),
     ]
     lines = build_catalog(chunk, divide_units(chunk, timeline_inputs=_TIMELINE_INPUTS)).splitlines()
@@ -204,7 +204,7 @@ def test_inbound_lines_carry_the_sender_as_their_type_and_drop_the_header_at_the
         "[2] human message: fix it now",
         "[3] watcher 1955: watch fired",
         "[4] shell 1940: exited 0",
-        "[5] system notice-reply: Re: x",
+        "[5] system question-reply: Re: x",
         "[6] human message: no source",
     ]
 

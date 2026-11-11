@@ -6,7 +6,7 @@ from psycopg.types.json import Jsonb
 from pydantic import BaseModel
 
 from base.agents.messages.reply_intent import normalize_last_message_text
-from base.api_contracts.notice_question import NoticeQuestion
+from base.api_contracts.question import QuestionSpec
 from base.api_contracts.user_delivery import (
     PublishMessage,
     UserDeliveryMode,
@@ -16,8 +16,8 @@ from base.events.notifications.publish import stage_unread_delivery, stage_unrea
 
 COLUMNS = (
     "id, agent_id, mode, source_key, content, suggestions, created_at, "
-    "id <= COALESCE((SELECT seen_id FROM agent_user_seen s "
-    "WHERE s.agent_id = agent_user_messages.agent_id), 0) AS seen"
+    "id <= COALESCE((SELECT seen_id FROM agent_publication_seen s "
+    "WHERE s.agent_id = agent_publications.agent_id), 0) AS seen"
 )
 
 
@@ -48,7 +48,7 @@ def publish(
     had_unread = has_unseen(conn, agent_id)
     with conn.cursor(row_factory=dict_row) as cur:
         cur.execute(
-            "INSERT INTO agent_user_messages (agent_id, source_key, mode, content, "
+            "INSERT INTO agent_publications (agent_id, source_key, mode, content, "
             "suggestions, created_at) VALUES (%s,%s,%s,%s,%s,%s) "
             "ON CONFLICT (agent_id, source_key) DO NOTHING",
             (
@@ -62,9 +62,9 @@ def publish(
         )
         inserted = cur.rowcount == 1
         cur.execute(
-            sql.SQL(
-                "SELECT {} FROM agent_user_messages WHERE agent_id=%s AND source_key=%s"
-            ).format(sql.SQL(COLUMNS)),
+            sql.SQL("SELECT {} FROM agent_publications WHERE agent_id=%s AND source_key=%s").format(
+                sql.SQL(COLUMNS)
+            ),
             (agent_id, source_key),
         )
         message = UserMessage.model_validate(cur.fetchone())
@@ -83,7 +83,7 @@ def publish(
 
 def seen_id(conn: Connection, agent_id: int) -> int:
     with conn.cursor(row_factory=scalar_row) as cur:
-        cur.execute("SELECT seen_id FROM agent_user_seen WHERE agent_id = %s", (agent_id,))
+        cur.execute("SELECT seen_id FROM agent_publication_seen WHERE agent_id = %s", (agent_id,))
         value: object = cur.fetchone()
     if value is None:
         return 0
@@ -104,7 +104,7 @@ def messages(
     with conn.cursor(row_factory=dict_row) as cur:
         cur.execute(
             sql.SQL(
-                "SELECT {} FROM agent_user_messages WHERE agent_id=%s AND id>%s AND content IS NOT NULL ORDER BY id LIMIT %s"
+                "SELECT {} FROM agent_publications WHERE agent_id=%s AND id>%s AND content IS NOT NULL ORDER BY id LIMIT %s"
             ).format(sql.SQL(COLUMNS)),
             (agent_id, floor, limit),
         )
@@ -113,16 +113,16 @@ def messages(
 
 def has_unseen(conn: Connection, agent_id: int) -> bool:
     return conn.execute(
-        "SELECT EXISTS (SELECT 1 FROM agent_user_messages WHERE agent_id = %s "
+        "SELECT EXISTS (SELECT 1 FROM agent_publications WHERE agent_id = %s "
         "AND content IS NOT NULL AND id > COALESCE("
-        "(SELECT seen_id FROM agent_user_seen WHERE agent_id = %s), 0))",
+        "(SELECT seen_id FROM agent_publication_seen WHERE agent_id = %s), 0))",
         (agent_id, agent_id),
     ).fetchone() == (True,)
 
 
 def advance_seen(conn: Connection, agent_id: int, up_to_id: int) -> tuple[int, bool]:
     newest = conn.execute(
-        "SELECT (SELECT COALESCE(MAX(id), 0) FROM agent_user_messages WHERE agent_id = %s), "
+        "SELECT (SELECT COALESCE(MAX(id), 0) FROM agent_publications WHERE agent_id = %s), "
         "EXISTS (SELECT 1 FROM agents WHERE id = %s)",
         (agent_id, agent_id),
     ).fetchone()
@@ -132,7 +132,7 @@ def advance_seen(conn: Connection, agent_id: int, up_to_id: int) -> tuple[int, b
         raise ValueError(f"up_to_id {up_to_id} is beyond the agent's newest delivery {newest[0]}")
     had_unread = has_unseen(conn, agent_id)
     moved = conn.execute(
-        "INSERT INTO agent_user_seen AS s (agent_id, seen_id) VALUES (%s, %s) "
+        "INSERT INTO agent_publication_seen AS s (agent_id, seen_id) VALUES (%s, %s) "
         "ON CONFLICT (agent_id) DO UPDATE SET seen_id = EXCLUDED.seen_id "
         "WHERE s.seen_id < EXCLUDED.seen_id RETURNING seen_id",
         (agent_id, up_to_id),
@@ -146,8 +146,8 @@ def advance_seen(conn: Connection, agent_id: int, up_to_id: int) -> tuple[int, b
 def latest_decision(conn: Connection, agent_id: int) -> int:
     with conn.cursor(row_factory=scalar_row) as cur:
         cur.execute(
-            "SELECT (SELECT COALESCE(MAX(id),0) FROM agent_user_messages WHERE agent_id=%s) + "
-            "(SELECT COALESCE(MAX(id),0) FROM agent_notices WHERE agent_id=%s)",
+            "SELECT (SELECT COALESCE(MAX(id),0) FROM agent_publications WHERE agent_id=%s) + "
+            "(SELECT COALESCE(MAX(id),0) FROM agent_questions WHERE agent_id=%s)",
             (agent_id, agent_id),
         )
         value: object = cur.fetchone()
@@ -174,13 +174,13 @@ class PendingQuestion(BaseModel):
     id: int
     title: str
     content: str | None
-    question: NoticeQuestion | None
+    question: QuestionSpec | None
 
 
 def pending_questions(conn: Connection, agent_id: int) -> str:
     with conn.cursor(row_factory=dict_row) as cur:
         cur.execute(
-            "SELECT id,title,content,question FROM agent_notices WHERE agent_id=%s "
+            "SELECT id,title,content,question FROM agent_questions WHERE agent_id=%s "
             "AND resolved_at IS NULL ORDER BY id LIMIT 21",
             (agent_id,),
         )

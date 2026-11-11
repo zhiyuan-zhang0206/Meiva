@@ -68,8 +68,8 @@ def test_a_cursor_move_that_clears_nothing_retracts_nothing(
 
 
 def test_a_question_alerts_when_asked_and_retracts_when_resolved() -> None:
-    asked = plan_question_asked(notice_id=31, title="Deploy now?", agent_label="Builder")
-    resolved = plan_question_resolved(notice_id=31, title="Deploy now?", agent_label="Builder")
+    asked = plan_question_asked(question_id=31, title="Deploy now?", agent_label="Builder")
+    resolved = plan_question_resolved(question_id=31, title="Deploy now?", agent_label="Builder")
     assert (asked.category, asked.action, asked.tag) == (
         QUESTION_CATEGORY,
         NotificationAction.ALERT,
@@ -80,6 +80,6 @@ def test_a_question_alerts_when_asked_and_retracts_when_resolved() -> None:
 
 
 def test_each_question_has_its_own_identity() -> None:
-    first = plan_question_asked(notice_id=1, title="A?", agent_label="x")
-    second = plan_question_asked(notice_id=2, title="B?", agent_label="x")
+    first = plan_question_asked(question_id=1, title="A?", agent_label="x")
+    second = plan_question_asked(question_id=2, title="B?", agent_label="x")
     assert first.tag != second.tag

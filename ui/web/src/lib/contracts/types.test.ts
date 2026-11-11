@@ -16,7 +16,7 @@ const detail: Required<WireAgentRow> = {
   last_active_at: "2026-09-01T00:00:00Z", last_inbound_at: "2026-09-01T00:00:00Z",
   label: "detail row", machine: "test-host", supports_vision: true,
   liveness_state: "unknown", last_probe_at: "2026-09-01T00:00:00Z",
-  availability, observation: null, notices_awaiting_response: [],
+  availability, observation: null, questions_awaiting_response: [],
     heartbeat_paused_until: null,
   has_unread_user_messages: false,
   harness_exit_code: null, harness_exit_at: null,
@@ -40,24 +40,24 @@ it("keeps every card field and input identity when status is unchanged", () => {
   expect(projectAgentStatus(input)).toBe(input);
 });
 it("keeps optional detail extensions while dropping detail-only fields and deriving the question flag", () => {
-  const notices: WireAgentRow["notices_awaiting_response"] = ([0, 1, 2] as const).map(
+  const questions: WireAgentRow["questions_awaiting_response"] = ([0, 1, 2] as const).map(
     (index) => ({
-      id: index, title: `notice ${index}`, content: "selected-detail-only body",
+      id: index, title: `question ${index}`, content: "selected-detail-only body",
       created_at: "2026-09-01T00:00:00Z",
       question: index === 1 ? { type: "text" } : null,
     }),
   );
   const input: Required<WireAgentRow> & { future_optional?: string } = {
-    ...detail, future_optional: "detail-extension", notices_awaiting_response: notices,
+    ...detail, future_optional: "detail-extension", questions_awaiting_response: questions,
   };
   const before = structuredClone(input);
   const projected = projectAgentStatus(input);
-  const { notices_awaiting_response: _notices, fork_source_checkpoint_id: _fork, last_probe_at: _probe, ...shared } = input;
+  const { questions_awaiting_response: _questions, fork_source_checkpoint_id: _fork, last_probe_at: _probe, ...shared } = input;
   expect(projected).toEqual({
     ...shared, has_pending_question: true,
     llm_model: null, reasoning_effort: null,
   });
-  for (const excluded of ["notices_awaiting_response", "fork_source_checkpoint_id", "last_probe_at"]) {
+  for (const excluded of ["questions_awaiting_response", "fork_source_checkpoint_id", "last_probe_at"]) {
     expect(projected).not.toHaveProperty(excluded);
   }
   expect(input).toEqual(before);

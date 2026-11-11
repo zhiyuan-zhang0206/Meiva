@@ -1,5 +1,6 @@
+// meiva:note
 // The alert section (/insights#alerts) — unresolved-first history rendered
-// from the ["alerts", "section"] cache. Alert is separate from Notice.
+// from the ["alerts", "section"] cache. Alert is separate from Question.
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";

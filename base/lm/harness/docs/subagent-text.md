@@ -81,7 +81,7 @@ What the CLIs send, recorded on Claude Code (claude-agent-sdk 0.2.168) and Codex
 
 The projector writes a `subagent_text` item per event: `payload` is the text, `source` the label,
 `parent_item_id` the `agent_code` item of the spawning call, `user_facing=False`. It is secondary work: it folds into Details beside
-the tool call, writes no `agent_user_messages` row, moves no unread cursor and sends no push.
+the tool call, writes no `agent_publications` row, moves no unread cursor and sends no push.
 
 A tool call a sub-agent made is the usual `agent_code` / `code_output` pair with the same
 `parent_item_id`; the main agent's own pair has none. The Details view nests the sub-agent's rows under a left

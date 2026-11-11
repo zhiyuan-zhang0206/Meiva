@@ -135,9 +135,9 @@ def test_a_question_is_one_push_of_its_own_and_is_retracted_when_resolved(
     db_conn: psycopg.Connection,
 ) -> None:
     agent_id = _agent(db_conn)
-    stage_question_asked(db_conn, agent_id=agent_id, notice_id=31, title="Deploy now?")
-    stage_question_asked(db_conn, agent_id=agent_id, notice_id=32, title="Which region?")
-    stage_question_resolved(db_conn, agent_id=agent_id, notice_id=31, title="Deploy now?")
+    stage_question_asked(db_conn, agent_id=agent_id, question_id=31, title="Deploy now?")
+    stage_question_asked(db_conn, agent_id=agent_id, question_id=32, title="Which region?")
+    stage_question_resolved(db_conn, agent_id=agent_id, question_id=31, title="Deploy now?")
 
     assert _pushes(db_conn, agent_id) == [
         ("alert", "question:31", "Deploy now?", "Builder"),

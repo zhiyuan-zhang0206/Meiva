@@ -1988,7 +1988,6 @@
     "/api/agents/{agent_id}/inspect/live": {
       "get": {
         "summary": "Get Agent Inspect Live",
-        "description": "Cheap current-state half of the inspector panel.\n\nReads the current projection, notice, and recent committed heartbeat pause\nfrom Postgres and probes shells on the owning runner. It performs no log\nqueries. Unknown agents return 404; shell probe failures report\nshells_available=False. No part of this response is cached.",
         "operationId": "get_agent_inspect_live_api_agents__agent_id__inspect_live_get",
         "parameters": [
           {
@@ -2028,7 +2027,6 @@
     "/api/agents/{agent_id}/inspect/statistics": {
       "get": {
         "summary": "Get Agent Inspect Statistics",
-        "description": "Read only the selected agent's window-dependent statistics.\n\nCurrent state, notices, runner shells, and heartbeat history are owned by\n``/inspect/live`` and are never fetched here. Persisted reads share only\nin-flight work and have database and admission deadlines. The requested\nwindow is preserved; unavailable historical coverage is explicit.",
         "operationId": "get_agent_inspect_statistics_api_agents__agent_id__inspect_statistics_get",
         "parameters": [
           {
@@ -2204,7 +2202,6 @@
     "/api/agents/{agent_id}/inspect/widgets": {
       "get": {
         "summary": "Get Agent Inspect Widgets",
-        "description": "The agent's plugin widgets for the inspector panel — the extension\nsurface where enabled plugins embed widgets (see `base/packages/plugins/surface/inspector.py`;\nregistration mirrors the plugin-metric system).\n\nBuilds the widget registry in process (shipped builtin plugins'\n``inspector.py`` modules imported under their plugin context, restricted\nto the plugins currently enabled), resolves the closed target vocabulary\nfor this agent — the open notice and the queue's task-ownership rule —\nand projects each widget, dropping a button whose target did not resolve\nand a widget left without buttons. Unknown agents return 404 like the\nrest of the /inspect family. Implementation in\n``gateway/inspect/_plugin_widgets.py``.",
         "operationId": "get_agent_inspect_widgets_api_agents__agent_id__inspect_widgets_get",
         "parameters": [
           {
@@ -3126,10 +3123,10 @@
         }
       }
     },
-    "/api/notices/open": {
+    "/api/questions/open": {
       "get": {
-        "summary": "Get Open Notices",
-        "operationId": "get_open_notices_api_notices_open_get",
+        "summary": "Get Open Questions",
+        "operationId": "get_open_questions_api_questions_open_get",
         "parameters": [
           {
             "name": "limit",
@@ -3175,9 +3172,9 @@
                 "schema": {
                   "type": "array",
                   "items": {
-                    "$ref": "#/components/schemas/NoticeItem"
+                    "$ref": "#/components/schemas/QuestionItem"
                   },
-                  "title": "Response Get Open Notices Api Notices Open Get"
+                  "title": "Response Get Open Questions Api Questions Open Get"
                 }
               }
             }
@@ -3195,10 +3192,10 @@
         }
       }
     },
-    "/api/notices": {
+    "/api/questions": {
       "get": {
-        "summary": "Get Notices Feed",
-        "operationId": "get_notices_feed_api_notices_get",
+        "summary": "Get Questions Feed",
+        "operationId": "get_questions_feed_api_questions_get",
         "parameters": [
           {
             "name": "limit",
@@ -3225,7 +3222,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/NoticesFeed"
+                  "$ref": "#/components/schemas/QuestionsFeed"
                 }
               }
             }
@@ -3243,11 +3240,10 @@
         }
       }
     },
-    "/api/keyed/v1/agents/{agent_id}/notices/{notice_id}/resolve": {
+    "/api/keyed/v1/agents/{agent_id}/questions/{question_id}/resolve": {
       "post": {
         "summary": "Resolve Observed",
-        "description": "Resolve the explicit global row using verified transactional recovery.",
-        "operationId": "resolve_observed_api_keyed_v1_agents__agent_id__notices__notice_id__resolve_post",
+        "operationId": "resolve_observed_api_keyed_v1_agents__agent_id__questions__question_id__resolve_post",
         "parameters": [
           {
             "name": "agent_id",
@@ -3259,12 +3255,12 @@
             }
           },
           {
-            "name": "notice_id",
+            "name": "question_id",
             "in": "path",
             "required": true,
             "schema": {
               "type": "integer",
-              "title": "Notice Id"
+              "title": "Question Id"
             }
           },
           {
@@ -3293,7 +3289,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/ResolveNoticeIn"
+                "$ref": "#/components/schemas/ResolveQuestionIn"
               }
             }
           }
@@ -6501,7 +6497,7 @@
     "/api/insights/run-timeline/link-content": {
       "get": {
         "summary": "Get Run Timeline Link Content",
-        "description": "The full text of one chat message (`inbound_id`) or the title and text of one notice (`notice_id`).",
+        "description": "The full text of one chat message (`inbound_id`) or the title and text of one question (`question_id`).",
         "operationId": "get_run_timeline_link_content_api_insights_run_timeline_link_content_get",
         "parameters": [
           {
@@ -6522,7 +6518,7 @@
             }
           },
           {
-            "name": "notice_id",
+            "name": "question_id",
             "in": "query",
             "required": false,
             "schema": {
@@ -6535,7 +6531,7 @@
                   "type": "null"
                 }
               ],
-              "title": "Notice Id"
+              "title": "Question Id"
             }
           }
         ],
@@ -8588,8 +8584,7 @@
           "has_pending_question",
           "heartbeat_paused_until"
         ],
-        "title": "AgentCard",
-        "description": "Scalar list state; selected-agent details and notice bodies are separate reads."
+        "title": "AgentCard"
       },
       "AgentCost": {
         "properties": {
@@ -9413,12 +9408,12 @@
               }
             ]
           },
-          "notices_awaiting_response": {
+          "questions_awaiting_response": {
             "items": {
-              "$ref": "#/components/schemas/OpenNotice"
+              "$ref": "#/components/schemas/OpenQuestion"
             },
             "type": "array",
-            "title": "Notices Awaiting Response"
+            "title": "Questions Awaiting Response"
           },
           "has_unread_user_messages": {
             "type": "boolean",
@@ -9476,7 +9471,7 @@
           "supports_vision",
           "liveness_state",
           "last_probe_at",
-          "notices_awaiting_response",
+          "questions_awaiting_response",
           "has_unread_user_messages",
           "heartbeat_paused_until"
         ],
@@ -10763,7 +10758,7 @@
           },
           "options": {
             "items": {
-              "$ref": "#/components/schemas/NoticeOption"
+              "$ref": "#/components/schemas/QuestionOption"
             },
             "type": "array",
             "maxItems": 20,
@@ -14489,241 +14484,6 @@
         "title": "NeighborsResponse",
         "description": "GET /api/agents/{id}/neighbors response."
       },
-      "NoticeAnswer": {
-        "properties": {
-          "option_ids": {
-            "items": {
-              "type": "string",
-              "minLength": 1
-            },
-            "type": "array",
-            "title": "Option Ids"
-          },
-          "other_text": {
-            "anyOf": [
-              {
-                "type": "string",
-                "minLength": 1
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Other Text",
-            "description": "Legacy stored answer; new answers cannot supply other_text."
-          },
-          "text": {
-            "anyOf": [
-              {
-                "type": "string",
-                "minLength": 1
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Text"
-          },
-          "comment": {
-            "anyOf": [
-              {
-                "type": "string",
-                "minLength": 1
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Comment"
-          }
-        },
-        "additionalProperties": false,
-        "type": "object",
-        "title": "NoticeAnswer"
-      },
-      "NoticeItem": {
-        "properties": {
-          "id": {
-            "type": "integer",
-            "title": "Id"
-          },
-          "agent_id": {
-            "type": "integer",
-            "title": "Agent Id"
-          },
-          "agent_label": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Agent Label"
-          },
-          "title": {
-            "type": "string",
-            "title": "Title"
-          },
-          "content": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Content"
-          },
-          "created_at": {
-            "type": "string",
-            "format": "date-time",
-            "title": "Created At"
-          },
-          "resolved_at": {
-            "anyOf": [
-              {
-                "type": "string",
-                "format": "date-time"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Resolved At"
-          },
-          "resolution": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Resolution"
-          },
-          "reply": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Reply"
-          },
-          "question": {
-            "anyOf": [
-              {
-                "oneOf": [
-                  {
-                    "$ref": "#/components/schemas/ChoiceQuestion"
-                  },
-                  {
-                    "$ref": "#/components/schemas/TextQuestion"
-                  }
-                ],
-                "discriminator": {
-                  "propertyName": "type",
-                  "mapping": {
-                    "multi_select": "#/components/schemas/ChoiceQuestion",
-                    "single_select": "#/components/schemas/ChoiceQuestion",
-                    "text": "#/components/schemas/TextQuestion"
-                  }
-                }
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Question"
-          },
-          "answer": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/NoticeAnswer"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "source_verified_by": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Source Verified By"
-          }
-        },
-        "type": "object",
-        "required": [
-          "id",
-          "agent_id",
-          "agent_label",
-          "title",
-          "content",
-          "created_at"
-        ],
-        "title": "NoticeItem"
-      },
-      "NoticeOption": {
-        "properties": {
-          "id": {
-            "type": "string",
-            "minLength": 1,
-            "title": "Id"
-          },
-          "label": {
-            "type": "string",
-            "minLength": 1,
-            "title": "Label"
-          },
-          "description": {
-            "anyOf": [
-              {
-                "type": "string",
-                "minLength": 1
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Description"
-          }
-        },
-        "additionalProperties": false,
-        "type": "object",
-        "required": [
-          "id",
-          "label"
-        ],
-        "title": "NoticeOption"
-      },
-      "NoticesFeed": {
-        "properties": {
-          "awaiting": {
-            "items": {
-              "$ref": "#/components/schemas/NoticeItem"
-            },
-            "type": "array",
-            "title": "Awaiting"
-          }
-        },
-        "type": "object",
-        "required": [
-          "awaiting"
-        ],
-        "title": "NoticesFeed"
-      },
       "NotificationCategoriesResponse": {
         "properties": {
           "categories": {
@@ -14917,7 +14677,7 @@
         ],
         "title": "Object"
       },
-      "OpenNotice": {
+      "OpenQuestion": {
         "properties": {
           "id": {
             "type": "integer",
@@ -14977,7 +14737,7 @@
           "content",
           "created_at"
         ],
-        "title": "OpenNotice"
+        "title": "OpenQuestion"
       },
       "OpenTaskRow": {
         "properties": {
@@ -15462,6 +15222,241 @@
         ],
         "title": "PublishMessage"
       },
+      "QuestionAnswer": {
+        "properties": {
+          "option_ids": {
+            "items": {
+              "type": "string",
+              "minLength": 1
+            },
+            "type": "array",
+            "title": "Option Ids"
+          },
+          "other_text": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Other Text",
+            "description": "Legacy stored answer; new answers cannot supply other_text."
+          },
+          "text": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Text"
+          },
+          "comment": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Comment"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "QuestionAnswer"
+      },
+      "QuestionItem": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "agent_id": {
+            "type": "integer",
+            "title": "Agent Id"
+          },
+          "agent_label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agent Label"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "content": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Content"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "resolved_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resolved At"
+          },
+          "resolution": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resolution"
+          },
+          "reply": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reply"
+          },
+          "question": {
+            "anyOf": [
+              {
+                "oneOf": [
+                  {
+                    "$ref": "#/components/schemas/ChoiceQuestion"
+                  },
+                  {
+                    "$ref": "#/components/schemas/TextQuestion"
+                  }
+                ],
+                "discriminator": {
+                  "propertyName": "type",
+                  "mapping": {
+                    "multi_select": "#/components/schemas/ChoiceQuestion",
+                    "single_select": "#/components/schemas/ChoiceQuestion",
+                    "text": "#/components/schemas/TextQuestion"
+                  }
+                }
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Question"
+          },
+          "answer": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/QuestionAnswer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "source_verified_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Verified By"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "agent_id",
+          "agent_label",
+          "title",
+          "content",
+          "created_at"
+        ],
+        "title": "QuestionItem"
+      },
+      "QuestionOption": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Id"
+          },
+          "label": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Label"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "label"
+        ],
+        "title": "QuestionOption"
+      },
+      "QuestionsFeed": {
+        "properties": {
+          "awaiting": {
+            "items": {
+              "$ref": "#/components/schemas/QuestionItem"
+            },
+            "type": "array",
+            "title": "Awaiting"
+          }
+        },
+        "type": "object",
+        "required": [
+          "awaiting"
+        ],
+        "title": "QuestionsFeed"
+      },
       "RebuildProgressOut": {
         "properties": {
           "id": {
@@ -15633,7 +15628,7 @@
         "title": "ReplySuggestionResponse",
         "description": "Drafted replies, or the reason there are none.\n\n`suggestions` is nonempty exactly when `reason` is None. Every non-error outcome is a 200: a\nmissing suggestion is an ordinary result, never a failure of the request."
       },
-      "ResolveNoticeIn": {
+      "ResolveQuestionIn": {
         "properties": {
           "action": {
             "type": "string",
@@ -15660,7 +15655,7 @@
           "answer": {
             "anyOf": [
               {
-                "$ref": "#/components/schemas/NoticeAnswer"
+                "$ref": "#/components/schemas/QuestionAnswer"
               },
               {
                 "type": "null"
@@ -15673,7 +15668,7 @@
         "required": [
           "action"
         ],
-        "title": "ResolveNoticeIn"
+        "title": "ResolveQuestionIn"
       },
       "ResolvedConfigView": {
         "properties": {
@@ -16274,7 +16269,7 @@
               "terminate",
               "restart",
               "resurrect",
-              "notice"
+              "question"
             ],
             "title": "Kind"
           },
@@ -16327,7 +16322,7 @@
             ],
             "title": "Fork From"
           },
-          "notice_id": {
+          "question_id": {
             "anyOf": [
               {
                 "type": "integer"
@@ -16336,7 +16331,7 @@
                 "type": "null"
               }
             ],
-            "title": "Notice Id"
+            "title": "Question Id"
           }
         },
         "type": "object",
@@ -16347,10 +16342,10 @@
           "receiver",
           "inbound_id",
           "fork_from",
-          "notice_id"
+          "question_id"
         ],
         "title": "RunTimelineLink",
-        "description": "One event between two agents, or between an agent and the user. `sender` did it to `receiver`; None is the user.\n\nA `notice` is an agent posting a notice to the user (`agent_notices`, the structured\nagent-to-user channel): its receiver is None and `notice_id` its row. The text of a message or\nnotice is not in the list; `/run-timeline/link-content` serves it for the one that is selected.\n\n`inbound_id` names the receiver's inbound row, when the event was delivered as one (a message, terminate, restart, resurrect, fork); `fork_from` is the agent\na fork was copied from (fork only; the sender is the agent that executed the fork)."
+        "description": "One event between two agents, or between an agent and the user. `sender` did it to `receiver`; None is the user.\n\nA `question` is an agent posting a question to the user (`agent_questions`, the structured\nagent-to-user channel): its receiver is None and `question_id` its row. The text of a message or\nquestion is not in the list; `/run-timeline/link-content` serves it for the one that is selected.\n\n`inbound_id` names the receiver's inbound row, when the event was delivered as one (a message, terminate, restart, resurrect, fork); `fork_from` is the agent\na fork was copied from (fork only; the sender is the agent that executed the fork)."
       },
       "RunTimelineLinkContent": {
         "properties": {
@@ -16376,7 +16371,7 @@
           "content"
         ],
         "title": "RunTimelineLinkContent",
-        "description": "GET /api/insights/run-timeline/link-content: the full text of one chat message, or the title and text of one notice."
+        "description": "GET /api/insights/run-timeline/link-content: the full text of one chat message, or the title and text of one question."
       },
       "RunTimelineLinks": {
         "properties": {

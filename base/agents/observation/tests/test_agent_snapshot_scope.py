@@ -133,35 +133,33 @@ def test_directory_is_bounded_searchable_and_cursor_ordered(
     )
 
 
-def test_notice_body_cannot_expand_roster_card(
+def test_question_body_cannot_expand_roster_card(
     model_catalog: ModelCatalog, db_conn: psycopg.Connection
 ) -> None:
     seed(db_conn, [(1, "user", "idling")])
     with db_conn.cursor() as cur:
         cur.execute(
-            "INSERT INTO agent_notices (agent_id,title,content,question) VALUES (1,'question',%s,'{\"type\":\"text\"}')",
+            "INSERT INTO agent_questions (agent_id,title,content,question) VALUES (1,'question',%s,'{\"type\":\"text\"}')",
             ("x" * 1_000_000,),
         )
     card = select_roster(
         db_conn, catalog=model_catalog, default_model=settings.lm.llm_model
     ).agents[0]
     assert card.has_pending_question is True
-    assert "notices_awaiting_response" not in AgentCard.model_fields
+    assert "questions_awaiting_response" not in AgentCard.model_fields
     assert len(card.model_dump_json()) < 1500
 
 
-def test_roster_distinguishes_pending_questions_from_resolved_questions_and_regular_replies(
+def test_roster_distinguishes_pending_questions_from_resolved_questions(
     model_catalog: ModelCatalog, db_conn: psycopg.Connection
 ) -> None:
     seed(db_conn, [(1, "user", "running"), (2, "user", "idling")])
     db_conn.execute(
         """
-        INSERT INTO agent_notices (agent_id,title,question,resolved_at,resolution)
+        INSERT INTO agent_questions (agent_id,title,question,resolved_at,resolution)
         VALUES
             (1,'Question','{"type":"text"}',NULL,NULL),
-            (1,'Regular reply',NULL,NULL,NULL),
-            (2,'Resolved question','{"type":"text"}',now(),'dismissed'),
-            (2,'Regular reply',NULL,NULL,NULL)
+            (2,'Resolved question','{"type":"text"}',now(),'dismissed')
         """
     )
     cards = {
@@ -228,41 +226,43 @@ def test_directory_rejects_invalid_cursor(
         )
 
 
-def test_roster_attention_skips_resolved_and_unrelated_notices(db_conn: psycopg.Connection) -> None:
+def test_roster_attention_skips_resolved_and_unrelated_questions(
+    db_conn: psycopg.Connection,
+) -> None:
     seed(db_conn, [(90001, "user", "idling")])
     seed(db_conn, [(i, "user", "terminated") for i in range(90002, 90102)])
     with db_conn.cursor() as cur:
         cur.execute("""
-            INSERT INTO agent_notices (agent_id,title,resolved_at,resolution)
-            SELECT 90001,'old',now(),'dismissed'
+            INSERT INTO agent_questions (agent_id,title,question,resolved_at,resolution)
+            SELECT 90001,'old','{"type":"text"}',now(),'dismissed'
             FROM generate_series(1,20000)i
         """)
         cur.execute("""
-            INSERT INTO agent_notices (agent_id,title,question)
+            INSERT INTO agent_questions (agent_id,title,question)
             VALUES (90001,'reply','{"type":"text"}')
         """)
         cur.execute("""
-            INSERT INTO agent_notices (agent_id,title,resolved_at,resolution)
-            SELECT 90002+i%100,'other',now(),'dismissed'
+            INSERT INTO agent_questions (agent_id,title,question,resolved_at,resolution)
+            SELECT 90002+i%100,'other','{"type":"text"}',now(),'dismissed'
             FROM generate_series(1,20000)i
         """)
-        cur.execute("ANALYZE agent_notices")
+        cur.execute("ANALYZE agent_questions")
         cur.execute(sql.SQL("EXPLAIN (ANALYZE, FORMAT JSON) ") + LIVE_SQL)
         row = cur.fetchone()
         assert row is not None
         plan: dict[str, Any] = row[0][0]["Plan"]
 
-    def visited_notices(node: dict[str, Any]) -> float:
+    def visited_questions(node: dict[str, Any]) -> float:
         visited = 0
-        if node.get("Relation Name") == "agent_notices":
+        if node.get("Relation Name") == "agent_questions":
             visited = (
                 node["Actual Rows"]
                 + node.get("Rows Removed by Filter", 0)
                 + node.get("Rows Removed by Index Recheck", 0)
             ) * node["Actual Loops"]
-        return visited + sum(visited_notices(child) for child in node.get("Plans", []))
+        return visited + sum(visited_questions(child) for child in node.get("Plans", []))
 
-    assert visited_notices(plan) < 100
+    assert visited_questions(plan) < 100
 
 
 def _install_conn(row: tuple[object, ...] | None) -> tuple[Database, FakeConnection]:
@@ -500,14 +500,14 @@ def test_has_unread_user_messages_means_a_delivery_past_the_agents_seen_cursor(
     seed(db_conn, [(1, "user", "idling"), (2, "user", "idling"), (3, "user", "idling")])
     with db_conn.cursor() as cur:
         cur.execute(
-            "INSERT INTO agent_user_messages (agent_id,source_key,mode,content,suggestions) "
+            "INSERT INTO agent_publications (agent_id,source_key,mode,content,suggestions) "
             "VALUES (1,'a','prefix','seen','[]'),(1,'b','prefix','unseen','[]'),"
             "(1,'silent','sdk',NULL,'[]'),(2,'a','prefix','other agent','[]'),"
             "(3,'a','prefix','seen','[]'),(3,'silent','sdk',NULL,'[]')"
         )
         cur.execute(
-            "INSERT INTO agent_user_seen (agent_id, seen_id) "
-            "SELECT agent_id, id FROM agent_user_messages WHERE source_key='a' AND agent_id IN (1,3)"
+            "INSERT INTO agent_publication_seen (agent_id, seen_id) "
+            "SELECT agent_id, id FROM agent_publications WHERE source_key='a' AND agent_id IN (1,3)"
         )
 
     def unread() -> dict[int, bool]:
@@ -528,9 +528,9 @@ def test_has_unread_user_messages_means_a_delivery_past_the_agents_seen_cursor(
         for agent_id, snap in snapshots.items()
         if snap is not None
     } == {1: True, 2: True, 3: False}
-    db_conn.execute("UPDATE agent_user_seen SET seen_id = seen_id + 1 WHERE agent_id = 1")
+    db_conn.execute("UPDATE agent_publication_seen SET seen_id = seen_id + 1 WHERE agent_id = 1")
     db_conn.execute(
-        "INSERT INTO agent_user_seen (agent_id, seen_id) "
-        "SELECT 2, MAX(id) FROM agent_user_messages WHERE agent_id = 2"
+        "INSERT INTO agent_publication_seen (agent_id, seen_id) "
+        "SELECT 2, MAX(id) FROM agent_publications WHERE agent_id = 2"
     )
     assert unread() == {1: False, 2: False, 3: False}

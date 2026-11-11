@@ -185,23 +185,23 @@ def test_runner_appends_visible_deliveries_without_rewriting_history(runner_db: 
     with psycopg.connect(runner_url(runner_db), autocommit=True) as conn:
         for _ in range(2):
             conn.execute(
-                "INSERT INTO agent_user_messages (agent_id,source_key,mode,content,suggestions) "
+                "INSERT INTO agent_publications (agent_id,source_key,mode,content,suggestions) "
                 "VALUES (%s,'reply:1','prefix','Done','[]') "
                 "ON CONFLICT (agent_id,source_key) DO NOTHING",
                 (agent_id,),
             )
         assert conn.execute(
-            "SELECT content FROM agent_user_messages WHERE agent_id=%s", (agent_id,)
+            "SELECT content FROM agent_publications WHERE agent_id=%s", (agent_id,)
         ).fetchall() == [("Done",)]
         with pytest.raises(psycopg.errors.InsufficientPrivilege):
             conn.execute(
-                "UPDATE agent_user_messages SET content='rewritten' WHERE agent_id=%s", (agent_id,)
+                "UPDATE agent_publications SET content='rewritten' WHERE agent_id=%s", (agent_id,)
             )
         with pytest.raises(psycopg.errors.InsufficientPrivilege):
-            conn.execute("DELETE FROM agent_user_messages WHERE agent_id=%s", (agent_id,))
+            conn.execute("DELETE FROM agent_publications WHERE agent_id=%s", (agent_id,))
         for statement in (
-            "INSERT INTO agent_user_seen (agent_id, seen_id) VALUES (%s, 1)",
-            "UPDATE agent_user_seen SET seen_id=2 WHERE agent_id=%s",
+            "INSERT INTO agent_publication_seen (agent_id, seen_id) VALUES (%s, 1)",
+            "UPDATE agent_publication_seen SET seen_id=2 WHERE agent_id=%s",
         ):
             with pytest.raises(psycopg.errors.InsufficientPrivilege):
                 conn.execute(statement, (agent_id,))

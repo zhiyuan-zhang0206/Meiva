@@ -205,18 +205,18 @@ def test_an_event_the_user_did_to_an_agent_has_no_sender(
     ]
 
 
-def test_a_notice_is_an_agent_posting_to_the_user(
+def test_a_question_is_an_agent_posting_to_the_user(
     redis_url: str, db_conn: psycopg.Connection, receiver: int, *, database_gate: ProcessDbGate
 ) -> None:
     db_conn.execute(
-        "INSERT INTO agent_notices (agent_id, title) VALUES (%s, 'need   a decision')",
+        "INSERT INTO agent_questions (agent_id, title, question) VALUES (%s, 'need   a decision', '{\"type\": \"text\"}')",
         (receiver,),
     )
     db_conn.commit()
-    [link] = read(receiver, kinds=("notice",), database_gate=database_gate)
-    assert (link.kind, link.sender, link.receiver) == ("notice", receiver, None)
-    assert link.notice_id is not None
-    assert read(receiver + 1, kinds=("notice",), database_gate=database_gate) == []
+    [link] = read(receiver, kinds=("question",), database_gate=database_gate)
+    assert (link.kind, link.sender, link.receiver) == ("question", receiver, None)
+    assert link.question_id is not None
+    assert read(receiver + 1, kinds=("question",), database_gate=database_gate) == []
 
 
 def test_an_unknown_source_prefix_fails_instead_of_being_skipped(
@@ -264,22 +264,22 @@ def test_only_a_chat_message_is_served(
     assert gone.value.status_code == 404
 
 
-def test_a_notice_is_served_with_title_and_text(
+def test_a_question_is_served_with_title_and_text(
     redis_url: str, db_conn: psycopg.Connection, receiver: int, *, database_gate: ProcessDbGate
 ) -> None:
     row = db_conn.execute(
-        "INSERT INTO agent_notices (agent_id, title, content) "
-        "VALUES (%s, 'a title', '## body') RETURNING id",
+        "INSERT INTO agent_questions (agent_id, title, content, question) "
+        "VALUES (%s, 'a title', '## body', '{\"type\": \"text\"}') RETURNING id",
         (receiver,),
     ).fetchone()
     assert row is not None
     db_conn.commit()
-    served = _content(notice_id=int(row[0]), database_gate=database_gate)
+    served = _content(question_id=int(row[0]), database_gate=database_gate)
     assert (served.title, served.content) == ("a title", "## body")
 
 
 def test_exactly_one_reference_is_required(*, database_gate: ProcessDbGate) -> None:
-    for params in ({}, {"inbound_id": 1, "notice_id": 1}):
+    for params in ({}, {"inbound_id": 1, "question_id": 1}):
         with pytest.raises(HTTPException) as bad:
             _content(database_gate=database_gate, **params)
         assert bad.value.status_code == 422

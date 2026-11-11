@@ -29,7 +29,7 @@ import type { AgentRow, DeliveredUploadStatus, UserMessage } from "@/lib/contrac
 import { errMsg } from "@/lib/contracts/errors";
 import { cn } from "@/lib/format/utils";
 import type { Harness } from "@/lib/harness/harness";
-import { useNotices } from "@/lib/notifications/use-notices";
+import { useQuestions } from "@/lib/notifications/use-questions";
 import type { useInspectorOpen } from "@/lib/inspector/inspector-panel-store";
 import { FLEX, FLEX_1, FLEX_COL, MIN_H_0, MIN_W_0, OVERFLOW_HIDDEN } from "@/lib/layout/layout";
 import type { useBreakpoint } from "@/lib/layout/breakpoint";
@@ -450,7 +450,7 @@ function HomeContent({
   const composerMode: "disabled" | "idle" | "busy" =
     activeId == null ? "disabled" : agentBusy ? "busy" : "idle";
   const publications = useUserMessages(activeId);
-  const questions = useNotices();
+  const questions = useQuestions();
   const pendingQuestions = useMemo(() => questions.awaiting.filter((item) => item.agent_id === activeId)
     .sort((a, b) => a.created_at.localeCompare(b.created_at)), [questions.awaiting, activeId]);
   const displayedItems = useMemo(() => withUserMessages(items, publications.data?.items ?? []), [items, publications.data]);

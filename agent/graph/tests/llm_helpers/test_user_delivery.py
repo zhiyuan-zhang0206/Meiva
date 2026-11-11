@@ -69,7 +69,7 @@ async def test_visible_reply_capture_and_checkpoint_metadata(
     restored = AIMessage.model_validate(serde.loads_typed(serde.dumps_typed(message)))
     assert read_meiva_kwargs(restored).get("meiva_user_delivery_mode") == "naive"
     assert db_conn.execute(
-        "SELECT mode,content FROM agent_user_messages WHERE agent_id=%s", (agent_id,)
+        "SELECT mode,content FROM agent_publications WHERE agent_id=%s", (agent_id,)
     ).fetchall() == [("naive", "Private wrap-up")]
     assert db_conn.execute(
         "SELECT action, tag, body FROM notification_events WHERE agent_id=%s", (agent_id,)
@@ -105,12 +105,12 @@ async def test_natural_end_requires_publication_and_reminds_once(
     with pytest.raises(FatalLLMStreamError, match="SDK delivery contract violated"):
         await llm_node(corrected, runtime, config, rng=seeded_rng())
     assert db_conn.execute(
-        "SELECT count(*) FROM agent_user_messages WHERE agent_id=%s", (agent_id,)
+        "SELECT count(*) FROM agent_publications WHERE agent_id=%s", (agent_id,)
     ).fetchone() == (0,)
 
     if delivery == "ask":
         db_conn.execute(
-            "INSERT INTO agent_notices(agent_id,title,question) "
+            "INSERT INTO agent_questions(agent_id,title,question) "
             "VALUES (%s,'Choose scope','{\"type\":\"text\"}')",
             (agent_id,),
         )
@@ -136,7 +136,7 @@ async def test_compacted_context_restores_unread_and_unanswered_deliveries(
 ) -> None:
     agent_id = create_agent(db_conn)
     db_conn.execute(
-        "INSERT INTO agent_notices(agent_id,title,question) "
+        "INSERT INTO agent_questions(agent_id,title,question) "
         "VALUES (%s,'Approve the smaller scope?','{\"type\":\"text\"}')",
         (agent_id,),
     )

@@ -6,7 +6,7 @@ from base.config.domains.display import DisplaySettings
 DISPLAY_RANGES = (
     ("messages_default_limit", 1, 10000),
     ("timeline_default_limit", 1, 1000),
-    ("notices_open_default_limit", 1, 500),
+    ("questions_open_default_limit", 1, 500),
     ("shell_capture_default_lines", 50, 2000),
     ("timeline_history_page_base", 1, 1000),
     ("timeline_window_activation_rows", 2, 5000),

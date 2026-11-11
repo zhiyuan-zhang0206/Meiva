@@ -246,11 +246,11 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
         Idempotency.AT_LEAST_ONCE_WITH_KEY,
         note="advances the agent's monotonic seen cursor; the cursor and its receipt commit together",
     ),
-    ("GET", "/api/notices"): RouteContract(note="unresolved questions across the fleet"),
-    ("GET", "/api/notices/open"): RouteContract(),
-    ("POST", "/api/keyed/v1/agents/{agent_id}/notices/{notice_id}/resolve"): RouteContract(
+    ("GET", "/api/questions"): RouteContract(note="unresolved questions across the fleet"),
+    ("GET", "/api/questions/open"): RouteContract(),
+    ("POST", "/api/keyed/v1/agents/{agent_id}/questions/{question_id}/resolve"): RouteContract(
         Idempotency.AT_LEAST_ONCE_WITH_KEY,
-        note="required verified principal key resolves only the explicit global notice and replays its original inbound",
+        note="required verified principal key resolves only the explicit global question and replays its original inbound",
     ),
     ("POST", "/api/keyed/v1/packages/draft"): RouteContract(
         Idempotency.AT_LEAST_ONCE_WITH_KEY,

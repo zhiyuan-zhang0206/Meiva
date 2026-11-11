@@ -1,7 +1,7 @@
 # Alerts Router
 
 The Alert system (user design 2026-08-12): Alert is fully separate from
-Notice — own table, own UI section; nothing here touches `agent_notices`. Grafana's embedded Alertmanager evaluates the alert rules
+Question — own table, own UI section; nothing here touches `agent_questions`. Grafana's embedded Alertmanager evaluates the alert rules
 (`deploy/lgtm/config/grafana/provisioning/alerting/rules.yml` as code) and delivers the Alertmanager
 standard webhook payload to the gateway; this router is the other half of
 the loop. This router is the only way alerts enter the store: no other process writes

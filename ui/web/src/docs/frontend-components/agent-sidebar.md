@@ -108,8 +108,8 @@ agent's composer.
 The hover card names the same state with the same mark.
 
 What the dot means is one number per agent: the **seen position**, the newest delivery
-id (`agent_user_messages.id`) the reader has seen, stored on the server
-(`agent_user_seen`, monotonic, never per record). Unread is "a delivery lies past it".
+id (`agent_publications.id`) the reader has seen, stored on the server
+(`agent_publication_seen`, monotonic, never per record). Unread is "a delivery lies past it".
 Opening an agent's conversation in a visible page counts everything delivered as seen,
 wherever the timeline is scrolled, and deliveries arriving while it stays open and
 visible are seen on arrival. A hidden page sees nothing, and its return starts a new

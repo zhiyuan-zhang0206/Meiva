@@ -267,7 +267,7 @@ def _flat(text: str, chars: int) -> str:
 # meiva:note
 # The type label of an inbound unit, from its source: `human message` for the user,
 # `agent N message` for agent N, any other source (`watcher:1955`, `shell:1940`,
-# `system:notice-reply`) by its own name.
+# `system:question-reply`) by its own name.
 def _inbound_type(source: str | None) -> str:
     if source is None or source == "user":
         return "human message"

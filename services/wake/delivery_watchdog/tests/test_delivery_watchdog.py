@@ -296,7 +296,7 @@ class TestSelectStalePending:
             aid,
             age_s=_THRESHOLD_S + 5,
             database_gate=database_gate,
-            source="system:notice-reply",
+            source="system:question-reply",
         )
         assert select_stale_pending(pool, _THRESHOLD_S) == []
 
@@ -441,7 +441,7 @@ class TestSelectStalePending:
             aid,
             age_s=_THRESHOLD_S + 5,
             database_gate=database_gate,
-            source="system:notice-reply",
+            source="system:question-reply",
         )
         assert select_stale_pending(pool, _THRESHOLD_S) == []
 

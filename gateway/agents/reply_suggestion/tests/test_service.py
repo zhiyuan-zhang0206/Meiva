@@ -422,7 +422,7 @@ async def test_candidates_feedback_and_memory_reach_one_draft_while_agent_runs(
         (old_offer,),
     )
     harness.db_conn.execute(
-        "INSERT INTO agent_user_messages(agent_id,source_key,mode,content,suggestions) VALUES (%s,'sdk:result','sdk','Ready to deploy',%s)",
+        "INSERT INTO agent_publications(agent_id,source_key,mode,content,suggestions) VALUES (%s,'sdk:result','sdk','Ready to deploy',%s)",
         (harness.agent_id, Jsonb(["Ship it"])),
     )
     harness.db_conn.commit()

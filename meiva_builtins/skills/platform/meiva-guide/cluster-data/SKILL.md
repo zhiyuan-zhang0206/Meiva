@@ -26,7 +26,7 @@ to a read-only query only when none fits.
 | What each agent costs (calls, tokens, cost, turn outcomes) | `meiva metrics agents [--days N] [--json]` (costliest first) |
 | Fleet cost and tokens over a window, warning and error totals, balances and quotas that plugins report | `meiva stats [--hours 0\|1\|6\|24\|72\|168\|720] [--json]` (the plugin cards, such as provider balances, are listed under the totals) |
 | Schedules and their runs | `meiva schedules ls`, `meiva schedules get <name>`, `meiva schedules runs <name> [--limit N]`, `meiva schedules logs <name> [--lines N]` |
-| Open questions waiting for the user | `meiva notices list [--agent ID]` |
+| Open questions waiting for the user | `meiva questions list [--agent ID]` |
 | Files of an agent, delivering something to the user | `meiva.files`, `meiva.ui` |
 | Service health | `meiva status` |
 
@@ -83,7 +83,7 @@ How to use it:
 | `agent_tasks` | The task board | `parent_id`, `title`, `status`, `priority`, `owner`, `created_at`, `updated_at` |
 | `schedules`, `schedule_runs` | Persistent scheduled work and its run history | `schedules.name`, `enabled`, `status`, `last_error`, `machine`; `schedule_runs.schedule_id`, `ran_at`, `ok`, `note` |
 | `agent_model_tokens_daily` | Per-agent, per-model token and cost totals by day | `agent_id`, `day`, `model`, `llm_calls`, `tokens_in`, `tokens_out`, `cost_usd` |
-| `agent_notices`, `machines`, `machine_status_snapshot` | Open questions for the user; which machines are in the cluster and how they look | see `db/schema.sql` |
+| `agent_questions`, `machines`, `machine_status_snapshot` | Open questions for the user; which machines are in the cluster and how they look | see `db/schema.sql` |
 
 `event_name` values come from the emitting code. To find the one you want, list the
 names that occurred in a short window with `meiva events count --by event_name --hours 24`,

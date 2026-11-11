@@ -100,6 +100,6 @@ execution lookup requires a complete catalog; it does not use nullable metadata.
 
 Agent cards carry `has_pending_question` (an unresolved row with a question) and
 `has_unread_user_messages` (a delivery past the agent's seen position); there are no
-counters. The roster and directory compute both without returning the notice bodies.
+counters. The roster and directory compute both without returning the question bodies.
 The agent snapshot additionally lists the unresolved questions in
-`notices_awaiting_response`.
+`questions_awaiting_response`.

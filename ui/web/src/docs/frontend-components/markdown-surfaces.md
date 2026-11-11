@@ -8,7 +8,7 @@ Text written as Markdown by a model or an author renders through the one `ChatMa
 - Timeline: agent replies, human and inter-agent `inbound_chat` bodies, reasoning, compact summaries, system prompts, and system markers (`memory` / `agent_memory` / `inherited_memory` and guidance notes).
 - Open-question content, memory-note bodies, and task descriptions / results (task graph hover card, kanban row).
 
-Notice titles and question option labels/descriptions use the same renderer in
+Question titles and question option labels/descriptions use the same renderer in
 inline mode, including resolved history. Emphasis, links and inline code render
 inside phrasing-only spans, keeping headings and form labels valid and retaining
 their compact typography. Paragraphs flatten to inline text; block layout and
@@ -17,7 +17,7 @@ allowlist before KaTeX runs, preserving its generated SVG and accessible MathML;
 both modes keep the same safe URL handling. The lazy fallback also remains inline
 inside these labels.
 Queue-row titles render the same formatting but keep link labels inert inside
-the row-selection button; links remain active in the notice detail.
+the row-selection button; links remain active in the question detail.
 
 The renderer arrives through the same chunk seam as the code highlighter
 (`components/content/lazy-chunk.ts`): the boundary reads it from

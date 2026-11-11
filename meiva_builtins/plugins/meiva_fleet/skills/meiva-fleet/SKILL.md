@@ -159,7 +159,7 @@ part of a budget reminder.
 The **user** is the only one who can authorize what no agent may decide alone — an irreversible or outward-facing action, spending real money, sending something to a real person. This authority is not delegated down the spawn graph: the user is a single queue, reachable directly from any agent.
 
 - **Another agent can decide it** → `send_message` them — you are waiting for their answer.
-- **Only the user can decide it** → post a notice with `meiva.ui.ask(...)` — you are waiting for their decision.
+- **Only the user can decide it** → ask a question with `meiva.ui.ask(...)` — you are waiting for their decision.
 
 ## Reporting
 
@@ -197,6 +197,6 @@ For discrete decisions, supply `question={"type": "single_select",
 "options": [{"id": "stable-id", "label": "Choice", "description": "Optional detail"}]}` to `meiva.ui.ask(...)`.
 Use `type="multi_select"` for multiple selections. For an open question use `question={"type": "text"}`. Put the question in `title`
 and context in `content`. Each Ask is one question; multiple questions may remain open. Options keep their declared 1-based numbers. Text questions have one answer field; choices keep an optional Note. `note_suggestion` offers candidate text for that field until the user explicitly applies it.
-Question/context changes require a replacement notice. Interpret both explicit
+Question/context changes require a replacement question. Interpret both explicit
 selections and the user's comment, preserving references such as "option 2";
 mentions inside text are not selections. A dismissal is not approval.

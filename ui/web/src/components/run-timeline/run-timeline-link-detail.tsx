@@ -17,7 +17,7 @@ import { useApi } from "@/lib/transport/transport-context";
 function LinkText({ link }: { link: ResolvedLink["link"] }) {
   const client = useApi();
   const t = useTranslations("runTimeline");
-  const ref = link.inbound_id !== null ? { inbound_id: link.inbound_id } : link.notice_id !== null ? { notice_id: link.notice_id } : null;
+  const ref = link.inbound_id !== null ? { inbound_id: link.inbound_id } : link.question_id !== null ? { question_id: link.question_id } : null;
   const read = useQuery({
     queryKey: ["run-timeline-link-content", ref],
     queryFn: () => (ref === null ? Promise.reject(new Error("an event with no text to read")) : client.getRunTimelineLinkContent(ref)),

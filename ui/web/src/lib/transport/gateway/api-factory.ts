@@ -1,5 +1,5 @@
 import type {
-  NoticesFeed,
+  QuestionsFeed,
   AgentInspectStatistics,
   AgentInspectLive,
   InspectWidget,
@@ -34,7 +34,7 @@ import type {
 import { projectAgentStatus } from "../../contracts/types";
 import { agentShellPath, commandsPath, inspectStatisticsPath, listAgentsPath, tasksPath } from "./routes/agent-routes";
 import { createControlApi } from "./api-control";
-import { noticesPath } from "./routes/control-routes";
+import { questionsPath } from "./routes/control-routes";
 import type { Http } from "./http";
 import { sendMessageWithReconciliation } from "./message-delivery";
 import { INSPECT_REQUEST_TIMEOUT_MS } from "./plans";
@@ -121,7 +121,7 @@ export function createApi(http: Http) {
     },
 
     getRunTimelineLinkContent: (
-      ref: { inbound_id: number } | { notice_id: number },
+      ref: { inbound_id: number } | { question_id: number },
     ): Promise<RunTimelineLinkContent> => {
       return f(runTimelineLinkContentPath(ref)).then(ok<RunTimelineLinkContent>);
     },
@@ -197,8 +197,8 @@ export function createApi(http: Http) {
       return sendMessageWithReconciliation(http, agentId, content, clientMessageId);
     },
 
-    getNotices: (): Promise<NoticesFeed> => {
-      return f(noticesPath()).then(ok<NoticesFeed>);
+    getQuestions: (): Promise<QuestionsFeed> => {
+      return f(questionsPath()).then(ok<QuestionsFeed>);
     },
 
     getAgentRoster: (signal?: AbortSignal): Promise<AgentRoster> =>

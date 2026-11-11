@@ -224,17 +224,17 @@ def get_run_timeline_links(
 
 @router.get(
     "/api/insights/run-timeline/link-content",
-    description="The full text of one chat message (`inbound_id`) or the title and text of one notice (`notice_id`); exactly one.",
+    description="The full text of one chat message (`inbound_id`) or the title and text of one question (`question_id`); exactly one.",
 )
 def get_run_timeline_link_content(
     request: Request,
     inbound_id: Annotated[int | None, Query(ge=1)] = None,
-    notice_id: Annotated[int | None, Query(ge=1)] = None,
+    question_id: Annotated[int | None, Query(ge=1)] = None,
 ) -> RunTimelineLinkContent:
     with _request_errors():
-        check_link_content_selector(inbound_id, notice_id)
+        check_link_content_selector(inbound_id, question_id)
     db = insights_state(request).db
-    found = read_link_content(db, inbound_id=inbound_id, notice_id=notice_id)
+    found = read_link_content(db, inbound_id=inbound_id, question_id=question_id)
     if found is None:
         raise HTTPException(status_code=404, detail="no such message or notice")
     return found

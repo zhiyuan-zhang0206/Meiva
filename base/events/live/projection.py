@@ -455,12 +455,12 @@ class LabelUpdated(_Base):
 
 # meiva:note
 # Published when the agent asks a question via `meiva.ui.ask`. Carries only the lightweight header
-# (not the body), so the open-question list refetches. A notice that needs a response also
+# (not the body), so the open-question list refetches. A question also
 # publishes AgentUpdated, which invalidates the selected agent's authoritative detail read for
 # inspector consumers.
-class NoticePosted(_Base):
-    role: Literal["notice_posted"] = "notice_posted"
-    notice_id: int
+class QuestionAsked(_Base):
+    role: Literal["question_asked"] = "question_asked"
+    question_id: int
     title: str
 
 
@@ -468,9 +468,9 @@ class NoticePosted(_Base):
 # Published when an open question leaves the queue; the frontend refetches the open questions.
 # The resolution's write or delivery path also publishes AgentUpdated, keeping the inspector
 # snapshot independent of this event.
-class NoticeResolved(_Base):
-    role: Literal["notice_resolved"] = "notice_resolved"
-    notice_id: int
+class QuestionResolved(_Base):
+    role: Literal["question_resolved"] = "question_resolved"
+    question_id: int
 
 
 class TaskCreated(_Base):
@@ -539,8 +539,8 @@ Event = Annotated[
     | TimelineSnapshot
     | AgentSpawned
     | AgentUpdated
-    | NoticePosted
-    | NoticeResolved
+    | QuestionAsked
+    | QuestionResolved
     | TaskCreated
     | TaskUpdated
     | NotificationEmitted,
@@ -578,8 +578,8 @@ ROLE_CLASSES: tuple[tuple[type[Event], bool], ...] = (
     (TimelineSnapshot, False),
     (AgentSpawned, True),
     (AgentUpdated, True),
-    (NoticePosted, True),
-    (NoticeResolved, True),
+    (QuestionAsked, True),
+    (QuestionResolved, True),
     (TaskCreated, True),
     (TaskUpdated, True),
     (NotificationEmitted, True),
@@ -619,8 +619,8 @@ SYSTEM_ROLES: frozenset[str] = frozenset(_role_of(cls) for cls, _ in ROLE_CLASSE
 # Cross-agent, low-frequency subset forwarded on the global /api/system
 # broadcast — every connected client sees these for *all* agents. Only the
 # fleet-wide views consume them: the sidebar agent list (spawned / updated /
-# label), the FYI notice feed (notice
-# posted / resolved), and cluster-update takeover. The high-frequency
+# label), the question feed (question
+# asked / resolved), and cluster-update takeover. The high-frequency
 # per-turn roles (chat_delta / code_delta / reasoning_delta /
 # exec_output_chunk / timeline_snapshot / token_usage / ...) are deliberately
 # excluded — they go only to the per-agent /api/agents/{id}/system stream of

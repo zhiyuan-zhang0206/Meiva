@@ -42,11 +42,11 @@ collapse after fetch.
 **Single column chrome owner.** `SharedContextPanel` owns the right column's
 outer chrome at every breakpoint — the desktop `document-bar` with the
 `ScanSearch` toggle, the mobile full-screen sheet with its `Back to messages` +
-`ScanSearch` header, and the pinned bottom `notice-region`
+`ScanSearch` header, and the pinned bottom `question-region`
 ([shared user context](../../frontend-state/shared-context/shared-context.md)
 and [Inspector mode](../../frontend-state/shared-context/inspector-mode/inspector-mode.md)).
 `InspectorPanel` therefore renders only its `ScrollArea` body inside `<aside>`
-with no standalone header, no `embedded` prop, no inline notice reply duplicate
+with no standalone header, no `embedded` prop, no inline question reply duplicate
 and no second mobile backdrop. Escape deliberately does not close the panel (user
 ruling 2026-08-24), and clicking outside the desktop panel does not close it
 either.

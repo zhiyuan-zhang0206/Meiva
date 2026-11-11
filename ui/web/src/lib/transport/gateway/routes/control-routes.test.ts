@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { configPath, harnessAvailabilityPath, inventoryPath, resolvedConfigPath, settingPath } from "./config-routes";
-import { alertClassSamplesPath, alertsPath, fleetGraphPath, memoryNotePath, noticesPath } from "./control-routes";
+import { alertClassSamplesPath, alertsPath, fleetGraphPath, memoryNotePath, questionsPath } from "./control-routes";
 
 describe("config routes", () => {
   it("getConfig appends ?machine= only when a machine is given", () => {
@@ -45,9 +45,9 @@ describe("control routes", () => {
       .toBe("/api/alerts?window=24h&status=unresolved&severity=error&limit=200");
   });
 
-  it("notices list only the limit when it is set", () => {
-    expect(noticesPath()).toBe("/api/notices");
-    expect(noticesPath({ limit: 50 })).toBe("/api/notices?limit=50");
+  it("questions list only the limit when it is set", () => {
+    expect(questionsPath()).toBe("/api/questions");
+    expect(questionsPath({ limit: 50 })).toBe("/api/questions?limit=50");
   });
 
   it("the fleet graph takes hours and the decay constant when given", () => {

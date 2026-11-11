@@ -18,6 +18,7 @@ from base.deploy.schema.tests.migration_support import (
     db_url,
     init_repo,
     restore_legacy_notice_columns,
+    restore_pre_split_names,
 )
 from base.deploy.schema.tests.migration_support import (
     reset_schema_migrations_state as reset_schema_migrations_state,
@@ -329,6 +330,7 @@ def test_current_reset_converges_when_the_missing_names_still_have_files(
             # meiva:note
             # This historical applied set predates delivery tables; remove their folded
             # schema effects before replaying the real migration tree from that state.
+            restore_pre_split_names(c)
             c.execute(
                 "DROP TABLE reply_suggestion_feedback, reply_suggestion_offers, agent_user_messages"
             )
@@ -370,6 +372,7 @@ def _live_reset_shape(url: str) -> set[str]:
     before = {BASELINE_NAME, *(set(PRE_RESET_SET) - file_backed)}
     with psycopg.connect(url, autocommit=True) as c:
         c.execute(cast(LiteralString, SCHEMA_SQL.read_text()))
+        restore_pre_split_names(c)
         c.execute(
             "DROP TABLE reply_suggestion_feedback, reply_suggestion_offers, agent_user_messages"
         )

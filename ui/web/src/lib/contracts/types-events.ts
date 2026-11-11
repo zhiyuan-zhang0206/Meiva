@@ -181,14 +181,14 @@ export interface AgentSpawnedEvent extends BaseEvent {
 export interface AgentUpdatedEvent extends BaseEvent {
   readonly role: "agent_updated";
 }
-export interface NoticePostedEvent extends BaseEvent {
-  readonly role: "notice_posted";
-  readonly notice_id: number;
+export interface QuestionAskedEvent extends BaseEvent {
+  readonly role: "question_asked";
+  readonly question_id: number;
   readonly title: string;
 }
-export interface NoticeResolvedEvent extends BaseEvent {
-  readonly role: "notice_resolved";
-  readonly notice_id: number;
+export interface QuestionResolvedEvent extends BaseEvent {
+  readonly role: "question_resolved";
+  readonly question_id: number;
 }
 export interface TaskCreatedEvent extends BaseEvent {
   readonly role: "task_created";
@@ -235,8 +235,8 @@ export type SystemEvent =
   | TimelineSnapshotEvent
   | AgentSpawnedEvent
   | AgentUpdatedEvent
-  | NoticePostedEvent
-  | NoticeResolvedEvent
+  | QuestionAskedEvent
+  | QuestionResolvedEvent
   | TaskCreatedEvent
   | TaskUpdatedEvent
   | NotificationEvent;

@@ -44,7 +44,7 @@ a popover, popover text 11.7:1, sidebar text 14.8:1; ladder steps canvas-to-card
 ## The run-timeline arrow tokens
 
 `--link-message`, `--link-user`, `--link-spawn`, `--link-fork`, `--link-terminate`,
-`--link-restart`, `--link-resurrect`, `--link-notice` — one per arrow kind
+`--link-restart`, `--link-resurrect`, `--link-question` — one per arrow kind
 (`LINK_COLORS`). Both blocks keep every kind at 4.5:1 or better against that
 theme's `--card`, because an arrow is a 1.6 px line drawn straight over it; the
 fixed hexes these replaced measured 1.4-3.1:1 once the canvas alpha was applied,

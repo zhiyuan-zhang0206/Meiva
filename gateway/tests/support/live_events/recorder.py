@@ -1,8 +1,8 @@
 # meiva:note
 # A subscriber on the cluster's live-events channel, as a frontend or an agent host would be.
 #
-# The gateway announces committed changes on one Redis channel (`AgentUpdated`, `NoticePosted`,
-# `NoticeResolved`, ...). A test that wants to know what was announced subscribes here instead of
+# The gateway announces committed changes on one Redis channel (`AgentUpdated`, `QuestionAsked`,
+# `QuestionResolved`, ...). A test that wants to know what was announced subscribes here instead of
 # replacing the publishing function: the real publish runs, the event travels through the test's
 # Redis, and the recorder reads it back. `react` runs on the subscriber's thread the moment an
 # event arrives, which is how a consumer reconciles from the authoritative store: a test uses it to

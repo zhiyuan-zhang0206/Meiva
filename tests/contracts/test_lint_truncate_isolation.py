@@ -39,6 +39,7 @@ def _strip_sql_comments(text: str) -> str:
 
 
 _DROP_TABLE_RE = re.compile(r"DROP TABLE (?:IF EXISTS )?(?:\w+\.)?(\w+)")
+_RENAME_TABLE_RE = re.compile(r"ALTER TABLE (?:IF EXISTS )?(\w+) RENAME TO (\w+)")
 
 
 def _schema_tables() -> set[str]:
@@ -50,6 +51,9 @@ def _schema_tables() -> set[str]:
         text = _strip_sql_comments(mig.read_text(encoding="utf-8"))
         tables.update(_CREATE_TABLE_RE.findall(text))
         tables.difference_update(_DROP_TABLE_RE.findall(text))
+        for old, new in _RENAME_TABLE_RE.findall(text):
+            tables.discard(old)
+            tables.add(new)
     return tables
 
 
@@ -131,12 +135,12 @@ def test_exemption_list_has_no_stale_entries(db_url: str) -> None:
 
 def test_strip_sql_comments_neutralizes_comment_ddl_citations() -> None:
     text = (
-        "-- inline in the agent_notices CREATE TABLE, because agent_notices is defined\n"
+        "-- inline in the agent_questions CREATE TABLE, because agent_questions is defined\n"
         "CREATE TABLE real_table (id BIGSERIAL);\n"
         "/* block comment: DROP TABLE ghost_block; */\n"
         "CREATE TABLE other_real (id BIGSERIAL);\n"
     )
     cleaned = _strip_sql_comments(text)
-    assert "agent_notices CREATE TABLE" not in cleaned
+    assert "agent_questions CREATE TABLE" not in cleaned
     assert "ghost_block" not in cleaned
     assert _CREATE_TABLE_RE.findall(cleaned) == ["real_table", "other_real"]

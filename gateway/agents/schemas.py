@@ -23,7 +23,7 @@ from base.agents.messages.inbound_images import TimelineUploadFile
 from base.agents.messages.kwargs import NoteTag
 from base.agents.observation.snapshot import AgentSnapshot
 from base.api_contracts.agent_contract import AgentStatus
-from base.api_contracts.notice_question import NoticeAnswer, NoticeQuestion
+from base.api_contracts.question import QuestionAnswer, QuestionSpec
 from ops.rpc_schemas.content import UserContent
 
 
@@ -110,23 +110,23 @@ class SystemNoteIn(BaseModel):
         return self
 
 
-class ResolveNoticeIn(BaseModel):
-    # meiva:link gateway/agents/docs/notice-receipts.md
+class ResolveQuestionIn(BaseModel):
+    # meiva:link gateway/agents/docs/operation-receipts.md
 
     model_config = ConfigDict(extra="forbid")
     action: Literal["answer", "dismiss", "read"]
     reply: UserContent | None = None
-    answer: NoticeAnswer | None = None
+    answer: QuestionAnswer | None = None
 
     @model_validator(mode="after")
-    def validate_answer_intent(self) -> "ResolveNoticeIn":
+    def validate_answer_intent(self) -> "ResolveQuestionIn":
         if self.answer is not None and (self.action != "answer" or self.reply is not None):
             raise ValueError("structured answer requires action=answer and cannot accompany reply")
         return self
 
 
-class NoticeItem(BaseModel):
-    # meiva:link meiva_builtins/plugins/meiva_fleet/docs/notify.md
+class QuestionItem(BaseModel):
+    # meiva:link meiva_builtins/plugins/meiva_fleet/docs/ask.md
 
     id: int
     agent_id: int
@@ -137,20 +137,20 @@ class NoticeItem(BaseModel):
     resolved_at: datetime | None = None
     resolution: str | None = None
     reply: str | None = None
-    question: NoticeQuestion | None = None
-    answer: NoticeAnswer | None = None
+    question: QuestionSpec | None = None
+    answer: QuestionAnswer | None = None
     # meiva:note
     # The credential fact the server verified for the request that wrote this row:
     # cluster_bearer / machine_token:<class> / user_session / internal. None on rows
     # written before the column existed — never a caller's own claim.
-    # meiva:link gateway/agents/docs/notice-receipts.md
+    # meiva:link gateway/agents/docs/operation-receipts.md
     source_verified_by: str | None = None
 
 
-class NoticesFeed(BaseModel):
+class QuestionsFeed(BaseModel):
     # meiva:link gateway/routers/docs/frontend-ui-data.md
 
-    awaiting: list[NoticeItem]
+    awaiting: list[QuestionItem]
 
 
 class PendingInbound(BaseModel):

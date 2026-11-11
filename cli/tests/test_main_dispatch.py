@@ -101,7 +101,7 @@ def test_every_leaf_subcommand_binds_a_handler_from_its_parser_module() -> None:
         func = leaf.get_default("func")
         assert callable(func), f"{leaf.prog!r} has no callable 'func' bound"
         module = getattr(func, "__module__", "")
-        if leaf.prog.startswith(("meiva agents ", "meiva notices ")):
+        if leaf.prog.startswith(("meiva agents ", "meiva questions ")):
             assert module == "cli.commands.agents.parsers", (leaf.prog, module)
         elif leaf.prog.startswith(
             ("meiva mcp ", "meiva memory ", "meiva packages ", "meiva plugins ", "meiva skill ")

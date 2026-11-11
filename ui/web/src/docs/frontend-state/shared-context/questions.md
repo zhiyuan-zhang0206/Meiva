@@ -8,9 +8,9 @@ collapsed, the bar occupies one stable row above the composer so it
 cannot obscure the last message or the scroll-to-bottom control. Answers expand
 upward over the conversation without changing the timeline viewport height. The inner `ScrollArea`
 viewport is capped at 45% of the visual viewport, including the on-screen
-keyboard. The existing `OpenNoticeDetail` owns submission, operation keys,
+keyboard. The existing `OpenQuestionDetail` owns submission, operation keys,
 conflicts and retries. Collapse hides mounted forms, preserving every draft.
-A successful reply drops only that question from the shared notice cache and
+A successful reply drops only that question from the shared question cache and
 refreshes resolved history. A failed feed preserves stale questions and visibly
 reports the failure.
 

@@ -246,7 +246,7 @@ for the full surface.
 | `meiva skill install <src>` | install Agent Skills from a git URL or local path |
 | `meiva plugins` / `meiva mcp` | manage plugins and MCP servers |
 | `meiva memory` | shared memory pool operations |
-| `meiva config` / `meiva notices` / `meiva trace` | config get/set, the notice queue, the trace mirror |
+| `meiva config` / `meiva questions` / `meiva trace` | config get/set, the question queue, the trace mirror |
 
 ---
 

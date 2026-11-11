@@ -570,8 +570,8 @@ export function applySystemEvent(
       // sidebar behavior — useAgentsCacheSync merges the snapshot into the
       // agents query cache. processSseEvent early-returns before reaching this
       // reducer, but the case labels stay for switch exhaustiveness.
-    case "notice_posted":
-    case "notice_resolved":
+    case "question_asked":
+    case "question_resolved":
       // inbox feed — useInboxFeed invalidate-refetches on these; they never
       // enter the timeline.
     case "task_created":
@@ -581,7 +581,7 @@ export function applySystemEvent(
     case "notification":
       // meiva:note
       // Delivered-notification log: the device transports render it, and the
-      // console's inbox is driven by notices, so it never enters a timeline.
+      // console's inbox is driven by questions, so it never enters a timeline.
     case "timeline_snapshot":
       // Handled by store.processSseEvent before applySystemEvent —
       // does not go through the delta reducer; uses mergeSnapshotWithStreaming directly.

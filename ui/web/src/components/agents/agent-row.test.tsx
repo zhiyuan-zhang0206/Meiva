@@ -372,7 +372,7 @@ describe("AgentRow lifecycle markers", () => {
 
 // meiva:note
 // One slot, one indicator: question mark > orange dot (unread) > nothing. Open reply requests
-// and notice counts do not take part.
+// and question counts do not take part.
 // meiva:link ui/web/src/docs/frontend-components/agent-sidebar.md
 describe("AgentRow attention indicator", () => {
   afterEach(() => useStore.setState({ readingAgentId: null }));

@@ -143,12 +143,12 @@ async def get_run_timeline_links(
     "/api/insights/run-timeline/link-content",
     response_model=RunTimelineLinkContent,
     dependencies=[Depends(deny_isolated_result_read)],
-    description="The full text of one chat message (`inbound_id`) or the title and text of one notice (`notice_id`).",
+    description="The full text of one chat message (`inbound_id`) or the title and text of one question (`question_id`).",
 )
 async def get_run_timeline_link_content(
     request: Request,
     _inbound_id: Annotated[int | None, Query(alias="inbound_id", ge=1)] = None,
-    _notice_id: Annotated[int | None, Query(alias="notice_id", ge=1)] = None,
+    _question_id: Annotated[int | None, Query(alias="question_id", ge=1)] = None,
 ) -> Response:
     return await _forward(request, "/api/insights/run-timeline/link-content")
 

@@ -30,7 +30,7 @@ class _Agent(BaseModel):
     last_inbound_at: datetime
     heartbeat_paused_until: datetime | None
     harness_exit_code: int | None
-    notices_awaiting_response: list[object]
+    questions_awaiting_response: list[object]
 
 
 def _stamp(moment: datetime | None) -> str:
@@ -59,7 +59,7 @@ def cmd_agents_get(access: GatewayAccess, agent_id: int, *, as_json: bool) -> in
     print(f"last inbound:      {_stamp(agent.last_inbound_at)}")
     print(f"heartbeat paused:  {_stamp(agent.heartbeat_paused_until)}")
     print(f"harness exit code: {exit_code}")
-    print(f"open questions:    {len(agent.notices_awaiting_response)}")
+    print(f"open questions:    {len(agent.questions_awaiting_response)}")
     return 0
 
 

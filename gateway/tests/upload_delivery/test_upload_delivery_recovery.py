@@ -30,7 +30,7 @@ from gateway.tests.auth.gateway_config import (
     gateway_test_client,
     gateway_test_config,
 )
-from gateway.tests.events.test_notices_endpoint import seed_agent
+from gateway.tests.events.test_questions_endpoint import seed_agent
 from gateway.tests.support.db_faults.update_fault import failing_update
 from gateway.tests.support.runner_ops.ops_stub import runner_ops
 from gateway.tests.upload_delivery.support import (

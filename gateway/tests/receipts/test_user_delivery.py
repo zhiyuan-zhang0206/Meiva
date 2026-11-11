@@ -7,9 +7,9 @@ from psycopg.types.json import Jsonb
 
 from base.api_contracts.user_delivery import UserMessage
 from base.events.live.bus import EventBus
-from gateway.agents.user_delivery.router import UserMessageFeed
+from gateway.agents.to_user.publications import UserMessageFeed
 from gateway.tests.auth.gateway_config import gateway_test_client
-from gateway.tests.events.test_notices_endpoint import seed_agent
+from gateway.tests.events.test_questions_endpoint import seed_agent
 from gateway.tests.support.live_events.recorder import recording_live_events
 
 pytestmark = pytest.mark.usefixtures("gateway_data_plane")
@@ -83,7 +83,7 @@ def test_seen_cursor_never_moves_back_and_is_idempotent(db_conn: psycopg.Connect
         changed = client.post(seen_path(aid), json={"up_to_id": first.id}, headers=headers("same"))
         assert changed.status_code == 409
     assert db_conn.execute(
-        "SELECT seen_id FROM agent_user_seen WHERE agent_id=%s", (aid,)
+        "SELECT seen_id FROM agent_publication_seen WHERE agent_id=%s", (aid,)
     ).fetchone() == (second.id,)
 
 
@@ -106,7 +106,7 @@ def test_seen_touches_only_its_own_agent_and_is_bounded_by_its_deliveries(
             seen_path(other + 1000), json={"up_to_id": 1}, headers=headers("missing")
         )
         assert missing.status_code == 404
-    assert db_conn.execute("SELECT agent_id FROM agent_user_seen").fetchall() == [(mine,)]
+    assert db_conn.execute("SELECT agent_id FROM agent_publication_seen").fetchall() == [(mine,)]
 
 
 def test_seen_announces_agent_updated_only_when_the_cursor_moved(
@@ -190,7 +190,7 @@ def test_publish_retry_is_atomic_and_rejects_changed_content(db_conn: psycopg.Co
             == 409
         )
     assert db_conn.execute(
-        "SELECT count(*) FROM agent_user_messages WHERE agent_id=%s", (aid,)
+        "SELECT count(*) FROM agent_publications WHERE agent_id=%s", (aid,)
     ).fetchone() == (1,)
 
 
@@ -211,7 +211,7 @@ def test_bad_publication_is_rejected(db_conn: psycopg.Connection, body: dict[str
             f"/api/agents/{aid}/user-messages", json=body, headers=headers("invalid")
         )
         assert response.status_code == 422
-    assert db_conn.execute("SELECT count(*) FROM agent_user_messages").fetchone() == (0,)
+    assert db_conn.execute("SELECT count(*) FROM agent_publications").fetchone() == (0,)
 
 
 def test_sdk_has_one_delivery_entry_and_explicit_silence(db_conn: psycopg.Connection) -> None:
@@ -228,7 +228,7 @@ def test_sdk_has_one_delivery_entry_and_explicit_silence(db_conn: psycopg.Connec
         )
         assert response.status_code == 201, response.text
         assert client.get(f"/api/agents/{aid}/user-messages").json()["items"] == []
-    assert db_conn.execute("SELECT count(*) FROM agent_user_messages").fetchone() == (1,)
+    assert db_conn.execute("SELECT count(*) FROM agent_publications").fetchone() == (1,)
 
 
 def test_ask_retries_note_and_answer_share_one_receipt(db_conn: psycopg.Connection) -> None:
@@ -246,10 +246,10 @@ def test_ask_retries_note_and_answer_share_one_receipt(db_conn: psycopg.Connecti
         created = client.post(path, json=question, headers=headers("question"))
         assert created.status_code == 201, created.text
         question_id = created.json()["id"]
-        row = client.get(f"/api/notices/open?agent_id={aid}").json()[0]
+        row = client.get(f"/api/questions/open?agent_id={aid}").json()[0]
         assert row["answer"] is None
         assert row["question"]["note_suggestion"] == "Validate first"
-        resolve = f"/api/keyed/v1/agents/{aid}/notices/{question_id}/resolve"
+        resolve = f"/api/keyed/v1/agents/{aid}/questions/{question_id}/resolve"
         body = {
             "action": "answer",
             "answer": {"option_ids": ["small"], "comment": "Validate tonight"},
@@ -257,7 +257,7 @@ def test_ask_retries_note_and_answer_share_one_receipt(db_conn: psycopg.Connecti
         answer = client.post(resolve, json=body, headers=headers("answer"))
         assert answer.status_code == 201, answer.text
         assert client.post(resolve, json=body, headers=headers("answer")).json() == answer.json()
-        assert client.get(f"/api/notices/open?agent_id={aid}").json() == []
+        assert client.get(f"/api/questions/open?agent_id={aid}").json() == []
     assert db_conn.execute(
         "SELECT count(*) FROM inbound_messages WHERE agent_id=%s", (aid,)
     ).fetchone() == (1,)
@@ -327,7 +327,7 @@ def test_ask_creation_retry_preserves_each_independent_question(
         changed = question | {"title": "Choose timing"}
         assert client.post(path, json=changed, headers=headers("question")).status_code == 409
         assert client.post(path, json=changed, headers=headers("timing")).status_code == 201
-        assert len(client.get(f"/api/notices/open?agent_id={aid}").json()) == 2
+        assert len(client.get(f"/api/questions/open?agent_id={aid}").json()) == 2
 
 
 def unread_pushes(conn: psycopg.Connection, aid: int) -> list[tuple[str, str, str | None]]:

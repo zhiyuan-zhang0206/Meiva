@@ -26,7 +26,7 @@ def test_sdk_publish_is_replayed_by_its_runtime_key(db_conn: psycopg.Connection)
         assert ui.publish("Choose a scope", suggestions=["Small", "Large"]) != first
         ui.publish(None, suggestions=[])
     assert db_conn.execute(
-        "SELECT count(*) FROM agent_user_messages WHERE agent_id=%s", (agent_id,)
+        "SELECT count(*) FROM agent_publications WHERE agent_id=%s", (agent_id,)
     ).fetchone() == (3,)
 
 
@@ -71,5 +71,5 @@ def test_sdk_ask_keeps_multiple_questions_and_agent_note_drafts(
         ("retract", "When?"),
     ]
     assert db_conn.execute(
-        "SELECT resolution FROM agent_notices WHERE agent_id=%s ORDER BY id", (agent_id,)
+        "SELECT resolution FROM agent_questions WHERE agent_id=%s ORDER BY id", (agent_id,)
     ).fetchall() == [("withdrawn",), ("withdrawn",)]
