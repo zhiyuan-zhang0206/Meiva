@@ -6,7 +6,7 @@ its delivery receipt named (`sendAnchor` in the timeline store), and
 (`READING_TOP_PX`: the 44 px header bar plus a 12 px gap, the same place a reveal
 of the first unseen message lands) and reports `notifyAnchored`: following stops
 there, so every later chunk paints below the reader's place instead of moving it.
-The numbers are pure functions (`model/send-park.ts`); the hook only measures and
+The numbers are pure functions (`parkScrollTop` / `parkReserve` in `model/use-viewport-arrivals.ts`); the hook only measures and
 writes. The jump-to-latest control sits at the bottom right of the conversation and
 carries a pulsing dot while the agent is still responding. A reader
 parked mid-history is parked there too — they just wrote the message — and a
