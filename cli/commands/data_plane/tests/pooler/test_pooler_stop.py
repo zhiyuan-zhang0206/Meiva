@@ -196,6 +196,30 @@ def test_a_restart_cannot_replace_a_pooler_holding_a_transaction(
 
 
 # meiva:note
+# A restart whose stop budget is spent before the stop reaches the pooler (a busy host spends it on
+# the lock and the listener scans, as CI runs 42885952133 and 42946600241 did with 0.5 s) fails the
+# call the same way a drain that outlasts the budget does: the clean "could not stop" exit, the
+# pooler untouched, no intent recorded, never a TimeoutError out of bring-up. A zero budget is that
+# situation without depending on how slow the host is.
+def test_a_restart_whose_stop_budget_is_spent_fails_cleanly_and_leaves_the_pooler(
+    unit_home: Path,
+    capsys: pytest.CaptureFixture[str],
+    command_machine: MachineIdentityReader,
+) -> None:
+    with running_pooler(unit_home) as running:
+        spec = pooler_spec(
+            command_machine, listen_port=running.port, socket_dir=unit_home, stop_wait_s=0.0
+        )
+
+        assert pooler.ensure_pgbouncer(spec, host=real_commands_host(), timers=SYSTEM_TIMERS) == 1
+
+        assert "could not stop the running pooler" in capsys.readouterr().err
+        assert running.identity.live()
+        assert not (running.directory / "stop-intent.json").exists()
+        assert port_preflight.require_listener(running.identity, running.port)
+
+
+# meiva:note
 # The stop records the birth before it signals, so a crash between the record and the signal
 # leaves an intent for a pooler that was never told. A retry must never read that as licence to
 # signal again: ambiguous delivery never authorizes a retry. The intent here is written by hand
