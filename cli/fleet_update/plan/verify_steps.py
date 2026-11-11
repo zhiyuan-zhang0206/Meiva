@@ -18,11 +18,14 @@ class DriftCheck:
 
 # meiva:note
 # The drift checks come last and every one runs: the gateway's stored schedules once, the plugins
-# on every host.
+# and the harness session records on every host. The session records are the one layout the new
+# code refuses to read: a host whose start did not migrate them reports success and then fails
+# every external agent's session (2026-11-11), so `up` must see them.
 def drift_checks(gateway: str, hosts: tuple[str, ...]) -> tuple[DriftCheck, ...]:
     return (
         DriftCheck(gateway, "schedules verify --no-notify"),
         *(DriftCheck(alias, "plugins verify") for alias in hosts),
+        *(DriftCheck(alias, "harness verify-sessions") for alias in hosts),
     )
 
 

@@ -123,6 +123,16 @@ class ConvergeStep:
     # `ConvergeAdvisoryError` and brings the services up). Reserve it for preparation only an
     # optional consumer needs, such as an external CLI.
     on_failure: Literal["continue", "stop", "advisory"] = "continue"
+    # meiva:note
+    # Why this step must not run while the application root is running; empty (the default) means
+    # it runs there like on any start.
+    #
+    # A `meiva start` that finds the root running (`--keep-shell-sessions` across an update) runs
+    # the whole table except the steps that name a reason here. Converge is the host's correctness
+    # guarantee, so the default is to run: on 2026-11-11 that start ran none of it and runners kept
+    # session records in the old layout. Name a reason only for a concrete harm a running root
+    # causes or suffers, and say what applies the step instead.
+    skipped_while_root_runs: str = ""
 
 
 # meiva:note

@@ -143,11 +143,15 @@ def test_the_roster_is_read_again_after_a_poll_until_the_window_is_spent(
     assert poll_delay(elapsed, 30, 5.0) == delay
 
 
-def test_the_drift_checks_are_the_gateways_schedules_then_every_hosts_plugins() -> None:
+def test_the_drift_checks_are_the_gateways_schedules_then_every_hosts_plugins_and_sessions() -> (
+    None
+):
     assert drift_checks("gw", ("gw", "mac")) == (
         DriftCheck("gw", "schedules verify --no-notify"),
         DriftCheck("gw", "plugins verify"),
         DriftCheck("mac", "plugins verify"),
+        DriftCheck("gw", "harness verify-sessions"),
+        DriftCheck("mac", "harness verify-sessions"),
     )
 
 

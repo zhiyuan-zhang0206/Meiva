@@ -201,6 +201,27 @@ def migrate_single_slot_records(root: Path) -> list[Path]:
 
 
 # meiva:note
+# What the registry would refuse in `root`, one line per file: a record still in the single-slot
+# layout, or one the current code cannot read (a missing required field, malformed JSON). Empty
+# on a converged home. The fleet update runs it on every host after the start, so a migration
+# that did not run fails the window instead of surfacing as an agent that cannot start a session.
+# meiva:link base/lm/harness/docs/harness.md
+def unreadable_records(root: Path) -> list[str]:
+    if not root.is_dir():
+        return []
+    problems: list[str] = []
+    for entry in sorted(root.iterdir()):
+        if _SINGLE_SLOT.fullmatch(entry.name) is not None:
+            problems.append(f"{entry}: single-slot layout")
+        elif re.fullmatch(r"\d+\.[a-z][a-z0-9_]*\.json", entry.name) is not None:
+            try:
+                _ = FileSessionRegistry._read(entry)
+            except (ValueError, TypeError) as exc:
+                problems.append(str(exc))
+    return problems
+
+
+# meiva:note
 # Complete the records written before `generation` existed: each gets generation 0 (the first process
 # that runs under it is generation 1), written atomically in place. Idempotent; returns the files
 # changed. A file that is not a record fails naming it.

@@ -6,7 +6,7 @@ from typing import Any
 
 import pytest
 
-from cli.commands.harness import cmd_harness_exec
+from cli.commands.harness import cmd_harness_exec, cmd_harness_verify_sessions
 from cli.parsers import build_parser
 
 
@@ -142,3 +142,22 @@ def test_the_parser_defaults_to_the_environment_handle() -> None:
     args = parser.parse_args(["harness", "exec"])
     assert args.handle is None
     assert args.file is None
+
+
+def test_verify_sessions_fails_naming_a_record_left_in_the_old_layout(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from base import paths
+
+    assert cmd_harness_verify_sessions(home=tmp_path) == 0
+    sessions = paths.harness_sessions_dir(home=tmp_path)
+    sessions.mkdir(parents=True)
+    (sessions / "7509.json").write_text("{}", encoding="utf-8")
+
+    assert cmd_harness_verify_sessions(home=tmp_path) == 1
+
+    err = capsys.readouterr().err
+    assert "7509.json: single-slot layout" in err and "meiva converge" in err
+    assert (
+        build_parser().parse_args(["harness", "verify-sessions"]).harness_cmd == "verify-sessions"
+    )

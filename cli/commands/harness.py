@@ -66,3 +66,21 @@ def _default_opener() -> AttachmentOpener:
     from meiva.self.harness.attachment import open_attachment
 
     return open_attachment
+
+
+# meiva:note
+# `meiva harness verify-sessions`: exit 1, naming each file, while a session record of this
+# home is in a layout the code cannot read. `meiva update up` runs it on every host after the
+# start; the cure is `meiva converge`.
+# meiva:link base/lm/harness/docs/session-identity.md
+def cmd_harness_verify_sessions(*, home: Path) -> int:
+    from base import paths
+    from base.lm.harness.registry import unreadable_records
+
+    problems = unreadable_records(paths.harness_sessions_dir(home=home))
+    for line in problems:
+        print(f"harness session record: {line}", file=sys.stderr)
+    if problems:
+        print("run `meiva converge` on this host to migrate them", file=sys.stderr)
+        return 1
+    return 0

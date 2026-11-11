@@ -32,6 +32,7 @@ from base.paths.home import home_checkout_error
 from base.sessions.hosting import hosting_supervised_session
 from base.telemetry import EventPipeline
 from cli.commands import _repo
+from cli.commands.converge.spec import ConvergeStep
 from cli.commands.lifecycle import root_driver, root_readiness, start
 from cli.commands.lifecycle.root_control.snapshot import root_units
 from cli.commands.lifecycle.start import readiness_preflight
@@ -81,6 +82,9 @@ class _Invocation:
     command: CommandRuntime
     database_factory: OperatorDatabaseFactory
     producer: Callable[[], EventPipeline]
+    # meiva:note
+    # The start leg's converge table; `None` is the host's own.
+    converge_steps: tuple[ConvergeStep, ...] | None = None
 
 
 def _run_leg(leg: Leg, run: _Invocation, retained_children: list[subprocess.Popen[bytes]]) -> int:
@@ -137,6 +141,7 @@ def _run_leg(leg: Leg, run: _Invocation, retained_children: list[subprocess.Pope
                 retained_children=retained_children,
                 producer=run.producer,
                 command=command,
+                converge_steps=run.converge_steps,
             )
         case _:
             assert_never(leg)
@@ -208,8 +213,9 @@ def run_restart(
     producer: Callable[[], EventPipeline],
     retained_children: list[subprocess.Popen[bytes]],
     legs: LegRunner | None = None,
+    converge_steps: tuple[ConvergeStep, ...] | None = None,
 ) -> int:
-    run = _Invocation(request, runtime, command, database_factory, producer)
+    run = _Invocation(request, runtime, command, database_factory, producer, converge_steps)
     print(f"[meiva restart] cwd = {run.runtime.code_root}")
     # meiva:note
     # When an outer operation's journal is still running, this restart records phases into it
@@ -298,6 +304,7 @@ def _cmd_restart_body(
     producer: Callable[[], EventPipeline],
     command: CommandRuntime,
     retained_children: list[subprocess.Popen[bytes]],
+    converge_steps: tuple[ConvergeStep, ...] | None,
 ) -> int:
     refusal = restart_refusal(hosting_exec_domain(), hosting_supervised_session(command.home))
     if refusal is not None:
@@ -310,6 +317,7 @@ def _cmd_restart_body(
         database_factory=database_factory,
         producer=producer,
         retained_children=retained_children,
+        converge_steps=converge_steps,
     )
 
 
@@ -330,6 +338,7 @@ def cmd_restart(
     database_factory: OperatorDatabaseFactory,
     producer: Callable[[], EventPipeline],
     command: CommandRuntime,
+    converge_steps: tuple[ConvergeStep, ...] | None = None,
 ) -> int:
     # meiva:note
     # Stop then start the service tree without a confirmation prompt.
@@ -362,6 +371,7 @@ def cmd_restart(
             producer=producer,
             command=command,
             retained_children=retained_children,
+            converge_steps=converge_steps,
         )
         audit.exited(code)
         return code

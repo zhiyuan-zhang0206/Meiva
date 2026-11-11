@@ -29,8 +29,9 @@ from base.host.runtime_interpreter import LoadedRuntimeIdentity, source_digest
 from base.host.system.tests.fake_commands import fake_host
 from base.sessions.env_forwarding import managed_service_env
 from base.telemetry import EventPipeline
+from cli.commands.converge.spec import ConvergeStep
 from cli.commands.data_plane.bringup import read_launch_delivery
-from cli.commands.lifecycle import root_driver
+from cli.commands.lifecycle import converge_host, root_driver
 from cli.commands.lifecycle.root_control.launch_plan import RootLaunchInputs
 from cli.commands.lifecycle.start import cmd_start_body, launch_roster
 from cli.commands.lifecycle.start.start_config import read_start_config
@@ -203,6 +204,7 @@ class StartRun:
             producer=self.producer,
             command=self.command,
             boot_attempt=boot_attempt,
+            converge_steps=host_steps(),
         )
 
     # meiva:note
@@ -231,7 +233,21 @@ class StartRun:
             database_factory=self.database_factory,
             producer=self.producer,
             command=self.command,
+            converge_steps=host_steps(),
         )
+
+
+# meiva:note
+# The converge steps these starts run: the table's own steps that need no tool of the test machine
+# (the real table also demands redis, node and `gh`), taken from the table by name so a step's
+# declaration, including whether it runs under a live root, is the production one.
+def host_steps() -> tuple[ConvergeStep, ...]:
+    names = {
+        "$MEIVA_HOME dir skeleton",
+        "harness session records layout",
+        "one DB URL + pgbouncer binary (when enabled)",
+    }
+    return tuple(step for step in converge_host.CONVERGE_STEPS if step.name in names)
 
 
 # meiva:note

@@ -38,7 +38,7 @@
 #   (the stops that take the daemon down), `recover_fails`: list[alias] (a start that fails), and
 #   `fail`: dict["<kind>|<alias>" -> int] for every other effect kind — `fetch`, `prestage`,
 #   `switch`, `start`, `oneshot`, `refresh`, `evidence`, `pre-verify`, `schedules-verify`,
-#   `plugins-verify`, `silence-open`, `silence-close`.
+#   `plugins-verify`, `sessions-verify`, `silence-open`, `silence-close`.
 # - `effects`: list[[kind, alias]] — every effect accepted, in order; `run_started_at`: int — the
 #   index into `effects` where the current window started.
 # - `commands`: list[[alias, command]] — every invocation this double received, for order checks.
@@ -291,6 +291,8 @@ class Sim:
             if "pre-update-verify" in command
             else "schedules-verify"
             if "schedules verify" in command
+            else "sessions-verify"
+            if "harness verify-sessions" in command
             else "plugins-verify"
         )
         self.s["effects"].append([kind, alias])

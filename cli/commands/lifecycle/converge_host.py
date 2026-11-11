@@ -104,6 +104,7 @@ __all__ = [
     "ConvergeStep",
     "cmd_converge",
     "converge_host",
+    "live_root_steps",
     "run_converge",
 ]
 
@@ -408,7 +409,8 @@ CONVERGE_STEPS: tuple[ConvergeStep, ...] = (
     ConvergeStep("$MEIVA_HOME dir skeleton", ensure_meiva_home_dirs, on_failure="stop"),
     # meiva:note
     # Session records are host-local files, so the migration to one record per harness runs here
-    # on every host, before any runner of this converge starts.
+    # on every host, before any runner of this converge starts. A start that finds the root still
+    # running (`--keep-shell-sessions`) runs it too.
     # meiva:link base/lm/harness/docs/session-identity.md
     ConvergeStep("harness session records layout", migrate_harness_session_records),
     # meiva:note
@@ -450,6 +452,11 @@ CONVERGE_STEPS: tuple[ConvergeStep, ...] = (
         "one DB URL + pgbouncer binary (when enabled)",
         ensure_pgbouncer_step,
         roles=frozenset({"gateway"}),
+        skipped_while_root_runs=(
+            "it rewrites MEIVA_DB_URL in .env onto the port the pooler toggle selects; while the "
+            "root runs the data plane listens where it was launched, so the rewrite would point "
+            "every new process at a port nothing serves until a full stop and start"
+        ),
     ),
     # Redis itself stays loopback-only. The off-box relay is the root-supervised
     # `redis-bridge` unit; this step only removes the standalone launchd job and
@@ -520,6 +527,12 @@ CONVERGE_STEPS: tuple[ConvergeStep, ...] = (
         "permissions helper build + sign + load",
         _ensure_permissions_helper,
         requires_unit_config=True,
+        skipped_while_root_runs=(
+            "a loaded helper is only observed, never replaced; when the helper's artifact or job "
+            "changed this step refuses ('stop and unregister this home's helper from outside its "
+            "process tree'), which would fail a start that cannot cure it while the root runs. A "
+            "full stop and start applies the new helper"
+        ),
     ),
     ConvergeStep(
         "cross-machine transfer backend",
@@ -605,6 +618,13 @@ CONVERGE_STEPS: tuple[ConvergeStep, ...] = (
 
 
 # meiva:note
+# `steps` without those that name a reason not to run while the application root runs
+# (`ConvergeStep.skipped_while_root_runs`): the table a start runs when it finds the root running.
+def live_root_steps(steps: tuple[ConvergeStep, ...]) -> tuple[ConvergeStep, ...]:
+    return tuple(step for step in steps if not step.skipped_while_root_runs)
+
+
+# meiva:note
 # Run the applicable converge steps in order; idempotent, fail-fast.
 #
 # The composition point of one converge operation: it builds the context the steps share
@@ -625,6 +645,7 @@ def converge_host(
     database_factory: DatabaseFactory,
     producer: Callable[[], EventPipeline],
     command: CommandRuntime,
+    partial: bool = False,
 ) -> None:
     ctx = ConvergeCtx(
         repo=repo,
@@ -652,7 +673,9 @@ def converge_host(
     # must BE the default home. A dev worktree resolves its home to `~/.meiva` too
     # whenever MEIVA_HOME is unset, so additionally require a checkout that is not a
     # dev worktree (`.worktrees/...` or `.claude/worktrees/...`).
-    run_converge(ctx, steps, prod_install=is_prod_install(repo=repo, home=command.home))
+    run_converge(
+        ctx, steps, prod_install=is_prod_install(repo=repo, home=command.home), partial=partial
+    )
 
 
 def selected_service_names(

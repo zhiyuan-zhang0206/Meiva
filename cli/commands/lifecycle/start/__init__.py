@@ -35,8 +35,10 @@ from base.paths.home import home_checkout_error
 from base.telemetry import EventPipeline
 from cli.commands import _repo, _setup, probe
 from cli.commands._setup import SetupValues
+from cli.commands.converge.spec import ConvergeStep
 from cli.commands.data_plane.bringup import read_launch_delivery
 from cli.commands.lifecycle import root_driver, root_readiness, stand_down
+from cli.commands.lifecycle.converge_host import live_root_steps
 from cli.commands.lifecycle.root_control.generation import record_running_sha
 from cli.commands.lifecycle.root_control.launch_plan import RootLaunchInputs
 from cli.commands.lifecycle.start.admission import (
@@ -45,7 +47,12 @@ from cli.commands.lifecycle.start.admission import (
     probes_gateway,
     roles_line,
 )
-from cli.commands.lifecycle.start.cold_start import ColdStart, cold_start_steps, prepare_cold_start
+from cli.commands.lifecycle.start.cold_start import (
+    ColdStart,
+    cold_start_steps,
+    prepare_cold_start,
+    prepare_live_start,
+)
 from cli.commands.lifecycle.start.cold_start_plan import SchemaCheck, plan_schema_checks
 from cli.commands.lifecycle.start.gateway_hint import gateway_hint_lines
 from cli.commands.lifecycle.start.login_link import print_login_link
@@ -117,6 +124,9 @@ class _Start:
     roles: MachineRoles
     config: StartConfig
     launch_inputs: RootLaunchInputs
+    # meiva:note
+    # The converge table the start runs; `None` is the host's own (`cold_start_steps()`).
+    converge_steps: tuple[ConvergeStep, ...] | None
 
     @property
     def repo(self) -> Path:
@@ -263,22 +273,29 @@ def _admit(start: _Start, *, retained_children: list[subprocess.Popen[bytes]]) -
                 inputs=start.launch_inputs,
                 pid=command.pid,
             )
-        if not live:
-            rc = prepare_cold_start(
-                ColdStart(
-                    command=command,
-                    database_factory=start.database_factory,
-                    producer=start.producer,
-                    repo=start.repo,
-                    roles=start.roles,
-                    plane=start.config.data_plane,
-                    converge_steps=cold_start_steps(),
-                ),
-                roster,
-                retained_children=retained_children,
-            )
-            if rc:
-                return rc
+        # meiva:note
+        # Both paths converge the host before anything launches. A cold start then prepares the
+        # storage; a live root is otherwise only inspected, because its schema never changes as a
+        # repeat-start effect. The live table omits the steps that name a reason not to run
+        # while the root runs.
+        table = cold_start_steps() if start.converge_steps is None else start.converge_steps
+        cold = ColdStart(
+            command=command,
+            database_factory=start.database_factory,
+            producer=start.producer,
+            repo=start.repo,
+            roles=start.roles,
+            plane=start.config.data_plane,
+            converge_steps=live_root_steps(table) if live else table,
+            partial_converge=live,
+        )
+        rc = (
+            prepare_live_start(cold, roster)
+            if live
+            else prepare_cold_start(cold, roster, retained_children=retained_children)
+        )
+        if rc:
+            return rc
     except (RuntimeError, OSError, ValueError) as exc:
         print(f"  \u2717 start admission/preparation failed: {exc}", file=sys.stderr)
         return 1
@@ -484,6 +501,7 @@ def cmd_start_body(
     producer: Callable[[], EventPipeline],
     command: CommandRuntime,
     boot_attempt: bool = False,
+    converge_steps: tuple[ConvergeStep, ...] | None = None,
 ) -> int:
     with resource_lock(
         home=command.home, pid=command.pid, purpose="cli.cmd_start_body", now=command.clock.now()
@@ -524,6 +542,7 @@ def cmd_start_body(
                 ),
                 service_path=config.service_path,
             ),
+            converge_steps=converge_steps,
         )
         admitted = _admit(start, retained_children=retained_children)
         if admitted is not None:
@@ -578,6 +597,7 @@ def cmd_start(
     producer: Callable[[], EventPipeline],
     command: CommandRuntime,
     boot_attempt: bool = False,
+    converge_steps: tuple[ConvergeStep, ...] | None = None,
 ) -> int:
     # meiva:note
     # Converge one configured unit through storage, schema, root and readiness.
@@ -605,6 +625,7 @@ def cmd_start(
             producer=producer,
             command=command,
             boot_attempt=boot_attempt,
+            converge_steps=converge_steps,
         )
         audit.exited(code)
         return code

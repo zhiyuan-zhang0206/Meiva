@@ -31,7 +31,7 @@ from cli.database import OperatorDatabaseFactory
 from cli.database.runtime import CommandRuntime
 from services.supervision.roster.service_spec import ServiceSpec
 
-__all__ = ["ColdStart", "cold_start_steps", "prepare_cold_start"]
+__all__ = ["ColdStart", "cold_start_steps", "prepare_cold_start", "prepare_live_start"]
 
 
 # meiva:note
@@ -64,6 +64,9 @@ class ColdStart:
     roles: MachineRoles
     plane: DataPlaneConfig
     converge_steps: tuple[ConvergeStep, ...]
+    # meiva:note
+    # A live-root start runs the table minus `skipped_while_root_runs` steps (`prepare_live_start`).
+    partial_converge: bool = False
 
 
 # meiva:note
@@ -84,6 +87,15 @@ def prepare_cold_start(
         if rc != 0:
             return rc
     return 0
+
+
+# meiva:note
+# The preparation of a start that finds the application root running: the converge table
+# without the steps that cannot run while the root does (`cold.converge_steps` carries it), none
+# of the storage preparation.
+def prepare_live_start(cold: ColdStart, roster: tuple[ServiceSpec, ...]) -> int:
+    with start_trace.phase("converge host (live root)"):
+        return _run_step(ColdStep.CONVERGE, cold, roster, [])
 
 
 def _run_step(
@@ -107,6 +119,7 @@ def _run_step(
                     producer=cold.producer,
                     command=command,
                     steps=cold.converge_steps,
+                    partial=cold.partial_converge,
                 )
             except ConvergeAdvisoryError as e:
                 # meiva:note
