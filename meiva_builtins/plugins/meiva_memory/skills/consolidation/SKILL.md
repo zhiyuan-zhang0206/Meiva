@@ -5,14 +5,12 @@ description: "Consolidates Meiva's shared memory. Use for assigned single-box ma
 
 # Memory pool consolidation (Meiva Dream)
 
-The shared memory pool (`meiva.memory.PATH`) is the `memory/` directory inside the Vault git repo. During the day, agents
-write notes into the working tree. Consolidation runs the four-phase **Meiva Dream**
-cycle (`Orientation` -> `Gather Signal` -> `Consolidation` -> `Prune & Index`) so
-the pool stays canonical, conflict-free, committed, pushed, and searchable.
+The shared memory pool (`meiva.memory.PATH`) is the Vault git repo’s `memory/` directory. Agents write notes into the working tree. Consolidation runs the four-phase **Meiva Dream**
+cycle (`Orientation` -> `Gather Signal` -> `Consolidation` -> `Prune & Index`) to keep the pool canonical, committed and searchable.
 
-All index-rebuild / validation / refresh operations are wrapped in scripts under
-`../scripts/`, `scripts/`, and the Vault root. `--pool` accepts the notes directory
+Index rebuild, validation and refresh use scripts under `../scripts/`, `scripts/`, and the Vault root. `--pool` accepts the notes directory
 (`$W/memory` for a Vault worktree), while Git operations use `$W`:
+
 - `python scripts/dream_gather.py [--pool <path>] [--repo <alias>=<path>] [--json]` — Phase 2 (`Gather Signal`) deterministic probe: scan body file links and optional `verified` / `stale_after` frontmatter across pool notes, intersect `/repos/<alias>/<path>` file links against repository file trees and recent `git log` changes, flag expired `stale_after` and aging `verified` notes, list pure-Markdown or legacy notes needing Dream OKF enrichment, scan `workspaces/*/memory/*.md` and `workspaces/*/memory/inherit/*.md` for `## Workspace Memory Candidates`, and surface existing-file pool churn/conflict hotspots
 - `python ../scripts/rebuild_memory_index.py` — rebuild the root `MEMORY.md` pointers (resolves the pool from `MEIVA_HOME` and takes no arguments)
 - `python3 validate.py` (at the Vault or worktree root) — enforce UTF-8, optional YAML frontmatter syntax (plus rejection of YAML `sources`, inline file-link checks, optional date checks for `verified` and `stale_after`, and unquoted `' #'` / `': '` truncation checks), 8000-character note cap, 20-file / 20-subdirectory Locality limits, `MEMORY.md` pointer targets and coverage, and `<!-- fact-check: ... -->` probes
@@ -21,11 +19,9 @@ All index-rebuild / validation / refresh operations are wrapped in scripts under
 - `python ../scripts/arbiter_merge.py` — inspect/merge open PRs whose `validate` check is green + refresh (`--apply` to merge; exit 1 = alert)
 - `meiva memory refresh` — fast-forward the gateway checkout to its configured branch; semantic indexing follows on the next indexer patrol
 
-**Worktree + PR discipline (remote-backed multi-host pools):** The shared
-authoring checkout (`~/.meiva/vault`) sits on this machine's `machine-<name>`
+**Worktree + PR discipline (remote-backed multi-host pools):** The shared authoring checkout (`~/.meiva/vault`) sits on this machine's `machine-<name>`
 branch (`main` only on a gateway-only unit) and the gateway's consolidated
-checkout (`~/.meiva/gateway/vault`) sits on `main`. The pool's pre-commit hook
-checks size caps and runs `validate.py`; it does not refuse commits by branch, so
+checkout (`~/.meiva/gateway/vault`) sits on `main`. The pool's pre-commit hook checks size caps and runs `validate.py`; it does not refuse commits by branch, so
 the rule below is a procedure, not a guard. Never commit consolidation work on
 either checkout's branch. Always create an isolated temporary git worktree from
 `origin/main` (`git -C ~/.meiva/vault worktree add -q -B <branch> $W origin/main`),
@@ -60,7 +56,16 @@ Every full consolidation executes four phases in order inside the target worktre
   ≤ 16000 chars, note ≤ 8000 chars, ≤ 20 `.md` notes and ≤ 20 subdirectories per
   directory).
 
-### Phase 2 — Gather Signal (Three Incremental Signal Sources)
+### Workspace promotion closed loop
+1. Export hosts with `--machine <name> --collect-workspace-candidates`; gather with
+   repeatable `--remote-candidates <json_file>` and the persistent `--ledger <path>`.
+   `--include-unreviewed` recovers historical notes before a ledger exists.
+2. Review `## Scope-Trapped Promotion Candidates` first (P0), verifying evidence.
+3. Record with `--record-review <key> --status promoted --promoted-to <pool_rel>`;
+   add `--prune-private` on the source host to repair private index links.
+   Record private-only notes with `--status local_only`; unchanged hashes are skipped.
+See [arbiter workflow](references/arbiter.md#workspace-promotion-closed-loop) for details.
+### Phase 2 — Gather Signal
 1. **Recent Session Transcripts (`USER_INPUT`)**: Scan recent session transcripts
    for user corrections, rulings, reversals, and explicit decisions in chronological
    order so newer rulings supersede older ones.
@@ -84,8 +89,8 @@ Every full consolidation executes four phases in order inside the target worktre
 3. **Per-Agent Workspace Memory (`~/.meiva/workspaces/*/memory/`)**: Review the
    `## Workspace Memory Candidates` section reported by `dream_gather.py`
    (which deterministically scans `workspaces/*/memory/*.md` and
-   `workspaces/*/memory/inherit/*.md` modified within `--since-days` with
-   non-zero size) alongside any legacy `MEMORY.md` remnants to extract durable,
+   `workspaces/*/memory/inherit/*.md` with non-empty content, using
+   hash-ledger review state across all ages) alongside any legacy `MEMORY.md` remnants to extract durable,
    reusable cross-agent rules and facts into the shared pool.
 
 ### Phase 3 — Consolidation (Canonical One-Topic-One-File, State Overwrite & Auto-OKF)

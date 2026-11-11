@@ -80,8 +80,42 @@ cd "$W"
      the pool budgets (`MEMORY.md` ≤ 16000 chars, note ≤ 8000 chars, ≤ 20 `.md`
      notes and ≤ 20 subdirectories per directory).
 
+### Workspace promotion closed loop
+
+1. **Ledger-backed cross-machine gather.** On each participating machine
+   (`company-mini`, `ubuntu`, `company-air`, `macbook-air`, `macmini`), run
+   `dream_gather.py --machine <name> --collect-workspace-candidates` and save its
+   JSON list. Transfer exports to the arbiter, then repeat
+   `--remote-candidates <json_file>` when gathering against the shared pool.
+   Use a consistent `--machine` name for local scans. The default review ledger
+   is `<vault>/sources/dream/workspace-memory-ledger.json`; `--ledger <path>`
+   selects another ledger. `--include-unreviewed` includes historical notes
+   even before a ledger exists. Unseen hashes and changed hashes need review;
+   unchanged reviewed notes are skipped and counted by `skipped_reviewed_count`.
+   Keep the ledger with the Vault across runs. The lookback remains useful for
+   repository drift and churn; it must not hide never-reviewed old notes.
+2. **P0 Scope-Trap promotion.** Review `## Scope-Trapped Promotion Candidates`
+   first. Deterministic topic overlap across different agents, or matching
+   cross-agent demand with low shared-pool coverage, signals knowledge trapped
+   in private scope. Supply `--user-demand-jsonl <path>` when demand evidence is
+   available. Verify the source notes and current evidence before promoting;
+   lexical similarity is a triage signal. Consolidate durable user preferences,
+   platform rules and reusable facts into the existing canonical topic whenever
+   possible, preserving source evidence.
+3. **Record and prune after promotion.** After the canonical shared note is
+   available, record each reviewed source with `--record-review <key> --status
+   promoted --promoted-to <pool_rel_path>`. Record private-only content with
+   `--status local_only`. Keys identify `<machine>:<agent_id>/<rel_path>`;
+   legacy unprefixed keys are accepted. For promoted local notes, add
+   `--prune-private` to remove redundant content or retain a pointer when
+   referenced, and repair the source agent's `memory/MEMORY.md` link to
+   `~/.meiva/vault/memory/<promoted_to>`. Perform remote private-file cleanup on
+   the source machine with `--machine <source_name>` and the same review ledger. The ledger retains the
+   reviewed SHA-256, status, shared destination and review date, closing the
+   loop so unchanged notes do not recur nightly.
+
 2. **Phase 2 — Gather Signal (Three Incremental Signal Sources)**:
-   - Run `dream_gather.py` first (`~/.meiva/source/.venv/bin/python ~/.meiva/source/meiva_builtins/plugins/meiva_memory/skills/consolidation/scripts/dream_gather.py --pool "$W/memory"`) to intersect note body file links against repository file trees and recent `git log` changes, flag expired `stale_after` and aging `verified` notes, list pure-Markdown or legacy notes needing Dream OKF enrichment, list `## Workspace Memory Candidates` (`workspaces/*/memory/*.md` and `workspaces/*/memory/inherit/*.md` modified within `--since-days`), and surface existing-file pool churn/conflict hotspots.
+   - Run `dream_gather.py` first (`~/.meiva/source/.venv/bin/python ~/.meiva/source/meiva_builtins/plugins/meiva_memory/skills/consolidation/scripts/dream_gather.py --pool "$W/memory"`) to intersect note body file links against repository file trees and recent `git log` changes, flag expired `stale_after` and aging `verified` notes, list pure-Markdown or legacy notes needing Dream OKF enrichment, list `## Workspace Memory Candidates` (`workspaces/*/memory/*.md` and `workspaces/*/memory/inherit/*.md` using content-hash review state across all ages), and surface existing-file pool churn/conflict hotspots.
    - **Recent Session Transcripts (`USER_INPUT`)**: Scan recent session transcripts
      for user corrections, rulings, reversals, and explicit decisions, ordered by
      timestamp so newer rulings supersede older ones.
@@ -248,7 +282,7 @@ Files exceeding 8000 characters → move to the Vault, leave a pointer in the or
 
 Besides the shared memory pool, each agent has a `memory/` directory under its own workspace (isomorphic to Claude Code auto-memory):
 - Path: `~/.meiva/workspaces/<agent_id>/memory/`
-- `memory/MEMORY.md` is the index (one memory per line, filenames must be uppercase) — the framework injects only this index after compaction and at session start
+- `memory/MEMORY.md` is the index (one memory per line) — the framework injects only this index after compaction and at session start
 - Each memory is an independent .md file beside the index, loaded by the agent on demand
 - The agent maintains the entire directory itself (dedup, update, delete erroneous entries)
 - All agents' files are mutually readable

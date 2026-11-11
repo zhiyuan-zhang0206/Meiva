@@ -43,6 +43,43 @@ and remove/prune the temporary worktree immediately afterwards.
    - If other machines have pending local notes, either collect their open PRs or
      spawn per-machine stewards to open worktree PRs against `main`.
 
+### Workspace promotion closed loop
+
+1. **Ledger-backed cross-machine gather.** On each participating machine
+   (`company-mini`, `ubuntu`, `company-air`, `macbook-air`, `macmini`), run
+   `dream_gather.py --machine <name> --collect-workspace-candidates` and save its
+   JSON list. Transfer exports to the arbiter, then repeat
+   `--remote-candidates <json_file>` when gathering against the shared pool.
+   Use a consistent `--machine` name for local scans. The default review ledger
+   is `<vault>/sources/dream/workspace-memory-ledger.json`; `--ledger <path>`
+   selects another ledger. `--include-unreviewed` includes historical notes
+   even before a ledger exists. Unseen hashes and changed hashes need review;
+   unchanged reviewed notes are skipped and counted by `skipped_reviewed_count`.
+   Keep the ledger with the Vault across runs. The lookback remains useful for
+   repository drift and churn; it must not hide never-reviewed old notes.
+2. **P0 Scope-Trap promotion.** Review `## Scope-Trapped Promotion Candidates`
+   first. Deterministic topic overlap across different agents, or matching
+   cross-agent demand with low shared-pool coverage, signals knowledge trapped
+   in private scope. Supply `--user-demand-jsonl <path>` when demand evidence is
+   available. Each JSONL object has `text` plus an `agent_id` (string or integer),
+   or `kind` set to `user-preference` or `platform-rule`. Similarity uses token
+   Jaccard with exact multiword headings weighted to 0.8; shared-pool coverage
+   below 0.45 allows promotion triage. Verify the source notes and current evidence before promoting;
+   lexical similarity is a triage signal. Consolidate durable user preferences,
+   platform rules and reusable facts into the existing canonical topic whenever
+   possible, preserving source evidence.
+3. **Record and prune after promotion.** After the canonical shared note is
+   available, record each reviewed source with `--record-review <key> --status
+   promoted --promoted-to <pool_rel_path>`. Record private-only content with
+   `--status local_only`. Keys identify `<machine>:<agent_id>/<rel_path>`;
+   legacy unprefixed keys are accepted. For promoted local notes, add
+   `--prune-private` to remove redundant content or retain a pointer when
+   referenced, and repair the source agent's `memory/MEMORY.md` link to
+   `~/.meiva/vault/memory/<promoted_to>`. Perform remote private-file cleanup on
+   the source machine with `--machine <source_name>` and the same review ledger. The ledger retains the
+   reviewed SHA-256, status, shared destination and review date, closing the
+   loop so unchanged notes do not recur nightly.
+
 3. **Phase 2 — Gather Signal (Three Incremental Sources):**
    - Run the deterministic Phase 2 probe helper first against the worktree:
      ```bash
