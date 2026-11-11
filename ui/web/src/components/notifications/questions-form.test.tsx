@@ -8,6 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { QuestionsForm } from "./questions-form";
 import { pressEnter } from "@/test-support/enter-key";
 import type { QuestionItem } from "@/lib/contracts/types";
+import { useStore } from "@/lib/state/store";
 import { resetTransport, transport } from "@/test-support/fake-api";
 import { renderWithProviders } from "@/test-support/render";
 
@@ -33,6 +34,7 @@ const submit = () => screen.getByRole<HTMLButtonElement>("button", { name: "Subm
 const article = (n: number) => within(screen.getByRole("article", { name: `Question ${n}` }));
 
 beforeEach(() => {
+  useStore.setState({ questionDrafts: {} });
   resetTransport();
   transport.getSettings.mockResolvedValue({ settings: [] });
 });
@@ -81,9 +83,8 @@ describe("QuestionsForm", () => {
     fireEvent.change(article(1).getByRole("textbox"), { target: { value: "x" } });
     fireEvent.click(submit());
     await waitFor(() => expect(onSettled).toHaveBeenCalledWith([1]));
-    rerender(<QuestionsForm agentId={7} questions={[q(1), q(2)]} onSettled={onSettled} onChanged={vi.fn()} />);
+    rerender(<QuestionsForm agentId={7} questions={[q(2)]} onSettled={onSettled} onChanged={vi.fn()} />);
     expect(article(2).getByRole<HTMLTextAreaElement>("textbox").disabled).toBe(false);
-    expect(article(1).getByRole<HTMLTextAreaElement>("textbox").disabled).toBe(false);
     fireEvent.change(article(2).getByRole("textbox"), { target: { value: "y" } });
     expect(submit().disabled).toBe(false);
   });
@@ -145,5 +146,38 @@ describe("QuestionsForm", () => {
     expect(submit().disabled).toBe(true);
     fireEvent.change(article(3).getByRole("textbox"), { target: { value: "new" } });
     expect(submit().disabled).toBe(false);
+  });
+
+  it("keeps drafts and skips when the user goes to another agent and comes back", () => {
+    const first = renderForm([q(1), q(2)]);
+    fireEvent.change(article(1).getByRole("textbox"), { target: { value: "kept" } });
+    fireEvent.click(article(2).getByRole("button", { name: "Skip" }));
+    first.unmount();
+    renderForm([q(1), q(2)]);
+    expect(article(1).getByRole<HTMLTextAreaElement>("textbox").value).toBe("kept");
+    expect(article(2).getByRole("button", { name: "Undo skip" })).toBeTruthy();
+    expect(submit().disabled).toBe(false);
+  });
+
+  it("does not show one agent's drafts to another", () => {
+    const first = renderForm([q(1)]);
+    fireEvent.change(article(1).getByRole("textbox"), { target: { value: "mine" } });
+    first.unmount();
+    renderWithProviders(
+      <QuestionsForm agentId={9} questions={[q(1, { agent_id: 9 })]} onSettled={vi.fn()} onChanged={vi.fn()} />,
+    );
+    expect(article(1).getByRole<HTMLTextAreaElement>("textbox").value).toBe("");
+  });
+
+  it("drops the drafts of questions that are no longer open and of the ones just answered", async () => {
+    transport.answerQuestions.mockResolvedValue({ kind: "settled" });
+    const { rerender } = renderForm([q(1), q(2)]);
+    fireEvent.change(article(1).getByRole("textbox"), { target: { value: "a" } });
+    fireEvent.change(article(2).getByRole("textbox"), { target: { value: "b" } });
+    expect(Object.keys(useStore.getState().questionDrafts[7] ?? {})).toEqual(["1", "2"]);
+    rerender(<QuestionsForm agentId={7} questions={[q(2)]} onSettled={vi.fn()} onChanged={vi.fn()} />);
+    await waitFor(() => expect(Object.keys(useStore.getState().questionDrafts[7] ?? {})).toEqual(["2"]));
+    fireEvent.click(submit());
+    await waitFor(() => expect(useStore.getState().questionDrafts[7]).toBeUndefined());
   });
 });

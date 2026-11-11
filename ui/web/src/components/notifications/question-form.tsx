@@ -1,22 +1,17 @@
 "use client";
 
-import { useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
+import { useEffect, useId, useRef, type KeyboardEvent, type ReactNode } from "react";
 import { useTranslations } from "next-intl";
 
 import { ChatMarkdown } from "@/components/content/markdown";
 import { AutoExpandTextarea } from "@/components/ui/auto-expand-textarea";
 import type { QuestionAnswer, QuestionSpec } from "@/lib/contracts/types";
+import type { QuestionDraft } from "@/lib/state/question-drafts-plan";
 import { isImeComposition } from "@/lib/input/enter-to-send";
 import { cn } from "@/lib/format/utils";
 import { FLEX, FLEX_1, MIN_W_0 } from "@/lib/layout/layout";
 
-interface Draft {
-  optionIds: string[];
-  text: string;
-  comment: string;
-}
-
-function answerFromDraft(question: QuestionSpec, draft: Draft): QuestionAnswer | null {
+export function answerFromDraft(question: QuestionSpec, draft: QuestionDraft): QuestionAnswer | null {
   const comment = draft.comment.trim();
   if (question.type === "text") {
     return draft.text.trim() ? { text: draft.text.trim() } : null;
@@ -37,15 +32,16 @@ function answerFromDraft(question: QuestionSpec, draft: Draft): QuestionAnswer |
 
 // meiva:note
 // Numbered choices share their frozen order with server replies and history.
-// onAnswerChange reports the answer the current draft would submit (null while
-// incomplete), which is what enables Submit; onSubmit sends an answer, and Enter
-// in the active answer or Note field calls it with the answer built from that draft.
+// The draft is owned by the caller (it outlives this component) and changes through onDraftChange;
+// onSubmit sends an answer, and Enter in the active answer or Note field calls it with the answer built
+// from that draft.
 // meiva:link ui/web/src/docs/frontend-components/enter-to-send.md
 export function QuestionForm({
   question,
   pending,
   focusAnswer,
-  onAnswerChange,
+  draft,
+  onDraftChange,
   onSubmit,
   submitAction,
 }: {
@@ -53,19 +49,14 @@ export function QuestionForm({
   question: QuestionSpec;
   pending: boolean;
   focusAnswer: boolean;
-  onAnswerChange: (answer: QuestionAnswer | null) => void;
+  draft: QuestionDraft;
+  onDraftChange: (draft: QuestionDraft) => void;
   onSubmit: (answer: QuestionAnswer) => void;
 }) {
   const t = useTranslations("questionDetail");
   const fieldId = useId();
   const textRef = useRef<HTMLTextAreaElement>(null);
-  const [draft, setDraft] = useState<Draft>({
-    optionIds: [], text: "", comment: "",
-  });
-
-  useEffect(() => {
-    onAnswerChange(answerFromDraft(question, draft));
-  }, [question, draft, onAnswerChange]);
+  const setDraft = onDraftChange;
 
   // meiva:note
   // Enter sends whatever the draft already answers; an incomplete draft sends

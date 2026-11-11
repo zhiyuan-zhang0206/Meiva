@@ -14,7 +14,9 @@ the draft), and Submit is enabled only when every question is. The submission na
 open set it was built from: when the server's set differs, nothing is settled, the latest
 set replaces the agent's rows in the shared cache, drafts and skips of questions still open
 stay, and the form states that the questions changed. Collapse hides mounted forms,
-preserving every draft. A successful submission drops all of the agent's questions from
+preserving every draft. Drafts and skips are kept per agent and question in the UI store
+(`questionDrafts`, memory only, never written to disk or sent to the server), so going to another agent
+and back keeps them; they are cleared when the question is answered and pruned when it is no longer open. A successful submission drops all of the agent's questions from
 the shared question cache and refreshes resolved history. A failed feed preserves stale questions and visibly
 reports the failure.
 
